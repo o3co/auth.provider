@@ -72,9 +72,8 @@ export function createRedisSubjectRevocation(
 	const key = (subject: string): string => `${prefix}${subject}`;
 
 	// A driver without the clamped write records a boundary as far ahead as a
-	// replica's clock runs, refusing the subject's sign-ins until then; one
-	// without the mode would answer a sessions-only stamp by revoking grants.
-	// So it fails here, at construction, rather than at the first revocation.
+	// replica's clock runs, refusing the subject's sign-ins until then. So it
+	// fails here, at construction, rather than at the first revocation.
 	if (
 		typeof (deps.client as { advanceRevocationBoundaries?: unknown })
 			.advanceRevocationBoundaries !== "function"
