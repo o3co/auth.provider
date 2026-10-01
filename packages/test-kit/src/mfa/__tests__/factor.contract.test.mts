@@ -937,6 +937,35 @@ describe("mfaFactorContract", () => {
 		expect(await failing(withSecond(inputFor()))).toEqual([]);
 	});
 
+	it("passes a factor whose enrollment derives its material from the transaction: each enrollment has its own", async () => {
+		const perTransaction = (factor: MfaFactor): MfaFactor => ({
+			...identified(factor),
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				const secret = createHash("sha256").update(ctx.transactionId).digest("base64url");
+				return {
+					...start,
+					state: { ...start.state, secret },
+					response: { ...(start.response as object), secret },
+				};
+			},
+		});
+		expect(await failing(withSecond(inputFor({}, perTransaction)))).toEqual([]);
+	});
+
+	it("passes a factor that refuses an enrollment within half a minute of a record the subject holds", async () => {
+		const coolingDown = (factor: MfaFactor): MfaFactor => ({
+			...identified(factor),
+			beginEnrollment: async (ctx) => {
+				if (ctx.factors.some((held) => ctx.nowMs - held.createdAt.getTime() < 30_000)) {
+					throw new Error("enrolled too recently");
+				}
+				return factor.beginEnrollment(ctx);
+			},
+		});
+		expect(await failing(withSecond(inputFor({}, coolingDown)))).toEqual([]);
+	});
+
 	it("fails an identity that answers one string for two authenticators", async () => {
 		const constant = (factor: MfaFactor): MfaFactor => ({ ...factor, identity: () => "one" });
 		expect(await failing(withSecond(inputFor({}, constant)))).toEqual([RULES.identityDistinct]);

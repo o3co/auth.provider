@@ -458,12 +458,18 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 	const malformed = input.malformedProofs ?? DEFAULT_MALFORMED;
 
 	/**
-	 * The start of an enrollment beside the factors the subject `held`, and —
-	 * when it asks for a code to be mailed — the digest of the address the code
-	 * goes to, as the coordinator keeps it at the send.
+	 * The start of an enrollment beside the factors the subject `held`, under
+	 * its own transaction and a minute after the last, as the coordinator opens
+	 * each, and — when it asks for a code to be mailed — the digest of the
+	 * address the code goes to, as the coordinator keeps it at the send.
 	 */
 	const begin = async (factor: MfaFactor, held: readonly MfaEnrolledFactor[] = []) => {
-		const context = contextAt(factor, subjectOf(input.user), ENROLLED_AT_MS, "contract-enrollment");
+		const context = contextAt(
+			factor,
+			subjectOf(input.user),
+			ENROLLED_AT_MS + held.length * 60_000,
+			`contract-enrollment-${held.length + 1}`,
+		);
 		const start = await factor.beginEnrollment({ ...context, user: input.user, factors: held });
 		const sentTo =
 			start.mail === undefined ? undefined : digestOfAddress(context.digests, input.user);
@@ -505,7 +511,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 		return {
 			id: held === undefined ? FACTOR_ID : SECOND_FACTOR_ID,
 			label: done.label,
-			createdAt: new Date(ENROLLED_AT_MS),
+			createdAt: new Date(begun.context.nowMs),
 			lastUsedAt: undefined,
 			data: reopened(done.data),
 		};
