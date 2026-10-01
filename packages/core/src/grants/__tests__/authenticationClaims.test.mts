@@ -154,8 +154,21 @@ describe("authTimeAt — an authentication instant as auth_time, read against a 
 		expect(authTimeAt(instant, nowMs)).toBeUndefined();
 	});
 
-	it("is undefined when the clock is NaN", () => {
-		expect(authTimeAt(new Date("2026-04-21T00:00:00Z"), Number.NaN)).toBeUndefined();
+	it.each([
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["-Infinity", Number.NEGATIVE_INFINITY],
+	])("is undefined when the clock is %s", (_label, clock) => {
+		expect(authTimeAt(new Date("2026-04-21T00:00:00Z"), clock)).toBeUndefined();
+	});
+
+	it.each([
+		["an ISO 8601 string", "2026-04-21T00:00:00Z"],
+		["a number of milliseconds", Date.UTC(2026, 3, 21)],
+		["null", null],
+		["undefined", undefined],
+	])("is undefined, without throwing, for a value that is not a Date: %s", (_label, instant) => {
+		expect(authTimeAt(instant, nowMs)).toBeUndefined();
 	});
 });
 
