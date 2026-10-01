@@ -33,7 +33,9 @@
  *
  * `userId` MUST be opaque and MUST NOT contain PII (email, username, etc.)
  * per WebAuthn §5.4.3: it is the user handle presented to the authenticator,
- * and may be persisted and synced by the device.
+ * and may be persisted and synced by the device. Where the RP ID is shared
+ * with another system it MUST NOT be guessable either: see the README's
+ * "`userId` opacity" and "Known limitations".
  */
 export interface WebAuthnSubject {
 	readonly userId: string;
