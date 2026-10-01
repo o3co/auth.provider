@@ -333,6 +333,7 @@ describe("InMemoryCodeRepository", () => {
 				nonce: "nonce-rt",
 				sid: "sid-rt",
 				acr: "urn:example:acr:mfa",
+				amr: ["pwd", "otp", "mfa"],
 				expiresIn: 90,
 				grantedScope: ["openid", "read"],
 				grantedAudience: ["https://api.example"],
@@ -357,6 +358,7 @@ describe("InMemoryCodeRepository", () => {
 				"nonce",
 				"sid",
 				"acr",
+				"amr",
 				"grantedScope",
 				"grantedAudience",
 			]) {

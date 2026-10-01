@@ -325,6 +325,21 @@ describe("RedisCodeRepository", () => {
 			expect((await repo.consumeByCode(without.code))?.acr).toBeUndefined();
 		});
 
+		it("persists and returns amr, and reads a stored amr that is not a list as none", async () => {
+			const withAmr = await repo.createCode({
+				...minimalParams,
+				amr: ["pwd", "otp", "mfa"],
+			});
+			expect((await repo.consumeByCode(withAmr.code))?.amr).toEqual(["pwd", "otp", "mfa"]);
+
+			const corrupt = await repo.createCode({ ...minimalParams, amr: ["pwd"] });
+			const key = `${KEY_PREFIX}${corrupt.code}`;
+			store.set(key, JSON.stringify({ ...JSON.parse(store.get(key) as string), amr: "pwd" }));
+			const read = await repo.consumeByCode(corrupt.code);
+			expect(read).not.toBeNull();
+			expect(read).toHaveProperty("amr", undefined);
+		});
+
 		it("persists and returns sid, nonce, grantedScope, grantedAudience via consumeByCode", async () => {
 			const result = await repo.createCode({
 				...minimalParams,
@@ -374,6 +389,7 @@ describe("RedisCodeRepository", () => {
 				nonce: "nonce-rt",
 				sid: "sid-rt",
 				acr: "urn:example:acr:mfa",
+				amr: ["pwd", "otp", "mfa"],
 				expiresIn: 90,
 				grantedScope: ["openid", "read"],
 				grantedAudience: ["https://api.example"],
@@ -397,6 +413,7 @@ describe("RedisCodeRepository", () => {
 				"nonce",
 				"sid",
 				"acr",
+				"amr",
 				"grantedScope",
 				"grantedAudience",
 			]) {
@@ -476,7 +493,7 @@ describe("RedisCodeRepository with real Redis", () => {
 		expect(await repo.findByCode(created.code)).toBeNull();
 	});
 
-	it("round-trips sid, nonce, redirect_uri, grantedScope, and grantedAudience through Redis", async () => {
+	it("round-trips sid, nonce, amr, redirect_uri, grantedScope, and grantedAudience through Redis", async () => {
 		if (!raw) throw new Error("Redis test container did not start");
 		const keyPrefix = `td4:fields:${Date.now()}:`;
 		const { codeRepositoryClient } = makeIoredisClients(raw);
@@ -488,6 +505,7 @@ describe("RedisCodeRepository with real Redis", () => {
 			redirect_uri: "https://rp.example/callback",
 			sid: "sid-real",
 			nonce: "nonce-real",
+			amr: ["pwd", "otp", "mfa"],
 			grantedScope: ["openid", "profile"],
 			grantedAudience: ["https://api.example"],
 		});
@@ -497,6 +515,7 @@ describe("RedisCodeRepository with real Redis", () => {
 		expect(consumed?.redirect_uri).toBe("https://rp.example/callback");
 		expect(consumed?.sid).toBe("sid-real");
 		expect(consumed?.nonce).toBe("nonce-real");
+		expect(consumed?.amr).toEqual(["pwd", "otp", "mfa"]);
 		expect(consumed?.grantedScope).toEqual(["openid", "profile"]);
 		expect(consumed?.grantedAudience).toEqual(["https://api.example"]);
 	});
