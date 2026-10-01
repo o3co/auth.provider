@@ -181,6 +181,8 @@ interface StepUpPage {
 
 **Amended 2026-10-02 (#989): the record condition is `canRecordSecondFactor`.** The row reads whether a second factor can be recorded on the record through `canRecordSecondFactor` (`user-sessions`): the primary can be told and the stored `amr` can be read — the predicate `sessionAfterSecondFactor` answers `null` on, so admission and the write cannot disagree. A record whose primary is told but whose `amr` is not in a shape the types admit is now a new login (`acr`) in this row, where it was a step-up the write then refused.
 
+**Amended 2026-10-02: admission decides once whether a second factor can be recorded, and hands it on.** The two conditions above — the store's `recordSecondFactor` (`supportsSecondFactorUpdate`) and `canRecordSecondFactor` over the record — are decided once per admission, as admission reads the record into its `SessionView` (`viewOf`), and carried there as `secondFactorRecordable`. Every requirement's copy of the view carries it, so a requirement that steps a session up through a second factor chooses `step_up` or `reauthenticate` on it without learning the store's capability or the record's shape rules. The admitted and `step_up` admissions carry it, so a route that opens a step-up ceremony itself can refuse one that could not be recorded. Step 7's row reads it from the view. The store's capability is therefore read whenever a record is read, no longer only when the row would choose the authority: the requirements are handed the answer too, and it is the store admission read the session from. A requirement's own `step_up` stays its to answer; what changes is that it is handed what it needs to answer it. The field is optional in the type only so a view built by hand still type-checks; admission always sets it.
+
 ### D3 — The requirement contract, the `sessionRequirements` kind, and its resolver
 
 ```ts
@@ -215,7 +217,7 @@ interface RequirementInterruption {
 
 interface RequirementInput {
 	readonly subject: string | undefined;                  // the record's `sub` when one was read, else the claim's subject — so a subject-specific requirement (an account hold) knows whose policy to check even with `session: null`; `undefined` only for the code record's first read
-	readonly session: SessionView | null;                  // `{ sid, sub, authTime, expiresAt }`
+	readonly session: SessionView | null;                  // `{ sid, sub, authTime, expiresAt }`, the enrollment facts, and `secondFactorRecordable` (D2, amended 2026-10-02)
 	readonly authentication: RequirementSession | null;   // `requirementSession(session)` (D6), or from a token's `amr` (D2 step 5): the primary, `mfaAt`, the vouched `amr`
 	readonly carrier: SessionClaim["carrier"];
 	readonly action: AdmissionAction;
