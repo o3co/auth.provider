@@ -1,6 +1,6 @@
 # grants
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 ## Responsibility
 
@@ -38,7 +38,7 @@ It is separate because every grant package — `oauth`, `device-grant`, `oauth-t
 - id_token: `typ: JWT` (disjoint from `at+jwt`), the OIDC claims, `nonce` reflected verbatim, `amr` / `acr` only when recorded, 3600 s default — [`idToken.test.mts`](./__tests__/idToken.test.mts); `email_verified: false` is not absence and a non-boolean is dropped — [`emailVerifiedClaim.test.mts`](./__tests__/emailVerifiedClaim.test.mts).
 - logout_token: `typ: logout+jwt`, the `events` claim, never `nonce`, `sid` by default, 300 s — [`logoutToken.test.mts`](./__tests__/logoutToken.test.mts).
 - `filterClaimsByScope` is a strict allowlist; provider-specific claims never pass; non-string `groups` members are dropped — [`claimFilter.test.mts`](./__tests__/claimFilter.test.mts).
-- Policy: a throwing hook is `503 temporarily_unavailable` (fail closed); a decision whose `outcome` is neither exactly `allow` nor exactly `deny` is `500 server_error` / `policy_decision_invalid`, never allow (`readGrantPolicyDecision`, the one reading every caller uses); a hook that widens scope or audience past its ceiling is `500 server_error`; a deny passes through as `400`; an empty `grantedScope` strips all — [`grantPolicy.test.mts`](./__tests__/grantPolicy.test.mts).
+- Policy: a throwing hook is `503 temporarily_unavailable` (fail closed, `policyUnavailable`); a decision whose `outcome` is neither exactly `allow` nor exactly `deny`, or a field of which throws when read, is `500 server_error` / `policy_decision_invalid`, never allow (`readGrantPolicyDecision`, the one reading every caller uses, which hands back a plain copy with each field read once); a hook that widens scope or audience past its ceiling is `500 server_error`; a deny passes through as `400`; an empty `grantedScope` strips all — [`grantPolicy.test.mts`](./__tests__/grantPolicy.test.mts).
 - `resource` (RFC 8707): each value is kept whole, never split on commas; the empty entries of a repeated parameter are dropped and an all-empty one means none was requested; a value that is neither a string nor an array of strings is malformed (`readTargetParameter` answers `null`), never converted to a string, and `extractResourceParam` reads it as none requested; an audience is derived only from one distinct resource inside `allowedAudiences` ∪ {client id}; a resource the issued `aud` does not represent is unrepresented, and a token with no `aud` represents none — [`resourceIndicator.test.mts`](./__tests__/resourceIndicator.test.mts).
 - A derived token's session link is `liveness_sid`, read by liveness checks alone; `livenessSidOf` reads a token's own `sid` first and never an empty or non-string value — [`sessionClaims.test.mts`](./__tests__/sessionClaims.test.mts).
 - `matchConfirmation` gates on the mechanism `kind`, not on the confirmation's shape, so a third-party kind cannot satisfy `jkt`; `Confirmation` is a closed union — [`confirmationMatch.test.mts`](./__tests__/confirmationMatch.test.mts), [`confirmation.test.mts`](./__tests__/confirmation.test.mts).
