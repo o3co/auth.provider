@@ -288,17 +288,17 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 		async recoverySetFloor(keys) {
 			return await io.hget(keys.recovery, "floor");
 		},
-		async raiseRecoverySetFloor(keys, generation) {
+		async raiseRecoverySetFloor(keys, input) {
 			const reply = await runScript(
 				io,
 				MFA_RECOVERY_SET_FLOOR_RAISE,
-				[keys.recovery],
-				[String(generation)],
+				[keys.recovery, keys.lease],
+				[String(input.setGeneration), input.leaseToken],
 			);
-			if (typeof reply !== "string") {
-				throw new Error("MfaTransactionStore: the floor script answered nothing it knows");
-			}
-			return reply;
+			const [raised, floor] = Array.isArray(reply) ? reply : [];
+			if (raised === 0) return { raised: false };
+			if (raised === 1 && typeof floor === "string") return { raised: true, floor };
+			throw new Error("MfaTransactionStore: the floor script answered nothing it knows");
 		},
 		async authorizeSubjectRecovery(keys, input) {
 			const reply = await runScript(

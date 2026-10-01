@@ -167,6 +167,17 @@ export type AuthorizeMfaSubjectRecoveryReply =
 	| { readonly authorized: true }
 	| { readonly authorized: false; readonly serverNowMs: number };
 
+export interface RaiseMfaRecoverySetFloorInput {
+	/** A recovery-code set's generation, not the subject's. */
+	readonly setGeneration: number;
+	readonly leaseToken: string;
+}
+
+/** What a floor raise answers: the floor after it, as the hash keeps it, or nothing raised without the lease. */
+export type RaiseMfaRecoverySetFloorReply =
+	| { readonly raised: true; readonly floor: string }
+	| { readonly raised: false };
+
 export interface ApplyMfaSubjectRecoveryInput {
 	readonly operation: MfaSubjectRecoveryOperation;
 	/** The recovery hash's field for the operation and sid. */
@@ -358,8 +369,15 @@ export interface MfaTransactionStoreClient {
 	): Promise<AuthorizeMfaSubjectRecoveryReply>;
 	/** The recovery hash's `floor` field (`HGET`); `null` when there is none. */
 	recoverySetFloor(keys: MfaSubjectKeys): Promise<string | null>;
-	/** Atomically: raise the recovery hash's `floor` to `generation` when it is higher; resolves the floor after, as decimal text. */
-	raiseRecoverySetFloor(keys: MfaSubjectKeys, generation: number): Promise<string>;
+	/**
+	 * Atomically, while the lease holds `input.leaseToken`: raise the recovery hash's `floor` to
+	 * `input.setGeneration` — a recovery-code set's generation, not the subject's — when it is
+	 * higher, and resolve the floor after, as decimal text; otherwise write nothing.
+	 */
+	raiseRecoverySetFloor(
+		keys: MfaSubjectKeys,
+		input: RaiseMfaRecoverySetFloorInput,
+	): Promise<RaiseMfaRecoverySetFloorReply>;
 	/** The port's `applySubjectRecovery`, one script over the four keys; a reply it does not know rejects. */
 	applySubjectRecovery(
 		keys: MfaSubjectKeys,

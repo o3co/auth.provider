@@ -943,17 +943,65 @@ export function readMfaSubjectCount(answer: unknown): number | undefined {
 	return isCount(answer) ? answer : undefined;
 }
 
+/** What `raiseRecoverySetFloor` is asked to raise, and under which lease. */
+export interface MfaRecoverySetFloorRaise {
+	/** A recovery-code set's generation, not the subject's: a safe whole number from 1. */
+	readonly setGeneration: number;
+	/** The subject's lease the caller holds. */
+	readonly leaseToken: string;
+}
+
+/** What `raiseRecoverySetFloor` answers: the floor after the raise, or the refusal without the lease. */
+export type MfaRecoverySetFloorAnswer =
+	| { readonly outcome: "raised"; readonly floor: number }
+	| { readonly outcome: "refused"; readonly reason: "lease_not_held" };
+
 /**
- * Refuses, with a `RangeError`, a raise `raiseRecoverySetFloor` cannot make:
- * `subject` a non-empty string, `generation` a safe whole number from 1.
- * Every adapter runs it first.
+ * The raise `raiseRecoverySetFloor` makes, its fields read once, or a
+ * `RangeError`: `subject` a non-empty string, `setGeneration` a safe whole
+ * number from 1, `leaseToken` a non-empty string. Every adapter calls it
+ * first.
  */
-export function checkRecoverySetFloorRaise(subject: unknown, generation: unknown): void {
+export function checkRecoverySetFloorRaise(
+	subject: unknown,
+	raise: unknown,
+): MfaRecoverySetFloorRaise {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.raiseRecoverySetFloor: ${what}`);
+	};
 	checkSubjectQuestion("raiseRecoverySetFloor", subject);
-	if (!isCount(generation) || generation < 1) {
-		throw new RangeError(
-			"MfaTransactionStore.raiseRecoverySetFloor: generation must be a safe whole number from 1",
-		);
+	if (!isRecord(raise)) return refuse("the raise must be an object");
+	const { setGeneration, leaseToken } = raise;
+	if (!isCount(setGeneration) || setGeneration < 1) {
+		refuse("setGeneration, a recovery-code set's generation, must be a safe whole number from 1");
+	}
+	if (!isSubject(leaseToken)) refuse("leaseToken must be a non-empty string");
+	return { setGeneration: setGeneration as number, leaseToken: leaseToken as string };
+}
+
+/**
+ * `answer`, what `raiseRecoverySetFloor` answered, as the port promises it:
+ * a raise with the floor after it, a safe whole number from 1, or the
+ * refusal without the lease. `undefined` for anything else, which the caller
+ * answers as the store's outage.
+ */
+export function readMfaRecoverySetFloorAnswer(
+	answer: unknown,
+): MfaRecoverySetFloorAnswer | undefined {
+	try {
+		if (!isRecord(answer)) return undefined;
+		const { outcome } = answer;
+		if (outcome === "raised") {
+			const { floor } = answer;
+			return isCount(floor) && floor >= 1 ? { outcome, floor } : undefined;
+		}
+		if (outcome === "refused") {
+			const { reason } = answer;
+			return reason === "lease_not_held" ? { outcome, reason } : undefined;
+		}
+		return undefined;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -1457,15 +1505,21 @@ export interface MfaTransactionStore {
 	// The recovery-set floor: kept apart from the sets, so that deleting a
 	// set never brings an older one back.
 	/**
-	 * Raises the subject's recovery-set floor to `generation` when it is
-	 * higher, and answers the floor after. Nothing lowers it: not a deleted
-	 * set, a reset or a sweep. A `RangeError`, nothing raised, for what
-	 * {@link checkRecoverySetFloorRaise} refuses.
+	 * Under the subject's lease held by `raise.leaseToken`, raises the
+	 * subject's recovery-set floor to `raise.setGeneration` — a recovery-code
+	 * set's generation, not the subject's — when it is higher, and answers
+	 * the floor after; without the lease, refuses `lease_not_held`, raising
+	 * nothing. Nothing lowers it: not a deleted set, a reset or a sweep. A
+	 * `RangeError`, nothing raised, for what {@link checkRecoverySetFloorRaise}
+	 * refuses.
 	 */
-	raiseRecoverySetFloor(subject: string, generation: number): Promise<number>;
+	raiseRecoverySetFloor(
+		subject: string,
+		raise: MfaRecoverySetFloorRaise,
+	): Promise<MfaRecoverySetFloorAnswer>;
 	/**
 	 * The subject's recovery-set floor, 0 when none was raised: a set of a
-	 * lower generation verifies no code. A `RangeError` for what
+	 * lower set generation verifies no code. A `RangeError` for what
 	 * {@link checkSubjectQuestion} refuses.
 	 */
 	recoverySetFloor(subject: string): Promise<number>;

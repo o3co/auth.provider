@@ -70,6 +70,7 @@ import {
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
+	type MfaRecoverySetFloorAnswer,
 	type MfaSubjectAttemptOutcome,
 	type MfaSubjectAttemptReservation,
 	type MfaSubjectHold,
@@ -388,6 +389,12 @@ export function createMemoryMfaTransactionStore(
 	/** At the cap: reclaims expired entries, then refuses if still full. */
 	const resident = (): number =>
 		transactions.size + proofs.size + marks.size + leases.size + slotCount;
+
+	/** Whether `token` holds the subject's lease, standing on this store's clock. */
+	function holds(subject: string, token: string): boolean {
+		const lease = leases.get(subject);
+		return lease !== undefined && lease.untilMs > clock() && lease.token === token;
+	}
 
 	function dropSlot(subject: string, slots: Map<string, RecoverySlot>, key: string): void {
 		if (slots.delete(key)) slotCount -= 1;
@@ -762,10 +769,7 @@ export function createMemoryMfaTransactionStore(
 				reason,
 				hard: hard(),
 			});
-			const lease = leases.get(subject);
-			if (lease === undefined || lease.untilMs <= storeNowMs || lease.token !== leaseToken) {
-				return refused("lease_not_held");
-			}
+			if (!holds(subject, leaseToken)) return refused("lease_not_held");
 			const slots = recoveries.get(subject);
 			const key = slotKeyOf(operation, sid);
 			const slot = slots?.get(key);
@@ -811,11 +815,12 @@ export function createMemoryMfaTransactionStore(
 			};
 		},
 
-		async raiseRecoverySetFloor(subject: string, generation: number): Promise<number> {
-			checkRecoverySetFloorRaise(subject, generation);
-			const floor = Math.max(floors.get(subject) ?? 0, generation);
+		async raiseRecoverySetFloor(subject, raise): Promise<MfaRecoverySetFloorAnswer> {
+			const { setGeneration, leaseToken } = checkRecoverySetFloorRaise(subject, raise);
+			if (!holds(subject, leaseToken)) return { outcome: "refused", reason: "lease_not_held" };
+			const floor = Math.max(floors.get(subject) ?? 0, setGeneration);
 			floors.set(subject, floor);
-			return floor;
+			return { outcome: "raised", floor };
 		},
 
 		async recoverySetFloor(subject: string): Promise<number> {

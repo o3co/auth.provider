@@ -524,12 +524,12 @@ export function createRedisMfaTransactionStore(
 			return client.releaseSubjectLease(subjectKeys(subject), token);
 		},
 
-		async raiseRecoverySetFloor(subject, generation) {
-			checkRecoverySetFloorRaise(subject, generation);
-			return countIn(
-				await client.raiseRecoverySetFloor(subjectKeys(subject), generation),
-				"recovery-set floor",
-			);
+		async raiseRecoverySetFloor(subject, raise) {
+			const checked = checkRecoverySetFloorRaise(subject, raise);
+			const reply = await client.raiseRecoverySetFloor(subjectKeys(subject), checked);
+			return reply.raised
+				? { outcome: "raised", floor: countIn(reply.floor, "recovery-set floor") }
+				: { outcome: "refused", reason: "lease_not_held" };
 		},
 
 		async recoverySetFloor(subject) {

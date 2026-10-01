@@ -76,6 +76,8 @@ export type {
 	ParkPendingConsentInput,
 	PendingConsentKeyspace,
 	PendingConsentStoreClient,
+	RaiseMfaRecoverySetFloorInput,
+	RaiseMfaRecoverySetFloorReply,
 	RateLimiterClient,
 	RateLimitIncrement,
 	RedisDurability,

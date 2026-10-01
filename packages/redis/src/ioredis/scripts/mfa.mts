@@ -588,12 +588,15 @@ return applied(ended_week, ended_run, lifted)
 `;
 
 /**
- * `MfaTransactionStoreClient.raiseRecoverySetFloor`. `KEYS[1]` = the recovery hash; `ARGV[1]` =
- * the generation, as decimal text. Writes it as `floor` when it is higher than the floor held,
- * takes off the hash's deadline, and answers the floor after. A `floor` that is not decimal
- * text is an error.
+ * `MfaTransactionStoreClient.raiseRecoverySetFloor`. `KEYS[1]` = the recovery hash, `KEYS[2]` =
+ * the subject's lease; `ARGV[1]` = a recovery-code set's generation (not the subject's), as
+ * decimal text, `ARGV[2]` = the lease token. Answers `{0}` when the lease is not held under the
+ * token, writing nothing. Otherwise writes the set generation as `floor` when it is higher than
+ * the floor held, takes off the hash's deadline, and answers `{1, floor}`. A `floor` that is not
+ * decimal text is an error.
  */
 const LUA_MFA_RECOVERY_SET_FLOOR_RAISE = `
+if redis.call('GET', KEYS[2]) ~= ARGV[2] then return {0} end
 local held = redis.call('HGET', KEYS[1], 'floor')
 if held and string.match(held, '^%d+$') == nil then
   error({err = 'MFA subject state: a stored value is not one this store wrote; the operation is refused'})
@@ -604,7 +607,7 @@ if not held or tonumber(ARGV[1]) > tonumber(held) then
   floor = ARGV[1]
 end
 redis.call('PERSIST', KEYS[1])
-return floor
+return {1, floor}
 `.trim();
 
 // A subject's first-binding mark is judged on one clock, the server's (`TIME`): its end, which
