@@ -19,25 +19,55 @@
  * `auditSink` slot with its fan-out over the slot's own sink and every hook,
  * so a reader of `deps.auditSink` reaches them all. Hooks alone satisfy the
  * slot's absence policy; with no sink and no hook the policy refuses boot as
- * before. A module that contributes a hook may not read `auditSink`.
+ * before. The fan-out hands an event a hook records while it runs to the
+ * slot's own sink alone, so a hook that reaches the slot cannot loop.
  */
 
 import { describe, expect, it } from "vitest";
-import { recordAuditEvent } from "../../audit/factory.mjs";
+import { emitAuditEvent, recordAuditEvent } from "../../audit/factory.mjs";
 import type { AuditEvent, AuditSink } from "../../audit/types.mjs";
 import { AUDIT_SINK_ABSENCE_POLICY } from "../../audit/types.mjs";
+import type { Logger } from "../../logging/Logger.mjs";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { auditHooksModule, createRecordingAuditSink } from "../../testing/index.mjs";
-import { createApp } from "../create-app.mjs";
+import { createApp, mergeWithBuiltins } from "../create-app.mjs";
+import { materializeComponents } from "../materialize-components.mjs";
+import { planBoot } from "../plan-boot.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
+import { validateManifests } from "../validate-manifests.mjs";
 
-const bootWith = (extra: Record<string, unknown> = {}): BootstrapMap =>
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly auditFixtureNotifier: { notify(): void };
+	}
+}
+
+const bootWith = (logger?: Logger): BootstrapMap =>
 	({
-		config: { ...makeValidCoreConfig(), ...extra } as never,
+		config: makeValidCoreConfig() as never,
 		pathResolver: (s: string) => s,
+		...(logger === undefined ? {} : { logger }),
 	}) satisfies Record<string, unknown> as BootstrapMap;
+
+/** A logger keeping each line's level, fields and message. */
+const recordingLogger = () => {
+	const lines: { level: string; fields: unknown; message: unknown }[] = [];
+	const at = (level: string) => (fields: unknown, message?: unknown) => {
+		lines.push({ level, fields, message });
+	};
+	const logger = {
+		trace: () => {},
+		debug: () => {},
+		info: at("info"),
+		warn: at("warn"),
+		error: at("error"),
+		fatal: () => {},
+		child: () => logger,
+	} as unknown as Logger;
+	return { logger, lines };
+};
 
 async function refusal(promise: Promise<unknown>): Promise<BootError> {
 	try {
@@ -195,33 +225,144 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		expect(disposed).toBe(1);
 	});
 
-	it("refuses a module that contributes a hook and reads auditSink", async () => {
-		const loop = defineModule({
-			name: "test:hook-reading-the-slot",
+	it("boots a module that reads auditSink and contributes a hook that never records into it", async () => {
+		const hook = createRecordingAuditSink();
+		let handed: AuditSink | undefined;
+		const both = defineModule({
+			name: "test:emits-and-hooks",
 			optional: ["auditSink"],
-			contributes: { auditHooks: [() => createRecordingAuditSink()] },
-		});
-
-		const err = await refusal(
-			createApp({
-				modules: [loop],
-				bootstrapComponents: bootWith(),
-			}),
-		);
-
-		expect({ reason: err.reason, stage: err.stage, details: err.details }).toEqual({
-			reason: "circular-dependency",
-			stage: "validateManifests",
-			details: {
-				reason: "circular-dependency",
-				cycle: [
-					{
-						module: "test:hook-reading-the-slot",
-						requires: "auditSink",
-						satisfiedBy: "test:hook-reading-the-slot",
+			contributes: {
+				auditHooks: [() => hook],
+				grantMiddleware: [
+					(deps) => {
+						handed = deps.auditSink;
+						return null;
 					},
 				],
 			},
 		});
+
+		await createApp({ modules: [both], bootstrapComponents: bootWith() });
+		await recordAuditEvent(handed as AuditSink, event);
+
+		expect(hook.events).toHaveLength(1);
+	});
+
+	it("ends the loop of a hook that reaches the slot through another module's component", async () => {
+		const adapter = createRecordingAuditSink();
+		let hookCalls = 0;
+		const notifier = defineModule({
+			name: "test:notifier",
+			optional: ["auditSink"],
+			provides: {
+				auditFixtureNotifier: (deps) => ({
+					notify: () => {
+						void emitAuditEvent(deps.auditSink, {
+							timestamp: new Date(0),
+							type: "test.notified",
+						});
+					},
+				}),
+			},
+		});
+		const notifyingHook = defineModule({
+			name: "test:notifying-hook",
+			requires: ["auditFixtureNotifier"],
+			contributes: {
+				auditHooks: [
+					(deps) => ({
+						kind: "notifying",
+						record: async () => {
+							hookCalls++;
+							if (hookCalls < 20) deps.auditFixtureNotifier.notify();
+						},
+					}),
+				],
+			},
+		});
+		const reader = auditReader();
+
+		await createApp({
+			modules: [sinkProvider(adapter), notifier, notifyingHook, reader.module],
+			bootstrapComponents: bootWith(recordingLogger().logger),
+		});
+		await recordAuditEvent(reader.handed.sink as AuditSink, event);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect({ hookCalls, adapter: adapter.events.map((e) => e.type) }).toEqual({
+			hookCalls: 1,
+			adapter: ["test.event", "test.notified"],
+		});
+	});
+
+	it("refuses a host collector for auditHooks", async () => {
+		const err = await refusal(
+			createApp({
+				modules: [auditHooksModule("test", createRecordingAuditSink())],
+				bootstrapComponents: bootWith(),
+				contributionKinds: { auditHooks: mergeWithBuiltins(undefined).auditHooks },
+			}),
+		);
+
+		expect({ reason: err.reason, details: err.details }).toEqual({
+			reason: "contribution-kind-guarded",
+			details: { reason: "contribution-kind-guarded", kind: "auditHooks" },
+		});
+	});
+
+	it("refuses a hook whose record is not a function, naming its module", async () => {
+		const broken = defineModule({
+			name: "test:broken-hook",
+			contributes: { auditHooks: [() => ({ kind: "broken" }) as never] },
+		});
+
+		const err = await refusal(createApp({ modules: [broken], bootstrapComponents: bootWith() }));
+
+		expect({ reason: err.reason, details: err.details }).toMatchObject({
+			reason: "contribute-factory-failed",
+			details: { module: "test:broken-hook", kind: "auditHooks" },
+		});
+	});
+
+	it("says once at info which module contributed each hook, by the position audit_sink_failed names", async () => {
+		const { logger, lines } = recordingLogger();
+
+		await createApp({
+			modules: [
+				sinkProvider(createRecordingAuditSink()),
+				auditHooksModule("a", createRecordingAuditSink(), createRecordingAuditSink()),
+				auditHooksModule("b", createRecordingAuditSink()),
+			],
+			bootstrapComponents: bootWith(logger),
+		});
+
+		expect(lines.filter((line) => line.message === "audit_hooks_registered")).toEqual([
+			{
+				level: "info",
+				message: "audit_hooks_registered",
+				fields: {
+					hooks: [
+						{ sink: 1, module: "audit-hooks-a" },
+						{ sink: 2, module: "audit-hooks-a" },
+						{ sink: 3, module: "audit-hooks-b" },
+					],
+				},
+			},
+		]);
+	});
+
+	it("refuses to fill the slot without the collectors when a hook is contributed (an invariant)", async () => {
+		const modules = [auditHooksModule("test", createRecordingAuditSink())];
+		const bootstrap = bootWith();
+		const validated = validateManifests({
+			modules,
+			bootstrapComponents: bootstrap,
+			contributionKinds: mergeWithBuiltins(undefined),
+		});
+		const plan = planBoot(validated, validated.bootstrapComponents, undefined);
+
+		await expect(
+			materializeComponents(plan, validated.bootstrapComponents, undefined),
+		).rejects.toThrow(/invariant violated/);
 	});
 });

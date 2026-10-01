@@ -22,7 +22,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { createAuditFanOut } from "#/audit/factory.mjs";
+import { createAuditFanOut, emitAuditEvent } from "#/audit/factory.mjs";
 import type { AuditEvent, AuditSink } from "#/audit/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { createRecordingAuditSink } from "#/testing/index.mjs";
@@ -36,8 +36,30 @@ const event = (): AuditEvent => ({
 
 const spyLogger = () => {
 	const error = vi.fn();
-	return { logger: { error } as unknown as Logger, error };
+	const warn = vi.fn();
+	return { logger: { error, warn } as unknown as Logger, error, warn };
 };
+
+/** Lets detached work (promise chains, a zero timer) run. */
+const settled = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+const recorded: AuditEvent = { timestamp: new Date(0), type: "hook.recorded" };
+
+/**
+ * A hook that records an event back into `fanOut()` each time it is handed
+ * one, by `how`, at most 20 times: without a guard, each event comes back to it.
+ */
+function reentering(fanOut: () => AuditSink, how: (sink: AuditSink) => unknown) {
+	let calls = 0;
+	const hook: AuditSink = {
+		kind: "reentering",
+		record: async () => {
+			calls++;
+			if (calls < 20) await how(fanOut());
+		},
+	};
+	return { hook, calls: () => calls };
+}
 
 const rejecting = (calls?: string[], name = "rejecting"): AuditSink => ({
 	kind: name,
@@ -227,6 +249,96 @@ describe("createAuditFanOut", () => {
 		await fanOut.record(event());
 
 		expect(error.mock.calls).toEqual([[{ sink: 2, type: "test.event" }, "audit_sink_failed"]]);
+	});
+
+	it("counts a hook's position from 1 when the slot has no sink of its own", async () => {
+		const { logger, error } = spyLogger();
+		const fanOut = createAuditFanOut({ hooks: () => [rejecting()], logger: () => logger });
+
+		await fanOut.record(event());
+
+		expect(error.mock.calls).toEqual([[{ sink: 1, type: "test.event" }, "audit_sink_failed"]]);
+	});
+
+	it("resolves when reading the hooks throws", async () => {
+		const fanOut = createAuditFanOut({
+			sink: createRecordingAuditSink(),
+			hooks: () => {
+				throw new Error("collector down");
+			},
+			logger: () => spyLogger().logger,
+		});
+
+		await expect(fanOut.record(event())).resolves.toBeUndefined();
+	});
+
+	it.each([
+		["awaits a record into the fan-out", (sink: AuditSink) => sink.record(recorded)],
+		["emits through emitAuditEvent, detached", (sink: AuditSink) => emitAuditEvent(sink, recorded)],
+		[
+			"emits from a timer it starts",
+			(sink: AuditSink) => {
+				setTimeout(() => void emitAuditEvent(sink, recorded), 0);
+			},
+		],
+		[
+			"emits from a promise chain it leaves running",
+			(sink: AuditSink) => {
+				void Promise.resolve().then(() => emitAuditEvent(sink, recorded));
+			},
+		],
+	])("hands an event a hook records while it runs (it %s) to the slot's own sink alone, warning audit_sink_reentered", async (_, how) => {
+		const own = createRecordingAuditSink();
+		const { logger, warn } = spyLogger();
+		let fanOut: AuditSink | undefined;
+		const loop = reentering(() => fanOut as AuditSink, how);
+		fanOut = createAuditFanOut({ sink: own, hooks: () => [loop.hook], logger: () => logger });
+
+		await fanOut.record(event());
+		await settled();
+
+		expect({
+			hookCalls: loop.calls(),
+			own: own.events.map((e) => e.type),
+			warned: warn.mock.calls,
+		}).toEqual({
+			hookCalls: 1,
+			own: ["test.event", "hook.recorded"],
+			warned: [[{ type: "hook.recorded" }, "audit_sink_reentered"]],
+		});
+	});
+
+	it("drops an event a hook records while it runs when the slot has no sink of its own, and warns", async () => {
+		const { logger, warn } = spyLogger();
+		let fanOut: AuditSink | undefined;
+		const loop = reentering(() => fanOut as AuditSink, (sink) => emitAuditEvent(sink, recorded));
+		fanOut = createAuditFanOut({ hooks: () => [loop.hook], logger: () => logger });
+
+		await fanOut.record(event());
+		await settled();
+
+		expect({ hookCalls: loop.calls(), warned: warn.mock.calls }).toEqual({
+			hookCalls: 1,
+			warned: [[{ type: "hook.recorded" }, "audit_sink_reentered"]],
+		});
+	});
+
+	it("hands the hooks an event the slot's own sink records while it runs", async () => {
+		const hook = createRecordingAuditSink();
+		let fanOut: AuditSink | undefined;
+		let ownCalls = 0;
+		const own: AuditSink = {
+			kind: "own",
+			record: async () => {
+				ownCalls++;
+				if (ownCalls === 1) await (fanOut as AuditSink).record(recorded);
+			},
+		};
+		fanOut = createAuditFanOut({ sink: own, hooks: () => [hook], logger: () => undefined });
+
+		await fanOut.record(event());
+
+		expect(hook.events.map((e) => e.type).sort()).toEqual(["hook.recorded", "test.event"]);
 	});
 
 	it("resolves when the logger itself throws", async () => {
