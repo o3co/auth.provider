@@ -427,22 +427,22 @@ const SUBJECT_HOLDS: ReadonlySet<unknown> = new Set<MfaSubjectHold>(["backoff", 
 
 /**
  * `answer`, what `reserveSubjectAttempt` answered, as the port promises it:
- * a pass with its reservation, a string; or a hold the port names, with
- * `first` a boolean and a time to come back — `null` for the hard hold, else
- * a finite number of milliseconds above 0, since the hold applies at the time
- * asked about. Copied to those fields. `undefined` for anything else, which
- * the caller answers as the store's outage: never a pass, never a hold. Each
- * field is read once.
+ * a pass with its reservation, a non-empty string; or a hold the port names,
+ * with `first` a boolean and a time to come back — `null` for the hard hold,
+ * else a finite number of milliseconds above 0, since the hold applies at the
+ * time asked about. Copied to those fields. `undefined` for anything else,
+ * which the caller answers as the store's outage: never a pass, never a hold.
+ * Each field is read once.
  */
 export function readMfaSubjectAttemptReservation(
 	answer: unknown,
 ): MfaSubjectAttemptReservation | undefined {
 	try {
-		if (typeof answer !== "object" || answer === null) return undefined;
-		const { ok, reservation, hold, retryAfterMs, first } = answer as Readonly<
-			Record<string, unknown>
-		>;
-		if (ok === true) return isText(reservation) ? { ok, reservation } : undefined;
+		if (!isRecord(answer)) return undefined;
+		const { ok, reservation, hold, retryAfterMs, first } = answer;
+		if (ok === true) {
+			return isText(reservation) && reservation.length > 0 ? { ok, reservation } : undefined;
+		}
 		if (ok !== false || !SUBJECT_HOLDS.has(hold) || typeof first !== "boolean") return undefined;
 		if (hold === "hard") {
 			return retryAfterMs === null ? { ok, hold, retryAfterMs, first } : undefined;
@@ -635,7 +635,11 @@ export type MfaSubjectHold = "backoff" | "weekly" | "hard";
 
 /** What `reserveSubjectAttempt` answers. */
 export type MfaSubjectAttemptReservation =
-	| { readonly ok: true; readonly reservation: string }
+	| {
+			readonly ok: true;
+			/** The attempt's handle for `settleSubjectAttempt`: a non-empty string. */
+			readonly reservation: string;
+	  }
 	| {
 			readonly ok: false;
 			readonly hold: MfaSubjectHold;
