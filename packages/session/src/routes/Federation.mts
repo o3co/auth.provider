@@ -73,11 +73,11 @@ import {
 	abandonCookieSession,
 	admissionUnavailable,
 	SESSION_STORE_UNAVAILABLE,
-	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
+import { identifyFederatedUser } from "./FederationCallbackIdentity.mjs";
 import { consumeCallbackState } from "./FederationCallbackState.mjs";
 import { type FederationRouterContext, recordedTokenType } from "./FederationContext.mjs";
 import { completeLink } from "./FederationLinkCallback.mjs";
@@ -325,81 +325,18 @@ export const createRouter = (
 		if (fed === null) return;
 		const { codeVerifier, redirectTo, nonce } = fed;
 
-		// A missing or empty `code` is a 400, not an empty string sent to the IdP
-		// (which would surface as a 502).
-		const codeParam = params.code;
-		if (typeof codeParam !== "string" || codeParam.length === 0) {
-			return res.status(400).json({
-				error: "invalid_request",
-				error_description: "Missing authorization code",
-			});
-		}
+		const identity = await identifyFederatedUser(
+			ctx,
+			provider,
+			params,
+			codeVerifier,
+			nonce,
+			res,
+			log,
+		);
+		if (identity === null) return;
+		const { profile, identityToken, user } = identity;
 
-		// Exchange the authorization code for a FederationProfile
-		// providerCallbackUrls is the authoritative map; same entry verified above in the start handler.
-		const callbackUrl = providerCallbackUrls.get(provider.name);
-		if (!callbackUrl) {
-			logMisconfigured(log, "no_callback_url");
-			return res.status(500).json({
-				error: "misconfiguration",
-				error_description: sanitizeErrorText(
-					`No callback URL registered for provider '${provider.name}'`,
-				),
-			});
-		}
-
-		// What the adapter sees of the callback, minus `code` (passed in its own
-		// field) and `state` (already checked here): a generic bag carrying them
-		// would be a second, unchecked place to read a credential from.
-		const { code: _code, state: _state, ...adapterCallbackParams } = params;
-
-		let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
-		try {
-			profile = await provider.exchangeCode({
-				code: codeParam,
-				codeVerifier,
-				redirectUri: callbackUrl,
-				// The session-stored nonce, so OIDC adapters bind the id_token via
-				// `expectedNonce`; OAuth-only adapters ignore it.
-				nonce,
-				// The remaining callback parameters, so an adapter can read identity
-				// an IdP delivers beside the token response (Apple's first-login
-				// `user` body — unsigned, so `mapClaims` and claim precedence decide
-				// what it may affect) or RFC 9207's `iss`.
-				callbackParams: adapterCallbackParams,
-			});
-		} catch (err) {
-			// The upstream's verdict or outage, not this server's: a warn. The
-			// error's cause chain can hold the refused token response, so only its
-			// projection is logged.
-			log.warn({ err: loggableError(err) }, "federation_callback_exchange_failed");
-			return res.status(502).json({
-				error: "exchange_failed",
-				error_description: "Token exchange with upstream IdP failed",
-			});
-		}
-
-		if (!profile.sub) {
-			return res.status(400).json({
-				error: "invalid_profile",
-				error_description: "Federation profile is missing sub claim",
-			});
-		}
-
-		const identityToken = `${provider.name}:${profile.sub}`;
-		let user: Awaited<ReturnType<typeof userRepository.authenticateByToken>>;
-		try {
-			user = await userRepository.authenticateByToken(identityToken);
-		} catch (err) {
-			logStoreUnavailable(
-				log,
-				"federation_callback_store_unavailable",
-				"user_repository",
-				"authenticate_by_token",
-				err,
-			);
-			return res.status(503).json(USER_DIRECTORY_UNAVAILABLE);
-		}
 		// An explicit link request completes or is refused here; it never falls
 		// through to the login path below: a link is not a login.
 		if (fed.link !== undefined) {
