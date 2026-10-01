@@ -241,11 +241,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			const carriedAmr = wellFormedAmr(claims.amr);
 			const carriedAcr = wellFormedAcr(claims.acr);
 			const carriedAuthTime = wellFormedAuthTime(claims.auth_time);
-			const authenticationClaims = {
-				...(carriedAmr ? { amr: carriedAmr } : {}),
-				...(carriedAcr ? { acr: carriedAcr } : {}),
-				...(carriedAuthTime !== undefined ? { auth_time: carriedAuthTime } : {}),
-			};
 			const tokenAzp =
 				typeof claims.azp === "string" && claims.azp.length > 0 ? claims.azp : tokenAud;
 			if (tokenAzp !== authenticatedClientId) {
@@ -736,6 +731,18 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				}
 			}
 
+			// A carried `auth_time` is never later than the presented token's own
+			// `iat` — an authentication precedes the token that records it — nor
+			// than this issuance, so `max_age` never reads a negative age.
+			const presentedIat = wellFormedAuthTime(tokenPayload.iat);
+			const authenticationClaims = {
+				...(carriedAmr ? { amr: carriedAmr } : {}),
+				...(carriedAcr ? { acr: carriedAcr } : {}),
+				...(carriedAuthTime !== undefined
+					? { auth_time: Math.min(carriedAuthTime, presentedIat ?? issuedAt, issuedAt) }
+					: {}),
+			};
+
 			// From here the rotation is committed, so a signer failure orphans
 			// the family's newest token: the client's retry with the old token
 			// reads as a replay and revokes the family — the price of reserving
@@ -757,6 +764,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						authorizedParty: authenticatedClientId,
 						scope: scopeClaim,
 						tokenType: "at+jwt",
+						// The rotation's issuance instant, which `auth_time` is capped at.
+						issuedAt,
 						...(presentedConfirmation ? { confirmation: presentedConfirmation } : {}),
 					},
 				);

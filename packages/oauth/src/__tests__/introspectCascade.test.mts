@@ -604,6 +604,17 @@ describe("/introspect carries token metadata only", () => {
 		expect(res.body.auth_time).toBe(1_776_729_600);
 	});
 
+	it("answers an auth_time later than the token's own iat as that iat", async () => {
+		const iat = Math.floor(Date.now() / 1000);
+		const token = await makeAccessToken({ client_id: "client1", iat, auth_time: iat + 3600 });
+		const app = await buildApp();
+		const res = await introspect(app, token);
+
+		expect(res.body.active).toBe(true);
+		expect(res.body.iat).toBe(iat);
+		expect(res.body.auth_time).toBe(iat);
+	});
+
 	it("omits acr, amr and auth_time when the token carries none", async () => {
 		const token = await makeAccessToken({ client_id: "client1" });
 		const app = await buildApp();
