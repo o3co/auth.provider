@@ -83,6 +83,7 @@ import {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
 	checkMfaVersionAdvances,
+	checkRecoverySetFloorRaise,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
 	checkSubjectLeaseRelease,
@@ -302,14 +303,13 @@ function firstBindingMarkOf(text: string | null, subject: string): FirstBindingM
 const recoveryField = (operation: MfaSubjectRecoveryOperation, sid: string | undefined): string =>
 	`a:${operation}:${sid === undefined ? "-" : mfaKeyPart(sid)}`;
 
-/** A subject's generation as the recovery hash keeps it: absent is 0; anything but decimal text of a safe whole number is an outage. */
-function generationOf(text: string | null): number {
+/** A count the recovery hash keeps (the generation, the floor): absent is 0; anything but decimal text of a safe whole number is an outage. */
+function countIn(text: string | null, what: string): number {
 	if (text === null) return 0;
-	const generation = countOf(text);
-	if (!Number.isSafeInteger(generation)) {
-		throw new Error("MfaTransactionStore: a subject generation it cannot read");
-	}
-	return generation;
+	const count = countOf(text);
+	if (!Number.isSafeInteger(count))
+		throw new Error(`MfaTransactionStore: a ${what} it cannot read`);
+	return count;
 }
 
 function checkInstant(nowMs: number, operation: string): void {
@@ -503,7 +503,7 @@ export function createRedisMfaTransactionStore(
 
 		async subjectGeneration(subject) {
 			checkSubjectQuestion("subjectGeneration", subject);
-			return generationOf(await client.subjectGeneration(subjectKeys(subject)));
+			return countIn(await client.subjectGeneration(subjectKeys(subject)), "subject generation");
 		},
 
 		async acquireSubjectLease(subject, request) {
@@ -520,6 +520,19 @@ export function createRedisMfaTransactionStore(
 		async releaseSubjectLease(subject, token) {
 			checkSubjectLeaseRelease(subject, token);
 			return client.releaseSubjectLease(subjectKeys(subject), token);
+		},
+
+		async raiseRecoverySetFloor(subject, generation) {
+			checkRecoverySetFloorRaise(subject, generation);
+			return countIn(
+				await client.raiseRecoverySetFloor(subjectKeys(subject), generation),
+				"recovery-set floor",
+			);
+		},
+
+		async recoverySetFloor(subject) {
+			checkSubjectQuestion("recoverySetFloor", subject);
+			return countIn(await client.recoverySetFloor(subjectKeys(subject)), "recovery-set floor");
 		},
 
 		async authorizeSubjectRecovery(subject, authorization) {

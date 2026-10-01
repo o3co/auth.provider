@@ -31,8 +31,8 @@
  *
  * A session's account-email proof, a subject's first-binding mark and a
  * subject's lease and recovery authorizations expire on this store's clock
- * too, and are swept with the transactions. A subject's generation is never
- * swept.
+ * too, and are swept with the transactions. A subject's generation and
+ * recovery-set floor are never swept.
  *
  * At most `maxEntries` entries are held: transactions, session email proofs,
  * first-binding marks, subject leases and recovery authorizations together. At the cap the store reclaims expired
@@ -56,6 +56,7 @@ import {
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	checkRecoverySetFloorRaise,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
 	checkSubjectLeaseRelease,
@@ -282,6 +283,8 @@ export function createMemoryMfaTransactionStore(
 	const leases = new Map<string, SubjectLease>();
 	/** Each subject's generation, once a recovery moved it: never swept. */
 	const generations = new Map<string, number>();
+	/** Each subject's recovery-set floor, once raised: never swept. */
+	const floors = new Map<string, number>();
 	/** Each subject's recovery authorizations, by `slotKeyOf`. */
 	const recoveries = new Map<string, Map<string, RecoverySlot>>();
 	/** The authorizations held across subjects, for the cap. */
@@ -811,6 +814,18 @@ export function createMemoryMfaTransactionStore(
 				cleared,
 				hard: hard(),
 			};
+		},
+
+		async raiseRecoverySetFloor(subject: string, generation: number): Promise<number> {
+			checkRecoverySetFloorRaise(subject, generation);
+			const floor = Math.max(floors.get(subject) ?? 0, generation);
+			floors.set(subject, floor);
+			return floor;
+		},
+
+		async recoverySetFloor(subject: string): Promise<number> {
+			checkSubjectQuestion("recoverySetFloor", subject);
+			return floors.get(subject) ?? 0;
 		},
 
 		async releaseSubjectLease(subject: string, token: string): Promise<boolean> {

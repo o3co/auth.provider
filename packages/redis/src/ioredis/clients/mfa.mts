@@ -31,6 +31,7 @@ import {
 	MFA_FACTOR_UPDATE,
 	MFA_FIRST_BINDING_NOTE,
 	MFA_FIRST_BINDING_READ,
+	MFA_RECOVERY_SET_FLOOR_RAISE,
 	MFA_SUBJECT_EXEMPT,
 	MFA_SUBJECT_LEASE_ACQUIRE,
 	MFA_SUBJECT_RECOVERY_APPLY,
@@ -286,6 +287,21 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 		},
 		async releaseSubjectLease(keys, token) {
 			return (await runScript(io, COMPARE_AND_DELETE, [keys.lease], [token])) === 1;
+		},
+		async recoverySetFloor(keys) {
+			return await io.hget(keys.recovery, "floor");
+		},
+		async raiseRecoverySetFloor(keys, generation) {
+			const reply = await runScript(
+				io,
+				MFA_RECOVERY_SET_FLOOR_RAISE,
+				[keys.recovery],
+				[String(generation)],
+			);
+			if (typeof reply !== "string") {
+				throw new Error("MfaTransactionStore: the floor script answered nothing it knows");
+			}
+			return reply;
 		},
 		async authorizeSubjectRecovery(keys, input) {
 			const reply = await runScript(

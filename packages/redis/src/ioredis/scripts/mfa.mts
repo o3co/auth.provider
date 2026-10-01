@@ -427,10 +427,11 @@ keep()
 return 1
 `;
 
-// A subject's recovery hash, under the subject's hash tag: `g`, its generation, and one field per
+// A subject's recovery hash, under the subject's hash tag: `g`, its generation, `floor`, its
+// recovery-set floor, and one field per
 // authorization, `a:<operation>:<sid>` → `p|<expiresAtMs>|<recoveryId>` while pending, or
 // `a|<generation>|<expiresAtMs>|<recoveryId>` once applied. An authorization ends on the
-// server's clock. The hash has no TTL while it holds a generation; before that it expires the
+// server's clock. The hash has no TTL while it holds a generation or a floor; before that it expires the
 // skew allowance after its latest authorization ends.
 
 const LUA_MFA_RECOVERY_PRELUDE = `
@@ -447,7 +448,7 @@ local function recovery_keep(key, allowance)
   local flat = redis.call('HGETALL', key)
   for i = 1, #flat, 2 do
     local field = flat[i]
-    if field == 'g' then
+    if field == 'g' or field == 'floor' then
       redis.call('PERSIST', key)
       return
     end
@@ -586,6 +587,26 @@ keep()
 return applied(ended_week, ended_run, lifted)
 `;
 
+/**
+ * `MfaTransactionStoreClient.raiseRecoverySetFloor`. `KEYS[1]` = the recovery hash; `ARGV[1]` =
+ * the generation, as decimal text. Writes it as `floor` when it is higher than the floor held,
+ * takes off the hash's deadline, and answers the floor after. A `floor` that is not decimal
+ * text is an error.
+ */
+const LUA_MFA_RECOVERY_SET_FLOOR_RAISE = `
+local held = redis.call('HGET', KEYS[1], 'floor')
+if held and string.match(held, '^%d+$') == nil then
+  error({err = 'MFA subject state: a stored value is not one this store wrote; the operation is refused'})
+end
+local floor = held
+if not held or tonumber(ARGV[1]) > tonumber(held) then
+  redis.call('HSET', KEYS[1], 'floor', ARGV[1])
+  floor = ARGV[1]
+end
+redis.call('PERSIST', KEYS[1])
+return floor
+`.trim();
+
 // A subject's first-binding mark is judged on one clock, the server's (`TIME`): its end, which
 // mark a note keeps, and the key's deadline. A replica's clock decides none of them.
 
@@ -684,3 +705,4 @@ export const MFA_FIRST_BINDING_READ = defineScript(LUA_MFA_FIRST_BINDING_READ);
 export const MFA_SUBJECT_LEASE_ACQUIRE = defineScript(LUA_MFA_SUBJECT_LEASE_ACQUIRE);
 export const MFA_SUBJECT_RECOVERY_AUTHORIZE = defineScript(LUA_MFA_SUBJECT_RECOVERY_AUTHORIZE);
 export const MFA_SUBJECT_RECOVERY_APPLY = defineScript(LUA_MFA_SUBJECT_RECOVERY_APPLY);
+export const MFA_RECOVERY_SET_FLOOR_RAISE = defineScript(LUA_MFA_RECOVERY_SET_FLOOR_RAISE);

@@ -917,6 +917,20 @@ export function readMfaSubjectCount(answer: unknown): number | undefined {
 	return isCount(answer) ? answer : undefined;
 }
 
+/**
+ * Refuses, with a `RangeError`, a raise `raiseRecoverySetFloor` cannot make:
+ * `subject` a non-empty string, `generation` a safe whole number from 1.
+ * Every adapter runs it first.
+ */
+export function checkRecoverySetFloorRaise(subject: unknown, generation: unknown): void {
+	checkSubjectQuestion("raiseRecoverySetFloor", subject);
+	if (!isCount(generation) || generation < 1) {
+		throw new RangeError(
+			"MfaTransactionStore.raiseRecoverySetFloor: generation must be a safe whole number from 1",
+		);
+	}
+}
+
 /** The two authorized recoveries: `recover`, the subject's own after an exempt proof; `reset`, the operator's. */
 export type MfaSubjectRecoveryOperation = "recover" | "reset";
 
@@ -1418,6 +1432,22 @@ export interface MfaTransactionStore {
 		subject: string,
 		application: MfaSubjectRecoveryApplication,
 	): Promise<MfaSubjectRecoveryAnswer>;
+
+	// The recovery-set floor: kept apart from the sets, so that deleting a
+	// set never brings an older one back.
+	/**
+	 * Raises the subject's recovery-set floor to `generation` when it is
+	 * higher, and answers the floor after. Nothing lowers it: not a deleted
+	 * set, a reset or a sweep. A `RangeError`, nothing raised, for what
+	 * {@link checkRecoverySetFloorRaise} refuses.
+	 */
+	raiseRecoverySetFloor(subject: string, generation: number): Promise<number>;
+	/**
+	 * The subject's recovery-set floor, 0 when none was raised: a set of a
+	 * lower generation verifies no code. A `RangeError` for what
+	 * {@link checkSubjectQuestion} refuses.
+	 */
+	recoverySetFloor(subject: string): Promise<number>;
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaTransactionStore}. */

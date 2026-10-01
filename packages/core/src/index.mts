@@ -651,6 +651,7 @@ export {
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	checkRecoverySetFloorRaise,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
 	checkSubjectLeaseRelease,

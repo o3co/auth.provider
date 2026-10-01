@@ -133,7 +133,8 @@ export interface MfaSubjectKeys {
 	/** ZSET: the attempts the rolling week counts, each scored by its time. */
 	readonly week: string;
 	/**
-	 * HASH: `g`, the subject's generation, as decimal text (absent is `0`);
+	 * HASH: `g`, the subject's generation, and `floor`, its recovery-set floor,
+	 * each as decimal text (absent is `0`);
 	 * `a:<operation>:<sid>` → `p|<expiresAtMs>|<recoveryId>` for each
 	 * authorization pending, `a|<generation>|<expiresAtMs>|<recoveryId>` once applied.
 	 */
@@ -355,6 +356,10 @@ export interface MfaTransactionStoreClient {
 		keys: MfaSubjectKeys,
 		input: AuthorizeMfaSubjectRecoveryInput,
 	): Promise<AuthorizeMfaSubjectRecoveryReply>;
+	/** The recovery hash's `floor` field (`HGET`); `null` when there is none. */
+	recoverySetFloor(keys: MfaSubjectKeys): Promise<string | null>;
+	/** Atomically: raise the recovery hash's `floor` to `generation` when it is higher; resolves the floor after, as decimal text. */
+	raiseRecoverySetFloor(keys: MfaSubjectKeys, generation: number): Promise<string>;
 	/** The port's `applySubjectRecovery`, one script over the four keys; a reply it does not know rejects. */
 	applySubjectRecovery(
 		keys: MfaSubjectKeys,
