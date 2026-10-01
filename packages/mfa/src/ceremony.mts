@@ -423,18 +423,15 @@ export interface MfaCeremonyKit {
 		subject: string,
 		authTimeMs: number | undefined,
 	) => Promise<MfaFirstBindingDistrusted | MfaStoreOutage | undefined>;
-	/** `subject`'s first-binding mark noted at `atMs`, standing its lifetime; the outage otherwise. */
-	readonly noteFirstBinding: (subject: string, atMs: number) => Promise<MfaStoreOutage | undefined>;
+	/** `subject`'s first-binding mark noted at the clock's reading as it is noted, standing its lifetime; the outage otherwise. */
+	readonly noteFirstBinding: (subject: string) => Promise<MfaStoreOutage | undefined>;
 	/**
-	 * D12's reconciliation for `subject`, verified at `nowMs` with a counting
-	 * factor its `User` does not say it enrolled: the first-binding mark noted,
-	 * then the witness marked — only once the mark was noted, and never by a
+	 * D12's reconciliation for `subject`, just verified with a counting factor
+	 * its `User` does not say it enrolled: the first-binding mark noted, then
+	 * the witness marked — only once the mark was noted, and never by a
 	 * directory that cannot write it. Never throws.
 	 */
-	readonly reconcileWitness: (
-		subject: string,
-		nowMs: number,
-	) => Promise<{
+	readonly reconcileWitness: (subject: string) => Promise<{
 		readonly witness: MfaWitnessMark | undefined;
 		readonly firstBindingUnnoted: MfaStoreOutage | undefined;
 	}>;

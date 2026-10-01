@@ -507,7 +507,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								}),
 								...(deps.subjectRevocation === undefined
 									? {}
-									: { revocation: deps.subjectRevocation }),
+									: { subjectRevocation: deps.subjectRevocation }),
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,

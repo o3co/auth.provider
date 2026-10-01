@@ -601,7 +601,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			// Noted before the factor is written: a first binding the mark misses
 			// would leave a stale session trusted.
 			if (first) {
-				const unnoted = await kit.noteFirstBinding(tx.subject, nowMs);
+				const unnoted = await kit.noteFirstBinding(tx.subject);
 				if (unnoted !== undefined) return unnoted;
 			}
 			// Consumed before anything is written: a lost race spends the

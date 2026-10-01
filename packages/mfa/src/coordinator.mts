@@ -223,7 +223,7 @@ export interface MfaCoordinatorOptions {
 	/** How long a subject's first-binding mark stands, in milliseconds (`firstBindingMarkLifetimeMs`). */
 	readonly firstBindingMarkMs: number;
 	/** The subjects' sessions boundary a login's transaction is held to; none wired, none is read. */
-	readonly revocation?: Pick<SubjectRevocation, "revokedBefore">;
+	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -256,7 +256,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		requireEmailProof,
 		sessionProofSeconds,
 		firstBindingMarkMs,
-		revocation,
+		subjectRevocation,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
@@ -267,9 +267,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	 * a time that cannot be compared, is the boundary's outage.
 	 */
 	const pastSessionsBoundary = async (tx: MfaTransaction): Promise<boolean | MfaStoreOutage> => {
-		if (revocation === undefined) return false;
+		if (subjectRevocation === undefined) return false;
 		try {
-			const boundary: unknown = await revocation.revokedBefore(tx.subject);
+			const boundary: unknown = await subjectRevocation.revokedBefore(tx.subject);
 			if (boundary === null) return false;
 			if (!(boundary instanceof Date)) {
 				throw new TypeError("the sessions boundary is neither a date nor null");
@@ -532,11 +532,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return { written: written as MfaTransaction };
 	};
 
-	/** `subject`'s first-binding mark noted at `atMs`, standing its lifetime; the outage otherwise. */
-	const noteFirstBinding = async (
-		subject: string,
-		atMs: number,
-	): Promise<MfaStoreOutage | undefined> => {
+	/**
+	 * `subject`'s first-binding mark noted, standing its lifetime; the outage
+	 * otherwise. Dated by the clock read just before the note, not the
+	 * request's start: a request that stalled must not date the mark early.
+	 */
+	const noteFirstBinding = async (subject: string): Promise<MfaStoreOutage | undefined> => {
+		const atMs = now();
 		try {
 			await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMarkMs);
 			return undefined;
@@ -634,11 +636,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				: undefined;
 		},
 		noteFirstBinding,
-		reconcileWitness: async (subject, nowMs) => {
+		reconcileWitness: async (subject) => {
 			// A directory that cannot write the witness leaves no session stale: no mark is due.
 			if (!witness.writable)
 				return { witness: await witness.mark(subject), firstBindingUnnoted: undefined };
-			const unnoted = await noteFirstBinding(subject, nowMs);
+			const unnoted = await noteFirstBinding(subject);
 			return unnoted === undefined
 				? { witness: await witness.mark(subject), firstBindingUnnoted: undefined }
 				: { witness: undefined, firstBindingUnnoted: unnoted };
@@ -1109,7 +1111,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				// say it enrolled marks it, so a mark that failed heals here.
 				const user = consumed.continuation?.primary.user;
 				const reconciled = reconciles(factor, user)
-					? await kit.reconcileWitness(tx.subject, nowMs)
+					? await kit.reconcileWitness(tx.subject)
 					: undefined;
 
 				return {
