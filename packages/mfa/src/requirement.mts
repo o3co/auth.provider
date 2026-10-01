@@ -45,7 +45,8 @@
  * then a recent primary (`authTime`; a second factor does not stand in for
  * it), then the subject's first-binding mark (`firstBindingMark.mts`): a
  * session it distrusts, whose recorded witness may predate the subject's
- * enrollment, is sent to log in, and a mark that cannot be read throws;
+ * enrollment, is sent to log in — said at info — and a mark that cannot be
+ * read throws;
  * then the one gate, whose proof is the one given in that session and
  * still standing (`MfaTransactionStore.sessionEmailProofAt`, read no older
  * than `mfa.manage.maxAgeSeconds` and the clock skew). A proof nobody can
@@ -442,7 +443,10 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		);
 		if (!recentPrimary) return REAUTHENTICATE;
 		const mark = readFirstBindingMark(await firstBindingAt(session.sub, nowMs), nowMs);
-		if (distrustedByFirstBinding(session.authTime.getTime(), mark)) return REAUTHENTICATE;
+		if (distrustedByFirstBinding(session.authTime.getTime(), mark)) {
+			logger.info({ sub: session.sub, action: action.name }, "mfa_first_binding_distrusted");
+			return REAUTHENTICATE;
+		}
 		const gate = await gateFor(session.sub, facts.mailAddress);
 		if (gate.outcome === "bind") return MET;
 		if (gate.outcome === "unprovable") return STEP_UP;

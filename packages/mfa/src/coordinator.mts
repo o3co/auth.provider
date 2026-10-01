@@ -33,6 +33,9 @@
  *   (`revokedBefore`) at every bound read: a continuation authenticated at or
  *   before it, the revocation skew allowed, is `revoked` and spends nothing;
  *   a boundary that cannot be read is an outage; none wired, none is read.
+ *   The step-up reads only its session's `enroll` transactions, so it never
+ *   reads a login's boundary. The boundary is read once per call: a
+ *   revocation landing during that call can still let it bind.
  * - The step-up of a subject with no record that may count opens, or uses,
  *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
  *   on one is recorded for its session alone, standing
@@ -64,8 +67,9 @@
  * - A verified counting factor marks the enrollment witness of a login whose
  *   `User` does not carry it (D12), after noting the subject's first-binding
  *   mark (`firstBindingMark.mts`): a note that fails leaves the witness
- *   unmarked, so no session's recorded witness goes stale unmarked. Neither
- *   failure fails the login.
+ *   unmarked, so no session's recorded witness goes stale unmarked; a
+ *   directory that cannot write the witness gets no note. Neither failure
+ *   fails the login (`reconcileWitness`).
  * - A factor is handed its records opened and digests under the ring; it
  *   never sees a key, a store, a transaction or the mail sender. A code it
  *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
@@ -111,13 +115,13 @@ import {
 	type MfaEnrollmentBeginOutcome,
 	type MfaEnrollmentCompleteOutcome,
 	type MfaFactorUnreadable,
+	type MfaFirstBindingDistrusted,
 	type MfaRefusalReason,
 	type MfaStepUpOutcome,
 	type MfaStoreOutage,
 	type MfaVerifyOutcome,
 	OUTSIDE_CONTRACT,
 	outage,
-	REVOKED,
 	type Revoked,
 	UNKNOWN_FACTOR,
 	UNKNOWN_TRANSACTION,
@@ -125,7 +129,11 @@ import {
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
 import type { RequireEmailProof } from "./firstBinding.mjs";
-import { readFirstBindingMark } from "./firstBindingMark.mjs";
+import {
+	distrustedByFirstBinding,
+	firstBindingRetryAfterMs,
+	readFirstBindingMark,
+} from "./firstBindingMark.mjs";
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
@@ -290,6 +298,31 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	const bound = async (
 		call: MfaCeremonyCall,
 	): Promise<MfaTransaction | null | Revoked | MfaStoreOutage> => {
+		const tx = await boundRead(call);
+		if (tx === null || "outcome" in tx) return tx;
+		if (tx.purpose === "login") {
+			const past = await pastSessionsBoundary(tx);
+			if (past === false) return tx;
+			return past === true ? { outcome: "revoked", subject: tx.subject } : past;
+		}
+		return inSession(tx, call);
+	};
+
+	/** An `enroll` transaction of the session `call` was admitted in — its `sid` and subject — else none. */
+	const inSession = (tx: MfaTransaction, call: MfaCeremonyCall): MfaTransaction | null => {
+		const session = call.session;
+		return tx.purpose === "enroll" &&
+			session !== undefined &&
+			tx.sid === session.sid &&
+			tx.subject === session.subject
+			? tx
+			: null;
+	};
+
+	/** The transaction `call` names, bound to its binding, whatever its purpose; `null` for none. */
+	const boundRead = async (
+		call: MfaCeremonyCall,
+	): Promise<MfaTransaction | null | MfaStoreOutage> => {
 		const id = call.transactionId;
 		if (id === undefined || !TRANSACTION_ID.test(id)) return null;
 		let tx: MfaTransaction | null;
@@ -298,19 +331,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		} catch (cause) {
 			return outage("mfa_transaction", "get", cause);
 		}
-		if (tx === null) return null;
-		if (tx.purpose === "login") {
-			const past = await pastSessionsBoundary(tx);
-			if (past === false) return tx;
-			return past === true ? REVOKED : past;
-		}
-		const session = call.session;
-		return tx.purpose === "enroll" &&
-			session !== undefined &&
-			tx.sid === session.sid &&
-			tx.subject === session.subject
-			? tx
-			: null;
+		return tx;
 	};
 
 	/** Every record of `subject`, oldest first; an outage is never "none". */
@@ -511,6 +532,19 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return { written: written as MfaTransaction };
 	};
 
+	/** `subject`'s first-binding mark noted at `atMs`, standing its lifetime; the outage otherwise. */
+	const noteFirstBinding = async (
+		subject: string,
+		atMs: number,
+	): Promise<MfaStoreOutage | undefined> => {
+		try {
+			await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMarkMs);
+			return undefined;
+		} catch (cause) {
+			return outage("mfa_transaction", "noteFirstBinding", cause);
+		}
+	};
+
 	const kit: MfaCeremonyKit = {
 		factors,
 		factorStore,
@@ -579,21 +613,35 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "recordSessionEmailProof", cause);
 			}
 		},
-		firstBindingAt: async (subject) => {
+		boundInSession: async (call) => {
+			const tx = await boundRead(call);
+			return tx === null || "outcome" in tx ? tx : inSession(tx, call);
+		},
+		firstBindingDistrust: async (subject, authTimeMs) => {
 			const nowMs = now();
+			let mark: number | null;
 			try {
-				return readFirstBindingMark(await transactions.firstBindingAt(subject, nowMs), nowMs);
+				mark = readFirstBindingMark(await transactions.firstBindingAt(subject, nowMs), nowMs);
 			} catch (cause) {
 				return outage("mfa_transaction", "firstBindingAt", cause);
 			}
+			return mark !== null && distrustedByFirstBinding(authTimeMs, mark)
+				? ({
+						outcome: "first_binding_distrusted",
+						subject,
+						retryAfterMs: firstBindingRetryAfterMs(mark, nowMs),
+					} satisfies MfaFirstBindingDistrusted)
+				: undefined;
 		},
-		noteFirstBinding: async (subject, atMs) => {
-			try {
-				await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMarkMs);
-				return undefined;
-			} catch (cause) {
-				return outage("mfa_transaction", "noteFirstBinding", cause);
-			}
+		noteFirstBinding,
+		reconcileWitness: async (subject, nowMs) => {
+			// A directory that cannot write the witness leaves no session stale: no mark is due.
+			if (!witness.writable)
+				return { witness: await witness.mark(subject), firstBindingUnnoted: undefined };
+			const unnoted = await noteFirstBinding(subject, nowMs);
+			return unnoted === undefined
+				? { witness: await witness.mark(subject), firstBindingUnnoted: undefined }
+				: { witness: undefined, firstBindingUnnoted: unnoted };
 		},
 		recordsOf,
 		reserve,
@@ -1058,12 +1106,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				}
 
 				// D12: a counting factor verified for a login's `User` that does not
-				// say it enrolled marks it, so a mark that failed heals here. The
-				// first-binding mark comes first: unnoted, the witness stays unmarked.
+				// say it enrolled marks it, so a mark that failed heals here.
 				const user = consumed.continuation?.primary.user;
-				const due = reconciles(factor, user);
-				const unnoted = due ? await kit.noteFirstBinding(tx.subject, nowMs) : undefined;
-				const marked = due && unnoted === undefined ? await witness.mark(tx.subject) : undefined;
+				const reconciled = reconciles(factor, user)
+					? await kit.reconcileWitness(tx.subject, nowMs)
+					: undefined;
 
 				return {
 					outcome: "verified",
@@ -1072,8 +1119,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
 						mfaAt: new Date(nowMs),
 					},
-					witness: marked,
-					firstBindingUnnoted: unnoted,
+					witness: reconciled?.witness,
+					firstBindingUnnoted: reconciled?.firstBindingUnnoted,
 					recoveryCodesRemaining: recoveryCodesLeft(factor, checked.next),
 					...about,
 				};

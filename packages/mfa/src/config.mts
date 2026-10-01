@@ -192,7 +192,7 @@ const mfaPageSchema = z.object(
 );
 
 /** The least and the most time a second factor verified in a session stays recent, in seconds. */
-const MFA_RECENT_WINDOW_SECONDS = { min: 60, max: 3600 } as const;
+export const MFA_RECENT_WINDOW_SECONDS = { min: 60, max: 3600 } as const;
 
 /**
  * `mfa.manage`: `maxAgeSeconds`, how long a second factor verified in a

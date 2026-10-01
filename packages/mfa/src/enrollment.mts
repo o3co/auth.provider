@@ -35,10 +35,13 @@
  *   code went to when it mailed one (`sendMfaMail`); the page is then
  *   answered where it went, masked (`sent_to`), and how long it lives
  *   (`expires_in`), which is how long the enrollment can be completed.
- * - A login's first binding is refused, before anything is spent, when the
- *   subject's first-binding mark distrusts its continuation's `authTime`
- *   (`firstBindingMark.mts`): another first binding came after the login
- *   began, so its `User`'s witness may be stale. A session's is admission's.
+ * - A first binding is refused at its start and at its completion, before
+ *   anything is spent or shown, when the subject's first-binding mark
+ *   (`firstBindingMark.mts`) distrusts the authentication it rests on — the
+ *   login's continuation, or the session's sign-in as admission read it —
+ *   since its `User`'s recorded witness may be stale. A completion checks
+ *   whenever the records it lists allow a first binding, whatever admission
+ *   saw before it.
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, in this order: for a first binding notes the
  *   subject's first-binding mark — a note that fails refuses it, nothing
@@ -85,7 +88,6 @@ import {
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
 import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
-import { distrustedByFirstBinding } from "./firstBindingMark.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes } from "./recovery/issue.mjs";
 
@@ -114,6 +116,10 @@ const INVALID_LABEL = Object.freeze({ outcome: "invalid_label" as const });
 
 /** Whether `tx` binds the subject's first counting factor: one opened `required`, a login's or an `enroll` one. */
 const isFirstBinding = (tx: MfaTransaction): boolean => tx.enrollment === "required";
+
+/** The authentication a binding on `tx` rests on: the login's primary, or the sign-in of the session `call` was admitted in. */
+const authTimeOf = (tx: MfaTransaction, call: MfaCeremonyCall): number | undefined =>
+	tx.purpose === "login" ? tx.continuation?.primary.authTimeMs : call.session?.authTimeMs;
 
 /** An enrollment over the coordinator's `kit` (see this file's header). */
 export function createMfaEnrollment(kit: MfaCeremonyKit): {
@@ -246,6 +252,10 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const first = reopenedEnrollment(factors, records) === "required";
 			const refused = refusedBy("enroll", first, records, UNTIL_COMPLETION);
 			if (refused !== undefined) return refused;
+			if (first) {
+				const distrusted = await kit.firstBindingDistrust(session.subject, session.authTimeMs);
+				if (distrusted !== undefined) return distrusted;
+			}
 			const tx = await kit.openEnrollment(call, session, {
 				enrollment: first ? "required" : "allowed",
 				emailProof: "not_required",
@@ -268,7 +278,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					: "password"
 				: UNTIL_COMPLETION,
 		);
-		return refused ?? { ...open, factor, records };
+		if (refused !== undefined) return refused;
+		if (isFirstBinding(open.tx)) {
+			const distrusted = await kit.firstBindingDistrust(open.tx.subject, authTimeOf(open.tx, call));
+			if (distrusted !== undefined) return distrusted;
+		}
+		return { ...open, factor, records };
 	};
 
 	/**
@@ -501,12 +516,9 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const firstBy: FirstBindingBy = proved ? "email_proof" : "password";
 			const refused = refusedBy(tx.purpose, first, records, firstBy);
 			if (refused !== undefined) return refused;
-			if (first && tx.purpose === "login") {
-				const mark = await kit.firstBindingAt(tx.subject);
-				if (typeof mark === "object" && mark !== null) return mark;
-				if (distrustedByFirstBinding(tx.continuation?.primary.authTimeMs, mark)) {
-					return closed(tx.purpose);
-				}
+			if (first) {
+				const distrusted = await kit.firstBindingDistrust(tx.subject, authTimeOf(tx, call));
+				if (distrusted !== undefined) return distrusted;
 			}
 
 			const about: MfaCeremonySubject = {

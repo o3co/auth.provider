@@ -92,8 +92,10 @@ import type {
 	MfaCeremonyCall,
 	MfaCeremonySession,
 	MfaFactorUnreadable,
+	MfaFirstBindingDistrusted,
 	MfaStoreOutage,
 	MfaVerifyOutcome,
+	Revoked,
 } from "./ceremony.mjs";
 import type { MfaCoordinator } from "./coordinator.mjs";
 import { type MfaMailRefusal, mailFailureOf } from "./mail.mjs";
@@ -325,7 +327,13 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			answerNoSession(res, admitted);
 			return undefined;
 		}
-		return { sid: session.sid, subject: session.sub, user };
+		const authTime = admitted.outcome === "admitted" ? admitted.view?.authTime : undefined;
+		return {
+			sid: session.sid,
+			subject: session.sub,
+			user,
+			authTimeMs: authTime === undefined ? undefined : authTime.getTime(),
+		};
 	};
 
 	/**
@@ -404,6 +412,27 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	const witnessUnwritten = (sub: string, mark: MfaWitnessMark | undefined): void => {
 		if (mark?.outcome !== "unwritten") return;
 		logger.warn({ sub, err: loggableError(mark.cause) }, "mfa_enrollment_witness_unwritten");
+	};
+
+	/** A login begun at or before its subject's sessions boundary: said at info, and `401 login_required`. */
+	const answerRevoked = (route: RouteName, res: Response, revoked: Revoked): void => {
+		logger.info({ sub: revoked.subject, route }, "mfa_login_revoked");
+		res.status(401).json(LOGIN_REQUIRED);
+	};
+
+	/**
+	 * A first binding the subject's first-binding mark distrusts: said at
+	 * info, and `401 login_required` with `Retry-After`, the whole seconds,
+	 * rounded up, until a fresh sign-in can bind on this replica's clock.
+	 */
+	const answerDistrusted = (
+		route: RouteName,
+		res: Response,
+		distrusted: MfaFirstBindingDistrusted,
+	): void => {
+		logger.info({ sub: distrusted.subject, route }, "mfa_first_binding_distrusted");
+		res.set("Retry-After", String(Math.max(1, Math.ceil(distrusted.retryAfterMs / 1000))));
+		res.status(401).json(LOGIN_REQUIRED);
 	};
 
 	/** A first-binding mark a verification could not note: once at warn; the witness was left unmarked, and the next login heals it. */
@@ -542,7 +571,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				return;
 			}
 			if (outcome.outcome === "revoked") {
-				res.status(401).json(LOGIN_REQUIRED);
+				answerRevoked("transaction", res, outcome);
 				return;
 			}
 			if (outcome.outcome === "unavailable") {
@@ -571,7 +600,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(400).json(UNKNOWN_TRANSACTION);
 					return;
 				case "revoked":
-					res.status(401).json(LOGIN_REQUIRED);
+					answerRevoked("challenge", res, outcome);
 					return;
 				case "unknown_factor":
 					res.status(400).json(UNKNOWN_FACTOR);
@@ -675,7 +704,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(400).json(UNKNOWN_TRANSACTION);
 					return;
 				case "revoked":
-					res.status(401).json(LOGIN_REQUIRED);
+					answerRevoked("verify", res, outcome);
+					return;
+				case "first_binding_distrusted":
+					answerDistrusted("verify", res, outcome);
 					return;
 				case "unknown_factor":
 					res.status(400).json(UNKNOWN_FACTOR);
@@ -832,7 +864,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(400).json(UNKNOWN_TRANSACTION);
 					return;
 				case "revoked":
-					res.status(401).json(LOGIN_REQUIRED);
+					answerRevoked("enrollment", res, outcome);
+					return;
+				case "first_binding_distrusted":
+					answerDistrusted("enrollment", res, outcome);
 					return;
 				case "enrollment_not_open":
 					res.status(400).json(NOT_OPEN);
@@ -895,7 +930,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(400).json(UNKNOWN_TRANSACTION);
 					return;
 				case "revoked":
-					res.status(401).json(LOGIN_REQUIRED);
+					answerRevoked("enrollment", res, outcome);
+					return;
+				case "first_binding_distrusted":
+					answerDistrusted("enrollment", res, outcome);
 					return;
 				case "enrollment_not_open":
 					res.status(400).json(NOT_OPEN);

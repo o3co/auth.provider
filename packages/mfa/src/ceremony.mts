@@ -96,26 +96,42 @@ export const UNKNOWN_TRANSACTION = Object.freeze({ outcome: "unknown_transaction
 /** No factor of the subject's that an installed factor verifies, by the id named. */
 export const UNKNOWN_FACTOR = Object.freeze({ outcome: "unknown_factor" as const });
 
-/**
- * A login transaction whose continuation was authenticated at or before its
- * subject's sessions boundary — a revocation or a password change since:
- * it completes nothing, and the user signs in again.
- */
-export const REVOKED = Object.freeze({ outcome: "revoked" as const });
-
 export type UnknownTransaction = typeof UNKNOWN_TRANSACTION;
 export type UnknownFactor = typeof UNKNOWN_FACTOR;
-export type Revoked = typeof REVOKED;
+
+/**
+ * A login transaction of `subject` whose continuation was authenticated at
+ * or before the subject's sessions boundary — a revocation or a password
+ * change since: it completes nothing, and the user signs in again.
+ */
+export interface Revoked {
+	readonly outcome: "revoked";
+	readonly subject: string;
+}
+
+/**
+ * A first binding of `subject` whose authentication — the login's, or the
+ * session's — the subject's first-binding mark distrusts
+ * (`firstBindingMark.mts`): nothing is spent or written, and the user signs
+ * in again, binding once `retryAfterMs` has passed on this clock.
+ */
+export interface MfaFirstBindingDistrusted {
+	readonly outcome: "first_binding_distrusted";
+	readonly subject: string;
+	readonly retryAfterMs: number;
+}
 
 /**
  * The signed-in session a ceremony outside a login runs in, as the route
- * admitted it: its `sid`, its subject, and the `User` its cookie holds
- * (core's `cookieSessionUser`).
+ * admitted it: its `sid`, its subject, the `User` its cookie holds (core's
+ * `cookieSessionUser`), and its primary sign-in as admission's view holds
+ * it — `undefined` without one, which any first-binding mark distrusts.
  */
 export interface MfaCeremonySession {
 	readonly sid: string;
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
+	readonly authTimeMs: number | undefined;
 }
 
 /** One call's request: the transaction named, the binding the browser presents, and what a factor may read of the request. */
@@ -246,6 +262,7 @@ export type MfaVerifyOutcome =
  * reached beside a record that may count.
  */
 export type MfaReopenRefusal =
+	| MfaFirstBindingDistrusted
 	| {
 			readonly outcome: "enrollment_state_inconsistent";
 			readonly witness: "enrolled" | "malformed";
@@ -261,6 +278,7 @@ export type MfaReopenRefusal =
 export type MfaEnrollmentRefusal =
 	| UnknownTransaction
 	| Revoked
+	| MfaFirstBindingDistrusted
 	| MfaStoreOutage
 	/** The transaction opened no enrollment, or it is not a login's first binding. */
 	| { readonly outcome: "enrollment_not_open" }
@@ -272,8 +290,7 @@ export type MfaEnrollmentRefusal =
 	 * The subject's records no longer allow the binding: a first binding's
 	 * subject holds a record now, or the factor it would go beside is gone —
 	 * a login starts again; a session, which stands, starts the enrollment
-	 * again. A login's first binding whose continuation the subject's
-	 * first-binding mark distrusts is refused so too: the login starts again.
+	 * again.
 	 */
 	| { readonly outcome: "first_binding_closed"; readonly purpose: MfaTransaction["purpose"] }
 	/** The subject holds `mfa.maxFactorsPerSubject` records. */
@@ -393,10 +410,34 @@ export interface MfaCeremonyKit {
 	readonly bound: (
 		call: MfaCeremonyCall,
 	) => Promise<MfaTransaction | null | Revoked | MfaStoreOutage>;
-	/** `subject`'s first-binding mark now (`firstBindingMark.mts`): its time, `null` for none; the outage otherwise. */
-	readonly firstBindingAt: (subject: string) => Promise<number | null | MfaStoreOutage>;
+	/** As `bound`, for an `enroll` transaction of `call.session` alone: a login's is none, and its boundary is never read. */
+	readonly boundInSession: (
+		call: MfaCeremonyCall,
+	) => Promise<MfaTransaction | null | MfaStoreOutage>;
+	/**
+	 * Whether `subject`'s first-binding mark distrusts an authentication at
+	 * `authTimeMs` (`firstBindingMark.mts`): the refusal; `undefined` when it
+	 * does not, or there is none; the outage when it cannot be read.
+	 */
+	readonly firstBindingDistrust: (
+		subject: string,
+		authTimeMs: number | undefined,
+	) => Promise<MfaFirstBindingDistrusted | MfaStoreOutage | undefined>;
 	/** `subject`'s first-binding mark noted at `atMs`, standing its lifetime; the outage otherwise. */
 	readonly noteFirstBinding: (subject: string, atMs: number) => Promise<MfaStoreOutage | undefined>;
+	/**
+	 * D12's reconciliation for `subject`, verified at `nowMs` with a counting
+	 * factor its `User` does not say it enrolled: the first-binding mark noted,
+	 * then the witness marked — only once the mark was noted, and never by a
+	 * directory that cannot write it. Never throws.
+	 */
+	readonly reconcileWitness: (
+		subject: string,
+		nowMs: number,
+	) => Promise<{
+		readonly witness: MfaWitnessMark | undefined;
+		readonly firstBindingUnnoted: MfaStoreOutage | undefined;
+	}>;
 	/** A new `enroll` transaction for `session`, bound to the browser `call` presents; the outage otherwise. */
 	readonly openEnrollment: (
 		call: MfaCeremonyCall,

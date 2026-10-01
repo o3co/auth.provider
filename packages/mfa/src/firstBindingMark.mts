@@ -26,7 +26,8 @@
  *   with the skew once for the clock that dated the authentication and once
  *   for the store's clock that ends the mark.
  * - An authentication at or before the mark plus `DEFAULT_CLOCK_SKEW_MS` is
- *   distrusted, and so is one whose time cannot be read.
+ *   distrusted, and so is one whose time cannot be read; a fresh one is not
+ *   until the mark plus the skew has passed (`firstBindingRetryAfterMs`).
  * - An answer the port does not promise is an outage, never "no mark".
  */
 
@@ -70,4 +71,13 @@ export function distrustedByFirstBinding(
 ): boolean {
 	if (markAtMs === null) return false;
 	return !(typeof authTimeMs === "number" && authTimeMs > markAtMs + DEFAULT_CLOCK_SKEW_MS);
+}
+
+/**
+ * How long from `nowMs` until an authentication is no longer distrusted by a
+ * mark at `markAtMs`: past the mark plus `DEFAULT_CLOCK_SKEW_MS`, on this
+ * clock. Another replica's clock may put it up to the skew later.
+ */
+export function firstBindingRetryAfterMs(markAtMs: number, nowMs: number): number {
+	return Math.max(0, markAtMs + DEFAULT_CLOCK_SKEW_MS + 1 - nowMs);
 }

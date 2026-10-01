@@ -22,11 +22,13 @@
 
 import { DEFAULT_CLOCK_SKEW_MS, MFA_CLOCK_SKEW_ALLOWANCE_MS } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
+import { MFA_RECENT_WINDOW_SECONDS } from "#/config.mjs";
 import {
 	distrustedByFirstBinding,
 	firstBindingMarkLifetimeMs,
 	readFirstBindingMark,
 } from "#/firstBindingMark.mjs";
+import { MFA_TRANSACTION_TTL_SECONDS } from "#/transactions.mjs";
 
 const NOW = 1_800_000_010_000;
 
@@ -44,9 +46,12 @@ describe("the mark's lifetime", () => {
 		}
 	});
 
-	it("stays within a day, the most a store keeps a mark, at the longest the settings allow", () => {
+	it("stays within a day, the most a store keeps a mark, at the longest mfa.manage.maxAgeSeconds and mfa.transactionTtlSeconds admit", () => {
 		expect(
-			firstBindingMarkLifetimeMs({ manageMaxAgeSeconds: 3600, transactionTtlSeconds: 1800 }),
+			firstBindingMarkLifetimeMs({
+				manageMaxAgeSeconds: MFA_RECENT_WINDOW_SECONDS.max,
+				transactionTtlSeconds: MFA_TRANSACTION_TTL_SECONDS.max,
+			}),
 		).toBeLessThanOrEqual(MFA_CLOCK_SKEW_ALLOWANCE_MS);
 	});
 });
