@@ -618,6 +618,34 @@ export function runSecondFactorUpdateContract(
 			expect(await store.get("sf-stale")).toStrictEqual(recorded);
 		});
 
+		it("reads the event's nonces once: what it records and compares is what was checked", async () => {
+			const store = await capable();
+			await store.create(INPUT({ sid: "sf-once", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
+			const checked = newRenewalNonce();
+			let nonceReads = 0;
+			let expectedReads = 0;
+			const event = Object.defineProperties(
+				{ amr: ["otp", "mfa"], at: at(1_000) },
+				{
+					renewalNonce: {
+						enumerable: true,
+						get: () => (nonceReads++ === 0 ? checked : "not-a-nonce"),
+					},
+					expectedRenewalNonce: {
+						enumerable: true,
+						// Absent on the read that is checked and compared; a nonce the
+						// session does not hold on any later one.
+						get: () => (expectedReads++ === 0 ? undefined : newRenewalNonce()),
+					},
+				},
+			);
+			const recorded = await store.recordSecondFactor("sf-once", event);
+			expect(recorded?.renewalNonce).toBe(checked);
+			expect((await store.get("sf-once"))?.renewalNonce).toBe(checked);
+			expect(nonceReads).toBe(1);
+			expect(expectedReads).toBe(1);
+		});
+
 		it("of two completions started at once from one session, records exactly one", async () => {
 			const store = await capable();
 			await store.create(INPUT({ sid: "sf-pair", amr: ["pwd"], authentication: PASSWORD_LOGIN }));

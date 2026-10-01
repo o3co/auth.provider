@@ -335,6 +335,56 @@ describe("the merge — the rows the MFA table does not reach", () => {
 		expect(admission).toEqual({ outcome: "unmet", requirement: "acr", session });
 	});
 
+	it("hands each requirement its own frozen authentication: what one does to it reaches neither the next requirement nor the merge", async () => {
+		// `urn:example:both` needs hwk and swk together: neither requirement's
+		// reach finishes it alone, so it is unmet — unless a requirement could
+		// make the merge believe hwk is held.
+		const table = readAcrTable({ "urn:example:both": ["hwk", "swk"] });
+		const stepped = passwordSession(["pwd", "otp", "mfa"], minutesAgo(1));
+		const seen: Array<{ amr: readonly string[]; mfaAtMs: number | undefined; frozen: boolean }> =
+			[];
+		const mutating: SessionRequirement = {
+			...reaching("a", ["hwk"]),
+			admit: async (input) => {
+				const held = input.authentication;
+				seen.push({
+					amr: [...(held?.amr ?? [])],
+					mfaAtMs: held?.authentication?.mfaAt?.getTime(),
+					frozen: Object.isFrozen(held) && Object.isFrozen(held?.amr),
+				});
+				try {
+					(held?.amr as string[] | undefined)?.push("hwk");
+				} catch {
+					// A frozen copy refuses the push; a careless requirement goes on.
+				}
+				held?.authentication?.mfaAt?.setTime(0);
+				return { outcome: "met" };
+			},
+		};
+		const watching: SessionRequirement = {
+			...reaching("b", ["swk"]),
+			admit: async (input) => {
+				seen.push({
+					amr: [...(input.authentication?.amr ?? [])],
+					mfaAtMs: input.authentication?.authentication?.mfaAt?.getTime(),
+					frozen: Object.isFrozen(input.authentication),
+				});
+				return { outcome: "met" };
+			},
+		};
+		const admission = await admitSession(
+			{ ...deps(stepped, [mutating, watching]), acrTable: table },
+			{ claim: claim(), action: "test.use", asks: { acrValues: ["urn:example:both"] } },
+		);
+		expect(admission).toEqual({ outcome: "unmet", requirement: "acr", session: stepped });
+		const mfaAtMs = stepped.authentication?.mfaAt?.getTime();
+		expect(seen).toEqual([
+			{ amr: ["pwd", "otp", "mfa"], mfaAtMs, frozen: true },
+			{ amr: ["pwd", "otp", "mfa"], mfaAtMs, frozen: true },
+		]);
+		expect(stepped.authentication?.mfaAt?.getTime()).toBe(mfaAtMs);
+	});
+
 	it("step_up + step_up: one trip — the requirement's page, the acr hint filtered to what that requirement's reach can finish, and unmet when it comes back still unmet", async () => {
 		const stepping = (reach: readonly string[]): SessionRequirement => ({
 			...reaching("first", reach),
