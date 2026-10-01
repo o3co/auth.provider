@@ -91,14 +91,15 @@ import {
 } from "@o3co/auth-provider-core";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import type { MfaAdmissionAction } from "./admissionActions.mjs";
-import type {
-	MfaCeremonyCall,
-	MfaCeremonySession,
-	MfaFactorUnreadable,
-	MfaFirstBindingDistrusted,
-	MfaStoreOutage,
-	MfaVerifyOutcome,
-	Revoked,
+import {
+	type MfaCeremonyCall,
+	type MfaCeremonySession,
+	type MfaFactorUnreadable,
+	type MfaFirstBindingDistrusted,
+	type MfaStoreOutage,
+	type MfaVerifyOutcome,
+	OUTSIDE_CONTRACT,
+	type Revoked,
 } from "./ceremony.mjs";
 import type { MfaCoordinator } from "./coordinator.mjs";
 import { type MfaMailRefusal, mailFailureOf } from "./mail.mjs";
@@ -117,6 +118,7 @@ const SESSION_STORE_UNAVAILABLE = errorEnvelope(
 	"Session store unavailable",
 );
 const LOGIN_REQUIRED = errorEnvelope("login_required", "Log in again");
+const STEP_UP_UNRECORDED = errorEnvelope("server_error", "The step-up could not be recorded");
 /** A proof that would reopen a login for a binding nobody could complete: refused, nothing spent. */
 const ENROLLMENT_REQUIRED = errorEnvelope(
 	"mfa_enrollment_required",
@@ -188,6 +190,16 @@ interface SignedInSession {
 	readonly session: MfaCeremonySession;
 	readonly expectedRenewalNonce: string | undefined;
 }
+
+/** How a session's escalation ended (`escalateSession`). */
+type Escalation =
+	| "escalated"
+	| "unrecordable_store"
+	| "not_renewed"
+	| "not_recorded"
+	| "unbound"
+	| "invalid"
+	| "unavailable";
 
 /** Which route a line is logged by: the enrollment's two share one name. */
 type RouteName = "transaction" | "challenge" | "verify" | "enrollment" | "step-up";
@@ -609,8 +621,25 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	/**
 	 * The signed-in session `session` escalated by `adds`: its express id
 	 * renewed, then the second factor recorded on its `UserSession` with the
-	 * renewal nonce, expecting the one admission compared — called once, and
-	 * never again. A fresh CSRF token on the response once recorded.
+	 * renewal nonce, expecting the one admission compared — called once, never
+	 * again, since a retry after a write that landed would expect the old
+	 * nonce and undo it. A fresh CSRF token on the response once recorded.
+	 * Each failure is logged here, once; the caller chooses the answer.
+	 *
+	 * - No step-up capability: `unrecordable_store`, nothing renewed.
+	 * - The renewal fails: `not_renewed`, nothing recorded; the port
+	 *   abandoned the request's cookie session.
+	 * - The record answers `null` — the session is gone, another completion
+	 *   from the same cookie session was recorded first, or it predates how a
+	 *   session was established: `not_recorded`. The renewed cookie session is
+	 *   left as it is: at its next admission each cause is `not_live` or
+	 *   below the level the step-up was for.
+	 * - A session without the renewal nonce: `unbound`, the escalation
+	 *   recorded and bound to no cookie session.
+	 * - A `RangeError`: `invalid`. Any other rejection, or an answer that is
+	 *   no session: `unavailable`.
+	 *
+	 * After a renewal, no failure abandons the renewed cookie session.
 	 */
 	const escalateSession = async (
 		route: RouteName,
@@ -619,8 +648,8 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		session: { readonly sid: string; readonly sub: string },
 		expected: string | undefined,
 		adds: { readonly amr: readonly string[]; readonly mfaAt: Date },
-	): Promise<{ readonly outcome: "escalated" | "not_escalated" }> => {
-		if (secondFactorStore === undefined) return { outcome: "not_escalated" };
+	): Promise<Escalation> => {
+		if (secondFactorStore === undefined) return "unrecordable_store";
 		const renewed = await loginCompletion.renewSession({
 			req,
 			reporter: {
@@ -628,16 +657,65 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					storeUnavailable(route, store, step, cause, { sid: session.sid }),
 			},
 		});
-		if (renewed.outcome !== "renewed") return { outcome: "not_escalated" };
-		const recorded = await secondFactorStore.recordSecondFactor(session.sid, {
-			amr: adds.amr,
-			at: adds.mfaAt,
-			renewalNonce: renewed.renewalNonce,
-			expectedRenewalNonce: expected,
-		});
-		if (recorded === null) return { outcome: "not_escalated" };
+		if (renewed.outcome !== "renewed") return "not_renewed";
+		let recorded: unknown;
+		try {
+			recorded = await secondFactorStore.recordSecondFactor(session.sid, {
+				amr: adds.amr,
+				at: adds.mfaAt,
+				renewalNonce: renewed.renewalNonce,
+				expectedRenewalNonce: expected,
+			});
+		} catch (cause) {
+			if (cause instanceof RangeError) {
+				logger.error(
+					{ route, sub: session.sub, err: loggableError(cause) },
+					"mfa_step_up_unrecordable",
+				);
+				return "invalid";
+			}
+			storeUnavailable(route, "user_session", "recordSecondFactor", cause, { sid: session.sid });
+			return "unavailable";
+		}
+		if (recorded === null) {
+			logger.info({ route, sub: session.sub }, "mfa_step_up_not_recorded");
+			return "not_recorded";
+		}
+		if (typeof recorded !== "object") {
+			storeUnavailable(route, "user_session", "recordSecondFactor", OUTSIDE_CONTRACT, {
+				sid: session.sid,
+			});
+			return "unavailable";
+		}
+		if ((recorded as { readonly renewalNonce?: unknown }).renewalNonce !== renewed.renewalNonce) {
+			logger.error({ route, sub: session.sub }, "mfa_step_up_unbound");
+			return "unbound";
+		}
 		csrfGuard.issue(res);
-		return { outcome: "escalated" };
+		return "escalated";
+	};
+
+	/** A step-up's answer for how its escalation ended (`escalateSession`). */
+	const answerEscalation = (res: Response, escalation: Escalation, answer: object): void => {
+		switch (escalation) {
+			case "escalated":
+				res.status(200).json(answer);
+				return;
+			case "unrecordable_store":
+			case "not_recorded":
+				res.status(401).json(LOGIN_REQUIRED);
+				return;
+			case "not_renewed":
+			case "unavailable":
+				res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				return;
+			case "unbound":
+			case "invalid":
+				res.status(500).json(STEP_UP_UNRECORDED);
+				return;
+			default:
+				return escalation satisfies never;
+		}
 	};
 
 	router
@@ -924,7 +1002,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					verifiedEvents(outcome);
 					firstBindingUnnoted(outcome.subject, outcome.firstBindingUnnoted);
 					witnessUnwritten(outcome.subject, outcome.witness);
-					const escalated = await escalateSession(
+					const escalation = await escalateSession(
 						"verify",
 						req,
 						res,
@@ -932,11 +1010,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						expectedRenewalNonce,
 						outcome.adds,
 					);
-					if (escalated.outcome !== "escalated") {
-						res.status(401).json(LOGIN_REQUIRED);
-						return;
-					}
-					res.status(200).json({
+					answerEscalation(res, escalation, {
 						step_up: "verified",
 						...(outcome.recoveryCodesRemaining === undefined
 							? {}
