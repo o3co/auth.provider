@@ -1955,6 +1955,112 @@ export function runMfaTransactionStoreContract(
 				expect(await store.subjectGeneration("user-1")).toBe(0);
 				expect(await recover(store, now)).toEqual(RELEASED);
 			});
+
+			describe("the hard hold", () => {
+				// The hold is lifted by an exempt proof and a rebind: no record of
+				// an installed guessable kind created before it remains. No
+				// sessions boundary is asked for; the week keeps that rule.
+
+				/** SMALL_HARD with the week holding at the six failures the hard hold counts. */
+				const WEEK_OF_SIX: MfaLockoutPolicy = { ...SMALL_HARD, weeklyBudget: 6 };
+
+				/** A record bound a day before the attack: no rebind. */
+				const OLD_RECORD = (): number => start() - DAY;
+
+				/** The run at SMALL_HARD's limit and an authorization: answers the hold's time (the last failure). */
+				async function latched(store: MfaTransactionStore): Promise<number> {
+					const last = await toTheHardLimit(store);
+					expect(held(await check(store, last + 1, SMALL_HARD))).toEqual(HARD);
+					await store.authorizeSubjectRecovery("user-1", authorization());
+					return last;
+				}
+
+				it("stays without a rebind: a recover with a boundary ends the week alone, keeps the run it counted, and answers that it stands", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					const answer = await recover(store, last + MINUTE, {
+						sessionsBoundaryMs: last + 1,
+						guessableBoundSinceMs: OLD_RECORD(),
+					});
+					expect(answer).toEqual({
+						outcome: "applied",
+						recoveryId: "recovery-1",
+						generation: 1,
+						cleared: { week: true, run: false, hard: false },
+						hard: true,
+					});
+					expect(held(await check(store, last + 2 * MINUTE, SMALL_HARD))).toEqual(HARD);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: OLD_RECORD() }),
+					).toEqual({
+						outcome: "already_applied",
+						recoveryId: "recovery-1",
+						generation: 1,
+						hard: true,
+					});
+				});
+
+				it("refuses not_revoked_since without a rebind or a boundary, answering that it stands", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: OLD_RECORD() }),
+					).toEqual({ outcome: "refused", reason: "not_revoked_since", hard: true });
+					expect(await store.subjectGeneration("user-1")).toBe(0);
+				});
+
+				it("lifts on a rebind with no sessions boundary: the run it counted ends, its backoff with it, and the week stands", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
+					).toEqual({
+						outcome: "applied",
+						recoveryId: "recovery-1",
+						generation: 1,
+						cleared: { week: false, run: true, hard: true },
+						hard: false,
+					});
+					// The week still counts the six failures; the run counts none.
+					expect(held(await check(store, last + 2 * MINUTE, WEEK_OF_SIX))).toMatchObject({
+						hold: "weekly",
+					});
+					expect((await check(store, last + 2 * MINUTE, SMALL_HARD)).ok).toBe(true);
+				});
+
+				it("lifts on a rebind and gives the week back with a boundary too", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, {
+							sessionsBoundaryMs: last + 1,
+							guessableBoundSinceMs: last + SKEW + 1,
+						}),
+					).toEqual({ ...RELEASED, cleared: { week: true, run: true, hard: true } });
+					expect((await check(store, last + 2 * MINUTE, WEEK_OF_SIX)).ok).toBe(true);
+				});
+
+				it("counts no guessable record left as a rebind", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(await recover(store, last + MINUTE)).toMatchObject({
+						outcome: "applied",
+						cleared: { hard: true },
+						hard: false,
+					});
+				});
+
+				it("takes a record as a rebind only when it was created later than the hold by more than the skew", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW }),
+					).toMatchObject({ outcome: "refused", reason: "not_revoked_since", hard: true });
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
+					).toMatchObject({ outcome: "applied", hard: false });
+				});
+			});
 		});
 	});
 
