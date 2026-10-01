@@ -548,7 +548,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				// against a refactor that reorders the gates.
 				if (previousJti === null || familyId === null) {
 					throw new Error(
-						"invariant violation: SF-6 fail-fast must run before refresh-token rotation block",
+						"invariant violation: a refresh token without a jti or a family_id must be refused before rotation",
 					);
 				}
 				// Fail closed when the store is unavailable: without an atomic

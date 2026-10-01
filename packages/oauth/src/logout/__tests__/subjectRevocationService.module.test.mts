@@ -241,6 +241,8 @@ describe("subjectRevocationServiceModule", () => {
 			expect(() => build({ config: enabled() })).toThrow(
 				/federation-grants\.enabled = true requires a federationGrantStore/,
 			);
+			// The refusal states the rule it enforces, with no design label.
+			expect(() => build({ config: enabled() })).not.toThrow(/\bD\d+\b/);
 		});
 
 		it("refuses an adapter that cannot carry the grants boundary", () => {
