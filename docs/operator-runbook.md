@@ -691,10 +691,11 @@ wires it.
   failures in any seven days hold guessable proofs (TOTP, an emailed code)
   for the subject, whatever succeeds between them, from every browser. A
   hundred consecutive failures hold them until the held factor is rebound or
-  the subject reset (step 12): no time and no exempt success lifts that hold.
-  An exempt proof — a recovery code, WebAuthn, the account-email proof —
-  passes during every lock, ends a consecutive run below the hard limit, and
-  refunds no weekly failure. So a TOTP-only user whose password an attacker
+  the subject reset, which step 12 brings: no time and no exempt success
+  lifts that hold.
+  An exempt proof — a recovery code, a WebAuthn assertion — passes during
+  every lock, ends a consecutive run below the hard limit, and refunds no
+  weekly failure. So a TOTP-only user whose password an attacker
   holds needs a recovery code at every login while a hold stands. A password
   change, like any revocation, locks out whoever held the old password and
   is still the advice, but it clears no hold: made without MFA, it proves
@@ -1323,8 +1324,8 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `consent:{pending}:sess:<sessionId>` | sorted set of challenges, score = the order they were parked | raised to its longest-lived member's; at most `PENDING_CONSENT_PER_SESSION_LIMIT` (16) members, the first-parked evicted past it. `{pending}` is a Cluster hash tag: every parked request shares one slot | same |
 | `mfaf:{<subject>}` | hash — one field per enrolled second factor (its id), value `<version>\n<fixed JSON>\n<mutable JSON>`; the factor's `data` sealed by the MFA package before it arrives (D11). `<subject>` and the id are base64url of their JSON | **none**: an enrolled factor does not expire, and losing one lets whoever holds the password bind their own (D12). Keep it where nothing evicts it and a restart keeps it — `noeviction` is recommended for every MFA key family (a `volatile-*` policy never picks this one, which has no TTL), AOF on, preferably a database or instance of its own; the module refuses an `allkeys-*` policy at boot and warns without AOF | `packages/redis/src/mfa-factor-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_FACTOR_UPDATE`) |
 | `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `enrollment`, `emailProof`, `challenge` and `pendingEnrollment` when set, `record` (the rest as JSON, the login's continuation among it) and `incarnation` | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification | `packages/redis/src/mfa-transaction-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_TX_*`) |
-| `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted — a run ends only at a success, an exempt success below the hard limit, or the MFA module's authorized recovery (step 12), and D21's hard limit counts it across weeks; otherwise a day past the last failure to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
-| `mfat:proof:{<subject>}` | string `"1"` — an operator reset's `requireEmailProof: true` (D25) | **none**, until the subject's next first binding consumes it; no revocation touches it, and the authorized recovery's clearing of the lock leaves it. As durable as `mfaf:` (D12's step-3 amendment): the transaction store's module runs the same boot check | same |
+| `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted — a run ends only at a success, an exempt success below the hard limit, or — once step 12 brings it — the MFA module's authorized recovery, and D21's hard limit counts it across weeks; otherwise a day past the last failure to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
+| `mfat:proof:{<subject>}` | string `"1"` — an operator reset's `requireEmailProof: true` (D25) | **none**, until the subject's next first binding consumes it; no revocation touches it, and the authorized recovery's clearing of the lock (step 12) will leave it. As durable as `mfaf:` (D12's step-3 amendment): the transaction store's module runs the same boot check | same |
 | `mfat:session-proof:{<subject>}:<sid>` | string, JSON `{provedAtMs, untilMs}` — the account-email proof (D24) given in one session of a subject: written when the MFA page's step-up proof is verified, `untilMs` `mfa.manage.maxAgeSeconds` later; read by the `mfa` requirement at each first binding in that session that asks the proof | `untilMs` less the store's clock (`SET … PX`), set when it is recorded; a later proof for the session replaces it. Losing one fails closed — the user proves again — so no durability is required of it, and a `volatile-*` policy evicting one costs only a re-proof | same |
 
 The MFA transaction store judges when a subject's lock state stops counting
@@ -1748,6 +1749,13 @@ before you flip — and a relying party holding the secret can also mint.
    installed (`ADAPTERS_REPLAY_SEEN_SET=redis` in the standalone). Installing
    one also turns on `private_key_jwt` wherever client authentication runs
    ([§1](#1-deployment-shapes)).
+
+   **The MFA hard hold during a rolling deploy.** From the release whose
+   exempt success stops lifting the hard hold (D21), an exempt success
+   routed to a replica of an earlier release still ends the subject's
+   consecutive run, a hard hold included, and no new replica restores it.
+   Drain the old replicas before relying on the hard hold. A release that
+   does not yet record exempt successes exposes nothing.
 
 3. **The upstream `amr` split (the MFA ADR's D13).** From this release an
    upstream IdP's `amr` counts only for a federation with
