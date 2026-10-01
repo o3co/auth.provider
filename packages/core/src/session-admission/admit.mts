@@ -101,6 +101,13 @@ import {
 	type SessionRequirementResolver,
 	type SessionView,
 } from "./requirement.mjs";
+import { checkResolver } from "./requirement-resolver.mjs";
+
+export {
+	checkResolver,
+	type SessionRequirementSource,
+	sessionRequirementResolverOver,
+} from "./requirement-resolver.mjs";
 
 // ---------------------------------------------------------------------------
 // The brands
@@ -108,75 +115,6 @@ import {
 
 /** The claims the builders below made. */
 const knownClaims = new WeakSet<object>();
-/** The resolvers the boot planner and `resolverForTests` built. */
-const knownResolvers = new WeakSet<object>();
-
-/** What a resolver is built over: the collectors' read side, or a test's lists. */
-export interface SessionRequirementSource {
-	get(name: string): RegisteredRequirement | undefined;
-	entries(): IterableIterator<readonly [string, RegisteredRequirement]>;
-	action(name: string): AdmissionAction | undefined;
-}
-
-/**
- * Builds the branded resolver over `source` and records it, so `admitSession`
- * knows it. `wrap` is the planner's read gate (closed while the `provides`
- * factories run); it is applied to the object recorded, which is the one a
- * consumer is handed. For the boot planner and `resolverForTests` alone.
- * @internal
- */
-export function sessionRequirementResolverOver(
-	source: SessionRequirementSource,
-	wrap: <T extends object>(view: T) => T = (view) => view,
-): SessionRequirementResolver {
-	const view = wrap(
-		Object.freeze({
-			get: (name: string) => source.get(name),
-			entries: () => source.entries(),
-			action: (name: string) => source.action(name),
-		}),
-	);
-	knownResolvers.add(view);
-	return view as unknown as SessionRequirementResolver;
-}
-
-const isKnownResolver = (value: unknown): value is SessionRequirementResolver =>
-	typeof value === "object" && value !== null && knownResolvers.has(value);
-
-/**
- * Refuses a resolver the planner or `resolverForTests` did not build; a
- * home-made object or a copy forges nothing. Consumer factories run it on
- * their `requirements` at construction, with their own name as `factory` and
- * the names of the actions they admit as `admits`, so a missing or forged
- * resolver, or an admitted action no module registers, fails where the
- * composition is assembled rather than on a request. Admission also runs it
- * on every call.
- */
-export function checkResolver(
-	value: unknown,
-	factory?: string,
-	admits: readonly string[] = [],
-): SessionRequirementResolver {
-	const who = factory === undefined ? "" : `${factory}: `;
-	if (isKnownResolver(value)) {
-		for (const name of admits) {
-			if (value.action(name) === undefined) {
-				throw new RangeError(
-					`${who}admits ${JSON.stringify(name)}, which no module registers: the module that installs it registers it under contributes.admissionActions`,
-				);
-			}
-		}
-		return value;
-	}
-	if (value === undefined || value === null) {
-		throw new RangeError(
-			`${who}requirements is required — the sessionRequirementResolver the boot planner built (the manifests pass it), or resolverForTests from @o3co/auth-provider-core/testing in a test`,
-		);
-	}
-	throw new RangeError(
-		`${who}requirements must be the sessionRequirementResolver the boot planner built (or resolverForTests, in a test)`,
-	);
-}
 
 // ---------------------------------------------------------------------------
 // The claim builders
