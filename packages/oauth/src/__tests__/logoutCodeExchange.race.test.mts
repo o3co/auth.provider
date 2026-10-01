@@ -42,6 +42,7 @@ import {
 	type GrantDependencies,
 	type GrantHandler,
 	type GrantResult,
+	type Module,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 	type RefreshTokenFamilyRevocation,
@@ -59,6 +60,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { cascadeLogout } from "#/logout/cascadeLogout.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
@@ -72,13 +74,7 @@ const RP_URI = "https://rp.example/cb";
 const CODE_VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(CODE_VERIFIER).digest("base64url");
 
-const config = {
-	oauth: {
-		jwt: { secret: "test-secret" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86_400 },
-	},
-} as unknown as GrantDependencies["config"];
+const config: GrantDependencies["config"] = { ...makeValidAppConfig(), ...oauthConfigForTests() };
 
 /** The line the grant logs when the session ended while it was issuing. */
 const INVALIDATED_LINE = "authorization_grant_rejected_session_invalidated_during_token_issuance";
@@ -306,7 +302,7 @@ describe("a logout and a code exchange on the same session", () => {
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 	});
 
-	it("end before add: the add answers ended, the exchange refuses with no tokens, and the family is revoked", async () => {
+	it("end before add: the add answers ended, the exchange refuses with no tokens, registers no RP, and the family is revoked", async () => {
 		const w = await world();
 		const held = checkpoint();
 		const logout = w.logout({
@@ -318,10 +314,13 @@ describe("a logout and a code exchange on the same session", () => {
 		await held.arrived;
 
 		const result = await w.exchange();
+		// Read before the logout's clean-up, which would empty the registry anyway.
+		const registered = await w.grantStores.sessionRPRegistry.listRPs(SID);
 		held.release();
 
 		expectSessionInvalidated(result);
 		expect(w.answers).toEqual(["ended"]);
+		expect(registered).toEqual([]);
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 		expect(await logout).toEqual({ outcome: "done" });
 	});
@@ -503,13 +502,16 @@ describe("the composition's family index", () => {
 		},
 	});
 
-	const boot = async (overrideComponents: Record<string, unknown> = {}) => {
+	const boot = async (
+		overrideComponents: Record<string, unknown> = {},
+		sessionStores: readonly Module[] = [memorySessionStoresModule],
+	) => {
 		const appConfig = withGrants(makeValidAppConfig(), { authorizationCode: true });
 		const logger = createMockLogger();
 		const handle = await createTestApp({
 			modules: [
 				oauthAuthorizationModule({ config: appConfig }),
-				memorySessionStoresModule,
+				...sessionStores,
 				memoryRefreshTokenFamilyStoreModule,
 				defaultRefreshTokenFamilyRotationModule,
 				defaultRefreshTokenFamilyRevocationModule,
@@ -580,6 +582,17 @@ describe("the composition's family index", () => {
 			expect(lines).toEqual([
 				[{ slot: "sessionFamilyIndex", kind: "memory" }, NO_SESSION_END_LINE],
 			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("no session store: boot says nothing of the index, since the grant links no family", async () => {
+		const index = withoutSessionEnd(createInMemorySessionFamilyIndex());
+		const { handle, lines } = await boot({ sessionFamilyIndex: index }, []);
+		try {
+			expect(handle.components.userSessionStore).toBeUndefined();
+			expect(lines).toEqual([]);
 		} finally {
 			await handle.dispose();
 		}
