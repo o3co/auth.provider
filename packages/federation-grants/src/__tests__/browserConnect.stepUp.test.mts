@@ -92,6 +92,8 @@ interface Browser {
 interface WorldOptions {
 	/** The origin the requirement's page is registered on; the issuer's by default. */
 	readonly pageIssuer?: string;
+	/** Wires no durable session store: admission then admits with no record to bind to. */
+	readonly withoutUserSessionStore?: boolean;
 }
 
 function world(options: WorldOptions = {}) {
@@ -159,9 +161,10 @@ function world(options: WorldOptions = {}) {
 				findById: async (id: string) => (id === CLIENT.clientId ? (CLIENT as never) : null),
 				authenticate: async () => null,
 			} as never,
-			userSessionStore: {
-				get: async (sid: string) => durable.get(sid) ?? null,
-			} as never,
+			userSessionStore:
+				options.withoutUserSessionStore === true
+					? (undefined as never)
+					: ({ get: async (sid: string) => durable.get(sid) ?? null } as never),
 			subjectRevocation: {
 				kind: "test",
 				revokeBefore: async () => undefined,
@@ -451,6 +454,24 @@ describe("GET /connect — a session a requirement steps up", () => {
 			error_description: "sign in again to continue",
 		});
 		expect(read.headers.location).toBeUndefined();
+	});
+
+	it("refuses a session admission admits with no record to bind to, as a dead session, and parks nothing", async () => {
+		const w = world({ withoutUserSessionStore: true });
+		const { handle, grantId } = await w.lodge();
+		w.signIn("b-1");
+
+		const response = await w.connect(handle, "b-1");
+
+		expect(response.status).toBe(403);
+		expect(response.text).toBe("Sign in again to continue.");
+		expect(response.headers.location).toBeUndefined();
+		expect(w.state.parked).toEqual([]);
+		expect(await w.audited()).toEqual([
+			expect.objectContaining({
+				details: expect.objectContaining({ grantId, outcome: "reauthentication_required" }),
+			}),
+		]);
 	});
 
 	it("never follows a page off the issuer's origin: a plain 500 and one error line naming the requirement", async () => {
