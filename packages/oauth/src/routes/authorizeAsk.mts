@@ -223,16 +223,30 @@ export const spendAskAtMint = async (
 };
 
 /**
- * Writes the ask that follows `ask`, spending `ask` first so one record
- * stands for the request; or answers the outage and returns `null`.
+ * How a trip ended: the browser sent, or answered (an outage, a refusal);
+ * or `spent` — the ask it was presented was spent by another pass of the
+ * request between this pass's read and its write, nothing was written or
+ * answered, and the request is to be judged again with no ask.
+ */
+export type TripOutcome = "sent" | "answered" | "spent";
+
+/**
+ * Writes the ask that follows `ask`, spending `ask` first so a chain of trips
+ * leaves one record: the new id, `null` once an outage is answered, or
+ * `spent` when `ask` was spent elsewhere — then no successor carries its
+ * instants.
  */
 const recordAsk = async (
 	ctx: AuthorizeContext,
 	askStore: ReauthAskStore,
 	ask: ReauthAskRecord | null,
 	record: ReauthAskRecord,
-): Promise<string | null> => {
-	if (ask !== null && (await spendPresented(ctx, askStore)) === undefined) return null;
+): Promise<string | null | "spent"> => {
+	if (ask !== null) {
+		const spent = await spendPresented(ctx, askStore);
+		if (spent === undefined) return null;
+		if (spent === null) return "spent";
+	}
 	try {
 		return await askStore.ask(record);
 	} catch (err) {
@@ -381,7 +395,7 @@ export const sendToLogin = async (
 	ctx: AuthorizeContext,
 	askStore: ReauthAskStore,
 	ask: ReauthAskRecord | null,
-): Promise<void> => {
+): Promise<TripOutcome> => {
 	const now = Date.now();
 	const askRequest = askRequestOf(ctx);
 	const askId = await recordAsk(ctx, askStore, ask, {
@@ -391,8 +405,10 @@ export const sendToLogin = async (
 		loginAskedAt: now,
 		stepUpAskedAt: { ...ask?.stepUpAskedAt },
 	});
-	if (askId === null) return;
+	if (askId === "spent") return "spent";
+	if (askId === null) return "answered";
 	loginRedirect(ctx.res, ctx.opts.login, returnWithAsk(askRequest, askId));
+	return "sent";
 };
 
 /**
@@ -443,7 +459,7 @@ export const stepUpTrip = async (
 	prompt: PromptDirective,
 	askStore: ReauthAskStore | undefined,
 	ask: ReauthAskRecord | null,
-): Promise<void> => {
+): Promise<TripOutcome> => {
 	const { requirement, page } = admission;
 	const trips = ask?.stepUpAskedAt;
 	const askedAt =
@@ -460,10 +476,9 @@ export const stepUpTrip = async (
 				"login_required",
 				"the session's authentication time cannot be read; a new login is required",
 			);
-			return;
+			return "answered";
 		}
-		await sendToLogin(ctx, askStore, ask);
-		return;
+		return sendToLogin(ctx, askStore, ask);
 	}
 	if (askedAt !== undefined && authenticatedAt !== undefined && authenticatedAt <= askedAt) {
 		if (admission.whenStillUnmet === "unmet") {
@@ -479,7 +494,7 @@ export const stepUpTrip = async (
 				`the session came back from ${requirement} still not meeting it; a new login is required`,
 			);
 		}
-		return;
+		return "answered";
 	}
 	if (prompt.silent) {
 		redirectError(
@@ -487,7 +502,7 @@ export const stepUpTrip = async (
 			"interaction_required",
 			`prompt=none was requested but the session must step up through ${requirement}`,
 		);
-		return;
+		return "answered";
 	}
 	if (askStore === undefined) {
 		// As a login trip is refused without a store to record the ask in: a
@@ -497,7 +512,7 @@ export const stepUpTrip = async (
 			"invalid_request",
 			"a step-up needs a session store, which this deployment does not wire",
 		);
-		return;
+		return "answered";
 	}
 	// The page as registered; this trip's own parameters are set on it below.
 	const target = new URL(page.href);
@@ -508,7 +523,7 @@ export const stepUpTrip = async (
 	if (target.origin !== ctx.issuerOrigin) {
 		ctx.opts.logger.error({ requirement }, "authorize_step_up_page_off_origin");
 		redirectError(ctx, "server_error", "the step-up page is not on this server's origin");
-		return;
+		return "answered";
 	}
 	if (admission.acrValues.length > 0) {
 		target.searchParams.set("acr_values", admission.acrValues.join(" "));
@@ -522,7 +537,9 @@ export const stepUpTrip = async (
 		loginAskedAt: ask?.loginAskedAt,
 		stepUpAskedAt: { ...trips, [requirement]: now },
 	});
-	if (askId === null) return;
+	if (askId === "spent") return "spent";
+	if (askId === null) return "answered";
 	target.searchParams.set(REDIRECT_TO_PARAM, returnWithAsk(askRequest, askId));
 	ctx.res.redirect(target.toString());
+	return "sent";
 };

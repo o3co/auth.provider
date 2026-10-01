@@ -48,7 +48,7 @@ import {
 	authorizeParams,
 	authorizeRequestUrl,
 } from "./authorizeContext.mjs";
-import type { ReauthAskStore } from "./reauthAsk.mjs";
+import type { ReauthAskRecord, ReauthAskStore } from "./reauthAsk.mjs";
 
 /**
  * The login check, before any lookup: an unauthenticated browser is sent to
@@ -229,7 +229,11 @@ const reauthenticate = async (
 		return;
 	}
 	if (!(await signedOut(ctx))) return;
-	await sendToLogin(ctx, askStore, ask);
+	// An ask spent by another pass since it was read: no successor carries
+	// its instants, and with no ask this is the first trip.
+	if ((await sendToLogin(ctx, askStore, ask)) === "spent") {
+		await sendToLogin(ctx, askStore, null);
+	}
 };
 
 /**
@@ -250,12 +254,7 @@ export const decideOnAdmission = async (
 	maxAge: number | undefined,
 	requested: readonly string[],
 	askStore: ReauthAskStore | undefined,
-): Promise<{
-	readonly session: UserSession | null;
-	readonly acr: string | undefined;
-	/** The session is fresh because of the login the presented ask asked for. */
-	readonly freshByAsk: boolean;
-} | null> => {
+): Promise<Decided | null> => {
 	switch (admission.outcome) {
 		case "unavailable":
 			redirectError(ctx, "temporarily_unavailable", describeAdmissionOutage(admission.store));
@@ -278,35 +277,53 @@ export const decideOnAdmission = async (
 			const needsAsk = prompt.login || maxAge !== undefined || admission.outcome === "step_up";
 			const ask = needsAsk ? await presentedAsk(ctx, askStore) : null;
 			if (ask === undefined) return null;
-			const reauth = evaluateReauthentication(
-				ctx,
-				prompt,
-				maxAge,
-				admission.session,
-				askStore,
-				ask,
-			);
-			if (reauth === "answered") return null;
-			if (reauth === "login") {
-				// `evaluateReauthentication` refused already when there is no store.
-				await sendToLogin(ctx, askStore as ReauthAskStore, ask);
-				return null;
-			}
-			if (admission.outcome === "unmet") {
-				refuseUnmet(ctx, admission.requirement, requested);
-				return null;
-			}
-			if (admission.outcome === "step_up") {
-				await stepUpTrip(ctx, admission, prompt, askStore, ask);
-				return null;
-			}
-			return {
-				session: admission.session,
-				acr: admission.acr,
-				freshByAsk: reauth === "fresh_by_ask",
-			};
+			const decided = await decideWithAsk(ctx, admission, prompt, maxAge, requested, askStore, ask);
+			if (decided !== "spent") return decided;
+			// An ask spent by another pass since it was read: judged again with
+			// none, so no successor carries its instants. With no ask, no trip
+			// finds one spent.
+			const again = await decideWithAsk(ctx, admission, prompt, maxAge, requested, askStore, null);
+			return again === "spent" ? null : again;
 		}
 	}
+};
+
+/** What `decideOnAdmission` hands on for a session it lets through. */
+interface Decided {
+	readonly session: UserSession | null;
+	readonly acr: string | undefined;
+	/** The session is fresh because of the login the presented ask asked for. */
+	readonly freshByAsk: boolean;
+}
+
+/**
+ * Freshness, then the verdict, for an admission that carries a session,
+ * judged with `ask`: what to proceed with, `null` once answered, or `spent`
+ * when a trip found `ask` spent by another pass (nothing answered).
+ */
+const decideWithAsk = async (
+	ctx: AuthorizeContext,
+	admission: Extract<Admission, { outcome: "admitted" | "step_up" | "unmet" }>,
+	prompt: PromptDirective,
+	maxAge: number | undefined,
+	requested: readonly string[],
+	askStore: ReauthAskStore | undefined,
+	ask: ReauthAskRecord | null,
+): Promise<Decided | null | "spent"> => {
+	const reauth = evaluateReauthentication(ctx, prompt, maxAge, admission.session, askStore, ask);
+	if (reauth === "answered") return null;
+	if (reauth === "login") {
+		// `evaluateReauthentication` refused already when there is no store.
+		return (await sendToLogin(ctx, askStore as ReauthAskStore, ask)) === "spent" ? "spent" : null;
+	}
+	if (admission.outcome === "unmet") {
+		refuseUnmet(ctx, admission.requirement, requested);
+		return null;
+	}
+	if (admission.outcome === "step_up") {
+		return (await stepUpTrip(ctx, admission, prompt, askStore, ask)) === "spent" ? "spent" : null;
+	}
+	return { session: admission.session, acr: admission.acr, freshByAsk: reauth === "fresh_by_ask" };
 };
 
 // Refuse before a code is minted when a verified email is required and the
