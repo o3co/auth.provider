@@ -733,8 +733,14 @@ wires it.
   for the subject, whatever succeeds between them, from every browser.
   `mfa.lockout.hardLimit` consecutive failures (100) hold them with no time
   to come back (`mfa.lockout`). An exempt proof (a recovery code, WebAuthn)
-  passes during every lock and ends a consecutive run below the hard limit;
-  it lifts no hard hold and refunds no weekly failure. The account-email
+  passes during every lock and ends a consecutive run before the hard hold;
+  it lifts no hard hold and refunds no weekly failure. The hard hold is
+  fixed the moment the run, attempts in flight counted, reaches the limit:
+  no later success, exempt proof or raised `hardLimit` lifts it. So the
+  attempt that is the hardLimit-th since the last success holds, whatever
+  its outcome. This is one stricter than NIST's '100 failed attempts': a
+  correct hardLimit-th attempt still signs in, but guessable factors stay
+  held until re-enrolled. The account-email
   proof is never held, and ends nothing. **A held subject can still be
   mailed an email code**: the challenge does not read the lock, so a code
   goes out up to the mail sender's limit (`429 rate_limited` beyond it), and
@@ -1526,7 +1532,7 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `consent:{pending}:sess:<sessionId>` | sorted set of challenges, score = the order they were parked | raised to its longest-lived member's; at most `PENDING_CONSENT_PER_SESSION_LIMIT` (16) members, the first-parked evicted past it. `{pending}` is a Cluster hash tag: every parked request shares one slot | same |
 | `mfaf:{<subject>}` | hash — one field per enrolled second factor (its id), value `<version>\n<fixed JSON>\n<mutable JSON>`; the factor's `data` sealed by the MFA package before it arrives (D11). `<subject>` and the id are base64url of their JSON | **none**: an enrolled factor does not expire, and losing one lets whoever holds the password bind their own (D12). Keep it where nothing evicts it and a restart keeps it — `noeviction` is recommended for every MFA key family (a `volatile-*` policy never picks this one, which has no TTL), AOF on, preferably a database or instance of its own; the module refuses an `allkeys-*` policy at boot and warns without AOF | `packages/redis/src/mfa-factor-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_FACTOR_UPDATE`) |
 | `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `enrollment`, `emailProof`, `challenge` and `pendingEnrollment` when set, `record` (the rest as JSON, the login's continuation among it) and `incarnation` | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification | `packages/redis/src/mfa-transaction-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_TX_*`) |
-| `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted — a run ends only at a success, an exempt success below the hard limit, or — once step 12 brings it — the MFA module's authorized recovery, and D21's hard limit counts it across weeks; otherwise a day past the last failure to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
+| `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted or the hard hold stands (the hash's `hard` field) — a run ends only at a success, an exempt success before the hard hold, or — once step 12 brings it — the MFA module's authorized recovery, and D21's hard limit counts it across weeks; the hard hold ends only when the subject's state is cleared; otherwise a day past the last failure to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
 | `mfat:proof:{<subject>}` | string `"1"` — an operator reset's `requireEmailProof: true` (D25) | **none**, until the subject's next first binding consumes it; no revocation touches it, and the authorized recovery's clearing of the lock (step 12) will leave it. As durable as `mfaf:` (D12's step-3 amendment): the transaction store's module runs the same boot check | same |
 | `mfat:session-proof:{<subject>}:<sid>` | string, JSON `{provedAtMs, untilMs}` — the account-email proof (D24) given in one session of a subject: written when the MFA page's step-up proof is verified, `untilMs` `mfa.manage.maxAgeSeconds` later; read by the `mfa` requirement at each first binding in that session that asks the proof | `untilMs` less the store's clock (`SET … PX`), set when it is recorded; a later proof for the session replaces it. Losing one fails closed — the user proves again — so no durability is required of it, and a `volatile-*` policy evicting one costs only a re-proof | same |
 | `mfat:first-binding:{<subject>}` | string, JSON `{atMs, untilMs}` — the subject's first-binding mark (D12): when a first counting factor was last bound for the subject, or its witness marked. A session or a login continuation authenticated no later than it may hold a stale enrollment witness; the mark does not stand in for the witness, and covers only the window in which one can be stale | its `untilMs` on the server's clock (`SET … PXAT`), which alone judges the mark: one script keeps the later time and the later end of the mark held and the one noted, so a note never moves it back or shortens it. A mark the store cannot read back is an outage, never absent — `DEL` the key, as for the lock keys, and the next first binding notes it again. Losing it together with the subject's `mfaf:` records — one Redis flushed inside its lifetime — reopens that window, so it is kept as `mfat:proof:` is, under the same boot check; it always carries a TTL, so a `volatile-*` policy may evict it, and an evicted mark fails open — the module warns (`mfa_transaction_store_lock_evictable`). At `maxmemory`, `volatile-lru` and `volatile-random` were seen to evict nearly every mark, while `volatile-lfu` and `volatile-ttl` spared them in the same probe; run `noeviction` | same (`LUA_MFA_FIRST_BINDING_*`) |
@@ -1955,12 +1961,16 @@ before you flip — and a relying party holding the secret can also mint.
    one also turns on `private_key_jwt` wherever client authentication runs
    ([§1](#1-deployment-shapes)).
 
-   **The MFA hard hold during a rolling deploy.** From the release whose
-   exempt success stops lifting the hard hold (D21), an exempt success
-   routed to a replica of an earlier release still ends the subject's
-   consecutive run, a hard hold included, and no new replica restores it.
-   Drain the old replicas before relying on the hard hold. A release that
-   does not yet record exempt successes exposes nothing.
+   **The MFA hard hold during a rolling deploy.** v0.16.0 ships no
+   subject-lock scripts, so an upgrade from it has nothing to drain; this
+   concerns pre-release builds only. A replica of a build that does not
+   write the lock hash's `hard` field neither reads nor keeps it: it can
+   end a run at the limit at an exempt success, let attempts through below
+   the limit, set a deadline on the keys, and — its `keep()` finding no run
+   and no week — delete both keys, the hold with them. A new replica refuses
+   a held subject whatever an old one did to the run, and its refusal takes
+   off a deadline the held hash carries; a hold already deleted is not
+   restored. Drain the old replicas before relying on the hard hold.
 
 3. **The upstream `amr` split (the MFA ADR's D13).** From this release an
    upstream IdP's `amr` counts only for a federation with
