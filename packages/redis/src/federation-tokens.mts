@@ -186,9 +186,9 @@ const isInstant = (v: unknown): v is number =>
  * would reach `fromEnvelope`, which does not throw, and be served on every read
  * instead of taking `get`'s self-heal. `expiresAtMs` must be present (`null`
  * means "no finite expiry"); `obtainedAtMs` may be absent. Unknown keys are
- * ignored, so a release that adds an envelope field keeps `RECORD_VERSION`
- * and an older replica still reads its records. Hand-written, not zod, to
- * keep the read path dependency-free.
+ * ignored, so adding an envelope key keeps `RECORD_VERSION` and an older
+ * replica still reads its records; changing a present key's type or meaning
+ * bumps it. Hand-written, not zod, to keep the read path dependency-free.
  */
 function isEnvelope(value: unknown): value is Envelope {
 	if (!isPlainObject(value)) return false;

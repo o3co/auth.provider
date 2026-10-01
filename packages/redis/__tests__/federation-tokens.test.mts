@@ -1117,6 +1117,21 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 				expect(Object.hasOwn((await store.get("sid-2", "google")) ?? {}, "obtainedAt")).toBe(false);
 			});
 
+			it.each([
+				["the end of the Date range", 8_640_000_000_000_000],
+				["the start of the Date range", -8_640_000_000_000_000],
+				["an instant before 1970", -86_400_000],
+			])("reads obtainedAtMs at %s as a Date", async (_label, ms) => {
+				const store = storeFor(mode);
+				writeV2(
+					mode,
+					"ft:sid-1:google",
+					`{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":${ms}}`,
+				);
+				expect((await store.get("sid-1", "google"))?.obtainedAt).toEqual(new Date(ms));
+				expect(redis.data.has("ft:sid-1:google")).toBe(true);
+			});
+
 			it("still reads a finite expiresAtMs as a Date", async () => {
 				const store = storeFor(mode);
 				writeV2(mode, "ft:sid-1:google", '{"accessToken":"at","expiresAtMs":1900000000000}');
