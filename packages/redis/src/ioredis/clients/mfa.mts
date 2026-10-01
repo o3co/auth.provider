@@ -29,7 +29,12 @@ import {
 	MFA_FACTOR_UPDATE,
 	MFA_FIRST_BINDING_NOTE,
 	MFA_FIRST_BINDING_READ,
+	MFA_RECOVERY_SET_FLOOR_RAISE,
 	MFA_SUBJECT_EXEMPT,
+	MFA_SUBJECT_LEASE_ACQUIRE,
+	MFA_SUBJECT_LEASE_RELEASE,
+	MFA_SUBJECT_RECOVERY_APPLY,
+	MFA_SUBJECT_RECOVERY_AUTHORIZE,
 	MFA_SUBJECT_RESERVE,
 	MFA_SUBJECT_SETTLE,
 	MFA_TX_CONSUME,
@@ -78,6 +83,10 @@ const serverMs = (text: unknown): number | undefined =>
 	typeof text === "string" && /^(0|[1-9][0-9]*)$/.test(text) && Number.isSafeInteger(Number(text))
 		? Number(text)
 		: undefined;
+
+/** The apply script's rebind argument: the time, `none` when no guessable record remains, empty for a reset. */
+const rebindArgument = (since: number | null | undefined): string =>
+	since === null ? "none" : since === undefined ? "" : String(since);
 
 /**
  * The `MfaTransactionStore`'s client over one ioredis connection. Also part of
@@ -179,9 +188,6 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				[String(input.nowMs), String(input.policy.hardLimit)],
 			);
 		},
-		async clearSubjectState(keys) {
-			await io.del(keys.lock, keys.week);
-		},
 		async requireEmailProof(key) {
 			await io.set(key, "1");
 		},
@@ -222,6 +228,76 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				);
 			}
 			return { value, serverNowMs };
+		},
+		async subjectGeneration(keys) {
+			return await io.hget(keys.recovery, "g");
+		},
+		async acquireSubjectLease(keys, input) {
+			const reply = await runScript(
+				io,
+				MFA_SUBJECT_LEASE_ACQUIRE,
+				[keys.lease, keys.recovery],
+				[input.token, String(input.ttlMs), String(input.generation)],
+			);
+			const [outcome, pttl] = Array.isArray(reply) ? reply : [];
+			if (outcome === "acquired" || outcome === "stale") return { outcome };
+			// A lease at its last millisecond answers 0: still busy, for at least one more. One with
+			// no deadline (PTTL -1) is none this store wrote: no verdict.
+			if (outcome === "busy" && typeof pttl === "number" && pttl >= 0) {
+				return { outcome, retryAfterMs: Math.max(pttl, 1) };
+			}
+			throw new Error("MfaTransactionStore: the lease script answered nothing it knows");
+		},
+		async releaseSubjectLease(keys, token) {
+			return (await runScript(io, MFA_SUBJECT_LEASE_RELEASE, [keys.lease], [token])) === 1;
+		},
+		async recoverySetFloor(keys) {
+			return await io.hget(keys.recovery, "floor");
+		},
+		async raiseRecoverySetFloor(keys, input) {
+			const reply = await runScript(
+				io,
+				MFA_RECOVERY_SET_FLOOR_RAISE,
+				[keys.recovery, keys.lease],
+				[String(input.setGeneration), input.leaseToken],
+			);
+			const [raised, floor] = Array.isArray(reply) ? reply : [];
+			if (raised === 0) return { raised: false };
+			if (raised === 1 && typeof floor === "string") return { raised: true, floor };
+			throw new Error("MfaTransactionStore: the floor script answered nothing it knows");
+		},
+		async authorizeSubjectRecovery(keys, input) {
+			const reply = await runScript(
+				io,
+				MFA_SUBJECT_RECOVERY_AUTHORIZE,
+				[keys.recovery],
+				[input.field, input.recoveryId, String(input.expiresAtMs), String(input.maxAheadMs)],
+			);
+			const [authorized, now] = Array.isArray(reply) ? reply : [];
+			const serverNowMs = serverMs(now);
+			if (authorized === 1 && serverNowMs !== undefined) return { authorized: true };
+			if (authorized === 0 && serverNowMs !== undefined) return { authorized: false, serverNowMs };
+			throw new Error("MfaTransactionStore: the authorize script answered nothing it knows");
+		},
+		async applySubjectRecovery(keys, input) {
+			const reply = await runScript(
+				io,
+				MFA_SUBJECT_RECOVERY_APPLY,
+				[keys.lock, keys.week, keys.recovery, keys.lease],
+				[
+					input.operation,
+					input.field,
+					String(input.nowMs),
+					input.leaseToken,
+					input.sessionsBoundaryMs === undefined ? "" : String(input.sessionsBoundaryMs),
+					rebindArgument(input.guessableBoundSinceMs),
+					String(input.clockSkewMs),
+				],
+			);
+			if (!Array.isArray(reply) || !reply.every((part) => typeof part === "string")) {
+				throw new Error("MfaTransactionStore: the apply script answered nothing it knows");
+			}
+			return reply;
 		},
 		durability: () => redisDurability(io),
 	};

@@ -147,7 +147,7 @@ const CASES: readonly Case[] = [
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
 		lockEvictable: "mfa_transaction_store_lock_evictable",
-		evictableFamilies: ["lock", "week", "first-binding"],
+		evictableFamilies: ["lock", "week", "first-binding", "lease"],
 		memoryModule: memoryMfaTransactionStoreModule,
 		client: makeIoredisMfaTransactionStoreClient,
 	},
