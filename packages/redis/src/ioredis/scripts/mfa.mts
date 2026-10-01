@@ -400,18 +400,22 @@ return 1
 /**
  * `MfaTransactionStoreClient.noteFirstBinding`. `KEYS[1]` = the subject's mark; `ARGV[1]` =
  * its `atMs`, `ARGV[2]` = its `untilMs` (whole, the shape already checked), `ARGV[3]` = the
- * clock skew allowed. Refuses, writing nothing, a mark whose end is not after the server's
- * clock or whose time lies further from it than the skew: `{0, now}`. Otherwise keeps the
- * later time and the later end of the mark held, while it stands, and this one, as core's
- * `laterFirstBindingMark` does, written to expire at that end (`PXAT`): `{1, now}`. A held
- * value that is no mark — not JSON, a time not whole or before the epoch, an end not after
- * its time, either past the Date range, a time further ahead than the skew — is replaced:
- * what does not read back is never kept over a mark that does.
+ * clock skew allowed, `ARGV[4]` = the longest a mark may stand. Refuses, writing nothing, a
+ * mark whose end is not after the server's clock or whose time lies further from it than
+ * the skew: `{0, now}`. Otherwise keeps the later time and the later end of the mark held,
+ * while it stands, and this one, as core's `laterFirstBindingMark` does, written to expire at
+ * that end (`PXAT`): `{1, now}`.
+ *
+ * A held mark is judged on its shape alone: a time whole and from the epoch, an end after it
+ * by no more than `ARGV[4]`, within the Date range. One that has it is merged, however its
+ * time sits on the server's clock, since a clock stepped back makes a sound mark look ahead.
+ * A value without it, or a key of another type, is replaced: what does not read back is never
+ * kept over a mark that does, and a key nothing can read is healed.
  */
 const LUA_MFA_FIRST_BINDING_NOTE = `
 local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
-local at, untl, skew = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])
+local at, untl, skew, longest = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), tonumber(ARGV[4])
 local stamp = string.format('%.0f', now)
 if not (untl > now) or at > now + skew or at < now - skew then return {0, stamp} end
 local MAX = 8640000000000000
@@ -423,11 +427,11 @@ local function mark_of(text)
   if h_at ~= h_at or h_at < 0 or math.floor(h_at) ~= h_at or math.floor(h_until) ~= h_until then
     return nil
   end
-  if not (h_until > h_at) or h_until > MAX or h_at > now + skew then return nil end
+  if not (h_until > h_at) or h_until > MAX or h_until - h_at > longest then return nil end
   return h_at, h_until
 end
-local held = redis.call('GET', KEYS[1])
-if held then
+local read, held = pcall(redis.call, 'GET', KEYS[1])
+if read and held then
   local h_at, h_until = mark_of(held)
   if h_at ~= nil and h_until > now then
     if h_at > at then at = h_at end

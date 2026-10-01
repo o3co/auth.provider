@@ -164,6 +164,8 @@ export interface NoteMfaFirstBindingInput {
 	readonly untilMs: number;
 	/** How far either side of the server's clock a mark's time may lie (`DEFAULT_CLOCK_SKEW_MS`). */
 	readonly skewMs: number;
+	/** The longest a held mark may stand past its time and still be one (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). */
+	readonly longestMs: number;
 }
 
 /** What a note answers: kept, or refused on the server's clock, which it names. */
@@ -269,8 +271,10 @@ export interface MfaTransactionStoreClient {
 	 * Atomically, on the server's clock: refuse a mark whose `untilMs` is not after it or
 	 * whose `atMs` lies further from it than `input.skewMs`, writing nothing; otherwise write
 	 * the later `atMs` and the later `untilMs` of the mark held, while it stands, and this
-	 * one, expiring at that `untilMs` (`SET … PXAT`). A held value that is not a mark, or
-	 * whose time lies further ahead than `input.skewMs`, is replaced.
+	 * one, expiring at that `untilMs` (`SET … PXAT`). A held mark is judged on its shape
+	 * alone, never on where its time sits on the server's clock; a held value that is not a
+	 * mark (`input.longestMs` bounding how long one stands), or a key of another type, is
+	 * replaced.
 	 */
 	noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<NoteMfaFirstBindingReply>;
 	/** The subject's first-binding mark at `key`, and the server's clock, in one step. */

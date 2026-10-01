@@ -202,7 +202,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				io,
 				MFA_FIRST_BINDING_NOTE,
 				[key],
-				[String(input.atMs), String(input.untilMs), String(input.skewMs)],
+				[String(input.atMs), String(input.untilMs), String(input.skewMs), String(input.longestMs)],
 			);
 			const [noted, now] = Array.isArray(reply) ? reply : [];
 			const serverNowMs = serverMs(now);

@@ -31,8 +31,9 @@
  * subject's run never expires (only a success, an exempt success below
  * `hardLimit` or `clearSubjectState` ends it), and an open sign-up lets anyone
  * mint subjects.
- * Transactions are bounded by expiry and the login rate, not per subject, so
- * the coordinator must bound the transactions one session holds.
+ * Transactions are bounded by their expiry alone, not per subject and not
+ * per session: nothing caps the transactions one session holds, and how many
+ * are open is bounded only by the rate limits of the routes that open them.
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
@@ -580,12 +581,14 @@ export interface FirstBindingMark {
  * Refuses, with a `RangeError` naming what is wrong, a first-binding mark a
  * store cannot keep. Its shape: `subject` a non-empty string; `atMs` and
  * `untilMs` whole epoch milliseconds within the Date range, `untilMs` after
- * `atMs`. On `storeNowMs`, the store's clock, when it is given: `untilMs`
+ * `atMs` by at most {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} (a mark stands a day
+ * at most). On `storeNowMs`, the store's clock, when it is given: `untilMs`
  * after it, and `atMs` no further from it, either way, than
  * `DEFAULT_CLOCK_SKEW_MS`. Every adapter runs it before it notes a mark; an
  * adapter whose store judges the clock in a script runs the shape first and
  * the rest on the clock that script answers. A mark read back is held to the
- * shape, and to the future side of that bound, as an outage.
+ * shape, as an outage; where its time sits on the clock is the caller's
+ * reading ({@link readFirstBindingAt}) to judge.
  */
 export function checkFirstBindingNote(
 	subject: unknown,
@@ -604,6 +607,9 @@ export function checkFirstBindingNote(
 		refuse("untilMs must be epoch milliseconds within the Date range");
 	}
 	if ((untilMs as number) <= (atMs as number)) refuse("untilMs must be after atMs");
+	if ((untilMs as number) - (atMs as number) > MFA_CLOCK_SKEW_ALLOWANCE_MS) {
+		refuse("untilMs must be no more than MFA_CLOCK_SKEW_ALLOWANCE_MS after atMs");
+	}
 	if (storeNowMs === undefined) return;
 	if (!((untilMs as number) > storeNowMs)) refuse("untilMs must be after the store's clock");
 	if (!((atMs as number) <= storeNowMs + DEFAULT_CLOCK_SKEW_MS)) {

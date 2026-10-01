@@ -68,9 +68,12 @@
  * note keeps (the later time and the later end) and the key's deadline
  * (`PXAT` its end). This side's clock decides none of them, so a replica
  * whose clock runs ahead or behind neither ends a mark early nor replaces it
- * with an earlier one. A value that does not read back as a mark, whatever
- * its end looks like, is an outage, never absent: an absent mark trusts the
- * session it is there to distrust.
+ * with an earlier one, and a mark whose time sits ahead of the server's clock
+ * (a clock stepped back) is still merged and answered: the caller's reading
+ * judges that. A value that does not read back as a mark, whatever its end
+ * looks like, or a key of another type, is an outage, never absent: an
+ * absent mark trusts the session it is there to distrust. A note replaces
+ * either.
  */
 
 import { randomBytes } from "node:crypto";
@@ -88,6 +91,7 @@ import {
 	type FirstBindingMark,
 	firstBindingAnswer,
 	isStorableExpiry,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
@@ -253,18 +257,18 @@ function sessionProofOf(
 	}
 }
 
+/** The fields a note writes, and no other. */
+const MARK_FIELDS: ReadonlySet<string> = new Set(["atMs", "untilMs"]);
+
 /**
  * The first-binding mark `text` holds, or `null` when there is none. Throws,
  * naming nothing it read, when it holds no mark a note could have written:
- * the shape `checkFirstBindingNote` holds a note to, judged before its end
- * is, and a time no further ahead of `serverNowMs` than
- * `DEFAULT_CLOCK_SKEW_MS`.
+ * `atMs` and `untilMs` and no other field — a note writes none, and the
+ * script that keeps the mark need not decode one — in the shape
+ * `checkFirstBindingNote` holds a note to, judged before its end is. Where
+ * its time sits on the server's clock is the caller's reading to judge.
  */
-function firstBindingMarkOf(
-	text: string | null,
-	subject: string,
-	serverNowMs: number,
-): FirstBindingMark | null {
+function firstBindingMarkOf(text: string | null, subject: string): FirstBindingMark | null {
 	if (text === null) return null;
 	const unreadable = (): never => {
 		throw new Error("MfaTransactionStore: a first-binding mark it cannot read");
@@ -275,14 +279,15 @@ function firstBindingMarkOf(
 	} catch {
 		return unreadable();
 	}
-	if (!isObject(value)) return unreadable();
+	if (!isObject(value) || !Object.keys(value).every((key) => MARK_FIELDS.has(key))) {
+		return unreadable();
+	}
 	const { atMs, untilMs } = value;
 	try {
 		checkFirstBindingNote(subject, atMs, untilMs);
 	} catch {
 		return unreadable();
 	}
-	if ((atMs as number) > serverNowMs + DEFAULT_CLOCK_SKEW_MS) return unreadable();
 	return { atMs: atMs as number, untilMs: untilMs as number };
 }
 
@@ -453,6 +458,7 @@ export function createRedisMfaTransactionStore(
 				atMs,
 				untilMs,
 				skewMs: DEFAULT_CLOCK_SKEW_MS,
+				longestMs: MFA_CLOCK_SKEW_ALLOWANCE_MS,
 			});
 			if (reply.noted) return;
 			checkFirstBindingNote(subject, atMs, untilMs, reply.serverNowMs);
@@ -464,7 +470,7 @@ export function createRedisMfaTransactionStore(
 		async firstBindingAt(subject, nowMs) {
 			checkFirstBindingQuestion(subject, nowMs);
 			const { value, serverNowMs } = await client.firstBindingMark(firstBindingKey(subject));
-			const mark = firstBindingMarkOf(value, subject, serverNowMs);
+			const mark = firstBindingMarkOf(value, subject);
 			return mark === null ? null : firstBindingAnswer(mark, serverNowMs);
 		},
 	};

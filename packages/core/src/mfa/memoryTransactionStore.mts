@@ -39,8 +39,8 @@
  * again, or trust a session a mark distrusts). Replacing a session's proof,
  * or noting a subject's mark again, is no new entry. Subject state is uncapped:
  * only a login the Store accepted creates a subject (an open sign-up lets
- * anyone mint them). The cap is global, so the coordinator bounds the
- * transactions one session holds.
+ * anyone mint them). The cap is global: nothing caps the transactions one
+ * session holds, so a client within the routes' rate limits can fill it.
  */
 
 import { randomBytes } from "node:crypto";
