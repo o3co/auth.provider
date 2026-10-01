@@ -281,7 +281,9 @@ const RESERVED_RESULT_PARAMETERS = ["grant_id", "state", "error"] as const;
  * its canonical name. Names are compared as the redirect-URI rule compares
  * the authorization response's (case, `_` and `-` ignored), so `GRANT_ID`,
  * `grantId` and `_grant_id` are `grant_id`: a client framework that reads
- * names case-insensitively would otherwise read the registered one.
+ * names case-insensitively would otherwise read the registered one. A name
+ * the redirect-URI grammar refuses (`grant%5Fid`, `grant_id[]`) is left to
+ * `checkRedirectUri` and not matched here, so call both.
  *
  * Exported so that where the URI is REGISTERED can refuse it too — at boot, for
  * a deployment whose clients are configured — and lodging keeps refusing it as

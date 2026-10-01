@@ -38,19 +38,10 @@ import { isLoopbackHostname } from "./loopback.mjs";
  * - **No escape hatch, deliberately**: a dotless custom scheme (`myapp:`) is
  *   refused with no config bypass. RFC 8252 §7.1 says SHOULD reverse-domain,
  *   and a flag would be two spellings for one decision.
- * - **Query names**: only `[A-Za-z0-9_-]`, each parameter named, and no `;`
- *   anywhere in the query. The authorization response's own names (`code`,
- *   `state`, `iss`, `error`, `error_description`) are refused, compared
- *   ignoring case, `_` and `-`. Values are otherwise free. A registered
- *   parameter of the same effective name as one this provider appends would
- *   reach the client beside it, and which one a client reads is its
- *   framework's choice; an allowlist on names leaves no spelling a parser
- *   could read as another name (`iss[]`, `;iss=`, `%69ss`). What is covered
- *   is the names as written and the common normalizations (case, `_`, `-`),
- *   not a mapping a client configures (an alias, a prefix it strips): a
- *   client reads the OAuth fields by their canonical names. A module that
- *   appends names of its own reserves them through
- *   {@link redirectUriQueryCarries}, compared the same way.
+ * - **Query names**: only `[A-Za-z0-9_-]`, each parameter named, no `;`
+ *   anywhere; the authorization response's names are refused ignoring case,
+ *   `_` and `-`. Values are otherwise free. Covered: names as written and
+ *   those normalizations, not a mapping a client configures.
  */
 
 /** Why a registered redirect URI was refused. */
@@ -85,41 +76,25 @@ const EXECUTABLE_SCHEME_LABELS: ReadonlySet<string> = new Set([
 const QUERY_NAME = /^[A-Za-z0-9_-]+$/;
 
 /**
- * A query name as the common name normalizations see it: case folded, `_` and
- * `-` removed. Case-insensitive collection, camelCase to snake_case, kebab to
- * snake and a stripped leading `_` keep a name's letters and digits and change
- * only these, so `_state`, `errorDescription` and `error-description` all key
- * as a response parameter. A mapping a client configures itself (an alias, a
- * prefix it strips) is outside what any fixed comparison can cover: a client
- * reads the OAuth fields by their canonical names. Only ever applied to an
- * allowlisted, hence ASCII, name, where `toLowerCase` is exact ASCII folding.
+ * A name as the common normalizations see it: case folded, `_` and `-`
+ * removed (`_state`, `errorDescription` key as response names). Applied only
+ * to allowlisted, hence ASCII, names, so `toLowerCase` is ASCII folding.
  */
 const nameKey = (name: string): string => name.toLowerCase().replace(/[_-]/g, "");
 
 /**
- * The parameters an authorization response appends to a client's redirect
- * URI, by {@link nameKey}.
- *
- * Invariant: a response that starts appending another name onto a client
- * redirect adds it here in the same change.
+ * The parameters an authorization response appends, by {@link nameKey}.
+ * Invariant: a response adds a name here before it starts appending it.
  */
 const RESPONSE_PARAMETERS: ReadonlyMap<string, string> = new Map(
 	["code", "state", "iss", "error", "error_description"].map((name) => [nameKey(name), name]),
 );
 
 /**
- * The query's parameter names, as written: `url.search` UNDECODED, pairs split
- * on `&`, each name running to the first `=` or being the whole pair. `[]` for
- * no query and for a bare trailing `?`.
- *
- * Read from `url.search` because the WHATWG parser has found where the query
- * starts and ends, and it decodes nothing: it only percent-encodes characters
- * the name allowlist refuses anyway. So a name is judged as it was written,
- * with one exception: the parser trims leading and trailing C0 controls and
- * spaces from the whole input (`?foo ` reads as `?foo`), as it does when a
- * redirect is built from the same string. `URLSearchParams` would decode
- * `%69ss` into `iss`, turn `+` into a space and drop empty pairs, judging a
- * different string from the one registered.
+ * The query's names as written: `url.search` UNDECODED, split on `&`, each
+ * name running to the first `=`; `[]` for none. The parser decodes nothing,
+ * but trims leading and trailing C0 and spaces (`?foo ` is `?foo`), as the
+ * builder does.
  */
 function queryNames(url: URL): string[] {
 	const query = url.search.slice(1);
@@ -131,10 +106,8 @@ function queryNames(url: URL): string[] {
 }
 
 /**
- * The query's verdict. A `;` is refused anywhere, values included: some
- * parsers split on it too and would read `?a=x;iss=y` as carrying `iss`. Then
- * the first name outside the allowlist, or the first response parameter,
- * decides.
+ * The query's verdict. `;` is refused anywhere, values included: some parsers
+ * split on it. Then the first offending name decides.
  */
 function queryRejection(url: URL): RedirectUriRejection | null {
 	if (url.search.includes(";")) return { reason: "query-name-invalid" };
@@ -147,16 +120,10 @@ function queryRejection(url: URL): RedirectUriRejection | null {
 }
 
 /**
- * Which of `names` a redirect URI's query already carries, compared as
- * {@link checkRedirectUri} compares the response's own names (case, `_` and
- * `-` ignored): the name as given in `names`, for the first match in query
- * order, or `undefined` for none or an unparsable URI.
- *
- * For a module that appends parameters of its own to a registered URI and
- * reserves them: the names are that module's, the comparison is this one's,
- * so the two reservations cannot drift apart. A name outside the allowlist
- * is never matched here; {@link checkRedirectUri} refuses it, and a caller
- * runs both.
+ * Which of `names` a URI's query carries (first match, as given in `names`),
+ * compared as {@link checkRedirectUri} compares names; `undefined` for none or
+ * an unparsable URI. For a module that reserves names of its own. A name the
+ * grammar refuses is never matched here: call {@link checkRedirectUri} too.
  */
 export function redirectUriQueryCarries(uri: string, names: readonly string[]): string | undefined {
 	let url: URL;
@@ -260,8 +227,8 @@ export function describeRedirectUriRejection(rejection: RedirectUriRejection): s
 		case "reserved-parameter":
 			return (
 				`must not carry ${JSON.stringify(rejection.parameter)} in its query (compared ignoring ` +
-				'case, "_" and "-"): this provider adds that parameter when it redirects there, so the ' +
-				"client would receive it twice, or read the registered value as the response's"
+				'case, "_" and "-"): an authorization response carries that parameter, so a client ' +
+				"redirected there could receive it twice, or read the registered value as the response's"
 			);
 	}
 }

@@ -267,6 +267,10 @@ describe("checkRedirectUri — query names", () => {
 			/must not carry "error_description" in its query/,
 		);
 		expect(reserved && describeRedirectUriRejection(reserved)).toMatch(/case, "_" and "-"/);
+		// True for every list the rule judges, post-logout and grant URIs included.
+		expect(reserved && describeRedirectUriRejection(reserved)).toMatch(
+			/an authorization response carries that parameter/,
+		);
 		const invalid = checkRedirectUri("https://app.example/cb?filter[x]=1");
 		expect(invalid && describeRedirectUriRejection(invalid)).toMatch(
 			/letters, digits, "_" and "-".*";"/,

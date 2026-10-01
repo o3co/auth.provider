@@ -308,7 +308,9 @@ describe("ClientEntrySchema — redirect URI query names", () => {
 			expect(
 				issues({ federationGrantRedirectUris: [`https://app.example/cb?${name}=x`] }),
 				name,
-			).toContain(`https://app.example/cb?${name}=x already carries "grant_id"`);
+			).toContain(
+				`https://app.example/cb?${name}=x already carries "grant_id" (compared ignoring case, "_" and "-")`,
+			);
 		}
 	});
 

@@ -286,8 +286,9 @@ export const ClientEntrySchema = z
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					message:
-						`federationGrantRedirectUris: ${uri} already carries "${reserved}", which the end of ` +
-						"a grant flow appends — the client would receive it twice",
+						`federationGrantRedirectUris: ${uri} already carries "${reserved}" (compared ignoring ` +
+						'case, "_" and "-"), which the end of a grant flow appends — the client would receive ' +
+						"it twice",
 					path: ["federationGrantRedirectUris"],
 				});
 			}
