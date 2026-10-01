@@ -73,14 +73,14 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"logout.family_revoked",
 	"logout.success",
 	// Multi-factor authentication (the MFA ADR's D28), the MFA package's
-	// routes'; each carries `subject`, `ip` and `userAgent`, and `kind` and
-	// `purpose` in its details. The MFA package is private until the template
+	// routes'; each carries `subject`, `ip` and `userAgent`, and the
+	// ceremonies' events `kind` and `purpose` in their details. The MFA package is private until the template
 	// wires it, so no released composition emits them; the inventory's drift
 	// test names the step that emits each. A deployment notifies the account
 	// holder from six of them, each carrying, beside those, in its details:
 	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`,
-	// `federated` or `mfa`) and `by: "user"`; `mfa.factor.removed` its `binding` and `by`
-	// (`user` or `operator`); `mfa.recovery_codes.generated` its `binding`,
+	// `federated` or `mfa`) and `by: "user"`; `mfa.factor.removed`, a removal
+	// from the account page, its `kind`, `factorId`, `binding` and `by: "user"`; `mfa.recovery_codes.generated` its `binding`,
 	// `by: "user"`, `regenerated` (true when a set stood, or may have)
 	// and, when an older set may still stand beside the new one,
 	// `unreplaced: true` — with `kept: "password_binding"` when it was kept

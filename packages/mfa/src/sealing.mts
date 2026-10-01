@@ -106,6 +106,8 @@ export interface MfaSealing {
 	openState(binding: MfaStateBinding, sealed: unknown): OpenedMfaValue<MfaFactorState>;
 	/** Keyed digests bound to `kind`, as a factor of that kind is handed them. */
 	digestsFor(kind: string): MfaDigests;
+	/** Whether the ring holds the key `keyId` names: a digest made under another cannot be compared. */
+	holdsKey(keyId: string): boolean;
 }
 
 export interface MfaSealingOptions {
@@ -329,6 +331,8 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 			seal(statePlacement(binding), state, "a ceremony's state"),
 
 		openState: (binding: MfaStateBinding, sealed: unknown) => open(statePlacement(binding), sealed),
+
+		holdsKey: (keyId: string) => keys.some((entry) => entry.id === keyId),
 
 		digestsFor(kind: string): MfaDigests {
 			if (!isWellFormedText(kind) || kind === "") {

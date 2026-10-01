@@ -694,10 +694,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept:
-			"what a factor record can do — usable, unreadable, not installed or a known exhausted recovery set — and whether it serves a login's ask for a second factor (the MFA ADR's F3, F4)",
+			"what a factor record can do — usable, unreadable, not installed, a known exhausted recovery set, an email factor whose address changed — what a transaction offers, and whether a password login asks for a second factor over it (the MFA ADR's F3, F4)",
 		home: "packages/mfa/src/factorState.mts",
-		definition: /(?:function|const)\s+(?:readFactorRecord|recordServes|holdsUsableRecord)\b/,
-		homeMatches: 3,
+		definition:
+			/(?:function|const)\s+(?:readFactorRecord|readFactorRecordAt|isOffered|asksForSecondFactor|holdsUsableRecord)\b/,
+		homeMatches: 5,
 	},
 ];
 

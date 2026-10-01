@@ -360,18 +360,12 @@ describe("a subject with no counting factor whose primary is older than mfa.mana
 			}
 		});
 
-		it(`${mode}: is still an outage when its session's witness says it enrolled: the witness is read before the primary's age`, async () => {
+		it(`${mode}: is sent to log in again, recording nothing, when its session's witness says it enrolled`, async () => {
 			const events: AuditEvent[] = [];
 			const { requirement } = build({ mode, events });
 			const stale = sessionOf("fed", facts("enrolled"), { ageMs: 301_000 });
-			await expect(requirement.admit(inputFor(stale))).rejects.toMatchObject({
-				reason: "mfa_enrollment_state_inconsistent",
-			});
-			expect(await admit(requirement, stale, "session.link")).toEqual({
-				outcome: "unavailable",
-				store: "mfa",
-			});
-			expect(events).toHaveLength(2);
+			expect(await requirement.admit(inputFor(stale))).toEqual(REAUTHENTICATE);
+			expect(events).toEqual([]);
 		});
 	}
 });
@@ -736,9 +730,9 @@ describe("a subject with no counting factor whose first-binding mark distrusts t
 
 		const stale = markedAt(() => null);
 		await stale.requirement.admit(inputFor(sessionOf("fed", facts(), { ageMs: 301_000 })));
-		await expect(
-			stale.requirement.admit(inputFor(sessionOf("fed", facts("enrolled")))),
-		).rejects.toMatchObject({ name: "MfaEnrollmentStateInconsistentError" });
+		expect(await stale.requirement.admit(inputFor(sessionOf("fed", facts("enrolled"))))).toEqual(
+			REAUTHENTICATE,
+		);
 		expect(stale.read).not.toHaveBeenCalled();
 	});
 

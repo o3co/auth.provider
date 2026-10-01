@@ -32,16 +32,18 @@
  * under `optional` it is met. The baseline steps a password session without a
  * second factor up only when its subject may hold a counting factor to step
  * up with; without one it sends the session to log in, where the login's
- * first binding is made. An action graded `credential_change` adds a way
- * into the account and is held to recent MFA (`isRecentMfa`) over a primary the
+ * first binding is made. An action graded `credential_change` changes the
+ * ways into the account — adds one, or renames or removes a factor — and is
+ * held to recent MFA (`isRecentMfa`) over a primary the
  * baseline knows — under `required` on top of the baseline, so it is never
  * looser than `use`: the subject's factor records say whether it may hold a
  * counting factor — a record of a kind no installed factor declares
  * non-counting counts — and a list that cannot answer throws.
  *
  * For a subject that holds none, the action is a first binding (D12, D24):
- * the view's recorded facts are read — none recorded sends the session to
- * log in, and a witness `enrolled` or malformed is recorded and thrown —
+ * the view's recorded facts are read — none recorded, or a witness `enrolled`
+ * or malformed, sends the session to log in, whose own read of the `User`
+ * records a real loss —
  * then a recent primary (`authTime`; a second factor does not stand in for
  * it), then the subject's first-binding mark (`firstBindingMark.mts`): a
  * session it distrusts, whose recorded witness may predate the subject's
@@ -53,12 +55,12 @@
  * give steps the session up and never admits it.
  *
  * `admitPrimary` interrupts a password login for a second factor when the subject
- * holds a record that serves (`factorState.mts`): a record it cannot use is
+ * holds a record it asks for one over (`factorState.mts`): a record it cannot use is
  * never "none", a recovery set with no code left is, and a `list` that cannot
  * answer throws, which admission answers `unavailable`. When no
  * record that may count stands, the login's `User` must not say the subject
  * enrolled: a witness `true` or malformed is recorded and thrown, under either
- * mode (D12). With none that serves, `optional` establishes and `required` interrupts
+ * mode (D12). With none it asks over, `optional` establishes and `required` interrupts
  * for a first binding offering the counting factors the user may enroll, the
  * account-email proof first where the one gate (`firstBinding.mts`) asks for
  * it. Other primaries establish without a read: the baseline applies after
@@ -94,7 +96,7 @@ import {
 	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
-import { recordServes } from "./factorState.mjs";
+import { asksForSecondFactor } from "./factorState.mjs";
 import {
 	countingKinds,
 	enrollableKinds,
@@ -426,8 +428,8 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 
 	/**
 	 * A first binding in `session`, whose subject holds no record that may
-	 * count: what the session recorded of its login's `User` — none is a new
-	 * login — then a recent primary, then the subject's first-binding mark —
+	 * count: what the session recorded of its login's `User` — none, or a
+	 * witness other than `not_enrolled`, is a new login — then a recent primary, then the subject's first-binding mark —
 	 * a session it distrusts is a new login — then the gate, a proof asked
 	 * for admitted only while one given in this session stands.
 	 */
@@ -437,10 +439,8 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		nowMs: number,
 	): Promise<RequirementVerdict> => {
 		const facts = session.enrollmentFacts;
-		if (facts === undefined) return REAUTHENTICATE;
-		if (facts.witness !== "not_enrolled") {
-			inconsistent(session.sub, facts.witness, { purpose: "session", action: action.name });
-		}
+		// A witness recorded at login may predate a removal that cleared it: the login reads it fresh.
+		if (facts === undefined || facts.witness !== "not_enrolled") return REAUTHENTICATE;
 		const recentPrimary = isRecentMfa(
 			{ authTime: session.authTime, mfaAt: undefined },
 			{ holdsCountingFactor: false },
@@ -557,7 +557,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			if (primary.recorded.authentication.primary !== PASSWORD_AMR) return "establish";
 			const records = await listRecords(primary.subject);
 			if (!records.some((record) => mayCount(factors, record))) checkWitness(primary);
-			if (records.some((record) => recordServes({ factors, sealing }, primary.subject, record))) {
+			if (
+				records.some((record) => asksForSecondFactor({ factors, sealing }, primary.subject, record))
+			) {
 				return interrupt({ error: "mfa_required" });
 			}
 			if (mode === "optional") return "establish";

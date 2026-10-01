@@ -99,6 +99,7 @@ import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
+import { createMfaFactorSet } from "./factorSet.mjs";
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
@@ -467,6 +468,12 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						deps.mfaFactorResolver,
 					);
 					checkInstalledFactors(deps.mfaFactorResolver, mode);
+					// The subject's records as read, and the writes the witness follows: one per boot.
+					const factorSet = createMfaFactorSet({
+						factors: deps.mfaFactorResolver,
+						factorStore: deps.mfaFactorStore,
+						witness,
+					});
 					const requirements = checkResolver(
 						deps.sessionRequirementResolver,
 						"mfaModule",
@@ -504,6 +511,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								mode,
 								mailSender: deps.mailSender,
 								witness,
+								factorSet,
 								transactionTtlSeconds: settings.transactionTtlSeconds,
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
 								requireEmailProof: settings.enrollment.requireEmailProof,
@@ -541,9 +549,9 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							management: {
 								factors: deps.mfaFactorResolver,
 								factorStore: deps.mfaFactorStore,
+								factorSet,
 								sealing,
 								mode,
-								witness,
 							},
 						}),
 					};

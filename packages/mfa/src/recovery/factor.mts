@@ -142,6 +142,12 @@ export function generateRecoveryCodes(
 	};
 }
 
+/** The key ids the set `data`'s digests name, for a factor this file made; `undefined` otherwise, or for data that is not a set. */
+export function recoverySetKeyIds(factor: MfaFactor, data: MfaFactorData): string[] | undefined {
+	if (!issuers.has(factor)) return undefined;
+	return digestsIn(data)?.map((stored) => stored.keyId);
+}
+
 /** Whether `data` is a set with no code left, for a factor this file made; data that is not a set is not one. */
 export function isExhaustedRecoverySet(factor: MfaFactor, data: MfaFactorData): boolean {
 	return issuers.has(factor) && digestsIn(data)?.length === 0;

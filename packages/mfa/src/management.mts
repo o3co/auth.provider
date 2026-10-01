@@ -21,19 +21,20 @@
  * session through `routes.mts` first.
  *
  * - `GET /factors`, admitted as `mfa.view`: every record of the subject,
- *   oldest first, with its state (`factorState.mts`) — `address_changed`
- *   for an email factor whose recorded address is not the one the
- *   session's login `User` holds — and a recovery set's codes left; never a
- *   record's data.
+ *   oldest first, with its state as `factorState.mts` reads it for the
+ *   session's login address, and a recovery set's codes left; never a
+ *   record's data. A record whose data or digest needs a key the ring no
+ *   longer holds is said at error with that key's id.
  * - `POST /factors/rename {factor_id, label}`, admitted as `mfa.manage`: the
  *   label written by compare-and-set at the version read, the data and last
  *   use as read; a lost race is `409`, nothing retried.
- * - `POST /factors/remove {factor_id}`, admitted as `mfa.manage`: under
- *   `required`, refused `409` when no other record of an installed counting
- *   kind stands. Audited `mfa.factor.removed`; once the records read again
- *   after it — or, unreadable, those read before less the one removed —
- *   hold none that may count (`mayCount`), the enrollment witness is cleared, and
- *   a clear that fails is said at warn, the removal standing.
+ * - `POST /factors/remove {factor_id}`, admitted as `mfa.manage`, run whole
+ *   by `factorSet.mts` (the read, this file's refusal, the removal, the
+ *   witness): under `required`, removing an installed counting factor is
+ *   refused `409` when no other usable counting record stands — one
+ *   unreadable or `address_changed` does not. Audited `mfa.factor.removed`;
+ *   a re-read that failed, and a witness clear that failed, are said at warn,
+ *   the removal standing.
  * - A factor named that is not the subject's is `400`; a store that cannot
  *   answer, or answers outside its port's contract, is `503`, logged once.
  */
@@ -53,14 +54,11 @@ import {
 import express, { type Request, type Response, type Router } from "express";
 import type { MfaAdmissionAction } from "./admissionActions.mjs";
 import { type MfaCeremonySession, OUTSIDE_CONTRACT } from "./ceremony.mjs";
-import { enrolledAddressDigest } from "./email/factor.mjs";
-import { byAge, readFactorRecord } from "./factorState.mjs";
-import { mayCount } from "./firstBinding.mjs";
-import { matchesRecordedAddress } from "./mail.mjs";
+import type { MfaFactorSet } from "./factorSet.mjs";
+import { type MfaRecordReading, readFactorRecordAt } from "./factorState.mjs";
 import { recoveryCodesLeft } from "./recovery/factor.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
-import type { MfaEnrollmentWitness } from "./witness.mjs";
 
 const UNKNOWN_FACTOR = errorEnvelope("invalid_request", "Unknown second factor");
 const INVALID_LABEL = errorEnvelope("invalid_request", "Invalid label");
@@ -74,22 +72,14 @@ const FACTOR_CONFLICT = errorEnvelope(
 	"The factor changed while it was renamed: try again",
 );
 
-/** A record's state as the list names it: `factorState.mts`'s, or an email factor's changed address. */
-export type MfaListedState =
-	| "usable"
-	| "unreadable"
-	| "not_installed"
-	| "exhausted"
-	| "address_changed";
-
 export interface MfaManagementOptions {
 	readonly factors: MfaFactorResolver;
 	readonly factorStore: MfaFactorStore;
+	/** The subject's records as read, and their removal with the witness after it. */
+	readonly factorSet: MfaFactorSet;
 	readonly sealing: MfaSealing;
-	/** `mfa.mode`: under `required` the last record of an installed counting kind stays. */
+	/** `mfa.mode`: under `required` the last usable counting factor stays. */
 	readonly mode: MfaRequirementMode;
-	/** The enrollment witness a removal that leaves nothing that may count clears. */
-	readonly witness: MfaEnrollmentWitness;
 	/** The signed-in session the request's cookie carries, admitted for `action`; `undefined` once the refusal is answered. */
 	readonly admit: (
 		req: Request,
@@ -106,7 +96,7 @@ const isoOf = (at: Date | undefined): string | undefined =>
 
 /** The management routes' router (see this file's header). */
 export function createMfaManagementRouter(options: MfaManagementOptions): Router {
-	const { factors, factorStore, sealing, mode, witness, admit, logger, auditSink } = options;
+	const { factors, factorStore, factorSet, sealing, mode, admit, logger, auditSink } = options;
 	const router = express.Router();
 
 	/** A factor store's outage: logged once, answered `503`. */
@@ -123,48 +113,17 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 		res: Response,
 		subject: string,
 	): Promise<MfaFactorRecord[] | undefined> => {
-		let records: unknown;
 		try {
-			records = await factorStore.list(subject);
+			return await factorSet.list(subject);
 		} catch (cause) {
 			unavailable(res, "list", cause);
 			return undefined;
 		}
-		if (!Array.isArray(records)) {
-			unavailable(res, "list", OUTSIDE_CONTRACT);
-			return undefined;
-		}
-		return [...(records as MfaFactorRecord[])].sort(byAge);
 	};
 
-	/** The record `factorId` names among `records`, else none. */
-	const named = (
-		records: readonly MfaFactorRecord[],
-		factorId: unknown,
-	): MfaFactorRecord | undefined =>
-		typeof factorId === "string" ? records.find((record) => record.id === factorId) : undefined;
-
-	/** `record`'s state for `session`, and the codes a recovery set has left. */
-	const listed = (
-		session: MfaCeremonySession,
-		record: MfaFactorRecord,
-	): { readonly state: MfaListedState; readonly codesLeft?: number } => {
-		const read = readFactorRecord({ factors, sealing }, session.subject, record);
-		if (read.state === "not_installed" || read.state === "unreadable") return read;
-		const codesLeft = recoveryCodesLeft(read.factor, read.data);
-		const recorded = enrolledAddressDigest(read.factor, read.data);
-		if (read.state === "usable" && recorded !== undefined) {
-			const compared = matchesRecordedAddress(
-				sealing.digestsFor(record.kind),
-				session.user.email,
-				recorded,
-			);
-			if (compared !== "match") {
-				return { state: compared === "mismatch" ? "address_changed" : "unreadable" };
-			}
-		}
-		return codesLeft === undefined ? { state: read.state } : { state: read.state, codesLeft };
-	};
+	/** `record` as read for `session`. */
+	const readFor = (session: MfaCeremonySession, record: MfaFactorRecord): MfaRecordReading =>
+		readFactorRecordAt({ factors, sealing }, session.subject, record, session.user.email);
 
 	router
 		.get("/factors", async (req: Request, res: Response) => {
@@ -174,7 +133,23 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 			if (records === undefined) return;
 			res.status(200).json({
 				factors: records.map((record) => {
-					const { state, codesLeft } = listed(session, record);
+					const read = readFor(session, record);
+					if (read.state === "unreadable" && read.keyId !== undefined) {
+						logger.error(
+							{
+								route: "factors",
+								kind: record.kind,
+								factorId: record.id,
+								state: "key_unavailable",
+								keyId: read.keyId,
+							},
+							"mfa_factor_unreadable",
+						);
+					}
+					const codesLeft =
+						read.state === "usable" || read.state === "exhausted"
+							? recoveryCodesLeft(read.factor, read.data)
+							: undefined;
 					const createdAt = isoOf(record.createdAt);
 					const lastUsedAt = isoOf(record.lastUsedAt);
 					return {
@@ -184,7 +159,7 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 						...(createdAt === undefined ? {} : { created_at: createdAt }),
 						...(lastUsedAt === undefined ? {} : { last_used_at: lastUsedAt }),
 						...(record.binding === undefined ? {} : { binding: record.binding }),
-						state,
+						state: read.state,
 						...(codesLeft === undefined ? {} : { recovery_codes_remaining: codesLeft }),
 					};
 				}),
@@ -201,7 +176,9 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 			}
 			const records = await recordsOf(res, session.subject);
 			if (records === undefined) return;
-			const record = named(records, body?.factor_id);
+			const factorId = body?.factor_id;
+			const record =
+				typeof factorId === "string" ? records.find((one) => one.id === factorId) : undefined;
 			if (record === undefined) {
 				res.status(400).json(UNKNOWN_FACTOR);
 				return;
@@ -236,27 +213,36 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 		.post("/factors/remove", async (req: Request, res: Response) => {
 			const session = await admit(req, res, "mfa.manage");
 			if (session === undefined) return;
-			const records = await recordsOf(res, session.subject);
-			if (records === undefined) return;
-			const record = named(records, (req.body as { factor_id?: unknown } | undefined)?.factor_id);
-			if (record === undefined) {
-				res.status(400).json(UNKNOWN_FACTOR);
-				return;
-			}
-			const others = records.filter((other) => other.id !== record.id);
-			if (
+			/** Under `required`, an installed counting factor stays unless another usable one does. */
+			const lastFactor = (record: MfaFactorRecord, records: readonly MfaFactorRecord[]) =>
 				mode === "required" &&
-				!others.some((other) => factors.get(other.kind)?.counting === true)
-			) {
-				res.status(409).json(LAST_FACTOR);
-				return;
+				factors.get(record.kind)?.counting === true &&
+				!records.some((other) => {
+					if (other.id === record.id) return false;
+					const read = readFor(session, other);
+					return read.state === "usable" && read.factor.counting === true;
+				})
+					? LAST_FACTOR
+					: undefined;
+			const removal = await factorSet.remove(
+				session.subject,
+				(req.body as { factor_id?: unknown } | undefined)?.factor_id,
+				lastFactor,
+			);
+			switch (removal.outcome) {
+				case "unknown_factor":
+					res.status(400).json(UNKNOWN_FACTOR);
+					return;
+				case "refused":
+					res.status(409).json(removal.refusal);
+					return;
+				case "unavailable":
+					unavailable(res, removal.step, removal.cause);
+					return;
+				case "removed":
+					break;
 			}
-			try {
-				await factorStore.remove(session.subject, record.id);
-			} catch (cause) {
-				unavailable(res, "remove", cause);
-				return;
-			}
+			const { record } = removal;
 			emitAuditEvent(auditSink, {
 				timestamp: new Date(),
 				type: "mfa.factor.removed",
@@ -265,27 +251,22 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 				userAgent: req.get("user-agent"),
 				details: {
 					kind: record.kind,
+					factorId: record.id,
 					...(record.binding === undefined ? {} : { binding: record.binding }),
 					by: "user",
 				},
 			});
-			let remaining: readonly MfaFactorRecord[] = others;
-			try {
-				const again: unknown = await factorStore.list(session.subject);
-				if (Array.isArray(again)) {
-					remaining = (again as MfaFactorRecord[]).filter((other) => other.id !== record.id);
-				}
-			} catch {
-				// The records read before, less the one removed, decide.
+			if ("unread" in removal) {
+				logger.warn(
+					{ sub: session.subject, err: loggableError(removal.unread) },
+					"mfa_factor_removal_unread",
+				);
 			}
-			if (!remaining.some((other) => mayCount(factors, other))) {
-				const cleared = await witness.clear(session.subject);
-				if (cleared.outcome === "unwritten") {
-					logger.warn(
-						{ sub: session.subject, err: loggableError(cleared.cause) },
-						"mfa_enrollment_witness_uncleared",
-					);
-				}
+			if (removal.witness?.outcome === "unwritten") {
+				logger.warn(
+					{ sub: session.subject, err: loggableError(removal.witness.cause) },
+					"mfa_enrollment_witness_uncleared",
+				);
 			}
 			res.status(200).json({});
 		});
