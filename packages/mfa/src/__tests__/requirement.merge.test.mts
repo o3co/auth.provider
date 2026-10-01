@@ -82,10 +82,15 @@ const ISSUER = "https://auth.test";
 /** `mfa.page.url` as the package's reference.conf ships it. */
 const PAGE: StepUpPage = { url: "/mfa", params: {} };
 
-/** The requirement the MFA module registers under `mode`, over the factors of `factors`. */
+/**
+ * The requirement the MFA module registers under `mode`, over the factors
+ * of `factors`; able to record a step-up exactly when the session store
+ * can, as boot builds it.
+ */
 const realRequirement = (
 	mode: "optional" | "required",
 	factors: MergeFactors,
+	stepUpRecordable: boolean,
 ): SessionRequirement =>
 	createMfaRequirement({
 		mode,
@@ -98,7 +103,7 @@ const realRequirement = (
 			ttlSeconds: 600,
 		}),
 		stepUpPage: PAGE,
-		stepUpRecordable: true,
+		stepUpRecordable,
 		recentMfaMaxAgeSeconds: 300,
 		logger: consoleLogger,
 		...WITHOUT_MAIL,
@@ -107,10 +112,7 @@ const realRequirement = (
 
 /**
  * Whether a row's store can record a second factor: every row's can,
- * unless the row says its store cannot. The requirement is built able to
- * record a step-up whatever the row says, so a row whose store cannot
- * record one checks core's merge alone; the requirement's own answer
- * without the capability (a new login) is held in its own tests.
+ * unless the row says its store cannot.
  */
 const recordsSecondFactor = (row: MergeRow): boolean =>
 	!("storeRecords" in row && row.storeRecords === false);
@@ -135,7 +137,7 @@ const deps = (row: MergeRow): AdmissionDeps => ({
 		row.session === null ? undefined : storeOf(row.session, recordsSecondFactor(row)),
 	subjectRevocation: undefined,
 	requirements: resolverForTests(
-		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors)],
+		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors, recordsSecondFactor(row))],
 		{ issuer: ISSUER, actions: { "test.use": { grade: "use" } } },
 	),
 	acrTable: MERGE_ACR_TABLE,
