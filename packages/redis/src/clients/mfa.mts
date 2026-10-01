@@ -33,7 +33,7 @@ import type {
 /**
  * What a Redis server says about keeping what it is written — read at boot
  * by the two MFA store modules (ADR 2026-09-25-multi-factor-authentication,
- * D12). Each part is `undefined` when it could not be read: the server
+ * on durability). Each part is `undefined` when it could not be read: the server
  * refused the question (`refusal`), or answered without the value.
  */
 export interface RedisDurability {
@@ -62,7 +62,7 @@ export interface MfaFactorRecordUpdateInput {
 
 /**
  * Backing client for the `MfaFactorStore` adapter (ADR
- * 2026-09-25-multi-factor-authentication, D7): one hash per subject, a field
+ * 2026-09-25-multi-factor-authentication): one hash per subject, a field
  * per factor.
  *
  * A factor's value is three lines — `<version>\n<fixed>\n<mutable>` — where
@@ -237,7 +237,9 @@ export interface MfaFirstBindingRead {
 
 /**
  * Backing client for the `MfaTransactionStore` adapter (ADR
- * 2026-09-25-multi-factor-authentication, D8, D21, D25).
+ * 2026-09-25-multi-factor-authentication): the transactions, the subject
+ * lock state and its recovery, the lease, the email-proof requirement, a
+ * session's proof and a subject's first-binding mark.
  *
  * Semantic operations: every one the port calls atomic is a read, a decision
  * and a write, which Redis makes one step only as a script (see
