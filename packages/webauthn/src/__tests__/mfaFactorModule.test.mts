@@ -15,8 +15,8 @@
  */
 
 /**
- * `webauthnMfaFactorModule` through `createApp` (the MFA ADR's D2, D4, D19,
- * D20): it contributes the `webauthn` factor under core's `mfaFactors` kind,
+ * `webauthnMfaFactorModule` through `createApp`: it contributes the
+ * `webauthn` factor under core's `mfaFactors` kind,
  * built from the relying party the `webauthnConfig` slot holds and its own
  * section, `webauthn-mfa-factor`; a factory answering `null` —
  * `webauthn-mfa-factor.enabled = false`, the reference default — leaves the
