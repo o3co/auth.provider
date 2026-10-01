@@ -4499,6 +4499,37 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 		});
 	});
 
+	it("records no obtainedAt for an end the upstream stated only as an instant, so it is not damped", async () => {
+		// An absolute `expiresAt` is on the upstream's clock, which no
+		// requirement keeps in step with this server's: only an end counted
+		// from the call is aged.
+		await withFrozenDate(async () => {
+			const store = await seeded({
+				...baseFedTokens,
+				obtainedAt: new Date(Date.now() - 3_600_000),
+				expiresAt: new Date(Date.now() - 1000),
+			});
+			let issued = 0;
+			const { app, provider } = appWith(store, async () => {
+				issued += 1;
+				return {
+					accessToken: `instant-at-${issued}`,
+					expiresAt: new Date(Date.now() + SHORT_S * 1000),
+					refreshToken: `rt-${issued}`,
+				};
+			});
+
+			await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+			vi.setSystemTime(Date.now() + 1000);
+			const second = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(stored !== null && "obtainedAt" in stored).toBe(false);
+			expect(second.body.access_token).toBe("instant-at-2");
+			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
+		});
+	});
+
 	it("records no obtainedAt for a token with no finite expiry, and drops the replaced token's", async () => {
 		const store = await seeded({
 			...baseFedTokens,

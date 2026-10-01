@@ -142,8 +142,10 @@ export interface RefreshReading {
 	readonly derivedExpiry: Date | null;
 	/**
 	 * When the token's lifetime counts from: the start of the refresh call.
-	 * `undefined` with no finite expiry, or a broken lifetime. With the cap,
-	 * `derivedExpiry − obtainedAt` may exceed the maximum by the call's duration.
+	 * `undefined` with no finite expiry, a broken lifetime, or an end the
+	 * upstream stated only as an instant, which is on its own clock and so is
+	 * never aged. With the cap, `derivedExpiry − obtainedAt` may exceed the
+	 * maximum by the call's duration.
 	 */
 	readonly obtainedAt: Date | undefined;
 	readonly lifetimeIsBroken: boolean;
@@ -199,7 +201,7 @@ const readRefreshedLifetime = (
 				expiresAt: new Date(
 					Math.min(lifetime.expiresAt.getTime(), now + policy.maxTokenLifetimeMs),
 				),
-				obtainedAt: lifetime.obtainedAt,
+				obtainedAt: lifetime.stated === "expiresAt" ? undefined : lifetime.obtainedAt,
 			};
 		default: {
 			// A verdict a newer core adds is not one this route can store.
