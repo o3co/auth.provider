@@ -745,11 +745,11 @@ describe("the transaction's life and attempts, and the lock", () => {
 		}
 	});
 
-	it("holds mfa.storeTimeoutMs to a whole number of milliseconds from 100, and refuses one whose lease — six of it, one more than the most Store calls a factor-set write makes — passes the longest subject lease, naming the key", () => {
-		for (const value of [100, 5_000, 100_000]) {
+	it("holds mfa.storeTimeoutMs to a whole number of milliseconds from 1000, and refuses one whose lease — six of it, one more than the most Store calls a factor-set write makes — passes the longest subject lease, naming the key", () => {
+		for (const value of [1_000, 5_000, 100_000]) {
 			expect(readSettings(valid({ storeTimeoutMs: value })).storeTimeoutMs).toBe(value);
 		}
-		for (const value of [99, 0, 10.5, "5e3", null, undefined]) {
+		for (const value of [999, 100, 0, 10.5, "5e3", null, undefined]) {
 			const message = refusal(() => readSettings(valid({ storeTimeoutMs: value })));
 			expect(message, String(value)).toContain("mfa.storeTimeoutMs");
 		}

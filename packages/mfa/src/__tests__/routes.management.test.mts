@@ -69,6 +69,7 @@ beforeEach(() => freezeClock());
 afterEach(async () => {
 	await disposeAll();
 	thawClock();
+	vi.restoreAllMocks();
 });
 
 const UNKNOWN_FACTOR = { error: "invalid_request", error_description: "Unknown second factor" };
@@ -716,6 +717,18 @@ async function moveGeneration(store: MfaTransactionStore, subject: string): Prom
 	await store.releaseSubjectLease(subject, lease.token);
 }
 
+/** A monotonic clock a test moves ahead: `performance.now`, as the factor set reads it, `advance`d by what the test says. */
+function monotonicClock() {
+	const real = performance.now.bind(performance);
+	let ahead = 0;
+	vi.spyOn(performance, "now").mockImplementation(() => real() + ahead);
+	return {
+		advance: (ms: number) => {
+			ahead += ms;
+		},
+	};
+}
+
 /** A gate a test opens: `wait` resolves once `open` is called, or after `fallbackMs`. */
 function gate(fallbackMs = 300) {
 	let open: () => void = () => {};
@@ -832,7 +845,9 @@ describe("the subject's factor-set writes, one at a time", () => {
 
 		expect(res.status, JSON.stringify(res.body)).toBe(409);
 		expect(res.body).toEqual(FACTORS_BUSY);
-		expect(res.headers["retry-after"]).toBe("60");
+		const retryAfter = Number(res.headers["retry-after"]);
+		expect(retryAfter).toBeGreaterThanOrEqual(58);
+		expect(retryAfter).toBeLessThanOrEqual(60);
 		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
 	});
 
@@ -900,13 +915,14 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 	});
 
 	it("gives up before writing when a slow Store left less than one Store timeout of the lease: 409 mfa_factors_busy, nothing removed", async () => {
-		const built = await composed("optional", { storeTimeoutMs: 100 });
+		const built = await composed();
 		const { agent, totp } = await signedIn(built);
+		const clock = monotonicClock();
 		const read = built.factorStore.list.bind(built.factorStore);
 		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
 		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
-			// Slow once the lease is held: the read under it outlasts what the lease leaves.
-			if (acquire.mock.calls.length > 0) await new Promise((resolve) => setTimeout(resolve, 1_500));
+			// Slow once the lease is held: the read under it leaves less than one Store timeout.
+			if (acquire.mock.calls.length > 0) clock.advance(26_000);
 			return read(subject);
 		});
 		const removed = vi.spyOn(built.factorStore, "remove");
@@ -916,6 +932,95 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		expect(res.status, JSON.stringify(res.body)).toBe(409);
 		expect(res.body).toEqual(FACTORS_BUSY);
 		expect(removed).not.toHaveBeenCalled();
+	});
+
+	it("leaves the witness as it was when a slow removal left too little of the lease for its clear: the removal stands, an overrun, 409 mfa_factors_changed", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		const clock = monotonicClock();
+		const removeFor = built.factorStore.remove.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "remove").mockImplementation(async (subject, id) => {
+			await removeFor(subject, id);
+			clock.advance(26_000);
+		});
+		const marked = vi.spyOn(built.users, "markMfaEnrolled");
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(FACTORS_CHANGED);
+		expect(await built.factorStore.list(ALICE.id)).toEqual([]);
+		expect(marked).not.toHaveBeenCalled();
+		expect(built.audit.of("mfa.factor.removed")).toHaveLength(1);
+		expect(built.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sub: ALICE.id, route: "factors" }),
+			"mfa_subject_lease_overrun",
+		);
+	});
+
+	it("says an overrun beside the 503 when a removal that failed cannot be read again in the time it had", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		const clock = monotonicClock();
+		vi.spyOn(built.factorStore, "remove").mockImplementation(async () => {
+			clock.advance(26_000);
+			throw new Error("timed out");
+		});
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status).toBe(503);
+		expect(built.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sub: ALICE.id, route: "factors" }),
+			"mfa_subject_lease_overrun",
+		);
+	});
+
+	it("a login's witness mark that runs out of time before the clear it found due: said once at warn, nothing cleared", async () => {
+		const built = await composed();
+		const totp = await seedTotp(built.factorStore);
+		const clock = monotonicClock();
+		const read = built.factorStore.list.bind(built.factorStore);
+		const mark = built.users.markMfaEnrolled.bind(built.users);
+		const marked = vi
+			.spyOn(built.users, "markMfaEnrolled")
+			.mockImplementation(async (subject, enrolled) => {
+				// A write outside the lease removes the last factor while the mark is written.
+				await built.factorStore.removeAllForSubject(subject);
+				return mark(subject, enrolled);
+			});
+		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
+			// The read after the mark: slow enough to leave no time for the clear.
+			if (marked.mock.calls.length > 0) clock.advance(26_000);
+			return read(subject);
+		});
+
+		await signInWithTotp(built.app, built.userSessionStore, totp);
+
+		expect(marked.mock.calls).toEqual([[ALICE.id, true]]);
+		expect(
+			events(built.logger, "warn").filter((event) => event === "mfa_enrollment_witness_unwritten"),
+		).toHaveLength(1);
+	});
+
+	it("reads no generation for a verification after which no mark could follow: a login whose User says the subject enrolled", async () => {
+		const built = await composed("optional", { alice: { enrolled: true } });
+		const totp = await seedTotp(built.factorStore);
+		const generation = vi.spyOn(built.transactionStore, "subjectGeneration");
+
+		await signInWithTotp(built.app, built.userSessionStore, totp);
+
+		expect(generation).not.toHaveBeenCalled();
+	});
+
+	it("reads no generation for a removal from a browser that is not signed in", async () => {
+		const built = await composed();
+		const generation = vi.spyOn(built.transactionStore, "subjectGeneration");
+
+		const res = await remove(request.agent(built.app), "AAAAAAAAAAAAAAAAAAAAAA");
+
+		expect(res.status).toBe(401);
+		expect(generation).not.toHaveBeenCalled();
 	});
 
 	it("says an overrun at error whatever the removal came to: an unknown factor is still 400", async () => {
@@ -1010,6 +1115,13 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 			await signInWithTotp(built.app, built.userSessionStore, totp);
 
 			expect(built.users.marks, records).toEqual([]);
+			// None that may count is in step, said nothing; none readable is warned.
+			expect(
+				events(built.logger, "warn").filter(
+					(event) => event === "mfa_enrollment_witness_unwritten",
+				),
+				records,
+			).toHaveLength(records === "gone" ? 0 : 1);
 			await disposeAll();
 		}
 	});
@@ -1018,10 +1130,12 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		const built = await composed("optional", { witnessless: true });
 		const totp = await seedTotp(built.factorStore);
 		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
+		const generation = vi.spyOn(built.transactionStore, "subjectGeneration");
 
 		await signInWithTotp(built.app, built.userSessionStore, totp);
 
 		expect(acquire).not.toHaveBeenCalled();
+		expect(generation).not.toHaveBeenCalled();
 	});
 });
 
