@@ -33,6 +33,7 @@ import type { MfaFactorRecord, MfaFactorRecordUpdate } from "#/mfa/factorStore.m
 import {
 	fromMfaStoreFactor,
 	type MfaStoreFactor,
+	type MfaStoreFactorBinding,
 	type MfaStoreFactorChanges,
 	type MfaStoreUpdateRequest,
 	readMfaStoreFactor,
@@ -83,6 +84,17 @@ const FULL_WIRE: MfaStoreFactor = {
 const overJson = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
 
 describe("a factor record on the wire", () => {
+	it("names four bindings: password, email_proof, federated and mfa", () => {
+		expectTypeOf<MfaStoreFactorBinding>().toEqualTypeOf<
+			"password" | "email_proof" | "federated" | "mfa"
+		>();
+		expectTypeOf<MfaFactorRecord["binding"]>().toEqualTypeOf<MfaStoreFactorBinding | undefined>();
+		expect(readMfaStoreFactor({ ...FULL_WIRE, binding: "federated" })).toStrictEqual({
+			...FULL_WIRE,
+			binding: "federated",
+		});
+	});
+
 	it("carries times as epoch milliseconds named …Ms", () => {
 		expect(toMfaStoreFactor(FULL)).toStrictEqual(FULL_WIRE);
 	});
@@ -106,6 +118,7 @@ describe("a factor record on the wire", () => {
 	it("round-trips every binding, a contributed kind, data byte for byte, and the version's bounds", () => {
 		const records: MfaFactorRecord[] = [
 			{ ...FULL, binding: "email_proof", kind: "email" },
+			{ ...FULL, binding: "federated", kind: "webauthn" },
 			{ ...FULL, binding: "mfa", kind: "acme-contributed" },
 			{ ...FULL, data: '{"a":[],"b":{}} ü∆ 漢字 🙂' },
 			{ ...FULL, version: 0 },

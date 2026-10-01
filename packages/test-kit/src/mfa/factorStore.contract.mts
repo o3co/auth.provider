@@ -141,6 +141,7 @@ export function mfaFactorStoreContract(
 				RECORD({ id: factorId("c"), kind: "webauthn", binding: "mfa" }),
 				RECORD({ id: factorId("d"), kind: "recovery_code", binding: undefined }),
 				RECORD({ id: factorId("e"), kind: "acme-contributed", binding: "mfa" }),
+				RECORD({ id: factorId("f"), kind: "webauthn", binding: "federated" }),
 			];
 			for (const record of records) await store.create(record);
 			assert.deepStrictEqual(byId(await store.list("user-1")), records);
