@@ -327,12 +327,17 @@ export const loginReturnWithAsk = async (
 
 /**
  * The session's authentication instant in milliseconds, for comparing with
- * an ask's, once core's `authTimeAt` reads it against the clock; `undefined`
- * when it cannot (further ahead than the skew allows), which this endpoint
- * answers with a login, never a comparison.
+ * an ask's: `undefined` when core's `authTimeAt` cannot read it against the
+ * clock, or when it is ahead of the clock at all — an instant ahead was
+ * stamped by a clock this one cannot check, so it shows no login made since
+ * an ask. Unreadable is a login trip, or `login_required` once a login was
+ * asked for or under `prompt=none`.
  */
-export const readableAuthTime = (session: UserSession, nowMs: number): number | undefined =>
-	authTimeAt(session.authTime, nowMs) === undefined ? undefined : session.authTime.getTime();
+export const readableAuthTime = (session: UserSession, nowMs: number): number | undefined => {
+	if (authTimeAt(session.authTime, nowMs) === undefined) return undefined;
+	const at = session.authTime.getTime();
+	return at > nowMs ? undefined : at;
+};
 
 /**
  * Whether a login was made since `instant` (an ask's, in milliseconds):
