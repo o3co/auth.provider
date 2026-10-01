@@ -61,7 +61,7 @@ import {
 import type { Request, RequestHandler, Response, Router } from "express";
 import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
-import { authorizationResponseUrl } from "./authorizationResponse.mjs";
+import type { AuthorizationResponse } from "./authorizationResponse.mjs";
 
 /** The action the consent step admits, as `oauthModule` registers it. */
 const CONSENT_ACTION = "oauth.consent" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
@@ -106,8 +106,8 @@ export interface ConsentRouterOptions {
 	readonly requirements: SessionRequirementResolver;
 	readonly auditSink?: AuditSink;
 	readonly logger: Logger;
-	/** The `iss` the deny's authorization response carries (RFC 9207): the issuer as discovery advertises it. */
-	readonly authorizationResponseIssuer: string;
+	/** Builds the deny's response to `redirect_uri`, its `iss` (RFC 9207) bound. */
+	readonly authorizationResponse: AuthorizationResponse;
 }
 
 const jsonError = (res: Response, status: number, error: string, description: string): Response =>
@@ -373,11 +373,10 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 				userAgent: req.get("user-agent"),
 				details: { scopes: pending.scopes },
 			});
-			const location = authorizationResponseUrl(
+			const location = opts.authorizationResponse(
 				pending.redirectUri,
 				{ error: "access_denied", error_description: "the resource owner denied the request" },
 				pending.state,
-				opts.authorizationResponseIssuer,
 			);
 			return res.redirect(303, location);
 		}

@@ -33,7 +33,6 @@ import {
 	vouchedAmr,
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
-import { authorizationResponseUrl } from "./authorizationResponse.mjs";
 import { redirectError } from "./authorizeAnswers.mjs";
 import type { AuthorizeContext } from "./authorizeContext.mjs";
 
@@ -139,12 +138,7 @@ export const mintCode = async (
 // concurrent requests sharing a session cannot race. `consumeByCode`'s atomic
 // read-and-delete is the sole authenticity gate.
 export const redirectWithCode = async (ctx: AuthorizeContext, code: string): Promise<Response> => {
-	const location = authorizationResponseUrl(
-		ctx.redirectUri,
-		{ code },
-		ctx.state,
-		ctx.opts.authorizationResponseIssuer,
-	);
+	const location = ctx.opts.authorizationResponse(ctx.redirectUri, { code }, ctx.state);
 
 	await emitAuditEvent(ctx.opts.auditSink, {
 		timestamp: new Date(),

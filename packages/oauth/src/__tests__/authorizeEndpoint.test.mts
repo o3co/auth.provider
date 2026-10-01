@@ -2503,13 +2503,13 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 });
 
 describe("/authorize — every authorization response names its issuer (RFC 9207)", () => {
-	/** Discovery's `issuer` for the suite's configured issuer. */
+	/** `advertisedIssuer` of the suite's configured issuer. */
 	const ISS = advertisedIssuer("https://issuer.example");
 
 	/** The one `iss` the redirect carries. */
 	const issOf = (params: URLSearchParams): string[] => params.getAll("iss");
 
-	it("carries iss, equal to discovery's issuer, on the code redirect", async () => {
+	it("carries iss, equal to advertisedIssuer of the configured issuer, on the code redirect", async () => {
 		const { app } = await makeApp({});
 		const params = redirectParams(await authorize(app, baseQuery));
 		expect(params.get("code")).toBe("code-x");
@@ -2548,7 +2548,7 @@ describe("/authorize — every authorization response names its issuer (RFC 9207
 			"access_denied",
 		],
 	] as const)(
-		"carries iss, equal to discovery's issuer, on the error redirect for %s",
+		"carries iss, equal to advertisedIssuer of the configured issuer, on the error redirect for %s",
 		async (_label, appOptions, query, error) => {
 			const { app } = await makeApp(appOptions as Parameters<typeof makeApp>[0]);
 			const params = redirectParams(await authorize(app, query as Query));
@@ -2557,23 +2557,25 @@ describe("/authorize — every authorization response names its issuer (RFC 9207
 		},
 	);
 
-	it("carries no iss on the JSON 400 answered before redirect_uri is trusted", async () => {
-		const { app } = await makeApp({ clientNotFound: true });
-		const res = await authorize(app, baseQuery);
-		expect(res.status).toBe(400);
-		expect(res.headers.location).toBeUndefined();
-		expect(res.body).not.toHaveProperty("iss");
-	});
+	it.each([
+		["an unknown client", { clientNotFound: true }, baseQuery],
+		[
+			"an unregistered redirect_uri",
+			{},
+			{ ...baseQuery, redirect_uri: "https://elsewhere.example/cb" },
+		],
+	] as const)(
+		"carries no iss on the JSON 400 answered before redirect_uri is trusted: %s",
+		async (_label, appOptions, query) => {
+			const { app } = await makeApp(appOptions as Parameters<typeof makeApp>[0]);
+			const res = await authorize(app, query as Query);
+			expect(res.status).toBe(400);
+			expect(res.headers.location).toBeUndefined();
+			expect(res.body).not.toHaveProperty("iss");
+		},
+	);
 
-	it("keeps a registered redirect_uri's own iss beside the response's: the builder rewrites no registered query", async () => {
-		const registered = `${REDIRECT_URI}?iss=${encodeURIComponent("https://other.example")}`;
-		const { app } = await makeApp({ client: { allowedRedirectUris: [registered] } });
-		const params = redirectParams(await authorize(app, { ...baseQuery, redirect_uri: registered }));
-		expect(params.get("code")).toBe("code-x");
-		expect(issOf(params)).toEqual(["https://other.example", ISS]);
-	});
-
-	it("names the issuer as discovery advertises it when the configured one ends in a slash", async () => {
+	it("carries advertisedIssuer of a configured issuer that ends in a slash: the slash removed", async () => {
 		const configured = "https://issuer.example/tenant/";
 		const { app } = await makeApp({
 			oauth: { jwt: oauthConfigForTests({ issuer: configured }).oauth.jwt },

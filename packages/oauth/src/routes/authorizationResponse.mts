@@ -25,9 +25,8 @@
 
 /**
  * `redirectUri` with `params` appended, then `state` when the request carried
- * one, then `iss` = `responseIssuer`. `responseIssuer` is core's
- * `advertisedIssuer` of the configured issuer, computed once at router
- * composition.
+ * one, then `iss` = `responseIssuer`. The registered query is kept as it is:
+ * nothing in it is rewritten or replaced.
  */
 export function authorizationResponseUrl(
 	redirectUri: string,
@@ -40,4 +39,21 @@ export function authorizationResponseUrl(
 	if (state !== undefined) url.searchParams.append("state", state);
 	url.searchParams.append("iss", responseIssuer);
 	return url.toString();
+}
+
+/** An authorization response's location, with its `iss` already bound. */
+export type AuthorizationResponse = (
+	redirectUri: string,
+	params: Readonly<Record<string, string>>,
+	state: string | undefined,
+) => string;
+
+/**
+ * {@link authorizationResponseUrl} bound to `responseIssuer` — core's
+ * `advertisedIssuer` of the configured issuer, resolved once at router
+ * composition — so the sites that answer never handle an issuer.
+ */
+export function authorizationResponseFor(responseIssuer: string): AuthorizationResponse {
+	return (redirectUri, params, state) =>
+		authorizationResponseUrl(redirectUri, params, state, responseIssuer);
 }

@@ -502,7 +502,7 @@ export const createOAuthRouter = async (
 	}
 	const router = express.Router();
 
-	const { options, acrTable, canonicalIssuer, authorizationResponseIssuer, clientRepository } =
+	const { options, acrTable, canonicalIssuer, authorizationResponse, clientRepository } =
 		resolveRouterSettings({
 			config,
 			authorizationEndpoint,
@@ -563,7 +563,7 @@ export const createOAuthRouter = async (
 					auditSink,
 					logger,
 					issuer: canonicalIssuer,
-					authorizationResponseIssuer,
+					authorizationResponse,
 					// The session module's login entry, required here.
 					login: requireLoginEntry(loginEntry),
 					// The consent page, `oauth.consentPage.url`, read per request. The
@@ -811,7 +811,7 @@ export const createOAuthRouter = async (
 				clientRepository,
 				auditSink,
 				logger,
-				authorizationResponseIssuer,
+				authorizationResponse,
 				// The same reading `/authorize` makes, through admission with the
 				// same slots.
 				userSessionStore,

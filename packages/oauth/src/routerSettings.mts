@@ -39,6 +39,10 @@ import {
 	withClientIdMetadataDocuments,
 } from "./clients/clientIdMetadataDocument.mjs";
 import { type ResolvedOAuthOptions, resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
+import {
+	type AuthorizationResponse,
+	authorizationResponseFor,
+} from "./routes/authorizationResponse.mjs";
 
 /** What {@link resolveRouterSettings} resolved. */
 export interface RouterSettings {
@@ -46,8 +50,8 @@ export interface RouterSettings {
 	/** Undefined when `/authorize` is not mounted. */
 	readonly acrTable: ReturnType<typeof vouchableAcrValues>["table"] | undefined;
 	readonly canonicalIssuer: string;
-	/** The `iss` every authorization response carries (RFC 9207): `advertisedIssuer(canonicalIssuer)`. */
-	readonly authorizationResponseIssuer: string;
+	/** Builds every authorization response, its `iss` (RFC 9207) bound to `advertisedIssuer(canonicalIssuer)`. */
+	readonly authorizationResponse: AuthorizationResponse;
 	readonly clientRepository: ClientRepository;
 }
 
@@ -147,7 +151,7 @@ export const resolveRouterSettings = ({
 		options,
 		acrTable,
 		canonicalIssuer,
-		authorizationResponseIssuer: advertisedIssuer(canonicalIssuer),
+		authorizationResponse: authorizationResponseFor(advertisedIssuer(canonicalIssuer)),
 		clientRepository,
 	};
 };
