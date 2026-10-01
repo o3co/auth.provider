@@ -291,7 +291,7 @@ function mfaFloodGuard(options: {
 			throw new BootError({
 				stage: "applyContributions",
 				reason: "replica-unsafe-adapter",
-				message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for the MFA routes: each replica would count ${budget.limit} per ${budget.windowSeconds}s apart, so the limit is really ${budget.limit} times the replicas. Wire a rateLimiter (rateLimiter.adapter = "redis"), or set core.deployment.mode = "single".`,
+				message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for the MFA routes: each replica would count ${budget.limit} per ${budget.windowSeconds}s apart, so the limit is really ${budget.limit} times the replicas. Wire a shared rateLimiter (adapters.rateLimiter = "redis" in the standalone template), or set core.deployment.mode = "single".`,
 				details: { reason: "replica-unsafe-adapter", modules: ["mfa"] },
 			});
 		}
