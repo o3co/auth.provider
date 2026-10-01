@@ -92,6 +92,7 @@ import {
 	errorEnvelope,
 	type IssuedRemediationAction,
 	isMfaFactorId,
+	isRenewalNonce,
 	type Logger,
 	type LoginCompletion,
 	loggableError,
@@ -101,6 +102,7 @@ import {
 	resumePrimary,
 	type SessionView,
 	type SupportsSecondFactorUpdate,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import type { MfaAdmissionAction } from "./admissionActions.mjs";
@@ -132,6 +134,11 @@ const SESSION_STORE_UNAVAILABLE = errorEnvelope(
 );
 const LOGIN_REQUIRED = errorEnvelope("login_required", "Log in again");
 const STEP_UP_UNRECORDED = errorEnvelope("server_error", "The step-up could not be recorded");
+/** A step-up recorded on a session the store left unbound: the session was ended. */
+const SESSION_NOT_SECURED = errorEnvelope(
+	"server_error",
+	"The session could not be secured: sign in again",
+);
 /** A proof that would reopen a login for a binding nobody could complete: refused, nothing spent. */
 const ENROLLMENT_REQUIRED = errorEnvelope(
 	"mfa_enrollment_required",
@@ -222,7 +229,7 @@ const ESCALATION_REFUSALS: Readonly<
 	not_recorded: [401, LOGIN_REQUIRED],
 	not_renewed: [503, SESSION_STORE_UNAVAILABLE],
 	unavailable: [503, SESSION_STORE_UNAVAILABLE],
-	unbound: [500, STEP_UP_UNRECORDED],
+	unbound: [500, SESSION_NOT_SECURED],
 	invalid: [500, STEP_UP_UNRECORDED],
 };
 
@@ -241,7 +248,7 @@ export interface MfaRoutesOptions {
 	readonly stepUp: IssuedRemediationAction;
 	readonly loginCompletion: LoginCompletion;
 	/** The session store's step-up capability, when it has it: where a session's escalation is recorded. */
-	readonly secondFactorStore: SupportsSecondFactorUpdate | undefined;
+	readonly secondFactorStore: (UserSessionStore & SupportsSecondFactorUpdate) | undefined;
 	/** The deployment's CSRF guard: every POST runs its middleware, and a login it completes is handed a fresh token. */
 	readonly csrfGuard: CsrfGuard;
 	/** The flood guard every POST runs after the CSRF guard. */
@@ -293,6 +300,25 @@ const postedAcrValues = (req: Request): readonly string[] | undefined => {
 		values.every((value) => value.length <= ACR_VALUES_LIMIT.length)
 		? values
 		: undefined;
+};
+
+/**
+ * Whether `value`, what `recordSecondFactor` answered other than `null`, is
+ * the record of `session`: an object holding its `sid` and subject and the
+ * record's dates. Anything else is outside the port's contract.
+ */
+const isSessionRecord = (
+	value: unknown,
+	session: { readonly sid: string; readonly sub: string },
+): value is { readonly renewalNonce?: unknown } => {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const { sid, sub, authTime, expiresAt } = value as Readonly<Record<string, unknown>>;
+	return (
+		sid === session.sid &&
+		sub === session.sub &&
+		authTime instanceof Date &&
+		expiresAt instanceof Date
+	);
 };
 
 /** The transaction id a POST names; two that disagree name none, which no transaction matches. */
@@ -655,19 +681,21 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	 * Each failure is logged here, once; the caller chooses the answer.
 	 *
 	 * - No step-up capability: `unrecordable_store`, nothing renewed.
-	 * - The renewal fails: `not_renewed`, nothing recorded; the port
-	 *   abandoned the request's cookie session.
+	 * - `adds` names a value outside the mfa requirement's sealed reach:
+	 *   `invalid`, nothing renewed.
+	 * - The renewal fails, or answers no renewal nonce: `not_renewed`, nothing
+	 *   recorded.
 	 * - The record answers `null` — the session is gone, another completion
 	 *   from the same cookie session was recorded first, or it predates how a
 	 *   session was established: `not_recorded`. The renewed cookie session is
 	 *   left as it is: at its next admission each cause is `not_live` or
 	 *   below the level the step-up was for.
-	 * - A session without the renewal nonce: `unbound`, the escalation
-	 *   recorded and bound to no cookie session.
+	 * - A session without the renewal nonce: `unbound`. The escalation would
+	 *   stand bound to no cookie session, so the session is ended.
 	 * - A `RangeError`: `invalid`. Any other rejection, or an answer that is
-	 *   no session: `unavailable`.
+	 *   not this session: `unavailable`.
 	 *
-	 * After a renewal, no failure abandons the renewed cookie session.
+	 * After a renewal, no failure but `unbound` ends the renewed cookie session.
 	 */
 	const escalateSession = async (
 		route: RouteName,
@@ -678,6 +706,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		adds: { readonly amr: readonly string[]; readonly mfaAt: Date },
 	): Promise<Escalation> => {
 		if (secondFactorStore === undefined) return "unrecordable_store";
+		const { amr, mfaAt } = adds;
+		const reach = admission.requirements.get(MFA_REQUIREMENT_NAME)?.reach;
+		if (reach === undefined || !amr.every((value) => reach.has(value))) {
+			logger.error({ route, sub: session.sub }, "mfa_escalation_invalid");
+			return "invalid";
+		}
 		const renewed = await loginCompletion.renewSession({
 			req,
 			reporter: {
@@ -686,11 +720,17 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			},
 		});
 		if (renewed.outcome !== "renewed") return "not_renewed";
+		if (!isRenewalNonce(renewed.renewalNonce)) {
+			storeUnavailable(route, "cookie_session", "renewSession", OUTSIDE_CONTRACT, {
+				sid: session.sid,
+			});
+			return "not_renewed";
+		}
 		let recorded: unknown;
 		try {
 			recorded = await secondFactorStore.recordSecondFactor(session.sid, {
-				amr: adds.amr,
-				at: adds.mfaAt,
+				amr,
+				at: mfaAt,
 				renewalNonce: renewed.renewalNonce,
 				expectedRenewalNonce: expected,
 			});
@@ -698,7 +738,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			if (cause instanceof RangeError) {
 				logger.error(
 					{ route, sub: session.sub, err: loggableError(cause) },
-					"mfa_step_up_unrecordable",
+					"mfa_escalation_invalid",
 				);
 				return "invalid";
 			}
@@ -706,17 +746,22 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			return "unavailable";
 		}
 		if (recorded === null) {
-			logger.info({ route, sub: session.sub }, "mfa_step_up_not_recorded");
+			logger.info({ route, sub: session.sub }, "mfa_escalation_not_recorded");
 			return "not_recorded";
 		}
-		if (typeof recorded !== "object") {
+		if (!isSessionRecord(recorded, session)) {
 			storeUnavailable(route, "user_session", "recordSecondFactor", OUTSIDE_CONTRACT, {
 				sid: session.sid,
 			});
 			return "unavailable";
 		}
-		if ((recorded as { readonly renewalNonce?: unknown }).renewalNonce !== renewed.renewalNonce) {
-			logger.error({ route, sub: session.sub }, "mfa_step_up_unbound");
+		if (recorded.renewalNonce !== renewed.renewalNonce) {
+			logger.error({ route, sub: session.sub }, "mfa_escalation_unbound");
+			try {
+				await secondFactorStore.delete(session.sid);
+			} catch (cause) {
+				storeUnavailable(route, "user_session", "delete", cause, { sid: session.sid });
+			}
 			return "unbound";
 		}
 		csrfGuard.issue(res);

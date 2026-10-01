@@ -1075,9 +1075,9 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	// The MFA routes: a session's escalation.
 	{
 		file: "packages/mfa/src/routes.mts",
-		read: "adds.amr",
+		read: "{amr}=adds",
 		count: 1,
-		why: "the step-up write D28 names: escalateSession hands recordSecondFactor what a verified second factor adds, as the ceremony built it — the factor's declared values and mfa — never a session record",
+		why: "the step-up write D28 names: escalateSession holds what a verified second factor adds, as the ceremony built it — the factor's declared values and mfa — to the mfa requirement's sealed reach, then hands it to recordSecondFactor; never a session record",
 	},
 	// Reads of a field of that name that is not a session's.
 	{
