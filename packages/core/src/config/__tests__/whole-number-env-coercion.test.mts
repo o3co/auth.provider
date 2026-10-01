@@ -15,20 +15,20 @@
  */
 
 /**
- * `numberFromEnv`, core's public strict reader of a number an environment
- * variable may carry: a number as written, or a string of decimal digits,
- * whitespace around them allowed. Every other shape reaches the bounds
+ * `wholeNumberFromEnv`, core's public strict reader of a whole number an
+ * environment variable may carry: a number as written, or a string of decimal
+ * digits, whitespace around them allowed. Every other shape reaches the bounds
  * unchanged and is refused there, never read as a number.
  */
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { readsEnvironmentString } from "#/config/schema-path.mjs";
-import { numberFromEnv } from "#/index.mjs";
+import { wholeNumberFromEnv } from "#/index.mjs";
 
-const reader = () => numberFromEnv(z.number().int().min(0).max(65_535));
+const reader = () => wholeNumberFromEnv(z.number().int().min(0).max(65_535));
 
-describe("numberFromEnv", () => {
+describe("wholeNumberFromEnv", () => {
 	it.each([
 		[8080, 8080],
 		[0, 0],

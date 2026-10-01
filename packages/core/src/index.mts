@@ -218,13 +218,14 @@ export {
 	// The hop ceiling `http.trustProxy` is held to, which the
 	// `httpSettings` contract suite holds the slot's value to as well.
 	MAX_TRUST_PROXY_HOPS,
-	// Any other number read strictly from a number or the decimal string a
-	// variable carries, for the packages outside core that declare a section's schema.
-	numberFromEnv,
 	type RefreshTokenLifetimeSource,
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
+	// Any other whole number read strictly from a number or a string of
+	// decimal digits a variable carries, for the packages outside core that
+	// declare a section's schema.
+	wholeNumberFromEnv,
 } from "./config/application.schema.mjs";
 // Transitional: the switches that choose a composition root's modules, read
 // before it knows them. `createApp` takes the resolved configuration itself,

@@ -117,13 +117,14 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 ];
 
 /**
- * A number read strictly: a number, or the plain decimal string an environment
- * variable arrives as, whitespace around its digits allowed. Not
- * `z.coerce.number()`, which reads `""`, `null` and `[]` as 0, `true` as 1 and
- * `"1e3"` as 1000: a malformed value would be normalised instead of failing
- * boot naming the key. `bounds` decide every other rule.
+ * A whole number read strictly: a number, or a string of decimal digits (a
+ * whole number) as an environment variable arrives, whitespace around the
+ * digits allowed. Not `z.coerce.number()`, which reads `""`, `null` and `[]`
+ * as 0, `true` as 1 and `"1e3"` as 1000: a malformed value would be
+ * normalised instead of failing boot naming the key. `bounds` decide every
+ * other rule.
  */
-export const numberFromEnv = (bounds: z.ZodNumber) =>
+export const wholeNumberFromEnv = (bounds: z.ZodNumber) =>
 	environmentCoercer(
 		z.preprocess((value) => {
 			if (typeof value === "number") return value;
@@ -135,10 +136,10 @@ export const numberFromEnv = (bounds: z.ZodNumber) =>
 	);
 
 /**
- * A duration read strictly, as {@link numberFromEnv} reads a number: a
+ * A duration read strictly, as {@link wholeNumberFromEnv} reads one: a
  * `tombstoneRetention: null` fails boot instead of disabling tombstones.
  */
-export const durationFromEnv = numberFromEnv;
+export const durationFromEnv = wholeNumberFromEnv;
 
 const jwtSchemaBase = z.object({
 	// Required: the issuer belongs to the deployment, never to a request. An

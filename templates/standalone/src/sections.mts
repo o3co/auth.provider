@@ -34,7 +34,7 @@ import {
 	MAX_KID_LENGTH,
 	MAX_TRUST_PROXY_HOPS,
 	normalizeAllowedOrigins,
-	numberFromEnv,
+	wholeNumberFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
@@ -152,7 +152,7 @@ const PORT_RULE =
  * `http.port`, read strictly: an empty or non-decimal value fails boot instead
  * of reading as 0, which would listen on a port the OS picks at random.
  */
-const portSchema = numberFromEnv(
+const portSchema = wholeNumberFromEnv(
 	z
 		.number({ error: PORT_RULE })
 		.int({ error: PORT_RULE })
