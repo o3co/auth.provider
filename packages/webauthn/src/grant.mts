@@ -52,6 +52,7 @@ import {
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
+import { readClientData } from "./internal/clientData.mjs";
 import { userHandleOf } from "./internal/options.mjs";
 import { storeUnavailableDescription, type WebAuthnStore } from "./internal/storeUnavailable.mjs";
 import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
@@ -548,18 +549,17 @@ function parseAssertionBody(raw: unknown): AssertionParseResult {
 		return { ok: false, reason: "assertion.response.clientDataJSON must be a string" };
 	}
 
-	// Decode clientDataJSON → extract challenge
-	let challengeValue: string;
-	try {
-		const clientDataJSON = JSON.parse(
-			Buffer.from(clientDataJSONBase64, "base64url").toString("utf8"),
-		) as Record<string, unknown>;
-		if (typeof clientDataJSON.challenge !== "string" || clientDataJSON.challenge.length === 0) {
-			return { ok: false, reason: "assertion.response.clientDataJSON has no valid challenge" };
-		}
-		challengeValue = clientDataJSON.challenge;
-	} catch {
-		return { ok: false, reason: "assertion.response.clientDataJSON is not valid base64url JSON" };
+	// Read as the library decodes it: the challenge consumed is the one it verifies.
+	const clientData = readClientData(clientDataJSONBase64);
+	if (clientData === undefined) {
+		return {
+			ok: false,
+			reason: "assertion.response.clientDataJSON is not a base64url JSON object",
+		};
+	}
+	const challengeValue = clientData.challenge;
+	if (typeof challengeValue !== "string" || challengeValue.length === 0) {
+		return { ok: false, reason: "assertion.response.clientDataJSON has no valid challenge" };
 	}
 
 	return {
