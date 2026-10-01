@@ -1064,9 +1064,9 @@ wires it.
   leaked password bound a factor first (D24). Route one event to an operator
   as well: `mfa.first_binding_conflict` with `removed: false`, a first factor
   that may be a password holder's and could not be removed — the
-  Investigate row for it says what to do. `auditSink` is one slot; to
-  keep the audit trail and notify at once, wrap both in an `AuditSink` of
-  your own (one method, `record`).
+  Investigate row for it says what to do. To keep the audit trail and
+  notify at once, contribute the notifier as `auditHooks` from a module of
+  your own: core hands every event to the `auditSink` and to each hook.
 
 ### Federation grants — what each answer means (#593)
 

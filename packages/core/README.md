@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 ## Responsibility
 
@@ -507,6 +507,7 @@ The one decision every consumer of an authenticated browser session calls, and t
 - `AuditSink.record(event)` fire-and-forget
 - Factory: `createAuditSinkFactory()`, built-in `"console"` via `registerBuiltinAuditSinks()`
 - Errors swallowed by core — audit failure never blocks auth flow
+- Several sinks: a module contributes `auditHooks`, each an `AuditSink`, and the `auditSink` slot then holds core's fan-out (`createAuditFanOut`, [`src/audit/factory.mts`](src/audit/factory.mts)) over the slot's own sink and every hook. Each is called at once, in registration order (the slot's sink first), and handed one deeply frozen copy of the event; a rejection, a synchronous throw or an answer that is not a promise is that sink's failure alone, logged at error as `audit_sink_failed` with `sink`, its position in that order, and the event's `type` — nothing else of the event. `record` resolves once every sink has settled and never rejects; core neither retries nor times a sink out. The slot's readers change nothing, and hooks alone fill it for its absence policy. A module that contributes a hook may not read `auditSink` (`circular-dependency`), and a hook must not emit from `record`. Tests use `createRecordingAuditSink()` and `auditHooksModule(name, ...sinks)` from `@o3co/auth-provider-core/testing`
 - Every built-in event reaches its sink through `recordAuditEvent(sink, event)` ([`src/audit/factory.mts`](src/audit/factory.mts)) — `emitAuditEvent` calls it and detaches; an emitter that waits on its sink (federation grants) calls it directly and gets the sink's promise. It hands the sink the event with `ip` an IPv4 or IPv6 address (`net.isIP`, an IPv6 `%zone` stripped) or left out — an SIEM that maps the field as an IP type rejects a whole event over `X-Forwarded-For: x` — and `userAgent` sanitised and capped as `auditErrorText` does (RFC 6749 NQSCHAR, `?` for anything else, at most 200 characters); either is dropped when it is not a string. Behind `trust proxy`, `req.ip` is what the caller wrote in `X-Forwarded-For`, and a user agent is the caller's own header. An ordinary address or user agent is carried unchanged, the event keeps its own key order, and a sink that throws synchronously or answers something that is not a promise never throws into the route. Besides `emitAuditEvent`, two emitters call it directly: the federation-grants routes' bridge, which returns the sink's promise for core to bound and a shutdown to drain, and oauth's subject-revocation auditor, which logs a rejection (`federation_grant_audit_failed`) rather than waiting on the sink. [`logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) pins that nothing else in the workspace writes a sink
 - An event carries an error it reports as `details.cause`, `auditedError(err)` ([`src/audit/auditedError.mts`](src/audit/auditedError.mts)): `{ name, code?, cause?: { name, code? } }` — the name and code `loggableError` reads, and one level of its cause, sanitised and capped, and never a message. A sink is a record other systems read, and a store's or an IdP's message is theirs: the arguments a Redis reply quotes, the input a JSON parse error quotes, an upstream's description. `rate_limit.unavailable`, `introspect.store_unavailable` and `federation.logout.idp_unreachable` carry it
 - Each `details` key keeps one type in every event, because a sink that fixes a field's type on first sight (Elasticsearch dynamic mapping, a BigQuery schema, a Datadog facet) drops the events that disagree: `details.error` is a string wherever it appears (an OAuth code, a reason), and a code in `details.cause` is a string. [`AuditEventDetails`](src/audit/types.mts) types both keys, and [`auditEventInventory.drift.test.mts`](src/audit/__tests__/auditEventInventory.drift.test.mts) reads every emission for them
@@ -561,7 +562,7 @@ Every other key is open, and is still expected to keep one type across the event
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
 - Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
 
-All five are optional. The audit sink carries an absence policy (`AUDIT_SINK_ABSENCE_POLICY`): when nothing fills the slot, the config must declare it absent (`core.declaredAbsent = ["auditSink"]`) or boot refuses. The other four are simply off when absent.
+All five are optional. The audit sink carries an absence policy (`AUDIT_SINK_ABSENCE_POLICY`): when nothing fills the slot — no sink and no `auditHooks` contribution — the config must declare it absent (`core.declaredAbsent = ["auditSink"]`) or boot refuses. The other four are simply off when absent.
 
 ### Token-binding mechanisms
 

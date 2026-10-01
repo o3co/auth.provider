@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-10-01
+最終更新: 2026-10-02
 
 ## 責務と役割
 
@@ -505,6 +505,7 @@ const clientRepo = new InMemoryClientRepository(
 - `AuditSink.record(event)` は fire-and-forget
 - Factory: `createAuditSinkFactory()`、built-in `"console"` は `registerBuiltinAuditSinks()` で登録
 - Sink のエラーは core 側で握りつぶす — audit 失敗で認証フローがブロックされることはない
+- 複数のシンク: モジュールが `auditHooks`（それぞれが `AuditSink`）を寄与すると、`auditSink` スロットには core のファンアウト（`createAuditFanOut`、[`src/audit/factory.mts`](src/audit/factory.mts)）が入り、スロット自身のシンクとすべてのフックに届ける。それぞれを登録順に（スロットのシンクが先）すぐに呼び、イベントを深く凍結した 1 つのコピーを渡す。reject、同期的な throw、Promise でない応答は、そのシンクだけの失敗で、`audit_sink_failed` として error で記録する — `sink`（その順での位置）とイベントの `type` だけで、イベントのほかの中身は載せない。`record` はすべてのシンクが決着してから resolve し、reject しない。core は再試行もタイムアウトもしない。スロットを読む側は何も変えず、フックだけでも absence policy に対してスロットを埋める。フックを寄与するモジュールは `auditSink` を読めない（`circular-dependency`）。フックは `record` の中から発行してはならない。テストでは `@o3co/auth-provider-core/testing` の `createRecordingAuditSink()` と `auditHooksModule(name, ...sinks)` を使う
 - 組み込みのイベントはすべて `recordAuditEvent(sink, event)`（[`src/audit/factory.mts`](src/audit/factory.mts)）を通ってシンクに届く — `emitAuditEvent` はこれを呼んで切り離し、シンクを待つ発行者（federation grants）は直接呼んでシンクの Promise を受け取る。シンクには、`ip` を IPv4 か IPv6 のアドレス（`net.isIP`、IPv6 の `%zone` は取り除く）に限り、それ以外なら省いて — `ip` を IP 型に対応づける SIEM は `X-Forwarded-For: x` だけでイベント全体を拒否する — 、`userAgent` を `auditErrorText` と同じくサニタイズして切り詰め（RFC 6749 の NQSCHAR、それ以外は `?`、最大 200 文字）て渡す。どちらも文字列でなければ落とす。`trust proxy` の下では `req.ip` は呼び出し元が `X-Forwarded-For` に書いたものであり、User-Agent は呼び出し元自身のヘッダーだからである。通常のアドレスや User-Agent はそのまま運ばれ、イベントのキーの順序は変わらず、同期的に throw したり Promise でないものを返したりするシンクがルートに throw を返すこともない。`emitAuditEvent` のほかに直接呼ぶ発行者が二つある: federation-grants のルートのブリッジ（シンクの Promise を返し、core が待ち時間を区切り、シャットダウンが待ちきる）と、oauth の subject-revocation の監査役（シンクを待たず、拒否をログに残す: `federation_grant_audit_failed`）。[`logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) が、ワークスペースのほかのどこもシンクに直接書かないことを確かめる
 - イベントが報告するエラーは `details.cause` に `auditedError(err)`（[`src/audit/auditedError.mts`](src/audit/auditedError.mts)）として載せる: `{ name, code?, cause?: { name, code? } }`。`loggableError` が読む name と code、およびその cause を 1 段だけ、サニタイズして切り詰めたもので、メッセージは運ばない。シンクは他のシステムが読む記録であり、ストアや IdP のメッセージは相手側の文字列だからである（Redis の応答が引用する引数、JSON のパースエラーが引用する入力、上流の説明）。`rate_limit.unavailable`、`introspect.store_unavailable`、`federation.logout.idp_unreachable` がこれを運ぶ
 - `details` の各キーはどのイベントでも型を 1 つに保つ。フィールドの型を最初に見たもので固定するシンク（Elasticsearch の dynamic mapping、BigQuery のスキーマ、Datadog のファセット）は食い違うイベントを落とすからである: `details.error` は現れるところではどこでも文字列（OAuth のコード、理由）で、`details.cause` の code も文字列。[`AuditEventDetails`](src/audit/types.mts) が両方のキーを型付けし、[`auditEventInventory.drift.test.mts`](src/audit/__tests__/auditEventInventory.drift.test.mts) がすべての発行箇所を読んで確かめる
@@ -559,7 +560,7 @@ const clientRepo = new InMemoryClientRepository(
 - `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用（`authorization_code` では再評価しない）
 - その他のグラント（refresh / client_credentials / token-exchange）はトークンエンドポイントで評価
 
-5 つとも任意です。audit sink は absence policy（`AUDIT_SINK_ABSENCE_POLICY`）を持ちます: スロットを埋めるものがなければ、設定で不在を宣言する（`core.declaredAbsent = ["auditSink"]`）必要があり、宣言がなければ boot は拒否されます。他の 4 つは、ないときは単に無効です。
+5 つとも任意です。audit sink は absence policy（`AUDIT_SINK_ABSENCE_POLICY`）を持ちます: スロットを埋めるもの — シンクも `auditHooks` の寄与も — がなければ、設定で不在を宣言する（`core.declaredAbsent = ["auditSink"]`）必要があり、宣言がなければ boot は拒否されます。他の 4 つは、ないときは単に無効です。
 
 ### トークンバインディング機構
 

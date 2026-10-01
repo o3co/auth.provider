@@ -62,7 +62,14 @@ export type MfaFactor = ConcreteMfaFactor;
  */
 export type SessionRequirement = ConcreteSessionRequirement;
 
-/** Type produced by an `AuditHookFactory<Deps>` contribution: an `AuditSink`. */
+/**
+ * Type produced by an `AuditHookFactory<Deps>` contribution: an `AuditSink`
+ * core hands every event the `auditSink` slot records, after the slot's own
+ * sink and the hooks registered before it (`createAuditFanOut`). A module
+ * that contributes one may not read `auditSink`. A hook that reaches the
+ * slot another way, through a component whose provider read it, is handed
+ * back what it emits: it must not emit from `record`.
+ */
 export type AuditHook = AuditSink;
 
 /**
