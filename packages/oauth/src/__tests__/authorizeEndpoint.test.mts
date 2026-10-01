@@ -932,7 +932,7 @@ describe("/authorize — policy evaluation edges", () => {
 });
 
 describe("/authorize — the grant policy's refusals, audited", () => {
-	/** A policy answering `decision`, with a spy audit sink. */
+	/** `/authorize` with a policy whose `evaluate` is the one given, and a spy audit sink. */
 	const withPolicy = async (evaluate: GrantPolicyHook["evaluate"]) => {
 		const record = vi.fn(async (_event: AuditEvent) => {});
 		const { app, createCode } = await makeApp({
@@ -997,7 +997,12 @@ describe("/authorize — the grant policy's refusals, audited", () => {
 		[
 			"an audience past the client's ceiling",
 			{ outcome: "allow", grantedAudience: ["https://elsewhere.example"] },
-			/.+/,
+			/outside client allowedAudiences: https:\/\/elsewhere\.example$/,
+		],
+		[
+			"a non-array grantedAudience",
+			{ outcome: "allow", grantedAudience: "https://elsewhere.example" },
+			/non-array grantedAudience/,
 		],
 	])(
 		"audits a decision with %s as authorize.rejected, reason policy_out_of_bounds",
@@ -1019,7 +1024,7 @@ describe("/authorize — the grant policy's refusals, audited", () => {
 	);
 
 	it("answers a policy that throws with core's policyUnavailable() on the redirect", async () => {
-		const { params, createCode } = await withPolicy(async () => {
+		const { params, audited, createCode } = await withPolicy(async () => {
 			throw new Error("decision service down");
 		});
 		const { error, errorDescription } = policyUnavailable();
@@ -1029,6 +1034,7 @@ describe("/authorize — the grant policy's refusals, audited", () => {
 			state: "xyz",
 		});
 		expect(createCode).not.toHaveBeenCalled();
+		expect(audited).toEqual([]);
 	});
 });
 
