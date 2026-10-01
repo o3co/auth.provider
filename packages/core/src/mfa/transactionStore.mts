@@ -423,6 +423,38 @@ export function readMfaAttemptReservation(
 	}
 }
 
+const SUBJECT_HOLDS: ReadonlySet<unknown> = new Set<MfaSubjectHold>(["backoff", "weekly", "hard"]);
+
+/**
+ * `answer`, what `reserveSubjectAttempt` answered, as the port promises it:
+ * a pass with its reservation, a string; or a hold the port names, with
+ * `first` a boolean and a time to come back — `null` for the hard hold, else
+ * a finite number of milliseconds above 0, since the hold applies at the time
+ * asked about. Copied to those fields. `undefined` for anything else, which
+ * the caller answers as the store's outage: never a pass, never a hold. Each
+ * field is read once.
+ */
+export function readMfaSubjectAttemptReservation(
+	answer: unknown,
+): MfaSubjectAttemptReservation | undefined {
+	try {
+		if (typeof answer !== "object" || answer === null) return undefined;
+		const { ok, reservation, hold, retryAfterMs, first } = answer as Readonly<
+			Record<string, unknown>
+		>;
+		if (ok === true) return isText(reservation) ? { ok, reservation } : undefined;
+		if (ok !== false || !SUBJECT_HOLDS.has(hold) || typeof first !== "boolean") return undefined;
+		if (hold === "hard") {
+			return retryAfterMs === null ? { ok, hold, retryAfterMs, first } : undefined;
+		}
+		return typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs > 0
+			? { ok, hold: hold as MfaSubjectHold, retryAfterMs, first }
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * `answer`, what `sessionEmailProofAt(subject, sid, nowMs)` answered, as the
  * port promises it: `null` for no proof, or when the proof was given — a
