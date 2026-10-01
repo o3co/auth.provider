@@ -103,8 +103,8 @@ const listen = async (
 
 /**
  * A loopback origin nothing listens on, so a fetch to it is refused. Port 2 is
- * privileged and below every ephemeral range, so no `listen(0)` in any test
- * running beside this one is handed it (port 1 is on fetch's bad-port list).
+ * below every ephemeral range, so no `listen(0)` in any test running beside
+ * this one is handed it (port 1 is on fetch's bad-port list).
  */
 const REFUSED_ORIGIN = "http://127.0.0.1:2";
 
@@ -112,13 +112,18 @@ beforeAll(async () => {
 	const code = await new Promise<string | undefined>((resolve) => {
 		const { hostname, port } = new URL(REFUSED_ORIGIN);
 		const socket = connect(Number(port), hostname);
+		// A firewall that drops the connection fails here, not as a hung test.
+		socket.setTimeout(2_000, () => {
+			socket.destroy();
+			resolve("ETIMEDOUT");
+		});
 		socket.once("connect", () => {
 			socket.destroy();
 			resolve(undefined);
 		});
 		socket.once("error", (err: NodeJS.ErrnoException) => resolve(err.code));
 	});
-	expect(code, `something listens on ${REFUSED_ORIGIN}`).toBe("ECONNREFUSED");
+	expect(code, `${REFUSED_ORIGIN} does not refuse connections`).toBe("ECONNREFUSED");
 });
 
 type LeafCrl = "refused" | "hanging" | "garbage" | "clean" | "revoked";
@@ -130,7 +135,7 @@ type LeafCrl = "refused" | "hanging" | "garbage" | "clean" | "revoked";
  * `mode = "both"`. `extra.morePoints` adds leaf distribution points after the
  * first: one the live server answers 404 (`missing`) or one nothing listens on
  * (`refused`). `extra.intSourcesRefused` points the intermediate's CRL and
- * responder at closed ports; `extra.intRevoked` has the root's list name the
+ * responder at the refused origin; `extra.intRevoked` has the root's list name the
  * intermediate; `extra.leafOrganization` puts an `O=` part before `CN=`.
  */
 const pki = async (
