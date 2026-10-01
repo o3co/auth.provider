@@ -238,8 +238,9 @@ const applyGrantPolicy = async (
  * authorization-code sequence.
  *
  * 1. an unauthenticated browser is sent to log in before any lookup;
- * 2. identify the client and validate `redirect_uri` (400 JSON — no trusted
- *    redirect target yet);
+ * 2. identify the client and validate `redirect_uri`: the registered list,
+ *    then core's `checkRedirectUri` (400 JSON — no trusted redirect target
+ *    yet; after step 1, so an unauthenticated browser meets it after login);
  * 3. read the request's shape: request objects refused, then `prompt`, the
  *    single-valued parameters, `claims`, `max_age` and `acr_values`;
  * 4. admit the session once (`admitSession`): freshness first, then the
