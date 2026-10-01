@@ -298,26 +298,43 @@ describe("deviceGrantModule — boot", () => {
 		);
 	});
 
+	/** Boot the enabled grant with `csrfGuard` in the slot, filled by hand. */
+	const bootWithGuard = (csrfGuard: unknown) => {
+		const bootstrapComponents = {
+			...makeBoot({ deviceGrant: ENABLED }),
+			csrfGuard,
+		} as unknown as BootstrapMap;
+		return createApp({
+			modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
+			bootstrapComponents,
+		});
+	};
+
 	it.each([
 		["absent", undefined],
 		["not a function", "middleware"],
+		// Express skips a four-parameter function on every request: it is an error handler.
+		["an error handler", (_err: unknown, _req: unknown, _res: unknown, next: () => void) => next()],
 	])(
 		"refuses to boot enabled with a csrfGuard whose middleware is %s, naming the slot",
 		async (_, middleware) => {
 			// The verification route mounts the guard's `middleware`; a guard filled
 			// by hand without a usable one is refused by name, before the route is built.
-			const bootstrapComponents = {
-				...makeBoot({ deviceGrant: ENABLED }),
-				csrfGuard: { ...createTestCsrfGuard(), middleware },
-			} as unknown as BootstrapMap;
-			await expect(
-				createApp({
-					modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
-					bootstrapComponents,
-				}),
-			).rejects.toThrow(/csrfGuard\.middleware is not a function.*sessionModule/s);
+			await expect(bootWithGuard({ ...createTestCsrfGuard(), middleware })).rejects.toThrow(
+				/csrfGuard\.middleware is not a request handler.*sessionModule/s,
+			);
 		},
 	);
+
+	it("refuses to boot enabled with a csrfGuard whose middleware cannot be read, naming the slot", async () => {
+		const unreadable = new Error("adapter unavailable");
+		const guard = Object.defineProperty({ ...createTestCsrfGuard() }, "middleware", {
+			get: () => {
+				throw unreadable;
+			},
+		});
+		await expect(bootWithGuard(guard)).rejects.toThrow(/csrfGuard\.middleware could not be read/);
+	});
 
 	it("boots disabled without a csrfGuard", async () => {
 		// The slot is optional in the manifest: a deployment that installs the
@@ -721,6 +738,55 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			expect(res.status).toBe(403);
 			expect(res.body.error_description).toBe("refused by the slot");
 		}
+	});
+
+	it("mounts the csrfGuard middleware it checked, reading it once", async () => {
+		// A getter answering differently on a second read must not swap the
+		// checked guard for one that mounts nothing.
+		const refuse = (_req: express.Request, res: express.Response) => {
+			res.status(403).json({ error: "access_denied", error_description: "refused by the slot" });
+		};
+		let reads = 0;
+		const shifting = Object.defineProperty({ ...createTestCsrfGuard() }, "middleware", {
+			get: () => {
+				reads += 1;
+				return reads === 1 ? refuse : [];
+			},
+		});
+		const app = mountVerificationRoute({ ...enabledDeps(), csrfGuard: shifting });
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(403);
+		expect(res.body.error_description).toBe("refused by the slot");
+		expect(reads).toBe(1);
+	});
+
+	it("runs the csrfGuard middleware it checked, whatever its arity reads later", async () => {
+		// Express re-reads a handler's `length` on every request and skips one of
+		// four as an error handler; the route must run the function checked.
+		let lengthReads = 0;
+		const refuse = Object.defineProperty(
+			(_req: express.Request, res: express.Response) => {
+				res.status(403).json({ error: "access_denied", error_description: "refused by the slot" });
+			},
+			"length",
+			{
+				get: () => {
+					lengthReads += 1;
+					return lengthReads === 1 ? 2 : 4;
+				},
+			},
+		);
+		const app = mountVerificationRoute({
+			...enabledDeps(),
+			csrfGuard: { ...createTestCsrfGuard(), middleware: refuse },
+		});
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(403);
+		expect(res.body.error_description).toBe("refused by the slot");
 	});
 
 	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides, over the configuration's", async () => {

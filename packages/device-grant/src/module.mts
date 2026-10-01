@@ -187,7 +187,7 @@ const OPTIONAL = [
 	// (a session it covers) and the grant (an approval it covers).
 	"subjectRevocation",
 	// The session module's CSRF policy, run on the whole verification route.
-	// Required once the grant is enabled (`requireCsrfGuard`).
+	// Required once the grant is enabled (`requireCsrfMiddleware`).
 	"csrfGuard",
 	// What the oauth module provides of `oauth {}`: the issuer, the
 	// access-token lifetime and `requireEmailVerified`. Optional: another token
@@ -423,14 +423,12 @@ const disabledRoute = (id: string, mountPath: string) => {
 };
 
 /**
- * The `csrfGuard` slot the session module provides — the guard
- * `/session/login` runs. Required when the grant is on, with a `middleware`
- * function, which the verification route mounts: the endpoint authorises on
- * the session cookie and would otherwise have no CSRF defence.
+ * The middleware of the `csrfGuard` slot the session module provides — the
+ * guard `/session/login` runs. Required when the grant is on: the
+ * verification endpoint authorises on the session cookie and would otherwise
+ * have no CSRF defence. Read once, so the route runs the function checked.
  */
-const requireCsrfGuard = (
-	deps: DeviceGrantModuleDeps,
-): NonNullable<DeviceGrantModuleDeps["csrfGuard"]> => {
+const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 	const guard = deps.csrfGuard;
 	if (guard === undefined) {
 		throw new Error(
@@ -443,15 +441,30 @@ const requireCsrfGuard = (
 				"or leave the grant disabled.",
 		);
 	}
-	if (typeof guard?.middleware !== "function") {
+	const install =
+		"Install the session module's guard (sessionModule), or one that keeps core's " +
+		"CsrfGuard contract.";
+	let middleware: unknown;
+	try {
+		middleware = (guard as { readonly middleware?: unknown } | null)?.middleware;
+	} catch (cause) {
+		throw new Error(`deviceGrantModule: csrfGuard.middleware could not be read. ${install}`, {
+			cause,
+		});
+	}
+	// Express runs a function of at most three parameters on a request; one
+	// of four is an error handler, skipped on every request.
+	if (typeof middleware !== "function" || middleware.length > 3) {
 		throw new Error(
-			"deviceGrantModule: csrfGuard.middleware is not a function. " +
-				"POST /oauth/device/verification mounts the csrfGuard's middleware in front of the " +
-				"whole route. Install the session module's guard (sessionModule), or one that keeps " +
-				"core's CsrfGuard contract.",
+			"deviceGrantModule: csrfGuard.middleware is not a request handler. " +
+				"POST /oauth/device/verification mounts it in front of the whole route. " +
+				install,
 		);
 	}
-	return guard;
+	// Mounted behind a handler of three parameters, so the route runs the
+	// function checked whatever its `length` reads later.
+	const checked = middleware as RequestHandler;
+	return (req, res, next) => checked(req, res, next);
 };
 
 const requireRateLimiter = (
@@ -722,14 +735,14 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					router.use(parserRefusals);
 					// The session module's CSRF guard, on the whole route rather than
 					// on `approve` / `deny` alone, so no future action can forget it.
-					const csrfGuard = requireCsrfGuard(deps);
+					const csrfMiddleware = requireCsrfMiddleware(deps);
 					// The `rateLimiter` requirement means the configured budget only
 					// while that budget is the one contributed.
 					requireContributedVerificationBudget(slice, deps);
 					const userSessionStore = requireUserSessionStore(deps);
 					router.post(
 						"/",
-						csrfGuard.middleware,
+						csrfMiddleware,
 						createDeviceVerificationHandler({
 							store: requireDeviceCodeStore(deps),
 							// The handler keys its budget on the subject, so it runs the
