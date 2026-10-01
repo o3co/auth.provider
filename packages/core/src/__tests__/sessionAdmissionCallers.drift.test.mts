@@ -35,7 +35,12 @@
  *   whose value is one of the four carriers;
  * - a call of `recordSecondFactor(`, `establishWithoutAsking(`,
  *   `resumePrimary(` or `continuationOf(`, each kept to the files listed
- *   below (that ADR's D3, D5, D10).
+ *   below (that ADR's D3, D5, D10);
+ * - a call of one of admission's own brand minters, `brandClaim(`,
+ *   `establish(` or `askEvery(`, kept to `admit.mts` and the file that
+ *   defines it: `session-admission/testing/` ships through `./testing`, and
+ *   an `Establishment` minted elsewhere would skip every requirement's
+ *   `admitPrimary`.
  *
  * A guarded function is found under an import alias (`import { selectAcr as
  * pick }`), as a string element access (`store["get"]`), and as a reference
@@ -75,7 +80,10 @@ type What =
 	| "recordSecondFactor"
 	| "establishWithoutAsking"
 	| "resumePrimary"
-	| "continuationOf";
+	| "continuationOf"
+	| "brandClaim"
+	| "establish"
+	| "askEvery";
 
 /** The guarded functions: a call, a reference (`.bind`, `.call`, a value passed on) or an aliased import of any is a site. */
 const GUARDED_FUNCTIONS: ReadonlySet<string> = new Set([
@@ -84,6 +92,9 @@ const GUARDED_FUNCTIONS: ReadonlySet<string> = new Set([
 	"establishWithoutAsking",
 	"resumePrimary",
 	"continuationOf",
+	"brandClaim",
+	"establish",
+	"askEvery",
 ]);
 
 interface Site {
@@ -426,6 +437,17 @@ const ESTABLISH_WITHOUT_ASKING_CALLERS: readonly string[] = [
 /** The files whose prefixes may call `resumePrimary(` or build a continuation: the MFA package (the session-admission ADR's D5); the full-set fixture under `tools/` is not scanned. */
 const RESUME_PRIMARY_CALLERS: readonly string[] = ["packages/mfa/src/"];
 
+const ADMIT = "packages/core/src/session-admission/admit.mts";
+const ESTABLISHMENT = "packages/core/src/session-admission/establishment.mts";
+
+/** The one file, beside the one that defines it, that may call each of admission's brand minters: `admit.mts`. */
+const MINTER_CALLERS: Readonly<Record<"brandClaim" | "establish" | "askEvery", readonly string[]>> =
+	{
+		brandClaim: [ADMIT, "packages/core/src/session-admission/request-check.mts"],
+		establish: [ADMIT, ESTABLISHMENT],
+		askEvery: [ADMIT, ESTABLISHMENT],
+	};
+
 /** `sites`, counted by kind. */
 const counted = (sites: readonly Site[]): Partial<Record<What, number>> => {
 	const counts: Partial<Record<What, number>> = {};
@@ -583,6 +605,39 @@ describe("session-admission callers", () => {
 		expect(offenders("establishWithoutAsking", ESTABLISH_WITHOUT_ASKING_CALLERS)).toEqual([]);
 		expect(offenders("resumePrimary", RESUME_PRIMARY_CALLERS)).toEqual([]);
 		expect(offenders("continuationOf", RESUME_PRIMARY_CALLERS)).toEqual([]);
+	});
+
+	it("finds a call of each brand minter, under an alias and as a value passed on", () => {
+		for (const [source, what] of [
+			["const c = brandClaim({ authenticated: true });", "brandClaim"],
+			["return establish(primary);", "establish"],
+			["return askEvery(deps, requirements, primary, primary, []);", "askEvery"],
+			[
+				'import { establish as mint } from "../session-admission/establishment.mjs"; mint(p);',
+				"establish",
+			],
+			["run(askEvery);", "askEvery"],
+		] as const) {
+			expect(
+				sessionAdmissionSites(source).map((s) => s.what),
+				source,
+			).toEqual([what]);
+		}
+	});
+
+	it("keeps admission's brand minters to admit.mts and the file that defines each, its testing entry excluded", () => {
+		const offenders = [...sites].flatMap(([file, found]) =>
+			(Object.keys(MINTER_CALLERS) as (keyof typeof MINTER_CALLERS)[])
+				.filter((what) => found.some((s) => s.what === what))
+				.filter((what) => !MINTER_CALLERS[what].includes(file))
+				.map((what) => `${file}: ${what}`),
+		);
+		expect(offenders, "mint a claim or an Establishment through admit.mts").toEqual([]);
+		// Not vacuous: admit.mts mints through each.
+		const inAdmit = counted(sites.get(ADMIT) ?? []);
+		expect(inAdmit.brandClaim).toBe(5);
+		expect(inAdmit.establish).toBe(1);
+		expect(inAdmit.askEvery).toBe(2);
 	});
 
 	it("has the federation callback call establishWithoutAsking exactly once", () => {

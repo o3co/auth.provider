@@ -1,0 +1,123 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
+ * read, the subject and the revocation boundary. The session store and the
+ * boundary are read here and nowhere else in admission; an outage is
+ * answered through admission's `unavailable`, which logs it.
+ */
+
+import { emitAuditEvent } from "../audit/factory.mjs";
+import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
+import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
+import type { UserSession } from "../user-sessions/types.mjs";
+import { nonEmptyString } from "./input-values.mjs";
+import type { CheckedRequest } from "./request-check.mjs";
+import type { Admission, AdmissionInfrastructureStore } from "./requirement.mjs";
+
+const isValidDate = (value: unknown): value is Date =>
+	value instanceof Date && !Number.isNaN(value.getTime());
+
+/**
+ * What steps 1 to 4 end in: the answer, when one of them gave it; else the
+ * live record, or `null` when there is no store or a token carrier has no
+ * `sid`.
+ */
+export type LiveSession = { readonly answer: Admission } | { readonly session: UserSession | null };
+
+/** Reads the session `checked.claim` names, as `admitSession`'s steps 1 to 4. */
+export async function readLiveSession(
+	checked: CheckedRequest,
+	unavailable: (store: string, err: unknown) => Admission,
+): Promise<LiveSession> {
+	const { claim: presented, userSessionStore, subjectRevocation, now, logger } = checked;
+	const label = checked.action.name;
+
+	// Step 1: the claim.
+	if (presented.authenticated !== true) return { answer: { outcome: "unauthenticated" } };
+	if (presented.carrier === "cookie" && presented.subject === undefined) {
+		// A cookie that says authenticated without a user: not a session this
+		// provider wrote. Said at warn with the action alone; nothing to audit.
+		logger?.warn({ action: label }, "session_admission_no_subject");
+		return { answer: { outcome: "not_live", reason: "no_subject" } };
+	}
+
+	// Step 2: the live read.
+	let session: UserSession | null = null;
+	if (userSessionStore !== undefined && presented.sid === undefined) {
+		if (presented.carrier !== "token") return { answer: { outcome: "not_live", reason: "no_sid" } };
+	} else if (userSessionStore !== undefined && presented.sid !== undefined) {
+		let record: UserSession | null | undefined;
+		try {
+			record = await userSessionStore.get(presented.sid);
+		} catch (err) {
+			return { answer: unavailable("user_session" satisfies AdmissionInfrastructureStore, err) };
+		}
+		// `== null`: the port answers `null`, and a store of the deployment's own
+		// that answers `undefined` for a missing session is still no session.
+		if (
+			record == null ||
+			nonEmptyString(record.sub) === undefined ||
+			!isValidDate(record.authTime) ||
+			!isValidDate(record.expiresAt) ||
+			!(record.expiresAt.getTime() > now.getTime())
+		) {
+			return { answer: { outcome: "not_live", reason: "gone" } };
+		}
+		session = record;
+	}
+
+	// Step 3: the subject.
+	if (session !== null && presented.subject !== undefined && presented.subject !== session.sub) {
+		logger?.warn({ action: label }, "session_admission_subject_mismatch");
+		void emitAuditEvent(checked.auditSink, {
+			timestamp: now,
+			type: "session.admission.subject_mismatch",
+			subject: session.sub,
+			details: {
+				// The claim's sid, whichever carrier made the claim: the record was read by it.
+				sid: presented.sid,
+				carrier: presented.carrier,
+				claimedSubject: presented.subject,
+				recordSubject: session.sub,
+			},
+		});
+		return { answer: { outcome: "not_live", reason: "subject_mismatch" } };
+	}
+
+	// Step 4: the revocation boundary, against a live record; a token's is
+	// verifyJwt's, so the two readings do not double up.
+	if (session !== null && subjectRevocation !== undefined && presented.carrier !== "token") {
+		try {
+			const boundary = await subjectRevocation.revokedBefore(session.sub);
+			if (boundary !== null && !isValidDate(boundary)) {
+				throw new TypeError("the sessions boundary is neither a date nor null");
+			}
+			if (
+				coveredByRevocationBoundary(session.authTime, boundary, DEFAULT_SUBJECT_REVOCATION_SKEW_MS)
+			) {
+				return { answer: { outcome: "revoked" } };
+			}
+		} catch (err) {
+			return {
+				answer: unavailable("revocation_boundary" satisfies AdmissionInfrastructureStore, err),
+			};
+		}
+	}
+
+	return { session };
+}
