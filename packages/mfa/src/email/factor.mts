@@ -29,7 +29,9 @@
  *   address, reads none, and shows no hint. A challenge mails that digest, or
  *   `null` when the data holds none it can read, which the coordinator
  *   refuses. A verification handed a digest under another key than the one
- *   recorded keeps the handed one, so the old key can leave the ring.
+ *   recorded keeps the handed one, so the old key can leave the ring. The
+ *   account page's list reads the recorded digest (`enrolledAddressDigest`)
+ *   to tell a record whose address changed.
  * - A completion is refused as a duplicate when one of the records it is
  *   handed holds the same digest under the same key. That is the records as
  *   read before the create: it does not see another completion at once.
@@ -42,6 +44,7 @@ import {
 	type MfaDigests,
 	type MfaEnrollmentCompletion,
 	type MfaFactor,
+	type MfaFactorData,
 	type MfaFactorState,
 	type MfaKeyedDigest,
 	type MfaVerification,
@@ -90,6 +93,21 @@ function matches(digests: MfaDigests, parts: readonly string[], kept: MfaKeyedDi
 		throw new RangeError("an email factor's code digest names a key the ring no longer holds");
 	}
 	return found === "match";
+}
+
+/** The factors this file made. */
+const made = new WeakSet<object>();
+
+/**
+ * The digest of the address the record `data` of a factor this file made was
+ * enrolled with — `null` when it holds none it can read; `undefined` for any
+ * other factor.
+ */
+export function enrolledAddressDigest(
+	factor: MfaFactor,
+	data: MfaFactorData,
+): MfaKeyedDigest | null | undefined {
+	return made.has(factor) ? (keyedDigest(data.addressDigest) ?? null) : undefined;
 }
 
 /** The `email` factor, its codes living `settings.codeTtlSeconds`. */
@@ -163,5 +181,7 @@ export function createEmailFactor(settings: EmailFactorSettings): MfaFactor {
 			return { ok: true, data: { addressDigest: handed } };
 		},
 	};
-	return Object.freeze(factor);
+	const frozen = Object.freeze(factor);
+	made.add(frozen);
+	return frozen;
 }

@@ -20,7 +20,8 @@
  * foundation's `HttpUserRepository`, which writes the witness to the Store's
  * mark endpoint; the factors kept by the same Store or in memory. A first
  * binding marks the witness after the factor is written, a mark that failed
- * is written at the next login, and a witness that says the subject enrolled
+ * is written at the next login, a removal that leaves no record that may
+ * count clears it after the removal, and a witness that says the subject enrolled
  * beside no factor stops a password login and every first binding of a
  * federated session — never a binding the lost factors would open.
  */
@@ -270,6 +271,73 @@ describe.each(["store", "memory"] as const)(
 			expect(endpointsSince(from)).not.toContain("markMfaEnrolled");
 			expect(create).not.toHaveBeenCalled();
 			expect(await storesOf(set).mfaFactorStore.list(ALICE.id)).toEqual([]);
+		});
+	},
+);
+
+describe.each(["store", "memory"] as const)(
+	"the witness at a removal, the factors kept in %s",
+	(factors) => {
+		it("sends {enrolled: false} to the Store once the last record that may count is removed, after the removal", async () => {
+			const set = await boot(factors, {
+				adjust: (config) => ({
+					...config,
+					...mfaConfigForTests({ key: MFA_KEY, mode: "optional" }),
+				}),
+			});
+			const page = browser();
+			const login = await page.post(
+				set.app,
+				"/session/login",
+				{ username: ALICE.username, password: ALICE.password },
+				{ form: true },
+			);
+			expect(login.status, JSON.stringify(login.body)).toBe(200);
+			const begun = await page.post(set.app, "/session/mfa/enrollment", { kind: "totp" });
+			expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+			const done = await page.post(set.app, "/session/mfa/enrollment/complete", {
+				transaction_id: begun.body.transaction,
+				proof: totpCodeForTests(fromBase32(begun.body.secret as string)),
+			});
+			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			expect(store.enrolled(ALICE.id)).toBe(true);
+			const from = store.requests.length;
+
+			const removed = await page.post(set.app, "/session/mfa/factors/remove", {
+				factor_id: done.body.factor.id,
+			});
+
+			expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+			const marks = store.requests
+				.slice(from)
+				.filter(({ endpoint }) => endpoint === "markMfaEnrolled");
+			expect(marks.map(({ body }) => body)).toEqual([{ subject: ALICE.id, enrolled: false }]);
+			expect(store.enrolled(ALICE.id)).toBe(false);
+			if (factors === "store") {
+				const endpoints = endpointsSince(from);
+				expect(endpoints.indexOf("delete")).toBeLessThan(endpoints.indexOf("markMfaEnrolled"));
+			}
+		});
+
+		it("sends nothing to the Store's mark endpoint when a record is removed beside a counting factor", async () => {
+			const set = await boot(factors);
+			const { done, page } = await firstBinding(set.app);
+			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			const listed = await page.get(set.app, "/session/mfa/factors");
+			expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+			const codes = (listed.body.factors as { id: string; kind: string }[]).find(
+				({ kind }) => kind === "recovery_code",
+			);
+			if (codes === undefined) throw new Error("the first binding issued no recovery codes");
+			const from = store.requests.length;
+
+			const removed = await page.post(set.app, "/session/mfa/factors/remove", {
+				factor_id: codes.id,
+			});
+
+			expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+			expect(endpointsSince(from)).not.toContain("markMfaEnrolled");
+			expect(store.enrolled(ALICE.id)).toBe(true);
 		});
 	},
 );

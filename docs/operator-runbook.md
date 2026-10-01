@@ -236,6 +236,33 @@ each names:
 
 Module-level messages that arrive wrapped in a factory failure:
 
+- Client registrations (the `yaml` / `static` client repository, which holds
+  `allowedRedirectUris`, `postLogoutRedirectUris` and
+  `federationGrantRedirectUris` to core's `checkRedirectUri`,
+  `packages/core/src/net/redirect-uri.mts`): `Invalid entry "<client>" in
+  <file>: …`, naming each bad entry. Two of them are about the query:
+  `allowedRedirectUris entry "https://client.example/cb?iss=x": must not
+  carry "iss" in its query (compared ignoring case, "_" and "-"): …` — the
+  query names `code`, `state`, `iss`, `error` or `error_description`, the
+  names an authorization response carries, in any case and with `_` or `-`
+  anywhere in it (`_state`, `errorDescription`); and
+  `allowedRedirectUris entry "https://client.example/cb?filter[x]=1": query
+  parameter names may use only letters, digits, "_" and "-", each parameter
+  must have a name, and the query must not contain ";": …` — a name outside
+  `[A-Za-z0-9_-]`, a parameter with no name (`?=x`, `?a=1&&b=2`, a trailing
+  `&`), or a `;` anywhere in the query, values included.
+  `postLogoutRedirectUris` reads the same with its own field name;
+  `federationGrantRedirectUris` reports the reason alone
+  (`federationGrantRedirectUris: reserved-parameter` or
+  `… query-name-invalid`), and also refuses `grant_id`, compared the same
+  way (`GRANT_ID`, `grantId`, `_grant_id`): `federationGrantRedirectUris:
+  <uri> already carries "grant_id" (compared ignoring case, "_" and "-"),
+  …`. Rename or remove the parameter in
+  the registration, and carry the client's own context in `state` or in the
+  path. The comparison covers names as written and the common
+  normalizations (case, `_`, `-`), not a mapping a client configures, such
+  as an alias or a prefix its binder strips: a client must read the OAuth
+  fields by their canonical names.
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `redis-clients.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
 - Standalone federation grant intents on Redis: `redis-federation-grant-store.keyPrefix
@@ -505,7 +532,7 @@ refresh grant takes care to answer `503` for outages.
 | **The Store as the MFA factor store** (`foundationMfaFactorStoreModule`) down or slow, answering a redirect or anything else outside its contract, or refusing this deployment's `bearerToken` | `POST /session/login` (the `mfa` requirement reads the subject's factors), and every MFA route that reads or writes a factor | `503 temporarily_unavailable`, never "no factors": a login under `mfa.mode = "optional"` is not let through without the second factor, and a subject with an unreadable record never opens a first binding. Nothing the Store sent — its status, text, headers or records — reaches the client | the caller's one error line — at login `session_admission_unavailable` (error, `store: "mfa"`) — whose `err` projection is what the adapter threw: `MfaStoreError` (`reason` `unexpected_status` with `storeStatus`, `malformed_answer`, `unreadable_record`, `version_skipped`; `operation`), `StoreTransportError`, a `TimeoutError`, `StoreCredentialRefusedError` (leading with `HttpMfaFactorStore`), an `Error` for an answer over the cap (`HttpMfaFactorStore: upstream <url> response exceeds the <n>-byte cap`), an `Error` for a `409` to a create (`an MFA factor record with this id already exists for the subject`), or a `RangeError` for a record or an update the wire codec would not read back, thrown before any request. `version_skipped` leads with the subject and the factor id (`packages/foundation/src/mfa/storeFailure.mts`) | the user repository's `timeout` (`repositories.user.http.timeout`) |
 | **The mail sender** down, answering outside its port, or refusing at its limit | `POST /session/mfa/challenge` — a factor's login code (the email factor's six-digit code), the account-email proof (`factor_id: "account-email"`) — and `POST /session/mfa/enrollment` for a factor that mails its enrollment code (the email factor's) | `429 rate_limited` at the sender's limit; `503 temporarily_unavailable` "MFA temporarily unavailable" otherwise. Either way the pending code is cleared and nothing was "sent"; the transaction stands, and the page asks again. With no mail sender wired, a factor that asks for a mail is the same `503`; the account-email proof is `403 mfa_email_proof_unavailable` (`packages/mfa/src/mail.mts`, `proof.mts`) | `mfa_mail_unavailable` (error — `route`, `purpose`, `kind`, `reason` `outage` or `no_sender`, `cleared` when a pending code was to be cleared, and the sender's failure by its `name`, `code` and `status` alone — never its text, which may quote the address or the code); at the limit `mfa_mail_refused_at_limit` (warn — `route`, `purpose`, `kind`, `cleared`). `cleared: false` means the clear was not written: the kept code stands until the transaction ends | the sender's own |
 | **The Store's enrollment witness** (`UserRepository.markMfaEnrolled`; foundation's at `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL`) failing its write — down, slow, or answering anything but `204` | a verification of a counting factor where the login's `User` does not say it enrolled — a login's, or a step-up's — and a first binding, at a login or in a signed-in session | nothing: the login completes and the factor stands — the witness is marked after the factor, so a failure leaves a factor without a witness, never the reverse, and the next such verification of a counting factor marks it again (the MFA ADR's D12) | `mfa_enrollment_witness_unwritten` (warn — `sub`, the error's projection) | the directory's |
-| **A login's `User` says it enrolled, and no counting factor is on record** — the factor store lost its records, or the Store answers `mfaEnrolled` wrongly or malformed | `POST /session/login`, under either mode; in a signed-in session whose login recorded it, every first binding — the link start, WebAuthn registration, `POST /session/mfa/enrollment` and `/step-up` | `503 temporarily_unavailable` "session requirement unavailable", nothing written — never a first binding (D12). See the MFA ADR's D12 for recovering a lost factor store | `session_admission_unavailable` (error, `store: "mfa"`, `phase: "establishment"` at a login, the `action` in a session) whose `err` is `MfaEnrollmentStateInconsistentError` (`reason` `mfa_enrollment_state_inconsistent`); audit `mfa.enrollment_state_inconsistent` (`details.witness`: `enrolled` or `malformed`; `details.purpose` `login`, or `session` with `details.action`) | — |
+| **A login's `User` says it enrolled, and no counting factor is on record** — the factor store lost its records; the Store answers `mfaEnrolled` wrongly or malformed; a removal from the account page left no record that may count and could not clear the witness (`mfa_enrollment_witness_uncleared`), or a store failed after removing the record and could not be read again (`503`, the witness left as it was); or a login's witness mark raced a removal's clear and its own clear after it failed | `POST /session/login`, under either mode; in a federated signed-in session whose login recorded it, every first binding — the link start, WebAuthn registration, `POST /session/mfa/enrollment`, `/step-up`, a rename or removal of a factor. A password session in that state is not answered so: its first bindings are sent to log in again (`401`), recording nothing, and the fresh login reads the `User` | `503 temporarily_unavailable` "session requirement unavailable", nothing written — never a first binding (D12). See the MFA ADR's D12 for recovering a lost factor store; after a removal, clear the subject's flag in the Store | `session_admission_unavailable` (error, `store: "mfa"`, `phase: "establishment"` at a login, the `action` in a session) whose `err` is `MfaEnrollmentStateInconsistentError` (`reason` `mfa_enrollment_state_inconsistent`); audit `mfa.enrollment_state_inconsistent` (`details.witness`: `enrolled` or `malformed`; `details.purpose` `login`, or `session` with `details.action` for a federated session) | — |
 | **Client repository** lookup throws | client authentication on `/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, device authorization and the federation-grant client routes — a secret (`findById` or `authenticate`) or a `private_key_jwt` assertion (`findById`) — the client lookup at `/authorize`, token exchange's own lookup, the federation token route's `azp` lookup, the code exchange's logout-metadata lookup, the consent page's and answer's lookup, the federation-grants connect and consent pages' lookup, and the two logout routes' check of a `post_logout_redirect_uri` against the client's registered list (`/oauth/logout`, `POST /oauth/federation/:name/logout` — asked only when the request names one and the hint names a session) | `503 temporarily_unavailable` "client repository unavailable" (`/oauth/consent`: "client registry unavailable") — except at the two logout routes, which complete the logout without the redirect, as if no `post_logout_redirect_uri` had been sent: an outage costs the redirect, never the logout (it used to be dropped without a log line), no `WWW-Authenticate` challenge — repository unavailability never admits a client, and is not answered `invalid_client` either: the client did nothing wrong, and a proxy holding client credentials would read `401 invalid_client` as its own misconfiguration. `/authorize` answers it as JSON (no redirect target is trusted yet); it was `500 server_error` "Failed to fetch client", unlogged. An unknown client or a wrong secret is still `401 invalid_client` (`400` at `/authorize`). A `client_id` that cannot name a client — a control character, or longer than 256 characters (`MAX_CLIENT_ID_LENGTH`) — is refused the same way before the repository is asked, so a store that throws on such input (a SQL driver refusing a NUL byte) cannot be made to answer `503` (`packages/oauth/src/middleware/clientAuth.mts`, `clientAssertion.mts`, `routes/authorizeClient.mts`; the check is core's `isWellFormedClientId`) | `client_repository_unavailable` (error, `step`: `find` / `authenticate`, `clientId` sanitised and capped at 200 characters, the error's projection; `site` where it is not client authentication: `authorize`, `token_exchange`, `federation_token`, `authorization_code`, `consent`, `federation_grant_connect`, `federation_grant_consent`, `logout`, `federation_logout` — and `federation_grants` for client authentication on the federation-grant client routes) — every client lookup in core, oauth, token exchange and federation grants writes this one line through core's `logClientRepositoryUnavailable` (the consent route's own `consent_client_repository_unavailable` is gone); `client_assertion_refused` (error, `reason: "client_repository_unavailable"`) for an assertion | the repository's own I/O |
 | **`grantPolicy` hook** throws | the grants that consult it at `/oauth/token` — `client_credentials` (under `oauth.resourceIndicator.enabled`), jwt-bearer, `refresh_token`, the WebAuthn grant and token exchange — and `/oauth/authorize` for the code flow (the code exchange does not consult it again; the device grant never does) | `503 temporarily_unavailable` "policy evaluation unavailable" (`packages/core/src/grants/grantPolicy.mts`); redirect `error=temporarily_unavailable` at `/authorize` | `grant_policy_unavailable` (error, `grantType`, the policy's `kind`, `site: "authorize"` at `/authorize`, the error's projection) — from every token grant (oauth's, token exchange, webauthn) and `/authorize`; `evaluateGrantPolicy` takes the logger as a required option, so no grant can leave it out, and core writes the line on its console logger when the composition wires none | the hook's own |
 | **`grantPolicy` hook** returns a decision that is neither allow nor deny — an `outcome` other than exactly `"allow"` or `"deny"` (another string or case), no `outcome`, a value that is not an object, or a field that throws when read | the grants that consult it at `/oauth/token` — `client_credentials` (under `oauth.resourceIndicator.enabled`), jwt-bearer, `refresh_token`, the WebAuthn grant and token exchange — and `/oauth/authorize` for the code flow (the code exchange does not consult it again; the device grant never does) | `500 server_error` `policy_decision_invalid`, never a token (`packages/core/src/grants/grantPolicy.mts`, `readGrantPolicyDecision`); redirect `error=server_error` at `/authorize`, never a code. Not `503`: the policy is misconfigured, and a retry gets the same answer | `grant_policy_decision_invalid` (error, `grantType`, the policy's `kind`, `site: "authorize"` at `/authorize`, never the decision; on core's console logger when the composition wires no logger); audit `token.issued.failure` / `authorize.rejected` with reason `policy_decision_invalid` | the hook's own |
@@ -878,8 +905,11 @@ wires it.
   `mfa.email_address_mismatch` when it refuses the factor for it. A user with
   no other factor needs a recovery code or an operator reset. The stale
   record stays — listed, refused at each challenge, and counted toward
-  `mfa.maxFactorsPerSubject` — until it is removed: factor management and the
-  reset are step 12's. Changing the
+  `mfa.maxFactorsPerSubject` — until it is removed: the account page's list
+  says `address_changed` and the user removes it
+  (`POST /session/mfa/factors/remove`), or an operator resets the subject
+  (step 12). A session begun before the address changed lists, and mails a
+  step-up's code, against the old address until the user signs in again. Changing the
   address is the Store's: ask for recent authentication, and tell the old
   address. **The Store must hold one mailbox per account**: the provider
   reads the address as one addr-spec alone, and an account whose address is
@@ -921,7 +951,8 @@ wires it.
   recovery code of a user whose counting factor is gone binds the first
   factor, by `password`, at the login the code reopens. The owner keeps
   their remaining codes and still signs in with them; the factor stands
-  until the owner removes it (step 12) or an operator does. The trail is
+  until the owner removes it (`POST /session/mfa/factors/remove`) or an
+  operator does. The trail is
   `mfa.recovery_code.used`, then `mfa.factor.enrolled {purpose: "login",
   binding: "password"}`, then `mfa.recovery_codes.generated {regenerated:
   true, binding: "password", kept: "password_binding"}`; a Store that keeps
@@ -1360,7 +1391,10 @@ stream — its level is fixed at `info`.
 | --- | --- | --- |
 | `session_admission_subject_mismatch` (warn — `action`) + audit `session.admission.subject_mismatch` (`sid`, `carrier`, `claimedSubject`, `recordSubject`) | `core/src/session-admission/live-session.mts` | a claim named a subject that is not the live record's — a cookie, a link transaction, a token or a code's second read against a session the record says belongs to someone else. Answered `not_live`; the identifiers are in the audit event alone. Sustained, with `carrier: "cookie"`, a login of the deployment's own writes the cookie session's `user.id` and `sid` from different sources: the cookie and the store disagree about who is signed in |
 | `session_admission_no_subject` (warn — `action`) | `core/src/session-admission/live-session.mts` | a cookie session says it is authenticated and names no user: not a session this provider wrote. Answered `not_live`, nothing read, nothing audited |
-| `mfa_enrollment_witness_unwritten` (warn — `sub`, the error's projection) | `mfa/src/routes.mts` | the Store could not write the enrollment witness after a counting factor was bound or verified: the login completed, and the next verification of a counting factor where the login's `User` does not say it enrolled — at a login, or a step-up — marks it again. Sustained, the Store's endpoint at `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` is failing, and a lost factor store would read those accounts as never enrolled |
+| `mfa_enrollment_witness_unwritten` (warn — `sub`, the error's projection) | `mfa/src/routes.mts` | the Store could not write the enrollment witness after a counting factor was bound or verified — or, for a verification's mark, the subject's lease stood in the way past its wait (busy), a recovery or a reset moved the subject's generation since the proof was checked (changed), the mark ran past its lease (overrun), the transaction store could not give the lease (outage), or the records could not be read before the mark: the login completed, and the next verification of a counting factor where the login's `User` does not say it enrolled — at a login, or a step-up — marks it again. Sustained, the Store's endpoint at `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` is failing, and a lost factor store would read those accounts as never enrolled |
+| `mfa_subject_lease_overrun` (error — `route`, `sub`) | `mfa/src/management.mts` | a removal from the account page ran past the subject's lease — six `mfa.storeTimeoutMs`, 30 s by default — or its release found another holder, or it ran out of the lease's time after it wrote (the witness then not cleared). Said whatever the removal answered: a removal it made stands, is audited and is answered `409 mfa_factors_changed`; a `400` or a `503` is answered as itself. A recovery or a reset may have run beside it: check the subject's factors and the Store's witness. Sustained, a store is slower than `mfa.storeTimeoutMs`, which must be at least every store's own per-call timeout |
+| `mfa_factor_removal_unread` (warn — `sub`, the error's projection) | `mfa/src/management.mts` | after a removal from the account page the factor store could not answer a read of the subject's records: the records read before the removal, less the removed one, decided whether to clear the enrollment witness. The removal stands. Sustained, the factor store is failing |
+| `mfa_enrollment_witness_uncleared` (warn — `sub`, the error's projection) | `mfa/src/management.mts` | a removal from the account page left the subject no factor record that may count, and the Store could not clear the enrollment witness (`markMfaEnrolled(subject, false)`): the removal stands, and the witness still says enrolled beside no counting record, so the subject's next password login is `503` with `mfa.enrollment_state_inconsistent`. Clear the flag in the Store for that subject; sustained, the endpoint at `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` is failing |
 | `mfa_first_binding_unnoted` (warn — `sub`, `store`, `step: "noteFirstBinding"`, the error's projection) | `mfa/src/routes.mts` | a verification of a counting factor, for a login whose `User` does not say it enrolled, could not note the subject's first-binding mark in the MFA transaction store, so it left the enrollment witness unmarked: a witness marked without the mark would leave the sessions signed in before it trusted. The login completed, and the next such verification notes the mark and marks the witness. Sustained, the transaction store is failing or full (a memory store at its cap: `MfaTransactionStoreFullError` in the error's projection) |
 | `mfa_login_revoked` (info — `sub`, `route`) | `mfa/src/routes.mts` | a call on a login's MFA transaction whose sign-in is at or before the subject's sessions boundary (a revocation or a password change since the login began): answered `401 login_required`, nothing spent. Expected after a password change; a burst for one subject is someone holding an old login open |
 | `mfa_first_binding_distrusted` (info — `sub`, and `route`, or `action` from a session's admission) | `mfa/src/routes.mts`, `mfa/src/requirement.mts` | a first binding refused by the subject's first-binding mark: its sign-in is no later than a mark noted within `DEFAULT_CLOCK_SKEW_MS` before it (the re-login wait, under "The first binding"). The user signs in again after the `Retry-After`; repeated for one subject, its factors vanish right after binding — look for `mfa_store_unavailable` around the mark |
@@ -1538,7 +1572,8 @@ emits `mfa.enrollment_state_inconsistent` (`witness`; `purpose` `login`, or
 `session` with the admitted `action`), and so do the routes for a recovery
 code that would reopen a login for a first binding (`purpose: "login"`).
 `mfa.verified` for a recovery code that reopens a login for a binding
-carries `reopened: true`. The rest are declared ahead
+carries `reopened: true`. `mfa.factor.removed` (`kind`, `factorId`,
+`binding`, `by: "user"`) is a removal from the account page. The rest are declared ahead
 of the build steps that emit them. `sign_count_regression` is
 the WebAuthn factor's clone event, and names the factor's record id as
 `factorId` — see
@@ -2238,6 +2273,40 @@ before you flip — and a relying party holding the secret can also mint.
      federation checks, `key-store.local.*` and `KEY_STORE_LOCAL_*` for the key
      store's, `REPOSITORIES_USER_HTTP_BEARER_TOKEN` for the Store credential's:
      a log alert matching the old text needs the new one.
+
+7. **Registered redirect URIs: query names.** Check every
+   `allowedRedirectUris`, `postLogoutRedirectUris` and
+   `federationGrantRedirectUris` entry, and every Client ID Metadata Document
+   you depend on. Two cases:
+
+   - **Newly refused registrations.** A query name outside `[A-Za-z0-9_-]`
+     (`?filter[x]=1`, `?a.b=1`), a parameter with no name, a `;` anywhere in
+     the query, or one of `code`, `state`, `iss`, `error` and
+     `error_description` (compared ignoring case, `_` and `-`), on any of the
+     three lists; and, on `federationGrantRedirectUris`, `grant_id` under
+     another case or separators (`GRANT_ID`, `grantId`, `_grant_id`,
+     `grant-id`). Such an entry used to be accepted. Now a `yaml` / `static`
+     client fails boot, with the messages in
+     [§1](#boot-refusals-you-will-meet); a CIMD client cannot be resolved
+     (`400 invalid_client` at `/authorize`, with the
+     `cimd_document_rejected` warning); and a federation-grant return URI
+     held by a custom `ClientRepository`, which bypasses that check, is
+     refused when a grant is lodged: `400 invalid_request` with
+     `redirect_uri_invalid` (`redirect_uri_reserved_parameter` for a
+     `grant_id` spelling).
+   - **Refusals whose reason changed.** A `federationGrantRedirectUris`
+     entry carrying `state` or `error` was already refused, at boot and at
+     lodging. Boot still refuses it. Lodging now answers
+     `redirect_uri_invalid` where it answered
+     `redirect_uri_reserved_parameter`; both are `400 invalid_request`, so
+     only an alert or client keyed on the `error_description` text sees the
+     difference.
+
+   Rename or remove such parameters, and carry the client's context in
+   `state` or in the path. The rule covers names as written and the common
+   normalizations, not a mapping a client configures (an alias, a stripped
+   prefix): make sure each client reads the OAuth fields by their canonical
+   names.
 
 ### Rolling out
 

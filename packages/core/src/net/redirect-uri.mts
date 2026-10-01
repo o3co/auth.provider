@@ -38,6 +38,10 @@ import { isLoopbackHostname } from "./loopback.mjs";
  * - **No escape hatch, deliberately**: a dotless custom scheme (`myapp:`) is
  *   refused with no config bypass. RFC 8252 §7.1 says SHOULD reverse-domain,
  *   and a flag would be two spellings for one decision.
+ * - **Query names**: only `[A-Za-z0-9_-]`, each parameter named, no `;`
+ *   anywhere; the authorization response's names are refused ignoring case,
+ *   `_` and `-`. Values are otherwise free. Covered: names as written and
+ *   those normalizations, not a mapping a client configures.
  */
 
 /** Why a registered redirect URI was refused. */
@@ -48,7 +52,9 @@ export type RedirectUriRejection =
 	| { reason: "userinfo" }
 	| { reason: "http-non-loopback"; hostname: string }
 	| { reason: "executable-scheme"; scheme: string }
-	| { reason: "scheme-not-reverse-domain"; scheme: string };
+	| { reason: "scheme-not-reverse-domain"; scheme: string }
+	| { reason: "query-name-invalid" }
+	| { reason: "reserved-parameter"; parameter: string };
 
 /**
  * First labels of executable/pseudo schemes, denied even when a dotted
@@ -65,6 +71,75 @@ const EXECUTABLE_SCHEME_LABELS: ReadonlySet<string> = new Set([
 	"about",
 	"intent",
 ]);
+
+/** A query parameter name a redirect URI may carry: nothing a parser could read as another name. */
+const QUERY_NAME = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * A name as the common normalizations see it: case folded, `_` and `-`
+ * removed (`_state`, `errorDescription` key as response names). Applied only
+ * to allowlisted, hence ASCII, names, so `toLowerCase` is ASCII folding.
+ */
+const nameKey = (name: string): string => name.toLowerCase().replace(/[_-]/g, "");
+
+/**
+ * The parameters an authorization response appends, by {@link nameKey}.
+ * Invariant: a response adds a name here before it starts appending it.
+ */
+const RESPONSE_PARAMETERS: ReadonlyMap<string, string> = new Map(
+	["code", "state", "iss", "error", "error_description"].map((name) => [nameKey(name), name]),
+);
+
+/**
+ * The query's names as written: `url.search` UNDECODED, split on `&`, each
+ * name running to the first `=`; `[]` for none. The parser decodes nothing,
+ * but trims leading and trailing C0 and spaces (`?foo ` is `?foo`), as the
+ * builder does.
+ */
+function queryNames(url: URL): string[] {
+	const query = url.search.slice(1);
+	if (query === "") return [];
+	return query.split("&").map((pair) => {
+		const equals = pair.indexOf("=");
+		return equals === -1 ? pair : pair.slice(0, equals);
+	});
+}
+
+/**
+ * The query's verdict. `;` is refused anywhere, values included: some parsers
+ * split on it. Then the first offending name decides.
+ */
+function queryRejection(url: URL): RedirectUriRejection | null {
+	if (url.search.includes(";")) return { reason: "query-name-invalid" };
+	for (const name of queryNames(url)) {
+		if (!QUERY_NAME.test(name)) return { reason: "query-name-invalid" };
+		const reserved = RESPONSE_PARAMETERS.get(nameKey(name));
+		if (reserved !== undefined) return { reason: "reserved-parameter", parameter: reserved };
+	}
+	return null;
+}
+
+/**
+ * Which of `names` a URI's query carries (first match, as given in `names`),
+ * compared as {@link checkRedirectUri} compares names; `undefined` for none or
+ * an unparsable URI. For a module that reserves names of its own. A name the
+ * grammar refuses is never matched here: call {@link checkRedirectUri} too.
+ */
+export function redirectUriQueryCarries(uri: string, names: readonly string[]): string | undefined {
+	let url: URL;
+	try {
+		url = new URL(uri);
+	} catch {
+		return undefined;
+	}
+	const byKey = new Map(names.map((name) => [nameKey(name), name]));
+	for (const name of queryNames(url)) {
+		if (!QUERY_NAME.test(name)) continue;
+		const carried = byKey.get(nameKey(name));
+		if (carried !== undefined) return carried;
+	}
+	return undefined;
+}
 
 /**
  * Check one registered redirect URI against the shape rules above. Returns
@@ -96,6 +171,14 @@ export function checkRedirectUri(raw: string): RedirectUriRejection | null {
 	if (url.hash !== "" || raw.includes("#")) return { reason: "fragment" };
 	if (url.username !== "" || url.password !== "") return { reason: "userinfo" };
 
+	const schemeRejection = checkScheme(scheme, url);
+	if (schemeRejection !== null) return schemeRejection;
+	// The shape is acceptable; only then is the query read.
+	return queryRejection(url);
+}
+
+/** The scheme rules: `https:`, loopback `http:`, or a reverse-domain custom scheme. */
+function checkScheme(scheme: string, url: URL): RedirectUriRejection | null {
 	if (scheme === "https") return null;
 	if (scheme === "http") {
 		return isLoopbackHostname(url.hostname)
@@ -134,6 +217,18 @@ export function describeRedirectUriRejection(rejection: RedirectUriRejection): s
 			return (
 				`custom scheme ${JSON.stringify(rejection.scheme)} must use the RFC 8252 §7.1 reverse-domain shape ` +
 				`(e.g. "com.example.app"); dotless legacy schemes are refused, deliberately, with no bypass`
+			);
+		case "query-name-invalid":
+			return (
+				'query parameter names may use only letters, digits, "_" and "-", each parameter must ' +
+				'have a name, and the query must not contain ";": a client framework can read any other ' +
+				'spelling as a different name (iss[] as iss, ";iss=" as a parameter)'
+			);
+		case "reserved-parameter":
+			return (
+				`must not carry ${JSON.stringify(rejection.parameter)} in its query (compared ignoring ` +
+				'case, "_" and "-"): an authorization response carries that parameter, so a client ' +
+				"redirected there could receive it twice, or read the registered value as the response's"
 			);
 	}
 }

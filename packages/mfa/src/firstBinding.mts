@@ -47,9 +47,10 @@ export type { MailAddressFact };
 /**
  * Whether `record` may hold a counting factor: unless an installed factor of
  * its kind declares it does not, so a kind no longer installed counts. Right
- * for admitting, and for telling a first binding — it fails closed, a
- * password never standing in for a factor it cannot see; wrong for a
- * last-factor check or clearing the witness.
+ * for admitting, for telling a first binding, and for clearing the witness
+ * after a removal — it fails closed, a password never standing in for a
+ * factor it cannot see; wrong for a last-factor check, which asks for a
+ * record of an installed counting kind.
  */
 export const mayCount = (
 	factors: MfaFactorResolver,

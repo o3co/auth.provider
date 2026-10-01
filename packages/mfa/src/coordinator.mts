@@ -75,7 +75,10 @@
  *   mark (`firstBindingMark.mts`): a note that fails leaves the witness
  *   unmarked, so no session's recorded witness goes stale unmarked; a
  *   directory that cannot write the witness gets no note. Neither failure
- *   fails the login (`reconcileWitness`).
+ *   fails the login (`reconcileWitness`). The mark is `factorSet.mts`'s,
+ *   held to the subject's generation read before the proof is checked: it
+ *   reads the records first, and clears the witness again when the records
+ *   read after it hold none that may count.
  * - A factor is handed its records opened and digests under the ring; it
  *   never sees a key, a store, a transaction or the mail sender. A code it
  *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
@@ -83,6 +86,8 @@
  *   challenge and handed back to the verification. The page is answered the
  *   factor's response with where the code went, masked (`sent_to`), and how
  *   long it lives (`expires_in`), as kept.
+ * - What a record can do is `factorState.mts`'s one reading: what a
+ *   transaction offers (`isOffered`) and what is usable are that file's.
  * - A refusal carries the factor id the factor named only when it is one of
  *   the subject's factors of the kind verified: nothing else reaches the audit.
  *   Another is dropped and flagged, never quoted.
@@ -134,6 +139,8 @@ import {
 	type UnknownTransaction,
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
+import type { MfaFactorSet } from "./factorSet.mjs";
+import { holdsUsableRecord, isOffered, readFactorRecord } from "./factorState.mjs";
 import type { RequireEmailProof } from "./firstBinding.mjs";
 import {
 	distrustedByFirstBinding,
@@ -221,6 +228,8 @@ export interface MfaCoordinatorOptions {
 	readonly mailSender?: MailSender;
 	/** The enrollment witness a verified counting factor reconciles. */
 	readonly witness: MfaEnrollmentWitness;
+	/** The subject's records as read, and the witness's reconciliation mark (`factorSet.mts`). */
+	readonly factorSet: MfaFactorSet;
 	/** `mfa.transactionTtlSeconds`: how long an `enroll` transaction lives. */
 	readonly transactionTtlSeconds: number;
 	/** `mfa.maxFactorsPerSubject`. */
@@ -246,10 +255,6 @@ const isPlainObject = (value: unknown): value is object => {
 	return prototype === Object.prototype || prototype === null;
 };
 
-/** The subject's records, oldest first: what the page lists and a request names. */
-const byAge = (a: MfaFactorRecord, b: MfaFactorRecord): number =>
-	a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-
 /** The coordinator over `options` (see this file's header). */
 export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordinator {
 	const {
@@ -262,6 +267,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		mode,
 		mailSender,
 		witness,
+		factorSet,
 		transactionTtlSeconds,
 		maxFactorsPerSubject,
 		requireEmailProof,
@@ -349,11 +355,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	/** Every record of `subject`, oldest first; an outage is never "none". */
 	const recordsOf = async (subject: string): Promise<MfaFactorRecord[] | MfaStoreOutage> => {
 		try {
-			const records: unknown = await factorStore.list(subject);
-			if (!Array.isArray(records)) {
-				throw new TypeError("MfaFactorStore.list answered something that is not a list");
-			}
-			return [...(records as MfaFactorRecord[])].sort(byAge);
+			return await factorSet.list(subject);
 		} catch (cause) {
 			return outage("mfa_factor", "list", cause);
 		}
@@ -370,24 +372,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return record === undefined || factor === undefined ? undefined : { record, factor };
 	};
 
-	/**
-	 * Whether `subject` holds a factor of an installed kind whose data opens
-	 * — one that counts, when `options.counting` asks it.
-	 */
+	/** Whether `subject` holds a usable record (`factorState.mts`) — one that counts, when `options.counting` asks it. */
 	const holdsUsable = (
 		subject: string,
 		records: readonly MfaFactorRecord[],
 		options: { readonly counting: boolean },
-	): boolean =>
-		records.some((candidate) => {
-			const factor = factors.get(candidate.kind);
-			return (
-				factor !== undefined &&
-				(!options.counting || factor.counting === true) &&
-				sealing.openFactorData({ subject, id: candidate.id, kind: candidate.kind }, candidate.data)
-					.state === "ok"
-			);
-		});
+	): boolean => holdsUsableRecord({ factors, sealing }, subject, records, options);
 
 	/**
 	 * The named record and every record of its kind, opened for `subject`: the
@@ -674,13 +664,19 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				: undefined;
 		},
 		noteFirstBinding,
-		reconcileWitness: async (subject) => {
+		reconcileWitness: async (subject, started) => {
 			// A directory that cannot write the witness leaves no session stale: no mark is due.
 			if (!witness.writable)
-				return { witness: await witness.mark(subject), firstBindingUnnoted: undefined };
+				return {
+					witness: await factorSet.markEnrolled(started, subject),
+					firstBindingUnnoted: undefined,
+				};
 			const unnoted = await noteFirstBinding(subject);
 			return unnoted === undefined
-				? { witness: await witness.mark(subject), firstBindingUnnoted: undefined }
+				? {
+						witness: await factorSet.markEnrolled(started, subject),
+						firstBindingUnnoted: undefined,
+					}
 				: { witness: undefined, firstBindingUnnoted: unnoted };
 		},
 		recordsOf,
@@ -732,16 +728,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const records = tx.purpose === "enroll" ? [] : await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const listed = records.flatMap((record) => {
-				const factor = factors.get(record.kind);
-				if (factor === undefined) return [];
-				const opened = sealing.openFactorData(
-					{ subject: tx.subject, id: record.id, kind: record.kind },
-					record.data,
-				);
+				const read = readFactorRecord({ factors, sealing }, tx.subject, record);
+				if (!isOffered(read)) return [];
 				let hint: unknown;
-				if (opened.state === "ok") {
+				if (read.state === "usable") {
 					try {
-						hint = factor.describe(opened.value).hint;
+						hint = read.factor.describe(read.data).hint;
 					} catch {
 						hint = undefined;
 					}
@@ -973,6 +965,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
 			}
 
+			// A reconciliation's mark, where one could follow, is held to the subject's generation as it was before the proof is checked.
+			const markDue =
+				tx.purpose === "step_up"
+					? reconcilesSession(factor, call.session?.witness)
+					: reconciles(factor, tx.continuation?.primary.user);
+			const started = markDue ? await factorSet.begin(tx.subject, "mark") : undefined;
+
 			const reserved = await reserve(tx);
 			if ("outcome" in reserved) {
 				return reserved.outcome === "exhausted" ? refused("exhausted", 0) : reserved;
@@ -1157,7 +1156,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						? reconcilesSession(factor, call.session?.witness)
 						: reconciles(factor, consumed.continuation?.primary.user)
 				)
-					? await kit.reconcileWitness(tx.subject)
+					? await kit.reconcileWitness(tx.subject, started)
 					: undefined;
 				const verified = {
 					adds: {
