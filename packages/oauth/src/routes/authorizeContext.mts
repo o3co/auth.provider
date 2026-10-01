@@ -37,6 +37,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, Response } from "express";
 import type { ResolvedOAuthOptions } from "../resolveOAuthOptions.mjs";
+import type { AuthorizationResponse } from "./authorizationResponse.mjs";
 
 export interface AuthorizeHandlerOptions {
 	readonly clientRepository: ClientRepository;
@@ -46,6 +47,8 @@ export interface AuthorizeHandlerOptions {
 	readonly logger: Logger;
 	/** The canonical issuer, config-only: never request-derived (Host is attacker-controlled). */
 	readonly issuer: string;
+	/** Builds a response to `redirect_uri`, its `iss` (RFC 9207) bound. */
+	readonly authorizationResponse: AuthorizationResponse;
 	/**
 	 * The login trip for a browser that must log in: `urlFor(returnTo)` is the
 	 * login page with the request to come back to — the `loginEntry` slot's.

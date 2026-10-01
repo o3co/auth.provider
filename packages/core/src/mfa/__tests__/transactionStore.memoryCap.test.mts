@@ -113,7 +113,7 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		expect(refusal).not.toBeInstanceOf(RangeError);
 		expect(refusal).toMatchObject({ name: "MfaTransactionStoreFullError", reason: "full" });
 		expect((refusal as Error).message).toBe(
-			"memory MfaTransactionStore is at its cap of 2 resident entries — transactions, session email proofs and first-binding marks, expired ones not yet swept included; refusing a new one rather than evicting one",
+			"memory MfaTransactionStore is at its cap of 2 resident entries — transactions, session email proofs, first-binding marks, subject leases and recovery authorizations, expired ones not yet swept included; refusing a new one rather than evicting one",
 		);
 
 		expect(store.transactions).toBe(2);
@@ -254,6 +254,82 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		expect(store.firstBindingMarks).toBe(1);
 		expect(store.transactions).toBe(1);
 		expect(await store.firstBindingAt("user-next", now)).toBe(T0 + 2_000);
+	});
+
+	it("counts subject leases against its cap beside its other entries: at the cap a new lease is refused as a store fault, holding nothing", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 2 });
+		await store.create(TX("tx-1"));
+		const held = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
+		expect(held.outcome).toBe("acquired");
+		expect(store.subjectLeases).toBe(1);
+		const refusal = await refusalOf(
+			store.acquireSubjectLease("user-2", { ttlMs: 60_000, generation: 0 }),
+		);
+		expect(refusal).toBeInstanceOf(MfaTransactionStoreFullError);
+		expect(store.subjectLeases).toBe(1);
+		expect(await refusalOf(store.create(TX("tx-2")))).toBeInstanceOf(MfaTransactionStoreFullError);
+		// Asked again while it stands, the held lease is busy, not refused.
+		expect(
+			(await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 })).outcome,
+		).toBe("busy");
+	});
+
+	it("reclaims a lapsed lease before it refuses, and takes a subject's next lease in its place", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			maxEntries: 2,
+			minSweepIntervalMs: 0,
+		});
+		await store.acquireSubjectLease("user-short", { ttlMs: 1_000, generation: 0 });
+		await store.create(TX("long"));
+		now = T0 + 2_000;
+		expect(
+			(await store.acquireSubjectLease("user-short", { ttlMs: 1_000, generation: 0 })).outcome,
+		).toBe("acquired");
+		now = T0 + 4_000;
+		expect(
+			(await store.acquireSubjectLease("user-next", { ttlMs: 60_000, generation: 0 })).outcome,
+		).toBe("acquired");
+		expect(store.subjectLeases).toBe(1);
+		expect(store.transactions).toBe(1);
+	});
+
+	it("counts recovery authorizations against its cap: at the cap a new one is refused as a store fault, and one replacing another's slot is no new entry", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 2 });
+		const authorization = (sid: string, recoveryId: string) => ({
+			operation: "recover" as const,
+			sid,
+			recoveryId,
+			expiresAtMs: T0 + 600_000,
+		});
+		await store.create(TX("tx-1"));
+		await store.authorizeSubjectRecovery("user-1", authorization("sid-1", "r-1"));
+		await store.authorizeSubjectRecovery("user-1", authorization("sid-1", "r-2"));
+		const refusal = await refusalOf(
+			store.authorizeSubjectRecovery("user-1", authorization("sid-2", "r-3")),
+		);
+		expect(refusal).toBeInstanceOf(MfaTransactionStoreFullError);
+		expect(await refusalOf(store.create(TX("tx-2")))).toBeInstanceOf(MfaTransactionStoreFullError);
+	});
+
+	it("reclaims lapsed authorizations before it refuses", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			maxEntries: 2,
+			minSweepIntervalMs: 0,
+		});
+		await store.authorizeSubjectRecovery("user-1", {
+			operation: "recover",
+			sid: "sid-1",
+			recoveryId: "r-1",
+			expiresAtMs: T0 + 1_000,
+		});
+		await store.create(TX("long"));
+		now = T0 + 2_000;
+		await store.create(TX("next"));
+		expect(store.transactions).toBe(2);
 	});
 
 	it("refuses a cap above what a Map can hold, 2^24 entries", () => {

@@ -90,6 +90,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isLoopbackHostname\b/,
 	},
 	{
+		concept: "the issuer as discovery advertises it (RFC 8414 §2, RFC 9207)",
+		home: "packages/core/src/issuer/canonical.mts",
+		definition: /(?:function|const)\s+advertisedIssuer\b/,
+	},
+	{
 		concept: "trusted-proxy address vocabulary — one entry (#292)",
 		home: "packages/core/src/net/trusted-proxy.mts",
 		definition: /(?:function|const)\s+checkTrustedProxyEntry\b/,

@@ -340,6 +340,68 @@ describe("verifyJwt — a keystore's findings from another copy of core", () => 
 	});
 });
 
+/*
+ * What a keystore throws is an adapter's value. One the verifier cannot ask
+ * about (its prototype chain, its `name`) is no finding about the token: the
+ * keystore failed to answer, and the verifier never rethrows the value raw.
+ */
+describe("verifyJwt — a keystore's throw it cannot inspect", () => {
+	const unreadable = (): never => {
+		throw new Error("trap");
+	};
+	const throwingPrototype = () => new Proxy({}, { getPrototypeOf: unreadable });
+	const UNINSPECTABLE: ReadonlyArray<readonly [string, () => unknown]> = [
+		["a Proxy whose getPrototypeOf trap throws", throwingPrototype],
+		[
+			"an Error whose prototype chain holds such a Proxy",
+			() => Object.setPrototypeOf(new Error("x"), throwingPrototype()),
+		],
+		[
+			"an Error whose name getter throws",
+			() => Object.defineProperty(new Error("x"), "name", { get: unreadable }),
+		],
+		[
+			"an object whose name getter throws",
+			() => Object.defineProperty({}, "name", { get: unreadable }),
+		],
+	];
+
+	it.each(UNINSPECTABLE)("reads %s as verification_key_unavailable", async (_label, make) => {
+		const thrown = make();
+		const err = await verifyJwt(await mint(), keyStoreWhoseLookupRejects(thrown), options).catch(
+			(e: unknown) => e,
+		);
+		expect(err).toBeInstanceOf(JwtVerificationError);
+		expect(err).toMatchObject({ reason: "verification_key_unavailable" });
+		expect((err as Error).cause).toBe(thrown);
+	});
+
+	it.each(UNINSPECTABLE)(
+		"reads %s, thrown by a thenable's then getter, as verification_key_unavailable",
+		async (_label, make) => {
+			const thrown = make();
+			const keyStore: KeyStore = {
+				...keyStoreWhoseLookupRejects(undefined),
+				// Awaiting the answer reads its `then`, which throws `thrown`.
+				getVerificationKey: async () =>
+					new Proxy(
+						{},
+						{
+							get: (_target, property) => {
+								if (property === "then") throw thrown;
+								return undefined;
+							},
+						},
+					) as Awaited<ReturnType<KeyStore["getVerificationKey"]>>,
+			};
+			const err = await verifyJwt(await mint(), keyStore, options).catch((e: unknown) => e);
+			expect(err).toBeInstanceOf(JwtVerificationError);
+			expect(err).toMatchObject({ reason: "verification_key_unavailable" });
+			expect((err as Error).cause).toBe(thrown);
+		},
+	);
+});
+
 describe("the keystore's finding errors cannot fail to be built", () => {
 	it("builds UnknownKidError and ExpiredKidError from any kid a custom keystore hands them", () => {
 		const throwing = {
