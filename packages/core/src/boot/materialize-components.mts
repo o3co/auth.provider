@@ -25,7 +25,7 @@
 import { deploymentModeOf } from "../deployment/mode.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import { prepareSyntheticProjections } from "./apply-contributions.mjs";
-import { auditFanOutFor } from "./audit-fan-out.mjs";
+import { auditSlotFor } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import type {
 	BootPlan,
@@ -117,10 +117,9 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * `core.deployment.mode`, injects the synthetic projections of
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
- * provider factory in `plan.providerActivations` order. When a module
- * contributes `auditHooks`, `auditSink` holds core's audit fan-out over
- * whatever fills the slot (`audit-fan-out.mts`); a cleanup is still handed
- * the provider's own value.
+ * provider factory in `plan.providerActivations` order. The `auditSink`
+ * slot is `audit-fan-out.mts`'s to fill (`auditSlotFor`); a cleanup is still
+ * handed the provider's own value.
  *
  * A factory failure becomes `BootError reason="provides-factory-failed"`, its
  * message naming the thrown value by `failureSummary` (never
@@ -168,19 +167,9 @@ export async function materializeComponents(
 		prepareSyntheticProjections(components, contributionKinds);
 	}
 
-	// With `auditHooks` contributed, `auditSink` holds core's fan-out: over the
-	// host's sink now, over a provider's when it runs, over none without one.
-	const auditFanOut =
-		contributionKinds === undefined
-			? undefined
-			: auditFanOutFor(plan, contributionKinds, components);
-	if (
-		auditFanOut !== undefined &&
-		("auditSink" in components ||
-			!plan.providerActivations.some((activation) => activation.componentKey === "auditSink"))
-	) {
-		components.auditSink = auditFanOut(components.auditSink);
-	}
+	// The `auditSink` slot's handling, `audit-fan-out.mts`'s alone.
+	const auditSlot = auditSlotFor(plan, contributionKinds, components);
+	auditSlot.beforeProviders();
 
 	for (const activation of plan.providerActivations) {
 		const { module: moduleName, componentKey } = activation;
@@ -236,8 +225,7 @@ export async function materializeComponents(
 			});
 		}
 
-		components[componentKey as string] =
-			auditFanOut !== undefined && componentKey === "auditSink" ? auditFanOut(value) : value;
+		components[componentKey as string] = auditSlot.provided(componentKey, value);
 
 		const cleanupFn = manifest.lifecycle?.[componentKey]?.cleanup;
 		if (cleanupFn !== undefined) {

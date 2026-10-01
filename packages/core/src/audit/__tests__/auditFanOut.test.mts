@@ -287,31 +287,37 @@ describe("createAuditFanOut", () => {
 				void Promise.resolve().then(() => emitAuditEvent(sink, recorded));
 			},
 		],
-	])("hands an event a hook records while it runs (it %s) to the slot's own sink alone, warning audit_sink_reentered", async (_, how) => {
-		const own = createRecordingAuditSink();
-		const { logger, warn } = spyLogger();
-		let fanOut: AuditSink | undefined;
-		const loop = reentering(() => fanOut as AuditSink, how);
-		fanOut = createAuditFanOut({ sink: own, hooks: () => [loop.hook], logger: () => logger });
+	])(
+		"hands an event a hook records while it runs (it %s) to the slot's own sink alone, warning audit_sink_reentered",
+		async (_, how) => {
+			const own = createRecordingAuditSink();
+			const { logger, warn } = spyLogger();
+			let fanOut: AuditSink | undefined;
+			const loop = reentering(() => fanOut as AuditSink, how);
+			fanOut = createAuditFanOut({ sink: own, hooks: () => [loop.hook], logger: () => logger });
 
-		await fanOut.record(event());
-		await settled();
+			await fanOut.record(event());
+			await settled();
 
-		expect({
-			hookCalls: loop.calls(),
-			own: own.events.map((e) => e.type),
-			warned: warn.mock.calls,
-		}).toEqual({
-			hookCalls: 1,
-			own: ["test.event", "hook.recorded"],
-			warned: [[{ type: "hook.recorded" }, "audit_sink_reentered"]],
-		});
-	});
+			expect({
+				hookCalls: loop.calls(),
+				own: own.events.map((e) => e.type),
+				warned: warn.mock.calls,
+			}).toEqual({
+				hookCalls: 1,
+				own: ["test.event", "hook.recorded"],
+				warned: [[{ type: "hook.recorded" }, "audit_sink_reentered"]],
+			});
+		},
+	);
 
 	it("drops an event a hook records while it runs when the slot has no sink of its own, and warns", async () => {
 		const { logger, warn } = spyLogger();
 		let fanOut: AuditSink | undefined;
-		const loop = reentering(() => fanOut as AuditSink, (sink) => emitAuditEvent(sink, recorded));
+		const loop = reentering(
+			() => fanOut as AuditSink,
+			(sink) => emitAuditEvent(sink, recorded),
+		);
 		fanOut = createAuditFanOut({ hooks: () => [loop.hook], logger: () => logger });
 
 		await fanOut.record(event());

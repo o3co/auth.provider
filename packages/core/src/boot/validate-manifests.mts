@@ -67,7 +67,7 @@ import {
 	lifetimeBeyondConfiguration,
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
-import { checkAuditHooksDoNotReadAuditSink, contributesAuditHooks } from "./audit-fan-out.mjs";
+import { contributesAuditHooks } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
@@ -706,11 +706,26 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
  * for `rateLimitBudgets` could answer a looser budget than the owning module
  * contributed — on RFC 8628 §5.1's device-verification prefix, say —
  * `federationTypes` is what the dispatch of configured federations will read,
- * and `admissionActions` is where admission reads the grade it hands the
- * requirements. Unlike `GUARDED_KINDS`, a module may override an entry of the
- * first two.
+ * `admissionActions` is where admission reads the grade it hands the
+ * requirements, and `auditHooks` is what the audit fan-out in the `auditSink`
+ * slot reads at each event, the slot stage 1 counts as filled once a hook is
+ * contributed. Unlike `GUARDED_KINDS`, a module may override an entry of the
+ * first two; `auditHooks` is list-shaped, and a list kind has no override.
  */
-const PLANNER_OWNED_KINDS = ["rateLimitBudgets", "federationTypes", "admissionActions"] as const;
+const PLANNER_OWNED_KINDS = [
+	"rateLimitBudgets",
+	"federationTypes",
+	"admissionActions",
+	"auditHooks",
+] as const;
+
+/** What a refusal of a host collector for a planner-owned `kind` says of its entries. */
+const plannerOwnedEntries = (kind: (typeof PLANNER_OWNED_KINDS)[number]): string =>
+	kind === "auditHooks"
+		? "and the audit fan-out in the auditSink slot reads them"
+		: kind === "admissionActions"
+			? "and no module overrides one"
+			: "and a module may override one";
 
 /**
  * A requirement is switched off by not installing it, never removed from
@@ -767,7 +782,7 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	for (const kind of PLANNER_OWNED_KINDS) {
 		if (Object.hasOwn(host, kind)) {
 			throw new BootError({
-				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${kind === "admissionActions" ? "and no module overrides one" : "and a module may override one"}.`,
+				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${plannerOwnedEntries(kind)}.`,
 				reason: "contribution-kind-guarded",
 				stage: "validateManifests",
 				details: { reason: "contribution-kind-guarded", kind },
@@ -2976,11 +2991,6 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		id: "contribution-shapes",
 		spec: "issue #728 (a rate-limit prefix; a federation type's declaration)",
 		run: (ctx) => checkContributionShapes(ctx.rawModules, ctx.modules),
-	},
-	{
-		id: "audit-hooks-read-no-audit-sink",
-		spec: "issue #710 (C1: a module's audit hooks are not handed back the events it emits)",
-		run: (ctx) => checkAuditHooksDoNotReadAuditSink(ctx.modules),
 	},
 	{
 		id: "per-kind-contribute-duplicates",

@@ -46,6 +46,7 @@ import {
 	sealRegisteredReach,
 	secondFactorAuthorities,
 } from "../session-admission/requirement.mjs";
+import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
@@ -1048,6 +1049,9 @@ export async function applyContributions(
 	// the loop below (`ListCollector` keeps values, not their module), and
 	// evaluated after it.
 	const legacyTokenBindingModules: string[] = [];
+	// Each `auditHooks` value checked as it registers, with its module, for the
+	// boot line (the collector keeps values only).
+	const auditHooks = auditHookRegistrations();
 
 	// ---------------------------------------------------------------------------
 	// Step 2: Name-keyed pass in BootPlan.initOrder.
@@ -1289,6 +1293,7 @@ export async function applyContributions(
 				let value: unknown;
 				try {
 					value = await factory(deps);
+					if (entry.kind === "auditHooks") value = auditHooks.registered(value, moduleName);
 				} catch (thrownValue) {
 					const cleanupErrors = await runCleanupsReverse(material.cleanups);
 					throw new BootError({
@@ -1324,6 +1329,7 @@ export async function applyContributions(
 	}
 
 	warnOnTokenBindingSurfaceOverlap(components, contributionKinds, legacyTokenBindingModules);
+	auditHooks.log(components, contributionKinds.auditHooks);
 
 	// ---------------------------------------------------------------------------
 	// Build registries map: kind → collector reference. Stage 5 uses this to

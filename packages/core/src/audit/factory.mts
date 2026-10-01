@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { isIP } from "node:net";
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { auditErrorText } from "../errors/envelope.mjs";
@@ -125,32 +126,51 @@ export interface AuditFanOutSources {
  *   emitter's own event is left as it was.
  * - Each call is isolated: a rejection, a synchronous throw or an answer that
  *   is not a promise is that sink's failure alone, logged at error as
- *   `audit_sink_failed` with `sink`, the sink's position in that order (0 is
- *   the slot's own sink when there is one), and the event's `type` — nothing
- *   else of the event and nothing of the failure, which may quote it. An
- *   event that cannot be copied is handed to no sink, each reported failed
- *   without a `type`.
+ *   `audit_sink_failed` with `sink`, the sink's position — 0 the slot's own
+ *   sink, `n` the `n`th hook in registration order — and the event's `type`:
+ *   nothing else of the event and nothing of the failure, which may quote it.
+ *   An event that cannot be copied, or hooks that cannot be read, reach no
+ *   sink, each sink known reported failed without a `type`.
+ * - An event recorded while a hook's `record` runs — by the hook, or by work
+ *   it started in its own async context (a promise chain, a timer, a detached
+ *   `emitAuditEvent`) — goes to the slot's own sink alone, or nowhere without
+ *   one, and is logged at warn as `audit_sink_reentered` with its `type`: a
+ *   hook is never handed an event it caused, so a hook cannot loop. Work the
+ *   hook hands to something created outside its context (a queue's consumer,
+ *   a pooled connection) carries that thing's context, not the hook's.
  * - `record` resolves once every sink has settled and never rejects. Core
  *   neither retries nor times a sink out.
  *
  * It carries the slot's sink's `kind`, or `audit-hooks` without one.
  */
 export function createAuditFanOut(sources: AuditFanOutSources): AuditSink {
+	/** Set while a hook's `record` runs, and in the async work it starts. */
+	const insideHook = new AsyncLocalStorage<true>();
 	return {
 		kind: sources.sink?.kind ?? "audit-hooks",
 		async record(event: AuditEvent): Promise<void> {
-			const sinks = [...(sources.sink === undefined ? [] : [sources.sink]), ...sources.hooks()];
+			const reentered = insideHook.getStore() === true;
+			const targets: { readonly sink: AuditSink; readonly position: number }[] = [];
+			if (sources.sink !== undefined) targets.push({ sink: sources.sink, position: 0 });
 			let shared: AuditEvent;
 			try {
+				if (!reentered) {
+					let position = 1;
+					for (const hook of sources.hooks()) targets.push({ sink: hook, position: position++ });
+				}
 				shared = frozenCopy(event, new Map()) as AuditEvent;
 			} catch {
-				// An event that cannot be read is handed to no sink: each has failed it.
-				for (const position of sinks.keys()) reportFailure(sources.logger, position, undefined);
+				// Handed to no sink: each one known has failed it.
+				for (const { position } of targets) reportFailure(sources.logger, position, undefined);
 				return;
 			}
+			if (reentered) report(sources.logger, "warn", { type: shared.type }, "audit_sink_reentered");
 			await Promise.all(
-				sinks.map((target, position) =>
-					delivered(target, shared).then((ok) => {
+				targets.map(({ sink: target, position }) =>
+					(position === 0
+						? delivered(target, shared)
+						: insideHook.run(true, () => delivered(target, shared))
+					).then((ok) => {
 						if (!ok) reportFailure(sources.logger, position, shared.type);
 					}),
 				),
@@ -187,8 +207,17 @@ function reportFailure(
 	position: number,
 	type: string | undefined,
 ): void {
+	report(logger, "error", { sink: position, type }, "audit_sink_failed");
+}
+
+function report(
+	logger: () => Logger | undefined,
+	level: "error" | "warn",
+	fields: Record<string, unknown>,
+	message: string,
+): void {
 	try {
-		(logger() ?? consoleLogger).error({ sink: position, type }, "audit_sink_failed");
+		(logger() ?? consoleLogger)[level](fields, message);
 	} catch {
 		// A logger that throws must not fail the fan-out.
 	}
