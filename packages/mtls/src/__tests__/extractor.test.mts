@@ -55,7 +55,7 @@ const makeReq = (
 	headers: Record<string, string | undefined>,
 	remoteAddress: string | undefined = TRUSTED_PEER,
 ): Partial<Request> => ({
-	get: (name: string) => headers[name.toLowerCase()],
+	get: ((name: string) => headers[name.toLowerCase()]) as Request["get"],
 	socket: { remoteAddress } as unknown as Request["socket"],
 });
 
