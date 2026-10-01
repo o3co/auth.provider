@@ -65,6 +65,7 @@ export type {
 	NameFederationGrantIntentInput,
 	NoteFederationGrantRefreshFailureInput,
 	NoteMfaExemptSuccessInput,
+	NoteMfaFirstBindingInput,
 	ParkPendingConsentInput,
 	PendingConsentKeyspace,
 	PendingConsentStoreClient,

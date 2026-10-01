@@ -16,8 +16,8 @@
 
 /**
  * The MFA transaction, the subject lock state that bounds guessable proofs, a
- * session's account-email proof, the port that keeps them, and its
- * `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
+ * session's account-email proof, a subject's first-binding mark, the port
+ * that keeps them, and its `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
  * (the MFA transaction; attempts, lockout and rate limits; D24).
  *
  * A transaction is the short-lived, single-use record of one second-factor
@@ -557,6 +557,97 @@ export function checkSessionEmailProofQuestion(
 }
 
 /**
+ * `answer`, what `firstBindingAt(subject, nowMs)` answered, as the port
+ * promises it: `null` for no mark, or when it was noted — whole epoch
+ * milliseconds, no further ahead of `nowMs` than
+ * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS}. `undefined` for anything else, which
+ * the caller answers as the store's outage: a mark it cannot read trusts no
+ * session.
+ */
+export function readFirstBindingAt(answer: unknown, nowMs: number): number | null | undefined {
+	if (answer === null) return null;
+	return isEpochMs(answer) && answer <= nowMs + MFA_CLOCK_SKEW_ALLOWANCE_MS ? answer : undefined;
+}
+
+/** A subject's first-binding mark as a store keeps it. */
+export interface FirstBindingMark {
+	readonly atMs: number;
+	readonly untilMs: number;
+}
+
+/**
+ * Refuses, with a `RangeError` naming what is wrong, a first-binding mark a
+ * store cannot keep, on `storeNowMs`, its clock: `subject` a non-empty string;
+ * `atMs` and `untilMs` epoch milliseconds, `untilMs` after `atMs` and after
+ * `storeNowMs`, within the Date range; `atMs` no further ahead of `storeNowMs`
+ * than {@link MFA_CLOCK_SKEW_ALLOWANCE_MS}. Every adapter runs it before it
+ * notes a mark.
+ */
+export function checkFirstBindingNote(
+	subject: unknown,
+	atMs: unknown,
+	untilMs: unknown,
+	storeNowMs: number,
+): void {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.noteFirstBinding: ${what}`);
+	};
+	if (!isNonEmptyText(subject)) refuse("subject must be a non-empty string");
+	if (!isEpochMs(atMs)) refuse("atMs must be epoch milliseconds");
+	if (!isEpochMs(untilMs) || !isStorableExpiry(untilMs)) {
+		refuse("untilMs must be epoch milliseconds within the Date range");
+	}
+	if ((untilMs as number) <= (atMs as number)) refuse("untilMs must be after atMs");
+	if (!((untilMs as number) > storeNowMs)) refuse("untilMs must be after the store's clock");
+	if (!((atMs as number) <= storeNowMs + MFA_CLOCK_SKEW_ALLOWANCE_MS)) {
+		refuse("atMs must be no further ahead of the store's clock than MFA_CLOCK_SKEW_ALLOWANCE_MS");
+	}
+}
+
+/**
+ * Refuses, with a `RangeError`, a question `firstBindingAt` cannot answer:
+ * `subject` a non-empty string, `nowMs` an instant from the epoch within the
+ * Date range. Every adapter runs it first.
+ */
+export function checkFirstBindingQuestion(subject: unknown, nowMs: unknown): void {
+	if (!isNonEmptyText(subject)) {
+		throw new RangeError("MfaTransactionStore.firstBindingAt: subject must be a non-empty string");
+	}
+	if (typeof nowMs !== "number" || !isStorableExpiry(nowMs) || nowMs < 0) {
+		throw new RangeError(
+			"MfaTransactionStore.firstBindingAt: nowMs must be an instant from the epoch within the Date range",
+		);
+	}
+}
+
+/**
+ * The mark a store keeps of `held`, a mark that still stands on its clock,
+ * and `next`: the one noted later, or of two noted at the same time the one
+ * that ends later. Answers a copy of its two fields.
+ */
+export function laterFirstBindingMark(
+	held: FirstBindingMark,
+	next: FirstBindingMark,
+): FirstBindingMark {
+	const kept =
+		next.atMs > held.atMs || (next.atMs === held.atMs && next.untilMs > held.untilMs) ? next : held;
+	return { atMs: kept.atMs, untilMs: kept.untilMs };
+}
+
+/**
+ * What a store answers of `mark` asked about at `nowMs`, on `storeNowMs`,
+ * its clock: when it was noted, never moved earlier, while its `untilMs` is
+ * after both; else `null`. Every adapter answers through it.
+ */
+export function firstBindingAnswer(
+	mark: FirstBindingMark,
+	nowMs: number,
+	storeNowMs: number,
+): number | null {
+	return mark.untilMs > nowMs && mark.untilMs > storeNowMs ? mark.atMs : null;
+}
+
+/**
  * Whether `consumed`, what `consume(bound.id, bound.version)` answered other
  * than `null`, is the transaction the bound read returned: the same id,
  * version, purpose, subject and `redirectTo`, bound to the same binding, and
@@ -675,8 +766,8 @@ export type MfaSubjectAttemptReservation =
 export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 
 /**
- * Where MFA transactions, the subject lock state and a session's
- * account-email proof are kept.
+ * Where MFA transactions, the subject lock state, a session's account-email
+ * proof and a subject's first-binding mark are kept.
  *
  * Every operation is atomic on its own. A store that cannot answer throws:
  * an outage is `503`, never a verdict on a proof.
@@ -806,6 +897,28 @@ export interface MfaTransactionStore {
 	 * `RangeError` for what {@link checkSessionEmailProofQuestion} refuses.
 	 */
 	sessionEmailProofAt(subject: string, sid: string, nowMs: number): Promise<number | null>;
+
+	// A subject's first-binding mark: a session or a login authenticated no
+	// later than it may hold a stale enrollment witness. It does not stand in
+	// for the witness; it covers only the window in which one can be stale.
+	/**
+	 * Note that a first counting factor was bound for `subject`, or its
+	 * witness marked, at `atMs`, standing until `untilMs` on the store's clock.
+	 * Of the mark held and this one the store keeps
+	 * {@link laterFirstBindingMark}'s: a later one replaces an earlier one, and
+	 * an earlier one never replaces a later one. A `RangeError`, nothing
+	 * noted, for what {@link checkFirstBindingNote} refuses on the store's
+	 * clock.
+	 */
+	noteFirstBinding(subject: string, atMs: number, untilMs: number): Promise<void>;
+	/**
+	 * What {@link firstBindingAnswer} answers of `subject`'s mark, on the
+	 * store's clock: when it was noted, while it stands at `nowMs`; else
+	 * `null`. A `RangeError` for what {@link checkFirstBindingQuestion}
+	 * refuses. A store that cannot read the mark it holds rejects: an absent
+	 * mark trusts the session.
+	 */
+	firstBindingAt(subject: string, nowMs: number): Promise<number | null>;
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaTransactionStore}. */

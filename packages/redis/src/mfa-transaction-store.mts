@@ -17,8 +17,8 @@
 /**
  * Redis {@link MfaTransactionStore}: the single-use record of each
  * second-factor ceremony, the subject lock that bounds guessable proofs, the
- * email proof an operator reset requires, and the account-email proof given
- * in a session (see
+ * email proof an operator reset requires, the account-email proof given in a
+ * session, and a subject's first-binding mark (see
  * packages/core/docs/adr/2026-09-25-multi-factor-authentication.md).
  *
  * ```text
@@ -27,6 +27,7 @@
  * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
  * <keyPrefix>proof:{<subject>}                  STRING the email-proof requirement, with no TTL
  * <keyPrefix>session-proof:{<subject>}:<sid>    STRING a session's account-email proof, expiring at its end
+ * <keyPrefix>first-binding:{<subject>}          STRING a subject's first-binding mark, expiring at its end
  * ```
  *
  * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`).
@@ -61,10 +62,17 @@
  * this side's clock (`untilMs` less `now`, rounded up), and answered absent
  * at or past `untilMs` on that clock too. One that does not read back is
  * absent: losing a proof fails closed — the user proves again.
+ *
+ * A subject's first-binding mark is JSON `{atMs, untilMs}` kept the same way,
+ * written by one script that keeps the later of the mark held and the one
+ * noted. One that does not read back is an outage, never absent: an absent
+ * mark trusts the session it is there to distrust.
  */
 
 import { randomBytes } from "node:crypto";
 import {
+	checkFirstBindingNote,
+	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
 	checkMfaVersionAdvances,
@@ -72,6 +80,8 @@ import {
 	checkSessionEmailProofQuestion,
 	consoleLogger,
 	defineModule,
+	type FirstBindingMark,
+	firstBindingAnswer,
 	isStorableExpiry,
 	type MfaTransaction,
 	type MfaTransactionPatch,
@@ -236,6 +246,33 @@ function sessionProofOf(
 	}
 }
 
+/**
+ * The first-binding mark `text` holds, or `null` when there is none or it no
+ * longer stands on `storeNowMs`. Throws when it holds no mark it could have
+ * been written as (`checkFirstBindingNote`), naming nothing it read.
+ */
+function firstBindingMarkOf(
+	text: string | null,
+	subject: string,
+	storeNowMs: number,
+): FirstBindingMark | null {
+	if (text === null) return null;
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		value = undefined;
+	}
+	const { atMs, untilMs } = isObject(value) ? value : {};
+	if (typeof untilMs === "number" && untilMs <= storeNowMs) return null;
+	try {
+		checkFirstBindingNote(subject, atMs, untilMs, storeNowMs);
+	} catch {
+		throw new Error("MfaTransactionStore: a first-binding mark it cannot read");
+	}
+	return { atMs: atMs as number, untilMs: untilMs as number };
+}
+
 function checkInstant(nowMs: number, operation: string): void {
 	if (!isStorableExpiry(nowMs)) {
 		throw new RangeError(
@@ -261,6 +298,8 @@ export function createRedisMfaTransactionStore(
 	const proofKey = (subject: string): string => `${keyPrefix}proof:{${mfaKeyPart(subject)}}`;
 	const sessionProofKey = (subject: string, sid: string): string =>
 		`${keyPrefix}session-proof:{${mfaKeyPart(subject)}}:${mfaKeyPart(sid)}`;
+	const firstBindingKey = (subject: string): string =>
+		`${keyPrefix}first-binding:{${mfaKeyPart(subject)}}`;
 
 	return {
 		kind: "redis",
@@ -392,6 +431,26 @@ export function createRedisMfaTransactionStore(
 			const storeNowMs = clock();
 			const proof = sessionProofOf(text, subject, sid, storeNowMs);
 			return proof === null ? null : sessionEmailProofAnswer(proof, nowMs, storeNowMs);
+		},
+
+		async noteFirstBinding(subject, atMs, untilMs) {
+			const nowMs = clock();
+			checkFirstBindingNote(subject, atMs, untilMs, nowMs);
+			await client.noteFirstBinding(firstBindingKey(subject), {
+				value: JSON.stringify({ atMs, untilMs }),
+				atMs,
+				untilMs,
+				ttlMs: Math.ceil(untilMs - nowMs),
+				nowMs,
+			});
+		},
+
+		async firstBindingAt(subject, nowMs) {
+			checkFirstBindingQuestion(subject, nowMs);
+			const text = await client.firstBindingMark(firstBindingKey(subject));
+			const storeNowMs = clock();
+			const mark = firstBindingMarkOf(text, subject, storeNowMs);
+			return mark === null ? null : firstBindingAnswer(mark, nowMs, storeNowMs);
 		},
 	};
 }

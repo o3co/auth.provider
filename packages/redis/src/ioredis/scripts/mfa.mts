@@ -15,8 +15,8 @@
  */
 
 /**
- * The MFA stores' scripts: a factor's version compare-and-set, a transaction's operations, and
- * the subject lock state's reserve, settle and exempt success. See
+ * The MFA stores' scripts: a factor's version compare-and-set, a transaction's operations, the
+ * subject lock state's reserve, settle and exempt success, and a subject's first-binding mark. See
  * packages/core/docs/adr/2026-09-25-multi-factor-authentication.md.
  */
 
@@ -394,6 +394,37 @@ keep()
 return 1
 `;
 
+/**
+ * `MfaTransactionStoreClient.noteFirstBinding`: keeps the later of the mark held and the one
+ * noted, as core's `laterFirstBindingMark` does. `KEYS[1]` = the subject's mark; `ARGV[1]` =
+ * the mark as written, `ARGV[2]` = its `atMs`, `ARGV[3]` = its `untilMs`, `ARGV[4]` = its
+ * lifetime in milliseconds, `ARGV[5]` = the store's clock. Returns 1 when it wrote, 0 when the
+ * mark held stands and was kept. A held value that is no mark — not JSON, a time not whole or
+ * before the epoch, an end not after its time or past the Date range — is replaced: what does
+ * not read back is never kept over a mark that does.
+ */
+const LUA_MFA_FIRST_BINDING_NOTE = `
+local function mark_of(text)
+  local ok, mark = pcall(cjson.decode, text)
+  if not ok or type(mark) ~= 'table' then return nil end
+  local at, untl = mark.atMs, mark.untilMs
+  if type(at) ~= 'number' or type(untl) ~= 'number' then return nil end
+  if at ~= at or at < 0 or math.floor(at) ~= at or math.floor(untl) ~= untl then return nil end
+  if not (untl > at) or untl > 8640000000000000 then return nil end
+  return at, untl
+end
+local held = redis.call('GET', KEYS[1])
+if held then
+  local at, untl = mark_of(held)
+  if at ~= nil and untl > tonumber(ARGV[5]) then
+    local next_at, next_until = tonumber(ARGV[2]), tonumber(ARGV[3])
+    if at > next_at or (at == next_at and untl >= next_until) then return 0 end
+  end
+end
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[4])
+return 1
+`.trim();
+
 export const MFA_TX_CREATE = defineScript(LUA_MFA_TX_CREATE);
 export const MFA_TX_UPDATE = defineScript(LUA_MFA_TX_UPDATE);
 export const MFA_TX_RESERVE_ATTEMPT = defineScript(LUA_MFA_TX_RESERVE_ATTEMPT);
@@ -402,3 +433,4 @@ export const MFA_TX_CONSUME = defineScript(LUA_MFA_TX_CONSUME);
 export const MFA_SUBJECT_RESERVE = defineScript(LUA_MFA_SUBJECT_RESERVE);
 export const MFA_SUBJECT_SETTLE = defineScript(LUA_MFA_SUBJECT_SETTLE);
 export const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);
+export const MFA_FIRST_BINDING_NOTE = defineScript(LUA_MFA_FIRST_BINDING_NOTE);

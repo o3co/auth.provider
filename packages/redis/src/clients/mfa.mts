@@ -16,8 +16,8 @@
 
 /**
  * The MFA stores' clients: the enrolled factors, one hash per subject; the transactions, a
- * subject's lock state and the email-proof requirement; and the durability report both are
- * checked by at boot.
+ * subject's lock state, the email-proof requirement, a session's proof and a subject's
+ * first-binding mark; and the durability report both are checked by at boot.
  */
 
 import type {
@@ -158,6 +158,18 @@ export interface NoteMfaExemptSuccessInput {
 	readonly policy: MfaLockoutPolicy;
 }
 
+/** A subject's first-binding mark to note, as the store's key keeps it. */
+export interface NoteMfaFirstBindingInput {
+	/** The mark as written: JSON `{atMs, untilMs}`. */
+	readonly value: string;
+	readonly atMs: number;
+	readonly untilMs: number;
+	/** Milliseconds from when the server takes the write to `untilMs`, on the store's clock. */
+	readonly ttlMs: number;
+	/** The store's clock: a mark held whose `untilMs` is at or before it no longer stands. */
+	readonly nowMs: number;
+}
+
 /**
  * Backing client for the `MfaTransactionStore` adapter (ADR
  * 2026-09-25-multi-factor-authentication, D8, D21, D25).
@@ -245,6 +257,14 @@ export interface MfaTransactionStoreClient {
 	recordSessionEmailProof(key: string, value: string, ttlMs: number): Promise<void>;
 	/** The session's email proof at `key` (`GET`); `null` when there is none. */
 	sessionEmailProof(key: string): Promise<string | null>;
+	/**
+	 * Atomically: write `input.value` at `key` (`SET … PX input.ttlMs`) unless the mark held
+	 * there still stands at `input.nowMs` and was noted after `input.atMs`, or at it and ends
+	 * no earlier than `input.untilMs`. A held value that is not a mark is replaced.
+	 */
+	noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<void>;
+	/** The subject's first-binding mark at `key` (`GET`); `null` when there is none. */
+	firstBindingMark(key: string): Promise<string | null>;
 	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }

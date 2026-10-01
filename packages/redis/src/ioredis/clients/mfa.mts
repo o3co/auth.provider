@@ -27,6 +27,7 @@ import { runScript } from "../commands.mjs";
 import { redisDurability } from "../durability.mjs";
 import {
 	MFA_FACTOR_UPDATE,
+	MFA_FIRST_BINDING_NOTE,
 	MFA_SUBJECT_EXEMPT,
 	MFA_SUBJECT_RESERVE,
 	MFA_SUBJECT_SETTLE,
@@ -187,6 +188,23 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			await io.set(key, value, "PX", ttlMs);
 		},
 		async sessionEmailProof(key) {
+			return await io.get(key);
+		},
+		async noteFirstBinding(key, input) {
+			await runScript(
+				io,
+				MFA_FIRST_BINDING_NOTE,
+				[key],
+				[
+					input.value,
+					String(input.atMs),
+					String(input.untilMs),
+					String(input.ttlMs),
+					String(input.nowMs),
+				],
+			);
+		},
+		async firstBindingMark(key) {
 			return await io.get(key);
 		},
 		durability: () => redisDurability(io),
