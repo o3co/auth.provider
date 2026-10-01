@@ -15,12 +15,12 @@
  */
 
 // This directory is its own npm project, run against a live provider. Its own
-// config stops vitest's upward search, which would otherwise find the
-// template's config and collect nothing here.
+// config fixes what this project collects; no config of the template's around
+// it decides that, whichever vitest the lockfile carries.
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	test: {
-		include: ["index.test.js"],
+		include: ["*.test.js"],
 	},
 });
