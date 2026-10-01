@@ -143,7 +143,7 @@ describe("generateSixDigitCode", () => {
 		}
 	});
 
-	it("draws from the CSPRNG by default: six ASCII digits, rarely the same twice", () => {
+	it("draws by default six ASCII digits, more than 45 of 50 draws distinct", () => {
 		const codes = Array.from({ length: 50 }, () => generateSixDigitCode());
 		for (const code of codes) expect(code).toMatch(/^[0-9]{6}$/);
 		expect(new Set(codes).size).toBeGreaterThan(45);

@@ -218,23 +218,34 @@ describe("a login with the email factor", () => {
 		expect(capped.sender.sent.at(-1)?.expiresAtMs).toBe(T0 + 60_000);
 	});
 
-	it("keeps the code across a wrong attempt, and a resend refuses the earlier code while the latest verifies", async () => {
+	it("keeps the code across a wrong attempt: the same code then verifies", async () => {
+		const { app, record, sender } = await withEmailFactor();
+		const { agent, transaction } = await beginLogin(app);
+		await challenge(agent, transaction, record.id);
+		const code = lastCode(sender);
+
+		const wrong = await verify(agent, transaction, record.id, otherThan(code));
+		expect(wrong.status).toBe(401);
+		expect(wrong.body).toMatchObject({ error: "mfa_invalid", attempts_remaining: 4 });
+
+		expect((await verify(agent, transaction, record.id, code)).status).toBe(200);
+	});
+
+	it("refuses the earlier code once a resend mailed another, and verifies the latest", async () => {
 		const { app, record, sender } = await withEmailFactor();
 		const { agent, transaction } = await beginLogin(app);
 		await challenge(agent, transaction, record.id);
 		const earlier = lastCode(sender);
-
-		const wrong = await verify(agent, transaction, record.id, otherThan(earlier));
-		expect(wrong.status).toBe(401);
-		expect(wrong.body).toMatchObject({ error: "mfa_invalid", attempts_remaining: 4 });
-
-		await challenge(agent, transaction, record.id);
-		const latest = lastCode(sender);
-		expect(sender.sent).toHaveLength(2);
-		if (latest !== earlier) {
-			const stale = await verify(agent, transaction, record.id, earlier);
-			expect(stale.status).toBe(401);
+		// A resend draws again; a draw equal to the earlier one (one in a million) is drawn once more.
+		let latest = earlier;
+		for (let tries = 0; latest === earlier && tries < 5; tries++) {
+			expect((await challenge(agent, transaction, record.id)).status).toBe(200);
+			latest = lastCode(sender);
 		}
+		expect(latest).not.toBe(earlier);
+
+		const stale = await verify(agent, transaction, record.id, earlier);
+		expect(stale.status).toBe(401);
 		expect((await verify(agent, transaction, record.id, latest)).status).toBe(200);
 	});
 
@@ -464,10 +475,10 @@ describe("enrolling the email factor", () => {
 		expect(email?.binding).toBe("mfa");
 	});
 
-	it("answers a session's start with the code's life, not a longer transaction's", async () => {
+	it("answers a session's start with the code's life, not a longer transaction's, which keeps its own", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const seeded = await seedTotp(factorStore);
-		const { app, userSessionStore } = await composed({
+		const { app, userSessionStore, transactionStore } = await composed({
 			factorStore,
 			totp: true,
 			codeTtlSeconds: 120,
@@ -477,9 +488,10 @@ describe("enrolling the email factor", () => {
 		const begun = await enrollFromAccount(agent, KIND);
 
 		expect(begun.body).toMatchObject({ sent_to: SENT_TO, expires_in: 120 });
+		expect((await transactionStore.get(begun.body.transaction))?.expiresAtMs).toBe(T0 + 600_000);
 	});
 
-	it("refuses a second email factor for the same address as a duplicate", async () => {
+	it("refuses (401) a second email factor for the same address, and keeps one record", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const seeded = await seedTotp(factorStore);
 		await seedFactor(factorStore, KIND, { addressDigest: recordedDigest(ALICE.email) });

@@ -140,7 +140,7 @@ describe("the email factor's challenge", () => {
 		}
 	});
 
-	it("draws another code at each challenge", async () => {
+	it("draws a code at each challenge: 20 challenges give more than 15 distinct codes", async () => {
 		const data = { addressDigest: addressDigest(USER.email) };
 		const codes = new Set<string>();
 		for (let n = 0; n < 20; n++) codes.add((await challenged(data)).mail?.code as string);
