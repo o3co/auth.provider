@@ -444,7 +444,7 @@ describe("POST /session/mfa/factors/rename", () => {
 					store: "mfa_factor",
 					step: "update",
 					err: expect.objectContaining({
-						message: "the store answered outside its port's contract",
+						detail: "the store answered outside its port's contract",
 					}),
 				}),
 				"mfa_store_unavailable",

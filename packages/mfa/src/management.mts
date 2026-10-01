@@ -27,7 +27,8 @@
  *   with that key's id.
  * - `POST /factors/rename {factor_id, label}`, admitted as `mfa.manage`: the
  *   label written by compare-and-set at the version read, the data and last use
- *   as read; a lost race is `409`, nothing retried.
+ *   as read; a lost race is `409`, nothing retried; an answer without that label
+ *   or that last use is outside the port, `503`.
  * - `POST /factors/remove {factor_id}`, admitted as `mfa.manage`, run whole by
  *   `factorSet.mts` (the read, this file's refusal, the removal, the witness),
  *   held to the start the admission carries — the subject's generation read
@@ -106,6 +107,32 @@ export interface MfaManagementOptions {
 	) => Promise<(Action extends "mfa.manage" ? MfaManagingSession : MfaCeremonySession) | undefined>;
 	readonly logger: Logger;
 	readonly auditSink: AuditSink | undefined;
+}
+
+/**
+ * Whether `written`, a rename the store answered at the next version, holds
+ * the label asked and the record's last use: each read once, the time
+ * compared by its value.
+ */
+function keptAsAsked(
+	written: MfaFactorRecord,
+	label: string,
+	record: Pick<MfaFactorRecord, "lastUsedAt">,
+): boolean {
+	try {
+		const { label: kept, lastUsedAt } = written as {
+			readonly label: unknown;
+			readonly lastUsedAt: unknown;
+		};
+		const expected = record.lastUsedAt;
+		const sameUse =
+			expected === undefined
+				? lastUsedAt === undefined
+				: lastUsedAt instanceof Date && lastUsedAt.getTime() === expected.getTime();
+		return kept === label && sameUse;
+	} catch {
+		return false;
+	}
 }
 
 /** A date as the list answers it; none for one that is not a valid date. */
@@ -227,7 +254,7 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 				expectedVersion: record.version,
 				next: { data: record.data },
 			};
-			if (!isMfaFactorUpdateWritten(written, asked)) {
+			if (!isMfaFactorUpdateWritten(written, asked) || !keptAsAsked(written, label, record)) {
 				unavailable(res, "update", OUTSIDE_CONTRACT);
 				return;
 			}
