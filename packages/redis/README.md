@@ -751,16 +751,23 @@ the same count of the week — judged on the time the
 caller passes; [`mfa-transaction-store.test.mts`](__tests__/mfa-transaction-store.test.mts)
 holds the two stores to the same answers over random walks of the
 operations. What a script forgets, and what Redis reclaims, is judged no
-later than the server's clock less a day. While a run is counted the keys
-carry no TTL — only a success, an exempt success while the attempts up to
-its time are fewer than the `hardLimit` the script is handed, or
-`clearSubjectState` ends one; at or past it they, and the hard hold, stand
-through an exempt success — and once none is they expire a day after the
-last failure stops counting. A missing or non-numeric `hardLimit` argument
-is refused before anything is read. During a rolling deploy from a release
-whose exempt script ends the run whatever its length, an exempt success
-routed to an old replica ends the run, a hard hold included, and no new
-replica restores it: drain the old replicas before relying on the hard hold.
+later than the server's clock less a day. The hard hold is the lock hash's
+`hard` field, the time it was fixed: the reserve or exempt script that finds
+the run — reservations in flight counted — at the `hardLimit` it is handed
+writes it (`HSETNX`) in the same step, the reservation that reaches it being
+let through; from then every reservation is refused `hard` whatever
+`hardLimit` it is handed, the exempt script ends nothing, and a settle
+lifts nothing; only `clearSubjectState` removes it. While a run is counted
+or the hold stands the keys carry no TTL — only a success, an exempt
+success before the hold, or `clearSubjectState` ends a run — and once
+neither is they expire a day after the last failure stops counting. A
+`hard` field the scripts cannot read refuses every lock operation, as any
+other field does. A missing or non-numeric `hardLimit` argument is refused
+before anything is read. During a rolling deploy, a replica of a release
+that does not write `hard` neither reads nor keeps it: its exempt script
+can end a run at the limit, its reserve script lets attempts through below
+the limit, and once its keys expire the field goes with them. Drain the old
+replicas before relying on the hard hold.
 A refusal answers whether it is the first since an attempt was
 let through (`first`) from the lock hash's `held` field, which the first
 refusal of a hold writes and an attempt let through deletes, so a subject
