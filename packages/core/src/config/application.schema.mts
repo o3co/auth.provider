@@ -117,13 +117,13 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 ];
 
 /**
- * A duration read strictly: a number, or the plain decimal string an
- * environment variable arrives as. Not `z.coerce.number()`, which reads `null`
- * and `[]` as 0, `true` as 1 and `"1e3"` as 1000: a malformed duration would be
- * normalised (`tombstoneRetention: null` disabling tombstones) instead of
- * failing boot naming the key.
+ * A number read strictly: a number, or the plain decimal string an environment
+ * variable arrives as, whitespace around its digits allowed. Not
+ * `z.coerce.number()`, which reads `""`, `null` and `[]` as 0, `true` as 1 and
+ * `"1e3"` as 1000: a malformed value would be normalised instead of failing
+ * boot naming the key. `bounds` decide every other rule.
  */
-export const durationFromEnv = (bounds: z.ZodNumber) =>
+export const numberFromEnv = (bounds: z.ZodNumber) =>
 	environmentCoercer(
 		z.preprocess((value) => {
 			if (typeof value === "number") return value;
@@ -133,6 +133,12 @@ export const durationFromEnv = (bounds: z.ZodNumber) =>
 			return value;
 		}, bounds),
 	);
+
+/**
+ * A duration read strictly, as {@link numberFromEnv} reads a number: a
+ * `tombstoneRetention: null` fails boot instead of disabling tombstones.
+ */
+export const durationFromEnv = numberFromEnv;
 
 const jwtSchemaBase = z.object({
 	// Required: the issuer belongs to the deployment, never to a request. An
