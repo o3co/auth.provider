@@ -222,6 +222,10 @@ export {
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
+	// Any other whole number read strictly from a number or a string of
+	// decimal digits a variable carries, for the packages outside core that
+	// declare a section's schema.
+	wholeNumberFromEnv,
 } from "./config/application.schema.mjs";
 // Transitional: the switches that choose a composition root's modules, read
 // before it knows them. `createApp` takes the resolved configuration itself,

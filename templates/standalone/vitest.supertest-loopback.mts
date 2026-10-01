@@ -134,7 +134,7 @@ function supertestFor(testPath: string): TestPrototype | undefined {
 		supertest = createRequire(manifestPath)("supertest");
 	} catch (cause) {
 		throw new Error(
-			`vitest.supertest-loopback.mts: ${manifestPath} declares supertest, but it cannot be loaded from there; the #556 loopback guard would be off.`,
+			`vitest.supertest-loopback.mts: ${manifestPath} declares supertest, but it cannot be loaded from there; the supertest loopback guard would be off.`,
 			{ cause },
 		);
 	}
@@ -142,7 +142,7 @@ function supertestFor(testPath: string): TestPrototype | undefined {
 	if (typeof proto?.serverAddress !== "function" || typeof proto.end !== "function") {
 		throw new Error(
 			"vitest.supertest-loopback.mts: supertest no longer exposes Test.prototype.serverAddress/end; " +
-				"re-check the #556 loopback guard against the installed supertest before removing it.",
+				"re-check the supertest loopback guard against the installed supertest before removing it.",
 		);
 	}
 	return proto;
@@ -271,7 +271,7 @@ function patch(proto: TestPrototype): void {
 const { testPath } = expect.getState();
 if (!testPath) {
 	throw new Error(
-		"vitest.supertest-loopback.mts: vitest did not say which test file this setup runs for, so the #556 loopback guard cannot find supertest.",
+		"vitest.supertest-loopback.mts: vitest did not say which test file this setup runs for, so the supertest loopback guard cannot find supertest.",
 	);
 }
 const proto = supertestFor(testPath);

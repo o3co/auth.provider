@@ -700,17 +700,17 @@ export const createOAuthRouter = async (
 			logoutRoute.createRouter(express, {
 				keyStore,
 				issuer: canonicalIssuer,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				userSessionStore: userSessionStore!,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				sessionRPRegistry: sessionRPRegistry!,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				sessionFamilyIndex: sessionFamilyIndex!,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				sessionFederationIndex: sessionFederationIndex!,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				federationTokenStore: federationTokenStore!,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever logoutSupported, the gate above, is truthy
 				refreshTokenFamilyRevocation: refreshTokenFamilyRevocation!,
 				clientRepository,
 				getFederationProviders,
@@ -725,13 +725,13 @@ export const createOAuthRouter = async (
 		router.use(
 			federationTokenRoute.createRouter(express, {
 				keyStore,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
 				refreshTokenFamilyRevocation: refreshTokenFamilyRevocation!,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
 				userSessionStore: userSessionStore!,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
 				sessionFederationIndex: sessionFederationIndex!,
-				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				// biome-ignore lint/style/noNonNullAssertion: set whenever federationTokenSupported, the gate above, is truthy
 				federationTokenStore: federationTokenStore!,
 				clientRepository,
 				getFederationProviders,

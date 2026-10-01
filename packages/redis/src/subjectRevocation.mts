@@ -51,7 +51,7 @@ export interface RedisSubjectRevocationOptions {
  * the caller's to shorten: it must outlive a grant lifetime the code bounds
  * absolutely, even when the caller knows nothing of grants. A sessions-only
  * stamp sets no such floor.
- * See ADR 2026-09-17-federation-grants-offline-delegation, D13.
+ * See `packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md`.
  */
 export function createRedisSubjectRevocation(
 	deps: RedisSubjectRevocationOptions,
@@ -70,9 +70,9 @@ export function createRedisSubjectRevocation(
 	) {
 		throw new Error(
 			"createRedisSubjectRevocation: this driver has no `setRevocationBoundaries`. " +
-				"It predates the two revocation boundaries of #593 (D13) and can only advance " +
-				"one, so a sessions-only stamp made through it would revoke the subject's " +
-				"federation grants. Upgrade the driver rather than the adapter.",
+				"Without it a driver can advance only one revocation boundary, so a sessions-only " +
+				"stamp made through it would revoke the subject's federation grants. Upgrade the " +
+				"driver rather than the adapter.",
 		);
 	}
 

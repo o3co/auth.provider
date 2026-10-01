@@ -837,11 +837,13 @@ describe("createDPoPMechanism — protected-resource profile (ath, RFC 9449 §7.
 
 describe("createDPoPMechanism — the issuer is required at construction", () => {
 	it("throws when no issuer is configured", () => {
-		expect(() =>
+		const construct = () =>
 			createDPoPMechanism({
 				replaySeenSet: createMemoryReplaySeenSet(),
-			} as unknown as Parameters<typeof createDPoPMechanism>[0]),
-		).toThrow(/oauth\.jwt\.issuer/);
+			} as unknown as Parameters<typeof createDPoPMechanism>[0]);
+		expect(construct).toThrow(/oauth\.jwt\.issuer/);
+		// The refusal states the rule it enforces, with no issue reference.
+		expect(construct).not.toThrow(/#\d/);
 	});
 
 	it("throws when the issuer is a bare host — the shape a Host header supplies", () => {

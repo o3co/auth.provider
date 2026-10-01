@@ -19,7 +19,6 @@
  * the server's clock, and the subject revocation record's forward-only write.
  */
 
-import { createHash } from "node:crypto";
 import { defineScript } from "./define.mjs";
 
 /**
@@ -56,7 +55,7 @@ return 0
  * `v1:` records exist an old writer can move the sessions boundary backward, so drain old
  * writers first. See packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md.
  */
-export const LUA_SET_REVOCATION_BOUNDARIES = `
+const LUA_SET_REVOCATION_BOUNDARIES = `
 local mode = ARGV[1]
 -- What a Date can hold (ECMA-262). A stored value outside it is not a
 -- boundary: the read path refuses it, and carrying it forward here would
@@ -130,11 +129,6 @@ end
 return value
 `.trim();
 
-/** See {@link LUA_COMPARE_AND_DELETE_SHA} for why the digest is precomputed. */
-export const LUA_SET_REVOCATION_BOUNDARIES_SHA = createHash("sha1")
-	.update(LUA_SET_REVOCATION_BOUNDARIES)
-	.digest("hex");
-
 /**
  * Sweep-then-list for the subject session index. `KEYS[1]` = the subject's sorted set; returns
  * the members still live.
@@ -144,14 +138,13 @@ export const LUA_SET_REVOCATION_BOUNDARIES_SHA = createHash("sha1")
  * between them. One script makes the sweep and the read agree on the boundary. A
  * non-deterministic `TIME` is fine: Redis 7 replicates scripts by their effects.
  */
-export const LUA_PRUNE_AND_LIST = `
+const LUA_PRUNE_AND_LIST = `
 local t = redis.call("TIME")
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", now)
 return redis.call("ZRANGEBYSCORE", KEYS[1], now, "+inf")
 `.trim();
 
-/** See {@link LUA_COMPARE_AND_DELETE_SHA} for why the digest is precomputed. */
-export const LUA_PRUNE_AND_LIST_SHA = createHash("sha1").update(LUA_PRUNE_AND_LIST).digest("hex");
-
 export const REPLACE_IF_UNCHANGED = defineScript(LUA_REPLACE_IF_UNCHANGED);
+export const SET_REVOCATION_BOUNDARIES = defineScript(LUA_SET_REVOCATION_BOUNDARIES);
+export const PRUNE_AND_LIST = defineScript(LUA_PRUNE_AND_LIST);

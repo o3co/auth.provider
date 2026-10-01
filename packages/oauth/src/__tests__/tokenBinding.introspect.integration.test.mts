@@ -32,13 +32,14 @@ import {
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { clientEntries, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt, decodeProtectedHeader, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -60,14 +61,14 @@ const fullConfig = {
 } as unknown as AppConfig;
 
 const codeRepoStub: CodeRepository = {
-	createCode: async () => ({ code: "x", client_id: TEST_CLIENT_ID, redirect_uri: "" }),
+	createCode: async () => codeRecord({ code: "x", client_id: TEST_CLIENT_ID, redirect_uri: "" }),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
 };
 
 const clientRepo = new InMemoryClientRepository(
-	new Map([
+	clientEntries([
 		[
 			TEST_CLIENT_ID,
 			{

@@ -26,6 +26,7 @@
  */
 
 import type {
+	FederationGrantLodgingResult,
 	FederationGrantReauthorizationResult,
 	FederationGrantTokenResult,
 } from "@o3co/auth-provider-core";
@@ -166,7 +167,10 @@ describe("serializeFederationGrantTokenResult", () => {
 });
 
 describe("serializeFederationGrantLodgingRefusal", () => {
-	type Refusal = Exclude<FederationGrantReauthorizationResult, { ok: true }>;
+	type Refusal = Exclude<
+		FederationGrantLodgingResult | FederationGrantReauthorizationResult,
+		{ ok: true }
+	>;
 	const refusal = (fields: Record<string, unknown>) => ({ ok: false, ...fields }) as Refusal;
 
 	it("renders every refusal lodging can give as its status and error body", () => {

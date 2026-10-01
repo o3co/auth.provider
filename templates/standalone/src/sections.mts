@@ -34,6 +34,7 @@ import {
 	MAX_KID_LENGTH,
 	MAX_TRUST_PROXY_HOPS,
 	normalizeAllowedOrigins,
+	wholeNumberFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
@@ -144,6 +145,21 @@ const allowedOriginsSchema = z
 		});
 	});
 
+const PORT_RULE =
+	"http.port must be a port number from 0 to 65535 in decimal digits, 0 letting the OS choose a free port (HTTP_PORT); an exported-but-empty HTTP_PORT is not one";
+
+/**
+ * `http.port`, read strictly: an empty or non-decimal value fails boot instead
+ * of reading as 0, which would listen on a port the OS picks at random.
+ */
+const portSchema = wholeNumberFromEnv(
+	z
+		.number({ error: PORT_RULE })
+		.int({ error: PORT_RULE })
+		.min(0, { error: PORT_RULE })
+		.max(65_535, { error: PORT_RULE }),
+);
+
 /**
  * `http`: the listener's port, the trusted forwarding hops, the readiness
  * deadline, and the CORS list. The deadline is bounded both ways, because
@@ -152,7 +168,7 @@ const allowedOriginsSchema = z
  */
 export const httpSectionSchema = z
 	.object({
-		port: z.coerce.number(),
+		port: portSchema,
 		trustProxy: trustProxySchema,
 		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
 		cors: z.object({ allowedOrigins: allowedOriginsSchema }).strict(),

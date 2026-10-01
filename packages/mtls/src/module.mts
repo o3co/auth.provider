@@ -336,11 +336,12 @@ export const mtlsModule = defineModule<never, "logger", typeof mtlsConfigSchema>
 				// (`tlsChain.mts`) and is not restricted.
 				if (cfg.mode === "pki" && cfg.source === "tls-layer") {
 					throw new Error(
-						'mtlsModule: mtls.mode = "pki" with source = "tls-layer" is not supported in Phase 3. ' +
-							"The narrow PKI mode requires the intermediate chain (e.g., the Envoy XFCC " +
-							"Chain= parameter); TLS-layer full-chain extraction is deferred to a future " +
-							'phase. Use source = "header" with certHeaderDialect = "envoy" for PKI mode, ' +
-							'or use mode = "self-signed" with TLS-layer source.',
+						'mtlsModule: mtls.mode = "pki" with source = "tls-layer" is not supported. ' +
+							"The narrow PKI mode takes the intermediate chain from the forwarded " +
+							"certificate header (e.g., the Envoy XFCC Chain= parameter), never from the TLS " +
+							'session. Use source = "header" with certHeaderDialect = "envoy" for PKI mode, ' +
+							'mode = "full-pki", which reads the chain from the TLS session, or ' +
+							'mode = "self-signed" with TLS-layer source.',
 					);
 				}
 

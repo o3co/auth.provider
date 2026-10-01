@@ -3317,6 +3317,146 @@ describe("consent — what an outage logs", () => {
 	});
 });
 
+describe("consent — what an outage audits", () => {
+	/** A question parked for alice's browser `b-1`. */
+	async function asked(w: World) {
+		const lodged = await w.lodge();
+		w.signIn("b-1");
+		return { ...lodged, challenge: await w.challengeFor(lodged.handle, "b-1") };
+	}
+
+	/** Every authorization_failed written, without its timestamp and request metadata. */
+	const failures = async (w: World) => {
+		await w.background.drain();
+		return w.events
+			.filter((e) => e.type === "federation.grant.authorization_failed")
+			.map(({ clientId, subject, details }) => ({ clientId, subject, details }));
+	};
+
+	it.each(["getConsent", "getIntent"] as const)(
+		"audits %s failing at the read as unavailable, naming no flow",
+		async (method) => {
+			const w = world();
+			const { challenge } = await asked(w);
+			w.state.faults.set(method, 0);
+			const response = await w.page(challenge, "b-1");
+			expect(response.status).toBe(503);
+			expect(await failures(w)).toEqual([
+				{
+					clientId: "",
+					subject: "",
+					details: {
+						correlationId: response.headers["x-request-id"],
+						grantId: "",
+						outcome: "unavailable",
+						operation: "connect",
+					},
+				},
+			]);
+		},
+	);
+
+	it("audits a client registry that could not describe the client as unavailable with the flow's grant, client, subject and connection", async () => {
+		const w = world();
+		const { challenge, grantId } = await asked(w);
+		// The judgement's own read succeeds; the description's fails.
+		w.state.faults.set("findById", 1);
+		const response = await w.page(challenge, "b-1");
+		expect(response.status).toBe(503);
+		expect(response.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "client registry unavailable",
+		});
+		expect(await failures(w)).toEqual([
+			{
+				clientId: CLIENT.clientId,
+				subject: "alice",
+				details: {
+					correlationId: "corr-1",
+					grantId,
+					connection: CONNECTION.name,
+					outcome: "unavailable",
+					operation: "connect",
+				},
+			},
+		]);
+	});
+
+	/** Another flow, already upstream, holding the state the next answer is given. */
+	const collidingState = async (w: World) => {
+		const first = await asked(w);
+		w.state.ids.push("same-state", "nonce-1", "verifier-1");
+		expect((await w.answer({ challenge: first.challenge, decision: "accept" }, "b-1")).status).toBe(
+			303,
+		);
+		return () => w.state.ids.push("same-state", "nonce-2", "verifier-2");
+	};
+
+	it.each([
+		{
+			path: "an accept the intent store cannot record",
+			decision: "accept",
+			description: "storage",
+			arrange: async (w: World) => () => w.state.faults.set("answerConsent", 0),
+		},
+		{
+			path: "a deny the intent store cannot record",
+			decision: "deny",
+			description: "storage",
+			arrange: async (w: World) => () => w.state.faults.set("answerConsent", 0),
+		},
+		{
+			path: "an upstream state another flow already holds",
+			decision: "accept",
+			description: "storage",
+			arrange: collidingState,
+		},
+		{
+			path: "an upstream URL that could not be built",
+			decision: "accept",
+			description: "upstream_unavailable",
+			arrange: async (w: World) => () => {
+				w.state.authorizerThrows = true;
+			},
+		},
+		{
+			path: "a federation that lost the capability",
+			decision: "accept",
+			description: "upstream_unavailable",
+			arrange: async (w: World) => () => {
+				w.state.authorizerMissing = true;
+			},
+		},
+	] as const)(
+		"audits $path as unavailable with the flow's grant, client, subject and connection",
+		async ({ decision, description, arrange }) => {
+			const w = world();
+			const fail = await arrange(w);
+			const { challenge, grantId } = await asked(w);
+			fail();
+			const response = await w.answer({ challenge, decision }, "b-1");
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: description,
+			});
+			expect(await failures(w)).toEqual([
+				{
+					clientId: CLIENT.clientId,
+					subject: "alice",
+					details: {
+						correlationId: "corr-1",
+						grantId,
+						connection: CONNECTION.name,
+						outcome: "unavailable",
+						operation: "connect",
+					},
+				},
+			]);
+		},
+	);
+});
+
 describe("the callback — what an outage logs", () => {
 	const unavailable = async (w: World, arrange: () => void, browser = "b-1", state?: string) => {
 		const a = state === undefined ? await approved(w, browser) : { state, grantId: "" };
@@ -3553,6 +3693,33 @@ describe("the callback — what an outage logs", () => {
 			site: "callback",
 			err: { name: "Error", detail: "injected: configuration unreadable" },
 		});
+	});
+});
+
+describe("the callback — what an outage audits", () => {
+	it("audits a transaction that could not be spent as temporarily_unavailable, naming no flow", async () => {
+		const w = world();
+		const { state } = await approved(w);
+		w.state.faults.set("consumeTransaction", 0);
+		const response = await callback(w, { state, code: "c" }, "b-1");
+		expect(response.status).toBe(503);
+		await w.background.drain();
+		expect(
+			w.events
+				.filter((e) => e.type === "federation.grant.authorization_failed")
+				.map(({ clientId, subject, details }) => ({ clientId, subject, details })),
+		).toEqual([
+			{
+				clientId: "",
+				subject: "",
+				details: {
+					correlationId: response.headers["x-request-id"],
+					grantId: "",
+					outcome: "temporarily_unavailable",
+					operation: "connect",
+				},
+			},
+		]);
 	});
 });
 

@@ -242,8 +242,8 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 					"Chain= parameter). Use " +
 					'source = "header" with certHeaderDialect = "envoy" and a trustedProxies ' +
 					"allowlist for PKI mode, or use " +
-					'mode = "self-signed" with TLS-layer source, or mode = "full-pki" which ' +
-					"reads the chain from the TLS session (#341).",
+					'mode = "self-signed" with TLS-layer source, or mode = "full-pki", which ' +
+					"reads the chain from the TLS session.",
 			);
 		}
 	}

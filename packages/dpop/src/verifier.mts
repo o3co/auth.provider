@@ -213,7 +213,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				"deployment's canonical issuer (config `oauth.jwt.issuer`), and its origin is what " +
 				"every DPoP proof's `htu` is checked against — reconstructing that origin from " +
 				"`req.protocol` and the `Host` header would let a caller behind a trusted proxy " +
-				"choose the value its own proof has to match (o3co/auth.provider#292).",
+				"choose the value its own proof has to match.",
 		);
 	}
 	// `URL.origin` is scheme + host + port with the default port elided —
