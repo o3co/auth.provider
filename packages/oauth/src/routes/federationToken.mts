@@ -181,7 +181,8 @@ const checkCallerStanding = async (
 const MIN_REFRESH_BUFFER_MS = REFRESH_FLOOR_MS;
 const MAX_REFRESH_BUFFER_MS = 2 ** 31 - 1;
 const DEFAULT_MAX_TOKEN_LIFETIME_MS = 86_400_000;
-const MAX_MAX_TOKEN_LIFETIME_MS = 365 * 86_400_000;
+const MAX_MAX_TOKEN_LIFETIME_DAYS = 365;
+const MAX_MAX_TOKEN_LIFETIME_MS = MAX_MAX_TOKEN_LIFETIME_DAYS * 86_400_000;
 
 /**
  * POST /federation/:name/token — the federation token proxy. Returns the
@@ -219,7 +220,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		maxTokenLifetimeMs > MAX_MAX_TOKEN_LIFETIME_MS
 	) {
 		throw new RangeError(
-			`federation token route: maxTokenLifetimeMs (default ${DEFAULT_MAX_TOKEN_LIFETIME_MS}) must be a whole number of milliseconds greater than refreshBufferMs (${refreshBufferMs}) and at most ${MAX_MAX_TOKEN_LIFETIME_MS}; pass a maxTokenLifetimeMs larger than your refreshBufferMs`,
+			`federation token route: maxTokenLifetimeMs must be a whole number of milliseconds greater than refreshBufferMs (${refreshBufferMs}) and at most ${MAX_MAX_TOKEN_LIFETIME_DAYS} days (${MAX_MAX_TOKEN_LIFETIME_MS}), got ${opts.maxTokenLifetimeMs === undefined ? `the default ${DEFAULT_MAX_TOKEN_LIFETIME_MS}` : String(opts.maxTokenLifetimeMs)}; with a refreshBufferMs of 24 h or more, pass a larger maxTokenLifetimeMs`,
 		);
 	}
 	const router = express.Router();

@@ -185,8 +185,10 @@ const readRefreshedExpiry = (
 		case "finite":
 			return new Date(Math.min(lifetime.expiresAt.getTime(), now + policy.maxTokenLifetimeMs));
 		default: {
+			// A verdict a newer core adds is not one this route can store.
 			const unknownVerdict: never = lifetime;
-			return unknownVerdict;
+			void unknownVerdict;
+			return undefined;
 		}
 	}
 };

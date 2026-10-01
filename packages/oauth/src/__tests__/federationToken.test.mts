@@ -1512,10 +1512,7 @@ describe("POST /oauth/federation/:name/token", () => {
 						vi.useRealTimers();
 					}
 				};
-				const auditedApp = (
-					answer: unknown,
-					options: Pick<BuildAppOpts, "maxTokenLifetimeMs"> = {},
-				) => {
+				const auditedApp = (answer: unknown) => {
 					const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
 					const fedTokenStore = makeFedTokenStore({
 						get: vi.fn().mockResolvedValue({
@@ -1532,7 +1529,6 @@ describe("POST /oauth/federation/:name/token", () => {
 						auditSink,
 						getFederationProviders: () =>
 							new Map<string, FederationProvider>([["google", refreshProvider]]),
-						...options,
 					});
 					return { app, fedTokenStore, auditSink };
 				};
@@ -1650,12 +1646,26 @@ describe("POST /oauth/federation/:name/token", () => {
 					// is malformed whatever the other field says.
 					const { app, fedTokenStore, auditSink } = auditedApp({
 						accessToken: "new-at",
+						refreshToken: "rotated-rt",
 						expiresIn: 1e306,
 						expiresAt: new Date(Date.now() + 3_600_000),
 					});
 					const res = await postFedToken(app, "google", await mintAccessToken());
 
-					expectInvalidExpiry(res, fedTokenStore, auditSink);
+					expect(res.status).toBe(500);
+					expect(res.body.error).toBe("refresh_failed");
+					expect(auditSink.record).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "federation.token.refresh_failed",
+							details: expect.objectContaining({ reason: "invalid_expiry" }),
+						}),
+					);
+					expect(fedTokenStore.update).toHaveBeenCalledTimes(1);
+					expect(fedTokenStore.update).toHaveBeenCalledWith(
+						expect.any(String),
+						"google",
+						expect.objectContaining({ accessToken: "upstream-at-xyz", refreshToken: "rotated-rt" }),
+					);
 				});
 
 				it("stores the instant for an expiresIn whose start would lie before the Date range, beside a usable expiresAt", async () => {
@@ -4405,7 +4415,13 @@ describe("createRouter — maxTokenLifetimeMs", () => {
 
 	it("refuses a refresh buffer the default maximum does not exceed, naming the fix", () => {
 		expect(() => buildApp({ refreshBufferMs: 86_400_000 })).toThrow(
-			/maxTokenLifetimeMs.*greater than refreshBufferMs/,
+			/maxTokenLifetimeMs.*greater than refreshBufferMs.*with a refreshBufferMs of 24 h or more, pass a larger maxTokenLifetimeMs/,
+		);
+	});
+
+	it("names the value it refused and the upper bound in days", () => {
+		expect(() => buildApp({ refreshBufferMs: 30_000, maxTokenLifetimeMs: 30_000 })).toThrow(
+			/at most 365 days \(31536000000\).*got 30000/,
 		);
 	});
 
