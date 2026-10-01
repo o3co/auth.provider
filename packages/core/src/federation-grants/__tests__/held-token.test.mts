@@ -119,4 +119,33 @@ describe("federationGrantKeptAccessToken", () => {
 				.effectiveExpiresAt,
 		).toEqual(at(3_600_000));
 	});
+
+	it("reads every field a store answers, an accessor on a prototype included", () => {
+		// A store of a deployment's own may answer a class instance; a spread
+		// would keep none of its fields, and the write would be refused.
+		class Answered {
+			get value() {
+				return token.value;
+			}
+			get tokenType() {
+				return token.tokenType;
+			}
+			get obtainedAt() {
+				return T0;
+			}
+			get issuedLifetime() {
+				return 3600;
+			}
+			get effectiveExpiresAt() {
+				return at(1_800_000);
+			}
+			get scopes() {
+				return token.scopes;
+			}
+		}
+		expect(federationGrantKeptAccessToken(new Answered())).toStrictEqual({
+			...stored,
+			effectiveExpiresAt: at(1_800_000),
+		});
+	});
 });

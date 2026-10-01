@@ -67,7 +67,23 @@ export function federationGrantHeldToken(token: StoredAccessToken): HeldUpstream
 	return { obtainedAt: new Date(obtainedAt), expiresAt: new Date(end) };
 }
 
-/** A stored access token written back as it is: it states the end it is read to have. */
+/**
+ * A stored access token written back as it is: it states the end it is read
+ * to have. Each field is read once, by name, so an accessor a store's answer
+ * carries is kept, and built as every written token is.
+ */
 export function federationGrantKeptAccessToken(token: StoredAccessToken): WrittenAccessToken {
-	return { ...token, effectiveExpiresAt: federationGrantHeldToken(token).expiresAt };
+	const { value, tokenType, obtainedAt, issuedLifetime, effectiveExpiresAt, scopes } = token;
+	const held = federationGrantHeldToken({
+		value,
+		tokenType,
+		obtainedAt,
+		issuedLifetime,
+		effectiveExpiresAt,
+		scopes,
+	});
+	return federationGrantAccessToken(
+		{ value, tokenType, scopes },
+		{ obtainedAt, expiresAt: held.expiresAt, issuedLifetime },
+	);
 }
