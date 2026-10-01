@@ -172,6 +172,7 @@ interface BuildAppOpts {
 	logger?: Logger;
 	auditSink?: AuditSink;
 	refreshBufferMs?: number;
+	maxTokenLifetimeMs?: number;
 }
 
 function buildApp(opts: BuildAppOpts = {}) {
@@ -187,6 +188,7 @@ function buildApp(opts: BuildAppOpts = {}) {
 		logger: opts.logger,
 		auditSink: opts.auditSink,
 		refreshBufferMs: opts.refreshBufferMs,
+		maxTokenLifetimeMs: opts.maxTokenLifetimeMs,
 	});
 	app.use("/oauth", router);
 	return app;
@@ -1510,7 +1512,10 @@ describe("POST /oauth/federation/:name/token", () => {
 						vi.useRealTimers();
 					}
 				};
-				const auditedApp = (answer: unknown) => {
+				const auditedApp = (
+					answer: unknown,
+					options: Pick<BuildAppOpts, "maxTokenLifetimeMs"> = {},
+				) => {
 					const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
 					const fedTokenStore = makeFedTokenStore({
 						get: vi.fn().mockResolvedValue({
@@ -1527,6 +1532,7 @@ describe("POST /oauth/federation/:name/token", () => {
 						auditSink,
 						getFederationProviders: () =>
 							new Map<string, FederationProvider>([["google", refreshProvider]]),
+						...options,
 					});
 					return { app, fedTokenStore, auditSink };
 				};
@@ -1639,6 +1645,37 @@ describe("POST /oauth/federation/:name/token", () => {
 					});
 				});
 
+				it("refuses an expiresIn whose milliseconds overflow to Infinity, even beside a usable expiresAt", async () => {
+					// A lifetime with no finite end in milliseconds names no lifetime: it
+					// is malformed whatever the other field says.
+					const { app, fedTokenStore, auditSink } = auditedApp({
+						accessToken: "new-at",
+						expiresIn: 1e306,
+						expiresAt: new Date(Date.now() + 3_600_000),
+					});
+					const res = await postFedToken(app, "google", await mintAccessToken());
+
+					expectInvalidExpiry(res, fedTokenStore, auditSink);
+				});
+
+				it("stores the instant for an expiresIn whose start would lie before the Date range, beside a usable expiresAt", async () => {
+					// Nothing is dated back to fit the issued lifetime, so no instant
+					// outside the Date range is ever derived: the earlier field stands.
+					await withFrozenDate(async () => {
+						const expiresAt = new Date(Date.now() + 3_600_000);
+						const { app, fedTokenStore } = auditedApp({
+							accessToken: "new-at",
+							expiresIn: 2e13,
+							expiresAt,
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(3600);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(expiresAt.getTime());
+					});
+				});
+
 				it("takes expiresAt when it ends before expiresIn", async () => {
 					await withFrozenDate(async () => {
 						const expiresAt = new Date(Date.now() + 600_000);
@@ -1652,6 +1689,151 @@ describe("POST /oauth/federation/:name/token", () => {
 						expect(res.status).toBe(200);
 						expect(res.body.expires_in).toBe(600);
 						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(expiresAt.getTime());
+					});
+				});
+
+				it.each([
+					["an object that only inherits from Date", () => Object.create(Date.prototype)],
+					["a Proxy around a Date", () => new Proxy(new Date(Date.now() + 3_600_000), {})],
+					[
+						"a revoked Proxy",
+						() => {
+							const { proxy, revoke } = Proxy.revocable(new Date(Date.now() + 3_600_000), {});
+							revoke();
+							return proxy;
+						},
+					],
+				])(
+					"refuses an expiresAt that is %s, and still keeps the rotated refresh token",
+					async (_label, expiresAt) => {
+						// Reading such a value must not throw out of the answer's reading:
+						// the refusal is what keeps the rotated refresh token.
+						const { app, fedTokenStore, auditSink } = auditedApp({
+							accessToken: "new-at",
+							refreshToken: "rotated-rt",
+							expiresAt: expiresAt(),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(500);
+						expect(res.body.error).toBe("refresh_failed");
+						expect(auditSink.record).toHaveBeenCalledWith(
+							expect.objectContaining({
+								type: "federation.token.refresh_failed",
+								details: expect.objectContaining({ reason: "invalid_expiry" }),
+							}),
+						);
+						expect(fedTokenStore.update).toHaveBeenCalledTimes(1);
+						expect(fedTokenStore.update).toHaveBeenCalledWith(
+							expect.any(String),
+							"google",
+							expect.objectContaining({
+								accessToken: "upstream-at-xyz",
+								refreshToken: "rotated-rt",
+							}),
+						);
+					},
+				);
+			});
+
+			describe("caps what it stores at the maximum lifetime, and never refuses over it", () => {
+				const DAY_MS = 86_400_000;
+				const cappedApp = (
+					answer: unknown,
+					options: Pick<BuildAppOpts, "maxTokenLifetimeMs"> = {},
+				) => {
+					const fedTokenStore = makeFedTokenStore({
+						get: vi.fn().mockResolvedValue({
+							...baseFedTokens,
+							expiresAt: new Date(Date.now() - 1000),
+						}),
+					});
+					const refreshProvider = {
+						...federationBase("google"),
+						refreshToken: vi.fn(async () =>
+							typeof answer === "function" ? (answer as () => unknown)() : answer,
+						),
+					} as unknown as FederationProvider;
+					const app = buildApp({
+						fedTokenStore,
+						getFederationProviders: () =>
+							new Map<string, FederationProvider>([["google", refreshProvider]]),
+						...options,
+					});
+					return { app, fedTokenStore };
+				};
+				const withFrozenDate = async (run: () => Promise<void>) => {
+					vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+					try {
+						await run();
+					} finally {
+						vi.useRealTimers();
+					}
+				};
+
+				it("caps an expiresAt far in the future at 24 hours by default", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = cappedApp({
+							accessToken: "new-at",
+							expiresAt: new Date("2100-01-01T00:00:00Z"),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(DAY_MS / 1000);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + DAY_MS);
+					});
+				});
+
+				it("caps an absurd expiresIn at 24 hours by default", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = cappedApp({ accessToken: "new-at", expiresIn: 1e12 });
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + DAY_MS);
+					});
+				});
+
+				it("caps at the configured maximum", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = cappedApp(
+							{ accessToken: "new-at", expiresIn: 7200 },
+							{ maxTokenLifetimeMs: 3_600_000 },
+						);
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(3600);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + 3_600_000);
+					});
+				});
+
+				it("leaves a lifetime under the maximum as it is", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = cappedApp(
+							{ accessToken: "new-at", expiresIn: 3599 },
+							{ maxTokenLifetimeMs: 3_600_000 },
+						);
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + 3_599_000);
+					});
+				});
+
+				it("counts the maximum from when the answer is read, so a slow call never leaves a capped token without its full maximum", async () => {
+					await withFrozenDate(async () => {
+						const CALL_MS = 120_000;
+						const { app, fedTokenStore } = cappedApp(() => {
+							vi.setSystemTime(Date.now() + CALL_MS);
+							return { accessToken: "new-at", expiresIn: (2 * DAY_MS) / 1000 };
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(DAY_MS / 1000);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + DAY_MS);
 					});
 				});
 			});
@@ -4196,7 +4378,40 @@ describe("createRouter — refreshBufferMs", () => {
 
 	it("accepts a positive buffer, and defaults when none is given", () => {
 		expect(() => buildApp({ refreshBufferMs: 1000 })).not.toThrow();
-		expect(() => buildApp({ refreshBufferMs: 2 ** 31 - 1 })).not.toThrow();
+		expect(() =>
+			buildApp({ refreshBufferMs: 2 ** 31 - 1, maxTokenLifetimeMs: 365 * 86_400_000 }),
+		).not.toThrow();
 		expect(() => buildApp()).not.toThrow();
+	});
+});
+
+describe("createRouter — maxTokenLifetimeMs", () => {
+	it.each([
+		["zero", 0],
+		["a negative maximum", -1],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a numeric string", "86400000" as unknown as number],
+		["null", null as unknown as number],
+		["a fraction of a millisecond", 60_000.5],
+		["equal to the refresh buffer", 30_000],
+		["below the refresh buffer", 29_999],
+		["more than 365 days", 365 * 86_400_000 + 1],
+	])("refuses %s when the route is built", (_label, maxTokenLifetimeMs) => {
+		// A maximum at or below the buffer stores every refreshed token already
+		// due, so every request would refresh upstream.
+		expect(() => buildApp({ refreshBufferMs: 30_000, maxTokenLifetimeMs })).toThrow(RangeError);
+	});
+
+	it("refuses a refresh buffer the default maximum does not exceed, naming the fix", () => {
+		expect(() => buildApp({ refreshBufferMs: 86_400_000 })).toThrow(
+			/maxTokenLifetimeMs.*greater than refreshBufferMs/,
+		);
+	});
+
+	it("accepts a maximum above the buffer up to 365 days, and defaults when none is given", () => {
+		expect(() => buildApp({ refreshBufferMs: 30_000, maxTokenLifetimeMs: 30_001 })).not.toThrow();
+		expect(() => buildApp({ maxTokenLifetimeMs: 365 * 86_400_000 })).not.toThrow();
+		expect(() => buildApp({ refreshBufferMs: 86_399_999 })).not.toThrow();
 	});
 });

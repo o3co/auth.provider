@@ -37,6 +37,8 @@ import {
 	type FederationTokenRouterOptions,
 } from "./federationTokenContext.mjs";
 import { refreshStoredTokens } from "./federationTokenRefresh.mjs";
+import { REFRESH_FLOOR_MS } from "./federationTokenRefreshAnswer.mjs";
+import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
 import { answerStoredToken, readStoredTokens } from "./federationTokenStored.mjs";
 
 export type { FederationTokenRouterOptions } from "./federationTokenContext.mjs";
@@ -176,8 +178,10 @@ const checkCallerStanding = async (
 	return true;
 };
 
-const MIN_REFRESH_BUFFER_MS = 1000;
+const MIN_REFRESH_BUFFER_MS = REFRESH_FLOOR_MS;
 const MAX_REFRESH_BUFFER_MS = 2 ** 31 - 1;
+const DEFAULT_MAX_TOKEN_LIFETIME_MS = 86_400_000;
+const MAX_MAX_TOKEN_LIFETIME_MS = 365 * 86_400_000;
 
 /**
  * POST /federation/:name/token — the federation token proxy. Returns the
@@ -202,6 +206,20 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 	) {
 		throw new RangeError(
 			`federation token route: refreshBufferMs must be a whole number of milliseconds from ${MIN_REFRESH_BUFFER_MS} to ${MAX_REFRESH_BUFFER_MS}`,
+		);
+	}
+	// At or below the buffer, every refreshed token would be stored already
+	// due, and every request would refresh upstream.
+	const maxTokenLifetimeMs: unknown =
+		opts.maxTokenLifetimeMs === undefined ? DEFAULT_MAX_TOKEN_LIFETIME_MS : opts.maxTokenLifetimeMs;
+	if (
+		typeof maxTokenLifetimeMs !== "number" ||
+		!Number.isInteger(maxTokenLifetimeMs) ||
+		maxTokenLifetimeMs <= refreshBufferMs ||
+		maxTokenLifetimeMs > MAX_MAX_TOKEN_LIFETIME_MS
+	) {
+		throw new RangeError(
+			`federation token route: maxTokenLifetimeMs (default ${DEFAULT_MAX_TOKEN_LIFETIME_MS}) must be a whole number of milliseconds greater than refreshBufferMs (${refreshBufferMs}) and at most ${MAX_MAX_TOKEN_LIFETIME_MS}; pass a maxTokenLifetimeMs larger than your refreshBufferMs`,
 		);
 	}
 	const router = express.Router();
@@ -229,6 +247,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			logger,
 			storeUnavailable,
 			refreshBufferMs,
+			maxTokenLifetimeMs,
 		};
 		const caller = await identifyCaller(ctx);
 		if (caller === null) return;
@@ -237,10 +256,9 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		const tokens = await readStoredTokens(ctx, caller);
 		if (tokens === null) return;
 
-		// Step 10: not expiring within the buffer → return the stored token.
-		// `expiresAt === null` is an upstream issuing no finite expiry (e.g.
-		// GitHub OAuth App tokens): never refresh, and omit `expires_in`.
-		if (tokens.expiresAt === null || tokens.expiresAt.getTime() > Date.now() + refreshBufferMs) {
+		// Step 10: a token not yet due is returned as stored; one with no
+		// finite expiry omits `expires_in`.
+		if (!refreshIsDue(ctx, tokens)) {
 			return answerStoredToken(ctx, caller, tokens);
 		}
 

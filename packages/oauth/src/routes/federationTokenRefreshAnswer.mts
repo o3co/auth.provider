@@ -16,8 +16,9 @@
 
 /**
  * Reading an adapter's refresh answer: each field read once behind a guard,
- * its lifetime and token type judged, and the rules that bound the scope it
- * names. Nothing here writes, logs or answers.
+ * its lifetime judged through core's reading and capped at the route's
+ * maximum, its token type judged, and the rules that bound the scope it
+ * names. Nothing here writes, logs or answers, and no lifetime field makes it throw.
  */
 
 import {
@@ -26,6 +27,7 @@ import {
 	type FederationTokens,
 	parseScopeTokens,
 	type RefreshedTokens,
+	readUpstreamTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { isUsableToken } from "./federationTokenCredential.mjs";
 
@@ -35,9 +37,8 @@ import { isUsableToken } from "./federationTokenCredential.mjs";
  * bar in `federation-grants/retrieve.mts`.
  */
 
-/** Seconds a token has left: finite and in the future. `NaN` and `-5` are neither. */
-const isUsableLifetime = (value: unknown): value is number =>
-	typeof value === "number" && Number.isFinite(value) && value > 0;
+/** No refreshed token is accepted with less than this left (ms) when its answer is read. */
+export const REFRESH_FLOOR_MS = 1000;
 
 /**
  * One field of an adapter's answer, or `undefined` if its getter throws: an
@@ -54,10 +55,6 @@ const readField = <T,>(source: object, key: string, unreadable: Set<string>): T 
 		return undefined;
 	}
 };
-
-/** A `Date` that names an instant. `new Date(NaN)` does not. */
-const isUsableDate = (value: unknown): value is Date =>
-	value instanceof Date && !Number.isNaN(value.getTime());
 
 /**
  * How a refresh answer names the token's scope. `narrowedScope` bounds it by
@@ -141,6 +138,7 @@ export interface RefreshReading {
 	readonly rotatedRefreshToken: string | undefined;
 	/** The answered id token when it is usable. */
 	readonly rotatedIdToken: string | undefined;
+	/** When the record's token ends next: the derived end, capped at the maximum; `null` is no finite expiry. */
 	readonly derivedExpiry: Date | null;
 	readonly lifetimeIsBroken: boolean;
 	readonly tokenTypeIsBroken: boolean;
@@ -150,15 +148,57 @@ export interface RefreshReading {
 	readonly answeredScope: AnsweredScope;
 }
 
+/** What the route asks of a refresh answer's lifetime. */
+export interface RefreshLifetimePolicy {
+	/** When the refresh was asked for (epoch ms): an `expiresIn` counts from it. */
+	readonly calledAt: number;
+	/** The longest a refreshed token is stored for (ms), counted from when the answer is read. */
+	readonly maxTokenLifetimeMs: number;
+}
+
+/**
+ * The end a refresh answer's lifetime fields give the record: `null` when
+ * neither names a lifetime (never refresh), `undefined` when they name none
+ * that can be used. A finite end is capped at `now + maxTokenLifetimeMs`,
+ * never refused over it.
+ */
+const readRefreshedExpiry = (
+	answer: Partial<RefreshedTokens>,
+	unreadable: ReadonlySet<string>,
+	policy: RefreshLifetimePolicy,
+): Date | null | undefined => {
+	// A lifetime field that would not be read is broken, not absent: absent
+	// is the never-refresh sentinel.
+	if (unreadable.has("expiresIn") || unreadable.has("expiresAt")) return undefined;
+	const now = Date.now();
+	const lifetime = readUpstreamTokenLifetime(
+		{ expiresIn: answer.expiresIn, expiresAt: answer.expiresAt },
+		{ calledAt: policy.calledAt, now, floorMs: REFRESH_FLOOR_MS },
+	);
+	switch (lifetime.verdict) {
+		case "unstated":
+			return null;
+		case "malformed":
+		case "contradictory":
+		case "spent":
+			return undefined;
+		case "finite":
+			return new Date(Math.min(lifetime.expiresAt.getTime(), now + policy.maxTokenLifetimeMs));
+		default: {
+			const unknownVerdict: never = lifetime;
+			return unknownVerdict;
+		}
+	}
+};
+
 /**
  * Reads `refreshed` once. `currentTokens` is the freshest snapshot of the
- * record, whose type stands when the answer names none. `calledAt` is when
- * the refresh was asked for (epoch ms): an `expiresIn` counts from it.
+ * record, whose type stands when the answer names none.
  */
 export const readRefreshAnswer = (
 	refreshed: RefreshedTokens,
 	currentTokens: FederationTokens,
-	calledAt: number,
+	policy: RefreshLifetimePolicy,
 ): RefreshReading => {
 	// The adapter's answer is unverified third-party data, read field by
 	// field behind guards: it may be `null`, a getter may throw, and an
@@ -178,59 +218,10 @@ export const readRefreshAnswer = (
 				}
 			: {};
 
-	// A lifetime stated wrongly is not one never stated: `null` is stored
-	// as "no finite expiry" (never refresh), so `NaN`, a non-positive
-	// lifetime or an Invalid Date must not fall through to it (core's
-	// `no_finite_lifetime` refuses the same).
-	const statedLifetime = answer.expiresIn !== undefined && answer.expiresIn !== null;
-	const statedInstant = answer.expiresAt !== undefined && answer.expiresAt !== null;
-
-	// The instant the token expires at, derived here so the refusal can
-	// judge it. `null` is the upstream committing to no finite
-	// lifetime; `undefined` on both fields is it saying nothing, which this
-	// route has always stored as `null`.
-	const now = Date.now();
-	const instant = isUsableDate(answer.expiresAt) ? answer.expiresAt : undefined;
-	// Dated from the call, so time the upstream took is not counted as life left.
-	const fromLifetime = isUsableLifetime(answer.expiresIn)
-		? new Date(calledAt + answer.expiresIn * 1000)
-		: undefined;
-	// Both usable: the earlier stands, so neither field can lengthen the
-	// other. A lifetime past the Date range is later than any instant.
-	const derivedExpiry: Date | null =
-		instant !== undefined
-			? fromLifetime !== undefined &&
-				isUsableDate(fromLifetime) &&
-				fromLifetime.getTime() < instant.getTime()
-				? fromLifetime
-				: instant
-			: answer.expiresAt === null
-				? null
-				: (fromLifetime ?? null);
-
-	// The derived instant is judged too: a finite `expiresIn` can overflow
-	// the Date range, and the Invalid Date stores as `null`. A lifetime in
-	// one field denied by the other is self-contradictory, so neither is
-	// believed.
-	const contradictsItself =
-		(answer.expiresAt === null && isUsableLifetime(answer.expiresIn)) ||
-		(answer.expiresIn === null && isUsableDate(answer.expiresAt));
-
-	const lifetimeIsBroken =
-		// A lifetime field that would not be read is broken, not absent:
-		// absent stores `null`, which is this route's never-refresh
-		// sentinel, so the two must not collapse into one another.
-		unreadable.has("expiresIn") ||
-		unreadable.has("expiresAt") ||
-		contradictsItself ||
-		(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
-		(statedInstant && !isUsableDate(answer.expiresAt)) ||
-		((statedLifetime || statedInstant) && derivedExpiry !== null && !isUsableDate(derivedExpiry)) ||
-		// Judged as the answer is read: no token is accepted with less than a
-		// second left now. `expires_in`, computed after the write and the audit,
-		// can still be `0` at that boundary; the refresh buffer refreshes such a
-		// token on the next request.
-		(derivedExpiry !== null && derivedExpiry.getTime() < now + 1000);
+	// A lifetime stated wrongly is not one never stated: `null` is stored as
+	// "no finite expiry" (never refresh), so a broken lifetime must not fall
+	// through to it.
+	const derivedExpiry = readRefreshedExpiry(answer, unreadable, policy);
 
 	// The refreshed token's type: unreadable or not a type name is broken
 	// (joins the refusals of an unusable answer, as core's `retrieve.mts`
@@ -254,8 +245,8 @@ export const readRefreshAnswer = (
 		// overwriting a usable stored token strands the connection.
 		rotatedRefreshToken: usable(answer.refreshToken),
 		rotatedIdToken: usable(answer.idToken),
-		derivedExpiry,
-		lifetimeIsBroken,
+		derivedExpiry: derivedExpiry ?? null,
+		lifetimeIsBroken: derivedExpiry === undefined,
 		tokenTypeIsBroken,
 		nextTokenType,
 		answeredScope: classifyAnsweredScope(answer, unreadable),

@@ -32,6 +32,7 @@ import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
 import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import { readRefreshAnswer } from "./federationTokenRefreshAnswer.mjs";
+import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
 import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
 import { recordRefresh } from "./federationTokenRefreshRecord.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
@@ -42,7 +43,7 @@ export const refreshStoredTokens = async (
 	caller: FederationTokenCaller,
 	tokens: FederationTokens,
 ): Promise<Response> => {
-	const { opts, res, name, federation, logger, storeUnavailable, refreshBufferMs } = ctx;
+	const { opts, res, name, federation, logger, storeUnavailable, maxTokenLifetimeMs } = ctx;
 	const { sid, azp } = caller;
 
 	// Step 11: Refresh path.
@@ -115,11 +116,7 @@ export const refreshStoredTokens = async (
 					error_description: "federation token store unavailable",
 				});
 			}
-			if (
-				freshTokens &&
-				(freshTokens.expiresAt === null ||
-					freshTokens.expiresAt.getTime() > Date.now() + refreshBufferMs)
-			) {
+			if (freshTokens && !refreshIsDue(ctx, freshTokens)) {
 				// Another caller refreshed, or there is no finite expiry: return
 				// the stored token without calling the IdP, judging its type as on
 				// the fast path.
@@ -165,7 +162,7 @@ export const refreshStoredTokens = async (
 			ctx,
 			caller,
 			currentTokens,
-			readRefreshAnswer(refreshed, currentTokens, calledAt),
+			readRefreshAnswer(refreshed, currentTokens, { calledAt, maxTokenLifetimeMs }),
 		);
 	} finally {
 		// 11g: Release lock if acquired.

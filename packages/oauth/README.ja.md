@@ -627,11 +627,11 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 2. そのファミリーが失効済みか、セッションがもう存在しなければ拒否する。
 3. `client.allowedAzpForFederationToken === true` でなければ拒否する。
 4. フェデレーションがセッションに紐付いていなければ拒否する。
-5. 保存済みの上流アクセストークンの有効期間が 30 秒を超えて残っていれば、それを返す。
+5. 保存済みの上流アクセストークンの有効期間がリフレッシュバッファ（`refreshBufferMs`、既定 30 秒）を超えて残っているか、有限の有効期限を持たなければ、それを返す。
 6. そうでなければリフレッシュする:
    - 同時リフレッシュのファンアウトを防ぐため advisory lock を取得する（`FederationTokenStore` が `SupportsLock` を実装している場合）。
    - ロック取得後に再読み込みする — 待機中に別のウェイターがリフレッシュしたかもしれない。
-   - `provider.refreshToken(refreshToken)` を呼び、結果を永続化する。
+   - `provider.refreshToken(refreshToken)` を呼び、結果を永続化する。その有効期間は core の `readUpstreamTokenLifetime` で読む: 使える有効期間を持たない応答や残りが 1 秒未満の応答は `500 refresh_failed`（`invalid_expiry`）となり、保存する期限は応答を読んだ時点から `maxTokenLifetimeMs`（既定 24 時間）で切り詰める — それより長い有効期間は短くするだけで拒否はしないので、そのようなトークンは少なくともその間隔でリフレッシュされる。
    - ロックを解放する。
 
 ### レスポンス
