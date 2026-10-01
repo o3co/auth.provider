@@ -291,21 +291,31 @@ export interface MfaFactor {
 	 */
 	enrollable?(user: Readonly<Record<string, unknown>>): boolean;
 	/**
-	 * The authenticator `data` records, as a string stable for it: a WebAuthn
-	 * credential id, the digest of the address an email factor's codes go to.
-	 * Two of a subject's records of this kind with equal identities hold one
-	 * authenticator enrolled twice; the coordinator compares identities only
-	 * among one subject's records of one kind, to find such a duplicate.
+	 * A duplicate key for the authenticator `data` records, as a string stable
+	 * for it: a WebAuthn credential id, the digest of the address an email
+	 * factor's codes go to. Two of a subject's records of this kind with equal
+	 * identities hold one authenticator enrolled twice; the coordinator
+	 * compares identities only among one subject's records of one kind, to
+	 * find such a duplicate.
 	 *
-	 * Using the factor leaves it as it was: a verification's next data answers
+	 * It depends on the data alone: a record answers the same whichever factor
+	 * instance reads it, in whatever order, and after later enrollments; using
+	 * the factor leaves it as it was, so a verification's next data answers
 	 * the same. Data rewritten under another key may answer another, which
-	 * only misses a duplicate. `undefined` when the data holds none the factor
-	 * can read: such a record is no duplicate of any. Absent: no record of
-	 * this kind is judged a duplicate of another (each TOTP enrollment makes a
-	 * new secret). Never coarser than the authenticator: an identity two
-	 * authenticators share (a constant, a kind-wide value) judges every second
-	 * enrollment of the kind a duplicate. Never a secret, nor derived from one,
-	 * since it is compared as it is.
+	 * only misses a duplicate.
+	 *
+	 * It is not an assurance signal: distinct identities do not show distinct
+	 * devices or mailboxes, since one authenticator can hold two credentials
+	 * (WebAuthn's `excludeCredentials` is enforced by the client).
+	 *
+	 * `undefined` when the data holds none the factor can read. Absent: no
+	 * record of this kind is judged a duplicate of another (each TOTP
+	 * enrollment makes a new secret). A record with no identity is a duplicate
+	 * of none and never a distinct authenticator: a consumer that counts
+	 * distinct authenticators does not count it. Never coarser than the
+	 * authenticator: an identity two authenticators share (a constant, a
+	 * kind-wide value) judges every second enrollment of the kind a duplicate.
+	 * Never a secret, nor derived from one, since it is compared as it is.
 	 *
 	 * Must not throw. The coordinator reads a throw as `undefined` — the
 	 * record is judged a duplicate of none — and logs it, so a broken identity

@@ -42,6 +42,7 @@
 import {
 	type AdapterBuilder,
 	type ApproveDeviceAuthorizationInput,
+	authTimeClaim,
 	type CreateDeviceAuthorizationInput,
 	type DeviceAuthorization,
 	type DeviceCodeStore,
@@ -50,6 +51,8 @@ import {
 	type DevicePollOutcome,
 	defineModule,
 	isStorableExpiry,
+	recordableDeviceApproval,
+	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type {
 	DeviceCodeDecisionReply,
@@ -102,6 +105,32 @@ const parseInstant = (value: string | undefined): number | undefined => {
 };
 
 /**
+ * A stored authentication instant, or `undefined` when there is none to read.
+ * Only an approval writes it, as the whole epoch milliseconds of a `Date`
+ * `approve` accepts; any other spelling (empty, signed, fractional, exponent
+ * form, past the Date range) reads as absent rather than as an instant.
+ */
+const parseAuthTimeMs = (value: string | undefined): number | undefined => {
+	if (value === undefined || !/^(?:0|[1-9][0-9]*)$/.test(value)) return undefined;
+	const ms = Number(value);
+	return authTimeClaim(new Date(ms)) === undefined ? undefined : ms;
+};
+
+/**
+ * A stored `amr`, or `undefined` when there is none to read. Only an approval
+ * writes it, and only as a well-formed list; any other value was written
+ * around the store and reads as absent, which the grant reads as "cannot tell".
+ */
+const parseAmr = (json: string | undefined): readonly string[] | undefined => {
+	if (json === undefined) return undefined;
+	try {
+		return wellFormedAmr(JSON.parse(json));
+	} catch {
+		return undefined;
+	}
+};
+
+/**
  * The authorization the hash fields hold; a field the hash lacks is
  * `undefined`. Every field is named, so one this copy forgets is a compile
  * error rather than a silent drop.
@@ -118,6 +147,10 @@ const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization =>
 	// Absent before an approval and on older records; a non-finite value reads
 	// as absent too, which a poll under a sessions boundary refuses.
 	approvedAtMs: parseInstant(fields.approvedAtMs),
+	// Absent unless an approval was handed them, and on records an older
+	// release approved.
+	amr: parseAmr(fields.amr),
+	authTimeMs: parseAuthTimeMs(fields.authTimeMs),
 });
 
 const decisionOutcome = (reply: DeviceCodeDecisionReply): DeviceDecisionOutcome => {
@@ -190,6 +223,8 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 		},
 
 		async approve(input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome> {
+			// Refused before the script runs, so a refused approval writes nothing.
+			const { amr, authTimeMs } = recordableDeviceApproval(input, input.nowMs);
 			// Omitted means "grant what was asked for"; supplied is narrowed
 			// against `requestedScope` inside the script, never widened.
 			return decisionOutcome(
@@ -197,6 +232,8 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 					decision: "approved",
 					subject: input.subject,
 					...(input.grantedScope === undefined ? {} : { grantedScope: input.grantedScope }),
+					...(amr === undefined ? {} : { amr }),
+					...(authTimeMs === undefined ? {} : { authTimeMs }),
 				}),
 			);
 		},

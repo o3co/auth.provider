@@ -514,6 +514,121 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		});
 	});
 
+	describe("an upstream answer read once: what is judged is what is stored", () => {
+		/** `answer`, with `field` a getter that answers `value` on its first read and throws on every later one. */
+		const readableOnce = (
+			answer: DelegatedTokens,
+			field: keyof DelegatedTokens,
+			value: unknown,
+		): { answer: DelegatedTokens; reads: () => number } => {
+			let count = 0;
+			const once = { ...answer };
+			Object.defineProperty(once, field, {
+				enumerable: true,
+				get() {
+					count += 1;
+					if (count > 1) throw new Error("a getter that throws");
+					return value;
+				},
+			});
+			return { answer: once, reads: () => count };
+		};
+
+		it("keeps the rotated refresh token it read, when a later read of the field would throw", async () => {
+			await h.seed();
+			setNow(DUE);
+			const { answer, reads } = readableOnce(
+				refreshed("1", DUE),
+				"refreshToken",
+				`${SECRET}-rotated`,
+			);
+			h.refresh.mockResolvedValue(answer);
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1" });
+			// Keeping the old one would present a revoked token to a rotating IdP.
+			expect((await stored())?.refreshToken).toBe(`${SECRET}-rotated`);
+			expect(reads()).toBe(1);
+		});
+
+		const readable: Array<[keyof DelegatedTokens, unknown]> = [
+			["accessToken", "at-1"],
+			["expiresIn", 3600],
+			["expiresAt", new Date(DUE.getTime() + HOUR)],
+			["tokenType", "Bearer"],
+			["scope", SCOPES.join(" ")],
+		];
+		for (const [field, value] of readable) {
+			it(`judges and stores the ${field} it read, when a later read of the field would throw`, async () => {
+				await h.seed();
+				setNow(DUE);
+				const { answer, reads } = readableOnce(refreshed("1", DUE), field, value);
+				h.refresh.mockResolvedValue(answer);
+				expect(await retrieve()).toStrictEqual({
+					ok: true,
+					accessToken: "at-1",
+					tokenType: "Bearer",
+					expiresIn: 3600,
+					scopes: [...SCOPES],
+					refreshed: true,
+				});
+				expect(await stored()).toStrictEqual({
+					refreshToken: `${SECRET}-1`,
+					accessToken: {
+						value: "at-1",
+						tokenType: "Bearer",
+						obtainedAt: DUE,
+						issuedLifetime: 3600,
+						effectiveExpiresAt: new Date(DUE.getTime() + HOUR),
+						scopes: [...SCOPES],
+					},
+				});
+				expect(reads()).toBe(1);
+			});
+		}
+
+		/** A real Date holding `ms`, whose own methods answer `lie`. */
+		const lyingDate = (ms: number, lie: number): Date => {
+			const date = new Date(ms);
+			Object.defineProperties(date, {
+				getTime: { value: () => lie },
+				valueOf: { value: () => lie },
+				[Symbol.toPrimitive]: { value: () => lie },
+			});
+			return date;
+		};
+
+		it("reads an expiry by the instant the Date holds, never by a getTime of its own", async () => {
+			await h.seed();
+			setNow(DUE);
+			h.refresh.mockResolvedValue(
+				refreshed("1", DUE, {
+					expiresAt: lyingDate(DUE.getTime() + 30 * MIN, DUE.getTime() + HOUR),
+				}),
+			);
+			expect(await retrieve()).toMatchObject({ ok: true, expiresIn: 1800 });
+			expect((await stored())?.accessToken).toMatchObject({
+				effectiveExpiresAt: new Date(DUE.getTime() + 30 * MIN),
+			});
+		});
+
+		it("reads an expiry by the instant the Date holds, never by a getTime of its own that answers a live token for a spent one", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockResolvedValue(
+				refreshed("1", GONE, { expiresAt: lyingDate(0, GONE.getTime() + HOUR) }),
+			);
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "upstream_token_ineligible",
+				reason: "no_finite_lifetime",
+				retryAfterSeconds: 300,
+			});
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-1`,
+				accessToken: undefined,
+			});
+		});
+	});
+
 	describe("a client that asks for more than a refresh can give", () => {
 		it("does not refresh tokens that are issued with less life than the buffer on every request, nor keep them until they die", async () => {
 			// Twenty-second tokens under a thirty-second buffer: each is inside the

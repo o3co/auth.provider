@@ -325,6 +325,10 @@ built on their own — `makeIoredisMfaFactorStoreClient(io)`,
 `makeIoredisMfaTransactionStoreClient(io)` — for the database or instance of
 their own that D12 prefers.
 
+A `DeviceCodeStoreClient` of your own writes an approval's `amr` and
+`authTimeMs` in `decide`'s same atomic write as the approval itself; one that
+does not makes every approval read both as absent.
+
 For mixed-backend deployments (another backend for `ChallengeStore`, Redis for
 `FederationTokenStore`), wire each per-purpose slot individually instead of
 spreading.
@@ -653,7 +657,7 @@ as two keys:
 
 | Key | Type | Holds |
 | --- | --- | --- |
-| `${keyPrefix}{devauth}:code:${device_code}` | hash | the record — status, expiry, interval, scope, subject, and the approval's instant (`approvedAtMs`, written by the approving script in the same `HSET`; a record approved before it was written reads it as absent) |
+| `${keyPrefix}{devauth}:code:${device_code}` | hash | the record — status, expiry, interval, scope, subject, the approval's instant (`approvedAtMs`), and the approving session's `amr` (a JSON array) and authentication instant (`authTimeMs`) when the approval was handed them. The approving script writes them in the same `HSET` as the approval; one it was not handed is not written. |
 | `${keyPrefix}{devauth}:user:${user_code}` | string | the `device_code` it belongs to |
 
 `keyPrefix` is `redis-device-code-store.keyPrefix` (default `devauth:`); the
@@ -677,6 +681,13 @@ carry the authorization's `expiresAtMs`, rounded up to a whole millisecond,
 as their deadline so Redis reclaims them, but `poll` still answers `expired`
 from the record's own exact timestamp: a record inside its TTL whose deadline
 has passed on the caller's clock expires, and is dropped.
+
+*Rolling upgrade.* A record approved before an upgrade, or by a replica that
+has not been upgraded yet, holds none of the fields that release did not
+write, and reads each as absent. An older replica that polls an approval a
+newer one wrote ignores the fields it does not know. So does a stored `amr` that is not a non-empty JSON
+list of non-empty strings, or an `authTimeMs` that is not the whole epoch
+milliseconds of an instant at or after the epoch. Nothing needs migrating.
 
 ## Consent records and parked requests
 
