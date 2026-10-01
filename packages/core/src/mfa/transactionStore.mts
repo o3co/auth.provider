@@ -729,7 +729,9 @@ export interface MfaLockoutPolicy {
 	 * higher `hardLimit` lifts it. NIST SP 800-63B-4's cap on consecutive
 	 * failed attempts is per authenticator and a ceiling; the per-subject
 	 * latch, and holding at the hardLimit-th attempt whatever its outcome, are
-	 * this product's choice. At most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
+	 * this product's choice. At most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}; a
+	 * configured policy, at least {@link MFA_LOCKOUT_MIN_HARD_LIMIT} and above
+	 * `threshold` ({@link checkConfiguredMfaLockoutPolicy}).
 	 */
 	readonly hardLimit: number;
 }
@@ -747,6 +749,13 @@ export const MFA_CLOCK_SKEW_ALLOWANCE_MS = 86_400_000;
 
 /** The most consecutive failures a lockout policy may allow: NIST SP 800-63B-4's cap. */
 export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
+
+/**
+ * The smallest `hardLimit` a configured policy may set
+ * ({@link checkConfiguredMfaLockoutPolicy}): the weekly cap's default, so the
+ * staged backoff acts before the hard hold.
+ */
+export const MFA_LOCKOUT_MIN_HARD_LIMIT = 10;
 
 /**
  * Which hold refused a guessable attempt. Once fixed, no time, no settle, no
@@ -972,14 +981,16 @@ const isPositiveWhole = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 
 /**
- * Refuses a lockout policy a store cannot apply as written, with a `RangeError`
- * naming `setting` and the field: an object, every field a positive whole
+ * The store's port check. Refuses a lockout policy a store cannot apply as
+ * written, with a `RangeError` naming `setting` and the field: an object,
+ * every field a positive whole
  * number, `maxSeconds` ≥ `baseSeconds`, `threshold` ≤ `hardLimit` (else the
  * backoff never engages before the hard hold), `hardLimit` ≤
  * {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every duration ending within the
- * Date range. Called at boot and again by every store operation taking a policy.
- * Answers the policy it checked, each field read once: a store applies that
- * copy, so what it applies is what was checked.
+ * Date range. Every store operation taking a policy calls it. A policy read
+ * from configuration is held to {@link checkConfiguredMfaLockoutPolicy}
+ * instead, which runs this first. Answers the policy it checked, each field
+ * read once: a store applies that copy, so what it applies is what was checked.
  *
  * @param setting - where the policy was read from, for the message.
  */
@@ -1030,6 +1041,33 @@ export function checkMfaLockoutPolicy(
 		}
 	}
 	return Object.freeze(checked);
+}
+
+/**
+ * The check for a lockout policy read from configuration, at boot: the store's
+ * port check ({@link checkMfaLockoutPolicy}), then the floor. A `RangeError`
+ * naming `setting` and the reason refuses a `hardLimit` below
+ * {@link MFA_LOCKOUT_MIN_HARD_LIMIT}, or one not above `threshold`. Answers
+ * the port check's copy.
+ *
+ * @param setting - where the policy was read from, for the message.
+ */
+export function checkConfiguredMfaLockoutPolicy(
+	policy: MfaLockoutPolicy,
+	setting = "mfa.lockout",
+): Readonly<MfaLockoutPolicy> {
+	const checked = checkMfaLockoutPolicy(policy, setting);
+	if (checked.hardLimit < MFA_LOCKOUT_MIN_HARD_LIMIT) {
+		throw new RangeError(
+			`${setting}.hardLimit must be at least ${MFA_LOCKOUT_MIN_HARD_LIMIT}: the attempt that is the hardLimit-th since the last success holds whatever its outcome, so a small value locks out a correct code`,
+		);
+	}
+	if (checked.hardLimit <= checked.threshold) {
+		throw new RangeError(
+			`${setting}.hardLimit must be above ${setting}.threshold: the staged backoff must act before the hard hold`,
+		);
+	}
+	return checked;
 }
 
 // ---------------------------------------------------------------------------

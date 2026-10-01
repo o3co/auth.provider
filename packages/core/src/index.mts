@@ -647,6 +647,7 @@ export {
 	toMfaStoreUpdateRequest,
 } from "./mfa/storeWire.mjs";
 export {
+	checkConfiguredMfaLockoutPolicy,
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
@@ -661,6 +662,7 @@ export {
 	laterFirstBindingMark,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_LOCKOUT_MAX_HARD_LIMIT,
+	MFA_LOCKOUT_MIN_HARD_LIMIT,
 	MFA_TRANSACTION_PATCH_KEYS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
