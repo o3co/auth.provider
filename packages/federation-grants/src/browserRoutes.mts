@@ -49,10 +49,11 @@
  * flow's own conditions: the intent's subject, the browser binding (express
  * session id and durable `sid`), the grant's current intent, the client's
  * permission, the connection's pins and the grants boundary. Anything admission
- * refuses, `step_up` included, gets the dead-session answer (connect: plain
- * `403`; consent: `403 reauthentication_required`; callback:
- * `error=reauthentication_required`); an unauthenticated cookie at connect is
- * sent to login instead.
+ * refuses gets the dead-session answer (connect: plain `403`; consent:
+ * `403 reauthentication_required`; callback: `error=reauthentication_required`),
+ * except a `step_up` at connect, which is sent once on the requirement's trip
+ * (`browserConnect.mts`); an unauthenticated cookie at connect is sent to
+ * login instead.
  *
  * Every `503` and every callback `temporarily_unavailable` redirect writes one
  * error line, `federation_grant_{connect,consent,callback}_unavailable`, with
