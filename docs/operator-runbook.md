@@ -887,8 +887,9 @@ wires it.
   the old id back in the cookie store after the renewal (express-session
   saves unconditionally). Both bundled user-session stores round-trip
   `renewalNonce`; a store of your own that drops it leaves escalated
-  sessions unbound. During a rolling upgrade, a replica on a release before
-  the nonce does not compare it. What is bound to the old id is orphaned and
+  sessions unbound. Of two step-ups completed from one cookie session, the
+  later one is answered as stale and signs in again. During a rolling
+  upgrade, a replica on a release before the nonce does not compare it. What is bound to the old id is orphaned and
   starts again: a
   consent `/authorize` parked, a federation-grant browser binding, and the
   session's other open MFA transactions — a consent or connect flow left
