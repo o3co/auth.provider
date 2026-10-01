@@ -19,7 +19,8 @@
  *
  * Two requirements are pinned by name: parse-then-check (the tab-smuggled
  * `javascript:` case) and the deliberate absence of a legacy dotless-scheme
- * escape hatch.
+ * escape hatch. The query-name rule is pinned over every accepted shape:
+ * the allowlist on names, and the authorization response's own names.
  *
  * `matchesRegisteredRedirectUri` is the runtime half — the /authorize
  * allowlist comparison, exact everywhere except the RFC 8252 §7.3 loopback
@@ -101,6 +102,172 @@ describe("checkRedirectUri", () => {
 		expect(reason("not a url")).toBe("unparsable");
 		expect(reason("%6aavascript:x")).toBe("unparsable");
 		expect(reason("/relative/path")).toBe("unparsable");
+	});
+});
+
+describe("checkRedirectUri — query names", () => {
+	// Every redirect-target shape the grammar accepts: https, loopback http
+	// (IPv4 and IPv6), and a reverse-domain custom scheme with a path and with
+	// an opaque one.
+	const BASES = [
+		"https://app.example/cb",
+		"http://127.0.0.1/cb",
+		"http://[::1]:8080/cb",
+		"com.example.app:/cb",
+		"com.example.app:cb",
+	];
+	/** The verdict for `?query` on every base, failing with the URI that differs. */
+	const verdictsOver = (query: string) => {
+		for (const base of BASES) {
+			const uri = `${base}?${query}`;
+			expect(checkRedirectUri(uri), uri).toEqual(checkRedirectUri(`${BASES[0]}?${query}`));
+		}
+		return checkRedirectUri(`${BASES[0]}?${query}`);
+	};
+	const RESPONSE_PARAMETERS = ["code", "state", "iss", "error", "error_description"];
+
+	it("refuses each response parameter name, with a value, an empty value or none, reporting it", () => {
+		for (const name of RESPONSE_PARAMETERS) {
+			for (const query of [`${name}=x`, `${name}=`, name]) {
+				expect(verdictsOver(query), query).toEqual({
+					reason: "reserved-parameter",
+					parameter: name,
+				});
+			}
+		}
+	});
+
+	it("refuses a response parameter name after another name, and repeated", () => {
+		for (const name of RESPONSE_PARAMETERS) {
+			for (const query of [`a=1&${name}=x`, `tenant=a&b=2&${name}`, `${name}=x&${name}=y`]) {
+				expect(verdictsOver(query), query).toEqual({
+					reason: "reserved-parameter",
+					parameter: name,
+				});
+			}
+		}
+	});
+
+	it("compares names ignoring ASCII case, reporting the canonical name", () => {
+		for (const [query, parameter] of [
+			["ISS=x", "iss"],
+			["Code=x", "code"],
+			["sTaTe=x", "state"],
+			["ERROR=x", "error"],
+			["Error_Description=x", "error_description"],
+		] as const) {
+			expect(verdictsOver(query), query).toEqual({ reason: "reserved-parameter", parameter });
+		}
+	});
+
+	it("compares names ignoring `_` and `-`, reporting the canonical name", () => {
+		// Name-normalizing middleware (camelCase to snake_case, leading `_`
+		// stripped) reads these as the response's own names.
+		for (const [query, parameter] of [
+			["_state=x", "state"],
+			["state_=x", "state"],
+			["-iss=x", "iss"],
+			["_code_=x", "code"],
+			["_error=x", "error"],
+			["errorDescription=x", "error_description"],
+			["error-description=x", "error_description"],
+			["errordescription=x", "error_description"],
+			["ERROR-DESCRIPTION=x", "error_description"],
+			["s_t_a_t_e=x", "state"],
+		] as const) {
+			expect(verdictsOver(query), query).toEqual({ reason: "reserved-parameter", parameter });
+		}
+	});
+
+	it("refuses a parameter with no name, and an empty pair", () => {
+		for (const query of ["=x", "=", "&", "&&", "a=1&&b=2", "a=1&", "&a=1"]) {
+			expect(verdictsOver(query), query).toEqual({ reason: "query-name-invalid" });
+		}
+	});
+
+	it("refuses `;` anywhere in the query, in a name or in a value", () => {
+		for (const query of ["x=1;iss=a", "a=x;y", "a;b", ";", "a=1&b=;"]) {
+			expect(verdictsOver(query), query).toEqual({ reason: "query-name-invalid" });
+		}
+	});
+
+	it("refuses `+` and percent-encoding in a name, decoding nothing", () => {
+		for (const query of ["+state=x", "a+b=1", "%69ss=x", "st%61te=x", "%41=1", "state%00x=1"]) {
+			expect(verdictsOver(query), query).toEqual({ reason: "query-name-invalid" });
+		}
+	});
+
+	it("refuses names a client framework can read as another name", () => {
+		for (const query of [
+			"iss[]=x",
+			"iss[0]=x",
+			"state[]=x",
+			"[]error=x",
+			"%20state=x",
+			"error.description=x",
+			"filter[x]=1",
+			"a.b=1",
+		]) {
+			expect(verdictsOver(query), query).toEqual({ reason: "query-name-invalid" });
+		}
+	});
+
+	it("refuses non-ASCII names, a space and an apostrophe", () => {
+		for (const query of ["ſtate=x", "ıss=x", "ｉss=x", "a b=1", " iss=1", "a'b=1"]) {
+			expect(verdictsOver(query), query).toEqual({ reason: "query-name-invalid" });
+		}
+	});
+
+	it("accepts a trailing `?` with no query", () => {
+		for (const base of BASES) expect(checkRedirectUri(`${base}?`), base).toBeNull();
+	});
+
+	it("accepts names whose letters differ from every response parameter's", () => {
+		for (const query of [
+			"x=1",
+			"foo",
+			"tenant=a&b-c=d_e",
+			"issuer=x",
+			"codes=x",
+			"code_challenge=x",
+			"state_id=x",
+			"state-id=x",
+			"error_uri=x",
+			"errorUri=x",
+			"A-b_9=1",
+		]) {
+			expect(verdictsOver(query), query).toBeNull();
+		}
+	});
+
+	it("leaves values unrestricted apart from `;`", () => {
+		for (const query of ["a=[1].x+y%20'", "a=x=y", "a=%26iss%3Db", "a=%3Biss=b", "a=state"]) {
+			expect(verdictsOver(query), query).toBeNull();
+		}
+	});
+
+	it("reports a shape problem before reading the query", () => {
+		expect(reason("https://app.example/cb?iss=x#f")).toBe("fragment");
+		expect(reason("https://app.example/cb?a=1#")).toBe("fragment");
+		expect(reason("https://app.example/cb?a[]=1#")).toBe("fragment");
+		expect(reason("http://evil.example/cb?iss=x")).toBe("http-non-loopback");
+		expect(reason("https://u@app.example/cb?state=x")).toBe("userinfo");
+		expect(reason("myapp://cb?code=x")).toBe("scheme-not-reverse-domain");
+	});
+
+	it("describes both reasons for the operator", () => {
+		const reserved = checkRedirectUri("https://app.example/cb?errorDescription=x");
+		expect(reserved && describeRedirectUriRejection(reserved)).toMatch(
+			/must not carry "error_description" in its query/,
+		);
+		expect(reserved && describeRedirectUriRejection(reserved)).toMatch(/case, "_" and "-"/);
+		const invalid = checkRedirectUri("https://app.example/cb?filter[x]=1");
+		expect(invalid && describeRedirectUriRejection(invalid)).toMatch(
+			/letters, digits, "_" and "-".*";"/,
+		);
+		for (const rejection of [reserved, invalid]) {
+			expect(rejection && describeRedirectUriRejection(rejection)).not.toMatch(/#\d/);
+		}
 	});
 });
 

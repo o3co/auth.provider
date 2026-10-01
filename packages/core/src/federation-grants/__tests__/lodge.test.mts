@@ -228,14 +228,25 @@ describe("lodging a first-time intent", () => {
 		}
 		const registered = {
 			...CLIENT,
-			federationGrantRedirectUris: ["https://client.test/cb?state=x"],
+			federationGrantRedirectUris: ["https://client.test/cb?grant_id=x"],
 		};
 		expect(
 			await lodgeFederationGrantIntent(
 				deps(),
-				initial({ client: registered, redirectUri: "https://client.test/cb?state=x" }),
+				initial({ client: registered, redirectUri: "https://client.test/cb?grant_id=x" }),
 			),
 		).toEqual({ ok: false, reason: "redirect_uri_reserved_parameter" });
+		expect(intents.size).toBe(0);
+	});
+
+	it("answers redirect_uri_invalid for a registered URI whose query the redirect-URI grammar refuses", async () => {
+		for (const redirectUri of ["https://client.test/cb?state=x", "https://client.test/cb?a[]=1"]) {
+			const client = { ...CLIENT, federationGrantRedirectUris: [redirectUri] };
+			expect(await lodgeFederationGrantIntent(deps(), initial({ client, redirectUri }))).toEqual({
+				ok: false,
+				reason: "redirect_uri_invalid",
+			});
+		}
 		expect(intents.size).toBe(0);
 	});
 
