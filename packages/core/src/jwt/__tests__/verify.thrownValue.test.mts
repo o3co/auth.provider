@@ -21,7 +21,7 @@
  */
 
 import { createSecretKey } from "node:crypto";
-import { SignJWT } from "jose";
+import { errors as joseErrors, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { type JwtVerifyOptions, verifyJwt } from "#/jwt/verify.mjs";
 import { createSymmetricKeyStore, type KeyStore } from "#/keys/KeyStore.mjs";
@@ -116,5 +116,31 @@ describe("verifyJwt — a thrown value it cannot inspect", () => {
 			name: "JwtVerificationError",
 			reason: "signature",
 		});
+	});
+});
+
+describe("verifyJwt — what jose throws, classified by its class and claim", () => {
+	const claim = (name: string) => new joseErrors.JWTClaimValidationFailed("claim", {}, name);
+	it.each([
+		["an expired token", "expired", new joseErrors.JWTExpired("expired", {})],
+		["an algorithm not allowed", "alg", new joseErrors.JOSEAlgNotAllowed("alg")],
+		["the iss claim", "iss", claim("iss")],
+		["the aud claim", "aud", claim("aud")],
+		["the nbf claim", "not_yet_valid", claim("nbf")],
+		["the iat claim", "not_yet_valid", claim("iat")],
+		["the exp claim", "expired", claim("exp")],
+		["a claim it has no reason for", "signature", claim("sub")],
+		[
+			"a signature that does not verify",
+			"signature",
+			new joseErrors.JWSSignatureVerificationFailed(),
+		],
+		["a malformed JWS", "signature", new joseErrors.JWSInvalid("jws")],
+		["a malformed JWT", "signature", new joseErrors.JWTInvalid("jwt")],
+		["any other Error", "signature", new Error("other")],
+	])("%s is %s", async (_label, reason, thrown) => {
+		await expect(
+			verifyJwt(await mint(), keyStoreWhoseKeyThrows(thrown), options),
+		).rejects.toMatchObject({ name: "JwtVerificationError", reason });
 	});
 });
