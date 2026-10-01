@@ -56,9 +56,13 @@ import {
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
+import express from "express";
+import { SignJWT } from "jose";
+import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { cascadeLogout } from "#/logout/cascadeLogout.mjs";
+import { createRouter as createLogoutRouter } from "#/routes/logout.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
@@ -467,6 +471,73 @@ describe("a logout and a code exchange on the same session", () => {
 		expect(cascade).toEqual({ outcome: "done" });
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 	});
+});
+
+describe("the logout route and a code exchange: the relying party it tells", () => {
+	const ISSUER = "https://auth.example";
+	const SECRET = "logout-route-race-secret-at-least-32-chars";
+
+	/**
+	 * `POST /oauth/logout` over the world's logout stores, with an id_token
+	 * hint for the session: the client ids of the relying parties each RP
+	 * listing returned are pushed on `listed`.
+	 */
+	const logoutRoute = async (
+		w: Awaited<ReturnType<typeof world>>,
+		listed: string[][],
+	): Promise<request.Response> => {
+		const registry = w.logoutStores.sessionRPRegistry;
+		const app = express();
+		app.use(
+			"/oauth",
+			createLogoutRouter(express, {
+				keyStore: createSymmetricKeyStore(SECRET),
+				issuer: ISSUER,
+				...w.logoutStores,
+				sessionRPRegistry: {
+					...registry,
+					listRPs: async (sid: string) => {
+						const rps = await registry.listRPs(sid);
+						listed.push(rps.map((rp) => rp.clientId));
+						return rps;
+					},
+				},
+				clientRepository: { findById: async () => null, authenticate: async () => null },
+				getFederationProviders: () => undefined,
+				fetchImpl: vi.fn(async () => new Response(null, { status: 200 })),
+			}),
+		);
+		const hint = await new SignJWT({ sub: SUBJECT, aud: CLIENT_ID, sid: SID })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "JWT" })
+			.setIssuer(ISSUER)
+			.setIssuedAt()
+			.setExpirationTime("1h")
+			.sign(crypto.createSecretKey(Buffer.from(SECRET)));
+		return request(app).post("/oauth/logout").type("form").send({ id_token_hint: hint });
+	};
+
+	for (const when of ["before", "after"] as const) {
+		it(`an exchange held ${when} its RP registration while the logout runs: the RP is in the logout's list, or the exchange is refused`, async () => {
+			const w = await world();
+			const held = checkpoint();
+			const exchange = w.exchange({
+				...w.grantStores,
+				sessionRPRegistry: holding(w.grantStores.sessionRPRegistry, "registerRP", held, { when }),
+			});
+			await held.arrived;
+
+			const listed: string[][] = [];
+			expect((await logoutRoute(w, listed)).status).toBe(200);
+			held.release();
+			const result = await exchange;
+
+			const told = listed.flat().includes(CLIENT_ID);
+			const refused = result.status === 400;
+			expect({ told, refused, status: result.status }).toMatchObject(
+				told ? { told: true } : { refused: true },
+			);
+		});
+	}
 });
 
 describe("the composition's family index", () => {

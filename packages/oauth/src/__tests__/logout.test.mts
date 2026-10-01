@@ -362,6 +362,46 @@ describe("POST /oauth/logout", () => {
 			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 		});
 
+		it("ends the session in a family index with the session-end capability before it lists the relying parties", async () => {
+			const sessionFamilyIndex = {
+				...makeSessionFamilyIndex(),
+				endSession: vi.fn(async (_sid: string, _expiresAt: Date) => ["fam-1"]),
+				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+			};
+			const sessionRPRegistry = makeSessionRPRegistry();
+			const app = buildApp({ sessionFamilyIndex, sessionRPRegistry });
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(200);
+			const ended = sessionFamilyIndex.endSession.mock.invocationCallOrder[0] as number;
+			const listed = (sessionRPRegistry.listRPs as ReturnType<typeof vi.fn>).mock
+				.invocationCallOrder[0] as number;
+			expect(ended).toBeLessThan(listed);
+		});
+
+		it("a session end that fails before the listing is 503, logged once, with no relying party listed", async () => {
+			const logger = createMockLogger();
+			const sessionFamilyIndex = {
+				...makeSessionFamilyIndex(),
+				endSession: vi.fn(async () => {
+					throw storeReplyError();
+				}),
+				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+			};
+			const sessionRPRegistry = makeSessionRPRegistry();
+			const app = buildApp({ sessionFamilyIndex, sessionRPRegistry, logger });
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(503);
+			expect(sessionRPRegistry.listRPs).not.toHaveBeenCalled();
+			expectOutageLine(logger, "logout_store_unavailable", {
+				store: "session_family_index",
+				step: "endSession",
+			});
+		});
+
 		it("confirmed=1 form-submission shape (hint + confirmed + state) completes hint-based logout, not 400", async () => {
 			// The GET confirmation page posts `confirmed=1` plus the
 			// id_token_hint as a hidden input; that shape must reach the
