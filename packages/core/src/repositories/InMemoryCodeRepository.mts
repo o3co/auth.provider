@@ -23,6 +23,10 @@ interface StoredCode extends Code {
 	expiresAt: number;
 }
 
+/** A frozen copy of a code's `amr`: the stored one and each answered one are arrays of their own. */
+const copyAmr = (amr: readonly string[] | undefined): readonly string[] | undefined =>
+	amr === undefined ? undefined : Object.freeze([...amr]);
+
 /**
  * A code's lifetime, in seconds, is a positive finite number whose end is
  * within the Date range (`adapters/expiry.mts`), or the code is refused. NaN is never `>= now`, so a code minted with it was redeemable for
@@ -80,7 +84,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			nonce: params.nonce,
 			sid: params.sid,
 			acr: params.acr,
-			amr: params.amr,
+			amr: copyAmr(params.amr),
 		};
 		this.codes.set(code, stored);
 		return {
@@ -95,7 +99,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			nonce: params.nonce,
 			sid: params.sid,
 			acr: params.acr,
-			amr: params.amr,
+			amr: copyAmr(stored.amr),
 		};
 	}
 
@@ -118,7 +122,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			nonce: stored.nonce,
 			sid: stored.sid,
 			acr: stored.acr,
-			amr: stored.amr,
+			amr: copyAmr(stored.amr),
 		};
 	}
 
@@ -139,7 +143,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			nonce: stored.nonce,
 			sid: stored.sid,
 			acr: stored.acr,
-			amr: stored.amr,
+			amr: copyAmr(stored.amr),
 		};
 	}
 

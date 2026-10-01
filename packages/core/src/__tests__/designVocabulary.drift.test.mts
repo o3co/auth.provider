@@ -1096,13 +1096,13 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	{
 		file: "packages/core/src/repositories/InMemoryCodeRepository.mts",
 		read: "params.amr",
-		count: 2,
+		count: 1,
 		why: CODE_AMR_STORE_WHY,
 	},
 	{
 		file: "packages/core/src/repositories/InMemoryCodeRepository.mts",
 		read: "stored.amr",
-		count: 2,
+		count: 3,
 		why: CODE_AMR_STORE_WHY,
 	},
 	{
@@ -1114,7 +1114,7 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	{
 		file: "packages/redis/src/code-repository.mts",
 		read: "p.amr",
-		count: 2,
+		count: 1,
 		why: CODE_AMR_STORE_WHY,
 	},
 	{

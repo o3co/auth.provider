@@ -25,6 +25,7 @@ import {
 	isStorableLifetime,
 	type Logger,
 	loggableError,
+	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { CodeRepositoryClient } from "./clients.mjs";
@@ -176,7 +177,8 @@ export class RedisCodeRepository implements CodeRepository {
 			// then reject naturally on the missing claim.
 			const grantedScope = Array.isArray(p.grantedScope) ? p.grantedScope : undefined;
 			const grantedAudience = Array.isArray(p.grantedAudience) ? p.grantedAudience : undefined;
-			const amr = Array.isArray(p.amr) ? p.amr : undefined;
+			// Mapped at the boundary: a list of non-empty strings, else none.
+			const amr = wellFormedAmr(p.amr);
 			return {
 				code,
 				client_id: p.client_id,
