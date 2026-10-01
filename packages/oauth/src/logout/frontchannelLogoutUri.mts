@@ -62,8 +62,8 @@ const UNREADABLE = Symbol("unreadable");
  *
  * Interim: a custom `ClientRepository` or session RP registry bypasses the
  * registration schema, so the value is checked where it is used. Exit
- * condition: #1095, core validating client records at the repository
- * boundary. Once that lands the rule moves to core and this helper goes.
+ * condition: core validating every client record at the repository
+ * boundary; once it does, the rule moves to core and this helper goes.
  */
 export function usableFrontchannelLogoutUri(
 	source: FrontchannelLogoutUriSource | null | undefined,
