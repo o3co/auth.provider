@@ -249,7 +249,7 @@ URL が無ければ何も書かれず、プロバイダーは Store が返す `m
 - `foundationMfaFactorStoreModule`・`FoundationMfaFactorStoreModuleOptions` — そのモジュール（[`src/mfa/module.mts`](src/mfa/module.mts)）。
 - `MfaStoreError`・`MfaStoreFailure`・`MfaStoreOperation` — MFA エンドポイントの失敗が投げるもの。`name`・`reason`・`operation`・`storeStatus` は契約の一部で、`status` は持たない（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）。アダプターが投げるときに通す関数と、`foundation-mfa-factor-store` セクションのスキーマと読み取り（[`src/mfa/section.mts`](src/mfa/section.mts)）はパッケージ内部のもの。
 
-[`src/testing/index.mts`](src/testing/index.mts) から `@o3co/auth-provider-foundation/testing` として、テストコードのためだけに export される: `foundationMfaFactorStoreConfig(urls, extra?)` — テストの設定に重ねる設定の断片としての `foundation-mfa-factor-store` セクション。`urls` が持つ四つの URL（偽の Store の `urls` も。その他のエンドポイントは残す）と、`extra` をそのまま持つ。
+[`src/testing/index.mts`](src/testing/index.mts) から `@o3co/auth-provider-foundation/testing` として、テストコードのためだけに export される: `foundationMfaFactorStoreConfig(urls, extra?)` — テストの設定に重ねる設定の断片としての `foundation-mfa-factor-store` セクション。`urls` が持つ四つの URL（偽の Store の `urls` も。その他のエンドポイントは残す）と、`extra` をそのまま持つ。そして `foundationUserRepositoryHttpConfig(urls, extra?)` — ユーザーリポジトリの `http` ブロック。`urls` が持つもののうち `"http"` ビルダーが読む Store の URL（MFA 要素のエンドポイントは残す）と、`extra` をそのまま持ち、組み立て側が core の `withUserRepositoryHttp` で置く。
 
 ## テスト
 
@@ -268,6 +268,8 @@ URL が無ければ何も書かれず、プロバイダーは Store が返す `m
 | [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | テストキットの `MfaFactorStore` スイートを、偽の Store の上の `HttpMfaFactorStore` に対して走らせる |
 | [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | 送るもの — 設定どおりの各 URL、ベアラートークン、バイト単位でそのままの封印されたデータと、その封印元を何も送らないこと、変換が拒否するものを送らないこと。各操作の応答と、契約を破る Store: `404`、`5xx`、リダイレクト、壊れた応答、読めないレコード、別の主体、重複した ID、飛んだバージョン、変更を書かなかった応答。Store が送ったものが投げるものに何も現れないこと。拒否された資格情報（このストアを名指す）、ヘッドまたはボディでの期限切れ、上限、届かない Store。構築と、ストアを検査したときにトークンもエンドポイントも見えないこと |
 | [`foundationMfaFactorStoreConfig.test.mts`](src/testing/__tests__/foundationMfaFactorStoreConfig.test.mts) | testing 入口のセクションのビルダー |
+| [`foundationUserRepositoryHttpConfig.test.mts`](src/testing/__tests__/foundationUserRepositoryHttpConfig.test.mts) | testing 入口のユーザーリポジトリの `http` ブロックのビルダーと、`"http"` ビルダーがそれを受け取ること |
+| [`storeRequestMessages.test.mts`](src/mfa/__tests__/storeRequestMessages.test.mts) | MFA エンドポイントでの通信の失敗が、どのクライアントから送っても同じ文言になること |
 | [`referenceConf.test.mts`](src/mfa/__tests__/referenceConf.test.mts) | パッケージの `reference.conf`: そのセクションだけを持ち、各 URL がそのパスから名付けた変数に既定値なしで結ばれること |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | テストキットの証人スイートを偽の Store の上の `HttpUserRepository` に対して走らせ、`markMfaEnrolled` で書き、`authenticate` と `authenticateByToken` で読み戻す。能力は `markMfaEnrolledUrl` があるときだけ |
 | [`markEnrolled.test.mts`](src/mfa/__tests__/markEnrolled.test.mts) | `markMfaEnrolled`: 送るもの — 設定どおりの URL、`{ subject, enrolled }`、bearer トークン、形の外の主体や値には何も送らない。`204` は完了、`404` は `unknown_subject`、他のステータスは `unexpected_status` で `Location` には接続しない。拒否された資格情報、期限、届かない Store。投げるものに Store が送ったもの・クエリ・主体が現れないこと。URL に課す https の規則 |

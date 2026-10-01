@@ -717,7 +717,11 @@ Exported from [`src/testing/index.mts`](src/testing/index.mts) as
 `foundationMfaFactorStoreConfig(urls, extra?)`, the
 `foundation-mfa-factor-store` section as a configuration fragment to lay over
 a test's configuration, holding the four URLs `urls` holds — a fake Store's
-`urls` included, its other endpoints left behind — and `extra` as given.
+`urls` included, its other endpoints left behind — and `extra` as given; and
+`foundationUserRepositoryHttpConfig(urls, extra?)`, the user repository's
+`http` block, holding the Store URLs the `"http"` builder reads that `urls`
+holds — its MFA factor endpoints left behind — and `extra` as given, which a
+composition places with core's `withUserRepositoryHttp`.
 
 ## Tests
 
@@ -736,6 +740,8 @@ a test's configuration, holding the four URLs `urls` holds — a fake Store's
 | [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | the test kit's `MfaFactorStore` suite against `HttpMfaFactorStore` over the fake Store |
 | [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | what it sends — each URL as configured, the bearer token, the sealed data byte for byte and nothing it was sealed from, nothing the codec refuses; each operation's answers, and a Store that breaks the contract: `404`, `5xx`, a redirect, a malformed answer, an unreadable record, a foreign subject, a repeated id, a skipped version, an answer that did not write the changes; nothing the Store sent in anything thrown; the credential refused (naming this store), a deadline over the head or the body, the cap, an unreachable Store; construction, and neither the token nor the endpoints shown when the store is inspected |
 | [`foundationMfaFactorStoreConfig.test.mts`](src/testing/__tests__/foundationMfaFactorStoreConfig.test.mts) | the testing entry's section builder |
+| [`foundationUserRepositoryHttpConfig.test.mts`](src/testing/__tests__/foundationUserRepositoryHttpConfig.test.mts) | the testing entry's builder of the user repository's `http` block, which the `"http"` builder takes |
+| [`storeRequestMessages.test.mts`](src/mfa/__tests__/storeRequestMessages.test.mts) | one wording for a transport failure at the MFA endpoints, whichever client sends to them |
 | [`referenceConf.test.mts`](src/mfa/__tests__/referenceConf.test.mts) | the package's `reference.conf`: only that section, each URL bound to the variable named after its path, no default |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the test kit's witness suite against `HttpUserRepository` over its fake Store, written through `markMfaEnrolled` and read back through `authenticate` and `authenticateByToken`; the capability present with `markMfaEnrolledUrl` alone |
 | [`markEnrolled.test.mts`](src/mfa/__tests__/markEnrolled.test.mts) | `markMfaEnrolled`: what it sends — the URL as configured, `{ subject, enrolled }`, the bearer token, nothing for a subject or a value out of shape; `204` done, `404` `unknown_subject`, any other status `unexpected_status` with no `Location` contacted; a refused credential, a deadline and an unreachable Store; nothing the Store sent, nor the query or the subject, in anything thrown; the URL held to the https rule |
