@@ -22,7 +22,9 @@
  * establishes, `establishSession` writes the session and a fresh CSRF token
  * is returned; if one interrupts, its ceremony is opened on a regenerated,
  * unauthenticated session and its `403` answered. A logout invalidates the
- * records the session owns before destroying the cookie session.
+ * records the session owns before destroying the cookie session — unless the
+ * record was renewed away from this cookie session (core's
+ * `cookieRenewedAway`), when only the cookie session is destroyed.
  */
 
 import {
@@ -34,6 +36,8 @@ import {
 	checkDeploymentMode,
 	checkResolver,
 	consoleLogger,
+	cookieClaim,
+	cookieRenewedAway,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
 	type DeploymentMode,
@@ -499,7 +503,18 @@ export const createRouter = (
 			const rawSub = req.session.user?.id;
 			const sub = typeof rawSub === "string" && rawSub.length > 0 ? rawSub : undefined;
 
-			if (sid) {
+			// A copy of a cookie session the record was renewed away from (a
+			// step-up moved it to another one) ends only itself: the record is
+			// the renewed session's. A read that fails leaves the logout as it was.
+			let renewedAway = false;
+			if (sid && userSessionStore) {
+				try {
+					renewedAway = await cookieRenewedAway(userSessionStore, cookieClaim(req));
+				} catch (err) {
+					logger.error({ err: loggableError(err), sid }, "logout_user_session_read_failed");
+				}
+			}
+			if (sid && !renewedAway) {
 				await invalidateSessionRecords(sid, sub);
 			}
 

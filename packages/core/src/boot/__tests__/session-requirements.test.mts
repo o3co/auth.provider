@@ -259,7 +259,12 @@ describe("the sessionRequirements kind and sessionRequirementResolver", () => {
 					action: "test.use",
 				},
 			);
-			expect(admission).toEqual({ outcome: "admitted", session: null, acr: undefined });
+			expect(admission).toEqual({
+				outcome: "admitted",
+				session: null,
+				view: null,
+				acr: undefined,
+			});
 		} finally {
 			await handle.dispose();
 		}

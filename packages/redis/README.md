@@ -159,9 +159,15 @@ Each one implements a port core declares; the slot name is in parentheses.
   an envelope written before it reads as `authentication: undefined` (a
   pre-upgrade session, split as core reads it), a malformed one is refused as
   corrupt, and a release before this one reads the envelope and ignores the
-  key. The step-up write rewrites only `amr` and the fields of
-  `authentication` this release knows, so what a newer release added beside
-  or inside them survives a step-up on a replica not yet upgraded. A custom
+  key. The step-up write rewrites only `amr`, the fields of
+  `authentication` this release knows, and `renewalNonce` when the event
+  carries one (the MFA ADR's D27: written in the same compare-and-set as the
+  escalation, kept by a step-up without one; absent until then, and any
+  value that is not a nonce reads the envelope as corrupt; an event whose
+  `expectedRenewalNonce` is not the envelope's nonce, judged on the bytes
+  the compare-and-set writes over, is answered `null` with nothing written), so what a newer
+  release added beside or inside them survives a step-up on a replica not
+  yet upgraded. A custom
   `UserSessionStoreClient` implements `replaceIfUnchanged`
   (`makeIoredisClients` does); `createRedisUserSessionStore` refuses a client
   without it when the store is built, naming the method. The envelope carries

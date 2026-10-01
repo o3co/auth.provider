@@ -32,6 +32,7 @@ import {
 	type RegisteredRequirement,
 	type RegisteredStepUpPage,
 	type RequirementVerdict,
+	type SessionView,
 } from "./requirement.mjs";
 
 /** The `remediation` names already said to be undeclared, once per process each, up to the cap; past it, once for all. */
@@ -60,6 +61,12 @@ export const isVerdict = (value: unknown): value is RequirementVerdict =>
 		value.whenStillUnmet === "reauthenticate" ||
 		value.whenStillUnmet === "unmet");
 
+/** A live record step 2 read, beside admission's view of it. */
+export interface LiveRecord {
+	readonly session: UserSession;
+	readonly view: SessionView;
+}
+
 /**
  * Step 5's verdict, with the requirement that gave it. An outage never gets
  * here — step 5 answers `unavailable` itself — and a `step_up` carries the
@@ -74,6 +81,7 @@ export type RequirementOutcome =
 			readonly requirement: string;
 			readonly stepping: RegisteredRequirement;
 			readonly session: UserSession;
+			readonly view: SessionView;
 			readonly page: RegisteredStepUpPage;
 			readonly whenStillUnmet: "reauthenticate" | "unmet";
 	  }
@@ -91,10 +99,10 @@ export function stepUpVerdict(
 	name: string,
 	requirement: RegisteredRequirement,
 	whenStillUnmet: "reauthenticate" | "unmet",
-	session: UserSession | null,
+	live: LiveRecord | null,
 	deps: AdmissionDeps,
 ): RequirementOutcome {
-	if (session === null) {
+	if (live === null) {
 		if (!sessionlessStepUps.has(name)) {
 			sessionlessStepUps.add(name);
 			deps.logger?.warn({ requirement: name }, "session_admission_step_up_without_session");
@@ -113,7 +121,8 @@ export function stepUpVerdict(
 		outcome: "step_up",
 		requirement: name,
 		stepping: requirement,
-		session,
+		session: live.session,
+		view: live.view,
 		page,
 		whenStillUnmet,
 	};

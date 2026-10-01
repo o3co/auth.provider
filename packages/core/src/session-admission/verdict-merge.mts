@@ -21,13 +21,13 @@
  * trip can finish.
  */
 
-import type { UserSession } from "../user-sessions/types.mjs";
 import type { AcrSelection } from "./acr.mjs";
 import type { Admission, AdmissionDeps, RegisteredRequirement } from "./requirement.mjs";
-import type { RequirementOutcome } from "./requirement-verdict.mjs";
+import type { LiveRecord, RequirementOutcome } from "./requirement-verdict.mjs";
 
 export interface MergeContext {
-	readonly session: UserSession | null;
+	/** The live record and admission's view of it; `null` without one. */
+	readonly live: LiveRecord | null;
 	/** No requested value is in the table: no login can meet the request. */
 	readonly noneConfigured: boolean;
 	readonly requirements: readonly (readonly [string, RegisteredRequirement])[];
@@ -42,17 +42,18 @@ export function merge(
 	A: AcrSelection | undefined,
 	context: MergeContext,
 ): Admission {
-	const { session } = context;
+	const { live } = context;
+	const session = live?.session ?? null;
 	const unmetAcr = (): Admission => ({ outcome: "unmet", requirement: "acr", session });
 	switch (R.outcome) {
 		case "met":
 			if (A === undefined || A.outcome === "met") {
-				return { outcome: "admitted", session, acr: A?.acr };
+				return { outcome: "admitted", session, view: live?.view ?? null, acr: A?.acr };
 			}
 			// A selection steps up only over a live session: step 6 hands it an
 			// empty reach otherwise.
-			if (A.outcome === "unmet" || session === null) return unmetAcr();
-			return stepUpThroughOne(A.acrValues, context, session) ?? unmetAcr();
+			if (A.outcome === "unmet" || live === null) return unmetAcr();
+			return stepUpThroughOne(A.acrValues, context, live) ?? unmetAcr();
 		case "reauthenticate":
 			return context.noneConfigured
 				? unmetAcr()
@@ -65,6 +66,7 @@ export function merge(
 				outcome: "step_up",
 				requirement: R.requirement,
 				session: R.session,
+				view: R.view,
 				page: R.page,
 				acrValues:
 					A?.outcome === "step_up"
@@ -102,7 +104,7 @@ const finishes = (
 function stepUpThroughOne(
 	reachable: readonly string[],
 	context: MergeContext,
-	session: UserSession,
+	live: LiveRecord,
 ): Admission | undefined {
 	for (const [name, requirement] of context.requirements) {
 		// What this requirement's reach alone can finish, beside what is held.
@@ -113,7 +115,8 @@ function stepUpThroughOne(
 			return {
 				outcome: "step_up",
 				requirement: name,
-				session,
+				session: live.session,
+				view: live.view,
 				page: requirement.stepUpPage,
 				// The hint: the entries this one trip can finish, in the request's order.
 				acrValues: finishable,

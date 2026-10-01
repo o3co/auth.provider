@@ -990,6 +990,7 @@ export {
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	cookieClaim,
+	cookieRenewedAway,
 	cookieSessionUser,
 	establishWithoutAsking,
 	type FederatedLogin,
@@ -1003,9 +1004,9 @@ export {
 	type TokenCarrier,
 	tokenClaim,
 } from "./session-admission/admit.mjs";
-// The tail of a login as a contract — what a requirement's completion
-// requires through the `loginCompletion` slot instead of importing the
-// session package.
+// The tail of a login, and the renewal of a signed-in session's id, as a
+// contract — what a requirement's completion requires through the
+// `loginCompletion` slot instead of importing the session package.
 export type {
 	LoginCompletion,
 	LoginEstablishmentCall,
@@ -1015,6 +1016,10 @@ export type {
 	LoginInterruptionReporter,
 	LoginInterruptionResult,
 	LoginInterruptionStep,
+	SessionRenewalCall,
+	SessionRenewalReporter,
+	SessionRenewalResult,
+	SessionRenewalStep,
 } from "./session-admission/login-completion.mjs";
 export {
 	checkPrimaryContinuation,
@@ -1068,10 +1073,13 @@ export type { OAuthTokenSettings } from "./token-settings/types.mjs";
 // way by every consumer of a session.
 export {
 	checkSecondFactorEvent,
+	expectsRenewalNonce,
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	type RecordedAuthentication,
+	type RenewalNonces,
+	readRenewalNonces,
 	recordableSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,
@@ -1099,6 +1107,13 @@ export { createInMemorySubjectRevocation } from "./user-sessions/memory/subjectR
 export { createInMemorySubjectSessionIndex } from "./user-sessions/memory/subjectSessionIndex.mjs";
 export { createInMemoryUserSessionStore } from "./user-sessions/memory/userSessionStore.mjs";
 export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
+// The nonce that binds an escalated session to the one cookie session a
+// renewal moved it to: minted by the renewal, recorded with the escalation.
+export {
+	isRenewalNonce,
+	newRenewalNonce,
+	RENEWAL_NONCE_BYTES,
+} from "./user-sessions/renewalNonce.mjs";
 export {
 	type CascadeSession,
 	type RevokeAllForSubjectCapability,

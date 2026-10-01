@@ -17,6 +17,8 @@
 import {
 	checkSecondFactorEvent,
 	copySessionAuthentication,
+	expectsRenewalNonce,
+	readRenewalNonces,
 	recordableSessionAuthentication,
 	sessionAfterSecondFactor,
 } from "../authentication.mjs";
@@ -44,6 +46,8 @@ interface Stored {
 	authentication: SessionAuthentication | undefined;
 	/** What `recordableEnrollmentFacts` answered at `create`; `undefined` for none. */
 	enrollmentFacts: SessionEnrollmentFacts | undefined;
+	/** The renewal nonce the last escalation carried; `undefined` for none. */
+	renewalNonce: string | undefined;
 }
 
 /**
@@ -72,6 +76,7 @@ const toSession = (s: Stored): UserSession => ({
 	authentication: s.authentication ? copySessionAuthentication(s.authentication) : undefined,
 	// Optional on the session: left out when none was recorded.
 	...(s.enrollmentFacts === undefined ? {} : { enrollmentFacts: { ...s.enrollmentFacts } }),
+	...(s.renewalNonce === undefined ? {} : { renewalNonce: s.renewalNonce }),
 });
 
 /**
@@ -141,6 +146,7 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 				// Already a copy, its `mfaAt` no later than this store's clock.
 				authentication,
 				enrollmentFacts,
+				renewalNonce: undefined,
 			});
 		},
 		async get(sid: string): Promise<UserSession | null> {
@@ -153,13 +159,17 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 			// its time judged on this store's clock.
 			const nowMs = Date.now();
 			checkSecondFactorEvent(event, nowMs);
+			const nonces = readRenewalNonces(event);
 			const s = readLive(sid);
 			if (!s) return null;
+			// A completion another one overtook: the session moved to its nonce.
+			if (!expectsRenewalNonce(s.renewalNonce, nonces)) return null;
 			const next = sessionAfterSecondFactor(toSession(s), event, nowMs);
 			if (next === null) return null;
 			// A field write: `expiresAt`, and everything else, stay as they were.
 			s.amr = [...next.amr];
 			s.authentication = copySessionAuthentication(next.authentication);
+			if (nonces.renewalNonce !== undefined) s.renewalNonce = nonces.renewalNonce;
 			return toSession(s);
 		},
 		async delete(sid: string) {
