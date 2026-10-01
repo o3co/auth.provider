@@ -54,8 +54,9 @@ end, so here **the provider decides and the Store only persists**: after the
 first counting factor is written the provider marks the subject enrolled, and
 after the last is removed it clears the mark — in that order, so a crash leaves
 a factor without a witness, never a witness without a factor. The Store answers
-the mark back as `User.mfaEnrolled` on `authenticate`, read only through
-`readMfaEnrollmentWitness`: a value that is neither a boolean nor absent is
+the mark back as `User.mfaEnrolled` on `authenticate` and on
+`authenticateByToken` alike — a federated session records it from the latter —
+read only through `readMfaEnrollmentWitness`: a value that is neither a boolean nor absent is
 malformed, answered `503`, and never read as "not enrolled". Why it is a Store write at
 all: the witness has to survive the factor store it vouches for. A factor store
 that loses its records — a Redis restarted without persistence, an eviction, a

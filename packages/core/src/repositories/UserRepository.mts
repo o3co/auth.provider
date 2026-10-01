@@ -85,7 +85,12 @@ export type LinkFederatedIdentityResult =
 export interface UserRepository {
 	/** The user `username` and `password` authenticate, as plain data (see {@link User}), or `null`. */
 	authenticate(username: string, password: string): Promise<User | null>;
-	/** The user a federated identity token is linked to, as plain data (see {@link User}), or `null`. */
+	/**
+	 * The user a federated identity token is linked to, as plain data (see
+	 * {@link User}), or `null`. The Store answers the MFA enrollment witness
+	 * (`User.mfaEnrolled`) here as on {@link authenticate}: a federated
+	 * session records it from this answer.
+	 */
 	authenticateByToken(token: string): Promise<User | null>;
 	/**
 	 * Link a federated identity to an existing user. Optional: without it the
@@ -153,7 +158,8 @@ export interface UserRepository {
 	): Promise<FederatedIdentityLookupResult>;
 	/**
 	 * Persist whether `subject` has a second factor enrolled: the MFA enrollment
-	 * witness the Store answers on `authenticate` as `User.mfaEnrolled`.
+	 * witness the Store answers on `authenticate` and on `authenticateByToken`
+	 * as `User.mfaEnrolled`.
 	 * Optional; detected by {@link supportsMfaEnrollmentWitness}.
 	 *
 	 * The provider decides and the Store only persists: `true` after the first

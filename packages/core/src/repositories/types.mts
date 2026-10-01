@@ -244,9 +244,11 @@ export interface User {
 	readonly groups?: readonly string[];
 	/**
 	 * The MFA enrollment witness: whether this user has enrolled a second
-	 * factor, as the Store answers it on `authenticate`. It lives outside the
-	 * factor store so that losing that store does not read as "never enrolled",
-	 * which would let whoever holds the password bind their own authenticator.
+	 * factor, answered by the Store on `authenticate` and on
+	 * `authenticateByToken` alike, since a federated session records it from
+	 * the `User` the latter answers. It lives outside the factor store so that
+	 * losing that store does not read as "never enrolled", which would let
+	 * whoever holds the password bind their own authenticator.
 	 * Read it only through `readMfaEnrollmentWitness`; the provider writes it
 	 * through `UserRepository.markMfaEnrolled` where the repository has it. See
 	 * the MFA ADR (2026-09-25-multi-factor-authentication), D12.
