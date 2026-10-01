@@ -26,7 +26,7 @@ import { defineScript } from "./define.mjs";
  * Returns 1 when the key was deleted (caller's token matched), 0 otherwise.
  * `KEYS[1]` = the lock key; `ARGV[1]` = the caller's acquire token.
  */
-export const LUA_COMPARE_AND_DELETE = `
+const LUA_COMPARE_AND_DELETE = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
   return redis.call("DEL", KEYS[1])
 else
@@ -34,5 +34,5 @@ else
 end
 `.trim();
 
-/** The federation token store's lock release. */
+/** The lock release, the one `CachedScript` for this text. */
 export const COMPARE_AND_DELETE = defineScript(LUA_COMPARE_AND_DELETE);

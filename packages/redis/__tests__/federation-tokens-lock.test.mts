@@ -44,8 +44,7 @@ describe("lock release is atomic compare-and-delete (no spurious DEL)", () => {
 		};
 
 		const lock = createRedisLock({
-			// biome-ignore lint/suspicious/noExplicitAny: the fake carries only the RedisLockClient methods the lock calls.
-			client: fakeClient as any,
+			client: fakeClient,
 			keyPrefix: "ftlock:",
 		});
 		const result = await lock.acquireLock({ sid: "sid-1", federationName: "google" });
@@ -87,8 +86,7 @@ describe("lock release is atomic compare-and-delete (no spurious DEL)", () => {
 		};
 
 		const lock = createRedisLock({
-			// biome-ignore lint/suspicious/noExplicitAny: see prior test.
-			client: fakeClient as any,
+			client: fakeClient,
 			keyPrefix: "ftlock:",
 		});
 		const result = await lock.acquireLock({ sid: "sid-2", federationName: "google" });

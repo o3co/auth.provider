@@ -694,9 +694,10 @@ describe("makeIoredisClients consent clients — keys declared and the caller's 
 });
 
 // ---------------------------------------------------------------------------
-// The subject sweep and the revocation record's write take the same
-// EVALSHA-first path: a cold cache is recovered by EVAL of the text EVALSHA
-// named, and anything that is not NOSCRIPT is the caller's error.
+// The lock release, the subject sweep and the revocation record's write take
+// the same EVALSHA-first path: a cold cache is recovered by EVAL of the text
+// EVALSHA named, and anything that is not NOSCRIPT is the caller's error.
+// `reply` is what Redis answers, `answer` what the client returns.
 // ---------------------------------------------------------------------------
 
 const sha1 = (text: string): string => createHash("sha1").update(text).digest("hex");
@@ -705,8 +706,17 @@ const noScript = (): Error => new Error("NOSCRIPT No matching script. Please use
 describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRIPT fallback", () => {
 	const scripts = [
 		{
+			name: "federationTokenStoreClient.compareAndDelete",
+			reply: 1,
+			answer: true,
+			run: (io: Redis) =>
+				makeIoredisClients(io).federationTokenStoreClient.compareAndDelete("k", "v"),
+			wire: [1, "k", "v"],
+		},
+		{
 			name: "subjectSessionIndexClient.pruneExpiredAndList",
 			reply: ["sid-1"],
+			answer: ["sid-1"],
 			run: (io: Redis) =>
 				makeIoredisClients(io).subjectSessionIndexClient.pruneExpiredAndList("idx"),
 			wire: [1, "idx"],
@@ -714,6 +724,7 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 		{
 			name: "subjectRevocationClient.setRevocationBoundaries",
 			reply: "stored",
+			answer: "stored",
 			run: (io: Redis) =>
 				makeIoredisClients(io).subjectRevocationClient.setRevocationBoundaries(
 					"rev",
@@ -728,7 +739,7 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 
 	it.each(scripts)(
 		"$name: NOSCRIPT on EVALSHA loads the named text by EVAL and re-warms the cache",
-		async ({ reply, run, wire }) => {
+		async ({ reply, answer, run, wire }) => {
 			const io = makeFakeIoredis({
 				evalsha: vi.fn().mockResolvedValue(reply),
 				eval: vi.fn().mockResolvedValue(reply),
@@ -738,7 +749,7 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 			io.eval.mockClear();
 			io.evalsha.mockReset().mockRejectedValueOnce(noScript()).mockResolvedValue(reply);
 
-			expect(await run(io)).toEqual(reply);
+			expect(await run(io)).toEqual(answer);
 			expect(io.evalsha).toHaveBeenCalledTimes(1);
 			expect(io.eval).toHaveBeenCalledTimes(1);
 			const [sha, ...shaWire] = io.evalsha.mock.calls[0] as [string, ...unknown[]];
@@ -747,7 +758,7 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 			expect(shaWire).toEqual(wire);
 			expect(evalWire).toEqual(wire);
 
-			expect(await run(io)).toEqual(reply);
+			expect(await run(io)).toEqual(answer);
 			expect(io.evalsha).toHaveBeenCalledTimes(2);
 			expect(io.eval).toHaveBeenCalledTimes(1);
 		},

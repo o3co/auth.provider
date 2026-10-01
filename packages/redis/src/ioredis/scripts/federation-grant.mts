@@ -20,7 +20,7 @@
  */
 
 import { defineScript } from "./define.mjs";
-import { LUA_COMPARE_AND_DELETE } from "./lock.mjs";
+import { COMPARE_AND_DELETE } from "./lock.mjs";
 
 // One script per write, with every guard inside it. A grant's HASH, credential and lock share
 // a hash tag, so one script may touch all three. The subject's index is its own key in its own
@@ -472,8 +472,8 @@ export const FG_RETIRE_INTENT = defineScript(LUA_FG_RETIRE_INTENT);
 export const FG_TOUCH = defineScript(LUA_FG_TOUCH);
 export const FG_RESERVE = defineScript(LUA_FG_RESERVE);
 export const FG_PRUNE = defineScript(LUA_FG_PRUNE);
-/** The same source the session lock uses: a delete that only frees the value it was given. */
-export const FG_UNLOCK = defineScript(LUA_COMPARE_AND_DELETE);
+/** The federation token lock's release, shared: a delete that frees only the value it was given. */
+export const FG_UNLOCK = COMPARE_AND_DELETE;
 export const FG_ACTIVATE = defineScript(LUA_FG_ACTIVATE);
 export const FG_REPLACE = defineScript(LUA_FG_REPLACE);
 export const FG_REQUIRE_REAUTH = defineScript(LUA_FG_REQUIRE_REAUTH);
