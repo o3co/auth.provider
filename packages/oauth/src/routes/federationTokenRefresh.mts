@@ -22,8 +22,6 @@
  */
 
 import {
-	BEARER_TOKEN_TYPE,
-	emitAuditEvent,
 	type FederationTokens,
 	loggableError,
 	sanitizeErrorText,
@@ -39,6 +37,7 @@ import {
 import { readRefreshAnswer } from "./federationTokenRefreshAnswer.mjs";
 import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
 import { recordRefresh } from "./federationTokenRefreshRecord.mjs";
+import { answerToken } from "./federationTokenSuccess.mjs";
 
 /** Step 11. `tokens` is the record as read before the lock. */
 export const refreshStoredTokens = async (
@@ -46,8 +45,8 @@ export const refreshStoredTokens = async (
 	caller: FederationTokenCaller,
 	tokens: FederationTokens,
 ): Promise<Response> => {
-	const { opts, req, res, name, federation, logger, storeUnavailable, refreshBufferMs } = ctx;
-	const { sid, azp, sub } = caller;
+	const { opts, res, name, federation, logger, storeUnavailable, refreshBufferMs } = ctx;
+	const { sid, azp } = caller;
 
 	// Step 11: Refresh path.
 
@@ -130,24 +129,7 @@ export const refreshStoredTokens = async (
 				if (!mayDiscloseTokenType(freshTokens.tokenType)) {
 					return refuseUndisclosableTokenType(ctx, caller, freshTokens.tokenType);
 				}
-				const expiresIn =
-					freshTokens.expiresAt === null
-						? undefined
-						: Math.max(0, Math.floor((freshTokens.expiresAt.getTime() - Date.now()) / 1000));
-				emitAuditEvent(opts.auditSink, {
-					timestamp: new Date(),
-					type: "federation.token.success",
-					subject: sub ?? undefined,
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: { federation, refreshed: false },
-				});
-				return res.status(200).json({
-					access_token: freshTokens.accessToken,
-					token_type: BEARER_TOKEN_TYPE,
-					...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
-					...(freshTokens.scope ? { scope: freshTokens.scope } : {}),
-				});
+				return answerToken(ctx, caller, freshTokens, false);
 			}
 			// Update to the post-lock re-read value (may be freshTokens or null if
 			// the store returned null; in either case currentTokens keeps the pre-lock
