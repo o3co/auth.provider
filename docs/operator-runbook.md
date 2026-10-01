@@ -313,8 +313,9 @@ Module-level messages that arrive wrapped in a factory failure:
   key ring and the development sample key as `packages/mfa/README.md` lists
   them, `mfa.transactionTtlSeconds` outside 60 to 1800 seconds,
   `mfa.maxAttemptsPerTransaction` outside 2 to 10, an
-  `mfa.lockout` core's `checkMfaLockoutPolicy` refuses (`mfa.lockout.threshold
-  must be at most mfa.lockout.hardLimit`, …), and an
+  `mfa.lockout` core's `checkConfiguredMfaLockoutPolicy` refuses
+  (`mfa.lockout.hardLimit must be at least 10: …`, `mfa.lockout.hardLimit
+  must be above mfa.lockout.threshold: …`, …), and an
   `mfa.enrollment.requireEmailProof` other than `when-mail`, `always` or
   `never`; `mfa.enrollment.requireEmailProof is "always" and no mail sender is
   wired` — nobody could give the account-email proof, so nobody could bind a
@@ -731,17 +732,18 @@ wires it.
   fifth consecutive failure a lock of 15 minutes, doubling to 24 hours. Ten
   failures in any seven days hold guessable proofs (TOTP, an emailed code)
   for the subject, whatever succeeds between them, from every browser.
-  `mfa.lockout.hardLimit` consecutive failures (100) hold them with no time
-  to come back (`mfa.lockout`). An exempt proof (a recovery code, WebAuthn)
-  passes during every lock and ends a consecutive run before the hard hold;
-  it lifts no hard hold and refunds no weekly failure. The hard hold is
-  fixed the moment the run, attempts in flight counted, reaches the limit:
-  no later success, exempt proof or raised `hardLimit` lifts it. So the
-  attempt that is the hardLimit-th since the last success holds, whatever
-  its outcome. This is one stricter than NIST's '100 failed attempts': a
-  correct hardLimit-th attempt still signs in, but guessable factors stay
-  held until re-enrolled. The account-email
-  proof is never held, and ends nothing. **A held subject can still be
+  The `mfa.lockout.hardLimit`-th attempt since the last success (100; at
+  least 10 and above `threshold`) holds them with no time to come back
+  (`mfa.lockout`), whatever its outcome. An
+  exempt proof (a recovery code, WebAuthn) passes during every lock and
+  ends a consecutive run before the hard hold; it lifts no hard hold and
+  refunds no weekly failure. The hard hold is fixed the moment the run,
+  attempts in flight counted, reaches the limit: no later success, exempt
+  proof or raised `hardLimit` lifts it. So the attempt that is the
+  hardLimit-th since the last success holds, whatever its outcome. This is
+  one stricter than NIST's '100 failed attempts': a correct hardLimit-th
+  attempt still signs in, but guessable factors stay held until
+  re-enrolled. The account-email proof is never held, and ends nothing. **A held subject can still be
   mailed an email code**: the challenge does not read the lock, so a code
   goes out up to the mail sender's limit (`429 rate_limited` beyond it), and
   is refused where it is verified (`429 mfa_locked`, spending one of the
