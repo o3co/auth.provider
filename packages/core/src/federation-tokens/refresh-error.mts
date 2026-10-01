@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { isError } from "../logging/loggableError.mjs";
+import { guardedRead, isError, thrownText } from "../logging/loggableError.mjs";
 import { isFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 /**
@@ -55,6 +55,15 @@ const NETWORK_CODES: ReadonlySet<string> = new Set([
 	"EAI_AGAIN",
 ]);
 
+/** What a field reads as when reading it throws (a getter, a Proxy's trap). */
+const UNREADABLE: unique symbol = Symbol("unreadable");
+
+/** `value[key]`, or {@link UNREADABLE}: the thrown value is whatever an adapter threw. */
+const field = (value: object, key: string): unknown => {
+	const read = guardedRead(value, key);
+	return read === null ? UNREADABLE : read.value;
+};
+
 /**
  * Finds a `NETWORK_CODES` code on the thrown value or its cause chain: undici
  * throws `TypeError("fetch failed")` with the code on `.cause`, and
@@ -64,13 +73,15 @@ const NETWORK_CODES: ReadonlySet<string> = new Set([
  * its cause and a `code` there says nothing about this server's transport.
  * `isFederationUpstreamOutage` follows causes by the same rule.
  */
-function extractNetworkCode(error: unknown): string | undefined {
+function extractNetworkCode(error: object): string | undefined | typeof UNREADABLE {
 	let cur: unknown = error;
 	for (let depth = 0; depth < 4 && cur !== null && typeof cur === "object"; depth++) {
 		if (depth > 0 && !isError(cur)) return undefined;
-		const code = (cur as { code?: unknown }).code;
+		const code = field(cur, "code");
+		if (code === UNREADABLE) return UNREADABLE;
 		if (typeof code === "string" && NETWORK_CODES.has(code)) return code;
-		cur = (cur as { cause?: unknown }).cause;
+		cur = field(cur, "cause");
+		if (cur === UNREADABLE) return UNREADABLE;
 	}
 	return undefined;
 }
@@ -124,8 +135,17 @@ function retryAfterSeconds(error: object): number | undefined {
 	}
 }
 
-function structuredReason(error: object): FederationRefreshErrorReason | undefined {
-	const e = error as { error?: unknown; status?: unknown };
+/** The fields of the thrown value the structured reading decides by, each read once. */
+interface ReadFields {
+	readonly code: unknown;
+	readonly status: unknown;
+	readonly networkCode: string | undefined;
+}
+
+function structuredReason(
+	error: object,
+	{ code, status, networkCode }: ReadFields,
+): FederationRefreshErrorReason | undefined {
 	// An outage (unreachable, timed out or 5xx, on the error, its Error causes or
 	// its Response, or a 5xx `status` on a non-Error an adapter threw) is read
 	// before the codes that reject the refresh token. A 5xx is never a verdict
@@ -133,20 +153,20 @@ function structuredReason(error: object): FederationRefreshErrorReason | undefin
 	// user their upstream tokens. A 429 is no outage.
 	const outage =
 		isFederationUpstreamOutage(error) ||
-		(typeof e.status === "number" && e.status >= 500 && e.status < 600);
+		(typeof status === "number" && status >= 500 && status < 600);
 	// A 429 (RFC 6585 §4) asks for less and is no verdict on the refresh token,
 	// whatever its body names, so it is read before any code that ends the
 	// credential. Some IdPs (Google, Microsoft) echo `too_many_requests` as `.error`.
-	if (e.error === "too_many_requests" || e.status === 429) return "rate_limited";
+	if (code === "too_many_requests" || status === 429) return "rate_limited";
 	// `.error` is the IdP's RFC 6749 §5.2 code. `invalid_grant` and
 	// `invalid_token` (RFC 6750 §3.1) both require re-auth.
-	if (!outage && (e.error === "invalid_grant" || e.error === "invalid_token")) {
+	if (!outage && (code === "invalid_grant" || code === "invalid_token")) {
 		return "invalid_grant";
 	}
 	if (outage) return "network";
 	// Also catches a network code on a thrown non-Error, which the outage test
 	// does not read.
-	if (extractNetworkCode(error) !== undefined) return "network";
+	if (networkCode !== undefined) return "network";
 	return undefined;
 }
 
@@ -168,18 +188,25 @@ export function isKnownFederationRefreshErrorCode(code: unknown): code is string
  *
  * `reason` is safe to act on alone: `invalid_grant` is the IdP's structured
  * verdict on the refresh token, never read during an outage or off a message.
+ * Never throws: a field that cannot be read makes the error `unknown`.
  */
 export function classifyFederationRefreshError(
 	error: unknown,
 ): FederationRefreshErrorClassification {
 	const extras: { upstreamCode?: string; retryAfterSeconds?: number } = {};
 	if (error !== null && typeof error === "object") {
-		const code = (error as { error?: unknown }).error;
+		const code = field(error, "error");
+		const status = field(error, "status");
+		const networkCode = extractNetworkCode(error);
+		// Nothing read off an error with an unreadable field is safe to act on.
+		if (code === UNREADABLE || status === UNREADABLE || networkCode === UNREADABLE) {
+			return { reason: "unknown", structured: false };
+		}
 		if (typeof code === "string" && KNOWN_ERROR_CODES.has(code)) extras.upstreamCode = code;
 		const retryAfter = retryAfterSeconds(error);
 		if (retryAfter !== undefined) extras.retryAfterSeconds = retryAfter;
 
-		const reason = structuredReason(error);
+		const reason = structuredReason(error, { code, status, networkCode });
 		if (reason !== undefined) return { reason, structured: true, ...extras };
 	}
 	// Message fallback for errors not from openid-client. It reads an outage
@@ -187,7 +214,7 @@ export function classifyFederationRefreshError(
 	// upstream wrote, so an `invalid_grant` in it ends no credential. An
 	// adapter that wants a rejection acted on sets `.error`, as openid-client's
 	// `ResponseBodyError` does.
-	const msg = error instanceof Error ? error.message : String(error);
+	const msg = thrownText(error);
 	if (msg.includes("temporarily_unavailable") || /5\d\d/.test(msg)) {
 		return { reason: "network", structured: false, ...extras };
 	}

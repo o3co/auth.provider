@@ -30,6 +30,7 @@ import {
 	LOGGED_STACK_MAX_LENGTH,
 	type LoggableError,
 	loggableError,
+	thrownText,
 	uncappedDetail,
 } from "#/logging/loggableError.mjs";
 
@@ -1321,5 +1322,29 @@ describe("loggableError — name, code and type are one line of text too", () =>
 			code: "E??????CODE",
 			type: "entity??????type",
 		});
+	});
+});
+
+describe("thrownText — a thrown value's text, read so that reading cannot throw", () => {
+	const unreadable = (): never => {
+		throw new Error("unreadable");
+	};
+
+	it("is an Error's message, and any other value as String makes it", () => {
+		expect(thrownText(new TypeError("fetch failed"))).toBe("fetch failed");
+		expect(thrownText("timeout")).toBe("timeout");
+		expect(thrownText({ error: "invalid_grant" })).toBe("[object Object]");
+	});
+
+	it("is empty for an Error whose message is not a string or cannot be read", () => {
+		expect(thrownText(Object.assign(new Error("x"), { message: 42 }))).toBe("");
+		expect(thrownText(Object.defineProperty(new Error("x"), "message", { get: unreadable }))).toBe(
+			"",
+		);
+	});
+
+	it("is empty for a value whose text cannot be made, and never throws", () => {
+		expect(thrownText({ toString: unreadable })).toBe("");
+		expect(thrownText(new Proxy({}, { get: unreadable, getPrototypeOf: unreadable }))).toBe("");
 	});
 });

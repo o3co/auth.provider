@@ -431,13 +431,14 @@ function workspaceSourceTrees(): string[] {
  * of `Error` or any `…Error` class (as a ternary's `?`, after `&&`, or as the
  * `return` an `if` makes, braced or not), and `(x as Error).message` or
  * `(x as TypeError).message`, through any chain of `as` casts ending in such
- * a class. Not flagged, since a regex cannot tell them from the same read of
- * a non-error: a bare `err.message` or `err?.message`,
+ * a class, and every call of `thrownText`, core's guarded reading of a thrown
+ * value's text. Not flagged, since a regex cannot tell them from the same
+ * read of a non-error: a bare `err.message` or `err?.message`,
  * `(x as { message: string }).message`, `String(err)`, `` `${err}` ``,
  * `err.toString()`.
  */
 const FLATTENED_ERROR_TEXT =
-	/\binstanceof\s+\w*Error\s*\)?\s*(?:\?|&&|\{?\s*return)\s*(?:[A-Za-z_$][\w$]*\??\.)+message\b|\(\s*[A-Za-z_$][\w$.]*(?:\s+as\s+[\w$]+)*\s+as\s+\w*Error\s*\)\s*\??\.message\b/g;
+	/\binstanceof\s+\w*Error\s*\)?\s*(?:\?|&&|\{?\s*return)\s*(?:[A-Za-z_$][\w$]*\??\.)+message\b|\(\s*[A-Za-z_$][\w$.]*(?:\s+as\s+[\w$]+)*\s+as\s+\w*Error\s*\)\s*\??\.message\b|\bthrownText\(/g;
 
 /**
  * The flattenings that stay: a site that needs the text (a message it throws,
@@ -476,10 +477,10 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
  * text flattened into one is text in the log the process ends in.
  *
  * Flagged, for a name the file binds as a caught error: `String(x)`,
- * `JSON.stringify(x)`, `inspect(x)` / `util.inspect(x, …)`, `x.message`,
- * `x.stack` and `x.toString()` (optionally chained, and through a cast of any
- * type text), `"…" + x` and `x + "…"`, and the error itself inside a
- * template's `${…}`. Not flagged: `x` as a value elsewhere (`{ cause: x }`),
+ * `JSON.stringify(x)`, `inspect(x)` / `util.inspect(x, …)`, `thrownText(x)`,
+ * `x.message`, `x.stack` and `x.toString()` (optionally chained, and through
+ * a cast of any type text), `"…" + x` and `x + "…"`, and the error itself
+ * inside a template's `${…}`. Not flagged: `x` as a value elsewhere (`{ cause: x }`),
  * a field of it that is not its text (`x.code`), `x` handed to
  * {@link TEXTLESS_NAMINGS}. Not seen, left to review: the message built into
  * a variable first (`const text = String(err); throw new Error(text)`), and
@@ -503,6 +504,7 @@ function flattenedInto(code: string, templates: readonly string[], name: string)
 			String.raw`\bJSON\.stringify\(\s*${n}\s*[,)]`,
 			// `inspect(x)`, `util.inspect(x, …)`: the whole error, printed.
 			String.raw`\binspect\(\s*${n}\s*[,)]`,
+			String.raw`\bthrownText\(\s*${n}\s*\)`,
 			// `x.message`, and the same read through a cast of any type text:
 			// `(x as Error).message`, `(x as unknown as Error).stack`,
 			// `(x as Error | undefined)?.message`, `(x as { message: string }).message`.
@@ -704,6 +706,7 @@ describe("a caught error is not flattened to text on its way to a log line", () 
 		["a cast, optionally chained", "const text = (err as Error)?.message;"],
 		["a subclass test", "const text = err instanceof TypeError ? err.message : String(err);"],
 		["a cast to a subclass", "const text = (err as TypeError).message;"],
+		["core's guarded reading", "const text = thrownText(err);"],
 	])("flags %s", (_label, source) => {
 		expect(source.match(FLATTENED_ERROR_TEXT)).not.toBeNull();
 	});
@@ -1274,6 +1277,7 @@ describe("a caught error is not flattened into the message of an error built fro
 				`try { x() } catch (err) { throw new Error((err as unknown as Error).toString()); }`,
 			],
 			["inspect of it", `try { x() } catch (err) { throw new Error(inspect(err)); }`],
+			["thrownText of it", `try { x() } catch (err) { throw new Error(thrownText(err)); }`],
 			[
 				"its message through a union cast",
 				`try { x() } catch (err) { throw new Error("failed: " + (err as Error | undefined)?.message); }`,

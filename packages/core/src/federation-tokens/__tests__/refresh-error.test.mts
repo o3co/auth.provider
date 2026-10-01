@@ -377,4 +377,46 @@ describe("classifyFederationRefreshError", () => {
 			});
 		});
 	});
+
+	describe("a thrown value it cannot read", () => {
+		const UNKNOWN = { reason: "unknown", structured: false };
+
+		/** `target`, with `key` a getter that throws, as an adapter's value may have. */
+		const throwingOn = <T extends object>(target: T, key: string): T =>
+			Object.defineProperty(target, key, {
+				get() {
+					throw new Error("unreadable");
+				},
+			});
+
+		it("is unknown when a field it reads throws, and the classifier does not throw", () => {
+			for (const key of ["error", "status", "code", "cause"]) {
+				expect(classifyFederationRefreshError(throwingOn({}, key)), key).toEqual(UNKNOWN);
+			}
+			expect(classifyFederationRefreshError(throwingOn(new Error("x"), "message"))).toEqual(
+				UNKNOWN,
+			);
+		});
+
+		it("is unknown, not invalid_grant, when a field beside the code cannot be read", () => {
+			for (const key of ["status", "cause"]) {
+				expect(
+					classifyFederationRefreshError(throwingOn({ error: "invalid_grant" }, key)),
+					key,
+				).toEqual(UNKNOWN);
+			}
+		});
+
+		it("classifies a Proxy whose getPrototypeOf trap throws, and does not throw", () => {
+			const proxy = new Proxy(
+				{},
+				{
+					getPrototypeOf() {
+						throw new Error("trap");
+					},
+				},
+			);
+			expect(classifyFederationRefreshError(proxy)).toEqual(UNKNOWN);
+		});
+	});
 });
