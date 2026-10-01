@@ -291,6 +291,22 @@ export interface MfaFactor {
 	 */
 	enrollable?(user: Readonly<Record<string, unknown>>): boolean;
 	/**
+	 * The authenticator `data` records, as a string stable for it: a WebAuthn
+	 * credential id, the digest of the address an email factor's codes go to.
+	 * Two of a subject's records of this kind with equal identities hold one
+	 * authenticator enrolled twice; the coordinator compares identities only
+	 * among one subject's records of one kind, to find such a duplicate.
+	 *
+	 * Using the factor leaves it as it was: a verification's next data answers
+	 * the same. Data rewritten under another key may answer another, which
+	 * only misses a duplicate. `undefined` when the data holds none the factor
+	 * can read: such a record is no duplicate of any. Absent: no record of
+	 * this kind is judged a duplicate of another (each TOTP enrollment makes a
+	 * new secret). Never a secret, since it is compared as it is. Must not
+	 * throw.
+	 */
+	identity?(data: MfaFactorData): string | undefined;
+	/**
 	 * Whether the pending challenge stays on the transaction across attempts
 	 * until a new one replaces it (an email code). Absent or false, the
 	 * fail-closed default, a verification takes it. See {@link MfaVerifyContext.state}.

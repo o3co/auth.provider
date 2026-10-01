@@ -37,8 +37,11 @@
  * `normaliseMailAddress` spells it, which the provider keeps none of and a
  * page does not show; a hint that never shows it; a proof
  * the factor cannot read answered `malformed`, never thrown;
- * and a valid proof that completes an enrollment and verifies the factor it
- * enrolled. The suite enrolls at one instant and verifies an hour later, so a
+ * a valid proof that completes an enrollment and verifies the factor it
+ * enrolled; and, for a factor that answers an identity, a non-empty string
+ * for its enrolled data, the same at each reading, through a JSON round trip
+ * and for a verification's next data, and over data it cannot read a
+ * non-empty string or `undefined`, never a throw. The suite enrolls at one instant and verifies an hour later, so a
  * factor that refuses reuse within a time step is not asked to verify at the
  * step it enrolled. Every call is made for the account's `User.id` as its
  * subject, and handed core's test digests (`createTestMfaDigests`), made for
@@ -943,6 +946,76 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					"the verification names a factor the subject does not hold",
 				);
 				if (verdict.next !== undefined) survivesJson(verdict.next, "the factor's next data");
+			},
+		},
+		{
+			name: "identity, when present, answers the enrolled data a non-empty string, the same at a second reading, through another JSON round trip, and for the next data a verification answers",
+			run: async () => {
+				const factor = input.build();
+				if (factor.identity === undefined) return;
+				const enrolled = await enroll(factor);
+				const identity = factor.identity(enrolled.data);
+				assert.ok(
+					typeof identity === "string" && identity.length > 0,
+					"identity answers no string for the data its enrollment completed with: no duplicate of it could be found",
+				);
+				assert.equal(
+					factor.identity(enrolled.data),
+					identity,
+					"identity answers another string at a second reading of the same data",
+				);
+				assert.equal(
+					factor.identity(reopened(enrolled.data)),
+					identity,
+					"identity answers another string for the same data after another JSON round trip",
+				);
+				const { context, sent } = await challenge(factor, enrolled);
+				const verdict = await factor.verify({
+					...context,
+					factor: enrolled,
+					factors: [enrolled],
+					state: sent?.state === undefined ? undefined : reopened(sent.state),
+					proof: await input.verificationProof(enrolled, sent, context),
+				});
+				assert.ok(verdict.ok, `a valid proof was refused: ${JSON.stringify(verdict)}`);
+				if (verdict.next === undefined) return;
+				assert.equal(
+					factor.identity(reopened(verdict.next)),
+					identity,
+					"a verification's next data answers another identity: using an authenticator does not change which it is",
+				);
+			},
+		},
+		{
+			name: "identity, when present, answers a non-empty string or undefined over data it cannot read, and never throws",
+			run: async () => {
+				const factor = input.build();
+				const { identity } = factor;
+				if (identity === undefined) return;
+				const { data } = await enroll(factor);
+				const unreadable: MfaFactorData[] = [
+					{},
+					{ unexpected: true },
+					...Object.keys(data).flatMap((key) => {
+						const { [key]: _removed, ...without } = data;
+						return [without, { ...data, [key]: null }];
+					}),
+				];
+				for (const damaged of unreadable) {
+					const what = `over data ${JSON.stringify(damaged)}`;
+					let answered: unknown;
+					try {
+						answered = identity.call(factor, damaged);
+					} catch (error) {
+						assert.fail(
+							`identity threw ${what} (${String(error)}): a record it cannot read is no duplicate, never an outage`,
+						);
+					}
+					assert.ok(
+						answered === undefined || (typeof answered === "string" && answered.length > 0),
+						`identity ${what} answers ${JSON.stringify(answered)}, neither a non-empty string nor undefined`,
+					);
+				}
 			},
 		},
 	];
