@@ -25,6 +25,7 @@
 - Amended 2026-10-01 (build-order step 19b, owner decision): the Store answers the enrollment witness on `authenticateByToken` as on `authenticate` (D12's amendment of that date); `markMfaEnrolledUrl` is a key of the user repository's settings (D19's amendment of that date); the witness kept on remove and reset is step 12's test (the build order's amendment of that date).
 - Amended 2026-10-01 (build-order step 10, owner decision): an exempt success no longer lifts the hard hold; a rebind or an operator reset does (D21's amendment of that date).
 - Amended 2026-10-01 (build-order step 10, owner decision): no revocation and no credential change clears the MFA lock; it is cleared only through the MFA module's authorized-recovery entry (D21's amendment of that date).
+- Amended 2026-10-01 (build-order step 11, owner decision): the regeneration after a step-up is the session package's `LoginCompletion.renewSession` (D27's amendment of that date).
 
 ## Context
 
@@ -895,6 +896,8 @@ A "trust this browser for 30 days" cookie turns the second factor into possessio
 - **The trusted-browser cookie** (D21) is `httpOnly`, `Secure`, `SameSite=Lax`, path `/session/mfa`, and useless without the subject state that names its digest.
 - **Cache and framing.** `no-store` on every MFA response; the TOTP secret, the URI and recovery codes appear in exactly one response each. The page contract requires `frame-ancestors 'none'`.
 - **Redirects.** `redirect_to` from `/authorize` is followed by the page only on the provider's origin; the login's `redirect_to` keeps its exact-match allowlist.
+
+**Amended 2026-10-01 (build-order step 11, owner decision):** the regeneration after a step-up, and after a binding in a session, is the session package's `LoginCompletion.renewSession`; a failed renewal abandons the cookie session, and the old id never holds the escalation.
 
 ### D28 — Outages, logs and audit
 

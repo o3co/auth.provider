@@ -178,7 +178,7 @@ Each provider runs core's contract suite in this package's tests.
 | --- | --- | --- | --- |
 | `csrfGuard` | `sessionModule` | The [CSRF policy](#csrf-on-the-state-changing-routes) `POST /session/login` runs: `middleware` for a request that changes state — the same `403 access_denied` and log line — and `check`, its verdict, which writes nothing; `checkNavigation` for a navigation that starts a flow (the [account-link start](#account-linking-across-federations-482)'s rule), and `issue`. The token's form field is `csrf_token`. | Device verification, once the grant is enabled; the federation-grants consent answer, once grants are enabled |
 | `loginEntry` | `sessionModule` | The login page, `session.loginPage.url`, and `urlFor(returnTo)`, which adds `redirect_to` to the page's own query, before any fragment. A page whose query already carries `redirect_to` is refused when the entry is built, and at config validation as `session.loginPage.url`, which the section requires. | `/authorize`, which requires it; the federation-grants connect flow, once grants are enabled |
-| `loginCompletion` | `loginCompletionModule` | [`establishSession`](#establishing-the-session) and [`answerInterruption`](#when-a-requirement-interrupts-the-login) over the session stores, the `csrfGuard` and the `sessionCookiePolicy` the module requires (the session's lifetime is the policy's). Its own module, loaded beside `sessionModule`: an interruption's token is the deployment's `csrfGuard`'s, whoever filled the slot, and `sessionModule` cannot require the slot it fills. | A requirement's completion (the MFA package's) |
+| `loginCompletion` | `loginCompletionModule` | [`establishSession`](#establishing-the-session), [`answerInterruption`](#when-a-requirement-interrupts-the-login) and [`renewSession`](#renewing-a-signed-in-sessions-id) over the session stores, the `csrfGuard` and the `sessionCookiePolicy` the module requires (the session's lifetime is the policy's). Its own module, loaded beside `sessionModule`: an interruption's token is the deployment's `csrfGuard`'s, whoever filled the slot, and `sessionModule` cannot require the slot it fills. | A requirement's completion, and the step-up's finish (the MFA package's) |
 | `sessionCookiePolicy` | the session store's module | The session cookie's name, `secure`, `sameSite`, domain and lifetime: the value the store's route mounts its cookie from. A section that would break core's contract is refused at config validation ([below](#browser-session-store)). Authoritative: while the store's module is loaded an `overrideComponents` entry for the slot refuses boot (`authoritative-component-overridden`), since the store would go on mounting the cookie `session-store.*` describes; a composition without the module fills the slot itself. | `sessionModule` (the CSRF cookie, the session's lifetime, the federation transaction cookie's name) and `loginCompletionModule`, which require it; the subject revocation service, which requires it to size its horizon |
 | `csrfTokenSigner` | the session store's module | The CSRF token's signature under a key derived from `session-store.secret` for this purpose alone: HKDF-SHA256, no salt, info `o3co.auth.provider/session-csrf/v1`, 32 bytes, then HMAC-SHA256, base64url. A fixed vector in the tests pins the derivation, so a token verifies for as long as the secret is kept. Neither the secret nor the key leaves it. | `sessionModule`: its `csrfGuard` and the `/session` routes |
 
@@ -540,6 +540,37 @@ What holds:
   accepts — no record is created and no step runs: the express session alone
   is regenerated, flagged and saved.
 - The CSRF token, the `200` and the redirect stay with the callers.
+
+### Renewing a signed-in session's id
+
+`renewSession` ([`src/establish-session.mts`](src/establish-session.mts),
+beside the one function that writes the signed-in state) moves a signed-in
+browser to a new express session id after its session is escalated — the MFA
+step-up (the MFA ADR's D27). It reaches the MFA package through the
+`loginCompletion` slot and is not exported. It reads `isAuthenticated`, `user`
+and `sid`, regenerates the express session, writes back those of the three the
+session held, and saves. It answers `renewed`, or `unavailable` with
+`cookie_session` and the step, `regenerate` or `save`, which the caller answers
+as an outage.
+
+What holds:
+
+- **Only the signed-in state moves.** Every other field — a login's
+  `redirectTo`, anything another flow left on the session — is dropped. A
+  session that is not signed in stays so.
+- **The old id names nothing after a renewal.** express-session regenerates by
+  destroying the old id in its store, so a copy of the cookie taken before
+  gains nothing a caller records after `renewed`. The `UserSession` record
+  is not touched: the `sid` is the same.
+- **A failure writes nothing and drops the request's cookie session**
+  (`abandonCookieSession`), reported once through the caller's reporter. At
+  `save` the old id is already destroyed, so the browser is signed out. At
+  `regenerate` the store could not destroy it, and the old id keeps what it
+  held before. Either way the caller records nothing on `unavailable`.
+- **What renewal orphans.** Records bound to the old express session id are
+  lost: a consent `/authorize` parked, a federation-grant browser binding,
+  and the session's other open MFA transactions. A flow in another tab starts
+  again.
 
 ### What `POST /session/logout` invalidates
 
@@ -1285,6 +1316,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | the session store's `csrfTokenSigner`: core's contract, the fixed vectors, the entropy floor, a token signed under `session-store.secret` passing `/session/*` and the `csrfGuard` slot, and an override replacing it; `sessionModule` and a hand-built router refused without a signer, signing through the slot's, its tokens passing between the slot and `/session/*`, and reading no `session-store.secret` on any route |
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, the cookie policy refuses whatever would break the contract, over every combination of the cookie's attributes, and a name or domain it refuses is refused at validation with its message; an override of the policy beside the store's module refuses boot, and a composition without the module fills the slot |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
+| [`src/__tests__/renewSession.test.mts`](src/__tests__/renewSession.test.mts) | the session renewal over express-session's `MemoryStore`: the signed-in state alone on the new id, the old id naming nothing, and a failed `regenerate` or `save` answered as the cookie session's outage with nothing written |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |

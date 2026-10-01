@@ -175,6 +175,8 @@ interface StepUpPage {
 
 `admitted.session` is the live record the consumer then uses. `reauthenticate`, `step_up` and `unmet` carry the session too, because `/authorize` decides freshness — `max_age`, `prompt=login`, the ask's `loginAskedAt` / the per-requirement `stepUpAskedAt` against `authTime` — before it acts on the method verdict (the MFA ADR's D17, "freshness first"), and the step-13 obligation needs the primary. `not_live`, `revoked` and `reauthenticate` are one class for a consumer — a new login is the remedy — and distinct in the type so a log line and an audit event can say which. A consumer that answers them with a redirect regenerates the cookie session first, dropping its authentication, so a login page that forwards signed-in users cannot loop (today's `/authorize` leaves the flag set). *(Amended 2026-09-29, review — D8's note.)* No consumer builds a URL from `page`: registration resolves the page once, on the issuer it was validated on — `new URL(page.url, issuer)` and `searchParams.set`, never concatenation — to `page.href`, and every consumer answers or navigates from `page.href` and resolves nothing itself; `/authorize` adds only its own trip's parameters to it.
 
+**Amended 2026-10-01 (MFA build-order step 11):** `LoginCompletion` gains `renewSession`; an admitted `Admission` (and a `step_up` one) carries the requirement's `SessionView`, core's copy of the record, so a consumer reads the session's facts without reading the record.
+
 ### D3 — The requirement contract, the `sessionRequirements` kind, and its resolver
 
 ```ts

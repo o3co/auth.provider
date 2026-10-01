@@ -844,6 +844,20 @@ wires it.
   action, and binds its first factor at that login. Under `required` such a
   session's actions read the factor store once each (whether the subject
   holds a counting factor), so a factor store outage answers them `503`.
+- **Renewing the session id after an escalation.** A session whose
+  authentication is raised in place — a step-up of its second factor — is
+  first moved to a new express session id (the session package's
+  `renewSession`, through the `loginCompletion` slot; the MFA ADR's D27):
+  `isAuthenticated`, `user` and `sid` carried over, every other field
+  dropped, the old id destroyed in the cookie store, so a copy of the old
+  cookie gains nothing. What is bound to the old id is orphaned and starts
+  again: a consent `/authorize` parked, a federation-grant browser binding,
+  and the session's other open MFA transactions — a consent or connect flow
+  left open in another tab is lost. The cookie store failing at the renewal
+  is its outage (`store: "cookie_session"`, `step` `regenerate` or `save`):
+  nothing is recorded, and the request's cookie session is dropped. At
+  `save` the old id is already destroyed and the user signs in again; at
+  `regenerate` the old id keeps what it held.
 - **Notices to the account holder: required, and yours.** The provider sends
   none. It records audit events (`auditSink`), and the deployment reads them
   and tells the account holder — by mail, a chat message, anything — of every
