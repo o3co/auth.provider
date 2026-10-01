@@ -286,8 +286,8 @@ const returnWithAsk = (askRequest: string, askId: string): string => {
 export const ANONYMOUS_ASK_MAX_REQUEST_BYTES = 8 * 1024;
 
 /**
- * Where the login page returns a browser that is not signed in and sent
- * `prompt=login`: this request with a login ask recorded before the login,
+ * Where the login page returns a browser that is not signed in — or whose
+ * dead session was just signed out — and sent `prompt=login`: this request with a login ask recorded before the login,
  * so the login it makes meets the prompt on the way back. Recorded only for
  * a request of the shape a client sends — a well-formed `client_id`, the
  * canonical request within `ANONYMOUS_ASK_MAX_REQUEST_BYTES` — a check of its

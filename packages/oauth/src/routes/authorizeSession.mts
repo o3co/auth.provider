@@ -156,9 +156,15 @@ const signedOut = async (ctx: AuthorizeContext): Promise<boolean> => {
 /**
  * A new login, for `not_live`, `revoked` and `unauthenticated`. Under
  * `prompt=none` the answer is `login_required` (OIDC Core §3.1.2.6).
- * Otherwise the cookie session is regenerated first (`signedOut`).
+ * Otherwise the cookie session is regenerated first (`signedOut`), and under
+ * `prompt=login` the login ask is recorded, as the login check records it,
+ * so the login made now meets the prompt.
  */
-const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise<void> => {
+const newLogin = async (
+	ctx: AuthorizeContext,
+	prompt: PromptDirective,
+	askStore: ReauthAskStore | undefined,
+): Promise<void> => {
 	if (prompt.silent) {
 		redirectError(
 			ctx,
@@ -168,7 +174,10 @@ const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise
 		return;
 	}
 	if (!(await signedOut(ctx))) return;
-	loginRedirect(ctx.res, ctx.opts.login, authorizeRequestUrl(ctx.issuerOrigin, ctx.req).toString());
+	const target = prompt.login
+		? await loginReturnWithAsk(ctx.req, ctx.issuerOrigin, askStore, ctx.opts.logger)
+		: authorizeRequestUrl(ctx.issuerOrigin, ctx.req).toString();
+	loginRedirect(ctx.res, ctx.opts.login, target);
 };
 
 /**
@@ -265,7 +274,7 @@ export const decideOnAdmission = async (
 		// log in, or answered `login_required`, before admission. Listed so the
 		// switch stays exhaustive over core's `Admission`.
 		case "unauthenticated":
-			await newLogin(ctx, prompt);
+			await newLogin(ctx, prompt, askStore);
 			return null;
 		case "reauthenticate":
 			await reauthenticate(ctx, admission, prompt, requested, askStore);
