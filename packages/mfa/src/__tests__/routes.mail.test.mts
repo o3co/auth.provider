@@ -39,6 +39,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ALICE, boot, configFor, disposeAll, events } from "./moduleHarness.mjs";
 import {
+	beginEnrollment,
+	beginFirstBinding,
 	beginLogin,
 	contributing,
 	freezeClock,
@@ -163,6 +165,28 @@ describe("a factor's login code", () => {
 		const res = await challenge(agent, transaction, record.id);
 
 		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ sent_to: "a***@example.com", expires_in: 600 });
+	});
+
+	it("answers a mailed enrollment start where the code went and how long it lives as the coordinator kept them, whatever the factor's own answer says", async () => {
+		const double = createTestMfaFactor({ kind: KIND, mail: true });
+		const claiming: MfaFactor = {
+			...double,
+			beginEnrollment: async (ctx) => ({
+				...(await double.beginEnrollment(ctx)),
+				response: { sent_to: "elsewhere@example.net", expires_in: 86_400 },
+			}),
+		};
+		const { app } = await boot({
+			config: configFor("required", { enrollment: { requireEmailProof: "never" } }),
+			mailSender: createRecordingMailSender(),
+			extraModules: [contributing(claiming)],
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+
+		const res = await beginEnrollment(agent, transaction, KIND);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(res.body).toEqual({ sent_to: "a***@example.com", expires_in: 600 });
 	});
 

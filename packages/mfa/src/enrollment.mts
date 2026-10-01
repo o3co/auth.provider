@@ -33,7 +33,7 @@
  *   transaction (`o3co:mfa:enrollment`), with the digest of the address its
  *   code went to when it mailed one (`sendMfaMail`); the page is then
  *   answered where it went, masked (`sent_to`), and how long it lives
- *   (`expires_in`), which bounds a session's enrollment too.
+ *   (`expires_in`), which is how long the enrollment can be completed.
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, in this order: consumes the transaction, writes
  *   the factor. Another factor then reads the subject's records again, and
@@ -77,7 +77,7 @@ import {
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
 import { mayCount } from "./firstBinding.mjs";
-import { keptState, mailRefusalOf, maskMailAddress, readKeptState, sendMfaMail } from "./mail.mjs";
+import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes } from "./recovery/issue.mjs";
 
 const NOT_OPEN = Object.freeze({ outcome: "enrollment_not_open" as const });
@@ -381,19 +381,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				});
 				switch (mailed.outcome) {
 					case "sent": {
-						// Where the code went and how long it lives, as kept; a session's
-						// enrollment can be completed no longer than its code.
-						const expiresIn = Math.max(1, Math.ceil((mailed.expiresAtMs - nowMs) / 1000));
+						// Where the code went and how long it lives, as kept: never the factor's to say.
+						const answer = mailedAnswer(mailed, nowMs);
 						return {
 							...begun,
-							response: {
-								...begun.response,
-								sent_to: maskMailAddress(mailed.to),
-								expires_in: expiresIn,
-							},
-							...(begun.transaction === undefined
-								? {}
-								: { transaction: { id: begun.transaction.id, expiresIn } }),
+							response: { ...begun.response, ...answer },
+							expiresIn: answer.expires_in,
 						};
 					}
 					case "not_kept":

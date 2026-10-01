@@ -282,6 +282,25 @@ export function maskMailAddress(address: unknown): string | undefined {
 	return `${first}***${normalised.slice(at)}`;
 }
 
+/** Where a code went and how long it lives: what a page is answered once a code was sent. */
+export interface MfaMailedAnswer {
+	/** The address the code went to, masked (`maskMailAddress`). */
+	readonly sent_to: string | undefined;
+	/** Whole seconds until the code expires, rounded up, at least 1. */
+	readonly expires_in: number;
+}
+
+/** The answer for a code `sent` at `nowMs`: the one reading every ceremony that mails a code answers with. */
+export function mailedAnswer(
+	sent: { readonly to: string; readonly expiresAtMs: number },
+	nowMs: number,
+): MfaMailedAnswer {
+	return {
+		sent_to: maskMailAddress(sent.to),
+		expires_in: Math.max(1, Math.ceil((sent.expiresAtMs - nowMs) / 1000)),
+	};
+}
+
 /** The kept form of a ceremony's pending state: the factor's state, and the digest of the address its code went to. */
 export interface MfaKeptState {
 	readonly state: Readonly<Record<string, unknown>> | undefined;

@@ -106,7 +106,7 @@ import {
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
-import { keptState, mailRefusalOf, maskMailAddress, readKeptState, sendMfaMail } from "./mail.mjs";
+import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import { recoveryCodesLeft } from "./recovery/factor.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
@@ -674,11 +674,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						// Where the code went and how long it lives, as kept: never the factor's to say.
 						return {
 							...sent,
-							response: {
-								...sent.response,
-								sent_to: maskMailAddress(mailed.to),
-								expires_in: Math.max(1, Math.ceil((mailed.expiresAtMs - nowMs) / 1000)),
-							},
+							response: { ...sent.response, ...mailedAnswer(mailed, nowMs) },
 						};
 					case "not_kept":
 						return mailed.refusal;
