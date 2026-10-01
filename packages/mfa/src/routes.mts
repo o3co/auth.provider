@@ -1118,7 +1118,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		.post("/enrollment/complete", async (req: Request, res: Response) => {
 			const signed = await signedInCall(req, res, postedTransactionId(req), MFA_MANAGE);
 			if (signed === undefined) return;
-			const { call } = signed;
+			const { call, expectedRenewalNonce } = signed;
 			const body = req.body as { proof?: unknown; label?: unknown } | undefined;
 			const outcome = await coordinator.completeEnrollment({
 				...call,
@@ -1286,7 +1286,19 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 								: { recovery_codes_issued: false }),
 					};
 					if (outcome.purpose === "enroll") {
-						// The session is left as it was.
+						// The binding escalates its session. The codes are shown this once, so
+						// the binding is answered whether or not the escalation lands; each
+						// failure is logged there.
+						if (call.session !== undefined) {
+							await escalateSession(
+								"enrollment",
+								req,
+								res,
+								{ sid: call.session.sid, sub: outcome.subject },
+								expectedRenewalNonce,
+								outcome.adds,
+							);
+						}
 						res.status(200).json(answer);
 						return;
 					}
