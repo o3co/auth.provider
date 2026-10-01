@@ -619,7 +619,7 @@ Two low-level helpers used by the `authorization_code` grant and the `/oauth/use
 Signs and returns an OIDC id_token JWT (OIDC Core §2). Claim composition:
 
 - `iss`, `sub`, `aud`, `exp`, `iat`, `jti` — standard JWT claims
-- `auth_time` — whole seconds since the epoch, from `opts.authTime` through `authTimeClaim`; an instant it cannot say (an invalid `Date`, one before the epoch) is a `RangeError`, and nothing is signed
+- `auth_time` — whole seconds since the epoch, from `opts.authTime` read against the clock that sets `iat` through `authTimeAt`, so never later than `iat`: an instant up to `DEFAULT_CLOCK_SKEW_MS` ahead is stamped as `iat`; one it cannot read (an invalid `Date`, one before the epoch, one further ahead) is a `RangeError`, and nothing is signed
 - `sid` — session identifier for back-channel logout
 - `azp` — authorized party, included when provided
 - `nonce` — reflected verbatim from the authorization request when provided
