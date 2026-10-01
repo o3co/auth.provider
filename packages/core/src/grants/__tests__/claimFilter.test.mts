@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { UserSessionClaims } from "../../user-sessions/types.mjs";
+import type { UserSessionClaims } from "#/user-sessions/types.mjs";
 import { filterClaimsByScope } from "../claimFilter.mjs";
 
 describe("filterClaimsByScope", () => {

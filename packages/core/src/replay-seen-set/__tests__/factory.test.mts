@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
-import type { MemoryReplaySeenSet } from "../adapters/memory.mjs";
+import type { MemoryReplaySeenSet } from "#/replay-seen-set/adapters/memory.mjs";
 import { createReplaySeenSetFactory, registerBuiltinReplaySeenSets } from "../factory.mjs";
 
 describe("ReplaySeenSetFactory", () => {

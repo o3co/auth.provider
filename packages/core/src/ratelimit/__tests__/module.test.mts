@@ -4,8 +4,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import type { RateLimiter } from "#/ratelimit/types.mjs";
 import { memoryRateLimiterModule } from "../module.mjs";
-import type { RateLimiter } from "../types.mjs";
 
 describe("memoryRateLimiterModule", () => {
 	it("has the canonical name", () => {

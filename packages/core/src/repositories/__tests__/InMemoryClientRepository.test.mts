@@ -15,11 +15,11 @@
  */
 import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
+import { clientEntries } from "#/repositories/__tests__/clientEntries.fixture.mjs";
 import {
 	ClientEntrySchema,
 	InMemoryClientRepository,
 } from "#/repositories/InMemoryClientRepository.mjs";
-import { clientEntries } from "./clientEntries.fixture.mjs";
 
 describe("InMemoryClientRepository", () => {
 	describe("findById", () => {

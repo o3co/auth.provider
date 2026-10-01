@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
-import type { MemoryChallengeStore } from "../adapters/memory.mjs";
+import type { MemoryChallengeStore } from "#/challenges/adapters/memory.mjs";
 import { createChallengeStoreFactory, registerBuiltinChallengeStores } from "../factory.mjs";
 
 describe("ChallengeStoreFactory", () => {
