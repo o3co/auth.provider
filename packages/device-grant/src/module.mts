@@ -424,14 +424,15 @@ const disabledRoute = (id: string, mountPath: string) => {
 
 /**
  * The `csrfGuard` slot the session module provides — the guard
- * `/session/login` runs. Required when the grant is on: the verification
- * endpoint authorises on the session cookie and would otherwise have no CSRF
- * defence.
+ * `/session/login` runs. Required when the grant is on, with a `middleware`
+ * function, which the verification route mounts: the endpoint authorises on
+ * the session cookie and would otherwise have no CSRF defence.
  */
 const requireCsrfGuard = (
 	deps: DeviceGrantModuleDeps,
 ): NonNullable<DeviceGrantModuleDeps["csrfGuard"]> => {
-	if (deps.csrfGuard === undefined) {
+	const guard = deps.csrfGuard;
+	if (guard === undefined) {
 		throw new Error(
 			"deviceGrantModule: device-grant.enabled = true requires a " +
 				"csrfGuard component. POST /oauth/device/verification runs inside the end-user " +
@@ -442,7 +443,15 @@ const requireCsrfGuard = (
 				"or leave the grant disabled.",
 		);
 	}
-	return deps.csrfGuard;
+	if (typeof guard?.middleware !== "function") {
+		throw new Error(
+			"deviceGrantModule: csrfGuard.middleware is not a function. " +
+				"POST /oauth/device/verification mounts the csrfGuard's middleware in front of the " +
+				"whole route. Install the session module's guard (sessionModule), or one that keeps " +
+				"core's CsrfGuard contract.",
+		);
+	}
+	return guard;
 };
 
 const requireRateLimiter = (

@@ -298,6 +298,27 @@ describe("deviceGrantModule — boot", () => {
 		);
 	});
 
+	it.each([
+		["absent", undefined],
+		["not a function", "middleware"],
+	])(
+		"refuses to boot enabled with a csrfGuard whose middleware is %s, naming the slot",
+		async (_, middleware) => {
+			// The verification route mounts the guard's `middleware`; a guard filled
+			// by hand without a usable one is refused by name, before the route is built.
+			const bootstrapComponents = {
+				...makeBoot({ deviceGrant: ENABLED }),
+				csrfGuard: { ...createTestCsrfGuard(), middleware },
+			} as unknown as BootstrapMap;
+			await expect(
+				createApp({
+					modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
+					bootstrapComponents,
+				}),
+			).rejects.toThrow(/csrfGuard\.middleware is not a function.*sessionModule/s);
+		},
+	);
+
 	it("boots disabled without a csrfGuard", async () => {
 		// The slot is optional in the manifest: a deployment that installs the
 		// package and leaves the grant off mounts no verification route.
