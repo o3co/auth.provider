@@ -794,11 +794,11 @@ const containerShape = (container: unknown): string =>
 	container === null ? "null" : Array.isArray(container) ? "an array" : `a ${typeof container}`;
 
 /**
- * What a `rateLimitBudgets`, `federationTypes` or `admissionActions`
- * contribution or override must be, read off the manifest before any factory
- * runs:
+ * What a `rateLimitBudgets`, `federationTypes`, `admissionActions` or
+ * `subjectRevocationParticipants` contribution or override must be, read off
+ * the manifest before any factory runs:
  *
- * - its container is a record keyed by prefix, type or action name
+ * - its container is a record keyed by prefix, type, action name or name
  *   (normalisation would file an array as list-shaped under Symbol keys, and
  *   skip a function or `null`);
  * - a prefix is not empty and holds no `:`, since a limiter key carries it

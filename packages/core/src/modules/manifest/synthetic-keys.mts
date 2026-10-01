@@ -63,8 +63,11 @@ export interface RateLimitBudgetResolver {
 	readonly entries: () => IterableIterator<readonly [string, RateLimitSpec]>;
 }
 
-/** Re-export for consumers that name the `federationProviders` slot's value type. */
-/** Re-export: the `subjectRevocationParticipantResolver` slot's value type, owned by `user-sessions/`. */
+/**
+ * Re-exports for consumers that name a slot's value type: `federationProviders`'
+ * (`FederationProvider`), and `subjectRevocationParticipantResolver`'s, owned
+ * by `user-sessions/`.
+ */
 export type { FederationProvider, SubjectRevocationParticipantResolver };
 
 /**
