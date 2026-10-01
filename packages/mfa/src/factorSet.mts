@@ -115,6 +115,11 @@ const leaseMsFor = (storeTimeoutMs: number): number =>
  * lease, and one write at a time would not hold.
  */
 export function checkFactorSetStoreTimeout(storeTimeoutMs: number): number {
+	if (!Number.isSafeInteger(storeTimeoutMs) || storeTimeoutMs < 1) {
+		throw new RangeError(
+			`mfa.storeTimeoutMs: ${String(storeTimeoutMs)} is not a whole number of milliseconds from 1`,
+		);
+	}
 	const leaseMs = (STORE_CALLS_PER_WRITE + 1) * storeTimeoutMs;
 	if (leaseMs > MFA_SUBJECT_LEASE_MAX_MS) {
 		throw new RangeError(

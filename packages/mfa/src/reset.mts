@@ -168,9 +168,28 @@ function checkRequest(
 	};
 }
 
+/** The kinds `records` name, each once in code-unit order; a record that is none, or whose kind cannot be read as a string, names none. */
+function kindsOf(records: readonly unknown[]): string[] {
+	const kinds = new Set<string>();
+	for (const record of records) {
+		try {
+			const kind: unknown = (record as { readonly kind?: unknown } | null | undefined)?.kind;
+			if (typeof kind === "string") kinds.add(kind);
+		} catch {
+			// A store's record whose field cannot be read names no kind; it was still removed.
+		}
+	}
+	return [...kinds].sort();
+}
+
 /** The operator reset over `options` (see this file's header). */
 export function createMfaReset(options: MfaResetOptions): MfaReset {
 	const { factorStore, transactionStore, subjectRevocationService, auditSink, logger } = options;
+	if (typeof subjectRevocationService?.revokeAllForSubject !== "function") {
+		throw new TypeError(
+			"the operator reset's subjectRevocationService is no service: it has no revokeAllForSubject",
+		);
+	}
 	const now = options.now ?? (() => Date.now());
 	const witness = createMfaEnrollmentWitness(options.userRepository);
 	const underLease = createMfaFactorSetReset({
@@ -234,6 +253,7 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 				| { readonly cause: unknown; readonly report?: SubjectRevocationReport }
 			> => {
 				let report: SubjectRevocationReport;
+				let complete: unknown;
 				try {
 					report = await subjectRevocationService.revokeAllForSubject({
 						subject,
@@ -241,10 +261,15 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 							? {}
 							: { federationGrants: asked.federationGrants }),
 					});
+					// The service is the deployment's: a report that is none, or whose read throws, ends nothing.
+					complete = (report as { readonly complete?: unknown } | null | undefined)?.complete;
 				} catch (cause) {
 					return { cause };
 				}
-				return report.complete === true
+				if (typeof report !== "object" || report === null) {
+					return { cause: new TypeError("the subject revocation service answered no report") };
+				}
+				return complete === true
 					? { report }
 					: { report, cause: new Error("the subject's sessions could not all be ended") };
 			};
@@ -279,10 +304,7 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 			const removed =
 				done.removed === undefined
 					? undefined
-					: {
-							kinds: [...new Set(done.removed.map((record) => record.kind))].sort(),
-							count: done.removed.length,
-						};
+					: { kinds: kindsOf(done.removed), count: done.removed.length };
 			const after = {
 				sessions: first.report,
 				...(again.report === undefined ? {} : { sessionsAgain: again.report }),

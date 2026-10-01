@@ -377,7 +377,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "loginCompletion"
 		| "deploymentMode",
 		"rateLimiter" | "auditSink" | "subjectRevocation" | "logger" | "mailSender" | "userRepository",
-		typeof mfaSectionSchema
+		typeof mfaSectionSchema,
+		"mfaSubjectLeases"
 	>({
 		name: "mfa",
 		// The module's own section, read at its name. Its schema holds the mode
@@ -413,6 +414,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
 		},
+		// Its readers hold it as this module's own, built from its section: no composition substitutes it.
+		authoritative: ["mfaSubjectLeases"],
 		provides: {
 			mfaSubjectLeases: (deps) =>
 				leaseOwnerFor(
