@@ -129,7 +129,8 @@ export const refreshStoredTokens = async (
 				if (!mayDiscloseTokenType(freshTokens.tokenType)) {
 					return refuseUndisclosableTokenType(ctx, caller, freshTokens.tokenType);
 				}
-				return answerToken(ctx, caller, freshTokens, false);
+				// Awaited inside the `try`, so the lock is released after the answer.
+				return await answerToken(ctx, caller, freshTokens, false);
 			}
 			// Update to the post-lock re-read value (may be freshTokens or null if
 			// the store returned null; in either case currentTokens keeps the pre-lock

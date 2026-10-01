@@ -607,6 +607,98 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 	});
 
+	describe("a record the route reads back is judged before it is answered", () => {
+		it("answers a stored record with an empty access token as one with no record", async () => {
+			// Never a 200 with an empty `access_token` (RFC 6749 §5.1). A store
+			// that judges its records answers such a one `null`; this is that answer.
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
+			const sessionFederationIndex = makeSessionFederationIndex();
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({ ...baseFedTokens, accessToken: "" }),
+			});
+			const app = buildApp({ sessionFederationIndex, fedTokenStore, auditSink });
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(404);
+			expect(res.body.error).toBe("federation_not_linked");
+			expect(res.body.error_description).toBe("federation 'google' tokens not found");
+			expect(sessionFederationIndex.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+			expect(auditSink.record).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "federation.token.success" }),
+			);
+		});
+
+		it("answers a re-read record with an empty access token as one with no record, then releases the lock", async () => {
+			// The clean-up is recorded when it settles, a macrotask after the
+			// call, and the release when it is called, so an early release lands first.
+			const order: string[] = [];
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const unusable = {
+				...baseFedTokens,
+				accessToken: "",
+				expiresAt: new Date(Date.now() + 3_600_000),
+			};
+			const sessionFederationIndex = makeSessionFederationIndex({
+				removeFederation: vi.fn(async () => {
+					await new Promise((resolve) => setImmediate(resolve));
+					order.push("removeFederation");
+				}),
+			});
+			const lockingStore = {
+				...makeFedTokenStore({
+					get: vi.fn().mockResolvedValueOnce(expiredTokens).mockResolvedValueOnce(unusable),
+				}),
+				acquireLock: vi.fn().mockResolvedValue({
+					acquired: true,
+					release: vi.fn(async () => {
+						order.push("release");
+					}),
+				}),
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn(),
+			} as unknown as FederationProvider;
+			const app = buildApp({
+				sessionFederationIndex,
+				fedTokenStore: lockingStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(404);
+			expect(res.body.error).toBe("federation_not_linked");
+			expect(order).toEqual(["removeFederation", "release"]);
+		});
+
+		it("omits a stored scope that names no scope-token", async () => {
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({ ...baseFedTokens, scope: " \t " }),
+			});
+			const app = buildApp({ fedTokenStore });
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect("scope" in res.body).toBe(false);
+		});
+
+		it("answers a stored scope in its canonical form", async () => {
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({ ...baseFedTokens, scope: " openid  email openid " }),
+			});
+			const app = buildApp({ fedTokenStore });
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid email");
+		});
+	});
+
 	// ---------------------------------------------------------------------------
 	// Refresh error paths
 	// ---------------------------------------------------------------------------
