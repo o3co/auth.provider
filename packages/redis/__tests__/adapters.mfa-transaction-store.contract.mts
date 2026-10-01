@@ -1417,7 +1417,10 @@ export function runMfaTransactionStoreContract(
 				await fail(store, at, SMALL_HARD);
 			}
 			at += MINUTE;
-			const results = await Promise.all([check(store, at, SMALL_HARD), check(store, at, SMALL_HARD)]);
+			const results = await Promise.all([
+				check(store, at, SMALL_HARD),
+				check(store, at, SMALL_HARD),
+			]);
 			const through = results.filter((r) => r.ok);
 			expect(through).toHaveLength(1);
 			expect(results.filter((r) => !r.ok).map((r) => held(r))).toEqual([HARD]);
