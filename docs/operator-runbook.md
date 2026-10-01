@@ -878,13 +878,20 @@ wires it.
   authentication is raised in place — a step-up of its second factor — is
   first moved to a new express session id (the session package's
   `renewSession`, through the `loginCompletion` slot; the MFA ADR's D27):
-  `isAuthenticated`, `user` and `sid` carried over, every other field
-  dropped, the old id destroyed in the cookie store, so a copy of the old
-  cookie gains nothing. What is bound to the old id is orphaned and starts
-  again: a consent `/authorize` parked, a federation-grant browser binding,
-  and the session's other open MFA transactions — a consent or connect flow
-  left open in another tab is lost. The cookie store failing at the renewal
-  is its outage (`store: "cookie_session"`, `step` `regenerate` or `save`):
+  `isAuthenticated`, `user` and `sid` carried over, a fresh renewal nonce
+  written beside them, every other field dropped, the old id destroyed in
+  the cookie store. The escalation is recorded with that nonce on the
+  `UserSession`, and admission answers any other cookie session on the same
+  `sid` `not_live` — so a browser tab, or a request in flight, that still
+  holds the old cookie is sent to sign in again, even when its own save put
+  the old id back in the cookie store after the renewal (express-session
+  saves unconditionally). A user-session store that does not round-trip
+  `renewalNonce` leaves escalated sessions unbound: the bundled Redis store
+  does not yet. What is bound to the old id is orphaned and starts again: a
+  consent `/authorize` parked, a federation-grant browser binding, and the
+  session's other open MFA transactions — a consent or connect flow left
+  open in another tab is lost. The cookie store failing at the renewal is
+  its outage (`store: "cookie_session"`, `step` `regenerate` or `save`):
   nothing is recorded, and the request's cookie session is dropped. At
   `save` the old id is already destroyed and the user signs in again; at
   `regenerate` the old id keeps what it held.

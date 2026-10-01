@@ -549,28 +549,38 @@ browser to a new express session id after its session is escalated — the MFA
 step-up (the MFA ADR's D27). It reaches the MFA package through the
 `loginCompletion` slot and is not exported. It reads `isAuthenticated`, `user`
 and `sid`, regenerates the express session, writes back those of the three the
-session held, and saves. It answers `renewed`, or `unavailable` with
-`cookie_session` and the step, `regenerate` or `save`, which the caller answers
-as an outage.
+session held and a fresh renewal nonce (core's `newRenewalNonce`, as
+`renewalNonce` beside `sid`), and saves. It answers `renewed` with the nonce,
+or `unavailable` with `cookie_session` and the step, `regenerate` or `save`,
+which the caller answers as an outage.
 
 What holds:
 
-- **Only the signed-in state moves.** Every other field — a login's
-  `redirectTo`, anything another flow left on the session — is dropped. A
-  session that is not signed in stays so.
-- **The old id names nothing after a renewal.** express-session regenerates by
-  destroying the old id in its store, so a copy of the cookie taken before
-  gains nothing a caller records after `renewed`. The `UserSession` record
-  is not touched: the `sid` is the same.
+- **Only the signed-in state moves, under a fresh nonce.** Every other field —
+  a login's `redirectTo`, anything another flow left on the session, a nonce
+  an earlier renewal wrote — is dropped. A session that is not signed in
+  stays so. No `UserSession` record is written: the `sid` is the same.
+- **The old id is destroyed, but that alone does not keep it out.**
+  express-session regenerates by destroying the old id in its store, and its
+  save overwrites whatever the store holds, unconditionally: a request in
+  flight on the old id that writes its session and ends after the renewal
+  puts the old id back, signed in on the same `sid`. What keeps the
+  escalation off it is the nonce: the caller records the escalation with it
+  (`recordSecondFactor`'s `renewalNonce`), and core's admission answers
+  every cookie session that does not hold the record's nonce `not_live`
+  (`renewed`) — the old id put back included.
 - **A failure writes nothing and drops the request's cookie session**
-  (`abandonCookieSession`), reported once through the caller's reporter. At
-  `save` the old id is already destroyed, so the browser is signed out. At
-  `regenerate` the store could not destroy it, and the old id keeps what it
-  held before. Either way the caller records nothing on `unavailable`.
+  (`abandonCookieSession`), reported once through the caller's reporter; a
+  request with no express session is the cookie session's outage at
+  `regenerate`. At `save` the old id is already destroyed, so the browser is
+  signed out. At `regenerate` the store could not destroy it, and the old id
+  keeps what it held before. Either way the caller records nothing on
+  `unavailable`, so no id holds the escalation.
 - **What renewal orphans.** Records bound to the old express session id are
   lost: a consent `/authorize` parked, a federation-grant browser binding,
   and the session's other open MFA transactions. A flow in another tab starts
-  again.
+  again; a tab that still holds the old cookie is refused once the session is
+  escalated, and signs in again.
 
 ### What `POST /session/logout` invalidates
 
@@ -1316,7 +1326,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/csrfTokenSigner.test.mts`](src/__tests__/csrfTokenSigner.test.mts) | the session store's `csrfTokenSigner`: core's contract, the fixed vectors, the entropy floor, a token signed under `session-store.secret` passing `/session/*` and the `csrfGuard` slot, and an override replacing it; `sessionModule` and a hand-built router refused without a signer, signing through the slot's, its tokens passing between the slot and `/session/*`, and reading no `session-store.secret` on any route |
 | [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, the cookie policy refuses whatever would break the contract, over every combination of the cookie's attributes, and a name or domain it refuses is refused at validation with its message; an override of the policy beside the store's module refuses boot, and a composition without the module fills the slot |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
-| [`src/__tests__/renewSession.test.mts`](src/__tests__/renewSession.test.mts) | the session renewal over express-session's `MemoryStore`: the signed-in state alone on the new id, the old id naming nothing, and a failed `regenerate` or `save` answered as the cookie session's outage with nothing written |
+| [`src/__tests__/renewSession.test.mts`](src/__tests__/renewSession.test.mts) | the session renewal over express-session's `MemoryStore`: the signed-in state and a fresh nonce alone on the new id, the old id destroyed, a failed `regenerate` or `save` answered as the cookie session's outage with nothing written; and the race — a request in flight on the old id puts it back after the renewal, and core's admission refuses it once the escalation carries the nonce |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |

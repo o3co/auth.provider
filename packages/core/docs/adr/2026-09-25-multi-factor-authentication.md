@@ -26,7 +26,7 @@
 - Amended 2026-10-01 (build-order step 10, owner decision): an exempt success no longer lifts the hard hold; a rebind or an operator reset does (D21's amendment of that date).
 - Amended 2026-10-01 (build-order step 10, owner decision): no revocation and no credential change clears the MFA lock; it is cleared only through the MFA module's authorized-recovery entry (D21's amendment of that date).
 - Amended 2026-10-01 (build-order step 16, owner decision): an email challenge is not refused while the subject is held; the hold is enforced at verification (F5's amendment of that date). The email factor's listing carries no hint (D23's amendment of that date).
-- Amended 2026-10-01 (build-order step 11, owner decision): the regeneration after a step-up is the session package's `LoginCompletion.renewSession` (D27's amendment of that date).
+- Amended 2026-10-01 (build-order step 11, owner decision): the regeneration after a step-up, and after a binding in a session, is the session package's `LoginCompletion.renewSession`, and the escalation is bound to the renewed cookie session by a renewal nonce (D27's amendment of that date).
 
 ## Context
 
@@ -902,7 +902,7 @@ A "trust this browser for 30 days" cookie turns the second factor into possessio
 - **Cache and framing.** `no-store` on every MFA response; the TOTP secret, the URI and recovery codes appear in exactly one response each. The page contract requires `frame-ancestors 'none'`.
 - **Redirects.** `redirect_to` from `/authorize` is followed by the page only on the provider's origin; the login's `redirect_to` keeps its exact-match allowlist.
 
-**Amended 2026-10-01 (build-order step 11, owner decision):** the regeneration after a step-up, and after a binding in a session, is the session package's `LoginCompletion.renewSession`; a failed renewal abandons the cookie session, and the old id never holds the escalation.
+**Amended 2026-10-01 (build-order step 11, owner decision):** the regeneration after a step-up, and after a binding in a session, is the session package's `LoginCompletion.renewSession`. "A copy of the id taken before the step-up does not gain it" holds through a renewal nonce, not through the old id's destruction: express-session's save overwrites whatever its store holds, so a request in flight on the old id can put it back after the renewal, signed in on the same `sid`. The renewal writes a fresh nonce into the new cookie session and answers it; the escalation records it on the `UserSession` in the same write (`recordSecondFactor`); admission answers a cookie session whose nonce is not the record's `not_live` (`renewed`). A record without a nonce is read as before, so only an escalated session is bound. A failed renewal abandons the cookie session, and the caller records nothing on `unavailable`: at a failed save the old id is already destroyed; at a failed regeneration it keeps what it held, and holds no escalation, provided the caller records nothing. What a renewal orphans also includes the session's other open MFA transactions.
 
 ### D28 — Outages, logs and audit
 

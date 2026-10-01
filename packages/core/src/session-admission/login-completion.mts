@@ -144,10 +144,10 @@ export type SessionRenewalResult =
 
 /**
  * The session package's login tails, and the renewal of a signed-in
- * session's id, as one contract. Each rejects with
- * a `RangeError`, before the session is touched, what core did not build —
- * an object shaped like an `Establishment` or an interruption, or a copy of
- * one (`isEstablishment`, `isInterruptAdmission`).
+ * session's id, as one contract. Each login tail rejects with a
+ * `RangeError`, before the session is touched, what core did not build — an
+ * object shaped like an `Establishment` or an interruption, or a copy of one
+ * (`isEstablishment`, `isInterruptAdmission`).
  */
 export interface LoginCompletion {
 	/**
@@ -178,15 +178,26 @@ export interface LoginCompletion {
 	/**
 	 * Regenerate a signed-in browser's express session and keep its signed-in
 	 * state on the new id — `isAuthenticated`, `user` and `sid` as they were —
-	 * then save it. Every other field is dropped. Against session fixation
-	 * after an escalation (the MFA ADR's D27): the old id is destroyed by the
-	 * regeneration, so a copy of it taken before gains nothing a caller
-	 * records after `renewed`. A failure abandons the request's cookie session
-	 * and saves nothing under either id; a caller escalates nothing on
-	 * `unavailable`. Records bound to the old id — a consent parked by
-	 * `/authorize`, a federation-grant browser binding, the session's other
-	 * open MFA transactions — are orphaned. Answers an outcome, never a
-	 * response.
+	 * with a fresh renewal nonce (`newRenewalNonce`) it answers, then save it.
+	 * Every other field is dropped, and no session record is written; a
+	 * session not signed in stays so.
+	 *
+	 * Against session fixation after an escalation (the MFA ADR's D27), the
+	 * nonce is what holds, not the old id's destruction: express-session's
+	 * save overwrites whatever its store holds, so a request in flight on the
+	 * old id can put it back after the renewal, signed in on the same `sid`.
+	 * The caller records the escalation with the nonce (`recordSecondFactor`'s
+	 * `renewalNonce`), and admission then refuses every cookie session but the
+	 * one holding it.
+	 *
+	 * A failure, or a request with no express session, abandons the request's
+	 * cookie session and saves nothing; the caller records nothing on
+	 * `unavailable`. At `save` the old id is already destroyed; at
+	 * `regenerate` the store could not destroy it, and it keeps what it held —
+	 * no escalation, provided the caller records nothing. Records bound to the
+	 * old id — a consent parked by `/authorize`, a federation-grant browser
+	 * binding, the session's other open MFA transactions — are orphaned.
+	 * Answers an outcome, never a response.
 	 */
 	renewSession(call: SessionRenewalCall): Promise<SessionRenewalResult>;
 }
