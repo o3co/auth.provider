@@ -66,9 +66,26 @@ export const reopenedEnrollment = (
 ): "allowed" | "required" =>
 	records.some((record) => mayCount(factors, record)) ? "allowed" : "required";
 
+/** A factor's `enrollable` that threw: its `kind`, and the factor's error as `cause`, never quoted. */
+export class MfaEnrollableError extends Error {
+	constructor(
+		readonly kind: string,
+		cause: unknown,
+	) {
+		super(`the ${kind} factor could not say whether the user may enroll it`, { cause });
+		this.name = "MfaEnrollableError";
+	}
+}
+
+/** The kinds of the installed counting factors, in registration order. */
+export const countingKinds = (factors: MfaFactorResolver): string[] =>
+	[...factors.entries()].filter(([, factor]) => factor.counting).map(([kind]) => kind);
+
 /**
  * The counting factors `user` may enroll, in registration order: what a
- * reopened binding offers. A factor whose `enrollable` throws offers nothing.
+ * first binding offers. A factor whose `enrollable` throws cannot answer —
+ * an outage, never "not offered" — so the throw goes through, as an
+ * {@link MfaEnrollableError} naming its kind.
  */
 export const enrollableKinds = (
 	factors: MfaFactorResolver,
@@ -76,11 +93,13 @@ export const enrollableKinds = (
 ): string[] =>
 	[...factors.entries()].flatMap(([kind, factor]) => {
 		if (!factor.counting) return [];
+		let offered: boolean;
 		try {
-			return (factor.enrollable?.(user) ?? true) ? [kind] : [];
-		} catch {
-			return [];
+			offered = factor.enrollable?.(user) ?? true;
+		} catch (cause) {
+			throw new MfaEnrollableError(kind, cause);
 		}
+		return offered ? [kind] : [];
 	});
 
 /** `mfa.enrollment.requireEmailProof`. */

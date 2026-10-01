@@ -29,8 +29,12 @@
  *   proof over the continuation's address fact — core's
  *   `enrollmentFactsOfContinuation`, as read at the sign-in — and D25's flag.
  *
- * What it is opened for is settled before anything is spent (`plan`), so a
- * refusal or an outage there spends neither the transaction nor the proof.
+ * What it is opened for is settled before anything is spent (`plan`, called
+ * before the transaction's attempt is reserved), so a refusal or an outage
+ * there spends neither the transaction, nor an attempt, nor the proof: a
+ * first binding's witness; the counting factors the user may enroll — none,
+ * or one that cannot say, is an outage; D25's flag and the gate — a proof
+ * nobody can give is refused; and, for `allowed`, `mfa.maxFactorsPerSubject`.
  */
 
 import {
@@ -39,12 +43,19 @@ import {
 	type MfaFactorRecord,
 	type MfaTransaction,
 } from "@o3co/auth-provider-core";
-import { type MfaCeremonyKit, type MfaStoreOutage, outage } from "./ceremony.mjs";
 import {
+	type MfaCeremonyKit,
+	type MfaReopenRefusal,
+	type MfaStoreOutage,
+	OUTSIDE_CONTRACT,
+	outage,
+} from "./ceremony.mjs";
+import {
+	countingKinds,
 	enrollableKinds,
 	firstBindingGate,
+	MfaEnrollableError,
 	reopenedEnrollment,
-	type UnprovableReason,
 } from "./firstBinding.mjs";
 
 /** What a login is reopened for, settled before the proof is spent. */
@@ -53,8 +64,6 @@ export interface MfaReopenPlan {
 	readonly enrollable: readonly string[];
 	/** Whether the account-email proof comes first: a first binding's, as the gate asked. */
 	readonly emailProof: boolean;
-	/** Why the proof the gate asked nobody can give; `undefined` when it can be, or none is asked. */
-	readonly unprovable: UnprovableReason | undefined;
 }
 
 /** The login's reopening over the coordinator's `kit` (see this file's header). */
@@ -63,14 +72,7 @@ export function createLoginReopen(kit: MfaCeremonyKit): {
 	plan(
 		tx: MfaTransaction,
 		records: readonly MfaFactorRecord[],
-	): Promise<
-		| MfaReopenPlan
-		| MfaStoreOutage
-		| {
-				readonly outcome: "enrollment_state_inconsistent";
-				readonly witness: "enrolled" | "malformed";
-		  }
-	>;
+	): Promise<MfaReopenPlan | MfaReopenRefusal | MfaStoreOutage>;
 	/** The new transaction `plan` settled, over `consumed`'s continuation and binding: the login's `403`, or the outage. */
 	open(consumed: MfaTransaction, plan: MfaReopenPlan): Promise<InterruptionAnswer | MfaStoreOutage>;
 } {
@@ -86,12 +88,24 @@ export function createLoginReopen(kit: MfaCeremonyKit): {
 				// The store holds a login's continuation to the same check at its create.
 				return outage("mfa_transaction", "get", cause);
 			}
-			const enrollable = enrollableKinds(kit.factors, tx.continuation.primary.user);
-			if (reopenedEnrollment(kit.factors, records) === "allowed") {
-				return { enrollment: "allowed", enrollable, emailProof: false, unprovable: undefined };
-			}
-			if (facts.witness !== "not_enrolled") {
+			const enrollment = reopenedEnrollment(kit.factors, records);
+			if (enrollment === "required" && facts.witness !== "not_enrolled") {
 				return { outcome: "enrollment_state_inconsistent", witness: facts.witness };
+			}
+			let enrollable: string[];
+			try {
+				enrollable = enrollableKinds(kit.factors, tx.continuation.primary.user);
+			} catch (cause) {
+				if (!(cause instanceof MfaEnrollableError)) throw cause;
+				return { outcome: "enrollable_failed", factorKind: cause.kind, cause };
+			}
+			if (enrollable.length === 0) {
+				return { outcome: "nothing_enrollable", countingKinds: countingKinds(kit.factors) };
+			}
+			if (enrollment === "allowed") {
+				return records.length < kit.maxFactorsPerSubject
+					? { enrollment, enrollable, emailProof: false }
+					: { outcome: "binding_refused", unprovable: undefined };
 			}
 			const flagged = await kit.emailProofRequired(tx.subject);
 			if (typeof flagged !== "boolean") return flagged;
@@ -101,19 +115,19 @@ export function createLoginReopen(kit: MfaCeremonyKit): {
 				mailAddress: facts.mailAddress,
 				requiredAtNextBinding: flagged,
 			});
-			return {
-				enrollment: "required",
-				enrollable,
-				emailProof: gate.outcome !== "bind",
-				unprovable: gate.outcome === "unprovable" ? gate.reason : undefined,
-			};
+			if (gate.outcome === "unprovable") {
+				return { outcome: "binding_refused", unprovable: gate.reason };
+			}
+			return { enrollment, enrollable, emailProof: gate.outcome === "prove" };
 		},
 
-		open: (consumed, plan) =>
-			kit.openLoginBinding(consumed.binding.id, consumed.continuation, {
-				enrollment: plan.enrollment,
-				enrollable: plan.enrollable,
-				emailProof: plan.emailProof,
-			}),
+		open: async (consumed, plan) =>
+			consumed.continuation === undefined
+				? outage("mfa_transaction", "consume", OUTSIDE_CONTRACT)
+				: kit.openLoginBinding(consumed.binding, consumed.continuation, {
+						enrollment: plan.enrollment,
+						enrollable: plan.enrollable,
+						emailProof: plan.emailProof,
+					}),
 	};
 }

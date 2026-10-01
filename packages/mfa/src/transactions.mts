@@ -43,6 +43,7 @@ import { randomBytes } from "node:crypto";
 import type {
 	InterruptionAnswer,
 	MfaTransaction,
+	MfaTransactionBinding,
 	MfaTransactionStore,
 	PrimaryContinuation,
 } from "@o3co/auth-provider-core";
@@ -127,7 +128,7 @@ export function createLoginTransactions({
 			await store.create(
 				loginTransaction({
 					id,
-					sessionId,
+					binding: { kind: "session", id: sessionId },
 					continuation,
 					enrollment: firstBinding ? "required" : "none",
 					emailProof: firstBinding && interruption.emailProof,
@@ -140,10 +141,10 @@ export function createLoginTransactions({
 	};
 }
 
-/** The new login transaction `id` over `continuation`, bound to the session `sessionId` names. */
+/** The new login transaction `id` over `continuation`, bound to `binding`. */
 const loginTransaction = (shape: {
 	readonly id: string;
-	readonly sessionId: string;
+	readonly binding: MfaTransactionBinding;
 	readonly continuation: PrimaryContinuation;
 	readonly enrollment: MfaTransaction["enrollment"];
 	readonly emailProof: boolean;
@@ -152,7 +153,7 @@ const loginTransaction = (shape: {
 }): MfaTransaction => ({
 	id: shape.id,
 	purpose: "login",
-	binding: { kind: "session", id: shape.sessionId },
+	binding: shape.binding,
 	subject: shape.continuation.primary.subject,
 	sid: undefined,
 	continuation: shape.continuation,
@@ -192,8 +193,8 @@ const interruptionAnswer = (
 
 /** What a login is reopened for after a non-counting proof. */
 export interface LoginBindingShape {
-	/** The express session id the login's transaction was bound to. */
-	readonly sessionId: string;
+	/** What the login's transaction was bound to, whole. */
+	readonly binding: MfaTransactionBinding;
 	readonly continuation: PrimaryContinuation;
 	/** `allowed`: a binding beside a record that may count; `required`: a first binding. */
 	readonly enrollment: "allowed" | "required";
@@ -226,7 +227,7 @@ export async function openLoginBinding(
 	await store.create(
 		loginTransaction({
 			id,
-			sessionId: shape.sessionId,
+			binding: shape.binding,
 			continuation: shape.continuation,
 			enrollment: shape.enrollment,
 			emailProof: shape.emailProof,

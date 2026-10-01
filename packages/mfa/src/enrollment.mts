@@ -78,7 +78,7 @@ import {
 	outage,
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
-import { mayCount } from "./firstBinding.mjs";
+import { mayCount, reopenedEnrollment } from "./firstBinding.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes } from "./recovery/issue.mjs";
 
@@ -219,7 +219,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			if (factor === undefined) return UNKNOWN_KIND;
 			const records = await kit.recordsOf(session.subject);
 			if ("outcome" in records) return records;
-			const first = !records.some((record) => mayCount(factors, record));
+			const first = reopenedEnrollment(factors, records) === "required";
 			const refused = refusedBy("enroll", first, records);
 			if (refused !== undefined) return refused;
 			const tx = await kit.openEnrollment(call, session, {
@@ -597,7 +597,11 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				subject: tx.subject,
 				binding,
 				nowMs,
-				replace: true,
+				// A reopened login's first binding by `password` keeps the set that
+				// stood: the owner's remaining codes stay usable (D25).
+				...(tx.purpose === "login" && binding === "password"
+					? { keep: "password_binding" as const }
+					: {}),
 			});
 			const witness = await kit.witness.mark(tx.subject);
 

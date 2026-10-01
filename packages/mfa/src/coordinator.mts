@@ -478,13 +478,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "create", cause);
 			}
 		},
-		openLoginBinding: async (sessionId, continuation, shape) => {
+		openLoginBinding: async (binding, continuation, shape) => {
 			try {
-				if (continuation === undefined) {
-					throw new TypeError("the login's transaction carries no continuation");
-				}
 				return await openLoginBinding(transactions, {
-					sessionId,
+					binding,
 					continuation,
 					...shape,
 					nowMs: now(),
@@ -755,7 +752,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
 			if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) return proof.verify(call, tx);
-			if (tx.purpose === "enroll") return UNKNOWN_FACTOR;
+			// A transaction opened for a binding binds; it verifies no other factor.
+			if (tx.purpose === "enroll" || tx.enrollment !== "none") return UNKNOWN_FACTOR;
 			let records = await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const found = named(records, call.factorId);
@@ -790,6 +788,24 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			// spends nothing.
 			let opened = openKind(tx.subject, record, records);
 			if ("outcome" in opened) return opened;
+
+			/**
+			 * F3: under `required`, a login's factor that does not count completes
+			 * no login for a subject left with no counting factor it can use over
+			 * `current`; what the login reopens for, or why not, is settled before
+			 * anything more is spent (`reopen.mts`).
+			 */
+			const planOver = (current: readonly MfaFactorRecord[]) =>
+				mode === "required" &&
+				tx.purpose === "login" &&
+				!factor.counting &&
+				!holdsUsableCounting(tx.subject, current)
+					? reopen.plan(tx, current)
+					: undefined;
+			let reopening = await planOver(records);
+			if (reopening !== undefined && "outcome" in reopening) {
+				return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
+			}
 
 			const reserved = await reserve(tx);
 			if ("outcome" in reserved) {
@@ -888,17 +904,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				// Right: from here a proof that completes nothing never counts.
 				settled = "void";
 
-				// F3: under `required`, a factor that does not count completes no login
-				// for a subject left with no counting factor it can use; what the login
-				// reopens for is settled before anything is spent.
-				const reopening =
-					mode === "required" && !factor.counting && !holdsUsableCounting(tx.subject, records)
-						? await reopen.plan(tx, records)
-						: undefined;
-				if (reopening !== undefined && "outcome" in reopening) {
-					return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
-				}
-
 				// Consumed before the factor moves on: a lost race spends the
 				// transaction, never the factor's state.
 				const consumed = await consume(tx);
@@ -963,6 +968,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						const { reason, ...concerns } = checked;
 						return refused(reason, 0, concerns);
 					}
+					// The records moved: what the proof completes is settled again over them.
+					reopening = await planOver(records);
+					if (reopening !== undefined && "outcome" in reopening) {
+						return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
+					}
 				}
 
 				if (reopening !== undefined) {
@@ -970,13 +980,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					const answer = await reopen.open(consumed, reopening);
 					return "outcome" in answer
 						? { outcome: "binding_not_reopened", outage: answer, recoveryCodesRemaining, ...about }
-						: {
-								outcome: "binding_reopened",
-								answer,
-								unprovable: reopening.unprovable,
-								recoveryCodesRemaining,
-								...about,
-							};
+						: { outcome: "binding_reopened", answer, recoveryCodesRemaining, ...about };
 				}
 
 				// D12: a counting factor verified for a login's `User` that does not

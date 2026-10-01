@@ -275,7 +275,7 @@ describe("a factor that does not count, under required (F3)", () => {
 		});
 		expect((await storedData(factorStore, record)).record.version).toBe(1);
 		expect(audit.of("mfa.verified").map((event) => event.details)).toEqual([
-			{ kind: "rc", purpose: "login" },
+			{ kind: "rc", purpose: "login", reopened: true },
 		]);
 	});
 

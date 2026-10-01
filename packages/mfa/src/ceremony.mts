@@ -197,13 +197,11 @@ export type MfaVerifyOutcome =
 	/**
 	 * The proof was right and spent, but it does not count and the subject
 	 * holds no counting factor it can use (F3): the login's own `403`, naming
-	 * the transaction reopened for a binding, and why a proof it asks nobody
-	 * can give.
+	 * the transaction reopened for a binding.
 	 */
 	| ({
 			readonly outcome: "binding_reopened";
 			readonly answer: InterruptionAnswer;
-			readonly unprovable: UnprovableReason | undefined;
 			/** The codes the set holds once a recovery code was spent; `undefined` for any other factor. */
 			readonly recoveryCodesRemaining: number | undefined;
 	  } & MfaCeremonySubject)
@@ -213,14 +211,7 @@ export type MfaVerifyOutcome =
 			readonly outage: MfaStoreOutage;
 			readonly recoveryCodesRemaining: number | undefined;
 	  } & MfaCeremonySubject)
-	/**
-	 * A first binding would be reopened while the login's `User` says the
-	 * subject enrolled, or says nothing readable (D12): an outage, nothing spent.
-	 */
-	| ({
-			readonly outcome: "enrollment_state_inconsistent";
-			readonly witness: "enrolled" | "malformed";
-	  } & MfaCeremonySubject)
+	| (MfaReopenRefusal & MfaCeremonySubject)
 	| ({
 			readonly outcome: "verified";
 			/** What the login persisted, as the store answered it at consumption. */
@@ -232,6 +223,26 @@ export type MfaVerifyOutcome =
 			/** The codes the set holds once a recovery code was spent; `undefined` for any other factor. */
 			readonly recoveryCodesRemaining: number | undefined;
 	  } & MfaCeremonySubject);
+
+/**
+ * Why a login is not reopened for a binding, answered before anything is
+ * spent: a first binding while the login's `User` says the subject enrolled,
+ * or says nothing readable (D12); no counting factor offered to the user, or
+ * one that cannot say (each an outage); or a binding nobody could complete —
+ * a proof the gate asks that nobody can give, or `mfa.maxFactorsPerSubject`
+ * reached beside a record that may count.
+ */
+export type MfaReopenRefusal =
+	| {
+			readonly outcome: "enrollment_state_inconsistent";
+			readonly witness: "enrolled" | "malformed";
+	  }
+	| { readonly outcome: "nothing_enrollable"; readonly countingKinds: readonly string[] }
+	| { readonly outcome: "enrollable_failed"; readonly factorKind: string; readonly cause: unknown }
+	| {
+			readonly outcome: "binding_refused";
+			readonly unprovable: UnprovableReason | undefined;
+	  };
 
 /** Why an enrollment is refused before anything is spent. */
 export type MfaEnrollmentRefusal =
@@ -376,13 +387,13 @@ export interface MfaCeremonyKit {
 	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */
 	readonly provedInSession: (subject: string, sid: string) => Promise<boolean | MfaStoreOutage>;
 	/**
-	 * A new login transaction over `continuation`, bound to the browser
-	 * session `sessionId`, opened for the binding `shape` says: the login's
-	 * `403` naming it; the outage otherwise.
+	 * A new login transaction over `continuation`, bound to `binding`, opened
+	 * for the binding `shape` says: the login's `403` naming it; the outage
+	 * otherwise.
 	 */
 	readonly openLoginBinding: (
-		sessionId: string,
-		continuation: PrimaryContinuation | undefined,
+		binding: MfaTransactionBinding,
+		continuation: PrimaryContinuation,
 		shape: {
 			readonly enrollment: "allowed" | "required";
 			readonly enrollable: readonly string[];

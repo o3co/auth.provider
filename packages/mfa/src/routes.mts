@@ -111,6 +111,11 @@ const SESSION_STORE_UNAVAILABLE = errorEnvelope(
 	"Session store unavailable",
 );
 const LOGIN_REQUIRED = errorEnvelope("login_required", "Log in again");
+/** A proof that would reopen a login for a binding nobody could complete: refused, nothing spent. */
+const ENROLLMENT_REQUIRED = errorEnvelope(
+	"mfa_enrollment_required",
+	"A second factor that counts must be enrolled",
+);
 const FACTOR_REFUSED = errorEnvelope(
 	"mfa_factor_refused",
 	"This second factor cannot be used: use another",
@@ -626,7 +631,11 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					subject: verified.subject,
 					ip: call.request.ip,
 					userAgent: call.request.userAgent,
-					details: { kind: verified.kind, purpose: verified.purpose },
+					details: {
+						kind: verified.kind,
+						purpose: verified.purpose,
+						...(verified.outcome === "verified" ? {} : { reopened: true }),
+					},
 				});
 				if (verified.recoveryCodesRemaining !== undefined) {
 					emitAuditEvent(auditSink, {
@@ -666,14 +675,28 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					);
 					res.status(503).json(MFA_UNAVAILABLE);
 					return;
-				case "binding_reopened":
-					verifiedEvents(outcome);
+				case "nothing_enrollable":
+					logger.warn({ kinds: outcome.countingKinds }, "mfa_enrollment_nothing_enrollable");
+					res.status(503).json(MFA_UNAVAILABLE);
+					return;
+				case "enrollable_failed":
+					logger.error(
+						{ route: "verify", kind: outcome.factorKind, err: mailFailureOf(outcome.cause) },
+						"mfa_factor_enrollment_unavailable",
+					);
+					res.status(503).json(MFA_UNAVAILABLE);
+					return;
+				case "binding_refused":
 					if (outcome.unprovable !== undefined) {
 						logger.warn(
 							{ sub: outcome.subject, reason: outcome.unprovable },
 							"mfa_email_proof_unprovable",
 						);
 					}
+					res.status(403).json(ENROLLMENT_REQUIRED);
+					return;
+				case "binding_reopened":
+					verifiedEvents(outcome);
 					res.status(outcome.answer.status).json(outcome.answer.body);
 					return;
 				case "binding_not_reopened":
@@ -960,13 +983,17 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 								purpose: outcome.purpose,
 								binding: outcome.binding,
 								by: "user",
-								regenerated: codes.regenerated === true,
+								regenerated: codes.regenerated,
+								// A set that stood may still stand beside the new one: kept, or not removed.
+								...(codes.unreplaced === undefined ? {} : { unreplaced: true }),
+								...(codes.unreplaced !== undefined && "kept" in codes.unreplaced
+									? { kept: codes.unreplaced.kept }
+									: {}),
 							},
 						});
-						if (codes.unreplaced !== undefined) {
-							// The set it was to replace may still stand beside the new one.
+						if (codes.unreplaced !== undefined && "cause" in codes.unreplaced) {
 							logger.error(
-								{ sub: outcome.subject, err: loggableError(codes.unreplaced) },
+								{ sub: outcome.subject, err: loggableError(codes.unreplaced.cause) },
 								"mfa_recovery_codes_unreplaced",
 							);
 						}
