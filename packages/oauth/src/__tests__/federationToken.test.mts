@@ -4152,14 +4152,19 @@ describe("createRouter — refreshBufferMs", () => {
 		["NaN", Number.NaN],
 		["Infinity", Number.POSITIVE_INFINITY],
 		["a numeric string", "30000" as unknown as number],
+		["a fraction of a millisecond", 0.001],
+		["less than a second", 999],
+		["more than 2^31 - 1", 2 ** 31],
 	])("refuses %s when the route is built", (_label, refreshBufferMs) => {
 		// A buffer of 0 or less serves a token with no life left; NaN never
-		// serves the stored token, so every request refreshes upstream.
+		// serves the stored token, so every request refreshes upstream. Under a
+		// second it is below the lifetime rule's own floor.
 		expect(() => buildApp({ refreshBufferMs })).toThrow(RangeError);
 	});
 
 	it("accepts a positive buffer, and defaults when none is given", () => {
-		expect(() => buildApp({ refreshBufferMs: 1 })).not.toThrow();
+		expect(() => buildApp({ refreshBufferMs: 1000 })).not.toThrow();
+		expect(() => buildApp({ refreshBufferMs: 2 ** 31 - 1 })).not.toThrow();
 		expect(() => buildApp()).not.toThrow();
 	});
 });

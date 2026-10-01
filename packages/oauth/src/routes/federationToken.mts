@@ -176,6 +176,9 @@ const checkCallerStanding = async (
 	return true;
 };
 
+const MIN_REFRESH_BUFFER_MS = 1000;
+const MAX_REFRESH_BUFFER_MS = 2 ** 31 - 1;
+
 /**
  * POST /federation/:name/token — the federation token proxy. Returns the
  * user's upstream federation access token to an opted-in client: the caller
@@ -185,16 +188,18 @@ const checkCallerStanding = async (
  * Mounted under /oauth → POST /oauth/federation/:name/token.
  */
 export function createRouter(express: ExpressLike, opts: FederationTokenRouterOptions): Router {
-	// Refused, never repaired: 0 or less serves a token with no life left, and
-	// NaN never serves the stored token, so every request refreshes upstream.
+	// Refused, never repaired: 0 or less serves a token with no life left,
+	// NaN never serves the stored token, and under a second sits below the
+	// refresh reading's own one-second floor.
 	const refreshBufferMs = opts.refreshBufferMs ?? 30_000;
 	if (
 		typeof refreshBufferMs !== "number" ||
-		!Number.isFinite(refreshBufferMs) ||
-		refreshBufferMs <= 0
+		!Number.isInteger(refreshBufferMs) ||
+		refreshBufferMs < MIN_REFRESH_BUFFER_MS ||
+		refreshBufferMs > MAX_REFRESH_BUFFER_MS
 	) {
 		throw new RangeError(
-			"federation token route: refreshBufferMs must be a positive finite number",
+			`federation token route: refreshBufferMs must be a whole number of milliseconds from ${MIN_REFRESH_BUFFER_MS} to ${MAX_REFRESH_BUFFER_MS}`,
 		);
 	}
 	const router = express.Router();
