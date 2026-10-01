@@ -158,9 +158,10 @@ return fields
 // Answers are judged on the caller's `now`; what a script forgets is judged no later than the
 // server's clock less a day (MFA_CLOCK_SKEW_ALLOWANCE_MS), so a caller far ahead erases nothing.
 // The lock hash's `hard` field is the hard hold, fixed (`HSETNX`) by the script that finds the
-// run at the hard limit and removed by nothing but clearing the subject. While a run is counted
-// or the hold stands the keys have no TTL; otherwise they expire a day after the last failure
-// stops counting. A stored value a script cannot read is an error (an outage), never read as an
+// run at the hard limit and removed by nothing but clearing the subject. It holds the later of
+// that script's `now` and the run's newest attempt, so no attempt of the run is dated after it.
+// While a run is counted or the hold stands the keys have no TTL; otherwise they expire a day
+// after the last failure stops counting. A stored value a script cannot read is an error (an outage), never read as an
 // empty state; a lock-hash field of a kind the scripts do not read is ignored.
 
 const LUA_MFA_SUBJECT_PRELUDE = `
@@ -236,6 +237,15 @@ local function prune(run, pending, week, horizon)
   return kept_week, forgot
 end
 
+-- The time a hold fixed at now records: never before the run's newest attempt.
+local function fixed_at(run, now)
+  local latest = now
+  for _, a in ipairs(run) do
+    if a.at > latest then latest = a.at end
+  end
+  return fmt(latest)
+end
+
 -- Sets what Redis reclaims: no TTL while a run is counted or the hard hold
 -- stands; else a day past the last failure to stop counting; nothing left,
 -- both keys go.
@@ -267,8 +277,10 @@ end
  * `{'held', hold, retryAfterMs, first}` with an empty retry for the hard
  * hold and `first` `1` for the refusal that begins an episode, `0` after.
  * The reservation that brings the run to hardLimit, or a call that finds it
- * there, fixes the hard hold at now in the same step; once fixed, every
- * reservation is refused `hard`, whatever hardLimit it is handed.
+ * there, fixes the hard hold in the same step, at the later of now and the
+ * run's newest attempt; once fixed, every reservation is refused `hard`,
+ * whatever hardLimit it is handed, and a refusal takes off a deadline the
+ * lock hash carries.
  */
 const LUA_MFA_SUBJECT_RESERVE = `${LUA_MFA_SUBJECT_PRELUDE}
 local now = num(ARGV[1])
@@ -280,20 +292,24 @@ local forgot
 week, forgot = prune(run, pending, week, math.min(now, server_ms()) - SKEW)
 
 -- A refusal writes only the mark that its episode began, once, and the hard
--- hold when it fixes it: the deadlines are set again only then or when the
--- prune forgot something, so a held subject hammered is no write load.
-local fixed = false
+-- hold when it fixes it: the deadlines are set again only then, when the
+-- prune forgot something, or when a held hash carries a deadline, so a held
+-- subject hammered is no write load.
+local rekeep = false
 local function refuse(hold, retry)
   local first = redis.call('HSETNX', KEYS[1], 'held', '1') == 1
-  if forgot or first or fixed then keep() end
+  if forgot or first or rekeep then keep() end
   local mark = '0'
   if first then mark = '1' end
   return {'held', hold, retry, mark}
 end
 
 if held_hard == nil and #run >= hard then
-  redis.call('HSETNX', KEYS[1], 'hard', ARGV[1])
-  fixed = true
+  redis.call('HSETNX', KEYS[1], 'hard', fixed_at(run, now))
+  rekeep = true
+elseif held_hard ~= nil and redis.call('PTTL', KEYS[1]) >= 0 then
+  -- A deadline set by a script that does not keep the hold: taken off here.
+  rekeep = true
 end
 if held_hard ~= nil or #run >= hard then
   return refuse('hard', '')
@@ -347,7 +363,7 @@ redis.call('HSET', KEYS[1], 'r:' .. id, seq .. '|' .. ARGV[1], 'p:' .. id, seq)
 redis.call('HDEL', KEYS[1], 'held')
 redis.call('ZADD', KEYS[2], ARGV[1], id)
 -- The attempt that brings the run to the limit fixes the hold in this step.
-if #run + 1 >= hard then redis.call('HSETNX', KEYS[1], 'hard', ARGV[1]) end
+if #run + 1 >= hard then redis.call('HSETNX', KEYS[1], 'hard', fixed_at(run, now)) end
 keep()
 return {'ok'}
 `;
@@ -386,7 +402,8 @@ return 1
  * `MfaTransactionStoreClient.noteExemptSuccess`.
  *
  * `ARGV`: now, hardLimit. Before the hard hold is fixed, ends the run up to
- * now; a run already at hardLimit or past it fixes the hold at now instead.
+ * now; a run already at hardLimit or past it fixes the hold instead, at the
+ * later of now and its newest attempt.
  * Once fixed, nothing ends. An attempt after now stays, and the week stands.
  * A hardLimit that is missing or not a number is refused before anything is
  * read.
@@ -400,7 +417,7 @@ local now = num(ARGV[1])
 local run, pending, week, held_hard = load()
 prune(run, pending, week, math.min(now, server_ms()) - SKEW)
 if held_hard == nil and #run >= hard then
-  redis.call('HSETNX', KEYS[1], 'hard', ARGV[1])
+  redis.call('HSETNX', KEYS[1], 'hard', fixed_at(run, now))
 elseif held_hard == nil then
   for _, a in ipairs(run) do
     if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end

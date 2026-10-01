@@ -150,7 +150,11 @@ interface SubjectState {
 	readonly pending: Map<string, number>;
 	/** Whether a refusal was answered since an attempt was last let through: an episode is under way. */
 	refusing: boolean;
-	/** When the run reached the hard limit: from then the hold stands until the state is cleared. */
+	/**
+	 * When the hard hold was fixed: the later of the fixing call's time and the
+	 * run's newest attempt, so no attempt of the run is dated after it. From
+	 * then the hold stands until the state is cleared.
+	 */
 	hard?: number;
 }
 
@@ -196,6 +200,10 @@ function backoffUntil(
 	}
 	return lockUntil !== undefined && nowMs < lockUntil ? lockUntil : undefined;
 }
+
+/** The time a hold fixed at `nowMs` records: never before the run's newest attempt. */
+const fixedAt = (run: readonly Attempt[], nowMs: number): number =>
+	run.reduce((latest, a) => Math.max(latest, a.atMs), nowMs);
 
 /** The failures the rolling week counts at `nowMs`. The store keeps them a while longer (see `prune`). */
 const inWeek = (week: readonly Attempt[], nowMs: number): Attempt[] =>
@@ -441,7 +449,8 @@ export function createMemoryMfaTransactionStore(
 			nowMs: number,
 			policy: MfaLockoutPolicy,
 		): Promise<MfaSubjectAttemptReservation> {
-			checkMfaLockoutPolicy(policy);
+			// One read of the policy: the values it checks are the values it applies.
+			const checked = checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "reserveSubjectAttempt");
 			sawCallerTime(nowMs);
 			const state = stateOf(subject);
@@ -457,11 +466,13 @@ export function createMemoryMfaTransactionStore(
 				return { ok: false, hold, retryAfterMs, first };
 			};
 
-			if (state.hard === undefined && state.run.length >= policy.hardLimit) state.hard = nowMs;
+			if (state.hard === undefined && state.run.length >= checked.hardLimit) {
+				state.hard = fixedAt(state.run, nowMs);
+			}
 			if (state.hard !== undefined) return refuse("hard", null);
 
-			const backoff = backoffUntil(state.run, policy, nowMs);
-			const weekly = weeklyUntil(state.week, policy, nowMs);
+			const backoff = backoffUntil(state.run, checked, nowMs);
+			const weekly = weeklyUntil(state.week, checked, nowMs);
 			if (backoff !== undefined || weekly !== undefined) {
 				// The hold that ends later is the one that decides when to come back.
 				return (weekly ?? Number.NEGATIVE_INFINITY) >= (backoff ?? Number.NEGATIVE_INFINITY)
@@ -480,7 +491,7 @@ export function createMemoryMfaTransactionStore(
 			state.refusing = false;
 			// The attempt that brings the run to the limit holds it in the same
 			// step: no later settle or exempt success can bring it back below.
-			if (state.run.length >= policy.hardLimit) state.hard = nowMs;
+			if (state.run.length >= checked.hardLimit) state.hard = fixedAt(state.run, nowMs);
 			return { ok: true, reservation: attempt.id };
 		},
 
@@ -524,7 +535,9 @@ export function createMemoryMfaTransactionStore(
 			// A run at the limit holds, as at a reservation; held, nothing
 			// ends. Otherwise the attempts up to this success end, and a later
 			// one stays.
-			if (state.hard === undefined && state.run.length >= hardLimit) state.hard = nowMs;
+			if (state.hard === undefined && state.run.length >= hardLimit) {
+				state.hard = fixedAt(state.run, nowMs);
+			}
 			if (state.hard === undefined) {
 				state.run = state.run.filter((a) => a.atMs > nowMs);
 			}

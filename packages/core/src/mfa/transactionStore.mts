@@ -843,9 +843,13 @@ export interface MfaTransactionStore {
 	 * The hard hold is fixed, in the same atomic step, the first time the
 	 * run — reservations in flight counted — reaches `policy.hardLimit`: at
 	 * the reservation that brings it there, which is let through, or at the
-	 * first call that finds it there under a lower `hardLimit`. From then
+	 * first call that finds it there under a lower `hardLimit`. The store
+	 * records its time as the later of that call's `nowMs` and the run's
+	 * newest attempt, so no attempt of the run is dated after it. From then
 	 * until `clearSubjectState` every reservation is refused `hard`, whatever
 	 * policy it is handed, and no settle, exempt success or sweep lifts it.
+	 * The policy is read once, by {@link checkMfaLockoutPolicy}, and its
+	 * copy is what the call applies.
 	 * Of reservations racing to the limit, the one that reaches it is let
 	 * through and fixes the hold; those after it are refused `hard`.
 	 */

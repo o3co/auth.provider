@@ -388,12 +388,13 @@ export function createRedisMfaTransactionStore(
 		},
 
 		async reserveSubjectAttempt(subject, nowMs, policy) {
-			checkMfaLockoutPolicy(policy);
+			// One read of the policy: the values it checks are the values the script applies.
+			const checked = checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "reserveSubjectAttempt");
 			const reservation = randomBytes(16).toString("base64url");
 			const reply = await client.reserveSubjectAttempt(subjectKeys(subject), {
 				nowMs,
-				policy,
+				policy: checked,
 				reservation,
 			});
 			return reply.ok
