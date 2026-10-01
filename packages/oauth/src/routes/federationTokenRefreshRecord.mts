@@ -29,12 +29,9 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
+import { isUsableToken } from "./federationTokenCredential.mjs";
 import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
-import {
-	isUsableToken,
-	narrowedScope,
-	type RefreshReading,
-} from "./federationTokenRefreshAnswer.mjs";
+import { narrowedScope, type RefreshReading } from "./federationTokenRefreshAnswer.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
 
 /**

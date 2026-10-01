@@ -27,16 +27,13 @@ import {
 	parseScopeTokens,
 	type RefreshedTokens,
 } from "@o3co/auth-provider-core";
+import { isUsableToken } from "./federationTokenCredential.mjs";
 
 /*
  * An adapter's refresh answer is unverified third-party data: every field of
  * `RefreshedTokens` is optional, and core holds the same contract to the same
  * bar in `federation-grants/retrieve.mts`.
  */
-
-/** A credential the client could actually present: present, a string, not empty. */
-export const isUsableToken = (value: unknown): value is string =>
-	typeof value === "string" && value !== "";
 
 /**
  * Seconds a token has left: finite and at least one. `NaN`, `-5` and `0.5`

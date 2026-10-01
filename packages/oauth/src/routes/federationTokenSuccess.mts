@@ -25,8 +25,8 @@
 import { BEARER_TOKEN_TYPE, canonicalScope, emitAuditEvent } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
+import { isUsableToken } from "./federationTokenCredential.mjs";
 import type { DisclosableToken } from "./federationTokenDisclosure.mjs";
-import { isUsableToken } from "./federationTokenRefreshAnswer.mjs";
 import { answerUnlinkedRecord } from "./federationTokenUnlinked.mjs";
 
 /**
