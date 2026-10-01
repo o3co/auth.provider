@@ -335,6 +335,21 @@ export const readableAuthTime = (session: UserSession, nowMs: number): number | 
 	authTimeAt(session.authTime, nowMs) === undefined ? undefined : session.authTime.getTime();
 
 /**
+ * Whether a login was made since `instant` (an ask's, in milliseconds):
+ * the session authenticated strictly after it — an authentication earlier
+ * in the same second is not one made since — or `unreadable` when its
+ * authentication time cannot be read (`readableAuthTime`).
+ */
+export const loginSince = (
+	session: UserSession,
+	instant: number,
+	nowMs: number,
+): boolean | "unreadable" => {
+	const at = readableAuthTime(session, nowMs);
+	return at === undefined ? "unreadable" : at > instant;
+};
+
+/**
  * `fresh_by_ask`: the session is fresh because of the login the presented
  * ask asked for, which the pass that mints then holds it to.
  */
@@ -386,9 +401,7 @@ export const evaluateReauthentication = (
 		// Strictly after the ask, to the millisecond: an authentication made
 		// before it — even earlier in the same second — is not the one it
 		// asked for, and one that cannot be read is not shown to be.
-		if (authSeconds !== undefined && session.authTime.getTime() > ask.loginAskedAt) {
-			return "fresh_by_ask";
-		}
+		if (loginSince(session, ask.loginAskedAt, now) === true) return "fresh_by_ask";
 		redirectError(
 			ctx,
 			"login_required",
@@ -496,9 +509,9 @@ export const stepUpTrip = async (
 	const trips = ask?.stepUpAskedAt;
 	const askedAt =
 		trips !== undefined && Object.hasOwn(trips, requirement) ? trips[requirement] : undefined;
-	const authenticatedAt =
-		askedAt === undefined ? undefined : readableAuthTime(admission.session, Date.now());
-	if (askedAt !== undefined && authenticatedAt === undefined) {
+	const since =
+		askedAt === undefined ? undefined : loginSince(admission.session, askedAt, Date.now());
+	if (since === "unreadable") {
 		// Back from a trip with an authentication time that cannot be read: no
 		// telling whether a new login was made since. One login trip, then a
 		// refusal.
@@ -512,7 +525,7 @@ export const stepUpTrip = async (
 		}
 		return sendToLogin(ctx, askStore, ask);
 	}
-	if (askedAt !== undefined && authenticatedAt !== undefined && authenticatedAt <= askedAt) {
+	if (since === false) {
 		if (admission.whenStillUnmet === "unmet") {
 			redirectError(
 				ctx,
