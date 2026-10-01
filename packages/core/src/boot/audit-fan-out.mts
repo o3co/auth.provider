@@ -59,8 +59,9 @@ const UNTOUCHED: AuditSlot = { beforeProviders: () => {}, provided: (_key, value
  * `Symbol.asyncDispose`, so boot's dispose reaches it as it would unwrapped.
  * The hooks are contributions and are not disposed.
  *
- * A contributed hook with no collectors to read is a broken invariant (the
- * planner always merges them), refused rather than left a fan-out to nothing.
+ * A contributed hook with no `auditHooks` collector to read is a broken
+ * invariant (the planner always merges it), refused rather than left a
+ * fan-out to nothing.
  */
 export function auditSlotFor(
 	plan: BootPlan,
@@ -68,12 +69,13 @@ export function auditSlotFor(
 	components: Record<string, unknown>,
 ): AuditSlot {
 	if (!contributesAuditHooks(plan.validated.modules.map((m) => m.normalised))) return UNTOUCHED;
-	if (contributionKinds === undefined) {
+	const collector = contributionKinds?.auditHooks;
+	if (collector === undefined) {
 		throw new Error(
-			"invariant violated: auditHooks are contributed but stage 3 was handed no contribution collectors",
+			"invariant violated: auditHooks are contributed but stage 3 was handed no auditHooks collector",
 		);
 	}
-	const hooks = (): Iterable<AuditSink> => contributionKinds.auditHooks?.values() ?? [];
+	const hooks = (): Iterable<AuditSink> => collector.values();
 	const logger = () => components.logger as Logger | undefined;
 	const fanOut = (sink: unknown): AuditSink => {
 		const own = sink === undefined || sink === null ? undefined : (sink as AuditSink);

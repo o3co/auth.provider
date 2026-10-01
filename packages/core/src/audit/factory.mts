@@ -127,7 +127,8 @@ export interface AuditFanOutSources {
  * - Each call is isolated: a rejection, a synchronous throw or an answer that
  *   is not a promise is that sink's failure alone, logged at error as
  *   `audit_sink_failed` with `sink`, the sink's position — 0 the slot's own
- *   sink, `n` the `n`th hook in registration order — and the event's `type`:
+ *   sink, `n` the `n`th hook in registration order — and the event's `type`
+ *   when it is a string:
  *   nothing else of the event and nothing of the failure, which may quote it.
  *   An event that cannot be copied, or hooks that cannot be read, reach no
  *   sink, each sink known reported failed without a `type`.
@@ -164,14 +165,15 @@ export function createAuditFanOut(sources: AuditFanOutSources): AuditSink {
 				for (const { position } of targets) reportFailure(sources.logger, position, undefined);
 				return;
 			}
-			if (reentered) report(sources.logger, "warn", { type: shared.type }, "audit_sink_reentered");
+			const type = typeof shared.type === "string" ? shared.type : undefined;
+			if (reentered) report(sources.logger, "warn", { type }, "audit_sink_reentered");
 			await Promise.all(
 				targets.map(({ sink: target, position }) =>
 					(position === 0
 						? delivered(target, shared)
 						: insideHook.run(true, () => delivered(target, shared))
 					).then((ok) => {
-						if (!ok) reportFailure(sources.logger, position, shared.type);
+						if (!ok) reportFailure(sources.logger, position, type);
 					}),
 				),
 			);
@@ -188,10 +190,19 @@ function delivered(target: AuditSink, event: AuditEvent): Promise<boolean> {
 		return Promise.resolve(false);
 	}
 	if (!isThenable(answer)) return Promise.resolve(false);
-	return Promise.resolve(answer).then(
-		() => true,
-		() => false,
-	);
+	const settled = answer;
+	return new Promise<boolean>((resolve) => {
+		try {
+			// A native promise is subscribed to through its own `then`, which a
+			// sink may have replaced: its throw is the sink's failure too.
+			Promise.resolve(settled).then(
+				() => resolve(true),
+				() => resolve(false),
+			);
+		} catch {
+			resolve(false);
+		}
+	});
 }
 
 const isThenable = (value: unknown): value is PromiseLike<unknown> => {
