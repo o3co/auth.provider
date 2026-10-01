@@ -1,6 +1,6 @@
 # auth.provider
 
-最終更新: 2026-10-01
+最終更新: 2026-10-02
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -11,6 +11,8 @@
 > このリポジトリは、[auth](https://github.com/o3co/auth) スタックの 3 層責務分離（認証・トークン発行 / [認可判定](https://github.com/o3co/auth.policy-verifier) / [認可実施](https://github.com/o3co/protobuf.interceptors)）のうち **認証・トークン発行** を担当します。
 
 OAuth 2.0 / OpenID Connect プロバイダー。ユーザーをサインインさせ — ユーザーサービスが検証するパスワード、上流の ID プロバイダー、またはパスキーによって — JWT のアクセストークン・リフレッシュトークン・ID トークンを発行する。下流のサービスは、公開された鍵を使ってそれらをオフラインで検証する。セッションログインと認可コードフローはどちらも同じ形式のトークンを発行し、同じイントロスペクションエンドポイントで応答し、下流では同じ方法で検証される。
+
+**安定性。** パッケージは 0.x 系にあり、マイナーリリースにも破壊的変更が含まれることがある。[CHANGELOG](CHANGELOG.md) は各破壊的変更を、それが出たリリースの節に載せており、アップグレード前に読むべき一覧はこちらである。コミットと PR タイトルは慣例として破壊的変更に `!` を付けるが、タイトルは記録ではない。詳しくは[リリースポリシー](docs/release-policy.md)を参照。
 
 ## 責務と役割
 
