@@ -1489,6 +1489,34 @@ describe("/authorize on admission — the session's authentication time is read 
 		expect(harness.regenerated).toBe(1);
 	});
 
+	it("an instant ahead of the clock within the skew does not meet a login an ask asked for: login_required", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		// No new login: the record's time merely runs ahead of this clock.
+		clock.authTime = new Date(Date.now() + 60_000);
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
+	it("an instant ahead of the clock within the skew, back from a step-up trip, is sent to log in rather than on another trip", async () => {
+		const { requirement } = steppingUp();
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+		});
+		const page = new URL((await authorize(harness.app, baseQuery)).headers.location as string);
+		const back = new URL(page.searchParams.get("redirect_to") as string);
+		clock.authTime = new Date(Date.now() + 60_000);
+		loginRedirectTo(await authorize(harness.app, Object.fromEntries(back.searchParams.entries())));
+	});
+
 	it("a record whose authTime is not a valid Date never reaches these checks: admission answers not_live, and the browser logs in anew", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record({ authTime: new Date(Number.NaN) })),
