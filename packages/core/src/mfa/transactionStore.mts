@@ -1405,7 +1405,9 @@ export interface MfaTransactionStore {
 	 * replaced authenticators. The week stands unless the boundary gives it
 	 * back. With the boundary, a `recover` ends the week's and the run's
 	 * attempts dated up to `nowMs`; while the hard hold stands, the week's
-	 * alone. A refusal changes nothing, and the authorization stays pending
+	 * alone. A `reset` asks for neither: it ends the subject's lock state
+	 * whole, the hard hold included, and every other authorization of the
+	 * subject. A refusal changes nothing, and the authorization stays pending
 	 * until it ends. Applied, the slot is marked applied (kept until it ends)
 	 * and the subject's generation moves on by one. The email-proof
 	 * requirement, the first-binding mark, session proofs and transactions

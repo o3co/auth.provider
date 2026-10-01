@@ -518,6 +518,24 @@ end
 if slot.applied ~= nil then return {'already', slot.id, slot.applied, hard_flag()} end
 if slot.ends <= now then return refused('expired') end
 
+-- Applied: the slot is marked at the generation this moves to.
+local function applied(ended_week, ended_run, lifted)
+  local gen = string.format('%.0f', redis.call('HINCRBY', KEYS[3], 'g', 1))
+  redis.call('HSET', KEYS[3], field, 'a|' .. gen .. '|' .. string.format('%.0f', slot.ends) .. '|' .. slot.id)
+  recovery_keep(KEYS[3], allowance)
+  return {'applied', slot.id, gen, ended_week, ended_run, lifted, hard_flag()}
+end
+
+if ARGV[1] == 'reset' then
+  -- The lock state whole, unread, and every other authorization of the subject.
+  redis.call('DEL', KEYS[1], KEYS[2])
+  local flat = redis.call('HGETALL', KEYS[3])
+  for i = 1, #flat, 2 do
+    if string.sub(flat[i], 1, 2) == 'a:' and flat[i] ~= field then redis.call('HDEL', KEYS[3], flat[i]) end
+  end
+  return applied('1', '1', '1')
+end
+
 local boundary, since = nil, nil
 if ARGV[5] ~= '' then boundary = tonumber(ARGV[5]) end
 if ARGV[6] ~= '' then since = tonumber(ARGV[6]) end
@@ -565,11 +583,7 @@ for id in pairs(pending) do
   if not kept[id] then redis.call('HDEL', KEYS[1], 'p:' .. id) end
 end
 keep()
-
-local gen = string.format('%.0f', redis.call('HINCRBY', KEYS[3], 'g', 1))
-redis.call('HSET', KEYS[3], field, 'a|' .. gen .. '|' .. string.format('%.0f', slot.ends) .. '|' .. slot.id)
-recovery_keep(KEYS[3], allowance)
-return {'applied', slot.id, gen, ended_week, ended_run, lifted, hard_flag()}
+return applied(ended_week, ended_run, lifted)
 `;
 
 // A subject's first-binding mark is judged on one clock, the server's (`TIME`): its end, which

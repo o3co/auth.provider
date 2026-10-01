@@ -788,10 +788,19 @@ export function createMemoryMfaTransactionStore(
 			if (sessionsBoundaryMs !== undefined && sessionsBoundaryMs > nowMs + DEFAULT_CLOCK_SKEW_MS) {
 				return refused("boundary_ahead");
 			}
-			const state = subjects.get(subject);
-			const cleared = recover(state, nowMs, sessionsBoundaryMs, guessableBoundSinceMs);
-			if (cleared === "not_revoked_since") return refused(cleared);
-			if (state !== undefined) settleEmpty(subject, state);
+			let cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean };
+			if (operation === "reset") {
+				// The lock state whole, and every other authorization of the subject.
+				subjects.delete(subject);
+				for (const other of slots.keys()) if (other !== key) dropSlot(subject, slots, other);
+				cleared = { week: true, run: true, hard: true };
+			} else {
+				const state = subjects.get(subject);
+				const recovered = recover(state, nowMs, sessionsBoundaryMs, guessableBoundSinceMs);
+				if (recovered === "not_revoked_since") return refused(recovered);
+				if (state !== undefined) settleEmpty(subject, state);
+				cleared = recovered;
+			}
 			const generation = (generations.get(subject) ?? 0) + 1;
 			generations.set(subject, generation);
 			slots.set(key, { ...slot, appliedAt: generation });
