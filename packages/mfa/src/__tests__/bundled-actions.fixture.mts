@@ -46,6 +46,7 @@ export const BUNDLED_ACTIONS: Readonly<Record<string, BundledAction>> = {
 	"session.link_callback": { grade: "use", carrier: "link" },
 	"webauthn.register": { grade: "credential_change", carrier: "cookie" },
 	"mfa.manage": { grade: "credential_change", carrier: "cookie" },
+	"mfa.view": { grade: "use", carrier: "cookie" },
 };
 
 /**
@@ -117,6 +118,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link_callback": "mmmmmmm",
 		"webauthn.register": "rmmmrrr",
 		"mfa.manage": "rmmmrrr",
+		"mfa.view": "mmmmmmm",
 	},
 	"optional · no factor": {
 		"oauth.authorize": "mmmmmmm",
@@ -134,6 +136,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link_callback": "mmmmmmm",
 		"webauthn.register": "rmmmrrr",
 		"mfa.manage": "rmmmrrr",
+		"mfa.view": "mmmmmmm",
 	},
 	"optional · totp, not recordable": {
 		"oauth.authorize": "mmmmmmm",
@@ -151,6 +154,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link_callback": "mmmmmmm",
 		"webauthn.register": "rmmmrrr",
 		"mfa.manage": "rmmmrrr",
+		"mfa.view": "mmmmmmm",
 	},
 	"required · totp, recordable": {
 		"oauth.authorize": "rrmmrrr",
@@ -168,6 +172,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link_callback": "rrmmrrr",
 		"webauthn.register": "rrmmrrr",
 		"mfa.manage": "rrmmrrr",
+		"mfa.view": "rrmmrrr",
 	},
 	"required · no factor": {
 		"oauth.authorize": "rummrru",
@@ -185,6 +190,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link_callback": "rummrru",
 		"webauthn.register": "rummrru",
 		"mfa.manage": "rummrru",
+		"mfa.view": "rummrru",
 	},
 	"required · totp, not recordable": {
 		"oauth.authorize": "rrmmrrr",
@@ -202,6 +208,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link_callback": "rrmmrrr",
 		"webauthn.register": "rrmmrrr",
 		"mfa.manage": "rrmmrrr",
+		"mfa.view": "rrmmrrr",
 	},
 	"optional · totp, recordable, holding totp": {
 		"oauth.authorize": "mmmmmmm",
@@ -219,6 +226,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link_callback": "mmmmmmm",
 		"webauthn.register": "rsmsrrs",
 		"mfa.manage": "rsmsrrs",
+		"mfa.view": "mmmmmmm",
 	},
 	"required · totp, recordable, holding totp": {
 		"oauth.authorize": "rsmmrrs",
@@ -236,5 +244,6 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link_callback": "rsmmrrs",
 		"webauthn.register": "rsmsrrs",
 		"mfa.manage": "rsmsrrs",
+		"mfa.view": "rsmmrrs",
 	},
 };

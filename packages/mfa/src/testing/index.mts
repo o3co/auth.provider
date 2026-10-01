@@ -54,6 +54,8 @@ export interface MfaConfigForTestsOptions {
 	readonly manage?: { readonly maxAgeSeconds: number };
 	readonly enrollment?: { readonly requireEmailProof: "when-mail" | "always" | "never" };
 	readonly maxFactorsPerSubject?: number;
+	/** `mfa.storeTimeoutMs`: how long one Store call may take. */
+	readonly storeTimeoutMs?: number;
 }
 
 /**
@@ -72,6 +74,7 @@ export function mfaConfigForTests(options: MfaConfigForTestsOptions) {
 			manage: { maxAgeSeconds: 300 },
 			enrollment: { requireEmailProof: "when-mail" as "when-mail" | "always" | "never" },
 			maxFactorsPerSubject: 10,
+			storeTimeoutMs: 5_000,
 			...rest,
 			encryptionKeys: encryptionKeys?.map((entry) => ({ ...entry })) ?? [{ key }],
 			lockout: {

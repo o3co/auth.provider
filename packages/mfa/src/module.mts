@@ -60,7 +60,8 @@
  * section gives none.
  *
  * Contributes `mfa.manage`, graded `credential_change`, as the admission
- * action its routes admit a signed-in session's enrollment for.
+ * action its routes admit a signed-in session's enrollment, rename or removal
+ * for, and `mfa.view`, graded `use`, for the list of its factors.
  *
  * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
  * session middleware. Their factory runs after every factor has registered,
@@ -98,6 +99,7 @@ import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
+import { createMfaFactorSet } from "./factorSet.mjs";
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
@@ -426,6 +428,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 					if (!witness.writable) {
 						logger.warn({ slot: "userRepository" }, "mfa_enrollment_witness_unwritable");
 					}
+					const sealing = createMfaSealing({ ring: settings.encryptionKeys, logger });
 					const requirement = createMfaRequirement({
 						mode,
 						factors: deps.mfaFactorResolver,
@@ -446,11 +449,12 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 						firstBindingAt: (subject, nowMs) =>
 							deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+						sealing,
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,
 						settings,
-						sealing: createMfaSealing({ ring: settings.encryptionKeys, logger }),
+						sealing,
 						requirement,
 						witness,
 						logger,
@@ -464,6 +468,14 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						deps.mfaFactorResolver,
 					);
 					checkInstalledFactors(deps.mfaFactorResolver, mode);
+					// The subject's records as read, and the writes the witness follows: one per boot.
+					const factorSet = createMfaFactorSet({
+						factors: deps.mfaFactorResolver,
+						factorStore: deps.mfaFactorStore,
+						witness,
+						leases: deps.mfaTransactionStore,
+						storeTimeoutMs: settings.storeTimeoutMs,
+					});
 					const requirements = checkResolver(
 						deps.sessionRequirementResolver,
 						"mfaModule",
@@ -501,6 +513,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								mode,
 								mailSender: deps.mailSender,
 								witness,
+								factorSet,
 								transactionTtlSeconds: settings.transactionTtlSeconds,
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
 								requireEmailProof: settings.enrollment.requireEmailProof,
@@ -535,6 +548,13 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							}),
 							logger,
 							auditSink: deps.auditSink,
+							management: {
+								factors: deps.mfaFactorResolver,
+								factorStore: deps.mfaFactorStore,
+								factorSet,
+								sealing,
+								mode,
+							},
 						}),
 					};
 				},

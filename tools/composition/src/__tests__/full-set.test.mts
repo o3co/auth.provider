@@ -366,6 +366,7 @@ describe("the full set boots together", () => {
 			"session.link_callback": "session",
 			"webauthn.register": "webauthn-session-subject",
 			"mfa.manage": "mfa",
+			"mfa.view": "mfa",
 		};
 		expect([...actions].sort((a, b) => a.name.localeCompare(b.name))).toEqual(
 			Object.entries(BUNDLED_ACTIONS)

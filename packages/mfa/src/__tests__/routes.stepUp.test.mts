@@ -64,6 +64,7 @@ import {
 	mfaPost,
 	readTransaction,
 	recordingAuditSink,
+	recoverySet,
 	STEP_UP_REQUIRED,
 	seedFactor,
 	seedTotp,
@@ -579,6 +580,33 @@ describe("the step-up of a subject holding a counting factor", () => {
 		});
 	});
 
+	it("answers 403 mfa_no_qualifying_factor, opening nothing, to a subject whose recovery set has no code left beside a TOTP whose data does not open", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+		const { agent } = await signIn(app, userSessionStore);
+		await seedTotp(factorStore, ALICE.id, { sealedFor: "u-someone-else" });
+		await seedFactor(factorStore, "recovery_code", recoverySet(0).data);
+		const create = vi.spyOn(transactionStore, "create");
+
+		const res = await stepUp(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(403);
+		expect(res.body).toEqual(NO_QUALIFYING_FACTOR);
+		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("leaves a recovery set with no code left out of what the step-up offers", async () => {
+		const { app, factorStore, userSessionStore } = await composed();
+		const { agent } = await signIn(app, userSessionStore);
+		const { record } = await seedTotp(factorStore);
+		await seedFactor(factorStore, "recovery_code", recoverySet(0).data);
+
+		const res = await stepUp(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		const listed = (await readTransaction(agent, res.body.transaction as string)).body.factors;
+		expect(listed).toEqual([{ id: record.id, kind: "totp" }]);
+	});
+
 	it("answers 401 login_required, opening nothing, when the session store cannot record a step-up — a session with recent MFA included", async () => {
 		const { recordSecondFactor: _record, ...legacy } = createInMemoryUserSessionStore();
 		const { app, factorStore, transactionStore, userSessionStore } = await composed({
@@ -620,7 +648,7 @@ describe("the step-up's refusals", () => {
 		expect(create).not.toHaveBeenCalled();
 	});
 
-	it("answers 503 to a session whose login's User said it enrolled while no counting factor is on record — the event recorded — and to a factor store that cannot answer", async () => {
+	it("answers 401 login_required to a session whose login's User said it enrolled while no counting factor is on record — nothing recorded — and 503 to a factor store that cannot answer", async () => {
 		const { app, factorStore, transactionStore, userSessionStore, audit } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
 		const create = vi.spyOn(transactionStore, "create");
@@ -631,14 +659,9 @@ describe("the step-up's refusals", () => {
 
 		const inconsistent = await stepUp(agent);
 
-		expect(inconsistent.status).toBe(503);
-		expect(inconsistent.body.error).toBe("temporarily_unavailable");
-		expect(audit.of("mfa.enrollment_state_inconsistent")).toEqual([
-			expect.objectContaining({
-				subject: ALICE.id,
-				details: { purpose: "session", action: "mfa.manage", witness: "enrolled" },
-			}),
-		]);
+		expect(inconsistent.status).toBe(401);
+		expect(inconsistent.body).toEqual(LOGIN_REQUIRED);
+		expect(audit.of("mfa.enrollment_state_inconsistent")).toEqual([]);
 		spy.mockRestore();
 
 		vi.spyOn(factorStore, "list").mockRejectedValue(new Error("factor store unreachable"));

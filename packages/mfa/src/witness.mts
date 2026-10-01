@@ -26,7 +26,9 @@
  *   `User` does not say it is enrolled — at a login, or at a session's
  *   step-up, as the session recorded that `User` — so a mark that failed
  *   heals at the next login or step-up.
- * - A mark that fails never undoes what it follows: the caller warns once.
+ * - Clear-after-remove: a removal that leaves no record that may count
+ *   clears the witness once the removal is written (`management.mts`).
+ * - A write that fails never undoes what it follows: the caller warns once.
  * - Read only through core's `readMfaEnrollmentWitness`.
  */
 
@@ -38,9 +40,11 @@ import {
 } from "@o3co/auth-provider-core";
 import type { MfaCeremonySession } from "./ceremony.mjs";
 
-/** What marking the witness came to. */
+/** What writing the witness — marking or clearing it — came to. */
 export type MfaWitnessMark =
 	| { readonly outcome: "marked" }
+	/** The witness says what the records do: no mark was due, or a mark was undone by a clear once the records held none that may count. */
+	| { readonly outcome: "in_step" }
 	/** The directory has no `markMfaEnrolled`: said once at boot. */
 	| { readonly outcome: "unwritable" }
 	| { readonly outcome: "unwritten"; readonly cause: unknown };
@@ -51,6 +55,8 @@ export interface MfaEnrollmentWitness {
 	readonly writable: boolean;
 	/** Marks `subject` enrolled; never throws. */
 	mark(subject: string): Promise<MfaWitnessMark>;
+	/** Marks `subject` not enrolled; never throws. */
+	clear(subject: string): Promise<MfaWitnessMark>;
 }
 
 /** The witness over `repository`; one without `markMfaEnrolled`, or none, writes nothing. */
@@ -59,17 +65,19 @@ export function createMfaEnrollmentWitness(
 ): MfaEnrollmentWitness {
 	const writer =
 		repository !== undefined && supportsMfaEnrollmentWitness(repository) ? repository : undefined;
+	const write = async (subject: string, enrolled: boolean): Promise<MfaWitnessMark> => {
+		if (writer === undefined) return { outcome: "unwritable" };
+		try {
+			await writer.markMfaEnrolled(subject, enrolled);
+			return { outcome: "marked" };
+		} catch (cause) {
+			return { outcome: "unwritten", cause };
+		}
+	};
 	return {
 		writable: writer !== undefined,
-		async mark(subject) {
-			if (writer === undefined) return { outcome: "unwritable" };
-			try {
-				await writer.markMfaEnrolled(subject, true);
-				return { outcome: "marked" };
-			} catch (cause) {
-				return { outcome: "unwritten", cause };
-			}
-		},
+		mark: (subject) => write(subject, true),
+		clear: (subject) => write(subject, false),
 	};
 }
 
