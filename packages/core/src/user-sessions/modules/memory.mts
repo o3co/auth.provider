@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { consoleLogger } from "../../logging/consoleLogger.mjs";
+import type { Logger } from "../../logging/Logger.mjs";
 import { defineModule } from "../../modules/manifest/define-module.mjs";
 import { createInMemorySessionFamilyIndex } from "../memory/sessionFamilyIndex.mjs";
 import { createInMemorySessionFederationIndex } from "../memory/sessionFederationIndex.mjs";
@@ -38,6 +40,7 @@ export const memorySessionStoresModule = defineModule({
 		reason:
 			"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it",
 	},
+	optional: ["logger"] as const,
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
 		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
@@ -47,6 +50,7 @@ export const memorySessionStoresModule = defineModule({
 		// the other memory session stores so a single-node deployment gets
 		// subject-level revocation by installing the module it already installs.
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
-		subjectRevocation: () => createInMemorySubjectRevocation(),
+		subjectRevocation: (deps: { readonly logger?: Logger }) =>
+			createInMemorySubjectRevocation({ logger: deps.logger ?? consoleLogger }),
 	} as never,
 });

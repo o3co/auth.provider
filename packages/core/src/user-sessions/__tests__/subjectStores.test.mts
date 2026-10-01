@@ -12,6 +12,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import { createInMemorySubjectSessionIndex } from "#/user-sessions/memory/subjectSessionIndex.mjs";
 import {
+	runSessionsOnlyRevocationClockContract,
+	runSubjectRevocationClockContract,
+} from "./subjectRevocation.clock.contract.mjs";
+import {
 	runSessionsOnlyRevocationContract,
 	runSubjectRevocationContract,
 } from "./subjectRevocation.contract.mjs";
@@ -26,6 +30,8 @@ runSubjectRevocationContract(async () => createInMemorySubjectRevocation());
 // The bundled adapter claims the capability, so it owes its contract (the
 // federation-grants ADR, D13).
 runSessionsOnlyRevocationContract(async () => createInMemorySubjectRevocation());
+runSubjectRevocationClockContract(async () => createInMemorySubjectRevocation());
+runSessionsOnlyRevocationClockContract(async () => createInMemorySubjectRevocation());
 
 const FUTURE = new Date(Date.now() + 3_600_000);
 
