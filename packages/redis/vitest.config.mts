@@ -54,6 +54,7 @@ export default defineConfig({
 				// program but not collected still fails the run.
 				"__tests__/federation-grant-store.order.test.mts",
 				"__tests__/federation-grant-store.faults.integration.test.mts",
+				"__tests__/federation-grant-store.extension.integration.test.mts",
 				"__tests__/federation-grant-primitives.integration.test.mts",
 				"__tests__/internal/federation-grant-codec.test.mts",
 				// #626: the session contract's parity test. The contract and the file
