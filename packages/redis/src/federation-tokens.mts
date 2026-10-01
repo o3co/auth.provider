@@ -37,6 +37,7 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	type FederationTokens,
+	isStorableExpiry,
 	isStorableLifetime,
 	type Logger,
 	SEALING_KEY_BYTES,
@@ -135,7 +136,7 @@ interface Envelope {
 	 */
 	expiresAtMs: number | null;
 	/**
-	 * Every field is a required key, like `FederationTokens`'s, so a projection
+	 * Every field is a required key, `obtainedAtMs` included, so a projection
 	 * that forgets one fails to compile rather than dropping it (a dropped
 	 * `tokenType` fails open). JSON drops `undefined`, so an unset key is absent
 	 * on the wire, and `isEnvelope` reads it as optional.
@@ -144,6 +145,12 @@ interface Envelope {
 	scope: string | undefined;
 	/** The link-time scope ceiling; `undefined` on older records. */
 	grantedScope: string | undefined;
+	/**
+	 * Epoch-ms the access token's lifetime counts from, a whole millisecond
+	 * within the Date range; `undefined` (absent on the wire) when the record
+	 * has none.
+	 */
+	obtainedAtMs: number | undefined;
 }
 
 /**
@@ -169,13 +176,19 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 const isOptionalString = (v: unknown): v is string | undefined =>
 	v === undefined || typeof v === "string";
 
+/** An instant a `Date` holds as written: a whole millisecond within the Date range. */
+const isInstant = (v: unknown): v is number =>
+	typeof v === "number" && Number.isInteger(v) && isStorableExpiry(v);
+
 /**
  * Shape check on the inner envelope, after unwrapping or decrypting. Without
  * it a malformed envelope (an array, no `accessToken`, `expiresAtMs: "soon"`)
  * would reach `fromEnvelope`, which does not throw, and be served on every read
  * instead of taking `get`'s self-heal. `expiresAtMs` must be present (`null`
- * means "no finite expiry"). Hand-written, not zod, to keep the read path
- * dependency-free.
+ * means "no finite expiry"); `obtainedAtMs` may be absent. Unknown keys are
+ * ignored, so a release that adds an envelope field keeps `RECORD_VERSION`
+ * and an older replica still reads its records. Hand-written, not zod, to
+ * keep the read path dependency-free.
  */
 function isEnvelope(value: unknown): value is Envelope {
 	if (!isPlainObject(value)) return false;
@@ -193,10 +206,21 @@ function isEnvelope(value: unknown): value is Envelope {
 	) {
 		return false;
 	}
+	if (value.obtainedAtMs !== undefined && !isInstant(value.obtainedAtMs)) return false;
 	// An envelope carrying the retired `rawParams` field is read; the field is
 	// ignored and not written back.
 	return true;
 }
+
+/**
+ * `obtainedAt` as the envelope holds it. An Invalid Date is written as
+ * absent: read back it would make the record unreadable and lose its tokens,
+ * where a record without the field loses only the refresh damping.
+ */
+const obtainedAtMsOf = (obtainedAt: Date | undefined): number | undefined => {
+	const ms = obtainedAt?.getTime();
+	return isInstant(ms) ? ms : undefined;
+};
 
 export function createRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
@@ -286,6 +310,7 @@ export function createRedisFederationTokenStore(
 		tokenType: t.tokenType,
 		scope: t.scope,
 		grantedScope: t.grantedScope,
+		obtainedAtMs: obtainedAtMsOf(t.obtainedAt),
 	});
 
 	const fromEnvelope = (e: Envelope): FederationTokens => ({
@@ -296,6 +321,8 @@ export function createRedisFederationTokenStore(
 		tokenType: e.tokenType,
 		scope: e.scope,
 		grantedScope: e.grantedScope,
+		// Absent stays absent, not `undefined`, as core's memory store answers.
+		...(e.obtainedAtMs === undefined ? {} : { obtainedAt: new Date(e.obtainedAtMs) }),
 	});
 
 	/**
