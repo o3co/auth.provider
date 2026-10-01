@@ -345,9 +345,10 @@ const read = (target: object, key: string): unknown => guardedRead(target, key)?
  * An Error from this realm or another (`node:vm`, a worker's structured
  * clone). `Error.isError` where the runtime has it (Node 24+); on Node 22 the
  * fallback asks the value for its prototype and its tag, which a Proxy may
- * answer by throwing — any throw reads as "not an Error".
+ * answer by throwing — any throw reads as "not an Error". The one Error
+ * test core asks of a value it did not raise itself.
  */
-const isError = (value: unknown): value is object => {
+export const isError = (value: unknown): value is object => {
 	try {
 		const brand = (Error as { isError?: (candidate: unknown) => boolean }).isError;
 		if (typeof brand === "function") return brand(value);
