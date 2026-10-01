@@ -2461,6 +2461,26 @@ describe("refresh carries how the user authenticated", () => {
 		expect(at.auth_time as number).toBeLessThanOrEqual(at.iat as number);
 	});
 
+	it("caps a carried auth_time later than the presented token's own iat at that iat", async () => {
+		const presentedIat = Math.floor(Date.now() / 1000) - 3600;
+		const presented = await new SignJWT({
+			sub: "u1",
+			scope: "read write",
+			family_id: "fam-1",
+			auth_time: presentedIat + 600,
+		})
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer("localhost")
+			.setAudience(DEFAULT_CLIENT_ID)
+			.setIssuedAt(presentedIat)
+			.setExpirationTime("24h")
+			.setJti("old-jti")
+			.sign(new TextEncoder().encode(SECRET));
+		const { at, rt } = await refresh(presented);
+		expect(at.auth_time).toBe(presentedIat);
+		expect(rt.auth_time).toBe(presentedIat);
+	});
+
 	it("refreshes a refresh token that carries no auth_time, and takes none from its live session", async () => {
 		const session: UserSession = {
 			sid: "sid-1",

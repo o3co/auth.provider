@@ -343,14 +343,17 @@ describe("the authorization_code grant — the auth_time it stamps, read against
 	});
 
 	it("an authTime ahead of the clock within the skew is stamped as the minting clock: never later than iat", async () => {
+		const before = Math.floor(Date.now() / 1000);
 		for (const claims of await minted(new Date(Date.now() + 60_000))) {
-			expect(claims.auth_time).toEqual(expect.any(Number));
+			expect(claims.auth_time as number).toBeGreaterThanOrEqual(before);
 			expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
 		}
 	});
 
-	it("an authTime further ahead than the skew allows is 400 invalid_grant session_invalid, nothing signed", async () => {
+	it("an authTime further ahead than the skew allows is 400 invalid_grant session_invalid, nothing signed, warned with how far ahead", async () => {
+		const logger = createMockLogger();
 		const { handler, signed } = makeGrant({
+			logger,
 			userSessionStore: storeAnswering(record({ authTime: new Date(Date.now() + 10 * 60_000) })),
 		});
 		expect(await refused(handler)).toMatchObject({
@@ -359,6 +362,14 @@ describe("the authorization_code grant — the auth_time it stamps, read against
 			errorDescription: "session_invalid",
 		});
 		expect(signed).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ sid: SID, clientId: CLIENT_ID, aheadMs: expect.any(Number) },
+			"auth_time_ahead_of_clock",
+		);
+		const [fields] = logger.warn.mock.calls.find(
+			([, line]) => line === "auth_time_ahead_of_clock",
+		) as [{ aheadMs: number }];
+		expect(fields.aheadMs).toBeGreaterThan(5 * 60_000);
 	});
 });
 

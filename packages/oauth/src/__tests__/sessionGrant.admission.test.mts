@@ -285,25 +285,37 @@ describe("the session grant — the auth_time it stamps", () => {
 	});
 
 	it("an authTime ahead of the clock within the skew is stamped as the minting clock: never later than iat", async () => {
+		const before = Math.floor(Date.now() / 1000);
 		const { result } = await grant({
 			userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 60_000) })),
 		}).handle(ctx(LIVE_COOKIE));
 		if (!("tokens" in result)) throw new Error("expected tokens");
 		const claims = decodeJwt(result.tokens.access_token);
-		expect(claims.auth_time).toEqual(expect.any(Number));
+		expect(claims.auth_time as number).toBeGreaterThanOrEqual(before);
 		expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
 	});
 
-	it("an authTime further ahead than the skew allows is 400 invalid_grant session_invalid, nothing minted", async () => {
-		const { result } = await grant({
-			userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 10 * 60_000) })),
-		}).handle(ctx(LIVE_COOKIE));
-		expect(result).toMatchObject({
-			status: 400,
-			error: "invalid_grant",
-			errorDescription: "session_invalid",
-		});
-		expect(result).not.toHaveProperty("tokens");
+	it("an authTime further ahead than the skew allows is 400 invalid_grant session_invalid, nothing signed, warned with how far ahead", async () => {
+		const logger = createMockLogger();
+		const signed = vi.spyOn(keyStore, "sign");
+		try {
+			const { result } = await grant({
+				logger,
+				userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 10 * 60_000) })),
+			}).handle(ctx(LIVE_COOKIE));
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "session_invalid",
+			});
+			expect(signed).not.toHaveBeenCalled();
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ sid: SID, clientId: AUTH_CLIENT.clientId, aheadMs: expect.any(Number) },
+				"auth_time_ahead_of_clock",
+			);
+		} finally {
+			signed.mockRestore();
+		}
 	});
 
 	it("stamps no auth_time without a userSessionStore, which records no authentication", async () => {
