@@ -58,8 +58,8 @@
  *   reported standing. It then clears D25's flag where the proof was given,
  *   issues the recovery codes — replacing the sets that stood, unless bound
  *   by `password` (`recovery/issue.mts`) — and marks the witness. So at most one first binding stands, and a lost race
- *   spends the transaction, never a factor. The caller resumes a login; a
- *   session is left as it was.
+ *   spends the transaction, never a factor. The caller resumes a login, or
+ *   escalates the session the binding was made in by what it adds.
  * - A codes write or a witness mark that fails never undoes the factor:
  *   the outcome says so, and the binding stands.
  */
