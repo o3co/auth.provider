@@ -120,8 +120,9 @@ export interface AuditFanOutSources {
  * each called at once, in that order, without waiting for the one before.
  *
  * - Every sink is handed one copy of the event, deeply frozen (plain objects,
- *   arrays and dates; anything else is handed as it is), so no sink can change
- *   what another reads; the emitter's own event is left as it was.
+ *   arrays, and dates, whose setters throw; any other object is handed as it
+ *   is, shared), so no sink can change the plain data another reads; the
+ *   emitter's own event is left as it was.
  * - Each call is isolated: a rejection, a synchronous throw or an answer that
  *   is not a promise is that sink's failure alone, logged at error as
  *   `audit_sink_failed` with `sink`, the sink's position in that order (0 is
@@ -193,10 +194,19 @@ function reportFailure(
 	}
 }
 
+/** `Date`'s mutators, which a frozen copy shadows: freezing leaves a date's time writable. */
+const DATE_SETTERS = Object.getOwnPropertyNames(Date.prototype).filter((name) =>
+	name.startsWith("set"),
+);
+
+function refuseDateChange(): never {
+	throw new TypeError("an audit event's date is read-only");
+}
+
 /**
  * A copy of `value` in which every plain object, array and `Date` is copied
- * and frozen; any other value is kept as it is. A value reached twice is
- * copied once, so a cycle ends.
+ * and frozen — a date's setters refused — and any other value is kept as it
+ * is. A value reached twice is copied once, so a cycle ends.
  */
 function frozenCopy(value: unknown, copies: Map<object, unknown>): unknown {
 	if (value === null || typeof value !== "object") return value;
@@ -204,6 +214,9 @@ function frozenCopy(value: unknown, copies: Map<object, unknown>): unknown {
 	if (known !== undefined) return known;
 	if (value instanceof Date) {
 		const date = new Date(value.getTime());
+		for (const setter of DATE_SETTERS) {
+			Object.defineProperty(date, setter, { value: refuseDateChange });
+		}
 		copies.set(value, date);
 		return Object.freeze(date);
 	}

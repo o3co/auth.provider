@@ -922,19 +922,16 @@ function checkContributionShapes(
 
 /**
  * Step 4: Requires/optional closure check.
- * For each module, every key in `requires` must appear in either
- * `bootstrapComponents`, the union of all modules' `provides`, or
- * `overrideComponents`, or be in the synthetic-key set (auto-satisfied).
+ * For each module, every key in `requires` must be planned (`plannedKeys`:
+ * `bootstrapComponents`, the union of all modules' `provides`,
+ * `overrideComponents`, and `auditSink` when `auditHooks` are contributed),
+ * or be in the synthetic-key set (auto-satisfied).
  * @internal
  */
 function checkRequiresClosure(
 	modules: readonly NormalisedModule[],
-	bootstrap: BootstrapMap,
-	override: Partial<ComponentMap> | undefined,
+	plannedKeys: ReadonlySet<string>,
 ): void {
-	const bootstrapKeys = new Set<string>(Object.keys(bootstrap));
-	const overrideKeys = new Set<string>(Object.keys(override ?? {}));
-
 	// Build a map: ComponentKey → providing NormalisedModule
 	const providerIndex = new Map<ComponentKey, NormalisedModule>();
 	for (const m of modules) {
@@ -944,10 +941,7 @@ function checkRequiresClosure(
 	}
 
 	const isSatisfied = (key: ComponentKey): boolean =>
-		bootstrapKeys.has(key) ||
-		overrideKeys.has(key) ||
-		providerIndex.has(key) ||
-		SYNTHETIC_COMPONENT_KEYS.has(key);
+		plannedKeys.has(key) || SYNTHETIC_COMPONENT_KEYS.has(key);
 
 	// Find the first module in input order whose requires contains an unsatisfied key
 	for (const m of modules) {
@@ -2971,8 +2965,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	{
 		id: "requires-closure",
 		spec: "A2-β §5.1 step 4",
-		run: (ctx) =>
-			checkRequiresClosure(ctx.modules, ctx.bootstrapComponents, ctx.overrideComponents),
+		run: (ctx) => checkRequiresClosure(ctx.modules, ctx.plannedKeys),
 	},
 	{
 		id: "contribution-kind-coverage",
