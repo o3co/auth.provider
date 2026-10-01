@@ -243,9 +243,9 @@ Module-level messages that arrive wrapped in a factory failure:
   <file>: …`, naming each bad entry. Two of them are about the query:
   `allowedRedirectUris entry "https://client.example/cb?iss=x": must not
   carry "iss" in its query (compared ignoring case, "_" and "-"): …` — the
-  query names `code`, `state`, `iss`, `error` or `error_description`, which
-  this provider appends when it redirects there, in any case and with `_` or
-  `-` anywhere in it (`_state`, `errorDescription`); and
+  query names `code`, `state`, `iss`, `error` or `error_description`, the
+  names an authorization response carries, in any case and with `_` or `-`
+  anywhere in it (`_state`, `errorDescription`); and
   `allowedRedirectUris entry "https://client.example/cb?filter[x]=1": query
   parameter names may use only letters, digits, "_" and "-", each parameter
   must have a name, and the query must not contain ";": …` — a name outside
@@ -256,7 +256,8 @@ Module-level messages that arrive wrapped in a factory failure:
   (`federationGrantRedirectUris: reserved-parameter` or
   `… query-name-invalid`), and also refuses `grant_id`, compared the same
   way (`GRANT_ID`, `grantId`, `_grant_id`): `federationGrantRedirectUris:
-  <uri> already carries "grant_id", …`. Rename or remove the parameter in
+  <uri> already carries "grant_id" (compared ignoring case, "_" and "-"),
+  …`. Rename or remove the parameter in
   the registration, and carry the client's own context in `state` or in the
   path. The comparison covers names as written and the common
   normalizations (case, `_`, `-`), not a mapping a client configures, such
@@ -2243,24 +2244,36 @@ before you flip — and a relying party holding the secret can also mint.
 7. **Registered redirect URIs: query names.** Check every
    `allowedRedirectUris`, `postLogoutRedirectUris` and
    `federationGrantRedirectUris` entry, and every Client ID Metadata Document
-   you depend on. A query name outside `[A-Za-z0-9_-]` (`?filter[x]=1`,
-   `?a.b=1`), a parameter with no name, a `;` anywhere in the query, or one
-   of `code`, `state`, `iss`, `error` and `error_description` (compared
-   ignoring case, `_` and `-`) now fails boot for a `yaml` / `static` client,
-   with the messages in [§1](#boot-refusals-you-will-meet), and makes a CIMD
-   client unresolvable (`400 invalid_client` at `/authorize`, with the
-   `cimd_document_rejected` warning). A federation-grant lodging whose
-   registered URI such a query fails is answered `redirect_uri_invalid`,
-   `state` and `error` included, where it used to be
-   `redirect_uri_reserved_parameter`; both are `400 invalid_request`. A
-   `federationGrantRedirectUris` entry that carries `grant_id` under another
-   case or separators (`GRANT_ID`, `grantId`, `_grant_id`, `grant-id`) now
-   fails boot too, and lodging answers it `redirect_uri_reserved_parameter`,
-   as it answers `grant_id` itself. Rename or remove such parameters, and
-   carry the client's context in `state` or in the path. The rule covers
-   names as written and the common normalizations, not a mapping a client
-   configures (an alias, a stripped prefix): make sure each client reads the
-   OAuth fields by their canonical names.
+   you depend on. Two cases:
+
+   - **Newly refused registrations.** A query name outside `[A-Za-z0-9_-]`
+     (`?filter[x]=1`, `?a.b=1`), a parameter with no name, a `;` anywhere in
+     the query, or one of `code`, `state`, `iss`, `error` and
+     `error_description` (compared ignoring case, `_` and `-`), on any of the
+     three lists; and, on `federationGrantRedirectUris`, `grant_id` under
+     another case or separators (`GRANT_ID`, `grantId`, `_grant_id`,
+     `grant-id`). Such an entry used to be accepted. Now a `yaml` / `static`
+     client fails boot, with the messages in
+     [§1](#boot-refusals-you-will-meet); a CIMD client cannot be resolved
+     (`400 invalid_client` at `/authorize`, with the
+     `cimd_document_rejected` warning); and a federation-grant return URI
+     held by a custom `ClientRepository`, which bypasses that check, is
+     refused when a grant is lodged: `400 invalid_request` with
+     `redirect_uri_invalid` (`redirect_uri_reserved_parameter` for a
+     `grant_id` spelling).
+   - **Refusals whose reason changed.** A `federationGrantRedirectUris`
+     entry carrying `state` or `error` was already refused, at boot and at
+     lodging. Boot still refuses it. Lodging now answers
+     `redirect_uri_invalid` where it answered
+     `redirect_uri_reserved_parameter`; both are `400 invalid_request`, so
+     only an alert or client keyed on the `error_description` text sees the
+     difference.
+
+   Rename or remove such parameters, and carry the client's context in
+   `state` or in the path. The rule covers names as written and the common
+   normalizations, not a mapping a client configures (an alias, a stripped
+   prefix): make sure each client reads the OAuth fields by their canonical
+   names.
 
 ### Rolling out
 
