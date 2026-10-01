@@ -63,6 +63,13 @@ export interface FederationGrantHashFields {
 	readonly failureUpstreamCode?: string;
 	readonly revokedBy?: string;
 	readonly revokedAt?: string;
+	/**
+	 * The credential's extension, sealed beside the credential and bound to its
+	 * exact bytes. Written and removed only in the step that writes the
+	 * credential; a release that does not know it leaves it, and it then no
+	 * longer opens.
+	 */
+	readonly ext?: string;
 }
 
 export interface CreatePendingFederationGrantInput {
@@ -102,6 +109,8 @@ export interface ActivateFederationGrantInput {
 	readonly upstreamSubject: string;
 	/** The sealed credential. */
 	readonly credential: string;
+	/** The credential's extension, sealed with it. Absent: the record keeps none. */
+	readonly extension?: string;
 }
 
 export interface ReplaceFederationGrantCredentialsInput {
@@ -110,6 +119,8 @@ export interface ReplaceFederationGrantCredentialsInput {
 	readonly credential: string;
 	/** The ineligibility marker as JSON `[reason, atMs, judgedAgainst]`, or `null` to remove it. */
 	readonly ineligible: string | null;
+	/** The new credential's extension, sealed with it. Absent: the record keeps none. */
+	readonly extension?: string;
 }
 
 export interface RequireFederationGrantReauthorizationInput {
@@ -216,10 +227,10 @@ export interface FederationGrantStoreClient {
 		input: ReplaceFederationGrantCredentialsInput,
 	): Promise<FederationGrantHashFields | null>;
 	/**
-	 * Takes the credential and asks for the user, at `expectedVersion`. The
-	 * only transition with no expiry guard: an upstream that says the
-	 * credential is dead is believed whenever it says it. The marker stays,
-	 * the horizon does not move.
+	 * Takes the credential and its extension, and asks for the user, at
+	 * `expectedVersion`. The only transition with no expiry guard: an upstream
+	 * that says the credential is dead is believed whenever it says it. The
+	 * marker stays, the horizon does not move.
 	 */
 	requireReauthorization(
 		grantKey: string,
@@ -227,11 +238,11 @@ export interface FederationGrantStoreClient {
 		input: RequireFederationGrantReauthorizationInput,
 	): Promise<FederationGrantHashFields | null>;
 	/**
-	 * Ends the grant: the credential and the intent go, what it was authorized
-	 * for stays, and the first revocation stays as it was recorded. No version
-	 * guard — a revocation does not lose to a refresh in flight. A revocation
-	 * moves no horizon, except for a grant that was never authorized and has
-	 * no expiry to be retained from.
+	 * Ends the grant: the credential, its extension and the intent go, what it
+	 * was authorized for stays, and the first revocation stays as it was
+	 * recorded. No version guard — a revocation does not lose to a refresh in
+	 * flight. A revocation moves no horizon, except for a grant that was never
+	 * authorized and has no expiry to be retained from.
 	 */
 	revoke(
 		grantKey: string,

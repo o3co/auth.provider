@@ -224,7 +224,8 @@ return redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. string.format('%.0
 /**
  * Takes a grant from its current intent to `active`. `KEYS[1]` = record, `KEYS[2]` =
  * credential; `ARGV` = the caller's clock, the handle, the authorization text, its expiry, the
- * identity revision, upstream issuer and subject, the sealed credential.
+ * identity revision, upstream issuer and subject, the sealed credential, whether an extension
+ * was given, the extension. The extension is written or removed with the credential.
  *
  * The current intent is compared here, not the version (naming and retiring an intent bump
  * none), so a renewal already superseded or retired by a subject-wide revocation can never be
@@ -267,6 +268,11 @@ redis.call('HSET', KEYS[1],
   'upstreamIssuer', ARGV[6],
   'upstreamSubject', ARGV[7])
 redis.call('SET', KEYS[2], ARGV[8])
+if ARGV[9] == '1' then
+  redis.call('HSET', KEYS[1], 'ext', ARGV[10])
+else
+  redis.call('HDEL', KEYS[1], 'ext')
+end
 local fields = redis.call('HGETALL', KEYS[1])
 local retention = fg_num(g['retentionMs']) or 0
 redis.call('PEXPIREAT', KEYS[1], math.ceil(expiresAt + retention))
@@ -277,7 +283,8 @@ return {1, fields}
 /**
  * Replaces an `active` grant's credential. `KEYS[1]` = record, `KEYS[2]` = credential; `ARGV` =
  * the caller's clock, the expected version, the sealed credential, whether a marker was given,
- * the marker. The marker is replaced whole (none given: removed) and the failure stamp cleared.
+ * the marker, whether an extension was given, the extension. The marker and the extension are
+ * replaced whole (none given: removed) and the failure stamp cleared.
  * No horizon moves: the credential keeps its expiry, so a rotation does not extend the consent.
  * A credential Redis has already reclaimed is not replaced; there is nothing to rotate.
  */
@@ -305,6 +312,11 @@ if ARGV[4] == '1' then
   redis.call('HSET', KEYS[1], 'ineligible', ARGV[5])
 end
 redis.call('SET', KEYS[2], ARGV[3])
+if ARGV[6] == '1' then
+  redis.call('HSET', KEYS[1], 'ext', ARGV[7])
+else
+  redis.call('HDEL', KEYS[1], 'ext')
+end
 local fields = redis.call('HGETALL', KEYS[1])
 redis.call('PEXPIREAT', KEYS[2], math.ceil(expiresAt))
 return {1, fields}
@@ -325,7 +337,7 @@ if g == nil or g['status'] ~= 'active' then return {0} end
 local version = fg_num(g['version'])
 if version == nil or version ~= expected then return {0} end
 redis.call('HDEL', KEYS[1],
-  'failureAt', 'failureKind', 'failureCount',
+  'ext', 'failureAt', 'failureKind', 'failureCount',
   'failureRetryAfterSeconds', 'failureUpstreamCode')
 redis.call('HSET', KEYS[1],
   'status', 'reauthorization_required',
@@ -392,7 +404,7 @@ if horizon ~= nil and not (at < horizon) then return {0} end
 local version = fg_num(g['version'])
 local wasPending = g['status'] == 'pending'
 redis.call('HDEL', KEYS[1],
-  'intentHandle', 'intentExpiresAt',
+  'intentHandle', 'intentExpiresAt', 'ext',
   'failureAt', 'failureKind', 'failureCount',
   'failureRetryAfterSeconds', 'failureUpstreamCode')
 redis.call('HSET', KEYS[1],

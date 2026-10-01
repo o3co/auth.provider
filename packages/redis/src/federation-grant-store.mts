@@ -55,10 +55,17 @@ import {
 	validateEncryptionMode,
 } from "./internal/encryption-mode.mjs";
 import {
+	CREDENTIAL_EXTENSION_MAX_TEXT,
 	canonicalAuthorization,
 	credentialAad,
+	credentialDigest,
+	credentialExtensionAad,
+	decodeCredentialExtension,
 	decodeCredentials,
+	encodeCredentialExtension,
 	encodeCredentials,
+	type FederationGrantCredentialBinding,
+	type FederationGrantCredentialExtension,
 	parseCanonicalAuthorization,
 } from "./internal/federation-grant-codec.mjs";
 import { createFederationGrantLock } from "./internal/federation-grant-lock.mjs";
@@ -108,6 +115,12 @@ export interface RedisFederationGrantStoreOptions {
 /** A plaintext credential, under `allow-plaintext`. Its own spelling, so that neither reader takes the other's. */
 const PLAINTEXT_PREFIX = "p2.";
 
+/**
+ * The longest stored extension opened: room for the longest text read, sealed.
+ * Anything longer reads as no extension, and is neither decoded nor parsed.
+ */
+const EXTENSION_MAX_STORED = 2 * CREDENTIAL_EXTENSION_MAX_TEXT;
+
 const RANGE = (what: string): RangeError => new RangeError(`federation grant store: ${what}`);
 
 /** Every instant a caller passes is refused rather than compared: every comparison with NaN is false. */
@@ -122,15 +135,20 @@ const isDate = (value: unknown): value is Date =>
 
 /**
  * Whether the credentials are ones this store can keep: the access token's
- * date is a date, and its issued lifetime a finite number. Sealed, a lifetime
+ * dates are dates, and its issued lifetime a finite number. Sealed, a lifetime
  * of NaN or infinity reads back as an unreadable credential, and every refresh
  * after it is refused; refused at the write instead, as every adapter refuses
  * it.
  */
-const storableCredentials = (credentials: FederationGrantCredentials): boolean =>
-	credentials.accessToken === undefined ||
-	(isDate(credentials.accessToken.obtainedAt) &&
-		Number.isFinite(credentials.accessToken.issuedLifetime));
+const storableCredentials = (credentials: FederationGrantCredentials): boolean => {
+	const token = credentials.accessToken;
+	return (
+		token === undefined ||
+		(isDate(token.obtainedAt) &&
+			Number.isFinite(token.issuedLifetime) &&
+			(token.effectiveExpiresAt === undefined || isDate(token.effectiveExpiresAt)))
+	);
+};
 
 /**
  * A key segment that cannot be confused with another value's, and cannot
@@ -228,6 +246,8 @@ interface Decoded {
 	readonly intent?: { readonly handle: string; readonly expiresAtMs: number };
 	/** Whether the fields a script guards on still agree with the authenticated text. */
 	readonly guardsAgree: boolean;
+	/** The credential's extension as stored, opened only beside the credential it was written with. */
+	readonly extension?: string;
 }
 
 /**
@@ -352,6 +372,7 @@ function decode(
 			fields.upstreamSubject === authorization.upstream.subject &&
 			numberFrom(fields.expiresAtMs) === authorization.expiresAt.getTime(),
 		...(intent ? { intent } : {}),
+		...(fields.ext !== undefined ? { extension: fields.ext } : {}),
 	};
 }
 
@@ -424,20 +445,32 @@ export function createRedisFederationGrantStore(
 
 	const lock = createFederationGrantLock({ client, lockKey });
 
-	const aadFor = (decoded: Decoded, authorizationText: string, grantId: string): Buffer =>
-		credentialAad({
-			// The key this credential was READ from, never one rebuilt from what
-			// the record says its ID is: a HASH copied together with its
-			// ciphertext into another grant's keys would otherwise authenticate
-			// under the name it carries.
-			credentialKey: credKey(grantId),
-			id: decoded.base.id,
-			subject: decoded.base.subject,
-			clientId: decoded.base.clientId,
-			connection: decoded.base.connection,
-			authorization: authorizationText,
-		});
+	const bindingFor = (
+		decoded: Decoded,
+		authorizationText: string,
+		grantId: string,
+	): FederationGrantCredentialBinding => ({
+		// The key this credential was READ from, never one rebuilt from what
+		// the record says its ID is: a HASH copied together with its
+		// ciphertext into another grant's keys would otherwise authenticate
+		// under the name it carries.
+		credentialKey: credKey(grantId),
+		id: decoded.base.id,
+		subject: decoded.base.subject,
+		clientId: decoded.base.clientId,
+		connection: decoded.base.connection,
+		authorization: authorizationText,
+	});
 
+	const plainText = (text: string): string =>
+		PLAINTEXT_PREFIX + Buffer.from(text, "utf8").toString("base64url");
+
+	/**
+	 * The credential and its extension, from one preparation: the extension
+	 * is bound to the exact credential envelope beside it — sealed under that
+	 * envelope's digest, or in plaintext carrying it — and is absent when the
+	 * credentials have nothing for it to carry.
+	 */
 	const seal = (
 		credentials: FederationGrantCredentials,
 		binding: {
@@ -447,16 +480,66 @@ export function createRedisFederationGrantStore(
 			connection: string;
 			authorization: string;
 		},
-	): string => {
+	): { readonly credential: string; readonly extension?: string } => {
 		const payload = encodeCredentials(credentials);
+		const end = credentials.accessToken?.effectiveExpiresAt;
+		const extension: FederationGrantCredentialExtension =
+			end === undefined ? {} : { effectiveExpiresAt: end };
 		if (options.encryption.mode === "allow-plaintext") {
-			return PLAINTEXT_PREFIX + Buffer.from(payload, "utf8").toString("base64url");
+			const credential = plainText(payload);
+			const text = encodeCredentialExtension(extension, credentialDigest(credential));
+			return { credential, ...(text === undefined ? {} : { extension: plainText(text) }) };
 		}
-		return sealCredential(
-			payload,
-			ring,
-			credentialAad({ credentialKey: credKey(binding.id), ...binding }),
-		);
+		const full: FederationGrantCredentialBinding = {
+			credentialKey: credKey(binding.id),
+			...binding,
+		};
+		const credential = sealCredential(payload, ring, credentialAad(full));
+		const text = encodeCredentialExtension(extension);
+		return {
+			credential,
+			...(text === undefined
+				? {}
+				: { extension: sealCredential(text, ring, credentialExtensionAad(full, credential)) }),
+		};
+	};
+
+	/**
+	 * What the extension stored beside `credential` says, or nothing: one that
+	 * is too long, does not open beside that exact credential, or does not
+	 * parse reads as absent, and never changes what the credential itself is.
+	 */
+	const openExtension = (
+		decoded: Decoded,
+		credential: string,
+		binding: FederationGrantCredentialBinding,
+	): FederationGrantCredentialExtension => {
+		const stored = decoded.extension;
+		if (stored === undefined || stored.length > EXTENSION_MAX_STORED) return {};
+		let text: string;
+		if (options.encryption.mode === "allow-plaintext") {
+			if (!stored.startsWith(PLAINTEXT_PREFIX)) return {};
+			text = Buffer.from(stored.slice(PLAINTEXT_PREFIX.length), "base64url").toString("utf8");
+		} else {
+			const opened = openSealedCredential(
+				stored,
+				ring,
+				credentialExtensionAad(binding, credential),
+			);
+			if (opened.state !== "ok") return {};
+			text = opened.value;
+		}
+		const read = decodeCredentialExtension(text);
+		if (read === undefined) return {};
+		if (
+			options.encryption.mode === "allow-plaintext" &&
+			(read.bind === undefined || !constantTimeStringEqual(read.bind, credentialDigest(credential)))
+		) {
+			return {};
+		}
+		return read.effectiveExpiresAt === undefined
+			? {}
+			: { effectiveExpiresAt: read.effectiveExpiresAt };
 	};
 
 	/** What `open` and `inspect` say about the credential they read beside the record. */
@@ -481,7 +564,7 @@ export function createRedisFederationGrantStore(
 		// authoritative, so the credential would still authenticate — and a
 		// record in that state is not one to hand a credential out of.
 		if (!decoded.guardsAgree) return { state: "unreadable" };
-		const text = decoded.authorizationText as string;
+		const binding = bindingFor(decoded, decoded.authorizationText as string, grantId);
 		let payload: string;
 		if (options.encryption.mode === "allow-plaintext") {
 			if (!credential.startsWith(PLAINTEXT_PREFIX)) return { state: "unreadable" };
@@ -489,14 +572,26 @@ export function createRedisFederationGrantStore(
 				"utf8",
 			);
 		} else {
-			const opened = openSealedCredential(credential, ring, aadFor(decoded, text, grantId));
+			const opened = openSealedCredential(credential, ring, credentialAad(binding));
 			if (opened.state !== "ok") return { state: opened.state };
 			payload = opened.value;
 		}
 		const credentials = decodeCredentials(payload);
-		return credentials === undefined
-			? { state: "unreadable" }
-			: { state: "ok", value: credentials };
+		if (credentials === undefined) return { state: "unreadable" };
+		const token = credentials.accessToken;
+		const end =
+			token === undefined
+				? undefined
+				: openExtension(decoded, credential, binding).effectiveExpiresAt;
+		return token === undefined || end === undefined
+			? { state: "ok", value: credentials }
+			: {
+					state: "ok",
+					value: {
+						refreshToken: credentials.refreshToken,
+						accessToken: { ...token, effectiveExpiresAt: end },
+					},
+				};
 	};
 
 	const visible = (decoded: Decoded | undefined, nowMs: number): Decoded | undefined =>
@@ -716,7 +811,7 @@ export function createRedisFederationGrantStore(
 			// text the credential was sealed under.
 			if (!current.guardsAgree) return { ok: false };
 			const text = canonicalAuthorization(authorization);
-			const credential = seal(input.credentials, {
+			const { credential, extension } = seal(input.credentials, {
 				id: current.base.id,
 				subject: current.base.subject,
 				clientId: current.base.clientId,
@@ -739,6 +834,7 @@ export function createRedisFederationGrantStore(
 					upstreamIssuer: authorization.upstream.issuer,
 					upstreamSubject: authorization.upstream.subject,
 					credential,
+					...(extension === undefined ? {} : { extension }),
 				}),
 				input.grantId,
 			);
@@ -770,7 +866,7 @@ export function createRedisFederationGrantStore(
 			if (openCredential(current, snapshot.credential, nowMs, input.grantId).state !== "ok") {
 				return { ok: false };
 			}
-			const credential = seal(input.credentials, {
+			const { credential, extension } = seal(input.credentials, {
 				id: current.base.id,
 				subject: current.base.subject,
 				clientId: current.base.clientId,
@@ -783,6 +879,7 @@ export function createRedisFederationGrantStore(
 					expectedVersion: input.expectedVersion,
 					credential,
 					ineligible: input.ineligible === null ? null : encodeMarker(input.ineligible),
+					...(extension === undefined ? {} : { extension }),
 				}),
 				input.grantId,
 			);

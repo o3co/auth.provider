@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { createHash } from "node:crypto";
 import type {
 	FederationGrantAuthorization,
 	FederationGrantCredentials,
@@ -240,4 +241,113 @@ export function decodeCredentials(text: string): FederationGrantCredentials | un
 		return undefined;
 	}
 	return { refreshToken, accessToken: { value, tokenType, obtainedAt, issuedLifetime, scopes } };
+}
+
+// --- the credential's extension ---------------------------------------------
+
+/**
+ * What the credential's extension carries: additive facts about the
+ * credential that the credential tuple cannot hold without breaking a release
+ * that reads it. Every key is safe to lose: the extension is dropped by a
+ * release that does not know it, by a rewrite of the credential, and on any
+ * failure to open, and then reads as absent. So no key may be the only place
+ * a limit on what the grant allows is kept.
+ */
+export interface FederationGrantCredentialExtension {
+	/** When the access token ends; read by core as no later than `obtainedAt + issuedLifetime`. */
+	readonly effectiveExpiresAt?: Date;
+}
+
+/** The extension as read: its keys, and the credential digest a plaintext one is bound by. */
+export interface DecodedFederationGrantCredentialExtension
+	extends FederationGrantCredentialExtension {
+	readonly bind?: string;
+}
+
+/** The longest extension text read. Anything longer is not parsed, and reads as no extension. */
+export const CREDENTIAL_EXTENSION_MAX_TEXT = 1024;
+
+/** The extremes of the Date range, in milliseconds. */
+const DATE_RANGE_MS = 8_640_000_000_000_000;
+
+/** The base64url SHA-256 of a stored credential, byte for byte as the key holds it. */
+export function credentialDigest(credential: string): string {
+	return createHash("sha256").update(credential, "utf8").digest("base64url");
+}
+
+/**
+ * The authenticated data the extension is sealed under: its own label, the
+ * credential's whole binding, and the digest of the exact credential envelope
+ * written with it. An extension therefore opens beside that envelope only:
+ * not beside another grant's, nor an earlier or later credential of its own
+ * grant, nor in place of the credential.
+ */
+export function credentialExtensionAad(
+	binding: FederationGrantCredentialBinding,
+	credential: string,
+): Buffer {
+	return Buffer.from(
+		JSON.stringify([
+			"o3co.auth-provider.federation-grant-ext",
+			1,
+			binding.credentialKey,
+			binding.id,
+			binding.subject,
+			binding.clientId,
+			binding.connection,
+			binding.authorization,
+			credentialDigest(credential),
+		]),
+		"utf8",
+	);
+}
+
+/**
+ * The extension's text: a JSON object of the keys there are, `bind` first
+ * when given, each instant a decimal millisecond string. `undefined` when it
+ * has no key to carry, which is written as no extension.
+ */
+export function encodeCredentialExtension(
+	extension: FederationGrantCredentialExtension,
+	bind?: string,
+): string | undefined {
+	const end = extension.effectiveExpiresAt;
+	if (end === undefined) return undefined;
+	return JSON.stringify({
+		...(bind === undefined ? {} : { bind }),
+		effectiveExpiresAt: ms(end),
+	});
+}
+
+const instantFrom = (value: unknown): Date | undefined => {
+	if (typeof value !== "string" || !/^-?\d+$/.test(value)) return undefined;
+	const at = Number(value);
+	return Number.isSafeInteger(at) && Math.abs(at) <= DATE_RANGE_MS ? new Date(at) : undefined;
+};
+
+/**
+ * Inverse of {@link encodeCredentialExtension}, into a fresh object holding
+ * only the keys it knows, each read from the parsed object's own properties.
+ * A key that is not its shape is left out; text past the bound, or that is
+ * not a JSON object, is no extension at all (`undefined`).
+ */
+export function decodeCredentialExtension(
+	text: string,
+): DecodedFederationGrantCredentialExtension | undefined {
+	if (text.length > CREDENTIAL_EXTENSION_MAX_TEXT) return undefined;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+	const own = (name: string): unknown =>
+		Object.hasOwn(parsed, name) ? (parsed as Record<string, unknown>)[name] : undefined;
+	const bind = own("bind");
+	const effectiveExpiresAt = instantFrom(own("effectiveExpiresAt"));
+	return {
+		...(typeof bind === "string" ? { bind } : {}),
+		...(effectiveExpiresAt === undefined ? {} : { effectiveExpiresAt }),
+	};
 }
