@@ -1551,6 +1551,32 @@ describe("/authorize on admission — the session's authentication time is read 
 		expect(harness.regenerated).toBe(0);
 	});
 
+	it("a login stamped up to 1 s ahead of this clock, by another replica, meets the login an ask asked for", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		clock.authTime = new Date(Date.now() + 500);
+		expect(
+			codeOf(await authorize(harness.app, Object.fromEntries(back.searchParams.entries()))),
+		).toBe("code-x");
+	});
+
+	it("a login stamped more than 1 s ahead of this clock does not meet the login an ask asked for: login_required", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+		});
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		clock.authTime = new Date(Date.now() + 1_500);
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+	});
+
 	it("an instant ahead of the clock within the skew does not meet a login an ask asked for: login_required", async () => {
 		const clock = { authTime: minutesAgo(5) };
 		const harness = await makeApp({
