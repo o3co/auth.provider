@@ -170,6 +170,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 						tokenType: "Bearer",
 						obtainedAt,
 						issuedLifetime: 3600,
+						effectiveExpiresAt: new Date(obtainedAt.getTime() + HOUR),
 						scopes: [...SCOPES],
 					},
 				},
@@ -275,7 +276,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 		it("keeps a token stored without its end, stating the end it is read to have", async () => {
 			// A record from before the end was recorded: it ends its issued
 			// lifetime after it was obtained, and is written back as ending there.
-			await h.seed({
+			await h.seedLegacy({
 				credentials: {
 					refreshToken: SECRET,
 					accessToken: {

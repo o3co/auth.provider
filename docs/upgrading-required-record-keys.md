@@ -74,9 +74,9 @@ Inputs that were optional are now keys you name:
 - the Redis consent client's `grant` takes `expiry`;
 - the Redis grant client's `noteRefreshFailure` takes `retryAfterSeconds` / `upstreamCode`;
 - `FederationGrantStore.activate` / `replaceCredentials` take `authorization.resource` / `credentials.accessToken`;
-- and, later, an access token's `effectiveExpiresAt` as a `Date`. Build the token with `federationGrantAccessToken(token, lifetime)` from a lifetime reading, as the bundled writers do. A token read back from the store and written again states the end it is read to have: its `effectiveExpiresAt`, never after `obtainedAt + issuedLifetime`, and that instant when it has none.
+- and, later, an access token's `effectiveExpiresAt` as a `Date`. Build the token with `federationGrantAccessToken(token, lifetime)` from a lifetime reading, as the bundled writers do.
 
-Write `undefined` where you have nothing. That makes "no expiry", "no state" or "no access token" something the code says, not something it arrives at by leaving a field out.
+Write `undefined` where you have nothing. That makes "no expiry", "no state" or "no access token" something the code says, not something it arrives at by leaving a field out. The one exception is an access token's `effectiveExpiresAt` on what you write: it is a `Date`, never `undefined`.
 
 ## What is observable at runtime, not only in the types
 
