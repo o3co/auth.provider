@@ -16,8 +16,9 @@
 
 /**
  * The admission actions the MFA package's routes admit, declared with their
- * grades, and registered by no module on the package's entry: a module
- * registers only what its own code admits.
+ * grades, and registered by the MFA module alone on the package's entry —
+ * the module whose routes admit a session for them: a module registers only
+ * what its own code admits.
  */
 
 import type { Module } from "@o3co/auth-provider-core";
@@ -40,7 +41,7 @@ describe("the MFA package's admission actions", () => {
 		});
 	});
 
-	it("are registered by no module on the package's entry", () => {
+	it("are registered by the MFA module alone on the package's entry", () => {
 		const isModule = (value: unknown): value is Module =>
 			typeof value === "object" && value !== null && typeof (value as Module).name === "string";
 		const modules = [
@@ -59,7 +60,9 @@ describe("the MFA package's admission actions", () => {
 			"mfa-totp-factor",
 		]);
 		for (const module of modules) {
-			expect(module.contributes?.admissionActions, module.name).toBeUndefined();
+			expect(module.contributes?.admissionActions, module.name).toEqual(
+				module.name === "mfa" ? MFA_ADMISSION_ACTIONS : undefined,
+			);
 		}
 	});
 });

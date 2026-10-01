@@ -211,6 +211,12 @@ const manageSchema = z.object(
 );
 
 /**
+ * The fewest and the most records a subject may hold: a first binding writes
+ * a factor and its recovery codes.
+ */
+const MFA_MAX_FACTORS_PER_SUBJECT = { min: 2, max: 100 } as const;
+
+/**
  * `mfa.enrollment`: `requireEmailProof`, whether the account-email proof
  * comes before a first binding (the MFA ADR's D24) — `when-mail`, `always`
  * or `never`.
@@ -226,8 +232,9 @@ const enrollmentSchema = z.object(
 
 /**
  * The MFA module's section, `mfa`: its mode, the page's shape, the key ring,
- * a transaction's life and attempts, the subject lock, recent MFA's window
- * and the first binding's proof, with their ranges. The page may be left out, and an empty url is
+ * a transaction's life and attempts, the subject lock, recent MFA's window,
+ * the first binding's proof and the records a subject may hold, with their
+ * ranges. The page may be left out, and an empty url is
  * allowed: the module refuses either as unset. The ring's refusals (a key
  * that is not 32 bytes, an empty ring, a duplicate id), the sample key's and
  * how the lock's fields relate are not the schema's: `readMfaSettings` makes
@@ -261,6 +268,11 @@ export const mfaConfigSchema = z.object(
 		lockout: lockoutSchema,
 		manage: manageSchema,
 		enrollment: enrollmentSchema,
+		maxFactorsPerSubject: wholeNumber(
+			MFA_MAX_FACTORS_PER_SUBJECT.min,
+			MFA_MAX_FACTORS_PER_SUBJECT.max,
+			" records",
+		),
 	},
 	{ error: sectionError },
 );
@@ -314,6 +326,8 @@ export interface MfaSettings {
 	readonly manage: { readonly maxAgeSeconds: number };
 	/** Whether the account-email proof comes before a first binding (D24). */
 	readonly enrollment: { readonly requireEmailProof: RequireEmailProof };
+	/** The records a subject may hold before an enrollment from its session is refused (F4): recovery codes are one. */
+	readonly maxFactorsPerSubject: number;
 }
 
 /** What the settings read beside the `mfa` section. */
@@ -504,8 +518,8 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
 /**
  * What the MFA module reads from its `mfa` section, `section`: the key ring
  * and whether it carries the development sample key, a transaction's life
- * and attempts, recent MFA's window, the first binding's proof, and the
- * subject lock — held to core's
+ * and attempts, recent MFA's window, the first binding's proof, the records
+ * a subject may hold, and the subject lock — held to core's
  * `checkMfaLockoutPolicy` under `mfa.lockout`. Not the mode, which the
  * module's section schema reads, and no factor's section: the TOTP factor's
  * is {@link readMfaTotpSettings}'s. `options.environment` is the name the
@@ -526,5 +540,6 @@ export function readMfaSettings(section: unknown, options: MfaSettingsOptions): 
 		lockout: { ...settings.lockout },
 		manage: { maxAgeSeconds: settings.manage.maxAgeSeconds },
 		enrollment: { requireEmailProof: settings.enrollment.requireEmailProof },
+		maxFactorsPerSubject: settings.maxFactorsPerSubject,
 	};
 }

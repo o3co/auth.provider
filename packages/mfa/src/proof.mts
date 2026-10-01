@@ -15,22 +15,26 @@
  */
 
 /**
- * The account-email proof at a login's first binding (the MFA ADR's D24,
- * F3 step 2, D21's 80-bit row), named by `factor_id: "account-email"` on
- * the challenge and verify routes of a transaction whose `emailProof` is
- * `required`, and on no other.
+ * The account-email proof before a first binding (the MFA ADR's D24, F3
+ * step 2, D21's 80-bit row), named by `factor_id: "account-email"` on the
+ * challenge and verify routes of a transaction whose `emailProof` is
+ * `required`, and on no other: a login's, or an `enroll` one a session's
+ * step-up opened.
  *
  * - The challenge mails a long code (`codes.mts`) through `sendMfaMail` to
- *   the login's address, the continuation's `User` — never a later read.
- *   The code lives ten minutes, capped at the transaction's expiry, and is
- *   kept only as a keyed digest over the transaction id and the code, sealed
- *   on the transaction; a resend replaces it. A proof nobody can give — no
- *   sender, no address — is refused, never skipped.
+ *   the login's address — the continuation's `User`, or the one the session's
+ *   cookie holds — never a later read. The code lives ten minutes, capped at
+ *   the transaction's expiry, and is kept only as a keyed digest over the
+ *   transaction id and the code, sealed on the transaction; a resend replaces
+ *   it. A proof nobody can give — no sender, no address — is refused, never
+ *   skipped.
  * - A verification reserves one of the transaction's attempts, never a
  *   subject's: an 80-bit code is not guessed, and a lock would let a
  *   password holder lock an unenrolled account out. The code stands across
  *   attempts until it is replaced or proved; past the transaction's attempts
- *   the transaction ends. A right code records `emailProof.provedAtMs`.
+ *   the transaction ends. A right code records `emailProof.provedAtMs`, and on
+ *   an `enroll` transaction the proof for its session alone, which a first
+ *   binding in that session is then admitted on.
  */
 
 import type { MfaKeyedDigest, MfaTransaction } from "@o3co/auth-provider-core";
@@ -64,7 +68,11 @@ const digestIn = (
 
 /** The account-email proof over the coordinator's `kit` (see this file's header). */
 export function createAccountEmailProof(kit: MfaCeremonyKit): {
-	challenge(tx: MfaTransaction): Promise<MfaChallengeOutcome>;
+	/** The code mailed to `user`'s address: the login's `User` the transaction was opened for. */
+	challenge(
+		tx: MfaTransaction,
+		user: Readonly<Record<string, unknown>> | undefined,
+	): Promise<MfaChallengeOutcome>;
 	verify(
 		call: MfaCeremonyCall & { readonly proof: unknown },
 		tx: MfaTransaction,
@@ -84,7 +92,7 @@ export function createAccountEmailProof(kit: MfaCeremonyKit): {
 	});
 
 	return {
-		async challenge(tx) {
+		async challenge(tx, user) {
 			if (tx.emailProof !== "required") return UNKNOWN_FACTOR;
 			const nowMs = kit.now();
 			const failed = (cause: unknown): MfaChallengeOutcome => ({
@@ -99,7 +107,7 @@ export function createAccountEmailProof(kit: MfaCeremonyKit): {
 				mail: { purpose: "account_email_proof", code, expiresAtMs: nowMs + PROOF_CODE_TTL_MS },
 				purpose: "account_email_proof",
 				subject: tx.subject,
-				address: tx.continuation?.primary.user.email,
+				address: user?.email,
 				nowMs,
 				notAfterMs: tx.expiresAtMs,
 				digests,
@@ -212,6 +220,11 @@ export function createAccountEmailProof(kit: MfaCeremonyKit): {
 				return written.outcome === "unknown_transaction"
 					? refused("expired", attemptsRemaining)
 					: written;
+			}
+			if (tx.purpose === "enroll") {
+				// The bound read held its sid to the session's; none is refused by the store, an outage.
+				const failed = await kit.recordSessionProof(tx.subject, tx.sid ?? "", nowMs);
+				if (failed !== undefined) return failed;
 			}
 			return { outcome: "proved", ...about(tx) };
 		},

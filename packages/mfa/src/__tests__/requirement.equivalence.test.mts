@@ -44,6 +44,7 @@ import {
 	FACTORS,
 	factorRecord,
 	factorStoreHolding,
+	NOT_ENROLLED_FACTS,
 	resolverOver,
 	WITHOUT_MAIL,
 } from "./requirementHarness.mjs";
@@ -137,6 +138,7 @@ function inputsFor(name: string): RequirementInput[] {
 							sub: session.sub,
 							authTime: session.authTime,
 							expiresAt: session.expiresAt,
+							enrollmentFacts: NOT_ENROLLED_FACTS,
 						},
 			authentication: requirementSession(session),
 		};

@@ -273,9 +273,22 @@ function checkAddressDigest(
 }
 
 /**
+ * `text` with every run of percent-escapes decoded as UTF-8, as a URI's
+ * reader decodes it; a run that is no UTF-8 is kept as it is.
+ */
+const percentDecoded = (text: string): string =>
+	text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+		try {
+			return decodeURIComponent(run);
+		} catch {
+			return run;
+		}
+	});
+
+/**
  * Refuses `value` when a string it holds carries the account's address,
- * whatever its case: as the account gives it, or as `normaliseMailAddress`
- * spells it — trimmed, NFC, its domain in ASCII.
+ * whatever its case, as it is or percent-decoded: as the account gives it,
+ * or as `normaliseMailAddress` spells it — trimmed, NFC, its domain in ASCII.
  */
 function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>>, what: string) {
 	const { email } = user;
@@ -285,9 +298,73 @@ function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>
 	);
 	assert.ok(
 		!decodedStrings(value).some((text) =>
-			addresses.some((address) => text.toLowerCase().includes(address)),
+			[text, percentDecoded(text)].some((read) =>
+				addresses.some((address) => read.toLowerCase().includes(address)),
+			),
 		),
 		`${what} carries the account's address, which the provider does not keep and a page does not show`,
+	);
+}
+
+/**
+ * Refuses `value` when a string it holds, percent-decoded, carries the
+ * account's address anywhere but in the account's username, verbatim: where
+ * the username is the address, it may be named by it, and only so.
+ */
+function carriesNoAddressButUsername(
+	value: unknown,
+	user: Readonly<Record<string, unknown>>,
+	what: string,
+) {
+	const { username, email } = user;
+	const address = typeof email === "string" ? [email, normaliseMailAddress(email)] : [];
+	// Only a username that holds the address is struck out: one that is part of it strikes nothing.
+	const named =
+		typeof username === "string" &&
+		address.some(
+			(spelling) =>
+				spelling !== undefined &&
+				spelling !== "" &&
+				username.toLowerCase().includes(spelling.toLowerCase()),
+		)
+			? username
+			: undefined;
+	const rest = decodedStrings(value).map((text) => {
+		const read = percentDecoded(text);
+		return named === undefined ? read : read.split(named).join(" ");
+	});
+	carriesNoAddress(rest, user, what);
+}
+
+/** The account the error probes run over: a username and an address no factor's text holds by chance. */
+const CANARY = {
+	username: "mfa-contract-canary-q7x",
+	email: "mfa-contract-canary-q7x@canary.example",
+} as const;
+
+/** What an error says: its name, message and own string properties, as a log line or its reader could show them. */
+function errorText(error: unknown): string {
+	try {
+		if (typeof error !== "object" || error === null) return String(error);
+		const own = Object.entries(error).filter(([, value]) => typeof value === "string");
+		return [String(error), (error as { message?: unknown }).message, ...own.flat()].join("\n");
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Refuses `text` when it carries the account's address — as {@link carriesNoAddress}
+ * reads it — or its username, whatever its case, as it is or percent-decoded.
+ */
+function carriesNoAccount(text: string, user: Readonly<Record<string, unknown>>, what: string) {
+	carriesNoAddress(text, user, what);
+	const { username } = user;
+	if (typeof username !== "string" || username.trim() === "") return;
+	const name = username.toLowerCase();
+	assert.ok(
+		![text, percentDecoded(text)].some((read) => read.toLowerCase().includes(name)),
+		`${what} quotes the account's username, which a log line would carry`,
 	);
 }
 
@@ -707,12 +784,17 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
+			name: "nothing kept, and no challenge's answer, carries the account's address — an enrollment's answer only as the account's username, verbatim — whatever its case or escaping: the pending enrollment's state and answer, the enrolled data and label, a challenge's state and answer, and a verification's next data",
 			run: async () => {
 				const factor = input.build();
 				const begun = await begin(factor);
 				carriesNoAddress(begun.start.state, input.user, "the pending enrollment's state");
-				carriesNoAddress(begun.start.response, input.user, "the pending enrollment's response");
+				// An enrollment's answer goes to the account's own browser: it may name the account by its username.
+				carriesNoAddressButUsername(
+					begun.start.response,
+					input.user,
+					"the pending enrollment's answer",
+				);
 				const done = await complete(
 					factor,
 					begun,
@@ -733,7 +815,8 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 				};
 				const { context: later, sent } = await challenge(factor, enrolled);
 				carriesNoAddress(sent?.state, input.user, "the challenge's state");
-				carriesNoAddress(sent?.response, input.user, "the challenge's response");
+				// A login's challenge answers whoever holds the password.
+				carriesNoAddress(sent?.response, input.user, "the challenge's answer");
 				const verdict = await factor.verify({
 					...later,
 					factor: enrolled,
@@ -742,6 +825,80 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					proof: await input.verificationProof(enrolled, sent, later),
 				});
 				if (verdict.ok) carriesNoAddress(verdict.next, input.user, "the factor's next data");
+			},
+		},
+		{
+			name: "an error the factor throws — over an account without a username, or a pending state or data it cannot read — quotes neither the account's address nor its username",
+			run: async () => {
+				const factor = input.build();
+				const enrolled = await enroll(factor);
+				const begun = await begin(factor);
+				const unreadable = { ...enrolled, data: {} };
+				// The suite's canary accounts, so a username that is an ordinary word is never
+				// mistaken: one named apart from its address, one named by it.
+				for (const account of [
+					{ ...input.user, ...CANARY },
+					{ ...input.user, username: CANARY.email, email: CANARY.email },
+				]) {
+					const { username: _username, ...nameless } = account;
+					const attempts: [string, () => Promise<unknown>][] = [
+						[
+							"beginEnrollment over an account without a username",
+							() => factor.beginEnrollment({ ...begun.context, user: nameless, factors: [] }),
+						],
+						[
+							"completeEnrollment over a pending state it cannot read",
+							() =>
+								factor.completeEnrollment({
+									...begun.context,
+									user: account,
+									factors: [],
+									state: {},
+									proof: "000000",
+								}),
+						],
+						[
+							"challenge over data it cannot read",
+							async () =>
+								factor.challenge?.({
+									...contextAt(
+										factor,
+										subjectOf(input.user),
+										VERIFIED_AT_MS,
+										"contract-verification",
+									),
+									factor: unreadable,
+									factors: [unreadable],
+								}),
+						],
+						[
+							"verify over data it cannot read",
+							() =>
+								factor.verify({
+									...contextAt(
+										factor,
+										subjectOf(input.user),
+										VERIFIED_AT_MS,
+										"contract-verification",
+									),
+									factor: unreadable,
+									factors: [unreadable],
+									state: undefined,
+									proof: "000000",
+								}),
+						],
+					];
+					for (const [what, attempt] of attempts) {
+						let thrown: unknown;
+						try {
+							await attempt();
+							continue;
+						} catch (error) {
+							thrown = error;
+						}
+						carriesNoAccount(errorText(thrown), account, `the error ${what} threw`);
+					}
+				}
 			},
 		},
 		{

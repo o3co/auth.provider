@@ -169,6 +169,13 @@ describe("the package's reference.conf", () => {
 		).toEqual({ requireEmailProof: "always" });
 	});
 
+	it("defaults a subject's factor limit, mfa.maxFactorsPerSubject, to 10 records", () => {
+		const settings = readSettings(
+			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),
+		);
+		expect(settings.maxFactorsPerSubject).toBe(10);
+	});
+
 	it("defaults recent MFA's window, mfa.manage.maxAgeSeconds, to 300 seconds", () => {
 		const settings = readSettings(
 			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),

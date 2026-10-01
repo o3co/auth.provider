@@ -42,6 +42,7 @@ import {
 	type Module,
 	type RateLimiter,
 	type SessionFederationIndex,
+	type SubjectRevocation,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -286,6 +287,8 @@ export interface BootOptions {
 	readonly mailSender?: MailSender;
 	/** The directory the login verifies; alice and bob in a {@link WitnessingUserRepository} by default. */
 	readonly userRepository?: UserRepository;
+	/** The subjects' revocation boundary; none by default, its absence declared by the configuration. */
+	readonly subjectRevocation?: SubjectRevocation;
 	/** Modules beside the composition's: another factor, say. */
 	readonly extraModules?: readonly Module[];
 	/** Leave the session package's login out: the MFA modules and their stores alone. */
@@ -335,6 +338,13 @@ export function modulesFor(options: BootOptions = {}): {
 			...(options.mailSender === undefined
 				? []
 				: [providing("test:mail-sender", { mailSender: () => options.mailSender })]),
+			...(options.subjectRevocation === undefined
+				? []
+				: [
+						providing("test:subject-revocation", {
+							subjectRevocation: () => options.subjectRevocation,
+						}),
+					]),
 			...(userSessionStore === null
 				? []
 				: [providing("test:user-session-store", { userSessionStore: () => userSessionStore })]),
