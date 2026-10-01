@@ -1439,7 +1439,9 @@ export function runMfaTransactionStoreContract(
 			await store.noteExemptSuccess("user-1", last + DAY, higher);
 			expect(held(await check(store, last + DAY + 1, higher))).toEqual(HARD);
 			await store.noteExemptSuccess("user-1", last + DAY + 2, lower);
-			for (const policy of [lower, SMALL_HARD, higher, { ...SMALL_HARD, hardLimit: 100 }]) {
+			// The lower limit asked last: asked first, it would hold a run the
+			// latch had let go.
+			for (const policy of [SMALL_HARD, higher, { ...SMALL_HARD, hardLimit: 100 }, lower]) {
 				expect(held(await check(store, last + 2 * DAY, policy)), String(policy.hardLimit)).toEqual(
 					HARD,
 				);
@@ -1499,6 +1501,55 @@ export function runMfaTransactionStoreContract(
 			await store.clearSubjectState("user-2");
 			expect(held(await check(store, next, POLICY, "user-1"))).toMatchObject({ hold: "weekly" });
 			await settled(store, next, "void", "user-2");
+		});
+
+		it("holds a run that a lower hardLimit finds at it, at a reservation or an exempt success, under every higher limit after", async () => {
+			const lower: MfaLockoutPolicy = { ...SMALL_HARD, hardLimit: 5 };
+			const higher: MfaLockoutPolicy = { ...SMALL_HARD, hardLimit: 7 };
+			for (const finds of ["reservation", "exempt success"] as const) {
+				const store = await factory();
+				let at = start();
+				for (let i = 0; i < 5; i++) {
+					at += MINUTE;
+					await fail(store, at, SMALL_HARD);
+				}
+				if (finds === "reservation") {
+					expect(held(await check(store, at + DAY, lower)), finds).toEqual(HARD);
+				} else {
+					await store.noteExemptSuccess("user-1", at + DAY, lower);
+				}
+				for (const policy of [SMALL_HARD, higher]) {
+					expect(
+						held(await check(store, at + 2 * DAY, policy)),
+						`${finds}, then ${policy.hardLimit}`,
+					).toEqual(HARD);
+				}
+			}
+		});
+
+		it("reads the policy once at a reservation: the hardLimit it checks is the one it holds at", async () => {
+			// Each call's policy answers hardLimit 3 to its first read and 100
+			// after: read apart, the third reservation would not hold.
+			const shifting = (): MfaLockoutPolicy => {
+				let reads = 0;
+				return new Proxy(
+					{ ...SMALL_HARD, hardLimit: 3 },
+					{
+						get: (target, key, receiver) => {
+							if (key !== "hardLimit") return Reflect.get(target, key, receiver);
+							reads += 1;
+							return reads === 1 ? 3 : 100;
+						},
+					},
+				);
+			};
+			const store = await factory();
+			let at = start();
+			for (let i = 0; i < 3; i++) {
+				at += MINUTE;
+				await fail(store, at, shifting());
+			}
+			expect(held(await check(store, at + DAY, shifting()))).toEqual(HARD);
 		});
 
 		it("refuses a lockout policy it cannot apply, and an instant that is not one, with a RangeError", async () => {
