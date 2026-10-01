@@ -38,6 +38,14 @@ import { isLoopbackHostname } from "./loopback.mjs";
  * - **No escape hatch, deliberately**: a dotless custom scheme (`myapp:`) is
  *   refused with no config bypass. RFC 8252 §7.1 says SHOULD reverse-domain,
  *   and a flag would be two spellings for one decision.
+ * - **Query names**: only `[A-Za-z0-9_-]`, each parameter named, and no `;`
+ *   anywhere in the query. The authorization response's own names (`code`,
+ *   `state`, `iss`, `error`, `error_description`) are refused, compared
+ *   ignoring case, `_` and `-`. Values are otherwise free. A registered
+ *   parameter of the same effective name as one this provider appends would
+ *   reach the client beside it, and which one a client reads is its
+ *   framework's choice; an allowlist on names leaves no spelling a framework
+ *   could read as another name (`iss[]`, `;iss=`, `%69ss`).
  */
 
 /** Why a registered redirect URI was refused. */
@@ -48,7 +56,9 @@ export type RedirectUriRejection =
 	| { reason: "userinfo" }
 	| { reason: "http-non-loopback"; hostname: string }
 	| { reason: "executable-scheme"; scheme: string }
-	| { reason: "scheme-not-reverse-domain"; scheme: string };
+	| { reason: "scheme-not-reverse-domain"; scheme: string }
+	| { reason: "query-name-invalid" }
+	| { reason: "reserved-parameter"; parameter: string };
 
 /**
  * First labels of executable/pseudo schemes, denied even when a dotted
@@ -65,6 +75,55 @@ const EXECUTABLE_SCHEME_LABELS: ReadonlySet<string> = new Set([
 	"about",
 	"intent",
 ]);
+
+/** A query parameter name a redirect URI may carry: nothing a parser could read as another name. */
+const QUERY_NAME = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * A query name as name-normalizing middleware sees it: case folded, `_` and
+ * `-` removed. Such middleware (camelCase to snake_case, a leading `_`
+ * stripped) keeps a name's letters and digits and changes only these, so
+ * `_state`, `errorDescription` and `error-description` all key as a response
+ * parameter. Only ever applied to an allowlisted, hence ASCII, name, where
+ * `toLowerCase` is exact ASCII folding.
+ */
+const nameKey = (name: string): string => name.toLowerCase().replace(/[_-]/g, "");
+
+/**
+ * The parameters an authorization response appends to a client's redirect
+ * URI, by {@link nameKey}.
+ *
+ * Invariant: a response that starts appending another name onto a client
+ * redirect adds it here in the same change.
+ */
+const RESPONSE_PARAMETERS: ReadonlyMap<string, string> = new Map(
+	["code", "state", "iss", "error", "error_description"].map((name) => [nameKey(name), name]),
+);
+
+/**
+ * The query's verdict, read from `url.search` UNDECODED: the WHATWG parser has
+ * found where the query starts and ends, and only percent-encodes characters
+ * the name allowlist refuses anyway, so a name is judged as it was written.
+ * `URLSearchParams` would decode `%69ss` into `iss`, turn `+` into a space and
+ * drop empty pairs, judging a different string from the one registered.
+ *
+ * Pairs are split on `&`; a name runs to the first `=`, or is the whole pair.
+ * A `;` is refused anywhere, values included: some parsers split on it too and
+ * would read `?a=x;iss=y` as carrying `iss`.
+ */
+function queryRejection(url: URL): RedirectUriRejection | null {
+	const query = url.search.slice(1); // "" for no query and for a bare trailing `?`
+	if (query === "") return null;
+	if (query.includes(";")) return { reason: "query-name-invalid" };
+	for (const pair of query.split("&")) {
+		const equals = pair.indexOf("=");
+		const name = equals === -1 ? pair : pair.slice(0, equals);
+		if (!QUERY_NAME.test(name)) return { reason: "query-name-invalid" };
+		const reserved = RESPONSE_PARAMETERS.get(nameKey(name));
+		if (reserved !== undefined) return { reason: "reserved-parameter", parameter: reserved };
+	}
+	return null;
+}
 
 /**
  * Check one registered redirect URI against the shape rules above. Returns
@@ -96,6 +155,14 @@ export function checkRedirectUri(raw: string): RedirectUriRejection | null {
 	if (url.hash !== "" || raw.includes("#")) return { reason: "fragment" };
 	if (url.username !== "" || url.password !== "") return { reason: "userinfo" };
 
+	const schemeRejection = checkScheme(scheme, url);
+	if (schemeRejection !== null) return schemeRejection;
+	// The shape is acceptable; only then is the query read.
+	return queryRejection(url);
+}
+
+/** The scheme rules: `https:`, loopback `http:`, or a reverse-domain custom scheme. */
+function checkScheme(scheme: string, url: URL): RedirectUriRejection | null {
 	if (scheme === "https") return null;
 	if (scheme === "http") {
 		return isLoopbackHostname(url.hostname)
@@ -134,6 +201,18 @@ export function describeRedirectUriRejection(rejection: RedirectUriRejection): s
 			return (
 				`custom scheme ${JSON.stringify(rejection.scheme)} must use the RFC 8252 §7.1 reverse-domain shape ` +
 				`(e.g. "com.example.app"); dotless legacy schemes are refused, deliberately, with no bypass`
+			);
+		case "query-name-invalid":
+			return (
+				'query parameter names may use only letters, digits, "_" and "-", each parameter must ' +
+				'have a name, and the query must not contain ";": a client framework can read any other ' +
+				'spelling as a different name (iss[] as iss, ";iss=" as a parameter)'
+			);
+		case "reserved-parameter":
+			return (
+				`must not carry ${JSON.stringify(rejection.parameter)} in its query (compared ignoring ` +
+				'case, "_" and "-"): this provider adds that parameter when it redirects there, so the ' +
+				"client would receive it twice, or read the registered value as the response's"
 			);
 	}
 }
