@@ -1169,6 +1169,8 @@ describe("the token carries the approving session's authentication", () => {
 			(nowMs: number) => nowMs + DEFAULT_CLOCK_SKEW_MS + 1_000,
 		],
 		["before the epoch", () => -1_000],
+		["a fraction before the epoch", () => -0.5],
+		["a fraction of a millisecond", (nowMs: number) => nowMs - 60_000.5],
 		["not a number", () => "1800000000000"],
 		["NaN", () => Number.NaN],
 		["null", () => null],
@@ -1194,6 +1196,55 @@ describe("the token carries the approving session's authentication", () => {
 			);
 		},
 	);
+
+	/** A memory store whose approved poll answers a record on which reading `field` throws. */
+	const throwingOn = (field: "amr" | "authTimeMs") => {
+		const inner = createMemoryDeviceCodeStore();
+		return {
+			...inner,
+			poll: async (code: string, nowMs: number) => {
+				const outcome = await inner.poll(code, nowMs);
+				if (outcome.status !== "approved") return outcome;
+				const authorization = { ...outcome.authorization };
+				Object.defineProperty(authorization, field, {
+					get() {
+						throw new Error(`${field} unreadable`);
+					},
+				});
+				return { ...outcome, authorization };
+			},
+		} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+	};
+
+	it("refuses an authentication time whose read throws: invalid_grant, not an exception", async () => {
+		const logger = makeLogger();
+		const harness = makeHarness({ logger, store: throwingOn("authTimeMs") });
+		const { result } = await approvedAndPolled(harness);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(logger.warn).toHaveBeenCalledWith({ clientId: CLIENT_ID }, "auth_time_ahead_of_clock");
+	});
+
+	it.each([
+		["the field's read throws", () => throwingOn("amr")],
+		[
+			"an element's read throws",
+			() => {
+				const amr = ["pwd"];
+				Object.defineProperty(amr, 1, {
+					enumerable: true,
+					get() {
+						throw new Error("element unreadable");
+					},
+				});
+				return pollingWith(() => ({ amr }));
+			},
+		],
+	])("stamps no amr when %s, and still mints", async (_label, store) => {
+		const harness = makeHarness({ store: store() });
+		const claims = claimsOf(await approvedAndPolled(harness));
+		expect(claims).not.toHaveProperty("amr");
+		expect(claims.auth_time).toBe(LOGIN / 1000);
+	});
 
 	it("warns how far ahead the authentication time is", async () => {
 		const logger = makeLogger();

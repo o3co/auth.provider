@@ -45,8 +45,10 @@
  * - The token carries the approval's recorded `amr` (`wellFormedAmr`) and its
  *   `authTimeMs` as `auth_time`, read against the minting clock with
  *   `authTimeAt`; the same instant is its `iat`. Neither recorded, neither is
- *   stamped. An `authTimeMs` that clock cannot read is `invalid_grant`. No
- *   `acr`: device verification selects none.
+ *   stamped. An `authTimeMs` that is not whole epoch milliseconds that clock
+ *   can read is `invalid_grant`; an `amr` that cannot be read is stamped as
+ *   none. A read that throws is one that cannot be read. No `acr`: device
+ *   verification selects none.
  *
  * `poll` consumes an approval in the same step that reads it.
  * `authorization_pending` and `slow_down` leave the code in place and the device
@@ -94,6 +96,19 @@ export interface DeviceCodeGrantOptions {
 const error = (status: number, code: string, description: string): GrantHandlerResult => ({
 	result: { status, error: code, errorDescription: description },
 });
+
+/** `read()`, or `fallback` when it throws: a polled record's field, read once. */
+const readOr = <T,>(read: () => T, fallback: T): T => {
+	try {
+		return read();
+	} catch {
+		return fallback;
+	}
+};
+
+/** Whole epoch milliseconds at or after the epoch: what a store records. */
+const isRecordedInstant = (ms: unknown): ms is number =>
+	typeof ms === "number" && Number.isSafeInteger(ms) && ms >= 0;
 
 export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHandler => {
 	const now = options.now ?? Date.now;
@@ -241,19 +256,19 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			// One minting instant: `auth_time` is read against it and stamped as
 			// `iat`, so `auth_time` is never after `iat` — see the file header.
 			const mintingNow = now();
-			const authTimeMs: unknown = authorization.authTimeMs;
+			const authTimeMs = readOr<unknown>(() => authorization.authTimeMs, Number.NaN);
 			const authTime =
 				authTimeMs === undefined
 					? undefined
 					: authTimeAt(
-							typeof authTimeMs === "number" ? new Date(authTimeMs) : undefined,
+							isRecordedInstant(authTimeMs) ? new Date(authTimeMs) : undefined,
 							mintingNow,
 						);
 			if (authTimeMs !== undefined && authTime === undefined) {
 				options.logger?.warn(
 					{
 						clientId: client.clientId,
-						...(typeof authTimeMs === "number" ? { aheadMs: authTimeMs - mintingNow } : {}),
+						...(isRecordedInstant(authTimeMs) ? { aheadMs: authTimeMs - mintingNow } : {}),
 					},
 					"auth_time_ahead_of_clock",
 				);
@@ -263,7 +278,7 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					"the approving session's authentication time cannot be read; start a new device authorization request",
 				);
 			}
-			const amr = wellFormedAmr(authorization.amr);
+			const amr = readOr(() => wellFormedAmr(authorization.amr), undefined);
 
 			const scope = authorization.grantedScope ?? [];
 			// Same audience rule the session and authorization-code grants use:
