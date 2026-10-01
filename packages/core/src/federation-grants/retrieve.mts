@@ -1020,8 +1020,8 @@ function readExpiry(value: unknown): AnswerSnapshot["expiresAt"] {
 
 /**
  * Anything at all may have been answered: `null` throws when it is read, a
- * field may be a getter that answers differently each time, or throws. Each
- * field is read once, on its own, so a read that throws costs only its field.
+ * field may be a getter, and a getter may throw. Each field is read once, on
+ * its own, so a read that throws costs only its field.
  */
 function snapshotAnswer(answer: unknown): AnswerSnapshot {
 	const refreshToken = readField(answer, "refreshToken");

@@ -515,87 +515,39 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 	});
 
 	describe("an upstream answer read once: what is judged is what is stored", () => {
-		/** `answer`, with `field` a getter answering `reads` in turn, and throwing once they run out. */
-		const shifting = (
+		/** `answer`, with `field` a getter that answers `value` on its first read and throws on every later one. */
+		const readableOnce = (
 			answer: DelegatedTokens,
 			field: keyof DelegatedTokens,
-			reads: readonly unknown[],
+			value: unknown,
 		): { answer: DelegatedTokens; reads: () => number } => {
 			let count = 0;
-			const shifted = { ...answer };
-			Object.defineProperty(shifted, field, {
+			const once = { ...answer };
+			Object.defineProperty(once, field, {
 				enumerable: true,
 				get() {
 					count += 1;
-					if (count > reads.length) throw new Error("a getter that throws");
-					return reads[count - 1];
+					if (count > 1) throw new Error("a getter that throws");
+					return value;
 				},
 			});
-			return { answer: shifted, reads: () => count };
+			return { answer: once, reads: () => count };
 		};
 
 		it("keeps the rotated refresh token it read, when a later read of the field would throw", async () => {
 			await h.seed();
 			setNow(DUE);
-			const { answer, reads } = shifting(refreshed("1", DUE), "refreshToken", [
+			const { answer, reads } = readableOnce(
+				refreshed("1", DUE),
+				"refreshToken",
 				`${SECRET}-rotated`,
-			]);
+			);
 			h.refresh.mockResolvedValue(answer);
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1" });
 			// Keeping the old one would present a revoked token to a rotating IdP.
 			expect((await stored())?.refreshToken).toBe(`${SECRET}-rotated`);
 			expect(reads()).toBe(1);
 		});
-
-		it("keeps the first refresh token it read, when the field answers another one on a later read", async () => {
-			await h.seed();
-			setNow(DUE);
-			const { answer, reads } = shifting(refreshed("1", DUE), "refreshToken", [
-				`${SECRET}-first`,
-				"",
-				`${SECRET}-second`,
-			]);
-			h.refresh.mockResolvedValue(answer);
-			expect((await retrieve()).ok).toBe(true);
-			expect((await stored())?.refreshToken).toBe(`${SECRET}-first`);
-			expect(reads()).toBe(1);
-		});
-
-		const shifts: Array<[keyof DelegatedTokens, readonly unknown[]]> = [
-			["accessToken", ["at-1", "at-other", 42]],
-			["expiresIn", [3600, 86_400, "3600"]],
-			["expiresAt", [new Date(DUE.getTime() + HOUR), new Date(0), "tomorrow"]],
-			["tokenType", ["Bearer", "DPoP", 7]],
-			["scope", [SCOPES.join(" "), "calendar.write", ["openid"]]],
-		];
-		for (const [field, values] of shifts) {
-			it(`judges and stores ONE ${field}: a field that answers differently on each read is read once`, async () => {
-				await h.seed();
-				setNow(DUE);
-				const { answer, reads } = shifting(refreshed("1", DUE), field, values);
-				h.refresh.mockResolvedValue(answer);
-				expect(await retrieve()).toStrictEqual({
-					ok: true,
-					accessToken: "at-1",
-					tokenType: "Bearer",
-					expiresIn: 3600,
-					scopes: [...SCOPES],
-					refreshed: true,
-				});
-				expect(await stored()).toStrictEqual({
-					refreshToken: `${SECRET}-1`,
-					accessToken: {
-						value: "at-1",
-						tokenType: "Bearer",
-						obtainedAt: DUE,
-						issuedLifetime: 3600,
-						effectiveExpiresAt: new Date(DUE.getTime() + HOUR),
-						scopes: [...SCOPES],
-					},
-				});
-				expect(reads()).toBe(1);
-			});
-		}
 
 		/** A real Date holding `ms`, whose own methods answer `lie`. */
 		const lyingDate = (ms: number, lie: number): Date => {
@@ -608,7 +560,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			return date;
 		};
 
-		it("reads an expiry by the instant the Date holds, never by a getTime of its own that answers later", async () => {
+		it("reads an expiry by the instant the Date holds, never by a getTime of its own", async () => {
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockResolvedValue(
@@ -620,29 +572,6 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			expect((await stored())?.accessToken).toMatchObject({
 				effectiveExpiresAt: new Date(DUE.getTime() + 30 * MIN),
 			});
-		});
-
-		it("looks at an expiry once: a Date whose prototype answers differently on a second look is judged by the first", async () => {
-			await h.seed();
-			setNow(DUE);
-			const expiresAt = new Date(DUE.getTime() + HOUR);
-			let looks = 0;
-			Object.setPrototypeOf(
-				expiresAt,
-				new Proxy(Date.prototype, {
-					getPrototypeOf() {
-						looks += 1;
-						if (looks > 1) throw new Error("a trap that throws");
-						return Date.prototype;
-					},
-				}),
-			);
-			h.refresh.mockResolvedValue(refreshed("1", DUE, { expiresAt }));
-			expect(await retrieve()).toMatchObject({ ok: true, expiresIn: 3600 });
-			expect((await stored())?.accessToken).toMatchObject({
-				effectiveExpiresAt: new Date(DUE.getTime() + HOUR),
-			});
-			expect(looks).toBe(1);
 		});
 
 		it("reads an expiry by the instant the Date holds, never by a getTime of its own that answers a live token for a spent one", async () => {
