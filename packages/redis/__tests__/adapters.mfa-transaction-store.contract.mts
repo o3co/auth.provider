@@ -18,9 +18,13 @@ import {
 	DEFAULT_CLOCK_SKEW_MS,
 	getBoundMfaTransaction,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
+	type MfaSubjectRecoveryAnswer,
+	type MfaSubjectRecoveryApplication,
+	type MfaSubjectRecoveryAuthorization,
 	type MfaTransaction,
 	type MfaTransactionBinding,
 	type MfaTransactionStore,
@@ -149,6 +153,34 @@ export function runMfaTransactionStoreContract(
 	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	const expiry = options.expiry ?? hostExpiry;
+
+	let resets = 0;
+	/** The operator reset of `subject`, authorized and applied under its lease: its lock state ends whole. */
+	async function resetSubject(store: MfaTransactionStore, subject: string): Promise<void> {
+		resets += 1;
+		const lease = await store.acquireSubjectLease(subject, {
+			ttlMs: 60_000,
+			generation: await store.subjectGeneration(subject),
+		});
+		if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
+		await store.authorizeSubjectRecovery(subject, {
+			operation: "reset",
+			sid: undefined,
+			recoveryId: `reset-${resets}`,
+			expiresAtMs: Date.now() + 10 * MINUTE,
+		});
+		const answer = await store.applySubjectRecovery(subject, {
+			operation: "reset",
+			sid: undefined,
+			nowMs: Date.now(),
+			leaseToken: lease.token,
+			sessionsBoundaryMs: undefined,
+			guessableBoundSinceMs: undefined,
+		});
+		await store.releaseSubjectLease(subject, lease.token);
+		if (answer.outcome !== "applied")
+			throw new Error(`expected the reset applied: ${answer.outcome}`);
+	}
 
 	describe("MfaTransactionStore contract: the transaction", () => {
 		it("refuses a login transaction whose subject or redirectTo is not the continuation's primary's: one record, one login", async () => {
@@ -1000,7 +1032,7 @@ export function runMfaTransactionStoreContract(
 			expect(first(await check(store, t + 7))).toBe(false);
 		});
 
-		it("begins another episode after an attempt is let through, and after clearSubjectState", async () => {
+		it("begins another episode after an attempt is let through, and after a reset", async () => {
 			const store = await factory();
 			const t = start();
 			for (let i = 0; i < 5; i++) await fail(store, t + i);
@@ -1011,7 +1043,7 @@ export function runMfaTransactionStoreContract(
 			await fail(store, after);
 			expect(first(await check(store, after + 1))).toBe(true);
 			expect(first(await check(store, after + 2))).toBe(false);
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			for (let i = 0; i < 5; i++) await fail(store, after + 10 + i);
 			expect(first(await check(store, after + 15))).toBe(true);
 		});
@@ -1226,7 +1258,7 @@ export function runMfaTransactionStoreContract(
 			hardLimit: 6,
 		};
 
-		it("holds guessable proofs at hardLimit consecutive failures: an exempt success does not lift it, clearSubjectState does", async () => {
+		it("holds guessable proofs at hardLimit consecutive failures: an exempt success does not lift it, a reset does", async () => {
 			const store = await factory();
 			let at = start();
 			for (let i = 0; i < 6; i++) {
@@ -1243,13 +1275,13 @@ export function runMfaTransactionStoreContract(
 				hold: "hard",
 				retryAfterMs: null,
 			});
-			// Nor does another, a week on: the run stands until the subject is cleared.
+			// Nor does another, a week on: the run stands until the subject is reset.
 			await store.noteExemptSuccess("user-1", at + WEEK, SMALL_HARD);
 			expect(held(await check(store, at + WEEK + 1, SMALL_HARD))).toEqual({
 				hold: "hard",
 				retryAfterMs: null,
 			});
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			expect((await check(store, at + WEEK + 2, SMALL_HARD)).ok).toBe(true);
 		});
 
@@ -1469,19 +1501,24 @@ export function runMfaTransactionStoreContract(
 			expect(last && held(last)).toEqual({ hold: "hard", retryAfterMs: null });
 		});
 
-		it("clears the run and the week on clearSubjectState", async () => {
+		it("clears the run and the week on a reset", async () => {
 			const store = await factory();
 			const t = start();
 			let at = await fillTheWeek(store, t);
-			await store.clearSubjectState("user-1");
-			await store.clearSubjectState("user-1");
-			await store.clearSubjectState("nobody");
+			await resetSubject(store, "user-1");
+			await resetSubject(store, "user-1");
+			await resetSubject(store, "nobody");
 			// The week starts empty: five failures reach the backoff, not the
-			// weekly hold, and clearing again lifts the backoff.
+			// weekly hold, and resetting again lifts the backoff.
 			for (let i = 0; i < 5; i++) await fail(store, ++at);
 			expect(held(await check(store, at + 1))).toMatchObject({ hold: "backoff" });
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			await settled(store, at + 1, "void");
+		});
+
+		it("offers no way to end the lock state but an applied recovery: there is no clearSubjectState", async () => {
+			const store = await factory();
+			expect("clearSubjectState" in store).toBe(false);
 		});
 
 		it("keeps subjects apart", async () => {
@@ -1498,7 +1535,7 @@ export function runMfaTransactionStoreContract(
 			});
 			// Clearing one subject leaves the other held.
 			const next = await fillTheWeek(store, at + MINUTE, "user-2");
-			await store.clearSubjectState("user-2");
+			await resetSubject(store, "user-2");
 			expect(held(await check(store, next, POLICY, "user-1"))).toMatchObject({ hold: "weekly" });
 			await settled(store, next, "void", "user-2");
 		});
@@ -1595,6 +1632,614 @@ export function runMfaTransactionStoreContract(
 				RangeError,
 			);
 		});
+
+		describe("authorized recovery", () => {
+			// A recovery is authorized once (an exempt proof's, or the operator
+			// reset's) and applied once, under the subject's lease. `recover`
+			// gives the attempt budget back only after a revocation later than
+			// the attack's first failure the week still counts.
+			const SKEW = DEFAULT_CLOCK_SKEW_MS;
+
+			async function leased(store: MfaTransactionStore, subject = "user-1"): Promise<string> {
+				const answer = await store.acquireSubjectLease(subject, {
+					ttlMs: 60_000,
+					generation: await store.subjectGeneration(subject),
+				});
+				if (answer.outcome !== "acquired") throw new Error(`expected a lease: ${answer.outcome}`);
+				return answer.token;
+			}
+
+			const authorization = (
+				overrides: Partial<MfaSubjectRecoveryAuthorization> = {},
+			): MfaSubjectRecoveryAuthorization => ({
+				operation: "recover",
+				sid: "sid-1",
+				recoveryId: "recovery-1",
+				expiresAtMs: Date.now() + 10 * MINUTE,
+				...overrides,
+			});
+
+			/** Applies a recover of `subject` in the session sid-1 at `nowMs`, under a lease of its own unless one is given. */
+			async function recover(
+				store: MfaTransactionStore,
+				nowMs: number,
+				overrides: Partial<MfaSubjectRecoveryApplication> = {},
+				subject = "user-1",
+			): Promise<MfaSubjectRecoveryAnswer> {
+				const own = overrides.leaseToken === undefined;
+				const leaseToken = overrides.leaseToken ?? (await leased(store, subject));
+				try {
+					return await store.applySubjectRecovery(subject, {
+						operation: "recover",
+						sid: "sid-1",
+						nowMs,
+						leaseToken,
+						sessionsBoundaryMs: undefined,
+						// No guessable record remains, unless a case names one.
+						guessableBoundSinceMs: null,
+						...overrides,
+					});
+				} finally {
+					if (own) await store.releaseSubjectLease(subject, leaseToken);
+				}
+			}
+
+			const RELEASED = {
+				outcome: "applied",
+				recoveryId: "recovery-1",
+				generation: 1,
+				cleared: { week: true, run: true, hard: false },
+				hard: false,
+			};
+
+			/** The week filled an hour before the host's clock: answers when its first failure was. */
+			async function attacked(store: MfaTransactionStore, subject = "user-1"): Promise<number> {
+				const from = start() - HOUR;
+				await fillTheWeek(store, from, subject);
+				return from;
+			}
+
+			it("answers unauthorized with nothing authorized, and for another session, operation or subject", async () => {
+				const store = await factory();
+				const now = start();
+				expect(await recover(store, now)).toEqual({
+					outcome: "refused",
+					reason: "unauthorized",
+					hard: false,
+				});
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				expect(await recover(store, now, { sid: "sid-2" })).toMatchObject({
+					reason: "unauthorized",
+				});
+				expect(
+					await recover(store, now, {
+						operation: "reset",
+						sid: undefined,
+						guessableBoundSinceMs: undefined,
+					}),
+				).toMatchObject({ reason: "unauthorized" });
+				expect(await recover(store, now, {}, "user-2")).toMatchObject({ reason: "unauthorized" });
+				expect(await store.subjectGeneration("user-1")).toBe(0);
+				expect(await recover(store, now)).toEqual(RELEASED);
+			});
+
+			it("refuses an apply without the subject's lease: none, another holder's token, or another subject's", async () => {
+				const store = await factory();
+				const now = start();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				const refused = { outcome: "refused", reason: "lease_not_held", hard: false };
+				expect(await recover(store, now, { leaseToken: "no-such-lease" })).toEqual(refused);
+				const other = await leased(store, "user-2");
+				expect(await recover(store, now, { leaseToken: other })).toEqual(refused);
+				const held = await leased(store);
+				expect(await recover(store, now, { leaseToken: `${held}x` })).toEqual(refused);
+				// The authorization stands for the apply that holds the lease.
+				expect(await recover(store, now, { leaseToken: held })).toEqual(RELEASED);
+			});
+
+			it("refuses an apply under a lease that lapsed on the store's clock", async () => {
+				const store = await factory();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				const answer = await store.acquireSubjectLease("user-1", { ttlMs: 1_000, generation: 0 });
+				if (answer.outcome !== "acquired") throw new Error("expected a lease");
+				await expiry.passed((await expiry.now()) + 1_000);
+				expect(await recover(store, start(), { leaseToken: answer.token })).toMatchObject({
+					reason: "lease_not_held",
+				});
+			});
+
+			it("applies a recover once: the week and the run end, the generation is 1, and the same authorization answers already_applied", async () => {
+				const store = await factory();
+				const from = await attacked(store);
+				const now = start();
+				expect(held(await check(store, now))).toMatchObject({ hold: "weekly" });
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				expect(await recover(store, now, { sessionsBoundaryMs: from + SKEW + 1 })).toEqual(
+					RELEASED,
+				);
+				expect(await store.subjectGeneration("user-1")).toBe(1);
+				expect(await recover(store, now, { sessionsBoundaryMs: from + SKEW + 1 })).toEqual({
+					outcome: "already_applied",
+					recoveryId: "recovery-1",
+					generation: 1,
+					hard: false,
+				});
+				expect(await store.subjectGeneration("user-1")).toBe(1);
+				// Ten failures fit the week again: the next five reach the backoff, not the weekly hold.
+				for (let i = 0; i < 5; i++) await fail(store, now + 1 + i);
+				expect(held(await check(store, now + 6))).toMatchObject({ hold: "backoff" });
+			});
+
+			it("applies a new authorization after an applied one, under its own recoveryId: the generation is 2", async () => {
+				const store = await factory();
+				const now = start();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				expect(await recover(store, now)).toEqual(RELEASED);
+				await store.authorizeSubjectRecovery("user-1", authorization({ recoveryId: "recovery-2" }));
+				expect(await recover(store, now)).toEqual({
+					...RELEASED,
+					recoveryId: "recovery-2",
+					generation: 2,
+				});
+				expect(await store.subjectGeneration("user-1")).toBe(2);
+			});
+
+			it("replaces a pending authorization of the same session and operation: the apply answers the newer recoveryId", async () => {
+				const store = await factory();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				await store.authorizeSubjectRecovery("user-1", authorization({ recoveryId: "recovery-2" }));
+				await store.authorizeSubjectRecovery(
+					"user-1",
+					authorization({ sid: "sid-2", recoveryId: "recovery-3" }),
+				);
+				expect(await recover(store, start())).toMatchObject({
+					outcome: "applied",
+					recoveryId: "recovery-2",
+				});
+				expect(await recover(store, start(), { sid: "sid-2" })).toMatchObject({
+					outcome: "applied",
+					recoveryId: "recovery-3",
+					generation: 2,
+				});
+			});
+
+			it("refuses not_revoked_since without a boundary later than the first counted failure by more than the skew, changing nothing, and applies once there is one", async () => {
+				const store = await factory();
+				const from = await attacked(store);
+				const now = start();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				const refused = { outcome: "refused", reason: "not_revoked_since", hard: false };
+				expect(await recover(store, now)).toEqual(refused);
+				expect(await recover(store, now, { sessionsBoundaryMs: from - 1 })).toEqual(refused);
+				expect(await recover(store, now, { sessionsBoundaryMs: from + SKEW })).toEqual(refused);
+				expect(held(await check(store, now))).toMatchObject({ hold: "weekly" });
+				expect(await store.subjectGeneration("user-1")).toBe(0);
+				expect(await recover(store, now, { sessionsBoundaryMs: from + SKEW + 1 })).toEqual(
+					RELEASED,
+				);
+			});
+
+			it("counts a reservation in flight as a failure the boundary must follow", async () => {
+				const store = await factory();
+				const now = start();
+				await reserved(store, now - HOUR);
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				expect(await recover(store, now)).toMatchObject({ reason: "not_revoked_since" });
+				expect(await recover(store, now, { sessionsBoundaryMs: now - HOUR + SKEW })).toMatchObject({
+					reason: "not_revoked_since",
+				});
+				expect(await recover(store, now, { sessionsBoundaryMs: now - HOUR + SKEW + 1 })).toEqual(
+					RELEASED,
+				);
+			});
+
+			it("applies, giving back nothing, when the week counts no failure at its time, with no boundary", async () => {
+				const store = await factory();
+				const now = start();
+				// A failure a week and a minute before: the week no longer counts it.
+				await fail(store, now - WEEK - MINUTE);
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				expect(await recover(store, now)).toEqual(RELEASED);
+			});
+
+			it("refuses boundary_ahead for a boundary later than its time by more than the skew, changing nothing, and takes one at the skew", async () => {
+				const store = await factory();
+				await attacked(store);
+				const now = start();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				expect(await recover(store, now, { sessionsBoundaryMs: now + SKEW + 1 })).toEqual({
+					outcome: "refused",
+					reason: "boundary_ahead",
+					hard: false,
+				});
+				expect(await store.subjectGeneration("user-1")).toBe(0);
+				expect(held(await check(store, now))).toMatchObject({ hold: "weekly" });
+				expect(await recover(store, now, { sessionsBoundaryMs: now + SKEW })).toEqual(RELEASED);
+			});
+
+			it("answers expired at a time at or past the authorization's end, and unauthorized once the store's clock passes it", async () => {
+				const store = await factory();
+				const ends = Date.now() + 10 * MINUTE;
+				await store.authorizeSubjectRecovery("user-1", authorization({ expiresAtMs: ends }));
+				expect(await recover(store, ends)).toEqual({
+					outcome: "refused",
+					reason: "expired",
+					hard: false,
+				});
+				expect(await recover(store, ends - 1)).toEqual(RELEASED);
+
+				const other = await factory();
+				const soon = Math.floor(await expiry.now()) + 1_000;
+				await other.authorizeSubjectRecovery("user-1", authorization({ expiresAtMs: soon }));
+				await expiry.passed(soon);
+				expect(await recover(other, soon - 500)).toMatchObject({ reason: "unauthorized" });
+			});
+
+			it("ends only the attempts dated up to its time: an attempt reserved later stays in the week", async () => {
+				const store = await factory();
+				const now = start();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				const later = await reserved(store, now + MINUTE);
+				expect(await recover(store, now)).toEqual(RELEASED);
+				await store.settleSubjectAttempt("user-1", later, "failure");
+				// A success ends the run, not the week: the later one and nine more fill it.
+				await settled(store, now + 2 * MINUTE, "success");
+				const at = await failures(store, now + 3 * MINUTE, 9);
+				expect(held(await check(store, at))).toMatchObject({ hold: "weekly" });
+			});
+
+			it("moves the generation a writer captured: its lease is answered stale, and one under the new generation is given", async () => {
+				const store = await factory();
+				const captured = await store.subjectGeneration("user-1");
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				expect(await recover(store, start())).toEqual(RELEASED);
+				expect(
+					await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: captured }),
+				).toEqual({ outcome: "stale" });
+				expect(
+					(await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 1 })).outcome,
+				).toBe("acquired");
+			});
+
+			it("keeps each subject's authorizations and generation apart", async () => {
+				const store = await factory();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				await store.authorizeSubjectRecovery("user-2", authorization({ recoveryId: "recovery-2" }));
+				expect(await recover(store, start(), {}, "user-2")).toMatchObject({
+					outcome: "applied",
+					recoveryId: "recovery-2",
+					generation: 1,
+				});
+				expect(await store.subjectGeneration("user-1")).toBe(0);
+				expect(await recover(store, start())).toEqual(RELEASED);
+			});
+
+			it("refuses, with a RangeError, an authorization it cannot keep, and records nothing", async () => {
+				const store = await factory();
+				const now = Math.floor(Math.max(Date.now(), await expiry.now()));
+				for (const [label, subject, value] of [
+					["an empty subject", "", authorization()],
+					["no authorization", "user-1", undefined],
+					[
+						"an operation it does not know",
+						"user-1",
+						authorization({ operation: "undo" as never }),
+					],
+					["a recover without a session", "user-1", authorization({ sid: undefined })],
+					["a recover with an empty session", "user-1", authorization({ sid: "" })],
+					["a reset with a session", "user-1", authorization({ operation: "reset" })],
+					["an empty recoveryId", "user-1", authorization({ recoveryId: "" })],
+					[
+						"a recoveryId that is not well-formed",
+						"user-1",
+						authorization({ recoveryId: "\ud800" }),
+					],
+					[
+						"an end that is not whole",
+						"user-1",
+						authorization({ expiresAtMs: now + MINUTE + 0.5 }),
+					],
+					["an end that is not a number", "user-1", authorization({ expiresAtMs: Number.NaN })],
+					[
+						"an end already past on the store's clock",
+						"user-1",
+						authorization({ expiresAtMs: now - MINUTE }),
+					],
+					[
+						"an end further ahead of the store's clock than MFA_RECOVERY_AUTHORIZATION_MAX_MS and the skew",
+						"user-1",
+						authorization({
+							expiresAtMs: now + MFA_RECOVERY_AUTHORIZATION_MAX_MS + SKEW + MINUTE,
+						}),
+					],
+				] as const) {
+					await expect(
+						store.authorizeSubjectRecovery(subject as never, value as never),
+						label,
+					).rejects.toThrow(RangeError);
+				}
+				expect(await recover(store, start())).toMatchObject({ reason: "unauthorized" });
+			});
+
+			it("refuses, with a RangeError, an apply it cannot make, and changes nothing", async () => {
+				const store = await factory();
+				await store.authorizeSubjectRecovery("user-1", authorization());
+				const now = start();
+				for (const [label, overrides] of [
+					["an operation it does not know", { operation: "undo" as never }],
+					["a recover without a session", { sid: undefined }],
+					["a reset with a session", { operation: "reset" as const }],
+					["a time that is not a number", { nowMs: Number.NaN }],
+					["an empty lease token", { leaseToken: "" }],
+					["a boundary before the epoch", { sessionsBoundaryMs: -1 }],
+					["a boundary that is not whole", { sessionsBoundaryMs: now + 0.5 }],
+					["a rebind time that is not a number", { guessableBoundSinceMs: Number.NaN }],
+					[
+						"a reset that names its rebind as none",
+						{ operation: "reset" as const, sid: undefined, guessableBoundSinceMs: null },
+					],
+					[
+						"a reset with a boundary",
+						{ operation: "reset" as const, sid: undefined, sessionsBoundaryMs: now },
+					],
+					[
+						"a reset with a rebind time",
+						{ operation: "reset" as const, sid: undefined, guessableBoundSinceMs: now },
+					],
+				] as const) {
+					await expect(
+						recover(store, now, overrides as Partial<MfaSubjectRecoveryApplication>),
+						label,
+					).rejects.toThrow(RangeError);
+				}
+				await expect(
+					store.applySubjectRecovery("", {
+						operation: "recover",
+						sid: "sid-1",
+						nowMs: now,
+						leaseToken: "token",
+						sessionsBoundaryMs: undefined,
+						guessableBoundSinceMs: undefined,
+					}),
+				).rejects.toThrow(RangeError);
+				expect(await store.subjectGeneration("user-1")).toBe(0);
+				expect(await recover(store, now)).toEqual(RELEASED);
+			});
+
+			describe("the hard hold", () => {
+				// The hold is lifted by an exempt proof and a rebind: no record of
+				// an installed guessable kind created before it remains. No
+				// sessions boundary is asked for; the week keeps that rule.
+
+				/** SMALL_HARD with the week holding at the six failures the hard hold counts. */
+				const WEEK_OF_SIX: MfaLockoutPolicy = { ...SMALL_HARD, weeklyBudget: 6 };
+
+				/** A record bound a day before the attack: no rebind. */
+				const OLD_RECORD = (): number => start() - DAY;
+
+				/** The run at SMALL_HARD's limit and an authorization: answers the hold's time (the last failure). */
+				async function latched(store: MfaTransactionStore): Promise<number> {
+					const last = await toTheHardLimit(store);
+					expect(held(await check(store, last + 1, SMALL_HARD))).toEqual(HARD);
+					await store.authorizeSubjectRecovery("user-1", authorization());
+					return last;
+				}
+
+				it("stays without a rebind: a recover with a boundary ends the week alone, keeps the run it counted, and answers that it stands", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					const answer = await recover(store, last + MINUTE, {
+						sessionsBoundaryMs: last + 1,
+						guessableBoundSinceMs: OLD_RECORD(),
+					});
+					expect(answer).toEqual({
+						outcome: "applied",
+						recoveryId: "recovery-1",
+						generation: 1,
+						cleared: { week: true, run: false, hard: false },
+						hard: true,
+					});
+					expect(held(await check(store, last + 2 * MINUTE, SMALL_HARD))).toEqual(HARD);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: OLD_RECORD() }),
+					).toEqual({
+						outcome: "already_applied",
+						recoveryId: "recovery-1",
+						generation: 1,
+						hard: true,
+					});
+				});
+
+				it("refuses not_revoked_since without a rebind or a boundary, answering that it stands", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: OLD_RECORD() }),
+					).toEqual({ outcome: "refused", reason: "not_revoked_since", hard: true });
+					expect(await store.subjectGeneration("user-1")).toBe(0);
+				});
+
+				it("lifts on a rebind with no sessions boundary: the run it counted ends, its backoff with it, and the week stands", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
+					).toEqual({
+						outcome: "applied",
+						recoveryId: "recovery-1",
+						generation: 1,
+						cleared: { week: false, run: true, hard: true },
+						hard: false,
+					});
+					// The week still counts the six failures; the run counts none.
+					expect(held(await check(store, last + 2 * MINUTE, WEEK_OF_SIX))).toMatchObject({
+						hold: "weekly",
+					});
+					expect((await check(store, last + 2 * MINUTE, SMALL_HARD)).ok).toBe(true);
+				});
+
+				it("lifts on a rebind and gives the week back with a boundary too", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, {
+							sessionsBoundaryMs: last + 1,
+							guessableBoundSinceMs: last + SKEW + 1,
+						}),
+					).toEqual({ ...RELEASED, cleared: { week: true, run: true, hard: true } });
+					expect((await check(store, last + 2 * MINUTE, WEEK_OF_SIX)).ok).toBe(true);
+				});
+
+				it("counts no guessable record left as a rebind", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(await recover(store, last + MINUTE)).toMatchObject({
+						outcome: "applied",
+						cleared: { hard: true },
+						hard: false,
+					});
+				});
+
+				it("starts a new episode once a recover leaves no hard hold: the next refusal is first, though the week still holds", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(first(await check(store, last + 2, SMALL_HARD))).toBe(false);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
+					).toMatchObject({ outcome: "applied", hard: false });
+					const refused = await check(store, last + 2 * MINUTE, WEEK_OF_SIX);
+					expect(held(refused)).toMatchObject({ hold: "weekly" });
+					expect(first(refused)).toBe(true);
+				});
+
+				it("keeps the episode while a recover leaves the hard hold standing: the next refusal is not first", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, {
+							sessionsBoundaryMs: last + 1,
+							guessableBoundSinceMs: OLD_RECORD(),
+						}),
+					).toMatchObject({ outcome: "applied", hard: true });
+					const refused = await check(store, last + 2 * MINUTE, SMALL_HARD);
+					expect(held(refused)).toEqual(HARD);
+					expect(first(refused)).toBe(false);
+				});
+
+				it("refuses, with a RangeError, a recover that names no rebind — neither the earliest guessable record's time nor null for none — and changes nothing", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					await expect(
+						recover(store, last + MINUTE, {
+							sessionsBoundaryMs: last + 1,
+							guessableBoundSinceMs: undefined,
+						}),
+					).rejects.toThrow(RangeError);
+					expect(held(await check(store, last + 2 * MINUTE, SMALL_HARD))).toEqual(HARD);
+					expect(await store.subjectGeneration("user-1")).toBe(0);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: OLD_RECORD() }),
+					).toMatchObject({ outcome: "refused", reason: "not_revoked_since", hard: true });
+				});
+
+				it("takes a record as a rebind only when it was created later than the hold by more than the skew", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW }),
+					).toMatchObject({ outcome: "refused", reason: "not_revoked_since", hard: true });
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
+					).toMatchObject({ outcome: "applied", hard: false });
+				});
+			});
+
+			describe("the reset", () => {
+				// The operator reset clears the subject's lock state whole, with no
+				// boundary or rebind asked for, and ends every other authorization.
+				const RESET = {
+					operation: "reset",
+					sid: undefined,
+					guessableBoundSinceMs: undefined,
+				} as const;
+				const resetAuthorization = () => authorization({ ...RESET, recoveryId: "reset-1" });
+
+				it("ends every hold, the hard hold included, with no boundary or rebind, and moves the generation", async () => {
+					const store = await factory();
+					const last = await toTheHardLimit(store);
+					await store.authorizeSubjectRecovery("user-1", resetAuthorization());
+					expect(await recover(store, last + MINUTE, RESET)).toEqual({
+						outcome: "applied",
+						recoveryId: "reset-1",
+						generation: 1,
+						cleared: { week: true, run: true, hard: true },
+						hard: false,
+					});
+					expect(await store.subjectGeneration("user-1")).toBe(1);
+					// Neither the hard hold nor a week of six holds: the state starts empty.
+					expect(
+						(await check(store, last + 2 * MINUTE, { ...SMALL_HARD, weeklyBudget: 6 })).ok,
+					).toBe(true);
+				});
+
+				it("ends every other authorization of the subject, keeps its own applied, and leaves another subject's", async () => {
+					const store = await factory();
+					await store.authorizeSubjectRecovery("user-1", authorization());
+					await store.authorizeSubjectRecovery(
+						"user-1",
+						authorization({ sid: "sid-2", recoveryId: "recovery-2" }),
+					);
+					await store.authorizeSubjectRecovery("user-2", authorization());
+					await store.authorizeSubjectRecovery("user-1", resetAuthorization());
+					const now = start();
+					expect(await recover(store, now, RESET)).toMatchObject({
+						outcome: "applied",
+						generation: 1,
+					});
+					expect(await recover(store, now)).toMatchObject({ reason: "unauthorized" });
+					expect(await recover(store, now, { sid: "sid-2" })).toMatchObject({
+						reason: "unauthorized",
+					});
+					expect(await recover(store, now, RESET)).toEqual({
+						outcome: "already_applied",
+						recoveryId: "reset-1",
+						generation: 1,
+						hard: false,
+					});
+					expect(await recover(store, now, {}, "user-2")).toMatchObject({ outcome: "applied" });
+				});
+
+				it("leaves what is not lock state: the email-proof requirement, the first-binding mark, a session's proof and a transaction", async () => {
+					const store = await factory();
+					const now = Math.floor(Math.max(Date.now(), await expiry.now()));
+					await store.requireEmailProofAtNextBinding("user-1");
+					await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+					await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+					await store.create(TX());
+					await store.authorizeSubjectRecovery("user-1", resetAuthorization());
+					expect(await recover(store, start(), RESET)).toMatchObject({ outcome: "applied" });
+					expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
+					expect(await store.firstBindingAt("user-1", now)).toBe(now);
+					expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+					expect(await store.get("tx-1")).not.toBeNull();
+				});
+
+				it("moves the generation on at each reset applied", async () => {
+					const store = await factory();
+					for (const generation of [1, 2, 3]) {
+						await store.authorizeSubjectRecovery(
+							"user-1",
+							authorization({ ...RESET, recoveryId: `reset-${generation}` }),
+						);
+						expect(await recover(store, start(), RESET)).toMatchObject({
+							outcome: "applied",
+							generation,
+						});
+					}
+					expect(await store.subjectGeneration("user-1")).toBe(3);
+				});
+			});
+		});
 	});
 
 	describe("MfaTransactionStore contract: the email proof at the next first binding", () => {
@@ -1611,10 +2256,10 @@ export function runMfaTransactionStoreContract(
 			expect(await store.emailProofRequiredAtNextBinding("user-2")).toBe(false);
 		});
 
-		it("keeps it through clearSubjectState, which the reset calls", async () => {
+		it("keeps it through a reset", async () => {
 			const store = await factory();
 			await store.requireEmailProofAtNextBinding("user-1");
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
 		});
 
@@ -1881,7 +2526,7 @@ export function runMfaTransactionStoreContract(
 			expect(await store.firstBindingAt("user-1", now)).toBe(now + MINUTE);
 		});
 
-		it("keeps each subject's mark apart, and through clearSubjectState", async () => {
+		it("keeps each subject's mark apart, and through a reset", async () => {
 			const store = await factory();
 			const now = await nowOnBoth();
 			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
@@ -1890,7 +2535,7 @@ export function runMfaTransactionStoreContract(
 			expect(await store.firstBindingAt("user-1", now)).toBe(now);
 			expect(await store.firstBindingAt("user-2", now)).toBe(now - MINUTE);
 			// The mark is not lock state: clearing the lock trusts no stale session.
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			expect(await store.firstBindingAt("user-1", now)).toBe(now);
 			// Nor is a session's proof of a subject its mark.
 			await store.recordSessionEmailProof("user-3", "sid-1", now, now + 10 * MINUTE);
@@ -1956,6 +2601,260 @@ export function runMfaTransactionStoreContract(
 					RangeError,
 				);
 			}
+		});
+	});
+
+	describe("MfaTransactionStore contract: a subject's lease and generation", () => {
+		// One writer at a time to a subject's factor set: a lease on the
+		// store's clock, freed by its holder's token alone. The generation is
+		// what a writer captured before it began; a lease asked for under any
+		// other is refused.
+		const TTL = 60_000;
+
+		const token = async (
+			store: MfaTransactionStore,
+			subject = "user-1",
+			generation = 0,
+		): Promise<string> => {
+			const answer = await store.acquireSubjectLease(subject, { ttlMs: TTL, generation });
+			if (answer.outcome !== "acquired") throw new Error(`expected a lease: ${answer.outcome}`);
+			return answer.token;
+		};
+
+		it("answers generation 0 for a subject that never recovered", async () => {
+			const store = await factory();
+			expect(await store.subjectGeneration("user-1")).toBe(0);
+		});
+
+		it("lets one holder at a time: busy while it stands, with the time left, and free again once its holder releases it", async () => {
+			const store = await factory();
+			const held = await token(store);
+			expect(held).toEqual(expect.any(String));
+			expect(held.length).toBeGreaterThan(0);
+			const busy = await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 });
+			expect(busy.outcome).toBe("busy");
+			if (busy.outcome !== "busy") return;
+			expect(busy.retryAfterMs).toBeGreaterThan(0);
+			expect(busy.retryAfterMs).toBeLessThanOrEqual(TTL);
+			expect(await store.releaseSubjectLease("user-1", `${held}x`)).toBe(false);
+			expect(
+				(await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 })).outcome,
+			).toBe("busy");
+			expect(await store.releaseSubjectLease("user-1", held)).toBe(true);
+			expect(await store.releaseSubjectLease("user-1", held)).toBe(false);
+			const next = await token(store);
+			expect(next).not.toBe(held);
+		});
+
+		it("gives the lease to exactly one of N acquires in flight", async () => {
+			const store = await factory();
+			const answers = await Promise.all(
+				Array.from({ length: 10 }, () =>
+					store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 }),
+				),
+			);
+			expect(answers.filter((a) => a.outcome === "acquired")).toHaveLength(1);
+			expect(answers.filter((a) => a.outcome === "busy")).toHaveLength(9);
+		});
+
+		it("lets a lease lapse at its end on the store's clock: another acquires it, and the first holder's release answers false", async () => {
+			const store = await factory();
+			const answer = await store.acquireSubjectLease("user-1", { ttlMs: 1_000, generation: 0 });
+			if (answer.outcome !== "acquired") throw new Error("expected a lease");
+			const after = await expiry.now();
+			await expiry.passed(after + 1_000);
+			const next = await token(store);
+			expect(await store.releaseSubjectLease("user-1", answer.token)).toBe(false);
+			expect(await store.releaseSubjectLease("user-1", next)).toBe(true);
+		});
+
+		it("keeps each subject's lease apart", async () => {
+			const store = await factory();
+			const one = await token(store, "user-1");
+			const two = await token(store, "user-2");
+			expect(await store.releaseSubjectLease("user-2", one)).toBe(false);
+			expect(await store.releaseSubjectLease("user-1", two)).toBe(false);
+			expect(await store.releaseSubjectLease("user-1", one)).toBe(true);
+			expect(
+				(await store.acquireSubjectLease("user-2", { ttlMs: TTL, generation: 0 })).outcome,
+			).toBe("busy");
+		});
+
+		it("acquires under the generation the caller captured, and answers stale under any other, holding nothing", async () => {
+			const store = await factory();
+			const held = await token(store, "user-1", 0);
+			expect(await store.releaseSubjectLease("user-1", held)).toBe(true);
+			for (const generation of [1, 7]) {
+				expect(
+					await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation }),
+					String(generation),
+				).toEqual({ outcome: "stale" });
+			}
+			// Stale is answered before busy: a writer that will never commit is not asked to wait.
+			const other = await token(store);
+			expect(await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 1 })).toEqual({
+				outcome: "stale",
+			});
+			expect(await store.releaseSubjectLease("user-1", other)).toBe(true);
+			expect(
+				(await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 })).outcome,
+			).toBe("acquired");
+		});
+
+		it("refuses, with a RangeError, a lease it cannot give or a question it cannot answer, and holds nothing", async () => {
+			const store = await factory();
+			for (const [label, subject, request] of [
+				["an empty subject", "", { ttlMs: TTL, generation: 0 }],
+				["a subject that is not a string", 7, { ttlMs: TTL, generation: 0 }],
+				["no request", "user-1", undefined],
+				// A writer that names no generation would pass every recovery and reset.
+				["a request with no generation", "user-1", { ttlMs: TTL }],
+				["a lease shorter than MFA_SUBJECT_LEASE_MIN_MS", "user-1", { ttlMs: 999 }],
+				["a lease longer than MFA_SUBJECT_LEASE_MAX_MS", "user-1", { ttlMs: 600_001 }],
+				["a lease that is not whole", "user-1", { ttlMs: 1_000.5 }],
+				["a lease that is not a number", "user-1", { ttlMs: Number.NaN }],
+				["a lease as text", "user-1", { ttlMs: "60000" }],
+				["a negative generation", "user-1", { ttlMs: TTL, generation: -1 }],
+				["a generation that is not whole", "user-1", { ttlMs: TTL, generation: 0.5 }],
+				["a generation as text", "user-1", { ttlMs: TTL, generation: "0" }],
+				["a generation past the safe integers", "user-1", { ttlMs: TTL, generation: 2 ** 53 }],
+			] as const) {
+				await expect(
+					store.acquireSubjectLease(subject as never, request as never),
+					label,
+				).rejects.toThrow(RangeError);
+			}
+			for (const [label, subject, held] of [
+				["an empty subject", "", "token"],
+				["an empty token", "user-1", ""],
+				["a token that is not a string", "user-1", 7],
+			] as const) {
+				await expect(
+					store.releaseSubjectLease(subject as never, held as never),
+					`release: ${label}`,
+				).rejects.toThrow(RangeError);
+			}
+			await expect(store.subjectGeneration("" as never)).rejects.toThrow(RangeError);
+			expect(
+				(await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 })).outcome,
+			).toBe("acquired");
+		});
+	});
+
+	describe("MfaTransactionStore contract: a subject's recovery-set floor", () => {
+		// The lowest recovery-code set generation that verifies: a set's
+		// generation, not the subject's. It is kept apart from the sets, so
+		// deleting a set never lowers it, and raised under the subject's lease.
+
+		/** The subject's lease, under the generation it is at. */
+		async function leased(store: MfaTransactionStore, subject = "user-1"): Promise<string> {
+			const generation = await store.subjectGeneration(subject);
+			const lease = await store.acquireSubjectLease(subject, { ttlMs: 60_000, generation });
+			if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
+			return lease.token;
+		}
+
+		const raised = (floor: number) => ({ outcome: "raised", floor });
+
+		it("answers floor 0 for a subject never issued a set", async () => {
+			const store = await factory();
+			expect(await store.recoverySetFloor("user-1")).toBe(0);
+		});
+
+		it("raises the floor under the subject's lease and never lowers it, answering the floor after each raise", async () => {
+			const store = await factory();
+			const leaseToken = await leased(store);
+			const raise = (setGeneration: number) =>
+				store.raiseRecoverySetFloor("user-1", { setGeneration, leaseToken });
+			expect(await raise(3)).toEqual(raised(3));
+			expect(await raise(2)).toEqual(raised(3));
+			expect(await store.recoverySetFloor("user-1")).toBe(3);
+			expect(await raise(5)).toEqual(raised(5));
+			expect(await store.recoverySetFloor("user-1")).toBe(5);
+		});
+
+		it("keeps the highest of N raises in flight under one lease", async () => {
+			const store = await factory();
+			const leaseToken = await leased(store);
+			await Promise.all(
+				[4, 9, 1, 7, 10, 2, 8, 3, 6, 5].map((setGeneration) =>
+					store.raiseRecoverySetFloor("user-1", { setGeneration, leaseToken }),
+				),
+			);
+			expect(await store.recoverySetFloor("user-1")).toBe(10);
+		});
+
+		it("refuses a raise without the subject's lease, raising nothing: none, another holder's token, or another subject's", async () => {
+			const store = await factory();
+			const refused = { outcome: "refused", reason: "lease_not_held" };
+			expect(
+				await store.raiseRecoverySetFloor("user-1", {
+					setGeneration: 2,
+					leaseToken: "no-such-lease",
+				}),
+			).toEqual(refused);
+			const other = await leased(store, "user-2");
+			expect(
+				await store.raiseRecoverySetFloor("user-1", { setGeneration: 2, leaseToken: other }),
+			).toEqual(refused);
+			const held = await leased(store);
+			expect(
+				await store.raiseRecoverySetFloor("user-1", { setGeneration: 2, leaseToken: `${held}x` }),
+			).toEqual(refused);
+			expect(await store.recoverySetFloor("user-1")).toBe(0);
+			expect(
+				await store.raiseRecoverySetFloor("user-1", { setGeneration: 2, leaseToken: held }),
+			).toEqual(raised(2));
+		});
+
+		it("keeps the floor through a reset, and each subject's apart", async () => {
+			const store = await factory();
+			const leaseToken = await leased(store);
+			await store.raiseRecoverySetFloor("user-1", { setGeneration: 4, leaseToken });
+			await store.authorizeSubjectRecovery("user-1", {
+				operation: "reset",
+				sid: undefined,
+				recoveryId: "reset-1",
+				expiresAtMs: Date.now() + 10 * MINUTE,
+			});
+			expect(
+				await store.applySubjectRecovery("user-1", {
+					operation: "reset",
+					sid: undefined,
+					nowMs: Date.now(),
+					leaseToken,
+					sessionsBoundaryMs: undefined,
+					guessableBoundSinceMs: undefined,
+				}),
+			).toMatchObject({ outcome: "applied" });
+			expect(await store.recoverySetFloor("user-1")).toBe(4);
+			expect(await store.recoverySetFloor("user-2")).toBe(0);
+		});
+
+		it("refuses, with a RangeError, a raise it cannot make or a question it cannot answer, and raises nothing", async () => {
+			const store = await factory();
+			const leaseToken = await leased(store);
+			for (const [label, subject, raise] of [
+				["an empty subject", "", { setGeneration: 1, leaseToken }],
+				["no raise", "user-1", undefined],
+				["a set generation of 0", "user-1", { setGeneration: 0, leaseToken }],
+				["a negative set generation", "user-1", { setGeneration: -1, leaseToken }],
+				["a set generation that is not whole", "user-1", { setGeneration: 1.5, leaseToken }],
+				["a set generation as text", "user-1", { setGeneration: "1", leaseToken }],
+				[
+					"a set generation past the safe integers",
+					"user-1",
+					{ setGeneration: 2 ** 53, leaseToken },
+				],
+				["an empty lease token", "user-1", { setGeneration: 1, leaseToken: "" }],
+			] as const) {
+				await expect(
+					store.raiseRecoverySetFloor(subject as never, raise as never),
+					label,
+				).rejects.toThrow(RangeError);
+			}
+			await expect(store.recoverySetFloor("" as never)).rejects.toThrow(RangeError);
+			expect(await store.recoverySetFloor("user-1")).toBe(0);
 		});
 	});
 }
