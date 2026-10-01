@@ -284,6 +284,28 @@ describe("the session grant — the auth_time it stamps", () => {
 		);
 	});
 
+	it("an authTime ahead of the clock within the skew is stamped as the minting clock: never later than iat", async () => {
+		const { result } = await grant({
+			userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 60_000) })),
+		}).handle(ctx(LIVE_COOKIE));
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		const claims = decodeJwt(result.tokens.access_token);
+		expect(claims.auth_time).toEqual(expect.any(Number));
+		expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+	});
+
+	it("an authTime further ahead than the skew allows is 400 invalid_grant session_invalid, nothing minted", async () => {
+		const { result } = await grant({
+			userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 10 * 60_000) })),
+		}).handle(ctx(LIVE_COOKIE));
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(result).not.toHaveProperty("tokens");
+	});
+
 	it("stamps no auth_time without a userSessionStore, which records no authentication", async () => {
 		const { result } = await grant({}).handle(ctx(LIVE_COOKIE));
 		if (!("tokens" in result)) throw new Error("expected tokens");

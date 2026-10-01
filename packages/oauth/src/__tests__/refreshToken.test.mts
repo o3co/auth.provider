@@ -2453,6 +2453,14 @@ describe("refresh carries how the user authenticated", () => {
 		expect(rt.auth_time).toBe(1_776_729_600);
 	});
 
+	it("caps a carried auth_time later than its own issuance at that issuance, on both new tokens", async () => {
+		const ahead = Math.floor(Date.now() / 1000) + 3600;
+		const { at, rt } = await refresh(await presentedWith({ auth_time: ahead }));
+		expect(rt.auth_time).toBe(rt.iat);
+		expect(at.auth_time).toBe(rt.iat);
+		expect(at.auth_time as number).toBeLessThanOrEqual(at.iat as number);
+	});
+
 	it("refreshes a refresh token that carries no auth_time, and takes none from its live session", async () => {
 		const session: UserSession = {
 			sid: "sid-1",
