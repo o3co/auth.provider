@@ -272,6 +272,42 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 			expect(h.refresh).toHaveBeenCalledTimes(1);
 		});
 
+		it("keeps a token stored without its end, stating the end it is read to have", async () => {
+			// A record from before the end was recorded: it ends its issued
+			// lifetime after it was obtained, and is written back as ending there.
+			await h.seed({
+				credentials: {
+					refreshToken: SECRET,
+					accessToken: {
+						value: "at-0",
+						tokenType: "Bearer",
+						obtainedAt: T0,
+						issuedLifetime: 3600,
+						scopes: [...SCOPES],
+					},
+				},
+			});
+			setNow(at(40 * MIN));
+			h.refresh.mockResolvedValue(garbage("rotated"));
+
+			expect(await retrieve({ scope: ["calendar.write"] })).toMatchObject({
+				ok: false,
+				code: "upstream_token_ineligible",
+			});
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-rotated`,
+				accessToken: {
+					value: "at-0",
+					tokenType: "Bearer",
+					obtainedAt: T0,
+					issuedLifetime: 3600,
+					effectiveExpiresAt: at(HOUR),
+					scopes: [...SCOPES],
+				},
+			});
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-0", expiresIn: 1200 });
+		});
+
 		it("does not cost it that token when the new one is merely ineligible, either", async () => {
 			await h.seed();
 			setNow(at(40 * MIN));
@@ -369,6 +405,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 						tokenType: "Bearer",
 						obtainedAt: new Date(moment.getTime() - 50 * MIN),
 						issuedLifetime: 3600,
+						effectiveExpiresAt: new Date(moment.getTime() + 10 * MIN),
 						scopes: [...SCOPES],
 					},
 				},

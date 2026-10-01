@@ -33,6 +33,7 @@ import type {
 	AuthorizedFederationGrant,
 	FederationGrantConnection,
 	FederationGrantCredentials,
+	FederationGrantCredentialsInput,
 } from "#/federation-grants/types.mjs";
 import type { DelegatedTokens } from "#/federations/types.mjs";
 
@@ -137,7 +138,8 @@ export interface Harness {
 	/**
 	 * Lodges and activates `g-1` now for `u-1` / `agent`, under the connection as
 	 * the world has it, with an access token obtained now and good for an hour,
-	 * carrying every consented scope.
+	 * carrying every consented scope. `credentials` may be any a store can
+	 * hold, one written before its access token's end was recorded included.
 	 */
 	seed(over?: {
 		credentials?: FederationGrantCredentials;
@@ -210,13 +212,16 @@ export function harness(): Harness {
 					authorizedAt: seededAt,
 					expiresAt: over.expiresAt ?? new Date(seededAt.getTime() + 30 * DAY),
 				},
-				credentials: over.credentials ?? {
+				// A record written without the end is one no writer of this release
+				// makes, so it is handed over as a store would hold it.
+				credentials: (over.credentials as FederationGrantCredentialsInput | undefined) ?? {
 					refreshToken: SECRET,
 					accessToken: {
 						value: "at-0",
 						tokenType: "Bearer",
 						obtainedAt: seededAt,
 						issuedLifetime: 3600,
+						effectiveExpiresAt: new Date(seededAt.getTime() + HOUR),
 						scopes: [...SCOPES],
 					},
 				},

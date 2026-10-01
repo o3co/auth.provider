@@ -34,6 +34,7 @@ A deployment that only wires the bundled stores and modules has nothing to chang
 | `DeviceAuthorization` (later) | `approvedAtMs`: the instant an approval was given, the `nowMs` `approve` was handed; `undefined` before. A `DeviceCodeStore` of your own records it and returns it — the device grant holds it against the subject's sessions boundary at the poll. A record approved before the upgrade (the bundled Redis store's included) reads it as `undefined` — and under `core.deployment.mode = "multi"` so does every approval a replica not yet upgraded writes during the rollout. A poll refuses such an approval only while the subject has a sessions boundary in force; the device is answered `invalid_grant` and simply restarts the flow. Nothing needs migrating. | — |
 | `FederationGrantIntent` | `resource`, `upstreamSubject` | #658 |
 | `FederationGrantAuthorization`, `FederationGrantUsage`, `FederationGrantCredentials` | `resource`; `lastUsedAt`, `ineligible`, `refreshFailure`; `accessToken` | #657 |
+| `FederationGrantCredentialsInput` (new: what `FederationGrantStore.activate` / `replaceCredentials` take) | the access token's `effectiveExpiresAt`, as a `Date`: when the token ends. What a store answers, `FederationGrantCredentials`, keeps it optional — a record written before the field, or rewritten by an earlier release during a rolling deploy, has none, and ends at `obtainedAt + issuedLifetime`. A store of your own keeps it as given and reads it back absent when it has none, as before. | — |
 | `FederationGrantRefreshFailure` (the stored stamp) | `retryAfterSeconds`, `upstreamCode`. It no longer `extends` `FederationGrantRefreshFailureInput`, whose fields stay optional. | #657 |
 | Redis `NoteFederationGrantRefreshFailureInput` | `retryAfterSeconds`, `upstreamCode` | #657 |
 | `UserSession`, `CreateUserSessionInput` | `amr` | #659 |
@@ -72,7 +73,8 @@ Inputs that were optional are now keys you name:
 - `PendingConsentStore.set` takes `state`;
 - the Redis consent client's `grant` takes `expiry`;
 - the Redis grant client's `noteRefreshFailure` takes `retryAfterSeconds` / `upstreamCode`;
-- `FederationGrantStore.activate` / `replaceCredentials` take `authorization.resource` / `credentials.accessToken`.
+- `FederationGrantStore.activate` / `replaceCredentials` take `authorization.resource` / `credentials.accessToken`;
+- and, later, an access token's `effectiveExpiresAt` as a `Date`. Build the token with `federationGrantAccessToken(token, lifetime)` from a lifetime reading, as the bundled writers do. A token read back from the store and written again states the end it is read to have: its `effectiveExpiresAt`, never after `obtainedAt + issuedLifetime`, and that instant when it has none.
 
 Write `undefined` where you have nothing. That makes "no expiry", "no state" or "no access token" something the code says, not something it arrives at by leaving a field out.
 

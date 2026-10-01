@@ -492,6 +492,7 @@ const establish = async (
 				tokenType: "Bearer",
 				obtainedAt: new Date(consentAt.getTime() + 1000),
 				issuedLifetime: 3600,
+				effectiveExpiresAt: new Date(consentAt.getTime() + 1000 + 3600 * 1000),
 				scopes: ["openid", "offline_access", "calendar.read"],
 			},
 		},

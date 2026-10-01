@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
 	federationGrantAccessToken,
 	federationGrantHeldToken,
+	federationGrantKeptAccessToken,
 } from "#/federation-grants/held-token.mjs";
 
 const T0 = new Date("2026-09-18T00:00:00.000Z");
@@ -95,5 +96,27 @@ describe("federationGrantHeldToken", () => {
 			expect(Number.isNaN(held.obtainedAt.getTime())).toBe(true);
 			expect(Number.isNaN(held.expiresAt.getTime())).toBe(true);
 		}
+	});
+});
+
+describe("federationGrantKeptAccessToken", () => {
+	const stored = { ...token, obtainedAt: T0, issuedLifetime: 3600 };
+
+	it("states the end a token without one is read to have: its issued lifetime after it was obtained", () => {
+		expect(federationGrantKeptAccessToken(stored)).toStrictEqual({
+			...stored,
+			effectiveExpiresAt: at(3_600_000),
+		});
+	});
+
+	it("keeps the end a token states, held to its issued lifetime as it is read", () => {
+		expect(
+			federationGrantKeptAccessToken({ ...stored, effectiveExpiresAt: at(1_800_000) })
+				.effectiveExpiresAt,
+		).toEqual(at(1_800_000));
+		expect(
+			federationGrantKeptAccessToken({ ...stored, effectiveExpiresAt: at(7_200_000) })
+				.effectiveExpiresAt,
+		).toEqual(at(3_600_000));
 	});
 });

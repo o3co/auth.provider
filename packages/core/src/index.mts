@@ -1526,6 +1526,7 @@ export {
 	type FederationGrantConnection,
 	type FederationGrantConsent,
 	type FederationGrantCredentials,
+	type FederationGrantCredentialsInput,
 	type FederationGrantDenial,
 	type FederationGrantExpiredReason,
 	type FederationGrantIneligibilityMarker,

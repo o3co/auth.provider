@@ -40,6 +40,7 @@ import {
 import {
 	federationGrantAccessToken,
 	federationGrantHeldToken,
+	federationGrantKeptAccessToken,
 	type StoredAccessToken,
 } from "./held-token.mjs";
 import { federationGrantEffectiveExpiry } from "./lifetime.mjs";
@@ -49,6 +50,7 @@ import {
 	type FederationGrant,
 	type FederationGrantConnection,
 	type FederationGrantCredentials,
+	type FederationGrantCredentialsInput,
 	type FederationGrantDenial,
 	type FederationGrantIneligibilityMarker,
 	type FederationGrantRefreshFailureInput,
@@ -1287,9 +1289,9 @@ async function refreshUnderLock(
 	// written — and the stored one that still can be is kept: a refresh that
 	// brought nothing usable must not cost the grant the token that worked. It
 	// is judged again, against the maximum and the clock, at every disclosure.
-	let credentials: FederationGrantCredentials = {
+	let credentials: FederationGrantCredentialsInput = {
 		refreshToken: response.refreshToken,
-		accessToken: held.keep,
+		accessToken: held.keep === undefined ? undefined : federationGrantKeptAccessToken(held.keep),
 	};
 	let ineligible: FederationGrantIneligibilityMarker | null = null;
 	const marker = (
