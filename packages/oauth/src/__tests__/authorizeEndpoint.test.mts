@@ -33,6 +33,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	type CreateCodeInput,
+	checkRedirectUri,
 	createSymmetricKeyStore,
 	type FederationProvider,
 	type GrantPolicyDecision,
@@ -2583,5 +2584,148 @@ describe("/authorize — every authorization response names its issuer (RFC 9207
 		const params = redirectParams(await authorize(app, baseQuery));
 		expect(issOf(params)).toEqual([advertisedIssuer(configured)]);
 		expect(issOf(params)).toEqual(["https://issuer.example/tenant"]);
+	});
+});
+
+// The harness's repository is a custom `ClientRepository`: it hands back the
+// record as written, with no `ClientEntrySchema` in between. A registered entry
+// that core's `checkRedirectUri` refuses is answered as an unregistered one:
+// 400 JSON, and no redirect to it.
+describe("/authorize — a registered redirect_uri that checkRedirectUri refuses", () => {
+	const NOT_ALLOWED = { error: "invalid_request", error_description: "redirect_uri not allowed" };
+
+	/** An app whose client registers `entry`, and the logger it writes to. */
+	const registering = async (entry: string, extra: Parameters<typeof makeApp>[0] = {}) => {
+		const logger = createMockLogger();
+		const harness = await makeApp({ client: { allowedRedirectUris: [entry] }, logger, ...extra });
+		return { ...harness, logger };
+	};
+
+	const expectRefused = (
+		res: request.Response,
+		logger: ReturnType<typeof createMockLogger>,
+		reason: string,
+	) => {
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual(NOT_ALLOWED);
+		expect(res.headers.location).toBeUndefined();
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ site: "authorize", clientId: CLIENT_ID, reason },
+			"authorize_registered_redirect_uri_refused",
+		);
+	};
+
+	const refusedQueries = [
+		["code", `${REDIRECT_URI}?code=x`, "reserved-parameter"],
+		["state", `${REDIRECT_URI}?state=x`, "reserved-parameter"],
+		["iss", `${REDIRECT_URI}?iss=x`, "reserved-parameter"],
+		["error", `${REDIRECT_URI}?error=x`, "reserved-parameter"],
+		["error_description", `${REDIRECT_URI}?error_description=x`, "reserved-parameter"],
+		["a bracketed name", `${REDIRECT_URI}?filter[x]=1`, "query-name-invalid"],
+		["a ;", `${REDIRECT_URI}?x=1;iss=a`, "query-name-invalid"],
+	] as const;
+
+	it.each(refusedQueries)(
+		"answers GET 400 with no redirect for a registered query that carries %s",
+		async (_label, entry, reason) => {
+			const { app, logger, createCode } = await registering(entry);
+			expectRefused(await authorize(app, { ...baseQuery, redirect_uri: entry }), logger, reason);
+			expect(createCode).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each(refusedQueries)(
+		"answers POST 400 with no redirect for a registered query that carries %s",
+		async (_label, entry, reason) => {
+			const { app, logger, createCode } = await registering(entry);
+			expectRefused(
+				await authorizePost(app, { ...baseQuery, redirect_uri: entry }),
+				logger,
+				reason,
+			);
+			expect(createCode).not.toHaveBeenCalled();
+		},
+	);
+
+	it("answers prompt=none with no session 400, not a login_required redirect to it", async () => {
+		const entry = `${REDIRECT_URI}?iss=x`;
+		const { app, logger } = await registering(entry, { session: { isAuthenticated: false } });
+		expectRefused(
+			await authorize(app, { ...baseQuery, redirect_uri: entry, prompt: "none" }),
+			logger,
+			"reserved-parameter",
+		);
+	});
+
+	it("sends an unauthenticated browser to log in first, and to the URI not at all", async () => {
+		const entry = `${REDIRECT_URI}?iss=x`;
+		const { app, logger } = await registering(entry, { session: { isAuthenticated: false } });
+		const res = await authorize(app, { ...baseQuery, redirect_uri: entry });
+		expect(res.status).toBe(302);
+		expect((res.headers.location as string).startsWith("/login?redirect_to=")).toBe(true);
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("answers 400 for a loopback entry presented with a port", async () => {
+		const entry = "http://127.0.0.1/cb?state=x";
+		const { app, logger } = await registering(entry);
+		expectRefused(
+			await authorize(app, { ...baseQuery, redirect_uri: "http://127.0.0.1:49152/cb?state=x" }),
+			logger,
+			"reserved-parameter",
+		);
+	});
+
+	it.each([
+		["in an executable scheme", "javascript:alert(document.domain)", "executable-scheme"],
+		["with a fragment", `${REDIRECT_URI}#top`, "fragment"],
+	] as const)("answers 400 for an entry %s", async (_label, entry, reason) => {
+		const { app, logger } = await registering(entry);
+		expectRefused(await authorize(app, { ...baseQuery, redirect_uri: entry }), logger, reason);
+	});
+
+	it("redirects to a registered query the rule accepts, keeping it beside one code, state and iss", async () => {
+		const entry = `${REDIRECT_URI}?tenant=a&b-c=d`;
+		const { app, logger } = await registering(entry);
+		const params = redirectParams(await authorize(app, { ...baseQuery, redirect_uri: entry }));
+		expect(params.getAll("tenant")).toEqual(["a"]);
+		expect(params.getAll("b-c")).toEqual(["d"]);
+		expect(params.getAll("code")).toEqual(["code-x"]);
+		expect(params.getAll("state")).toEqual(["xyz"]);
+		expect(params.getAll("iss")).toEqual([advertisedIssuer("https://issuer.example")]);
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+});
+
+// Read from real responses, not from the names a test hands the builder: a
+// caller that starts passing another name fails here until core reserves it.
+describe("/authorize — every name a redirect appends is one checkRedirectUri refuses", () => {
+	/** Each name `location` carries beyond the registered `redirect_uri`'s own query (none here). */
+	const appendedNames = (res: request.Response): string[] => {
+		expect(res.status).toBe(302);
+		return [...new URL(res.headers.location as string).searchParams.keys()];
+	};
+
+	const expectEachReserved = (names: readonly string[]) => {
+		for (const name of names) {
+			expect(checkRedirectUri(`${REDIRECT_URI}?${name}=x`), name).toEqual({
+				reason: "reserved-parameter",
+				parameter: name,
+			});
+		}
+	};
+
+	it("on the code redirect", async () => {
+		const { app } = await makeApp({});
+		const names = appendedNames(await authorize(app, baseQuery));
+		expect(names).toContain("code");
+		expectEachReserved(names);
+	});
+
+	it("on an error redirect (unsupported_response_type)", async () => {
+		const { app } = await makeApp({});
+		const names = appendedNames(await authorize(app, { ...baseQuery, response_type: "token" }));
+		expect(names).toContain("error");
+		expectEachReserved(names);
 	});
 });

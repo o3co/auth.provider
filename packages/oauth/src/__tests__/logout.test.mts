@@ -18,6 +18,7 @@ import { createSecretKey } from "node:crypto";
 import {
 	type AuditSink,
 	type ClientRepository,
+	checkRedirectUri,
 	createSymmetricKeyStore,
 	type FederationProvider,
 	type FederationTokenStore,
@@ -1111,18 +1112,22 @@ describe("POST /oauth/logout", () => {
 
 		// A custom ClientRepository bypasses ClientEntrySchema, so an entry
 		// `checkRedirectUri` would refuse at boot can reach this route: one the
-		// URL parser cannot read, or one in an executable scheme. Matching it
-		// exactly does not make it a place to send a browser: `new URL()` on
-		// the first would end a finished logout in a 500, and the second would
-		// reach `window.location.href` on the front-channel page, which is
-		// script on this origin. Either is dropped with one warn, and the
-		// logout completes as if no URI had been sent.
+		// URL parser cannot read, one in an executable scheme, or one whose
+		// query carries a name the response appends. Matching it exactly does
+		// not make it a place to send a browser: `new URL()` on the first would
+		// end a finished logout in a 500, the second would reach
+		// `window.location.href` on the front-channel page, which is script on
+		// this origin, and the third would hand the RP a `state` it never sent.
+		// Each is dropped with one warn, and the logout completes as if no URI
+		// had been sent.
 		describe("a registered entry this server would not redirect to", () => {
 			const UNPARSABLE = "::not a url";
 			const EXECUTABLE = "javascript:alert(document.domain)";
+			const RESERVED = "https://rp.example/bye?state=registered";
 			const cases = [
 				["one the URL parser cannot read", UNPARSABLE, "unparsable"],
 				["one in an executable scheme", EXECUTABLE, "executable-scheme"],
+				["one whose query carries a response parameter", RESERVED, "reserved-parameter"],
 			] as const;
 
 			const registering = (entry: string) =>
@@ -1215,6 +1220,7 @@ describe("POST /oauth/logout", () => {
 					expect(res.text).not.toContain("<script>");
 					expect(res.text).not.toContain("javascript:");
 					expect(res.text).not.toContain("not a url");
+					expect(res.text).not.toContain("state=registered");
 					expectRefusedOnce(logger, reason);
 				},
 			);
@@ -1671,6 +1677,36 @@ describe("GET /oauth/logout", () => {
 		expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 		expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
 		expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
+	});
+
+	it("appends to a post-logout redirect only names checkRedirectUri refuses in a registered query", async () => {
+		const app = buildApp({
+			clientRepo: makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					tokenEndpointAuthMethod: "client_secret_basic",
+					allowedRedirectUris: ["https://example.test/cb"],
+					allowedScopes: ["openid"],
+					postLogoutRedirectUris: ["https://rp.example/logged-out"],
+				}),
+			}),
+		});
+
+		const res = await getLogout(app, {
+			id_token_hint: await mintIdToken(),
+			post_logout_redirect_uri: "https://rp.example/logged-out",
+			state: "bye",
+		});
+
+		expect(res.status).toBe(303);
+		const appended = [...new URL(res.headers.location as string).searchParams.keys()];
+		expect(appended).toContain("state");
+		for (const name of appended) {
+			expect(checkRedirectUri(`https://rp.example/logged-out?${name}=x`), name).toEqual({
+				reason: "reserved-parameter",
+				parameter: name,
+			});
+		}
 	});
 
 	it("returns 400 invalid_request when id_token_hint is missing (no hint to pass through)", async () => {
@@ -2133,6 +2169,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 		it.each([
 			["one the URL parser cannot read", "::not a url", "unparsable"],
 			["one in an executable scheme", "javascript:alert(document.domain)", "executable-scheme"],
+			[
+				"one whose query carries a response parameter",
+				"https://rp.example/bye?state=registered",
+				"reserved-parameter",
+			],
 		] as const)(
 			"is none for a registered entry this server would not redirect to: %s",
 			async (_label, entry, reason) => {
