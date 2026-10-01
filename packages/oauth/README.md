@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 The OAuth 2.0 / OpenID Connect authorization-server endpoints of [auth.provider](../../README.md): the HTTP surface under `/oauth`, the built-in grant types, client authentication, and the logout cascade.
 
@@ -132,7 +132,7 @@ The six slots are `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
 
 The router refuses to be built — which through `createApp` is a boot failure — when `consentStore` is wired without `pendingConsentStore` or the reverse, and when `oauth.revocation.accessToken = "denylist"` is declared with no `accessTokenDenylist`.
 
-**Discovery.** `oauthModule` contributes its endpoints and metadata to core's `/.well-known/openid-configuration`, which core serves only when an issuer is configured. Each capability is advertised only where it can be honoured: `revocation_endpoint` when the endpoint can revoke something, `private_key_jwt` when a `replaySeenSet` is wired, `client_id_metadata_document_supported` when the feature is on, a consent store is wired and the `authorization_code` grant is registered, the logout fields under the six-slot check above. `grant_types_supported` is read off the resolver `/oauth/token` dispatches against, and so is the authorization endpoint's presence: with the `authorization_code` grant the document names it and advertises `response_types_supported: ["code"]`, `code_challenge_methods_supported: ["S256"]`, `request_uri_parameter_supported` and the acr table; without it, `response_types_supported: []` and none of the rest. The rules are stated where they are computed, in [`module.mts`](./src/module.mts), and pinned by [`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts).
+**Discovery.** `oauthModule` contributes its endpoints and metadata to core's `/.well-known/openid-configuration`, which core serves only when an issuer is configured. Each capability is advertised only where it can be honoured: `revocation_endpoint` when the endpoint can revoke something, `private_key_jwt` when a `replaySeenSet` is wired, `client_id_metadata_document_supported` when the feature is on, a consent store is wired and the `authorization_code` grant is registered, the logout fields under the six-slot check above. `grant_types_supported` is read off the resolver `/oauth/token` dispatches against, and so is the authorization endpoint's presence: with the `authorization_code` grant the document names it and advertises `response_types_supported: ["code"]`, `code_challenge_methods_supported: ["S256"]`, `request_uri_parameter_supported`, `authorization_response_iss_parameter_supported: true` and the acr table; without it, `response_types_supported: []` and none of the rest. The rules are stated where they are computed, in [`module.mts`](./src/module.mts), and pinned by [`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts).
 
 ## Public API
 
@@ -255,6 +255,8 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 - The comparison lives in `matchesRegisteredRedirectUri` (`@o3co/auth-provider-core`), exported so a custom authorization endpoint matches the way this one does.
 
 **PKCE is mandatory, and `S256` is the method.** `plain` is admitted only for a client whose registration carries `allowPlainPkce: true`, which is why discovery lists `S256` alone. PKCE takes no configuration: `oauth.grants.authorization_code.pkce`, and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` set at all, refuse boot as removed.
+
+**Every authorization response names its issuer** ([RFC 9207](https://datatracker.ietf.org/doc/html/rfc9207)). Each redirect to a client's `redirect_uri` — the code, every error redirect from `/oauth/authorize`, and the consent step's deny — carries `iss`, the issuer exactly as the discovery document's `issuer` states it (core's `advertisedIssuer`: the configured `oauth.jwt.issuer` without a trailing slash), and discovery says so with `authorization_response_iss_parameter_supported: true`. A client checks it against the issuer it sent the request to, which defeats a mix-up between authorization servers. The `400` JSON answers given before `redirect_uri` is trusted (an unknown client, an unregistered `redirect_uri`) reach no client and carry none. There is no switch: every such response is built by one function, [`routes/authorizationResponse.mts`](./src/routes/authorizationResponse.mts), so none can leave without it.
 
 **`prompt=none` is supported.** No session answers `login_required` at the client's `redirect_uri` — which is the point, since a hidden renewal iframe cannot act on a login page. A session proceeds silently. A `prompt` that names `none` but is malformed (`none<TAB>`) or combines it with another value still comes from a silent context, so it too is answered at the `redirect_uri` — `invalid_request` — never with the login page.
 
