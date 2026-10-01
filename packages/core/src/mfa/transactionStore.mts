@@ -787,6 +787,136 @@ export type MfaSubjectAttemptReservation =
  */
 export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 
+/** The shortest subject lease a store gives. */
+export const MFA_SUBJECT_LEASE_MIN_MS = 1_000;
+
+/** The longest subject lease a store gives. */
+export const MFA_SUBJECT_LEASE_MAX_MS = 600_000;
+
+/**
+ * The lease a factor-set write takes when its configuration names none: above
+ * the few Store calls one write makes at the Store transport's default timeout.
+ */
+export const DEFAULT_MFA_SUBJECT_LEASE_MS = 60_000;
+
+/** What a subject lease is asked for with. */
+export interface MfaSubjectLeaseRequest {
+	/** How long it stands on the store's clock, from {@link MFA_SUBJECT_LEASE_MIN_MS} to {@link MFA_SUBJECT_LEASE_MAX_MS}. */
+	readonly ttlMs: number;
+	/** The subject's generation the writer captured before it began; absent, none is compared. */
+	readonly generation?: number;
+}
+
+/** What `acquireSubjectLease` answers. */
+export type MfaSubjectLeaseAnswer =
+	| {
+			readonly outcome: "acquired";
+			/** What `releaseSubjectLease` and `applySubjectRecovery` are handed: a non-empty string. */
+			readonly token: string;
+	  }
+	| {
+			readonly outcome: "busy";
+			/** Milliseconds until another holder's lease ends, above 0. */
+			readonly retryAfterMs: number;
+	  }
+	| { readonly outcome: "stale" };
+
+/** A non-empty string, read once by the caller. */
+const isSubject = (value: unknown): value is string =>
+	typeof value === "string" && value.length > 0;
+
+/**
+ * The request {@link MfaTransactionStore.acquireSubjectLease} acts on, its
+ * fields read once, or a `RangeError`: `subject` a non-empty string, `ttlMs`
+ * a whole number from {@link MFA_SUBJECT_LEASE_MIN_MS} to
+ * {@link MFA_SUBJECT_LEASE_MAX_MS}, `generation` absent or a safe whole
+ * number from 0. Every adapter calls it first.
+ */
+export function checkSubjectLeaseRequest(
+	subject: unknown,
+	request: unknown,
+): { readonly ttlMs: number; readonly generation: number | undefined } {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.acquireSubjectLease: ${what}`);
+	};
+	if (!isSubject(subject)) refuse("subject must be a non-empty string");
+	if (!isRecord(request)) return refuse("the request must be an object");
+	const { ttlMs, generation } = request;
+	if (
+		typeof ttlMs !== "number" ||
+		!Number.isSafeInteger(ttlMs) ||
+		ttlMs < MFA_SUBJECT_LEASE_MIN_MS ||
+		ttlMs > MFA_SUBJECT_LEASE_MAX_MS
+	) {
+		refuse(
+			`ttlMs must be a whole number from MFA_SUBJECT_LEASE_MIN_MS (${MFA_SUBJECT_LEASE_MIN_MS}) to MFA_SUBJECT_LEASE_MAX_MS (${MFA_SUBJECT_LEASE_MAX_MS})`,
+		);
+	}
+	if (generation !== undefined && !isCount(generation)) {
+		refuse("generation must be absent or a safe whole number from 0");
+	}
+	return { ttlMs: ttlMs as number, generation: generation as number | undefined };
+}
+
+/**
+ * Refuses, with a `RangeError` naming `operation`, a subject that is not a
+ * non-empty string. Every adapter runs it first for the operations that take
+ * a subject alone.
+ */
+export function checkSubjectQuestion(operation: string, subject: unknown): void {
+	if (!isSubject(subject)) {
+		throw new RangeError(`MfaTransactionStore.${operation}: subject must be a non-empty string`);
+	}
+}
+
+/**
+ * Refuses, with a `RangeError`, a release `releaseSubjectLease` cannot make:
+ * `subject` and `token` non-empty strings. Every adapter runs it first.
+ */
+export function checkSubjectLeaseRelease(subject: unknown, token: unknown): void {
+	checkSubjectQuestion("releaseSubjectLease", subject);
+	if (!isSubject(token)) {
+		throw new RangeError(
+			"MfaTransactionStore.releaseSubjectLease: the token must be a non-empty string",
+		);
+	}
+}
+
+/**
+ * `answer`, what `acquireSubjectLease` answered, as the port promises it,
+ * copied to its outcome's fields, each read once; `undefined` for anything
+ * else, which the caller answers as the store's outage: never a lease, never
+ * a refusal.
+ */
+export function readMfaSubjectLeaseAnswer(answer: unknown): MfaSubjectLeaseAnswer | undefined {
+	try {
+		if (!isRecord(answer)) return undefined;
+		const { outcome } = answer;
+		if (outcome === "acquired") {
+			const { token } = answer;
+			return isSubject(token) ? { outcome, token } : undefined;
+		}
+		if (outcome === "busy") {
+			const { retryAfterMs } = answer;
+			return typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs > 0
+				? { outcome, retryAfterMs }
+				: undefined;
+		}
+		return outcome === "stale" ? { outcome } : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * `answer`, a subject's generation or recovery-set floor as the port promises
+ * it: a safe whole number from 0. `undefined` for anything else, which the
+ * caller answers as the store's outage.
+ */
+export function readMfaSubjectCount(answer: unknown): number | undefined {
+	return isCount(answer) ? answer : undefined;
+}
+
 /**
  * Where MFA transactions, the subject lock state, a session's account-email
  * proof and a subject's first-binding mark are kept.
@@ -963,6 +1093,37 @@ export interface MfaTransactionStore {
 	 * mark trusts the session.
 	 */
 	firstBindingAt(subject: string, nowMs: number): Promise<number | null>;
+
+	// A subject's generation and lease: one writer at a time to the subject's
+	// factor set, and a write begun before a recovery or a reset refused.
+	/**
+	 * The subject's generation: 0 until a recovery or a reset is first
+	 * applied, then one more for each. A writer captures it before the
+	 * request that writes is admitted, or at the begin of the ceremony and
+	 * carried with it, and acquires the lease under it. A `RangeError` for
+	 * what {@link checkSubjectQuestion} refuses.
+	 */
+	subjectGeneration(subject: string): Promise<number>;
+	/**
+	 * In one step: `stale` when `request.generation` is given and is not the
+	 * subject's generation; else `busy` while another holder's lease stands;
+	 * else a lease standing `ttlMs` on the store's clock, under a fresh token.
+	 * The generation moves only under the lease
+	 * (`applySubjectRecovery`), so it stays the one acquired under until the
+	 * lease ends. A `RangeError`, nothing held, for what
+	 * {@link checkSubjectLeaseRequest} refuses.
+	 */
+	acquireSubjectLease(
+		subject: string,
+		request: MfaSubjectLeaseRequest,
+	): Promise<MfaSubjectLeaseAnswer>;
+	/**
+	 * Ends the lease `token` holds: `true` when it still held it, so the
+	 * generation did not move while it stood; `false` when the lease had
+	 * ended, or another holds it, which it leaves. A `RangeError` for what
+	 * {@link checkSubjectLeaseRelease} refuses.
+	 */
+	releaseSubjectLease(subject: string, token: string): Promise<boolean>;
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaTransactionStore}. */

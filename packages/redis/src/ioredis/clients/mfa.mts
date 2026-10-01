@@ -25,11 +25,13 @@ import type { MfaFactorStoreClient, MfaTransactionStoreClient } from "../../clie
 import { fgNumber, hashFields } from "../codec.mjs";
 import { runScript } from "../commands.mjs";
 import { redisDurability } from "../durability.mjs";
+import { COMPARE_AND_DELETE } from "../scripts/lock.mjs";
 import {
 	MFA_FACTOR_UPDATE,
 	MFA_FIRST_BINDING_NOTE,
 	MFA_FIRST_BINDING_READ,
 	MFA_SUBJECT_EXEMPT,
+	MFA_SUBJECT_LEASE_ACQUIRE,
 	MFA_SUBJECT_RESERVE,
 	MFA_SUBJECT_SETTLE,
 	MFA_TX_CONSUME,
@@ -222,6 +224,31 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				);
 			}
 			return { value, serverNowMs };
+		},
+		async subjectGeneration(keys) {
+			return await io.hget(keys.recovery, "g");
+		},
+		async acquireSubjectLease(keys, input) {
+			const reply = await runScript(
+				io,
+				MFA_SUBJECT_LEASE_ACQUIRE,
+				[keys.lease, keys.recovery],
+				[
+					input.token,
+					String(input.ttlMs),
+					input.generation === undefined ? "" : String(input.generation),
+				],
+			);
+			const [outcome, pttl] = Array.isArray(reply) ? reply : [];
+			if (outcome === "acquired" || outcome === "stale") return { outcome };
+			// A lease with no deadline (PTTL -1) is none this store wrote: no verdict.
+			if (outcome === "busy" && typeof pttl === "number" && pttl > 0) {
+				return { outcome, retryAfterMs: pttl };
+			}
+			throw new Error("MfaTransactionStore: the lease script answered nothing it knows");
+		},
+		async releaseSubjectLease(keys, token) {
+			return (await runScript(io, COMPARE_AND_DELETE, [keys.lease], [token])) === 1;
 		},
 		durability: () => redisDurability(io),
 	};

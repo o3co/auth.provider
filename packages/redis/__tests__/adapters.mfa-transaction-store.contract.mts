@@ -2048,9 +2048,7 @@ export function runMfaTransactionStoreContract(
 				outcome: "stale",
 			});
 			expect(await store.releaseSubjectLease("user-1", other)).toBe(true);
-			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe(
-				"acquired",
-			);
+			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe("acquired");
 		});
 
 		it("refuses, with a RangeError, a lease it cannot give or a question it cannot answer, and holds nothing", async () => {
@@ -2085,9 +2083,7 @@ export function runMfaTransactionStoreContract(
 				).rejects.toThrow(RangeError);
 			}
 			await expect(store.subjectGeneration("" as never)).rejects.toThrow(RangeError);
-			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe(
-				"acquired",
-			);
+			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe("acquired");
 		});
 	});
 }

@@ -35,6 +35,8 @@ export {
 // ---------------------------------------------------------------------------
 export type {
 	AccessTokenDenylistClient,
+	AcquireMfaSubjectLeaseInput,
+	AcquireMfaSubjectLeaseReply,
 	ActivateFederationGrantInput,
 	ChallengeStoreClient,
 	CodeRepositoryClient,

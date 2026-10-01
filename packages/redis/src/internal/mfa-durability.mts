@@ -29,7 +29,8 @@
  *   lock and weekly window carry a TTL once no run is counted, and an evicted
  *   one lifts a lockout hold early; a subject's first-binding mark carries one
  *   always, and an evicted one no longer refuses a stale session's first
- *   binding. Any other policy
+ *   binding; a subject's lease carries one always, and an evicted one lets a
+ *   second writer in. Any other policy
  *   (empty, unknown, a future server's) cannot be judged and is named in the
  *   warning below;
  * - RDB snapshots without AOF are one warning, no persistence at all another;
@@ -102,7 +103,7 @@ const NAMES: Readonly<
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
 		lockEvictable: "mfa_transaction_store_lock_evictable",
-		evictableFamilies: ["lock", "week", "first-binding"],
+		evictableFamilies: ["lock", "week", "first-binding", "lease"],
 		holds:
 			"the email proof an operator reset requires at the next first binding, which a password holder could then skip",
 		remedy: '"noeviction"',

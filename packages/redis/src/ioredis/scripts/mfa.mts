@@ -482,6 +482,27 @@ return {1, stamp}
 `.trim();
 
 /**
+ * `MfaTransactionStoreClient.acquireSubjectLease`. `KEYS[1]` = the subject's lease, `KEYS[2]` =
+ * its recovery hash; `ARGV[1]` = the new holder's token, `ARGV[2]` = the lease's length in ms,
+ * `ARGV[3]` = the generation the writer captured, as decimal text, or empty for none. Returns
+ * `{'stale'}` when that is not the hash's `g` (absent is `0`), else `{'busy', pttl}` while
+ * another holder's lease stands, else `{'acquired'}` with the lease written (`SET NX PX`, on the
+ * server's clock). A `g` that is not decimal text is an error.
+ */
+const LUA_MFA_SUBJECT_LEASE_ACQUIRE = `
+if ARGV[3] ~= '' then
+  local g = redis.call('HGET', KEYS[2], 'g')
+  if not g then g = '0' end
+  if string.match(g, '^%d+$') == nil then
+    error({err = 'MFA subject state: a stored value is not one this store wrote; the operation is refused'})
+  end
+  if g ~= ARGV[3] then return {'stale'} end
+end
+if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then return {'acquired'} end
+return {'busy', redis.call('PTTL', KEYS[1])}
+`.trim();
+
+/**
  * `MfaTransactionStoreClient.firstBindingMark`: `KEYS[1]` = the subject's mark. Returns the
  * server's clock and the key's value (nil when there is none), read in one step.
  */
@@ -501,3 +522,4 @@ export const MFA_SUBJECT_SETTLE = defineScript(LUA_MFA_SUBJECT_SETTLE);
 export const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);
 export const MFA_FIRST_BINDING_NOTE = defineScript(LUA_MFA_FIRST_BINDING_NOTE);
 export const MFA_FIRST_BINDING_READ = defineScript(LUA_MFA_FIRST_BINDING_READ);
+export const MFA_SUBJECT_LEASE_ACQUIRE = defineScript(LUA_MFA_SUBJECT_LEASE_ACQUIRE);

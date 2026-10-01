@@ -57,6 +57,8 @@ import type {
 } from "./clients/federation-grant-intent.mjs";
 import type { FederationTokenStoreClient } from "./clients/federation-tokens.mjs";
 import type {
+	AcquireMfaSubjectLeaseInput,
+	AcquireMfaSubjectLeaseReply,
 	MfaFactorRecordUpdateInput,
 	MfaFactorStoreClient,
 	MfaFirstBindingRead,
@@ -96,6 +98,8 @@ import type {
 
 export type {
 	AccessTokenDenylistClient,
+	AcquireMfaSubjectLeaseInput,
+	AcquireMfaSubjectLeaseReply,
 	ActivateFederationGrantInput,
 	ChallengeStoreClient,
 	CodeRepositoryClient,

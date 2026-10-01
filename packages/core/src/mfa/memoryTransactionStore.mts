@@ -29,11 +29,12 @@
  * requirement the operator reset records is not lock state: only its
  * consumption at the next first binding removes it.
  *
- * A session's account-email proof and a subject's first-binding mark expire
- * on this store's clock too, and are swept with the transactions.
+ * A session's account-email proof, a subject's first-binding mark and a
+ * subject's lease expire on this store's clock too, and are swept with the
+ * transactions. A subject's generation is never swept.
  *
- * At most `maxEntries` entries are held: transactions, session email proofs
- * and first-binding marks together. At the cap the store reclaims expired
+ * At most `maxEntries` entries are held: transactions, session email proofs,
+ * first-binding marks and subject leases together. At the cap the store reclaims expired
  * entries (no more often than the sweep floor) and, if still full, refuses a
  * new one with {@link MfaTransactionStoreFullError}, never evicting a live one
  * (that would end the ceremony of a user typing a code, send them to prove
@@ -55,6 +56,9 @@ import {
 	checkMfaTransactionTransitions,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
+	checkSubjectLeaseRelease,
+	checkSubjectLeaseRequest,
+	checkSubjectQuestion,
 	type FirstBindingMark,
 	firstBindingAnswer,
 	laterFirstBindingMark,
@@ -64,6 +68,7 @@ import {
 	type MfaSubjectAttemptOutcome,
 	type MfaSubjectAttemptReservation,
 	type MfaSubjectHold,
+	type MfaSubjectLeaseAnswer,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
@@ -94,8 +99,8 @@ export interface MemoryMfaTransactionStoreOptions extends AmortizedSweepOptions 
 	/** The clock a transaction expires by, in epoch milliseconds. Default `Date.now`. */
 	readonly now?: () => number;
 	/**
-	 * The most entries held — transactions, session email proofs and
-	 * first-binding marks, expired-but-unswept included; default
+	 * The most entries held — transactions, session email proofs,
+	 * first-binding marks and subject leases, expired-but-unswept included; default
 	 * {@link DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES}. Anything but a
 	 * positive whole number up to 2^24 (a `Map`'s limit) is a `RangeError`,
 	 * never read as no cap.
@@ -114,7 +119,7 @@ export class MfaTransactionStoreFullError extends Error {
 
 	constructor(maxEntries: number) {
 		super(
-			`memory MfaTransactionStore is at its cap of ${maxEntries} resident entries — transactions, session email proofs and first-binding marks, expired ones not yet swept included; refusing a new one rather than evicting one`,
+			`memory MfaTransactionStore is at its cap of ${maxEntries} resident entries — transactions, session email proofs, first-binding marks and subject leases, expired ones not yet swept included; refusing a new one rather than evicting one`,
 		);
 		this.name = "MfaTransactionStoreFullError";
 	}
@@ -130,7 +135,9 @@ export interface MemoryMfaTransactionStore extends MfaTransactionStore {
 	readonly sessionEmailProofs: number;
 	/** First-binding marks resident, expired-but-unswept included. */
 	readonly firstBindingMarks: number;
-	/** The most entries it holds (`maxEntries`), transactions, proofs and marks together; at it, a new one is refused. */
+	/** Subject leases resident, expired-but-unswept included. */
+	readonly subjectLeases: number;
+	/** The most entries it holds (`maxEntries`), transactions, proofs, marks and leases together; at it, a new one is refused. */
 	readonly maxEntries: number;
 }
 
@@ -156,6 +163,12 @@ interface SubjectState {
 	 * then the hold stands until the state is cleared.
 	 */
 	hard?: number;
+}
+
+/** A subject's lease: its holder's token, standing until `untilMs` on this store's clock. */
+interface SubjectLease {
+	readonly token: string;
+	readonly untilMs: number;
 }
 
 /** Where a session's proof is kept: the subject and the `sid` as one unambiguous key. */
@@ -246,6 +259,10 @@ export function createMemoryMfaTransactionStore(
 	const proofs = new Map<string, SessionEmailProof>();
 	/** Each subject's first-binding mark. */
 	const marks = new Map<string, FirstBindingMark>();
+	/** Each subject's lease. */
+	const leases = new Map<string, SubjectLease>();
+	/** Each subject's generation, once a recovery moved it: never swept. */
+	const generations = new Map<string, number>();
 	/** Subjects whose next first binding requires the email proof: no expiry, never swept. */
 	const emailProofRequired = new Set<string>();
 	/** The order of the next reservation. */
@@ -292,6 +309,9 @@ export function createMemoryMfaTransactionStore(
 		for (const [subject, mark] of marks) {
 			if (mark.untilMs <= storeNowMs) marks.delete(subject);
 		}
+		for (const [subject, lease] of leases) {
+			if (lease.untilMs <= storeNowMs) leases.delete(subject);
+		}
 		if (latestCallerMs === undefined) return;
 		for (const [subject, state] of subjects) {
 			prune(state, latestCallerMs);
@@ -335,7 +355,7 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	/** At the cap: reclaims expired entries, then refuses if still full. */
-	const resident = (): number => transactions.size + proofs.size + marks.size;
+	const resident = (): number => transactions.size + proofs.size + marks.size + leases.size;
 
 	function makeRoom(nowMs: number): void {
 		if (resident() < maxEntries) return;
@@ -362,6 +382,10 @@ export function createMemoryMfaTransactionStore(
 
 		get firstBindingMarks() {
 			return marks.size;
+		},
+
+		get subjectLeases() {
+			return leases.size;
 		},
 
 		maxEntries,
@@ -609,6 +633,39 @@ export function createMemoryMfaTransactionStore(
 			// Gone on this store's clock: reclaimed now rather than at a sweep.
 			if (mark.untilMs <= storeNowMs) marks.delete(subject);
 			return firstBindingAnswer(mark, storeNowMs);
+		},
+
+		async subjectGeneration(subject: string): Promise<number> {
+			checkSubjectQuestion("subjectGeneration", subject);
+			return generations.get(subject) ?? 0;
+		},
+
+		async acquireSubjectLease(subject, request): Promise<MfaSubjectLeaseAnswer> {
+			const { ttlMs, generation } = checkSubjectLeaseRequest(subject, request);
+			if (generation !== undefined && generation !== (generations.get(subject) ?? 0)) {
+				return { outcome: "stale" };
+			}
+			const nowMs = clock();
+			const held = leases.get(subject);
+			if (held !== undefined && held.untilMs > nowMs) {
+				return { outcome: "busy", retryAfterMs: held.untilMs - nowMs };
+			}
+			if (held === undefined) makeRoom(nowMs);
+			const token = randomBytes(16).toString("base64url");
+			leases.set(subject, { token, untilMs: nowMs + ttlMs });
+			if (schedule.wrote()) sweep(nowMs);
+			return { outcome: "acquired", token };
+		},
+
+		async releaseSubjectLease(subject: string, token: string): Promise<boolean> {
+			checkSubjectLeaseRelease(subject, token);
+			const held = leases.get(subject);
+			if (held === undefined) return false;
+			const standing = held.untilMs > clock();
+			if (!standing) leases.delete(subject);
+			if (!standing || held.token !== token) return false;
+			leases.delete(subject);
+			return true;
 		},
 	};
 }

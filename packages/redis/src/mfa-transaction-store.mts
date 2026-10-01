@@ -85,6 +85,9 @@ import {
 	checkMfaVersionAdvances,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
+	checkSubjectLeaseRelease,
+	checkSubjectLeaseRequest,
+	checkSubjectQuestion,
 	consoleLogger,
 	DEFAULT_CLOCK_SKEW_MS,
 	defineModule,
@@ -291,6 +294,16 @@ function firstBindingMarkOf(text: string | null, subject: string): FirstBindingM
 	return { atMs: atMs as number, untilMs: untilMs as number };
 }
 
+/** A subject's generation as the recovery hash keeps it: absent is 0; anything but decimal text of a safe whole number is an outage. */
+function generationOf(text: string | null): number {
+	if (text === null) return 0;
+	const generation = countOf(text);
+	if (!Number.isSafeInteger(generation)) {
+		throw new Error("MfaTransactionStore: a subject generation it cannot read");
+	}
+	return generation;
+}
+
 function checkInstant(nowMs: number, operation: string): void {
 	if (!isStorableExpiry(nowMs)) {
 		throw new RangeError(
@@ -311,7 +324,12 @@ export function createRedisMfaTransactionStore(
 	const txKey = (id: string): string => `${keyPrefix}tx:{${mfaKeyPart(id)}}`;
 	const subjectKeys = (subject: string): MfaSubjectKeys => {
 		const tag = `{${mfaKeyPart(subject)}}`;
-		return { lock: `${keyPrefix}lock:${tag}`, week: `${keyPrefix}week:${tag}` };
+		return {
+			lock: `${keyPrefix}lock:${tag}`,
+			week: `${keyPrefix}week:${tag}`,
+			recovery: `${keyPrefix}recovery:${tag}`,
+			lease: `${keyPrefix}lease:${tag}`,
+		};
 	};
 	const proofKey = (subject: string): string => `${keyPrefix}proof:{${mfaKeyPart(subject)}}`;
 	const sessionProofKey = (subject: string, sid: string): string =>
@@ -474,6 +492,27 @@ export function createRedisMfaTransactionStore(
 			const mark = firstBindingMarkOf(value, subject);
 			return mark === null ? null : firstBindingAnswer(mark, serverNowMs);
 		},
+
+		async subjectGeneration(subject) {
+			checkSubjectQuestion("subjectGeneration", subject);
+			return generationOf(await client.subjectGeneration(subjectKeys(subject)));
+		},
+
+		async acquireSubjectLease(subject, request) {
+			const { ttlMs, generation } = checkSubjectLeaseRequest(subject, request);
+			const token = randomBytes(16).toString("base64url");
+			const reply = await client.acquireSubjectLease(subjectKeys(subject), {
+				token,
+				ttlMs,
+				generation,
+			});
+			return reply.outcome === "acquired" ? { outcome: "acquired", token } : reply;
+		},
+
+		async releaseSubjectLease(subject, token) {
+			checkSubjectLeaseRelease(subject, token);
+			return client.releaseSubjectLease(subjectKeys(subject), token);
+		},
 	};
 }
 
@@ -496,7 +535,9 @@ export function createRedisMfaTransactionStore(
  * (`mfa_transaction_store_lock_evictable`, naming `evictableFamilies`): the
  * lock state carries a TTL once no run is counted, and evicting it lifts a
  * lockout hold early; a first-binding mark carries one always, and evicting
- * it fails open — a stale session's first binding is no longer refused.
+ * it fails open — a stale session's first binding is no longer refused; a
+ * subject's lease carries one always, and evicting it lets a second writer
+ * at the subject's factor set.
  */
 export const redisMfaTransactionStoreModule = defineModule({
 	name: "redis-mfa-transaction-store",

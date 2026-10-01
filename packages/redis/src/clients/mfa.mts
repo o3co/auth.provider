@@ -117,8 +117,8 @@ export interface MfaTransactionUpdateInput {
 }
 
 /**
- * A subject's lock-state keys. Both carry the subject's hash tag: every
- * operation on the state is one script over the two.
+ * A subject's keys. Each carries the subject's hash tag: every operation on
+ * them is one command or one script on one Cluster slot.
  */
 export interface MfaSubjectKeys {
 	/**
@@ -130,7 +130,25 @@ export interface MfaSubjectKeys {
 	readonly lock: string;
 	/** ZSET: the attempts the rolling week counts, each scored by its time. */
 	readonly week: string;
+	/** HASH: `g`, the subject's generation, as decimal text; absent is `0`. */
+	readonly recovery: string;
+	/** STRING: the lease holder's token, expiring at the lease's end on the server's clock. */
+	readonly lease: string;
 }
+
+export interface AcquireMfaSubjectLeaseInput {
+	/** The token the lease is written with when it is free. */
+	readonly token: string;
+	readonly ttlMs: number;
+	/** The generation the writer captured; absent, none is compared. */
+	readonly generation: number | undefined;
+}
+
+/** What an acquire answers, as the port's `acquireSubjectLease` but for the token, which the caller made. */
+export type AcquireMfaSubjectLeaseReply =
+	| { readonly outcome: "acquired" }
+	| { readonly outcome: "busy"; readonly retryAfterMs: number }
+	| { readonly outcome: "stale" };
 
 export interface ReserveMfaSubjectAttemptInput {
 	/** The caller's time, which every hold is judged on. */
@@ -279,6 +297,19 @@ export interface MfaTransactionStoreClient {
 	noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<NoteMfaFirstBindingReply>;
 	/** The subject's first-binding mark at `key`, and the server's clock, in one step. */
 	firstBindingMark(key: string): Promise<MfaFirstBindingRead>;
+	/** The recovery hash's `g` field (`HGET`); `null` when there is none. */
+	subjectGeneration(keys: MfaSubjectKeys): Promise<string | null>;
+	/**
+	 * Atomically: `stale` when `input.generation` is given and is not the recovery hash's `g`
+	 * (absent is `0`); else `busy`, with the lease's time left, while one stands; else the lease
+	 * written with `input.token` for `input.ttlMs` (`SET NX PX`).
+	 */
+	acquireSubjectLease(
+		keys: MfaSubjectKeys,
+		input: AcquireMfaSubjectLeaseInput,
+	): Promise<AcquireMfaSubjectLeaseReply>;
+	/** Atomically: delete the lease while it holds `token`; resolves whether it did. */
+	releaseSubjectLease(keys: MfaSubjectKeys, token: string): Promise<boolean>;
 	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }
