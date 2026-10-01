@@ -210,13 +210,13 @@ declare module "@o3co/auth-provider-core" {
 export type MfaEnrollmentWitness = "enrolled" | "not_enrolled" | "malformed";
 
 /**
- * The one reading of `User.mfaEnrolled`, for the `User` a login's
- * `authenticate` answered and for the session's snapshot of it alike: `true`
- * is `enrolled`; `false` or absent is `not_enrolled`; any other value (`1`,
- * `"true"`, `null`) is `malformed`. A malformed witness is never read as
- * "not enrolled", which would open a first binding to whoever holds the
- * password: the MFA package answers it `503 temporarily_unavailable` and
- * binds nothing (the MFA ADR's D12).
+ * The one reading of `User.mfaEnrolled`, for the `User` a primary sign-in's
+ * `authenticate` or `authenticateByToken` answered and for the session's
+ * snapshot of it alike: `true` is `enrolled`; `false` or absent is
+ * `not_enrolled`; any other value (`1`, `"true"`, `null`) is `malformed`. A
+ * malformed witness is never read as "not enrolled", which would open a first
+ * binding to whoever holds the password: the MFA package answers it
+ * `503 temporarily_unavailable` and binds nothing (the MFA ADR's D12).
  */
 export function readMfaEnrollmentWitness(
 	user: Readonly<Record<string, unknown>>,
