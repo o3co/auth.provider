@@ -1833,7 +1833,7 @@ export function runMfaTransactionStoreContract(
 				);
 			});
 
-			it("applies without a boundary when the week counts no failure at its time", async () => {
+			it("applies, giving back nothing, when the week counts no failure at its time, with no boundary", async () => {
 				const store = await factory();
 				const now = start();
 				// A failure a week and a minute before: the week no longer counts it.
@@ -2098,6 +2098,32 @@ export function runMfaTransactionStoreContract(
 						cleared: { hard: true },
 						hard: false,
 					});
+				});
+
+				it("starts a new episode once a recover leaves no hard hold: the next refusal is first, though the week still holds", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(first(await check(store, last + 2, SMALL_HARD))).toBe(false);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
+					).toMatchObject({ outcome: "applied", hard: false });
+					const refused = await check(store, last + 2 * MINUTE, WEEK_OF_SIX);
+					expect(held(refused)).toMatchObject({ hold: "weekly" });
+					expect(first(refused)).toBe(true);
+				});
+
+				it("keeps the episode while a recover leaves the hard hold standing: the next refusal is not first", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, {
+							sessionsBoundaryMs: last + 1,
+							guessableBoundSinceMs: OLD_RECORD(),
+						}),
+					).toMatchObject({ outcome: "applied", hard: true });
+					const refused = await check(store, last + 2 * MINUTE, SMALL_HARD);
+					expect(held(refused)).toEqual(HARD);
+					expect(first(refused)).toBe(false);
 				});
 
 				it("refuses, with a RangeError, a recover that names no rebind — neither the earliest guessable record's time nor null for none — and changes nothing", async () => {
