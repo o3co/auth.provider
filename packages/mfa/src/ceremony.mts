@@ -480,8 +480,9 @@ export interface MfaCeremonyKit {
 		acrValues: readonly string[] | undefined,
 	) => Promise<MfaTransaction | MfaStoreOutage>;
 	/**
-	 * Whether `subject` holds a factor of an installed kind whose data opens
-	 * among `records` — one that counts, when `options.counting` asks it.
+	 * Whether `subject` holds a usable record among `records` (`factorState.mts`:
+	 * a factor of an installed kind whose data opens, but a recovery set with no
+	 * code left) — one that counts, when `options.counting` asks it.
 	 */
 	readonly holdsUsable: (
 		subject: string,

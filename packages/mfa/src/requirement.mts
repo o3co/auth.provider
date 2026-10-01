@@ -53,11 +53,12 @@
  * give steps the session up and never admits it.
  *
  * `admitPrimary` interrupts a password login for a second factor when the subject
- * has any factor record: a record it cannot use is never "none", and a `list`
- * that cannot answer throws, which admission answers `unavailable`. When no
+ * holds a record that serves (`factorState.mts`): a record it cannot use is
+ * never "none", a recovery set with no code left is, and a `list` that cannot
+ * answer throws, which admission answers `unavailable`. When no
  * record that may count stands, the login's `User` must not say the subject
  * enrolled: a witness `true` or malformed is recorded and thrown, under either
- * mode (D12). With no records, `optional` establishes and `required` interrupts
+ * mode (D12). With none that serves, `optional` establishes and `required` interrupts
  * for a first binding offering the counting factors the user may enroll, the
  * account-email proof first where the one gate (`firstBinding.mts`) asks for
  * it. Other primaries establish without a read: the baseline applies after
@@ -93,6 +94,7 @@ import {
 	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
+import { recordServes } from "./factorState.mjs";
 import {
 	countingKinds,
 	enrollableKinds,
@@ -102,6 +104,7 @@ import {
 	type RequireEmailProof,
 } from "./firstBinding.mjs";
 import { distrustedByFirstBinding, readFirstBindingMark } from "./firstBindingMark.mjs";
+import type { MfaSealing } from "./sealing.mjs";
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
 import { MfaEnrollmentStateInconsistentError } from "./witness.mjs";
 
@@ -159,6 +162,8 @@ export interface MfaRequirementOptions {
 	 * (`MfaTransactionStore.firstBindingAt`); rejects on an outage.
 	 */
 	readonly firstBindingAt: (subject: string, nowMs: number) => Promise<number | null>;
+	/** The key ring's sealing: what tells a recovery set with no code left (`factorState.mts`). */
+	readonly sealing: MfaSealing;
 }
 
 /** What recent MFA is read from: a live session's primary time and its last second factor. */
@@ -274,6 +279,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		emailProofRequiredAtNextBinding,
 		sessionEmailProofAt,
 		firstBindingAt,
+		sealing,
 	} = options;
 
 	/**
@@ -551,7 +557,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			if (primary.recorded.authentication.primary !== PASSWORD_AMR) return "establish";
 			const records = await listRecords(primary.subject);
 			if (!records.some((record) => mayCount(factors, record))) checkWitness(primary);
-			if (records.length > 0) return interrupt({ error: "mfa_required" });
+			if (records.some((record) => recordServes({ factors, sealing }, primary.subject, record))) {
+				return interrupt({ error: "mfa_required" });
+			}
 			if (mode === "optional") return "establish";
 			const emailProof = await proofAsked(primary);
 			return interrupt({

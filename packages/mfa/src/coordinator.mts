@@ -83,6 +83,9 @@
  *   challenge and handed back to the verification. The page is answered the
  *   factor's response with where the code went, masked (`sent_to`), and how
  *   long it lives (`expires_in`), as kept.
+ * - What a record can do is `factorState.mts`'s one reading: a transaction
+ *   offers every record an installed factor verifies but a recovery set with
+ *   no code left, and "usable" is that file's.
  * - A refusal carries the factor id the factor named only when it is one of
  *   the subject's factors of the kind verified: nothing else reaches the audit.
  *   Another is dropped and flagged, never quoted.
@@ -134,6 +137,7 @@ import {
 	type UnknownTransaction,
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
+import { byAge, holdsUsableRecord, readFactorRecord } from "./factorState.mjs";
 import type { RequireEmailProof } from "./firstBinding.mjs";
 import {
 	distrustedByFirstBinding,
@@ -245,10 +249,6 @@ const isPlainObject = (value: unknown): value is object => {
 	const prototype = Object.getPrototypeOf(value);
 	return prototype === Object.prototype || prototype === null;
 };
-
-/** The subject's records, oldest first: what the page lists and a request names. */
-const byAge = (a: MfaFactorRecord, b: MfaFactorRecord): number =>
-	a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /** The coordinator over `options` (see this file's header). */
 export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordinator {
@@ -370,24 +370,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return record === undefined || factor === undefined ? undefined : { record, factor };
 	};
 
-	/**
-	 * Whether `subject` holds a factor of an installed kind whose data opens
-	 * — one that counts, when `options.counting` asks it.
-	 */
+	/** Whether `subject` holds a usable record (`factorState.mts`) — one that counts, when `options.counting` asks it. */
 	const holdsUsable = (
 		subject: string,
 		records: readonly MfaFactorRecord[],
 		options: { readonly counting: boolean },
-	): boolean =>
-		records.some((candidate) => {
-			const factor = factors.get(candidate.kind);
-			return (
-				factor !== undefined &&
-				(!options.counting || factor.counting === true) &&
-				sealing.openFactorData({ subject, id: candidate.id, kind: candidate.kind }, candidate.data)
-					.state === "ok"
-			);
-		});
+	): boolean => holdsUsableRecord({ factors, sealing }, subject, records, options);
 
 	/**
 	 * The named record and every record of its kind, opened for `subject`: the
@@ -731,17 +719,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			// An enroll transaction verifies the account-email proof alone: it lists no factor.
 			const records = tx.purpose === "enroll" ? [] : await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
+			// Offered: every record an installed factor verifies, but a recovery set with no code left.
 			const listed = records.flatMap((record) => {
-				const factor = factors.get(record.kind);
-				if (factor === undefined) return [];
-				const opened = sealing.openFactorData(
-					{ subject: tx.subject, id: record.id, kind: record.kind },
-					record.data,
-				);
+				const read = readFactorRecord({ factors, sealing }, tx.subject, record);
+				if (read.state === "not_installed" || read.state === "exhausted") return [];
 				let hint: unknown;
-				if (opened.state === "ok") {
+				if (read.state === "usable") {
 					try {
-						hint = factor.describe(opened.value).hint;
+						hint = read.factor.describe(read.data).hint;
 					} catch {
 						hint = undefined;
 					}

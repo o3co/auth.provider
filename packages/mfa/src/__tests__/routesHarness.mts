@@ -136,7 +136,10 @@ export async function seedFactor(
 }
 
 /** A recovery-code set of `count` codes as the factor issues it, digested under the suite's key: its codes and the record's data. */
-export function recoverySet(count: number): { readonly codes: readonly string[]; readonly data: MfaFactorData } {
+export function recoverySet(count: number): {
+	readonly codes: readonly string[];
+	readonly data: MfaFactorData;
+} {
 	if (count === 0) return { codes: [], data: { codes: [] } };
 	const set = generateRecoveryCodes(
 		createRecoveryCodeFactor({ count }),

@@ -142,6 +142,11 @@ export function generateRecoveryCodes(
 	};
 }
 
+/** Whether `data` is a set with no code left, for a factor this file made; data that is not a set is not one. */
+export function isExhaustedRecoverySet(factor: MfaFactor, data: MfaFactorData): boolean {
+	return issuers.has(factor) && digestsIn(data)?.length === 0;
+}
+
 /**
  * How many codes the set `data` holds, for a factor this file made; none
  * for data that is not a set; `undefined` for any other factor.

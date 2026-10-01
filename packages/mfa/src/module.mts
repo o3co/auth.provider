@@ -426,6 +426,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 					if (!witness.writable) {
 						logger.warn({ slot: "userRepository" }, "mfa_enrollment_witness_unwritable");
 					}
+					const sealing = createMfaSealing({ ring: settings.encryptionKeys, logger });
 					const requirement = createMfaRequirement({
 						mode,
 						factors: deps.mfaFactorResolver,
@@ -446,11 +447,12 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 						firstBindingAt: (subject, nowMs) =>
 							deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+						sealing,
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,
 						settings,
-						sealing: createMfaSealing({ ring: settings.encryptionKeys, logger }),
+						sealing,
 						requirement,
 						witness,
 						logger,

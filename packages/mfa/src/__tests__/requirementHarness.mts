@@ -21,6 +21,7 @@
  * record for a subject that holds one. Not a test file.
  */
 
+import { randomBytes } from "node:crypto";
 import {
 	createMemoryMfaFactorStore,
 	type MfaFactor,
@@ -28,6 +29,7 @@ import {
 	type MfaFactorResolver,
 	type MfaFactorStore,
 } from "@o3co/auth-provider-core";
+import { createMfaSealing } from "#/sealing.mjs";
 
 /** The first-binding gate's inputs of a composition with no mail sender and no operator reset: no proof is asked, and none was given. */
 export const WITHOUT_MAIL = {
@@ -35,6 +37,11 @@ export const WITHOUT_MAIL = {
 	emailProofRequiredAtNextBinding: async () => false,
 	sessionEmailProofAt: async () => null,
 } as const;
+
+/** A key ring's sealing of the suites' own: a record's data these suites hold as `"sealed"` does not open under it. */
+export const SEALING = createMfaSealing({
+	ring: [{ id: "requirement-suite", key: randomBytes(32) }],
+});
 
 /** A transaction store that holds no subject's first-binding mark. */
 export const NO_FIRST_BINDING_MARK = {

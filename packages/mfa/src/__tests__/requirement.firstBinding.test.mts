@@ -57,6 +57,7 @@ import {
 	factorRecord,
 	factorStoreHolding,
 	resolverOver,
+	SEALING,
 	stubFactor,
 } from "./requirementHarness.mjs";
 
@@ -189,6 +190,7 @@ function build(options: BuildOptions = {}) {
 		sessionEmailProofAt: (subject, sid, nowMs) =>
 			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
 		firstBindingAt: (subject, nowMs) => transactionStore.firstBindingAt(subject, nowMs),
+		sealing: SEALING,
 	});
 	return { requirement, transactionStore };
 }
