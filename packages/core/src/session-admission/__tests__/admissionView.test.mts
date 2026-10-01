@@ -68,6 +68,22 @@ const holding = (session: UserSession): UserSessionStore => ({
 	delete: async () => {},
 });
 
+/**
+ * `holding` with the step-up capability, and how many times admission read
+ * it: `recordSecondFactor` is a getter that counts.
+ */
+const recording = (session: UserSession): { store: UserSessionStore; reads: () => number } => {
+	let reads = 0;
+	const store = Object.defineProperty(holding(session), "recordSecondFactor", {
+		enumerable: true,
+		get: () => {
+			reads++;
+			return async () => null;
+		},
+	});
+	return { store, reads: () => reads };
+};
+
 /** A requirement that notes the view it is handed and answers `verdict`. */
 const watching = (
 	seen: Array<RequirementInput["session"]>,
@@ -89,11 +105,16 @@ const watching = (
 const deps = (
 	store: UserSessionStore | undefined,
 	requirements: readonly SessionRequirement[],
+	acrTable: AdmissionDeps["acrTable"] = readAcrTable({}),
 ): AdmissionDeps => ({
 	userSessionStore: store,
 	subjectRevocation: undefined,
-	requirements: resolverForTests(requirements, { issuer: ISSUER, actions: TEST_ACTIONS }),
-	acrTable: readAcrTable({}),
+	requirements: resolverForTests(requirements, {
+		issuer: ISSUER,
+		actions: TEST_ACTIONS,
+		allowAnyReach: true,
+	}),
+	acrTable,
 	logger: undefined,
 	auditSink: undefined,
 	now: () => NOW,
@@ -104,7 +125,14 @@ const cookie = (): SessionClaim =>
 		session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1", email: ADDRESS } },
 	});
 
-const VIEW_KEYS = ["authTime", "enrollmentFacts", "expiresAt", "sid", "sub"];
+const VIEW_KEYS = [
+	"authTime",
+	"enrollmentFacts",
+	"expiresAt",
+	"secondFactorRecordable",
+	"sid",
+	"sub",
+];
 
 describe("the view an admission carries", () => {
 	it("is typed SessionView on a step_up, and SessionView or null on an admitted one", () => {
@@ -137,6 +165,8 @@ describe("the view an admission carries", () => {
 			authTime: record().authTime,
 			expiresAt: record().expiresAt,
 			enrollmentFacts: { witness: "not_enrolled", mailAddress: "address" },
+			// `holding` has no `recordSecondFactor`.
+			secondFactorRecordable: false,
 		});
 		expect(Object.isFrozen(view)).toBe(true);
 	});
@@ -215,7 +245,7 @@ describe("the view an admission carries", () => {
 		});
 	});
 
-	it("carries the four fields and the facts alone: no address, claim or amr of the record", async () => {
+	it("carries the four fields, the facts and whether a second factor can be recorded alone: no address, claim or amr of the record", async () => {
 		const seen: Array<RequirementInput["session"]> = [];
 		for (const verdict of [
 			{ outcome: "met" },
@@ -230,6 +260,134 @@ describe("the view an admission carries", () => {
 			expect(JSON.stringify(view), verdict.outcome).not.toContain(ADDRESS);
 			expect(view, verdict.outcome).not.toHaveProperty("amr");
 			expect(view, verdict.outcome).not.toHaveProperty("claims");
+		}
+	});
+});
+
+/**
+ * A record whose second factor cannot be recorded (`canRecordSecondFactor`
+ * false): its `authentication` names a password primary, its `amr` is in a
+ * shape the types do not admit. Only a custom store answers one.
+ */
+const unrecordable = (amr: unknown): UserSession => record({ amr: amr as never });
+
+const UNRECORDABLE_AMRS: readonly unknown[] = [["pwd", ""], ["pwd", 1], "pwd"];
+
+describe("secondFactorRecordable: whether a second factor can be recorded on the session", () => {
+	it("is typed boolean on SessionView, optional only so a view built by hand still type-checks", () => {
+		expectTypeOf<SessionView["secondFactorRecordable"]>().toEqualTypeOf<boolean | undefined>();
+		expect(true).toBe(true);
+	});
+
+	it("is true over a store with the step-up capability, on a record a second factor can be recorded on: the admitted view's and every requirement's", async () => {
+		const seen: Array<RequirementInput["session"]> = [];
+		const admission = await admitSession(
+			deps(recording(record()).store, [
+				watching(seen, { outcome: "met" }, { name: "first" }),
+				watching(seen, { outcome: "met" }, { name: "second" }),
+			]),
+			{ claim: cookie(), action: "test.use" },
+		);
+		expect(admission).toMatchObject({
+			outcome: "admitted",
+			view: { secondFactorRecordable: true },
+		});
+		expect(seen.map((view) => view?.secondFactorRecordable)).toEqual([true, true]);
+	});
+
+	it("is false over a store without recordSecondFactor, whatever the record", async () => {
+		const seen: Array<RequirementInput["session"]> = [];
+		const admission = await admitSession(deps(holding(record()), [watching(seen)]), {
+			claim: cookie(),
+			action: "test.use",
+		});
+		expect(admission).toMatchObject({
+			outcome: "admitted",
+			view: { secondFactorRecordable: false },
+		});
+		expect(seen[0]?.secondFactorRecordable).toBe(false);
+	});
+
+	it("is false over a store that can record, on a record canRecordSecondFactor refuses", async () => {
+		for (const amr of UNRECORDABLE_AMRS) {
+			const seen: Array<RequirementInput["session"]> = [];
+			const admission = await admitSession(
+				deps(recording(unrecordable(amr)).store, [watching(seen)]),
+				{ claim: cookie(), action: "test.use" },
+			);
+			expect(admission, JSON.stringify(amr)).toMatchObject({
+				outcome: "admitted",
+				view: { secondFactorRecordable: false },
+			});
+			expect(seen[0]?.secondFactorRecordable, JSON.stringify(amr)).toBe(false);
+		}
+	});
+
+	it("is carried on a requirement's own step_up, which the requirement answered from the same view", async () => {
+		for (const [store, expected] of [
+			[recording(record()).store, true],
+			[recording(unrecordable(["pwd", ""])).store, false],
+			[holding(record()), false],
+		] as const) {
+			const seen: Array<RequirementInput["session"]> = [];
+			const admission = await admitSession(
+				deps(store, [watching(seen, { outcome: "step_up", whenStillUnmet: "reauthenticate" })]),
+				{ claim: cookie(), action: "test.use" },
+			);
+			expect(admission).toMatchObject({
+				outcome: "step_up",
+				view: { secondFactorRecordable: expected },
+			});
+			expect(seen[0]?.secondFactorRecordable).toBe(expected);
+		}
+	});
+
+	it("is the record's for a token carrier whose record was read, never the token's amr", async () => {
+		const seen: Array<RequirementInput["session"]> = [];
+		const admission = await admitSession(
+			deps(recording(unrecordable(["pwd", ""])).store, [watching(seen)]),
+			{ claim: tokenClaim({ sub: "user-1", sid: "sid-1", amr: ["pwd"] }), action: "test.use" },
+		);
+		expect(admission).toMatchObject({
+			outcome: "admitted",
+			view: { secondFactorRecordable: false },
+		});
+		expect(seen[0]?.secondFactorRecordable).toBe(false);
+	});
+
+	it("is read off the store once per admission, however many requirements are asked and whether the merge steps up through the authority", async () => {
+		const MFA = "urn:example:mfa";
+		const table = readAcrTable({ [MFA]: ["mfa"] });
+		const authority = (seen: Array<RequirementInput["session"]>): SessionRequirement =>
+			watching(
+				seen,
+				{ outcome: "met" },
+				{
+					name: "authority",
+					secondFactorAuthority: true,
+					reach: new Set(["otp", "mfa"]),
+					remediations: ["authority.step_up"],
+				},
+			);
+		for (const [session, outcome] of [
+			[record(), "step_up"],
+			[unrecordable(["pwd", ""]), "reauthenticate"],
+		] as const) {
+			const seen: Array<RequirementInput["session"]> = [];
+			const { store, reads } = recording(session);
+			const admission = await admitSession(
+				deps(store, [watching(seen, { outcome: "met" }, { name: "first" }), authority(seen)], table),
+				{ claim: cookie(), action: "test.use", asks: { acrValues: [MFA] } },
+			);
+			// The merge's row: what the authority alone can finish, recorded or
+			// sent to log in again, from the answer the requirements were handed.
+			expect(admission, outcome).toMatchObject(
+				outcome === "step_up"
+					? { outcome, requirement: "authority", view: { secondFactorRecordable: true } }
+					: { outcome, requirement: "acr" },
+			);
+			expect(seen).toHaveLength(2);
+			expect(reads(), outcome).toBe(1);
 		}
 	});
 });
