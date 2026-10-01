@@ -160,7 +160,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			const userId = tracked === null ? claim.subject : tracked.sub;
 			const sid = claim.sid;
 			// The access token's `amr` is what the tracked session vouches for
-			// (as in the authorization_code grant), never the record's raw `amr`;
+			// (as `/authorize` records on the code), never the record's raw `amr`;
 			// an untracked browser session is not a source.
 			const trackedAmr = tracked === null ? undefined : wellFormedAmr(vouchedAmr(tracked));
 			// The primary authentication's time, which a step-up never moves (RFC 9470 §6.1).

@@ -29,6 +29,7 @@ A deployment that only wires the bundled stores and modules has nothing to chang
 | Redis `GrantConsentInput`, `ConsentRecordFields` | `expiry`; `expiresAt` | #654 |
 | `CodeData`, `Code` | `code_challenge`, `code_challenge_method`, `nonce`, `sid`, `acr`; `expiresIn`, `grantedScope`, `grantedAudience` | #655 |
 | `CreateCodeInput` (new: what `createCode` takes) | every field of `Code` but `code`, all required except `expiresIn` (left out, the repository's default applies) | #655 |
+| `CodeData`, `Code`, `CreateCodeInput` (later) | `amr`: what the session vouched for at `/authorize`, which `/token` stamps on the code's tokens. A `CodeRepository` of your own records it and returns it; one that drops it yields tokens without `amr`, and their refresh tokens carry none forward. `createCode` is handed it, `undefined` without a user-session store. | — |
 | `DeviceAuthorization`, `CreateDeviceAuthorizationInput` | `requestedScope`, `subject`, `grantedScope`; `requestedScope`. `ApproveDeviceAuthorizationInput.grantedScope` stays optional: leaving it out grants `requestedScope` whole. | #656 |
 | `DeviceAuthorization` (later) | `approvedAtMs`: the instant an approval was given, the `nowMs` `approve` was handed; `undefined` before. A `DeviceCodeStore` of your own records it and returns it — the device grant holds it against the subject's sessions boundary at the poll. A record approved before the upgrade (the bundled Redis store's included) reads it as `undefined` — and under `core.deployment.mode = "multi"` so does every approval a replica not yet upgraded writes during the rollout. A poll refuses such an approval only while the subject has a sessions boundary in force; the device is answered `invalid_grant` and simply restarts the flow. Nothing needs migrating. | — |
 | `FederationGrantIntent` | `resource`, `upstreamSubject` | #658 |
@@ -95,7 +96,7 @@ Write `undefined` where you have nothing. That makes "no expiry", "no state" or 
 - **Inputs the library hands to ports you implement** now carry these keys, `undefined` included:
   - `ConsentStore.grant` gets `expiresAt` (`POST /oauth/consent`);
   - `PendingConsentStore.set` gets `state` (`/authorize`);
-  - `CodeRepository.createCode` gets `acr` (`/authorize`; `nonce` and `sid` were already named);
+  - `CodeRepository.createCode` gets `acr` (`/authorize`; `nonce` and `sid` were already named), and later `amr`;
   - `DeviceCodeStore.create` gets `requestedScope` (`/device_authorization`);
   - `FederationTokenStore.attach` gets `tokenType` (the federation callback);
   - `FederationGrantIntentStore.putIntent` gets `resource` and `upstreamSubject` (lodging);

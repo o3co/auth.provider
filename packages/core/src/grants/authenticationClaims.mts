@@ -72,11 +72,17 @@ export const EMAIL_OTP_AMR = "email";
 /** A recovery code (a look-up secret). Deployment-defined; it adds `mfa`. */
 export const RECOVERY_CODE_AMR = "recovery";
 
-/** `amr` as a token may carry it — a non-empty array of non-empty strings, copied — else undefined. */
+/**
+ * `amr` as a token may carry it — a non-empty array of non-empty strings —
+ * else undefined. Each element is read once, into the copy that is checked
+ * and answered; a hole reads as `undefined` and fails.
+ */
 export function wellFormedAmr(value: unknown): readonly string[] | undefined {
-	if (!Array.isArray(value) || value.length === 0) return undefined;
-	if (!value.every((v) => typeof v === "string" && v.length > 0)) return undefined;
-	return [...(value as string[])];
+	if (!Array.isArray(value)) return undefined;
+	const copy: unknown[] = Array.from(value);
+	if (copy.length === 0) return undefined;
+	if (!copy.every((v) => typeof v === "string" && v.length > 0)) return undefined;
+	return copy as string[];
 }
 
 /** `acr` as a token may carry it — a non-empty string — else undefined. */

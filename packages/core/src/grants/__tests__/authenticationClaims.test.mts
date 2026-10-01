@@ -51,6 +51,28 @@ describe("wellFormedAmr — the amr a token may carry", () => {
 		// inconsistency this exists to prevent: every grant reads the same shape.
 		expect(wellFormedAmr(value)).toBeUndefined();
 	});
+
+	it("is undefined for a sparse array, whose hole is no string", () => {
+		const sparse: string[] = new Array(2);
+		sparse[0] = "pwd";
+		expect(wellFormedAmr(sparse)).toBeUndefined();
+	});
+
+	it("answers the values it checked, reading each element once", () => {
+		// An element that answers a valid value on its first read and an empty
+		// one after: the copy handed back is the one validated.
+		const flaky: string[] = ["pwd", "otp"];
+		let reads = 0;
+		Object.defineProperty(flaky, 1, {
+			enumerable: true,
+			get: () => {
+				reads += 1;
+				return reads === 1 ? "otp" : "";
+			},
+		});
+		expect(wellFormedAmr(flaky)).toEqual(["pwd", "otp"]);
+		expect(reads).toBe(1);
+	});
 });
 
 describe("wellFormedAcr — the acr a token may carry", () => {

@@ -850,6 +850,8 @@ const READER_WHY = "the D9 reading itself: how a session was established and wha
 const MEMORY_STORE_WHY = "the memory store copying the record in and out, and the step-up write";
 const REDIS_STORE_WHY =
 	"the Redis store copying the record to and from its envelope, and the step-up write";
+const CODE_AMR_STORE_WHY =
+	"a code repository copying the code record's amr in and out: what /authorize filled with vouchedAmr, never a session record";
 
 /**
  * Every read of a field named `amr` or `authentication` in the scanned
@@ -1100,6 +1102,38 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		read: "...authenticationClaims",
 		count: 2,
 		why: "the amr, acr and auth_time the presented refresh token carries, read above as claims.amr, wellFormedAcr and wellFormedAuthTime",
+	},
+	// The authorization code's amr: what the session vouched for at `/authorize`
+	// (`vouchedAmr`), carried on the code to the exchange.
+	{
+		file: "packages/core/src/repositories/InMemoryCodeRepository.mts",
+		read: "params.amr",
+		count: 1,
+		why: CODE_AMR_STORE_WHY,
+	},
+	{
+		file: "packages/core/src/repositories/InMemoryCodeRepository.mts",
+		read: "stored.amr",
+		count: 3,
+		why: CODE_AMR_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/code-repository.mts",
+		read: "{amr}=(parameter)",
+		count: 1,
+		why: CODE_AMR_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/code-repository.mts",
+		read: "p.amr",
+		count: 1,
+		why: CODE_AMR_STORE_WHY,
+	},
+	{
+		file: "packages/oauth/src/grants/authorization.mts",
+		read: "codeData.amr",
+		count: 1,
+		why: "the authorization_code grant stamps the amr the code carries, which /authorize filled with vouchedAmr, never the session record's at exchange",
 	},
 	{
 		file: "packages/session/src/routes/Federation.mts",

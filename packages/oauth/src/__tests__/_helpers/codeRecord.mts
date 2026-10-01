@@ -19,7 +19,7 @@ import type { Code } from "@o3co/auth-provider-core";
  * A `Code` for a stub repository: the fields a test names, every other one
  * `undefined`. `Code` names each field as a required key so that a
  * repository's copy cannot forget one; a stub that returns a fixed record has
- * nothing to forget, and spelling eight `undefined`s into each would hide
+ * nothing to forget, and spelling nine `undefined`s into each would hide
  * the fields the test is about.
  */
 export const codeRecord = (
@@ -30,6 +30,7 @@ export const codeRecord = (
 	nonce: undefined,
 	sid: undefined,
 	acr: undefined,
+	amr: undefined,
 	expiresIn: undefined,
 	grantedScope: undefined,
 	grantedAudience: undefined,

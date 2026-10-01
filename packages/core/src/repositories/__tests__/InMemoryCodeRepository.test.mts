@@ -30,6 +30,7 @@ describe("InMemoryCodeRepository", () => {
 		nonce: undefined,
 		sid: undefined,
 		acr: undefined,
+		amr: undefined,
 		grantedScope: undefined,
 		grantedAudience: undefined,
 	};
@@ -333,6 +334,7 @@ describe("InMemoryCodeRepository", () => {
 				nonce: "nonce-rt",
 				sid: "sid-rt",
 				acr: "urn:example:acr:mfa",
+				amr: ["pwd", "otp", "mfa"],
 				expiresIn: 90,
 				grantedScope: ["openid", "read"],
 				grantedAudience: ["https://api.example"],
@@ -342,6 +344,21 @@ describe("InMemoryCodeRepository", () => {
 			expect(created).toStrictEqual(expected);
 			expect(await repo.findByCode(created.code)).toStrictEqual(expected);
 			expect(await repo.consumeByCode(created.code)).toStrictEqual(expected);
+		});
+
+		it("keeps the amr it was given: neither the caller's array nor a returned one reaches the stored code", async () => {
+			repo = new InMemoryCodeRepository();
+			const amr = ["pwd"];
+			const created = await repo.createCode({ ...minimalParams, amr });
+			amr.push("otp", "mfa");
+			// What it answers is frozen, from `createCode` and from each read.
+			expect(Object.isFrozen(created.amr)).toBe(true);
+			expect(() => (created.amr as string[]).push("otp")).toThrow(TypeError);
+			const found = await repo.findByCode(created.code);
+			if (found === null) throw new Error("the code was not found");
+			expect(Object.isFrozen(found.amr)).toBe(true);
+			expect(() => (found.amr as string[]).push("otp")).toThrow(TypeError);
+			expect((await repo.consumeByCode(created.code))?.amr).toEqual(["pwd"]);
 		});
 
 		it("names every field it has no value for as undefined, rather than leaving it out", async () => {
@@ -357,6 +374,7 @@ describe("InMemoryCodeRepository", () => {
 				"nonce",
 				"sid",
 				"acr",
+				"amr",
 				"grantedScope",
 				"grantedAudience",
 			]) {

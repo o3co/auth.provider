@@ -372,6 +372,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			grantedScope: scopeForPersist,
 			grantedAudience: audience.audienceForPersist,
 			acr: decided.acr,
+			session: decided.session,
 		});
 		if (!minted) return;
 

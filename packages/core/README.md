@@ -603,7 +603,7 @@ Signs and returns an OIDC id_token JWT (OIDC Core §2). Claim composition:
 - `sid` — session identifier for back-channel logout
 - `azp` — authorized party, included when provided
 - `nonce` — reflected verbatim from the authorization request when provided
-- `amr`, `acr` — as the caller passes them (the `authorization_code` grant: what the session vouches for, `vouchedAmr`, and the code's `acr`); an empty `amr` is omitted, not emitted as `[]`
+- `amr`, `acr` — as the caller passes them (the `authorization_code` grant: the code's `amr` — what the session vouched for at `/authorize`, `vouchedAmr` — and its `acr`); an empty `amr` is omitted, not emitted as `[]`
 - scope-filtered user claims via `filterClaimsByScope`
 
 Header uses `typ: "JWT"` — the standard spelling, kept deliberately disjoint from RFC 9068's `at+jwt` so an id_token can never pass an access-token surface. An id_token carrying `id+jwt` is refused as an ordinary `typ` mismatch.
