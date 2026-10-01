@@ -29,6 +29,7 @@ import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	DEFAULT_CLOCK_SKEW_MS,
+	InMemoryUserRepository,
 	type MfaFactorStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -120,8 +121,9 @@ async function bindFromAccount(agent: Parameters<typeof enrollFromAccount>[0]) {
 }
 
 describe("a first binding in a session after the subject's first binding elsewhere", () => {
-	it("is refused to the session that bound, once its factors are lost: 401 login_required, nothing opened", async () => {
-		const { app, factorStore, transactionStore, userSessionStore } = await composed("optional");
+	it("is refused to the session that bound, once its factors are lost: 401 login_required, nothing opened, one info line", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, logger } =
+			await composed("optional");
 		const { agent } = await signIn(app, userSessionStore);
 		expect((await bindFromAccount(agent)).status).toBe(200);
 		await loseFactors(factorStore);
@@ -134,6 +136,62 @@ describe("a first binding in a session after the subject's first binding elsewhe
 		expect(res.body).toEqual(LOGIN_REQUIRED);
 		expect(create).not.toHaveBeenCalled();
 		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(
+			logger.info.mock.calls.filter((call) => call[1] === "mfa_first_binding_distrusted"),
+		).toEqual([[{ sub: ALICE.id, action: "mfa.manage" }, "mfa_first_binding_distrusted"]]);
+	});
+
+	it("is refused at an account-page completion admitted on recent MFA, once the counting factor admission saw is gone: 401, nothing written", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const generated = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			suiteSealing().digestsFor("recovery_code"),
+		);
+		if (generated === undefined) throw new Error("no set");
+		const set = await seedFactor(factorStore, "recovery_code", generated.data);
+		const booted = await boot({
+			config: configFor("optional", { enrollment: { requireEmailProof: "never" } }),
+			factorStore,
+		});
+		// A recovery-code login: a second factor verified now, the witness not enrolled.
+		const stale = await beginLogin(booted.app);
+		expect((await verify(stale.agent, stale.transaction, set.id, generated.codes[0])).status).toBe(
+			200,
+		);
+		const pending = await enrollFromAccount(stale.agent, "totp");
+		expect(pending.status, JSON.stringify(pending.body)).toBe(200);
+		freezeClock(T0 + 30_000);
+		const other = await beginLogin(booted.app);
+		expect((await verify(other.agent, other.transaction, set.id, generated.codes[1])).status).toBe(
+			200,
+		);
+		expect((await bindFromAccount(other.agent)).status).toBe(200);
+		freezeClock(T0 + 60_000);
+		// Admission lists the TOTP factor and admits on recent MFA; the factor is gone by the completion's listing.
+		const list = factorStore.list.bind(factorStore);
+		let reads = 0;
+		vi.spyOn(factorStore, "list").mockImplementation(async (subject) => {
+			const records = await list(subject);
+			if (reads++ === 0) {
+				for (const record of records) {
+					if (record.kind === "totp") await factorStore.remove(subject, record.id);
+				}
+			}
+			return records;
+		});
+
+		const res = await completeEnrollment(
+			stale.agent,
+			pending.body.transaction as string,
+			totpProofOf(pending.body.secret),
+		);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect((await list(ALICE.id)).some((record) => record.kind === "totp")).toBe(false);
+		expect(await booted.transactionStore.get(pending.body.transaction as string)).toMatchObject({
+			attempts: 0,
+		});
 	});
 
 	it("is refused to a session signed in before another session's first binding, at the start and at a completion begun before it: 401, nothing bound", async () => {
@@ -177,8 +235,8 @@ describe("a first binding in a session after the subject's first binding elsewhe
 });
 
 describe("a first binding at a login after the subject's first binding elsewhere", () => {
-	it("is refused at the completion of a login begun before it: 401 login_required, nothing bound, nothing spent", async () => {
-		const { app, factorStore, transactionStore } = await composed("required");
+	it("is refused at the completion of a login begun before it: 401 login_required with Retry-After until the mark and the clock skew have passed, one info line, nothing bound, nothing spent", async () => {
+		const { app, factorStore, transactionStore, logger } = await composed("required");
 		const stale = await beginFirstBinding(app);
 		const begun = await beginEnrollment(stale.agent, stale.transaction, "totp");
 		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
@@ -202,8 +260,97 @@ describe("a first binding at a login after the subject's first binding elsewhere
 
 		expect(res.status).toBe(401);
 		expect(res.body).toEqual(LOGIN_REQUIRED);
+		// The mark was noted at T0 + 30 s: a login binds once past it and the skew.
+		expect(res.headers["retry-after"]).toBe(
+			String(Math.ceil((30_000 + DEFAULT_CLOCK_SKEW_MS + 1 - 60_000) / 1000)),
+		);
 		expect(await factorStore.list(ALICE.id)).toEqual([]);
 		expect(await transactionStore.get(stale.transaction)).toMatchObject({ attempts: 0 });
+		expect(
+			logger.info.mock.calls.filter((call) => call[1] === "mfa_first_binding_distrusted"),
+		).toEqual([[{ sub: ALICE.id, route: "enrollment" }, "mfa_first_binding_distrusted"]]);
+	});
+
+	it("is refused at the start of a login begun before it: 401, no secret shown, nothing kept", async () => {
+		const { app, factorStore, transactionStore } = await composed("required");
+		const stale = await beginFirstBinding(app);
+		freezeClock(T0 + 30_000);
+		const other = await beginFirstBinding(app);
+		const otherBegun = await beginEnrollment(other.agent, other.transaction, "totp");
+		expect(
+			(
+				await completeEnrollment(
+					other.agent,
+					other.transaction,
+					totpProofOf(otherBegun.body.secret),
+				)
+			).status,
+		).toBe(200);
+		await loseFactors(factorStore);
+		freezeClock(T0 + 60_000);
+
+		const res = await beginEnrollment(stale.agent, stale.transaction, "totp");
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual(LOGIN_REQUIRED);
+		expect(await transactionStore.get(stale.transaction)).toMatchObject({
+			pendingEnrollment: undefined,
+		});
+	});
+
+	it("refuses to reopen a login begun before it for a first binding after a recovery code: 401, the code unspent, nothing spent — and 503 when the mark cannot be read", async () => {
+		for (const failure of [false, true]) {
+			const factorStore = createMemoryMfaFactorStore();
+			const generated = generateRecoveryCodes(
+				createRecoveryCodeFactor({ count: 3 }),
+				suiteSealing().digestsFor("recovery_code"),
+			);
+			if (generated === undefined) throw new Error("no set");
+			const set = await seedFactor(factorStore, "recovery_code", generated.data);
+			const booted = await boot({
+				config: configFor("required", { enrollment: { requireEmailProof: "never" } }),
+				factorStore,
+			});
+			const stale = await beginLogin(booted.app);
+			freezeClock(T0 + 30_000);
+			const other = await beginLogin(booted.app);
+			const otherReopened = await verify(
+				other.agent,
+				other.transaction,
+				set.id,
+				generated.codes[1],
+			);
+			const otherTransaction = otherReopened.body.transaction as string;
+			const otherBegun = await beginEnrollment(other.agent, otherTransaction, "totp");
+			expect(
+				(
+					await completeEnrollment(
+						other.agent,
+						otherTransaction,
+						totpProofOf(otherBegun.body.secret),
+					)
+				).status,
+			).toBe(200);
+			for (const record of await factorStore.list(ALICE.id)) {
+				if (record.kind === "totp") await factorStore.remove(ALICE.id, record.id);
+			}
+			freezeClock(T0 + 60_000);
+			if (failure) {
+				vi.spyOn(booted.transactionStore, "firstBindingAt").mockRejectedValue(
+					new Error("transaction store unreachable"),
+				);
+			}
+			const sets = JSON.stringify(await factorStore.list(ALICE.id));
+
+			const res = await verify(stale.agent, stale.transaction, set.id, generated.codes[0]);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(failure ? 503 : 401);
+			expect(res.body).toEqual(failure ? MFA_UNAVAILABLE : LOGIN_REQUIRED);
+			expect(JSON.stringify(await factorStore.list(ALICE.id))).toBe(sets);
+			expect(await booted.transactionStore.get(stale.transaction)).toMatchObject({ attempts: 0 });
+			await disposeAll();
+			freezeClock();
+		}
 	});
 
 	it("is refused on a login reopened for a binding after a recovery code, begun before it: 401, nothing bound", async () => {
@@ -342,7 +489,7 @@ describe("noting the mark", () => {
 		expect(note).not.toHaveBeenCalled();
 	});
 
-	it("refuses a first binding 503 when the mark cannot be noted — a full or unreachable store — writing no factor, no codes and no witness, the transaction unspent", async () => {
+	it("refuses a first binding 503 when the mark cannot be noted — a full or unreachable store — writing no factor, no codes and no witness, the transaction kept with the one attempt the proof reserved", async () => {
 		for (const mode of ["optional", "required"] as const) {
 			const { app, factorStore, transactionStore, userSessionStore, users, logger } =
 				await composed(mode);
@@ -372,6 +519,7 @@ describe("noting the mark", () => {
 			expect(users.marks, mode).toEqual([]);
 			expect(await transactionStore.get(transaction), mode).toMatchObject({
 				pendingEnrollment: { kind: "totp" },
+				attempts: 1,
 			});
 			expect(logger.error.mock.calls, mode).toContainEqual([
 				expect.objectContaining({
@@ -403,6 +551,23 @@ describe("noting the mark", () => {
 		expect(note.mock.invocationCallOrder[0]).toBeLessThan(
 			mark.mock.invocationCallOrder[0] as number,
 		);
+	});
+
+	it("notes none where the directory cannot write the witness", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const seeded = await seedTotp(factorStore);
+		const booted = await boot({
+			config: configFor("required"),
+			factorStore,
+			userRepository: new InMemoryUserRepository(directoryEntries()),
+		});
+		const note = vi.spyOn(booted.transactionStore, "noteFirstBinding");
+		const { agent, transaction } = await beginLogin(booted.app);
+
+		const res = await verify(agent, transaction, seeded.record.id, totpCode(seeded.secret));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(note).not.toHaveBeenCalled();
 	});
 
 	it("notes none for a login whose User says it enrolled", async () => {

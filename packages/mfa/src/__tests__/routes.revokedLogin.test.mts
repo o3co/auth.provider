@@ -26,6 +26,7 @@
  * that cannot be read is `503`; with no boundary wired, none is read.
  */
 
+import { randomBytes } from "node:crypto";
 import {
 	createInMemorySubjectRevocation,
 	createMemoryMfaFactorStore,
@@ -42,7 +43,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
-import { ALICE, boot, configFor, disposeAll } from "./moduleHarness.mjs";
+import { ALICE, boot, configFor, disposeAll, sessionIdSet } from "./moduleHarness.mjs";
 import {
 	beginEnrollment,
 	beginFirstBinding,
@@ -54,6 +55,7 @@ import {
 	type SeededTotp,
 	seedFactor,
 	seedTotp,
+	stepUp,
 	suiteSealing,
 	T0,
 	thawClock,
@@ -135,8 +137,8 @@ const revokeAlice = (revocation: SubjectRevocation | null) =>
 const snapshot = async (store: MfaFactorStore) => JSON.stringify(await store.list(ALICE.id));
 
 describe("a login begun before its subject's sessions were revoked", () => {
-	it("answers 401 login_required to the transaction read, a challenge and every verification, spending no attempt, no code and no factor, and writing no session", async () => {
-		const { app, factorStore, transactionStore, userSessionStore, revocation, totp, set } =
+	it("answers 401 login_required to the transaction read, a challenge and every verification, spending no attempt, no code and no factor, writing no session, and saying each at info", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, revocation, totp, set, logger } =
 			await composed();
 		if (totp === undefined || set === undefined) throw new Error("nothing seeded");
 		const { agent, transaction } = await beginLogin(app);
@@ -161,6 +163,12 @@ describe("a login begun before its subject's sessions were revoked", () => {
 		expect(await snapshot(factorStore)).toBe(before);
 		expect(await transactionStore.get(transaction)).toMatchObject({ attempts: 0 });
 		expect(created).not.toHaveBeenCalled();
+		expect(logger.info.mock.calls.filter((call) => call[1] === "mfa_login_revoked")).toEqual(
+			["transaction", "challenge", "verify", "verify"].map((route) => [
+				{ sub: ALICE.id, route },
+				"mfa_login_revoked",
+			]),
+		);
 	});
 
 	it("answers 401 at a first binding's start and completion, writing no factor and spending no attempt", async () => {
@@ -258,7 +266,7 @@ describe("the boundary's edge", () => {
 });
 
 describe("a login transaction carrying no continuation", () => {
-	it("cannot show it began after a boundary in force: 401, nothing spent; with none in force it is read as before", async () => {
+	it("cannot show it began after a boundary in force: 401; with none in force it is read as before", async () => {
 		for (const [boundaryMs, status] of [
 			[T0 - 60_000, 401],
 			[undefined, 200],
@@ -322,7 +330,7 @@ describe("a boundary that cannot be read", () => {
 });
 
 describe("no boundary wired", () => {
-	it("reads none: the login completes", async () => {
+	it("leaves the login as it was: it completes", async () => {
 		const { app, totp } = await composed({ revocation: null });
 		if (totp === undefined) throw new Error("nothing seeded");
 		const { agent, transaction } = await beginLogin(app);
@@ -330,5 +338,52 @@ describe("no boundary wired", () => {
 		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
+	});
+});
+
+describe("a login transaction named at the step-up", () => {
+	it("is no step-up's: 400, its subject's boundary read no more than for an unknown transaction", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const factorStore = createMemoryMfaFactorStore();
+		const generated = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			suiteSealing().digestsFor("recovery_code"),
+		);
+		if (generated === undefined) throw new Error("no set");
+		const set = await seedFactor(factorStore, "recovery_code", generated.data);
+		const booted = await boot({
+			config: configFor("optional", { enrollment: { requireEmailProof: "never" } }),
+			factorStore,
+			subjectRevocation: revocation,
+		});
+		const begun = await beginLogin(booted.app);
+		const login = await booted.transactionStore.get(begun.transaction);
+		if (login === null) throw new Error("no login transaction");
+		await revocation.revokeBefore(ALICE.id, new Date(T0), new Date(T0 + 86_400_000));
+		// A session signed in after the boundary, by a recovery code.
+		freezeClock(T0 + 2_000);
+		const signed = await beginLogin(booted.app);
+		const verified = await verify(signed.agent, signed.transaction, set.id, generated.codes[0]);
+		expect(verified.status, JSON.stringify(verified.body)).toBe(200);
+		const boundTo = sessionIdSet(verified);
+		if (boundTo === undefined) throw new Error("no session set");
+		// The login's transaction, bound to that browser's session.
+		const named = randomBytes(32).toString("base64url");
+		await booted.transactionStore.create({
+			...login,
+			id: named,
+			binding: { kind: "session", id: boundTo },
+		});
+		const read = vi.spyOn(revocation, "revokedBefore");
+		const unknown = await stepUp(signed.agent, "A".repeat(43));
+		const readsForUnknown = read.mock.calls.length;
+		read.mockClear();
+
+		const res = await stepUp(signed.agent, named);
+
+		expect(unknown.status).toBe(400);
+		expect(res.status, JSON.stringify(res.body)).toBe(400);
+		expect(res.body).toEqual(unknown.body);
+		expect(read.mock.calls.length).toBe(readsForUnknown);
 	});
 });
