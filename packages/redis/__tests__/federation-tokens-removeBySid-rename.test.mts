@@ -5,8 +5,8 @@
 
 import type { FederationTokens } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import type { FederationTokenStoreClient } from "../src/clients.mjs";
-import { createRedisFederationTokenStore } from "../src/federation-tokens.mjs";
+import type { FederationTokenStoreClient } from "#/clients.mjs";
+import { createRedisFederationTokenStore } from "#/federation-tokens.mjs";
 
 function createFakeRedis() {
 	const data = new Map<string, string>();

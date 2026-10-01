@@ -16,8 +16,8 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisSessionFederationIndex } from "../src/sessionFederationIndex.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisSessionFederationIndex } from "#/sessionFederationIndex.mjs";
 import { runSessionFederationIndexContract } from "./sessionFederationIndex.contract.mjs";
 import { serverDeadlines, testRedis } from "./support/redis.mjs";
 

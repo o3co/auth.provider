@@ -14,8 +14,8 @@
 import { createMemoryRateLimiter } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisRateLimiter } from "../src/ratelimit.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisRateLimiter } from "#/ratelimit.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let redis: Redis;

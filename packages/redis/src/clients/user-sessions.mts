@@ -267,6 +267,10 @@ export interface SubjectRevocationClient {
 	 * one key, monotonically, and retain the record for as long as either
 	 * needs (ADR 2026-09-17-federation-grants-offline-delegation, D13).
 	 *
+	 * `beforeMs` is first clamped to the server's clock plus `skewMs`, that
+	 * clock read in the same atomic step as the write; a `beforeMs` behind it
+	 * is written as given.
+	 *
 	 * - `mode: "all"` advances both boundaries to `max(existing, beforeMs)`,
 	 *   each taken independently. This is `revokeBefore`.
 	 * - `mode: "sessions"` advances the sessions boundary alone and leaves the
@@ -278,26 +282,10 @@ export interface SubjectRevocationClient {
 	 * **expired** key is absent, so the guard does not resurrect a lapsed
 	 * record's larger values.
 	 *
-	 * Resolves with the stored value, exactly as written.
+	 * Resolves with the stored value, exactly as written, and the server's
+	 * clock in epoch milliseconds, as read in that step.
 	 */
-	setRevocationBoundaries(
-		key: string,
-		mode: "all" | "sessions",
-		beforeMs: number,
-		expiresAtMs: number,
-		grantRetentionMs: number,
-	): Promise<string>;
-	/**
-	 * `setRevocationBoundaries`, with `beforeMs` first clamped to the server's
-	 * clock plus `skewMs`, that clock read in the same atomic step as the write.
-	 * A `beforeMs` behind it is written as given. Resolves with the stored value
-	 * and the server's clock in epoch milliseconds, as read in that step.
-	 *
-	 * Optional: a client without it still constructs; the adapter then
-	 * records through `setRevocationBoundaries`, unclamped, and says so at warn
-	 * once.
-	 */
-	advanceRevocationBoundaries?(
+	advanceRevocationBoundaries(
 		key: string,
 		mode: "all" | "sessions",
 		write: {

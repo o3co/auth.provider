@@ -16,11 +16,11 @@
 
 import type { Logger, SessionRPRegistry } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "../src/clients.mjs";
+import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "#/clients.mjs";
 import {
 	createRedisSessionRPRegistry,
 	redisSessionRPRegistryBuilder,
-} from "../src/sessionRPRegistry.mjs";
+} from "#/sessionRPRegistry.mjs";
 
 function createMockLogger(): Logger {
 	const logger = {

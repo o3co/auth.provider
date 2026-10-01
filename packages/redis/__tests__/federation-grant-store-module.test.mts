@@ -25,14 +25,14 @@
 import { createApp, type DeploymentMode, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
-import type { FederationGrantStoreClient } from "../src/clients.mjs";
+import type { FederationGrantStoreClient } from "#/clients.mjs";
 import {
 	createRedisFederationGrantStore,
 	DEFAULT_FEDERATION_GRANT_LISTING_ALLOWANCE_MS,
 	redisFederationGrantStoreModule,
 	redisFederationGrantStoreModuleFor,
 	resolveRedisFederationGrantStoreOptions,
-} from "../src/federation-grant-store.mjs";
+} from "#/federation-grant-store.mjs";
 import { capturing, withSection } from "./support/section.mjs";
 
 const client = {} as FederationGrantStoreClient;

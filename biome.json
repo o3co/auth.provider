@@ -24,5 +24,27 @@
 			"trailingCommas": "all",
 			"semicolons": "always"
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["packages/redis/__tests__/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["../**/src/**"],
+										"message": "A test imports its package's source through the `#/` subpath mapping, not a relative path into src/ (AGENTS.md, Module Resolution)."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		}
+	]
 }

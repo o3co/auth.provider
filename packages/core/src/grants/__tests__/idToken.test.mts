@@ -15,7 +15,8 @@
  */
 
 import { decodeJwt, decodeProtectedHeader } from "jose";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { generateIdToken } from "../idToken.mjs";
 
@@ -154,6 +155,35 @@ describe("generateIdToken", () => {
 
 describe("generateIdToken — auth_time", () => {
 	const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxxxx");
+	const nowMs = Date.UTC(2026, 9, 1, 12, 0, 0, 500);
+	const mint = (authTime: Date) =>
+		generateIdToken({
+			sub: "u-1",
+			aud: "client-1",
+			authTime,
+			sid: "sid-1",
+			scopes: ["openid"],
+			userClaims: {},
+			keyStore,
+			issuer: "https://auth.example.com",
+		});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("stamps an authentication instant ahead of the clock by up to DEFAULT_CLOCK_SKEW_MS as iat, never later", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: nowMs });
+		const { token } = await mint(new Date(nowMs + DEFAULT_CLOCK_SKEW_MS));
+		const payload = decodeJwt(token);
+		expect(payload.iat).toBe(Math.floor(nowMs / 1000));
+		expect(payload.auth_time).toBe(payload.iat);
+	});
+
+	it("refuses with a RangeError an authentication instant ahead of the clock by more than DEFAULT_CLOCK_SKEW_MS", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: nowMs });
+		await expect(mint(new Date(nowMs + DEFAULT_CLOCK_SKEW_MS + 1))).rejects.toThrow(RangeError);
+	});
 
 	it.each([
 		["a Date that is not valid", new Date("not a date")],

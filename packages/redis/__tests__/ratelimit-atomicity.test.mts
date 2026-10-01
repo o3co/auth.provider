@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { createRedisRateLimiter } from "../src/ratelimit.mjs";
+import { createRedisRateLimiter } from "#/ratelimit.mjs";
 
 /**
  * A Redis stand-in whose TTL bookkeeping is visible, so a test can assert that

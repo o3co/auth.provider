@@ -12,5 +12,12 @@ export default defineConfig({
 		// `create-app/templates`, and every `scaffold()` in `index.test.mts`
 		// copies from it. A scaffold inside that window fails with ENOENT.
 		fileParallelism: false,
+		// A `@ts-expect-error` or `satisfies` in a test fires only under
+		// typecheck; tsconfig.test.json is the program it compiles.
+		typecheck: {
+			enabled: true,
+			include: ["src/**/__tests__/**/*.test.mts"],
+			tsconfig: "./tsconfig.test.json",
+		},
 	},
 });
