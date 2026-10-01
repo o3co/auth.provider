@@ -1246,6 +1246,29 @@ describe("a sender-constrained poll", () => {
 	});
 });
 
+/**
+ * A `SubjectRevocation` that answers the sessions boundary each test sets,
+ * the later of those set, judged on no clock. These tests date boundaries on
+ * the harness clock, which runs ahead of the host's; a store bounds a
+ * boundary by its own clock and would refuse them.
+ */
+const boundariesAsSet = (): SubjectRevocation => {
+	const boundaries = new Map<string, number>();
+	return {
+		kind: "as-set",
+		revokeBefore: async (subject, before) => {
+			boundaries.set(
+				subject,
+				Math.max(boundaries.get(subject) ?? before.getTime(), before.getTime()),
+			);
+		},
+		revokedBefore: async (subject) => {
+			const ms = boundaries.get(subject);
+			return ms === undefined ? null : new Date(ms);
+		},
+	};
+};
+
 describe("the session check, further", () => {
 	/** The authTime of every fixed session (`liveSessions.mts`). */
 	const AUTH_TIME = new Date(1_800_000_000_000);
@@ -1320,7 +1343,7 @@ describe("the session check, further", () => {
 		// sessions after it; a cascade that failed, or a session the subject
 		// index never learnt of, leaves the record while the boundary is in
 		// force. federation-grants refuses that session the same way.
-		const subjectRevocation = createInMemorySubjectRevocation();
+		const subjectRevocation = boundariesAsSet();
 		await subjectRevocation.revokeBefore("user-1", AUTH_TIME, FAR);
 		const { app, poll } = makeHarness({ subjectRevocation });
 		const started = await startDevice(app);
@@ -1335,7 +1358,7 @@ describe("the session check, further", () => {
 	});
 
 	it("approves from a session that authenticated after the boundary", async () => {
-		const subjectRevocation = createInMemorySubjectRevocation();
+		const subjectRevocation = boundariesAsSet();
 		await subjectRevocation.revokeBefore("user-1", new Date(AUTH_TIME.getTime() - 60_000), FAR);
 		const { app } = makeHarness({ subjectRevocation });
 		const started = await startDevice(app);
@@ -1494,7 +1517,7 @@ describe("a subject revocation between the approval and the poll", () => {
 	};
 
 	it("refuses the poll when the boundary was stamped at or after the approval", async () => {
-		const subjectRevocation = createInMemorySubjectRevocation();
+		const subjectRevocation = boundariesAsSet();
 		const harness = makeHarness({ subjectRevocation });
 		const deviceCode = await approvedDevice(harness);
 		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
@@ -1508,7 +1531,7 @@ describe("a subject revocation between the approval and the poll", () => {
 	});
 
 	it("honours an approval given after the boundary", async () => {
-		const subjectRevocation = createInMemorySubjectRevocation();
+		const subjectRevocation = boundariesAsSet();
 		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
 		const harness = makeHarness({ subjectRevocation });
 		const deviceCode = await approvedDevice(harness);
@@ -1518,7 +1541,7 @@ describe("a subject revocation between the approval and the poll", () => {
 	it("refuses an approval that records no instant while a boundary is in force", async () => {
 		// A record written before the store recorded the approval's instant
 		// cannot show it postdates the boundary; the iat-less token's rule.
-		const subjectRevocation = createInMemorySubjectRevocation();
+		const subjectRevocation = boundariesAsSet();
 		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
 		const inner = createMemoryDeviceCodeStore();
 		const legacy = {
