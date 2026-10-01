@@ -270,7 +270,9 @@ async function applyGrantPolicy(
 				result: {
 					status: 503,
 					error: "temporarily_unavailable",
-					errorDescription: "grant policy evaluation failed",
+					// Core's `evaluateGrantPolicy` text for a policy that throws, repeated
+					// until core exports that answer.
+					errorDescription: "policy evaluation unavailable",
 				},
 			};
 		}
@@ -294,8 +296,9 @@ async function applyGrantPolicy(
 				error = "invalid_request";
 			}
 			// A JavaScript policy can return anything as its description; one
-			// that is empty or not a string is not sent — RFC 6749 A.8 makes
-			// the field 1*NQSCHAR — and the default is.
+			// that is empty or not a string is not sent (RFC 6749 A.8 makes the
+			// field 1*NQSCHAR), and nothing replaces it, as `/oauth/token` answers
+			// the other grants' deny.
 			const description = reading.decision.errorDescription;
 			// `400` whatever the code (RFC 6749 §5.2), as core's
 			// `evaluateGrantPolicy` answers the other grants' deny.
@@ -303,7 +306,9 @@ async function applyGrantPolicy(
 				result: {
 					status: 400,
 					error,
-					errorDescription: (typeof description === "string" && description) || "denied by policy",
+					...(typeof description === "string" && description !== ""
+						? { errorDescription: description }
+						: {}),
 				},
 			};
 		}
