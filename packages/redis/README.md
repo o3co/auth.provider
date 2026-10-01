@@ -810,7 +810,9 @@ lock state exactly as core's in-process store does, and moves the generation
 so it ends a lock state the other scripts cannot read. The acquire script
 compares the generation a writer captured with `g` (absent is `0`) and writes
 the lease with `SET NX PX`; the release is a compare-and-delete of its own,
-which answers a lease holding the token with no deadline as an outage. The
+which answers a lease at its last millisecond (`PTTL` 0) as lapsed, `false`,
+and one holding the token with no deadline (`PTTL` -1) as an outage; an apply
+and a floor raise take neither as held. The
 floor is the recovery hash's `floor` — a recovery-code set's generation, not
 the subject's — raised under the lease by one script that never lowers it.
 Counts are safe whole numbers (at most 2^53−1) and an authorization's end lies

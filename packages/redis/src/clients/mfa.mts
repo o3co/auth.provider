@@ -360,7 +360,7 @@ export interface MfaTransactionStoreClient {
 		keys: MfaSubjectKeys,
 		input: AcquireMfaSubjectLeaseInput,
 	): Promise<AcquireMfaSubjectLeaseReply>;
-	/** Atomically: delete the lease while it holds `token`; resolves whether it did. A lease holding it with no deadline rejects, nothing deleted. */
+	/** Atomically: delete the lease while it holds `token`; resolves whether it did. One at its last millisecond has lapsed (`false`); one holding it with no deadline rejects, nothing deleted. */
 	releaseSubjectLease(keys: MfaSubjectKeys, token: string): Promise<boolean>;
 	/**
 	 * Atomically, on the server's clock: refuse an authorization whose end is not after it or

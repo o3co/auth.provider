@@ -501,7 +501,8 @@ local function recovery_keep(key, counted, slots)
   redis.call('PEXPIREAT', key, string.format('%.0f', latest + ALLOWANCE))
 end
 
--- Whether the lease holds token, with a deadline: a lease with none is not one this store wrote.
+-- Whether the lease holds token and stands: one at its last millisecond (PTTL 0) has lapsed, and
+-- one with no deadline (PTTL -1) is not one this store wrote; neither is held.
 local function lease_held(key, token)
   return redis.call('GET', key) == token and redis.call('PTTL', key) > 0
 end
@@ -728,14 +729,17 @@ return {1, stamp}
 /**
  * `MfaTransactionStoreClient.releaseSubjectLease`. `KEYS[1]` = the subject's lease; `ARGV[1]` =
  * the holder's token. Deletes the lease while it holds the token and answers `1`; `0` when it
- * holds another or none. A lease holding the token with no deadline is none this store wrote:
- * an error, nothing deleted.
+ * holds another or none, or is at its last millisecond (`PTTL` 0: it has lapsed, and goes
+ * within that millisecond). A lease holding the token with no deadline (`PTTL` -1) is none
+ * this store wrote: an error, nothing deleted.
  */
 const LUA_MFA_SUBJECT_LEASE_RELEASE = `
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
-if redis.call('PTTL', KEYS[1]) <= 0 then
+local left = redis.call('PTTL', KEYS[1])
+if left == -1 then
   error({err = 'MFA subject lease: a lease with no deadline is not one this store wrote; the operation is refused'})
 end
+if left <= 0 then return 0 end
 return redis.call('DEL', KEYS[1])
 `.trim();
 
