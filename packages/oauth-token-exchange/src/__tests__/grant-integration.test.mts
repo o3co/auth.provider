@@ -29,6 +29,7 @@ import {
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
 	type PublicClient,
+	policyUnavailable,
 	type RefreshTokenFamilyRevocation,
 	type TokenBinding,
 } from "@o3co/auth-provider-core";
@@ -1298,7 +1299,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 
 	// A policy that throws is an outage, answered as core answers it for the
 	// other grants.
-	it("answers a policy that throws as core's policy evaluation does: 503 policy evaluation unavailable", async () => {
+	it("answers a policy that throws with core's policyUnavailable(), as core's policy evaluation does", async () => {
 		const policy: GrantPolicyHook = {
 			kind: "test",
 			evaluate: async () => {
@@ -1315,6 +1316,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			subject_token: await signSelfIssuedAccessToken({}),
 			subject_token_type: ACCESS_TOKEN_TYPE,
 		});
+		expect(result).toEqual(policyUnavailable());
 		expect(result).toEqual({
 			status: 503,
 			error: "temporarily_unavailable",
