@@ -153,9 +153,11 @@ describe("createAuditFanOut", () => {
 			kind: "broken-then",
 			record: () => {
 				const answer = Promise.resolve();
-				answer.then = () => {
-					throw new Error("broken then");
-				};
+				Object.defineProperty(answer, "then", {
+					value: () => {
+						throw new Error("broken then");
+					},
+				});
 				return answer;
 			},
 		};
