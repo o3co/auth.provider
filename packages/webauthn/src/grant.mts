@@ -552,7 +552,10 @@ function parseAssertionBody(raw: unknown): AssertionParseResult {
 	// Read as the library decodes it: the challenge consumed is the one it verifies.
 	const clientData = readClientData(clientDataJSONBase64);
 	if (clientData === undefined) {
-		return { ok: false, reason: "assertion.response.clientDataJSON is not valid base64url JSON" };
+		return {
+			ok: false,
+			reason: "assertion.response.clientDataJSON is not a base64url JSON object",
+		};
 	}
 	const challengeValue = clientData.challenge;
 	if (typeof challengeValue !== "string" || challengeValue.length === 0) {

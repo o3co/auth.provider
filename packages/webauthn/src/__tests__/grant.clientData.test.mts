@@ -112,4 +112,35 @@ describe("the challenge the WebAuthn grant consumes", () => {
 
 		expect(signedIn.status, JSON.stringify(signedIn)).toBe(200);
 	});
+
+	it.each([
+		[
+			"an object whose challenge is a number",
+			{ clientData: { challenge: 7 } },
+			"assertion.response.clientDataJSON has no valid challenge",
+		],
+		[
+			"an object whose challenge is empty",
+			{ clientData: { challenge: "" } },
+			"assertion.response.clientDataJSON has no valid challenge",
+		],
+		[
+			"JSON that is not an object",
+			{ encode: () => Buffer.from("[]").toString("base64url") },
+			"assertion.response.clientDataJSON is not a base64url JSON object",
+		],
+	] as const)(
+		"is not consumed for client data the library reads as %s: 400 invalid_grant, and the challenge still completes a sign-in",
+		async (_what, options: CeremonyOptions, errorDescription) => {
+			const { signIn } = await grant();
+
+			const refused = await signIn(options);
+
+			expect(refused).toEqual({ status: 400, error: "invalid_grant", errorDescription });
+
+			const signedIn = await signIn();
+
+			expect(signedIn.status, JSON.stringify(signedIn)).toBe(200);
+		},
+	);
 });
