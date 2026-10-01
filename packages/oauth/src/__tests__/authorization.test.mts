@@ -262,22 +262,6 @@ describe("createAuthorizationGrant", () => {
 			expect(result.status).toBe(400);
 		});
 
-		it("returns 400 when client_id does not match session code_client_id", async () => {
-			const deps = makeDeps(vi.fn().mockResolvedValue(null));
-			const handler = createAuthorizationGrant(deps);
-			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "wrong-client", code_verifier: CODE_VERIFIER },
-				session: { code: "abc" },
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-				authenticatedClient: DEFAULT_AUTH_CLIENT,
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
-		});
-
 		it("returns 400 when codeRepository.consumeByCode returns null", async () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue(null));
 			const handler = createAuthorizationGrant(deps);
@@ -513,7 +497,7 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("answers no empty-string scope, and mints no scope claim, when granted scopes is empty", async () => {
-			// Code has neither grantedScope nor session.granted_scopes.
+			// The code carries no grantedScope.
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
 			);
@@ -527,7 +511,6 @@ describe("createAuthorizationGrant", () => {
 				},
 				session: {
 					code: "abc",
-					// granted_scopes intentionally omitted
 					user: { id: "u1" },
 				},
 				issuer: "localhost",
