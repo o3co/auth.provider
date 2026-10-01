@@ -889,7 +889,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// is logged once here and skipped. With none, the logout answers as
 		// without front-channel logout (7b–7d). Read only for an HTML answer.
 		const frontchannelRps = acceptsHtml
-			? rps.filter((rp) => usableFrontchannelLogoutUri(rp, "logout", opts.logger) !== undefined)
+			? rps.filter(
+					(rp) => usableFrontchannelLogoutUri(rp, "logout", opts.logger ?? console) !== undefined,
+				)
 			: [];
 		if (frontchannelRps.length > 0) {
 			const html = renderFrontchannelLogoutHtml({
