@@ -523,7 +523,7 @@ describe("createSubjectRevocationService", () => {
 		});
 
 		it("runs on the real clock when no clock is injected", async () => {
-			const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
+			const revocation = createInMemorySubjectRevocation();
 			const { now: _injected, ...withoutClock } = keeping({ subjectRevocation: revocation });
 			const service = createSubjectRevocationService(
 				withoutClock as Parameters<typeof createSubjectRevocationService>[0],

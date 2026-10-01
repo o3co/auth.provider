@@ -16,8 +16,9 @@
 
 /**
  * What every `SubjectRevocation` adapter owes on its own clock: a boundary
- * later than the store's clock plus `DEFAULT_CLOCK_SKEW_MS` is refused with a
- * `RangeError` and nothing is written; one behind the store's clock is not.
+ * later than the store's clock plus `DEFAULT_CLOCK_SKEW_MS` is recorded as
+ * that clock plus the skew, never refused; one within it, or behind the
+ * store's clock however far, is recorded as given.
  */
 
 import { describe, expect, it } from "vitest";
@@ -45,7 +46,91 @@ const MARGIN_MS = 60_000;
 const lifetime = async (clock: StoreClock): Promise<Date> =>
 	new Date((await clock.now()) + 600_000);
 
+/** The store's clock read just before and just after a write, the boundary asked for, and what reads back. */
+interface ClampedWrite {
+	readonly from: number;
+	readonly to: number;
+	readonly asked: number;
+	readonly recorded: number | undefined;
+}
+
+/**
+ * Writes a boundary past the bound through `write` and answers what `read`
+ * says, with the store's clock read just before and just after the write: the
+ * clamp lies between the two, plus the skew.
+ */
+const clampedWrite = async (
+	clock: StoreClock,
+	write: (before: Date, expiresAt: Date) => Promise<void>,
+	read: () => Promise<Date | null>,
+): Promise<ClampedWrite> => {
+	const until = await lifetime(clock);
+	const from = await clock.now();
+	const asked = new Date(from + DEFAULT_CLOCK_SKEW_MS + MARGIN_MS);
+	await write(asked, until);
+	const to = await clock.now();
+	const recorded = (await read())?.getTime();
+	return { from, to, asked: asked.getTime(), recorded };
+};
+
+const expectClamped = (w: ClampedWrite): void => {
+	expect(w.recorded).toBeDefined();
+	expect(w.recorded as number).toBeGreaterThanOrEqual(w.from + DEFAULT_CLOCK_SKEW_MS);
+	expect(w.recorded as number).toBeLessThanOrEqual(w.to + DEFAULT_CLOCK_SKEW_MS);
+	expect(w.recorded as number).toBeLessThan(w.asked);
+};
+
+/** The base port's boundary on the store's clock: `revokeBefore` and `revokedBefore` only. */
 export function runSubjectRevocationClockContract(
+	factory: () => Promise<SubjectRevocation>,
+	options: { readonly clock?: StoreClock } = {},
+): void {
+	const clock = options.clock ?? hostClock;
+
+	describe("SubjectRevocation contract: the boundary on the store's clock", () => {
+		it("records a boundary past the store's clock plus the skew as that clock plus the skew", async () => {
+			const store = await factory();
+			expectClamped(
+				await clampedWrite(
+					clock,
+					(before, until) => store.revokeBefore("k-u1", before, until),
+					() => store.revokedBefore("k-u1"),
+				),
+			);
+		});
+
+		it("records a boundary ahead of the store's clock by less than the skew as given", async () => {
+			const store = await factory();
+			const within = new Date((await clock.now()) + DEFAULT_CLOCK_SKEW_MS - MARGIN_MS);
+			await store.revokeBefore("k-u2", within, await lifetime(clock));
+			expect((await store.revokedBefore("k-u2"))?.getTime()).toBe(within.getTime());
+		});
+
+		it("records a boundary far behind the store's clock as given: a replica running behind still revokes", async () => {
+			const store = await factory();
+			const behind = new Date((await clock.now()) - DEFAULT_CLOCK_SKEW_MS - MARGIN_MS);
+			await store.revokeBefore("k-u3", behind, await lifetime(clock));
+			expect((await store.revokedBefore("k-u3"))?.getTime()).toBe(behind.getTime());
+		});
+
+		it("keeps a later boundary in force over an earlier one", async () => {
+			const store = await factory();
+			const within = new Date((await clock.now()) + DEFAULT_CLOCK_SKEW_MS - MARGIN_MS / 2);
+			await store.revokeBefore("k-u4", within, await lifetime(clock));
+			const behind = new Date((await clock.now()) - MARGIN_MS);
+			await store.revokeBefore("k-u4", behind, await lifetime(clock));
+			expect((await store.revokedBefore("k-u4"))?.getTime()).toBe(within.getTime());
+		});
+	});
+}
+
+/**
+ * The second boundary on the store's clock, for a store that claims
+ * `SupportsSessionsOnlyRevocation`: `revokeBefore` clamps the grants boundary
+ * with the sessions one, and `revokeSessionsBefore` clamps the sessions
+ * boundary alone, leaving the grants boundary as it was.
+ */
+export function runSessionsOnlyRevocationClockContract(
 	factory: () => Promise<SubjectRevocation>,
 	options: { readonly clock?: StoreClock } = {},
 ): void {
@@ -58,64 +143,38 @@ export function runSubjectRevocationClockContract(
 		return store;
 	};
 
-	describe("SubjectRevocation contract: the boundary on the store's clock", () => {
-		it("refuses a boundary past the store's clock plus the skew, writing nothing", async () => {
-			const store = await factory();
-			const ahead = new Date((await clock.now()) + DEFAULT_CLOCK_SKEW_MS + MARGIN_MS);
-			await expect(store.revokeBefore("k-u1", ahead, await lifetime(clock))).rejects.toThrow(
-				RangeError,
-			);
-			expect(await store.revokedBefore("k-u1")).toBeNull();
-		});
-
-		it("leaves a boundary in force as it was when it refuses a later one", async () => {
-			const store = await capable();
-			const held = new Date((await clock.now()) - MARGIN_MS);
-			await store.revokeBefore("k-u2", held, await lifetime(clock));
-			const ahead = new Date((await clock.now()) + DEFAULT_CLOCK_SKEW_MS + MARGIN_MS);
-			await expect(store.revokeBefore("k-u2", ahead, await lifetime(clock))).rejects.toThrow(
-				RangeError,
-			);
-			expect((await store.revokedBefore("k-u2"))?.getTime()).toBe(held.getTime());
-			expect((await store.grantsRevokedBefore("k-u2"))?.getTime()).toBe(held.getTime());
-		});
-
-		it("records a boundary ahead of the store's clock by less than the skew", async () => {
-			const store = await factory();
-			const within = new Date((await clock.now()) + DEFAULT_CLOCK_SKEW_MS - MARGIN_MS);
-			await store.revokeBefore("k-u3", within, await lifetime(clock));
-			expect((await store.revokedBefore("k-u3"))?.getTime()).toBe(within.getTime());
-		});
-
-		it("records a boundary far behind the store's clock: a replica running behind still revokes", async () => {
-			const store = await factory();
-			const behind = new Date((await clock.now()) - DEFAULT_CLOCK_SKEW_MS - MARGIN_MS);
-			await store.revokeBefore("k-u4", behind, await lifetime(clock));
-			expect((await store.revokedBefore("k-u4"))?.getTime()).toBe(behind.getTime());
-		});
-	});
-
 	describe("SupportsSessionsOnlyRevocation contract: the boundary on the store's clock", () => {
-		it("refuses a sessions boundary past the store's clock plus the skew, writing nothing", async () => {
+		it("clamps the grants boundary with the sessions one on a full revocation", async () => {
 			const store = await capable();
-			const held = new Date((await clock.now()) - MARGIN_MS);
-			await store.revokeSessionsBefore("k-u5", held, await lifetime(clock));
-			const ahead = new Date((await clock.now()) + DEFAULT_CLOCK_SKEW_MS + MARGIN_MS);
-			await expect(
-				store.revokeSessionsBefore("k-u5", ahead, await lifetime(clock)),
-			).rejects.toThrow(RangeError);
-			expect((await store.revokedBefore("k-u5"))?.getTime()).toBe(held.getTime());
-			expect(await store.grantsRevokedBefore("k-u5")).toBeNull();
+			const w = await clampedWrite(
+				clock,
+				(before, until) => store.revokeBefore("k-u5", before, until),
+				() => store.revokedBefore("k-u5"),
+			);
+			expectClamped(w);
+			expect((await store.grantsRevokedBefore("k-u5"))?.getTime()).toBe(w.recorded);
 		});
 
-		it("records a sessions boundary within the skew, and one far behind", async () => {
+		it("records a sessions boundary past the store's clock plus the skew as that clock plus the skew, leaving grants as they were", async () => {
+			const store = await capable();
+			expectClamped(
+				await clampedWrite(
+					clock,
+					(before, until) => store.revokeSessionsBefore("k-u6", before, until),
+					() => store.revokedBefore("k-u6"),
+				),
+			);
+			expect(await store.grantsRevokedBefore("k-u6")).toBeNull();
+		});
+
+		it("records a sessions boundary within the skew, and one far behind, as given", async () => {
 			const store = await capable();
 			const behind = new Date((await clock.now()) - DEFAULT_CLOCK_SKEW_MS - MARGIN_MS);
-			await store.revokeSessionsBefore("k-u6", behind, await lifetime(clock));
-			expect((await store.revokedBefore("k-u6"))?.getTime()).toBe(behind.getTime());
+			await store.revokeSessionsBefore("k-u7", behind, await lifetime(clock));
+			expect((await store.revokedBefore("k-u7"))?.getTime()).toBe(behind.getTime());
 			const within = new Date((await clock.now()) + DEFAULT_CLOCK_SKEW_MS - MARGIN_MS);
-			await store.revokeSessionsBefore("k-u6", within, await lifetime(clock));
-			expect((await store.revokedBefore("k-u6"))?.getTime()).toBe(within.getTime());
+			await store.revokeSessionsBefore("k-u7", within, await lifetime(clock));
+			expect((await store.revokedBefore("k-u7"))?.getTime()).toBe(within.getTime());
 		});
 	});
 }

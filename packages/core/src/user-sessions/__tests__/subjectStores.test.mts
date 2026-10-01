@@ -11,7 +11,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import { createInMemorySubjectSessionIndex } from "#/user-sessions/memory/subjectSessionIndex.mjs";
-import { runSubjectRevocationClockContract } from "./subjectRevocation.clock.contract.mjs";
+import {
+	runSessionsOnlyRevocationClockContract,
+	runSubjectRevocationClockContract,
+} from "./subjectRevocation.clock.contract.mjs";
 import {
 	runSessionsOnlyRevocationContract,
 	runSubjectRevocationContract,
@@ -28,6 +31,7 @@ runSubjectRevocationContract(async () => createInMemorySubjectRevocation());
 // federation-grants ADR, D13).
 runSessionsOnlyRevocationContract(async () => createInMemorySubjectRevocation());
 runSubjectRevocationClockContract(async () => createInMemorySubjectRevocation());
+runSessionsOnlyRevocationClockContract(async () => createInMemorySubjectRevocation());
 
 const FUTURE = new Date(Date.now() + 3_600_000);
 

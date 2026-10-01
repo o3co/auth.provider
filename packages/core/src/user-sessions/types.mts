@@ -475,10 +475,14 @@ export interface SubjectRevocation {
 	 * Keeping grants takes the deliberate call on
 	 * {@link SupportsSessionsOnlyRevocation}.
 	 *
-	 * A `RangeError`, nothing written, for a `before` that
-	 * `checkSubjectRevocationBoundary` refuses on the store's clock: one later
-	 * than it by more than `DEFAULT_CLOCK_SKEW_MS` would revoke sign-ins that
-	 * have not happened yet. One behind the store's clock is recorded.
+	 * A `before` later than the store's clock plus `DEFAULT_CLOCK_SKEW_MS` is
+	 * recorded as that clock plus the skew (`clampSubjectRevocationBoundary`,
+	 * read in the same atomic step as the write), never refused: a boundary
+	 * further ahead than the clock skew between hosts is no replica's clock
+	 * reading, and a refusal would leave every token already issued alive. One
+	 * behind the store's clock is recorded as given. A `RangeError`, nothing
+	 * written, for a `before` or `expiresAt` that is not a `Date` with a finite
+	 * time (`checkSubjectRevocationInstant`).
 	 */
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
 	/** The sessions watermark, or `null` when this subject has none in force. */
@@ -504,8 +508,8 @@ export interface SupportsSessionsOnlyRevocation {
 	/**
 	 * Advance the sessions boundary alone, leaving the grants boundary exactly
 	 * as it was — including absent. It is never a way back: a grant an earlier
-	 * revocation ended stays ended. Its `before` is checked as
-	 * {@link SubjectRevocation.revokeBefore}'s is.
+	 * revocation ended stays ended. Its `before` is clamped, and its
+	 * arguments checked, as {@link SubjectRevocation.revokeBefore}'s are.
 	 */
 	revokeSessionsBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
 	/** The grants watermark, or `null` when this subject has none in force. */

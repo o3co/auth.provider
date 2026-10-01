@@ -15,31 +15,49 @@
  */
 
 /**
- * The one check of a boundary a `SubjectRevocation` store is asked to
- * record: a date, and — on the store's clock — never later than it by more
- * than `DEFAULT_CLOCK_SKEW_MS`. A boundary behind the store's clock is not
- * refused: a revocation must not fail because the revoking replica runs
- * behind, and the stores keep the later boundary anyway.
+ * How a `SubjectRevocation` store reads what it is asked to record: an
+ * instant only as a `Date` with a finite time, and a boundary never later
+ * than the store's clock plus `DEFAULT_CLOCK_SKEW_MS`, clamped to it rather
+ * than refused. A refusal would leave every token already issued alive; the
+ * clamp still revokes all a replica within the skew minted, and holds a
+ * lockout to the skew.
  */
 
 import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 
 /**
- * `before` as epoch milliseconds, or a `RangeError` naming what is wrong: not
- * a valid `Date`, or, given `storeNowMs`, the store's clock, later than it
- * plus `DEFAULT_CLOCK_SKEW_MS`. Every adapter runs it before it writes; one
- * whose store judges the clock in a script runs the shape first and the bound
- * on the clock that script answers.
+ * `value`'s epoch milliseconds when it is a `Date` (of any realm) with a
+ * finite time; else a `RangeError` naming `name`. An object that only answers
+ * `getTime` is not a date: its time could read back as no instant at all.
  */
-export function checkSubjectRevocationBoundary(before: unknown, storeNowMs?: number): number {
-	const ms = (before as Date | null | undefined)?.getTime?.();
-	if (typeof ms !== "number" || Number.isNaN(ms)) {
-		throw new RangeError("SubjectRevocation: before must be a date");
+export function checkSubjectRevocationInstant(value: unknown, name: string): number {
+	let ms: number;
+	try {
+		ms = Date.prototype.getTime.call(value);
+	} catch {
+		ms = Number.NaN;
 	}
-	if (storeNowMs !== undefined && !(ms <= storeNowMs + DEFAULT_CLOCK_SKEW_MS)) {
-		throw new RangeError(
-			"SubjectRevocation: before must be no further ahead of the store's clock than DEFAULT_CLOCK_SKEW_MS",
-		);
-	}
+	if (!Number.isFinite(ms)) throw new RangeError(`SubjectRevocation: ${name} must be a date`);
 	return ms;
+}
+
+/**
+ * The boundary a store records for `before` on `storeNowMs`, its clock read
+ * in the same step as the write: `before` when it is no later than
+ * `storeNowMs + DEFAULT_CLOCK_SKEW_MS`, else exactly that, with `clamped`
+ * saying which. A `RangeError` for a `before` that is no date, or a clock
+ * that is not a finite instant: the bound is never skipped.
+ */
+export function clampSubjectRevocationBoundary(
+	before: unknown,
+	storeNowMs: number,
+): { readonly boundary: Date; readonly clamped: boolean } {
+	const beforeMs = checkSubjectRevocationInstant(before, "before");
+	if (typeof storeNowMs !== "number" || !Number.isFinite(storeNowMs)) {
+		throw new RangeError("SubjectRevocation: the store's clock must be a finite instant");
+	}
+	const latestMs = storeNowMs + DEFAULT_CLOCK_SKEW_MS;
+	return beforeMs > latestMs
+		? { boundary: new Date(latestMs), clamped: true }
+		: { boundary: new Date(beforeMs), clamped: false };
 }

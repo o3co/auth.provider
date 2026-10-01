@@ -322,7 +322,8 @@ out-of-tree adapter can import and run:
 | --- | --- |
 | `KeyStore` | `packages/core/src/keys/__tests__/keyStore.contract.mts` |
 | `SubjectSessionIndex` | `packages/core/src/user-sessions/__tests__/subjectSessionIndex.contract.mts` |
-| `SubjectRevocation` | `packages/core/src/user-sessions/__tests__/subjectRevocation.contract.mts` |
+| `SubjectRevocation` | `packages/core/src/user-sessions/__tests__/subjectRevocation.contract.mts` (`runSubjectRevocationContract`); its boundary on the store's clock, `packages/core/src/user-sessions/__tests__/subjectRevocation.clock.contract.mts` (`runSubjectRevocationClockContract`) |
+| `SupportsSessionsOnlyRevocation` (the `SubjectRevocation` second-boundary capability; run only for a store that claims it) | `packages/core/src/user-sessions/__tests__/subjectRevocation.contract.mts` (`runSessionsOnlyRevocationContract`), and on the store's clock `packages/core/src/user-sessions/__tests__/subjectRevocation.clock.contract.mts` (`runSessionsOnlyRevocationClockContract`) |
 | `AccessTokenDenylist` | `packages/core/src/access-token-denylist/__tests__/adapters.contract.mts` |
 | `ChallengeStore` | `packages/core/src/challenges/__tests__/adapters.contract.mts` |
 | `ConsentStore` | `packages/core/src/consents/__tests__/adapters.contract.mts` |

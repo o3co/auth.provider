@@ -1122,8 +1122,11 @@ export {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./user-sessions/revokeAllForSubject.mjs";
-// The one check of a boundary a SubjectRevocation store records, on its clock.
-export { checkSubjectRevocationBoundary } from "./user-sessions/subjectRevocationBoundary.mjs";
+// How a SubjectRevocation store reads its arguments, and bounds a boundary by its clock.
+export {
+	checkSubjectRevocationInstant,
+	clampSubjectRevocationBoundary,
+} from "./user-sessions/subjectRevocationBoundary.mjs";
 export {
 	createSubjectRevocationService,
 	type FederationGrantDisposition,
