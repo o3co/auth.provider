@@ -76,6 +76,19 @@ export function policyOutOfBounds(errorDescription: string): GrantError {
 }
 
 /**
+ * Core's answer to a grant policy that throws: `503 temporarily_unavailable`
+ * with a fixed description that quotes nothing the policy threw. The policy
+ * could not answer, as a store that cannot be read could not.
+ */
+export function policyUnavailable(): GrantError & { readonly errorDescription: string } {
+	return {
+		status: 503,
+		error: "temporarily_unavailable",
+		errorDescription: "policy evaluation unavailable",
+	};
+}
+
+/**
  * Logs a grant policy that threw — it could not answer, and the request is
  * refused `503 temporarily_unavailable` — as `grant_policy_unavailable` at
  * error level, with the grant type, the policy's `kind`, the caller's `site`
@@ -103,7 +116,13 @@ export function logGrantPolicyUnavailable(
  * The one reading of what a grant policy returned. Only an `outcome` that is
  * exactly `"allow"` allows, and only one that is exactly `"deny"` refuses;
  * anything else — another string or case, no `outcome`, a value that is not
- * an object, an `outcome` that throws when read — is `invalid`, never allow.
+ * an object, a field that throws when read — is `invalid`, never allow.
+ *
+ * The decision handed back is a plain copy, each field read once —
+ * `outcome`, `grantedScope` and `grantedAudience` for allow, `outcome`,
+ * `error` and `errorDescription` for deny, an array copied element by
+ * element — so a getter or a proxy cannot answer the caller's check one
+ * value and its use another. Callers act on the copy alone.
  *
  * An invalid decision is the deployment's policy at fault, not the caller, and
  * not an outage: `500 server_error`, as {@link policyOutOfBounds} answers.
@@ -117,9 +136,8 @@ export function readGrantPolicyDecision(
 	logger: Pick<Logger, "error"> | undefined,
 	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
 ): GrantPolicyReading {
-	const outcome = outcomeOf(decision);
-	if (outcome === "allow") return { verdict: outcome, decision: decision as GrantPolicyAllow };
-	if (outcome === "deny") return { verdict: outcome, decision: decision as GrantPolicyDeny };
+	const reading = snapshotOf(decision);
+	if (reading !== undefined) return reading;
 	(logger ?? consoleLogger).error(
 		{
 			...(context.site !== undefined ? { site: context.site } : {}),
@@ -134,14 +152,50 @@ export function readGrantPolicyDecision(
 	};
 }
 
-/** `decision.outcome`, read once; `undefined` when there is none to read. */
-function outcomeOf(decision: unknown): unknown {
+/**
+ * `decision` as an allow or a deny, each field read once into a plain copy;
+ * `undefined` when it is neither or a field throws when read.
+ */
+function snapshotOf(
+	decision: unknown,
+): Exclude<GrantPolicyReading, { readonly verdict: "invalid" }> | undefined {
 	if (typeof decision !== "object" || decision === null) return undefined;
+	const fields = decision as Readonly<Record<string, unknown>>;
 	try {
-		return (decision as { readonly outcome?: unknown }).outcome;
+		const outcome = fields.outcome;
+		if (outcome === "allow") {
+			const grantedScope = copied(fields.grantedScope);
+			const grantedAudience = copied(fields.grantedAudience);
+			return {
+				verdict: outcome,
+				decision: {
+					outcome,
+					...(grantedScope !== undefined ? { grantedScope } : {}),
+					...(grantedAudience !== undefined ? { grantedAudience } : {}),
+				} as GrantPolicyAllow,
+			};
+		}
+		if (outcome === "deny") {
+			const error = fields.error;
+			const errorDescription = fields.errorDescription;
+			return {
+				verdict: outcome,
+				decision: {
+					outcome,
+					error,
+					...(errorDescription !== undefined ? { errorDescription } : {}),
+				} as GrantPolicyDeny,
+			};
+		}
 	} catch {
-		return undefined;
+		// A field that throws when read is a decision that cannot be read.
 	}
+	return undefined;
+}
+
+/** An array as a plain array of its elements; any other value as it is. */
+function copied(value: unknown): unknown {
+	return Array.isArray(value) ? Array.from(value) : value;
 }
 
 /** The rest of {@link evaluateGrantPolicy}'s inputs. */
@@ -163,10 +217,10 @@ export interface EvaluateGrantPolicyOptions {
  * decision to the grant's already-narrowed effective scope. The rules every
  * minting path applies:
  *
- * - **A policy that throws is `503 temporarily_unavailable`**, never allow:
- *   failing open would grant the pre-policy ceiling the policy exists to
- *   narrow. Logged as `grant_policy_unavailable`
- *   ({@link logGrantPolicyUnavailable}).
+ * - **A policy that throws is `503 temporarily_unavailable`**
+ *   ({@link policyUnavailable}), never allow: failing open would grant the
+ *   pre-policy ceiling the policy exists to narrow. Logged as
+ *   `grant_policy_unavailable` ({@link logGrantPolicyUnavailable}).
  * - **A decision that is neither `allow` nor `deny` is `500 server_error`**,
  *   never allow ({@link readGrantPolicyDecision}).
  * - **`deny` is `400` with the policy's own error** and description.
@@ -202,14 +256,7 @@ export async function evaluateGrantPolicy(
 			{ grantType: request.grantType, policy: grantPolicy.kind },
 			err,
 		);
-		return {
-			ok: false,
-			result: {
-				status: 503,
-				error: "temporarily_unavailable",
-				errorDescription: "policy evaluation unavailable",
-			},
-		};
+		return { ok: false, result: policyUnavailable() };
 	}
 	const reading = readGrantPolicyDecision(answer, logger, {
 		grantType: request.grantType,
