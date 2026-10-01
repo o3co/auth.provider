@@ -254,8 +254,14 @@ Module-level messages that arrive wrapped in a factory failure:
   `postLogoutRedirectUris` reads the same with its own field name;
   `federationGrantRedirectUris` reports the reason alone
   (`federationGrantRedirectUris: reserved-parameter` or
-  `… query-name-invalid`). Rename or remove the parameter in the registration,
-  and carry the client's own context in `state` or in the path.
+  `… query-name-invalid`), and also refuses `grant_id`, compared the same
+  way (`GRANT_ID`, `grantId`, `_grant_id`): `federationGrantRedirectUris:
+  <uri> already carries "grant_id", …`. Rename or remove the parameter in
+  the registration, and carry the client's own context in `state` or in the
+  path. The comparison covers names as written and the common
+  normalizations (case, `_`, `-`), not a mapping a client configures, such
+  as an alias or a prefix its binder strips: a client must read the OAuth
+  fields by their canonical names.
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `redis-clients.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
 - Standalone federation grant intents on Redis: `redis-federation-grant-store.keyPrefix
@@ -2246,9 +2252,15 @@ before you flip — and a relying party holding the secret can also mint.
    `cimd_document_rejected` warning). A federation-grant lodging whose
    registered URI such a query fails is answered `redirect_uri_invalid`,
    `state` and `error` included, where it used to be
-   `redirect_uri_reserved_parameter`; both are `400 invalid_request`. Rename
-   or remove such parameters, and carry the client's context in `state` or in
-   the path.
+   `redirect_uri_reserved_parameter`; both are `400 invalid_request`. A
+   `federationGrantRedirectUris` entry that carries `grant_id` under another
+   case or separators (`GRANT_ID`, `grantId`, `_grant_id`, `grant-id`) now
+   fails boot too, and lodging answers it `redirect_uri_reserved_parameter`,
+   as it answers `grant_id` itself. Rename or remove such parameters, and
+   carry the client's context in `state` or in the path. The rule covers
+   names as written and the common normalizations, not a mapping a client
+   configures (an alias, a stripped prefix): make sure each client reads the
+   OAuth fields by their canonical names.
 
 ### Rolling out
 
