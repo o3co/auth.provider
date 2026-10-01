@@ -44,6 +44,7 @@ import express from "express";
 import type request from "supertest";
 import { expect, vi } from "vitest";
 import { readMfaSettings } from "#/config.mjs";
+import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
 import { createMfaSealing, type MfaSealing } from "#/sealing.mjs";
 import {
 	mfaConfigForTests,
@@ -132,6 +133,17 @@ export async function seedFactor(
 	};
 	await store.create(record);
 	return record;
+}
+
+/** A recovery-code set of `count` codes as the factor issues it, digested under the suite's key: its codes and the record's data. */
+export function recoverySet(count: number): { readonly codes: readonly string[]; readonly data: MfaFactorData } {
+	if (count === 0) return { codes: [], data: { codes: [] } };
+	const set = generateRecoveryCodes(
+		createRecoveryCodeFactor({ count }),
+		suiteSealing().digestsFor("recovery_code"),
+	);
+	if (set === undefined) throw new Error("the recovery-code factor issued no set");
+	return set;
 }
 
 /** The TOTP code of `secret` at `atMs`, `offset` steps away (SHA1, 6 digits, 30 s). */
