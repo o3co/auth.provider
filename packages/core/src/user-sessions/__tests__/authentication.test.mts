@@ -166,6 +166,23 @@ describe("vouchedAmr — the amr this provider vouches for", () => {
 		expect(vouchedAmr(session(undefined))).toEqual([]);
 		expect(vouchedAmr(recorded(undefined, FEDERATED))).toEqual([]);
 	});
+
+	it.each([
+		["a string", "mfa"],
+		["a string holding fed", "confed"],
+		["an array holding a non-string", ["pwd", 1]],
+		["an array holding an empty string", ["pwd", ""]],
+		["an array with a hole", Object.assign(new Array<string>(3), { 0: "pwd", 2: "mfa" })],
+		["an object", { 0: "pwd", length: 1 }],
+	])(
+		"is empty for a session whose stored amr is %s: a custom store's record is not trusted for its shape",
+		(_label, stored) => {
+			// A string spread would become one-letter methods, `["m", "f", "a"]`.
+			const amr = stored as unknown as readonly string[];
+			expect(vouchedAmr({ ...session(undefined), amr })).toEqual([]);
+			expect(vouchedAmr(recorded(amr, FEDERATED))).toEqual([]);
+		},
+	);
 });
 
 describe("requirementSession — the requirement rule's input, built from sessionAuthentication and vouchedAmr", () => {

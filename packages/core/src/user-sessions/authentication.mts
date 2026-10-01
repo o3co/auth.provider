@@ -35,7 +35,12 @@
  */
 
 import { federationsOf } from "../federations/configured.mjs";
-import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
+import {
+	FEDERATED_AMR,
+	MFA_AMR,
+	PASSWORD_AMR,
+	wellFormedAmr,
+} from "../grants/authenticationClaims.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import type { RequirementSession } from "../session-admission/requirement.mjs";
 import { isRenewalNonce } from "./renewalNonce.mjs";
@@ -91,14 +96,16 @@ export function sessionAuthentication(session: UserSession): SessionAuthenticati
  * The `amr` this provider vouches for in `session`, copied: what `acr` is
  * matched against and a token may carry. A recorded session's `amr`, which
  * holds nothing else; for one written before the `authentication` key, the
- * split: a federated session vouches for `fed` alone.
+ * split: a federated session vouches for `fed` alone. A stored `amr` that is
+ * not `wellFormedAmr` vouches for nothing: a custom store's record is not
+ * trusted for its shape.
  */
 export function vouchedAmr(session: UserSession): readonly string[] {
-	const amr = session.amr ?? [];
+	const amr = wellFormedAmr(session.amr) ?? [];
 	if (session.authentication === undefined && amr.includes(FEDERATED_AMR)) {
 		return [FEDERATED_AMR];
 	}
-	return [...amr];
+	return amr;
 }
 
 /** What a login path records about how the user authenticated: the `amr` and `authentication` a session is created with. */
