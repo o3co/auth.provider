@@ -28,10 +28,12 @@
 import {
 	createMemoryDeviceCodeStore,
 	createMemoryRateLimiter,
+	DEFAULT_CLOCK_SKEW_MS,
 	type RequirementInput,
 	type RequirementVerdict,
 	type SessionRequirement,
 	type SubjectRevocation,
+	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -139,7 +141,7 @@ const harness = async (options: HarnessOptions = {}) => {
 		const polled = await store.poll(DEVICE_CODE, NOW);
 		return polled.status === "approved" ? polled.authorization.subject : undefined;
 	};
-	return { verify, undecided, approvedBy, logger };
+	return { verify, undecided, approvedBy, logger, store };
 };
 
 /** `liveSessionStore()` with `user-1`'s record expiring at `expiresAt`. */
@@ -149,6 +151,17 @@ const expiringAt = (expiresAt: number): UserSessionStore => {
 	store.get = async (sid) => {
 		const record = await get(sid);
 		return record === null ? null : { ...record, expiresAt: new Date(expiresAt) };
+	};
+	return store;
+};
+
+/** `liveSessionStore()` with `user-1`'s record changed by `change`. */
+const changedRecord = (change: (record: UserSession) => UserSession): UserSessionStore => {
+	const store = liveSessionStore();
+	const get = store.get.bind(store);
+	store.get = async (sid) => {
+		const record = await get(sid);
+		return record === null ? null : change(record);
 	};
 	return store;
 };
@@ -492,4 +505,77 @@ describe("device verification on session admission", () => {
 			} as never),
 		).toThrow(/^createDeviceVerificationHandler: requirements is required/);
 	});
+});
+
+describe("an approval records the session's authentication", () => {
+	it("hands approve the amr the admitted session vouches for and when it authenticated", async () => {
+		const { verify, store } = await harness();
+		const approve = vi.spyOn(store, "approve");
+		expect((await verify({ action: "approve", user_code: USER_CODE })).status).toBe(200);
+		expect(approve).toHaveBeenCalledTimes(1);
+		expect(approve.mock.calls[0]?.[0]).toEqual({
+			userCode: USER_CODE,
+			subject: "user-1",
+			nowMs: NOW,
+			amr: ["pwd"],
+			authTime: new Date(NOW),
+		});
+	});
+
+	it("hands approve no amr for a session that vouches for none", async () => {
+		const { verify, store } = await harness({
+			userSessionStore: changedRecord((record) => ({
+				...record,
+				amr: "pwd" as unknown as string[],
+			})),
+		});
+		const approve = vi.spyOn(store, "approve");
+		expect((await verify({ action: "approve", user_code: USER_CODE })).status).toBe(200);
+		expect(approve.mock.calls[0]?.[0]?.amr).toBeUndefined();
+		expect(approve.mock.calls[0]?.[0]?.authTime).toEqual(new Date(NOW));
+	});
+
+	it("records an authentication time within the skew ahead of its clock as that clock", async () => {
+		const { verify, store } = await harness({
+			userSessionStore: changedRecord((record) => ({
+				...record,
+				authTime: new Date(NOW + 60_000),
+			})),
+		});
+		expect((await verify({ action: "approve", user_code: USER_CODE })).status).toBe(200);
+		const polled = await store.poll(DEVICE_CODE, NOW);
+		expect(polled.status === "approved" ? polled.authorization.authTimeMs : null).toBe(NOW);
+	});
+
+	it.each([
+		["further ahead of its clock than the skew", NOW + DEFAULT_CLOCK_SKEW_MS + 1_000],
+		["before the epoch", -1_000],
+	])(
+		"refuses an approval from a session that authenticated %s, before the store is asked: 401 login_required, warned, no outcome left unknown",
+		async (_label, authTimeMs) => {
+			const { verify, store, logger, undecided } = await harness({
+				userSessionStore: changedRecord((record) => ({
+					...record,
+					authTime: new Date(authTimeMs),
+				})),
+			});
+			const approve = vi.spyOn(store, "approve");
+			const res = await verify({ action: "approve", user_code: USER_CODE });
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({
+				error: "login_required",
+				error_description: "sign in again to continue",
+			});
+			expect(approve).not.toHaveBeenCalled();
+			expect(await undecided()).toBe(true);
+			// Refused, not an outage: nothing logged at error, nothing audited as unknown.
+			expect(logger.error).not.toHaveBeenCalled();
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ sid: LIVE_SID, aheadMs: authTimeMs - NOW },
+				"auth_time_ahead_of_clock",
+			);
+			// A denial records nothing of the session, so the same session denies.
+			expect((await verify({ action: "deny", user_code: USER_CODE })).status).toBe(200);
+		},
+	);
 });

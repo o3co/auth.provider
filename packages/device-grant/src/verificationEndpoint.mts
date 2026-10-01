@@ -26,12 +26,18 @@
  *   attacker burns their own account's budget; that is why this runs
  *   `checkWithFailMode` itself instead of the IP-keyed guard middleware.
  * - Order: JSON media type (415), the body's `action` (400), session
- *   admission, the email gate (`approve` only), the budget, then the code.
- *   Refusals before the budget spend no attempt and read no code.
+ *   admission, the email gate (`approve` only), the budget, the code, then
+ *   what an approval records (below). Refusals before the budget spend no
+ *   attempt and read no code.
  * - Admission (`admitSession`; see the session-admission ADR) reads the live
  *   `UserSession` behind the cookie's `sid`, not the cookie's claim: the
  *   device token carries no `sid` or `family_id`, so no later logout reaches
  *   it, and the approval is the last point that can check the session.
+ * - An approval records the admitted session's `vouchedAmr` and `authTime`,
+ *   which the device token carries. One the store would refuse to record
+ *   (core's `recordableDeviceApproval`: an `authTime` further ahead of the
+ *   approval's clock than the skew) is refused `401 login_required` before
+ *   the store is asked, so a store error stays an outage.
  * - Outages fail closed as 503 (a limiter outage follows the limiter's own
  *   `failMode`), never as `login_required`.
  * - Decisions and budget exhaustion are audit events; none carries the user
@@ -45,6 +51,7 @@
 import type {
 	Admission,
 	AdmissionDeps,
+	ApproveDeviceAuthorizationInput,
 	CookieCarrier,
 	Logger,
 	RateLimitContext,
@@ -66,6 +73,9 @@ import {
 	isEmailVerified,
 	normaliseUserCode,
 	rateLimiterUnavailableEnvelope,
+	recordableDeviceApproval,
+	vouchedAmr,
+	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import type { DeviceGrantAdmissionAction } from "./admissionActions.mjs";
@@ -428,16 +438,41 @@ export const createDeviceVerificationHandler = (
 			return;
 		}
 
+		let approval: ApproveDeviceAuthorizationInput | undefined;
+		if (action === "approve") {
+			// `grantedScope` is deliberately omitted: the port grants
+			// `requestedScope`, which was settled and filtered against the
+			// client's allowlist when the device asked. Re-reading it here to
+			// pass it back would open a window between the lookup that showed
+			// the user a scope and the write that grants one.
+			const authTime = session.authTime;
+			approval = {
+				userCode,
+				subject,
+				nowMs,
+				amr: wellFormedAmr(vouchedAmr(session)),
+				authTime,
+			};
+			// The store's own rule, on the input and clock it is handed — see
+			// the file header.
+			try {
+				recordableDeviceApproval(approval, approval.nowMs);
+			} catch {
+				(options.logger ?? consoleLogger).warn(
+					{ sid: session.sid, aheadMs: authTime.getTime() - nowMs },
+					"auth_time_ahead_of_clock",
+				);
+				const refusal = loginRequired(SIGN_IN_AGAIN);
+				respond(res, refusal.status, refusal.body);
+				return;
+			}
+		}
+
 		let outcome: Awaited<ReturnType<typeof options.store.approve>>;
 		try {
 			outcome =
-				action === "approve"
-					? // `grantedScope` is deliberately omitted: the port grants
-						// `requestedScope`, which was settled and filtered against the
-						// client's allowlist when the device asked. Re-reading it here
-						// to pass it back would open a window between the lookup that
-						// showed the user a scope and the write that grants one.
-						await options.store.approve({ userCode, subject, nowMs })
+				approval !== undefined
+					? await options.store.approve(approval)
 					: await options.store.deny(userCode, nowMs);
 		} catch (err) {
 			// The store may have recorded the decision before its reply was lost,

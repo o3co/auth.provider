@@ -33,6 +33,7 @@ import type {
 	RateLimitFailMode,
 	SubjectRevocation,
 	TokenBinding,
+	UserSession,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -41,6 +42,7 @@ import {
 	createMemoryDeviceCodeStore,
 	createMemoryRateLimiter,
 	createSymmetricKeyStore,
+	DEFAULT_CLOCK_SKEW_MS,
 	generateUserCode,
 	normaliseUserCode,
 } from "@o3co/auth-provider-core";
@@ -1018,6 +1020,192 @@ describe("the token carries what was approved", () => {
 			// anything that checks `aud` loosely.
 			aud: "https://api.example.test",
 		});
+	});
+});
+
+describe("the token carries the approving session's authentication", () => {
+	// The harness clock's start, and when each fixed session authenticated.
+	const LOGIN = 1_800_000_000_000;
+
+	/** `liveSessionStore()` with `user-1`'s record as `change` makes it. */
+	const sessionStoreWith = (change: (record: UserSession) => UserSession): UserSessionStore => {
+		const store = liveSessionStore();
+		const get = store.get.bind(store);
+		store.get = async (sid) => {
+			const record = await get(sid);
+			return record === null || record.sub !== "user-1" ? record : change(record);
+		};
+		return store;
+	};
+
+	/** A memory store whose approved poll answers the record with `fields` in place of its own. */
+	const pollingWith = (fields: (nowMs: number) => Record<string, unknown>) => {
+		const inner = createMemoryDeviceCodeStore();
+		return {
+			...inner,
+			poll: async (code: string, nowMs: number) => {
+				const outcome = await inner.poll(code, nowMs);
+				return outcome.status === "approved"
+					? { ...outcome, authorization: { ...outcome.authorization, ...fields(nowMs) } }
+					: outcome;
+			},
+		} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+	};
+
+	/** A device started and approved `afterLogin` ms after the login, polled 10 s later. */
+	const approvedAndPolled = async (harness: ReturnType<typeof makeHarness>, afterLogin = 0) => {
+		harness.clock.advance(afterLogin);
+		const started = await startDevice(harness.app);
+		const approved = await verify(harness.app, {
+			action: "approve",
+			user_code: started.body.user_code,
+		});
+		expect(approved.status).toBe(200);
+		harness.clock.advance(10_000);
+		return harness.poll(started.body.device_code as string);
+	};
+
+	const claimsOf = (result: Awaited<ReturnType<typeof approvedAndPolled>>) => {
+		if (!("tokens" in result.result)) {
+			throw new Error(`expected a token response, got ${JSON.stringify(result.result)}`);
+		}
+		const [, payloadB64] = result.result.tokens.access_token.split(".");
+		return JSON.parse(Buffer.from(payloadB64 as string, "base64url").toString()) as Record<
+			string,
+			unknown
+		>;
+	};
+
+	const PASSWORD_AND_TOTP = (record: UserSession): UserSession => ({
+		...record,
+		amr: ["pwd", "otp", "mfa"],
+		authentication: {
+			primary: "pwd",
+			federation: undefined,
+			upstreamAmr: undefined,
+			mfaAt: new Date(LOGIN + 5 * 60_000),
+		},
+	});
+
+	it("stamps the amr the session vouches for, and when it authenticated — not when it approved", async () => {
+		const harness = makeHarness({ userSessionStore: sessionStoreWith(PASSWORD_AND_TOTP) });
+		const claims = claimsOf(await approvedAndPolled(harness, 10 * 60_000));
+		expect(claims.amr).toEqual(["pwd", "otp", "mfa"]);
+		expect(claims.auth_time).toBe(LOGIN / 1000);
+		expect(claims.iat).toBe((LOGIN + 10 * 60_000 + 10_000) / 1000);
+		expect(claims).not.toHaveProperty("acr");
+	});
+
+	it.each([
+		[
+			"a federation whose upstream amr is not trusted",
+			(record: UserSession): UserSession => ({
+				...record,
+				amr: ["fed"],
+				authentication: {
+					primary: "fed",
+					federation: "corp",
+					upstreamAmr: ["hwk", "mfa"],
+					mfaAt: undefined,
+				},
+			}),
+		],
+		[
+			"a federated session written before its authentication was recorded",
+			(record: UserSession): UserSession => ({
+				...record,
+				amr: ["hwk", "mfa", "fed"],
+				authentication: undefined,
+			}),
+		],
+	])("stamps none of the upstream values of %s: only fed", async (_label, change) => {
+		const harness = makeHarness({ userSessionStore: sessionStoreWith(change) });
+		const claims = claimsOf(await approvedAndPolled(harness));
+		expect(claims.amr).toEqual(["fed"]);
+		expect(claims.auth_time).toBe(LOGIN / 1000);
+	});
+
+	it("stamps no amr for a session whose amr cannot be read, and still its auth_time", async () => {
+		const harness = makeHarness({
+			userSessionStore: sessionStoreWith((record) => ({
+				...record,
+				amr: "pwd" as unknown as string[],
+			})),
+		});
+		const claims = claimsOf(await approvedAndPolled(harness));
+		expect(claims).not.toHaveProperty("amr");
+		expect(claims.auth_time).toBe(LOGIN / 1000);
+	});
+
+	it("mints a token with neither from an approval recorded without them — an older replica's", async () => {
+		const harness = makeHarness({
+			userSessionStore: sessionStoreWith(PASSWORD_AND_TOTP),
+			store: pollingWith(() => ({ amr: undefined, authTimeMs: undefined })),
+		});
+		const claims = claimsOf(await approvedAndPolled(harness));
+		expect(claims).not.toHaveProperty("amr");
+		expect(claims).not.toHaveProperty("auth_time");
+		expect(claims.sub).toBe("user-1");
+	});
+
+	it("stamps an amr the record holds in a shape no token may carry as none", async () => {
+		const harness = makeHarness({ store: pollingWith(() => ({ amr: ["pwd", ""] })) });
+		const claims = claimsOf(await approvedAndPolled(harness));
+		expect(claims).not.toHaveProperty("amr");
+	});
+
+	it("stamps an authentication time within the skew ahead of the minting clock as that clock: never after iat", async () => {
+		const harness = makeHarness({
+			store: pollingWith((nowMs) => ({ authTimeMs: nowMs + 60_000 })),
+		});
+		const claims = claimsOf(await approvedAndPolled(harness));
+		expect(claims.auth_time).toBe(claims.iat);
+		expect(claims.iat).toBe((LOGIN + 10_000) / 1000);
+	});
+
+	it.each([
+		[
+			"further ahead of the minting clock than the skew",
+			(nowMs: number) => nowMs + DEFAULT_CLOCK_SKEW_MS + 1_000,
+		],
+		["before the epoch", () => -1_000],
+		["not a number", () => "1800000000000"],
+		["NaN", () => Number.NaN],
+		["null", () => null],
+	])(
+		"refuses an authentication time %s: invalid_grant, nothing minted, warned",
+		async (_label, authTimeMs) => {
+			const logger = makeLogger();
+			const harness = makeHarness({
+				logger,
+				store: pollingWith((nowMs) => ({ authTimeMs: authTimeMs(nowMs) })),
+			});
+			const { result } = await approvedAndPolled(harness);
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					"the approving session's authentication time cannot be read; start a new device authorization request",
+			});
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.objectContaining({ clientId: CLIENT_ID }),
+				"auth_time_ahead_of_clock",
+			);
+		},
+	);
+
+	it("warns how far ahead the authentication time is", async () => {
+		const logger = makeLogger();
+		const harness = makeHarness({
+			logger,
+			store: pollingWith((nowMs) => ({ authTimeMs: nowMs + DEFAULT_CLOCK_SKEW_MS + 1_000 })),
+		});
+		await approvedAndPolled(harness);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ clientId: CLIENT_ID, aheadMs: DEFAULT_CLOCK_SKEW_MS + 1_000 },
+			"auth_time_ahead_of_clock",
+		);
 	});
 });
 
