@@ -774,6 +774,7 @@ describe("POST /session/federation-grants/consent — the answer", () => {
 					tokenType: "Bearer",
 					obtainedAt: w.state.now,
 					issuedLifetime: 3600,
+					effectiveExpiresAt: new Date(w.state.now.getTime() + 3_600_000),
 					scopes: [...CONNECTION.scopes],
 				},
 			},

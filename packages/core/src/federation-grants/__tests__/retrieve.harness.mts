@@ -33,6 +33,7 @@ import type {
 	AuthorizedFederationGrant,
 	FederationGrantConnection,
 	FederationGrantCredentials,
+	FederationGrantCredentialsInput,
 } from "#/federation-grants/types.mjs";
 import type { DelegatedTokens } from "#/federations/types.mjs";
 
@@ -139,13 +140,23 @@ export interface Harness {
 	 * the world has it, with an access token obtained now and good for an hour,
 	 * carrying every consented scope.
 	 */
-	seed(over?: {
-		credentials?: FederationGrantCredentials;
-		expiresAt?: Date;
-		id?: string;
-		/** When the user agreed, for a test that turns on which grants were consented when. */
-		consentAt?: Date;
-	}): Promise<AuthorizedFederationGrant>;
+	seed(over?: SeedOptions<FederationGrantCredentialsInput>): Promise<AuthorizedFederationGrant>;
+	/**
+	 * `seed`, with credentials a store may hold but no writer of this release
+	 * writes: an access token without its end, as a record from before the
+	 * field was recorded.
+	 */
+	seedLegacy(
+		over: SeedOptions<FederationGrantCredentials> & { credentials: FederationGrantCredentials },
+	): Promise<AuthorizedFederationGrant>;
+}
+
+interface SeedOptions<C> {
+	credentials?: C;
+	expiresAt?: Date;
+	id?: string;
+	/** When the user agreed, for a test that turns on which grants were consented when. */
+	consentAt?: Date;
 }
 
 export function harness(): Harness {
@@ -176,6 +187,54 @@ export function harness(): Harness {
 		},
 	};
 
+	const seed = async (
+		over: SeedOptions<FederationGrantCredentialsInput> = {},
+	): Promise<AuthorizedFederationGrant> => {
+		const id = over.id ?? "g-1";
+		const seededAt = now();
+		// Under the connection as the world has it NOW, so that a test which
+		// reconfigures it first gets a grant whose revisions match.
+		const configured = world.connections.get(connection.name) ?? connection;
+		await store.createPending({
+			id,
+			subject: "u-1",
+			clientId: "agent",
+			connection: connection.name,
+			intent: { handle: `h-${id}`, expiresAt: new Date(seededAt.getTime() + 10 * MIN) },
+			now: seededAt,
+		});
+		const written = await store.activate({
+			grantId: id,
+			intentHandle: `h-${id}`,
+			authorization: {
+				identityRevision: federationGrantIdentityRevision(configured),
+				authorizationRevision: federationGrantAuthorizationRevision(configured),
+				upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
+				resource: configured.resource,
+				scopes: [...SCOPES],
+				consent: { at: over.consentAt ?? seededAt, sid: "sid-1", scopes: [...CONSENTED] },
+				authorizedAt: seededAt,
+				expiresAt: over.expiresAt ?? new Date(seededAt.getTime() + 30 * DAY),
+			},
+			credentials: over.credentials ?? {
+				refreshToken: SECRET,
+				accessToken: {
+					value: "at-0",
+					tokenType: "Bearer",
+					obtainedAt: seededAt,
+					issuedLifetime: 3600,
+					effectiveExpiresAt: new Date(seededAt.getTime() + HOUR),
+					scopes: [...SCOPES],
+				},
+			},
+			now: seededAt,
+		});
+		if (!written.ok || written.grant.status !== "active") {
+			throw new Error("fixture: the grant was not activated");
+		}
+		return written.grant;
+	};
+
 	return {
 		store,
 		deps,
@@ -183,49 +242,10 @@ export function harness(): Harness {
 		events,
 		background,
 		world,
-		async seed(over = {}) {
-			const id = over.id ?? "g-1";
-			const seededAt = now();
-			// Under the connection as the world has it NOW, so that a test which
-			// reconfigures it first gets a grant whose revisions match.
-			const configured = world.connections.get(connection.name) ?? connection;
-			await store.createPending({
-				id,
-				subject: "u-1",
-				clientId: "agent",
-				connection: connection.name,
-				intent: { handle: `h-${id}`, expiresAt: new Date(seededAt.getTime() + 10 * MIN) },
-				now: seededAt,
-			});
-			const written = await store.activate({
-				grantId: id,
-				intentHandle: `h-${id}`,
-				authorization: {
-					identityRevision: federationGrantIdentityRevision(configured),
-					authorizationRevision: federationGrantAuthorizationRevision(configured),
-					upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
-					resource: configured.resource,
-					scopes: [...SCOPES],
-					consent: { at: over.consentAt ?? seededAt, sid: "sid-1", scopes: [...CONSENTED] },
-					authorizedAt: seededAt,
-					expiresAt: over.expiresAt ?? new Date(seededAt.getTime() + 30 * DAY),
-				},
-				credentials: over.credentials ?? {
-					refreshToken: SECRET,
-					accessToken: {
-						value: "at-0",
-						tokenType: "Bearer",
-						obtainedAt: seededAt,
-						issuedLifetime: 3600,
-						scopes: [...SCOPES],
-					},
-				},
-				now: seededAt,
-			});
-			if (!written.ok || written.grant.status !== "active") {
-				throw new Error("fixture: the grant was not activated");
-			}
-			return written.grant;
-		},
+		seed,
+		// No writer of this release leaves the end out, so the record is handed
+		// over as a store would hold it.
+		seedLegacy: (over) =>
+			seed({ ...over, credentials: over.credentials as FederationGrantCredentialsInput }),
 	};
 }
