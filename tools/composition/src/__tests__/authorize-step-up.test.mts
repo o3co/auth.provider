@@ -390,11 +390,11 @@ describe.each(["memory", "redis"] as const)("the step-up round trip, stores in %
 		const factor = await seedTotp(a.handle.components, a.config, user.id);
 
 		const afterStepUp = atMfaPage(
-			await page.get(a.app, authorizePath({ max_age: "2", acr_values: ACR_MFA })),
+			await page.get(a.app, authorizePath({ max_age: "5", acr_values: ACR_MFA })),
 		);
 		await stepUp(b.app, a.app, page, factor);
 		// The page takes longer than max_age.
-		await new Promise((resolve) => setTimeout(resolve, 3_100));
+		await new Promise((resolve) => setTimeout(resolve, 6_100));
 		const afterLogin = atLogin(await page.get(b.app, afterStepUp));
 		expect(askOn(afterLogin)).toBeTruthy();
 		// The login this user makes now is interrupted for the factor, a step later than the step-up's.

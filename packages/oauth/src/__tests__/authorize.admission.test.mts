@@ -1379,6 +1379,12 @@ describe("/authorize on admission — a reauthenticate verdict is answered with 
 		const toLogin = loginRedirectTo(
 			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
 		);
+		const loginAsk = (
+			harness.records.get(`reauth:${toLogin.searchParams.get("reauth_ask")}`) as {
+				reauth: Record<string, unknown>;
+			}
+		).reauth;
+		expect(loginAsk.stepUpAskedAt).toEqual({ fixture: expect.any(Number) });
 		await loggedInNow(harness, clock);
 		const secondPage = new URL(
 			(await authorize(harness.app, Object.fromEntries(toLogin.searchParams.entries()))).headers
@@ -1703,7 +1709,7 @@ describe("/authorize on admission — what the new order changes, pinned", () =>
 		expect(harness.records.size).toBe(0);
 	});
 
-	it("records a login ask for a reauthenticate verdict, so the session that comes back from the login is judged once", async () => {
+	it("records a login ask for a reauthenticate verdict", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record()),
 			requirements: [fixture("fixture", () => ({ outcome: "reauthenticate" }))],
