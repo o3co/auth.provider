@@ -64,10 +64,9 @@ export interface FederationGrantHashFields {
 	readonly revokedBy?: string;
 	readonly revokedAt?: string;
 	/**
-	 * The credential's extension, sealed beside the credential and bound to its
-	 * exact bytes. Written and removed only in the step that writes the
-	 * credential; a release that does not know it leaves it, and it then no
-	 * longer opens.
+	 * The credential's extension. Written or removed in the step that writes
+	 * the credential, and removed with it. Opens only beside the exact
+	 * credential it was written with.
 	 */
 	readonly ext?: string;
 }

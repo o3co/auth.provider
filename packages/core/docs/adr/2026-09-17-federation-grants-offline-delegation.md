@@ -2184,9 +2184,10 @@ field of the grant HASH, `ext`: a JSON object of named keys, of which a reader
 reads the ones it knows and ignores the rest. `effectiveExpiresAt` (D17's
 amendment) is the first key. Later additive facts go here, not into the tuple.
 
-- **Sealed beside the credential, and bound to it.** `ext` is sealed in the
-  same key-ring envelope as the credential. Its authenticated data is its own
-  label (`o3co.auth-provider.federation-grant-ext`), the credential's whole
+- **Sealed beside the credential, and bound to it.** `ext` is sealed under the
+  same key ring as the credential, in its own envelope. Its authenticated
+  data is its own label (`o3co.auth-provider.federation-grant-ext`), the
+  credential's whole
   binding (the key, the record's identity, the authorization text), and the
   SHA-256 of the exact credential envelope written with it. Both come from one
   preparation, and the script that sets the credential sets `ext` or removes

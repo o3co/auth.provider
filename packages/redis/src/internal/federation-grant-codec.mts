@@ -248,10 +248,10 @@ export function decodeCredentials(text: string): FederationGrantCredentials | un
 /**
  * What the credential's extension carries: additive facts about the
  * credential that the credential tuple cannot hold without breaking a release
- * that reads it. Every key is safe to lose: the extension is dropped by a
- * release that does not know it, by a rewrite of the credential, and on any
- * failure to open, and then reads as absent. So no key may be the only place
- * a limit on what the grant allows is kept.
+ * that reads it. Every key is safe to lose: the extension reads as absent
+ * beside any other credential than the one it was written with, and on any
+ * failure to open. So no key may be the only place a limit on what the grant
+ * allows is kept.
  */
 export interface FederationGrantCredentialExtension {
 	/** When the access token ends; read by core as no later than `obtainedAt + issuedLifetime`. */

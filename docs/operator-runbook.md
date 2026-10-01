@@ -1247,16 +1247,16 @@ credential that every earlier release still reads. No migration, and a
 rolling upgrade or a rollback is safe. Until the last replica runs the new
 release:
 
-- **A replica on an earlier release serves a token to its issued end**,
-  `obtainedAt + issuedLifetime`, as that release always did. A token whose
+- **A replica on an earlier release serves a token to the released end**
+  (`obtainedAt + issuedLifetime`), as that release always did. A token whose
   upstream said it ends sooner can be handed out after that, and the upstream
   answers it with `401`: availability, not wider access.
 - **A credential written by an earlier replica orphans the `ext` beside it**
   (under `allow-plaintext`, unless it is byte for byte the credential already
-  there), and the new release reads it as absent: that token, too, ends at its issued
-  end, until the next refresh on a new replica writes `ext` again.
+  there), and the new release reads it as absent: that token, too, ends at the
+  released end, until the next refresh on a new replica writes `ext` again.
 - **A `FederationGrantStoreClient` of your own** that ignores the new
-  `extension` input never writes `ext`. Its grants stay on the issued end
+  `extension` input never writes `ext`. Its grants stay on the released end
   indefinitely, which is the behaviour before this release.
 
 ---

@@ -622,8 +622,9 @@ in the [operator runbook](../../docs/operator-runbook.md).
 credential's tuple, authenticated data and `format` stay what every earlier
 release reads. Facts it cannot hold without breaking those readers — first the
 access token's `effectiveExpiresAt` — go into the grant hash's `ext` field: a
-JSON object of named keys, sealed in the same envelope under its own label,
-the credential's whole binding and the SHA-256 of the exact credential
+JSON object of named keys, sealed under the same key ring, in its own
+envelope, under its own label, the credential's whole binding and the SHA-256
+of the exact credential
 envelope written with it (under `allow-plaintext`, that digest is carried as
 `bind`). The script that writes the credential writes or removes `ext` in the
 same step, so a rewrite of the credential by any release orphans the `ext`
@@ -633,8 +634,7 @@ the same token, which keeps its end. An `ext` that is absent, too long, does not
 credential or does not parse reads as absent, and the credential reads as it
 would without it. Unknown keys are ignored on read and dropped on every
 rewrite, so every key must be safe to lose: an absent `effectiveExpiresAt`
-ends the token at `obtainedAt + issuedLifetime`, the end every earlier release
-used.
+ends the token at the released end (`obtainedAt + issuedLifetime`).
 
 **Acquisition's records sit beside the grants.** The intent store keeps the
 intent a backend lodged, the consent challenge and the connect transaction
