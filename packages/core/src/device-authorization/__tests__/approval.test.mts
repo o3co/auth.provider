@@ -70,4 +70,11 @@ describe("recordableDeviceApproval", () => {
 			);
 		}
 	});
+
+	it("refuses an instant it would record before the epoch, as against a clock before it", () => {
+		// Held no later than the clock, the instant would be one no store reads
+		// back as an authentication time.
+		expect(() => recordableDeviceApproval({ authTime: new Date(0) }, -0.5)).toThrow(RangeError);
+		expect(() => recordableDeviceApproval({ authTime: new Date(0) }, -1)).toThrow(RangeError);
+	});
 });

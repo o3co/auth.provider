@@ -32,6 +32,9 @@ export interface RecordableDeviceApproval {
 	readonly authTimeMs: number | undefined;
 }
 
+/** Whole epoch milliseconds at or after the epoch: what a store records and reads back. */
+const isRecordableInstant = (ms: number): boolean => Number.isSafeInteger(ms) && ms >= 0;
+
 /**
  * The approval's `amr` and `authTime` as a store records them, each read
  * once. `nowMs` is the approval's clock: an instant up to
@@ -58,14 +61,19 @@ export function recordableDeviceApproval(
 	}
 	const authTime: unknown = approval.authTime;
 	const ms = authTime instanceof Date ? authTime.getTime() : Number.NaN;
-	if (authTime !== undefined && !(ms >= 0 && ms <= nowMs + DEFAULT_CLOCK_SKEW_MS)) {
+	// What is recorded is held to the domain a store reads back: whole
+	// milliseconds at or after the epoch, as well as the input to its own.
+	const authTimeMs = Math.min(ms, Math.floor(nowMs));
+	if (
+		authTime !== undefined &&
+		!(ms >= 0 && ms <= nowMs + DEFAULT_CLOCK_SKEW_MS && isRecordableInstant(authTimeMs))
+	) {
 		throw new RangeError(
 			"DeviceCodeStore.approve: authTime must be a valid Date at or after the epoch, no further ahead of the approval than the clock skew",
 		);
 	}
 	return {
 		amr: amr === undefined ? undefined : Object.freeze(amr),
-		// A Date's milliseconds are whole; the clock's may not be.
-		authTimeMs: authTime === undefined ? undefined : Math.min(ms, Math.floor(nowMs)),
+		authTimeMs: authTime === undefined ? undefined : authTimeMs,
 	};
 }

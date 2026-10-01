@@ -1292,8 +1292,8 @@ const SESSION_RECORD_FIELDS: ReadonlySet<string> = new Set(["amr", "authenticati
  * claim), matched by the name they are called by: the token minters
  * `generateToken` and `generateIdToken`, the key store's `sign`, which takes
  * the claims both build (see {@link CLAIMS_ONLY_TAKERS}), the amr composer, a
- * store's `create`, a device-code store's `approve`, the step-up and the acr
- * selection. A spread into an object
+ * store's `create`, a device-code store's `approve` and what decides its
+ * record, the step-up and the acr selection. A spread into an object
  * handed to one of them copies a record's own `amr` without naming it.
  * `create` is also other factories' name: their spreads are pinned like reads.
  */
@@ -1304,6 +1304,7 @@ const AMR_TAKERS: ReadonlySet<string> = new Set([
 	"composeAmr",
 	"create",
 	"approve",
+	"recordableDeviceApproval",
 	"recordSecondFactor",
 	"sessionAfterSecondFactor",
 	"checkSecondFactorEvent",
@@ -2072,6 +2073,13 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			sessionRecordReads(
 				"await store.approve({ userCode, subject, nowMs, ...(amr ? { amr } : {}) });",
 			),
+		).toHaveLength(0);
+	});
+
+	it("counts what decides a device approval's record among what takes an amr", () => {
+		expect(sessionRecordReads("recordableDeviceApproval({ ...session }, nowMs);")).toHaveLength(1);
+		expect(
+			sessionRecordReads("recordableDeviceApproval({ ...(amr ? { amr } : {}) }, nowMs);"),
 		).toHaveLength(0);
 	});
 
