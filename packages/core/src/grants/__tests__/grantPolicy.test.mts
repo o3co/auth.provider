@@ -19,6 +19,7 @@ import {
 	boundPolicyAudience,
 	evaluateGrantPolicy,
 	policyOutOfBounds,
+	policyUnavailable,
 	readGrantPolicyDecision,
 } from "#/grants/grantPolicy.mjs";
 import { consoleLogger } from "#/logging/consoleLogger.mjs";
@@ -90,7 +91,30 @@ describe("policyOutOfBounds", () => {
 	});
 });
 
+describe("policyUnavailable", () => {
+	it("is 503 temporarily_unavailable with the fixed description", () => {
+		expect(policyUnavailable()).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "policy evaluation unavailable",
+		});
+	});
+});
+
 describe("evaluateGrantPolicy", () => {
+	it("answers a policy that throws with policyUnavailable", async () => {
+		const outcome = await evaluateGrantPolicy(
+			hook(async () => {
+				throw new Error("policy service down");
+			}),
+			request,
+			context,
+			["read"],
+			{ logger: { error: vi.fn() } },
+		);
+		expect(outcome).toEqual({ ok: false, result: policyUnavailable() });
+	});
+
 	it("answers 503 temporarily_unavailable when the policy throws — fail closed, never open", async () => {
 		const logger = { error: vi.fn() };
 		const outcome = await evaluateGrantPolicy(
@@ -295,6 +319,26 @@ describe("evaluateGrantPolicy", () => {
 		expect(outcome.ok && outcome.decision.grantedAudience).toEqual(["https://api.example"]);
 	});
 
+	it("reads grantedScope once, so a getter that widens on a later read gets what it first answered", async () => {
+		let reads = 0;
+		const decision = {
+			outcome: "allow",
+			get grantedScope() {
+				reads += 1;
+				return reads === 1 ? ["read"] : ["read", "admin"];
+			},
+		};
+		const outcome = await evaluateGrantPolicy(
+			hook(async () => decision as GrantPolicyDecision),
+			request,
+			context,
+			["read"],
+			{ logger: undefined },
+		);
+		expect(outcome).toMatchObject({ ok: true, scopes: ["read"] });
+		expect(reads).toBe(1);
+	});
+
 	it("refuses a non-array grantedScope as 500 server_error instead of throwing", async () => {
 		// A JS policy returning a string passes a truthiness check, and
 		// `.filter` then throws a TypeError that /token dispatch does not
@@ -360,6 +404,94 @@ describe("readGrantPolicyDecision", () => {
 			verdict: "allow",
 		});
 		expect(reads).toBe(1);
+	});
+
+	it("reads each field of an allow once, into a plain copy", () => {
+		const reads: string[] = [];
+		const grantedScope = ["read"];
+		const grantedAudience = ["https://api.example"];
+		const answer = new Proxy(
+			{ outcome: "allow", grantedScope, grantedAudience },
+			{
+				get(target, key, receiver) {
+					reads.push(String(key));
+					return Reflect.get(target, key, receiver);
+				},
+			},
+		);
+		const reading = readGrantPolicyDecision(answer, { error: vi.fn() }, site);
+		expect(reads.toSorted()).toEqual(["grantedAudience", "grantedScope", "outcome"]);
+		expect(reading).toEqual({
+			verdict: "allow",
+			decision: {
+				outcome: "allow",
+				grantedScope: ["read"],
+				grantedAudience: ["https://api.example"],
+			},
+		});
+		const { decision } = reading as Extract<typeof reading, { verdict: "allow" }>;
+		expect(decision).not.toBe(answer);
+		expect(decision.grantedScope).not.toBe(grantedScope);
+		expect(decision.grantedAudience).not.toBe(grantedAudience);
+	});
+
+	it("keeps the copy of an allow's arrays when the policy changes its own arrays afterwards", () => {
+		const grantedScope = ["read"];
+		const grantedAudience = ["https://api.example"];
+		const reading = readGrantPolicyDecision(
+			{ outcome: "allow", grantedScope, grantedAudience },
+			{ error: vi.fn() },
+			site,
+		);
+		grantedScope.push("admin");
+		grantedAudience.push("https://evil.example");
+		expect(reading).toEqual({
+			verdict: "allow",
+			decision: {
+				outcome: "allow",
+				grantedScope: ["read"],
+				grantedAudience: ["https://api.example"],
+			},
+		});
+	});
+
+	it("reads each field of a deny once, into a plain copy", () => {
+		const reads: string[] = [];
+		const answer = new Proxy(
+			{ outcome: "deny", error: "access_denied", errorDescription: "not today" },
+			{
+				get(target, key, receiver) {
+					reads.push(String(key));
+					return Reflect.get(target, key, receiver);
+				},
+			},
+		);
+		const reading = readGrantPolicyDecision(answer, { error: vi.fn() }, site);
+		expect(reads.toSorted()).toEqual(["error", "errorDescription", "outcome"]);
+		expect(reading).toEqual({
+			verdict: "deny",
+			decision: { outcome: "deny", error: "access_denied", errorDescription: "not today" },
+		});
+		expect((reading as Extract<typeof reading, { verdict: "deny" }>).decision).not.toBe(answer);
+	});
+
+	it.each([
+		["an allow's grantedScope", { outcome: "allow" }, "grantedScope"],
+		["an allow's grantedAudience", { outcome: "allow" }, "grantedAudience"],
+		["a deny's error", { outcome: "deny" }, "error"],
+		["a deny's errorDescription", { outcome: "deny", error: "access_denied" }, "errorDescription"],
+	] as const)("reads a decision as invalid when %s throws when read", (_label, fields, key) => {
+		const decision = Object.defineProperty({ ...fields }, key, {
+			get() {
+				throw new Error("unreadable");
+			},
+		});
+		const logger = { error: vi.fn() };
+		expect(readGrantPolicyDecision(decision, logger, site)).toEqual({
+			verdict: "invalid",
+			result: DECISION_INVALID,
+		});
+		expect(logger.error).toHaveBeenCalledWith(site, "grant_policy_decision_invalid");
 	});
 
 	it("names the caller's site in the log line when it has one", () => {
