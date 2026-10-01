@@ -124,14 +124,17 @@ export interface MfaFirstBindingDistrusted {
 /**
  * The signed-in session a ceremony outside a login runs in, as the route
  * admitted it: its `sid`, its subject, the `User` its cookie holds (core's
- * `cookieSessionUser`), and its primary sign-in as admission's view holds
- * it — `undefined` without one, which any first-binding mark distrusts.
+ * `cookieSessionUser`), its primary sign-in as admission's view holds
+ * it — `undefined` without one, which any first-binding mark distrusts —
+ * and the enrollment witness its login's `User` carried as admission's view
+ * holds it, `undefined` when it recorded none.
  */
 export interface MfaCeremonySession {
 	readonly sid: string;
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
 	readonly authTimeMs: number | undefined;
+	readonly witness: "enrolled" | "not_enrolled" | "malformed" | undefined;
 }
 
 /** One call's request: the transaction named, the binding the browser presents, and what a factor may read of the request. */
@@ -246,6 +249,23 @@ export type MfaVerifyOutcome =
 			/** What the verification adds to the login: the factor's `amr`, `mfa` when it adds it, and when. */
 			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
 			/** The witness marked for a login's `User` that lacked it; `undefined` when none was due, or no mark was noted before it. */
+			readonly witness: MfaWitnessMark | undefined;
+			/** Why the first-binding mark due before the witness could not be noted, leaving the witness unmarked; `undefined` otherwise. */
+			readonly firstBindingUnnoted: MfaStoreOutage | undefined;
+			/** The codes the set holds once a recovery code was spent; `undefined` for any other factor. */
+			readonly recoveryCodesRemaining: number | undefined;
+	  } & MfaCeremonySubject)
+	/**
+	 * A session's step-up verified, its transaction consumed and the factor
+	 * moved on: the session `sid` is to be escalated by `adds`, which the
+	 * ceremony records nowhere.
+	 */
+	| ({
+			readonly outcome: "stepped_up";
+			readonly sid: string;
+			/** What the verification adds to the session: the factor's `amr`, `mfa` when it adds it, and when. */
+			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
+			/** The witness marked for a session whose recorded `User` lacked it; `undefined` when none was due, or no mark was noted before it. */
 			readonly witness: MfaWitnessMark | undefined;
 			/** Why the first-binding mark due before the witness could not be noted, leaving the witness unmarked; `undefined` otherwise. */
 			readonly firstBindingUnnoted: MfaStoreOutage | undefined;

@@ -520,6 +520,9 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							},
 							stepUp,
 							loginCompletion: deps.loginCompletion,
+							secondFactorStore: supportsSecondFactorUpdate(deps.userSessionStore)
+								? deps.userSessionStore
+								: undefined,
 							csrfGuard: deps.csrfGuard,
 							floodGuard: mfaFloodGuard({
 								rateLimiter: deps.rateLimiter,

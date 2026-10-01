@@ -86,6 +86,8 @@ import {
 	type PrimaryAdmission,
 	readSpaceDelimitedParameter,
 	resumePrimary,
+	type SessionView,
+	type SupportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import type { MfaAdmissionAction } from "./admissionActions.mjs";
@@ -181,6 +183,12 @@ const notAccepted = (attemptsRemaining: number) => ({
 	attempts_remaining: attemptsRemaining,
 });
 
+/** A signed-in session as a route admitted it, and the renewal nonce admission compared: never handed to a ceremony. */
+interface SignedInSession {
+	readonly session: MfaCeremonySession;
+	readonly expectedRenewalNonce: string | undefined;
+}
+
 /** Which route a line is logged by: the enrollment's two share one name. */
 type RouteName = "transaction" | "challenge" | "verify" | "enrollment" | "step-up";
 
@@ -195,6 +203,8 @@ export interface MfaRoutesOptions {
 	/** The `mfa.step_up` remediation core issued the requirement: what the step-up's trip is admitted as. */
 	readonly stepUp: IssuedRemediationAction;
 	readonly loginCompletion: LoginCompletion;
+	/** The session store's step-up capability, when it has it: where a session's escalation is recorded. */
+	readonly secondFactorStore: SupportsSecondFactorUpdate | undefined;
 	/** The deployment's CSRF guard: every POST runs its middleware, and a login it completes is handed a fresh token. */
 	readonly csrfGuard: CsrfGuard;
 	/** The flood guard every POST runs after the CSRF guard. */
@@ -280,6 +290,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		admission,
 		stepUp,
 		loginCompletion,
+		secondFactorStore,
 		csrfGuard,
 		floodGuard,
 		logger,
@@ -287,13 +298,22 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	} = options;
 	const router = express.Router();
 
-	/** The session the request's cookie carries, admitted for `action`. */
-	const admitCookie = (
+	/**
+	 * The session the request's cookie carries, admitted for `action`, and the
+	 * renewal nonce of the claim admission compared — what an escalation of
+	 * this session expects the record to hold.
+	 */
+	const admitCookie = async (
 		req: Request,
 		action: MfaAdmissionAction | IssuedRemediationAction,
-	): Promise<Admission> =>
+	): Promise<{ readonly admitted: Admission; readonly expectedRenewalNonce: string | undefined }> => {
 		// express-session's `req.session`, read without its type package.
-		admitSession(admission, { claim: cookieClaim(req as unknown as CookieCarrier), action });
+		const claim = cookieClaim(req as unknown as CookieCarrier);
+		return {
+			admitted: await admitSession(admission, { claim, action }),
+			expectedRenewalNonce: claim.renewalNonce,
+		};
+	};
 
 	/**
 	 * A binding the subject's records no longer allow: a login starts again
@@ -329,15 +349,16 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 
 	/**
 	 * The signed-in session the request's cookie carries, admitted for
-	 * `action`, with the `User` its cookie holds; `undefined` once the refusal
-	 * is answered — a requirement's step-up among them.
+	 * `action`, with the `User` its cookie holds and the renewal nonce
+	 * admission compared; `undefined` once the refusal is answered — a
+	 * requirement's step-up among them.
 	 */
 	const sessionFor = async (
 		req: Request,
 		res: Response,
 		action: MfaAdmissionAction | IssuedRemediationAction,
-	): Promise<MfaCeremonySession | undefined> => {
-		const admitted = await admitCookie(req, action);
+	): Promise<SignedInSession | undefined> => {
+		const { admitted, expectedRenewalNonce } = await admitCookie(req, action);
 		if (admitted.outcome === "step_up") {
 			answerStepUp(res, admitted);
 			return undefined;
@@ -351,31 +372,45 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			answerNoSession(res, admitted);
 			return undefined;
 		}
-		const authTime = admitted.outcome === "admitted" ? admitted.view?.authTime : undefined;
+		let authTimeMs: number | undefined;
+		let witness: MfaCeremonySession["witness"];
+		if (admitted.outcome === "admitted" && admitted.view !== null) {
+			const view: SessionView = admitted.view;
+			authTimeMs = view.authTime.getTime();
+			witness = view.enrollmentFacts?.witness;
+		}
 		return {
-			sid: session.sid,
-			subject: session.sub,
-			user,
-			authTimeMs: authTime === undefined ? undefined : authTime.getTime(),
+			session: { sid: session.sid, subject: session.sub, user, authTimeMs, witness },
+			expectedRenewalNonce,
 		};
 	};
 
 	/**
 	 * The call `req` makes, naming `transactionId`, in the session its cookie
-	 * carries when it is signed in — admitted for `action` — and in none when
-	 * it is not, as a login's ceremony is; `undefined` once a refusal is
-	 * answered.
+	 * carries when it is signed in — admitted for `action`, with the renewal
+	 * nonce admission compared — and in none when it is not, as a login's
+	 * ceremony is; `undefined` once a refusal is answered.
 	 */
 	const signedInCall = async (
 		req: Request,
 		res: Response,
 		transactionId: string | undefined,
 		action: MfaAdmissionAction | IssuedRemediationAction,
-	): Promise<MfaCeremonyCall | undefined> => {
+	): Promise<
+		| { readonly call: MfaCeremonyCall; readonly expectedRenewalNonce: string | undefined }
+		| undefined
+	> => {
 		const call = callOf(req, transactionId);
-		if (!cookieClaim(req as unknown as CookieCarrier).authenticated) return call;
-		const session = await sessionFor(req, res, action);
-		return session === undefined ? undefined : { ...call, session };
+		if (!cookieClaim(req as unknown as CookieCarrier).authenticated) {
+			return { call, expectedRenewalNonce: undefined };
+		}
+		const signedIn = await sessionFor(req, res, action);
+		return signedIn === undefined
+			? undefined
+			: {
+					call: { ...call, session: signedIn.session },
+					expectedRenewalNonce: signedIn.expectedRenewalNonce,
+				};
 	};
 
 	const storeUnavailable = (
@@ -571,6 +606,40 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		res.status(200).json({ message: "Logged in successfully", ...answer });
 	};
 
+	/**
+	 * The signed-in session `session` escalated by `adds`: its express id
+	 * renewed, then the second factor recorded on its `UserSession` with the
+	 * renewal nonce, expecting the one admission compared — called once, and
+	 * never again. A fresh CSRF token on the response once recorded.
+	 */
+	const escalateSession = async (
+		route: RouteName,
+		req: Request,
+		res: Response,
+		session: { readonly sid: string; readonly sub: string },
+		expected: string | undefined,
+		adds: { readonly amr: readonly string[]; readonly mfaAt: Date },
+	): Promise<{ readonly outcome: "escalated" | "not_escalated" }> => {
+		if (secondFactorStore === undefined) return { outcome: "not_escalated" };
+		const renewed = await loginCompletion.renewSession({
+			req,
+			reporter: {
+				storeUnavailable: (store, step, cause) =>
+					storeUnavailable(route, store, step, cause, { sid: session.sid }),
+			},
+		});
+		if (renewed.outcome !== "renewed") return { outcome: "not_escalated" };
+		const recorded = await secondFactorStore.recordSecondFactor(session.sid, {
+			amr: adds.amr,
+			at: adds.mfaAt,
+			renewalNonce: renewed.renewalNonce,
+			expectedRenewalNonce: expected,
+		});
+		if (recorded === null) return { outcome: "not_escalated" };
+		csrfGuard.issue(res);
+		return { outcome: "escalated" };
+	};
+
 	router
 		.all(
 			["/transaction", "/challenge", "/verify", "/enrollment", "/enrollment/complete", "/step-up"],
@@ -587,8 +656,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		)
 		.get("/transaction", async (req: Request, res: Response) => {
 			// The id travels in the header alone: a GET has no body, and never a URL.
-			const call = await signedInCall(req, res, headerOf(req, TRANSACTION_HEADER), stepUp);
-			if (call === undefined) return;
+			const signed = await signedInCall(req, res, headerOf(req, TRANSACTION_HEADER), stepUp);
+			if (signed === undefined) return;
+			const { call } = signed;
 			const outcome = await coordinator.describe(call);
 			if (outcome.outcome === "unknown_transaction") {
 				res.status(400).json(UNKNOWN_TRANSACTION);
@@ -613,8 +683,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			});
 		})
 		.post("/challenge", async (req: Request, res: Response) => {
-			const call = await signedInCall(req, res, postedTransactionId(req), stepUp);
-			if (call === undefined) return;
+			const signed = await signedInCall(req, res, postedTransactionId(req), stepUp);
+			if (signed === undefined) return;
+			const { call } = signed;
 			const outcome = await coordinator.challenge({
 				...call,
 				factorId: (req.body as { factor_id?: unknown } | undefined)?.factor_id,
@@ -680,8 +751,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			}
 		})
 		.post("/verify", async (req: Request, res: Response) => {
-			const call = await signedInCall(req, res, postedTransactionId(req), stepUp);
-			if (call === undefined) return;
+			const signed = await signedInCall(req, res, postedTransactionId(req), stepUp);
+			if (signed === undefined) return;
+			const { call, expectedRenewalNonce } = signed;
 			const body = req.body as { factor_id?: unknown; proof?: unknown } | undefined;
 			const outcome = await coordinator.verify({
 				...call,
@@ -692,7 +764,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			const verifiedEvents = (
 				verified: Extract<
 					MfaVerifyOutcome,
-					{ outcome: "verified" | "binding_reopened" | "binding_not_reopened" }
+					{ outcome: "verified" | "stepped_up" | "binding_reopened" | "binding_not_reopened" }
 				>,
 			): void => {
 				emitAuditEvent(auditSink, {
@@ -704,7 +776,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					details: {
 						kind: verified.kind,
 						purpose: verified.purpose,
-						...(verified.outcome === "verified" ? {} : { reopened: true }),
+						...(verified.outcome === "binding_reopened" ||
+						verified.outcome === "binding_not_reopened"
+							? { reopened: true }
+							: {}),
 					},
 				});
 				if (verified.recoveryCodesRemaining !== undefined) {
@@ -845,6 +920,30 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					});
 					res.status(200).json({ email_proof: "verified" });
 					return;
+				case "stepped_up": {
+					verifiedEvents(outcome);
+					firstBindingUnnoted(outcome.subject, outcome.firstBindingUnnoted);
+					witnessUnwritten(outcome.subject, outcome.witness);
+					const escalated = await escalateSession(
+						"verify",
+						req,
+						res,
+						{ sid: outcome.sid, sub: outcome.subject },
+						expectedRenewalNonce,
+						outcome.adds,
+					);
+					if (escalated.outcome !== "escalated") {
+						res.status(401).json(LOGIN_REQUIRED);
+						return;
+					}
+					res.status(200).json({
+						step_up: "verified",
+						...(outcome.recoveryCodesRemaining === undefined
+							? {}
+							: { recovery_codes_remaining: outcome.recoveryCodesRemaining }),
+					});
+					return;
+				}
 				case "verified":
 					verifiedEvents(outcome);
 					firstBindingUnnoted(outcome.subject, outcome.firstBindingUnnoted);
@@ -873,10 +972,13 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			// With no transaction named, the enrollment is the signed-in session's own.
 			let call: MfaCeremonyCall | undefined;
 			if (transactionId === undefined) {
-				const session = await sessionFor(req, res, MFA_MANAGE);
-				call = session === undefined ? undefined : { ...callOf(req, undefined), session };
+				const signedIn = await sessionFor(req, res, MFA_MANAGE);
+				call =
+					signedIn === undefined
+						? undefined
+						: { ...callOf(req, undefined), session: signedIn.session };
 			} else {
-				call = await signedInCall(req, res, transactionId, MFA_MANAGE);
+				call = (await signedInCall(req, res, transactionId, MFA_MANAGE))?.call;
 			}
 			if (call === undefined) return;
 			const outcome = await coordinator.beginEnrollment({
@@ -940,8 +1042,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			}
 		})
 		.post("/enrollment/complete", async (req: Request, res: Response) => {
-			const call = await signedInCall(req, res, postedTransactionId(req), MFA_MANAGE);
-			if (call === undefined) return;
+			const signed = await signedInCall(req, res, postedTransactionId(req), MFA_MANAGE);
+			if (signed === undefined) return;
+			const { call } = signed;
 			const body = req.body as { proof?: unknown; label?: unknown } | undefined;
 			const outcome = await coordinator.completeEnrollment({
 				...call,
@@ -1125,12 +1228,13 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				return;
 			}
 			// The trip is admitted as the remediation: a live session, whatever it lacks.
-			const session = await sessionFor(req, res, stepUp);
-			if (session === undefined) return;
+			const signedIn = await sessionFor(req, res, stepUp);
+			if (signedIn === undefined) return;
+			const { session } = signedIn;
 			// What a first binding in this session is answered: an outage, a new
 			// login, another requirement's step-up — answered as its own — or one
 			// this requirement's proof can meet, or none owed.
-			const judged = await admitCookie(req, MFA_MANAGE);
+			const { admitted: judged } = await admitCookie(req, MFA_MANAGE);
 			if (judged.outcome === "step_up" && judged.requirement !== MFA_REQUIREMENT_NAME) {
 				answerStepUp(res, judged);
 				return;

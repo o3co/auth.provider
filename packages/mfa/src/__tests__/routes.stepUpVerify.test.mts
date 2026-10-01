@@ -155,15 +155,28 @@ async function signedIn(app: Parameters<typeof login>[0], store: UserSessionStor
 	return { agent, sid, cookie: sessionCookie(res) };
 }
 
-/** Whether the cookie session `cookie` names is admitted as a live session: a transaction read that gets as far as the transaction. */
-const admitted = async (app: Parameters<typeof login>[0], cookie: string): Promise<boolean> => {
-	const res = await request(app)
-		.get("/session/mfa/transaction")
-		.set("Cookie", cookie)
-		.set("MFA-Transaction", "A".repeat(43));
-	if (res.status !== 400 && res.status !== 401) throw new Error(`answered ${res.status}`);
-	return res.status === 400;
-};
+/** `POST /session/mfa<path>` from a browser holding only the cookie session `cookie`, with a CSRF token fetched on it. */
+async function postAs(
+	app: Parameters<typeof login>[0],
+	cookie: string,
+	path: string,
+	body: Record<string, unknown>,
+): Promise<request.Response> {
+	const csrf = await request(app).get("/session/csrf").set("Cookie", cookie);
+	const csrfCookie = ([] as string[])
+		.concat(csrf.headers["set-cookie"] ?? [])
+		.map((line) => line.split(";")[0] as string)
+		.filter((pair) => !pair.startsWith("auth.session="));
+	return request(app)
+		.post(`/session/mfa${path}`)
+		.set("Cookie", [cookie, ...csrfCookie].join("; "))
+		.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+		.send(body);
+}
+
+/** Whether the cookie session `cookie` names is admitted as a live signed-in session: a step-up it asks for is not refused 401. */
+const admitted = async (app: Parameters<typeof login>[0], cookie: string): Promise<boolean> =>
+	(await postAs(app, cookie, "/step-up", {})).status !== 401;
 
 /** A step-up opened in the agent's session: its transaction. */
 const openedStepUp = async (agent: Agent): Promise<string> => {
@@ -235,6 +248,7 @@ describe("a TOTP step-up verified in a password session", () => {
 		const totp = await seedTotp(factorStore);
 		expect((await enrollFromAccount(agent, "totp")).status).toBe(403);
 		const transaction = await openedStepUp(agent);
+		expect(await admitted(app, cookie)).toBe(true);
 
 		expect((await verify(agent, transaction, totp.record.id, totpCode(totp.secret))).status).toBe(
 			200,

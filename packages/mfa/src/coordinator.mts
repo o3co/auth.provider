@@ -66,8 +66,12 @@
  *   round; once the transaction is consumed and the proof spent, the login is
  *   reopened for a binding. A login transaction opened for a binding
  *   verifies no factor.
- * - A verified counting factor marks the enrollment witness of a login whose
- *   `User` does not carry it (D12), after noting the subject's first-binding
+ * - A verified proof on a session's `step_up` transaction is answered
+ *   `stepped_up`, naming the session and what the proof adds, dated by the
+ *   verification's time: the caller records it on the session. The factor's
+ *   mailed code goes to the session's own address.
+ * - A verified counting factor marks the enrollment witness of a login — or
+ *   a step-up's session — whose `User` does not carry it (D12), after noting the subject's first-binding
  *   mark (`firstBindingMark.mts`): a note that fails leaves the witness
  *   unmarked, so no session's recorded witness goes stale unmarked; a
  *   directory that cannot write the witness gets no note. Neither failure
@@ -149,7 +153,7 @@ import {
 	openLoginBinding,
 	openStepUpTransaction,
 } from "./transactions.mjs";
-import { type MfaEnrollmentWitness, reconciles } from "./witness.mjs";
+import { type MfaEnrollmentWitness, reconciles, reconcilesSession } from "./witness.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */
 const TRANSACTION_ID = /^[A-Za-z0-9_-]{43}$/;
@@ -828,7 +832,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					mail: issued.mail,
 					purpose: "login_code",
 					subject: tx.subject,
-					address: tx.continuation?.primary.user.email,
+					// A step-up's code goes to the session's own address; the bound read held the session to it.
+					address:
+						tx.purpose === "step_up"
+							? call.session?.user.email
+							: tx.continuation?.primary.user.email,
 					nowMs,
 					notAfterMs: tx.expiresAtMs,
 					digests: sealing.digestsFor(record.kind),
@@ -1134,16 +1142,17 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						: { outcome: "binding_reopened", answer, recoveryCodesRemaining, ...about };
 				}
 
-				// D12: a counting factor verified for a login's `User` that does not
-				// say it enrolled marks it, so a mark that failed heals here.
-				const user = consumed.continuation?.primary.user;
-				const reconciled = reconciles(factor, user)
+				// D12: a counting factor verified for a `User` that does not say it
+				// enrolled — the login's, or the one the session recorded — marks it,
+				// so a mark that failed heals here.
+				const reconciled = (
+					tx.purpose === "step_up"
+						? reconcilesSession(factor, call.session?.witness)
+						: reconciles(factor, consumed.continuation?.primary.user)
+				)
 					? await kit.reconcileWitness(tx.subject)
 					: undefined;
-
-				return {
-					outcome: "verified",
-					continuation: consumed.continuation,
+				const verified = {
 					adds: {
 						amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
 						mfaAt: new Date(nowMs),
@@ -1153,6 +1162,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					recoveryCodesRemaining: recoveryCodesLeft(factor, checked.next),
 					...about,
 				};
+				// A step-up's session is escalated by the caller; a login is resumed by it.
+				return tx.purpose === "step_up" && tx.sid !== undefined
+					? { outcome: "stepped_up", sid: tx.sid, ...verified }
+					: { outcome: "verified", continuation: consumed.continuation, ...verified };
 			} finally {
 				await entered.settle(settled);
 			}

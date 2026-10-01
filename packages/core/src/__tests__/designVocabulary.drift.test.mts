@@ -1072,6 +1072,13 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: "admitPrimary's check that the primary a login route built is a password login, the only one the baseline applies after (the MFA ADR's D13) — a primary, never a session record",
 	},
+	// The MFA routes: a session's escalation.
+	{
+		file: "packages/mfa/src/routes.mts",
+		read: "adds.amr",
+		count: 1,
+		why: "the step-up write D28 names: escalateSession hands recordSecondFactor what a verified second factor adds, as the ceremony built it — the factor's declared values and mfa — never a session record",
+	},
 	// Reads of a field of that name that is not a session's.
 	{
 		file: "packages/core/src/grants/authenticationClaims.mts",
