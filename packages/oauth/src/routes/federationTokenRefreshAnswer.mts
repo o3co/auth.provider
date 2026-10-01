@@ -226,8 +226,10 @@ export const readRefreshAnswer = (
 		(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
 		(statedInstant && !isUsableDate(answer.expiresAt)) ||
 		((statedLifetime || statedInstant) && derivedExpiry !== null && !isUsableDate(derivedExpiry)) ||
-		// Less than a whole second left: answered `expires_in: 0`, and stored,
-		// refreshed again on every request.
+		// Judged as the answer is read: no token is accepted with less than a
+		// second left now. `expires_in`, computed after the write and the audit,
+		// can still be `0` at that boundary; the refresh buffer refreshes such a
+		// token on the next request.
 		(derivedExpiry !== null && derivedExpiry.getTime() < now + 1000);
 
 	// The refreshed token's type: unreadable or not a type name is broken

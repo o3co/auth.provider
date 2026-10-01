@@ -190,8 +190,10 @@ const MAX_REFRESH_BUFFER_MS = 2 ** 31 - 1;
 export function createRouter(express: ExpressLike, opts: FederationTokenRouterOptions): Router {
 	// Refused, never repaired: 0 or less serves a token with no life left,
 	// NaN never serves the stored token, and under a second sits below the
-	// refresh reading's own one-second floor.
-	const refreshBufferMs = opts.refreshBufferMs ?? 30_000;
+	// refresh reading's own one-second floor. Only an absent option takes the
+	// default; `null` is refused like any other non-number.
+	const refreshBufferMs: unknown =
+		opts.refreshBufferMs === undefined ? 30_000 : opts.refreshBufferMs;
 	if (
 		typeof refreshBufferMs !== "number" ||
 		!Number.isInteger(refreshBufferMs) ||

@@ -4183,6 +4183,7 @@ describe("createRouter — refreshBufferMs", () => {
 		["NaN", Number.NaN],
 		["Infinity", Number.POSITIVE_INFINITY],
 		["a numeric string", "30000" as unknown as number],
+		["null", null as unknown as number],
 		["a fraction of a millisecond", 0.001],
 		["less than a second", 999],
 		["more than 2^31 - 1", 2 ** 31],
