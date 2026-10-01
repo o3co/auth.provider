@@ -302,6 +302,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+coveredByRevocationBoundary\b/,
 	},
 	{
+		concept:
+			"the subject-revocation participants' pass — in order, each awaited, only after a complete revocation, a failure reported by name (the MFA ADR's D21)",
+		home: "packages/core/src/user-sessions/subjectRevocationParticipants.mts",
+		definition: /(?:function|const)\s+runSubjectRevocationParticipants\b/,
+	},
+	{
 		concept: "the amr a verified second factor adds when it adds mfa — mfa (the MFA ADR's D14)",
 		home: "packages/core/src/grants/authenticationClaims.mts",
 		definition: /(?:function|const)\s+MFA_AMR\b/,

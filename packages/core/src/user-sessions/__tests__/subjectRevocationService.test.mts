@@ -29,6 +29,10 @@ import { describe, expect, it, vi } from "vitest";
 import { harness, MIN, now } from "#/federation-grants/__tests__/retrieve.harness.mjs";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import { createInMemorySubjectSessionIndex } from "#/user-sessions/memory/subjectSessionIndex.mjs";
+import type {
+	SubjectRevocationParticipant,
+	SubjectRevocationParticipantResolver,
+} from "#/user-sessions/subjectRevocationParticipants.mjs";
 import { createSubjectRevocationService } from "#/user-sessions/subjectRevocationService.mjs";
 import type { SubjectRevocation } from "#/user-sessions/types.mjs";
 
@@ -575,5 +579,90 @@ describe("createSubjectRevocationService", () => {
 			).rejects.toThrow(/revokeGrantsConsentedSince/);
 			expect(await revocation.revokedBefore("u-1")).toBeNull();
 		});
+	});
+});
+
+describe("createSubjectRevocationService — participants", () => {
+	/** A resolver over one participant that records the subjects it was run for. */
+	const participants = (runs: string[]): SubjectRevocationParticipantResolver => {
+		const byName = new Map<string, SubjectRevocationParticipant>([
+			[
+				"feature",
+				{
+					async run({ subject }) {
+						runs.push(subject);
+					},
+				},
+			],
+		]);
+		return { get: (name) => byName.get(name), entries: () => byName.entries() };
+	};
+
+	it("runs them once on the revoke path, after the revocation completed", async () => {
+		const runs: string[] = [];
+		const service = createSubjectRevocationService(
+			deps({ subjectRevocationParticipantResolver: participants(runs) }),
+		);
+
+		const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+		expect(runs).toEqual(["u-1"]);
+		expect(result.participantsHeldBack).toEqual([]);
+		expect(result.complete).toBe(true);
+	});
+
+	it("runs them on the keep path, after the revocation completed", async () => {
+		const runs: string[] = [];
+		const service = createSubjectRevocationService(
+			deps({ allowKeep: true, subjectRevocationParticipantResolver: participants(runs) }),
+		);
+
+		const result = await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
+
+		expect(result.federationGrants.applied).toBe("keep");
+		expect(runs).toEqual(["u-1"]);
+		expect(result.participantsHeldBack).toEqual([]);
+		expect(result.complete).toBe(true);
+	});
+
+	it("holds them back on the keep path when the sessions boundary could not be written", async () => {
+		const runs: string[] = [];
+		const revocation = createInMemorySubjectRevocation();
+		vi.spyOn(revocation, "revokeSessionsBefore").mockRejectedValue(new Error("store is down"));
+		const service = createSubjectRevocationService(
+			deps({
+				allowKeep: true,
+				subjectRevocation: revocation,
+				subjectRevocationParticipantResolver: participants(runs),
+				logger: { error: () => {}, warn: () => {} },
+			}),
+		);
+
+		const result = await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
+
+		expect(runs).toEqual([]);
+		expect(result.participantsHeldBack).toEqual(["feature"]);
+		expect(result.complete).toBe(false);
+	});
+
+	it("reports a failing participant on the keep path, and the report is not complete", async () => {
+		const byName = new Map<string, SubjectRevocationParticipant>([
+			["feature", { run: () => Promise.reject(new Error("u-1 is locked")) }],
+		]);
+		const service = createSubjectRevocationService(
+			deps({
+				allowKeep: true,
+				subjectRevocationParticipantResolver: {
+					get: (name: string) => byName.get(name),
+					entries: () => byName.entries(),
+				},
+				logger: { error: () => {}, warn: () => {} },
+			}),
+		);
+
+		const result = await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
+
+		expect(result.participantFailures).toEqual([{ name: "feature", error: { name: "Error" } }]);
+		expect(result.complete).toBe(false);
 	});
 });
