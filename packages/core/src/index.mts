@@ -997,9 +997,9 @@ export {
 	type TokenCarrier,
 	tokenClaim,
 } from "./session-admission/admit.mjs";
-// The tail of a login as a contract — what a requirement's completion
-// requires through the `loginCompletion` slot instead of importing the
-// session package.
+// The tail of a login, and the renewal of a signed-in session's id, as a
+// contract — what a requirement's completion requires through the
+// `loginCompletion` slot instead of importing the session package.
 export type {
 	LoginCompletion,
 	LoginEstablishmentCall,
@@ -1009,6 +1009,10 @@ export type {
 	LoginInterruptionReporter,
 	LoginInterruptionResult,
 	LoginInterruptionStep,
+	SessionRenewalCall,
+	SessionRenewalReporter,
+	SessionRenewalResult,
+	SessionRenewalStep,
 } from "./session-admission/login-completion.mjs";
 export {
 	checkPrimaryContinuation,

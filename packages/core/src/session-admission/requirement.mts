@@ -823,6 +823,8 @@ export type Admission =
 	| {
 			readonly outcome: "admitted";
 			readonly session: UserSession | null;
+			/** Admission's view of the record, equal to what the requirements are handed; `null` without a record. */
+			readonly view: SessionView | null;
 			readonly acr: string | undefined;
 	  }
 	| { readonly outcome: "unauthenticated" }
@@ -840,6 +842,8 @@ export type Admission =
 			readonly outcome: "step_up";
 			readonly requirement: string;
 			readonly session: UserSession;
+			/** Admission's view of the record, equal to what the requirements are handed. */
+			readonly view: SessionView;
 			/** The requirement's page as registered: `href` is where a consumer sends the browser. */
 			readonly page: RegisteredStepUpPage;
 			readonly acrValues: readonly string[];

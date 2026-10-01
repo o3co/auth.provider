@@ -19,7 +19,8 @@
  * reached through. Types only.
  *
  * Establishing a session (record, subject index, regeneration, sign-in,
- * save, rollback) is the session package's. A requirement's completion
+ * save, rollback), and renewing a signed-in session's id, are the session
+ * package's: it alone writes the signed-in cookie state. A requirement's completion
  * finishes a login the same way, but a package imports only core, so it
  * requires this slot. The session stores, the session's lifetime and the
  * CSRF mechanism stay the provider's: a caller hands only the request, the
@@ -107,8 +108,39 @@ export type LoginInterruptionResult =
 			readonly step: LoginInterruptionStep;
 	  };
 
+/** Where a renewal failed: the express session's regeneration, or its save. */
+export type SessionRenewalStep = "regenerate" | "save";
+
+/** What the caller logs while a session's id is renewed, in its own vocabulary. */
+export interface SessionRenewalReporter {
+	/** The cookie session's store could not answer; the caller answers the outage. */
+	storeUnavailable(store: "cookie_session", step: SessionRenewalStep, cause: unknown): void;
+}
+
+/** What a caller hands `renewSession`. */
+export interface SessionRenewalCall {
+	/** The request whose signed-in express session is renewed. */
+	readonly req: Request;
+	readonly reporter: SessionRenewalReporter;
+}
+
 /**
- * The session package's two login tails, as one contract. Each rejects with
+ * The signed-in state is on a new express session id, saved; or the cookie
+ * session's store could not answer, as the reporter was told, and the
+ * request's cookie session was abandoned. Either way the caller answers the
+ * response.
+ */
+export type SessionRenewalResult =
+	| { readonly outcome: "renewed" }
+	| {
+			readonly outcome: "unavailable";
+			readonly store: "cookie_session";
+			readonly step: SessionRenewalStep;
+	  };
+
+/**
+ * The session package's login tails, and the renewal of a signed-in
+ * session's id, as one contract. Each rejects with
  * a `RangeError`, before the session is touched, what core did not build —
  * an object shaped like an `Establishment` or an interruption, or a copy of
  * one (`isEstablishment`, `isInterruptAdmission`).
@@ -139,6 +171,20 @@ export interface LoginCompletion {
 		admission: InterruptAdmission,
 		call: LoginInterruptionCall,
 	): Promise<LoginInterruptionResult>;
+	/**
+	 * Regenerate a signed-in browser's express session and keep its signed-in
+	 * state on the new id — `isAuthenticated`, `user` and `sid` as they were —
+	 * then save it. Every other field is dropped. Against session fixation
+	 * after an escalation (the MFA ADR's D27): the old id is destroyed by the
+	 * regeneration, so a copy of it taken before gains nothing a caller
+	 * records after `renewed`. A failure abandons the request's cookie session
+	 * and saves nothing under either id; a caller escalates nothing on
+	 * `unavailable`. Records bound to the old id — a consent parked by
+	 * `/authorize`, a federation-grant browser binding, the session's other
+	 * open MFA transactions — are orphaned. Answers an outcome, never a
+	 * response.
+	 */
+	renewSession(call: SessionRenewalCall): Promise<SessionRenewalResult>;
 }
 
 // ---------------------------------------------------------------------------

@@ -35,6 +35,7 @@ import {
 	cookieSessionUser,
 	linkClaim,
 	tokenClaim,
+	viewOf,
 } from "#/session-admission/admit.mjs";
 import type {
 	AdmissionDeps,
@@ -574,7 +575,7 @@ describe("step 2 — the live read", () => {
 				}),
 				request({ claim: tokenClaim({ sub: "user-1", amr: ["pwd"] }) }),
 			),
-		).toEqual({ outcome: "admitted", session: null, acr: undefined });
+		).toEqual({ outcome: "admitted", session: null, view: null, acr: undefined });
 		expect(asked).toBe(0);
 		expect(seen[0]).toMatchObject({ session: null, carrier: "token" });
 	});
@@ -684,7 +685,7 @@ describe("step 2 — the live read", () => {
 				}),
 				request(),
 			),
-		).toEqual({ outcome: "admitted", session: null, acr: undefined });
+		).toEqual({ outcome: "admitted", session: null, view: null, acr: undefined });
 		expect(seen).toHaveLength(1);
 		expect(seen[0]).toMatchObject({ session: null, authentication: null });
 	});
@@ -692,7 +693,12 @@ describe("step 2 — the live read", () => {
 	it("answers the live record itself on admitted", async () => {
 		const record = session();
 		const admission = await admitSession(deps({ userSessionStore: holding(record) }), request());
-		expect(admission).toEqual({ outcome: "admitted", session: record, acr: undefined });
+		expect(admission).toEqual({
+			outcome: "admitted",
+			session: record,
+			view: viewOf(record),
+			acr: undefined,
+		});
 	});
 });
 
@@ -1661,7 +1667,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 					asks: { acrValues: ["urn:o3co:acr:mfa"] },
 				}),
 			),
-		).toEqual({ outcome: "admitted", session: null, acr: "urn:o3co:acr:mfa" });
+		).toEqual({ outcome: "admitted", session: null, view: null, acr: "urn:o3co:acr:mfa" });
 	});
 
 	it("judges a token with a sid on its own amr when the record's differs, in both directions", async () => {
@@ -1693,6 +1699,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 		expect(await ask(plain, ["pwd", "otp", "mfa"])).toEqual({
 			outcome: "admitted",
 			session: plain,
+			view: viewOf(plain),
 			acr: "urn:o3co:acr:mfa",
 		});
 	});
@@ -1762,7 +1769,12 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 			expect(
 				await admitSession(deps({ acrTable: table }), request({ asks })),
 				JSON.stringify(asks),
-			).toEqual({ outcome: "admitted", session: session(), acr: undefined });
+			).toEqual({
+				outcome: "admitted",
+				session: session(),
+				view: viewOf(session()),
+				acr: undefined,
+			});
 		}
 	});
 });

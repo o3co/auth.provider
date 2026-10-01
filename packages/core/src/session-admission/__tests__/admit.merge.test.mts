@@ -33,7 +33,7 @@
 
 import { describe, expect, it } from "vitest";
 import { readAcrTable } from "#/session-admission/acr.mjs";
-import { admitSession, cookieClaim } from "#/session-admission/admit.mjs";
+import { admitSession, cookieClaim, viewOf } from "#/session-admission/admit.mjs";
 import type {
 	Admission,
 	AdmissionDeps,
@@ -213,6 +213,7 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 		expect(mergeAdmission({ outcome: "met", acr: MFA }, session, undefined)).toEqual({
 			outcome: "admitted",
 			session,
+			view: viewOf(session),
 			acr: MFA,
 		});
 		expect(mergeAdmission({ outcome: "unmet", requirement: "acr" }, session, undefined)).toEqual({
@@ -293,6 +294,7 @@ describe("the merge — the rows the MFA table does not reach", () => {
 			outcome: "step_up",
 			requirement: "keys",
 			session,
+			view: viewOf(session),
 			page: { url: "/keys", params: { via: "keys" }, href: `${ISSUER}/keys?via=keys` },
 			acrValues: [PHR],
 			whenStillUnmet: "unmet",
@@ -343,6 +345,7 @@ describe("the merge — the rows the MFA table does not reach", () => {
 			outcome: "step_up",
 			requirement: "first",
 			session,
+			view: viewOf(session),
 			page: { url: "/first", params: { via: "first" }, href: `${ISSUER}/first?via=first` },
 			acrValues: [],
 			whenStillUnmet: "unmet",

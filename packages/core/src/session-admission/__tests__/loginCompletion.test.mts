@@ -41,6 +41,8 @@ import type {
 	LoginEstablishmentResult,
 	LoginInterruptionCall,
 	LoginInterruptionResult,
+	SessionRenewalCall,
+	SessionRenewalResult,
 } from "#/session-admission/login-completion.mjs";
 import type {
 	Establishment,
@@ -72,6 +74,10 @@ const RULES = {
 		"an interruption is answered with the requirement's 403, its ceremony opened on the regenerated session, saved and not signed in",
 	interruptionOutage:
 		"an interruption that cannot be answered is 503: the ceremony's outage, or the cookie session's, reported once, the browser not signed in",
+	renewed:
+		"renewSession moves a signed-in session to a regenerated id, saved with isAuthenticated, user and sid as they were and no other field",
+	renewalOutage:
+		"a renewal whose regenerate or save fails is the cookie session's outage: reported once, nothing saved, the request's cookie session abandoned",
 } as const;
 
 const withOutage = () => {
@@ -225,7 +231,19 @@ describe("the loginCompletion slot", () => {
 		// What a caller hands: the request (and for an interruption the response)
 		// and its reporter — never a store, a lifetime or a CSRF mechanism, which
 		// are the provider's.
+		expectTypeOf<LoginCompletion["renewSession"]>().toEqualTypeOf<
+			(call: SessionRenewalCall) => Promise<SessionRenewalResult>
+		>();
+		expectTypeOf<SessionRenewalResult>().toEqualTypeOf<
+			| { readonly outcome: "renewed" }
+			| {
+					readonly outcome: "unavailable";
+					readonly store: "cookie_session";
+					readonly step: "regenerate" | "save";
+			  }
+		>();
 		expectTypeOf<keyof LoginEstablishmentCall>().toEqualTypeOf<"req" | "reporter">();
+		expectTypeOf<keyof SessionRenewalCall>().toEqualTypeOf<"req" | "reporter">();
 		expectTypeOf<keyof LoginInterruptionCall>().toEqualTypeOf<"req" | "res" | "reporter">();
 		expectTypeOf<LoginCompletionContractInput["records"]>().toEqualTypeOf<
 			(() => number) | undefined
@@ -287,6 +305,8 @@ describe("loginCompletionContract — the recording double", () => {
 			RULES.forgedInterruption,
 			RULES.interrupted,
 			RULES.interruptionOutage,
+			RULES.renewed,
+			RULES.renewalOutage,
 		]);
 	});
 
@@ -464,6 +484,57 @@ describe("createRecordingLoginCompletion", () => {
 	});
 });
 
+describe("createRecordingLoginCompletion — renewSession", () => {
+	/** A request whose express session is signed in, with a field beside the signed-in state. */
+	const signedInRequest = (): Request => {
+		const req = requestWithSession();
+		Object.assign(sessionOf(req), {
+			isAuthenticated: true,
+			user: { id: "user-1" },
+			sid: "sid-1",
+			redirectTo: "https://rp.example.test/after",
+		});
+		return req;
+	};
+
+	it("keeps isAuthenticated, user and sid on the regenerated id, and drops the rest", async () => {
+		const req = signedInRequest();
+		expect(
+			await createRecordingLoginCompletion().renewSession({
+				req,
+				reporter: { storeUnavailable: () => {} },
+			}),
+		).toEqual({ outcome: "renewed" });
+		expect(sessionIdOf(req)).toBe("after");
+		expect({ ...sessionOf(req) }).toEqual({
+			isAuthenticated: true,
+			user: { id: "user-1" },
+			sid: "sid-1",
+		});
+	});
+
+	it("writes no field the session did not hold: a session not signed in stays so", async () => {
+		const req = requestWithSession();
+		await createRecordingLoginCompletion().renewSession({
+			req,
+			reporter: { storeUnavailable: () => {} },
+		});
+		expect({ ...sessionOf(req) }).toEqual({});
+		expect(cookieClaim(req as never).authenticated).toBe(false);
+	});
+
+	it("answers a request with no express session as the cookie session's outage at regenerate", async () => {
+		const reported: string[] = [];
+		expect(
+			await createRecordingLoginCompletion().renewSession({
+				req: { headers: {} } as unknown as Request,
+				reporter: { storeUnavailable: (store, step) => reported.push(`${store}:${step}`) },
+			}),
+		).toEqual({ outcome: "unavailable", store: "cookie_session", step: "regenerate" });
+		expect(reported).toEqual(["cookie_session:regenerate"]);
+	});
+});
+
 describe("loginCompletionContract — each way a completion can break it", () => {
 	it("accepting an establishment core did not build", async () => {
 		expect(
@@ -588,6 +659,103 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 		expect(
 			await failing(inputOver(undefined, { withSessionStoreOutage: regeneratingAnyway })),
 		).toContain(RULES.storeOutage);
+	});
+
+	it("renewing without regenerating the session id", async () => {
+		expect(
+			await failing(
+				broken(() => ({
+					renewSession: async ({ req }) => {
+						const { isAuthenticated, user, sid } = sessionOf(req);
+						for (const key of Object.keys(sessionOf(req))) delete sessionOf(req)[key];
+						Object.assign(sessionOf(req), { isAuthenticated, user, sid });
+						await operate(req, "save");
+						return { outcome: "renewed" };
+					},
+				})),
+			),
+		).toContain(RULES.renewed);
+	});
+
+	it("carrying a field beside the signed-in state to the new id, or losing one of its three", async () => {
+		const renewingWith = (pick: (old: Record<string, unknown>) => Record<string, unknown>) =>
+			broken(() => ({
+				renewSession: async ({ req }) => {
+					const old = { ...sessionOf(req) };
+					await operate(req, "regenerate");
+					Object.assign(sessionOf(req), pick(old));
+					await operate(req, "save");
+					return { outcome: "renewed" };
+				},
+			}));
+		expect(await failing(renewingWith((old) => old))).toContain(RULES.renewed);
+		expect(
+			await failing(renewingWith(({ isAuthenticated, user }) => ({ isAuthenticated, user }))),
+		).toContain(RULES.renewed);
+		expect(
+			await failing(
+				renewingWith(({ user, sid }) => ({ isAuthenticated: false, user, sid })),
+			),
+		).toContain(RULES.renewed);
+	});
+
+	it("answering renewed before the renewed session is saved", async () => {
+		expect(
+			await failing(
+				broken(() => ({
+					renewSession: async ({ req }) => {
+						const { isAuthenticated, user, sid } = sessionOf(req);
+						await operate(req, "regenerate");
+						Object.assign(sessionOf(req), { isAuthenticated, user, sid });
+						return { outcome: "renewed" };
+					},
+				})),
+			),
+		).toContain(RULES.renewed);
+	});
+
+	it("keeping the request's cookie session after a renewal failed, answering renewed, or not reporting it", async () => {
+		expect(
+			await failing(
+				broken(() => ({
+					renewSession: async ({ req, reporter }) => {
+						const { isAuthenticated, user, sid } = sessionOf(req);
+						try {
+							await operate(req, "regenerate");
+						} catch (cause) {
+							reporter.storeUnavailable("cookie_session", "regenerate", cause);
+							return { outcome: "unavailable", store: "cookie_session", step: "regenerate" };
+						}
+						Object.assign(sessionOf(req), { isAuthenticated, user, sid });
+						try {
+							await operate(req, "save");
+						} catch (cause) {
+							reporter.storeUnavailable("cookie_session", "save", cause);
+							return { outcome: "unavailable", store: "cookie_session", step: "save" };
+						}
+						return { outcome: "renewed" };
+					},
+				})),
+			),
+		).toContain(RULES.renewalOutage);
+		expect(
+			await failing(
+				broken((original) => ({
+					renewSession: async (call) => {
+						const result = await original.renewSession(call);
+						return result.outcome === "unavailable" ? { outcome: "renewed" } : result;
+					},
+				})),
+			),
+		).toContain(RULES.renewalOutage);
+		expect(
+			await failing(
+				broken((original) => ({
+					renewSession: (call) =>
+						original.renewSession({ ...call, reporter: { storeUnavailable: () => {} } }),
+				})),
+			),
+		).toContain(RULES.renewalOutage);
 	});
 
 	it("accepting an interruption core did not answer", async () => {

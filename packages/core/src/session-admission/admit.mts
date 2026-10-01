@@ -232,11 +232,12 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 // ---------------------------------------------------------------------------
 
 /**
- * The view a requirement is handed: a copy of four fields, and of the
- * record's `enrollmentFacts` when it holds ones the type admits — never the
- * record.
+ * The view a requirement is handed, and an admitted or `step_up` admission
+ * carries: a copy of four fields, and of the record's `enrollmentFacts` when
+ * it holds ones the type admits — never the record. Each call is a fresh copy.
+ * @internal
  */
-const viewOf = (session: UserSession): SessionView => {
+export const viewOf = (session: UserSession): SessionView => {
 	const enrollmentFacts = readEnrollmentFacts(session.enrollmentFacts);
 	return Object.freeze({
 		sid: session.sid,
