@@ -806,12 +806,15 @@ ahead than an hour and the skew, and drops the authorizations ended on it. The
 apply script runs over the lock hash, the week, the recovery hash and the
 lease: it checks the lease's token, then the authorization, then judges the
 lock state exactly as core's in-process store does, and moves the generation
-(`HINCRBY g`) in the same step; a reset deletes the lock and week keys unread,
+(computed before the first write, set with `HSET g`) in the same step; a reset deletes the lock and week keys unread,
 so it ends a lock state the other scripts cannot read. The acquire script
 compares the generation a writer captured with `g` (absent is `0`) and writes
-the lease with `SET NX PX`; the release is the compare-and-delete script the
-federation stores' locks use. The floor is the recovery hash's `floor` — a recovery-code set's generation,
-not the subject's — raised under the lease by one script that never lowers it. The recovery hash carries no TTL once it
+the lease with `SET NX PX`; the release is a compare-and-delete of its own,
+which answers a lease holding the token with no deadline as an outage. The
+floor is the recovery hash's `floor` — a recovery-code set's generation, not
+the subject's — raised under the lease by one script that never lowers it.
+Counts are safe whole numbers (at most 2^53−1) and an authorization's end lies
+within the Date range; anything else is an outage. The recovery hash carries no TTL once it
 holds a generation or a floor — losing the generation refuses a writer that
 captured it and lets through one that captured 0 before a recovery, losing
 the floor brings an older recovery-code set back — and before that expires a

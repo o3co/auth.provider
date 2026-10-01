@@ -448,13 +448,21 @@ local function count_of(text)
   corrupt()
 end
 
+-- An authorization's end: whole epoch milliseconds within the Date range.
+local MAX_INSTANT = 8640000000000000
+local function ends_of(text)
+  local n = num(text)
+  if n > MAX_INSTANT then corrupt() end
+  return n
+end
+
 local function slot_of(value)
   local ends, id = string.match(value, '^p|(%d+)|(.+)$')
-  if ends ~= nil then return {ends = num(ends), id = id} end
+  if ends ~= nil then return {ends = ends_of(ends), id = id} end
   local gen, applied_ends, applied_id = string.match(value, '^a|([1-9]%d*)|(%d+)|(.+)$')
   if gen == nil then corrupt() end
   count_of(gen)
-  return {applied = gen, ends = num(applied_ends), id = applied_id}
+  return {applied = gen, ends = ends_of(applied_ends), id = applied_id}
 end
 
 -- The recovery hash, read and validated whole: its generation and floor (nil when absent) and
@@ -718,6 +726,20 @@ return {1, stamp}
 `.trim();
 
 /**
+ * `MfaTransactionStoreClient.releaseSubjectLease`. `KEYS[1]` = the subject's lease; `ARGV[1]` =
+ * the holder's token. Deletes the lease while it holds the token and answers `1`; `0` when it
+ * holds another or none. A lease holding the token with no deadline is none this store wrote:
+ * an error, nothing deleted.
+ */
+const LUA_MFA_SUBJECT_LEASE_RELEASE = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call('PTTL', KEYS[1]) <= 0 then
+  error({err = 'MFA subject lease: a lease with no deadline is not one this store wrote; the operation is refused'})
+end
+return redis.call('DEL', KEYS[1])
+`.trim();
+
+/**
  * `MfaTransactionStoreClient.acquireSubjectLease`. `KEYS[1]` = the subject's lease, `KEYS[2]` =
  * its recovery hash; `ARGV[1]` = the new holder's token, `ARGV[2]` = the lease's length in ms,
  * `ARGV[3]` = the generation the writer captured, as decimal text. Returns
@@ -756,6 +778,7 @@ export const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);
 export const MFA_FIRST_BINDING_NOTE = defineScript(LUA_MFA_FIRST_BINDING_NOTE);
 export const MFA_FIRST_BINDING_READ = defineScript(LUA_MFA_FIRST_BINDING_READ);
 export const MFA_SUBJECT_LEASE_ACQUIRE = defineScript(LUA_MFA_SUBJECT_LEASE_ACQUIRE);
+export const MFA_SUBJECT_LEASE_RELEASE = defineScript(LUA_MFA_SUBJECT_LEASE_RELEASE);
 export const MFA_SUBJECT_RECOVERY_AUTHORIZE = defineScript(LUA_MFA_SUBJECT_RECOVERY_AUTHORIZE);
 export const MFA_SUBJECT_RECOVERY_APPLY = defineScript(LUA_MFA_SUBJECT_RECOVERY_APPLY);
 export const MFA_RECOVERY_SET_FLOOR_RAISE = defineScript(LUA_MFA_RECOVERY_SET_FLOOR_RAISE);

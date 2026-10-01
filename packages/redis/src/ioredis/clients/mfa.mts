@@ -25,7 +25,6 @@ import type { MfaFactorStoreClient, MfaTransactionStoreClient } from "../../clie
 import { fgNumber, hashFields } from "../codec.mjs";
 import { runScript } from "../commands.mjs";
 import { redisDurability } from "../durability.mjs";
-import { COMPARE_AND_DELETE } from "../scripts/lock.mjs";
 import {
 	MFA_FACTOR_UPDATE,
 	MFA_FIRST_BINDING_NOTE,
@@ -33,6 +32,7 @@ import {
 	MFA_RECOVERY_SET_FLOOR_RAISE,
 	MFA_SUBJECT_EXEMPT,
 	MFA_SUBJECT_LEASE_ACQUIRE,
+	MFA_SUBJECT_LEASE_RELEASE,
 	MFA_SUBJECT_RECOVERY_APPLY,
 	MFA_SUBJECT_RECOVERY_AUTHORIZE,
 	MFA_SUBJECT_RESERVE,
@@ -249,7 +249,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			throw new Error("MfaTransactionStore: the lease script answered nothing it knows");
 		},
 		async releaseSubjectLease(keys, token) {
-			return (await runScript(io, COMPARE_AND_DELETE, [keys.lease], [token])) === 1;
+			return (await runScript(io, MFA_SUBJECT_LEASE_RELEASE, [keys.lease], [token])) === 1;
 		},
 		async recoverySetFloor(keys) {
 			return await io.hget(keys.recovery, "floor");
