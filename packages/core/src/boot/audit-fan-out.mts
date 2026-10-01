@@ -84,7 +84,13 @@ export function auditSlotFor(
 		});
 		const dispose = (own as { [Symbol.asyncDispose]?: unknown } | undefined)?.[Symbol.asyncDispose];
 		if (typeof dispose !== "function") return composite;
-		return { ...composite, [Symbol.asyncDispose]: () => dispose.call(own) };
+		const disposable: AuditSink & AsyncDisposable = {
+			...composite,
+			[Symbol.asyncDispose]: async () => {
+				await dispose.call(own);
+			},
+		};
+		return disposable;
 	};
 	const provider = plan.providerActivations.some(
 		(activation) => activation.componentKey === "auditSink",
