@@ -6,7 +6,6 @@
 	// The build config leaves `__tests__` out. vitest's typecheck runs tsc on
 	// this program, and an error in any of its files fails the run; every test
 	// file and helper comes in by glob, so a new one is compiled unlisted.
-	// core's testProgram.drift.test.mts holds it to every file vitest collects.
 	"include": ["src/**/*.mts"],
 	"exclude": ["node_modules", "dist"]
 }
