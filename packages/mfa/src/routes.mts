@@ -35,8 +35,15 @@
  *   The step-up asks the requirement, as `mfa.manage`, what a first binding
  *   in the session is answered, and opens the proof only where it would not
  *   be refused outright; another requirement's step-up is answered as its
- *   own. A binding in a session that the subject's factors no longer allow
- *   is `409`: the session stands.
+ *   own. Requirements are asked in order and the first that is not met
+ *   answers, so where this one's gate asks the proof, the trip opens before
+ *   a later requirement is asked, and that one may still hold the binding
+ *   back once the proof is given. A binding in a session that the subject's
+ *   factors no longer allow is `409`: the session stands.
+ * - A factor bound beside another that cannot stand — past the limit, or
+ *   its records unreadable — and cannot be removed stands: it is audited as
+ *   enrolled and said once at error before the `503`.
+ * - A factor's own failure is logged by its name and code, never its text.
  * - Each outage is answered `503` and logged once, at error. A mail the
  *   sender refused at its limit is `429`; a factor whose recorded address no
  *   longer matches the login's is `403`, recorded as
@@ -332,7 +339,15 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					...(isMfaFactorId(failure.factorId) ? { factorId: failure.factorId } : {}),
 					state: failure.state,
 					...(failure.keyId === undefined ? {} : { keyId: failure.keyId }),
-					...(failure.cause === undefined ? {} : { err: loggableError(failure.cause) }),
+					...(failure.cause === undefined
+						? {}
+						: {
+								// A factor's own throw by its name and code alone: its text may quote the account.
+								err:
+									failure.state === "verification" || failure.state === "enrollment"
+										? mailFailureOf(failure.cause)
+										: loggableError(failure.cause),
+							}),
 				},
 				"mfa_factor_unreadable",
 			);
@@ -518,7 +533,8 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						{
 							kind: outcome.kind,
 							...(isMfaFactorId(outcome.factorId) ? { factorId: outcome.factorId } : {}),
-							err: loggableError(outcome.cause),
+							// The factor's failure by its name and code alone: its text may quote the account.
+							err: mailFailureOf(outcome.cause),
 						},
 						"mfa_factor_challenge_unavailable",
 					);
@@ -677,7 +693,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					return;
 				case "enrollment_failed":
 					logger.error(
-						{ route: "enrollment", kind: outcome.kind, err: loggableError(outcome.cause) },
+						{ route: "enrollment", kind: outcome.kind, err: mailFailureOf(outcome.cause) },
 						"mfa_factor_enrollment_unavailable",
 					);
 					res.status(503).json(MFA_UNAVAILABLE);
@@ -748,6 +764,40 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						return;
 					}
 					answerClosed(res, outcome.purpose);
+					return;
+				case "factor_standing":
+					// The factor stands and is usable: audited as bound, and said, so the
+					// account holder's notice is not missed.
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.factor.enrolled",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: {
+							kind: outcome.kind,
+							purpose: outcome.purpose,
+							binding: outcome.binding,
+							by: "user",
+						},
+					});
+					if (outcome.listing !== undefined) {
+						storeUnavailable(
+							"enrollment",
+							outcome.listing.store,
+							outcome.listing.step,
+							outcome.listing.cause,
+						);
+					}
+					logger.error(
+						{
+							sub: outcome.subject,
+							kind: outcome.kind,
+							err: loggableError(outcome.standing.cause),
+						},
+						"mfa_enrollment_factor_standing",
+					);
+					res.status(503).json(MFA_UNAVAILABLE);
 					return;
 				case "first_binding_unchecked":
 					answerOutage("enrollment", res, outcome.listing);

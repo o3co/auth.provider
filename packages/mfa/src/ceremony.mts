@@ -247,6 +247,19 @@ export type MfaEnrollmentCompleteOutcome =
 			readonly outcome: "first_binding_conflict";
 			readonly standing: { readonly cause: unknown } | undefined;
 	  } & MfaCeremonySubject)
+	/**
+	 * Another factor, once written, found its subject's records past
+	 * `mfa.maxFactorsPerSubject` — or could not read them again to tell
+	 * (`listing`) — and could not be removed after every try: it stands, and
+	 * is usable.
+	 */
+	| ({
+			readonly outcome: "factor_standing";
+			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
+			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
+			readonly listing: MfaStoreOutage | undefined;
+			readonly standing: { readonly cause: unknown };
+	  } & MfaCeremonySubject)
 	| ({
 			readonly outcome: "first_binding_unchecked";
 			readonly listing: MfaStoreOutage;

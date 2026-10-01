@@ -36,7 +36,8 @@
  *   factor's data, and then, in this order: consumes the transaction, writes
  *   the factor. Another factor then reads the subject's records again, and
  *   one past `mfa.maxFactorsPerSubject` — bindings made at once — removes
- *   its own, so the limit holds. A first binding — `binding` `email_proof` when the proof was
+ *   its own, so the limit holds; one it cannot remove is reported standing,
+ *   for the caller to audit as bound. A first binding — `binding` `email_proof` when the proof was
  *   given, on the transaction or in the session, else `password` — then
  *   reads the subject's records again: it stands only when they are its own
  *   alone; otherwise another transaction bound one at once, or a reset
@@ -69,6 +70,7 @@ import {
 	type MfaEnrollmentCompleteOutcome,
 	type MfaEnrollmentRefusal,
 	type MfaFactorUnreadable,
+	type MfaStoreOutage,
 	outage,
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
@@ -236,17 +238,25 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 	 * while the records read again stay within `mfa.maxFactorsPerSubject`.
 	 * Otherwise — past it, as bindings made at once can be, or unreadable —
 	 * its own is removed, and the answer is the limit or the read's outage;
-	 * one it cannot remove is the removal's outage.
+	 * one it cannot remove is reported standing, with the read's outage.
 	 */
 	const pastLimit = async (
 		subject: string,
 		id: string,
-	): Promise<MfaEnrollmentCompleteOutcome | undefined> => {
+	): Promise<
+		| MfaEnrollmentRefusal
+		| {
+				readonly listing: MfaStoreOutage | undefined;
+				readonly standing: { readonly cause: unknown };
+		  }
+		| undefined
+	> => {
 		const records = await kit.recordsOf(subject);
 		if (!("outcome" in records) && records.length <= kit.maxFactorsPerSubject) return undefined;
+		const listing = "outcome" in records ? records : undefined;
 		const standing = await removeOwn(subject, id);
-		if (standing !== undefined) return outage("mfa_factor", "remove", standing.cause);
-		return "outcome" in records ? records : FACTOR_LIMIT;
+		if (standing !== undefined) return { listing, standing };
+		return listing ?? FACTOR_LIMIT;
 	};
 
 	/** This binding's factor `id` removed, tried {@link REMOVAL_TRIES} times: `undefined` once removed, else the last failure. */
@@ -538,6 +548,16 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			};
 			if (!first) {
 				const over = await pastLimit(tx.subject, id);
+				if (over !== undefined && "standing" in over) {
+					return {
+						outcome: "factor_standing",
+						factor: enrolled.factor,
+						binding,
+						listing: over.listing,
+						standing: over.standing,
+						...about,
+					};
+				}
 				if (over !== undefined) return over;
 				return {
 					...enrolled,

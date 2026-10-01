@@ -241,10 +241,11 @@ export function mailRefusalOf(
 const TOKEN = /^[A-Za-z0-9_.-]{1,64}$/;
 
 /**
- * What of a sender's failure may be logged: its `name` and `code` when each
- * is a short token, and its `status` (or `responseCode`, SMTP's) when it is a
- * whole number — never its message, which a relay may write the address or
- * the code into.
+ * What of a sender's failure — or a factor's own — may be logged: its `name`
+ * and `code` when each is a short token, and its `status` (or
+ * `responseCode`, SMTP's) when it is a whole number — never its message,
+ * which a relay or a factor may write the address, the username or the code
+ * into.
  */
 export function mailFailureOf(cause: unknown): {
 	readonly name?: string;

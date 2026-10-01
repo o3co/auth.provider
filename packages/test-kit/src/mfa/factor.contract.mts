@@ -306,6 +306,32 @@ function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>
 	);
 }
 
+/** What an error says: its name, message and own string properties, as a log line or its reader could show them. */
+function errorText(error: unknown): string {
+	try {
+		if (typeof error !== "object" || error === null) return String(error);
+		const own = Object.entries(error).filter(([, value]) => typeof value === "string");
+		return [String(error), (error as { message?: unknown }).message, ...own.flat()].join("\n");
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Refuses `text` when it carries the account's address — as {@link carriesNoAddress}
+ * reads it — or its username, whatever its case, as it is or percent-decoded.
+ */
+function carriesNoAccount(text: string, user: Readonly<Record<string, unknown>>, what: string) {
+	carriesNoAddress(text, user, what);
+	const { username } = user;
+	if (typeof username !== "string" || username.trim() === "") return;
+	const name = username.toLowerCase();
+	assert.ok(
+		![text, percentDecoded(text)].some((read) => read.toLowerCase().includes(name)),
+		`${what} quotes the account's username, which a log line would carry`,
+	);
+}
+
 /**
  * The keyed digest of `user`'s address as the coordinator makes it when it
  * mails a code there: `normaliseMailAddress`'s spelling, under `digests`.
@@ -756,6 +782,73 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					proof: await input.verificationProof(enrolled, sent, later),
 				});
 				if (verdict.ok) carriesNoAddress(verdict.next, input.user, "the factor's next data");
+			},
+		},
+		{
+			name: "an error the factor throws — over an account without a username, or a pending state or data it cannot read — quotes neither the account's address nor its username",
+			run: async () => {
+				const factor = input.build();
+				const enrolled = await enroll(factor);
+				const begun = await begin(factor);
+				const { username: _username, ...nameless } = input.user;
+				const unreadable = { ...enrolled, data: {} };
+				const attempts: [string, () => Promise<unknown>][] = [
+					[
+						"beginEnrollment over an account without a username",
+						() => factor.beginEnrollment({ ...begun.context, user: nameless, factors: [] }),
+					],
+					[
+						"completeEnrollment over a pending state it cannot read",
+						() =>
+							factor.completeEnrollment({
+								...begun.context,
+								user: input.user,
+								factors: [],
+								state: {},
+								proof: "000000",
+							}),
+					],
+					[
+						"challenge over data it cannot read",
+						async () =>
+							factor.challenge?.({
+								...contextAt(
+									factor,
+									subjectOf(input.user),
+									VERIFIED_AT_MS,
+									"contract-verification",
+								),
+								factor: unreadable,
+								factors: [unreadable],
+							}),
+					],
+					[
+						"verify over data it cannot read",
+						() =>
+							factor.verify({
+								...contextAt(
+									factor,
+									subjectOf(input.user),
+									VERIFIED_AT_MS,
+									"contract-verification",
+								),
+								factor: unreadable,
+								factors: [unreadable],
+								state: undefined,
+								proof: "000000",
+							}),
+					],
+				];
+				for (const [what, attempt] of attempts) {
+					let thrown: unknown;
+					try {
+						await attempt();
+						continue;
+					} catch (error) {
+						thrown = error;
+					}
+					carriesNoAccount(errorText(thrown), input.user, `the error ${what} threw`);
+				}
 			},
 		},
 		{
