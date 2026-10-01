@@ -114,6 +114,8 @@ interface Case {
 	readonly unchecked: string;
 	/** The notice a `volatile-*` policy is given, for the store whose keys carry a TTL. */
 	readonly lockEvictable: string | undefined;
+	/** The key families that notice names: each one's loss fails open. */
+	readonly evictableFamilies: readonly string[] | undefined;
 	readonly memoryModule: Module;
 	readonly client: (io: Redis) => { durability(): Promise<RedisDurability> };
 }
@@ -130,6 +132,7 @@ const CASES: readonly Case[] = [
 		volatile: "mfa_factor_store_volatile",
 		unchecked: "mfa_factor_store_durability_unchecked",
 		lockEvictable: undefined,
+		evictableFamilies: undefined,
 		memoryModule: memoryMfaFactorStoreModule,
 		client: makeIoredisMfaFactorStoreClient,
 	},
@@ -144,6 +147,7 @@ const CASES: readonly Case[] = [
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
 		lockEvictable: "mfa_transaction_store_lock_evictable",
+		evictableFamilies: ["lock", "week", "first-binding"],
 		memoryModule: memoryMfaTransactionStoreModule,
 		client: makeIoredisMfaTransactionStoreClient,
 	},
@@ -247,7 +251,12 @@ describe.each(CASES)("$module.name", (c) => {
 							{
 								level: "warn",
 								args: [
-									{ store: c.slot, adapter: "redis", maxmemoryPolicy: policy },
+									{
+										store: c.slot,
+										adapter: "redis",
+										maxmemoryPolicy: policy,
+										evictableFamilies: c.evictableFamilies,
+									},
 									c.lockEvictable,
 								],
 							},

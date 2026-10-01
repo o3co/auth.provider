@@ -16,8 +16,8 @@
 
 /**
  * The MFA transaction, the subject lock state that bounds guessable proofs, a
- * session's account-email proof, the port that keeps them, and its
- * `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
+ * session's account-email proof, a subject's first-binding mark, the port
+ * that keeps them, and its `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
  * (the MFA transaction; attempts, lockout and rate limits; D24).
  *
  * A transaction is the short-lived, single-use record of one second-factor
@@ -31,12 +31,14 @@
  * subject's run never expires (only a success, an exempt success below
  * `hardLimit` or `clearSubjectState` ends it), and an open sign-up lets anyone
  * mint subjects.
- * Transactions are bounded by expiry and the login rate, not per subject, so
- * the coordinator must bound the transactions one session holds.
+ * Transactions are bounded by their expiry alone, not per subject and not
+ * per session: nothing caps the transactions one session holds, and how many
+ * are open is bounded only by the rate limits of the routes that open them.
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { isStorableExpiry, isStorableLifetime } from "../adapters/expiry.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import { constantTimeStringEqual } from "../security/timingSafe.mjs";
 import { checkPrimaryContinuation } from "../session-admission/primary.mjs";
 import type { PrimaryContinuation } from "../session-admission/requirement.mjs";
@@ -557,6 +559,108 @@ export function checkSessionEmailProofQuestion(
 }
 
 /**
+ * `answer`, what `firstBindingAt(subject, nowMs)` answered, as the port
+ * promises it: `null` for no mark, or when it was noted — whole epoch
+ * milliseconds, no further ahead of `nowMs` than `DEFAULT_CLOCK_SKEW_MS`.
+ * `undefined` for anything else, which the caller answers as the store's
+ * outage: a mark it cannot read trusts no session. This is the mark's one
+ * reading.
+ */
+export function readFirstBindingAt(answer: unknown, nowMs: number): number | null | undefined {
+	if (answer === null) return null;
+	return isEpochMs(answer) && answer <= nowMs + DEFAULT_CLOCK_SKEW_MS ? answer : undefined;
+}
+
+/** A subject's first-binding mark as a store keeps it. */
+export interface FirstBindingMark {
+	readonly atMs: number;
+	readonly untilMs: number;
+}
+
+/**
+ * Refuses, with a `RangeError` naming what is wrong, a first-binding mark a
+ * store cannot keep. Its shape: `subject` a non-empty string; `atMs` and
+ * `untilMs` whole epoch milliseconds within the Date range, `untilMs` after
+ * `atMs` by at most {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} (a mark stands a day
+ * at most). On `storeNowMs`, the store's clock, when it is given: `untilMs`
+ * after it, and `atMs` no further from it, either way, than
+ * `DEFAULT_CLOCK_SKEW_MS`. Every adapter runs it before it notes a mark; an
+ * adapter whose store judges the clock in a script runs the shape first and
+ * the rest on the clock that script answers. A mark read back is held to the
+ * shape, as an outage; where its time sits on the clock is the caller's
+ * reading ({@link readFirstBindingAt}) to judge.
+ */
+export function checkFirstBindingNote(
+	subject: unknown,
+	atMs: unknown,
+	untilMs: unknown,
+	storeNowMs?: number,
+): void {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.noteFirstBinding: ${what}`);
+	};
+	if (!isNonEmptyText(subject)) refuse("subject must be a non-empty string");
+	if (!isEpochMs(atMs) || !isStorableExpiry(atMs)) {
+		refuse("atMs must be epoch milliseconds within the Date range");
+	}
+	if (!isEpochMs(untilMs) || !isStorableExpiry(untilMs)) {
+		refuse("untilMs must be epoch milliseconds within the Date range");
+	}
+	if ((untilMs as number) <= (atMs as number)) refuse("untilMs must be after atMs");
+	if ((untilMs as number) - (atMs as number) > MFA_CLOCK_SKEW_ALLOWANCE_MS) {
+		refuse("untilMs must be no more than MFA_CLOCK_SKEW_ALLOWANCE_MS after atMs");
+	}
+	if (storeNowMs === undefined) return;
+	if (!((untilMs as number) > storeNowMs)) refuse("untilMs must be after the store's clock");
+	if (!((atMs as number) <= storeNowMs + DEFAULT_CLOCK_SKEW_MS)) {
+		refuse("atMs must be no further ahead of the store's clock than DEFAULT_CLOCK_SKEW_MS");
+	}
+	if (!((atMs as number) >= storeNowMs - DEFAULT_CLOCK_SKEW_MS)) {
+		refuse("atMs must be no further behind the store's clock than DEFAULT_CLOCK_SKEW_MS");
+	}
+}
+
+/**
+ * Refuses, with a `RangeError`, a question `firstBindingAt` cannot answer:
+ * `subject` a non-empty string, `nowMs` an instant from the epoch within the
+ * Date range. Every adapter runs it first.
+ */
+export function checkFirstBindingQuestion(subject: unknown, nowMs: unknown): void {
+	if (!isNonEmptyText(subject)) {
+		throw new RangeError("MfaTransactionStore.firstBindingAt: subject must be a non-empty string");
+	}
+	if (typeof nowMs !== "number" || !isStorableExpiry(nowMs) || nowMs < 0) {
+		throw new RangeError(
+			"MfaTransactionStore.firstBindingAt: nowMs must be an instant from the epoch within the Date range",
+		);
+	}
+}
+
+/**
+ * The mark a store keeps of `held`, a mark that still stands on its clock,
+ * and `next`: the later `atMs` and the later `untilMs`, whichever mark each
+ * comes from. A mark distrusts, so no note moves it back or shortens it.
+ */
+export function laterFirstBindingMark(
+	held: FirstBindingMark,
+	next: FirstBindingMark,
+): FirstBindingMark {
+	return {
+		atMs: Math.max(held.atMs, next.atMs),
+		untilMs: Math.max(held.untilMs, next.untilMs),
+	};
+}
+
+/**
+ * What a store answers of `mark` on `storeNowMs`, its clock: `atMs`, never
+ * moved earlier, while `untilMs` is after it; else `null`. The caller's time
+ * never ends a mark. Every adapter answers through it.
+ */
+export function firstBindingAnswer(mark: FirstBindingMark, storeNowMs: number): number | null {
+	return mark.untilMs > storeNowMs ? mark.atMs : null;
+}
+
+/**
  * Whether `consumed`, what `consume(bound.id, bound.version)` answered other
  * than `null`, is the transaction the bound read returned: the same id,
  * version, purpose, subject and `redirectTo`, bound to the same binding, and
@@ -675,8 +779,8 @@ export type MfaSubjectAttemptReservation =
 export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 
 /**
- * Where MFA transactions, the subject lock state and a session's
- * account-email proof are kept.
+ * Where MFA transactions, the subject lock state, a session's account-email
+ * proof and a subject's first-binding mark are kept.
  *
  * Every operation is atomic on its own. A store that cannot answer throws:
  * an outage is `503`, never a verdict on a proof.
@@ -760,7 +864,9 @@ export interface MfaTransactionStore {
 	noteExemptSuccess(subject: string, nowMs: number, policy: MfaLockoutPolicy): Promise<void>;
 	/**
 	 * Forget `subject`'s lock state (the run and the week). No revocation and
-	 * no credential change calls it.
+	 * no credential change calls it. It leaves the subject's first-binding
+	 * mark: that is not lock state, and clearing it would trust a stale
+	 * session.
 	 */
 	clearSubjectState(subject: string): Promise<void>;
 
@@ -806,6 +912,31 @@ export interface MfaTransactionStore {
 	 * `RangeError` for what {@link checkSessionEmailProofQuestion} refuses.
 	 */
 	sessionEmailProofAt(subject: string, sid: string, nowMs: number): Promise<number | null>;
+
+	// A subject's first-binding mark: a session or a login authenticated no
+	// later than it may hold a stale enrollment witness. It does not stand in
+	// for the witness; it covers only the window in which one can be stale.
+	// It distrusts, so every doubt keeps it.
+	/**
+	 * Note that a first counting factor was bound for `subject`, or its
+	 * witness marked, at `atMs`, standing until `untilMs` on the store's clock.
+	 * The store keeps {@link laterFirstBindingMark} of the mark held and this
+	 * one: the later `atMs` and the later `untilMs`, so no note moves a mark
+	 * back or shortens it. `clearSubjectState` leaves it. A `RangeError`,
+	 * nothing noted, for what {@link checkFirstBindingNote} refuses on the
+	 * store's clock.
+	 */
+	noteFirstBinding(subject: string, atMs: number, untilMs: number): Promise<void>;
+	/**
+	 * What {@link firstBindingAnswer} answers of `subject`'s mark: `atMs`
+	 * while the mark stands on the store's clock, else `null`. One clock
+	 * decides its end, the store's: `nowMs` never ends a mark. The answer is
+	 * never clamped to `nowMs`: an earlier answer would trust a session the
+	 * mark distrusts. A `RangeError` for what {@link checkFirstBindingQuestion}
+	 * refuses. A store that cannot read the mark it holds rejects: an absent
+	 * mark trusts the session.
+	 */
+	firstBindingAt(subject: string, nowMs: number): Promise<number | null>;
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaTransactionStore}. */
