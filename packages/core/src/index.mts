@@ -666,6 +666,7 @@ export {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 	readMfaAttemptReservation,
+	readMfaSubjectAttemptReservation,
 	readSessionEmailProof,
 	type SessionEmailProof,
 	sessionEmailProofAnswer,

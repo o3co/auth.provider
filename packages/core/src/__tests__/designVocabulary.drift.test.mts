@@ -499,6 +499,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+readMfaAttemptReservation\b/,
 	},
 	{
+		concept:
+			"an MFA store's answer, read as promised — a subject attempt's reservation (the MFA ADR's D21)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+readMfaSubjectAttemptReservation\b/,
+	},
+	{
 		concept: "an MFA store's answer, read as promised — a consumed transaction (#809)",
 		home: "packages/core/src/mfa/transactionStore.mts",
 		definition: /(?:function|const)\s+isConsumedMfaTransaction\b/,

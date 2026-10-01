@@ -16,10 +16,10 @@
 
 /**
  * The MFA stores' answers, read as their ports promise them, beside the
- * bound read: a reservation, a consumed transaction, a factor's
- * compare-and-set and a session's account-email proof. An answer outside the
- * promise is `undefined` or `false`, which a caller answers as the store's
- * outage — never as a verdict.
+ * bound read: a reservation, a subject attempt's reservation, a consumed
+ * transaction, a factor's compare-and-set and a session's account-email
+ * proof. An answer outside the promise is `undefined` or `false`, which a
+ * caller answers as the store's outage — never as a verdict.
  */
 
 import { describe, expect, it } from "vitest";
@@ -29,6 +29,7 @@ import {
 	isConsumedMfaTransaction,
 	type MfaTransaction,
 	readMfaAttemptReservation,
+	readMfaSubjectAttemptReservation,
 	readSessionEmailProof,
 } from "#/mfa/transactionStore.mjs";
 
@@ -88,6 +89,144 @@ describe("readMfaAttemptReservation", () => {
 			attempts: 1,
 		};
 		expect(readMfaAttemptReservation(answer, 5)).toBeUndefined();
+	});
+});
+
+describe("readMfaSubjectAttemptReservation", () => {
+	it("reads a pass as its reservation", () => {
+		expect(readMfaSubjectAttemptReservation({ ok: true, reservation: "r-1" })).toStrictEqual({
+			ok: true,
+			reservation: "r-1",
+		});
+	});
+
+	it("reads a hold with its time to come back, none for the hard hold, and whether it is first", () => {
+		expect(
+			readMfaSubjectAttemptReservation({
+				ok: false,
+				hold: "backoff",
+				retryAfterMs: 900_000,
+				first: true,
+			}),
+		).toStrictEqual({ ok: false, hold: "backoff", retryAfterMs: 900_000, first: true });
+		expect(
+			readMfaSubjectAttemptReservation({
+				ok: false,
+				hold: "weekly",
+				retryAfterMs: 0.5,
+				first: false,
+			}),
+		).toStrictEqual({ ok: false, hold: "weekly", retryAfterMs: 0.5, first: false });
+		expect(
+			readMfaSubjectAttemptReservation({
+				ok: false,
+				hold: "hard",
+				retryAfterMs: null,
+				first: true,
+			}),
+		).toStrictEqual({ ok: false, hold: "hard", retryAfterMs: null, first: true });
+	});
+
+	it("copies only the fields its answer has", () => {
+		expect(
+			readMfaSubjectAttemptReservation({ ok: true, reservation: "r-1", hold: "hard", extra: 1 }),
+		).toStrictEqual({ ok: true, reservation: "r-1" });
+		expect(
+			readMfaSubjectAttemptReservation({
+				ok: false,
+				hold: "hard",
+				retryAfterMs: null,
+				first: false,
+				reservation: "r-1",
+			}),
+		).toStrictEqual({ ok: false, hold: "hard", retryAfterMs: null, first: false });
+	});
+
+	it.each<[string, unknown]>([
+		["nothing", undefined],
+		["null", null],
+		["a string", "r-1"],
+		["an array carrying a pass's fields", Object.assign([], { ok: true, reservation: "r-1" })],
+		["a pass without its reservation", { ok: true }],
+		["a pass whose reservation is empty", { ok: true, reservation: "" }],
+		["a pass whose reservation is not a string", { ok: true, reservation: 1 }],
+		["an ok that is truthy but not true", { ok: "yes", reservation: "r-1" }],
+		["an ok that is missing", { reservation: "r-1" }],
+		["a hold it does not name", { ok: false, hold: "forever", retryAfterMs: 1, first: true }],
+		["a refusal without its hold", { ok: false, retryAfterMs: 1, first: true }],
+		[
+			"a hard hold with a time to come back",
+			{ ok: false, hold: "hard", retryAfterMs: 1, first: true },
+		],
+		["a hard hold whose time is missing", { ok: false, hold: "hard", first: true }],
+		[
+			"a backoff with no time to come back",
+			{ ok: false, hold: "backoff", retryAfterMs: null, first: true },
+		],
+		["a weekly hold already over", { ok: false, hold: "weekly", retryAfterMs: 0, first: true }],
+		[
+			"a backoff that came back before it was asked about",
+			{ ok: false, hold: "backoff", retryAfterMs: -1, first: true },
+		],
+		[
+			"a time that is not a number",
+			{ ok: false, hold: "weekly", retryAfterMs: Number.NaN, first: true },
+		],
+		[
+			"an infinite time",
+			{ ok: false, hold: "backoff", retryAfterMs: Number.POSITIVE_INFINITY, first: true },
+		],
+		["a time as text", { ok: false, hold: "weekly", retryAfterMs: "1", first: true }],
+		[
+			"a refusal that does not say whether it is first",
+			{ ok: false, hold: "hard", retryAfterMs: null },
+		],
+		["a first that is text", { ok: false, hold: "hard", retryAfterMs: null, first: "true" }],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaSubjectAttemptReservation(answer)).toBeUndefined();
+	});
+
+	it("reads each field once: a getter cannot answer the check and the caller differently", () => {
+		let reads = 0;
+		const answer = {
+			ok: true,
+			get reservation() {
+				reads++;
+				return reads === 1 ? "r-1" : 1;
+			},
+		};
+		expect(readMfaSubjectAttemptReservation(answer)).toStrictEqual({
+			ok: true,
+			reservation: "r-1",
+		});
+
+		let holdReads = 0;
+		const hold = {
+			ok: false,
+			hold: "backoff",
+			get retryAfterMs() {
+				holdReads++;
+				return holdReads === 1 ? 900_000 : -1;
+			},
+			first: true,
+		};
+		expect(readMfaSubjectAttemptReservation(hold)).toStrictEqual({
+			ok: false,
+			hold: "backoff",
+			retryAfterMs: 900_000,
+			first: true,
+		});
+		expect(holdReads).toBe(1);
+	});
+
+	it("reads an answer whose field throws as no answer", () => {
+		const answer = {
+			get ok(): boolean {
+				throw new Error("boom");
+			},
+			reservation: "r-1",
+		};
+		expect(readMfaSubjectAttemptReservation(answer)).toBeUndefined();
 	});
 });
 
@@ -262,8 +401,9 @@ describe("isMfaFactorUpdateWritten", () => {
 });
 
 describe("on the package's root", () => {
-	it("are the four readings", () => {
+	it("are the five readings", () => {
 		expect(core.readMfaAttemptReservation).toBe(readMfaAttemptReservation);
+		expect(core.readMfaSubjectAttemptReservation).toBe(readMfaSubjectAttemptReservation);
 		expect(core.isConsumedMfaTransaction).toBe(isConsumedMfaTransaction);
 		expect(core.isMfaFactorUpdateWritten).toBe(isMfaFactorUpdateWritten);
 		expect(core.readSessionEmailProof).toBe(readSessionEmailProof);
