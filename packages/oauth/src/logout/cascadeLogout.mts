@@ -70,10 +70,9 @@ export type CascadeLogoutResult =
  *      retry needs and mark the cascade complete over an un-revoked family.
  *   3. Reverse-index cleanup (RP registry, family index, federation index),
  *      best-effort: logged and continued, orphans bounded by TTL. Never fails,
- *      hence no step 3 in the result. Without the mark, a family added after
- *      step 1 is dropped from the index here unrevoked; a caller that holds
- *      a live session but not its `expiresAt` runs {@link runLogoutFanout}
- *      (steps 1 and 2 alone) and retries the whole cascade later.
+ *      hence no step 3 in the result. Without the mark (no `expiresAt`, or an
+ *      index without the capability), a family a code exchange adds after
+ *      step 1 is dropped from the index here unrevoked.
  *   4. `userSessionStore.delete`, last, which must succeed; failure returns
  *      `failed` step 4.
  *
@@ -88,69 +87,6 @@ export type CascadeLogoutResult =
  * @param opts.logger - Defaults to `console`.
  */
 export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<CascadeLogoutResult> {
-	const logger = opts.logger ?? console;
-
-	const fanout = await runLogoutFanout(opts);
-	if (fanout.outcome === "failed") return fanout;
-
-	// Step 3: reverse-index cleanup, best-effort; orphans are bounded by TTL.
-	await opts.sessionRPRegistry.removeBySid(opts.sid).catch((error) => {
-		logger.warn(
-			{ operation: "remove_rp_registrations", sid: opts.sid, err: loggableError(error) },
-			"logout_cascade_cleanup_failed",
-		);
-	});
-	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
-		logger.warn(
-			{ operation: "remove_family_index", sid: opts.sid, err: loggableError(error) },
-			"logout_cascade_cleanup_failed",
-		);
-	});
-	await opts.sessionFederationIndex.removeBySid(opts.sid).catch((error) => {
-		logger.warn(
-			{ operation: "remove_federation_index", sid: opts.sid, err: loggableError(error) },
-			"logout_cascade_cleanup_failed",
-		);
-	});
-
-	// Step 4: primary invalidation, which must succeed.
-	try {
-		await opts.userSessionStore.delete(opts.sid);
-	} catch (error) {
-		return { outcome: "failed", step: 4, errors: [error] };
-	}
-
-	// Clear the family index again after the delete: a family added between
-	// step 3 and step 4 (one the ended mark refused, or one added on an index
-	// without the mark) would otherwise stay until the index's TTL. Idempotent
-	// and best-effort; `removeBySid` keeps the ended mark.
-	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
-		logger.warn(
-			{ operation: "remove_family_index_after_delete", sid: opts.sid, err: loggableError(error) },
-			"logout_cascade_cleanup_failed",
-		);
-	});
-
-	return { outcome: "done" };
-}
-
-/** Steps 1 and 2 of {@link cascadeLogout}: what a partial result looks like. */
-export type LogoutFanoutResult =
-	| { readonly outcome: "done" }
-	| {
-			readonly outcome: "failed";
-			readonly step: 1 | 2;
-			readonly errors: ReadonlyArray<unknown>;
-	  };
-
-/**
- * Steps 1 and 2 of {@link cascadeLogout} alone: the session's families are
- * read (and the session marked ended, as there) and revoked, and its
- * federation tokens removed. No clean-up and no delete, so the index entries
- * and the session a retry needs stay. For a caller that must revoke now but
- * cannot yet run the whole cascade.
- */
-export async function runLogoutFanout(opts: CascadeLogoutOptions): Promise<LogoutFanoutResult> {
 	const logger = opts.logger ?? console;
 
 	// Step 1: read fanout context.
@@ -193,6 +129,44 @@ export async function runLogoutFanout(opts: CascadeLogoutOptions): Promise<Logou
 	if (stepTwoFailures.length > 0) {
 		return { outcome: "failed", step: 2, errors: stepTwoFailures };
 	}
+
+	// Step 3: reverse-index cleanup, best-effort; orphans are bounded by TTL.
+	await opts.sessionRPRegistry.removeBySid(opts.sid).catch((error) => {
+		logger.warn(
+			{ operation: "remove_rp_registrations", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_cleanup_failed",
+		);
+	});
+	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
+		logger.warn(
+			{ operation: "remove_family_index", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_cleanup_failed",
+		);
+	});
+	await opts.sessionFederationIndex.removeBySid(opts.sid).catch((error) => {
+		logger.warn(
+			{ operation: "remove_federation_index", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_cleanup_failed",
+		);
+	});
+
+	// Step 4: primary invalidation, which must succeed.
+	try {
+		await opts.userSessionStore.delete(opts.sid);
+	} catch (error) {
+		return { outcome: "failed", step: 4, errors: [error] };
+	}
+
+	// Clear the family index again after the delete: a family added between
+	// step 3 and step 4 (one the ended mark refused, or one added on an index
+	// without the mark) would otherwise stay until the index's TTL. Idempotent
+	// and best-effort; `removeBySid` keeps the ended mark.
+	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
+		logger.warn(
+			{ operation: "remove_family_index_after_delete", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_cleanup_failed",
+		);
+	});
 
 	return { outcome: "done" };
 }

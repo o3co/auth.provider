@@ -26,7 +26,6 @@ import {
 	type AuditEvent,
 	BootError,
 	createApp,
-	createInMemorySessionFamilyIndex,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
 	createMemoryFederationGrantStore,
@@ -55,20 +54,9 @@ const config = (over: Record<string, unknown> = {}) => ({
 /** The session store's slot: a session lives a day. */
 const sessionCookiePolicy = createTestSessionCookiePolicy({ maxAgeMs: 24 * HOUR });
 
-/** When the session each cascade reads ends. */
-const SESSION_EXPIRES_AT = new Date(Date.now() + HOUR);
-
 /** Every store `cascadeLogout` fans out to, each one a spy that succeeds. */
 const cascadeStores = () => ({
-	userSessionStore: {
-		get: vi.fn(
-			async (sid: string): Promise<{ sid: string; expiresAt: Date } | null> => ({
-				sid,
-				expiresAt: SESSION_EXPIRES_AT,
-			}),
-		),
-		delete: vi.fn(async () => undefined),
-	},
+	userSessionStore: { delete: vi.fn(async () => undefined) },
 	sessionRPRegistry: { removeBySid: vi.fn(async () => undefined) },
 	sessionFamilyIndex: {
 		listFamilyIds: vi.fn(async () => ["fam-1"]),
@@ -220,117 +208,30 @@ describe("subjectRevocationServiceModule", () => {
 	});
 
 	describe("the session's end", () => {
-		/** The cascade's stores over a family index with the session-end capability. */
-		const endingStores = () => {
+		it("runs the cascade without expiresAt: the families are listed, not marked, and no session is read", async () => {
+			const index = createInMemorySubjectSessionIndex();
+			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
 			const stores = cascadeStores();
+			const userSessionStore = { ...stores.userSessionStore, get: vi.fn() };
 			const sessionFamilyIndex = {
 				...stores.sessionFamilyIndex,
-				endSession: vi.fn(async (_sid: string, _expiresAt: Date) => ["fam-1"]),
+				endSession: vi.fn(async () => ["fam-1"]),
 				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
 			};
-			return { ...stores, sessionFamilyIndex };
-		};
-
-		it("marks each session ended with the expiresAt its session store holds", async () => {
-			const index = createInMemorySubjectSessionIndex();
-			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
-			const stores = endingStores();
-			const service = build({ ...stores, subjectSessionIndex: index });
+			const service = build({
+				...stores,
+				userSessionStore,
+				sessionFamilyIndex,
+				subjectSessionIndex: index,
+			});
 
 			const result = await service.revokeAllForSubject({ subject: "u-1" });
 
-			expect(stores.userSessionStore.get).toHaveBeenCalledWith("sid-1");
-			expect(stores.sessionFamilyIndex.endSession).toHaveBeenCalledWith(
-				"sid-1",
-				SESSION_EXPIRES_AT,
-			);
-			expect(stores.sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
+			expect(userSessionStore.get).not.toHaveBeenCalled();
+			expect(sessionFamilyIndex.endSession).not.toHaveBeenCalled();
+			expect(sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-1");
 			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 			expect(result.sessionsRevoked).toEqual(["sid-1"]);
-		});
-
-		it("lists the families without marking when the session store holds no session", async () => {
-			const index = createInMemorySubjectSessionIndex();
-			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
-			const stores = endingStores();
-			stores.userSessionStore.get.mockResolvedValue(null);
-			const service = build({ ...stores, subjectSessionIndex: index });
-
-			const result = await service.revokeAllForSubject({ subject: "u-1" });
-
-			expect(stores.sessionFamilyIndex.endSession).not.toHaveBeenCalled();
-			expect(stores.sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-1");
-			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
-			expect(result.sessionsRevoked).toEqual(["sid-1"]);
-		});
-
-		it("still revokes the families of a session whose store cannot answer, and leaves the sid, its index entries and the session for a retry", async () => {
-			const index = createInMemorySubjectSessionIndex();
-			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
-			const stores = endingStores();
-			const outage = new Error("session store is down");
-			stores.userSessionStore.get.mockRejectedValue(outage);
-			const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
-			const service = build({ ...stores, subjectSessionIndex: index, logger });
-
-			const result = await service.revokeAllForSubject({ subject: "u-1" });
-
-			expect(stores.sessionFamilyIndex.endSession).not.toHaveBeenCalled();
-			expect(stores.sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-1");
-			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
-			expect(stores.sessionFamilyIndex.removeBySid).not.toHaveBeenCalled();
-			expect(stores.sessionRPRegistry.removeBySid).not.toHaveBeenCalled();
-			expect(stores.sessionFederationIndex.removeBySid).not.toHaveBeenCalled();
-			expect(stores.userSessionStore.delete).not.toHaveBeenCalled();
-			expect(result.sessionsFailed).toEqual(["sid-1"]);
-			expect(await index.listSids("u-1")).toEqual(["sid-1"]);
-			expect(logger.error).toHaveBeenCalledWith(
-				expect.objectContaining({ subject: "u-1", sid: "sid-1" }),
-				"revoke_all_cascade_failed",
-			);
-		});
-	});
-
-	describe("a failed session read racing a code exchange", () => {
-		it("keeps a family added after the listing indexed, and the retry with the session revokes it", async () => {
-			const subjects = createInMemorySubjectSessionIndex();
-			await subjects.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
-			const families = createInMemorySessionFamilyIndex();
-			await families.addFamilyId("sid-1", "fam-1", SESSION_EXPIRES_AT);
-			// A code exchange past its revalidation adds its family right after
-			// the subject cascade's listing, which wrote no ended mark.
-			let raced = false;
-			const sessionFamilyIndex = {
-				...families,
-				listFamilyIds: vi.fn(async (sid: string) => {
-					const listed = await families.listFamilyIds(sid);
-					if (!raced) {
-						raced = true;
-						await families.addFamilyIdUnlessEnded(sid, "fam-late", SESSION_EXPIRES_AT);
-					}
-					return listed;
-				}),
-				removeBySid: vi.fn(families.removeBySid),
-			};
-			const stores = { ...cascadeStores(), sessionFamilyIndex };
-			stores.userSessionStore.get.mockRejectedValueOnce(new Error("session store is down"));
-			const service = build({ ...stores, subjectSessionIndex: subjects });
-
-			const first = await service.revokeAllForSubject({ subject: "u-1" });
-
-			expect(first.sessionsFailed).toEqual(["sid-1"]);
-			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
-			expect(stores.refreshTokenFamilyRevocation.revokeFamily).not.toHaveBeenCalledWith("fam-late");
-			expect(await families.listFamilyIds("sid-1")).toEqual(["fam-1", "fam-late"]);
-			// The session stays, so the retry can read its expiresAt.
-			expect(stores.userSessionStore.delete).not.toHaveBeenCalled();
-
-			const retry = await service.revokeAllForSubject({ subject: "u-1" });
-
-			expect(retry.sessionsRevoked).toEqual(["sid-1"]);
-			expect(stores.userSessionStore.get).toHaveBeenCalledTimes(2);
-			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-late");
-			expect(stores.userSessionStore.delete).toHaveBeenCalledWith("sid-1");
 		});
 	});
 

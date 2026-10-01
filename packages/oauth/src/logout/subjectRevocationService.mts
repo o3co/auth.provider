@@ -42,7 +42,7 @@ import {
 	resolveFederationGrantKeepPolicy,
 	resolveSubjectRevocationHorizonMs,
 } from "@o3co/auth-provider-core";
-import { cascadeLogout, runLogoutFanout } from "./cascadeLogout.mjs";
+import { cascadeLogout } from "./cascadeLogout.mjs";
 
 const NAME = "subjectRevocationServiceModule";
 
@@ -207,41 +207,30 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 			return createSubjectRevocationService({
 				subjectSessionIndex: deps.subjectSessionIndex,
 				subjectRevocation,
-				cascadeSession: async (sid: string) => {
-					const stores = {
-						sid,
-						refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
-						federationTokenStore: deps.federationTokenStore,
-						userSessionStore: deps.userSessionStore,
-						sessionRPRegistry: deps.sessionRPRegistry,
-						sessionFamilyIndex: deps.sessionFamilyIndex,
-						sessionFederationIndex: deps.sessionFederationIndex,
-						...(deps.logger === undefined ? {} : { logger: deps.logger }),
-					};
-					// The session's own `expiresAt`, for the cascade's ended mark; a
-					// session already gone has none.
-					let expiresAt: Date | undefined;
-					try {
-						expiresAt = (await deps.userSessionStore.get(sid))?.expiresAt;
-					} catch (readError) {
-						// Without the mark, a family added after the listing would be
-						// dropped from the index by the clean-up, unrevoked. So only the
-						// listed families are revoked now; the index entries and the
-						// session stay, and the throw makes the helper count the sid
-						// failed, keep it for a retry with the mark, and log the error.
-						await runLogoutFanout(stores);
-						throw readError;
-					}
-					// `cascadeLogout` answers with its own union, and its `step` is
-					// what makes a failure retryable. What this needs is the one bit
-					// the helper's loop branches on; the detail is already in the log
-					// the cascade wrote.
-					const cascade = await cascadeLogout({
-						...stores,
-						...(expiresAt === undefined ? {} : { expiresAt }),
-					});
-					return { ok: cascade.outcome === "done" };
-				},
+				// No `expiresAt`: this path reads no session, so the cascade lists
+				// the families and writes no ended mark. Without a
+				// `subjectRevocation` boundary, a code exchanged at the same moment
+				// can leave its family unrevoked; with one, the subject watermark
+				// covers it.
+				cascadeSession: async (sid: string) => ({
+					// `cascadeLogout` answers with its own union, and its `step`
+					// is what makes a failure retryable. What this needs is the
+					// one bit the helper's loop branches on; the detail is
+					// already in the log the cascade wrote.
+					ok:
+						(
+							await cascadeLogout({
+								sid,
+								refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+								federationTokenStore: deps.federationTokenStore,
+								userSessionStore: deps.userSessionStore,
+								sessionRPRegistry: deps.sessionRPRegistry,
+								sessionFamilyIndex: deps.sessionFamilyIndex,
+								sessionFederationIndex: deps.sessionFederationIndex,
+								...(deps.logger === undefined ? {} : { logger: deps.logger }),
+							})
+						).outcome === "done",
+				}),
 				// The boundary must outlive the longest-lived thing it covers,
 				// which this module can read and the service cannot: the token
 				// lifetimes from `oauthTokenSettings` when the composition holds
