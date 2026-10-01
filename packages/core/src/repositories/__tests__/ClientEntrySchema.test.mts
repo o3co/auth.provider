@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { clientEntries } from "#/repositories/__tests__/clientEntries.fixture.mjs";
 import {
 	ClientEntrySchema,
 	InMemoryClientRepository,
 } from "#/repositories/InMemoryClientRepository.mjs";
+import { clientEntries } from "#/testing/index.mjs";
 
 describe("ClientEntrySchema — allowedGrantTypes field", () => {
 	it("accepts absent allowedGrantTypes (existing clients)", () => {
