@@ -135,38 +135,44 @@ const COMPLETE: SubjectRevocationReport = {
 };
 
 describe("the subject lease's call budget", () => {
-	it("covers the longest binding: a first binding by the account-email proof, reopened after a recovery code, over the standing set", async () => {
-		const factorStore = createMemoryMfaFactorStore();
-		const transactionStore = createMemoryMfaTransactionStore();
-		const set = recoverySet(3);
-		const record = await seedFactor(factorStore, "recovery_code", set.data);
-		const users = new WitnessingUserRepository(directoryEntries());
-		const sender = createRecordingMailSender();
-		const { app } = await boot({
-			config: configFor("required"),
-			factorStore,
-			transactionStore,
-			userRepository: users,
-			mailSender: sender,
-		});
-		const counted = countUnderLease(transactionStore, transactionStore, factorStore, users);
-		const { agent, transaction } = await beginLogin(app);
-		const reopened = await verify(agent, transaction, record.id, set.codes[0]);
-		expect(reopened.status, JSON.stringify(reopened.body)).toBe(403);
-		const binding = reopened.body.transaction as string;
-		expect((await giveEmailProof(agent, binding, sender)).status).toBe(200);
-		const begun = await beginEnrollment(agent, binding, "totp");
+	it.each([1, 2])(
+		"covers the longest binding: a first binding by the account-email proof, reopened after a recovery code, over %i standing set(s)",
+		async (sets) => {
+			const factorStore = createMemoryMfaFactorStore();
+			const transactionStore = createMemoryMfaTransactionStore();
+			const set = recoverySet(3);
+			const record = await seedFactor(factorStore, "recovery_code", set.data);
+			for (let more = 1; more < sets; more++) {
+				await seedFactor(factorStore, "recovery_code", recoverySet(3).data);
+			}
+			const users = new WitnessingUserRepository(directoryEntries());
+			const sender = createRecordingMailSender();
+			const { app } = await boot({
+				config: configFor("required"),
+				factorStore,
+				transactionStore,
+				userRepository: users,
+				mailSender: sender,
+			});
+			const counted = countUnderLease(transactionStore, transactionStore, factorStore, users);
+			const { agent, transaction } = await beginLogin(app);
+			const reopened = await verify(agent, transaction, record.id, set.codes[0]);
+			expect(reopened.status, JSON.stringify(reopened.body)).toBe(403);
+			const binding = reopened.body.transaction as string;
+			expect((await giveEmailProof(agent, binding, sender)).status).toBe(200);
+			const begun = await beginEnrollment(agent, binding, "totp");
 
-		const done = await completeEnrollment(agent, binding, totpProofOf(begun.body.secret));
+			const done = await completeEnrollment(agent, binding, totpProofOf(begun.body.secret));
 
-		expect(done.status, JSON.stringify(done.body)).toBe(200);
-		expect((await factorStore.list(ALICE.id)).map((one) => one.binding).sort()).toEqual([
-			"email_proof",
-			"email_proof",
-		]);
-		expect(counted.most()).toBeGreaterThanOrEqual(9);
-		expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
-	});
+			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			expect((await factorStore.list(ALICE.id)).map((one) => one.binding).sort()).toEqual([
+				"email_proof",
+				"email_proof",
+			]);
+			expect(counted.most()).toBeGreaterThanOrEqual(8 + sets);
+			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
+		},
+	);
 
 	it("covers the operator reset with D25's flag", async () => {
 		const factorStore = createMemoryMfaFactorStore();

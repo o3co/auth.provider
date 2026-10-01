@@ -603,6 +603,25 @@ function leaseAdmittingEveryWriter(store: MfaTransactionStore): void {
 const overruns = (logger: { readonly error: { readonly mock: { readonly calls: unknown[][] } } }) =>
 	logger.error.mock.calls.filter((call) => call[1] === "mfa_subject_lease_overrun").length;
 
+describe("a binding's transaction-store writes under the lease", () => {
+	it("answers 503, nothing bound, when the first-binding note is not answered within a Store call's time", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const { app, transactionStore } = await boot({
+			config: configFor("required", { storeTimeoutMs: 1_000 }),
+			factorStore: memory,
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+		vi.spyOn(transactionStore, "noteFirstBinding").mockReturnValue(new Promise<never>(() => {}));
+		const create = vi.spyOn(memory, "create");
+
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(done.status, JSON.stringify(done.body)).toBe(503);
+		expect(create).not.toHaveBeenCalled();
+	});
+});
+
 describe("two first bindings of one subject completed at once under the lease", () => {
 	it("serialises them: one binds; the other is refused — 401 login_required, by the first-binding mark or by the conflict it finds after its write, or 409 busy — and one factor stands, with no overrun", async () => {
 		const memory = createMemoryMfaFactorStore();
