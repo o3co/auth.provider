@@ -28,9 +28,13 @@ import {
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	defineModule,
 	EMAIL_OTP_AMR,
+	HARDWARE_KEY_AMR,
 	InMemoryUserRepository,
+	type LoginCompletion,
 	MFA_AMR,
+	type MfaFactor,
 	type MfaFactorStore,
 	type Module,
 	newRenewalNonce,
@@ -42,6 +46,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createRecordingMailSender } from "@o3co/auth-provider-core/testing";
+import { loginCompletionModule } from "@o3co/auth-provider-session";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
@@ -60,6 +65,7 @@ import {
 import {
 	type Agent,
 	completeEnrollment,
+	contributing,
 	cookieSessionTap,
 	enrollFromAccount,
 	freezeClock,
@@ -108,6 +114,8 @@ interface Setup {
 	readonly users?: UserRepository;
 	readonly userSessionStore?: UserSessionStore;
 	readonly extraModules?: readonly Module[];
+	/** The login completion in place of the session package's own module. */
+	readonly loginCompletion?: Module;
 }
 
 /** Boots `optional` (unless `setup` says otherwise) with a recording sender, an audit sink and a witnessing directory. */
@@ -133,7 +141,11 @@ async function composed(setup: Setup = {}) {
 		auditSink: audit,
 		mailSender: sender,
 		userRepository: users,
-		...(setup.extraModules === undefined ? {} : { extraModules: setup.extraModules }),
+		...(setup.loginCompletion === undefined ? {} : { withoutLoginCompletion: true }),
+		extraModules: [
+			...(setup.extraModules ?? []),
+			...(setup.loginCompletion === undefined ? [] : [setup.loginCompletion]),
+		],
 	});
 	return { ...booted, factorStore, transactionStore, userSessionStore, users, sender, audit };
 }
@@ -206,6 +218,31 @@ async function seedRecoveryCodes(factorStore: MfaFactorStore, count = 3) {
 	const record = await seedFactor(factorStore, "recovery_code", set.data);
 	return { record, codes: set.codes };
 }
+
+/** The session package's login completion, its renewal answering without the renewal nonce it wrote. */
+const nonceDropping = (): Module =>
+	defineModule({
+		name: "test:login-completion-dropping-the-nonce",
+		requires: ["sessionCookiePolicy", "userSessionStore", "csrfGuard"],
+		optional: ["subjectSessionIndex"],
+		provides: {
+			loginCompletion: (deps: unknown): LoginCompletion => {
+				const real = (
+					loginCompletionModule.provides as {
+						readonly loginCompletion: (deps: unknown) => LoginCompletion;
+					}
+				).loginCompletion(deps);
+				return {
+					establishSession: (...args) => real.establishSession(...args),
+					answerInterruption: (...args) => real.answerInterruption(...args),
+					renewSession: async (call) => {
+						const renewed = await real.renewSession(call);
+						return { ...renewed, renewalNonce: undefined } as unknown as typeof renewed;
+					},
+				};
+			},
+		} as never,
+	});
 
 /** The digest the email factor records for `address`, under the suite's ring. */
 const recordedDigest = (address: string) => suiteSealing().digestsFor("email").digest([address]);
@@ -622,7 +659,10 @@ describe("the step-up's finish", () => {
 	/** A TOTP step-up opened in a password session, with the cookie-session tap mounted. */
 	async function opened(setup: Setup = {}) {
 		const tap = cookieSessionTap();
-		const booted = await composed({ ...setup, extraModules: [tap.module] });
+		const booted = await composed({
+			...setup,
+			extraModules: [tap.module, ...(setup.extraModules ?? [])],
+		});
 		const session = await signedIn(booted.app, booted.userSessionStore);
 		const totp = await seedTotp(booted.factorStore);
 		const transaction = await openedStepUp(session.agent);
@@ -653,6 +693,10 @@ describe("the step-up's finish", () => {
 	const SERVER_ERROR = {
 		error: "server_error",
 		error_description: "The step-up could not be recorded",
+	};
+	const SIGN_IN_AGAIN = {
+		error: "server_error",
+		error_description: "The session could not be secured: sign in again",
 	};
 
 	it("answers 503 and records nothing when the cookie session cannot be regenerated: the old one stands, not stepped up", async () => {
@@ -737,7 +781,49 @@ describe("the step-up's finish", () => {
 		expect(record).toHaveBeenCalledTimes(1);
 	});
 
-	it("answers 500 when the store refuses the event as one it cannot record, said as mfa_step_up_unrecordable", async () => {
+	it("answers 503 to a session store that answers an object holding the new nonce and nothing of the session, said as the store's outage: the renewed cookie stands, not stepped up", async () => {
+		const { app, sid, userSessionStore, record, logger, verified } = await opened();
+		record.mockImplementationOnce(
+			async (_sid, event) => ({ renewalNonce: event.renewalNonce }) as unknown as UserSession,
+		);
+
+		const res = await verified();
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				route: "verify",
+				sid,
+				store: "user_session",
+				step: "recordSecondFactor",
+			}),
+			"mfa_store_unavailable",
+		);
+		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR]);
+		expect((await postAs(app, sessionCookie(res), "/enrollment", { kind: "totp" })).status).toBe(
+			403,
+		);
+	});
+
+	it("answers 503 and records nothing when the renewal answers no renewal nonce, said as the cookie store's outage", async () => {
+		const { sid, userSessionStore, record, logger, verified } = await opened({
+			loginCompletion: nonceDropping(),
+		});
+
+		const res = await verified();
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expect(record).not.toHaveBeenCalled();
+		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR]);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "verify", sid, store: "cookie_session" }),
+			"mfa_store_unavailable",
+		);
+	});
+
+	it("answers 500 when the store refuses the event as one it cannot record, said as mfa_escalation_invalid", async () => {
 		const { record, logger, verified } = await opened();
 		record.mockRejectedValueOnce(new RangeError("recordSecondFactor: at is ahead of the clock"));
 
@@ -748,24 +834,94 @@ describe("the step-up's finish", () => {
 		expect(record).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({ route: "verify", sub: ALICE.id }),
-			"mfa_step_up_unrecordable",
+			"mfa_escalation_invalid",
 		);
 	});
 
-	it("answers 500 when the store answers the session without the renewal nonce, said as mfa_step_up_unbound", async () => {
-		const { record, recordUnwatched, logger, verified } = await opened();
-		record.mockImplementationOnce(async (sid, event) => {
-			const { renewalNonce: _dropped, ...rest } = event;
-			return recordUnwatched(sid, rest);
+	it("answers 500, renewing and recording nothing, when what the verification adds is outside the mfa requirement's reach, said as mfa_escalation_invalid", async () => {
+		const amrValues = [HARDWARE_KEY_AMR];
+		const outside = "x-outside-reach";
+		const keyFactor: MfaFactor = {
+			kind: "key",
+			amrValues,
+			amrFor: () => [outside],
+			addsMfa: false,
+			counting: true,
+			guessable: false,
+			describe: () => ({}),
+			verify: async ({ factor }) => ({ ok: true, factorId: factor.id }),
+			beginEnrollment: async () => {
+				throw new Error("not enrolled here");
+			},
+			completeEnrollment: async () => {
+				throw new Error("not enrolled here");
+			},
+		};
+		const { agent, sid, factorStore, userSessionStore, record, logger } = await opened({
+			extraModules: [contributing(keyFactor)],
 		});
+		const key = await seedFactor(factorStore, "key", {});
+		const transaction = await openedStepUp(agent);
+		// The factor now declares a value its reach, sealed at boot, never held.
+		amrValues.push(outside);
+
+		const res = await verify(agent, transaction, key.id, "assertion");
+
+		expect(res.status, JSON.stringify(res.body)).toBe(500);
+		expect(res.body).toEqual(SERVER_ERROR);
+		expect(sessionIdSet(res)).toBeUndefined();
+		expect(record).not.toHaveBeenCalled();
+		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR]);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "verify", sub: ALICE.id }),
+			"mfa_escalation_invalid",
+		);
+	});
+
+	it("answers 500 and ends the session when the store answers it without the renewal nonce, said as mfa_escalation_unbound: neither the renewed cookie nor an old one put back is admitted", async () => {
+		const { app, cookie, sid, tap, userSessionStore, record, recordUnwatched, logger, verified } =
+			await opened();
+		record.mockImplementationOnce(async (recorded, event) => {
+			const { renewalNonce: _dropped, ...rest } = event;
+			return recordUnwatched(recorded, rest);
+		});
+		const held = request(app)
+			.get("/test-tap/hold")
+			.set("Cookie", cookie)
+			.then((res) => res);
+		await tap.held.reached;
+
+		const res = await verified();
+		tap.release();
+		expect((await held).status).toBe(204);
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual(SIGN_IN_AGAIN);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "verify", sub: ALICE.id }),
+			"mfa_escalation_unbound",
+		);
+		expect(await userSessionStore.get(sid)).toBeNull();
+		expect(await signedInAs(app, cookie)).toBe(true);
+		expect(await admitted(app, cookie)).toBe(false);
+		expect(await admitted(app, sessionCookie(res))).toBe(false);
+	});
+
+	it("still answers 500 when the unbound session cannot be ended, said as the store's outage", async () => {
+		const { sid, userSessionStore, record, recordUnwatched, logger, verified } = await opened();
+		record.mockImplementationOnce(async (recorded, event) => {
+			const { renewalNonce: _dropped, ...rest } = event;
+			return recordUnwatched(recorded, rest);
+		});
+		vi.spyOn(userSessionStore, "delete").mockRejectedValueOnce(new Error("session store down"));
 
 		const res = await verified();
 
 		expect(res.status).toBe(500);
-		expect(res.body).toEqual(SERVER_ERROR);
+		expect(res.body).toEqual(SIGN_IN_AGAIN);
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ route: "verify", sub: ALICE.id }),
-			"mfa_step_up_unbound",
+			expect.objectContaining({ route: "verify", sid, store: "user_session", step: "delete" }),
+			"mfa_store_unavailable",
 		);
 	});
 

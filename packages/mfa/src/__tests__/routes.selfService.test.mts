@@ -1096,6 +1096,24 @@ describe("a first binding's escalation of its session, when it does not land", (
 		);
 	});
 
+	it("still answers 200 with the factor and its codes when the store answers the session without the renewal nonce, and ends that session, said as mfa_escalation_unbound", async () => {
+		const { agent, sid, userSessionStore, logger, completed } = await begunBinding();
+		const store = userSessionStore as ReturnType<typeof createInMemoryUserSessionStore>;
+		const recordUnwatched = store.recordSecondFactor.bind(store);
+		vi.spyOn(store, "recordSecondFactor").mockImplementationOnce(async (recorded, event) => {
+			const { renewalNonce: _dropped, ...rest } = event;
+			return recordUnwatched(recorded, rest);
+		});
+
+		const done = await completed();
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body).toEqual(BOUND);
+		expect(events(logger, "error")).toEqual(["mfa_escalation_unbound"]);
+		expect(await userSessionStore.get(sid)).toBeNull();
+		expect((await stepUp(agent)).status).toBe(401);
+	});
+
 	it("leaves the session as it was, its express id kept, when the session store cannot record a second factor", async () => {
 		const { recordSecondFactor: _record, ...legacy } = createInMemoryUserSessionStore();
 		const { sid, before, userSessionStore, completed } = await begunBinding({
