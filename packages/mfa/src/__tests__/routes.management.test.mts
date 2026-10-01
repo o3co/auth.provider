@@ -421,6 +421,39 @@ describe("POST /session/mfa/factors/rename", () => {
 		expect((await built.factorStore.list(ALICE.id))[0]?.label).toBe("Moved");
 	});
 
+	it("answers 503, logged once, when the store answers the rename at the next version without the label asked, or with another last use", async () => {
+		for (const answered of ["the old label", "another last use"] as const) {
+			const built = await composed();
+			const { agent, totp } = await signedIn(built);
+			const write = built.factorStore.update.bind(built.factorStore);
+			vi.spyOn(built.factorStore, "update").mockImplementationOnce(async (...args) => {
+				const written = await write(...args);
+				if (written === null) return null;
+				return answered === "the old label"
+					? { ...written, label: undefined }
+					: { ...written, lastUsedAt: new Date(0) };
+			});
+
+			const res = await rename(agent, { factor_id: totp.record.id, label: "Work phone" });
+
+			expect(res.status, answered).toBe(503);
+			expect(res.body, answered).toEqual(UNAVAILABLE);
+			expect(built.logger.error, answered).toHaveBeenCalledWith(
+				expect.objectContaining({
+					route: "factors",
+					store: "mfa_factor",
+					step: "update",
+					err: expect.objectContaining({
+						message: "the store answered outside its port's contract",
+					}),
+				}),
+				"mfa_store_unavailable",
+			);
+			await disposeAll();
+			vi.restoreAllMocks();
+		}
+	});
+
 	it("answers 400 for a label a page cannot show as it is, and for a factor that is not the subject's", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
