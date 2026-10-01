@@ -18,7 +18,8 @@
  * Refreshing a token that is due (`refreshIsDue`): the provider has to be
  * able to refresh and the record to hold a refresh token. The record's lock,
  * when the store has one, is taken before the re-read and released, always,
- * once the answer is sent.
+ * once the answer is sent. A record the re-read finds gone is answered as
+ * unlinked, and neither refreshed nor written back.
  */
 
 import {
@@ -36,6 +37,7 @@ import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
 import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
 import { recordRefresh } from "./federationTokenRefreshRecord.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
+import { answerUnlinkedRecord } from "./federationTokenUnlinked.mjs";
 
 /** Step 11. `tokens` is the record as read before the lock. */
 export const refreshStoredTokens = async (
@@ -116,7 +118,13 @@ export const refreshStoredTokens = async (
 					error_description: "federation token store unavailable",
 				});
 			}
-			if (freshTokens && !refreshIsDue(ctx, freshTokens)) {
+			if (!freshTokens) {
+				// A concurrent logout or unlink removed the record: refreshing it
+				// would write back a refresh token the user asked to drop.
+				// Awaited inside the `try`, so the lock is released after the answer.
+				return await answerUnlinkedRecord(ctx, caller);
+			}
+			if (!refreshIsDue(ctx, freshTokens)) {
 				// Another caller refreshed, or the token is not due: return
 				// the stored token without calling the IdP, judging its type as on
 				// the fast path.
@@ -126,12 +134,7 @@ export const refreshStoredTokens = async (
 				// Awaited inside the `try`, so the lock is released after the answer.
 				return await answerToken(ctx, caller, freshTokens, false);
 			}
-			// Update to the post-lock re-read value (may be freshTokens or null if
-			// the store returned null; in either case currentTokens keeps the pre-lock
-			// snapshot when freshTokens is null, which is the safest fallback).
-			if (freshTokens) {
-				currentTokens = freshTokens;
-			}
+			currentTokens = freshTokens;
 		}
 
 		// The post-lock re-read may lack a refresh token too (a concurrent
