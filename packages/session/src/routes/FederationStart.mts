@@ -33,10 +33,10 @@ import { generateCodeVerifier } from "../federations/pkce.mjs";
 import { type LinkIntent, mintFederationTransactionId } from "../federations/transaction.mjs";
 import { abandonCookieSession, SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
-import { answerNoRedirectPolicy } from "./FederationCallbackRedirect.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import { checkLinkStart } from "./FederationLinkStart.mjs";
 import { logMisconfigured, logStoreUnavailable } from "./FederationLog.mjs";
+import { answerNoRedirectPolicy } from "./FederationRedirectAnswer.mjs";
 
 /** The start route's handler, over the router's context. */
 export const createStartHandler =

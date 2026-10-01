@@ -15,10 +15,13 @@
  */
 
 /**
- * Refusals of a request's shape, and the line a refused callback's failed
- * discard writes:
+ * Refusals of a request's shape, the start's answer to a composition fault,
+ * and the line a refused callback's failed discard writes:
  * - the start refuses a `redirect_to` that is not one string, before any
  *   policy or store is reached;
+ * - a start with a `redirect_to` for a provider with no redirect policy is a
+ *   composition fault: exactly `500 internal_error` and one
+ *   `federation_misconfigured` line naming the provider, nothing stored;
  * - a callback's parameters are read from an object only; anything else is
  *   no parameters, so a `form_post` callback whose body is not a form is a
  *   missing `state` and leaves its transaction in place;
@@ -340,6 +343,7 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 		expect(records.has(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`)).toBe(false);
 		expect(trail).toEqual([]);
 	});
+
 	it("lets a session drop that throws propagate rather than answer the refusal", async () => {
 		const { app, records } = buildApp();
 		const flow = await startFormPost(app);

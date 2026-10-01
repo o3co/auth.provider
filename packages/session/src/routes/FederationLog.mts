@@ -103,9 +103,10 @@ export const logMisconfigured = (
 /**
  * The warn line a best-effort step that failed is logged as,
  * `federation_cleanup_failed`: `store`, `step` and the error's projection.
- * {@link cleanUp} emits it for a step that throws; a step that returns its
- * error (the callback's discard of a refused transaction) calls it directly;
- * the login tail's reporter emits it for the steps `establishSession` runs.
+ * {@link cleanUp} emits it for a step that throws; the caller of a step that
+ * returns its error (the callback's discard of a refused transaction) calls
+ * it directly; the login tail's reporter emits it for the steps
+ * `establishSession` runs.
  */
 export const logCleanupFailed = (
 	log: Logger,

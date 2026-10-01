@@ -59,7 +59,6 @@ import { SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { identifyFederatedUser } from "./FederationCallbackIdentity.mjs";
-import { redirectAfterCallback } from "./FederationCallbackRedirect.mjs";
 import { readCallbackParams, resolveCallbackProvider } from "./FederationCallbackRequest.mjs";
 import { consumeCallbackState } from "./FederationCallbackState.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
@@ -71,6 +70,7 @@ import {
 	logCleanupFailed,
 	logStoreUnavailable,
 } from "./FederationLog.mjs";
+import { redirectAfterCallback } from "./FederationRedirectAnswer.mjs";
 import { createStartHandler } from "./FederationStart.mjs";
 import { createTransactionCookie, readSessionCookieName } from "./FederationTransactionCookie.mjs";
 

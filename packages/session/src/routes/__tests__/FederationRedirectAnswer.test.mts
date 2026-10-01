@@ -15,10 +15,12 @@
  */
 
 /**
- * The callback's one redirect, shared by the login and the link: the
- * federation's redirect policy resolves the start's `redirectTo`; a provider
- * with no policy is a composition fault (`500`, `federation_misconfigured`);
- * a policy's refusal is answered in its words, held to RFC 6749's characters.
+ * The answers that rest on a provider's redirect policy. The callback's one
+ * redirect, shared by the login and the link: the policy resolves the start's
+ * `redirectTo`, and its refusal is answered in its words, held to RFC 6749's
+ * characters. A provider with no policy is a composition fault (`500`,
+ * `federation_misconfigured`), answered the same by the start and the
+ * callbacks.
  */
 
 import type { FederationProvider, Logger } from "@o3co/auth-provider-core";
@@ -29,7 +31,7 @@ import type { FederationRedirectPolicy } from "#/federations/redirect-policy.mjs
 import {
 	answerNoRedirectPolicy,
 	redirectAfterCallback,
-} from "#/routes/FederationCallbackRedirect.mjs";
+} from "#/routes/FederationRedirectAnswer.mjs";
 
 const provider = { name: "test" } as FederationProvider;
 
@@ -171,6 +173,7 @@ describe("redirectAfterCallback", () => {
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 		expect(logger.warn.mock.calls[0]?.[1]).toBe("redirect_policy_error_malformed");
 	});
+
 	it("lets a policy that throws propagate, answering nothing itself", async () => {
 		const logger = spyLogger();
 		const policy = {

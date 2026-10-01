@@ -39,7 +39,6 @@ import {
 	SESSION_STORE_UNAVAILABLE,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
-import { redirectAfterCallback } from "./FederationCallbackRedirect.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import {
 	cleanUp,
@@ -47,6 +46,7 @@ import {
 	type FederationStoreStep,
 	logStoreUnavailable,
 } from "./FederationLog.mjs";
+import { redirectAfterCallback } from "./FederationRedirectAnswer.mjs";
 
 /**
  * The record's `tokenType` for what an adapter answered: the upstream's
