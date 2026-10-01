@@ -5,7 +5,7 @@
 
 import type { RateLimiter } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { redisRateLimiterModule } from "../src/ratelimit.mjs";
+import { redisRateLimiterModule } from "#/ratelimit.mjs";
 
 describe("redisRateLimiterModule", () => {
 	it("has the canonical name", () => {

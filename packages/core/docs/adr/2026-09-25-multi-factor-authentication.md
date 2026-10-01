@@ -34,6 +34,7 @@
 - Amended 2026-10-01 (build-order step 11, owner decision): the regeneration after a step-up, and after a binding in a session, is the session package's `LoginCompletion.renewSession`, and the escalation is bound to the renewed cookie session by a renewal nonce (D27's amendment of that date).
 - Amended 2026-10-01 (build-order step 11-0c, owner decision): an authorization code carries the `amr` `/authorize` vouched for, and its tokens carry that, not the session's at exchange (D27's amendment of that date).
 - Amended 2026-10-01 (build-order step 11-A, owner decision): a step-up offers every factor the subject can use, a recovery code included, which opens no binding. It keeps `acr_values` as a hint. Its finish renews the session id, then records the factor once (F2's amendment of that date).
+- Amended 2026-10-01 (build-order step 13, owner decision): `auth_time` is never later than the clock that mints it; a recorded `authTime` more than `DEFAULT_CLOCK_SKEW_MS` ahead of that clock is unreadable (D18's amendment of that date).
 
 ## Context
 
@@ -745,6 +746,8 @@ interface AuthorizeAsk { // the `reauth:` record, reshaped
 
 - `auth_time` on the id_token stays `UserSession.authTime`: the **primary**, the conservative reading for an RP applying `max_age`.
 - For RFC 9470 resource servers — `auth.policy-verifier` among them — the access token gains `auth_time` beside its `acr` and `amr` (the refresh token carries it forward), and introspection answers `acr`, `amr` and `auth_time`. Additive, a PR of its own that can be dropped (§8, PR 15).
+
+**Amended 2026-10-01 (build-order step 13, owner decision): `auth_time` is never later than the clock that mints it.** A recorded authentication instant is read against the clock that mints or judges with it, through core's `authTimeAt(instant, nowMs)`: up to `DEFAULT_CLOCK_SKEW_MS` ahead it reads as `nowMs`; further ahead, like an invalid `Date` or one before the epoch, it is unreadable. An unreadable one fails closed at every reader: the id_token is not minted (`RangeError`), `/authorize` sends the browser to log in, and `/oauth/token` answers `invalid_grant`. A refresh carries forward no `auth_time` later than its own clock. The id_token's reading lands with build-order step 13-0b; the `/authorize` behaviour with step 13-A, and the `/oauth/token` and refresh behaviour with step 13-D. Otherwise `now − auth_time` goes negative and the token passes any `max_age`. `authTimeClaim` stays for an instant the caller computed on its own clock. Capping `authTime` where a store records it is not part of this.
 
 ---
 

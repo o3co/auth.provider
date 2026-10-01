@@ -617,7 +617,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 OIDC id_token JWT（OIDC Core §2）に署名して返す。クレーム構成:
 
 - `iss`、`sub`、`aud`、`exp`、`iat`、`jti` — 標準 JWT クレーム
-- `auth_time` — `opts.authTime` をエポック秒に変換した値
+- `auth_time` — `opts.authTime` を `iat` を決める時計に対して `authTimeAt` で読んだエポック秒（切り捨て）。`iat` より後になることはない: 時計より `DEFAULT_CLOCK_SKEW_MS` 以内だけ先の時刻は `iat` として刻む。読めない時刻（不正な `Date`、エポックより前、時計より `DEFAULT_CLOCK_SKEW_MS` を超えて先）は `RangeError` で、何も署名しない
 - `sid` — バックチャネルログアウト用セッション識別子
 - `azp` — authorized party、指定された場合のみ付与
 - `nonce` — 認可リクエストから転送され、指定された場合にそのまま反映

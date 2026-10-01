@@ -29,8 +29,8 @@ import {
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SET_REVOCATION_BOUNDARIES } from "#/ioredis/scripts/user-sessions.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisSubjectRevocation } from "#/subjectRevocation.mjs";
 import {
 	runSessionsOnlyRevocationClockContract,
 	runSubjectRevocationClockContract,
@@ -287,10 +287,102 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 					String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
 					skew,
 				),
-			).rejects.toThrow(/non-numeric argument/);
+			).rejects.toThrow(/subject revocation: invalid argument/);
 			expect(await raw.get(key)).toBe("1000");
 		},
 	);
+
+	it("refuses a write with no skew, writing nothing", async () => {
+		// Without the skew the script could not clamp `before`.
+		const key = "t593e:skew:absent";
+		await raw.set(key, "1000", "PX", 600_000);
+		const now = await serverClock(() => raw)();
+		await expect(
+			raw.eval(
+				SET_REVOCATION_BOUNDARIES.source,
+				1,
+				key,
+				"all",
+				String(now + 10 * DEFAULT_CLOCK_SKEW_MS),
+				String(now + 600_000),
+				String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
+			),
+		).rejects.toThrow(/subject revocation: invalid argument/);
+		expect(await raw.get(key)).toBe("1000");
+	});
+
+	it.each([
+		["ALL", ["ALL"]],
+		["an empty mode", [""]],
+		// EVAL arguments are positional: with no mode, `before` takes its place.
+		["no mode", []],
+	])("refuses %s, leaving the record as it was", async (_label, mode) => {
+		// A mode it did not know would be read as sessions-only, leaving the
+		// subject's grants unrevoked.
+		const key = `t593e:mode:${mode.length === 0 ? "absent" : mode[0]}`;
+		await raw.set(key, "1000", "PX", 600_000);
+		const expiry = await raw.pexpiretime(key);
+		const now = await serverClock(() => raw)();
+		await expect(
+			raw.eval(
+				SET_REVOCATION_BOUNDARIES.source,
+				1,
+				key,
+				...mode,
+				String(now),
+				String(now + 600_000),
+				String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
+				String(DEFAULT_CLOCK_SKEW_MS),
+			),
+		).rejects.toThrow(/subject revocation: invalid argument/);
+		expect(await raw.get(key)).toBe("1000");
+		expect(await raw.pexpiretime(key)).toBe(expiry);
+	});
+
+	const unreadableInstants = [
+		"NaN",
+		"nan",
+		"Infinity",
+		"inf",
+		"-Infinity",
+		"-inf",
+		// One millisecond past what a Date can hold, either side.
+		"8640000000000001",
+		"-8640000000000001",
+		"0.5",
+	];
+	it.each([
+		...unreadableInstants.map((value) => ["before", value] as const),
+		...unreadableInstants.map((value) => ["expiresAt", value] as const),
+		...[...unreadableInstants, "-1"].map((value) => ["retention", value] as const),
+	])("refuses %s = %s, leaving the record as it was", async (argument, value) => {
+		// The script is driven directly: what it took would be written as a
+		// record nothing can read, or would size the record's expiry from it.
+		const key = `t593e:args:${argument}:${value}`;
+		await raw.set(key, "1000", "PX", 600_000);
+		const expiry = await raw.pexpiretime(key);
+		const now = await serverClock(() => raw)();
+		const args = {
+			before: String(now),
+			expiresAt: String(now + 600_000),
+			retention: String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
+			[argument]: value,
+		};
+		await expect(
+			raw.eval(
+				SET_REVOCATION_BOUNDARIES.source,
+				1,
+				key,
+				"all",
+				args.before,
+				args.expiresAt,
+				args.retention,
+				String(DEFAULT_CLOCK_SKEW_MS),
+			),
+		).rejects.toThrow(/subject revocation: invalid argument/);
+		expect(await raw.get(key)).toBe("1000");
+		expect(await raw.pexpiretime(key)).toBe(expiry);
+	});
 
 	it("refuses to write over a record it cannot read", async () => {
 		// The script fails the whole call rather than starting a fresh record:
@@ -319,17 +411,19 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		}
 	});
 
-	it("refuses a driver that cannot express a sessions-only stamp", async () => {
-		// A driver with only the single-boundary primitive would answer every
-		// sessions-only stamp by revoking the subject's grants.
-		const construct = () =>
-			createRedisSubjectRevocation({
-				client: { get: async () => null } as never,
-				keyPrefix: "t593e:9:",
-			});
-		expect(construct).toThrow(/setRevocationBoundaries/);
-		// The refusal states the rule it enforces, with no issue number or design label.
-		expect(construct).toThrow(/can advance only one revocation boundary/);
-		expect(construct).not.toThrow(/#\d|\bD\d+\b/);
+	it("refuses a driver that cannot clamp a boundary to the server's clock", async () => {
+		// A driver with only the unclamped write records a boundary a replica's
+		// clock runs ahead to, refusing the subject's sign-ins until then.
+		for (const client of [
+			{ get: async () => null },
+			{ get: async () => null, setRevocationBoundaries: async () => "1000" },
+		]) {
+			const construct = () =>
+				createRedisSubjectRevocation({ client: client as never, keyPrefix: "t593e:9:" });
+			expect(construct).toThrow(/advanceRevocationBoundaries/);
+			// The refusal states the rule it enforces, with no issue number or design label.
+			expect(construct).toThrow(/clamp/);
+			expect(construct).not.toThrow(/#\d|\bD\d+\b/);
+		}
 	});
 });

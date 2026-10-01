@@ -13,7 +13,7 @@
 // client; `del` is not called when `compareAndDelete` reports no ownership.
 
 import { describe, expect, it, vi } from "vitest";
-import { createRedisLock } from "../src/internal/lock.mjs";
+import { createRedisLock } from "#/internal/lock.mjs";
 
 describe("lock release is atomic compare-and-delete (no spurious DEL)", () => {
 	it("release() does NOT call del when compareAndDelete reports value mismatch", async () => {

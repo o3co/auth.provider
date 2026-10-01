@@ -28,8 +28,8 @@ import type {
 	SessionSidSortedSetClient,
 	SessionSidSortedSetMultiClient,
 	UserSessionStoreClient,
-} from "../src/index.mjs";
-import type { makeIoredisClients } from "../src/ioredis.mjs";
+} from "#/index.mjs";
+import type { makeIoredisClients } from "#/ioredis.mjs";
 
 type IoredisClientsReturn = ReturnType<typeof makeIoredisClients>;
 

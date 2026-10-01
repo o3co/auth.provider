@@ -361,6 +361,7 @@ export {
 } from "./federations/types.mjs";
 // The authentication claims a token may carry
 export {
+	authTimeAt,
 	authTimeClaim,
 	composeAmr,
 	EMAIL_OTP_AMR,
