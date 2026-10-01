@@ -706,7 +706,11 @@ wires it.
   goes out up to the mail sender's limit (`429 rate_limited` beyond it), and
   is refused where it is verified (`429 mfa_locked`, spending one of the
   transaction's attempts). How many codes a password holder can have sent
-  during a hold is that limit: set it on your mail sender (see **Mail**). A held proof is answered
+  during a hold is that limit: set it on your mail sender (see **Mail**).
+  `@o3co/auth-provider-standard`'s SMTP sender has no limit setting of its
+  own: with it, the cap is your relay's quota. Apart from the sender,
+  `mfa.rateLimit.routes` bounds the MFA requests of each client address
+  (`mfa:ip:<ip>`), challenges included. A held proof is answered
   `429 {"error":"mfa_locked","hold":…,"usable_kinds":[…],"attempts_remaining":…}`
   — `Retry-After` in whole seconds, none for the hard hold. `usable_kinds`
   names the exempt kinds the subject holds, whether or not each still works:
@@ -792,7 +796,7 @@ wires it.
   to nobody else.
 - **The email factor's address.** Off by default; switch it on with
   `MFA_EMAIL_FACTOR_ENABLED=true` beside a mail sender. It mails a six-digit
-  code at each login and a long code to enroll, each living
+  code at each challenge and a long code to enroll, each living
   `MFA_EMAIL_FACTOR_CODE_TTL_SECONDS` (600), capped at the transaction's
   life. It counts, and adds `mfa` only with `MFA_EMAIL_FACTOR_ADDS_MFA=true`.
   The factor keeps no address: only a keyed
