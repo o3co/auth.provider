@@ -20,19 +20,14 @@
  * and handed on as stored while they do not expire within the refresh buffer.
  */
 
-import {
-	BEARER_TOKEN_TYPE,
-	emitAuditEvent,
-	type FederationTokens,
-	loggableError,
-	sanitizeErrorText,
-} from "@o3co/auth-provider-core";
+import { type FederationTokens, loggableError, sanitizeErrorText } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
 import {
 	mayDiscloseTokenType,
 	refuseUndisclosableTokenType,
 } from "./federationTokenDisclosure.mjs";
+import { answerToken } from "./federationTokenSuccess.mjs";
 
 /**
  * Step 9: the record for this session and federation. Returns it, or `null`
@@ -91,30 +86,10 @@ export const answerStoredToken = (
 	caller: FederationTokenCaller,
 	tokens: FederationTokens,
 ): Response => {
-	const { opts, req, res, federation } = ctx;
-	const { sub } = caller;
-
 	// The type is judged before the token is read and before the success
 	// is audited, so a refused disclosure is not counted as one.
 	if (!mayDiscloseTokenType(tokens.tokenType)) {
 		return refuseUndisclosableTokenType(ctx, caller, tokens.tokenType);
 	}
-	emitAuditEvent(opts.auditSink, {
-		timestamp: new Date(),
-		type: "federation.token.success",
-		subject: sub ?? undefined,
-		ip: req.ip,
-		userAgent: req.get("user-agent"),
-		details: { federation, refreshed: false },
-	});
-	const expiresIn =
-		tokens.expiresAt === null
-			? undefined
-			: Math.max(0, Math.floor((tokens.expiresAt.getTime() - Date.now()) / 1000));
-	return res.status(200).json({
-		access_token: tokens.accessToken,
-		token_type: BEARER_TOKEN_TYPE,
-		...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
-		...(tokens.scope ? { scope: tokens.scope } : {}),
-	});
+	return answerToken(ctx, caller, tokens, false);
 };

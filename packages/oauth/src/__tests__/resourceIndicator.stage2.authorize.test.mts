@@ -37,6 +37,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const CLIENT_ID = "client-1";
 const REDIRECT = "https://example.test/cb";
@@ -46,6 +47,7 @@ const OTHER = "https://other.example";
 const clientRepo: ClientRepository = {
 	findById: async () => ({
 		clientId: CLIENT_ID,
+		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedRedirectUris: [REDIRECT],
 		firstParty: true,
 		allowedScopes: ["openid", "profile"],
@@ -73,7 +75,11 @@ async function buildApp(opts: {
 	const codeRepo: CodeRepository = {
 		createCode: async (params) => {
 			opts.captureCode?.(params);
-			return { code: "auth-code", client_id: params.client_id, redirect_uri: params.redirect_uri };
+			return codeRecord({
+				code: "auth-code",
+				client_id: params.client_id,
+				redirect_uri: params.redirect_uri,
+			});
 		},
 		findByCode: async () => null,
 		consumeByCode: async () => null,

@@ -232,7 +232,7 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `HTTP_PORT` | `3000` | サーバーがリッスンするポート |
+| `HTTP_PORT` | `3000` | サーバーがリッスンするポート。`0` から `65535` の 10 進数字で書く。`0` は空いているポートを OS に選ばせる。空のまま設定すると起動に失敗する |
 | `HTTP_TRUST_PROXY` | `false` | Express の `trust proxy`: `false`、アドレス／CIDR のリスト（`10.0.0.0/8,loopback`）、ホップ数（`1`）、または `true`。**ロードバランサ配下では必須** — 設定しないと、IP をキーとするすべての rate limit が全ユーザーで 1 つのバケットを共有する。`true` よりもプロキシを名指しすることを優先する。[マルチレプリカ構成](#マルチレプリカ構成) を参照 |
 | `HTTP_READINESS_TIMEOUT_MS` | `1000` | `/readyz` の probe ごとの deadline（[ヘルスエンドポイント](#ヘルスエンドポイント) を参照） |
 | `LOGGING_LEVEL` | `info` | 出力する最小レベル: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`。監査ログの出力は左右**しない** — [監査ログ](#監査ログ) を参照 |

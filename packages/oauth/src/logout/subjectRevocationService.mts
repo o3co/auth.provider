@@ -193,7 +193,7 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 					`${NAME}: federation-grants.enabled = true requires a federationGrantStore ` +
 						"component. Without it a subject-wide revocation would end the sessions and " +
 						"the tokens, report itself complete, and leave every offline credential the " +
-						"subject had standing (D13).",
+						"subject had standing.",
 				);
 			}
 			const subjectRevocation = enabled

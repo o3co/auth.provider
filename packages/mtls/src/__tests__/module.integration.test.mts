@@ -342,12 +342,15 @@ describe("mtlsModule — integration via createApp", () => {
 			trustedCas: [ROOT_PEM],
 		});
 
-		await expect(
-			createApp({
-				modules: [mtlsModule],
-				bootstrapComponents: boot,
-			}),
-		).rejects.toThrow(/tls-layer/);
+		const booting = createApp({
+			modules: [mtlsModule],
+			bootstrapComponents: boot,
+		});
+		await expect(booting).rejects.toThrow(/tls-layer/);
+		// The refusal names the mode that reads the chain from the TLS session,
+		// and no process label or issue number.
+		await expect(booting).rejects.toThrow(/mode = "full-pki"/);
+		await expect(booting).rejects.not.toThrow(/phase|#\d/i);
 	});
 });
 

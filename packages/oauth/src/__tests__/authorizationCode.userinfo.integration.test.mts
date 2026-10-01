@@ -124,7 +124,7 @@ async function exchangeCodeWithoutCookie() {
 			listRPs: vi.fn(async () => []),
 			removeBySid: vi.fn(async () => {}),
 		},
-	} as unknown as GrantDependencies);
+	} as unknown as Parameters<typeof createAuthorizationGrant>[0]);
 
 	// The session object a back-channel /token call sees: the code correlation
 	// keys written at /authorize, and no `user` — there is no browser here.
@@ -135,7 +135,7 @@ async function exchangeCodeWithoutCookie() {
 			redirect_uri: RP_URI,
 			code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
 		},
-		session: { code: "the-code", code_client_id: CLIENT_ID },
+		session: { code: "the-code" },
 		issuer: ISSUER,
 		metadata: { ip: "127.0.0.1" },
 		authenticatedClient: {

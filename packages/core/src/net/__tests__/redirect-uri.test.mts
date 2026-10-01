@@ -76,6 +76,7 @@ describe("checkRedirectUri", () => {
 		expect(reason("myapp://callback")).toBe("scheme-not-reverse-domain");
 		const rejection = checkRedirectUri("myapp://callback");
 		expect(rejection && describeRedirectUriRejection(rejection)).toContain("reverse-domain");
+		expect(rejection && describeRedirectUriRejection(rejection)).not.toMatch(/#\d/);
 	});
 
 	it("refuses a dotted spelling whose first label is an executable scheme", () => {

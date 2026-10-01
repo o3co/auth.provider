@@ -249,6 +249,12 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 設定を読むモジュールは、自分のセクションをマニフェストで宣言します（[#728](https://github.com/o3co/auth.provider/issues/728)）: `section.schema` はモジュールが所有する唯一のセクションの Zod スキーマで、boot はどのファクトリーよりも先にそのセクションをパースし、スキーマの出力の型を持つ `deps.section` としてすべてのファクトリーに渡します。スキーマが拒否する値は、オペレーターが書いたパスを示して boot を拒否します（`config-validation-failed`）。セクションはモジュール名の位置から読まれ、まだ古いパスにある間は `section.at` の位置から読まれます。`section.relocatedFrom` はセクションの移動元のパスを示します。そこにまだキーを設定している設定は、そのキーの新しいパスとそれを束縛する環境変数、またはキーが削除されたことを示して boot を拒否します（`config-path-relocated`）。0.x 系の間の橋渡しで、最初のメジャーリリースで削除されます（削除を忘れたリリースカットは relocated-paths のドリフトテストが失敗させます）。`section.renamedVariables` は名前が変わった環境変数を、古い名前からそれが束縛されていた古いパスへの対応で示します（新しい名前は新しいパスが束縛される変数で、削除されたキーのものにはありません）。パッケージの `reference.conf` は各名前を予約セクション `renamed-variables` に捕捉します。解決時に古い名前が設定されていたと捕捉された場合、新しい名前が同じ値で捕捉されていなければ boot を拒否します（`environment-variable-renamed`）。削除されたキーの変数が設定されている場合と、名前が捕捉されていない場合も同じく拒否します。`section.reference` はパッケージの `config/reference.conf` を指します: boot はこれを読まず、`moduleReferences(modules)`（[`src/config/references.mts`](src/config/references.mts)）が、構成が読み込むモジュールの reference を、それぞれ一度ずつ、core 自身のもの（`coreReference()`）を一番下にして答え、composition root はそれを自分のファイルの下に重ねます。パッケージは自分の reference を、自分のテストで `@o3co/auth-provider-core/testing` の `packageReferenceProblems` を使って検査します。boot はパースした各モジュールのセクションをそのパスで設定に書き戻すので、`config` を読むファクトリーは、セクションのスキーマがそれをどうしたかを見ます。別のモジュールのセクションの内側にあるセクションはその内側に書き戻され、二つのモジュールが同じパスにセクションを宣言することはできません（`module-section-path-invalid`）。boot が core のスキーマの後に設定全体をパースする `configSchema` は、各セクションがモジュール名の下に移った時点で非推奨になります。
 
+環境変数が設定できるセクションの葉は、HOCON が `${?VAR}` に代入する文字列を読みます。core はその文字列の読み手を export します。定義はすべて [`src/config/application.schema.mts`](src/config/application.schema.mts) にあり、どのパッケージも変数を同じように読みます:
+
+- `wholeNumberFromEnv(bounds)` は整数を読みます。受け付けるのは、書かれたままの数値か、10 進数字の文字列（整数）です。数字の前後の空白は許します。それ以外はそのまま `bounds` に渡り、そこで `bounds` のメッセージとともに拒否されます。空文字列や空白だけの文字列、符号・小数・指数（`"8e3"`）・16 進（`"0x50"`）を含む文字列、そして `null`、`true`、リストがそうです。`z.coerce.number()` なら `""`、`null`、`[]` を `0` と、`"1e3"` を `1000` と読んでしまいます。`bounds` は `z.number()` のスキーマで、ほかの規則をすべて決めます: 数値として書かれた値の整数チェック、最小値、最大値、メッセージ。standalone テンプレートは `http.port` をこれで読むので、空のまま export された `HTTP_PORT` は、OS が選ぶポートで待ち受ける代わりに起動を失敗させます。
+- `durationFromEnv(bounds)` は同じ読み手を、期間を表す葉が使う名前で呼んだものです。
+- `coerceBooleanFromEnv` は真偽値を読みます: `"true"` / `"1"` と `"false"` / `"0"` / `""`（前後の空白を除き、大文字小文字を区別しない）。それ以外は起動を失敗させます。
+
 複数のモジュールが読むキーは所有者が 1 つで、ほかのモジュールは契約が core にあるスロットを通して受け取ります（[#728](https://github.com/o3co/auth.provider/issues/728)）: 所有者が自分のセクションを解釈して値を provide し、コード上パッケージは core だけを import します。core はこれらのスロットを宣言しています。`loginCompletion`、`loginEntry`、`csrfGuard`、`sessionCookiePolicy`、`csrfTokenSigner` は session パッケージのモジュールが、`oauthTokenSettings` は oauth モジュールが provide し、`deploymentMode` は core 自身が埋め、残りは提供者より先に宣言されています:
 
 - `oauthTokenSettings` — ほかのモジュールが読む oauth モジュールのトークン設定 — [`src/token-settings/types.mts`](src/token-settings/types.mts)。
@@ -455,6 +461,19 @@ const clientRepo = new InMemoryClientRepository(clients);
 const userRepo = new InMemoryUserRepository(users);
 ```
 
+テストでは、`@o3co/auth-provider-core/testing` の `clientEntries` が、コードに書いたエントリから同じマップを作ります（[`src/testing/fixtures/clientEntries.mts`](src/testing/fixtures/clientEntries.mts)）。各エントリは登録ファイルと同じ形で書き、スキーマのデフォルトは省きます。`InMemoryClientRepository` が各エントリをパースします:
+
+```typescript
+import { InMemoryClientRepository } from "@o3co/auth-provider-core";
+import { clientEntries } from "@o3co/auth-provider-core/testing";
+
+const clientRepo = new InMemoryClientRepository(
+  clientEntries([
+    ["rp", { tokenEndpointAuthMethod: "client_secret_basic", clientSecret: "s", allowedRedirectUris: [], allowedScopes: ["read"] }],
+  ]),
+);
+```
+
 ### 拡張ポイント
 
 任意の拡張ポイントが 5 つあります: composition root が埋める、あるいは空のままにするスロットか contribution 種別です。
@@ -534,7 +553,8 @@ const userRepo = new InMemoryUserRepository(users);
 #### GrantPolicyHook（scope / audience / token exchange のポリシー）
 
 - `GrantPolicyHook.evaluate(request, ctx)` は allow（narrowing 可）/ deny を返す
-- allow になるのは `outcome` がちょうど `"allow"` のときだけ、拒否になるのはちょうど `"deny"` のときだけである。それ以外 — 別の文字列や大文字小文字違い、`outcome` がない、オブジェクトでない値 — は不正な決定で、allow にはならない: `/oauth/token` では説明 `policy_decision_invalid` 付きの `500 server_error`、`/oauth/authorize` ではリダイレクトの `error=server_error` で答え、ポリシーの `kind` だけを付けて（決定の中身は付けずに）`grant_policy_decision_invalid`（error）としてログに残し、理由 `policy_decision_invalid` の失敗として監査する。ポリシーを参照するすべてのグラントと `/oauth/authorize` は決定を `readGrantPolicyDecision`（[`grants/grantPolicy.mts`](src/grants/grantPolicy.mts)）で読む。ロガーが渡されなければ、この関数は core のコンソールロガーにログを書く
+- allow になるのは `outcome` がちょうど `"allow"` のときだけ、拒否になるのはちょうど `"deny"` のときだけである。それ以外 — 別の文字列や大文字小文字違い、`outcome` がない、オブジェクトでない値、読むと例外を投げるフィールド — は不正な決定で、allow にはならない: `/oauth/token` では説明 `policy_decision_invalid` 付きの `500 server_error`、`/oauth/authorize` ではリダイレクトの `error=server_error` で答え、ポリシーの `kind` だけを付けて（決定の中身は付けずに）`grant_policy_decision_invalid`（error）としてログに残し、理由 `policy_decision_invalid` の失敗として監査する。ポリシーを参照するすべてのグラントと `/oauth/authorize` は決定を `readGrantPolicyDecision`（[`grants/grantPolicy.mts`](src/grants/grantPolicy.mts)）で読む。ロガーが渡されなければ、この関数は core のコンソールロガーにログを書く。この関数は決定のプレーンなコピーを返す。各フィールドは 1 回だけ読み、配列はコピーするので、getter や proxy がチェックと使用で別の値を答えることはできない。呼び出し側はコピーだけを扱う
+- 例外を投げるポリシーは allow にならない: core の答えは `policyUnavailable()`、説明 `policy evaluation unavailable` 付きの `503 temporarily_unavailable` で、`evaluateGrantPolicy` を通してポリシーを参照するすべてのグラントがこれを返す
 - deny の `error` は RFC 6749 のエラーコード `1*NQSCHAR`（空でない、`"` と `\` を除く印字可能な ASCII）でなければならない（`isWellFormedErrorCode`、[`errors/envelope.mts`](src/errors/envelope.mts)）。それ以外のコードを `/oauth/token` は `invalid_request`、`/oauth/authorize` は `access_denied` として返し、ポリシーのコードをサニタイズしてログに残す
 - `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用（`authorization_code` では再評価しない）
 - その他のグラント（refresh / client_credentials / token-exchange）はトークンエンドポイントで評価

@@ -81,7 +81,7 @@ describe("createMtlsMechanism — mode = full-pki", () => {
 
 		const binding = await mech.extract(makeTlsReq([leaf, int, root]) as Request);
 		expect(binding?.kind).toBe("mtls");
-		expect(binding?.confirmation["x5t#S256"]).toBeTypeOf("string");
+		expect(binding?.confirmation).toHaveProperty("x5t#S256", expect.any(String));
 	});
 
 	it("refuses a certificate whose anchor is not configured", async () => {

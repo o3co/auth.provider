@@ -444,6 +444,21 @@ describe("http", () => {
 		}
 	});
 
+	it("refuses an exported-but-empty HTTP_PORT at boot, naming http.port and HTTP_PORT", async () => {
+		const booting = bootTemplate({ env: { HTTP_PORT: "" } });
+		await expect(booting).rejects.toThrow(/http\.port/);
+		await expect(booting).rejects.toThrow(/HTTP_PORT/);
+	});
+
+	it("hands the host an explicit HTTP_PORT=0, the OS choosing a free port", async () => {
+		const handle = await bootTemplate({ env: { HTTP_PORT: "0" } });
+		try {
+			expect(handle.components.httpHostSettings?.port).toBe(0);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
 	it("refuses a trust proxy entry that is not an address, a range or a named range at boot, naming http.trustProxy", async () => {
 		await expect(bootTemplate({ env: { HTTP_TRUST_PROXY: "proxy.internal" } })).rejects.toThrow(
 			/http\.trustProxy/,

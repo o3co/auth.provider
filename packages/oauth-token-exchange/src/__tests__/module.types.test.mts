@@ -125,11 +125,11 @@ describe("the validator contract is core's", () => {
 	// fails the moment the name comes back.
 	it("is not re-exported from this package", () => {
 		if (false as boolean) {
-			// @ts-expect-error — `ExchangeTokenValidator` is core's since #626 P1
+			// @ts-expect-error — `ExchangeTokenValidator` is core's, not re-exported here
 			type _V = import("#/index.mjs").ExchangeTokenValidator;
-			// @ts-expect-error — `ExchangeTokenValidationContext` is core's since #626 P1
+			// @ts-expect-error — `ExchangeTokenValidationContext` is core's, not re-exported here
 			type _C = import("#/index.mjs").ExchangeTokenValidationContext;
-			// @ts-expect-error — `ValidatedToken` is core's since #626 P1
+			// @ts-expect-error — `ValidatedToken` is core's, not re-exported here
 			type _T = import("#/index.mjs").ValidatedToken;
 		}
 		expect(true).toBe(true);

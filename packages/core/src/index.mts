@@ -222,6 +222,10 @@ export {
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
+	// Any other whole number read strictly from a number or a string of
+	// decimal digits a variable carries, for the packages outside core that
+	// declare a section's schema.
+	wholeNumberFromEnv,
 } from "./config/application.schema.mjs";
 // Transitional: the switches that choose a composition root's modules, read
 // before it knows them. `createApp` takes the resolved configuration itself,
@@ -401,6 +405,7 @@ export {
 	type PolicyAudienceOutcome,
 	type PolicyScopeCeiling,
 	policyOutOfBounds,
+	policyUnavailable,
 	readGrantPolicyDecision,
 } from "./grants/grantPolicy.mjs";
 // id_token generation (OIDC Core §2)
@@ -1122,6 +1127,11 @@ export {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./user-sessions/revokeAllForSubject.mjs";
+// How a SubjectRevocation store reads its arguments, and bounds a boundary by its clock.
+export {
+	checkSubjectRevocationInstant,
+	clampSubjectRevocationBoundary,
+} from "./user-sessions/subjectRevocationBoundary.mjs";
 export {
 	createSubjectRevocationService,
 	type FederationGrantDisposition,

@@ -56,6 +56,9 @@ export {
 	type FakeIdpOptions,
 	type FakeIdpRequest,
 } from "./fake-idp.mjs";
+// Client registrations as a registration file writes them, for an
+// `InMemoryClientRepository`, which fills the schema's defaults.
+export { clientEntries } from "./fixtures/clientEntries.mjs";
 export {
 	type FederationEntryForTests,
 	type FederationForTests,

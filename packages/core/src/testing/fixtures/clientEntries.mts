@@ -15,7 +15,10 @@
  */
 
 import type { z } from "zod";
-import type { ClientEntry, ClientEntrySchema } from "#/repositories/InMemoryClientRepository.mjs";
+import type {
+	ClientEntry,
+	ClientEntrySchema,
+} from "../../repositories/InMemoryClientRepository.mjs";
 
 /**
  * Client entries as a registration file gives them: the schema's input, its
