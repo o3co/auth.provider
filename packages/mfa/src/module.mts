@@ -473,6 +473,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						factors: deps.mfaFactorResolver,
 						factorStore: deps.mfaFactorStore,
 						witness,
+						leases: deps.mfaTransactionStore,
 					});
 					const requirements = checkResolver(
 						deps.sessionRequirementResolver,

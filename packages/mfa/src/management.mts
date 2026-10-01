@@ -30,7 +30,11 @@
  *   use as read; a lost race is `409`, nothing retried.
  * - `POST /factors/remove {factor_id}`, admitted as `mfa.manage`, run whole
  *   by `factorSet.mts` (the read, this file's refusal, the removal, the
- *   witness): under `required`, removing an installed counting factor is
+ *   witness), one write of the subject's at a time: another in the way past
+ *   its wait is `409 mfa_factors_busy` with `Retry-After`; a recovery or a
+ *   reset since it began, `409 mfa_factors_changed`, nothing removed; one
+ *   that ran past its hold, said at error, its removal audited and answered
+ *   `409 mfa_factors_changed`. Under `required`, removing an installed counting factor is
  *   refused `409` when no other usable counting record stands — one
  *   unreadable or `address_changed` does not. Audited `mfa.factor.removed`;
  *   a re-read that failed, and a witness clear that failed, are said at warn,
@@ -67,6 +71,14 @@ const LAST_FACTOR = errorEnvelope(
 	"mfa_last_factor",
 	"The last second factor that counts cannot be removed",
 );
+const FACTORS_BUSY = errorEnvelope(
+	"mfa_factors_busy",
+	"The account's second factors are being changed: try again",
+);
+const FACTORS_CHANGED = errorEnvelope(
+	"mfa_factors_changed",
+	"The account's second factors changed: read them again",
+);
 const FACTOR_CONFLICT = errorEnvelope(
 	"mfa_factor_conflict",
 	"The factor changed while it was renamed: try again",
@@ -99,10 +111,15 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 	const { factors, factorStore, factorSet, sealing, mode, admit, logger, auditSink } = options;
 	const router = express.Router();
 
-	/** A factor store's outage: logged once, answered `503`. */
-	const unavailable = (res: Response, step: string, cause: unknown): void => {
+	/** A store's outage: logged once, answered `503`. */
+	const unavailable = (
+		res: Response,
+		step: string,
+		cause: unknown,
+		store: "mfa_factor" | "mfa_transaction" = "mfa_factor",
+	): void => {
 		logger.error(
-			{ route: "factors", store: "mfa_factor", step, err: loggableError(cause) },
+			{ route: "factors", store, step, err: loggableError(cause) },
 			"mfa_store_unavailable",
 		);
 		res.status(503).json(MFA_UNAVAILABLE);
@@ -237,7 +254,14 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 					res.status(409).json(removal.refusal);
 					return;
 				case "unavailable":
-					unavailable(res, removal.step, removal.cause);
+					unavailable(res, removal.step, removal.cause, removal.store);
+					return;
+				case "busy":
+					res.set("Retry-After", "1");
+					res.status(409).json(FACTORS_BUSY);
+					return;
+				case "changed":
+					res.status(409).json(FACTORS_CHANGED);
 					return;
 				case "removed":
 					break;
@@ -267,6 +291,12 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 					{ sub: session.subject, err: loggableError(removal.witness.cause) },
 					"mfa_enrollment_witness_uncleared",
 				);
+			}
+			if (removal.overran === true) {
+				// The removal stands; a recovery or a reset may have run beside it.
+				logger.error({ route: "factors", sub: session.subject }, "mfa_subject_lease_overrun");
+				res.status(409).json(FACTORS_CHANGED);
+				return;
 			}
 			res.status(200).json({});
 		});
