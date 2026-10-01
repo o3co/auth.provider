@@ -244,7 +244,8 @@ export function webAuthnCredentialStoreContract(
 			const found = await store.findByCredentialId("cid-1");
 			const [listed] = await store.listByUserId("u-opaque-1");
 			for (const credential of [found, listed]) {
-				assert.deepEqual(credential?.transports, ["hybrid", "internal"]);
+				// The port promises the transports, not their order.
+				assert.deepEqual([...(credential?.transports ?? [])].sort(), ["hybrid", "internal"]);
 				assert.equal(credential?.backedUp, true);
 				assert.equal(credential?.nickname, "laptop");
 			}

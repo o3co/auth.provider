@@ -356,6 +356,27 @@ describe("the suite refuses a store that breaks the contract", () => {
 	});
 });
 
+describe("the suite accepts a store that keeps the contract", () => {
+	it("one that answers a credential's transports in another order", async () => {
+		const reversed = (credential: WebAuthnCredential): WebAuthnCredential => ({
+			...credential,
+			...(credential.transports === undefined
+				? {}
+				: { transports: [...credential.transports].reverse() }),
+		});
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				findByCredentialId: async (credentialId) => {
+					const found = await store.findByCredentialId(credentialId);
+					return found === null ? null : reversed(found);
+				},
+				listByUserId: async (userId) => (await store.listByUserId(userId)).map(reversed),
+			})),
+		);
+		expect(refused).toEqual([]);
+	});
+});
+
 describe("the suite's cases", () => {
 	it("are typed as core's ContractCase, which the kit re-exports", () => {
 		expectTypeOf(
