@@ -321,7 +321,7 @@ named `…Ms`. An optional field with no value is left out: `null` is never
 read. `id` is 22 base64url characters (16 random bytes); `kind` a hint token
 (`^[a-z][a-z0-9_-]{0,63}$`); `label` 1 to 64 characters, well formed, none of
 them one that breaks or reorders a line; `binding` is `password`,
-`email_proof` or `mfa`; `version` a safe non-negative integer; `data` a
+`email_proof`, `federated` or `mfa`; `version` a safe non-negative integer; `data` a
 string kept byte for byte. A record outside that shape is one the provider
 cannot read (core's `isMfaFactorId`, `isMfaFactorKind`, `isMfaFactorLabel`).
 
