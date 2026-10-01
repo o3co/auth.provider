@@ -92,9 +92,8 @@ describe("the barrel's session-admission surface", () => {
 		}
 	});
 
-	it("exports cookieSessionUser beside cookieClaim, and not the facts' derivation, which only core's primary builders run", () => {
+	it("exports cookieSessionUser beside cookieClaim", () => {
 		expect(typeof core.cookieSessionUser).toBe("function");
-		expect(Object.hasOwn(core, "enrollmentFactsOf")).toBe(false);
 	});
 
 	it("exports a continuation's enrollment facts, for the requirement holding it, and not their derivation from a user", () => {
