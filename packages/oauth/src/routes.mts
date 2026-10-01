@@ -502,16 +502,17 @@ export const createOAuthRouter = async (
 	}
 	const router = express.Router();
 
-	const { options, acrTable, canonicalIssuer, clientRepository } = resolveRouterSettings({
-		config,
-		authorizationEndpoint,
-		requirements,
-		getFederationProviders,
-		registeredClients,
-		consentStore,
-		clientIdMetadataDocumentSeams,
-		logger,
-	});
+	const { options, acrTable, canonicalIssuer, authorizationResponse, clientRepository } =
+		resolveRouterSettings({
+			config,
+			authorizationEndpoint,
+			requirements,
+			getFederationProviders,
+			registeredClients,
+			consentStore,
+			clientIdMetadataDocumentSeams,
+			logger,
+		});
 	const legacyTypAcceptOpt = options.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
@@ -562,6 +563,7 @@ export const createOAuthRouter = async (
 					auditSink,
 					logger,
 					issuer: canonicalIssuer,
+					authorizationResponse,
 					// The session module's login entry, required here.
 					login: requireLoginEntry(loginEntry),
 					// The consent page, `oauth.consentPage.url`, read per request. The
@@ -809,6 +811,7 @@ export const createOAuthRouter = async (
 				clientRepository,
 				auditSink,
 				logger,
+				authorizationResponse,
 				// The same reading `/authorize` makes, through admission with the
 				// same slots.
 				userSessionStore,

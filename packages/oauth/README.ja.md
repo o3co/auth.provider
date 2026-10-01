@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-10-01
+最終更新: 2026-10-02
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -126,7 +126,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `consentStore` が `pendingConsentStore` 無しで配線されたとき（またはその逆）、および `oauth.revocation.accessToken = "denylist"` を宣言して `accessTokenDenylist` が無いとき、ルーターは構築を拒否する — `createApp` 経由では boot の失敗になる。
 
-**ディスカバリー。** `oauthModule` は自分のエンドポイントとメタデータを core の `/.well-known/openid-configuration` に提供し、core は issuer が設定されているときだけそれを提供する。各機能は守れる場合にだけ広告される: `revocation_endpoint` はエンドポイントが何かを失効できるとき、`private_key_jwt` は `replaySeenSet` が配線されているとき、`client_id_metadata_document_supported` は機能が有効で同意ストアが配線され、`authorization_code` グラントが登録されているとき、ログアウトのフィールドは上の 6 スロットのチェックに従う。`grant_types_supported` は `/oauth/token` が振り分けに使う resolver から読み、authorization endpoint の有無も同じ resolver から読む: `authorization_code` グラントがあれば、ドキュメントはそれを示し、`response_types_supported: ["code"]`、`code_challenge_methods_supported: ["S256"]`、`request_uri_parameter_supported` と acr の表を広告する。無ければ `response_types_supported: []` で、残りはどれも出さない。規則はそれを計算している [`module.mts`](./src/module.mts) に書かれており、[`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts) で固定されている。
+**ディスカバリー。** `oauthModule` は自分のエンドポイントとメタデータを core の `/.well-known/openid-configuration` に提供し、core は issuer が設定されているときだけそれを提供する。各機能は守れる場合にだけ広告される: `revocation_endpoint` はエンドポイントが何かを失効できるとき、`private_key_jwt` は `replaySeenSet` が配線されているとき、`client_id_metadata_document_supported` は機能が有効で同意ストアが配線され、`authorization_code` グラントが登録されているとき、ログアウトのフィールドは上の 6 スロットのチェックに従う。`grant_types_supported` は `/oauth/token` が振り分けに使う resolver から読み、authorization endpoint の有無も同じ resolver から読む: `authorization_code` グラントがあれば、ドキュメントはそれを示し、`response_types_supported: ["code"]`、`code_challenge_methods_supported: ["S256"]`、`request_uri_parameter_supported`、`authorization_response_iss_parameter_supported: true` と acr の表を広告する。無ければ `response_types_supported: []` で、残りはどれも出さない。規則はそれを計算している [`module.mts`](./src/module.mts) に書かれており、[`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts) で固定されている。
 
 ## パブリック API
 
@@ -249,6 +249,8 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 - 比較は `matchesRegisteredRedirectUri`（`@o3co/auth-provider-core`）にあり、独自の認可エンドポイントがこれと同じやり方で照合できるよう export されている。
 
 **PKCE は必須で、方式は `S256`。** `plain` は登録に `allowPlainPkce: true` を持つクライアントにだけ許されるので、ディスカバリーは `S256` だけを載せる。PKCE は設定を取らない: `oauth.grants.authorization_code.pkce` と、設定されていれば値にかかわらず `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` は、削除されたものとして boot を拒否する。
+
+**どの認可レスポンスも自分の issuer を名乗る**（[RFC 9207](https://datatracker.ietf.org/doc/html/rfc9207)）。クライアントの `redirect_uri` へのリダイレクト — コード、`/oauth/authorize` のすべてのエラーリダイレクト、同意ステップの deny — はどれも `iss` を運ぶ。値はディスカバリードキュメントの `issuer` そのもの（core の `advertisedIssuer`: 設定された `oauth.jwt.issuer` から末尾のスラッシュを除いたもの）で、ディスカバリーは `authorization_response_iss_parameter_supported: true` でそれを示す。クライアントはそれを、リクエストを送った issuer と照合し、認可サーバーの取り違え（mix-up）を防ぐ。`redirect_uri` を信頼する前に返す `400` の JSON（未知のクライアント、登録されていない `redirect_uri`）はクライアントに届かないので運ばない。切り替えは無い: こうしたレスポンスはすべて 1 つの関数 [`routes/authorizationResponse.mts`](./src/routes/authorizationResponse.mts) が組み立てる。この関数は登録済みの `redirect_uri` が持つクエリの後ろに追加し、そのクエリを書き換えない。そのため、クエリがレスポンスのパラメーター名 — `code`、`state`、`iss`、`error`、`error_description` — を使う URI では、その名前が 2 つになり、`searchParams.get` で読むクライアントは登録された値を読むことになる。そうした URI は登録しないこと。core の redirect-URI の検査がそれを拒否することになっている（[#1034](https://github.com/o3co/auth.provider/issues/1034)）。
 
 **`prompt=none` に対応する。** セッションが無ければクライアントの `redirect_uri` で `login_required` を返す — 非表示の更新用 iframe はログインページを操作できないので、それが目的どおりである。セッションがあれば黙って進む。`none` を名指すが不正な形式の `prompt`（`none<TAB>`）や、`none` を他の値と組み合わせた `prompt` も無音のコンテキストから来るので、同じく `redirect_uri` で `invalid_request` を返し、ログインページには送らない。
 

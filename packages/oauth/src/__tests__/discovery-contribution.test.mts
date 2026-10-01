@@ -588,6 +588,7 @@ describe("a composition with no authorization_code grant", () => {
 		const meta = await headless();
 		expect(meta.metadata).not.toHaveProperty("code_challenge_methods_supported");
 		expect(meta.metadata).not.toHaveProperty("request_uri_parameter_supported");
+		expect(meta.metadata).not.toHaveProperty("authorization_response_iss_parameter_supported");
 	});
 
 	it("advertises no acr table: acr_values are asked for at /authorize", async () => {
@@ -610,5 +611,12 @@ describe("a composition with no authorization_code grant", () => {
 		expect(meta.endpoints?.authorization_endpoint).toBe("/oauth/authorize");
 		expect(meta.metadata?.response_types_supported).toEqual(["code"]);
 		expect(meta.metadata?.code_challenge_methods_supported).toEqual(["S256"]);
+	});
+
+	it("with the grant, advertises that every authorization response carries iss (RFC 9207)", async () => {
+		const meta = await discoveryContribution({
+			grantHandlerResolver: grantResolver("authorization_code"),
+		});
+		expect(meta.metadata?.authorization_response_iss_parameter_supported).toBe(true);
 	});
 });

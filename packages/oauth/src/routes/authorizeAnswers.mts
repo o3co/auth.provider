@@ -43,11 +43,12 @@ export const redirectError = (
 	error: string,
 	errorDescription: string,
 ): Response => {
-	const url = new URL(ctx.redirectUri);
-	url.searchParams.append("error", error);
-	url.searchParams.append("error_description", sanitizeErrorText(errorDescription));
-	if (typeof ctx.state === "string") url.searchParams.append("state", ctx.state);
-	return ctx.res.redirect(url.toString()) as unknown as Response;
+	const location = ctx.opts.authorizationResponse(
+		ctx.redirectUri,
+		{ error, error_description: sanitizeErrorText(errorDescription) },
+		ctx.state,
+	);
+	return ctx.res.redirect(location) as unknown as Response;
 };
 
 /**
