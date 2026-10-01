@@ -18,7 +18,9 @@
  * The consent question parked for this browser: the one reader behind `GET` and
  * `POST /consent`, so the page learns nothing on `GET` that the answer would then
  * refuse, and `GET /consent`'s data. A challenge with nothing behind it for this
- * browser, whatever the reason, gets the one indistinguishable answer.
+ * browser, whatever the reason, gets the one indistinguishable answer. Every
+ * `503` it answers is audited as `federation.grant.authorization_failed` with the
+ * outcome `unavailable`, naming the flow only once its intent has been read.
  */
 
 import {
@@ -74,6 +76,8 @@ export const pendingFor = async (
 			},
 			error,
 		);
+		// Nothing read names a flow yet: the audit carries this request alone.
+		failed(req, res, "unavailable");
 		jsonError(res, 503, "temporarily_unavailable", "storage");
 		return null;
 	}
@@ -143,7 +147,7 @@ export const pendingFor = async (
 
 /** `GET /consent`: what the page shows the user, as data. */
 export function createPendingConsentHandler(flow: BrowserFlow): RequestHandler {
-	const { options, now, log } = flow;
+	const { options, now, log, failed } = flow;
 	return async (req, res) => {
 		try {
 			const found = await pendingFor(flow, req, res, req.query.challenge);
@@ -154,6 +158,7 @@ export function createPendingConsentHandler(flow: BrowserFlow): RequestHandler {
 				client = await options.clientRepository.findById(intent.clientId);
 			} catch (error) {
 				log.clientRepositoryUnavailable("federation_grant_consent", intent.clientId, error);
+				failed(req, res, "unavailable", intent);
 				jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
 				return;
 			}
