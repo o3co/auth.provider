@@ -48,6 +48,7 @@ import {
 	directoryEntries,
 	disposeAll,
 	events,
+	modulesFor,
 	refusal,
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
@@ -543,6 +544,64 @@ describe("resetMfaForSubject", () => {
 		});
 	});
 
+	it("answers an incomplete report, audited, when a revocation answers no report or one whose read throws", async () => {
+		for (const answer of [
+			null,
+			{
+				get complete(): boolean {
+					throw new Error("a lazy field could not load");
+				},
+			},
+		]) {
+			for (const which of [0, 1]) {
+				const service = revocationService();
+				if (which === 0) service.revokeAllForSubject.mockResolvedValueOnce(answer as never);
+				else {
+					service.revokeAllForSubject
+						.mockResolvedValueOnce(revocationReport())
+						.mockResolvedValueOnce(answer as never);
+				}
+				const { reset, audit } = await setup({ service });
+
+				const report = await reset.resetMfaForSubject(ALICE.id);
+
+				expect(report).toMatchObject({ complete: false, stoppedAt: "sessions" });
+				expect(audit.of("mfa.reset")).toHaveLength(1);
+			}
+		}
+	});
+
+	it("still answers its report, counting the records removed, when a record listed has no readable kind", async () => {
+		for (const odd of [
+			null,
+			{
+				get kind(): string {
+					throw new Error("a lazy field could not load");
+				},
+			},
+		]) {
+			const factorStore = createMemoryMfaFactorStore();
+			vi.spyOn(factorStore, "list").mockResolvedValue([odd] as never);
+			const { reset, audit } = await setup({ factorStore });
+
+			const report = await reset.resetMfaForSubject(ALICE.id);
+
+			expect(report).toMatchObject({ complete: true, removed: { kinds: [], count: 1 } });
+			expect(audit.of("mfa.reset")).toHaveLength(1);
+		}
+	});
+
+	it("takes a lease owner only over a whole Store timeout from 1 ms: one that is no such number is refused", () => {
+		for (const storeTimeoutMs of [Number.NaN, 0, -1, 1.5, "1000"]) {
+			expect(() =>
+				createMfaSubjectLeases({
+					store: createMemoryMfaTransactionStore(),
+					storeTimeoutMs: storeTimeoutMs as number,
+				}),
+			).toThrow(RangeError);
+		}
+	});
+
 	it("stops, the witness left, when the records cannot be removed", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		vi.spyOn(factorStore, "removeAllForSubject").mockRejectedValue(new Error("down"));
@@ -687,6 +746,47 @@ describe("mfaResetModule", () => {
 		expect(apply.mock.invocationCallOrder[0]).toBeGreaterThan(
 			removed.mock.invocationCallOrder[0] as number,
 		);
+	});
+
+	it("refuses the boot when a composition substitutes the lease owner mfaModule provides", async () => {
+		const config = configFor("required");
+		const composed = modulesFor({
+			config,
+			extraModules: [mfaResetModule, providingService(revocationService())],
+		});
+		let refused: unknown;
+		try {
+			const handle = await createApp({
+				modules: composed.modules,
+				bootstrapComponents: { config, pathResolver: (s: string) => s } as never,
+				overrideComponents: {
+					mfaSubjectLeases: createMfaSubjectLeases({
+						store: composed.transactionStore,
+						storeTimeoutMs: 1_000,
+					}),
+				} as never,
+			});
+			await handle.dispose();
+		} catch (err) {
+			refused = err;
+		}
+
+		expect(refused).toBeInstanceOf(BootError);
+		expect((refused as BootError).message).toContain("mfaSubjectLeases");
+	});
+
+	it("refuses the boot when the subject revocation service provided is no service", async () => {
+		const refused = await refusal({
+			extraModules: [
+				mfaResetModule,
+				defineModule({
+					name: "test:subject-revocation-service",
+					provides: { subjectRevocationService: () => undefined } as never,
+				}),
+			],
+		});
+
+		expect(refused.message).toContain("mfa-reset");
 	});
 
 	it("refuses the boot without a subject revocation service", async () => {
