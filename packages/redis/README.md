@@ -804,8 +804,10 @@ are in flight it may hold more than five; only a step that failed leaves an
 excess, until it expires. A create refused at its index step has already
 written its transaction. An eviction that fails is warned
 (`mfa_transaction_evict_failed`) and the create still answers; a member that
-cannot leave is warned (`mfa_transaction_unindex_failed`) and counts until its
-transaction's expiry, so a later create may end a live one early meanwhile.
+cannot leave is warned (`mfa_transaction_unindex_failed`) and counts toward the
+cap until it is taken out: while live members expire sooner, a later create
+ends one of them first, so a live one may go early; once its transaction's
+expiry has passed, it goes first.
 The bound is the store managing the state the Provider owns; abuse and DoS
 defence stay outside the Provider, and the login path is bounded by the login
 limiter and a correct password, not by this cap.

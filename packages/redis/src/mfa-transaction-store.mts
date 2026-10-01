@@ -73,14 +73,18 @@
  * the one it would have ended. A member that failed to leave (warned,
  * `mfa_transaction_unindex_failed`), or one added after its transaction was
  * already consumed (a consume landing between a create's write and its index
- * step, which no caller can do before `create` hands it the id), scores late
- * and counts for a transaction that is gone until its deadline: meanwhile a
- * create past the cap may end a live transaction early. A server whose clock
- * runs ahead of the callers' by more than a transaction's lifetime finds
- * every deadline in an index past, so `PEXPIREAT` drops the index as it is
- * written and the binding goes unbounded while that lasts, each transaction
- * still ending at its own expiry: callers' clocks and the server's must
- * agree (NTP).
+ * step, which no caller can do before `create` hands it the id), keeps its
+ * transaction's score and counts toward the cap until the index takes it
+ * out: while live members expire sooner, a create past the cap ends one of
+ * them first, so a live transaction may go early; once its transaction's
+ * expiry has passed it sorts before every live member and goes first. A
+ * Redis server whose clock runs ahead of the callers' by more than a
+ * transaction's lifetime expires what it is written at once: on one server
+ * the transaction too, so the create leaves nothing; on Cluster, an index
+ * node ahead of the transactions' nodes drops the index while the
+ * transactions stand, and the binding goes unbounded while that lasts, each
+ * transaction still ending at its own expiry. Callers' clocks and the
+ * servers' must agree (NTP).
  *
  * A transaction is written and read back through core's
  * `newMfaTransactionRecord`, so it has the in-process store's shape and rules.
@@ -444,10 +448,10 @@ export function createRedisMfaTransactionStore(
 	/**
 	 * Takes a transaction already gone out of its binding's index. Best
 	 * effort: the operation that removed it has answered, and must keep its
-	 * answer. A member that fails to leave is warned, and counts for a
-	 * transaction that is gone until its `expiresAtMs`: it scores late, so it
-	 * is not taken out first, and meanwhile a create past the cap may end a
-	 * live transaction early. Its own eviction deletes nothing (the
+	 * answer. A member that fails to leave is warned, and counts toward the
+	 * cap until the index takes it out: while live members expire sooner, a
+	 * create past the cap ends one of them first; once its transaction's
+	 * expiry has passed, it goes first. Its own eviction deletes nothing (the
 	 * incarnation is gone).
 	 */
 	const unindex = async (
