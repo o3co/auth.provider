@@ -15,10 +15,10 @@
  */
 
 /**
- * Session admission's entry point, where core's drift guards pin it: the claim
- * builders, `admitSession` running its steps in order, and a login's
- * decisions. Product code calls `selectAcr` here alone, over the vouched `amr`,
- * so a value an untrusted IdP asserted in a pre-upgrade session meets no `acr`.
+ * Session admission's entry point: the claim builders, `admitSession` running
+ * its steps in order, and a login's decisions. Product code calls `selectAcr`
+ * here alone, over the vouched `amr`, so a value an untrusted IdP asserted in
+ * a pre-upgrade session meets no `acr`.
  */
 
 import {
@@ -49,7 +49,7 @@ import {
 	frozenUserCopy,
 	primaryFromDto,
 } from "./primary.mjs";
-import { checkRequest, claim } from "./request-check.mjs";
+import { brandClaim, checkRequest } from "./request-check.mjs";
 import type {
 	Admission,
 	AdmissionDeps,
@@ -103,7 +103,7 @@ export function cookieClaim(req: CookieCarrier): SessionClaim {
 	if (!isObject(req)) throw new RangeError("cookieClaim: the request must be an object");
 	const session = isObject(req.session) ? req.session : undefined;
 	const user = session !== undefined && isObject(session.user) ? session.user : undefined;
-	return claim({
+	return brandClaim({
 		authenticated: session?.isAuthenticated === true,
 		sid: nonEmptyString(session?.sid),
 		subject: nonEmptyString(user?.id),
@@ -149,7 +149,7 @@ export function codeClaimFirstRead(code: CodeCarrier): SessionClaim {
 	if (!isObject(code)) {
 		throw new RangeError("codeClaimFirstRead: the code record must be an object");
 	}
-	return claim({
+	return brandClaim({
 		authenticated: true,
 		sid: nonEmptyString(code.sid),
 		subject: undefined,
@@ -171,7 +171,7 @@ export function codeClaimRevalidation(code: CodeCarrier, subject: string): Sessi
 			"codeClaimRevalidation: the first read's subject must be a non-empty string",
 		);
 	}
-	return claim({
+	return brandClaim({
 		authenticated: true,
 		sid: nonEmptyString(code.sid),
 		subject,
@@ -197,7 +197,7 @@ export function linkClaim(link: LinkCarrier): SessionClaim {
 	if (sid === undefined || subject === undefined) {
 		throw new RangeError("linkClaim: the transaction must record a sid and a subject");
 	}
-	return claim({ authenticated: true, sid, subject, carrier: "link" } as SessionClaim);
+	return brandClaim({ authenticated: true, sid, subject, carrier: "link" } as SessionClaim);
 }
 
 /** What a token claim is built from: a verified token's claims. */
@@ -218,7 +218,7 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 	const subject = nonEmptyString(claims.sub);
 	if (subject === undefined) throw new RangeError("tokenClaim: the token must carry a sub");
 	const tokenAmr = wellFormedAmr(claims.amr);
-	return claim({
+	return brandClaim({
 		authenticated: true,
 		sid: nonEmptyString(claims.sid),
 		subject,

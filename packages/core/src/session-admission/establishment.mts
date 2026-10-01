@@ -52,7 +52,11 @@ export function isInterruptAdmission(value: unknown): value is InterruptAdmissio
 	return typeof value === "object" && value !== null && knownInterruptions.has(value);
 }
 
-/** Builds and brands the `Establishment` of `primary`: the one `isEstablishment` accepts. */
+/**
+ * Builds and brands the `Establishment` of `primary`: the one `isEstablishment`
+ * accepts. Called only by `admit.mts` (`establishWithoutAsking`) and by
+ * `askEvery`, once every requirement answered `establish`.
+ */
 export const establish = (primary: PrimaryAuthentication): Establishment => {
 	const built = Object.freeze({ primary });
 	knownEstablishments.add(built);
@@ -78,6 +82,8 @@ const unavailableAtEstablishment = (
  * login, whatever it added. The first interruption wins, carrying the
  * continuation and an `open` that validates the answer. A throw, or an
  * answer that is neither `establish` nor an interruption, is `unavailable`.
+ * Called only by `admit.mts` (`admitPrimary`, `resumePrimary`), after its
+ * checks of the primary.
  */
 export async function askEvery(
 	deps: AdmissionDeps,

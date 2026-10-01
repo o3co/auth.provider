@@ -37,11 +37,14 @@ import {
 } from "./requirement.mjs";
 import { checkResolver } from "./requirement-resolver.mjs";
 
-/** The claims `claim` branded: the ones the claim builders made. */
+/** The claims `brandClaim` branded: the ones the claim builders made. */
 const knownClaims = new WeakSet<object>();
 
-/** Freezes and brands a claim a builder made, so `checkRequest` accepts it. */
-export const claim = (fields: Omit<SessionClaim, never>): SessionClaim => {
+/**
+ * Freezes and brands a claim a builder made, so `checkRequest` accepts it.
+ * Called only by `admit.mts`'s claim builders.
+ */
+export const brandClaim = (fields: Omit<SessionClaim, never>): SessionClaim => {
 	const built = Object.freeze({ ...fields });
 	knownClaims.add(built);
 	return built;
