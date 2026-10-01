@@ -18,7 +18,8 @@
  * The login's MFA transaction: opened after the login route regenerated the
  * express session, bound to that session's id, carrying the continuation core
  * built (never a `user` or `primary` field of its own), and living
- * `mfa.transactionTtlSeconds`, its expiry derived from that alone. See ADR
+ * `mfa.transactionTtlSeconds`, its expiry derived from that alone; and a
+ * signed-in session's step-up transaction. See ADR
  * 2026-09-25-multi-factor-authentication, as ADR 2026-09-28-session-admission
  * amends it.
  */
@@ -30,7 +31,11 @@ import {
 	passwordSessionAuthentication,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import { createLoginTransactions, openLoginBinding } from "#/transactions.mjs";
+import {
+	createLoginTransactions,
+	openLoginBinding,
+	openStepUpTransaction,
+} from "#/transactions.mjs";
 
 const NOW = 1_900_000_000_000;
 
@@ -277,5 +282,54 @@ describe("a login's transaction reopened for a binding", () => {
 		await expect(
 			openLoginBinding(store, { ...shape, enrollment: "required", emailProof: false }),
 		).rejects.toThrow("down");
+	});
+});
+
+describe("a session's step-up transaction", () => {
+	it("is opened bound to the browser session, recording the session's sid and subject and the acr values hinted, owing no proof, for mfa.transactionTtlSeconds", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const tx = await openStepUpTransaction(store, {
+			sessionId: "sess-browser",
+			sid: "sid-1",
+			subject: "u-alice",
+			acrValues: ["urn:o3co:acr:mfa"],
+			nowMs: NOW,
+			ttlSeconds: 600,
+		});
+		expect(tx.id).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(await store.get(tx.id)).toEqual({
+			id: tx.id,
+			purpose: "step_up",
+			binding: { kind: "session", id: "sess-browser" },
+			subject: "u-alice",
+			sid: "sid-1",
+			continuation: undefined,
+			redirectTo: undefined,
+			enrollment: "none",
+			emailProof: "not_required",
+			acrValues: ["urn:o3co:acr:mfa"],
+			challenge: undefined,
+			pendingEnrollment: undefined,
+			attempts: 0,
+			createdAtMs: NOW,
+			expiresAtMs: NOW + 600_000,
+			version: 0,
+		});
+	});
+
+	it("records no acr values when none were hinted, and rejects when the store cannot keep it", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const shape = {
+			sessionId: "sess-browser",
+			sid: "sid-1",
+			subject: "u-alice",
+			acrValues: undefined,
+			nowMs: NOW,
+			ttlSeconds: 600,
+		};
+		const tx = await openStepUpTransaction(store, shape);
+		expect((await store.get(tx.id))?.acrValues).toBeUndefined();
+		vi.spyOn(store, "create").mockRejectedValue(new Error("store unreachable"));
+		await expect(openStepUpTransaction(store, shape)).rejects.toThrow("store unreachable");
 	});
 });
