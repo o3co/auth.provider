@@ -39,6 +39,7 @@ import {
 	type Logger,
 	type LoginEntry,
 	type PublicClient,
+	policyUnavailable,
 	type SessionAuthentication,
 	type UserSession,
 	type UserSessionStore,
@@ -927,6 +928,107 @@ describe("/authorize — policy evaluation edges", () => {
 		const params = redirectParams(res);
 		expect(params.get("error")).toBe("access_denied");
 		expect(params.get("error_description")).toBe("policy denied");
+	});
+});
+
+describe("/authorize — the grant policy's refusals, audited", () => {
+	/** A policy answering `decision`, with a spy audit sink. */
+	const withPolicy = async (evaluate: GrantPolicyHook["evaluate"]) => {
+		const record = vi.fn(async (_event: AuditEvent) => {});
+		const { app, createCode } = await makeApp({
+			auditSink: { kind: "spy", record },
+			grantPolicy: { kind: "test-policy", evaluate },
+		});
+		const params = redirectParams(await authorize(app, baseQuery));
+		const audited = record.mock.calls
+			.map(([event]) => event)
+			.filter((event) => event.type.startsWith("authorize."))
+			.map(({ type, clientId, details }) => ({ type, clientId, details }));
+		return { params, audited, createCode };
+	};
+
+	it("audits a deny as authorize.rejected, reason policy_denied, with the code the redirect carries", async () => {
+		const { params, audited, createCode } = await withPolicy(async () => ({
+			outcome: "deny" as const,
+			error: "access_denied",
+			errorDescription: "not for you",
+		}));
+		expect(Object.fromEntries(params)).toEqual({
+			error: "access_denied",
+			error_description: "not for you",
+			state: "xyz",
+		});
+		expect(createCode).not.toHaveBeenCalled();
+		expect(audited).toEqual([
+			{
+				type: "authorize.rejected",
+				clientId: CLIENT_ID,
+				details: { reason: "policy_denied", error: "access_denied" },
+			},
+		]);
+	});
+
+	it("audits a deny whose code is malformed with the access_denied the redirect carries instead", async () => {
+		const { params, audited } = await withPolicy(async () => ({
+			outcome: "deny" as const,
+			error: 'bad "code"',
+		}));
+		expect(params.get("error")).toBe("access_denied");
+		expect(audited).toEqual([
+			{
+				type: "authorize.rejected",
+				clientId: CLIENT_ID,
+				details: { reason: "policy_denied", error: "access_denied" },
+			},
+		]);
+	});
+
+	it.each([
+		[
+			"a non-array grantedScope",
+			{ outcome: "allow", grantedScope: "read" },
+			/non-array grantedScope/,
+		],
+		[
+			"a scope outside the client's allowance",
+			{ outcome: "allow", grantedScope: ["admin"] },
+			/outside client allowance: admin/,
+		],
+		[
+			"an audience past the client's ceiling",
+			{ outcome: "allow", grantedAudience: ["https://elsewhere.example"] },
+			/.+/,
+		],
+	])(
+		"audits a decision with %s as authorize.rejected, reason policy_out_of_bounds",
+		async (_label, decision, description) => {
+			const { params, audited, createCode } = await withPolicy(
+				async () => decision as unknown as GrantPolicyDecision,
+			);
+			expect(params.get("error")).toBe("server_error");
+			expect(params.get("error_description")).toMatch(description);
+			expect(createCode).not.toHaveBeenCalled();
+			expect(audited).toEqual([
+				{
+					type: "authorize.rejected",
+					clientId: CLIENT_ID,
+					details: { reason: "policy_out_of_bounds" },
+				},
+			]);
+		},
+	);
+
+	it("answers a policy that throws with core's policyUnavailable() on the redirect", async () => {
+		const { params, createCode } = await withPolicy(async () => {
+			throw new Error("decision service down");
+		});
+		const { error, errorDescription } = policyUnavailable();
+		expect(Object.fromEntries(params)).toEqual({
+			error,
+			error_description: errorDescription,
+			state: "xyz",
+		});
+		expect(createCode).not.toHaveBeenCalled();
 	});
 });
 
