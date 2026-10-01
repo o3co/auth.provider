@@ -152,20 +152,20 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 		["not an object", "pwd"],
 		["no subject", { subject: "" }],
 		["a user that is not an object", { user: "alice" }],
-		["a user that cannot be copied", { user: { f: () => 1 } }],
-		["a user holding a Date", { user: { id: "user-1", joined: new Date(0) } }],
-		["a user holding a Map", { user: { id: "user-1", roles: new Map() } }],
+		["a user without an id", { user: { username: "alice" } }],
+		["a user whose email is a function", { user: { id: "user-1", email: () => "a@example.com" } }],
+		["a user whose witness is a Date", { user: { id: "user-1", mfaEnrolled: new Date(0) } }],
+		["a user whose groups hold a Map", { user: { id: "user-1", groups: [new Map()] } }],
 		[
-			"a user that is a class instance",
+			"a user whose email is a class instance",
 			{
-				user: new (class User {
-					id = "user-1";
-				})(),
+				user: {
+					id: "user-1",
+					email: new (class Address {
+						value = "a@example.com";
+					})(),
+				},
 			},
-		],
-		[
-			"a user with a field it does not enumerate",
-			{ user: Object.defineProperty({ id: "user-1" }, "mfaEnrolled", { value: true }) },
 		],
 		["no recorded", { recorded: undefined }],
 		["an empty amr", { recorded: { amr: [], authentication: primary().recorded.authentication } }],

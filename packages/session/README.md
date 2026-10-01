@@ -502,10 +502,12 @@ from the `User` (the MFA enrollment witness and what its address is — none,
 one the provider reads, or one it cannot — never the address), and the `redirectTo`; nothing a caller passes
 beside it. Anything that is not an `Establishment` core built —
 an object shaped like one, a copy of one — is a `RangeError` before anything
-is written. On both paths core copies the `User` into the primary with
-`structuredClone`, so a Store's `toJSON` is not applied and a value that
-cannot be copied (a function) refuses the login with nothing written (`500`):
-a `UserRepository` returns plain data. It runs, in order: the
+is written. On both paths core reads the `User` into the primary by name, once, as a
+plain snapshot — each field `User` declares however the object holds it, so a
+class instance with getters or an ORM entity logs in, then each other own
+enumerable field — and a Store's `toJSON` is not applied. A `User` core
+refuses (an `id` that is not a non-empty string, a declared field holding
+what is not plain data) refuses the login with nothing written (`500`). It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session-store.maxAge` after
 `authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the

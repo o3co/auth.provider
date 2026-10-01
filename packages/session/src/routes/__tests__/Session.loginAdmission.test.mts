@@ -420,14 +420,15 @@ describe("POST /session/login — every requirement answers establish", () => {
 // A primary core cannot build
 // ---------------------------------------------------------------------------
 
-describe("POST /session/login — a user core cannot copy into the primary", () => {
+describe("POST /session/login — a user whose field the login needs is not plain data", () => {
 	it("is refused before any requirement is asked and before anything is written: the route's error, answered 500", async () => {
-		// `passwordPrimary` holds a structured-clone copy of the user, so a
-		// value that cannot be copied — a function — is a RangeError there.
+		// `passwordPrimary` reads the user into a plain snapshot: a field the
+		// login needs that is not plain data — a witness that is a Date — is a
+		// RangeError there, since the snapshot would read it as not enrolled.
 		const { requirement, asked } = fixture(() => "establish");
 		const { app, userSessionStore, trace } = setup({
 			requirements: [requirement],
-			user: { ...ALICE, greet: () => "hello" },
+			user: { ...ALICE, mfaEnrolled: new Date(0) },
 		});
 
 		const res = await login(app);

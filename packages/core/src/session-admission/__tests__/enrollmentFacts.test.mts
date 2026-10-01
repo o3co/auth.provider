@@ -224,7 +224,10 @@ const bothLogins = (user: unknown) => [
 
 describe("a user is read by name — each field the login needs, once, into a plain snapshot", () => {
 	const SHAPES: ReadonlyArray<readonly [string, () => unknown]> = [
-		["a class instance whose fields are prototype getters", () => new GetterUser("alice@example.com")],
+		[
+			"a class instance whose fields are prototype getters",
+			() => new GetterUser("alice@example.com"),
+		],
 		[
 			"an ORM entity, its columns prototype getters over an internal record",
 			() =>
@@ -426,12 +429,32 @@ describe("a malformed user — still refused before anything is derived from it"
 	// from it, and the witness read as not enrolled: refused, not dropped.
 	const MALFORMED: ReadonlyArray<readonly [string, () => unknown, RegExp]> = [
 		["no object", () => "user-1", /user must be an object/],
-		["no id", () => ({ username: "alice", mfaEnrolled: true }), /user\.id must be a non-empty string/],
+		[
+			"no id",
+			() => ({ username: "alice", mfaEnrolled: true }),
+			/user\.id must be a non-empty string/,
+		],
 		["an id that is not a string", () => ({ id: 1 }), /user\.id must be a non-empty string/],
-		["a witness that is a Date", () => ({ id: "user-1", mfaEnrolled: new Date(0) }), /user\.mfaEnrolled must be plain data/],
-		["a witness that is a function", () => ({ id: "user-1", mfaEnrolled: () => true }), /user\.mfaEnrolled must be plain data/],
-		["an email that is a class instance", () => ({ id: "user-1", email: new Row() }), /user\.email must be plain data/],
-		["groups holding a Map", () => ({ id: "user-1", groups: [new Map()] }), /user\.groups must be plain data/],
+		[
+			"a witness that is a Date",
+			() => ({ id: "user-1", mfaEnrolled: new Date(0) }),
+			/user\.mfaEnrolled must be plain data/,
+		],
+		[
+			"a witness that is a function",
+			() => ({ id: "user-1", mfaEnrolled: () => true }),
+			/user\.mfaEnrolled must be plain data/,
+		],
+		[
+			"an email that is a class instance",
+			() => ({ id: "user-1", email: new Row() }),
+			/user\.email must be plain data/,
+		],
+		[
+			"groups holding a Map",
+			() => ({ id: "user-1", groups: [new Map()] }),
+			/user\.groups must be plain data/,
+		],
 		[
 			"an ORM entity whose witness column holds a Date",
 			() => ormEntity({ id: "user-1", mfaEnrolled: new Date(0) }),
