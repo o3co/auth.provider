@@ -393,14 +393,17 @@ export function createMemoryMfaTransactionStore(
 
 	/**
 	 * A `recover` of `state` at `nowMs`, past its authorization: what it ends,
-	 * or the refusal. The week's earliest failure it still counts must come
-	 * before the sessions boundary by more than the skew. While the hard hold
-	 * stands, the run it counted stays.
+	 * or the refusal. The week is given back when its earliest failure up to
+	 * `nowMs` comes before the sessions boundary by more than the skew. The
+	 * hard hold is lifted on a rebind (no guessable record from before it, by
+	 * more than the skew), ending the run it counted; while it stands, that
+	 * run stays.
 	 */
 	function recover(
 		state: SubjectState | undefined,
 		nowMs: number,
 		sessionsBoundaryMs: number | undefined,
+		guessableBoundSinceMs: number | undefined,
 	):
 		| { readonly week: boolean; readonly run: boolean; readonly hard: boolean }
 		| "not_revoked_since" {
@@ -411,16 +414,28 @@ export function createMemoryMfaTransactionStore(
 		const revokedSince =
 			counted.length === 0 ||
 			(sessionsBoundaryMs !== undefined && sessionsBoundaryMs > earliest + DEFAULT_CLOCK_SKEW_MS);
-		if (!revokedSince) return "not_revoked_since";
+		const hard = state?.hard;
+		const rebound =
+			hard !== undefined &&
+			(guessableBoundSinceMs === undefined || guessableBoundSinceMs > hard + DEFAULT_CLOCK_SKEW_MS);
+		if (!revokedSince && !rebound) return "not_revoked_since";
 		if (state === undefined) return { week: true, run: true, hard: false };
-		state.week = state.week.filter((a) => a.atMs > nowMs);
-		const run = state.hard === undefined;
-		if (run) {
-			state.run = state.run.filter((a) => a.atMs > nowMs);
-			state.refusing = false;
+		let run = false;
+		if (rebound) {
+			delete state.hard;
+			state.run = [];
+			run = true;
 		}
+		if (revokedSince) {
+			state.week = state.week.filter((a) => a.atMs > nowMs);
+			if (state.hard === undefined) {
+				state.run = state.run.filter((a) => a.atMs > nowMs);
+				run = true;
+			}
+		}
+		if (state.hard === undefined) state.refusing = false;
 		prune(state, nowMs);
-		return { week: true, run, hard: false };
+		return { week: revokedSince, run, hard: rebound };
 	}
 
 	function makeRoom(nowMs: number): void {
@@ -739,7 +754,7 @@ export function createMemoryMfaTransactionStore(
 		},
 
 		async applySubjectRecovery(subject, application): Promise<MfaSubjectRecoveryAnswer> {
-			const { operation, sid, nowMs, leaseToken, sessionsBoundaryMs } =
+			const { operation, sid, nowMs, leaseToken, sessionsBoundaryMs, guessableBoundSinceMs } =
 				checkSubjectRecoveryApplication(subject, application);
 			sawCallerTime(nowMs);
 			const storeNowMs = clock();
@@ -774,7 +789,7 @@ export function createMemoryMfaTransactionStore(
 				return refused("boundary_ahead");
 			}
 			const state = subjects.get(subject);
-			const cleared = recover(state, nowMs, sessionsBoundaryMs);
+			const cleared = recover(state, nowMs, sessionsBoundaryMs, guessableBoundSinceMs);
 			if (cleared === "not_revoked_since") return refused(cleared);
 			if (state !== undefined) settleEmpty(subject, state);
 			const generation = (generations.get(subject) ?? 0) + 1;

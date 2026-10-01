@@ -518,8 +518,9 @@ end
 if slot.applied ~= nil then return {'already', slot.id, slot.applied, hard_flag()} end
 if slot.ends <= now then return refused('expired') end
 
-local boundary = nil
+local boundary, since = nil, nil
 if ARGV[5] ~= '' then boundary = tonumber(ARGV[5]) end
+if ARGV[6] ~= '' then since = tonumber(ARGV[6]) end
 if boundary ~= nil and boundary > now + skew then return refused('boundary_ahead') end
 local run, pending, week, held_hard = load()
 
@@ -528,25 +529,38 @@ local earliest = nil
 for _, a in ipairs(week) do
   if a.at <= now and a.at + WEEK > now and (earliest == nil or a.at < earliest) then earliest = a.at end
 end
-if not (earliest == nil or (boundary ~= nil and boundary > earliest + skew)) then
-  return refused('not_revoked_since')
-end
+local revoked = earliest == nil or (boundary ~= nil and boundary > earliest + skew)
+-- The hard hold lifts on a rebind alone: no guessable record from before it, by more than the skew.
+local rebound = held_hard ~= nil and (since == nil or since > held_hard + skew)
+if not revoked and not rebound then return refused('not_revoked_since') end
 
--- The attempts up to now end: the week's, and the run's unless the hard hold keeps it.
-local kept = {}
-for _, a in ipairs(week) do
-  if a.at <= now then redis.call('ZREM', KEYS[2], a.id) else kept[a.id] = true end
+local ended_week, ended_run, lifted = '0', '0', '0'
+if rebound then
+  -- The run the hold counted ends with it, its backoff included.
+  redis.call('HDEL', KEYS[1], 'hard')
+  for _, a in ipairs(run) do redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
+  run, held_hard = {}, nil
+  ended_run, lifted = '1', '1'
 end
-local ended_run = '0'
-if held_hard == nil then
-  for _, a in ipairs(run) do
-    if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) else kept[a.id] = true end
+if revoked then
+  -- The attempts up to now end: the week's, and the run's unless the hard hold keeps it.
+  local week_left = {}
+  for _, a in ipairs(week) do
+    if a.at <= now then redis.call('ZREM', KEYS[2], a.id) else week_left[#week_left + 1] = a end
   end
-  redis.call('HDEL', KEYS[1], 'held')
-  ended_run = '1'
-else
-  for _, a in ipairs(run) do kept[a.id] = true end
+  week, ended_week = week_left, '1'
+  if held_hard == nil then
+    local run_left = {}
+    for _, a in ipairs(run) do
+      if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) else run_left[#run_left + 1] = a end
+    end
+    run, ended_run = run_left, '1'
+  end
 end
+if held_hard == nil then redis.call('HDEL', KEYS[1], 'held') end
+local kept = {}
+for _, a in ipairs(run) do kept[a.id] = true end
+for _, a in ipairs(week) do kept[a.id] = true end
 for id in pairs(pending) do
   if not kept[id] then redis.call('HDEL', KEYS[1], 'p:' .. id) end
 end
@@ -555,7 +569,7 @@ keep()
 local gen = string.format('%.0f', redis.call('HINCRBY', KEYS[3], 'g', 1))
 redis.call('HSET', KEYS[3], field, 'a|' .. gen .. '|' .. string.format('%.0f', slot.ends) .. '|' .. slot.id)
 recovery_keep(KEYS[3], allowance)
-return {'applied', slot.id, gen, '1', ended_run, '0', hard_flag()}
+return {'applied', slot.id, gen, ended_week, ended_run, lifted, hard_flag()}
 `;
 
 // A subject's first-binding mark is judged on one clock, the server's (`TIME`): its end, which

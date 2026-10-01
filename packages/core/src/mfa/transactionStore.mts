@@ -1398,8 +1398,13 @@ export interface MfaTransactionStore {
 	 *   failure by more than `DEFAULT_CLOCK_SKEW_MS`, and no hard hold is
 	 *   lifted.
 	 *
-	 * A `recover` that passes ends the week's and the run's attempts dated up
-	 * to `nowMs`, while no hard hold stands; while one stands, the week's
+	 * A `recover` lifts the hard hold on a rebind: `guessableBoundSinceMs` is
+	 * absent or later than the hold's time by more than `DEFAULT_CLOCK_SKEW_MS`.
+	 * No sessions boundary is asked for, and the run the hold counted ends
+	 * with it, its backoff included: every attempt in it was against the
+	 * replaced authenticators. The week stands unless the boundary gives it
+	 * back. With the boundary, a `recover` ends the week's and the run's
+	 * attempts dated up to `nowMs`; while the hard hold stands, the week's
 	 * alone. A refusal changes nothing, and the authorization stays pending
 	 * until it ends. Applied, the slot is marked applied (kept until it ends)
 	 * and the subject's generation moves on by one. The email-proof
