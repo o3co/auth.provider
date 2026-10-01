@@ -151,18 +151,19 @@ return fields
 `.trim();
 
 // A binding's index: a sorted set under a hash tag of its own, one member per transaction —
-// `<incarnation>:<id key part>` — scored by the transaction's deadline. The transactions sit on
+// `<incarnation>:<id key part>` — scored by the transaction's `expiresAtMs`. The transactions sit on
 // slots of their own, so no script reaches both: the index script decides which go, and the
 // client ends each through `MFA_TX_EVICT`, which deletes a transaction only while it still holds
 // the incarnation its member names.
 
 /**
  * `MfaTransactionStoreClient.indexTransaction`. `KEYS[1]` = the binding's index; `ARGV[1]` = the
- * new member, `ARGV[2]` = its deadline (epoch ms, whole), `ARGV[3]` = the most members held.
- * While the index holds that many or more, removes the lowest-scored (the soonest deadlines;
- * between equal scores, the lower member) until one fewer remain, then adds the new member — so
- * it is never among those removed — and sets the key to expire at the highest score it holds.
- * Returns the members removed.
+ * new member, `ARGV[2]` = its transaction's `expiresAtMs` (epoch ms, as the caller's text),
+ * `ARGV[3]` = the most members held. While the index holds that many or more, removes the
+ * lowest-scored (the soonest to expire; between equal scores, the lower member) until one fewer
+ * remain, then adds the new member — so it is never among those removed — and sets the key to
+ * expire at the highest score it holds, rounded up, as the transactions' keys are. Returns the
+ * members removed.
  */
 const LUA_MFA_BINDING_INDEX = `
 local max = tonumber(ARGV[3])
@@ -174,7 +175,7 @@ if held >= max then
 end
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
 local latest = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
-redis.call('PEXPIREAT', KEYS[1], string.format('%.0f', tonumber(latest[2])))
+redis.call('PEXPIREAT', KEYS[1], string.format('%.0f', math.ceil(tonumber(latest[2]))))
 return ended
 `.trim();
 

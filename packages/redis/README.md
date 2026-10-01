@@ -735,7 +735,7 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 | --- | --- | --- |
 | `mfaf:{<subject>}` | hash | one field per enrolled factor (its id): `<version>\n<fixed JSON>\n<mutable JSON>` |
 | `mfat:tx:{<id>}` | hash | one MFA transaction, expiring at its `expiresAtMs` |
-| `mfat:binding:{<digest>}` | sorted set | one binding's transactions, at most `MFA_MAX_TRANSACTIONS_PER_BINDING` (5): one member `<incarnation>:<id>` each, scored by its deadline, the key expiring at the latest; `<digest>` is the SHA-256 of the binding, so no key holds the express session id |
+| `mfat:binding:{<digest>}` | sorted set | one binding's transactions, at most `MFA_MAX_TRANSACTIONS_PER_BINDING` (5): one member `<incarnation>:<id>` each, scored by its `expiresAtMs`, the key expiring at the latest; `<digest>` is the SHA-256 of the binding, so no key holds the express session id |
 | `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, and whether a hold's first refusal was answered (`held`) |
 | `mfat:week:{<subject>}` | sorted set | the weekly window: one member per failure, scored by its time |
 | `mfat:recovery:{<subject>}` | hash | the subject's generation (`g`), its recovery-set floor (`floor`), and one field per recovery authorization, `a:<operation>:<sid>` |
@@ -791,7 +791,7 @@ in-process store's `structuredClone` keeps both.
 the one of them that expires first, as core's port says. Its index is the
 `mfat:binding:` sorted set, which shares no hash tag with the transactions:
 `create` writes the transaction, then one script adds its member and takes
-out those with the soonest deadlines past the cap — never the new one — and
+out those that expire soonest past the cap — never the new one — and
 the adapter deletes each taken out through a script that compares its
 `incarnation`, so a member left behind never ends a transaction created again
 under its id, for this binding or another. `consume`, and a reservation past

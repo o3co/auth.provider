@@ -272,7 +272,7 @@ export interface MfaFirstBindingRead {
  * name, and never decode its `record`.
  *
  * A binding's index is a sorted set of its own, one member per transaction
- * scored by the transaction's deadline. It shares no hash tag with the
+ * scored by the transaction's `expiresAtMs`. It shares no hash tag with the
  * transactions, so it and they change in separate steps: the store adds a
  * member after the transaction is written, ends what the index removed
  * through `evictTransaction`, and removes a member after the transaction is
@@ -338,14 +338,14 @@ export interface MfaTransactionStoreClient {
 	consume(key: string, expectedVersion: string): Promise<Readonly<Record<string, string>> | null>;
 	/**
 	 * Atomically, on the binding's index at `key`: while it holds `max` members or more, remove
-	 * those with the soonest deadlines until one fewer remain; then add `member` scored by
-	 * `deadlineMs` — never among those removed — and set the key to expire at the latest deadline
-	 * it holds (`PEXPIREAT`). Resolves the members removed.
+	 * those with the soonest `expiresAtMs` until one fewer remain; then add `member` scored by
+	 * `expiresAtMs` — never among those removed — and set the key to expire at the latest it
+	 * holds, rounded up (`PEXPIREAT`). Resolves the members removed.
 	 */
 	indexTransaction(
 		key: string,
 		member: string,
-		deadlineMs: number,
+		expiresAtMs: number,
 		max: number,
 	): Promise<readonly string[]>;
 	/** Remove `member` from the binding's index at `key` (`ZREM`). Idempotent. */

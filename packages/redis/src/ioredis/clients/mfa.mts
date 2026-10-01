@@ -151,12 +151,12 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			const reply = await runScript(io, MFA_TX_CONSUME, [key], [expectedVersion]);
 			return Array.isArray(reply) ? hashFields(reply) : null;
 		},
-		async indexTransaction(key, member, deadlineMs, max) {
+		async indexTransaction(key, member, expiresAtMs, max) {
 			const reply = await runScript(
 				io,
 				MFA_BINDING_INDEX,
 				[key],
-				[member, fgNumber(deadlineMs), String(max)],
+				[member, String(expiresAtMs), String(max)],
 			);
 			return Array.isArray(reply)
 				? reply.filter((removed): removed is string => typeof removed === "string")

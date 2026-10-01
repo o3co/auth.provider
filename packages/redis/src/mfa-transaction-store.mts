@@ -24,7 +24,7 @@
  *
  * ```text
  * <keyPrefix>tx:{<id>}                          HASH   one transaction, expiring at its expiresAtMs
- * <keyPrefix>binding:{<digest>}                ZSET   a binding's transactions, scored by deadline, expiring at the latest
+ * <keyPrefix>binding:{<digest>}                ZSET   a binding's transactions, scored by expiresAtMs, expiring at the latest
  * <keyPrefix>lock:{<subject>}                   HASH   the lockout run, reservations in flight, the hard hold
  * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
  * <keyPrefix>recovery:{<subject>}               HASH   the generation, the recovery-set floor, the recovery authorizations
@@ -49,9 +49,10 @@
  *
  * A binding holds at most `MFA_MAX_TRANSACTIONS_PER_BINDING` live
  * transactions, kept in its index: one member per transaction,
- * `<incarnation>:<id key part>`, scored by its deadline. `create` writes the
+ * `<incarnation>:<id key part>`, scored by its `expiresAtMs` (so the one
+ * ended is the one core's in-process store ends). `create` writes the
  * transaction, then one script adds its member and takes out those with the
- * soonest deadlines past the cap, never the new one; each taken out is
+ * soonest expiries past the cap, never the new one; each taken out is
  * deleted by a script that compares its `incarnation`, so a member left
  * behind never deletes a transaction created again under its id, for any
  * binding. `consume`, and a reservation past `max`, take the member out.
@@ -461,18 +462,16 @@ export function createRedisMfaTransactionStore(
 				);
 			}
 			const incarnation = randomBytes(16).toString("base64url");
-			const digest = bindingDigest(record.binding);
-			const deadlineMs = Math.ceil(record.expiresAtMs);
 			const written = await client.create(
 				txKey(record.id),
-				fieldsOf(record, incarnation, digest),
-				deadlineMs,
+				fieldsOf(record, incarnation, bindingDigest(record.binding)),
+				Math.ceil(record.expiresAtMs),
 			);
 			if (!written) throw new Error("an MFA transaction with this id already exists");
 			const ended = await client.indexTransaction(
-				indexKey(digest),
+				indexKey(bindingDigest(record.binding)),
 				memberOf(incarnation, record.id),
-				deadlineMs,
+				record.expiresAtMs,
 				MFA_MAX_TRANSACTIONS_PER_BINDING,
 			);
 			await Promise.all(ended.map(evict));

@@ -491,7 +491,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 	const A = { kind: "session", id: "Qx7-dP_2mZkL9vRt3YbN8cW-4sHj_E1a" } as const;
 	const B = { kind: "session", id: "Rk2_aW-9pLmX3vQt7ZbN0cY-5sJh_F8b" } as const;
 
-	/** `count` transactions `<prefix>-<i>` bound to `binding`, each expiring a second after the one before. */
+	/** `count` transactions `<prefix>-<i>` bound to `binding`, each expiring a second after the one before: their `expiresAtMs`. */
 	async function opened(
 		store: MfaTransactionStore,
 		prefix: string,
@@ -499,25 +499,25 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 		binding: MfaTransaction["binding"],
 	): Promise<number[]> {
 		const base = Date.now() + 10 * MINUTE;
-		const deadlines: number[] = [];
+		const expiries: number[] = [];
 		for (let i = 0; i < count; i++) {
 			const expiresAtMs = base + i * 1_000 + 0.25;
 			await store.create(TX({ id: `${prefix}-${i}`, binding, expiresAtMs }));
-			deadlines.push(Math.ceil(expiresAtMs));
+			expiries.push(expiresAtMs);
 		}
-		return deadlines;
+		return expiries;
 	}
 
-	it("indexes a binding's transactions in one sorted set, <prefix>binding:{<digest>}, scored by deadline and expiring at the latest", async () => {
+	it("indexes a binding's transactions in one sorted set, <prefix>binding:{<digest>}, scored by expiresAtMs and expiring at the latest, rounded up", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		const deadlines = await opened(store, "tab", 2, A);
+		const expiries = await opened(store, "tab", 2, A);
 		const index = bindingKey(prefix, A);
 		expect(await first().type(index)).toBe("zset");
 		const members = await first().zrange(index, "0", "-1", "WITHSCORES");
 		expect(members).toHaveLength(4);
-		expect([Number(members[1]), Number(members[3])]).toEqual(deadlines);
-		expect(await deadlineOf(index)).toBe(deadlines[1]);
+		expect([Number(members[1]), Number(members[3])]).toEqual(expiries);
+		expect(await deadlineOf(index)).toBe(Math.ceil(expiries[1] as number));
 		// Each member names its transaction's key part, after the incarnation `create` wrote.
 		for (const [i, member] of [members[0], members[2]].entries()) {
 			const incarnation = await first().hget(`${prefix}tx:{${keyPart(`tab-${i}`)}}`, "incarnation");
@@ -536,13 +536,13 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 		}
 	});
 
-	it("holds at most N members, its deadline the latest of them, and ends an evicted transaction's key", async () => {
+	it("holds at most N members, its deadline the latest of theirs, and ends an evicted transaction's key", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		const deadlines = await opened(store, "tab", N + 2, A);
+		const expiries = await opened(store, "tab", N + 2, A);
 		const index = bindingKey(prefix, A);
 		expect(await first().zcard(index)).toBe(N);
-		expect(await deadlineOf(index)).toBe(deadlines[N + 1]);
+		expect(await deadlineOf(index)).toBe(Math.ceil(expiries[N + 1] as number));
 		expect(await first().exists(`${prefix}tx:{${keyPart("tab-0")}}`)).toBe(0);
 		expect(await first().exists(`${prefix}tx:{${keyPart("tab-1")}}`)).toBe(0);
 	});
