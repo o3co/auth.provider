@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
 	judgeHeldUpstreamToken,
@@ -31,6 +32,24 @@ const MAX_INSTANT_MS = 8.64e15;
 const at = (ms: number): Date => new Date(ms);
 const read = (expiresIn: unknown, expiresAt: unknown, floorMs = 1000, now = NOW) =>
 	readUpstreamTokenLifetime({ expiresIn, expiresAt }, { calledAt: CALLED_AT, now, floorMs });
+
+/** Dates no reading may trust or be thrown out of: each must read as no Date at all. */
+const hostileDates = (ms: number): ReadonlyArray<readonly [string, unknown]> => {
+	const revocable = Proxy.revocable(new Date(ms), {});
+	revocable.revoke();
+	return [
+		["a Proxy around a Date", new Proxy(new Date(ms), {})],
+		["a revoked Proxy", revocable.proxy],
+		["a Date from another realm", runInNewContext("new Date(ms)", { ms })],
+		["an object that only inherits from Date", Object.create(Date.prototype)],
+	];
+};
+
+/** A value that answers `first` on its first read and `then` on every later one. */
+const flipping = (first: number, then: number): (() => number) => {
+	let reads = 0;
+	return () => (reads++ === 0 ? first : then);
+};
 
 type Finite = Extract<UpstreamTokenLifetime, { verdict: "finite" }>;
 const finite = (reading: UpstreamTokenLifetime): Finite => {
@@ -84,6 +103,33 @@ describe("readUpstreamTokenLifetime — the verdicts", () => {
 			throw new Error("read me");
 		};
 		expect(finite(read(undefined, hostile)).expiresAt.getTime()).toBe(CALLED_AT + 3_600_000);
+	});
+
+	it.each(hostileDates(CALLED_AT + 3_600_000))(
+		"expiresAt %s: malformed, never thrown",
+		(_, date) => {
+			expect(read(undefined, date)).toEqual({ verdict: "malformed" });
+			expect(read(3600, date)).toEqual({ verdict: "malformed" });
+		},
+	);
+
+	it("the derived instant at the end of the Date range is finite, and a millisecond beyond it malformed", () => {
+		const clockAt = (calledAt: number) => ({ calledAt, now: calledAt, floorMs: 1000 });
+		const fields = { expiresIn: 3600, expiresAt: undefined };
+		const last = finite(readUpstreamTokenLifetime(fields, clockAt(MAX_INSTANT_MS - 3_600_000)));
+		expect(last.expiresAt.getTime()).toBe(MAX_INSTANT_MS);
+		expect(readUpstreamTokenLifetime(fields, clockAt(MAX_INSTANT_MS - 3_599_999))).toEqual({
+			verdict: "malformed",
+		});
+	});
+
+	it("the anchor at the start of the Date range is finite, and a millisecond before it malformed", () => {
+		const expiresAt = CALLED_AT + 3_600_000;
+		const expiresIn = (expiresAt + MAX_INSTANT_MS) / 1000;
+		const first = finite(read(expiresIn, at(expiresAt)));
+		expect(first.obtainedAt.getTime()).toBe(-MAX_INSTANT_MS);
+		expect(first.expiresAt.getTime()).toBe(expiresAt);
+		expect(read(expiresIn, at(expiresAt - 1))).toEqual({ verdict: "malformed" });
 	});
 
 	it.each([
@@ -226,7 +272,11 @@ describe("readUpstreamTokenLifetime — the dating of a finite lifetime", () => 
 describe("readUpstreamTokenLifetime — the clock is the consumer's to get right", () => {
 	it.each([
 		["calledAt NaN", { calledAt: Number.NaN, now: NOW, floorMs: 1000 }],
+		["calledAt Infinity", { calledAt: Number.POSITIVE_INFINITY, now: NOW, floorMs: 1000 }],
+		["calledAt beyond the Date range", { calledAt: MAX_INSTANT_MS + 1, now: NOW, floorMs: 1000 }],
+		["now NaN", { calledAt: CALLED_AT, now: Number.NaN, floorMs: 1000 }],
 		["now Infinity", { calledAt: CALLED_AT, now: Number.POSITIVE_INFINITY, floorMs: 1000 }],
+		["now before the Date range", { calledAt: CALLED_AT, now: -MAX_INSTANT_MS - 1, floorMs: 1000 }],
 		["floorMs negative", { calledAt: CALLED_AT, now: NOW, floorMs: -1 }],
 		["floorMs NaN", { calledAt: CALLED_AT, now: NOW, floorMs: Number.NaN }],
 		["floorMs Infinity", { calledAt: CALLED_AT, now: NOW, floorMs: Number.POSITIVE_INFINITY }],
@@ -234,6 +284,52 @@ describe("readUpstreamTokenLifetime — the clock is the consumer's to get right
 		expect(() =>
 			readUpstreamTokenLifetime({ expiresIn: 3600, expiresAt: undefined }, clock),
 		).toThrow(RangeError);
+	});
+
+	it("reads each clock field once: a floor that answers differently later cannot be skipped", () => {
+		const floorMs = flipping(1000, Number.NaN);
+		const clock = {
+			calledAt: CALLED_AT,
+			now: NOW,
+			get floorMs() {
+				return floorMs();
+			},
+		};
+		expect(
+			readUpstreamTokenLifetime({ expiresIn: undefined, expiresAt: at(NOW + 500) }, clock),
+		).toEqual({
+			verdict: "spent",
+		});
+	});
+
+	it("reads each clock field once: a now that answers differently later cannot lengthen what is left", () => {
+		const now = flipping(NOW, NOW - 10_000);
+		const clock = {
+			calledAt: CALLED_AT,
+			get now() {
+				return now();
+			},
+			floorMs: 1000,
+		};
+		expect(
+			readUpstreamTokenLifetime({ expiresIn: undefined, expiresAt: at(NOW + 500) }, clock),
+		).toEqual({
+			verdict: "spent",
+		});
+	});
+
+	it("reads each clock field once: a calledAt that answers differently later cannot move the dating", () => {
+		const calledAt = flipping(CALLED_AT, CALLED_AT + 1_000_000);
+		const clock = {
+			get calledAt() {
+				return calledAt();
+			},
+			now: NOW,
+			floorMs: 1000,
+		};
+		expect(readUpstreamTokenLifetime({ expiresIn: 1, expiresAt: undefined }, clock)).toEqual({
+			verdict: "spent",
+		});
 	});
 });
 
@@ -317,8 +413,65 @@ describe("judgeHeldUpstreamToken — the age of a token already held", () => {
 		expect(judge(now, token)).toEqual(unbelieved);
 	});
 
+	it.each(hostileDates(OBTAINED))("obtainedAt %s: not believed, never thrown", (_, date) => {
+		expect(judge(OBTAINED + 10, { obtainedAt: date as Date, expiresAt: held.expiresAt })).toEqual(
+			unbelieved,
+		);
+	});
+
+	it.each(hostileDates(OBTAINED + LIFETIME_MS))(
+		"expiresAt %s: not believed, never thrown",
+		(_, date) => {
+			expect(
+				judge(OBTAINED + 10, { obtainedAt: held.obtainedAt, expiresAt: date as Date }),
+			).toEqual(unbelieved);
+		},
+	);
+
+	it("a held Date whose getTime is overridden is read by its own value", () => {
+		const obtainedAt = at(OBTAINED);
+		obtainedAt.getTime = () => OBTAINED + LIFETIME_MS;
+		expect(judge(OBTAINED + 10, { obtainedAt, expiresAt: held.expiresAt })).toEqual({
+			believed: true,
+			remainingMs: LIFETIME_MS - 10,
+			halfSpent: false,
+		});
+	});
+
+	it("every result not believed is its own: changing one does not make the next believed", () => {
+		const first = judge(OBTAINED - 30_001);
+		const second = judge(OBTAINED - 30_001);
+		expect(second).not.toBe(first);
+		(first as { believed: boolean }).believed = true;
+		expect(judge(OBTAINED - 30_001).believed).toBe(false);
+	});
+
+	it("reads each clock field once: an allowance that answers differently later cannot believe a token", () => {
+		const allowanceMs = flipping(0, Number.POSITIVE_INFINITY);
+		const clock = {
+			now: OBTAINED - 1,
+			get allowanceMs() {
+				return allowanceMs();
+			},
+		};
+		expect(judgeHeldUpstreamToken(held, clock)).toEqual(unbelieved);
+	});
+
+	it("reads each clock field once: a now that answers differently later cannot believe a token", () => {
+		const now = flipping(OBTAINED - 1_000_000, OBTAINED);
+		const clock = {
+			get now() {
+				return now();
+			},
+			allowanceMs: 30_000,
+		};
+		expect(judgeHeldUpstreamToken(held, clock)).toEqual(unbelieved);
+	});
+
 	it.each([
 		["now NaN", { now: Number.NaN, allowanceMs: 0 }],
+		["now beyond the Date range", { now: MAX_INSTANT_MS + 1, allowanceMs: 0 }],
+		["allowanceMs NaN", { now: OBTAINED, allowanceMs: Number.NaN }],
 		["allowanceMs negative", { now: OBTAINED, allowanceMs: -1 }],
 		["allowanceMs Infinity", { now: OBTAINED, allowanceMs: Number.POSITIVE_INFINITY }],
 	])("%s throws a RangeError", (_, clock) => {

@@ -109,8 +109,13 @@ const readExpiresAt = (value: unknown): Field<number> => {
 	return ms === undefined ? "malformed" : { value: ms };
 };
 
+/** The largest epoch ms a `Date` holds, either side of the epoch (ECMA-262 §21.4.1.1). */
+const MAX_INSTANT_MS = 8.64e15;
+
 const assertFiniteInstant = (name: string, value: number): void => {
-	if (!Number.isFinite(value)) throw new RangeError(`${name} must be a finite epoch ms`);
+	if (!(Math.abs(value) <= MAX_INSTANT_MS)) {
+		throw new RangeError(`${name} must be an epoch ms within the Date range`);
+	}
 };
 
 const assertDuration = (name: string, value: number): void => {
@@ -124,15 +129,17 @@ const assertDuration = (name: string, value: number): void => {
  * from `calledAt`, so time the upstream took is not counted as life left:
  * the derived instant is `min(expiresAt, calledAt + expiresIn)`, and
  * `obtainedAt` is `min(expiresAt − expiresIn, calledAt)`. Throws a
- * `RangeError` only for a clock that is not finite.
+ * `RangeError` only for a clock that is not a finite instant, or a floor
+ * that is not a finite duration ≥ 0. Each clock field is read once.
  */
 export function readUpstreamTokenLifetime(
 	fields: UpstreamLifetimeFields,
 	clock: UpstreamLifetimeClock,
 ): UpstreamTokenLifetime {
-	assertFiniteInstant("calledAt", clock.calledAt);
-	assertFiniteInstant("now", clock.now);
-	assertDuration("floorMs", clock.floorMs);
+	const { calledAt, now, floorMs } = clock;
+	assertFiniteInstant("calledAt", calledAt);
+	assertFiniteInstant("now", now);
+	assertDuration("floorMs", floorMs);
 
 	const expiresIn = readExpiresIn(fields.expiresIn);
 	const expiresAt = readExpiresAt(fields.expiresAt);
@@ -147,7 +154,6 @@ export function readUpstreamTokenLifetime(
 		return { verdict: "contradictory" };
 	}
 
-	const { calledAt } = clock;
 	const lifetimeMs = lifetime === undefined ? undefined : lifetime * 1000;
 	const anchor =
 		instant !== undefined && lifetimeMs !== undefined ? instant - lifetimeMs : calledAt;
@@ -161,12 +167,8 @@ export function readUpstreamTokenLifetime(
 	);
 	if (obtainedAt === undefined || derived === undefined) return { verdict: "malformed" };
 
-	const remainingMs = derived.getTime() - clock.now;
-	if (
-		remainingMs <= 0 ||
-		remainingMs < clock.floorMs ||
-		derived.getTime() <= obtainedAt.getTime()
-	) {
+	const remainingMs = derived.getTime() - now;
+	if (remainingMs <= 0 || remainingMs < floorMs || derived.getTime() <= obtainedAt.getTime()) {
 		return { verdict: "spent" };
 	}
 	return {
@@ -178,32 +180,40 @@ export function readUpstreamTokenLifetime(
 	};
 }
 
-const UNBELIEVED: HeldUpstreamTokenAge = { believed: false, remainingMs: 0, halfSpent: true };
+/** A fresh object each time: a caller that changes one cannot make another token believed. */
+const unbelieved = (): HeldUpstreamTokenAge => ({
+	believed: false,
+	remainingMs: 0,
+	halfSpent: true,
+});
 
 /**
  * The age of a token held since `obtainedAt`. One dated ahead of `now` by
  * up to `allowanceMs` (a refresh buffer, or replicas' clock skew) is
  * believed; one dated further ahead, or not before its own end, is not, and
- * reads as ended. Throws a `RangeError` only for a clock that is not finite.
+ * reads as ended. Throws a `RangeError` only for a clock that is not a
+ * finite instant, or an allowance that is not a finite duration ≥ 0. Each
+ * clock field is read once.
  */
 export function judgeHeldUpstreamToken(
 	token: HeldUpstreamToken,
 	at: { readonly now: number; readonly allowanceMs: number },
 ): HeldUpstreamTokenAge {
-	assertFiniteInstant("now", at.now);
-	assertDuration("allowanceMs", at.allowanceMs);
+	const { now, allowanceMs } = at;
+	assertFiniteInstant("now", now);
+	assertDuration("allowanceMs", allowanceMs);
 
 	const obtainedAt = instantOf(token.obtainedAt);
 	const expiresAt = instantOf(token.expiresAt);
 	if (obtainedAt === undefined || expiresAt === undefined || obtainedAt >= expiresAt) {
-		return UNBELIEVED;
+		return unbelieved();
 	}
-	const age = at.now - obtainedAt;
-	if (age < -at.allowanceMs) return UNBELIEVED;
+	const age = now - obtainedAt;
+	if (age < -allowanceMs) return unbelieved();
 	const lifetimeMs = expiresAt - obtainedAt;
 	return {
 		believed: true,
-		remainingMs: Math.min(obtainedAt, at.now) + lifetimeMs - at.now,
+		remainingMs: Math.min(obtainedAt, now) + lifetimeMs - now,
 		halfSpent: age >= lifetimeMs / 2,
 	};
 }
