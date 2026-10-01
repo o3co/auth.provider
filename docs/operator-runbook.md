@@ -280,12 +280,18 @@ Module-level messages that arrive wrapped in a factory failure:
   email proof an operator reset requires, must survive. An `allkeys-*` policy
   is refused with a `RedisMfaStoreEvictableError` `cause` whose `reason` is
   `mfa-factor-store-evictable` or `mfa-transaction-store-evictable` and whose
-  message names the policy: set `maxmemory-policy` to `noeviction` — what the
-  MFA key families are meant to run on — or give the stores a Redis of their
-  own. The policy is read from `INFO memory` (`CONFIG GET maxmemory-policy`
-  only where INFO does not say), so a managed server that blocks `CONFIG` is
-  still refused. A `volatile-*` policy boots: the factor store's keys carry no
-  TTL, and the transaction store warns that it may evict a D21 hold (§4). A
+  message names the policy. **The MFA stores' Redis must run
+  `maxmemory-policy` `noeviction`**, on a server of its own if the rest of
+  your Redis may not. The policy is read from `INFO memory` (`CONFIG GET
+  maxmemory-policy` only where INFO does not say), so a managed server that
+  blocks `CONFIG` is still refused. A `volatile-*` policy boots, with a
+  warning, but is not a supported setting: the factor store's keys carry no
+  TTL, and the transaction store warns (§4) that it may evict a D21 hold, a
+  first-binding mark, or a subject's lease — an evicted lease lets a second
+  writer at the subject's factors. The subject's `recovery:` hash (its
+  generation and recovery-set floor) carries no TTL once it holds either, so a
+  `volatile-*` policy never picks it, and `allkeys-*` is refused at boot: the
+  current checks already protect it. A
   question the server refuses (`NOPERM`, an unknown or renamed command) is a
   warning instead (§4); any other reply error (`BUSY`, `LOADING`, `NOAUTH`, …),
   and a server that cannot be reached, fails the boot with it as the `cause`. A `redis-mfa-factor-store.keyPrefix` or
@@ -1323,7 +1329,7 @@ stream — its level is fixed at `info`.
 | `mfa_factor_store_lossy`, `mfa_transaction_store_lossy` (warn, `store`, `adapter: "redis"`, once at boot) | `redis/src/internal/mfa-durability.mts` | the MFA store's Redis takes RDB snapshots and has no AOF: a crash loses what was written since the last snapshot — enrollments, whose accounts then read as never enrolled, or an operator reset's email-proof requirement (D12). Turn AOF on (`appendonly yes`, `appendfsync everysec`) |
 | `mfa_factor_store_volatile`, `mfa_transaction_store_volatile` (warn, `store`, `adapter: "redis"`, once at boot) | same | the MFA store's Redis has no persistence at all: a restart empties it. Turn AOF on |
 | `mfa_factor_store_durability_unchecked`, `mfa_transaction_store_durability_unchecked` (warn, `store`, `adapter: "redis"`; `unread` — the parts it could not read: `maxmemory-policy`, `appendonly`, `save`; `maxmemoryPolicy` — a policy it does not know, neither `noeviction`, a `volatile-*` nor an `allkeys-*` one; `err` — the first refusal's projection; once at boot) | same | part of the check could not run, and the store booted: the server refused a question — `INFO` or `CONFIG` renamed, disabled, or not permitted to the connection's user — or answered without the value, or reports a policy the check does not know. Confirm the rest where the server is configured (`noeviction`, AOF on), or let the user run `INFO` and `CONFIG GET` |
-| `mfa_transaction_store_lock_evictable` (warn, `store`, `adapter: "redis"`, `maxmemoryPolicy`, `evictableFamilies`, once at boot) | same | the MFA transaction store's Redis runs a `volatile-*` policy. A subject's lock and weekly window (`mfat:lock:`, `mfat:week:`) carry a TTL once no run of failures is counted, so at `maxmemory` the server may evict them, and a weekly hold on guessable proofs ends early (D21). A subject's first-binding mark (`mfat:first-binding:`) always carries one, and an evicted mark fails open: a session whose recorded enrollment witness may be stale is no longer refused a first binding (D12). A subject's lease (`mfat:lease:`) always carries one, and an evicted lease lets a second writer at the subject's factors. At `maxmemory`, `volatile-lru` and `volatile-random` were seen to evict nearly every mark; `volatile-lfu` and `volatile-ttl` spared them in the same probe. `evictableFamilies` names the four: `lock`, `week`, `first-binding`, `lease`. Set `maxmemory-policy` to `noeviction`, or give the MFA stores a Redis that never reaches `maxmemory` |
+| `mfa_transaction_store_lock_evictable` (warn, `store`, `adapter: "redis"`, `maxmemoryPolicy`, `evictableFamilies`, once at boot) | same | the MFA transaction store's Redis runs a `volatile-*` policy. A subject's lock and weekly window (`mfat:lock:`, `mfat:week:`) carry a TTL once no run of failures is counted, so at `maxmemory` the server may evict them, and a weekly hold on guessable proofs ends early (D21). A subject's first-binding mark (`mfat:first-binding:`) always carries one, and an evicted mark fails open: a session whose recorded enrollment witness may be stale is no longer refused a first binding (D12). A subject's lease (`mfat:lease:`) always carries one, and an evicted lease lets a second writer at the subject's factors. At `maxmemory`, `volatile-lru` and `volatile-random` were seen to evict nearly every mark; `volatile-lfu` and `volatile-ttl` spared them in the same probe. `evictableFamilies` names the four: `lock`, `week`, `first-binding`, `lease`. The MFA stores require `maxmemory-policy` `noeviction`: set it, on a Redis of their own if need be |
 | `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `core.deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; the standalone template installs no MFA store |
 | `mfa_rate_limiter_not_shared` (warn — `limit`, `windowSeconds`; once at boot) | `mfa/src/module.mts` | no `rateLimiter` is wired, so the MFA routes limit through a per-process limiter over `mfa.rateLimit.routes`: with several replicas each counts apart. Wire `adapters.rateLimiter = "redis"`, or set `core.deployment.mode = "single"` if one replica is the deployment |
 | `mfa_digest_made_with_retired_key` (info — `keyId`; once per key id per process) | `mfa/src/sealing.mts` | a stored digest (a recovery code's, an email code's) matched under a key that is no longer the ring's first: that key is still needed. Beside `mfa_factor_sealed_with_retired_key`, it is what to count before retiring a key |

@@ -818,8 +818,10 @@ before that expires a day after its latest authorization ends. A generation,
 floor or authorization the store cannot read is an outage, never none, and so
 is a lease key with no deadline. The lease is logical: a write that outlives
 it is told so at its release (`false`), never stopped. Evicting a lease lets a
-second writer at the subject's factor set, so the server must not evict it:
-run it on `noeviction`.
+second writer at the subject's factor set, so the MFA stores require
+`noeviction`; the recovery hash, with no TTL once it holds a generation or a
+floor, is never picked by a `volatile-*` policy, and `allkeys-*` is refused at
+boot.
 
 **A session's account-email proof.** One string per session of a subject,
 written with one `SET … PX`, whose lifetime is `untilMs` less the store's own
