@@ -26,6 +26,7 @@ import {
 } from "#/federation-grants/intentStore.mjs";
 import {
 	type FederationGrantAcquisitionConnection,
+	type FederationGrantConnectionNotConfigured,
 	type FederationGrantLodgingDeps,
 	type FederationGrantLodgingResult,
 	type FederationGrantReauthorizationResult,
@@ -765,6 +766,19 @@ describe("lodging a reauthorization", () => {
 		expectTypeOf<Admits<FederationGrantReauthorizationResult>>().toEqualTypeOf<false>();
 		// The control: a first intent still answers it.
 		expectTypeOf<Admits<FederationGrantLodgingResult>>().toEqualTypeOf<true>();
+	});
+
+	it("admits a connection on no refusal of its result type: only connection_not_configured carries one", () => {
+		type Carrying<R> = R extends { readonly ok: false }
+			? "connection" extends keyof R
+				? R
+				: never
+			: never;
+		expectTypeOf<Carrying<FederationGrantReauthorizationResult>>().toBeNever();
+		// The control: a first intent's connection_not_configured carries it, and that refusal alone.
+		expectTypeOf<
+			Carrying<FederationGrantLodgingResult>
+		>().toEqualTypeOf<FederationGrantConnectionNotConfigured>();
 	});
 
 	it("refuses a client that may no longer use the grant's connection", async () => {

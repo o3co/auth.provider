@@ -1406,6 +1406,7 @@ export {
 } from "./federation-grants/lifetime.mjs";
 export {
 	type FederationGrantAcquisitionConnection,
+	type FederationGrantConnectionNotConfigured,
 	type FederationGrantLodged,
 	type FederationGrantLodgingAbsorbedCarrier,
 	type FederationGrantLodgingClient,

@@ -38,7 +38,7 @@
  * Never throws: every read is guarded.
  */
 
-import { isError } from "../logging/loggableError.mjs";
+import { guardedRead, isError } from "../logging/loggableError.mjs";
 
 /** The names a request that was given up on is raised under: `AbortSignal.timeout` raises `TimeoutError`. */
 const ABANDONED: ReadonlySet<string> = new Set(["AbortError", "TimeoutError"]);
@@ -129,18 +129,6 @@ const isTransportCode = (code: unknown): boolean =>
 /** How many causes deep the chain is followed: the libraries nest two or three. */
 const MAX_CAUSE_DEPTH = 4;
 
-/**
- * `value[key]`, or `undefined` when the read throws (a getter, a Proxy's
- * trap). Only ever asked of an Error or a Response.
- */
-const field = (value: object, key: string): unknown => {
-	try {
-		return (value as Record<string, unknown>)[key];
-	} catch {
-		return undefined;
-	}
-};
-
 const serverError = (status: unknown): boolean =>
 	typeof status === "number" && Number.isInteger(status) && status >= 500 && status <= 599;
 
@@ -164,21 +152,47 @@ const isResponse = (value: unknown): value is object => {
 	}
 };
 
-/** Whether `error`, a failed upstream call, is the upstream's outage rather than its answer. */
-export function isFederationUpstreamOutage(error: unknown): boolean {
+/**
+ * What the walk read: an outage; none; or none found while a field it read
+ * threw (a getter, a Proxy's trap), so a field it could not read might have
+ * held one. Internal to core: the refresh-error classifier acts on no
+ * verdict beside an `unreadable`.
+ */
+export type FederationUpstreamOutageReading = "outage" | "none" | "unreadable";
+
+/** The walk {@link isFederationUpstreamOutage} answers from, saying when it could not read a field. */
+export function readFederationUpstreamOutage(error: unknown): FederationUpstreamOutageReading {
+	let unreadable = false;
+	// `value[key]`, read as absent when the read throws, and remembered.
+	// Only ever asked of an Error or a Response.
+	const field = (value: object, key: string): unknown => {
+		const read = guardedRead(value, key);
+		if (read === null) unreadable = true;
+		return read?.value;
+	};
+	const found = (outage: boolean): FederationUpstreamOutageReading =>
+		outage ? "outage" : unreadable ? "unreadable" : "none";
 	let current = error;
 	for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
 		// The Response an error was raised over says what the upstream answered.
-		if (isResponse(current)) return serverError(field(current, "status"));
-		if (!isError(current)) return false;
+		if (isResponse(current)) return found(serverError(field(current, "status")));
+		if (!isError(current)) return found(false);
 		const name = field(current, "name");
 		const code = field(current, "code");
-		if (typeof name === "string" && ABANDONED.has(name)) return true;
-		if (isTransportCode(code)) return true;
-		if (serverError(field(current, "status"))) return true;
+		if (typeof name === "string" && ABANDONED.has(name)) return "outage";
+		if (isTransportCode(code)) return "outage";
+		if (serverError(field(current, "status"))) return "outage";
 		// `fetch`'s TypeError says only that the request failed; its cause, one
 		// step down, is read by the same rule on the next turn.
 		current = field(current, "cause");
 	}
-	return false;
+	return found(false);
+}
+
+/**
+ * Whether `error`, a failed upstream call, is the upstream's outage rather
+ * than its answer. A field it cannot read is read as absent.
+ */
+export function isFederationUpstreamOutage(error: unknown): boolean {
+	return readFederationUpstreamOutage(error) === "outage";
 }

@@ -377,4 +377,68 @@ describe("classifyFederationRefreshError", () => {
 			});
 		});
 	});
+
+	describe("a thrown value it cannot read", () => {
+		const UNKNOWN = { reason: "unknown", structured: false };
+
+		/** `target`, with `key` a getter that throws, as an adapter's value may have. */
+		const throwingOn = <T extends object>(target: T, key: string): T =>
+			Object.defineProperty(target, key, {
+				get() {
+					throw new Error("unreadable");
+				},
+			});
+
+		it("is unknown when a field it reads throws, and the classifier does not throw", () => {
+			for (const key of ["error", "status", "code", "cause"]) {
+				expect(classifyFederationRefreshError(throwingOn({}, key)), key).toEqual(UNKNOWN);
+			}
+			expect(classifyFederationRefreshError(throwingOn(new Error("x"), "message"))).toEqual(
+				UNKNOWN,
+			);
+		});
+
+		it("is unknown, not invalid_grant, when a field beside the code cannot be read", () => {
+			for (const key of ["status", "cause"]) {
+				expect(
+					classifyFederationRefreshError(throwingOn({ error: "invalid_grant" }, key)),
+					key,
+				).toEqual(UNKNOWN);
+			}
+		});
+
+		it("is unknown, not invalid_grant, when a field the outage check reads along the chain cannot be read", () => {
+			const response = throwingOn(new Response(null, { status: 400 }), "status");
+			for (const [label, cause] of [
+				["an Error cause's status", throwingOn(new Error("cause"), "status")],
+				["an Error cause's name", throwingOn(new Error("cause"), "name")],
+				["the Response it was raised over's status", response],
+			] as const) {
+				const error = Object.assign(new Error("rejected"), { error: "invalid_grant", cause });
+				expect(classifyFederationRefreshError(error), label).toEqual(UNKNOWN);
+			}
+		});
+
+		it("is network when the outage walk finds an outage beside a field it cannot read", () => {
+			for (const key of ["error", "status", "code"]) {
+				const timedOut = throwingOn(Object.assign(new Error("x"), { name: "TimeoutError" }), key);
+				expect(classifyFederationRefreshError(timedOut), key).toEqual({
+					reason: "network",
+					structured: true,
+				});
+			}
+		});
+
+		it("classifies a Proxy whose getPrototypeOf trap throws, and does not throw", () => {
+			const proxy = new Proxy(
+				{},
+				{
+					getPrototypeOf() {
+						throw new Error("trap");
+					},
+				},
+			);
+			expect(classifyFederationRefreshError(proxy)).toEqual(UNKNOWN);
+		});
+	});
 });

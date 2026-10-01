@@ -34,8 +34,9 @@
  *   the deployment's issuer.
  * - `mfa.transactionTtlSeconds` is held to 60-1800 seconds and
  *   `mfa.maxAttemptsPerTransaction` to 2-10 (the ADR states neither bound),
- *   and the subject lock, `mfa.lockout`, to core's `checkMfaLockoutPolicy`
- *   under that key: obligations the MFA module refuses a boot for.
+ *   and the subject lock, `mfa.lockout`, to core's
+ *   `checkConfiguredMfaLockoutPolicy` under that key (`hardLimit` at least 10
+ *   and above `threshold`): obligations the MFA module refuses a boot for.
  * - The settings say whether the development sample key was accepted, so the
  *   MFA module can say so once at boot.
  */
@@ -682,7 +683,7 @@ describe("the transaction's life and attempts, and the lock", () => {
 		}
 	});
 
-	it("holds mfa.lockout to core's checkMfaLockoutPolicy, naming the field under mfa.lockout", () => {
+	it("holds mfa.lockout to core's checkConfiguredMfaLockoutPolicy: the port check's refusals, naming the field under mfa.lockout", () => {
 		for (const [lockout, field] of [
 			[{ ...LOCKOUT, threshold: 0 }, "mfa.lockout.threshold"],
 			[{ ...LOCKOUT, weeklyBudget: 2.5 }, "mfa.lockout.weeklyBudget"],
@@ -697,6 +698,22 @@ describe("the transaction's life and attempts, and the lock", () => {
 				refusal(() => readSettings(valid({ lockout }))),
 				JSON.stringify(lockout),
 			).toContain(field);
+		}
+	});
+
+	it("holds mfa.lockout.hardLimit to at least 10 and above threshold: core's checkConfiguredMfaLockoutPolicy", () => {
+		const accepted = { ...LOCKOUT, threshold: 5, hardLimit: 10 };
+		expect(readSettings(valid({ lockout: accepted })).lockout).toEqual(accepted);
+		for (const lockout of [
+			{ ...LOCKOUT, threshold: 5, hardLimit: 9 },
+			{ ...LOCKOUT, threshold: 1, hardLimit: 2 },
+			{ ...LOCKOUT, threshold: 10, hardLimit: 10 },
+			{ ...LOCKOUT, threshold: 50, hardLimit: 50 },
+		]) {
+			expect(
+				refusal(() => readSettings(valid({ lockout }))),
+				JSON.stringify(lockout),
+			).toMatch(/^mfa\.lockout\.hardLimit must be (at least 10|above mfa\.lockout\.threshold)/);
 		}
 	});
 

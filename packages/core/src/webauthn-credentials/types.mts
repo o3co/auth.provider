@@ -84,7 +84,9 @@ export interface WebAuthnCredentialStore {
 	 * stored signCount equals `expectedCurrentSignCount` at the write.
 	 *
 	 * @returns `false` when it did not match (a concurrent update); callers
-	 *   MUST treat that as a replay/clone attack signal.
+	 *   MUST treat that as a replay/clone attack signal. Also `false`, creating
+	 *   nothing, for a `credentialId` it does not hold (not a clone signal: the
+	 *   credential is gone).
 	 */
 	updateSignCount(
 		credentialId: string,
