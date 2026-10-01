@@ -1024,3 +1024,24 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		expect(acquire).not.toHaveBeenCalled();
 	});
 });
+
+describe("a login's witness mark that cannot read the records again after it", () => {
+	it("is said once at warn, never taken as a mark in step", async () => {
+		const built = await composed();
+		const totp = await seedTotp(built.factorStore);
+		const read = built.factorStore.list.bind(built.factorStore);
+		const marked = vi.spyOn(built.users, "markMfaEnrolled");
+		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
+			// The read after the mark: the store is gone.
+			if (marked.mock.calls.length > 0) throw new Error("factor store unreachable");
+			return read(subject);
+		});
+
+		await signInWithTotp(built.app, built.userSessionStore, totp);
+
+		expect(marked.mock.calls).toEqual([[ALICE.id, true]]);
+		expect(
+			events(built.logger, "warn").filter((event) => event === "mfa_enrollment_witness_unwritten"),
+		).toHaveLength(1);
+	});
+});
