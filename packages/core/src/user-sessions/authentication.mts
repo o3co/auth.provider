@@ -34,9 +34,10 @@
  * written.
  *
  * A record comes from the deployment's own store, which may answer a value
- * in a shape the types do not admit. Such an `authentication`, or such a
- * pre-upgrade `amr`, reads as one that cannot be told: no primary, and
- * nothing vouched for. No reader throws on it.
+ * in a shape the types do not admit. Such an `authentication` reads as one
+ * that cannot be told: no primary, nothing vouched for. A stored `amr` in
+ * such a shape vouches for nothing; a pre-upgrade one names no primary
+ * unless it is an array that holds `fed`. No reader throws on either.
  */
 
 import { federationsOf } from "../federations/configured.mjs";
@@ -117,7 +118,7 @@ const isRecordable = (reading: RecordReading): reading is RecordableReading =>
 /**
  * The one reading of a session record: `authentication` and `amr` each read
  * once, and answered as copies. An `authentication` that
- * {@link readAuthentication} refuses tells nothing. A pre-upgrade record is
+ * {@link readAuthentication} refuses by {@link READ_RULES} tells nothing. A pre-upgrade record is
  * split on an array that holds `fed` before its shape is read, so one that
  * also holds a value no token may carry is still federated and vouches for
  * `fed`; what is beside `fed` is kept as its upstream `amr` only when
@@ -130,7 +131,7 @@ function readRecord(session: UserSession): RecordReading {
 	const values = Array.isArray(amr) ? Array.from(amr as unknown[]) : undefined;
 	const vouched = amr === undefined || values?.length === 0 ? [] : wellFormedAmr(values);
 	if (stored !== undefined) {
-		const read = readAuthentication(stored, isReadableVerificationTime);
+		const read = readAuthentication(stored, READ_RULES);
 		return read.admitted === undefined
 			? { established: undefined, vouched: undefined }
 			: { established: read.admitted, vouched };
@@ -220,6 +221,24 @@ const isRecordableVerificationTime = (ms: number, nowMs: number): boolean =>
  * caps it there.
  */
 const isReadableVerificationTime = (ms: number): boolean => Number.isFinite(ms) && ms >= 0;
+
+/** What {@link readAuthentication} holds a field to beyond its type. */
+interface AuthenticationRules {
+	/** Whether an `mfaAt` whose time is `ms` is admitted. */
+	readonly admitsMfaAt: (ms: number) => boolean;
+	/** Whether a `null` `federation` reads as none rather than being refused. */
+	readonly nullFederationIsNone: boolean;
+}
+
+/**
+ * The rules a stored `authentication` is read by. A `null` `federation` is
+ * none: a store may map an empty column to `null`, and the federation grants
+ * nothing. Any other `null` field is refused.
+ */
+const READ_RULES: AuthenticationRules = {
+	admitsMfaAt: isReadableVerificationTime,
+	nullFederationIsNone: true,
+};
 
 /** `ms` as an instant no later than `nowMs`, the store's clock: a new `Date`. */
 const notAfter = (ms: number, nowMs: number): Date => new Date(Math.min(ms, nowMs));
@@ -322,7 +341,10 @@ export function recordableSessionAuthentication(
 	nowMs: number,
 ): SessionAuthentication | undefined {
 	if (authentication === undefined) return undefined;
-	const read = readAuthentication(authentication, (ms) => isRecordableVerificationTime(ms, nowMs));
+	const read = readAuthentication(authentication, {
+		admitsMfaAt: (ms) => isRecordableVerificationTime(ms, nowMs),
+		nullFederationIsNone: false,
+	});
 	if (read.admitted === undefined) {
 		throw new RangeError(
 			`UserSession ${sid}: ${read.refused} must be ${RECORDABLE_RULES[read.refused]}`,
@@ -361,15 +383,13 @@ type AuthenticationRead =
 /**
  * `value` as a `SessionAuthentication`, each field read once and the answer
  * a copy, or the first field it refuses: not an object; a `primary` that is
- * not a non-empty string; a `federation` that is not a string; an
- * `upstreamAmr` that is not a list of strings; an `mfaAt` that is not a
- * `Date` whose time `admitsMfaAt`. A field may be `undefined`, `primary`
- * excepted. The one rule a store records by and the readers read by.
+ * not a non-empty string; a `federation` that is not a string (a `null` one
+ * is none when `rules.nullFederationIsNone`); an `upstreamAmr` that is not a
+ * list of strings; an `mfaAt` that is not a `Date` whose time
+ * `rules.admitsMfaAt`. A field may be `undefined`, `primary` excepted. The
+ * one rule a store records by and the readers read by.
  */
-function readAuthentication(
-	value: unknown,
-	admitsMfaAt: (ms: number) => boolean,
-): AuthenticationRead {
+function readAuthentication(value: unknown, rules: AuthenticationRules): AuthenticationRead {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		return { refused: "authentication" };
 	}
@@ -378,7 +398,8 @@ function readAuthentication(
 	if (typeof primary !== "string" || primary.length === 0) {
 		return { refused: "authentication.primary" };
 	}
-	const federation = a.federation;
+	const stored = a.federation;
+	const federation = stored === null && rules.nullFederationIsNone ? undefined : stored;
 	if (federation !== undefined && typeof federation !== "string") {
 		return { refused: "authentication.federation" };
 	}
@@ -392,7 +413,7 @@ function readAuthentication(
 	}
 	const mfaAt = a.mfaAt;
 	const mfaAtMs = mfaAt instanceof Date ? mfaAt.getTime() : Number.NaN;
-	if (mfaAt !== undefined && !admitsMfaAt(mfaAtMs)) {
+	if (mfaAt !== undefined && !rules.admitsMfaAt(mfaAtMs)) {
 		return { refused: "authentication.mfaAt" };
 	}
 	return {
@@ -444,11 +465,12 @@ export function sessionAfterSecondFactor(
 
 /**
  * What a session requirement is asked about `session`: how it was
- * established and what it vouches for, as the two readers above answer
- * them from one reading of the record, or `null` when there is no session (no `sid`, or no `UserSessionStore`).
- * Admission builds it here and nowhere else, and its `acr` selection reads
- * the `amr` from it: one built from the record's own `amr` would let a
- * value an untrusted IdP asserted in a pre-upgrade session meet an `acr`.
+ * established and what it vouches for, as the two readers above answer them
+ * from one reading of the record, or `null` when there is no session (no
+ * `sid`, or no `UserSessionStore`). Admission builds it here and nowhere
+ * else, and its `acr` selection reads the `amr` from it: one built from the
+ * record's own `amr` would let a value an untrusted IdP asserted in a
+ * pre-upgrade session meet an `acr`.
  */
 export function requirementSession(session: UserSession | null): RequirementSession | null {
 	if (session === null) return null;

@@ -256,7 +256,6 @@ describe("a session whose recorded authentication is not one SessionAuthenticati
 		["a list", []],
 		["a null primary", { ...PASSWORD, primary: null }],
 		["an empty primary", { ...PASSWORD, primary: "" }],
-		["a null federation", { ...PASSWORD, federation: null }],
 		["a federation that is a number", { ...PASSWORD, federation: 1 }],
 		["a null upstreamAmr", { ...PASSWORD, upstreamAmr: null }],
 		["an upstreamAmr that is a string", { ...PASSWORD, upstreamAmr: "hwk" }],
@@ -282,6 +281,20 @@ describe("a session whose recorded authentication is not one SessionAuthenticati
 			).toBeNull();
 		},
 	);
+
+	it("reads a null federation as none: a store may map an empty column to null, and the federation grants nothing", () => {
+		const s: UserSession = {
+			...session(["pwd"]),
+			authentication: { ...PASSWORD, federation: null } as unknown as SessionAuthentication,
+		};
+		expect(sessionAuthentication(s)).toStrictEqual(PASSWORD);
+		expect(vouchedAmr(s)).toEqual(["pwd"]);
+		expect(canRecordSecondFactor(s)).toBe(true);
+		expect(
+			sessionAfterSecondFactor(s, { amr: ["otp", "mfa"], at: new Date() }, Date.now())
+				?.authentication.federation,
+		).toBeUndefined();
+	});
 
 	it("reads an mfaAt ahead of any clock as recorded: the readers hold no clock, and its consumers cap it", () => {
 		const mfaAt = new Date(Date.now() + 24 * 60 * 60_000);
@@ -325,8 +338,8 @@ describe("canRecordSecondFactor — whether a second factor can be recorded on a
 		["a session whose authentication is an empty object", withAuthentication(["pwd"], {}), false],
 		["a session whose authentication is null", withAuthentication(["pwd"], null), false],
 		[
-			"a session whose authentication has a null field",
-			withAuthentication(["pwd"], { ...PASSWORD, federation: null }),
+			"a session whose authentication has a null mfaAt",
+			withAuthentication(["pwd"], { ...PASSWORD, mfaAt: null }),
 			false,
 		],
 	])("agrees with sessionAfterSecondFactor on %s", (_label, s, can) => {
@@ -694,6 +707,7 @@ describe("recordableSessionAuthentication — what a session may record as authe
 		["no primary", { federation: undefined }, "authentication.primary"],
 		["an empty primary", { ...PASSWORD, primary: "" }, "authentication.primary"],
 		["a federation that is a number", { ...PASSWORD, federation: 1 }, "authentication.federation"],
+		["a null federation", { ...PASSWORD, federation: null }, "authentication.federation"],
 		[
 			"an upstreamAmr that is a string",
 			{ ...PASSWORD, upstreamAmr: "hwk" },
