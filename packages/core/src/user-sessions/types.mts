@@ -261,9 +261,11 @@ export interface SupportsSecondFactorUpdate {
 	 *
 	 * `null`, nothing written, when the session is gone, when its renewal
 	 * nonce is not the event's `expectedRenewalNonce` (a completion another
-	 * one overtook), or when it predates `authentication` and its primary
-	 * cannot be told: such a session logs in again (`/authorize` sends it to
-	 * the login page rather than asking a step-up).
+	 * one overtook), or whenever `sessionAfterSecondFactor` answers `null`
+	 * (`canRecordSecondFactor` is false): its primary cannot be told, or its
+	 * `authentication` or `amr` is not in a shape the types admit. A session
+	 * whose primary cannot be told logs in again (`/authorize` sends it to the
+	 * login page rather than asking a step-up).
 	 *
 	 * A `RangeError` before anything is read, nothing written, for an event
 	 * with no values, an empty value, a primary's marker (`pwd`, `fed`), only
