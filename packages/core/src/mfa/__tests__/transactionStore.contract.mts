@@ -1670,7 +1670,8 @@ export function runMfaTransactionStoreContract(
 						nowMs,
 						leaseToken,
 						sessionsBoundaryMs: undefined,
-						guessableBoundSinceMs: undefined,
+						// No guessable record remains, unless a case names one.
+						guessableBoundSinceMs: null,
 						...overrides,
 					});
 				} finally {
@@ -1705,9 +1706,13 @@ export function runMfaTransactionStoreContract(
 				expect(await recover(store, now, { sid: "sid-2" })).toMatchObject({
 					reason: "unauthorized",
 				});
-				expect(await recover(store, now, { operation: "reset", sid: undefined })).toMatchObject({
-					reason: "unauthorized",
-				});
+				expect(
+					await recover(store, now, {
+						operation: "reset",
+						sid: undefined,
+						guessableBoundSinceMs: undefined,
+					}),
+				).toMatchObject({ reason: "unauthorized" });
 				expect(await recover(store, now, {}, "user-2")).toMatchObject({ reason: "unauthorized" });
 				expect(await store.subjectGeneration("user-1")).toBe(0);
 				expect(await recover(store, now)).toEqual(RELEASED);
@@ -1965,6 +1970,10 @@ export function runMfaTransactionStoreContract(
 					["a boundary that is not whole", { sessionsBoundaryMs: now + 0.5 }],
 					["a rebind time that is not a number", { guessableBoundSinceMs: Number.NaN }],
 					[
+						"a reset that names its rebind as none",
+						{ operation: "reset" as const, sid: undefined, guessableBoundSinceMs: null },
+					],
+					[
 						"a reset with a boundary",
 						{ operation: "reset" as const, sid: undefined, sessionsBoundaryMs: now },
 					],
@@ -2086,6 +2095,22 @@ export function runMfaTransactionStoreContract(
 					});
 				});
 
+				it("refuses, with a RangeError, a recover that names no rebind — neither the earliest guessable record's time nor null for none — and changes nothing", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					await expect(
+						recover(store, last + MINUTE, {
+							sessionsBoundaryMs: last + 1,
+							guessableBoundSinceMs: undefined,
+						}),
+					).rejects.toThrow(RangeError);
+					expect(held(await check(store, last + 2 * MINUTE, SMALL_HARD))).toEqual(HARD);
+					expect(await store.subjectGeneration("user-1")).toBe(0);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: OLD_RECORD() }),
+					).toMatchObject({ outcome: "refused", reason: "not_revoked_since", hard: true });
+				});
+
 				it("takes a record as a rebind only when it was created later than the hold by more than the skew", async () => {
 					const store = await factory();
 					const last = await latched(store);
@@ -2101,7 +2126,11 @@ export function runMfaTransactionStoreContract(
 			describe("the reset", () => {
 				// The operator reset clears the subject's lock state whole, with no
 				// boundary or rebind asked for, and ends every other authorization.
-				const RESET = { operation: "reset", sid: undefined } as const;
+				const RESET = {
+					operation: "reset",
+					sid: undefined,
+					guessableBoundSinceMs: undefined,
+				} as const;
 				const resetAuthorization = () => authorization({ ...RESET, recoveryId: "reset-1" });
 
 				it("ends every hold, the hard hold included, with no boundary or rebind, and moves the generation", async () => {

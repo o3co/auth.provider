@@ -215,7 +215,7 @@ async function applied(
 			nowMs: Date.now(),
 			leaseToken: lease.token,
 			sessionsBoundaryMs: undefined,
-			guessableBoundSinceMs: undefined,
+			guessableBoundSinceMs: operation === "reset" ? undefined : null,
 			...application,
 		});
 	} finally {
@@ -980,7 +980,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 						operation: "recover" as const,
 						nowMs: at,
 						sessionsBoundaryMs: choose([undefined, at - choose(STEPS_MS.filter((s) => s >= 0))]),
-						guessableBoundSinceMs: choose([undefined, at - DAY, at + DAY]),
+						guessableBoundSinceMs: choose([null, at - DAY, at + DAY]),
 					};
 					const expected = await applied(memory, "user-1", recover);
 					const actual = await applied(redis, "user-1", recover);
@@ -1524,7 +1524,7 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 				nowMs: Date.now(),
 				leaseToken: lease.token,
 				sessionsBoundaryMs: undefined,
-				guessableBoundSinceMs: undefined,
+				guessableBoundSinceMs: null,
 			}),
 		).rejects.toThrow(/subject state/);
 	});
