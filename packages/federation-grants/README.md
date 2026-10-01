@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -856,7 +856,10 @@ It checks, in this order:
    `identityLookup = "unsupported"` and accept the loss of this one check.
 6. **Eligibility**: a refresh token, and an access token with a finite lifetime
    within `maxAccessTokenLifetime`, of a type a route without a proof key can
-   present.
+   present. The lifetime is read as a refresh's is (core's
+   `readUpstreamTokenLifetime`): both `expiresIn` and `expiresAt` must state
+   it, with life left when the answer arrives. An answer with only one of
+   them, or whose `expiresAt` has passed, is `upstream_token_ineligible`.
 7. **Scope containment**: nothing beyond what the user was shown. The
    upstream's `scope` is read tolerantly by RFC 6749 §3.3's grammar (core's
    `parseScopeTokens`, as every upstream answer is): whitespace separates, and
@@ -866,7 +869,10 @@ It checks, in this order:
 8. **Activation**, immediately after admitting the session again — a second
    admission with the same claim — and re-reading the current-intent pointer
    and the grants boundary. It replaces
-   the authorization and the credentials together, and clears with them the
+   the authorization and the credentials together — the access token stored
+   as a refresh stores one (core's `federationGrantAccessToken`): obtained at
+   the exchange's start, and ending at the earlier of `expiresAt` and that
+   start plus `expiresIn` — and clears with them the
    ineligibility marker and the stamp of a refresh the upstream refused for
    the user's absence (#616); a renewal refused at any check above leaves all
    of it exactly as it was.
