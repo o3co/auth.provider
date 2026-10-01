@@ -3,78 +3,12 @@
 	"compilerOptions": {
 		"noEmit": true
 	},
-	"include": [
-		"src/modules/manifest/**/*.mts",
-		"src/boot/**/*.mts",
-		"src/refresh-token-family/**/*.mts",
-		"src/user-sessions/**/*.mts",
-		"src/adapters/**/*.mts",
-		"src/repositories/__tests__/InMemoryCodeRepository.test.mts",
-		// #343: paired with the same entry in vitest.config.mts's
-		// `typecheck.include`. BOTH lists are needed -- vitest decides which
-		// files it typechecks, this decides what tsc is given -- and adding the
-		// file to only one leaves the annotation unchecked while looking wired.
-		"src/repositories/__tests__/entrySchemaConformance.test.mts",
-		// D-1 FOLLOW-UP: this entry is a single file, not a `repositories/__tests__/**` glob,
-		// because `InMemoryClientRepository.test.mts` has 16 pre-existing TS errors
-		// (Map<...> shape mismatches) unrelated to D-1. Widen this to the glob
-		// once that file is cleaned up — track in the next core/repositories
-		// hygiene PR.
-		"src/__tests__/grant-context-readonly.test.mts",
-		"src/__tests__/repository-types-readonly.test.mts",
-		"src/__tests__/naming-aliases.test.mts",
-		"src/__tests__/contributes-map-substitution.test.mts",
-		// #626 P1: paired with the same two entries in vitest.config.mts, which
-		// is what keeps the relocated port assertions checked rather than merely
-		// transpiled.
-		"src/federations/__tests__/federation-provider-slim.test.mts",
-		// Paired with the same entry in vitest.config.mts.
-		"src/assertions/__tests__/entry-fields.types.test.mts",
-		"src/assertions/__tests__/issuerRegistry.test.mts",
-		"src/assertions/__tests__/registryAssertionVerifier.test.mts",
-		// #645 follow-up: paired with the same entry in vitest.config.mts.
-		"src/federation-tokens/__tests__/record-fields.types.test.mts",
-		"src/federation-tokens/__tests__/memory.test.mts",
-		"src/federation-tokens/__tests__/removeBySid-rename.test.mts",
-		"src/federations/__tests__/delegated-authorization-types.test.mts",
-		// v0.13.0 audit: these three were in neither list (or only in vitest's),
-		// so their type contracts — `wiring.test.mts`'s `satisfies … as
-		// BootstrapMap` among them — were never compiled. Paired with
-		// vitest.config.mts's `typecheck.include`, as #343 requires.
-		"src/webauthn-credentials/__tests__/types.test.mts",
-		"src/challenges/__tests__/types.test.mts",
-		"src/challenges/__tests__/wiring.test.mts",
-		// #593: paired with vitest.config.mts, as #343 requires. The
-		// `@ts-expect-error` directives in this file are the regression test for
-		// the FederationGrant union.
-		"src/federation-grants/**/*.mts",
-		// #626 P2: paired with vitest.config.mts, as #343 requires.
-		"src/grants/__tests__/dependencies.types.test.mts",
-		// #626: paired with vitest.config.mts, as #343 requires.
-		"src/consents/**/*.mts",
-		"src/repositories/__tests__/code-fields.types.test.mts",
-		"src/repositories/__tests__/createRepositoryFactories.test.mts",
-		// #626: paired with vitest.config.mts, as #343 requires.
-		"src/device-authorization/**/*.mts",
-		// One type per audit `details` key; paired with vitest.config.mts.
-		"src/audit/__tests__/audit-details.types.test.mts",
-		// The session-admission ADR (A2): paired with vitest.config.mts, as #343 requires.
-		"src/session-admission/**/*.mts",
-		// The MFA ports; paired with vitest.config.mts.
-		"src/mfa/**/*.mts",
-		"src/mail/**/*.mts",
-		// The MFA enrollment witness; paired with vitest.config.mts.
-		"src/repositories/__tests__/mfaEnrollmentWitness.test.mts",
-		// The slots modules share what one of them owns through (#728); paired
-		// with vitest.config.mts.
-		"src/token-settings/**/*.mts",
-		"src/browser-session/**/*.mts",
-		"src/deployment/**/*.mts",
-		"src/ratelimit/__tests__/rateLimiter.contract.test.mts",
-		// The outage policy's brand and options; paired with vitest.config.mts.
-		"src/ratelimit/__tests__/policy.types.test.mts",
-		// The rate-limit guard; paired with vitest.config.mts.
-		"src/ratelimit/__tests__/guard.test.mts"
-	],
+	// vitest's typecheck runs tsc on this program in any run that includes one
+	// of the files `typecheck.include` in vitest.config.mts names (a full run,
+	// and CI, always does). An error in any file of the program then fails the
+	// run, whether or not that list names the file. `tsconfig.json` leaves
+	// `__tests__` out, so every test file and helper comes in here by glob: a
+	// new one is compiled without being listed.
+	"include": ["src/**/*.mts"],
 	"exclude": ["node_modules", "dist"]
 }

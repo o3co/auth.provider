@@ -15,57 +15,30 @@
  */
 
 /**
- * `audit.sink` has to be a DECLARED top-level section, not merely a key an
- * operator writes in HOCON. `AppConfigSchema` is a plain `z.object` and strips
- * what it does not declare, so an undeclared section does not fail loudly: the
- * key vanishes between `parseFile` and the composition root, the sink selector
- * reads `undefined`, and the deployment falls back to whatever the default is
- * while the operator's configuration sits in the file looking effective.
- *
- * Shape only — the literal default lives in `reference.conf` per
- * ADR 2026-04-30.
+ * `audit`, where the audit sink's selection, its options and its declared
+ * absence were, is presence-only: the selection is a composition root's own
+ * (the standalone template's `adapters.auditSink`), the options the sink
+ * module's section, and the declared absence core's own list,
+ * `core.declaredAbsent`. Core keeps the section as written, whatever it holds,
+ * so a root that parses with `AppConfigSchema` before boot still hands it to
+ * the refusal of the paths it moved from, and reads nothing of it.
  */
 
 import { describe, expect, it } from "vitest";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
-import { AppConfigSchema, fullSectionsSchema } from "../application.schema.mjs";
+import { AppConfigSchema } from "../application.schema.mjs";
 
-describe("audit schema", () => {
-	it("preserves audit.sink.type through a full AppConfigSchema parse", () => {
-		const parsed = AppConfigSchema.parse({
-			...makeValidAppConfig(),
-			audit: { sink: { type: "console" } },
-		});
-		expect(parsed.audit?.sink.type).toBe("console");
+describe("audit, where the sink's settings were", () => {
+	it("is kept as written, whatever it holds", () => {
+		const written = {
+			sink: { type: "splunk-hec", "splunk-hec": { endpoint: "https://splunk.example/collector" } },
+		};
+		expect(AppConfigSchema.parse({ ...makeValidAppConfig(), audit: written }).audit).toEqual(
+			written,
+		);
 	});
 
-	it("keeps the sink type open so a deployment can register its own", () => {
-		// The selector names a builder in an AdapterFactory the composition
-		// root owns. Pinning an enum here would make every out-of-tree sink a
-		// schema change in this package.
-		const parsed = fullSectionsSchema.shape.audit.parse({ sink: { type: "splunk-hec" } });
-		expect(parsed?.sink.type).toBe("splunk-hec");
-	});
-
-	it("carries the selected sink's own options alongside the selector", () => {
-		// Same `{ type, [type]: { … } }` shape as `repositories.*` and
-		// `session.storage`, which the composition root flattens before handing
-		// the slice to the factory. Without passthrough the options would be
-		// stripped and every out-of-tree sink would boot unconfigured.
-		const parsed = fullSectionsSchema.shape.audit.parse({
-			sink: {
-				type: "splunk-hec",
-				"splunk-hec": { endpoint: "https://splunk.example/services/collector" },
-			},
-		});
-		const sink = parsed?.sink as Record<string, Record<string, unknown>> | undefined;
-		expect(sink?.["splunk-hec"]?.endpoint).toBe("https://splunk.example/services/collector");
-	});
-
-	it("accepts the section being absent (composition root supplies the safe default)", () => {
-		// Absence must not be a boot failure for a hand-built config, but it
-		// must also not mean "no sink" — that is the composition root's
-		// concern, pinned in the standalone template's own tests.
-		expect(fullSectionsSchema.shape.audit.safeParse(undefined).success).toBe(true);
+	it("is absent when omitted", () => {
+		expect(AppConfigSchema.parse(makeValidAppConfig()).audit).toBeUndefined();
 	});
 });

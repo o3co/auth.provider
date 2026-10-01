@@ -73,7 +73,7 @@ const refusal = (composing: Promise<Composition>): Promise<unknown> =>
 describe("what the template expects of session admission", () => {
 	it("is [] in the shipped configuration under the shipped mfa.mode, off, and the composition boots with it", async () => {
 		const own = readOwnLayers(ownFiles(), { env: SINGLE_ENV });
-		expect(resolveLayers(own, []).core).toEqual({ sessionRequirements: { expected: [] } });
+		expect(resolveLayers(own, []).core).toMatchObject({ sessionRequirements: { expected: [] } });
 		expect(readMfaMode(readSwitches(own))).toBe("off");
 		current = await compose();
 		expect(current.config).not.toHaveProperty("mfa");

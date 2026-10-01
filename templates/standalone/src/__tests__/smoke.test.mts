@@ -29,11 +29,18 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
+import { coreConfigForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { capturedRenames } from "./library-references.fixture.mjs";
+import type { Switches } from "../configPath.mjs";
+import type { Adapters } from "../sections.mjs";
+import {
+	capturedRenames,
+	inProcessAdapters,
+	shippedAdapters,
+} from "./library-references.fixture.mjs";
 
 const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
 
@@ -46,9 +53,15 @@ const smokeKeyPair = generateKeyPairSync("ed25519", {
 });
 
 /** The `http` module's section, as the hand-built configuration below carries it. */
-const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
+const HTTP = {
+	port: 0,
+	trustProxy: false,
+	readinessTimeoutMs: 1000,
+	cors: { allowedOrigins: [] as string[] },
+};
 
-const config: AppConfig = {
+/** The template modules' sections sit beside core's, so the configuration is wider than `AppConfig`. */
+const config: AppConfig & Record<string, unknown> = {
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
@@ -56,23 +69,23 @@ const config: AppConfig = {
 	},
 	http: HTTP,
 	logging: { level: "silent" },
+	"key-store": {
+		provider: "local",
+		local: {
+			algorithm: "EdDSA",
+			kid: "v0",
+			privateKey: smokeKeyPair.privateKey,
+			publicKey: smokeKeyPair.publicKey,
+			previousKeys: [],
+		},
+	},
 	// A composition with a consumer of session admission states what it
 	// expects (ADR 2026-09-28-session-admission): the shipped
 	// `application.conf` expects none, and so does this hand-built config.
-	core: { sessionRequirements: { expected: [] } },
+	...coreConfigForTests({ federations: { google: { enabled: false } } }),
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "EdDSA",
-					kid: "v0",
-					privateKey: smokeKeyPair.privateKey,
-					publicKey: smokeKeyPair.publicKey,
-					previousKeys: [],
-				},
-			},
 		},
 		accessToken: { expiresIn: 3600 },
 		refreshToken: {
@@ -83,9 +96,6 @@ const config: AppConfig = {
 		grants: {},
 		oidcMode: "oidc-required",
 		// No `authorize` section: the first-party invariant is unconditional.
-		// The memory adapter is explicit: the legacy `repositories.code.type`
-		// fallback would also pick memory, but with a deprecation warning.
-		code: { adapter: "memory" as const },
 	},
 	"session-store": {
 		// `session-store.secret` carries a 256-bit entropy floor.
@@ -102,16 +112,14 @@ const config: AppConfig = {
 		rateLimit: { login: { windowMs: 60000, limit: 10 } },
 	},
 	rateLimit: { failMode: "open" },
-	federations: {
-		google: { enabled: false },
-	},
-	repositories: {
-		client: { type: "yaml", path: "./config/clients.yaml" },
-		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
-		code: { type: "memory", defaultExpiresIn: 600 },
-	},
-	cors: { allowedOrigins: [] },
+	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
 };
+
+/** What phase one hands `buildModules`: the configuration, with `changes` over every store in process. */
+const switchesWith = (changes: Partial<Adapters> = {}): Switches =>
+	({ ...config, adapters: { ...inProcessAdapters(), ...changes } }) as unknown as Switches;
+
+const switches = switchesWith();
 
 /**
  * The one confidential client, so the `clientAuthMw` middleware in front of
@@ -126,7 +134,7 @@ const SMOKE_BASIC_AUTH = `Basic ${Buffer.from(`${SMOKE_CLIENT_ID}:${SMOKE_CLIENT
  * Test-only repository module in place of the file-system-backed repositories
  * `repositoriesModule` provides in production: the smoke tests verify the
  * boot pipeline shape, not the data layer. `codeRepository` is not provided
- * here; the `oauth.code.adapter` switch in `buildModules` wires it.
+ * here; the `adapters.codeRepository` selection in `buildModules` wires it.
  */
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",
@@ -165,7 +173,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},
@@ -176,7 +184,7 @@ describe("standalone smoke test", () => {
 
 	async function buildApp() {
 		const handle = await createApp({
-			modules: buildModules(config, {
+			modules: buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				// A memory RT family store in place of the default Redis store and
@@ -305,11 +313,14 @@ describe("standalone smoke test", () => {
 			},
 		};
 		const handle = await createApp({
-			modules: buildModules(issuerConfig, {
-				keyStoreModule: testKeyStoreModule,
-				repositoriesModule: testRepositoriesModule,
-				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
-			}),
+			modules: buildModules(
+				{ ...switches, oauth: issuerConfig.oauth },
+				{
+					keyStoreModule: testKeyStoreModule,
+					repositoriesModule: testRepositoriesModule,
+					refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+				},
+			),
 			bootstrapComponents: { config: issuerConfig, pathResolver: (s) => s },
 		});
 		handleRef = handle;
@@ -353,14 +364,14 @@ describe("standalone smoke test", () => {
 	});
 
 	// A freshly scaffolded app must boot under the default
-	// `federations.google.enabled = false`. `buildModules` includes
+	// `core.federations.google.enabled = false`. `buildModules` includes
 	// `googleFederationModule` and its config bridge only when enabled, since
 	// the bridge throws at boot when `extractFederationSection` returns
 	// undefined. The manifest is asserted directly, so a bypassed gate fails
 	// even if the bridge is later made tolerant of `undefined`; then the
 	// handle must still boot.
 	it("boots when google federation is disabled (default scaffold config)", async () => {
-		const modules = buildModules(config, {
+		const modules = buildModules(switches, {
 			keyStoreModule: testKeyStoreModule,
 			repositoriesModule: testRepositoriesModule,
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -383,7 +394,7 @@ describe("standalone smoke test", () => {
 	// in-process. The smoke tests above exercise the memory override.
 	describe("redis-clients + adapter wiring", () => {
 		it("buildModules includes the shared redis-clients module + redis store by default", () => {
-			const modules = buildModules(config, {
+			const modules = buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 			});
@@ -394,7 +405,7 @@ describe("standalone smoke test", () => {
 		});
 
 		it("buildModules drops the shared redis-clients module when override forces memory-only", () => {
-			const modules = buildModules(config, {
+			const modules = buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -406,7 +417,7 @@ describe("standalone smoke test", () => {
 		});
 
 		it("buildModules wires memoryRateLimiterModule by default", () => {
-			const modules = buildModules(config, {
+			const modules = buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -416,12 +427,8 @@ describe("standalone smoke test", () => {
 			expect(names).not.toContain("redis-rate-limiter");
 		});
 
-		it("buildModules switches to redisRateLimiterModule when rateLimiter.adapter = 'redis'", () => {
-			const redisRlConfig = {
-				...config,
-				rateLimiter: { adapter: "redis" as const },
-			};
-			const modules = buildModules(redisRlConfig, {
+		it("buildModules switches to redisRateLimiterModule when adapters.rateLimiter = 'redis'", () => {
+			const modules = buildModules(switchesWith({ rateLimiter: "redis" }), {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -433,12 +440,8 @@ describe("standalone smoke test", () => {
 			expect(names).toContain("redis-clients");
 		});
 
-		it("buildModules switches to redisSessionStoresModule when userSessionStores.adapter = 'redis'", () => {
-			const redisSessConfig = {
-				...config,
-				userSessionStores: { adapter: "redis" as const },
-			};
-			const modules = buildModules(redisSessConfig, {
+		it("buildModules switches to redisSessionStoresModule when adapters.userSessionStores = 'redis'", () => {
+			const modules = buildModules(switchesWith({ userSessionStores: "redis" }), {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -456,14 +459,13 @@ describe("standalone smoke test", () => {
 		// shared clients module exists for: every `*Client` slot any selected
 		// module requires is one it provides.
 		it("redis-clients provides every *Client slot the Redis branches require", () => {
-			const allRedisConfig = {
-				...config,
-				userSessionStores: { adapter: "redis" as const },
-				rateLimiter: { adapter: "redis" as const },
-				accessTokenDenylist: { adapter: "redis" as const },
-				consentStore: { adapter: "redis" as const },
-				oauth: { ...config.oauth, code: { adapter: "redis" as const } },
-			};
+			const allRedisConfig = switchesWith({
+				userSessionStores: "redis",
+				rateLimiter: "redis",
+				accessTokenDenylist: "redis",
+				consentStore: "redis",
+				codeRepository: "redis",
+			});
 			// No `refreshTokenFamilyModules` override: the default is the Redis
 			// RT-family store, so `refreshTokenFamilyClient` is part of what the
 			// invariant covers. Still hermetic — buildModules opens no socket.
@@ -490,7 +492,7 @@ describe("standalone smoke test", () => {
 	// "multi"` refuses it.
 	describe("access-token denylist wiring", () => {
 		it("always wires a denylist, so /oauth/revoke can keep its promise", () => {
-			const modules = buildModules(config, {
+			const modules = buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -502,7 +504,7 @@ describe("standalone smoke test", () => {
 		});
 
 		it("defaults to the memory denylist when no adapter is configured", () => {
-			const modules = buildModules(config, {
+			const modules = buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -512,12 +514,8 @@ describe("standalone smoke test", () => {
 			expect(names).not.toContain("redis-access-token-denylist");
 		});
 
-		it("switches to the Redis denylist when accessTokenDenylist.adapter = 'redis'", () => {
-			const redisDenylistConfig = {
-				...config,
-				accessTokenDenylist: { adapter: "redis" as const },
-			};
-			const modules = buildModules(redisDenylistConfig, {
+		it("switches to the Redis denylist when adapters.accessTokenDenylist = 'redis'", () => {
+			const modules = buildModules(switchesWith({ accessTokenDenylist: "redis" }), {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -531,14 +529,13 @@ describe("standalone smoke test", () => {
 			expect(names).toContain("redis-clients");
 		});
 
-		it("the shipped application.conf selects the replica-safe adapter", () => {
+		it("the template's reference.conf selects the replica-safe adapter", () => {
 			// The template's own config is the artifact operators deploy. It runs
 			// with `core.deployment.mode = multi` in the umbrella E2E, which refuses
 			// every in-memory shared store — so shipping the memory denylist here
 			// would be a boot failure in the very stack that proves the scaffold
 			// works.
-			const conf = readFileSync(new URL("../../config/application.conf", import.meta.url), "utf8");
-			expect(conf).toMatch(/accessTokenDenylist\s*\{[\s\S]*?adapter\s*=\s*"redis"/);
+			expect(shippedAdapters().accessTokenDenylist).toBe("redis");
 		});
 
 		it("keeps the composition boot-valid end to end", async () => {
@@ -546,7 +543,7 @@ describe("standalone smoke test", () => {
 			// the denylist slot without one. A scaffold that trips its own library's
 			// guard is not a scaffold.
 			const handle = await createApp({
-				modules: buildModules(config, {
+				modules: buildModules(switches, {
 					keyStoreModule: testKeyStoreModule,
 					repositoriesModule: testRepositoriesModule,
 					refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -558,12 +555,12 @@ describe("standalone smoke test", () => {
 		});
 	});
 
-	// Adapter switch for the OAuth code repository: the memory branch wires
+	// The OAuth code repository's selection: the memory branch wires
 	// `inMemoryCodeRepositoryModule`; the redis branch wires
 	// `redisCodeRepositoryModule` against the shared ioredis socket.
 	describe("code-repository adapter wiring", () => {
-		it("buildModules wires inMemoryCodeRepositoryModule by default (oauth.code.adapter = 'memory')", () => {
-			const modules = buildModules(config, {
+		it("buildModules wires inMemoryCodeRepositoryModule when adapters.codeRepository = 'memory'", () => {
+			const modules = buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -573,12 +570,8 @@ describe("standalone smoke test", () => {
 			expect(names).not.toContain("redis-code-repository");
 		});
 
-		it("buildModules switches to redisCodeRepositoryModule when oauth.code.adapter = 'redis'", () => {
-			const redisCodeConfig = {
-				...config,
-				oauth: { ...config.oauth, code: { adapter: "redis" as const } },
-			};
-			const modules = buildModules(redisCodeConfig, {
+		it("buildModules switches to redisCodeRepositoryModule when adapters.codeRepository = 'redis'", () => {
+			const modules = buildModules(switchesWith({ codeRepository: "redis" }), {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
@@ -591,57 +584,14 @@ describe("standalone smoke test", () => {
 			expect(names).toContain("redis-clients");
 		});
 
-		it("buildModules honors legacy repositories.code.type='redis' with one object-first deprecation warn when oauth.code.adapter is absent", () => {
-			const warn = vi.fn();
-			const logger = {
-				trace: vi.fn(),
-				debug: vi.fn(),
-				info: vi.fn(),
-				warn,
-				error: vi.fn(),
-				fatal: vi.fn(),
-				child: () => logger,
-			};
-			const legacyConfig = {
-				...config,
-				oauth: { ...config.oauth, code: undefined },
-				repositories: {
-					...config.repositories,
-					code: { type: "redis" as const, defaultExpiresIn: 600 },
-				},
-			};
-			const modules = buildModules(legacyConfig, {
-				keyStoreModule: testKeyStoreModule,
-				repositoriesModule: testRepositoriesModule,
-				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
-				logger,
-			});
-			const names = modules.map((m) => m.name);
-			expect(names).toContain("redis-code-repository");
-			expect(warn.mock.calls).toEqual([
-				[
-					{
-						key: "repositories.code.type",
-						env: "CLIENT_CODE_TYPE",
-						replacement: "oauth.code.adapter",
-						replacementEnv: "OAUTH_CODE_ADAPTER",
-					},
-					"config_key_deprecated",
-				],
-			]);
-			for (const level of ["trace", "debug", "info", "error", "fatal"] as const) {
-				expect(logger[level]).not.toHaveBeenCalled();
-			}
-		});
-
 		it("buildModules has only ONE codeRepository provider in the manifest (no slot collision)", () => {
-			// `repositoriesModule` must NOT provide `codeRepository` — the slot
-			// is owned by `inMemoryCodeRepositoryModule` or
+			// The `repositories` module must NOT provide `codeRepository` — the
+			// slot is owned by `inMemoryCodeRepositoryModule` or
 			// `redisCodeRepositoryModule` exclusively, selected via
-			// `oauth.code.adapter`.
-			const modules = buildModules(config, {
+			// `adapters.codeRepository`.
+			const modules = buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
-				// The production repositoriesModule (not the test override), so
+				// The production `repositories` module (not the test override), so
 				// its own provides are exercised.
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 			});
@@ -661,7 +611,7 @@ describe("standalone smoke test", () => {
 		registerBuiltinKeyStores(ksf);
 		const keyStore = await ksf.create({
 			type: "local",
-			...(config.oauth.jwt.signingKey?.local ?? {}),
+			...(config["key-store"] as { local: object }).local,
 		});
 		// The token must carry the deployment's configured `iss`: introspection
 		// pins it (RFC 9068 §4), and every deployment has one.

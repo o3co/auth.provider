@@ -36,7 +36,7 @@ const signer = generateKeyPairSync("ed25519");
 
 const jwksFetch = () =>
 	vi.fn(
-		async () =>
+		async (_input: string | URL | Request) =>
 			new Response(
 				JSON.stringify({
 					keys: [{ ...(await exportJWK(signer.publicKey)), kid: "k1", alg: "EdDSA" }],

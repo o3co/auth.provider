@@ -36,6 +36,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	CORE_RELOCATIONS,
+	coreConfigForTests,
 	createTestOAuthTokenSettings,
 	createTestSessionCookiePolicy,
 	makeValidCoreConfig,
@@ -365,7 +366,7 @@ describe("subjectRevocationServiceModule", () => {
 				bootstrapComponents: {
 					config: {
 						...makeValidCoreConfig(),
-						audit: { sink: { type: "none" } },
+						...coreConfigForTests({ declaredAbsent: ["auditSink"] }),
 						"renamed-variables": renamedVariableCaptures({
 							modules: [subjectRevocationServiceModule],
 							core: CORE_RELOCATIONS,

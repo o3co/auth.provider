@@ -75,6 +75,7 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
+	type Switches,
 } from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
 import { requireMfaSecondFactorAuthority } from "#/secondFactorAuthority.mjs";
@@ -100,25 +101,25 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ISSUER: ISSUER,
 	// The shipped default algorithm (EdDSA), with the key pair inline.
-	OAUTH_JWT_PRIVATE_KEY: signingKey.privateKey,
-	OAUTH_JWT_PUBLIC_KEY: signingKey.publicKey,
+	KEY_STORE_LOCAL_PRIVATE_KEY: signingKey.privateKey,
+	KEY_STORE_LOCAL_PUBLIC_KEY: signingKey.publicKey,
 	SESSION_STORE_SECRET: "all-modules-composition-session.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	CORE_DEPLOYMENT_MODE: "single",
 	SESSION_STORE_STORAGE_TYPE: "memory",
-	USER_SESSION_STORES_ADAPTER: "memory",
-	RATE_LIMITER_ADAPTER: "memory",
-	OAUTH_CODE_ADAPTER: "memory",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-	REPLAY_SEEN_SET_ADAPTER: "memory",
-	FEDERATION_TOKEN_STORE_TYPE: "memory",
-	CONSENT_STORE_ADAPTER: "memory",
-	FEDERATION_GRANT_STORE_ADAPTER: "memory",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+	ADAPTERS_USER_SESSION_STORES: "memory",
+	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_CODE_REPOSITORY: "memory",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+	ADAPTERS_REPLAY_SEEN_SET: "memory",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
+	ADAPTERS_CONSENT_STORE: "memory",
+	ADAPTERS_FEDERATION_GRANT_STORE: "memory",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 	// The user repository is replaced (see the header); `yaml` keeps the
 	// shipped `http` adapter's URL requirements out of config validation.
-	CLIENT_USER_TYPE: "yaml",
+	ADAPTERS_USER_REPOSITORY: "yaml",
 	OAUTH_SESSION_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
 	OAUTH_AUTHORIZATION_GRANTS_REFRESH_TOKEN_ENABLED: "true",
@@ -129,13 +130,13 @@ export const SINGLE_ENV: Readonly<Record<string, string>> = {
 	// The in-memory user repository covers no registration; `required` is a
 	// Store's statement that it does (see the federation-grants README).
 	FEDERATION_GRANTS_IDENTITY_LOOKUP: "unsupported",
-	FEDERATIONS_GOOGLE_ENABLED: "true",
-	FEDERATIONS_GOOGLE_CLIENT_ID: "google-client",
-	FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-secret",
-	FEDERATIONS_OIDC_ENABLED: "true",
-	FEDERATIONS_OIDC_ISSUER: OIDC_ISSUER,
-	FEDERATIONS_OIDC_CLIENT_ID: "oidc-client",
-	FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-secret",
+	CORE_FEDERATIONS_GOOGLE_ENABLED: "true",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_ID: "google-client",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-secret",
+	CORE_FEDERATIONS_OIDC_ENABLED: "true",
+	CORE_FEDERATIONS_OIDC_ISSUER: OIDC_ISSUER,
+	CORE_FEDERATIONS_OIDC_CLIENT_ID: "oidc-client",
+	CORE_FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-secret",
 };
 
 /**
@@ -147,17 +148,17 @@ export const MULTI_ENV: Readonly<Record<string, string>> = {
 	CORE_DEPLOYMENT_MODE: "multi",
 	SESSION_STORE_STORAGE_TYPE: "redis",
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
-	USER_SESSION_STORES_ADAPTER: "redis",
-	RATE_LIMITER_ADAPTER: "redis",
-	OAUTH_CODE_ADAPTER: "redis",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
-	REPLAY_SEEN_SET_ADAPTER: "redis",
-	FEDERATION_TOKEN_STORE_TYPE: "redis",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
+	ADAPTERS_USER_SESSION_STORES: "redis",
+	ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_CODE_REPOSITORY: "redis",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
+	ADAPTERS_REPLAY_SEEN_SET: "redis",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: ENCRYPTION_KEY,
-	CONSENT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
+	ADAPTERS_CONSENT_STORE: "redis",
+	ADAPTERS_FEDERATION_GRANT_STORE: "redis",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "redis",
 };
 
 /** The grant connection the federation-grant flows use, on the shipped `oidc` federation. */
@@ -175,8 +176,8 @@ const OPERATOR_LAYER: string = (() => {
 	const quoted = (value: string) => JSON.stringify(value);
 	writeFileSync(
 		file,
-		`federations.google.clientUrl = ${quoted(FEDERATION_LANDING)}
-federations.oidc.clientUrl = ${quoted(FEDERATION_LANDING)}
+		`core.federations.google.clientUrl = ${quoted(FEDERATION_LANDING)}
+core.federations.oidc.clientUrl = ${quoted(FEDERATION_LANDING)}
 redis-federation-grant-store.encryptionKeys = [{ id = "k-test", key = ${quoted(ENCRYPTION_KEY)} }]
 federation-grants {
   connections {
@@ -219,7 +220,7 @@ export function resolveConfig(
 	env: Readonly<Record<string, string>>,
 	reads: readonly string[] = [],
 	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
-): AppConfig {
+): Switches {
 	return readSwitches(own, { reads });
 }
 
@@ -416,7 +417,7 @@ async function createUpstreams(): Promise<Upstreams> {
 		oidc: await createFakeIdp({
 			issuer: OIDC_ISSUER,
 			discovery: true,
-			clientId: SINGLE_ENV.FEDERATIONS_OIDC_CLIENT_ID,
+			clientId: SINGLE_ENV.CORE_FEDERATIONS_OIDC_CLIENT_ID,
 			sub: OIDC_SUB,
 		}),
 		// Google's endpoints are fixed in the adapter, not discovered.
@@ -426,7 +427,7 @@ async function createUpstreams(): Promise<Upstreams> {
 			tokenEndpoint: "https://oauth2.googleapis.com/token",
 			jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
 			userinfoEndpoint: "https://www.googleapis.com/oauth2/v3/userinfo",
-			clientId: SINGLE_ENV.FEDERATIONS_GOOGLE_CLIENT_ID,
+			clientId: SINGLE_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_ID,
 			sub: GOOGLE_SUB,
 		}),
 	};
@@ -451,7 +452,7 @@ const bridged = <T,>(module: Module, slot: string, config: AppConfig): T => {
  * config enables — which is when `buildModules` lists the bridges.
  */
 async function federationOverrides(
-	config: AppConfig,
+	config: Switches,
 	upstreams: Upstreams,
 ): Promise<Record<string, unknown>> {
 	const overrides: Record<string, unknown> = {};
@@ -594,9 +595,9 @@ export interface ComposeOptions {
 	 */
 	readonly reads?: readonly string[];
 	/** Modules added after the template's own, before the order and the outage apply. */
-	readonly extraModules?: (config: AppConfig) => readonly Module[];
+	readonly extraModules?: (config: Switches) => readonly Module[];
 	/** Components laid over the boot's, beside the federation config slots. */
-	readonly extraOverrides?: (config: AppConfig) => Record<string, unknown>;
+	readonly extraOverrides?: (config: Switches) => Record<string, unknown>;
 	/** Client registrations beside the fixture's own, as `ClientEntrySchema` input. */
 	readonly extraClients?: Readonly<Record<string, Record<string, unknown>>>;
 	/** Users beside the fixture's own, keyed by username. */
@@ -606,7 +607,7 @@ export interface ComposeOptions {
 	 * layer would: applied to phase one's switches, and to what `createApp` is
 	 * handed, as resolved.
 	 */
-	readonly config?: (config: AppConfig) => AppConfig;
+	readonly config?: (config: Switches) => Switches;
 	readonly order?: ModuleOrder;
 	readonly outage?: { readonly slot: string; readonly outage: Outage };
 	/** Keep the shipped Redis refresh-token family store (the `multi` boot). */
@@ -621,7 +622,7 @@ export interface ComposeOptions {
 }
 
 /** The module list the template boots for `config`, as `app.mts` builds it. */
-export function composedModules(config: AppConfig, options: ComposeOptions = {}): Module[] {
+export function composedModules(config: Switches, options: ComposeOptions = {}): Module[] {
 	let modules = [
 		...buildModules(config, {
 			environment: options.environment ?? "production",
@@ -657,7 +658,8 @@ export interface Composition {
  */
 export async function compose(options: ComposeOptions = {}): Promise<Composition> {
 	const env = options.env ?? SINGLE_ENV;
-	const adjust = (config: AppConfig) => (options.config ? options.config(config) : config);
+	const adjust = <C extends AppConfig>(config: C): C =>
+		options.config ? (options.config(config as unknown as Switches) as unknown as C) : config;
 	// The composition's own layers, read once for both phases, as `app.mts`
 	// reads them. Phase one: the switches the modules are chosen by.
 	const own = readOwnLayers(

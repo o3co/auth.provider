@@ -29,7 +29,7 @@ import {
 
 // ComponentMap slot declaration-merge: one slot holds the config of every
 // OIDC instance, keyed by federation name. A composition root fills it —
-// `readOidcFederationConfigs` turns the `federations` config section into
+// `readOidcFederationConfigs` turns the `core.federations` map into
 // it — and each `oidcFederationModule(name)` reads its own entry.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
@@ -37,7 +37,7 @@ declare module "@o3co/auth-provider-core" {
 	}
 }
 
-/** The `type` a `federations.<name>` section names to select this provider. */
+/** The `type` a `core.federations.<name>` entry names to select this provider. */
 export const OIDC_FEDERATION_TYPE = "oidc";
 
 function entryFor(
@@ -47,7 +47,7 @@ function entryFor(
 	const entry = configs?.[name];
 	if (entry === undefined) {
 		throw new Error(
-			`oidcFederationConfigs has no entry for "${name}" — federation-oidc-${name} is in the manifest, so the composition root must supply its config under that name (readOidcFederationConfigs builds the slot from config.federations)`,
+			`oidcFederationConfigs has no entry for "${name}" — federation-oidc-${name} is in the manifest, so the composition root must supply its config under that name (readOidcFederationConfigs builds the slot from core.federations)`,
 		);
 	}
 	return entry;
@@ -81,8 +81,10 @@ export function oidcFederationModule(name: string): Module {
 	});
 }
 
-/** Names of every enabled `federations.<name>` section of type `oidc`, sorted. */
-export function oidcFederationNames(federations: Record<string, unknown> | undefined): string[] {
+/** Names of every enabled `core.federations.<name>` entry of type `oidc`, sorted. */
+export function oidcFederationNames(
+	federations: Readonly<Record<string, unknown>> | undefined,
+): string[] {
 	if (!federations) return [];
 	return Object.keys(federations)
 		.filter((name) => extractFederationSection(federations, name)?.type === OIDC_FEDERATION_TYPE)
@@ -103,7 +105,7 @@ const isObject = (value: unknown): value is Slice =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 function readSection(name: string, slice: Slice): OidcProviderConfig {
-	const at = (field: string): string => `federations.${name}.${field}`;
+	const at = (field: string): string => `core.federations.${name}.${field}`;
 	const present = (field: string): boolean => slice[field] !== undefined && slice[field] !== null;
 
 	const requiredString = (field: string): string => {
@@ -171,7 +173,7 @@ function readSection(name: string, slice: Slice): OidcProviderConfig {
 	}
 	if ((clientSecret === undefined) === (privateKey === undefined)) {
 		throw new Error(
-			`federations.${name} must set exactly one of clientSecret (client_secret_basic) or privateKey (private_key_jwt)`,
+			`core.federations.${name} must set exactly one of clientSecret (client_secret_basic) or privateKey (private_key_jwt)`,
 		);
 	}
 
@@ -224,16 +226,16 @@ function readSection(name: string, slice: Slice): OidcProviderConfig {
 }
 
 /**
- * The `oidcFederationConfigs` slot from the `federations` config section:
- * every enabled section whose `type` is `oidc`, flat or nested (the shapes
- * `extractFederationSection` accepts), checked field by field so a typo is a
- * boot refusal naming `federations.<name>.<field>`. The map has no prototype,
+ * The `oidcFederationConfigs` slot from the `core.federations` map
+ * (`federationsOf`): every enabled entry whose `type` is `oidc`, flat or
+ * nested (the shapes `extractFederationSection` accepts), checked field by
+ * field so a typo is a boot refusal naming `core.federations.<name>.<field>`. The map has no prototype,
  * and every name is checked before it becomes a key: a section named
  * `__proto__` is refused by name rather than assigned through the prototype
  * setter.
  */
 export function readOidcFederationConfigs(
-	federations: Record<string, unknown> | undefined,
+	federations: Readonly<Record<string, unknown>> | undefined,
 ): Readonly<Record<string, OidcProviderConfig>> {
 	const out: Record<string, OidcProviderConfig> = Object.create(null);
 	if (!federations) return out;

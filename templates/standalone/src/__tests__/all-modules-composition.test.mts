@@ -34,10 +34,11 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import type { AppConfig } from "@o3co/auth-provider-core";
+import { federationsOf } from "@o3co/auth-provider-core";
 import type express from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { Switches } from "#/configPath.mjs";
 import {
 	ALICE,
 	AS_LISTED,
@@ -189,7 +190,6 @@ const ALL_ON_MODULES = [
 	"federation-oidc-oidc",
 	"logging",
 	"http",
-	"cors",
 	"key-store",
 	"test:repositories",
 	"audit-sink",
@@ -250,7 +250,7 @@ describe("every module the template can turn on boots together", () => {
 	});
 
 	it("hands the deployment's logger to every module that answers a request", async () => {
-		// `app.mts` fills the `logger` slot so that `LOG_LEVEL` and the JSON
+		// `app.mts` fills the `logger` slot so that `LOGGING_LEVEL` and the JSON
 		// envelope reach every module; boot hands a module only the slots its
 		// manifest names, so a route or grant module without `logger` writes
 		// its outage lines to nobody.
@@ -379,7 +379,7 @@ describe("discovery", () => {
 		await on.handle.dispose();
 		current = undefined;
 
-		const { app } = await boot({ env: { ...SINGLE_ENV, CONSENT_STORE_ADAPTER: "none" } });
+		const { app } = await boot({ env: { ...SINGLE_ENV, ADAPTERS_CONSENT_STORE: "none" } });
 		const doc = (await request(app).get(DISCOVERY_PATHS[0])).body;
 		expectValidMetadata(doc);
 		expect(doc.client_id_metadata_document_supported).toBeUndefined();
@@ -387,30 +387,30 @@ describe("discovery", () => {
 	});
 
 	/** The grant connections dropped: they name the OIDC federation. */
-	const withoutConnections = (config: AppConfig): AppConfig =>
+	const withoutConnections = (config: Switches): Switches =>
 		({
 			...config,
 			"federation-grants": { ...config["federation-grants"], connections: {} },
-		}) as AppConfig;
+		}) as Switches;
 
 	const FEATURE_SWITCHES: ReadonlyArray<
 		readonly [
 			feature: string,
 			variable: string,
 			path: string,
-			config: ((config: AppConfig) => AppConfig) | undefined,
+			config: ((config: Switches) => Switches) | undefined,
 		]
 	> = [
 		["federation grants", "FEDERATION_GRANTS_ENABLED", "/oauth/federation-grants", undefined],
 		[
 			"the Google federation",
-			"FEDERATIONS_GOOGLE_ENABLED",
+			"CORE_FEDERATIONS_GOOGLE_ENABLED",
 			"/session/oauth/federation/google",
 			undefined,
 		],
 		[
 			"the OIDC federation",
-			"FEDERATIONS_OIDC_ENABLED",
+			"CORE_FEDERATIONS_OIDC_ENABLED",
 			"/session/oauth/federation/oidc",
 			withoutConnections,
 		],
@@ -436,7 +436,7 @@ describe("discovery", () => {
 
 	it("the OIDC federation off while a grant connection names it is refused at boot, naming both", async () => {
 		await expect(
-			compose({ env: { ...SINGLE_ENV, FEDERATIONS_OIDC_ENABLED: "false" } }),
+			compose({ env: { ...SINGLE_ENV, CORE_FEDERATIONS_OIDC_ENABLED: "false" } }),
 		).rejects.toSatisfy((err: unknown) => {
 			const e = err as { name?: string; cause?: { message?: string } };
 			return (
@@ -569,7 +569,7 @@ describe("every module's primary route answers in the one app", () => {
 
 	// KNOWN DEFECT (the template's federation config, with the session
 	// package's redirect policy): a federation enabled the way the template
-	// README documents — its `FEDERATIONS_OIDC_*` variables — boots, and every
+	// README documents — its `CORE_FEDERATIONS_OIDC_*` variables — boots, and every
 	// login through it then ends at the callback in `500 misconfiguration`
 	// "client URL not configured", after the user has signed in upstream.
 	// `clientUrl` has no environment form (`application.conf` ships it
@@ -579,10 +579,13 @@ describe("every module's primary route answers in the one app", () => {
 	knownDefect(
 		"a federation enabled from the documented variables alone either refuses to boot or completes a login",
 		async () => {
-			const withoutLanding = (config: AppConfig): AppConfig => {
-				const federations = config.federations as Record<string, Record<string, unknown>>;
+			const withoutLanding = (config: Switches): Switches => {
+				const federations = federationsOf(config) as Record<string, Record<string, unknown>>;
 				const { clientUrl: _dropped, ...oidc } = federations.oidc ?? {};
-				return { ...config, federations: { ...federations, oidc } } as unknown as AppConfig;
+				return {
+					...config,
+					core: { ...config.core, federations: { ...federations, oidc } },
+				} as unknown as Switches;
 			};
 			let composed: Composition;
 			try {

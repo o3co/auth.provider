@@ -319,7 +319,10 @@ describe("core-mfa-transaction-store-memory.maxEntries", () => {
 			...makeValidAppConfig(),
 			mfaTransactionStore: { adapter: "memory", memory: { maxEntries: "5000" } },
 		});
-		expect(parsed.mfaTransactionStore?.memory).toEqual({ maxEntries: "5000" });
+		expect(parsed.mfaTransactionStore).toEqual({
+			adapter: "memory",
+			memory: { maxEntries: "5000" },
+		});
 	});
 
 	it("is read from the module's own section", async () => {

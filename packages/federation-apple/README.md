@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-apple
 
-Last updated: 2026-09-26
+Last updated: 2026-10-01
 
 Sign in with Apple federation provider for `auth.provider` — Apple's **web**
 flow, in a browser, back to this server.
@@ -69,7 +69,7 @@ config-bootstrap module supplies the typed `appleFederationConfig` slot:
 
 ```ts
 import { readFileSync } from "node:fs";
-import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
 import {
   extractFederationSection,
   sessionModule,
@@ -85,8 +85,8 @@ const appleConfigBridgeModule = defineModule({
   requires: ["config"] as const,
   provides: {
     appleFederationConfig: (deps): AppleProviderConfig => {
-      const slice = extractFederationSection(deps.config.federations, "apple");
-      if (slice?.type !== "apple") throw new Error("federations.apple must be enabled, with type apple");
+      const slice = extractFederationSection(federationsOf(deps.config), "apple");
+      if (slice?.type !== "apple") throw new Error("core.federations.apple must be enabled, with type apple");
       return {
         clientId: slice.clientId as string,          // Services ID
         callbackURL: slice.callbackURL as string,    // must be https
@@ -157,7 +157,7 @@ a dev hostname holding a certificate. The provider checks both at
 construction, through core's loopback predicate (`isLoopbackHostname`), rather
 than letting the authorization endpoint answer the first login with an opaque
 `invalid_request`. The value the flow actually sends is held to it as well: the
-session module derives the `redirect_uri` from `federations.<name>.callbackURL`,
+session module derives the `redirect_uri` from `core.federations.<name>.callbackURL`,
 and a request whose derived URL is not the configured `callbackURL` is refused
 before anything reaches Apple — the two are one value in the bridge above, and
 a composition where they drift fails at the first request instead of validating

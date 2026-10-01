@@ -87,6 +87,26 @@ const ALLOWED_RAW_READS: readonly AllowedRawRead[] = [
 	},
 ];
 
+/**
+ * The expression under any parentheses, type assertions (`as`, `<T>`,
+ * `satisfies`), non-null assertions and instantiation expressions: every
+ * wrapper TypeScript's own `skipOuterExpressions` removes from parsed source.
+ */
+function skipOuterExpressions(node: ts.Expression): ts.Expression {
+	let current = node;
+	while (
+		ts.isParenthesizedExpression(current) ||
+		ts.isAsExpression(current) ||
+		ts.isTypeAssertionExpression(current) ||
+		ts.isSatisfiesExpression(current) ||
+		ts.isNonNullExpression(current) ||
+		ts.isExpressionWithTypeArguments(current)
+	) {
+		current = current.expression;
+	}
+	return current;
+}
+
 /** One read of the field: its line, what it is read off, whether that is core's copy, and the names of the functions and constants around it. */
 interface FactsRead {
 	readonly line: number;
@@ -112,7 +132,7 @@ function declaredTypeOf(checker: ts.TypeChecker, name: ts.Identifier): string | 
 
 /** Whether `receiver`, what the field is read off, is an identifier declared as one of {@link COPIES}. */
 function readsCopy(checker: ts.TypeChecker, receiver: ts.Expression): boolean {
-	const bare = ts.skipOuterExpressions(receiver);
+	const bare = skipOuterExpressions(receiver);
 	if (!ts.isIdentifier(bare)) return false;
 	const type = declaredTypeOf(checker, bare);
 	return type !== undefined && COPIES.has(type);

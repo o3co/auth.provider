@@ -22,6 +22,7 @@ import { createAsymmetricKeyStore, createSymmetricKeyStore } from "../../keys/Ke
 import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { createTestHttpSettings } from "../../testing/slots/httpSettings.mjs";
 import { jwksModule } from "../module.mjs";
 import { JWKS_SECTION } from "../section.mjs";
 
@@ -196,16 +197,16 @@ describe("jwksModule — its own section, jwks {}", () => {
 
 describe("jwksModule — the CORS table lists the path its route serves", () => {
 	const ORIGIN = "https://spa.example";
-	const boot = (modules: Parameters<typeof createTestApp>[0]["modules"]) =>
+	const boot = (modules: NonNullable<Parameters<typeof createTestApp>[0]>["modules"]) =>
 		createTestApp({
 			modules,
 			bootstrapComponents: {
 				config: {
 					...makeValidAppConfig(),
-					cors: { allowedOrigins: [ORIGIN] },
 					jwks: { path: "/keys/jwks.json" },
 				} as unknown as ReturnType<typeof makeValidAppConfig>,
 				pathResolver: (s) => s,
+				httpSettings: createTestHttpSettings({ allowedOrigins: [ORIGIN] }),
 			},
 		});
 	const originAllowedOn = async (

@@ -318,12 +318,19 @@ describe("federatedSessionAuthentication — what a federation callback records"
 });
 
 describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts", () => {
-	const config = (entry: unknown) => ({ federations: { google: entry } });
+	const config = (entry: unknown) => ({ core: { federations: { google: entry } } });
 
 	it("is false by default: an upstream IdP's word is not this provider's", () => {
 		expect(federationTrustsUpstreamAmr(config({ enabled: true }), "google")).toBe(false);
-		expect(federationTrustsUpstreamAmr({ federations: {} }, "google")).toBe(false);
+		expect(federationTrustsUpstreamAmr({ core: { federations: {} } }, "google")).toBe(false);
 		expect(federationTrustsUpstreamAmr({}, "google")).toBe(false);
+		// The map written at the top level is not core's: boot refuses it.
+		expect(
+			federationTrustsUpstreamAmr(
+				{ federations: { google: { enabled: true, trustUpstreamAmr: true } } },
+				"google",
+			),
+		).toBe(false);
 		expect(federationTrustsUpstreamAmr(undefined, "google")).toBe(false);
 	});
 
@@ -337,7 +344,7 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts",
 		// Another federation's switch is not this one's.
 		expect(
 			federationTrustsUpstreamAmr(
-				{ federations: { github: { trustUpstreamAmr: true } } },
+				{ core: { federations: { github: { trustUpstreamAmr: true } } } },
 				"google",
 			),
 		).toBe(false);
@@ -356,7 +363,7 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts",
 		// Enabling the federation later must not be what first reveals it.
 		expect(() =>
 			federationTrustsUpstreamAmr(config({ enabled: false, trustUpstreamAmr: "yes" }), "google"),
-		).toThrow(new RangeError("federations.google.trustUpstreamAmr must be true or false"));
+		).toThrow(new RangeError("core.federations.google.trustUpstreamAmr must be true or false"));
 		expect(() =>
 			federationTrustsUpstreamAmr(
 				config({ enabled: false, type: "oidc", oidc: { trustUpstreamAmr: true } }),
@@ -385,27 +392,29 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts",
 			"a typed sub-section",
 			{ okta: { enabled: true, type: "oidc", oidc: { trustUpstreamAmr: true } } },
 			"okta",
-			"federations.okta.oidc.trustUpstreamAmr",
+			"core.federations.okta.oidc.trustUpstreamAmr",
 		],
 		[
 			"a typed sub-section, saying false",
 			{ okta: { enabled: true, type: "oidc", oidc: { trustUpstreamAmr: false } } },
 			"okta",
-			"federations.okta.oidc.trustUpstreamAmr",
+			"core.federations.okta.oidc.trustUpstreamAmr",
 		],
 		[
 			"the sub-section a shorthand key names",
 			{ google: { enabled: true, google: { trustUpstreamAmr: true } } },
 			"google",
-			"federations.google.google.trustUpstreamAmr",
+			"core.federations.google.google.trustUpstreamAmr",
 		],
 	])(
 		"refuses the switch inside %s, saying it belongs beside enabled, rather than ignore it",
 		(_label, federations, name, placed) => {
 			// Ignored there, an operator who wrote it would believe the IdP
 			// trusted — or, writing false, distrusted — when neither holds.
-			expect(() => federationTrustsUpstreamAmr({ federations }, name)).toThrow(
-				new RangeError(`${placed} belongs beside enabled, as federations.${name}.trustUpstreamAmr`),
+			expect(() => federationTrustsUpstreamAmr({ core: { federations } }, name)).toThrow(
+				new RangeError(
+					`${placed} belongs beside enabled, as core.federations.${name}.trustUpstreamAmr`,
+				),
 			);
 		},
 	);
@@ -422,13 +431,13 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts",
 			// schema coerces the spellings an environment variable delivers first.
 			expect(() =>
 				federationTrustsUpstreamAmr(config({ enabled: true, trustUpstreamAmr: value }), "google"),
-			).toThrow(new RangeError("federations.google.trustUpstreamAmr must be true or false"));
+			).toThrow(new RangeError("core.federations.google.trustUpstreamAmr must be true or false"));
 		},
 	);
 
 	it("reads no inherited key: a federation named like an Object.prototype member has no switch", () => {
-		expect(federationTrustsUpstreamAmr({ federations: {} }, "constructor")).toBe(false);
-		expect(federationTrustsUpstreamAmr({ federations: {} }, "__proto__")).toBe(false);
+		expect(federationTrustsUpstreamAmr({ core: { federations: {} } }, "constructor")).toBe(false);
+		expect(federationTrustsUpstreamAmr({ core: { federations: {} } }, "__proto__")).toBe(false);
 	});
 });
 

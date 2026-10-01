@@ -21,7 +21,7 @@ the Store keeps a deployment's MFA factors,
 [`MfaFactorStore`](../core/src/mfa/factorStore.mts). Despite the
 package name it is not a base layer: no other package imports it at runtime
 (`federation-grants` uses it in a test). A composition root selects it —
-`repositories.user.type = "http"` in the standalone template.
+`adapters.userRepository = "http"` in the standalone template.
 
 **Owns:**
 
@@ -102,19 +102,20 @@ required, since the 5000 ms default is the builder's.
 
 ### Configuration
 
-Under `repositories.user` (`type = "http"`, `CLIENT_USER_TYPE`), in its `http`
-block; defaults are in [`reference.conf`](../core/config/reference.conf):
+Under `repositories.user.http`, the standalone template's `repositories`
+section, read when `adapters.userRepository = "http"` (`ADAPTERS_USER_REPOSITORY`);
+defaults are in [the template's `reference.conf`](../../templates/standalone/config/reference.conf):
 
 | Key | Env | |
 | --- | --- | --- |
-| `authenticateUrl` | `CLIENT_USER_AUTHENTICATE_URL` | Required. Password login. |
-| `authenticateByTokenUrl` | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | Required. Resolves an opaque handle: federated login, the jwt-bearer grant. |
-| `linkFederatedIdentityUrl` | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | Optional. Enables account linking. |
-| `findSubjectByFederatedIdentityUrl` | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | Optional. The identity lookup. |
+| `authenticateUrl` | `REPOSITORIES_USER_HTTP_AUTHENTICATE_URL` | Required. Password login. |
+| `authenticateByTokenUrl` | `REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL` | Required. Resolves an opaque handle: federated login, the jwt-bearer grant. |
+| `linkFederatedIdentityUrl` | `REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL` | Optional. Enables account linking. |
+| `findSubjectByFederatedIdentityUrl` | `REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | Optional. The identity lookup. |
 | `federatedIdentityLookupCoverage` | — (a list; HOCON only) | What the lookup covers. Default `[]`. |
-| `bearerToken` | `CLIENT_USER_BEARER_TOKEN` | Optional. Sent on every request as `Authorization: Bearer <token>`; at least 32 bytes of key material. Unset, no `Authorization` header is sent. See [who may call the Store](#what-the-store-must-enforce-itself). |
-| `timeout` | `CLIENT_USER_TIMEOUT` | Milliseconds. Default 5000. |
-| `maxResponseBytes` | `CLIENT_USER_MAX_RESPONSE_BYTES` | Default 1048576. |
+| `bearerToken` | `REPOSITORIES_USER_HTTP_BEARER_TOKEN` | Optional. Sent on every request as `Authorization: Bearer <token>`; at least 32 bytes of key material. Unset, no `Authorization` header is sent. See [who may call the Store](#what-the-store-must-enforce-itself). |
+| `timeout` | `REPOSITORIES_USER_HTTP_TIMEOUT` | Milliseconds. Default 5000. |
+| `maxResponseBytes` | `REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES` | Default 1048576. |
 
 ## The wire contract
 
@@ -497,7 +498,7 @@ section's test builder, `foundationMfaFactorStoreConfig`, is on
   `deleteUrl` or `markMfaEnrolledUrl` can remove a subject's factors and clear
   its witness, and the subject's next password login then opens a first
   binding to whoever holds the password. Configure `bearerToken`
-  (`CLIENT_USER_BEARER_TOKEN`, from `openssl rand -hex 32`) and have the Store
+  (`REPOSITORIES_USER_HTTP_BEARER_TOKEN`, from `openssl rand -hex 32`) and have the Store
   refuse every request on every endpoint it serves auth.provider — the user
   repository's four and the MFA endpoints alike — whose `Authorization` is not
   exactly `Bearer <that token>`, compared in constant time, and never log the
@@ -570,7 +571,7 @@ section's test builder, `foundationMfaFactorStoreConfig`, is on
 
 Where `err` is logged, a `StoreCredentialRefusedError`'s message names the
 Store endpoint (its origin and path), the status and
-`CLIENT_USER_BEARER_TOKEN` — never the token; a `StoreTransportError`'s names
+`REPOSITORIES_USER_HTTP_BEARER_TOKEN` — never the token; a `StoreTransportError`'s names
 the endpoint the same way, what failed and at most a transport code. No
 message this adapter throws quotes a URL's query string or fragment.
 
@@ -631,7 +632,7 @@ refused unless it is a string, not blank (a blank environment override is a
 boot failure, not "no token"), made only of letters, digits, `-._~+/` and
 trailing `=` padding — no whitespace, no line break, and no `Bearer ` prefix,
 which the adapter adds — and it clears core's shared-secret floor
-(`MIN_SECRET_ENTROPY_BYTES`, the one `SESSION_STORE_SECRET` and `OAUTH_JWT_SECRET`
+(`MIN_SECRET_ENTROPY_BYTES`, the one `SESSION_STORE_SECRET` and `KEY_STORE_LOCAL_SECRET`
 clear), measured on the decoded length of a hex or base64 value, so
 `openssl rand -hex 16` is 16 bytes however long it looks. Whoever holds the
 token speaks to the Store as auth.provider. The shape is checked here because
@@ -640,7 +641,7 @@ refusal quotes the value, no error from a request carries it — a transport
 failure is thrown without the transport's error (see the wire contract) — and
 it is held in an ECMAScript private field, so it is absent from `inspect()`
 and `JSON.stringify` of the repository. These checks run when the repository
-is built, which a deployment does under `repositories.user.type = "http"`
+is built, which a deployment does under `adapters.userRepository = "http"`
 (the standalone template's default); under core's `reference.conf` default,
 `yaml`, the `http` block — and a token in it — is not read at all.
 

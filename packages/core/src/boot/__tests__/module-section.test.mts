@@ -341,14 +341,14 @@ describe("a module's section — read from the parsed configuration", () => {
 		// The choice pinned: the section is read out of the composed parse's
 		// output — core's schema laid over what was written. Under a
 		// parent core's schema declares, a value core coerces arrives coerced —
-		// so a section read raw would refuse `port: "3000"` — and a key core
-		// does not declare is still there.
+		// so a section read raw would refuse `maxLength: "128"` — and a key
+		// core does not declare is still there.
 		let seen: unknown;
 		const sectioned = defineModule({
 			name: "fixture-section",
 			section: {
-				schema: z.object({ port: z.number(), extra: z.string().optional() }),
-				at: "http",
+				schema: z.object({ maxLength: z.number(), extra: z.string().optional() }),
+				at: "oauth.nonce",
 			},
 			contributes: {
 				grantMiddleware: [
@@ -363,11 +363,11 @@ describe("a module's section — read from the parsed configuration", () => {
 		const handle = await createApp({
 			modules: [sectioned],
 			bootstrapComponents: bootWith({
-				http: { port: "3000", trustProxy: false, readinessTimeoutMs: 1000, extra: "kept" },
+				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128", extra: "kept" } },
 			}),
 		});
 
-		expect(seen).toEqual({ port: 3000, extra: "kept" });
+		expect(seen).toEqual({ maxLength: 128, extra: "kept" });
 		await handle.dispose();
 	});
 

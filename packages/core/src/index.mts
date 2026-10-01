@@ -294,6 +294,7 @@ export { isFederationUpstreamOutage } from "./federation-tokens/upstreamOutage.m
 export { callbackUrlForExchange } from "./federations/callback-url.mjs";
 export type { FederationClientSecret } from "./federations/client-secret.mjs";
 export { resolveClientSecret } from "./federations/client-secret.mjs";
+export { federationsOf } from "./federations/configured.mjs";
 export { codeChallenge } from "./federations/pkce.mjs";
 export type { FederationResponseMode } from "./federations/response-mode.mjs";
 export {
@@ -665,6 +666,7 @@ export {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 	readMfaAttemptReservation,
+	readMfaSubjectAttemptReservation,
 	readSessionEmailProof,
 	type SessionEmailProof,
 	sessionEmailProofAnswer,
@@ -764,6 +766,13 @@ export {
 	type FederationTypeDeclaration,
 	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
+// The one reading of a declared absence, and the one way of saying how to
+// write it: for a module that checks a policy itself (a feature switched on
+// at stage 4 cannot attach one), so its refusal agrees with boot's.
+export {
+	describeAbsenceDeclaration,
+	isAbsenceDeclared,
+} from "./modules/manifest/absence-policy.mjs";
 // The single loopback-hostname vocabulary — the predicate behind every
 // "http:// is accepted for loopback hosts only" carve-out
 // (`checkSecureEndpoint` in foundation, `checkRedirectShape` in session).
@@ -771,13 +780,13 @@ export {
 // the designVocabulary drift guard fails any second definition.
 export { isLoopbackHostname } from "./net/loopback.mjs";
 // The serialized-origin vocabulary — what a configured browser origin
-// may be. Enforced on `cors.allowedOrigins` by the config schema at boot and
-// re-applied by `corsMw`, and on every web entry of the WebAuthn package's
-// `origin` / `topOrigin`; exported so a consumer assembling its own policy
-// holds origins to the same rules and refuses in the same words.
-// `normalizeAllowedOrigins` reads an origin list in both its spellings — an
-// array, or the comma-separated string an environment variable carries — for
-// `cors.allowedOrigins`; the WebAuthn package hands it only that string.
+// may be. Enforced on a composition's CORS list by the schema of the module
+// that provides `httpSettings`, re-applied by `corsMw`, and on every web entry
+// of the WebAuthn package's `origin` / `topOrigin`; exported so a consumer
+// assembling its own policy holds origins to the same rules and refuses in the
+// same words. `normalizeAllowedOrigins` reads an origin list in both its
+// spellings — an array, or the comma-separated string an environment variable
+// carries.
 export {
 	checkSerializedOrigin,
 	describeSerializedOriginRejection,

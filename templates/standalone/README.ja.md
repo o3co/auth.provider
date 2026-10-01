@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -10,8 +10,8 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 
 **所有する**のは、1 つのデプロイに固有の選択である:
 
-- どのモジュールをどの順序で合成し、各ストアスロットをどのアダプターで埋めるか — [`src/buildModules.mts`](src/buildModules.mts)（[モジュール合成順序](#モジュール合成順序) を参照）
-- この scaffold だけが持つモジュール — `logging`、`http`、`cors`（ホストプロセス自身の設定と、core の `httpSettings` スロット）、署名鍵ストア、クライアントリポジトリとユーザーリポジトリ、監査 sink、共有される唯一の Redis 接続、in-memory のユーザーセッションストア・コードリポジトリ・フェデレーショントークンストア、そしてフェデレーションの config bridge — [`src/modules.mts`](src/modules.mts)。それらが所有するセクションのデフォルトは [`config/reference.conf`](config/reference.conf) にある。これらがパッケージではなく scaffold 側にあるのは、どれもこのテンプレートの設定セクションから自分のコンポーネントを組み立てるためである。別のソースを使いたいデプロイは、同じ形のモジュールを自前で配線する
+- どのモジュールをどの順序で合成し、各ストアスロットをどのアダプターで埋めるか — [`src/buildModules.mts`](src/buildModules.mts)（[モジュール合成順序](#モジュール合成順序) を参照）。その選択は自身のセクション `adapters` から読む（[`src/adapters.mts`](src/adapters.mts)）
+- この scaffold だけが持つモジュール — `logging` と `http`（ホストプロセス自身の設定とその CORS のリスト、および core の `httpSettings` スロット）、署名鍵ストア、クライアントリポジトリとユーザーリポジトリ、監査 sink、共有される唯一の Redis 接続、in-memory のユーザーセッションストア・コードリポジトリ・フェデレーショントークンストア、そしてフェデレーションの config bridge — [`src/modules.mts`](src/modules.mts)。それらが所有するセクションのデフォルトは [`config/reference.conf`](config/reference.conf) にある。これらがパッケージではなく scaffold 側にあるのは、どれもこのテンプレートの設定セクションから自分のコンポーネントを組み立てるためである。別のソースを使いたいデプロイは、同じ形のモジュールを自前で配線する
 - 設定をどこから読み、そのレイヤーをどう重ねるか — [`src/configPath.mts`](src/configPath.mts) と [`config/`](config/)
 - ホストプロセス: Express アプリ、そのセキュリティヘッダー、起動処理 — [`src/app.mts`](src/app.mts)。health / readiness / metrics の各ルート、合成されたルーター、その後ろの core の終端のエラーハンドラーを、マウントする順に — [`src/routes.mts`](src/routes.mts)。リスナーはソケットが bind されたときに `server_listening`（info、`port`）を 1 行ログに出し、bind できなければその bind のエラーで起動を失敗させ、その後のサーバーのエラーは `server_error`（error）としてログに出す — [`src/listen.mts`](src/listen.mts)。このコードがログに出すエラー — 処理されなかったリクエストのエラー、共有 Redis 接続の `error` イベント、失敗したシャットダウン — はすべて core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影としてログに出し、エラーそのものは出さない。エラーは上流や Redis が言ったことを運びうるためである（サーバーが接続を拒否したとき、接続のエラーは `AUTH` のハンドシェイクをパスワードごと運ぶ）
 - 具体的な logger と監査ストリーム（pino） — [`src/logger.mts`](src/logger.mts) — およびメトリクス（[`src/metrics.mts`](src/metrics.mts)）
@@ -36,7 +36,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 
 これは**ファーストパーティ**の OP — 登録されたクライアントがすべて自分で運用するものである OP — にとっては筋の通ったモデルだが、それ以外では成り立たない。自分が制御していないページが `/authorize?client_id=X&redirect_uri=...&code_challenge=<theirs>` へのトップレベル遷移を強制できる。ログイン中のユーザーのブラウザは*そのユーザーの*セッションに紐づいたコードを発行し、それは X の登録済み `redirect_uri` に届けられ、`code_challenge` を選んだ者がそれを、そのユーザーの identity を載せたトークンと引き換える。
 
-そのため、この前提は仮定されるのではなく強制される。それ以外のクライアント — `firstParty` フィールドを持たないものも、`false` を持つものも同様に — は同意ステップを通る: コードが発行される前に、デプロイ側の同意ページでユーザーに確認する。このステップには同意ストアが必要だが、テンプレートは何も同梱していない（`CONSENT_STORE_ADAPTER=none`）ため、デフォルトのままではそのようなクライアントは `/authorize` で `unauthorized_client` として拒否される。それを受け付けるには [同意ストア](#同意ストア) を参照。クライアントをファーストパーティとしてマークするのは、そのクライアントが**ユーザーに確認することなく**ユーザーの identity を受け取っても構わないと言える場合だけにすること。
+そのため、この前提は仮定されるのではなく強制される。それ以外のクライアント — `firstParty` フィールドを持たないものも、`false` を持つものも同様に — は同意ステップを通る: コードが発行される前に、デプロイ側の同意ページでユーザーに確認する。このステップには同意ストアが必要だが、テンプレートは何も同梱していない（`ADAPTERS_CONSENT_STORE=none`）ため、デフォルトのままではそのようなクライアントは `/authorize` で `unauthorized_client` として拒否される。それを受け付けるには [同意ストア](#同意ストア) を参照。クライアントをファーストパーティとしてマークするのは、そのクライアントが**ユーザーに確認することなく**ユーザーの identity を受け取っても構わないと言える場合だけにすること。
 
 ```yaml
 # config/clients.yaml
@@ -56,7 +56,7 @@ my-app:
 
 運用面は [オペレーター runbook](../../docs/operator-runbook.md) が端から端まで扱っている — 起動拒否、probe、依存先の障害、アラート、Redis のサイジング、鍵ローテーション。このセクションはマルチレプリカのチェックリストである。
 
-ロードバランサ配下で standalone サーバーを複数インスタンス動かすときは、`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` を**共有**の Redis 7.2+ インスタンスに向けること。共有の Redis URL が無いと、各レプリカは refresh token family を自分の接続（と、ローカル専用の Redis）に保持するため、トークンを発行していないレプリカに届いた refresh リクエストは `invalid_grant` を返し、ラウンドロビンの LB では 1 回おきにそうなる。
+ロードバランサ配下で standalone サーバーを複数インスタンス動かすときは、`REDIS_CLIENTS_URL` を**共有**の Redis 7.2+ インスタンスに向けること。共有の Redis URL が無いと、各レプリカは refresh token family を自分の接続（と、ローカル専用の Redis）に保持するため、トークンを発行していないレプリカに届いた refresh リクエストは `invalid_grant` を返し、ラウンドロビンの LB では 1 回おきにそうなる。
 
 **ロードバランサ配下では `HTTP_TRUST_PROXY` をプロキシのアドレスに設定すること。** デフォルトは `false` で、この場合 `req.ip` はクライアントではなく*ロードバランサの*アドレスになる。すると IP をキーとするすべての rate limit — OAuth エンドポイントの limiter と `POST /session/login` の総当たり対策ガード — が**全ユーザーで 1 つのバケットを共有する**: 誰からであれ最初の 20 回のログイン試行でウィンドウを使い切り、以降のユーザーは全員 `429` を受け取る。この障害は設定ミスではなく攻撃のように見えるため、深夜 3 時の診断が高くつく。このサービスの前段で何かが TLS を終端したりプロキシしたりしているなら必ず設定し、`X-Forwarded-For` を設定しているのがそのホップであることを確認すること。`ip` のない監査イベントは、リクエストのアドレスがアドレスでなかった — `req.ip` がアドレス以外を入れた `X-Forwarded-For` から来た — ことを意味するので、`HTTP_TRUST_PROXY` がそのヘッダーを設定するホップだけを信頼しているか確認すること。
 
@@ -73,7 +73,7 @@ my-app:
 
 allowlist はネットワーク上の制御であって、暗号学的な制御ではない。エッジは受信した `X-Forwarded-*` ヘッダーに追記するのではなく**除去**しなければならず、エッジとこのプロセスの間のホップは、送信元アドレスを偽装できる者から到達できてはならない。
 
-**`rateLimiter.adapter` を Redis に向けること。** デフォルトは `"memory"` でプロセスごとである: N レプリカでは設定したすべての limit が実質 N 倍になり、デプロイのたびにリセットされる。memory アダプターは**バケット枯渇によって回避可能**でもある: バケット数の上限を 10,000 とし、上限に達すると、新しいキーを受け入れる際にリセットが最も近いバケットを追い出す — そのため多数の送信元 IP を提示できる攻撃者（`HTTP_TRUST_PROXY` が実際のホップより広ければ、`req.ip` はクライアントの影響を受ける）は、標的のカウンターが追い出されてやり直しになるまでテーブルをかき回せる。これは開発用の 1 プロセスなら許容できるが、本番の rate limit ではない。ログインガードも同じ共有コンポーネントの上で動くため、1 つの設定で OAuth エンドポイントと `/session/login` の両方がカバーされる。ログインのウィンドウと上限は引き続き `session.rateLimit.login` で設定する。session モジュールがそれを両アダプターが読む `login` の予算として寄与するため、改めて書き直すものは無い。
+**`adapters.rateLimiter` を Redis に向けること。** デフォルトは `"memory"` でプロセスごとである: N レプリカでは設定したすべての limit が実質 N 倍になり、デプロイのたびにリセットされる。memory アダプターは**バケット枯渇によって回避可能**でもある: バケット数の上限を 10,000 とし、上限に達すると、新しいキーを受け入れる際にリセットが最も近いバケットを追い出す — そのため多数の送信元 IP を提示できる攻撃者（`HTTP_TRUST_PROXY` が実際のホップより広ければ、`req.ip` はクライアントの影響を受ける）は、標的のカウンターが追い出されてやり直しになるまでテーブルをかき回せる。これは開発用の 1 プロセスなら許容できるが、本番の rate limit ではない。ログインガードも同じ共有コンポーネントの上で動くため、1 つの設定で OAuth エンドポイントと `/session/login` の両方がカバーされる。ログインのウィンドウと上限は引き続き `session.rateLimit.login` で設定する。session モジュールがそれを両アダプターが読む `login` の予算として寄与するため、改めて書き直すものは無い。
 
 **BFF の背後では、必要になる前に `limits.token` を上げておくこと。** OAuth エンドポイントの rate limit は `req.ip` をキーにする（`packages/core/src/ratelimit/guard.mts` はバケットキーを `<endpoint>:ip:<req.ip>` として組み立てる）。クライアントがブラウザやネイティブアプリで、このプロバイダーと直接通信しているなら、これは正しい identity である。しかし backend-for-frontend 構成 — サーバー側アプリがセッションを保持し、ユーザーに代わってコード交換と refresh を行う構成 — では誤った identity になる: すべての `/oauth/token` と `/oauth/introspect` の呼び出しが BFF の単一アドレスから届き、デプロイ全体で 1 つのバケットを共有する。デフォルトの 60 秒あたり 60 リクエストでは、**全ユーザー合計で毎分およそ 60 回の session グラント交換**が上限になる — しかもそれは rate limit として表に出てこない。BFF は想定していない `429` を受け取り、それを自分の呼び出し元への `502` に変え、ユーザーが報告する症状は「サインインがときどき壊れる」になる。それは起き始めるトラフィック量に達した時点で現れ、それより前には現れない。
 
@@ -90,27 +90,27 @@ redis-rate-limiter {
 }
 ```
 
-（memory アダプターでは `core-rate-limiter-memory.limits` で、形は同じ。）BFF の毎分のサインインと refresh のピークから、余裕を持たせてサイズを決めること。また `rateLimiter.adapter = "redis"` のもとでは予算がレプリカ間で共有されることを覚えておくこと — ここではそれが望ましい挙動であり、それによってこの数値が意味を持つ。
+（memory アダプターでは `core-rate-limiter-memory.limits` で、形は同じ。）BFF の毎分のサインインと refresh のピークから、余裕を持たせてサイズを決めること。また `adapters.rateLimiter = "redis"` のもとでは予算がレプリカ間で共有されることを覚えておくこと — ここではそれが望ましい挙動であり、それによってこの数値が意味を持つ。
 
 デフォルトは意図的に変えていない: 送信元 IP ごとに 60 秒あたり 60 回というのは、クライアントが本当に別々の IP であるデプロイにとって妥当な総当たり対策の上限であり、一方の構成に合わせて全体的に引き上げれば、もう一方の構成での防御が弱まる。BFF *自身の*ユーザーを守るスロットリングは、ユーザーごとの identity がまだ存在する BFF の前段に置くこと。
 
-**2 つ以上のレプリカを動かすようになったら `CORE_DEPLOYMENT_MODE=multi` を設定すること。** すると、共有が必要な in-memory ストアがまだ配線されていれば起動が*失敗*し、該当するものすべてと、それぞれの代償が名指しされる — ユーザーセッションの分岐（back-channel logout が 1 つのレプリカにしか届かず、ログアウトしたセッションが他のレプリカでは有効なまま）、rate limit カウンターの倍増、アクセストークン失効の未伝播、一度きりのクライアントアサーションや WebAuthn チャレンジがレプリカごとに 1 回ずつ再利用できてしまうこと。このチェックはライブラリのモジュール名のリストではなく、インストールされた各モジュールが自身の manifest に持つ宣言を読むため、このテンプレート独自の in-memory モジュール — ユーザーセッションストア（`USER_SESSION_STORES_ADAPTER=memory`）、認可コードリポジトリ（`OAUTH_CODE_ADAPTER=memory`）、フェデレーショントークンストア（`FEDERATION_TOKEN_STORE_TYPE=memory`、デフォルト） — も名指しで拒否される。`SESSION_STORE_STORAGE_TYPE=memory` のときの express-session 自身のストア（#474）と、デフォルトの memory の rate limiter（`core-rate-limiter-memory`、`RATE_LIMITER_ADAPTER=memory`）も同様である。モードが未設定なら何も拒否されない: これらはすべて、起動時の 1 件の `replica_unsafe_adapters` 警告に列挙される。（login と WebAuthn-options のルートは、それぞれ個別に警告するプロセス単位のフォールバック limiter を持つが、それが働くのは `rateLimiter` をまったく配線しない構成だけで、このテンプレートは常に配線する。オペレーター runbook を参照。）`CORE_DEPLOYMENT_MODE=single` ではチェックは何も言わない。レプリカは 1 つだと宣言したからである。このテンプレートは DPoP をインストールしない。DPoP を加えた構成では、受け入れた DPoP proof はすべて `private_key_jwt` と同じ replay seen-set（`REPLAY_SEEN_SET_ADAPTER`）に記録されるため、同じ扱いを受ける — `memory` は `CORE_DEPLOYMENT_MODE=multi` のもとで拒否され、モード未設定なら警告に列挙される。同梱の `redis` なら DPoP の記録もレプリカ間で共有される。dpop パッケージの [operator requirements](../../packages/dpop/README.md#operator-requirements) を参照。
+**2 つ以上のレプリカを動かすようになったら `CORE_DEPLOYMENT_MODE=multi` を設定すること。** すると、共有が必要な in-memory ストアがまだ配線されていれば起動が*失敗*し、該当するものすべてと、それぞれの代償が名指しされる — ユーザーセッションの分岐（back-channel logout が 1 つのレプリカにしか届かず、ログアウトしたセッションが他のレプリカでは有効なまま）、rate limit カウンターの倍増、アクセストークン失効の未伝播、一度きりのクライアントアサーションや WebAuthn チャレンジがレプリカごとに 1 回ずつ再利用できてしまうこと。このチェックはライブラリのモジュール名のリストではなく、インストールされた各モジュールが自身の manifest に持つ宣言を読むため、このテンプレート独自の in-memory モジュール — ユーザーセッションストア（`ADAPTERS_USER_SESSION_STORES=memory`）、認可コードリポジトリ（`ADAPTERS_CODE_REPOSITORY=memory`）、フェデレーショントークンストア（`ADAPTERS_FEDERATION_TOKEN_STORE=memory`、デフォルト） — も名指しで拒否される。`SESSION_STORE_STORAGE_TYPE=memory` のときの express-session 自身のストア（#474）と、デフォルトの memory の rate limiter（`core-rate-limiter-memory`、`ADAPTERS_RATE_LIMITER=memory`）も同様である。モードが未設定なら何も拒否されない: これらはすべて、起動時の 1 件の `replica_unsafe_adapters` 警告に列挙される。（login と WebAuthn-options のルートは、それぞれ個別に警告するプロセス単位のフォールバック limiter を持つが、それが働くのは `rateLimiter` をまったく配線しない構成だけで、このテンプレートは常に配線する。オペレーター runbook を参照。）`CORE_DEPLOYMENT_MODE=single` ではチェックは何も言わない。レプリカは 1 つだと宣言したからである。このテンプレートは DPoP をインストールしない。DPoP を加えた構成では、受け入れた DPoP proof はすべて `private_key_jwt` と同じ replay seen-set（`ADAPTERS_REPLAY_SEEN_SET`）に記録されるため、同じ扱いを受ける — `memory` は `CORE_DEPLOYMENT_MODE=multi` のもとで拒否され、モード未設定なら警告に列挙される。同梱の `redis` なら DPoP の記録もレプリカ間で共有される。dpop パッケージの [operator requirements](../../packages/dpop/README.md#operator-requirements) を参照。
 
 この変数は `core.deployment.mode` を設定する。旧名の `DEPLOYMENT_MODE` は、単独で、または `CORE_DEPLOYMENT_MODE` と異なる値で設定されているとブートを拒否し、同じ値で並べて設定されていればブートする。
 
 このチェックに*できない*ことも把握しておくこと: `CORE_DEPLOYMENT_MODE` を一度も設定しないまま N レプリカにスケールしても、何も失敗しない。すべての状態を自分のメモリに持つプロセスには、他のピアに気づくための共有媒体が無い — その状態は、まさにそれが真であるときに内側からは検出できない。この変数はスケールの一環として設定し、何かが壊れてからにしないこと。
 
-**アクセストークンの失効には denylist が必要で、テンプレートはそれを同梱している。** `POST /oauth/revoke` はアクセストークンの `jti` を `accessTokenDenylist` に書き込むことで失効させ、トークン検証と introspection はそれを参照する。背後に denylist の無い状態でエンドポイントがマウントされていると、起動が*失敗*する: RFC 7009 はエンドポイントに `200` を返すことを義務づけているため、denylist が配線されていないと、トークンは失効したと告げながら、そのトークンは期限切れまで使え続けてしまう。ここでは `accessTokenDenylist.adapter` のデフォルトは `"redis"` で（単一インスタンスのローカル作業では `ACCESS_TOKEN_DENYLIST_ADAPTER=memory`）、`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` で設定した ioredis ソケットを共有するため、追加の接続は発生しない。本当にアクセストークンを失効させないデプロイは、代わりに `OAUTH_REVOCATION_ACCESS_TOKEN=unsupported` を設定する。するとエンドポイントは `token_type_hint=access_token` に対して `unsupported_token_type` を返す。**リフレッシュトークンの失効はどちらの場合でも機能し、denylist を必要としたことは一度もない。**
+**アクセストークンの失効には denylist が必要で、テンプレートはそれを同梱している。** `POST /oauth/revoke` はアクセストークンの `jti` を `accessTokenDenylist` に書き込むことで失効させ、トークン検証と introspection はそれを参照する。背後に denylist の無い状態でエンドポイントがマウントされていると、起動が*失敗*する: RFC 7009 はエンドポイントに `200` を返すことを義務づけているため、denylist が配線されていないと、トークンは失効したと告げながら、そのトークンは期限切れまで使え続けてしまう。ここでは `adapters.accessTokenDenylist` のデフォルトは `"redis"` で（単一インスタンスのローカル作業では `ADAPTERS_ACCESS_TOKEN_DENYLIST=memory`）、`REDIS_CLIENTS_URL` で設定した ioredis ソケットを共有するため、追加の接続は発生しない。本当にアクセストークンを失効させないデプロイは、代わりに `OAUTH_REVOCATION_ACCESS_TOKEN=unsupported` を設定する。するとエンドポイントは `token_type_hint=access_token` に対して `unsupported_token_type` を返す。**リフレッシュトークンの失効はどちらの場合でも機能し、denylist を必要としたことは一度もない。**
 
 デフォルトのモジュールがカバーする、その他のマルチレプリカ上の考慮点:
 
 - `express-session` のストア（`sessionStoreModule`）は独自の接続である: `SESSION_STORE_STORAGE_TYPE=redis` とし、`SESSION_STORE_STORAGE_REDIS_URL`（`session-store.storage.redis.url`）を共有インスタンスに向ける。
-- ユーザーセッションストアは `userSessionStores.adapter = "redis"`（`USER_SESSION_STORES_ADAPTER`）で切り替わり、共有の ioredis 接続 — `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` で設定するもの — の上に `redisSessionStoresModule` を配線する。
-- 認可コードリポジトリは `oauth.code.adapter`（`OAUTH_CODE_ADAPTER`）で切り替わる。テンプレートは同じ接続上の `"redis"` を同梱している。`oauth.code.adapter` が優先される。非推奨の `repositories.code.type`（`CLIENT_CODE_TYPE`）は、`oauth.code.adapter` が未設定のときにだけ、起動時の `config_key_deprecated` 警告付きで読まれる — 同梱の `config/application.conf` がそれを未設定のままにすることはない。`CLIENT_CODE_ENDPOINT_URI`（`repositories.code.redis.endpointUri`）は `config/application.conf` でバインドされているが、それを読むものは何も無い: Redis のコードリポジトリは共有接続の上で動くため、すべてのアダプターで Redis URL は 1 つである。
-- replay seen-set — `private_key_jwt` クライアント認証（#484）の背後にある、`jti` の一回限り使用の記録 — は `replaySeenSet.adapter`（`REPLAY_SEEN_SET_ADAPTER`）で切り替わる。テンプレートは共有接続上の `"redis"` を同梱しており、`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。捕獲されたクライアントアサーションが、レプリカごとに 1 回ずつリプレイできてしまうためである。
-- ファーストパーティでないクライアントのための同意ステップ（#527）は `consentStore.adapter`（`CONSENT_STORE_ADAPTER`）で切り替わる。デフォルトはオフ（`none`）である。`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。あるレプリカで与えた同意が他のすべてのレプリカで再度求められ、同意ページが保留したリクエストを、回答を受け取ったレプリカが知らないという事態になるためである。`redis`（#561）は両方を共有接続上に保持する。[同意ストア](#同意ストア) を参照。
-- フェデレーショントークンストアのデフォルトは memory である。`FEDERATION_TOKEN_STORE_TYPE=redis`（`federationTokenStore.type = "redis"`）を設定し、`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 バイト、base64 エンコード（`openssl rand -base64 32`） — を与えること。ストアは保持する上流のリフレッシュトークンを暗号化する。`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` で設定した ioredis ソケットを共有する。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照。
-- フェデレーショングラント（#593）は、有効にするとさらに 2 つのストアを持つ: グラントそのもの（`FEDERATION_GRANT_STORE_ADAPTER`）と、取得フローの記録（`FEDERATION_GRANT_INTENT_STORE_ADAPTER`）。どちらも共有ソケット上の `redis` を同梱している。いずれかを `memory` にすると `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否され、Redis のグラントと memory のユーザーセッションストアの組み合わせはレプリカ数にかかわらず拒否される。グラントが、それを終わらせる境界より長生きしてしまうためである。[フェデレーショングラント](#フェデレーショングラント) を参照。
+- ユーザーセッションストアは `adapters.userSessionStores = "redis"`（`ADAPTERS_USER_SESSION_STORES`）で切り替わり、共有の ioredis 接続 — `REDIS_CLIENTS_URL` で設定するもの — の上に `redisSessionStoresModule` を配線する。
+- 認可コードリポジトリは `adapters.codeRepository`（`ADAPTERS_CODE_REPOSITORY`）で切り替わる。テンプレートは同じ接続上の `"redis"` を同梱しているので、すべてのアダプターで Redis URL は 1 つである。Redis のリポジトリ自身の設定はそのセクション `redis-code-repository`、in-process のものは `standalone-in-memory-code-repository` にある（[コードリポジトリ](#コードリポジトリ) を参照）。
+- replay seen-set — `private_key_jwt` クライアント認証（#484）の背後にある、`jti` の一回限り使用の記録 — は `adapters.replaySeenSet`（`ADAPTERS_REPLAY_SEEN_SET`）で切り替わる。テンプレートは共有接続上の `"redis"` を同梱しており、`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。捕獲されたクライアントアサーションが、レプリカごとに 1 回ずつリプレイできてしまうためである。
+- ファーストパーティでないクライアントのための同意ステップ（#527）は `adapters.consentStore`（`ADAPTERS_CONSENT_STORE`）で切り替わる。デフォルトはオフ（`none`）である。`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。あるレプリカで与えた同意が他のすべてのレプリカで再度求められ、同意ページが保留したリクエストを、回答を受け取ったレプリカが知らないという事態になるためである。`redis`（#561）は両方を共有接続上に保持する。[同意ストア](#同意ストア) を参照。
+- フェデレーショントークンストアのデフォルトは memory である。`ADAPTERS_FEDERATION_TOKEN_STORE=redis`（`adapters.federationTokenStore = "redis"`）を設定し、`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 バイト、base64 エンコード（`openssl rand -base64 32`） — を与えること。ストアは保持する上流のリフレッシュトークンを暗号化する。`REDIS_CLIENTS_URL` で設定した ioredis ソケットを共有する。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照。
+- フェデレーショングラント（#593）は、有効にするとさらに 2 つのストアを持つ: グラントそのもの（`ADAPTERS_FEDERATION_GRANT_STORE`）と、取得フローの記録（`ADAPTERS_FEDERATION_GRANT_INTENT_STORE`）。どちらも共有ソケット上の `redis` を同梱している。いずれかを `memory` にすると `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否され、Redis のグラントと memory のユーザーセッションストアの組み合わせはレプリカ数にかかわらず拒否される。グラントが、それを終わらせる境界より長生きしてしまうためである。[フェデレーショングラント](#フェデレーショングラント) を参照。
 
 ## 使い方
 
@@ -119,28 +119,28 @@ redis-rate-limiter {
 ある — そして、その環境が次のものを与えるまで起動しない:
 
 - `OAUTH_JWT_ISSUER` — このサーバーのオリジン（loopback ホストなら `http` も可）;
-- 署名鍵のペア、`OAUTH_JWT_PRIVATE_KEY_PATH` / `OAUTH_JWT_PUBLIC_KEY_PATH`
+- 署名鍵のペア、`KEY_STORE_LOCAL_PRIVATE_KEY_PATH` / `KEY_STORE_LOCAL_PUBLIC_KEY_PATH`
   （[OAuth JWT](#oauth-jwt) を参照）;
 - `SESSION_STORE_SECRET`、32 バイト以上;
-- `CLIENT_USER_AUTHENTICATE_URL` と `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` —
+- `REPOSITORIES_USER_HTTP_AUTHENTICATE_URL` と `REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL` —
   ユーザーサービス（「the Store」）。`https`、または loopback ホストなら `http`。
   起動時に検査されるのは形式だけで、応答があるかどうかではない。何かが応答する
   までログインは失敗する（[ユーザーリポジトリ](#ユーザーリポジトリ) を参照）;
 - `redis://localhost:6379` で到達できる Redis。同梱の設定は、ブラウザセッションの
   ストアをそこに置き（`SESSION_STORE_STORAGE_REDIS_URL`）、共有の接続を 1 本
-  （`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`）開いて、refresh token family、
+  （`REDIS_CLIENTS_URL`）開いて、refresh token family、
   認可コード、アクセストークン denylist、replay seen-set に使う — 下の設定を
   加えれば、ユーザーセッションストアにも。
 
 平文の HTTP では、さらに `SESSION_STORE_SECURE=false` と、`__Host-` プレフィックスを
 持たないセッション Cookie 名が必要になる（[Session](#session) を参照）。また
-`USER_SESSION_STORES_ADAPTER=redis` を設定すること: ブラウザセッションのストアは
+`ADAPTERS_USER_SESSION_STORES=redis` を設定すること: ブラウザセッションのストアは
 Redis にあり、ユーザーセッションストアのデフォルトは memory で、`tsx watch` は
 保存のたびにプロセスを再起動する — 両者が分かれていると、再起動のあとブラウザの
 セッションは既に存在しない `UserSession` を指し、`/authorize` がループする
 （[Docker](#docker) を参照）。
 
-クライアントレジストリ `config/clients.yaml`（`CLIENT_PATH`）も読む。このファイルは
+クライアントレジストリ `config/clients.yaml`（`REPOSITORIES_CLIENT_YAML_PATH`）も読む。このファイルは
 デプロイごとのもの: scaffold は空のものを作るが、`.gitignore` がそれをプロジェクトの
 リポジトリから外すため、新しい clone には無く、作るまで起動はそのパスを挙げて失敗する
 — `config/clients.yaml.example` から作るか、クライアントの無いレジストリなら空で作る。
@@ -164,13 +164,13 @@ docker run -d --name auth-redis -p 127.0.0.1:6379:6379 redis:7.2-alpine
 
 # 起動に必要なもの（ユーザーサービスの URL は自分の Store のものに置き換える）
 export OAUTH_JWT_ISSUER=http://localhost:3000 \
-  OAUTH_JWT_PRIVATE_KEY_PATH=./jwt-private.pem \
-  OAUTH_JWT_PUBLIC_KEY_PATH=./jwt-public.pem \
+  KEY_STORE_LOCAL_PRIVATE_KEY_PATH=./jwt-private.pem \
+  KEY_STORE_LOCAL_PUBLIC_KEY_PATH=./jwt-public.pem \
   SESSION_STORE_SECRET="$(openssl rand -hex 32)" \
   SESSION_STORE_SECURE=false SESSION_STORE_NAME=auth.sid \
-  USER_SESSION_STORES_ADAPTER=redis \
-  CLIENT_USER_AUTHENTICATE_URL=http://localhost:8080/authenticate \
-  CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL=http://localhost:8080/authenticate-by-token
+  ADAPTERS_USER_SESSION_STORES=redis \
+  REPOSITORIES_USER_HTTP_AUTHENTICATE_URL=http://localhost:8080/authenticate \
+  REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL=http://localhost:8080/authenticate-by-token
 
 # 開発モードで起動（ホットリロード）
 pnpm run debug
@@ -199,11 +199,34 @@ pnpm run start
 
 1. **`config/{ENV}.conf`** — 現在の環境の overlay。`ENV = CONFIG_ENV || NODE_ENV || "development"` で決まる。
 2. **`config/application.conf`** — このデプロイの設定。
-3. **読み込むモジュールの各パッケージの `reference.conf`**、その次に **`@o3co/auth-provider-core` のもの** — デフォルト。インストール済みパッケージから解決される: 各モジュールが自分のパッケージのファイルを宣言し、core の `moduleReferences(modules)` がそれを core のものを最後にして列挙する。テンプレート自身のモジュールは `config/reference.conf` を宣言し、そこには自身が所有するセクションのデフォルトがある: `logging`、`http`、`cors`、鍵ストアの `oauth.jwt.signingKey`、共有 Redis 接続の `refreshTokenFamilyStore.redis`。デプロイ固有の値はそこではなく上の 2 ファイルに書く。`config/reference.conf` はこれらのキーの変数をデフォルトの横で束縛するので、上の 2 ファイルのどちらかが設定する値は変数に勝つ。ただし `HTTP_PORT`、`HTTP_TRUST_PROXY`、`CORS_ALLOWED_ORIGINS`、`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` / `_PASSWORD` は `application.conf` が末尾の行でもう一度束縛するので、それぞれ、そのファイルがそれより上で設定する値に勝つ。上の 2 ファイルのどちらも設定していないキーは、ここから値を得る。
+3. **読み込むモジュールの各パッケージの `reference.conf`**、その次に **`@o3co/auth-provider-core` のもの** — デフォルト。インストール済みパッケージから解決される: 各モジュールが自分のパッケージのファイルを宣言し、core の `moduleReferences(modules)` がそれを core のものを最後にして列挙する。テンプレート自身のモジュールは `config/reference.conf` を宣言し、そこには自身が所有するセクション — `logging`、`http`（その CORS のリスト `http.cors` を含む）、`key-store`、共有 Redis 接続の `redis-clients`、`repositories`、in-process のコードリポジトリの `standalone-in-memory-code-repository`、`audit-sink` — と、composition root 自身の `adapters`（下記）のデフォルトがある。デプロイ固有の値はそこではなく上の 2 ファイルに書く。`config/reference.conf` はこれらのキーの変数をデフォルトの横で束縛するので、上の 2 ファイルのどちらかが設定する値は変数に勝つ。ただし `HTTP_PORT`、`HTTP_TRUST_PROXY`、`HTTP_CORS_ALLOWED_ORIGINS`、`REDIS_CLIENTS_URL` / `REDIS_CLIENTS_PASSWORD` は `application.conf` が末尾の行でもう一度束縛するので、それぞれ、そのファイルがそれより上で設定する値に勝つ。上の 2 ファイルのどちらも設定していないキーは、ここから値を得る。
 
-上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — アダプター、フェデレーション — と、期待するセッション要件を導く元の `sessionRequirements` を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。それと並んで `mfa.mode` をテンプレート自身が読む（`readMfaMode`）: composition root が読まない MFA モジュールのキーを、テンプレート自身のレイヤーから生のまま — `application.conf` が既定値なしで `MFA_MODE` を束縛する — 読み、`off`・`optional`・`required` に限り、無いときは `off` とする。このキーを読むのは MFA モジュールを組み込むまでで、MFA ADR のビルド順のステップ 20 がこの読み込みを取り除く。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。ログレベルも boot の前に読むが、それは `logging` モジュールのセクションとして、そのモジュールのスキーマで、テンプレートの `reference.conf` の上に読む（`readLogging`）: テンプレートは設定を読みモジュールを選ぶ間もログを出すので、logger は boot の前に存在する。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込み、読み込むモジュールが読まない限り `mfa` セクションを除いて、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースし、どのモジュールのセクションも取り除かない。boot の後にテンプレートが読むもの — 信頼するホップ、ポート、readiness の期限 — は、`http` モジュールから読む: core の `httpSettings` スロットと、テンプレートの `httpHostSettings` である。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
+上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — フェデレーション、機能 — と、期待するセッション要件を導く元の `sessionRequirements` を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。`adapters` — 各スロットをどのアダプターで埋めるか、composition root 自身のセクション — は、上の 2 ファイルをテンプレートの `config/reference.conf` の上に重ね、テンプレート自身のスキーマで読む（`readAdapters`）: 移動する前のパスにまだ書かれた選択や、それとともに改名された変数は、どのモジュールを選ぶよりも前にここで拒否され、新しいパスと変数を名指しする。boot には `adapters` を渡さない。それと並んで `mfa.mode` をテンプレート自身が読む（`readMfaMode`）: composition root が読まない MFA モジュールのキーを、テンプレート自身のレイヤーから生のまま — `application.conf` が既定値なしで `MFA_MODE` を束縛する — 読み、`off`・`optional`・`required` に限り、無いときは `off` とする。このキーを読むのは MFA モジュールを組み込むまでで、MFA ADR のビルド順のステップ 20 がこの読み込みを取り除く。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。ログレベルも boot の前に読むが、それは `logging` モジュールのセクションとして、そのモジュールのスキーマで、テンプレートの `reference.conf` の上に読む（`readLogging`）: テンプレートは設定を読みモジュールを選ぶ間もログを出すので、logger は boot の前に存在する。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込み、読み込むモジュールが読まない限り `mfa` セクションを除いて、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースし、どのモジュールのセクションも取り除かない。boot の後にテンプレートが読むもの — 信頼するホップ、ポート、readiness の期限 — は、`http` モジュールから読む: core の `httpSettings` スロットと、テンプレートの `httpHostSettings` である。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
 
 overlay の値は `application.conf` より優先される。scaffold には `development.conf` と `production.conf` が同梱されている。別の環境（例: `staging`）を追加するときは `config/staging.conf` を作成し、`CONFIG_ENV=staging` を設定する。`{ENV}.conf` が存在しない場合は起動時エラーになる — タイポは黙ってデフォルトにフォールバックせず、fail-fast する。
+
+### アダプター
+
+各スロットをどのアダプターで埋めるかは composition root 自身の選択で、自身のセクション `adapters` にあり、どのモジュールを選ぶよりも前に読む（上記）。各キーに変数がある。テンプレートが知らない値や、宣言していないキーは、それを名指しして boot の前に失敗する。
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `ADAPTERS_RATE_LIMITER` | `memory` | `adapters.rateLimiter`: `memory` または `redis`。[マルチレプリカ構成](#マルチレプリカ構成) を参照 |
+| `ADAPTERS_USER_SESSION_STORES` | `memory` | `adapters.userSessionStores`: ユーザーセッションストア、`memory` または `redis`。`SESSION_STORE_STORAGE_TYPE` と揃える（[Docker](#docker) を参照） |
+| `ADAPTERS_ACCESS_TOKEN_DENYLIST` | `redis` | `adapters.accessTokenDenylist`: `memory` または `redis` |
+| `ADAPTERS_REPLAY_SEEN_SET` | `redis` | `adapters.replaySeenSet`: `private_key_jwt` の背後の replay seen-set、`memory` または `redis` |
+| `ADAPTERS_CONSENT_STORE` | `none` | `adapters.consentStore`: `none`、`memory` または `redis`。[同意ストア](#同意ストア) を参照 |
+| `ADAPTERS_FEDERATION_TOKEN_STORE` | `memory` | `adapters.federationTokenStore`: `memory` または `redis`。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照 |
+| `ADAPTERS_FEDERATION_GRANT_STORE` | `redis` | `adapters.federationGrantStore`: `memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
+| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `redis` | `adapters.federationGrantIntentStore`: `memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
+| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`、`redis` または `store`。MFA を組み込む合成のためのもので、テンプレートは組み込まない |
+| `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` または `redis`。MFA を組み込む合成のためのもの |
+| `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: 認可コードリポジトリ、`memory` または `redis`。[コードリポジトリ](#コードリポジトリ) を参照 |
+| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`、または `static`（core の `yaml` の別名）。[クライアントリポジトリ](#クライアントリポジトリ) を参照 |
+| `ADAPTERS_USER_REPOSITORY` | `http` | `adapters.userRepository`: `http`、`yaml` または `static`（core の `yaml` の別名）。[ユーザーリポジトリ](#ユーザーリポジトリ) を参照 |
+| `ADAPTERS_AUDIT_SINK` | `logger` | `adapters.auditSink`: セキュリティイベントの送り先、`logger`（stdout への pino エンベロープ付き NDJSON）または `console`（イベントの JSON そのまま）。`none` は存在しない。[監査ログ](#監査ログ) を参照 |
+
+移動する前の場所 — `rateLimiter.adapter`、`oauth.code.adapter`、`audit.sink.type`、`repositories.user.type` など — にまだ書かれた選択や、それとともに改名された変数（`RATE_LIMITER_ADAPTER`、`CLIENT_TYPE` など）が単独で、または別の値で設定されていると、新しいパスと変数を名指しして boot の前に失敗する。古い変数が新しい変数と同じ値で並んでいるなら受け入れる。
 
 ### HTTP
 
@@ -212,18 +235,19 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `HTTP_PORT` | `3000` | サーバーがリッスンするポート |
 | `HTTP_TRUST_PROXY` | `false` | Express の `trust proxy`: `false`、アドレス／CIDR のリスト（`10.0.0.0/8,loopback`）、ホップ数（`1`）、または `true`。**ロードバランサ配下では必須** — 設定しないと、IP をキーとするすべての rate limit が全ユーザーで 1 つのバケットを共有する。`true` よりもプロキシを名指しすることを優先する。[マルチレプリカ構成](#マルチレプリカ構成) を参照 |
 | `HTTP_READINESS_TIMEOUT_MS` | `1000` | `/readyz` の probe ごとの deadline（[ヘルスエンドポイント](#ヘルスエンドポイント) を参照） |
-| `LOG_LEVEL` | `info` | 出力する最小レベル: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`。監査ログの出力は左右**しない** — [監査ログ](#監査ログ) を参照 |
-| `AUDIT_SINK_TYPE` | `logger` | セキュリティイベントの送り先: `logger`（stdout への pino エンベロープ付き NDJSON）または `console`（イベントの JSON そのまま）。`none` は存在しない。[監査ログ](#監査ログ) を参照 |
+| `LOGGING_LEVEL` | `info` | 出力する最小レベル: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`。監査ログの出力は左右**しない** — [監査ログ](#監査ログ) を参照 |
 
 ### OAuth JWT
 
+署名鍵は `key-store` モジュールのセクションである: `key-store.provider`（`KEY_STORE_PROVIDER`、`local`）と、ローカル鍵ストアの `key-store.local`（`KEY_STORE_LOCAL_*`）。issuer とトークンの形式は `oauth.jwt` に残る。
+
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `OAUTH_JWT_ALGORITHM` | `EdDSA` | JWT 署名アルゴリズム: `EdDSA` / `ES256` / `RS256` / `HS256`。デフォルトが非対称なので `/.well-known/jwks.json` が実際の検証鍵を公開する。 |
-| `OAUTH_JWT_SECRET` | — | 署名シークレット（**HMAC (`HS256`) 専用**）。32 バイト（256 bit）以上のランダム値 — `openssl rand -hex 32`。hex / base64 値は**デコード後**の長さで測るため、32 文字の hex 文字列は 16 バイト扱いで拒否される。 |
+| `KEY_STORE_LOCAL_ALGORITHM` | `EdDSA` | JWT 署名アルゴリズム: `EdDSA` / `ES256` / `RS256` / `HS256`。デフォルトが非対称なので `/.well-known/jwks.json` が実際の検証鍵を公開する。 |
+| `KEY_STORE_LOCAL_SECRET` | — | 署名シークレット（**HMAC (`HS256`) 専用**）。32 バイト（256 bit）以上のランダム値 — `openssl rand -hex 32`。hex / base64 値は**デコード後**の長さで測るため、32 文字の hex 文字列は 16 バイト扱いで拒否される。 |
 | `OAUTH_JWT_ISSUER` | **（必須）** | すべてのトークンの `iss` に刻まれる canonical issuer URL。絶対 `https` URL（`http` は loopback ホストのみ）で、query / fragment を含まないこと。未設定なら起動に失敗する — `Host` ヘッダーから導出されることはない。 |
 | `OAUTH_REQUIRE_EMAIL_VERIFIED` | `false` | Store が `emailVerified: true` を公開するまで、そのユーザーへのトークン発行を拒否する。`/authorize` と `session` グラントで強制される。検証そのものは Store の仕事で、これは結果を読むだけである。 |
-| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED` | `false` | Client ID Metadata Document を受け付ける（#529）: `client_id` が自身の登録情報の `https` URL であるクライアントで、MCP ホストが使うモデルである。このようなクライアントは public で、決してファーストパーティにはならない — 同意ステップを通るため、`CONSENT_STORE_ADAPTER` を配線すること。 |
+| `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ENABLED` | `false` | Client ID Metadata Document を受け付ける（#529）: `client_id` が自身の登録情報の `https` URL であるクライアントで、MCP ホストが使うモデルである。このようなクライアントは public で、決してファーストパーティにはならない — 同意ステップを通るため、`ADAPTERS_CONSENT_STORE` を配線すること。 |
 | `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_SCOPES` | — | カンマ区切り: そのようなクライアントが取得してよいもの（ドキュメントの `scope` はこれとの積集合を取る）。空なら何も許可しない。 |
 | `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_AUDIENCES` | — | カンマ区切り: そのクライアント向けにトークンを発行してよいリソースサーバー（RFC 8707 の `resource`）。空なら自身の `client_id` だけを許可する。 |
 | `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_ALLOWED_HOSTS` | — | ドキュメントを置いてよいホスト（カンマ区切り）: 完全一致、またはドメインとそのサブドメインを表す `.suffix`。空なら任意の公開ホストを許可する。 |
@@ -235,11 +259,11 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_STALE_IF_ERROR_MS` | `300000` | 検証済みの登録情報を、ドキュメント側に原因の無い理由（DNS の一時的な不調、5xx、タイムアウト）で再検証が失敗した後も返し続ける期間 — 障害で、動いているクライアントを壊すべきではないため。*拒否*されたドキュメントは即座に破棄される。`0` で無効化する。 |
 | `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_NEGATIVE_CACHE_MS` | `60000` | 拒否を記憶しておく期間。同じ `client_id` をリクエストのたびに解決・取得し直さないためである。ドキュメントを修正したクライアントが締め出されないよう、短くしてある。 |
 | `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES` | `8` | すべての `client_id` を通じて、同時に取得中にできるドキュメントの数。未認証の呼び出し元がこのサーバーに接続させられる量を制限する。 |
-| `OAUTH_JWT_KID` | `v0` | JWT ヘッダーに含まれる key ID。制御文字を含まない 1〜256 文字。それ以外は起動時に拒否される — export されているが空の変数も含む（以前は kid `""` で署名されていた。そうして発行されたトークンは修正後に拒否されるため、そのユーザーは再ログインになる） |
-| `OAUTH_JWT_PRIVATE_KEY` | — | PEM エンコードされた秘密鍵（非対称アルゴリズム用） |
-| `OAUTH_JWT_PRIVATE_KEY_PATH` | — | PEM 秘密鍵ファイルのパス |
-| `OAUTH_JWT_PUBLIC_KEY` | — | PEM エンコードされた公開鍵 |
-| `OAUTH_JWT_PUBLIC_KEY_PATH` | — | PEM 公開鍵ファイルのパス |
+| `KEY_STORE_LOCAL_KID` | `v0` | JWT ヘッダーに含まれる key ID。制御文字を含まない 1〜256 文字。それ以外は起動時に拒否される — export されているが空の変数も含む（以前は kid `""` で署名されていた。そうして発行されたトークンは修正後に拒否されるため、そのユーザーは再ログインになる） |
+| `KEY_STORE_LOCAL_PRIVATE_KEY` | — | PEM エンコードされた秘密鍵（非対称アルゴリズム用） |
+| `KEY_STORE_LOCAL_PRIVATE_KEY_PATH` | — | PEM 秘密鍵ファイルのパス |
+| `KEY_STORE_LOCAL_PUBLIC_KEY` | — | PEM エンコードされた公開鍵 |
+| `KEY_STORE_LOCAL_PUBLIC_KEY_PATH` | — | PEM 公開鍵ファイルのパス |
 | `OAUTH_JWT_LEGACY_TYP_ACCEPT` | `false` | `typ` ヘッダーの無いトークンを受け付ける。`false` ではそれらを拒否し、typ の無いトークンを、たいていそうであるように設定ミスかダウングレードの試みとして扱う。`true` にするのは、v0.4.x のトークンがまだ流通している間の、期限を区切った移行期間に限ること。 |
 | `JWKS_PATH` | `/.well-known/jwks.json` | issuer の下で検証鍵を公開するパスで、discovery が `jwks_uri` として広告するもの（`jwks.path`）。`//`、ドットセグメント、クエリ、フラグメント、バックスラッシュ、パーセントエンコーディング、制御文字を含まない絶対パス。 |
 | `JWKS_CACHE_MAX_AGE` | `300` | JWKS レスポンスの `Cache-Control: public, max-age`（秒、`jwks.cacheMaxAge`）。ローテーションした鍵がキャッシュする検証者に間に合って届くよう、鍵の重複期間より十分短く保つこと。 |
@@ -251,9 +275,9 @@ openssl genpkey -algorithm ed25519 -out jwt-private.pem
 openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 ```
 
-生成したら `OAUTH_JWT_PRIVATE_KEY_PATH` / `OAUTH_JWT_PUBLIC_KEY_PATH` をそれらに向ける（または `OAUTH_JWT_PRIVATE_KEY` / `OAUTH_JWT_PUBLIC_KEY` で PEM をインラインで渡す）。
+生成したら `KEY_STORE_LOCAL_PRIVATE_KEY_PATH` / `KEY_STORE_LOCAL_PUBLIC_KEY_PATH` をそれらに向ける（または `KEY_STORE_LOCAL_PRIVATE_KEY` / `KEY_STORE_LOCAL_PUBLIC_KEY` で PEM をインラインで渡す）。
 
-`HS256` も引き続き選択可能（`OAUTH_JWT_ALGORITHM=HS256` と 32 バイト以上の `OAUTH_JWT_SECRET`）だが、代償を理解した上で選ぶこと: 対称鍵には公開鍵の片割れが存在しないため `/.well-known/jwks.json` は `404 jwks_not_published` を返し、すべての RP に共有シークレットを渡す必要がある — そしてその共有シークレットは、RP にトークンの検証だけでなく**発行**も可能にしてしまう。
+`HS256` も引き続き選択可能（`KEY_STORE_LOCAL_ALGORITHM=HS256` と 32 バイト以上の `KEY_STORE_LOCAL_SECRET`）だが、代償を理解した上で選ぶこと: 対称鍵には公開鍵の片割れが存在しないため `/.well-known/jwks.json` は `404 jwks_not_published` を返し、すべての RP に共有シークレットを渡す必要がある — そしてその共有シークレットは、RP にトークンの検証だけでなく**発行**も可能にしてしまう。
 
 ### トークン有効期限
 
@@ -284,7 +308,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `SESSION_STORE_SECRET` | — | **必須。** 認証済みセッション*そのもの*である Cookie に署名する鍵で、推測されればログインを偽造できる。32 バイト（256 bit）以上 — `openssl rand -hex 32`。`OAUTH_JWT_SECRET` と同じく**デコード後**の長さで測る。 |
+| `SESSION_STORE_SECRET` | — | **必須。** 認証済みセッション*そのもの*である Cookie に署名する鍵で、推測されればログインを偽造できる。32 バイト（256 bit）以上 — `openssl rand -hex 32`。`KEY_STORE_LOCAL_SECRET` と同じく**デコード後**の長さで測る。 |
 | `SESSION_STORE_NAME` | `__Host-auth.session` | セッション Cookie 名。デフォルトは `__Host-` prefix を使うため、`SESSION_STORE_SECURE=true` と、`SESSION_STORE_DOMAIN` の未設定が必要になる。 |
 | `SESSION_STORE_MAX_AGE` | `3600000` | セッション Cookie の最大有効期間（ミリ秒）。正の整数、上限は 1 年（`31536000000`）。 |
 | `SESSION_STORE_SECURE` | `true` | セッション Cookie に `Secure` フラグを設定 |
@@ -306,15 +330,15 @@ cookie とそのストアはセッションストアのセクション `session-
 設定上の注意が 2 点ある:
 
 - TLS 終端プロキシの背後では `HTTP_TRUST_PROXY` を設定する（`true` ではなく、プロキシのアドレスまたは CIDR レンジに）。設定しないと `req.protocol` は `http` と読まれる一方でブラウザは `Origin: https://…` を送るため、origin 側の判定がすべてのリクエストを拒否する。
-- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON 設定の `session.csrf.trustedOrigins` に列挙する。列挙した origin はフェデレーショングラントの同意とデバイス検証にも回答できるので、クライアントの origin は決して載せない（federation-grants ADR の D7）。`cors.allowedOrigins` は CSRF 上の信頼を与えない — それが何を与えるかは [CORS](#cors) を参照。
+- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON 設定の `session.csrf.trustedOrigins` に列挙する。列挙した origin はフェデレーショングラントの同意とデバイス検証にも回答できるので、クライアントの origin は決して載せない（federation-grants ADR の D7）。`http.cors.allowedOrigins` は CSRF 上の信頼を与えない — それが何を与えるかは [CORS](#cors) を参照。
 
 ### CORS
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `CORS_ALLOWED_ORIGINS` | *（空 — CORS 無効）* | token、userinfo、revocation、discovery/JWKS の各レスポンスの読み取りを許可するブラウザ origin のカンマ区切りリスト |
+| `HTTP_CORS_ALLOWED_ORIGINS` | *（空 — CORS 無効）* | token、userinfo、revocation、discovery/JWKS の各レスポンスの読み取りを許可するブラウザ origin のカンマ区切りリスト |
 
-このプロバイダーと別の origin から配信されるブラウザアプリ — `https://auth.example.com` のプロバイダーに対する `https://app.example.com` の SPA — は、その origin が `cors.allowedOrigins` に無い限り、token エンドポイントをまったく呼べない。設定すると、プロバイダーは、ブラウザがクロスオリジンで呼ぶ正当な理由のある 5 つのエンドポイントで preflight に応答し、`Access-Control-Allow-Origin` を付与する:
+このプロバイダーと別の origin から配信されるブラウザアプリ — `https://auth.example.com` のプロバイダーに対する `https://app.example.com` の SPA — は、その origin が `http.cors.allowedOrigins` に無い限り、token エンドポイントをまったく呼べない。設定すると、プロバイダーは、ブラウザがクロスオリジンで呼ぶ正当な理由のある 5 つのエンドポイントで preflight に応答し、`Access-Control-Allow-Origin` を付与する:
 
 | エンドポイント | メソッド | 理由 |
 |---|---|---|
@@ -327,14 +351,14 @@ cookie とそのストアはセッションストアのセクション `session-
 `/oauth/introspect` と `/oauth/authorize` は意図的に**含めていない**。introspection はサーバー間通信で、既に public client を拒否しているため、ブラウザが使うことはあり得ない。`/authorize` は `fetch` ではなくトップレベル遷移であり、ブラウザがどこへ遷移してよいかについて CORS は関与しない。
 
 ```hocon
-cors {
+http.cors {
   allowedOrigins = ["https://app.example.com", "http://localhost:5173"]
 }
 ```
 
-または `CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173`。書き方はこの 2 通りで、どちらでもない値 — 数値、オブジェクト、真偽値。設定ファイルでしか書けない形 — は、origin なしとして読まれるのではなく、`cors.allowedOrigins` を示して起動時に失敗する。
+または `HTTP_CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173`。書き方はこの 2 通りで、どちらでもない値 — 数値、オブジェクト、真偽値。設定ファイルでしか書けない形 — は、origin なしとして読まれるのではなく、`http.cors.allowedOrigins` を示して起動時に失敗する。
 
-このリストは `cors` モジュールのセクションで、デフォルトは `config/reference.conf` にある。`http` モジュールがそれを、信頼するホップとともに `httpSettings` スロットで core の CORS middleware に渡し、core は設定ではなくスロットを読む。
+このリストは `http` モジュールのセクションの一部で、デフォルトは `config/reference.conf` にある。`http` モジュールがそれを、信頼するホップとともに `httpSettings` スロットで core の CORS middleware に渡し、core は設定ではなくスロットを読む: `httpSettings` の provider が無い合成は CORS を組み込まない。
 
 **照合は `Origin` ヘッダーとの文字列の完全一致である**。一致し得ない形はすべて、誰も許可しないまま設定に居座るのではなく、そのインデックスを名指しして起動時に失敗する。つまり: 末尾スラッシュ（`https://app.example.com/`）、明示的なデフォルトポート（`:443`）、パス、大文字のホストはいずれも不可で、**ワイルドカードも不可** — サブドメインの照合は無く、今後も提供しない。loopback ホスト（`localhost`、`127.0.0.0/8`、`[::1]`）を除き `https` が必須で、この例外は、フロントエンドの開発サーバーを証明書なしで動かせるようにするためのものである。
 
@@ -344,30 +368,32 @@ cors {
 
 ### Google フェデレーション
 
+フェデレーションは core のものである: `core.federations`、各フェデレーションに到達する名前（`/session/oauth/federation/<name>`）をキーとする 1 つのマップ。各キーは、そのパスから名付けた変数 `CORE_FEDERATIONS_<NAME>_<KEY>` に束縛される。トップレベルに書いたマップ（`federations { ... }`）は、各キーの `core.federations` の下のパスを名指しして起動を拒否する。`FEDERATIONS_GOOGLE_*` や `FEDERATIONS_OIDC_*` の変数が単独で、または新しい名前と異なる値で設定されていると、どのモジュールを選ぶよりも前に拒否される。
+
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `FEDERATIONS_GOOGLE_ENABLED` | `false` | Google OAuth フェデレーションを有効化 |
-| `FEDERATIONS_GOOGLE_CLIENT_ID` | — | Google OAuth クライアント ID |
-| `FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth クライアントシークレット |
-| `FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth コールバック URL |
-| `FEDERATIONS_GOOGLE_ACCESS_TYPE` | 未設定（`offline`） | `offline`: サインインのたびに Google の同意画面を表示し、すべてのセッションがリフレッシュトークンを得る。`online`: 同意画面は初回のサインインだけで、リフレッシュトークンはまったく得ない。[federation-google](../../packages/federation-google/README.md#refresh-tokens-and-the-consent-screen) を参照 |
+| `CORE_FEDERATIONS_GOOGLE_ENABLED` | `false` | Google OAuth フェデレーションを有効化 |
+| `CORE_FEDERATIONS_GOOGLE_CLIENT_ID` | — | Google OAuth クライアント ID |
+| `CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth クライアントシークレット |
+| `CORE_FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth コールバック URL |
+| `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE` | 未設定（`offline`） | `offline`: サインインのたびに Google の同意画面を表示し、すべてのセッションがリフレッシュトークンを得る。`online`: 同意画面は初回のサインインだけで、リフレッシュトークンはまったく得ない。[federation-google](../../packages/federation-google/README.md#refresh-tokens-and-the-consent-screen) を参照 |
 
 ### OIDC フェデレーション（任意の OpenID Connect プロバイダー）
 
-`config/application.conf` の `federations.oidc` に 1 つのインスタンスが同梱されている（`@o3co/auth-provider-federation-oidc`、#524）: Okta、Entra ID、Auth0、Keycloak、または自前のテナントを issuer で選ぶ。Discovery は起動時に実行され、失敗すれば起動を拒否する。Store に渡される identity は `oidc:<sub>` で、Store が知らない identity は 401 で拒否される — 何もプロビジョニングされない。
+`config/application.conf` の `core.federations.oidc` に 1 つのインスタンスが同梱されている（`@o3co/auth-provider-federation-oidc`、#524）: Okta、Entra ID、Auth0、Keycloak、または自前のテナントを issuer で選ぶ。Discovery は起動時に実行され、失敗すれば起動を拒否する。Store に渡される identity は `oidc:<sub>` で、Store が知らない identity は 401 で拒否される — 何もプロビジョニングされない。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `FEDERATIONS_OIDC_ENABLED` | `false` | OIDC フェデレーションを有効化 |
-| `FEDERATIONS_OIDC_ISSUER` | — | issuer 識別子（https）。IdP が `iss` に書くものと完全に同じにする |
-| `FEDERATIONS_OIDC_CLIENT_ID` | — | IdP に登録したクライアント ID |
-| `FEDERATIONS_OIDC_CLIENT_SECRET` | — | クライアントシークレット（`client_secret_basic`）。`private_key_jwt` を使う場合は、代わりに設定ファイルで `privateKey` を設定する |
-| `FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | IdP がブラウザを戻す先 |
+| `CORE_FEDERATIONS_OIDC_ENABLED` | `false` | OIDC フェデレーションを有効化 |
+| `CORE_FEDERATIONS_OIDC_ISSUER` | — | issuer 識別子（https）。IdP が `iss` に書くものと完全に同じにする |
+| `CORE_FEDERATIONS_OIDC_CLIENT_ID` | — | IdP に登録したクライアント ID |
+| `CORE_FEDERATIONS_OIDC_CLIENT_SECRET` | — | クライアントシークレット（`client_secret_basic`）。`private_key_jwt` を使う場合は、代わりに設定ファイルで `privateKey` を設定する |
+| `CORE_FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | IdP がブラウザを戻す先 |
 
 2 つ目の IdP は、`type = "oidc"` と独自のコールバックを持つ別のセクションにする:
 
 ```hocon
-federations {
+core.federations {
   okta {
     enabled = true
     type = "oidc"
@@ -380,7 +406,7 @@ federations {
 }
 ```
 
-セクションの `type` が実装を指定する。`type` の無い `federations.google` は組み込みの Google フェデレーションである。`type = "oidc"` を付けると `google` という名前の汎用 OIDC インスタンスになり、組み込みモジュールは合成されない。
+エントリの `type` が実装を指定する。`type` の無い `core.federations.google` は組み込みの Google フェデレーションである。`type = "oidc"` を付けると `google` という名前の汎用 OIDC インスタンスになり、組み込みモジュールは合成されない。
 
 パッケージが受け付けるすべてのフィールド — `scopes`、`discovery` / `endpoints`、`privateKey`、`userInfo`、`idTokenSignedResponseAlg`、`clockToleranceSeconds` — は [パッケージの README](../../packages/federation-oidc/README.md) に記載されている。
 
@@ -388,8 +414,8 @@ federations {
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `CLIENT_TYPE` | `yaml` | クライアントストアのバックエンド: `yaml` |
-| `CLIENT_PATH` | `./config/clients.yaml` | YAML クライアントレジストリのパス |
+| `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | クライアントストアのバックエンド: `yaml`、または core の `yaml` の別名で `repositories.client.static.path`（デフォルトなし）を読む `static` |
+| `REPOSITORIES_CLIENT_YAML_PATH` | `./config/clients.yaml` | YAML クライアントレジストリのパス |
 
 レジストリはデプロイごとの設定である: `.gitignore` は `config/clients.yaml` を git から、`.dockerignore` はイメージから外し、本番の compose ファイルがそれをマウントする（[Docker](#docker) を参照）。
 
@@ -397,37 +423,41 @@ federations {
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `CLIENT_USER_TYPE` | `http` | ユーザーリポジトリのバックエンド: `http` |
-| `CLIENT_USER_AUTHENTICATE_URL` | — | パスワード認証用のユーザー認証 URL。**https 必須**（下記参照） |
-| `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | トークン認証用のユーザー認証 URL。**https 必須**（下記参照） |
-| `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | — | 任意。Store がフェデレーション identity を紐づける URL（#482）。フェデレーション開始ルートで `?link=1` を有効にする。**https 必須** |
-| `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | — | 任意。上流 identity の持ち主を Store が答える URL（#613、フェデレーショングラントの check 5）。設定した場合は、Store が cover する範囲を `repositories.user.http.federatedIdentityLookupCoverage`（HOCON）に宣言する。**https 必須** |
-| `CLIENT_USER_BEARER_TOKEN` | — | 任意。このサーバーが Store に提示する資格情報: Store へのすべてのリクエストが `Authorization: Bearer <token>` を持つ。32 バイト以上の素のトークン（`Bearer ` の接頭辞なし）— `openssl rand -hex 32`。未設定なら `Authorization` ヘッダーは送らない（下記参照） |
-| `CLIENT_USER_TIMEOUT` | `5000` | HTTP リクエストタイムアウト（ミリ秒）。`2147483647` 以下の正の整数 |
-| `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | 上流レスポンスボディの受け入れ上限（バイト） |
+| `ADAPTERS_USER_REPOSITORY` | `http` | ユーザーリポジトリのバックエンド: `http`、またはローカル作業用の `yaml`（core の `yaml` の別名 `static` は `repositories.user.static.path` を読み、デフォルトはない） |
+| `REPOSITORIES_USER_YAML_PATH` | `./config/users.yaml` | `yaml` バックエンドが読む YAML のユーザーファイル |
+| `REPOSITORIES_USER_HTTP_AUTHENTICATE_URL` | — | パスワード認証用のユーザー認証 URL。**https 必須**（下記参照） |
+| `REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL` | — | トークン認証用のユーザー認証 URL。**https 必須**（下記参照） |
+| `REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL` | — | 任意。Store がフェデレーション identity を紐づける URL（#482）。フェデレーション開始ルートで `?link=1` を有効にする。**https 必須** |
+| `REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | — | 任意。上流 identity の持ち主を Store が答える URL（#613、フェデレーショングラントの check 5）。設定した場合は、Store が cover する範囲を `repositories.user.http.federatedIdentityLookupCoverage`（HOCON）に宣言する。**https 必須** |
+| `REPOSITORIES_USER_HTTP_BEARER_TOKEN` | — | 任意。このサーバーが Store に提示する資格情報: Store へのすべてのリクエストが `Authorization: Bearer <token>` を持つ。32 バイト以上の素のトークン（`Bearer ` の接頭辞なし）— `openssl rand -hex 32`。未設定なら `Authorization` ヘッダーは送らない（下記参照） |
+| `REPOSITORIES_USER_HTTP_TIMEOUT` | `5000` | HTTP リクエストタイムアウト（ミリ秒）。`2147483647` 以下の正の整数 |
+| `REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES` | `1048576` | 上流レスポンスボディの受け入れ上限（バイト） |
 
 ユーザー認証 URL は 2 つとも上流ストアへ**平文のユーザー資格情報**を運ぶため、いずれも絶対 `https://` URL でなければならない。`http://` は loopback ホスト（`localhost`、`127.0.0.0/8` 内のアドレス、`[::1]`）に限って許可され、ローカル開発で証明書を用意せずに済むようにしている。プライベートレンジのアドレス（`http://10.0.0.5/…`）やコンテナネットワークのサービス名（`http://user-service/…`）には依然として `https://` が必要 — これらはデプロイが端から端まで制御していないネットワークを越えるため。URL のどちらか、タイムアウト、レスポンス上限のいずれかが使えない値なら、最初のログイン時ではなく起動時に失敗する。
 
 各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する: どのリクエストも `3xx` を追わないので、リダイレクトする URL ではすべての呼び出しが失敗する — [Store が自分で守るべきこと](../../packages/foundation/README.ja.md#store-が自分で守るべきこと) を参照。
 
-**Store を誰が呼べるか。** トークンによるログインとアカウントリンクが送るものは秘密ではなく識別子なので、誰にでも応答する Store は、そこに届く者なら誰にでも、既知の ID をそのユーザーに解決し — あるいは任意のアカウントにリンクし — てしまう。`CLIENT_USER_BEARER_TOKEN` を設定し、Store は `Authorization` が `Bearer <そのトークン>` と正確に一致しないすべてのリクエストに、`401` と `WWW-Authenticate: Bearer error="invalid_token"`（または `403` と `error="insufficient_scope"`）を返す。一つのトークンが上のすべての Store の URL に送られるので、それらのエンドポイントは一つの信頼境界でなければならない。`CLIENT_USER_TYPE=http` — このテンプレートのデフォルト — のもとでは、トークンが 32 バイトより弱い（`SESSION_STORE_SECRET` と同じ測り方）、形が誤っている、または空で export されている場合は起動に失敗する。トークンはこのサーバーが投げるどのエラーにも現れない。そのチャレンジがあれば、Store が受け付けないトークンはすべての Store 呼び出しで障害になる: ログインは `503 temporarily_unavailable` を返し、拒否された資格情報を示すエラーをログに出す（トークンは示さない）。federation-grants の接続も同じエラーを `federation_grant_callback_unavailable` としてログに出す。チャレンジの無い `401` や `403` は従来の意味を保つ — ログインでは「ユーザーが居ない」、`?link=1` のリンクでは拒否、federation-grants の ID の照会では他の `2xx` 以外と同じく障害 — ので、不一致はすべてのログインの失敗とすべてのリンクの拒否としてしか現れない。そして、ユーザーのパスワード誤りや拒否するリンクに `Bearer` チャレンジを付けてはならない。Store に届かない、完全な応答の前に接続を閉じる、または壊れた HTTP の応答を返す場合はそのようにログに出され、運ぶのはせいぜい通信のコード（`ECONNREFUSED`、`UND_ERR_SOCKET`、`ERR_SSL_WRONG_VERSION_NUMBER` など）だけで、通信が引用したものは決して含まない。トークンを使わない場合は、ネットワークポリシーかプラットフォームの相互 TLS で、このサーバーだけが Store に届くようにする。ローテーション、各呼び出し元がログに出すもの、Store が検査することは、同じ foundation README の節にある。
+**Store を誰が呼べるか。** トークンによるログインとアカウントリンクが送るものは秘密ではなく識別子なので、誰にでも応答する Store は、そこに届く者なら誰にでも、既知の ID をそのユーザーに解決し — あるいは任意のアカウントにリンクし — てしまう。`REPOSITORIES_USER_HTTP_BEARER_TOKEN` を設定し、Store は `Authorization` が `Bearer <そのトークン>` と正確に一致しないすべてのリクエストに、`401` と `WWW-Authenticate: Bearer error="invalid_token"`（または `403` と `error="insufficient_scope"`）を返す。一つのトークンが上のすべての Store の URL に送られるので、それらのエンドポイントは一つの信頼境界でなければならない。`ADAPTERS_USER_REPOSITORY=http` — このテンプレートのデフォルト — のもとでは、トークンが 32 バイトより弱い（`SESSION_STORE_SECRET` と同じ測り方）、形が誤っている、または空で export されている場合は起動に失敗する。トークンはこのサーバーが投げるどのエラーにも現れない。そのチャレンジがあれば、Store が受け付けないトークンはすべての Store 呼び出しで障害になる: ログインは `503 temporarily_unavailable` を返し、拒否された資格情報を示すエラーをログに出す（トークンは示さない）。federation-grants の接続も同じエラーを `federation_grant_callback_unavailable` としてログに出す。チャレンジの無い `401` や `403` は従来の意味を保つ — ログインでは「ユーザーが居ない」、`?link=1` のリンクでは拒否、federation-grants の ID の照会では他の `2xx` 以外と同じく障害 — ので、不一致はすべてのログインの失敗とすべてのリンクの拒否としてしか現れない。そして、ユーザーのパスワード誤りや拒否するリンクに `Bearer` チャレンジを付けてはならない。Store に届かない、完全な応答の前に接続を閉じる、または壊れた HTTP の応答を返す場合はそのようにログに出され、運ぶのはせいぜい通信のコード（`ECONNREFUSED`、`UND_ERR_SOCKET`、`ERR_SSL_WRONG_VERSION_NUMBER` など）だけで、通信が引用したものは決して含まない。トークンを使わない場合は、ネットワークポリシーかプラットフォームの相互 TLS で、このサーバーだけが Store に届くようにする。ローテーション、各呼び出し元がログに出すもの、Store が検査することは、同じ foundation README の節にある。
 
 ### コードリポジトリ
 
+`adapters.codeRepository`（`ADAPTERS_CODE_REPOSITORY`）がリポジトリを選び、それぞれが自身のセクションを読む。Redis のものは `REDIS_CLIENTS_URL` が設定する共有接続の上で動くので、自身の URL やパスワードは持たない。
+
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `CLIENT_CODE_TYPE` | `redis` | `OAUTH_CODE_ADAPTER` の非推奨エイリアス（`repositories.code.type`）。`oauth.code.adapter` が未設定のときにだけ、起動時の `config_key_deprecated` 警告付きで読まれる — 同梱の config はそれを設定している |
-| `CLIENT_CODE_ENDPOINT_URI` | — | レガシー。`repositories.code.redis.endpointUri` にバインドされているが読まれない — コードは共有の `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` 接続を使う |
-| `CLIENT_CODE_PASSWORD` | — | コードストア用 Redis パスワード |
-| `CLIENT_CODE_DEFAULT_EXPIRES_IN` | `600` | 認可コードのデフォルト有効期間（秒） |
+| `REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN` | `600` | `redis-code-repository.defaultExpiresIn`: Redis のリポジトリの認可コードのデフォルト有効期間（秒） |
+| `REDIS_CODE_REPOSITORY_KEY_PREFIX` | `oauth:code:` | `redis-code-repository.keyPrefix`: Redis のリポジトリのキー名前空間（[Redis の名前空間](#redis-の名前空間) を参照） |
+| `STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN` | `600` | `standalone-in-memory-code-repository.defaultExpiresIn`: in-process のリポジトリのもの。正の整数（秒） |
+
+`CLIENT_CODE_DEFAULT_EXPIRES_IN` と `CLIENT_CODE_KEY_PREFIX` はこれらとともに改名され、`CLIENT_CODE_ENDPOINT_URI` と `CLIENT_CODE_PASSWORD` は削除された。改名されたものが単独で、または新しい名前と異なる値で設定されていると、そして削除されたものが設定されていると、代わりに設定すべきものを名指しして起動に失敗する。
 
 ### フェデレーショントークンストア
 
-セッションに代わって保持する上流 IdP のトークン（たとえば Google のリフレッシュトークン）。デフォルトは memory で、レプリカごとに分岐し、`CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。Redis ストアは `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` で設定したソケットを共有し、保存時にレコードを暗号化するため、鍵が必要になる。
+セッションに代わって保持する上流 IdP のトークン（たとえば Google のリフレッシュトークン）。デフォルトは memory で、レプリカごとに分岐し、`CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。Redis ストアは `REDIS_CLIENTS_URL` で設定したソケットを共有し、保存時にレコードを暗号化するため、鍵が必要になる。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `FEDERATION_TOKEN_STORE_TYPE` | `memory` | フェデレーショントークンストアのバックエンド: `memory` または `redis` |
+| `ADAPTERS_FEDERATION_TOKEN_STORE` | `memory` | フェデレーショントークンストアのバックエンド: `memory` または `redis` |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` | — | 保存時のレコード暗号化に使う AES-256-GCM 鍵: 32 バイト、base64 エンコード（`openssl rand -base64 32`）。下のモードが `allow-plaintext` でない限り、`redis` では**必須** |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` または `allow-plaintext`。平文は、config が production/staging 環境（`CONFIG_ENV` または `NODE_ENV`）によって選択された場合と、任意の環境での `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。ただし `FEDERATION_TOKENS_ALLOW_INSECURE=1` も設定されている場合を除く — 開発専用 |
 
@@ -435,11 +465,11 @@ federations {
 
 ### 同意ストア
 
-ファーストパーティでないクライアントに対するエンドユーザーの同意と、同意ページが確認している間保留される `/authorize` リクエストを記録する場所（#527、#552）。1 つのスイッチで両方を配線する。デフォルトは `none` で、そのようなクライアントは拒否され、ファーストパーティのクライアントだけが受け付けられる。`memory` はレプリカごとに分岐し、`CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。`redis`（#561）は `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` で設定したソケット上で両方を共有する。
+ファーストパーティでないクライアントに対するエンドユーザーの同意と、同意ページが確認している間保留される `/authorize` リクエストを記録する場所（#527、#552）。1 つのスイッチで両方を配線する。デフォルトは `none` で、そのようなクライアントは拒否され、ファーストパーティのクライアントだけが受け付けられる。`memory` はレプリカごとに分岐し、`CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。`redis`（#561）は `REDIS_CLIENTS_URL` で設定したソケット上で両方を共有する。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `CONSENT_STORE_ADAPTER` | `none` | ファーストパーティでないクライアントのための同意ストア（#527）: `none`（そのようなクライアントは拒否される）、`memory`（単一レプリカ）、または `redis`（共有、#561） |
+| `ADAPTERS_CONSENT_STORE` | `none` | ファーストパーティでないクライアントのための同意ストア（#527）: `none`（そのようなクライアントは拒否される）、`memory`（単一レプリカ）、または `redis`（共有、#561） |
 
 ### フェデレーショングラント
 
@@ -450,8 +480,8 @@ federations {
 | `FEDERATION_GRANTS_ENABLED` | `false` | ルート、下記 2 つのストア、subject-revocation service をインストールする |
 | `FEDERATION_GRANTS_CONSENT_URL` | — | グラント用の、デプロイ側の同意ページ: パス、またはプロバイダーの origin 上の絶対 URL。デフォルトは無い — グラントの有効化はページが存在するという表明であり、無ければ起動を拒否する |
 | `FEDERATION_GRANTS_IDENTITY_LOOKUP` | `required` | connect callback が、既に別のローカルユーザーに紐づいた上流アカウントを拒否するかどうか。`required` には、すべての connection の registration を cover するユーザーリポジトリが必要（下記）。`unsupported` はこの検査を行わないことを記録する |
-| `FEDERATION_GRANT_STORE_ADAPTER` | `redis` | グラントの保存先: `memory`（1 レプリカ。再起動で失われ、全ユーザーが再接続する）または `redis`（共有ソケット） |
-| `FEDERATION_GRANT_INTENT_STORE_ADAPTER` | `redis` | 取得フローの記録 — バックエンドが登録した intent、同意チャレンジ、connect トランザクション — の保存先: `memory`（1 レプリカ。再起動で失うのは進行中のフローだけ）または `redis` |
+| `ADAPTERS_FEDERATION_GRANT_STORE` | `redis` | グラントの保存先: `memory`（1 レプリカ。再起動で失われ、全ユーザーが再接続する）または `redis`（共有ソケット） |
+| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `redis` | 取得フローの記録 — バックエンドが登録した intent、同意チャレンジ、connect トランザクション — の保存先: `memory`（1 レプリカ。再起動で失うのは進行中のフローだけ）または `redis` |
 | `REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE` | `required` | `required` または `allow-plaintext`。`FEDERATION_TOKENS_ALLOW_INSECURE=1` でない限り、平文は production/staging と `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | subject 全体の失効に、確立済みのグラントを残すよう*求めて*よいかどうか。許可であって指示ではない |
 | `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Redis グラントストアのキー名前空間 |
@@ -471,7 +501,7 @@ redis-federation-grant-store {
 federation-grants {
   connections {
     files {
-      federation = "entra-files"   # an enabled federations.<name> of type "oidc", with an app registration of its own
+      federation = "entra-files"   # an enabled core.federations.<name> of type "oidc", with an app registration of its own
       scopes = ["openid", "profile", "offline_access", "Files.Read"]
       boundary = "production"
       maxAccessTokenLifetime = 3600
@@ -485,9 +515,9 @@ federation-grants {
 }
 ```
 
-**起動時に拒否されるもの**（ユーザーがフローの途中で出くわすのではなく、それぞれ名指しで）: 同意ページが無い；`callbackURL` の無い connection、有効になっていない federation 上の connection、または委譲 capability を持たないアダプターの federation 上の connection — それを持つのは汎用 OIDC アダプターだけなので、Google の connection は `type = "oidc"` の federation にする；`required` なのに connection の registration を cover しないユーザーリポジトリ；memory のユーザーセッションストアと並ぶ Redis のグラント（`USER_SESSION_STORES_ADAPTER=memory` — グラントが、それを終わらせる境界より長生きしてしまう。compose ファイルは 2 つとも `redis` を設定している）；`encryptionMode = "required"` なのにリングに鍵が無い Redis グラントストア（memory ストアは何も封じないので鍵を必要としない）；`CORE_DEPLOYMENT_MODE=multi` のもとで、いずれかのストアが `memory`。
+**起動時に拒否されるもの**（ユーザーがフローの途中で出くわすのではなく、それぞれ名指しで）: 同意ページが無い；`callbackURL` の無い connection、有効になっていない federation 上の connection、または委譲 capability を持たないアダプターの federation 上の connection — それを持つのは汎用 OIDC アダプターだけなので、Google の connection は `type = "oidc"` の federation にする；`required` なのに connection の registration を cover しないユーザーリポジトリ；memory のユーザーセッションストアと並ぶ Redis のグラント（`ADAPTERS_USER_SESSION_STORES=memory` — グラントが、それを終わらせる境界より長生きしてしまう。compose ファイルは 2 つとも `redis` を設定している）；`encryptionMode = "required"` なのにリングに鍵が無い Redis グラントストア（memory ストアは何も封じないので鍵を必要としない）；`CORE_DEPLOYMENT_MODE=multi` のもとで、いずれかのストアが `memory`。
 
-**ユーザーリポジトリ。** `required` のもとでは、起動時に各 connection の registration を cover するかをリポジトリに問い、connect callback は上流アカウントの持ち主をリポジトリに問う。テンプレートの `http` リポジトリはそれを Store に問う（#613）: `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` にエンドポイントを設定し、そのエンドポイントが cover するもの — registration ごとに 1 エントリ、Store の戦略が必要とする claim 付き — を HOCON レイヤーに宣言する:
+**ユーザーリポジトリ。** `required` のもとでは、起動時に各 connection の registration を cover するかをリポジトリに問い、connect callback は上流アカウントの持ち主をリポジトリに問う。テンプレートの `http` リポジトリはそれを Store に問う（#613）: `REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` にエンドポイントを設定し、そのエンドポイントが cover するもの — registration ごとに 1 エントリ、Store の戦略が必要とする claim 付き — を HOCON レイヤーに宣言する:
 
 ```hocon
 repositories.user.http.federatedIdentityLookupCoverage = [
@@ -524,9 +554,9 @@ worker:
 |---|---|---|
 | `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | ユーザーセッション、RP レジストリ、session-family インデックス、session-federation インデックスの外側の prefix。 |
 | `REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | refresh token family レコードの prefix。 |
-| `CLIENT_CODE_KEY_PREFIX` | `oauth:code:` | OAuth 認可コードの prefix。 |
+| `REDIS_CODE_REPOSITORY_KEY_PREFIX` | `oauth:code:` | OAuth 認可コードの prefix。 |
 | `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX` | `ft:` | フェデレーショントークンのレコード、そのセッションごとのインデックス、およびそのロックキーの prefix。 |
-| `REDIS_CONSENT_STORE_KEY_PREFIX` | `consent:` | 同意レコードと、保留中の同意リクエストおよびそのセッションごとのインデックスの prefix（`CONSENT_STORE_ADAPTER=redis`、#561）。 |
+| `REDIS_CONSENT_STORE_KEY_PREFIX` | `consent:` | 同意レコードと、保留中の同意リクエストおよびそのセッションごとのインデックスの prefix（`ADAPTERS_CONSENT_STORE=redis`、#561）。 |
 
 デプロイ名を含む値を使う。たとえば `tenant-a:ss:`、`tenant-a:rtfam:`、`tenant-a:code:`、`tenant-a:ft:`、`tenant-a:consent:`。
 
@@ -537,7 +567,7 @@ worker:
 | `SESSION_LOGIN_PAGE_URL` | `/login` | ログインページの URL（リダイレクト用） |
 | `OAUTH_CONSENT_PAGE_URL` | `/consent` | ファーストパーティでないクライアントが経由させられる同意ページの URL。`?challenge=<id>` 付きで遷移する（#527） |
 
-デプロイ全体で共通のクライアント URL やコールバック URL は無い: フェデレーションのコールバック URL はフェデレーションごとに設定する（`FEDERATIONS_GOOGLE_CALLBACK_URL`、`FEDERATIONS_OIDC_CALLBACK_URL`）。
+デプロイ全体で共通のクライアント URL やコールバック URL は無い: フェデレーションのコールバック URL はフェデレーションごとに設定する（`CORE_FEDERATIONS_GOOGLE_CALLBACK_URL`、`CORE_FEDERATIONS_OIDC_CALLBACK_URL`）。
 
 ## モジュール合成順序
 
@@ -545,10 +575,10 @@ worker:
 
 1. **`sessionStoreModuleFor(config)` は先頭のままにする。** これは `express-session` の middleware をマウントし、`before` / `after` を宣言しないため、`req.session` を読むすべてのルートより前に来るのは、リスト内の位置のおかげである。`config` から組み立てるのは、`session-store.storage.type = "memory"` が自らを replica-unsafe と宣言するようにするためである。
 2. **`/oauth` の下では順序は関係しない。** `federationGrantsModules`（フェデレーショングラントが有効な間）、`oauthModule`、独自のモジュールは、いずれも `/oauth` の下にルートをマウントしうる。`oauthModule` のルーターが body をパースするのは自身のルートだけなので、各モジュールへのリクエストは、リストの順に関係なくそのモジュール自身の parser に届く — ただし、`/oauth` 配下のどのモジュールも自分の body を自分でパースし、その parser を自分のパスちょうどに限定している場合に限る（同梱のモジュールはそうしている）。限定はルートとして行う（`router.all(path, parser)` か、ルート自身のハンドラ列）。`router.use(path, parser)` は `path` の下のすべてのパスにもマッチする。フェデレーショングラントのブラウザ側の半分は、自身の `after` によってセッション middleware の後ろに自らを並べる。
-3. **ストアスロット 1 つにつきモジュール 1 つ。** 各アダプタースイッチ — `federationTokenStore.type`、`userSessionStores.adapter`、`rateLimiter.adapter`、`oauth.code.adapter`、`accessTokenDenylist.adapter`、`replaySeenSet.adapter`、`consentStore.adapter`、およびフェデレーショングラントの 2 つのストアスイッチ — は、memory / Redis の組から 1 つを選ぶ。両者は同じスロットを提供するため、両方を配線すると起動時のスロット衝突になる。`consentStore.adapter = "none"` はどちらも配線せず、フェデレーショングラントのストアは機能が有効な間だけ配線される。
-4. **共有 Redis 接続は、最初の Redis バックエンドのモジュールとともに加わる。** `standaloneRedisClientsModule` は、ここにあるすべての Redis アダプターが使う 1 本の ioredis 接続を自身のセクション（`refreshTokenFamilyStore.redis`）から開き、合成されたモジュールがそれを必要とするときには必ず追加される。同梱の合成では refresh token family ストアが Redis 上にあるため、デプロイには常にこれがある。in-memory の family ストアはテスト用の override（`overrides.refreshTokenFamilyModules`）である。
-5. **テンプレート自身の設定モジュールは常に合成される。** `loggingModule`、`httpModule`、`corsModule` は `logging {}`、`http {}`、`cors {}` を所有する。`httpModule` は `corsModule` が提供する CORS のリスト（`corsAllowedOrigins`、テンプレート自身のスロット）を要求し、core の `httpSettings` を提供する。両スロットとも authoritative なので、それぞれのモジュールが読み込まれている間は `overrideComponents` のエントリで置き換えられない。`httpModule` はさらに、`app.mts` が boot の後にポートと readiness の期限を読むテンプレートの `httpHostSettings` を提供する。logger はモジュールではなく、boot の前に `logging` セクションから作られ（`readLogging`）、`logger` コンポーネントとして boot に渡される。
-6. **フェデレーションアダプターは、その config bridge とともに加わる。** `googleFederationModule` には `googleFederationConfigModule` が伴い — これは有効化され、かつ `type` が `google` である `federations.google` セクションに対してのみで、そのため `google` という名前の `type = "oidc"` セクションが二重に合成されることはない — 有効化された `type = "oidc"` のセクションごとに 1 つずつの `oidcFederationModule(name)` には、それらが共有する 1 つの `oidcFederationConfigModule` が伴う。bridge の provider は対応するセクションが無いと throw するため、この組は内部でゲートされるのではなく、合成時に含めるかどうかが決まる。
+3. **ストアスロット 1 つにつきモジュール 1 つ。** 各アダプタースイッチ — `adapters.federationTokenStore`、`adapters.userSessionStores`、`adapters.rateLimiter`、`adapters.codeRepository`、`adapters.accessTokenDenylist`、`adapters.replaySeenSet`、`adapters.consentStore`、およびフェデレーショングラントの 2 つのストアスイッチ — は、memory / Redis の組から 1 つを選ぶ。両者は同じスロットを提供するため、両方を配線すると起動時のスロット衝突になる。`adapters.consentStore = "none"` はどちらも配線せず、フェデレーショングラントのストアは機能が有効な間だけ配線される。
+4. **共有 Redis 接続は、最初の Redis バックエンドのモジュールとともに加わる。** `standaloneRedisClientsModule` は、ここにあるすべての Redis アダプターが使う 1 本の ioredis 接続を自身のセクション（`redis-clients`）から開き、合成されたモジュールがそれを必要とするときには必ず追加される。同梱の合成では refresh token family ストアが Redis 上にあるため、デプロイには常にこれがある。in-memory の family ストアはテスト用の override（`overrides.refreshTokenFamilyModules`）である。
+5. **テンプレート自身の設定モジュールは常に合成される。** `loggingModule` と `httpModule` は `logging {}` と `http {}` を所有し、CORS のリストは `http` のキーの一つ（`http.cors.allowedOrigins`）である。`httpModule` は core の `httpSettings` を提供する。これは authoritative なので、モジュールが読み込まれている間は `overrideComponents` のエントリで置き換えられない。`httpModule` はさらに、`app.mts` が boot の後にポートと readiness の期限を読むテンプレートの `httpHostSettings` を提供する。logger はモジュールではなく、boot の前に `logging` セクションから作られ（`readLogging`）、`logger` コンポーネントとして boot に渡される。
+6. **フェデレーションアダプターは、その config bridge とともに加わる。** `googleFederationModule` には `googleFederationConfigModule` が伴い — これは有効化され、かつ `type` が `google` である `core.federations.google` エントリに対してのみで、そのため `google` という名前の `type = "oidc"` セクションが二重に合成されることはない — 有効化された `type = "oidc"` のセクションごとに 1 つずつの `oidcFederationModule(name)` には、それらが共有する 1 つの `oidcFederationConfigModule` が伴う。bridge の provider は対応するセクションが無いと throw するため、この組は内部でゲートされるのではなく、合成時に含めるかどうかが決まる。
 7. **メール送信者は環境に従う。** 設定が `development` として選ばれたところでは `@o3co/auth-provider-standard` の開発用送信者で、これは各コードをログに書く。そのモジュールは、その名前と、設定されていれば `CONFIG_ENV` と `NODE_ENV` のそれぞれが `development` か `test` であるところでだけ入り、それ以外のところ、または `core.deployment.mode` が `multi` のところでは起動を拒否する。それ以外の名前では SMTP 送信者のモジュールで、そのセクションは `standard-smtp-mail-sender`（[パッケージの README](../../packages/standard/README.md)）。その送信者は `mailSender` スロットを何かが読むところでだけ作られ、そこでは起動に `STANDARD_SMTP_MAIL_SENDER_HOST` と `STANDARD_SMTP_MAIL_SENDER_FROM` が要る。このテンプレートが合成するものでメールを送るものは無い: `mailSender` スロットを読むのは MFA パッケージで、テンプレートはそれを入れていないので、それらが無くても起動する。
 
 `jwksModule`（core 由来）は常に合成される: トークンに署名するプロバイダーは、issuer が設定されているかどうかにかかわらず検証鍵を公開する。各ルートモジュールが何をマウントするかは、それぞれのパッケージの README にある。合成時に知っておくべき振る舞いが 1 つある: `sessionModule` の `POST /session/logout` は `UserSession` レコード（これにより `/oauth/introspect` と `/oauth/userinfo` はそのセッションから発行されたトークンを受け付けなくなる）、subject インデックス、フェデレーションのエントリを削除する — しかし refresh token family は失効させ**ない**。完全なカスケードを実行するエンドポイントは `POST /oauth/logout` である。[どのログアウトエンドポイントが何を無効化するか](../../docs/operator-runbook.md#which-logout-endpoint-invalidates-what) を参照。
@@ -590,7 +620,7 @@ make test
 
 そこでは `HTTP_TRUST_PROXY` は明示的な `${HTTP_TRUST_PROXY:?…}` エントリになっているため、`.env` でホップを指定するまで `docker compose up` は**起動を拒否する**。これは意図的である: ファイルがデフォルトにできるアドレスで、自分が選んでいないホップを黙って信頼しないものは存在しない。そしてこの変数が無いと、ファイルが固定している Secure Cookie は一度もセットされず、CSRF の origin チェックはブラウザからのすべての POST を 403 にし、IP をキーとするすべての rate limit が 1 つのバケットを共有する。
 
-レコードが 1 プロセスより長く生き残らなければならないストアは、継承に任せるのではなく、すべてそのファイルの `environment:` ブロックで名指しされている — `SESSION_STORE_STORAGE_TYPE=redis` と必ずセットで設定しなければならない `USER_SESSION_STORES_ADAPTER=redis` も含めて。両者が揃っていないとき、`CORE_DEPLOYMENT_MODE=single` はそれを教えてくれない: レプリカガードが答えるのは「これらのストアは共有できるか」であって、「この 2 つのストアは同じ寿命を持つか」ではない。両者を分けると、再起動後にすべてのブラウザが、生き残った express-session — 背後に `UserSession` が無いのにまだ `isAuthenticated` と読めるもの — を保持したままになる。`/authorize` はログインへ飛ばし、Cookie がそれを送り返し、このループはユーザーが Cookie を削除するまで解消しない。
+レコードが 1 プロセスより長く生き残らなければならないストアは、継承に任せるのではなく、すべてそのファイルの `environment:` ブロックで名指しされている — `SESSION_STORE_STORAGE_TYPE=redis` と必ずセットで設定しなければならない `ADAPTERS_USER_SESSION_STORES=redis` も含めて。両者が揃っていないとき、`CORE_DEPLOYMENT_MODE=single` はそれを教えてくれない: レプリカガードが答えるのは「これらのストアは共有できるか」であって、「この 2 つのストアは同じ寿命を持つか」ではない。両者を分けると、再起動後にすべてのブラウザが、生き残った express-session — 背後に `UserSession` が無いのにまだ `isAuthenticated` と読めるもの — を保持したままになる。`/authorize` はログインへ飛ばし、Cookie がそれを送り返し、このループはユーザーが Cookie を削除するまで解消しない。
 
 ```bash
 # 署名鍵は必須の入力である。デフォルトは EdDSA で鍵素材のデフォルト値は存在しないため、
@@ -605,9 +635,9 @@ chmod 600 jwt-private.pem
 docker compose -f docker-compose.production.yml up -d --build
 ```
 
-**コンテナ内の鍵。** pem のペアは compose の **secret** としてコンテナに届き、`/run/secrets/` に read-only でマウントされ、compose ファイルが `OAUTH_JWT_*_KEY_PATH` をそこに向ける。`config/` に置いてはならない: `Dockerfile` はこのディレクトリを `COPY` する。`.dockerignore` は、`.gitignore` が git から外すのと同じく、すべての `*.pem` と `*.key` をビルドコンテキストから外すが、それ以外の名前でそこに置いた鍵はイメージレイヤーに焼き込まれ、push のたびに一緒に運ばれる — 保管場所を誤っただけの鍵ではなく、ローテーションしなければならない鍵になる。`.env` も同様である。どちらも git の外に置くこと。
+**コンテナ内の鍵。** pem のペアは compose の **secret** としてコンテナに届き、`/run/secrets/` に read-only でマウントされ、compose ファイルが `KEY_STORE_LOCAL_*_KEY_PATH` をそこに向ける。`config/` に置いてはならない: `Dockerfile` はこのディレクトリを `COPY` する。`.dockerignore` は、`.gitignore` が git から外すのと同じく、すべての `*.pem` と `*.key` をビルドコンテキストから外すが、それ以外の名前でそこに置いた鍵はイメージレイヤーに焼き込まれ、push のたびに一緒に運ばれる — 保管場所を誤っただけの鍵ではなく、ローテーションしなければならない鍵になる。`.env` も同様である。どちらも git の外に置くこと。
 
-**コンテナ内のクライアントレジストリ。** `config/clients.yaml` も同じ経路で、compose の secret `client_registry` として届き、`CLIENT_PATH` がそこを指す。これはデプロイごとのもので、クライアントのシークレットを含みうるため、`.dockerignore` がビルドコンテキストから外す: どのイメージもレジストリを持たず、作業コピーからビルドしたイメージと clean checkout からビルドしたイメージは同じになる。ファイルが存在するまで compose は起動を拒否する。別の方法でイメージを動かすなら、自分でマウントして `CLIENT_PATH` を設定する。
+**コンテナ内のクライアントレジストリ。** `config/clients.yaml` も同じ経路で、compose の secret `client_registry` として届き、`REPOSITORIES_CLIENT_YAML_PATH` がそこを指す。これはデプロイごとのもので、クライアントのシークレットを含みうるため、`.dockerignore` がビルドコンテキストから外す: どのイメージもレジストリを持たず、作業コピーからビルドしたイメージと clean checkout からビルドしたイメージは同じになる。ファイルが存在するまで compose は起動を拒否する。別の方法でイメージを動かすなら、自分でマウントして `REPOSITORIES_CLIENT_YAML_PATH` を設定する。
 
 production ファイルは `environment:` ブロックで `SESSION_STORE_SECURE=true` と `__Host-` の Cookie 名も固定しており、これは `env_file` より優先される。`.env.example` は plain-HTTP の compose 実行（`make dev`）が `__Host-` Cookie の検査に引っかからないよう `SESSION_STORE_SECURE=false` を同梱しており、このファイルはその同じ `.env` を要求する — このファイルが前提とする TLS の背後では、非 Secure のセッション Cookie は、平文区間を 1 つでも読める相手にセッションを渡すことに等しい。
 
@@ -732,9 +762,9 @@ probe は接続を開いた builder が登録するため、リストはこの�
 
 ### ログ
 
-プロバイダーは [pino](https://getpino.io) を通じて stdout に改行区切りの JSON をログ出力する。これはログアグリゲーターがパーサーなしで取り込める形式である。`LOG_LEVEL`（HOCON では `logging.level`。`logging` モジュールのセクションで、boot の前にそのモジュールのスキーマで読む）が閾値を設定する。`trace` と `debug` はリクエスト単位の詳細を含み、デフォルトではオフである。pino は閾値未満の呼び出しをフォーマット前に捨てるため、出力されてから下流でフィルタされるのではなく、本番環境ではコストがかからない。
+プロバイダーは [pino](https://getpino.io) を通じて stdout に改行区切りの JSON をログ出力する。これはログアグリゲーターがパーサーなしで取り込める形式である。`LOGGING_LEVEL`（HOCON では `logging.level`。`logging` モジュールのセクションで、boot の前にそのモジュールのスキーマで読む）が閾値を設定する。`trace` と `debug` はリクエスト単位の詳細を含み、デフォルトではオフである。pino は閾値未満の呼び出しをフォーマット前に捨てるため、出力されてから下流でフィルタされるのではなく、本番環境ではコストがかからない。
 
-logger は boot planner の `logger` コンポーネントスロットに配線されるため、`optional: ["logger"]` を宣言するすべてのモジュール — oauth、session、dpop、mtls、token-exchange — はこの 1 つのインスタンスを通じてログを出す。`LOG_LEVEL` がそれらに届くのは、このスロットを埋めているからである。スロットを空のままにした composition root では、代わりに各モジュール自身のデフォルトの `consoleLogger` が使われ、レベルを設定しても何も変わらない。
+logger は boot planner の `logger` コンポーネントスロットに配線されるため、`optional: ["logger"]` を宣言するすべてのモジュール — oauth、session、dpop、mtls、token-exchange — はこの 1 つのインスタンスを通じてログを出す。`LOGGING_LEVEL` がそれらに届くのは、このスロットを埋めているからである。スロットを空のままにした composition root では、代わりに各モジュール自身のデフォルトの `consoleLogger` が使われ、レベルを設定しても何も変わらない。
 
 イベントは構造化され、名前が付いている: `logger.error({ err }, "session_store_redis_error")`。アラートはメッセージ本文ではなく名前に対して設定すること。
 
@@ -742,7 +772,7 @@ logger は boot planner の `logger` コンポーネントスロットに配線�
 
 ### 監査ログ
 
-セキュリティに関わるイベント — 誰が認証したか、何が発行されたか、何が拒否されたか、rate limiter がいつ応答できなかったか — は、`audit.sink.type`（環境変数 `AUDIT_SINK_TYPE`）が指す sink に送られる。テンプレートは `"logger"` を同梱しており、これは他のすべてと同じ pino ストリームを通じて 1 行に 1 イベントを書き出す:
+セキュリティに関わるイベント — 誰が認証したか、何が発行されたか、何が拒否されたか、rate limiter がいつ応答できなかったか — は、`adapters.auditSink`（環境変数 `ADAPTERS_AUDIT_SINK`）が指す sink に送られる。テンプレートは `"logger"` を同梱しており、これは他のすべてと同じ pino ストリームを通じて 1 行に 1 イベントを書き出す:
 
 ```json
 {"level":30,"time":1787841564013,"name":"audit","audit":{"timestamp":"2026-08-27T14:39:24.013Z","type":"token.issued.failure","ip":"203.0.113.7","details":{"reason":"unsupported_grant_type"}},"msg":"token.issued.failure"}
@@ -750,22 +780,20 @@ logger は boot planner の `logger` コンポーネントスロットに配線�
 
 出力形式は 1 つなので、アグリゲーターはアプリケーションログと監査イベントを 1 つのパーサーで取り込み、`name`（`"provider"` か `"audit"` か）で分けられる。イベント種別はメッセージでもあるため、`session_store_redis_error` の場合と同じように、名前 — `authorize.rejected`、`token.issued.failure`、`rate_limit.unavailable` — に対してアラートを設定すること。
 
-`AUDIT_SINK_TYPE=console` を指定すると、代わりに core の組み込み sink が選ばれる: ログのエンベロープ無しで、イベントそのものを 1 行に 1 つの JSON オブジェクトとして出す。イベントだけを必要とし、それ以外は要らないパイプライン向けである。
+`ADAPTERS_AUDIT_SINK=console` を指定すると、代わりに core の組み込み sink が選ばれる: ログのエンベロープ無しで、イベントそのものを 1 行に 1 つの JSON オブジェクトとして出す。イベントだけを必要とし、それ以外は要らないパイプライン向けである。
 
-**`LOG_LEVEL` は監査ログの出力を左右しない。** 監査ストリームのレベルは `info` に固定されている。`warn` は本番では普通の設定であり、`silent` も正当な設定である。そのどちらかがこれを黙らせれば、ログの好みの設定のように見えながら、すべての認証と発行の記録を消してしまう。監査イベントの送り先は `audit.sink.type` で選ぶ — そしてこのセレクターには **`"none"` が無い**。未知の type は、監査ログの無いデプロイを生むのではなく、登録されている sink を名指しして起動を失敗させる。
+**`LOGGING_LEVEL` は監査ログの出力を左右しない。** 監査ストリームのレベルは `info` に固定されている。`warn` は本番では普通の設定であり、`silent` も正当な設定である。そのどちらかがこれを黙らせれば、ログの好みの設定のように見えながら、すべての認証と発行の記録を消してしまう。監査イベントの送り先は `adapters.auditSink` で選ぶ — そしてこのセレクターには **`"none"` が無い**。未知の sink は、監査ログの無いデプロイを生むのではなく、登録されている sink を名指しして起動を失敗させる。sink を意図して組み込まない合成は、core 自身のセクションで `core.declaredAbsent = ["auditSink"]` とそれを宣言する。このテンプレートは常に 1 つ組み込む。
 
-実際の sink — SIEM、ログパイプライン、メッセージバス — に向けるには、`auditSinkModule`（`src/modules.mts`）に builder を登録し、config でその名前を指定する。オプションは同じブロックに一緒に書く:
+実際の sink — SIEM、ログパイプライン、メッセージバス — に向けるには、`auditSinkModuleFor`（`src/modules.mts`）に builder を登録し、それを選択する。オプションは `audit-sink` モジュールのセクションに、sink の名前の下に書く:
 
 ```ts
 factory.register("splunk-hec", (cfg) => createSplunkSink(cfg));
 ```
 
 ```hocon
-audit {
-  sink {
-    type = "splunk-hec"
-    splunk-hec { endpoint = ${?SPLUNK_HEC_URL}, token = ${?SPLUNK_HEC_TOKEN} }
-  }
+adapters.auditSink = "splunk-hec"
+audit-sink {
+  splunk-hec { endpoint = ${?SPLUNK_HEC_URL}, token = ${?SPLUNK_HEC_TOKEN} }
 }
 ```
 

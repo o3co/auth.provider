@@ -262,7 +262,7 @@ describe("buildAuthorizationUrl", () => {
 
 describe("the return URL the flow sends is the configured callbackURL", () => {
 	// The boot-time guard validates `config.callbackURL`, but the redirect_uri
-	// the route hands in is derived from `config.federations.<name>.callbackURL`
+	// the route hands in is derived from `core.federations.<name>.callbackURL`
 	// by the session module. They are one value in every shipped composition;
 	// this is what makes a composition where they drift fail loudly instead of
 	// sending Apple a return URL nobody validated.

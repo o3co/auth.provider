@@ -162,9 +162,9 @@ describe("registerBuiltinKeyStores - HS256 secret entropy floor", () => {
 		expect(ks.algorithm).toBe("HS256");
 	});
 
-	it("names oauth.jwt.signingKey.local.secret and OAUTH_JWT_SECRET in the failure", async () => {
-		await expect(build("x")).rejects.toThrow(/oauth\.jwt\.signingKey\.local\.secret/);
-		await expect(build("x")).rejects.toThrow(/OAUTH_JWT_SECRET/);
+	it("names key-store.local.secret and KEY_STORE_LOCAL_SECRET in the failure", async () => {
+		await expect(build("x")).rejects.toThrow(/key-store\.local\.secret/);
+		await expect(build("x")).rejects.toThrow(/KEY_STORE_LOCAL_SECRET/);
 	});
 
 	it("does not echo the rejected secret back to the operator", async () => {
@@ -537,17 +537,17 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 		} catch (err) {
 			message = (err as Error).message;
 		}
-		expect(message).toMatch(/oauth\.jwt\.signingKey\.local\.privateKey/);
-		expect(message).toMatch(/oauth\.jwt\.signingKey\.local\.publicKey/);
-		expect(message).toMatch(/OAUTH_JWT_PRIVATE_KEY_PATH/);
-		expect(message).toMatch(/OAUTH_JWT_PUBLIC_KEY_PATH/);
+		expect(message).toMatch(/key-store\.local\.privateKey/);
+		expect(message).toMatch(/key-store\.local\.publicKey/);
+		expect(message).toMatch(/KEY_STORE_LOCAL_PRIVATE_KEY_PATH/);
+		expect(message).toMatch(/KEY_STORE_LOCAL_PUBLIC_KEY_PATH/);
 		// Tells the operator how to produce the material, not just that it is missing.
 		expect(message).toMatch(/openssl genpkey -algorithm ed25519/i);
 	});
 
-	it("points an operator who set only OAUTH_JWT_SECRET at the HS256 opt-in", async () => {
-		// Upgrade path: a 0.x deployment carrying only OAUTH_JWT_SECRET now
-		// lands on the EdDSA default. The error must connect the two.
+	it("points an operator who set only KEY_STORE_LOCAL_SECRET at the HS256 opt-in", async () => {
+		// A deployment carrying only a secret lands on the EdDSA default. The
+		// error must connect the two.
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
 		let message = "";
@@ -561,7 +561,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 		} catch (err) {
 			message = (err as Error).message;
 		}
-		expect(message).toMatch(/OAUTH_JWT_ALGORITHM=HS256/);
+		expect(message).toMatch(/KEY_STORE_LOCAL_ALGORITHM=HS256/);
 	});
 
 	it("throws when a previousKeys entry is missing publicKey/publicKeyPath", async () => {

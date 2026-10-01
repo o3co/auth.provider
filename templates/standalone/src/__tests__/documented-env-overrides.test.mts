@@ -22,6 +22,7 @@ import {
 	type AppConfig,
 	BootError,
 	createApp,
+	type Module,
 	moduleReferences,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
@@ -36,8 +37,9 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
+	type Switches,
 } from "../configPath.mjs";
-import { templateReference } from "../modules.mjs";
+import { httpModule, keyStoreModule, templateReference } from "../modules.mjs";
 
 /**
  * Boots the shipped config with EVERY documented override supplied the way an
@@ -65,7 +67,7 @@ const readmeJaPath = fileURLToPath(new URL("../../README.ja.md", import.meta.url
  * Every environment variable the shipped artifact documents, as the string an
  * operator would supply.
  *
- * `OAUTH_JWT_ALGORITHM` is `EdDSA` so the asymmetric key variables fit in the
+ * `KEY_STORE_LOCAL_ALGORITHM` is `EdDSA` so the asymmetric key variables fit in the
  * same map: the HS256 branch of `signingKey.local` is a `.strict()`
  * discriminated-union member and refuses `privateKeyPath` and friends by
  * design. The HS256 shape gets its own test below.
@@ -77,18 +79,18 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	HTTP_READINESS_TIMEOUT_MS: "1500",
 
 	// --- logging ------------------------------------------------------
-	LOG_LEVEL: "debug",
+	LOGGING_LEVEL: "debug",
 
 	// --- oauth.jwt ----------------------------------------------------
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	OAUTH_JWT_SIGNING_KEY_PROVIDER: "local",
-	OAUTH_JWT_ALGORITHM: "EdDSA",
-	OAUTH_JWT_KID: "v1",
-	OAUTH_JWT_SECRET: "documented-env-secret.at-least-32-bytes.ok",
-	OAUTH_JWT_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nMC4=\n-----END PRIVATE KEY-----",
-	OAUTH_JWT_PRIVATE_KEY_PATH: "./config/jwt-private.pem",
-	OAUTH_JWT_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\nMCo=\n-----END PUBLIC KEY-----",
-	OAUTH_JWT_PUBLIC_KEY_PATH: "./config/jwt-public.pem",
+	KEY_STORE_PROVIDER: "local",
+	KEY_STORE_LOCAL_ALGORITHM: "EdDSA",
+	KEY_STORE_LOCAL_KID: "v1",
+	KEY_STORE_LOCAL_SECRET: "documented-env-secret.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nMC4=\n-----END PRIVATE KEY-----",
+	KEY_STORE_LOCAL_PRIVATE_KEY_PATH: "./config/jwt-private.pem",
+	KEY_STORE_LOCAL_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\nMCo=\n-----END PUBLIC KEY-----",
+	KEY_STORE_LOCAL_PUBLIC_KEY_PATH: "./config/jwt-public.pem",
 	OAUTH_JWT_LEGACY_TYP_ACCEPT: "true",
 
 	// --- oauth tokens / policy ----------------------------------------
@@ -100,7 +102,6 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_REFRESH_TOKEN_EXPIRES_IN: "86400",
 	OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "reject",
 	OAUTH_OIDC_MODE: "dual",
-	OAUTH_CODE_ADAPTER: "redis",
 	OAUTH_REVOCATION_ACCESS_TOKEN: "denylist",
 	OAUTH_REVOCATION_SUBJECT: "unsupported",
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
@@ -145,16 +146,31 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 
 	// --- rate limiting ------------------------------------------------
 	REDIS_RATE_LIMITER_FAIL_MODE: "open",
-	RATE_LIMITER_ADAPTER: "redis",
 	CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS: "10000",
 
-	// --- audit --------------------------------------------------------
-	// Selects the sink builder; "console" is the registered builtin.
-	// There is deliberately no "none" — an unknown type fails boot in
-	// buildModules (pinned by audit-sink.test.mts), not at config parse,
-	// because the schema keeps `audit.sink.type` an open string so
-	// out-of-tree sinks need no schema change here.
-	AUDIT_SINK_TYPE: "console",
+	// --- adapters -----------------------------------------------------
+	// Which adapter fills each slot: the composition root's own section,
+	// read before the modules are chosen.
+	ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_USER_SESSION_STORES: "redis",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
+	// The replay seen-set behind private_key_jwt client authentication.
+	ADAPTERS_REPLAY_SEEN_SET: "redis",
+	ADAPTERS_CONSENT_STORE: "redis",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
+	ADAPTERS_FEDERATION_GRANT_STORE: "redis",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "redis",
+	ADAPTERS_MFA_FACTOR_STORE: "redis",
+	ADAPTERS_MFA_TRANSACTION_STORE: "redis",
+	ADAPTERS_CODE_REPOSITORY: "redis",
+	ADAPTERS_CLIENT_REPOSITORY: "yaml",
+	ADAPTERS_USER_REPOSITORY: "yaml",
+	// Selects the sink builder; "console" is the registered builtin. There
+	// is deliberately no "none" — an unknown sink fails boot in buildModules
+	// (pinned by audit-sink.test.mts), not in phase one, because the schema
+	// keeps `adapters.auditSink` an open string so out-of-tree sinks need no
+	// schema change here.
+	ADAPTERS_AUDIT_SINK: "console",
 
 	// --- JWKS ---------------------------------------------------------
 	JWKS_PATH: "/keys/jwks.json",
@@ -162,30 +178,21 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 
 	// --- shared stores ------------------------------------------------
 	CORE_DEPLOYMENT_MODE: "multi",
-	USER_SESSION_STORES_ADAPTER: "redis",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
-	// The replay seen-set behind private_key_jwt client authentication.
-	REPLAY_SEEN_SET_ADAPTER: "redis",
-	// The consent stores' shared backend and its namespace.
-	CONSENT_STORE_ADAPTER: "redis",
+	// The consent stores' namespace.
 	REDIS_CONSENT_STORE_KEY_PREFIX: "tenant-a:consent:",
 	REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX: "atdeny:",
 	REDIS_SESSION_STORES_KEY_PREFIX: "ss:",
 	REDIS_REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "rtfam:",
 	REDIS_REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "3",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "rt-family-password",
+	REDIS_CLIENTS_URL: "redis://redis:6379",
+	REDIS_CLIENTS_PASSWORD: "rt-family-password",
 	// The federation token store's Redis branch.
-	FEDERATION_TOKEN_STORE_TYPE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX: "ft:",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "required",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 	// Federation grants: a user's standing consent that a client may obtain
-	// upstream tokens without them. The overrides `reference.conf` declares,
-	// and the two adapter switches the template composes the feature from.
+	// upstream tokens without them. The overrides `reference.conf` declares.
 	FEDERATION_GRANTS_ENABLED: "true",
-	FEDERATION_GRANT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
 	REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE: "required",
 	FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION: "false",
 	// Acquisition's two deployment decisions — whether the callback
@@ -199,50 +206,49 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// --- multi-factor authentication ----------------------------------
 	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
 	// module reads and the template declares `mfa` from (ADR
-	// 2026-09-28-session-admission), and the two store switches a composition
-	// installs MFA's stores from.
+	// 2026-09-28-session-admission).
 	MFA_MODE: "off",
-	MFA_FACTOR_STORE_ADAPTER: "redis",
-	MFA_TRANSACTION_STORE_ADAPTER: "redis",
 	// …and the Redis stores' key namespaces, which the Redis package's two MFA
 	// modules read.
 	REDIS_MFA_FACTOR_STORE_KEY_PREFIX: "tenant-a:mfaf:",
 	REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX: "tenant-a:mfat:",
 
 	// --- federation ---------------------------------------------------
-	FEDERATIONS_GOOGLE_ENABLED: "true",
-	FEDERATIONS_GOOGLE_CLIENT_ID: "google-client-id",
-	FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-client-secret",
-	FEDERATIONS_GOOGLE_CALLBACK_URL: "https://auth.test/session/oauth/federation/google/callback",
-	FEDERATIONS_GOOGLE_ACCESS_TYPE: "online",
+	CORE_FEDERATIONS_GOOGLE_ENABLED: "true",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_ID: "google-client-id",
+	CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-client-secret",
+	CORE_FEDERATIONS_GOOGLE_CALLBACK_URL:
+		"https://auth.test/session/oauth/federation/google/callback",
+	CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE: "online",
 	// The generic OIDC federation the template ships disabled.
-	FEDERATIONS_OIDC_ENABLED: "true",
-	FEDERATIONS_OIDC_ISSUER: "https://idp.test",
-	FEDERATIONS_OIDC_CLIENT_ID: "oidc-client-id",
-	FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-client-secret",
-	FEDERATIONS_OIDC_CALLBACK_URL: "https://auth.test/session/oauth/federation/oidc/callback",
+	CORE_FEDERATIONS_OIDC_ENABLED: "true",
+	CORE_FEDERATIONS_OIDC_ISSUER: "https://idp.test",
+	CORE_FEDERATIONS_OIDC_CLIENT_ID: "oidc-client-id",
+	CORE_FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-client-secret",
+	CORE_FEDERATIONS_OIDC_CALLBACK_URL: "https://auth.test/session/oauth/federation/oidc/callback",
 
 	// --- repositories -------------------------------------------------
-	CLIENT_TYPE: "yaml",
-	CLIENT_PATH: "./config/clients.yaml",
-	CLIENT_USER_TYPE: "yaml",
-	CLIENT_USER_PATH: "./config/users.yaml",
-	CLIENT_USER_AUTHENTICATE_URL: "https://users.example.com/authenticate",
-	CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL: "https://users.example.com/authenticate-by-token",
-	CLIENT_USER_LINK_FEDERATED_IDENTITY_URL: "https://users.example.com/link-federated-identity",
+	REPOSITORIES_CLIENT_YAML_PATH: "./config/clients.yaml",
+	REPOSITORIES_USER_YAML_PATH: "./config/users.yaml",
+	REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: "https://users.example.com/authenticate",
+	REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL:
+		"https://users.example.com/authenticate-by-token",
+	REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL:
+		"https://users.example.com/link-federated-identity",
 	// The Store's identity lookup for federation grants (see ADR
 	// 2026-09-17-federation-grants-offline-delegation).
-	CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL:
+	REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL:
 		"https://users.example.com/find-subject-by-federated-identity",
-	CLIENT_USER_TIMEOUT: "5000",
-	CLIENT_USER_MAX_RESPONSE_BYTES: "1048576",
+	REPOSITORIES_USER_HTTP_TIMEOUT: "5000",
+	REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES: "1048576",
 	// The credential the http user adapter presents to the Store; >= 32 bytes.
-	CLIENT_USER_BEARER_TOKEN: "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a",
-	CLIENT_CODE_TYPE: "redis",
-	CLIENT_CODE_DEFAULT_EXPIRES_IN: "600",
-	CLIENT_CODE_ENDPOINT_URI: "redis://redis:6379",
-	CLIENT_CODE_PASSWORD: "code-store-password",
-	CLIENT_CODE_KEY_PREFIX: "oauth:code:",
+	REPOSITORIES_USER_HTTP_BEARER_TOKEN:
+		"0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a",
+	// The authorization-code repositories: the Redis one (selected above) and
+	// the in-process one.
+	REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "600",
+	REDIS_CODE_REPOSITORY_KEY_PREFIX: "oauth:code:",
+	STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "600",
 
 	// --- the login and consent pages ----------------------------------
 	SESSION_LOGIN_PAGE_URL: "/login",
@@ -252,7 +258,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// A list, in the only shape an environment variable can carry one.
 	// The schema splits and validates it; the `turns every non-boolean
 	// override into its declared type` case below pins the result.
-	CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
+	HTTP_CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
 };
 
 /**
@@ -337,6 +343,56 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"renamed SESSION_STORE_STORAGE_REDIS_URL, and only captured — set alone, or to another value, it fails boot",
 	SESSION_STORAGE_REDIS_PASSWORD:
 		"renamed SESSION_STORE_STORAGE_REDIS_PASSWORD, and only captured — set alone, or to another value, it fails boot",
+	LOG_LEVEL:
+		"renamed LOGGING_LEVEL, and only captured — set alone, or to another value, it fails boot",
+	CORS_ALLOWED_ORIGINS:
+		"renamed HTTP_CORS_ALLOWED_ORIGINS, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_SIGNING_KEY_PROVIDER:
+		"renamed KEY_STORE_PROVIDER, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_ALGORITHM:
+		"renamed KEY_STORE_LOCAL_ALGORITHM, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_KID:
+		"renamed KEY_STORE_LOCAL_KID, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_SECRET:
+		"renamed KEY_STORE_LOCAL_SECRET, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_PRIVATE_KEY_PATH:
+		"renamed KEY_STORE_LOCAL_PRIVATE_KEY_PATH, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_PUBLIC_KEY_PATH:
+		"renamed KEY_STORE_LOCAL_PUBLIC_KEY_PATH, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_PRIVATE_KEY:
+		"renamed KEY_STORE_LOCAL_PRIVATE_KEY, and only captured — set alone, or to another value, it fails boot",
+	OAUTH_JWT_PUBLIC_KEY:
+		"renamed KEY_STORE_LOCAL_PUBLIC_KEY, and only captured — set alone, or to another value, it fails boot",
+	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL:
+		"renamed REDIS_CLIENTS_URL, and only captured — set alone, or to another value, it fails boot",
+	REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD:
+		"renamed REDIS_CLIENTS_PASSWORD, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_PATH:
+		"renamed REPOSITORIES_CLIENT_YAML_PATH, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_USER_PATH:
+		"renamed REPOSITORIES_USER_YAML_PATH, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_USER_AUTHENTICATE_URL:
+		"renamed REPOSITORIES_USER_HTTP_AUTHENTICATE_URL, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL:
+		"renamed REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_USER_LINK_FEDERATED_IDENTITY_URL:
+		"renamed REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL:
+		"renamed REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_USER_BEARER_TOKEN:
+		"renamed REPOSITORIES_USER_HTTP_BEARER_TOKEN, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_USER_TIMEOUT:
+		"renamed REPOSITORIES_USER_HTTP_TIMEOUT, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_USER_MAX_RESPONSE_BYTES:
+		"renamed REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_CODE_DEFAULT_EXPIRES_IN:
+		"renamed REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN (the Redis code repository) and STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN (the in-process one), and only captured — set alone, or to another value, it fails boot",
+	CLIENT_CODE_KEY_PREFIX:
+		"renamed REDIS_CODE_REPOSITORY_KEY_PREFIX, and only captured — set alone, or to another value, it fails boot",
+	CLIENT_CODE_ENDPOINT_URI:
+		"removed: the Redis code repository uses the shared redis-clients connection; only captured — set at all, it fails boot",
+	CLIENT_CODE_PASSWORD:
+		"removed: the Redis code repository uses the shared redis-clients connection; only captured — set at all, it fails boot",
 };
 
 /**
@@ -371,16 +427,16 @@ const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	SESSION_STORAGE_REDIS_URL: "redis://redis:6379",
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis:6379",
 	USER_SESSION_STORES_ADAPTER: "redis",
-	STANDALONE_ADAPTERS_USER_SESSION_STORES: "redis",
+	ADAPTERS_USER_SESSION_STORES: "redis",
 	RATE_LIMITER_ADAPTER: "redis",
-	STANDALONE_ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_RATE_LIMITER: "redis",
 	OAUTH_CODE_ADAPTER: "redis",
-	STANDALONE_ADAPTERS_CODE_REPOSITORY: "redis",
+	ADAPTERS_CODE_REPOSITORY: "redis",
 	FEDERATION_TOKEN_STORE_TYPE: "redis",
-	STANDALONE_ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 	CLIENT_USER_TYPE: "yaml",
-	STANDALONE_ADAPTERS_USER_REPOSITORY: "yaml",
+	ADAPTERS_USER_REPOSITORY: "yaml",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
 	OAUTH_GRANTS_SESSION_ENABLED: "true",
@@ -397,7 +453,7 @@ function ownFiles(configEnv: string, operatorLayer?: string): string[] {
 }
 
 /** Phase one, as `app.mts` reads it: the switches. */
-function readShippedSwitches(env: Record<string, string>, configEnv = "production"): AppConfig {
+function readShippedSwitches(env: Record<string, string>, configEnv = "production"): Switches {
 	return readSwitches(readOwnLayers(ownFiles(configEnv), { env }));
 }
 
@@ -422,18 +478,20 @@ const FEDERATION_STORES = Object.fromEntries(
  * session admission, phase two resolved over the reference of every package
  * the template's modules come from (the template's own and core's) and
  * parsed once by `createApp` — no bridge on the way.
- * No module is loaded: the parse is what this suite asks about, and each
- * key it reads is one core's schema declares.
+ * No module is loaded unless `modules` names one: the parse is what this
+ * suite asks about, and each key it reads is one core's schema declares, or
+ * the section of a module it loads.
  */
 async function bootParsed(
 	env: Record<string, string>,
 	configEnv = "production",
 	operatorLayer?: string,
+	modules: readonly Module[] = [],
 ): Promise<AppConfig> {
 	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
 	const switches = readSwitches(own);
 	const handle = await createApp({
-		modules: [],
+		modules: [...modules],
 		bootstrapComponents: {
 			config: resolveForBoot(
 				own,
@@ -468,6 +526,16 @@ function sessionSection(config: AppConfig): { readonly csrf?: { readonly ttlSeco
 	const schema = sessionModule.section?.schema;
 	if (schema === undefined) throw new Error("the session module declares no section");
 	return schema.parse(config.session) as ReturnType<typeof sessionSection>;
+}
+
+/** `http {}` as the `http` module parsed it, in a configuration boot parsed with the module loaded. */
+function httpSectionOf(config: AppConfig): {
+	readonly port: number;
+	readonly readinessTimeoutMs: number;
+	readonly trustProxy: unknown;
+	readonly cors: { readonly allowedOrigins: readonly string[] };
+} {
+	return (config as unknown as { http: ReturnType<typeof httpSectionOf> }).http;
 }
 
 /** `oauth {}` as the oauth module's own schema parses it. */
@@ -535,8 +603,8 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(config.oauth.jwt.legacyTypAccept).toBe(true);
 		expect(config.oauth.requireEmailVerified).toBe(true);
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
-		expect(config.federations.google?.enabled).toBe(true);
-		expect(config.federations.oidc?.enabled).toBe(true);
+		expect(config.core?.federations?.google?.enabled).toBe(true);
+		expect(config.core?.federations?.oidc?.enabled).toBe(true);
 		// A leftover string here would be read as "on" by a truthiness check
 		// and as "off" by `=== true`, for a feature whose whole default is off.
 		expect(config["federation-grants"]?.enabled).toBe(true);
@@ -544,10 +612,13 @@ describe("the shipped config boots with every documented override supplied as a 
 
 	it("turns every non-boolean override into its declared type", async () => {
 		const config = await bootParsed(DOCUMENTED_ENV);
-		expect(config.http?.port).toBe(3000);
-		expect(config.http?.readinessTimeoutMs).toBe(1500);
-		expect(config.http?.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
-		expect(config.federations.google?.accessType).toBe("online");
+		const http = httpSectionOf(
+			await bootParsed(DOCUMENTED_ENV, "production", undefined, [httpModule]),
+		);
+		expect(http.port).toBe(3000);
+		expect(http.readinessTimeoutMs).toBe(1500);
+		expect(http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
+		expect(config.core?.federations?.google?.accessType).toBe("online");
 		// The new default wins over the deprecated variable, and the parsed
 		// config mirrors it onto the old key for readers that predate the split.
 		expect(resolveAccessTokenLifetime(config)).toEqual({
@@ -559,7 +630,7 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(sessionStoreSection(config).maxAge).toBe(3600000);
 		expect(sessionSection(config).csrf?.ttlSeconds).toBe(7200);
 		expect(config.oauth.nonce?.maxLength).toBe(256);
-		expect(config.consentStore?.adapter).toBe("redis");
+		expect(readShippedSwitches(DOCUMENTED_ENV).adapters.consentStore).toBe("redis");
 		// A Redis store's section, which its module (not loaded here) parses.
 		const sections = config as unknown as Record<string, { keyPrefix?: unknown } | undefined>;
 		expect(sections["redis-consent-store"]?.keyPrefix).toBe("tenant-a:consent:");
@@ -584,23 +655,27 @@ describe("the shipped config boots with every documented override supplied as a 
 		expect(readMfaMode(readShippedSwitches(DOCUMENTED_ENV))).toBe("off");
 		expect(config).not.toHaveProperty("mfa");
 		expect(config).not.toHaveProperty("endpoints.mfa");
-		expect(config.mfaFactorStore?.adapter).toBe("redis");
-		expect(config.mfaTransactionStore?.adapter).toBe("redis");
+		expect(readShippedSwitches(DOCUMENTED_ENV).adapters).toMatchObject({
+			mfaFactorStore: "redis",
+			mfaTransactionStore: "redis",
+		});
 		expect(sections["redis-mfa-factor-store"]?.keyPrefix).toBe("tenant-a:mfaf:");
 		expect(sections["redis-mfa-transaction-store"]?.keyPrefix).toBe("tenant-a:mfat:");
 		// A comma-separated string becomes a list of origins, trimmed.
-		expect(config.cors?.allowedOrigins).toEqual([
-			"https://app.example.com",
-			"http://localhost:5173",
-		]);
+		expect(http.cors.allowedOrigins).toEqual(["https://app.example.com", "http://localhost:5173"]);
 	});
 
-	describe("CORS_ALLOWED_ORIGINS", () => {
+	describe("HTTP_CORS_ALLOWED_ORIGINS", () => {
 		it("reads an exported-but-empty variable as no origins, not as an error", async () => {
 			// The .env / compose / ConfigMap shape. "CORS off" is what both the
 			// unset key and the empty string mean, so they must agree.
-			const config = await bootParsed({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: "" });
-			expect(config.cors?.allowedOrigins).toEqual([]);
+			const config = await bootParsed(
+				{ ...DOCUMENTED_ENV, HTTP_CORS_ALLOWED_ORIGINS: "" },
+				"production",
+				undefined,
+				[httpModule],
+			);
+			expect(httpSectionOf(config).cors.allowedOrigins).toEqual([]);
 		});
 
 		it("fails boot on an origin that could never match, naming the key", async () => {
@@ -614,9 +689,14 @@ describe("the shipped config boots with every documented override supplied as a 
 				"http://app.example.com", // plaintext off loopback
 				"https://app.example.com/callback", // a URL, not an origin
 			]) {
-				await expect(bootParsed({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: bad })).rejects.toThrow(
-					/cors\.allowedOrigins/,
-				);
+				await expect(
+					bootParsed(
+						{ ...DOCUMENTED_ENV, HTTP_CORS_ALLOWED_ORIGINS: bad },
+						"production",
+						undefined,
+						[httpModule],
+					),
+				).rejects.toThrow(/http\.cors\.allowedOrigins/);
 			}
 		});
 
@@ -626,34 +706,51 @@ describe("the shipped config boots with every documented override supplied as a 
 			// silently off for a key someone wrote.
 			for (const value of ["42", "true", '{ origin = "https://app.example.com" }']) {
 				await expect(
-					bootParsed(DOCUMENTED_ENV, "production", `cors.allowedOrigins = ${value}`),
+					bootParsed(DOCUMENTED_ENV, "production", `http.cors.allowedOrigins = ${value}`, [
+						httpModule,
+					]),
 					value,
-				).rejects.toThrow(/cors\.allowedOrigins/);
+				).rejects.toThrow(/http\.cors\.allowedOrigins/);
 			}
 		});
 
 		it("accepts the loopback http carve-out a dev front-end needs", async () => {
-			const config = await bootParsed({
-				...DOCUMENTED_ENV,
-				CORS_ALLOWED_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,https://app.example.com",
-			});
-			expect(config.cors?.allowedOrigins).toHaveLength(3);
+			const config = await bootParsed(
+				{
+					...DOCUMENTED_ENV,
+					HTTP_CORS_ALLOWED_ORIGINS:
+						"http://localhost:5173,http://127.0.0.1:5173,https://app.example.com",
+				},
+				"production",
+				undefined,
+				[httpModule],
+			);
+			expect(httpSectionOf(config).cors.allowedOrigins).toHaveLength(3);
 		});
 	});
 
 	it("parses the HS256 shape, whose strict union refuses asymmetric key fields", async () => {
-		// `OAUTH_JWT_ALGORITHM=HS256` is not a variation on the map above: the
-		// HS256 member of the signingKey union is `.strict()`, so a deployment
-		// that switches algorithm must also stop exporting the key-file
-		// variables. Worth pinning — it is the umbrella E2E's shape.
-		const { OAUTH_JWT_PRIVATE_KEY, OAUTH_JWT_PRIVATE_KEY_PATH, ...rest } = DOCUMENTED_ENV;
-		void OAUTH_JWT_PRIVATE_KEY;
-		void OAUTH_JWT_PRIVATE_KEY_PATH;
-		const { OAUTH_JWT_PUBLIC_KEY, OAUTH_JWT_PUBLIC_KEY_PATH, ...hs256 } = rest;
-		void OAUTH_JWT_PUBLIC_KEY;
-		void OAUTH_JWT_PUBLIC_KEY_PATH;
-		const config = await bootParsed({ ...hs256, OAUTH_JWT_ALGORITHM: "HS256" });
-		expect(config.oauth.jwt.signingKey?.local?.algorithm).toBe("HS256");
+		// `KEY_STORE_LOCAL_ALGORITHM=HS256` is not a variation on the map above:
+		// the HS256 member of the key store's `local` union is strict, so a
+		// deployment that switches algorithm must also stop exporting the
+		// key-file variables. Worth pinning — it is the umbrella E2E's shape.
+		const { KEY_STORE_LOCAL_PRIVATE_KEY, KEY_STORE_LOCAL_PRIVATE_KEY_PATH, ...rest } =
+			DOCUMENTED_ENV;
+		void KEY_STORE_LOCAL_PRIVATE_KEY;
+		void KEY_STORE_LOCAL_PRIVATE_KEY_PATH;
+		const { KEY_STORE_LOCAL_PUBLIC_KEY, KEY_STORE_LOCAL_PUBLIC_KEY_PATH, ...hs256 } = rest;
+		void KEY_STORE_LOCAL_PUBLIC_KEY;
+		void KEY_STORE_LOCAL_PUBLIC_KEY_PATH;
+		const config = await bootParsed(
+			{ ...hs256, KEY_STORE_LOCAL_ALGORITHM: "HS256" },
+			"production",
+			undefined,
+			[keyStoreModule],
+		);
+		expect(
+			(config as unknown as { "key-store": { local: { algorithm: string } } })["key-store"].local
+				.algorithm,
+		).toBe("HS256");
 	});
 
 	it("parses the environment the umbrella E2E boots, with SESSION_STORE_SECURE=false as a string", async () => {

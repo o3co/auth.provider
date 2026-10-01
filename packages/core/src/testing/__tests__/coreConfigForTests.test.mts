@@ -49,6 +49,23 @@ describe("coreConfigForTests", () => {
 		}
 	});
 
+	it("declares the federations and the slots absent on purpose it is given, as core reads them", () => {
+		const federations = { upstream: { enabled: false, type: "oidc" } };
+		const config = {
+			...makeValidCoreConfig(),
+			...coreConfigForTests({ federations, declaredAbsent: ["auditSink"] }),
+		};
+		expect(CoreConfigSchema.parse(config).core).toMatchObject({
+			federations,
+			declaredAbsent: ["auditSink"],
+		});
+	});
+
+	it("states neither the federations nor a declared absence by default", () => {
+		expect(coreConfigForTests().core).not.toHaveProperty("federations");
+		expect(coreConfigForTests().core).not.toHaveProperty("declaredAbsent");
+	});
+
 	it("is what the valid fixture declares", () => {
 		expect(makeValidCoreConfig().core).toEqual(coreConfigForTests().core);
 	});

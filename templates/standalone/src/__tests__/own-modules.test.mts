@@ -15,13 +15,15 @@
  */
 
 /**
- * The template's own modules: each owns a section of the configuration, at
- * the path it declares, with its defaults in the template's
- * `config/reference.conf`, and reads it through `deps.section`, never the
- * whole configuration. What each section sets reaches the process, for the
- * shipped configuration and for an operator's environment and HOCON
- * overrides, through the template's real path: `readOwnLayers`, then
- * `resolveForBoot` over every loaded module's reference, then `createApp`.
+ * The template's own modules: each owns the section named after it, with its
+ * defaults in the template's `config/reference.conf`, and reads it through
+ * `deps.section`, never the whole configuration. What each section sets
+ * reaches the process, for the shipped configuration and for an operator's
+ * environment and HOCON overrides, through the template's real path:
+ * `readOwnLayers`, then `resolveForBoot` over every loaded module's
+ * reference, then `createApp`. A path a section moved from refuses boot
+ * naming its new path, and a variable renamed with it refuses boot unless its
+ * new name carries the same value.
  */
 
 import { generateKeyPairSync } from "node:crypto";
@@ -33,7 +35,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppHandle,
-	coreReference,
+	BootError,
 	createApp,
 	DEFAULT_SIGNING_ALGORITHM,
 	defineModule,
@@ -45,10 +47,12 @@ import {
 	moduleReferences,
 } from "@o3co/auth-provider-core";
 import { httpSettingsContract, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
+import { HttpUserRepository } from "@o3co/auth-provider-foundation";
 import { parseFile } from "@o3co/ts.hocon";
 import express from "express";
 import request from "supertest";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { ADAPTERS_SECTION } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
@@ -57,17 +61,19 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
-	resolveLayers,
 	SWITCHES,
 } from "../configPath.mjs";
 import { createAppLogger } from "../logger.mjs";
 import {
-	corsModule,
+	auditSinkModuleFor,
 	httpModule,
+	inMemoryCodeRepositoryModule,
 	keyStoreModule,
 	loggingModule,
+	repositoriesModuleFor,
 	standaloneRedisClientsModule,
 } from "../modules.mjs";
+import { repositoriesSectionSchema } from "../sections.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 /** The template's own defaults: what its modules declare as their sections' reference. */
@@ -85,17 +91,17 @@ const signingKey = generateKeyPairSync("ed25519", {
  */
 const BASE_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	OAUTH_JWT_PRIVATE_KEY: signingKey.privateKey,
-	OAUTH_JWT_PUBLIC_KEY: signingKey.publicKey,
+	KEY_STORE_LOCAL_PRIVATE_KEY: signingKey.privateKey,
+	KEY_STORE_LOCAL_PUBLIC_KEY: signingKey.publicKey,
 	SESSION_STORE_SECRET: "own-modules-session-secret.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "memory",
-	CLIENT_USER_TYPE: "yaml",
+	ADAPTERS_USER_REPOSITORY: "yaml",
 	CORE_DEPLOYMENT_MODE: "single",
-	OAUTH_CODE_ADAPTER: "memory",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-	REPLAY_SEEN_SET_ADAPTER: "memory",
+	ADAPTERS_CODE_REPOSITORY: "memory",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+	ADAPTERS_REPLAY_SEEN_SET: "memory",
 };
 
 /** A logger that writes nothing. */
@@ -135,6 +141,8 @@ interface BootOptions {
 	readonly adjust?: (resolved: Record<string, unknown>) => Record<string, unknown>;
 	/** Components a host lays over the modules' (`overrideComponents`). */
 	readonly overrides?: Record<string, unknown>;
+	/** Keep the template's own `repositories` module, reading its section, rather than in-memory ones. */
+	readonly repositories?: boolean;
 }
 
 /** The directories the operator layers are written to, removed after the suite. */
@@ -165,7 +173,7 @@ async function bootTemplate(options: BootOptions = {}): Promise<AppHandle> {
 	const switches = readSwitches(own);
 	const modules = buildModules(switches, {
 		environment: "development",
-		repositoriesModule: testRepositoriesModule,
+		...(options.repositories ? {} : { repositoriesModule: testRepositoriesModule }),
 		...(options.redis ? {} : { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),
 	});
 	const resolved = resolveForBoot(own, modules, expectedSessionRequirements(switches));
@@ -195,29 +203,38 @@ const named = (modules: readonly Module[], name: string): Module => {
 	return found;
 };
 
+/** Every module whose section the template's reference holds. */
+const REFERENCED_MODULES = [
+	loggingModule,
+	httpModule,
+	keyStoreModule,
+	standaloneRedisClientsModule,
+	repositoriesModuleFor({ client: "yaml", user: "http" }),
+	inMemoryCodeRepositoryModule,
+	auditSinkModuleFor("logger"),
+];
+
 describe("the template's config/reference.conf", () => {
-	it("holds only its own modules' sections, each of which parses its part without losing a path", () => {
+	it("holds only its own modules' sections and the composition root's adapters, each module's parsing its part without losing a path", () => {
 		expect(
 			packageReferenceProblems({
 				reference: TEMPLATE_REFERENCE,
-				modules: [
-					loggingModule,
-					httpModule,
-					corsModule,
-					keyStoreModule,
-					standaloneRedisClientsModule,
-				],
-				read: (path) => parseFile(path, { env: {} }).toObject(),
+				modules: REFERENCED_MODULES,
+				// `adapters` is the composition root's own section, which phase
+				// one reads with its own schema (`adapters.test.mts`).
+				read: (path, env) => {
+					const { [ADAPTERS_SECTION]: _adapters, ...tree } = parseFile(path, {
+						env: { ...env },
+					}).toObject() as Record<string, unknown>;
+					return tree;
+				},
 			}),
 		).toEqual([]);
 	});
 
-	it.each([loggingModule, httpModule, corsModule, keyStoreModule, standaloneRedisClientsModule])(
-		"is among the references $name alone brings",
-		(module) => {
-			expect(moduleReferences([module]).map((url) => url.href)).toContain(TEMPLATE_REFERENCE.href);
-		},
-	);
+	it.each(REFERENCED_MODULES)("is among the references $name alone brings", (module) => {
+		expect(moduleReferences([module]).map((url) => url.href)).toContain(TEMPLATE_REFERENCE.href);
+	});
 });
 
 describe("logging", () => {
@@ -236,7 +253,7 @@ describe("logging", () => {
 	});
 
 	it("has boot refuse a level its schema does not know, naming logging.level", async () => {
-		await expect(bootTemplate({ env: { LOG_LEVEL: "verbose" } })).rejects.toMatchObject({
+		await expect(bootTemplate({ env: { LOGGING_LEVEL: "verbose" } })).rejects.toMatchObject({
 			reason: "config-validation-failed",
 			message: expect.stringMatching(/logging\.level/),
 		});
@@ -248,9 +265,9 @@ describe("logging", () => {
 
 	it.each([
 		["the shipped default", {}, undefined, "info"],
-		["LOG_LEVEL", { LOG_LEVEL: "debug" }, undefined, "debug"],
+		["LOGGING_LEVEL", { LOGGING_LEVEL: "debug" }, undefined, "debug"],
 		["HOCON an operator writes", {}, 'logging.level = "warn"\n', "warn"],
-		["HOCON over LOG_LEVEL", { LOG_LEVEL: "debug" }, 'logging.level = "error"\n', "error"],
+		["HOCON over LOGGING_LEVEL", { LOGGING_LEVEL: "debug" }, 'logging.level = "error"\n', "error"],
 	])("gives the logger the level %s sets", (_name, env, hocon, level) => {
 		const own = readOwnLayers(ownFiles(hocon), { env: { ...BASE_ENV, ...env } });
 		expect(readLogging(own)).toEqual({ level });
@@ -259,8 +276,30 @@ describe("logging", () => {
 	});
 
 	it("refuses a level it does not know before boot, naming logging.level", () => {
-		const own = readOwnLayers(ownFiles(), { env: { ...BASE_ENV, LOG_LEVEL: "verbose" } });
+		const own = readOwnLayers(ownFiles(), { env: { ...BASE_ENV, LOGGING_LEVEL: "verbose" } });
 		expect(() => readLogging(own)).toThrow(/logging\.level/);
+	});
+
+	it("has boot refuse LOG_LEVEL set alone, naming LOGGING_LEVEL and logging.level", async () => {
+		await expect(bootTemplate({ env: { LOG_LEVEL: "debug" } })).rejects.toMatchObject({
+			details: {
+				reason: "environment-variable-renamed",
+				renamed: [
+					{
+						module: "logging",
+						from: "LOG_LEVEL",
+						to: "LOGGING_LEVEL",
+						path: "logging.level",
+						state: "unset",
+					},
+				],
+			},
+		});
+	});
+
+	it("boots with LOG_LEVEL beside LOGGING_LEVEL at the same value", async () => {
+		const handle = await bootTemplate({ env: { LOG_LEVEL: "debug", LOGGING_LEVEL: "debug" } });
+		await handle.dispose();
 	});
 });
 
@@ -291,11 +330,11 @@ const preflight = (app: express.Express, origin: string) =>
 		.set("Access-Control-Request-Method", "POST");
 
 describe("http", () => {
-	it("owns http, reads the CORS list through the cors module's slot, and requires no configuration", () => {
+	it("owns http, the CORS list included, and requires nothing", () => {
 		expect(httpModule.name).toBe("http");
 		expect(httpModule.section?.at).toBeUndefined();
 		expect(httpModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
-		expect(httpModule.requires ?? []).toEqual(["corsAllowedOrigins"]);
+		expect(httpModule.requires ?? []).toEqual([]);
 		expect(httpModule.optional ?? []).toEqual([]);
 	});
 
@@ -309,11 +348,11 @@ describe("http", () => {
 		expect(httpModule.lifecycle?.httpHostSettings?.eager).toBe(true);
 	});
 
-	it("is loaded by the shipped composition, with the cors module", () => {
+	it("is loaded by the shipped composition, and no module owns a top-level cors", () => {
 		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
 		const modules = buildModules(readSwitches(own), { environment: "development" });
 		expect(named(modules, "http")).toBe(httpModule);
-		expect(named(modules, "cors")).toBe(corsModule);
+		expect(modules.map((module) => module.name)).not.toContain("cors");
 	});
 
 	describe("the httpSettings it provides keeps the slot's contract", () => {
@@ -323,7 +362,7 @@ describe("http", () => {
 				"for an operator's overrides",
 				{
 					HTTP_TRUST_PROXY: "10.0.0.0/8,loopback",
-					CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
+					HTTP_CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
 				},
 			],
 		] as const) {
@@ -411,45 +450,7 @@ describe("http", () => {
 	});
 });
 
-describe("cors", () => {
-	it.each([
-		["with CORS_ALLOWED_ORIGINS unset", {}],
-		[
-			"with a list in CORS_ALLOWED_ORIGINS",
-			{ CORS_ALLOWED_ORIGINS: "https://a.example,https://b.example" },
-		],
-		["with CORS_ALLOWED_ORIGINS empty", { CORS_ALLOWED_ORIGINS: "" }],
-	])(
-		"resolves its application.conf over its reference as core's reference resolves alone, which core reads without httpSettings, %s",
-		(_name, env) => {
-			const { applicationConfPath } = resolveConfigPaths(configDir, "development");
-			const template = resolveLayers(readOwnLayers([applicationConfPath], { env }), [
-				TEMPLATE_REFERENCE,
-			]).cors;
-			const core = (
-				parseFile(fileURLToPath(coreReference()), { env }).toObject() as { cors?: unknown }
-			).cors;
-			expect(template).toEqual(core);
-			expect(template).toBeDefined();
-		},
-	);
-
-	it("names corsAllowedOrigins authoritative: an override of it refuses the boot, as one of httpSettings does", async () => {
-		await expect(
-			bootTemplate({ overrides: { corsAllowedOrigins: ["https://evil.example"] } }),
-		).rejects.toMatchObject({ reason: "authoritative-component-overridden" });
-		expect(corsModule.authoritative).toEqual(["corsAllowedOrigins"]);
-	});
-
-	it("owns cors, and requires nothing", () => {
-		expect(corsModule.name).toBe("cors");
-		expect(corsModule.section?.at).toBeUndefined();
-		expect(corsModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
-		expect(corsModule.requires ?? []).toEqual([]);
-		expect(corsModule.optional ?? []).toEqual([]);
-		expect(Object.keys(corsModule.provides ?? {})).toEqual(["corsAllowedOrigins"]);
-	});
-
+describe("http.cors", () => {
 	it("lets no origin read with the shipped default: no CORS headers, not even Vary", async () => {
 		const { app, handle } = await mountTemplate();
 		try {
@@ -462,8 +463,12 @@ describe("cors", () => {
 	});
 
 	it.each([
-		["CORS_ALLOWED_ORIGINS", { CORS_ALLOWED_ORIGINS: "https://app.example.com" }, undefined],
-		["HOCON an operator writes", {}, 'cors.allowedOrigins = ["https://app.example.com"]\n'],
+		[
+			"HTTP_CORS_ALLOWED_ORIGINS",
+			{ HTTP_CORS_ALLOWED_ORIGINS: "https://app.example.com" },
+			undefined,
+		],
+		["HOCON an operator writes", {}, 'http.cors.allowedOrigins = ["https://app.example.com"]\n'],
 	])(
 		"lets the origin %s lists read the token endpoint, and no other",
 		async (_name, env, hocon) => {
@@ -480,10 +485,47 @@ describe("cors", () => {
 		},
 	);
 
-	it("refuses an origin that could never match at boot, naming cors.allowedOrigins", async () => {
+	it("refuses an origin that could never match at boot, naming http.cors.allowedOrigins", async () => {
 		await expect(
-			bootTemplate({ env: { CORS_ALLOWED_ORIGINS: "https://app.example.com/" } }),
-		).rejects.toThrow(/cors\.allowedOrigins/);
+			bootTemplate({ env: { HTTP_CORS_ALLOWED_ORIGINS: "https://app.example.com/" } }),
+		).rejects.toThrow(/http\.cors\.allowedOrigins/);
+	});
+
+	it("has boot refuse cors.allowedOrigins, the path it moved from, naming the new path and its variable", async () => {
+		await expect(
+			bootTemplate({ hocon: 'cors.allowedOrigins = ["https://app.example.com"]\n' }),
+		).rejects.toMatchObject({
+			details: {
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "http",
+						from: "cors.allowedOrigins",
+						to: "http.cors.allowedOrigins",
+						environmentVariable: "HTTP_CORS_ALLOWED_ORIGINS",
+					},
+				],
+			},
+		});
+	});
+
+	it("has boot refuse CORS_ALLOWED_ORIGINS set alone, naming HTTP_CORS_ALLOWED_ORIGINS", async () => {
+		await expect(
+			bootTemplate({ env: { CORS_ALLOWED_ORIGINS: "https://app.example.com" } }),
+		).rejects.toMatchObject({
+			details: {
+				reason: "environment-variable-renamed",
+				renamed: [
+					{
+						module: "http",
+						from: "CORS_ALLOWED_ORIGINS",
+						to: "HTTP_CORS_ALLOWED_ORIGINS",
+						path: "http.cors.allowedOrigins",
+						state: "unset",
+					},
+				],
+			},
+		});
 	});
 });
 
@@ -528,10 +570,10 @@ describe("an environment variable wins over a value the template's application.c
 		}
 	});
 
-	it("CORS_ALLOWED_ORIGINS over cors.allowedOrigins", async () => {
+	it("HTTP_CORS_ALLOWED_ORIGINS over http.cors.allowedOrigins", async () => {
 		const handle = await bootTemplate({
-			files: withApplicationValues('cors.allowedOrigins = ["https://file.example.com"]'),
-			env: { CORS_ALLOWED_ORIGINS: "https://env.example.com" },
+			files: withApplicationValues('http.cors.allowedOrigins = ["https://file.example.com"]'),
+			env: { HTTP_CORS_ALLOWED_ORIGINS: "https://env.example.com" },
 		});
 		try {
 			expect(handle.components.httpSettings?.cors.allowedOrigins).toEqual([
@@ -542,14 +584,14 @@ describe("an environment variable wins over a value the template's application.c
 		}
 	});
 
-	it("REFRESH_TOKEN_FAMILY_STORE_REDIS_URL over refreshTokenFamilyStore.redis.url", async () => {
+	it("REDIS_CLIENTS_URL over redis-clients.url", async () => {
 		const redis = await listeningRedis();
 		const handle = await bootTemplate({
 			redis: true,
-			files: withApplicationValues('refreshTokenFamilyStore.redis.url = "redis://127.0.0.1:9"'),
+			files: withApplicationValues('redis-clients.url = "redis://127.0.0.1:9"'),
 			env: {
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: `redis://127.0.0.1:${redis.port}`,
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "url-test-password",
+				REDIS_CLIENTS_URL: `redis://127.0.0.1:${redis.port}`,
+				REDIS_CLIENTS_PASSWORD: "url-test-password",
 			},
 		});
 		try {
@@ -562,14 +604,14 @@ describe("an environment variable wins over a value the template's application.c
 		}
 	});
 
-	it("REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD over refreshTokenFamilyStore.redis.password", async () => {
+	it("REDIS_CLIENTS_PASSWORD over redis-clients.password", async () => {
 		const redis = await listeningRedis();
 		const handle = await bootTemplate({
 			redis: true,
-			files: withApplicationValues('refreshTokenFamilyStore.redis.password = "from-the-file"'),
+			files: withApplicationValues('redis-clients.password = "from-the-file"'),
 			env: {
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: `redis://127.0.0.1:${redis.port}`,
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "from-the-environment",
+				REDIS_CLIENTS_URL: `redis://127.0.0.1:${redis.port}`,
+				REDIS_CLIENTS_PASSWORD: "from-the-environment",
 			},
 		});
 		try {
@@ -625,10 +667,10 @@ describe("a value the template's application.conf sets wins over a variable only
 		}
 	});
 
-	it("oauth.jwt.signingKey.local.kid over OAUTH_JWT_KID", async () => {
+	it("key-store.local.kid over KEY_STORE_LOCAL_KID", async () => {
 		const handle = await bootTemplate({
-			files: withApplicationValues('oauth.jwt.signingKey.local.kid = "k-file"'),
-			env: { OAUTH_JWT_KID: "k-env" },
+			files: withApplicationValues('key-store.local.kid = "k-file"'),
+			env: { KEY_STORE_LOCAL_KID: "k-env" },
 		});
 		try {
 			expect(handle.components.keyStore?.getSigningKidFallback()).toBe("k-file");
@@ -652,10 +694,10 @@ describe("an environment variable takes effect though application.conf does not 
 		}
 	});
 
-	it("CORS_ALLOWED_ORIGINS", async () => {
+	it("HTTP_CORS_ALLOWED_ORIGINS", async () => {
 		const handle = await bootTemplate({
 			files: withoutApplicationBindings(),
-			env: { CORS_ALLOWED_ORIGINS: "https://env.example.com" },
+			env: { HTTP_CORS_ALLOWED_ORIGINS: "https://env.example.com" },
 		});
 		try {
 			expect(handle.components.httpSettings?.cors.allowedOrigins).toEqual([
@@ -666,14 +708,14 @@ describe("an environment variable takes effect though application.conf does not 
 		}
 	});
 
-	it("REFRESH_TOKEN_FAMILY_STORE_REDIS_URL and _PASSWORD", async () => {
+	it("REDIS_CLIENTS_URL and REDIS_CLIENTS_PASSWORD", async () => {
 		const redis = await listeningRedis();
 		const handle = await bootTemplate({
 			redis: true,
 			files: withoutApplicationBindings(),
 			env: {
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: `redis://127.0.0.1:${redis.port}`,
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "trimmed-file-password",
+				REDIS_CLIENTS_URL: `redis://127.0.0.1:${redis.port}`,
+				REDIS_CLIENTS_PASSWORD: "trimmed-file-password",
 			},
 		});
 		try {
@@ -688,8 +730,9 @@ describe("an environment variable takes effect though application.conf does not 
 });
 
 describe("key-store", () => {
-	it("owns oauth.jwt.signingKey, and reads it as its section rather than the configuration", () => {
-		expect(keyStoreModule.section?.at).toBe("oauth.jwt.signingKey");
+	it("owns key-store, and reads it as its section rather than the configuration", () => {
+		expect(keyStoreModule.name).toBe("key-store");
+		expect(keyStoreModule.section?.at).toBeUndefined();
 		expect(keyStoreModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(keyStoreModule.requires ?? []).not.toContain("config");
 		expect(keyStoreModule.optional ?? []).not.toContain("config");
@@ -705,14 +748,14 @@ describe("key-store", () => {
 		}
 	});
 
-	it("builds an HS256 key store under OAUTH_JWT_ALGORITHM and OAUTH_JWT_SECRET, with the kid OAUTH_JWT_KID names", async () => {
+	it("builds an HS256 key store under KEY_STORE_LOCAL_ALGORITHM and KEY_STORE_LOCAL_SECRET, with the kid KEY_STORE_LOCAL_KID names", async () => {
 		const handle = await bootTemplate({
 			env: {
-				OAUTH_JWT_PRIVATE_KEY: undefined,
-				OAUTH_JWT_PUBLIC_KEY: undefined,
-				OAUTH_JWT_ALGORITHM: "HS256",
-				OAUTH_JWT_SECRET: "own-modules-hs256-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_KID: "k-env",
+				KEY_STORE_LOCAL_PRIVATE_KEY: undefined,
+				KEY_STORE_LOCAL_PUBLIC_KEY: undefined,
+				KEY_STORE_LOCAL_ALGORITHM: "HS256",
+				KEY_STORE_LOCAL_SECRET: "own-modules-hs256-secret.at-least-32-bytes.ok",
+				KEY_STORE_LOCAL_KID: "k-env",
 			},
 		});
 		try {
@@ -724,7 +767,7 @@ describe("key-store", () => {
 	});
 
 	it("takes a kid an operator writes in HOCON", async () => {
-		const handle = await bootTemplate({ hocon: 'oauth.jwt.signingKey.local.kid = "k-hocon"\n' });
+		const handle = await bootTemplate({ hocon: 'key-store.local.kid = "k-hocon"\n' });
 		try {
 			expect(handle.components.keyStore?.getSigningKidFallback()).toBe("k-hocon");
 		} finally {
@@ -734,10 +777,10 @@ describe("key-store", () => {
 
 	it("ships core's default algorithm, and no key material", () => {
 		const shipped = parseFile(fileURLToPath(TEMPLATE_REFERENCE), { env: {} }).toObject() as {
-			oauth: { jwt: { signingKey: { provider: unknown; local: Record<string, unknown> } } };
+			"key-store": { provider: unknown; local: Record<string, unknown> };
 		};
-		expect(shipped.oauth.jwt.signingKey.provider).toBe("local");
-		expect(shipped.oauth.jwt.signingKey.local).toEqual({
+		expect(shipped["key-store"].provider).toBe("local");
+		expect(shipped["key-store"].local).toEqual({
 			algorithm: DEFAULT_SIGNING_ALGORITHM,
 			kid: "v0",
 		});
@@ -745,42 +788,129 @@ describe("key-store", () => {
 
 	it("refuses to boot with no key material, naming the variables to set and how to make a key pair", async () => {
 		const booting = bootTemplate({
-			env: { OAUTH_JWT_PRIVATE_KEY: undefined, OAUTH_JWT_PUBLIC_KEY: undefined },
+			env: { KEY_STORE_LOCAL_PRIVATE_KEY: undefined, KEY_STORE_LOCAL_PUBLIC_KEY: undefined },
 		});
-		await expect(booting).rejects.toThrow(/OAUTH_JWT_PRIVATE_KEY_PATH/);
-		await expect(booting).rejects.toThrow(/OAUTH_JWT_PUBLIC_KEY_PATH/);
+		await expect(booting).rejects.toThrow(/KEY_STORE_LOCAL_PRIVATE_KEY_PATH/);
+		await expect(booting).rejects.toThrow(/KEY_STORE_LOCAL_PUBLIC_KEY_PATH/);
+		await expect(booting).rejects.toThrow(/key-store\.local\.privateKeyPath/);
 		await expect(booting).rejects.toThrow(/openssl genpkey -algorithm ed25519/i);
 	});
 
-	it("refuses to boot on OAUTH_JWT_SECRET alone, saying how to opt into HS256", async () => {
+	it("refuses to boot on KEY_STORE_LOCAL_SECRET alone, saying how to opt into HS256", async () => {
 		await expect(
 			bootTemplate({
 				env: {
-					OAUTH_JWT_PRIVATE_KEY: undefined,
-					OAUTH_JWT_PUBLIC_KEY: undefined,
-					OAUTH_JWT_SECRET: "own-modules-hs256-secret.at-least-32-bytes.ok",
+					KEY_STORE_LOCAL_PRIVATE_KEY: undefined,
+					KEY_STORE_LOCAL_PUBLIC_KEY: undefined,
+					KEY_STORE_LOCAL_SECRET: "own-modules-hs256-secret.at-least-32-bytes.ok",
 				},
 			}),
-		).rejects.toThrow(/OAUTH_JWT_ALGORITHM=HS256/);
+		).rejects.toThrow(/KEY_STORE_LOCAL_ALGORITHM=HS256/);
 	});
 
-	it("refuses to boot on an HS256 secret below 32 bytes", async () => {
-		await expect(
-			bootTemplate({
-				env: {
-					OAUTH_JWT_PRIVATE_KEY: undefined,
-					OAUTH_JWT_PUBLIC_KEY: undefined,
-					OAUTH_JWT_ALGORITHM: "HS256",
-					OAUTH_JWT_SECRET: "too-short-a-secret",
-				},
-			}),
-		).rejects.toThrow(/at least 32 bytes/i);
+	it("refuses to boot on an HS256 secret below 32 bytes, naming the key and its variable", async () => {
+		const booting = bootTemplate({
+			env: {
+				KEY_STORE_LOCAL_PRIVATE_KEY: undefined,
+				KEY_STORE_LOCAL_PUBLIC_KEY: undefined,
+				KEY_STORE_LOCAL_ALGORITHM: "HS256",
+				KEY_STORE_LOCAL_SECRET: "too-short-a-secret",
+			},
+		});
+		await expect(booting).rejects.toThrow(/at least 32 bytes/i);
+		await expect(booting).rejects.toThrow(/key-store\.local\.secret/);
+		await expect(booting).rejects.toThrow(/KEY_STORE_LOCAL_SECRET/);
 	});
 
 	it("refuses a key store section its schema refuses at boot, naming the operator's path", async () => {
+		await expect(bootTemplate({ hocon: 'key-store.local.algorithm = "none"\n' })).rejects.toThrow(
+			/key-store\.local/,
+		);
+	});
+
+	it("has boot refuse each key at oauth.jwt.signingKey, the path it moved from, naming its new path and variable", async () => {
 		await expect(
-			bootTemplate({ hocon: 'oauth.jwt.signingKey.local.algorithm = "none"\n' }),
-		).rejects.toThrow(/oauth\.jwt\.signingKey\.local/);
+			bootTemplate({
+				hocon: 'oauth.jwt.signingKey { provider = "local", local.kid = "k-old" }\n',
+			}),
+		).rejects.toMatchObject({
+			details: {
+				reason: "config-path-relocated",
+				relocated: expect.arrayContaining([
+					{
+						module: "key-store",
+						from: "oauth.jwt.signingKey.provider",
+						to: "key-store.provider",
+						environmentVariable: "KEY_STORE_PROVIDER",
+					},
+					{
+						module: "key-store",
+						from: "oauth.jwt.signingKey.local.kid",
+						to: "key-store.local.kid",
+						environmentVariable: "KEY_STORE_LOCAL_KID",
+					},
+				]),
+			},
+		});
+	});
+
+	it.each([
+		["OAUTH_JWT_SIGNING_KEY_PROVIDER", "KEY_STORE_PROVIDER", "key-store.provider", "local"],
+		["OAUTH_JWT_ALGORITHM", "KEY_STORE_LOCAL_ALGORITHM", "key-store.local.algorithm", "EdDSA"],
+		["OAUTH_JWT_KID", "KEY_STORE_LOCAL_KID", "key-store.local.kid", "k-renamed"],
+		[
+			"OAUTH_JWT_SECRET",
+			"KEY_STORE_LOCAL_SECRET",
+			"key-store.local.secret",
+			"own-modules-hs256-secret.at-least-32-bytes.ok",
+		],
+		[
+			"OAUTH_JWT_PRIVATE_KEY_PATH",
+			"KEY_STORE_LOCAL_PRIVATE_KEY_PATH",
+			"key-store.local.privateKeyPath",
+			"/keys/private.pem",
+		],
+		[
+			"OAUTH_JWT_PUBLIC_KEY_PATH",
+			"KEY_STORE_LOCAL_PUBLIC_KEY_PATH",
+			"key-store.local.publicKeyPath",
+			"/keys/public.pem",
+		],
+		[
+			"OAUTH_JWT_PRIVATE_KEY",
+			"KEY_STORE_LOCAL_PRIVATE_KEY",
+			"key-store.local.privateKey",
+			signingKey.privateKey,
+		],
+		[
+			"OAUTH_JWT_PUBLIC_KEY",
+			"KEY_STORE_LOCAL_PUBLIC_KEY",
+			"key-store.local.publicKey",
+			signingKey.publicKey,
+		],
+	])("has boot refuse %s set alone, naming %s", async (from, to, path, value) => {
+		await expect(bootTemplate({ env: { [from]: value, [to]: undefined } })).rejects.toMatchObject({
+			details: {
+				reason: "environment-variable-renamed",
+				renamed: [{ module: "key-store", from, to, path, state: "unset" }],
+			},
+		});
+	});
+
+	it("boots with each old name beside its new one at the same value", async () => {
+		const handle = await bootTemplate({
+			env: {
+				OAUTH_JWT_PRIVATE_KEY: signingKey.privateKey,
+				OAUTH_JWT_PUBLIC_KEY: signingKey.publicKey,
+				OAUTH_JWT_KID: "k-both",
+				KEY_STORE_LOCAL_KID: "k-both",
+			},
+		});
+		try {
+			expect(handle.components.keyStore?.getSigningKidFallback()).toBe("k-both");
+		} finally {
+			await handle.dispose();
+		}
 	});
 });
 
@@ -817,8 +947,9 @@ async function listeningRedis(): Promise<{
 }
 
 describe("redis-clients", () => {
-	it("owns refreshTokenFamilyStore.redis, and reads it as its section rather than the configuration", () => {
-		expect(standaloneRedisClientsModule.section?.at).toBe("refreshTokenFamilyStore.redis");
+	it("owns redis-clients, and reads it as its section rather than the configuration", () => {
+		expect(standaloneRedisClientsModule.name).toBe("redis-clients");
+		expect(standaloneRedisClientsModule.section?.at).toBeUndefined();
 		expect(standaloneRedisClientsModule.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
 		expect(standaloneRedisClientsModule.requires ?? []).not.toContain("config");
 		expect(standaloneRedisClientsModule.optional ?? []).not.toContain("config");
@@ -830,14 +961,14 @@ describe("redis-clients", () => {
 		expect(named(modules, "redis-clients")).toBe(standaloneRedisClientsModule);
 	});
 
-	it("dials the URL REFRESH_TOKEN_FAMILY_STORE_REDIS_URL names, with the password REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD names", async () => {
+	it("dials the URL REDIS_CLIENTS_URL names, with the password REDIS_CLIENTS_PASSWORD names", async () => {
 		const redis = await listeningRedis();
 		const password = "own-modules-redis-password";
 		const handle = await bootTemplate({
 			redis: true,
 			env: {
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: `redis://127.0.0.1:${redis.port}`,
-				REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: password,
+				REDIS_CLIENTS_URL: `redis://127.0.0.1:${redis.port}`,
+				REDIS_CLIENTS_PASSWORD: password,
 			},
 		});
 		try {
@@ -852,7 +983,7 @@ describe("redis-clients", () => {
 		const redis = await listeningRedis();
 		const handle = await bootTemplate({
 			redis: true,
-			hocon: `refreshTokenFamilyStore.redis { url = "redis://127.0.0.1:${redis.port}", password = "from-hocon-password" }\n`,
+			hocon: `redis-clients { url = "redis://127.0.0.1:${redis.port}", password = "from-hocon-password" }\n`,
 		});
 		try {
 			await vi.waitFor(() => expect(redis.received()).toContain("from-hocon-password"), {
@@ -866,22 +997,379 @@ describe("redis-clients", () => {
 
 	it("refuses a null URL at boot, naming the key", async () => {
 		await expect(
-			bootTemplate({ redis: true, hocon: "refreshTokenFamilyStore.redis.url = null\n" }),
-		).rejects.toThrow(/refreshTokenFamilyStore\.redis\.url/);
+			bootTemplate({ redis: true, hocon: "redis-clients.url = null\n" }),
+		).rejects.toThrow(/redis-clients\.url/);
 	});
 
 	it("refuses a configuration without its section at boot, naming the section: its own parse", async () => {
 		await expect(
 			bootTemplate({
 				redis: true,
-				adjust: ({ refreshTokenFamilyStore: _dropped, ...rest }) => rest,
+				adjust: ({ "redis-clients": _dropped, ...rest }) => rest,
 			}),
-		).rejects.toThrow(/refreshTokenFamilyStore\.redis/);
+		).rejects.toThrow(/redis-clients/);
 	});
 
 	it("refuses an empty URL when a client is built, naming the key and its variable", async () => {
+		await expect(bootTemplate({ redis: true, env: { REDIS_CLIENTS_URL: "" } })).rejects.toThrow(
+			/redis-clients\.url.*REDIS_CLIENTS_URL/s,
+		);
+	});
+
+	it("has boot refuse refreshTokenFamilyStore.redis, the path it moved from, naming the new paths and variables", async () => {
+		const err = await bootTemplate({
+			redis: true,
+			hocon: 'refreshTokenFamilyStore.redis { url = "redis://127.0.0.1:9", password = "p" }\n',
+		}).then(
+			() => undefined,
+			(thrown: unknown) => thrown,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "redis-clients",
+					from: "refreshTokenFamilyStore.redis.url",
+					to: "redis-clients.url",
+					environmentVariable: "REDIS_CLIENTS_URL",
+				},
+				{
+					module: "redis-clients",
+					from: "refreshTokenFamilyStore.redis.password",
+					to: "redis-clients.password",
+					environmentVariable: "REDIS_CLIENTS_PASSWORD",
+				},
+			],
+		});
+	});
+
+	it.each([
+		["REFRESH_TOKEN_FAMILY_STORE_REDIS_URL", "REDIS_CLIENTS_URL", "redis-clients.url"],
+		[
+			"REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD",
+			"REDIS_CLIENTS_PASSWORD",
+			"redis-clients.password",
+		],
+	])("has boot refuse %s set alone, naming %s", async (from, to, path) => {
 		await expect(
-			bootTemplate({ redis: true, env: { REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "" } }),
-		).rejects.toThrow(/refreshTokenFamilyStore\.redis\.url.*REFRESH_TOKEN_FAMILY_STORE_REDIS_URL/s);
+			bootTemplate({ redis: true, env: { [from]: "redis://127.0.0.1:9" } }),
+		).rejects.toMatchObject({
+			details: {
+				reason: "environment-variable-renamed",
+				renamed: [{ module: "redis-clients", from, to, path, state: "unset" }],
+			},
+		});
+	});
+});
+
+/** A YAML file of `text` in a directory removed after the suite. */
+function yamlFile(name: string, text: string): string {
+	const dir = mkdtempSync(join(tmpdir(), "own-modules-yaml-"));
+	operatorDirs.push(dir);
+	const file = join(dir, name);
+	writeFileSync(file, text);
+	return file;
+}
+
+/** The value at a dotted path of the configuration boot parsed. */
+function parsedAt(handle: AppHandle, path: string): unknown {
+	let cursor: unknown = handle.components.config;
+	for (const key of path.split(".")) {
+		if (typeof cursor !== "object" || cursor === null) return undefined;
+		cursor = (cursor as Record<string, unknown>)[key];
+	}
+	return cursor;
+}
+
+/** Each variable the repositories module renamed: old name, new name, path, a value. */
+const REPOSITORY_RENAMES = [
+	["CLIENT_PATH", "REPOSITORIES_CLIENT_YAML_PATH", "repositories.client.yaml.path", "./x.yaml"],
+	["CLIENT_USER_PATH", "REPOSITORIES_USER_YAML_PATH", "repositories.user.yaml.path", "./y.yaml"],
+	...(
+		[
+			["AUTHENTICATE_URL", "authenticateUrl", "https://store.example/authenticate"],
+			["AUTHENTICATE_BY_TOKEN_URL", "authenticateByTokenUrl", "https://store.example/by-token"],
+			["LINK_FEDERATED_IDENTITY_URL", "linkFederatedIdentityUrl", "https://store.example/link"],
+			[
+				"FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL",
+				"findSubjectByFederatedIdentityUrl",
+				"https://store.example/find",
+			],
+			[
+				"BEARER_TOKEN",
+				"bearerToken",
+				"0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a",
+			],
+			["TIMEOUT", "timeout", "3000"],
+			["MAX_RESPONSE_BYTES", "maxResponseBytes", "2048"],
+		] as const
+	).map(
+		([name, key, value]) =>
+			[
+				`CLIENT_USER_${name}`,
+				`REPOSITORIES_USER_HTTP_${name}`,
+				`repositories.user.http.${key}`,
+				value,
+			] as const,
+	),
+] as const;
+
+describe("repositories", () => {
+	it("owns repositories, and reads it as its section rather than the configuration", async () => {
+		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
+		const modules = buildModules(readSwitches(own), { environment: "development" });
+		const repositories = named(modules, "repositories");
+		expect(repositories.section?.at).toBeUndefined();
+		expect(repositories.section?.reference?.href).toBe(TEMPLATE_REFERENCE.href);
+		expect(repositories.requires ?? []).not.toContain("config");
+		expect(repositories.optional ?? []).not.toContain("config");
+	});
+
+	it("reads the client registry and the users from the YAML files REPOSITORIES_*_YAML_PATH name", async () => {
+		const clients = yamlFile(
+			"clients.yaml",
+			"yaml-client:\n  tokenEndpointAuthMethod: none\n  allowedRedirectUris: []\n",
+		);
+		const users = yamlFile("users.yaml", "");
+		const handle = await bootTemplate({
+			repositories: true,
+			env: { REPOSITORIES_CLIENT_YAML_PATH: clients, REPOSITORIES_USER_YAML_PATH: users },
+		});
+		try {
+			expect(parsedAt(handle, "repositories.client.yaml.path")).toBe(clients);
+			expect(await handle.components.clientRepository?.findById("yaml-client")).toBeDefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("builds the Store's HTTP user repository under ADAPTERS_USER_REPOSITORY=http, from REPOSITORIES_USER_HTTP_*", async () => {
+		const clients = yamlFile("clients.yaml", "");
+		const handle = await bootTemplate({
+			repositories: true,
+			env: {
+				ADAPTERS_USER_REPOSITORY: "http",
+				REPOSITORIES_CLIENT_YAML_PATH: clients,
+				REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: "https://store.example/authenticate",
+				REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL: "https://store.example/by-token",
+				REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL: "https://store.example/link",
+			},
+		});
+		try {
+			const users = handle.components.userRepository;
+			expect(users).toBeInstanceOf(HttpUserRepository);
+			expect((users as HttpUserRepository).linkFederatedIdentity).toBeDefined();
+			expect(parsedAt(handle, "repositories.user.http.timeout")).toBe(5000);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	/** `repositories` as the template's reference resolves it under `env`, parsed with the module's schema. */
+	const referenced = (env: Record<string, string> = {}) =>
+		repositoriesSectionSchema.parse(
+			(parseFile(fileURLToPath(TEMPLATE_REFERENCE), { env }).toObject() as Record<string, unknown>)
+				.repositories,
+		).user.http;
+
+	it.each([
+		[
+			"REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL",
+			"linkFederatedIdentityUrl",
+			"https://store.example/link",
+		],
+		[
+			"REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL",
+			"findSubjectByFederatedIdentityUrl",
+			"https://store.example/identity",
+		],
+		[
+			"REPOSITORIES_USER_HTTP_BEARER_TOKEN",
+			"bearerToken",
+			"0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a",
+		],
+	])(
+		"binds %s at repositories.user.http.%s, and leaves the key absent while it is unset",
+		(variable, key, value) => {
+			// Absent, not blank: the repository defines the seam a URL enables only
+			// when the URL is there, and refuses a blank credential.
+			expect(referenced({ [variable]: value })).toHaveProperty(key, value);
+			expect(referenced()).not.toHaveProperty(key);
+		},
+	);
+
+	it("ships an empty identity-lookup coverage declaration, which reaches the factory as a list", () => {
+		expect(referenced().federatedIdentityLookupCoverage).toEqual([]);
+	});
+
+	it("reads the client registry and the users under static, core's alias of yaml, from its own blocks", async () => {
+		const clients = yamlFile(
+			"clients.yaml",
+			"static-client:\n  tokenEndpointAuthMethod: none\n  allowedRedirectUris: []\n",
+		);
+		const users = yamlFile("users.yaml", "");
+		const handle = await bootTemplate({
+			repositories: true,
+			env: { ADAPTERS_CLIENT_REPOSITORY: "static", ADAPTERS_USER_REPOSITORY: "static" },
+			hocon: `repositories.client.static.path = "${clients}"\nrepositories.user.static.path = "${users}"\n`,
+		});
+		try {
+			expect(parsedAt(handle, "repositories.client.static.path")).toBe(clients);
+			expect(await handle.components.clientRepository?.findById("static-client")).toBeDefined();
+			expect(handle.components.userRepository).toBeDefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it.each([
+		["ADAPTERS_CLIENT_REPOSITORY", "repositories.client.static.path"],
+		["ADAPTERS_USER_REPOSITORY", "repositories.user.static.path"],
+	])(
+		"refuses %s=static without %s at the section's parse, before any repository is built, naming it",
+		async (variable, path) => {
+			// The client registry's file is absent, as in a fresh copy of the
+			// template: the refusal comes before any repository reads a file.
+			await expect(
+				bootTemplate({
+					repositories: true,
+					env: { [variable]: "static", REPOSITORIES_CLIENT_YAML_PATH: "/nonexistent/clients.yaml" },
+				}),
+			).rejects.toMatchObject({
+				reason: "config-validation-failed",
+				message: expect.stringContaining(path),
+			});
+		},
+	);
+
+	it("refuses a key the section does not declare, naming it", async () => {
+		await expect(
+			bootTemplate({ repositories: true, hocon: 'repositories.user.ldap.url = "ldap://x"\n' }),
+		).rejects.toMatchObject({
+			reason: "config-validation-failed",
+			message: expect.stringContaining('"ldap"'),
+		});
+	});
+
+	it.each(REPOSITORY_RENAMES)(
+		"has boot refuse %s set alone, naming %s and %s",
+		async (from, to, path, value) => {
+			await expect(
+				bootTemplate({ repositories: true, env: { [from]: value } }),
+			).rejects.toMatchObject({
+				details: {
+					reason: "environment-variable-renamed",
+					renamed: [{ module: "repositories", from, to, path, state: "unset" }],
+				},
+			});
+		},
+	);
+});
+
+describe("standalone-in-memory-code-repository", () => {
+	it("reads its own section, which STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN sets", async () => {
+		const handle = await bootTemplate({
+			env: { STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "900" },
+		});
+		try {
+			expect(parsedAt(handle, "standalone-in-memory-code-repository.defaultExpiresIn")).toBe(900);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses a lifetime that is not positive whole seconds, naming the key", async () => {
+		await expect(
+			bootTemplate({ env: { STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN: "0" } }),
+		).rejects.toThrow(/standalone-in-memory-code-repository\.defaultExpiresIn/);
+	});
+
+	it("has boot refuse repositories.code.memory, the path it moved from, and repositories.code.redis, removed", async () => {
+		await expect(
+			bootTemplate({
+				hocon:
+					'repositories.code { memory.defaultExpiresIn = 900, redis.endpointUri = "redis://x" }\n',
+			}),
+		).rejects.toMatchObject({
+			details: {
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "standalone-in-memory-code-repository",
+						from: "repositories.code.memory.defaultExpiresIn",
+						to: "standalone-in-memory-code-repository.defaultExpiresIn",
+						environmentVariable: "STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN",
+					},
+					{
+						module: "standalone-in-memory-code-repository",
+						from: "repositories.code.redis.endpointUri",
+						to: null,
+					},
+				],
+			},
+		});
+	});
+
+	it.each([
+		[
+			"CLIENT_CODE_DEFAULT_EXPIRES_IN",
+			"900",
+			{
+				to: "STANDALONE_IN_MEMORY_CODE_REPOSITORY_DEFAULT_EXPIRES_IN",
+				path: "standalone-in-memory-code-repository.defaultExpiresIn",
+				state: "unset",
+			},
+		],
+		["CLIENT_CODE_ENDPOINT_URI", "redis://x", { to: null, path: null, state: "removed" }],
+		["CLIENT_CODE_PASSWORD", "p", { to: null, path: null, state: "removed" }],
+	])("has boot refuse %s", async (from, value, expected) => {
+		await expect(bootTemplate({ env: { [from]: value } })).rejects.toMatchObject({
+			details: {
+				reason: "environment-variable-renamed",
+				renamed: [{ module: "standalone-in-memory-code-repository", from, ...expected }],
+			},
+		});
+	});
+});
+
+describe("audit-sink", () => {
+	it("builds the sink ADAPTERS_AUDIT_SINK names, the template's logger by default", async () => {
+		const shipped = await bootTemplate();
+		const console = await bootTemplate({ env: { ADAPTERS_AUDIT_SINK: "console" } });
+		try {
+			expect(shipped.components.auditSink?.kind).toBe("logger");
+			expect(console.components.auditSink?.kind).toBe("console");
+		} finally {
+			await shipped.dispose();
+			await console.dispose();
+		}
+	});
+
+	it("reads its own section, audit-sink, and requires no configuration", () => {
+		const own = readOwnLayers(ownFiles(), { env: BASE_ENV });
+		const sink = named(
+			buildModules(readSwitches(own), { environment: "development" }),
+			"audit-sink",
+		);
+		expect(sink.section?.at).toBeUndefined();
+		expect(sink.requires ?? []).not.toContain("config");
+	});
+
+	it("has boot refuse a sink's options at audit.sink, the path they moved from, naming audit-sink", async () => {
+		await expect(
+			bootTemplate({ hocon: "audit.sink.console.pretty = true\n" }),
+		).rejects.toMatchObject({
+			details: {
+				reason: "config-path-relocated",
+				relocated: [
+					{
+						module: "audit-sink",
+						from: "audit.sink.console.pretty",
+						to: "audit-sink.console.pretty",
+					},
+				],
+			},
+		});
 	});
 });

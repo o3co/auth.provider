@@ -30,6 +30,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { clientEntries } from "#/repositories/__tests__/clientEntries.fixture.mjs";
 import { MAX_CLIENT_ID_LENGTH } from "#/repositories/clientId.mjs";
 import { InMemoryClientRepository } from "#/repositories/InMemoryClientRepository.mjs";
 import { createRepositoryFactories } from "#/repositories/RepositoryFactory.mjs";
@@ -42,7 +43,7 @@ const ENTRY = {
 };
 
 const build = (...ids: string[]) =>
-	new InMemoryClientRepository(new Map(ids.map((id) => [id, { ...ENTRY }])));
+	new InMemoryClientRepository(clientEntries(ids.map((id) => [id, { ...ENTRY }])));
 
 describe("InMemoryClientRepository — a registered client id no request can reach", () => {
 	for (const [label, id] of [

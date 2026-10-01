@@ -20,10 +20,11 @@
  * factor store — a Redis restarted without persistence, an eviction, a Store
  * restored from an old backup — is not read as "this user never enrolled",
  * which would let whoever holds the password bind their own authenticator.
- * The Store answers it on `authenticate` as `User.mfaEnrolled` and may be told
- * it through the optional `markMfaEnrolled` capability, detected by method
- * presence. A repository without the capability, and a Store that answers no
- * field, leave the witness absent.
+ * The Store answers it on `authenticate` and on `authenticateByToken` as
+ * `User.mfaEnrolled`, and may be told it through the optional
+ * `markMfaEnrolled` capability, detected by method presence. A repository
+ * without the capability, and a Store that answers no field, leave the
+ * witness absent.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";

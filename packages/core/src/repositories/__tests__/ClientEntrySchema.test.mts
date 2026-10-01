@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
+import { clientEntries } from "#/repositories/__tests__/clientEntries.fixture.mjs";
 import {
 	ClientEntrySchema,
 	InMemoryClientRepository,
@@ -314,7 +315,7 @@ describe("ClientEntrySchema — private_key_jwt", () => {
 	it("accepts inline jwks and exposes it — public keys — through the repository", async () => {
 		expect(issues({ tokenEndpointAuthMethod: "private_key_jwt", jwks: { keys: [jwk] } })).toBe("");
 		const repo = new InMemoryClientRepository(
-			new Map([
+			clientEntries([
 				["rp", { tokenEndpointAuthMethod: "private_key_jwt" as const, jwks: { keys: [jwk] } }],
 			]),
 		);
@@ -353,7 +354,7 @@ describe("ClientEntrySchema — private_key_jwt", () => {
 			issues({ tokenEndpointAuthMethod: "private_key_jwt", jwksUri: "http://rp.example.com/jwks" }),
 		).toMatch(/https/);
 		const repo = new InMemoryClientRepository(
-			new Map([
+			clientEntries([
 				[
 					"rp",
 					{

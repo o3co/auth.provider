@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-export type { AbsencePolicy } from "./absence-policy.mjs";
+export {
+	type AbsencePolicy,
+	describeAbsenceDeclaration,
+	isAbsenceDeclared,
+} from "./absence-policy.mjs";
 export type { ComponentKey, ComponentMap } from "./component-map.mjs";
 export type {
 	AuditHook,

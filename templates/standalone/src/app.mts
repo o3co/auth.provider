@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { fileURLToPath } from "node:url";
-import { type AppConfig, createApp } from "@o3co/auth-provider-core";
+import { createApp } from "@o3co/auth-provider-core";
 import express from "express";
 import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
@@ -26,6 +26,7 @@ import {
 	readSwitches,
 	resolveConfigPaths,
 	resolveForBoot,
+	type Switches,
 } from "./configPath.mjs";
 import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
@@ -44,11 +45,12 @@ const { applicationConfPath, envConfPath } = resolveConfigPaths(configDirPath, e
 // Read once, so both phases read the same thing.
 const own = readOwnLayers([envConfPath, applicationConfPath]);
 // Phase one: what the template reads before it knows its modules, only for
-// those choices, and for what the composition expects of session admission
+// those choices — its own `adapters`, and the switches core's reader parses —
+// and for what the composition expects of session admission
 // (`expectedSessionRequirements`): the configuration's list, with `mfa` added
 // when `mfa.mode`, which the template reads itself (`readMfaMode`), asks for a
 // second factor.
-const switches: AppConfig = readSwitches(own);
+const switches: Switches = readSwitches(own);
 // `mfa.mode`, read once, for the second-factor authority's guard.
 const mfaMode = readMfaMode(switches);
 

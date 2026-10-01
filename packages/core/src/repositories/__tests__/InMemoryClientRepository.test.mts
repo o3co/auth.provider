@@ -15,6 +15,7 @@
  */
 import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
+import { clientEntries } from "#/repositories/__tests__/clientEntries.fixture.mjs";
 import {
 	ClientEntrySchema,
 	InMemoryClientRepository,
@@ -24,7 +25,7 @@ describe("InMemoryClientRepository", () => {
 	describe("findById", () => {
 		it("returns client when found", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"test-app",
 						{
@@ -46,7 +47,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("returns null when not found", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"test-app",
 						{
@@ -68,7 +69,7 @@ describe("InMemoryClientRepository", () => {
 		// without re-fetching the client record.
 		it("returns tokenEndpointAuthMethod from findById", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"basic-client",
 						{
@@ -98,7 +99,7 @@ describe("InMemoryClientRepository", () => {
 	describe("logout metadata fields round-trip", () => {
 		it("preserves all logout fields when set", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"logout-client",
 						{
@@ -132,7 +133,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("omits optional logout URI fields when not set, but session-required booleans default to true", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"no-logout-client",
 						{
@@ -158,7 +159,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("explicit false is preserved (not overwritten by default)", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"explicit-false-client",
 						{
@@ -182,7 +183,7 @@ describe("InMemoryClientRepository", () => {
 	describe("federation-token opt-in field round-trip", () => {
 		it("preserves allowedAzpForFederationToken when set to true", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"rp",
 						{
@@ -201,7 +202,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("defaults allowedAzpForFederationToken to false when omitted", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"rp",
 						{
@@ -219,7 +220,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("preserves allowedAzpForFederationToken: false when explicit", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"rp",
 						{
@@ -371,7 +372,7 @@ describe("InMemoryClientRepository", () => {
 	describe("allowedAudiences field round-trip (Token Exchange RFC 8693)", () => {
 		it("exposes allowedAudiences via findById (empty array when omitted)", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"client-a",
 						{
@@ -389,7 +390,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("exposes allowedAudiences via findById (preserves configured values)", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"client-b",
 						{
@@ -408,7 +409,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("exposes allowedAudiences via authenticate() (also propagates on auth path)", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"client-c",
 						{
@@ -432,7 +433,7 @@ describe("InMemoryClientRepository", () => {
 			// not configure the field, the resolved PublicClient must surface
 			// `allowedGrantTypes === undefined` so deny-by-absence-for-cc applies.
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"cc-client-a",
 						{
@@ -450,7 +451,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("findById preserves a configured allowedGrantTypes list", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"cc-client-b",
 						{
@@ -469,7 +470,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("authenticate() propagates allowedGrantTypes on the auth path", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"cc-client-c",
 						{
@@ -491,7 +492,7 @@ describe("InMemoryClientRepository", () => {
 			// all grants for this client. The repository must NOT collapse it to
 			// undefined.
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"cc-client-d",
 						{
@@ -512,7 +513,7 @@ describe("InMemoryClientRepository", () => {
 	describe("authenticate", () => {
 		it("returns client with correct plain text secret", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"my-client",
 						{
@@ -532,7 +533,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("returns null with wrong plain text secret", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"my-client",
 						{
@@ -550,7 +551,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("returns null for nonexistent client", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"my-client",
 						{
@@ -569,7 +570,7 @@ describe("InMemoryClientRepository", () => {
 		it("returns client with correct bcrypt secret", async () => {
 			const realHash = bcrypt.hashSync("my-secret", 10);
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"bcrypt-client",
 						{
@@ -589,7 +590,7 @@ describe("InMemoryClientRepository", () => {
 		it("returns null with wrong bcrypt secret", async () => {
 			const realHash = bcrypt.hashSync("my-secret", 10);
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"bcrypt-client",
 						{
@@ -616,7 +617,7 @@ describe("InMemoryClientRepository", () => {
 			expect(
 				() =>
 					new InMemoryClientRepository(
-						new Map([
+						clientEntries([
 							[
 								"missing-secret",
 								{
@@ -634,7 +635,7 @@ describe("InMemoryClientRepository", () => {
 			expect(
 				() =>
 					new InMemoryClientRepository(
-						new Map([
+						clientEntries([
 							[
 								"missing-secret-post",
 								{
@@ -652,7 +653,7 @@ describe("InMemoryClientRepository", () => {
 			expect(
 				() =>
 					new InMemoryClientRepository(
-						new Map([
+						clientEntries([
 							[
 								"public-with-secret",
 								{
@@ -669,7 +670,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("tokenEndpointAuthMethod=none without clientSecret succeeds", () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"public-spa",
 						{
@@ -685,7 +686,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("authenticate() on a public client returns null (does not throw)", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"public-spa",
 						{
@@ -705,7 +706,7 @@ describe("InMemoryClientRepository", () => {
 
 		it("findById() returns tokenEndpointAuthMethod on the PublicClient projection", async () => {
 			const repo = new InMemoryClientRepository(
-				new Map([
+				clientEntries([
 					[
 						"basic-rp",
 						{

@@ -69,7 +69,7 @@ beforeAll(async () => {
 	const url = `redis://${redis.host}:${redis.port}/${redis.db}`;
 	redisEnv = {
 		...MULTI_ENV,
-		REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: url,
+		REDIS_CLIENTS_URL: url,
 		SESSION_STORE_STORAGE_REDIS_URL: url,
 	};
 });
@@ -439,7 +439,7 @@ describe("the Redis grant store's key prefix moved and the intent store's left a
 	 * memory grant store is refused under "multi"): a pairing the template allows.
 	 */
 	const GRANTS_IN_MEMORY = {
-		FEDERATION_GRANT_STORE_ADAPTER: "memory",
+		ADAPTERS_FEDERATION_GRANT_STORE: "memory",
 		CORE_DEPLOYMENT_MODE: "single",
 	};
 

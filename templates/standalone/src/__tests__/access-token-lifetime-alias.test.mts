@@ -16,8 +16,7 @@
 
 /**
  * `oauth.accessToken.expiresIn` / OAUTH_ACCESS_TOKEN_EXPIRES_IN is a deprecated
- * alias of `defaultExpiresIn`, and the composition says so once, as it does for
- * `repositories.code.type`.
+ * alias of `defaultExpiresIn`, and the composition says so once.
  *
  * Core's `reference.conf` keeps the shipped lifetime on the deprecated key, so
  * the alias supplies the default for every deployment that set nothing; a
@@ -26,42 +25,36 @@
  */
 
 import { fileURLToPath } from "node:url";
-import {
-	type AppConfig,
-	AppConfigSchema,
-	coreReference,
-	type Logger,
-} from "@o3co/auth-provider-core";
+import { AppConfigSchema, coreReference, type Logger } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths } from "../configPath.mjs";
+import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
+import { adaptersOf } from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 const REQUIRED_ENV = {
-	OAUTH_JWT_SECRET: "access-token-alias.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_SECRET: "access-token-alias.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "access-token-alias-session.at-least-32-bytes.ok",
 };
 
 /** The shipped layers, resolved the way `app.mts` resolves them. */
-function loadShipped(env: Record<string, string> = {}): AppConfig {
+function loadShipped(env: Record<string, string> = {}): Switches {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "development");
 	const resolvedEnv = { ...REQUIRED_ENV, ...env };
-	return validate(
-		parseFile(envConfPath, { env: resolvedEnv })
-			.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env: resolvedEnv }))
-			.withFallback(parseFile(fileURLToPath(coreReference()), { env: resolvedEnv })),
-		AppConfigSchema,
-	);
+	const layers = parseFile(envConfPath, { env: resolvedEnv })
+		.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env: resolvedEnv }))
+		.withFallback(parseFile(fileURLToPath(coreReference()), { env: resolvedEnv }));
+	return { ...validate(layers, AppConfigSchema), adapters: adaptersOf(layers, resolvedEnv) };
 }
 
 /** What `buildModules` hands the logger it is given, per level. */
-function logged(config: AppConfig): Array<{ level: string; args: unknown[] }> {
+function logged(config: Switches): Array<{ level: string; args: unknown[] }> {
 	const calls: Array<{ level: string; args: unknown[] }> = [];
 	const record =
 		(level: string) =>
@@ -96,7 +89,7 @@ const ALIAS_WARNING = {
 };
 
 /** Every line `buildModules` writes about the deprecated key. */
-const aliasWarnings = (config: AppConfig) =>
+const aliasWarnings = (config: Switches) =>
 	logged(config).filter(
 		({ args }) => (args[0] as { key?: unknown } | undefined)?.key === "oauth.accessToken.expiresIn",
 	);

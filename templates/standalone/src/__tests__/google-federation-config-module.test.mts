@@ -33,9 +33,11 @@ const bridge = (
 	}
 ).provides.googleFederationConfig;
 
-/** Runs the bridge over a `federations.google` section in the flat shape. */
+/** Runs the bridge over a `core.federations.google` entry in the flat shape. */
 function buildConfig(googleSection: Record<string, unknown>): GoogleProviderConfig {
-	return bridge({ config: { federations: { google: { enabled: true, ...googleSection } } } });
+	return bridge({
+		config: { core: { federations: { google: { enabled: true, ...googleSection } } } },
+	});
 }
 
 const credentials = {
@@ -96,13 +98,15 @@ describe("googleFederationConfigModule — redirect-policy plumbing", () => {
 	it("reads through the nested federation shape as well as the flat one", () => {
 		const out = bridge({
 			config: {
-				federations: {
-					google: {
-						enabled: true,
-						type: "google",
-						sessionDomain: ".example.com",
-						redirectAllowlist: ["https://app.example.com/dashboard"],
-						google: credentials,
+				core: {
+					federations: {
+						google: {
+							enabled: true,
+							type: "google",
+							sessionDomain: ".example.com",
+							redirectAllowlist: ["https://app.example.com/dashboard"],
+							google: credentials,
+						},
 					},
 				},
 			},
@@ -156,14 +160,14 @@ describe("googleFederationConfigModule — requireAuthorizationResponseIss", () 
 
 	it("refuses an empty value, which elsewhere reads as false: exported-but-empty must not switch this check off", () => {
 		expect(() => buildConfig({ ...credentials, requireAuthorizationResponseIss: "" })).toThrow(
-			/federations\.google\.requireAuthorizationResponseIss/,
+			/core\.federations\.google\.requireAuthorizationResponseIss/,
 		);
 	});
 
 	it("refuses anything else: a typo must not silently switch the check off, or leave it on", () => {
 		for (const bad of ["no", "off", 0, 1, []]) {
 			expect(() => buildConfig({ ...credentials, requireAuthorizationResponseIss: bad })).toThrow(
-				/federations\.google\.requireAuthorizationResponseIss/,
+				/core\.federations\.google\.requireAuthorizationResponseIss/,
 			);
 		}
 	});
@@ -191,7 +195,7 @@ describe("googleFederationConfigModule — accessType", () => {
 	it("refuses anything else at boot, naming the key", () => {
 		for (const bad of ["", "offine", "Online", "true", false, 1]) {
 			expect(() => buildConfig({ ...credentials, accessType: bad })).toThrow(
-				/federations\.google\.accessType/,
+				/core\.federations\.google\.accessType/,
 			);
 		}
 	});

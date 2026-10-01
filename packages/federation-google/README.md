@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-google
 
-Last updated: 2026-09-26
+Last updated: 2026-10-01
 
 Google federation provider for `auth.provider`: sign-in with a Google account
 through Google's OpenID Connect endpoints, with token refresh, upstream logout
@@ -63,7 +63,7 @@ Add `googleFederationModule` to the manifest list passed to `createApp`. A small
 config-bootstrap module supplies the typed `googleFederationConfig` slot:
 
 ```ts
-import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
 import {
   extractFederationSection,
   sessionModule,
@@ -79,8 +79,8 @@ const googleConfigBridgeModule = defineModule({
   requires: ["config"] as const,
   provides: {
     googleFederationConfig: (deps): GoogleProviderConfig => {
-      const slice = extractFederationSection(deps.config.federations, "google");
-      if (slice?.type !== "google") throw new Error("federations.google must be enabled, with type google");
+      const slice = extractFederationSection(federationsOf(deps.config), "google");
+      if (slice?.type !== "google") throw new Error("core.federations.google must be enabled, with type google");
       return {
         clientId: slice.clientId as string,
         clientSecret: slice.clientSecret as string,
@@ -109,7 +109,7 @@ const handle = await createApp({
 ```
 
 Single-tenant: `provider.name` is fixed at `"google"`, so the federation is
-`federations.google` and a deployment has one Google client. The config fields
+`core.federations.google` and a deployment has one Google client. The config fields
 are [`GoogleProviderConfig`](src/google.mts). The four redirect fields
 (`redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl`) follow the
 [session package's redirect rules](../session/README.md#redirect-allowlists),
@@ -190,7 +190,7 @@ token route (it answers `410 refresh_token_absent` once that token expires).
 Only an omitted field means the default: any other value, `null` included,
 is refused at construction. An environment override arrives as a string, so
 coerce it in the bridge. The standalone template's bridge
-forwards it from `FEDERATIONS_GOOGLE_ACCESS_TYPE`.
+forwards it from `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`.
 
 Keeping an earlier session's refresh token for the same `google:<sub>` is not
 done: it would need a credential store that outlives sessions.

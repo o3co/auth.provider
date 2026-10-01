@@ -874,8 +874,10 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 			modules: [noSchema],
 			bootstrapComponents: minBootstrap,
 		});
-		const parsed = result.bootstrapComponents.config as { http: { port: number } };
-		expect(parsed.http.port).toBe(minCoreConfig.http.port);
+		const parsed = result.bootstrapComponents.config as {
+			oauth: { refreshToken: { expiresIn: number } };
+		};
+		expect(parsed.oauth.refreshToken.expiresIn).toBe(minCoreConfig.oauth.refreshToken.expiresIn);
 	});
 
 	it("preserves top-level extra config keys not in any schema", () => {
@@ -898,7 +900,9 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 		});
 		const cfg = result.bootstrapComponents.config as Record<string, unknown>;
 		// Parsed config flows through with the values supplied at the boundary
-		expect((cfg.http as { port: number }).port).toBe(minCoreConfig.http.port);
+		expect((cfg.oauth as { refreshToken: { expiresIn: number } }).refreshToken.expiresIn).toBe(
+			minCoreConfig.oauth.refreshToken.expiresIn,
+		);
 		// Top-level extras preserved
 		expect(cfg.consumerSession).toEqual({ strategy: "jwt-signed-cookie", cookieName: "_sess" });
 		expect(cfg.customConsumerKey).toEqual({ whatever: 42 });

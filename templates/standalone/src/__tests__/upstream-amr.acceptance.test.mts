@@ -16,7 +16,7 @@
 
 /**
  * What an upstream IdP asserted about its own login counts only for a
- * federation configured with `federations.<name>.trustUpstreamAmr = true`
+ * federation configured with `core.federations.<name>.trustUpstreamAmr = true`
  * (ADR 2026-09-25-multi-factor-authentication), end to end: a federated login
  * through the session routes, `/oauth/authorize` with `acr_values`, and
  * `/oauth/token`, on the standalone as a deployment composes it
@@ -36,6 +36,7 @@ import {
 	createKeyStoreFactory,
 	defineModule,
 	type FederationProvider,
+	federationsOf,
 	InMemoryClientRepository,
 	InMemoryUserRepository,
 	memoryRefreshTokenFamilyStoreModule,
@@ -48,9 +49,14 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
-import { resolveConfigPaths } from "#/configPath.mjs";
+import { resolveConfigPaths, type Switches } from "#/configPath.mjs";
 import { templateReference } from "../modules.mjs";
-import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
+import {
+	adaptersOf,
+	capturedRenames,
+	libraryLayers,
+	sectionsCoreDoesNotDeclare,
+} from "./library-references.fixture.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -67,43 +73,44 @@ const MFA_ACR = "urn:example:mfa";
 const FED_ACR = "urn:example:fed";
 
 const ENV: Readonly<Record<string, string>> = {
-	OAUTH_JWT_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: "upstream-amr.acceptance.at-least-32-bytes",
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_SECRET: "upstream-amr.acceptance.at-least-32-bytes",
 	OAUTH_JWT_ISSUER: ISSUER,
 	SESSION_STORE_SECRET: "upstream-amr.acceptance-session.at-least-32-bytes",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "memory",
-	CLIENT_USER_TYPE: "yaml",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
-	USER_SESSION_STORES_ADAPTER: "memory",
-	RATE_LIMITER_ADAPTER: "memory",
-	OAUTH_CODE_ADAPTER: "memory",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-	REPLAY_SEEN_SET_ADAPTER: "memory",
-	FEDERATION_TOKEN_STORE_TYPE: "memory",
-	CONSENT_STORE_ADAPTER: "none",
+	ADAPTERS_USER_REPOSITORY: "yaml",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
+	ADAPTERS_USER_SESSION_STORES: "memory",
+	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_CODE_REPOSITORY: "memory",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+	ADAPTERS_REPLAY_SEEN_SET: "memory",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
+	ADAPTERS_CONSENT_STORE: "none",
 };
 
 /** The shipped configuration, with the partner federation and an acr table beside it. */
-function resolveConfig(trustUpstreamAmr: boolean | undefined): AppConfig {
+function resolveConfig(trustUpstreamAmr: boolean | undefined): Switches {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const shipped = validate(
-		parseFile(envConfPath, { env: ENV })
-			.withFallback(parseFile(applicationConfPath, { env: ENV }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env: ENV }))
-			.withFallback(libraryLayers(ENV)),
-		AppConfigSchema,
-	) as AppConfig;
+	const layers = parseFile(envConfPath, { env: ENV })
+		.withFallback(parseFile(applicationConfPath, { env: ENV }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env: ENV }))
+		.withFallback(libraryLayers(ENV));
+	const shipped = validate(layers, AppConfigSchema) as AppConfig;
 	const parsed = AppConfigSchema.parse({
 		...shipped,
-		federations: {
-			...shipped.federations,
-			[FEDERATION]: {
-				enabled: true,
-				type: FEDERATION,
-				callbackURL: CALLBACK_URL,
-				...(trustUpstreamAmr === undefined ? {} : { trustUpstreamAmr }),
+		core: {
+			...shipped.core,
+			federations: {
+				...federationsOf(shipped),
+				[FEDERATION]: {
+					enabled: true,
+					type: FEDERATION,
+					callbackURL: CALLBACK_URL,
+					...(trustUpstreamAmr === undefined ? {} : { trustUpstreamAmr }),
+				},
 			},
 		},
 		oauth: {
@@ -115,11 +122,13 @@ function resolveConfig(trustUpstreamAmr: boolean | undefined): AppConfig {
 		},
 	});
 	return {
+		...sectionsCoreDoesNotDeclare(layers),
+		adapters: adaptersOf(layers, ENV),
 		...parsed,
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(ENV),
-	} as AppConfig;
+	} as Switches;
 }
 
 /** An IdP that authenticates `ext-1` and says it did so with `mfa` and `hwk`. */
@@ -193,7 +202,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},

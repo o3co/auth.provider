@@ -99,7 +99,7 @@ which audits only the backstop revocation it writes, and no denial — the
 one generated for the call when the caller gives none, so that a pass over a
 subject's grants reads as one operation in the sink (#618). Recording and
 delivery are the deployment's: the module refuses to boot with the feature
-enabled and no `auditSink` unless `audit.sink.type = "none"` declares the
+enabled and no `auditSink` unless `core.declaredAbsent = ["auditSink"]` declares the
 capability absent on purpose — the product-wide declaration, which opts the
 whole provider out of audit and which the standalone does not offer. A Store
 that drives a revocation through the library without passing `audit` records
@@ -791,7 +791,7 @@ It checks, in this order:
    who connects. With no connection configured nothing is required — not even
    the two methods — because no callback can reach check 5; removing the last
    connection stays operable on any repository. A connection re-pointed onto
-   another `federations.<name>` entry mid-flow ends that flow
+   another `core.federations.<name>` entry mid-flow ends that flow
    (`grant_not_authorizable`), because boot probed the Store under the new
    name.
 

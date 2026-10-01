@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { UserSessionClaims } from "#/user-sessions/types.mjs";
 import { filterClaimsByScope } from "../claimFilter.mjs";
 
 describe("filterClaimsByScope", () => {
@@ -71,11 +72,11 @@ describe("filterClaimsByScope", () => {
 	});
 
 	it("filters non-string elements from groups array (security)", () => {
-		// UserSessionClaims has an index signature, so upstream code may put
-		// arbitrary values in. Ensure only strings leak through.
+		// The type admits only strings in `groups`; a caller that bypasses it
+		// still gets only the strings through.
 		const mixed = {
 			groups: ["admins", 42, { nested: "obj" }, null, "editors"] as unknown[],
-		};
+		} as unknown as UserSessionClaims;
 		expect(filterClaimsByScope(mixed, ["openid", "groups"])).toEqual({
 			groups: ["admins", "editors"],
 		});

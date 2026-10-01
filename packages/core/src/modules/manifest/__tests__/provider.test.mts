@@ -5,8 +5,8 @@ import type { ProviderDeps } from "../provider.mjs";
 // ---------------------------------------------------------------------------
 // Local fixture types, used instead of augmenting the shared ComponentMap:
 // this file is compiled in one program with component-map.test.mts
-// (tsconfig.test.json `files`), whose assertions about the BASE ComponentMap
-// an augmentation here would break.
+// (tsconfig.test.json takes every file under `src`), whose assertions about
+// the BASE ComponentMap an augmentation here would break.
 // ---------------------------------------------------------------------------
 
 /** Minimal local fixture — mirrors the shape of ComponentMap for these tests. */

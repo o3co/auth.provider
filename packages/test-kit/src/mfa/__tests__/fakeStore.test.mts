@@ -20,9 +20,10 @@
  * back through. Every record it holds is answered back, readable or not; an
  * update is a compare-and-set that writes the changes and nothing else of
  * the record, at the expected version plus one; the witness mark is `204`,
- * idempotent, and `404` for a subject it does not hold. It refuses a body
- * not declared JSON, a request naming another host or an absolute target,
- * and a body over 1 MiB, before it records the request. Told to, it answers
+ * idempotent, and `404` for a subject it does not hold, and both logins
+ * answer it back. It refuses a body not declared JSON, a request naming
+ * another host or an absolute target, and a body over 1 MiB, before it
+ * records the request. Told to, it answers
  * an endpoint otherwise — later, or never — so an adapter's reading of a
  * Store that breaks the contract can be tested.
  */
@@ -58,6 +59,12 @@ const WIRE: MfaStoreFactor = toMfaStoreFactor(RECORD);
 const USERS = [
 	{ id: "user-1", username: "alice", password: "alice-password" },
 	{ id: "user-2", username: "bob", password: "bob-password", claims: { email: "bob@example.com" } },
+] as const;
+
+/** Users each resolvable by tokens of their own. */
+const USERS_WITH_TOKENS = [
+	{ ...USERS[0], tokens: ["github:alice", "google:alice"] },
+	{ ...USERS[1], tokens: ["github:bob"] },
 ] as const;
 
 let store: FakeStore | undefined;
@@ -357,6 +364,55 @@ describe("markMfaEnrolled and the login it is read back through", () => {
 		expect(
 			(await post(urls.authenticateUrl, { email: "bob", password: "bob-password" })).body,
 		).toEqual({ id: "user-2", username: "bob", email: "bob@example.com" });
+	});
+});
+
+describe("authenticateByToken", () => {
+	it("answers 200 with the user a token of its own names, its other fields included", async () => {
+		const { urls } = await start({ users: USERS_WITH_TOKENS });
+		for (const token of ["github:alice", "google:alice"]) {
+			expect(await post(urls.authenticateByTokenUrl, { token }), token).toMatchObject({
+				status: 200,
+				body: { id: "user-1", username: "alice" },
+			});
+		}
+		expect((await post(urls.authenticateByTokenUrl, { token: "github:bob" })).body).toEqual({
+			id: "user-2",
+			username: "bob",
+			email: "bob@example.com",
+		});
+	});
+
+	it("answers the witness as authenticate does: absent until marked, then true or false as marked", async () => {
+		const fake = await start({ users: USERS_WITH_TOKENS });
+		const byToken = async () =>
+			(await post(fake.urls.authenticateByTokenUrl, { token: "github:alice" })).body;
+		const byPassword = async () =>
+			(await post(fake.urls.authenticateUrl, { email: "alice", password: "alice-password" })).body;
+		expect(await byToken()).toEqual({ id: "user-1", username: "alice" });
+		for (const enrolled of [true, false]) {
+			await post(fake.urls.markMfaEnrolledUrl, { subject: "user-1", enrolled });
+			expect(await byToken()).toEqual({ id: "user-1", username: "alice", mfaEnrolled: enrolled });
+			expect(await byToken()).toEqual(await byPassword());
+		}
+		expect(
+			(await post(fake.urls.authenticateByTokenUrl, { token: "github:bob" })).body,
+		).not.toHaveProperty("mfaEnrolled");
+	});
+
+	it("answers 401 to a body naming no token a user holds: an unknown one, a password, a subject, none", async () => {
+		const { urls } = await start({ users: USERS_WITH_TOKENS });
+		for (const body of [
+			{ token: "github:carol" },
+			{ token: "alice-password" },
+			{ token: "user-1" },
+			{ token: "" },
+			{},
+		]) {
+			expect((await post(urls.authenticateByTokenUrl, body)).status, JSON.stringify(body)).toBe(
+				401,
+			);
+		}
 	});
 });
 

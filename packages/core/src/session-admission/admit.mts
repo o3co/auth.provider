@@ -15,39 +15,18 @@
  */
 
 /**
- * Session admission: the one decision point every consumer of an
- * authenticated browser session calls, and the one the login route calls
- * before a session is written. See ADR 2026-09-28-session-admission.
- *
- * `admitSession` judges a session for an action; the claim builders are the
- * one reading of each carrier, and `cookieSessionUser` the one reading of the
- * cookie session's user. `admitPrimary` and `resumePrimary` ask the
- * requirements that interrupt a login and answer the `Establishment`
- * `establishSession` requires; `establishWithoutAsking` builds a federated
- * login's.
- *
- * Every step fails closed: a store that throws is `unavailable`, logged once
- * at error with `loggableError`'s projection, never the `sid`. A caller's
- * fault is a `RangeError` before anything is read. The brands are
- * module-private `WeakSet`s, so an `as` cast forges nothing.
- *
- * `selectAcr` is called only here in product code, over the vouched `amr`,
- * so a value an untrusted IdP asserted in a pre-upgrade session meets no
- * `acr`.
+ * Session admission's entry point: the claim builders, `admitSession` running
+ * its steps in order, and a login's decisions. Product code calls `selectAcr`
+ * here alone, over the vouched `amr`, so a value an untrusted IdP asserted in
+ * a pre-upgrade session meets no `acr`.
  */
 
-import { emitAuditEvent } from "../audit/factory.mjs";
-import type { AuditSink } from "../audit/types.mjs";
-import { isWellFormedErrorCode } from "../errors/envelope.mjs";
-import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import {
 	composeAmr,
 	MFA_AMR,
 	PASSWORD_AMR,
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
-import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
-import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import {
 	copySessionAuthentication,
@@ -57,141 +36,54 @@ import {
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
-import type {
-	SubjectRevocation,
-	UserSession,
-	UserSessionClaims,
-	UserSessionStore,
-} from "../user-sessions/types.mjs";
-import { type AcrSelection, type AcrTable, selectAcr, stepUpReach } from "./acr.mjs";
-import type { AdmissionAction } from "./actions.mjs";
+import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
+import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
+import { askEvery, establish } from "./establishment.mjs";
+import { isObject, nonEmptyString } from "./input-values.mjs";
+import { readLiveSession } from "./live-session.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
-	continuationOf,
 	frozenUserCopy,
 	primaryFromDto,
 } from "./primary.mjs";
-import {
-	type Admission,
-	type AdmissionAsks,
-	type AdmissionDeps,
-	type AdmissionInfrastructureStore,
-	type AdmissionRequest,
-	type CompletedRequirement,
-	type Establishment,
-	type InterruptAdmission,
-	type InterruptionAnswer,
-	isHintKey,
-	isHintToken,
-	isIssuedAction,
-	issuedActionsOf,
-	type PrimaryAdmission,
-	type PrimaryAuthentication,
-	type PrimaryContinuation,
-	type RegisteredRequirement,
-	type RegisteredStepUpPage,
-	type RequirementInput,
-	type RequirementInterruption,
-	type RequirementVerdict,
-	type SessionClaim,
-	type SessionRequirementResolver,
-	type SessionView,
+import { brandClaim, checkRequest } from "./request-check.mjs";
+import type {
+	Admission,
+	AdmissionDeps,
+	AdmissionRequest,
+	CompletedRequirement,
+	Establishment,
+	PrimaryAdmission,
+	PrimaryAuthentication,
+	PrimaryContinuation,
+	RegisteredRequirement,
+	RequirementInput,
+	SessionClaim,
+	SessionView,
 } from "./requirement.mjs";
+import { checkResolver } from "./requirement-resolver.mjs";
+import {
+	copyVerdict,
+	effectiveAction,
+	isVerdict,
+	type RequirementOutcome,
+	stepUpVerdict,
+} from "./requirement-verdict.mjs";
+import { merge } from "./verdict-merge.mjs";
 
-// ---------------------------------------------------------------------------
-// The brands
-// ---------------------------------------------------------------------------
-
-/** The claims the builders below made. */
-const knownClaims = new WeakSet<object>();
-/** The resolvers the boot planner and `resolverForTests` built. */
-const knownResolvers = new WeakSet<object>();
-
-/** What a resolver is built over: the collectors' read side, or a test's lists. */
-export interface SessionRequirementSource {
-	get(name: string): RegisteredRequirement | undefined;
-	entries(): IterableIterator<readonly [string, RegisteredRequirement]>;
-	action(name: string): AdmissionAction | undefined;
-}
-
-/**
- * Builds the branded resolver over `source` and records it, so `admitSession`
- * knows it. `wrap` is the planner's read gate (closed while the `provides`
- * factories run); it is applied to the object recorded, which is the one a
- * consumer is handed. For the boot planner and `resolverForTests` alone.
- * @internal
- */
-export function sessionRequirementResolverOver(
-	source: SessionRequirementSource,
-	wrap: <T extends object>(view: T) => T = (view) => view,
-): SessionRequirementResolver {
-	const view = wrap(
-		Object.freeze({
-			get: (name: string) => source.get(name),
-			entries: () => source.entries(),
-			action: (name: string) => source.action(name),
-		}),
-	);
-	knownResolvers.add(view);
-	return view as unknown as SessionRequirementResolver;
-}
-
-const isKnownResolver = (value: unknown): value is SessionRequirementResolver =>
-	typeof value === "object" && value !== null && knownResolvers.has(value);
-
-/**
- * Refuses a resolver the planner or `resolverForTests` did not build; a
- * home-made object or a copy forges nothing. Consumer factories run it on
- * their `requirements` at construction, with their own name as `factory` and
- * the names of the actions they admit as `admits`, so a missing or forged
- * resolver, or an admitted action no module registers, fails where the
- * composition is assembled rather than on a request. Admission also runs it
- * on every call.
- */
-export function checkResolver(
-	value: unknown,
-	factory?: string,
-	admits: readonly string[] = [],
-): SessionRequirementResolver {
-	const who = factory === undefined ? "" : `${factory}: `;
-	if (isKnownResolver(value)) {
-		for (const name of admits) {
-			if (value.action(name) === undefined) {
-				throw new RangeError(
-					`${who}admits ${JSON.stringify(name)}, which no module registers: the module that installs it registers it under contributes.admissionActions`,
-				);
-			}
-		}
-		return value;
-	}
-	if (value === undefined || value === null) {
-		throw new RangeError(
-			`${who}requirements is required — the sessionRequirementResolver the boot planner built (the manifests pass it), or resolverForTests from @o3co/auth-provider-core/testing in a test`,
-		);
-	}
-	throw new RangeError(
-		`${who}requirements must be the sessionRequirementResolver the boot planner built (or resolverForTests, in a test)`,
-	);
-}
+export { isEstablishment, isInterruptAdmission } from "./establishment.mjs";
+export {
+	checkResolver,
+	type SessionRequirementSource,
+	sessionRequirementResolverOver,
+} from "./requirement-resolver.mjs";
 
 // ---------------------------------------------------------------------------
 // The claim builders
 // ---------------------------------------------------------------------------
-
-const nonEmptyString = (value: unknown): string | undefined =>
-	typeof value === "string" && value.length > 0 ? value : undefined;
-
-const isObject = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null;
-
-const claim = (fields: Omit<SessionClaim, never>): SessionClaim => {
-	const built = Object.freeze({ ...fields });
-	knownClaims.add(built);
-	return built;
-};
 
 /** What a cookie claim is built from: the express session, when the request has one. */
 export interface CookieCarrier {
@@ -211,7 +103,7 @@ export function cookieClaim(req: CookieCarrier): SessionClaim {
 	if (!isObject(req)) throw new RangeError("cookieClaim: the request must be an object");
 	const session = isObject(req.session) ? req.session : undefined;
 	const user = session !== undefined && isObject(session.user) ? session.user : undefined;
-	return claim({
+	return brandClaim({
 		authenticated: session?.isAuthenticated === true,
 		sid: nonEmptyString(session?.sid),
 		subject: nonEmptyString(user?.id),
@@ -257,7 +149,7 @@ export function codeClaimFirstRead(code: CodeCarrier): SessionClaim {
 	if (!isObject(code)) {
 		throw new RangeError("codeClaimFirstRead: the code record must be an object");
 	}
-	return claim({
+	return brandClaim({
 		authenticated: true,
 		sid: nonEmptyString(code.sid),
 		subject: undefined,
@@ -279,7 +171,7 @@ export function codeClaimRevalidation(code: CodeCarrier, subject: string): Sessi
 			"codeClaimRevalidation: the first read's subject must be a non-empty string",
 		);
 	}
-	return claim({
+	return brandClaim({
 		authenticated: true,
 		sid: nonEmptyString(code.sid),
 		subject,
@@ -305,7 +197,7 @@ export function linkClaim(link: LinkCarrier): SessionClaim {
 	if (sid === undefined || subject === undefined) {
 		throw new RangeError("linkClaim: the transaction must record a sid and a subject");
 	}
-	return claim({ authenticated: true, sid, subject, carrier: "link" } as SessionClaim);
+	return brandClaim({ authenticated: true, sid, subject, carrier: "link" } as SessionClaim);
 }
 
 /** What a token claim is built from: a verified token's claims. */
@@ -326,7 +218,7 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 	const subject = nonEmptyString(claims.sub);
 	if (subject === undefined) throw new RangeError("tokenClaim: the token must carry a sub");
 	const tokenAmr = wellFormedAmr(claims.amr);
-	return claim({
+	return brandClaim({
 		authenticated: true,
 		sid: nonEmptyString(claims.sid),
 		subject,
@@ -336,129 +228,8 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 }
 
 // ---------------------------------------------------------------------------
-// The actions: each a consumer's registration (`actions.mts`) or a
-// remediation core issued to a requirement (`requirement.mts`).
-// ---------------------------------------------------------------------------
-
-/** The `remediation` names already said to be undeclared, once per process each, up to the cap; past it, once for all. */
-const undeclaredRemediations = new Set<string>();
-const UNDECLARED_REMEDIATION_CAP = 256;
-let undeclaredRemediationsOverflowed = false;
-
-/** The requirements already said to have stepped up without a page, once per process each. */
-const pagelessStepUps = new Set<string>();
-
-/** The requirements already said to have stepped up over no session, once per process each. */
-const sessionlessStepUps = new Set<string>();
-
-// ---------------------------------------------------------------------------
 // admitSession
 // ---------------------------------------------------------------------------
-
-const isStringList = (value: unknown): value is readonly string[] =>
-	Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0);
-
-/**
- * What `checkRequest` answers: every untrusted input (claim, action, `asks`,
- * each dependency off `deps`) read once and copied, so a getter answering
- * one thing to the check and another to the steps changes nothing, and a
- * requirement cannot reach the caller's objects.
- */
-interface CheckedRequest {
-	readonly claim: SessionClaim;
-	readonly action: AdmissionAction;
-	readonly asks: AdmissionAsks | undefined;
-	readonly requirements: SessionRequirementResolver;
-	readonly userSessionStore: UserSessionStore | undefined;
-	readonly subjectRevocation: SubjectRevocation | undefined;
-	readonly acrTable: AcrTable;
-	readonly logger: Logger | undefined;
-	readonly auditSink: AuditSink | undefined;
-	readonly now: Date;
-}
-
-/**
- * The action a request names: a registered action by its name — the object
- * registration made, so the grade is never the caller's to restate — or a
- * remediation core issued to a requirement, by its identity. Both are core's
- * vocabulary, so a log line names either.
- */
-function checkedAction(asked: unknown, requirements: SessionRequirementResolver): AdmissionAction {
-	if (typeof asked === "string") {
-		const registered = requirements.action(asked);
-		if (registered === undefined) {
-			throw new RangeError(
-				`admitSession: ${JSON.stringify(asked)} is not a registered admission action: the module that admits it registers it under contributes.admissionActions`,
-			);
-		}
-		return registered;
-	}
-	// The issued object keeps its identity: that is what step 5 checks.
-	if (isIssuedAction(asked)) return asked;
-	throw new RangeError(
-		"admitSession: the action is a registered action's name, or a remediation core issued to a requirement (issuedRemediationActions)",
-	);
-}
-
-/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once. */
-function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
-	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
-	const requirements = checkResolver(deps.requirements);
-	const acrTable = deps.acrTable;
-	if (!isObject(acrTable)) throw new RangeError("admitSession: acrTable must be an object");
-	const userSessionStore = deps.userSessionStore;
-	const subjectRevocation = deps.subjectRevocation;
-	const logger = deps.logger;
-	const auditSink = deps.auditSink;
-	const clock = deps.now;
-	const now = clock === undefined ? new Date() : clock();
-	if (!isObject(request)) throw new RangeError("admitSession: the request must be an object");
-	const presented = request.claim;
-	if (!isObject(presented) || !knownClaims.has(presented)) {
-		throw new RangeError(
-			"admitSession: the claim must be one a claim builder made — cookieClaim, codeClaimFirstRead, codeClaimRevalidation, linkClaim or tokenClaim",
-		);
-	}
-	// A branded claim is frozen and core's own; the copy is still taken, so
-	// nothing downstream reads the caller's object twice.
-	const claim = Object.freeze({
-		authenticated: presented.authenticated === true,
-		sid: nonEmptyString(presented.sid),
-		subject: nonEmptyString(presented.subject),
-		carrier: presented.carrier,
-		...(Array.isArray(presented.tokenAmr)
-			? { tokenAmr: Object.freeze([...(presented.tokenAmr as readonly string[])]) }
-			: {}),
-	}) as SessionClaim;
-	const action = checkedAction(request.action, requirements);
-	const asksRead = request.asks;
-	let asks: AdmissionAsks | undefined;
-	if (asksRead !== undefined) {
-		if (!isObject(asksRead)) throw new RangeError("admitSession: asks must be an object");
-		const acrValues = asksRead.acrValues;
-		if (acrValues !== undefined && !isStringList(acrValues)) {
-			throw new RangeError("admitSession: asks.acrValues must be a list of non-empty strings");
-		}
-		asks = Object.freeze({
-			...(acrValues === undefined ? {} : { acrValues: Object.freeze([...acrValues]) }),
-		});
-	}
-	return {
-		claim,
-		action,
-		asks,
-		requirements,
-		userSessionStore,
-		subjectRevocation,
-		acrTable,
-		logger,
-		auditSink,
-		now,
-	};
-}
-
-const isValidDate = (value: unknown): value is Date =>
-	value instanceof Date && !Number.isNaN(value.getTime());
 
 /**
  * The view a requirement is handed: a copy of four fields, and of the
@@ -475,40 +246,6 @@ const viewOf = (session: UserSession): SessionView => {
 		...(enrollmentFacts === undefined ? {} : { enrollmentFacts: Object.freeze(enrollmentFacts) }),
 	});
 };
-
-const VERDICTS: ReadonlySet<string> = new Set(["met", "reauthenticate", "step_up", "unmet"]);
-
-/** A requirement's answer read once — `outcome` and `whenStillUnmet` — into a plain object; anything that is not an object as it is. */
-const copyVerdict = (answer: unknown): unknown =>
-	isObject(answer) ? { outcome: answer.outcome, whenStillUnmet: answer.whenStillUnmet } : answer;
-
-/** Whether `value` is one of the four verdicts, its `step_up` with a `whenStillUnmet` (and no page: the registered one answers). */
-const isVerdict = (value: unknown): value is RequirementVerdict =>
-	isObject(value) &&
-	typeof value.outcome === "string" &&
-	VERDICTS.has(value.outcome) &&
-	(value.outcome !== "step_up" ||
-		value.whenStillUnmet === "reauthenticate" ||
-		value.whenStillUnmet === "unmet");
-
-/**
- * Step 5's verdict, with the requirement that gave it. An outage never gets
- * here — step 5 answers `unavailable` itself — and a `step_up` carries the
- * live session it was taken over and the requirement whose reach bounds its
- * hint: `stepUpVerdict` makes one over no session `reauthenticate`.
- */
-type RequirementOutcome =
-	| { readonly outcome: "met" }
-	| { readonly outcome: "reauthenticate"; readonly requirement: string }
-	| {
-			readonly outcome: "step_up";
-			readonly requirement: string;
-			readonly stepping: RegisteredRequirement;
-			readonly session: UserSession;
-			readonly page: RegisteredStepUpPage;
-			readonly whenStillUnmet: "reauthenticate" | "unmet";
-	  }
-	| { readonly outcome: "unmet"; readonly requirement: string };
 
 /**
  * Whether the session `request.claim` names may proceed with
@@ -537,15 +274,7 @@ export async function admitSession(
 	request: AdmissionRequest,
 ): Promise<Admission> {
 	const checked = checkRequest(deps, request);
-	const {
-		claim: presented,
-		asks,
-		requirements: resolver,
-		userSessionStore,
-		subjectRevocation,
-		now,
-		logger,
-	} = checked;
+	const { claim: presented, asks, requirements: resolver, now, logger } = checked;
 	const label = checked.action.name;
 	const unavailable = (store: string, err: unknown): Admission => {
 		logger?.error(
@@ -555,75 +284,10 @@ export async function admitSession(
 		return { outcome: "unavailable", store };
 	};
 
-	// Step 1: the claim.
-	if (presented.authenticated !== true) return { outcome: "unauthenticated" };
-	if (presented.carrier === "cookie" && presented.subject === undefined) {
-		// A cookie that says authenticated without a user: not a session this
-		// provider wrote. Said at warn with the action alone; nothing to audit.
-		logger?.warn({ action: label }, "session_admission_no_subject");
-		return { outcome: "not_live", reason: "no_subject" };
-	}
-
-	// Step 2: the live read.
-	let session: UserSession | null = null;
-	if (userSessionStore !== undefined && presented.sid === undefined) {
-		if (presented.carrier !== "token") return { outcome: "not_live", reason: "no_sid" };
-	} else if (userSessionStore !== undefined && presented.sid !== undefined) {
-		let record: UserSession | null | undefined;
-		try {
-			record = await userSessionStore.get(presented.sid);
-		} catch (err) {
-			return unavailable("user_session" satisfies AdmissionInfrastructureStore, err);
-		}
-		// `== null`: the port answers `null`, and a store of the deployment's own
-		// that answers `undefined` for a missing session is still no session.
-		if (
-			record == null ||
-			nonEmptyString(record.sub) === undefined ||
-			!isValidDate(record.authTime) ||
-			!isValidDate(record.expiresAt) ||
-			!(record.expiresAt.getTime() > now.getTime())
-		) {
-			return { outcome: "not_live", reason: "gone" };
-		}
-		session = record;
-	}
-
-	// Step 3: the subject.
-	if (session !== null && presented.subject !== undefined && presented.subject !== session.sub) {
-		logger?.warn({ action: label }, "session_admission_subject_mismatch");
-		void emitAuditEvent(checked.auditSink, {
-			timestamp: now,
-			type: "session.admission.subject_mismatch",
-			subject: session.sub,
-			details: {
-				// The claim's sid, whichever carrier made the claim: the record was read by it.
-				sid: presented.sid,
-				carrier: presented.carrier,
-				claimedSubject: presented.subject,
-				recordSubject: session.sub,
-			},
-		});
-		return { outcome: "not_live", reason: "subject_mismatch" };
-	}
-
-	// Step 4: the revocation boundary, against a live record; a token's is
-	// verifyJwt's, so the two readings do not double up.
-	if (session !== null && subjectRevocation !== undefined && presented.carrier !== "token") {
-		try {
-			const boundary = await subjectRevocation.revokedBefore(session.sub);
-			if (boundary !== null && !isValidDate(boundary)) {
-				throw new TypeError("the sessions boundary is neither a date nor null");
-			}
-			if (
-				coveredByRevocationBoundary(session.authTime, boundary, DEFAULT_SUBJECT_REVOCATION_SKEW_MS)
-			) {
-				return { outcome: "revoked" };
-			}
-		} catch (err) {
-			return unavailable("revocation_boundary" satisfies AdmissionInfrastructureStore, err);
-		}
-	}
+	// Steps 1 to 4: the claim, the live read, the subject, the revocation boundary.
+	const live = await readLiveSession(checked, unavailable);
+	if ("answer" in live) return live.answer;
+	const { session } = live;
 
 	// Step 5: the requirements, by the action's effective grade: only the
 	// issued remediation keeps its grade and skips them.
@@ -702,188 +366,9 @@ export async function admitSession(
 	});
 }
 
-/**
- * A requirement's `step_up` as admission takes it: over no session (no
- * store, or a token carrier without a record) it is `reauthenticate`, since
- * nothing can be stepped up onto no session and a login can; from a
- * requirement that registered no page it is `unmet`, since nothing could
- * finish the trip. Each is logged once per process per name. So a `step_up`
- * always carries a live session and a page.
- */
-function stepUpVerdict(
-	name: string,
-	requirement: RegisteredRequirement,
-	whenStillUnmet: "reauthenticate" | "unmet",
-	session: UserSession | null,
-	deps: AdmissionDeps,
-): RequirementOutcome {
-	if (session === null) {
-		if (!sessionlessStepUps.has(name)) {
-			sessionlessStepUps.add(name);
-			deps.logger?.warn({ requirement: name }, "session_admission_step_up_without_session");
-		}
-		return { outcome: "reauthenticate", requirement: name };
-	}
-	const page = requirement.stepUpPage;
-	if (page === undefined) {
-		if (!pagelessStepUps.has(name)) {
-			pagelessStepUps.add(name);
-			deps.logger?.warn({ requirement: name }, "session_admission_step_up_without_page");
-		}
-		return { outcome: "unmet", requirement: name };
-	}
-	return {
-		outcome: "step_up",
-		requirement: name,
-		stepping: requirement,
-		session,
-		page,
-		whenStillUnmet,
-	};
-}
-
-/**
- * The action as the requirements see it: a registered action as registered;
- * `remediation` only for an object core issued to one of these requirements —
- * else, one issued to a requirement another composition registered, as
- * `credential_change`, the strictest grade, said once per process per name.
- */
-function effectiveAction(
-	requirements: readonly (readonly [string, RegisteredRequirement])[],
-	asked: AdmissionAction,
-	logger: Logger | undefined,
-): AdmissionAction {
-	if (asked.grade !== "remediation") return { name: asked.name, grade: asked.grade };
-	if (
-		isIssuedAction(asked) &&
-		// Every registered copy was issued its actions ({} when it declared none).
-		requirements.some(([, r]) => Object.values(issuedActionsOf(r) as object).includes(asked))
-	) {
-		return asked;
-	}
-	// Once per name, and once for all past the cap, so the log stays bounded.
-	if (undeclaredRemediations.size < UNDECLARED_REMEDIATION_CAP) {
-		if (!undeclaredRemediations.has(asked.name)) {
-			undeclaredRemediations.add(asked.name);
-			logger?.warn({ action: asked.name }, "session_admission_remediation_undeclared");
-		}
-	} else if (!undeclaredRemediations.has(asked.name) && !undeclaredRemediationsOverflowed) {
-		undeclaredRemediationsOverflowed = true;
-		logger?.warn(
-			{ action: asked.name, overflow: true },
-			"session_admission_remediation_undeclared",
-		);
-	}
-	return { name: asked.name, grade: "credential_change" };
-}
-
-interface MergeContext {
-	readonly session: UserSession | null;
-	/** No requested value is in the table: no login can meet the request. */
-	readonly noneConfigured: boolean;
-	readonly requirements: readonly (readonly [string, RegisteredRequirement])[];
-	/** The vouched `amr`. */
-	readonly held: readonly string[];
-	readonly table: AdmissionDeps["acrTable"];
-}
-
-/** The merge table of ADR 2026-09-28-session-admission: `R` the requirements' verdict, `A` the acr selection (`undefined` when nothing was asked). */
-function merge(
-	R: RequirementOutcome,
-	A: AcrSelection | undefined,
-	context: MergeContext,
-): Admission {
-	const { session } = context;
-	const unmetAcr = (): Admission => ({ outcome: "unmet", requirement: "acr", session });
-	switch (R.outcome) {
-		case "met":
-			if (A === undefined || A.outcome === "met") {
-				return { outcome: "admitted", session, acr: A?.acr };
-			}
-			// A selection steps up only over a live session: step 6 hands it an
-			// empty reach otherwise.
-			if (A.outcome === "unmet" || session === null) return unmetAcr();
-			return stepUpThroughOne(A.acrValues, context, session) ?? unmetAcr();
-		case "reauthenticate":
-			return context.noneConfigured
-				? unmetAcr()
-				: { outcome: "reauthenticate", requirement: R.requirement, session };
-		case "step_up": {
-			if (A?.outcome === "unmet") return unmetAcr();
-			// The hint: what the stepping requirement's own trip can finish, as
-			// in the met + step_up row — never an entry only another reaches.
-			return {
-				outcome: "step_up",
-				requirement: R.requirement,
-				session: R.session,
-				page: R.page,
-				acrValues:
-					A?.outcome === "step_up"
-						? A.acrValues.filter((acr: string) => finishes(context, R.stepping, acr))
-						: [],
-				whenStillUnmet: A?.outcome === "step_up" ? "unmet" : R.whenStillUnmet,
-			};
-		}
-		case "unmet":
-			return A?.outcome === "unmet"
-				? unmetAcr()
-				: { outcome: "unmet", requirement: R.requirement, session };
-	}
-}
-
-/** Whether `requirement`'s reach, beside what is held, covers one alternative of the entry `acr`. */
-const finishes = (
-	context: MergeContext,
-	requirement: RegisteredRequirement,
-	acr: string,
-): boolean =>
-	// `acr` is one the selection answered reachable: a key of the table.
-	(context.table[acr] as readonly (readonly string[])[]).some(
-		(alternative) =>
-			alternative.length > 0 &&
-			alternative.every((value) => context.held.includes(value) || requirement.reach.has(value)),
-	);
-
-/**
- * The `met` + `step_up` row: the page of the first requirement whose own
- * reach covers everything one alternative of a reachable entry lacks, with
- * the entries that requirement alone can finish as the hint — `undefined`
- * when no single requirement covers any, since no one trip can finish it.
- */
-function stepUpThroughOne(
-	reachable: readonly string[],
-	context: MergeContext,
-	session: UserSession,
-): Admission | undefined {
-	for (const [name, requirement] of context.requirements) {
-		// What this requirement's reach alone can finish, beside what is held.
-		const finishable = reachable.filter((acr: string) => finishes(context, requirement, acr));
-		// A requirement whose reach covers an entry registered a page: boot
-		// holds a non-empty reach to one. Without one nothing could finish it.
-		if (finishable.length > 0 && requirement.stepUpPage !== undefined) {
-			return {
-				outcome: "step_up",
-				requirement: name,
-				session,
-				page: requirement.stepUpPage,
-				// The hint: the entries this one trip can finish, in the request's order.
-				acrValues: finishable,
-				whenStillUnmet: "unmet",
-			};
-		}
-	}
-	return undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Establishment
 // ---------------------------------------------------------------------------
-
-/** The establishments `admitPrimary`, `resumePrimary` and `establishWithoutAsking` built. */
-const knownEstablishments = new WeakSet<object>();
-
-/** The interruptions `admitPrimary` and `resumePrimary` answered. */
-const knownInterruptions = new WeakSet<object>();
 
 /**
  * The primaries core's builders made (`passwordPrimary`, and
@@ -925,194 +410,6 @@ export function passwordPrimary(facts: PasswordLoginFacts): PrimaryAuthenticatio
 	});
 	knownPrimaries.add(primary);
 	return primary;
-}
-
-/** Whether `value` is an `Establishment` one of the three built: a copy, or an object shaped like one, is not. */
-export function isEstablishment(value: unknown): value is Establishment {
-	return typeof value === "object" && value !== null && knownEstablishments.has(value);
-}
-
-/** Whether `value` is an interruption `admitPrimary` or `resumePrimary` answered: a copy, or an object shaped like one, is not. */
-export function isInterruptAdmission(value: unknown): value is InterruptAdmission {
-	return typeof value === "object" && value !== null && knownInterruptions.has(value);
-}
-
-const establish = (primary: PrimaryAuthentication): Establishment => {
-	const built = Object.freeze({ primary });
-	knownEstablishments.add(built);
-	return built as unknown as Establishment;
-};
-
-/** The keys an interruption's body may carry: closed, so a `user` snapshot, a `sub` or a `sid` cannot leave through it. */
-const ANSWER_KEYS: ReadonlySet<string> = new Set(["error", "transaction", "expires_in", "hints"]);
-const BASE64URL = /^[A-Za-z0-9_-]+$/;
-/** The hint grammar's caps: an integer's range, a list's length, a transaction's length. */
-const HINT_NUMBER_MAX = 86_400;
-const HINT_LIST_MAX = 16;
-const TRANSACTION_MAX_LENGTH = 128;
-
-/**
- * Holds an interruption's answer to the closed body (`ANSWER_KEYS`, `error`
- * in the RFC 6749 error-text class) and to the `hintKeys` the requirement
- * named `name` declared, each hint a boolean, a bounded integer or
- * enum-like tokens, so a snapshot, a URL, an address or a name cannot pass.
- * Answers a frozen copy; a body that fails is the requirement's fault, a
- * `RangeError` the route answers as an `open` failure.
- */
-function checkInterruptionAnswer(
-	value: unknown,
-	name: string,
-	hintKeys: readonly string[],
-): InterruptionAnswer {
-	const refuse = (what: string): never => {
-		throw new RangeError(`requirement "${name}" answered an interruption ${what}`);
-	};
-	if (!isObject(value)) return refuse("that is not an object");
-	if (value.status !== 403) refuse("whose status is not 403");
-	// The body is read once into a null-prototype object, which is what gets
-	// validated and answered: an own "__proto__" key is then an ordinary key,
-	// not the prototype's setter.
-	const bodyRead = value.body;
-	if (!isObject(bodyRead) || Array.isArray(bodyRead)) return refuse("without a body");
-	const body: Record<string, unknown> = Object.create(null);
-	for (const key of Object.keys(bodyRead)) body[key] = bodyRead[key];
-	for (const key of Object.keys(body)) {
-		if (!ANSWER_KEYS.has(key)) {
-			refuse(`whose body carries "${key}", which the body's shape does not admit`);
-		}
-	}
-	const error = body.error;
-	if (!isWellFormedErrorCode(error)) refuse("whose error is not a well-formed error code");
-	const transaction = body.transaction;
-	if (transaction !== undefined) {
-		if (
-			typeof transaction !== "string" ||
-			transaction.length > TRANSACTION_MAX_LENGTH ||
-			!BASE64URL.test(transaction)
-		) {
-			refuse(`whose transaction is not a base64url string of at most ${TRANSACTION_MAX_LENGTH}`);
-		}
-	}
-	const expiresIn = body.expires_in;
-	if (expiresIn !== undefined) {
-		if (!Number.isSafeInteger(expiresIn) || (expiresIn as number) <= 0) {
-			refuse("whose expires_in is not a positive integer");
-		}
-	}
-	let hints: Record<string, string | number | boolean | readonly string[]> | undefined;
-	const hintsRead = body.hints;
-	if (hintsRead !== undefined) {
-		if (!isObject(hintsRead) || Array.isArray(hintsRead)) {
-			return refuse("whose hints are not an object");
-		}
-		hints = {};
-		for (const key of Object.keys(hintsRead)) {
-			const hint = hintsRead[key];
-			if (!hintKeys.includes(key) || !isHintKey(key)) {
-				refuse(`with a hint "${key}" it did not declare, or that is not a hint name`);
-			}
-			if (typeof hint === "boolean") {
-				hints[key] = hint;
-			} else if (typeof hint === "number") {
-				if (!Number.isSafeInteger(hint) || hint < 0 || hint > HINT_NUMBER_MAX) {
-					refuse(`with a hint "${key}" that is not an integer in [0, ${HINT_NUMBER_MAX}]`);
-				}
-				hints[key] = hint;
-			} else if (isHintToken(hint)) {
-				hints[key] = hint;
-			} else if (Array.isArray(hint) && hint.every(isHintToken)) {
-				if (hint.length > HINT_LIST_MAX) {
-					refuse(`with a hint "${key}" that lists more than ${HINT_LIST_MAX} tokens`);
-				}
-				hints[key] = Object.freeze([...hint]);
-			} else {
-				refuse(`with a hint "${key}" that is not a boolean, an integer, or an enum-like token`);
-			}
-		}
-	}
-	return Object.freeze({
-		status: 403,
-		body: Object.freeze({
-			error: error as string,
-			...(transaction === undefined ? {} : { transaction: transaction as string }),
-			...(expiresIn === undefined ? {} : { expires_in: expiresIn as number }),
-			...(hints === undefined ? {} : { hints: Object.freeze(hints) }),
-		}),
-	});
-}
-
-/** An outage at establishment: logged once, at error, object-first, with the requirement's name and the projection. */
-const unavailableAtEstablishment = (
-	deps: AdmissionDeps,
-	store: string,
-	err: unknown,
-): PrimaryAdmission => {
-	deps.logger?.error(
-		{ store, phase: "establishment", err: loggableError(err) },
-		"session_admission_unavailable",
-	);
-	return { outcome: "unavailable", store };
-};
-
-/**
- * Asks every requirement with `admitPrimary` not in `done`, in registration
- * order, about `composed`; one that completed is not asked again in this
- * login, whatever it added. The first interruption wins, carrying the
- * continuation and an `open` that validates the answer. A throw, or an
- * answer that is neither `establish` nor an interruption, is `unavailable`.
- */
-async function askEvery(
-	deps: AdmissionDeps,
-	requirements: SessionRequirementResolver,
-	composed: PrimaryAuthentication,
-	primary: PrimaryAuthentication,
-	done: readonly CompletedRequirement[],
-): Promise<PrimaryAdmission> {
-	const completed = new Set(done.map((entry) => entry.requirement));
-	for (const [name, requirement] of requirements.entries()) {
-		const ask = requirement.admitPrimary;
-		if (ask === undefined || completed.has(name)) continue;
-		let answer: unknown;
-		try {
-			answer = await ask.call(requirement, composed);
-		} catch (err) {
-			return unavailableAtEstablishment(deps, name, err);
-		}
-		if (answer === "establish") continue;
-		// The answer's `open` is read once, here.
-		const open = isObject(answer) ? answer.open : undefined;
-		if (typeof open === "function") {
-			// The continuation names who interrupted: `resumePrimary` accepts
-			// that requirement's completion alone.
-			const continuation = continuationOf(primary, done, name);
-			const interruption = Object.freeze({
-				outcome: "interrupt" as const,
-				requirement: name,
-				continuation,
-				open: async (sessionId: string) => {
-					if (nonEmptyString(sessionId) === undefined) {
-						throw new RangeError("open: the session id must be a non-empty string");
-					}
-					// The requirement persists what core built.
-					return checkInterruptionAnswer(
-						await (open as RequirementInterruption["open"]).call(answer, sessionId, continuation),
-						name,
-						requirement.hintKeys,
-					);
-				},
-			});
-			knownInterruptions.add(interruption);
-			return interruption as unknown as InterruptAdmission;
-		}
-		return unavailableAtEstablishment(
-			deps,
-			name,
-			new TypeError(
-				"a requirement answered something that is neither establish nor an interruption",
-			),
-		);
-	}
-	return { outcome: "establish", establishment: establish(composed) };
 }
 
 /**
@@ -1261,7 +558,7 @@ export interface FederatedLogin {
 	readonly user: Readonly<Record<string, unknown>>;
 	/** The merged claims envelope the callback composed: what the session record's `claims` will hold. */
 	readonly claims: UserSessionClaims;
-	/** The federation's name (`federations.<name>`). */
+	/** The federation's name (`core.federations.<name>`). */
 	readonly federation: string;
 	/** The upstream IdP's `amr`, as it surfaced it. */
 	readonly upstreamAmr: readonly string[];

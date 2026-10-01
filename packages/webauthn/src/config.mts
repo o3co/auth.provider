@@ -41,7 +41,7 @@ import { z } from "zod";
  * Reads `origin` / `topOrigin` as a config-file list or as the comma-separated string
  * `${?WEBAUTHN_ORIGIN}` / `${?WEBAUTHN_TOP_ORIGIN}` delivers.
  *
- * A string goes through core's `normalizeAllowedOrigins`, as `CORS_ALLOWED_ORIGINS` does: split on
+ * A string goes through core's `normalizeAllowedOrigins`, as a CORS origin list's does: split on
  * commas, trimmed, empties dropped; a refusal's index counts entries after that. In a list, string
  * entries are trimmed and any other entry keeps its index for the schema to refuse (not dropped,
  * which would shorten the operator's list). Any other shape passes through, refused as the wrong
@@ -56,8 +56,8 @@ const readOriginList = (raw: unknown): unknown => {
 
 /**
  * {@link readOriginList} for the optional `topOrigin`, where an exported-but-
- * empty variable reads as unset — not framed — as an empty
- * `CORS_ALLOWED_ORIGINS` reads as CORS off. An explicit empty list is still
+ * empty variable reads as unset — not framed — as an empty CORS origin list
+ * reads as CORS off. An explicit empty list is still
  * refused.
  */
 const readTopOriginList = (raw: unknown): unknown => {
@@ -93,7 +93,7 @@ const IPV4_HOST = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 /**
  * Why a web entry of `origin` or `topOrigin` cannot be used, or `null`.
  *
- * First core's `checkSerializedOrigin`, the rule `cors.allowedOrigins` follows: SimpleWebAuthn
+ * First core's `checkSerializedOrigin`, the rule a CORS origin list follows: SimpleWebAuthn
  * compares each entry by exact string with the origin the browser serialized into clientDataJSON,
  * so an entry that is not that serialization (trailing slash, path, userinfo, uppercase host,
  * default port, wildcard) matches no ceremony. `https:` is required except on a loopback host:
@@ -197,7 +197,11 @@ export const webauthnConfigSchema = z.object({
 	 * With it on, a credential that returns no user handle (a non-resident security key, such as a
 	 * WebAuthn second factor's) can be registered by another account through the grant and then
 	 * sign its owner in as that account: keep it off where WebAuthn second factors are enrolled.
-	 * `webauthnMfaFactorModule` refuses the boot while it is on.
+	 * `webauthnMfaFactorModule` refuses the boot while it is on. The same holds for such a
+	 * credential (one that returns no user handle) from any other system on the RP ID, which the
+	 * boot cannot see: "Known limitations" in the package README, path 1. Path 2 there, a
+	 * discoverable credential whose user handle equals another account's `userId`, does not depend
+	 * on this flag.
 	 *
 	 * `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`: "true" / "1" on, "false" / "0" / empty off (case
 	 * and surrounding spaces ignored); any other value fails the parse.

@@ -587,7 +587,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 		optional: OPTIONAL,
 		// Optional to wire, not optional to decide. A composition with no
 		// sink discards every device approval — a consent event — with no
-		// symptom, so it has to write `audit.sink.type = "none"` to say so.
+		// symptom, so it has to list `auditSink` in `core.declaredAbsent` to say so.
 		absencePolicies: {
 			deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY,
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
