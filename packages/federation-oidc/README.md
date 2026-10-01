@@ -286,7 +286,7 @@ linked:
   instance, requiring `oidcFederationConfigs` and contributing
   `federations.<name>` and `federationRedirectPolicies.<name>`.
 - `readOidcFederationConfigs` ([`src/module.mts`](src/module.mts)) — fills that
-  slot from a `federations` config section, refusing a malformed field by
+  slot from the `core.federations` map (`federationsOf(config)`), refusing a malformed field by
   `core.federations.<name>.<field>`.
 - `oidcFederationNames` ([`src/module.mts`](src/module.mts)) — the names of every
   enabled section of type `oidc`, sorted.
