@@ -33,7 +33,11 @@ import {
 	passwordPrimary,
 	resumePrimary,
 } from "#/session-admission/admit.mjs";
-import { checkPrimaryAuthentication, continuationOf } from "#/session-admission/primary.mjs";
+import {
+	checkPrimaryAuthentication,
+	continuationOf,
+	enrollmentFactsOfContinuation,
+} from "#/session-admission/primary.mjs";
 import type {
 	AdmissionDeps,
 	RequirementInput,
@@ -320,6 +324,138 @@ describe("the enrollment facts across an interruption — the continuation carri
 			witness: "enrolled",
 			mailAddress: "none",
 		});
+	});
+});
+
+describe("the enrollment facts of a login's continuation — read by its holder before it resumes the login", () => {
+	const interrupting: SessionRequirement = {
+		name: "verifier",
+		secondFactorAuthority: true,
+		reach: new Set(["otp", "mfa"]),
+		stepUpPage: { url: "/verifier", params: {} },
+		remediations: [],
+		hintKeys: [],
+		admit: async () => ({ outcome: "met" }),
+		admitPrimary: async (primary) =>
+			primary.recorded.authentication.mfaAt === undefined
+				? { open: async () => ({ status: 403, body: { error: "mfa_required" } }) }
+				: "establish",
+	};
+
+	const deps = (): AdmissionDeps => ({
+		userSessionStore: undefined,
+		subjectRevocation: undefined,
+		requirements: resolverForTests([interrupting], { issuer: "https://auth.test" }),
+		acrTable: readAcrTable({}),
+		logger: undefined,
+		auditSink: undefined,
+		now: () => NOW,
+	});
+
+	/** The continuation a password login of `user` is interrupted with. */
+	const continuationFor = async (user: Record<string, unknown>) => {
+		const first = await admitPrimary(deps(), passwordPrimary(passwordFacts(user)));
+		if (first.outcome !== "interrupt") throw new Error("expected an interruption");
+		return first.continuation;
+	};
+
+	/** The facts `resumePrimary` derives for the session it establishes from `continuation`. */
+	const resumedFacts = async (continuation: unknown) => {
+		const resumed = await resumePrimary(deps(), continuation as never, {
+			requirement: "verifier",
+			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
+		});
+		if (resumed.outcome !== "establish") throw new Error("expected an establishment");
+		return resumed.establishment.primary.enrollmentFacts;
+	};
+
+	it.each(WITNESSES)(
+		"reads a witness %s on the continuation's user as the resumed login does",
+		async (_label, user, witness) => {
+			const continuation = await continuationFor(user);
+			const facts = enrollmentFactsOfContinuation(continuation);
+			expect(facts).toEqual({ witness, mailAddress: "none" });
+			expect(facts).toEqual(await resumedFacts(continuation));
+		},
+	);
+
+	it.each(ADDRESSES)(
+		"reads the user's email — %s — as the resumed login does",
+		async (_label, user, mailAddress) => {
+			const continuation = await continuationFor(user);
+			const facts = enrollmentFactsOfContinuation(continuation);
+			expect(facts).toEqual({ witness: "not_enrolled", mailAddress });
+			expect(facts).toEqual(await resumedFacts(continuation));
+		},
+	);
+
+	it("reads a malformed witness beside an unreadable address together, as the resumed login does", async () => {
+		const continuation = await continuationFor({ mfaEnrolled: "yes", email: "a, b@example.com" });
+		const facts = enrollmentFactsOfContinuation(continuation);
+		expect(facts).toEqual({ witness: "malformed", mailAddress: "unreadable" });
+		expect(facts).toEqual(await resumedFacts(continuation));
+	});
+
+	it("reads no facts the continuation carries: the ones its user says stand", async () => {
+		const continuation = await continuationFor({ mfaEnrolled: true });
+		const tampered = {
+			...continuation,
+			primary: {
+				...continuation.primary,
+				enrollmentFacts: { witness: "not_enrolled", mailAddress: "address" },
+			},
+		};
+		expect(enrollmentFactsOfContinuation(tampered as never)).toEqual({
+			witness: "enrolled",
+			mailAddress: "none",
+		});
+		expect(enrollmentFactsOfContinuation(tampered as never)).toEqual(await resumedFacts(tampered));
+	});
+
+	it("never reads an enrollmentFacts field the continuation or its primary carries", async () => {
+		const continuation = await continuationFor({ mfaEnrolled: true });
+		const primary = { ...continuation.primary };
+		const carried = { ...continuation, primary };
+		for (const target of [primary, carried]) {
+			Object.defineProperty(target, "enrollmentFacts", {
+				enumerable: true,
+				get: () => {
+					throw new Error("a carried enrollmentFacts was read");
+				},
+			});
+		}
+		expect(enrollmentFactsOfContinuation(carried as never)).toEqual({
+			witness: "enrolled",
+			mailAddress: "none",
+		});
+	});
+
+	it("answers the two facts alone, frozen, and no address", async () => {
+		const facts = enrollmentFactsOfContinuation(
+			await continuationFor({ mfaEnrolled: true, email: "alice@example.com", name: "Alice" }),
+		);
+		expect(Object.keys(facts).sort()).toEqual(["mailAddress", "witness"]);
+		expect(JSON.stringify(facts)).not.toContain("alice");
+		expect(Object.isFrozen(facts)).toBe(true);
+	});
+
+	it.each([
+		["no object", undefined],
+		["a continuation without its primary", { done: [], interruptedBy: "verifier" }],
+		["a user that is not plain data", "user"],
+	])("refuses %s with a RangeError, as resumePrimary does", async (_label, shape) => {
+		const continuation =
+			shape === "user"
+				? {
+						...(await continuationFor({})),
+						primary: {
+							...(await continuationFor({})).primary,
+							user: { id: "user-1", joined: new Date(0) },
+						},
+					}
+				: shape;
+		expect(() => enrollmentFactsOfContinuation(continuation as never)).toThrow(RangeError);
+		await expect(resumedFacts(continuation)).rejects.toThrow(RangeError);
 	});
 });
 

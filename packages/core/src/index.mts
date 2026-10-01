@@ -1010,7 +1010,10 @@ export type {
 	LoginInterruptionResult,
 	LoginInterruptionStep,
 } from "./session-admission/login-completion.mjs";
-export { checkPrimaryContinuation } from "./session-admission/primary.mjs";
+export {
+	checkPrimaryContinuation,
+	enrollmentFactsOfContinuation,
+} from "./session-admission/primary.mjs";
 export {
 	type Admission,
 	type AdmissionAsks,

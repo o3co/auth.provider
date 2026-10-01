@@ -527,6 +527,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+enrollmentFactsOf\b/,
 	},
 	{
+		concept:
+			"a session's enrollment facts — a login continuation's, derived as its rehydration derives them (the MFA ADR's D12, D24)",
+		home: "packages/core/src/session-admission/primary.mts",
+		definition: /(?:function|const)\s+enrollmentFactsOfContinuation\b/,
+	},
+	{
 		concept: "a session's enrollment facts — what a store may record (the MFA ADR's D12, D24)",
 		home: "packages/core/src/user-sessions/enrollmentFacts.mts",
 		definition: /(?:function|const)\s+recordableEnrollmentFacts\b/,

@@ -29,7 +29,8 @@
  *
  * A primary's `enrollmentFacts` are derived here from its copied `user`, as
  * it is checked and as it is rehydrated, and never read from what a caller
- * hands in; a continuation carries none.
+ * hands in; a continuation carries none, and its holder reads them through
+ * `enrollmentFactsOfContinuation`, the same derivation.
  */
 
 import {
@@ -318,6 +319,22 @@ export function primaryFromDto(dto: PrimaryAuthenticationDto): PrimaryAuthentica
 		enrollmentFacts: enrollmentFactsOf(fields.user),
 		authTime: new Date(authTimeMs),
 	});
+}
+
+/**
+ * The enrollment facts of the login `continuation` carries, derived from its
+ * `user` exactly as its rehydration derives them: for the requirement that
+ * holds it and decides a first binding before resuming the login. Facts the
+ * continuation carries are not read. A continuation `checkPrimaryContinuation`
+ * cannot read is a `RangeError`, as it is for `resumePrimary`.
+ */
+export function enrollmentFactsOfContinuation(
+	continuation: PrimaryContinuation,
+): SessionEnrollmentFacts {
+	const primary: PrimaryAuthentication = primaryFromDto(
+		checkPrimaryContinuation(continuation).primary,
+	);
+	return primary.enrollmentFacts;
 }
 
 /** The completing requirement as registered: its name and its declaration, read once. */
