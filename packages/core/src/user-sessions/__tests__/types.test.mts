@@ -82,6 +82,8 @@ test("UserSession value type has no activeRPs/familyIds/federations fields", () 
 		readonly authentication: SessionAuthentication | undefined;
 		// The MFA ADR's D12, D24; optional, as a session without it says nothing
 		readonly enrollmentFacts?: SessionEnrollmentFacts;
+		// The MFA ADR's D27; optional, as a session without it is bound to no cookie session
+		readonly renewalNonce?: string;
 	}>();
 });
 

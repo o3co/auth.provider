@@ -131,7 +131,11 @@ export interface SessionRenewalCall {
  * response.
  */
 export type SessionRenewalResult =
-	| { readonly outcome: "renewed" }
+	| {
+			readonly outcome: "renewed";
+			/** The new cookie session's renewal nonce: what `recordSecondFactor` records with the escalation. */
+			readonly renewalNonce: string;
+	  }
 	| {
 			readonly outcome: "unavailable";
 			readonly store: "cookie_session";

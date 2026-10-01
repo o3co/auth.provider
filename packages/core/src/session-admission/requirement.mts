@@ -112,6 +112,8 @@ export interface SessionClaim {
 	readonly carrier: "cookie" | "code" | "link" | "token";
 	/** A token carrier only: the `amr` the verified token carries, for the requirements; absent when the token carries none. */
 	readonly tokenAmr?: readonly string[];
+	/** A cookie carrier only: the cookie session's renewal nonce, compared with the record's; absent when it holds none. */
+	readonly renewalNonce?: string;
 }
 
 /** What the request asks beyond the action: `acr_values`, at `/authorize` only. */
@@ -830,7 +832,8 @@ export type Admission =
 	| { readonly outcome: "unauthenticated" }
 	| {
 			readonly outcome: "not_live";
-			readonly reason: "no_subject" | "no_sid" | "gone" | "subject_mismatch";
+			/** `renewed`: the record is bound to another cookie session, one a renewal moved it to. */
+			readonly reason: "no_subject" | "no_sid" | "gone" | "subject_mismatch" | "renewed";
 	  }
 	| { readonly outcome: "revoked" }
 	| {

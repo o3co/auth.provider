@@ -1097,6 +1097,13 @@ export { createInMemorySubjectRevocation } from "./user-sessions/memory/subjectR
 export { createInMemorySubjectSessionIndex } from "./user-sessions/memory/subjectSessionIndex.mjs";
 export { createInMemoryUserSessionStore } from "./user-sessions/memory/userSessionStore.mjs";
 export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
+// The nonce that binds an escalated session to the one cookie session a
+// renewal moved it to: minted by the renewal, recorded with the escalation.
+export {
+	isRenewalNonce,
+	newRenewalNonce,
+	RENEWAL_NONCE_BYTES,
+} from "./user-sessions/renewalNonce.mjs";
 export {
 	type CascadeSession,
 	type RevokeAllForSubjectCapability,

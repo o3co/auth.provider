@@ -20,12 +20,20 @@
  * moves to a regenerated id and the old id names nothing in the store; a
  * `regenerate` or `save` the store fails is answered as its outage, writes
  * nothing, and leaves no signed-in state saved under a new id.
+ *
+ * And the race the renewal nonce closes: a request in flight on the old id
+ * saves after the renewal — express-session's save overwrites whatever the
+ * store holds — and puts the old id back, signed in on the same `sid`. Once
+ * the escalation is recorded with the renewal's nonce, core's admission
+ * refuses that id, and admits the renewed one.
  */
 
 import {
 	admitPrimary,
+	admitSession,
 	cookieClaim,
 	createInMemoryUserSessionStore,
+	isRenewalNonce,
 	passwordPrimary,
 	type SessionRenewalResult,
 } from "@o3co/auth-provider-core";
@@ -96,6 +104,16 @@ function setup() {
 		csrf: createTestCsrfGuard(),
 	});
 	const reported: string[] = [];
+	// A request on the old id, held while the renewal runs: it writes the
+	// session it loaded, as the federation start writes its state.
+	let entered: () => void = () => {};
+	const inFlightEntered = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	let release: () => void = () => {};
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
 	const app = express();
 	app.use(
 		session({
@@ -139,16 +157,51 @@ function setup() {
 		res.json(result);
 	});
 	app.post("/renew", async (req, res) => {
+		const sid = req.session?.sid;
 		const result: SessionRenewalResult = await completion.renewSession({
 			req,
 			reporter: { storeUnavailable: (store, step) => reported.push(`${store}:${step}`) },
 		});
+		// The step-up's finish: the escalation, recorded on the record the
+		// renewed session names — with the renewal's nonce, or (to show the
+		// race) without it.
+		if (result.outcome === "renewed" && sid !== undefined && req.query.record !== undefined) {
+			await userSessionStore.recordSecondFactor(sid, {
+				amr: ["otp", "mfa"],
+				at: new Date(),
+				...(req.query.record === "bound" ? { renewalNonce: result.renewalNonce } : {}),
+			});
+		}
 		res.status(result.outcome === "renewed" ? 200 : 503).json(result);
+	});
+	app.post("/in-flight", async (req, res) => {
+		entered();
+		await held;
+		(req.session as unknown as Record<string, unknown>).federationState = "state";
+		res.json({ ok: true });
 	});
 	app.get("/whoami", (req, res) => {
 		res.json(cookieClaim(req));
 	});
-	return { app, cookieStore, userSessionStore, reported };
+	app.get("/admit", async (req, res) => {
+		const admission = await admitSession(
+			{
+				userSessionStore,
+				subjectRevocation: undefined,
+				requirements: resolverForTests([], { actions: { "test.use": { grade: "use" } } }),
+				acrTable: {},
+				logger: undefined,
+				auditSink: undefined,
+			},
+			{ claim: cookieClaim(req), action: "test.use" },
+		);
+		res.json(
+			admission.outcome === "admitted"
+				? { outcome: admission.outcome, amr: admission.session?.amr }
+				: admission,
+		);
+	});
+	return { app, cookieStore, userSessionStore, reported, inFlightEntered, release };
 }
 
 /** Signs a browser in: the response that set its cookie, its id, and the record's `sid`. */
@@ -176,7 +229,7 @@ describe("renewSession over express-session's MemoryStore", () => {
 
 		const renewed = await request(app).post("/renew").set("Cookie", old);
 		expect(renewed.status).toBe(200);
-		expect(renewed.body).toEqual({ outcome: "renewed" });
+		expect(renewed.body).toEqual({ outcome: "renewed", renewalNonce: expect.any(String) });
 		expect(reported).toEqual([]);
 		const id = cookieSessionId(renewed) as string;
 		expect(id).toBeDefined();
@@ -185,7 +238,13 @@ describe("renewSession over express-session's MemoryStore", () => {
 		const held = cookieStore.sessions();
 		expect(Object.keys(held)).toEqual([id]);
 		const { cookie: _cookie, ...fields } = held[id] as Record<string, unknown>;
-		expect(fields).toEqual({ isAuthenticated: true, user: USER, sid: signedIn.sid });
+		expect(isRenewalNonce(renewed.body.renewalNonce)).toBe(true);
+		expect(fields).toEqual({
+			isAuthenticated: true,
+			user: USER,
+			sid: signedIn.sid,
+			renewalNonce: renewed.body.renewalNonce,
+		});
 
 		expect((await request(app).get("/whoami").set("Cookie", cookieOf(renewed))).body).toMatchObject(
 			{
@@ -243,11 +302,60 @@ describe("renewSession over express-session's MemoryStore", () => {
 	it("a session that is not signed in stays so: no signed-in field is written on the new id", async () => {
 		const { app, cookieStore } = setup();
 		const res = await request(app).post("/renew");
-		expect(res.body).toEqual({ outcome: "renewed" });
+		expect(res.body).toEqual({ outcome: "renewed", renewalNonce: expect.any(String) });
 		for (const held of Object.values(cookieStore.sessions())) {
 			expect(held).not.toHaveProperty("isAuthenticated");
 			expect(held).not.toHaveProperty("user");
 			expect(held).not.toHaveProperty("sid");
 		}
+	});
+});
+
+describe("the renewal race: a request in flight on the old id saves after the renewal", () => {
+	/** Signs in, holds a writing request on the old id, renews (recording as `record` says), then lets it save. */
+	async function race(record: "bound" | "unbound") {
+		const setUp = setup();
+		const { app, cookieStore, inFlightEntered, release } = setUp;
+		const signedIn = await signIn(app);
+		const old = cookieOf(signedIn.raw);
+		const inFlight = request(app)
+			.post("/in-flight")
+			.set("Cookie", old)
+			.then((res) => res);
+		await inFlightEntered;
+		const renewed = await request(app).post(`/renew?record=${record}`).set("Cookie", old);
+		expect(renewed.status).toBe(200);
+		// The old id is destroyed by the renewal …
+		expect(cookieStore.sessions()[signedIn.id]).toBeUndefined();
+		release();
+		await inFlight;
+		// … and the request in flight saves it back, signed in on the same sid.
+		expect(cookieStore.sessions()[signedIn.id]).toMatchObject({
+			isAuthenticated: true,
+			sid: signedIn.sid,
+			federationState: "state",
+		});
+		expect(cookieStore.sessions()[signedIn.id]).not.toHaveProperty("renewalNonce");
+		return { ...setUp, old, renewed: cookieOf(renewed) };
+	}
+
+	it("with the escalation recorded with the renewal's nonce, the old id saved back is not_live (renewed), and the renewed one is admitted with the escalation", async () => {
+		const { app, old, renewed } = await race("bound");
+		expect((await request(app).get("/admit").set("Cookie", old)).body).toEqual({
+			outcome: "not_live",
+			reason: "renewed",
+		});
+		expect((await request(app).get("/admit").set("Cookie", renewed)).body).toEqual({
+			outcome: "admitted",
+			amr: ["pwd", "otp", "mfa"],
+		});
+	});
+
+	it("without the nonce on the record, the old id saved back is admitted to the escalated session: the race the binding closes", async () => {
+		const { app, old } = await race("unbound");
+		expect((await request(app).get("/admit").set("Cookie", old)).body).toEqual({
+			outcome: "admitted",
+			amr: ["pwd", "otp", "mfa"],
+		});
 	});
 });

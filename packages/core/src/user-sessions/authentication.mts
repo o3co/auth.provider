@@ -37,6 +37,7 @@ import { federationsOf } from "../federations/configured.mjs";
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import type { RequirementSession } from "../session-admission/requirement.mjs";
+import { isRenewalNonce } from "./renewalNonce.mjs";
 import type { SecondFactorEvent, SessionAuthentication, UserSession } from "./types.mjs";
 
 /** A copy of `authentication` that shares nothing with it: its list and its date are new. */
@@ -166,8 +167,9 @@ const notAfter = (ms: number, nowMs: number): Date => new Date(Math.min(ms, nowM
  * values; a value that is not a non-empty string; a primary's marker (`pwd`,
  * `fed`: a second factor must not change the primary the baseline is
  * decided on); `mfa` alone (it comes beside a factor's own values, and alone
- * names no factor); or a time `isRecordableVerificationTime` refuses on
- * `nowMs`, the store's clock. Every bundled store's `recordSecondFactor`
+ * names no factor); a time `isRecordableVerificationTime` refuses on
+ * `nowMs`, the store's clock; or a `renewalNonce` that is not one
+ * (`isRenewalNonce`). Every bundled store's `recordSecondFactor`
  * runs this before it reads anything. The message quotes nothing but a
  * primary's marker.
  */
@@ -196,6 +198,9 @@ export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number):
 		throw new RangeError(
 			"recordSecondFactor: at must be a valid date at or after the epoch, and no further ahead than hosts' clocks drift",
 		);
+	}
+	if (event.renewalNonce !== undefined && !isRenewalNonce(event.renewalNonce)) {
+		throw new RangeError("recordSecondFactor: renewalNonce must be one newRenewalNonce spells");
 	}
 }
 

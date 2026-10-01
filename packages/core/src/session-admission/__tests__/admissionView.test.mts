@@ -127,6 +127,10 @@ describe("the view an admission carries", () => {
 		expect(view).not.toBeNull();
 		expect(view).toEqual(seen[0]);
 		expect(view).not.toBe(seen[0]);
+		// The requirement's copy is its own: changing it leaves the admission's.
+		const authTime = record().authTime.getTime();
+		seen[0]?.authTime.setTime(0);
+		expect(view?.authTime.getTime()).toBe(authTime);
 		expect(view).toEqual({
 			sid: "sid-1",
 			sub: "user-1",
@@ -135,6 +139,37 @@ describe("the view an admission carries", () => {
 			enrollmentFacts: { witness: "not_enrolled", mailAddress: "address" },
 		});
 		expect(Object.isFrozen(view)).toBe(true);
+	});
+
+	it("is not changed by what a requirement does to the Dates of the view it is handed, nor is the next requirement's", async () => {
+		const seen: Array<RequirementInput["session"]> = [];
+		const original = record();
+		const mutating = watching(
+			seen,
+			{ outcome: "met" },
+			{
+				name: "first",
+				admit: async (input) => {
+					seen.push(input.session);
+					input.session?.authTime.setTime(0);
+					input.session?.expiresAt.setTime(0);
+					return { outcome: "met" };
+				},
+			},
+		);
+		const second = watching(seen, { outcome: "met" }, { name: "second", stepUpPage: undefined });
+		const admission = await admitSession(deps(holding(original), [mutating, second]), {
+			claim: cookie(),
+			action: "test.use",
+		});
+		const { view } = admission as Extract<Admission, { outcome: "admitted" }>;
+		expect(seen).toHaveLength(2);
+		expect(seen[0]?.authTime.getTime()).toBe(0);
+		expect(seen[1]?.authTime.getTime()).toBe(original.authTime.getTime());
+		expect(seen[1]?.expiresAt.getTime()).toBe(original.expiresAt.getTime());
+		expect(view?.authTime.getTime()).toBe(original.authTime.getTime());
+		expect(view?.expiresAt.getTime()).toBe(original.expiresAt.getTime());
+		expect(seen[1]).not.toBe(seen[0]);
 	});
 
 	it("step_up: equals the view the stepping requirement was handed", async () => {

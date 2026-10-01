@@ -58,6 +58,7 @@ import {
 	type RecordingLoginCompletion,
 	resolverForTests,
 } from "#/testing/index.mjs";
+import { isRenewalNonce, newRenewalNonce } from "#/user-sessions/renewalNonce.mjs";
 
 const RULES = {
 	forgedEstablishment:
@@ -75,9 +76,11 @@ const RULES = {
 	interruptionOutage:
 		"an interruption that cannot be answered is 503: the ceremony's outage, or the cookie session's, reported once, the browser not signed in",
 	renewed:
-		"renewSession moves a signed-in session to a regenerated id, saved with isAuthenticated, user and sid as they were and no other field",
+		"renewSession moves a signed-in session to a regenerated id, saved with isAuthenticated, user and sid as they were, a fresh renewal nonce and no other field, writing no session record",
+	notSignedIn:
+		"renewSession leaves a session that is not signed in so: no signed-in field is written",
 	renewalOutage:
-		"a renewal whose regenerate or save fails is the cookie session's outage: reported once, nothing saved, the request's cookie session abandoned",
+		"a renewal whose regenerate or save fails, or of a request with no express session, is the cookie session's outage: reported once, nothing saved, the request's cookie session abandoned",
 } as const;
 
 const withOutage = () => {
@@ -235,7 +238,7 @@ describe("the loginCompletion slot", () => {
 			(call: SessionRenewalCall) => Promise<SessionRenewalResult>
 		>();
 		expectTypeOf<SessionRenewalResult>().toEqualTypeOf<
-			| { readonly outcome: "renewed" }
+			| { readonly outcome: "renewed"; readonly renewalNonce: string }
 			| {
 					readonly outcome: "unavailable";
 					readonly store: "cookie_session";
@@ -306,6 +309,7 @@ describe("loginCompletionContract — the recording double", () => {
 			RULES.interrupted,
 			RULES.interruptionOutage,
 			RULES.renewed,
+			RULES.notSignedIn,
 			RULES.renewalOutage,
 		]);
 	});
@@ -497,29 +501,31 @@ describe("createRecordingLoginCompletion — renewSession", () => {
 		return req;
 	};
 
-	it("keeps isAuthenticated, user and sid on the regenerated id, and drops the rest", async () => {
+	it("keeps isAuthenticated, user and sid on the regenerated id with a fresh renewal nonce, and drops the rest", async () => {
 		const req = signedInRequest();
 		expect(
 			await createRecordingLoginCompletion().renewSession({
 				req,
 				reporter: { storeUnavailable: () => {} },
 			}),
-		).toEqual({ outcome: "renewed" });
+		).toEqual({ outcome: "renewed", renewalNonce: expect.any(String) });
 		expect(sessionIdOf(req)).toBe("after");
-		expect({ ...sessionOf(req) }).toEqual({
+		const { renewalNonce, ...signedIn } = sessionOf(req);
+		expect(isRenewalNonce(renewalNonce)).toBe(true);
+		expect(signedIn).toEqual({
 			isAuthenticated: true,
 			user: { id: "user-1" },
 			sid: "sid-1",
 		});
 	});
 
-	it("writes no field the session did not hold: a session not signed in stays so", async () => {
+	it("writes no signed-in field the session did not hold: a session not signed in stays so", async () => {
 		const req = requestWithSession();
 		await createRecordingLoginCompletion().renewSession({
 			req,
 			reporter: { storeUnavailable: () => {} },
 		});
-		expect({ ...sessionOf(req) }).toEqual({});
+		expect(Object.keys(sessionOf(req))).toEqual(["renewalNonce"]);
 		expect(cookieClaim(req as never).authenticated).toBe(false);
 	});
 
@@ -666,11 +672,12 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 			await failing(
 				broken(() => ({
 					renewSession: async ({ req }) => {
+						const renewalNonce = newRenewalNonce();
 						const { isAuthenticated, user, sid } = sessionOf(req);
 						for (const key of Object.keys(sessionOf(req))) delete sessionOf(req)[key];
-						Object.assign(sessionOf(req), { isAuthenticated, user, sid });
+						Object.assign(sessionOf(req), { isAuthenticated, user, sid, renewalNonce });
 						await operate(req, "save");
-						return { outcome: "renewed" };
+						return { outcome: "renewed", renewalNonce };
 					},
 				})),
 			),
@@ -681,14 +688,17 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 		const renewingWith = (pick: (old: Record<string, unknown>) => Record<string, unknown>) =>
 			broken(() => ({
 				renewSession: async ({ req }) => {
+					const renewalNonce = newRenewalNonce();
 					const old = { ...sessionOf(req) };
 					await operate(req, "regenerate");
-					Object.assign(sessionOf(req), pick(old));
+					Object.assign(sessionOf(req), pick(old), { renewalNonce });
 					await operate(req, "save");
-					return { outcome: "renewed" };
+					return { outcome: "renewed", renewalNonce };
 				},
 			}));
-		expect(await failing(renewingWith((old) => old))).toContain(RULES.renewed);
+		expect(await failing(renewingWith(({ renewalNonce: _earlier, ...old }) => old))).toContain(
+			RULES.renewed,
+		);
 		expect(
 			await failing(renewingWith(({ isAuthenticated, user }) => ({ isAuthenticated, user }))),
 		).toContain(RULES.renewed);
@@ -702,10 +712,11 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 			await failing(
 				broken(() => ({
 					renewSession: async ({ req }) => {
+						const renewalNonce = newRenewalNonce();
 						const { isAuthenticated, user, sid } = sessionOf(req);
 						await operate(req, "regenerate");
-						Object.assign(sessionOf(req), { isAuthenticated, user, sid });
-						return { outcome: "renewed" };
+						Object.assign(sessionOf(req), { isAuthenticated, user, sid, renewalNonce });
+						return { outcome: "renewed", renewalNonce };
 					},
 				})),
 			),
@@ -717,6 +728,7 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 			await failing(
 				broken(() => ({
 					renewSession: async ({ req, reporter }) => {
+						const renewalNonce = newRenewalNonce();
 						const { isAuthenticated, user, sid } = sessionOf(req);
 						try {
 							await operate(req, "regenerate");
@@ -724,14 +736,14 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 							reporter.storeUnavailable("cookie_session", "regenerate", cause);
 							return { outcome: "unavailable", store: "cookie_session", step: "regenerate" };
 						}
-						Object.assign(sessionOf(req), { isAuthenticated, user, sid });
+						Object.assign(sessionOf(req), { isAuthenticated, user, sid, renewalNonce });
 						try {
 							await operate(req, "save");
 						} catch (cause) {
 							reporter.storeUnavailable("cookie_session", "save", cause);
 							return { outcome: "unavailable", store: "cookie_session", step: "save" };
 						}
-						return { outcome: "renewed" };
+						return { outcome: "renewed", renewalNonce };
 					},
 				})),
 			),
@@ -741,7 +753,9 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 				broken((original) => ({
 					renewSession: async (call) => {
 						const result = await original.renewSession(call);
-						return result.outcome === "unavailable" ? { outcome: "renewed" } : result;
+						return result.outcome === "unavailable"
+							? { outcome: "renewed", renewalNonce: newRenewalNonce() }
+							: result;
 					},
 				})),
 			),
@@ -754,6 +768,61 @@ describe("loginCompletionContract — each way a completion can break it", () =>
 				})),
 			),
 		).toContain(RULES.renewalOutage);
+	});
+
+	it("answering a nonce the renewed session does not hold, or keeping the one an earlier renewal left", async () => {
+		expect(
+			await failing(
+				broken((original) => ({
+					renewSession: async (call) => {
+						const result = await original.renewSession(call);
+						return result.outcome === "renewed"
+							? { outcome: "renewed", renewalNonce: newRenewalNonce() }
+							: result;
+					},
+				})),
+			),
+		).toContain(RULES.renewed);
+		expect(
+			await failing(
+				broken(() => ({
+					renewSession: async ({ req }) => {
+						const { isAuthenticated, user, sid, renewalNonce } = sessionOf(req);
+						await operate(req, "regenerate");
+						Object.assign(sessionOf(req), { isAuthenticated, user, sid, renewalNonce });
+						await operate(req, "save");
+						return { outcome: "renewed", renewalNonce: renewalNonce as string };
+					},
+				})),
+			),
+		).toContain(RULES.renewed);
+	});
+
+	it("writing a session record at a renewal", async () => {
+		expect(
+			await failing(
+				leaking((original, leak) => ({
+					renewSession: (call) => {
+						leak();
+						return original.renewSession(call);
+					},
+				})),
+			),
+		).toContain(RULES.renewed);
+	});
+
+	it("signing in a session that was not", async () => {
+		expect(
+			await failing(
+				broken((original) => ({
+					renewSession: async (call) => {
+						const result = await original.renewSession(call);
+						if (result.outcome === "renewed") sessionOf(call.req).isAuthenticated = true;
+						return result;
+					},
+				})),
+			),
+		).toContain(RULES.notSignedIn);
 	});
 
 	it("accepting an interruption core did not answer", async () => {

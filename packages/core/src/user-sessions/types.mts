@@ -97,6 +97,16 @@ export interface UserSession {
 	 * round-trips it.
 	 */
 	readonly enrollmentFacts?: SessionEnrollmentFacts;
+	/**
+	 * The renewal nonce of the one cookie session this session is bound to
+	 * (`./renewalNonce.mts`): recorded by `recordSecondFactor` with the
+	 * escalation, and compared by admission with the cookie session's, which
+	 * refuses any other. Absent: bound to no cookie session, read as before
+	 * renewals existed. Optional, like `enrollmentFacts`: a store that drops
+	 * it leaves its escalated sessions unbound, so a store with the step-up
+	 * capability round-trips it.
+	 */
+	readonly renewalNonce?: string;
 }
 
 /**
@@ -211,6 +221,12 @@ export interface UserSessionStore {
 export interface SecondFactorEvent {
 	readonly amr: readonly string[];
 	readonly at: Date;
+	/**
+	 * The renewed cookie session's nonce (`LoginCompletion.renewSession`'s
+	 * answer), recorded on the session in the same write, replacing an
+	 * earlier one. Absent: the session's nonce is left as it is.
+	 */
+	readonly renewalNonce?: string;
 }
 
 /**
@@ -228,8 +244,9 @@ export interface SupportsSecondFactorUpdate {
 	 * `amr` becomes what the session vouches for followed by `event.amr`, in
 	 * insertion order, each value once. `mfaAt` becomes the later of the stored
 	 * one and the event's, each clamped to the store's clock (so a value from a
-	 * replica whose clock ran ahead comes back to it). Nothing else changes,
-	 * `authTime` and the session's lifetime included. A session written before
+	 * replica whose clock ran ahead comes back to it). `renewalNonce` becomes
+	 * the event's, when it carries one, in the same write. Nothing else
+	 * changes, `authTime` and the session's lifetime included. A session written before
 	 * `authentication` existed is split first (`sessionAfterSecondFactor`), so
 	 * an untrusted upstream IdP's value never becomes a vouched one.
 	 *
@@ -240,9 +257,9 @@ export interface SupportsSecondFactorUpdate {
 	 *
 	 * A `RangeError` before anything is read, nothing written, for an event
 	 * with no values, an empty value, a primary's marker (`pwd`, `fed`), only
-	 * `mfa`, or a time that is not a valid date at or after the epoch or is
-	 * further ahead of the store's clock than `DEFAULT_CLOCK_SKEW_MS`
-	 * (`checkSecondFactorEvent`). A store outage rejects with the store's own
+	 * `mfa`, a time that is not a valid date at or after the epoch or is
+	 * further ahead of the store's clock than `DEFAULT_CLOCK_SKEW_MS`, or a
+	 * `renewalNonce` that is not one (`checkSecondFactorEvent`). A store outage rejects with the store's own
 	 * error.
 	 */
 	recordSecondFactor(sid: string, event: SecondFactorEvent): Promise<UserSession | null>;
