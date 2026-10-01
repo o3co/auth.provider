@@ -37,6 +37,7 @@ import {
 	loginReturnWithAsk,
 	type PromptDirective,
 	presentedAsk,
+	readableAuthTime,
 	refuseUnmet,
 	sendToLogin,
 	stepUpTrip,
@@ -209,11 +210,12 @@ const reauthenticate = async (
 	if (ask === undefined) return;
 	const loginAskedAt = ask?.loginAskedAt;
 	// Strictly after the ask, to the millisecond, as freshness reads it. With
-	// no record to read an authentication from, the trip already asked is
-	// the one this request gets.
+	// no record to read an authentication from, or one whose time cannot be
+	// read, the trip already asked is the one this request gets.
+	const authenticatedAt =
+		admission.session === null ? undefined : readableAuthTime(admission.session, Date.now());
 	const cameBack =
-		loginAskedAt !== undefined &&
-		(admission.session === null || admission.session.authTime.getTime() > loginAskedAt);
+		loginAskedAt !== undefined && (authenticatedAt === undefined || authenticatedAt > loginAskedAt);
 	if (cameBack) {
 		if (admission.requirement === "acr") {
 			refuseUnmet(ctx, "acr", requested);

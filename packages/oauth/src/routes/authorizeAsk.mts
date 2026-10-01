@@ -25,6 +25,7 @@
 
 import {
 	type Admission,
+	authTimeAt,
 	LOGIN_RETURN_PARAMETER,
 	type Logger,
 	loggableError,
@@ -279,6 +280,15 @@ export const loginReturnWithAsk = async (
 };
 
 /**
+ * The session's authentication instant in milliseconds, for comparing with
+ * an ask's, once core's `authTimeAt` reads it against the clock; `undefined`
+ * when it cannot (further ahead than the skew allows), which this endpoint
+ * answers with a login, never a comparison.
+ */
+export const readableAuthTime = (session: UserSession, nowMs: number): number | undefined =>
+	authTimeAt(session.authTime, nowMs) === undefined ? undefined : session.authTime.getTime();
+
+/**
  * `fresh_by_ask`: the session is fresh because of the login the presented
  * ask asked for, which the pass that mints then holds it to.
  */
@@ -324,10 +334,15 @@ export const evaluateReauthentication = (
 		);
 		return "answered";
 	}
+	const now = Date.now();
+	const authSeconds = authTimeAt(session.authTime, now);
 	if (ask !== null && ask.loginAskedAt !== undefined) {
 		// Strictly after the ask, to the millisecond: an authentication made
-		// before it — even earlier in the same second — is not the one it asked for.
-		if (session.authTime.getTime() > ask.loginAskedAt) return "fresh_by_ask";
+		// before it — even earlier in the same second — is not the one it
+		// asked for, and one that cannot be read is not shown to be.
+		if (authSeconds !== undefined && session.authTime.getTime() > ask.loginAskedAt) {
+			return "fresh_by_ask";
+		}
 		redirectError(
 			ctx,
 			"login_required",
@@ -338,10 +353,11 @@ export const evaluateReauthentication = (
 	// An id that names no ask, names one for another request, or has expired,
 	// is simply not an ask — and one that records a step-up trip alone asked
 	// for no login: evaluate the request on its merits, which asks again
-	// rather than proceeding.
-	const nowSeconds = Math.floor(Date.now() / 1000);
-	const authTimeSeconds = Math.floor(session.authTime.getTime() / 1000);
-	const stale = maxAge !== undefined && nowSeconds - authTimeSeconds > maxAge;
+	// rather than proceeding. An authentication time that cannot be read is
+	// stale for any `max_age`.
+	const stale =
+		maxAge !== undefined &&
+		(authSeconds === undefined || Math.floor(now / 1000) - authSeconds > maxAge);
 	if (!prompt.login && !stale) return "proceed";
 	if (prompt.silent) {
 		redirectError(
@@ -432,7 +448,24 @@ export const stepUpTrip = async (
 	const trips = ask?.stepUpAskedAt;
 	const askedAt =
 		trips !== undefined && Object.hasOwn(trips, requirement) ? trips[requirement] : undefined;
-	if (askedAt !== undefined && admission.session.authTime.getTime() <= askedAt) {
+	const authenticatedAt =
+		askedAt === undefined ? undefined : readableAuthTime(admission.session, Date.now());
+	if (askedAt !== undefined && authenticatedAt === undefined) {
+		// Back from a trip with an authentication time that cannot be read: no
+		// telling whether a new login was made since. One login trip, then a
+		// refusal.
+		if (prompt.silent || ask?.loginAskedAt !== undefined || askStore === undefined) {
+			redirectError(
+				ctx,
+				"login_required",
+				"the session's authentication time cannot be read; a new login is required",
+			);
+			return;
+		}
+		await sendToLogin(ctx, askStore, ask);
+		return;
+	}
+	if (askedAt !== undefined && authenticatedAt !== undefined && authenticatedAt <= askedAt) {
 		if (admission.whenStillUnmet === "unmet") {
 			redirectError(
 				ctx,
