@@ -241,6 +241,7 @@ export interface FederationGrantConnection {
 }
 
 export type FederationGrantIneligibilityReason =
+	/** No lifetime, a malformed one, or none left when the answer was read. */
 	| "no_finite_lifetime"
 	| "lifetime_over_maximum"
 	| "scope_exceeded"
@@ -319,11 +320,13 @@ export interface FederationGrantCredentials {
 				/** Seconds, as the upstream issued it — not what remains of it, and not cut by an earlier expiry. */
 				readonly issuedLifetime: number;
 				/**
-				 * When the token ends, where the adapter's expiry ended it no later
-				 * than its issued lifetime. The one optional key: absent on records
-				 * written before it, by the connect callback, and by a store that
-				 * does not keep it, which read as ending at `obtainedAt` +
-				 * `issuedLifetime`.
+				 * When the token ends: never after `obtainedAt` + `issuedLifetime`,
+				 * and earlier when the adapter's expiry ended it sooner. Every
+				 * refresh writes it. A record without it ends at `obtainedAt` +
+				 * `issuedLifetime`, which serves a token past the adapter's stated
+				 * end by up to the difference: it fails open. Optional for now,
+				 * until the Redis store and the connect callback write it too; then
+				 * a required `Date | undefined` key like every other field.
 				 */
 				readonly effectiveExpiresAt?: Date;
 				/** What this token carries. A refresh response that omits `scope` means the grant's scopes (RFC 6749 §6). */

@@ -19,13 +19,15 @@
  * reading and read back as a token held. Keeps the three facts the reading
  * answers — when it was obtained, the lifetime issued, when it ends — and
  * never ends a token after `obtainedAt` + `issuedLifetime`. A record without
- * `effectiveExpiresAt` ends there: nothing it lost is invented.
+ * `effectiveExpiresAt` ends there: nothing it lost is invented. A stored value
+ * that is not what its type says reads as no instant, never as a throw.
  */
 
-import type { HeldUpstreamToken } from "../federations/token-lifetime.mjs";
+import { type HeldUpstreamToken, instantOf } from "../federations/token-lifetime.mjs";
 import type { FederationGrantCredentials } from "./types.mjs";
 
-type StoredAccessToken = NonNullable<FederationGrantCredentials["accessToken"]>;
+/** A grant credential's access token, when it has one. */
+export type StoredAccessToken = NonNullable<FederationGrantCredentials["accessToken"]>;
 
 /** The access token to store, from a finite reading that names its issued lifetime. */
 export function federationGrantAccessToken(
@@ -46,14 +48,17 @@ export function federationGrantAccessToken(
 	};
 }
 
-/** The stored access token as a token held. An end that is not an instant reads as an Invalid Date. */
+/**
+ * The stored access token as a token held. A start, an end or a lifetime
+ * that is no instant or no finite number reads as an Invalid Date, which
+ * `judgeHeldUpstreamToken` does not believe: the token is refreshed.
+ */
 export function federationGrantHeldToken(token: StoredAccessToken): HeldUpstreamToken {
-	const issuedEnd = token.obtainedAt.getTime() + token.issuedLifetime * 1000;
+	const obtainedAt = instantOf(token.obtainedAt) ?? Number.NaN;
+	const lifetime = token.issuedLifetime;
+	const issuedEnd = typeof lifetime === "number" ? obtainedAt + lifetime * 1000 : Number.NaN;
 	const effective = token.effectiveExpiresAt;
-	return {
-		obtainedAt: token.obtainedAt,
-		expiresAt: new Date(
-			effective === undefined ? issuedEnd : Math.min(effective.getTime(), issuedEnd),
-		),
-	};
+	const end =
+		effective === undefined ? issuedEnd : Math.min(instantOf(effective) ?? Number.NaN, issuedEnd);
+	return { obtainedAt: new Date(obtainedAt), expiresAt: new Date(end) };
 }

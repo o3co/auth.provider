@@ -2361,18 +2361,23 @@ others remain as the paragraph above leaves them.
 **Amended 2026-10-01 (#1005): a refreshed token is dated from when the call
 began, and the earlier of its two instants ends it.** The decision above
 dated a refreshed token on the adapter's clock (`expiresAt − expiresIn`),
-held between the call's start and the answer's arrival, so an `expiresAt`
-earlier than that window was clamped up and the token lived its full
-`expiresIn`. Core now has one reading of an upstream token's lifetime,
+held between the call's start and the answer's arrival, so an
+`expiresAt − expiresIn` earlier than that window was clamped up to the
+call's start and the token lived its full `expiresIn`. Core now has one reading of an upstream token's lifetime,
 `readUpstreamTokenLifetime` (`federations/token-lifetime.mts`), and the
 retrieval reads every refresh answer through it. The stored token keeps
-three facts, none derived from another: `obtainedAt` is `calledAt`;
+three facts, each as read and none recomputed from the others once stored:
+`obtainedAt` is `calledAt`;
 `issuedLifetime` is the `expires_in` as issued, which D5 judges when the
 answer arrives and again at every disclosure; and a new optional field,
 `effectiveExpiresAt`, is when the token ends,
 `min(expiresAt, calledAt + expiresIn)`. A record without
 `effectiveExpiresAt` ends at `obtainedAt + issuedLifetime`, as every record
-did before, and no record ends later than that.
+did before, and no record ends later than that: the end is bounded by
+`obtainedAt + issuedLifetime`. `effectiveExpiresAt` is optional only until
+the Redis store (#1037) and the connect callback (#1020) write it; leaving
+it out serves a token past its adapter's stated end, so it then becomes a
+required key.
 
 Why: two readers of the same answer, the retrieval and the oauth federation
 token route, applied different rules to it. This is the route's rule, and it
@@ -2401,9 +2406,9 @@ field can lengthen the other. What it changes:
 D5's rule on top of the reading is unchanged: a lifetime counts only when
 both fields state it, and anything else has no finite lifetime. A held
 token's age (D10's believed date, the life it has left, and half-spent) is
-`judgeHeldUpstreamToken`, beside the reading. A stored credential whose
-issued lifetime would end beyond any instant a `Date` holds is not believed,
-and so it is refreshed. The Redis adapter does not keep `effectiveExpiresAt`
+`judgeHeldUpstreamToken`, beside the reading. A stored credential without
+`effectiveExpiresAt` whose issued lifetime would end beyond any instant a
+`Date` holds is not believed, and so it is refreshed. The Redis adapter does not keep `effectiveExpiresAt`
 yet, so a record it holds ends at `obtainedAt + issuedLifetime`, which now
 counts from the call's start. The connect callback (D7 check 6) still dates
 the token it activates by the earlier clamp and writes no

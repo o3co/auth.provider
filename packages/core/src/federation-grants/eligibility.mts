@@ -72,8 +72,8 @@ export type UpstreamTokenJudgement =
  *
  * - The lifetime must be finite: a disclosed token cannot be shortened, so
  *   no expiry means unbounded residual access.
- * - It must not exceed the maximum. The lifetime the token was given is
- *   judged, not what remains, so a token never becomes disclosable by ageing.
+ * - It must not exceed the maximum. The ISSUED lifetime is judged, not what
+ *   remains, so a token never becomes disclosable by ageing.
  * - Its scopes must be within the user's consent: an IdP that accumulates
  *   consent may answer a refresh with more, and a token cannot be narrowed.
  * - It must be a bearer token (see `federations/token-type.mts`).
@@ -83,11 +83,7 @@ export type UpstreamTokenJudgement =
  * See ADR 2026-09-17-federation-grants-offline-delegation, D5.
  */
 export function judgeUpstreamAccessToken(token: {
-	/**
-	 * Seconds: the `expires_in` as issued when an answer arrives, and the
-	 * stored credential's lifetime at a disclosure; `null` when the upstream
-	 * named no finite lifetime.
-	 */
+	/** Seconds, as issued; `null` when the upstream named no finite lifetime. */
 	readonly issuedLifetime: number | null;
 	readonly scopes: readonly string[];
 	readonly consentedScopes: readonly string[];

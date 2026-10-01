@@ -21,12 +21,12 @@
  * finite lifetime is required, whether both fields are, and any maximum.
  * Pure: no clock, no I/O, and no throw on any field value.
  *
- * A finite lifetime answers three facts, none derived from another:
- * `obtainedAt` is always `calledAt`; `expiresAt` is when the token ends, the
- * earlier instant the fields name; `issuedLifetime` is the `expiresIn` as
- * issued, which a maximum is judged against. The end may come before
- * `obtainedAt + issuedLifetime`, never after it. A record that keeps the
- * token keeps all three, or loses only what it drops.
+ * A finite lifetime answers three facts, or two when `expiresAt` alone
+ * stated it: `obtainedAt` is always `calledAt`; `expiresAt` is when the
+ * token ends, the earlier instant the fields name; `issuedLifetime` is the
+ * `expiresIn` as issued, which a maximum is judged against. A record keeps
+ * each as read, none recomputed from the others once stored; the end is
+ * bounded by `obtainedAt + issuedLifetime`.
  */
 
 /** The lifetime fields of an adapter's answer, each as the consumer read it once. */
@@ -83,14 +83,14 @@ export interface HeldUpstreamToken {
 export interface HeldUpstreamTokenAge {
 	/** `obtainedAt` is a valid instant, before `expiresAt`, and not more than `allowanceMs` ahead of `now`. */
 	readonly believed: boolean;
-	/** `min(obtainedAt, now)` + lifetime − `now`: no token has more left than it was issued with. 0 when not believed. */
+	/** `min(obtainedAt, now)` + lifetime − `now`: no token has more left than its own life (`expiresAt − obtainedAt`). 0 when not believed. */
 	readonly remainingMs: number;
 	/** At least half its lifetime has passed, or it is not believed: before then it is never refreshed. */
 	readonly halfSpent: boolean;
 }
 
-/** The epoch ms of a real `Date` holding an instant, read by its own value, never through a method it may override. */
-const instantOf = (value: unknown): number | undefined => {
+/** The epoch ms of a real `Date` holding an instant, read by its own value, never through a method it may override. Never throws. */
+export const instantOf = (value: unknown): number | undefined => {
 	try {
 		if (!(value instanceof Date)) return undefined;
 		const ms = Date.prototype.getTime.call(value);

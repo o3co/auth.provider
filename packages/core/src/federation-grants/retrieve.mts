@@ -37,7 +37,11 @@ import {
 	judgeUpstreamAccessToken,
 	scopesWithin,
 } from "./eligibility.mjs";
-import { federationGrantAccessToken, federationGrantHeldToken } from "./held-token.mjs";
+import {
+	federationGrantAccessToken,
+	federationGrantHeldToken,
+	type StoredAccessToken,
+} from "./held-token.mjs";
 import { federationGrantEffectiveExpiry } from "./lifetime.mjs";
 import type { FederationGrantStore } from "./store.mjs";
 import {
@@ -460,8 +464,6 @@ interface Look {
 	readonly fetched?: string;
 }
 
-type StoredAccessToken = NonNullable<FederationGrantCredentials["accessToken"]>;
-
 type Evaluation =
 	| {
 			readonly kind: "deny";
@@ -772,7 +774,7 @@ async function evaluate(
 		}).eligible;
 		// A token dated further ahead than the refresh buffer absorbs, or than
 		// replicas' clocks may differ where the buffer is set to less, is not
-		// believed; none has more life left than it was issued with.
+		// believed; none has more left than its own life (`expiresAt − obtainedAt`).
 		const { believed, remainingMs, halfSpent } = judgeHeldUpstreamToken(
 			federationGrantHeldToken(token),
 			{ now: now.getTime(), allowanceMs: dateAllowanceMs(deps.limits) },
@@ -1001,7 +1003,12 @@ function readResponse(
 	if (typeof accessToken !== "string" || accessToken === "") return { refreshToken };
 	if (typeof tokenType !== "string" || tokenType === "") return { refreshToken };
 	if (expiresIn !== null && typeof expiresIn !== "number") return { refreshToken };
-	if (expiresAt !== null && !(expiresAt instanceof Date)) return { refreshToken };
+	try {
+		// A Proxy's prototype trap may throw: such an answer is malformed.
+		if (expiresAt !== null && !(expiresAt instanceof Date)) return { refreshToken };
+	} catch {
+		return { refreshToken };
+	}
 	if (scope !== undefined && typeof scope !== "string") return { refreshToken };
 
 	// RFC 6749 §3.3, read as every upstream answer is (`parseScopeTokens`):

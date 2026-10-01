@@ -96,7 +96,14 @@ function instant(date: Date, name: string): number {
 	return ms;
 }
 
-const isDate = (date: Date): boolean => !Number.isNaN(date.getTime());
+/** A real `Date` holding an instant, read by its own value and never through a method it may override; anything else is not one. */
+const isDate = (date: unknown): boolean => {
+	try {
+		return !Number.isNaN(Date.prototype.getTime.call(date));
+	} catch {
+		return false;
+	}
+};
 
 function copyAuthorization(from: FederationGrantAuthorization): FederationGrantAuthorization {
 	// Field by field, and not a spread: what is stored is the authorization and
