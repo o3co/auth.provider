@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { readMfaEnrollmentWitness, type User } from "@o3co/auth-provider-core";
 import { delay, HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -109,6 +110,31 @@ describe("HttpUserRepository", () => {
 		it("returns null on 401", async () => {
 			const user = await repo.authenticateByToken("invalid-token");
 			expect(user).toBeNull();
+		});
+
+		it("hands mfaEnrolled through as the Store answered it, for core to read — a string included, which reads as malformed", async () => {
+			for (const [answered, reading] of [
+				[true, "enrolled"],
+				[false, "not_enrolled"],
+				["true", "malformed"],
+			] as const) {
+				server.use(
+					http.post(`${BASE_URL}/user/authenticate/token`, () =>
+						HttpResponse.json({ ...mockUser, mfaEnrolled: answered }, { status: 200 }),
+					),
+				);
+				const user = await repo.authenticateByToken("valid-token");
+				expect(user?.mfaEnrolled, String(answered)).toBe(answered);
+				expect(readMfaEnrollmentWitness(user as User), String(answered)).toBe(reading);
+			}
+			server.use(
+				http.post(`${BASE_URL}/user/authenticate/token`, () =>
+					HttpResponse.json(mockUser, { status: 200 }),
+				),
+			);
+			const unmarked = await repo.authenticateByToken("valid-token");
+			expect(unmarked).not.toHaveProperty("mfaEnrolled");
+			expect(readMfaEnrollmentWitness(unmarked as User)).toBe("not_enrolled");
 		});
 	});
 

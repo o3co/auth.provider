@@ -24,6 +24,7 @@ import type {
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import { assertSecureEndpoint, endpointForMessage } from "../endpointUrl.mjs";
+import { markMfaEnrolledAtStore } from "../mfa/markEnrolled.mjs";
 import {
 	bearerAuthorization,
 	checkStoreResponseCap,
@@ -249,6 +250,13 @@ export class HttpUserRepository implements UserRepository {
 	readonly findSubjectByFederatedIdentity?: (
 		identity: FederatedIdentityLookup,
 	) => Promise<FederatedIdentityLookupResult>;
+	/**
+	 * See {@link UserRepository.markMfaEnrolled}. Present only when
+	 * `markMfaEnrolledUrl` is configured, which is how
+	 * `supportsMfaEnrollmentWitness` detects it; written as the Store's MFA
+	 * endpoints are (`src/mfa/markEnrolled.mts`).
+	 */
+	readonly markMfaEnrolled?: (subject: string, enrolled: boolean) => Promise<void>;
 
 	constructor({
 		authenticateUrl,
@@ -256,6 +264,7 @@ export class HttpUserRepository implements UserRepository {
 		linkFederatedIdentityUrl,
 		findSubjectByFederatedIdentityUrl,
 		federatedIdentityLookupCoverage,
+		markMfaEnrolledUrl,
 		bearerToken,
 		timeout,
 		maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
@@ -268,6 +277,8 @@ export class HttpUserRepository implements UserRepository {
 		findSubjectByFederatedIdentityUrl?: string;
 		/** Which registrations the Store's lookup covers. Needs the URL; `[]` covers none. */
 		federatedIdentityLookupCoverage?: readonly FederatedIdentityLookupCoverage[];
+		/** Optional; the Store's MFA enrollment witness endpoint. Same https rule. */
+		markMfaEnrolledUrl?: string;
 		/**
 		 * Optional; sent to the Store on every request as `Authorization: Bearer
 		 * <token>`. A bare RFC 6750 token (no scheme) of at least
@@ -289,6 +300,11 @@ export class HttpUserRepository implements UserRepository {
 				"linkFederatedIdentityUrl",
 			);
 			this.linkFederatedIdentity = (userId, identity) => this.linkViaHttp(userId, identity);
+		}
+		if (markMfaEnrolledUrl !== undefined) {
+			const url = assertSecureEndpoint(markMfaEnrolledUrl, "markMfaEnrolledUrl");
+			this.markMfaEnrolled = (subject, enrolled) =>
+				markMfaEnrolledAtStore(url, this.settings(), OWNER, subject, enrolled);
 		}
 		this.coverage = validateCoverage(federatedIdentityLookupCoverage);
 		if (findSubjectByFederatedIdentityUrl !== undefined) {

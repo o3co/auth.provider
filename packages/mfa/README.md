@@ -93,7 +93,7 @@ Installed is on (the session-admission ADR's D7): a composition that wants no MF
 
 A `userSessionStore` without `recordSecondFactor` (core's `supportsSecondFactorUpdate`) cannot record a step-up: the module boots, says so once at warn (`mfa_step_up_unsupported`, with the adapter's `kind`), and the requirement sends a session to log in again where it would step it up.
 
-A directory without `markMfaEnrolled` (core's `supportsMfaEnrollmentWitness`), or none, cannot hold the enrollment witness: the module boots and says so once at warn (`mfa_enrollment_witness_unwritable`); D12's defence is then what the Store answers on `authenticate`. With `mfa.enrollment.requireEmailProof = "when-mail"` and no `mailSender`, a first binding asks for no proof: said once at warn (`mfa_first_binding_without_email_proof`) — notify account holders of `mfa.factor.enrolled` from the audit events.
+A directory without `markMfaEnrolled` (core's `supportsMfaEnrollmentWitness`), or none, cannot hold the enrollment witness: the module boots and says so once at warn (`mfa_enrollment_witness_unwritable`); D12's defence is then what the Store answers on `authenticate` and on `authenticateByToken`. With `mfa.enrollment.requireEmailProof = "when-mail"` and no `mailSender`, a first binding asks for no proof: said once at warn (`mfa_first_binding_without_email_proof`) — notify account holders of `mfa.factor.enrolled` from the audit events.
 
 ## The `mfa` requirement
 
