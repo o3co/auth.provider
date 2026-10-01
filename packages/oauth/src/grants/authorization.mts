@@ -49,6 +49,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
+import { usableFrontchannelLogoutUri } from "../logout/frontchannelLogoutUri.mjs";
 import { joinSession } from "../logout/sessionEnd.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
@@ -758,7 +759,14 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 								// from the logout cascade.
 								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
 								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-								frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
+								// Held to the redirect-URI rules here, before the page that
+								// renders it: a refused URI leaves this RP without a
+								// front-channel entry, and the exchange goes on.
+								frontchannelLogoutUri: usableFrontchannelLogoutUri(
+									() => clientRecord?.frontchannelLogoutUri,
+									{ site: "authorization_code", clientId: authenticatedClientId },
+									logger,
+								),
 								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
 								registeredAt: new Date(),
 							},

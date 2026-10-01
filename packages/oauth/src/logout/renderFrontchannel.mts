@@ -15,6 +15,7 @@
 
 import type { Logger } from "@o3co/auth-provider-core";
 import { auditErrorText, loggableError } from "@o3co/auth-provider-core";
+import { usableFrontchannelLogoutUri } from "./frontchannelLogoutUri.mjs";
 
 export interface FrontchannelRP {
 	readonly clientId: string;
@@ -37,8 +38,8 @@ export interface RenderFrontchannelLogoutHtmlOptions {
 	/** Defaults to 2000ms. */
 	readonly redirectDelayMs?: number;
 	/**
-	 * Optional logger for warning when an RP's frontchannelLogoutUri is invalid
-	 * and its iframe must be skipped. Falls back to `console` when omitted.
+	 * Optional logger for warning when an RP's frontchannelLogoutUri is refused
+	 * or its iframe must be skipped. Falls back to `console` when omitted.
 	 */
 	readonly logger?: Logger;
 }
@@ -68,8 +69,7 @@ const DEFAULT_REDIRECT_DELAY_MS = 2_000;
 
 /**
  * `baseUri` with `iss` (and optionally `sid`) set as query parameters,
- * through `URL` so an existing query is kept and a fragment stays last (RFC
- * 3986 §3.5) instead of swallowing the new parameters.
+ * through `URL` so an existing query is kept.
  */
 function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined): string {
 	const url = new URL(baseUri);
@@ -82,7 +82,8 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
 
 /**
  * Renders an OIDC Front-Channel Logout 1.0 page: one hidden `<iframe>` per RP
- * with a `frontchannelLogoutUri`, its URL carrying `iss` and, unless
+ * with a `frontchannelLogoutUri` core's `checkRedirectUri` accepts (any other
+ * is skipped with a warn), its URL carrying `iss` and, unless
  * `frontchannelLogoutSessionRequired` is `false`, `sid`. With
  * `postLogoutRedirectUri`, a `<script>` redirects after `redirectDelayMs` so
  * the iframes can load. Pure; callers MUST send it as
@@ -91,32 +92,33 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
 export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
 	const logger = opts.logger ?? console;
 	const iframes = opts.rps
-		.filter(
-			(rp): rp is FrontchannelRP & { frontchannelLogoutUri: string } =>
-				typeof rp.frontchannelLogoutUri === "string" && rp.frontchannelLogoutUri.length > 0,
-		)
-		.map((rp) => {
-			// A URI `URL` cannot parse (past schema validation, or a corrupt record)
-			// skips that RP's iframe: throwing after cascadeLogout has cleared
-			// session state would answer a 500 with an empty body.
+		.flatMap((rp) => {
+			// Held to the redirect-URI rules: a registry entry made before the
+			// code exchange checked it, or by a custom registry, is checked here.
+			const uri = usableFrontchannelLogoutUri(
+				() => rp.frontchannelLogoutUri,
+				{ site: "logout", clientId: rp.clientId },
+				logger,
+			);
+			if (uri === undefined) return [];
+			// A failure building the iframe URL skips that RP's iframe: throwing
+			// after cascadeLogout has cleared session state would answer a 500
+			// with an empty body.
 			try {
 				const includeSid = rp.frontchannelLogoutSessionRequired !== false;
-				const iframeSrc = buildIframeUrl(
-					rp.frontchannelLogoutUri,
-					opts.issuer,
-					includeSid ? opts.sid : undefined,
-				);
+				const iframeSrc = buildIframeUrl(uri, opts.issuer, includeSid ? opts.sid : undefined);
 				// `URL` encodes for URL context; the HTML attribute still needs `&amp;`.
-				return `<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`;
+				return [
+					`<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`,
+				];
 			} catch (err) {
 				logger.warn(
 					{ clientId: auditErrorText(rp.clientId), err: loggableError(err) },
 					"logout_frontchannel_iframe_skipped",
 				);
-				return ""; // skipped; filtered out below
+				return [];
 			}
 		})
-		.filter((s) => s.length > 0)
 		.join("\n    ");
 
 	const delay = opts.redirectDelayMs ?? DEFAULT_REDIRECT_DELAY_MS;

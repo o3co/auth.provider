@@ -1,9 +1,6 @@
 import { assert, describe, expect, it } from "vitest";
 import { createMockLogger, type MockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
-import {
-	expectBestEffortWarn,
-	serialisedCalls,
-} from "../../__tests__/_helpers/projectedLog.mjs";
+import { expectBestEffortWarn, serialisedCalls } from "../../__tests__/_helpers/projectedLog.mjs";
 import { type FrontchannelRP, renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
 
 describe("renderFrontchannelLogoutHtml", () => {
