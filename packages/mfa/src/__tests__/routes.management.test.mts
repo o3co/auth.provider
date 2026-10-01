@@ -280,25 +280,20 @@ describe("POST /session/mfa/factors/rename", () => {
 	it("answers 409 mfa_factor_conflict when the factor moved since it was read, writing nothing more", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
-		const read = built.factorStore.list.bind(built.factorStore);
-		vi.spyOn(built.factorStore, "list").mockImplementationOnce(async (subject) => {
-			const records = await read(subject);
-			const [record] = records;
-			if (record !== undefined) {
-				await built.factorStore.update(subject, record.id, record.version, {
-					data: record.data,
-					label: "Moved",
-					lastUsedAt: record.lastUsedAt,
-				});
-			}
-			return records;
-		});
+		const write = built.factorStore.update.bind(built.factorStore);
+		// Another write lands between the rename's read and its compare-and-set.
+		vi.spyOn(built.factorStore, "update").mockImplementationOnce(
+			async (subject, id, expectedVersion, next) => {
+				await write(subject, id, expectedVersion, { ...next, label: "Moved" });
+				return write(subject, id, expectedVersion, next);
+			},
+		);
 
 		const res = await rename(agent, { factor_id: totp.record.id, label: "Work phone" });
 
 		expect(res.status, JSON.stringify(res.body)).toBe(409);
 		expect(res.body).toEqual(FACTOR_CONFLICT);
-		expect((await read(ALICE.id))[0]?.label).toBe("Moved");
+		expect((await built.factorStore.list(ALICE.id))[0]?.label).toBe("Moved");
 	});
 
 	it("answers 400 for a label a page cannot show as it is, and for a factor that is not the subject's", async () => {

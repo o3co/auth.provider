@@ -60,7 +60,8 @@
  * section gives none.
  *
  * Contributes `mfa.manage`, graded `credential_change`, as the admission
- * action its routes admit a signed-in session's enrollment for.
+ * action its routes admit a signed-in session's enrollment, rename or removal
+ * for, and `mfa.view`, graded `use`, for the list of its factors.
  *
  * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
  * session middleware. Their factory runs after every factor has registered,
@@ -537,6 +538,13 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							}),
 							logger,
 							auditSink: deps.auditSink,
+							management: {
+								factors: deps.mfaFactorResolver,
+								factorStore: deps.mfaFactorStore,
+								sealing,
+								mode,
+								witness,
+							},
 						}),
 					};
 				},

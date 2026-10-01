@@ -692,6 +692,13 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/mfa/src/firstBinding.mts",
 		definition: /(?:function|const)\s+mayCount\b/,
 	},
+	{
+		concept:
+			"what a factor record can do — usable, unreadable, not installed or a known exhausted recovery set — and whether it serves a login's ask for a second factor (the MFA ADR's F3, F4)",
+		home: "packages/mfa/src/factorState.mts",
+		definition: /(?:function|const)\s+(?:readFactorRecord|recordServes|holdsUsableRecord)\b/,
+		homeMatches: 3,
+	},
 ];
 
 /**

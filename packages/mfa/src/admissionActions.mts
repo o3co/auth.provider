@@ -19,8 +19,9 @@ import type { AdmissionActionDeclaration } from "@o3co/auth-provider-core";
 /**
  * The actions the MFA package's routes admit a browser session for, with the
  * grade each is registered under: `mfa.manage` — enrolling a factor outside a
- * login, removing one, regenerating recovery codes — changes the ways into
- * the account, so it is a `credential_change`.
+ * login, renaming or removing one, regenerating recovery codes — changes the
+ * ways into the account, so it is a `credential_change`; `mfa.view` — listing
+ * the subject's factors — reads them, so it is a `use`.
  *
  * Declared, and registered by no module: a module registers only what its
  * own code admits, and the module whose route admits a session contributes
@@ -28,6 +29,7 @@ import type { AdmissionActionDeclaration } from "@o3co/auth-provider-core";
  */
 export const MFA_ADMISSION_ACTIONS = Object.freeze({
 	"mfa.manage": Object.freeze({ grade: "credential_change" }),
+	"mfa.view": Object.freeze({ grade: "use" }),
 } as const satisfies Readonly<Record<string, AdmissionActionDeclaration>>);
 
 /** An action the MFA package's routes admit. */

@@ -145,6 +145,20 @@ function compareAddress(
 	}
 }
 
+/**
+ * Whether `address`, as the account's user record holds it, is the one
+ * `recorded` is the digest of — what a login code is held to: an account
+ * with no address is a mismatch.
+ */
+export function matchesRecordedAddress(
+	digests: MfaDigests,
+	address: unknown,
+	recorded: unknown,
+): "match" | "mismatch" | { readonly keyUnavailable: string } {
+	const to = normaliseMailAddress(address);
+	return to === undefined ? "mismatch" : compareAddress(digests, to, recorded);
+}
+
 /** Sends `options.mail` in the order this file's header states. */
 export async function sendMfaMail<Refusal>(
 	options: SendMfaMailOptions<Refusal>,
@@ -155,13 +169,11 @@ export async function sendMfaMail<Refusal>(
 	if (sender === undefined) return { outcome: "no_sender" };
 	const to = normaliseMailAddress(options.address);
 	if (purpose === "login_code") {
-		if (to === undefined) return { outcome: "address_mismatch" };
-		const compared = compareAddress(digests, to, mail.addressDigest);
+		const compared = matchesRecordedAddress(digests, options.address, mail.addressDigest);
 		if (compared === "mismatch") return { outcome: "address_mismatch" };
 		if (compared !== "match") return { outcome: "key_unavailable", keyId: compared.keyUnavailable };
-	} else if (to === undefined) {
-		return { outcome: "no_address" };
 	}
+	if (to === undefined) return { outcome: "no_address" };
 	const expiresAtMs = Math.min(mail.expiresAtMs ?? notAfterMs, notAfterMs);
 	const kept = await options.keep(digests.digest([to]), expiresAtMs);
 	if (!kept.kept) return { outcome: "not_kept", refusal: kept.refusal };

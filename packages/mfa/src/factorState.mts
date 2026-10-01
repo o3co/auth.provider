@@ -15,18 +15,24 @@
  */
 
 /**
- * The one reading of what a subject's factor record can do now, for every
- * decision made over the records — the login's interruption, a step-up, the
- * factors a transaction offers — and for the account page's list.
+ * The one reading of what a subject's factor record can do now, for the
+ * decisions made over the records and for the account page's list.
  *
  * - `not_installed`: no installed factor verifies its kind.
  * - `unreadable`: its data does not open, a key that left the ring included.
- * - `exhausted`: a recovery-code set with no code left. It stays on record,
- *   for audit, and serves no decision.
- * - `usable`: anything else; the state a second factor is verified in.
+ * - `exhausted`: a recovery-code set whose data opened and holds no code
+ *   left. It stays on record, for audit.
+ * - `usable`: anything else.
  *
- * A record serves in every state but `exhausted`: one the provider cannot
- * read, or whose kind it no longer installs, fails closed and serves.
+ * Three judgments stay apart:
+ * - whether a factor can be presented — offered at a challenge or a
+ *   step-up: `usable` alone (`holdsUsableRecord`);
+ * - whether a login asks for a second factor: a record serves
+ *   (`recordServes`) in every state but `exhausted`, so one the provider
+ *   cannot read — a TOTP whose key is lost among them — or whose kind it no
+ *   longer installs fails closed and asks;
+ * - whether a first binding may open: `mayCount` (`firstBinding.mts`), which
+ *   reads no data.
  */
 
 import type {
