@@ -15,8 +15,7 @@
  */
 
 /**
- * The WebAuthn second factor's section, `webauthn-mfa-factor` (the MFA ADR's
- * D19 `mfa.factors.webauthn`, in the configuration's own shape), which its
+ * The WebAuthn second factor's section, `webauthn-mfa-factor`, which its
  * module reads: its switch and the user verification its ceremonies ask for,
  * each read from the string its variable carries, and an unknown key refused
  * by its name. Its defaults — off, `preferred` — are the package's
@@ -33,7 +32,7 @@ import { webauthnMfaFactorConfigForTests } from "#/testing/index.mjs";
 const REFERENCE = fileURLToPath(new URL("../../config/reference.conf", import.meta.url));
 
 describe("webauthn-mfa-factor, the WebAuthn second factor's section", () => {
-	it("accepts the MFA ADR's defaults: off, and user verification preferred", () => {
+	it("accepts the defaults: off, and user verification preferred", () => {
 		expect(
 			webauthnMfaFactorConfigSchema.parse({ enabled: false, userVerification: "preferred" }),
 		).toEqual({ enabled: false, userVerification: "preferred" });

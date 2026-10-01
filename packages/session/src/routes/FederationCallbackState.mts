@@ -24,7 +24,6 @@
 import {
 	type FederationProvider,
 	type Logger,
-	loggableError,
 	resolveFederationResponseMode,
 } from "@o3co/auth-provider-core";
 import type { Request, Response } from "express";
@@ -35,7 +34,11 @@ import type {
 import { abandonCookieSession, SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
-import { type FederationStoreStep, logStoreUnavailable } from "./FederationLog.mjs";
+import {
+	type FederationStoreStep,
+	logCleanupFailed,
+	logStoreUnavailable,
+} from "./FederationLog.mjs";
 
 /**
  * Read, check and retire the callback's ephemeral state. Answers and
@@ -91,10 +94,7 @@ export const consumeCallbackState = async (
 	const discardTransaction = async (): Promise<void> => {
 		const discardErr = await consumeTransaction();
 		if (discardErr) {
-			log.warn(
-				{ store: "federation_transaction", step: "delete", err: loggableError(discardErr) },
-				"federation_cleanup_failed",
-			);
+			logCleanupFailed(log, "federation_transaction", "delete", discardErr);
 			abandonCookieSession(req);
 		}
 	};

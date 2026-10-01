@@ -25,7 +25,7 @@
 
 import {
 	type FederationGrantAuthorization,
-	type FederationGrantCredentials,
+	type FederationGrantCredentialsInput,
 	type FederationGrantStore,
 	hasFederationGrantAuthorization,
 } from "@o3co/auth-provider-core";
@@ -113,13 +113,14 @@ const authorization = (
 	...over,
 });
 
-const credentials = (tag = "1"): FederationGrantCredentials => ({
+const credentials = (tag = "1"): FederationGrantCredentialsInput => ({
 	refreshToken: `rt-${tag}`,
 	accessToken: {
 		value: `at-${tag}`,
 		tokenType: "Bearer",
 		obtainedAt: at(2 * MIN),
 		issuedLifetime: 3600,
+		effectiveExpiresAt: at(62 * MIN),
 		scopes: [...SCOPES],
 	},
 });

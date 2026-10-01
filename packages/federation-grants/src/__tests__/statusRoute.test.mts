@@ -125,6 +125,7 @@ describe("the status route — what it reports", () => {
 					tokenType: "Bearer",
 					obtainedAt: h.world.now,
 					issuedLifetime: 3600,
+					effectiveExpiresAt: new Date(h.world.now.getTime() + 3_600_000),
 					scopes: ["openid"],
 				},
 			},

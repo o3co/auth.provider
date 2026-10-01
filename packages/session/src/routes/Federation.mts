@@ -58,7 +58,6 @@ import {
 import { SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { loginRequestFacts } from "../internal/loginRequest.mjs";
-import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { identifyFederatedUser } from "./FederationCallbackIdentity.mjs";
 import { readCallbackParams, resolveCallbackProvider } from "./FederationCallbackRequest.mjs";
 import { consumeCallbackState } from "./FederationCallbackState.mjs";
@@ -69,9 +68,9 @@ import {
 	type FederationStore,
 	type FederationStoreStep,
 	logCleanupFailed,
-	logMisconfigured,
 	logStoreUnavailable,
 } from "./FederationLog.mjs";
+import { redirectAfterCallback } from "./FederationRedirectAnswer.mjs";
 import { createStartHandler } from "./FederationStart.mjs";
 import { createTransactionCookie, readSessionCookieName } from "./FederationTransactionCookie.mjs";
 
@@ -255,9 +254,8 @@ export const createRouter = (
 		req: Request,
 		res: Response,
 	): Promise<unknown> => {
-		// Per-handler logger child carrying the provider binding. After
-		// `randomUUID()` produces `sid` below, we rebind to include `sid`
-		// so subsequent calls do not need to repeat either field.
+		// Bound to the provider; the login's reporter rebinds it with the `sid`
+		// `establishSession` creates, so every later line carries both.
 		let log = logger.child({ provider: provider.name });
 
 		const fed = await consumeCallbackState(ctx, provider, params, req, res, log);
@@ -410,21 +408,7 @@ export const createRouter = (
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 
-		// Resolve the redirect URL via the federation's redirect policy.
-		const callbackPolicy = federationRedirectPolicyResolver.get(provider.name);
-		if (!callbackPolicy) {
-			logMisconfigured(log, "no_redirect_policy");
-			return res.status(500).json({
-				error: "internal_error",
-				error_description: "redirect policy not registered for provider",
-			});
-		}
-		const redirectResult = callbackPolicy.resolveCallbackRedirect({ redirectTo });
-		if (!redirectResult.ok) {
-			return res.status(redirectResult.status).json(refusalEnvelope(redirectResult, log));
-		}
-
-		return res.redirect(redirectResult.value);
+		return redirectAfterCallback(ctx, provider, redirectTo, res, log);
 	};
 
 	/**

@@ -35,6 +35,7 @@ A deployment that only wires the bundled stores and modules has nothing to chang
 | `DeviceAuthorization` (later) | `amr`, `authTimeMs`: the approving session's vouched `amr` and when it authenticated (epoch milliseconds), recorded when `approve` is handed them; `undefined` otherwise. `ApproveDeviceAuthorizationInput.amr` and `authTime` stay optional. A `DeviceCodeStore` of your own records what core's `recordableDeviceApproval({ amr, authTime }, nowMs)` answers — never its own input — and returns it. The function refuses with a `RangeError` an `amr` that is not a non-empty list of non-empty strings, and an `authTime` that is not a valid `Date` at or after the epoch or is further ahead of `nowMs` than `DEFAULT_CLOCK_SKEW_MS`; it answers a frozen copy of the `amr` and the instant no later than `nowMs`. A refused approval records nothing; the conformance suite checks all of this. A Redis `DeviceCodeStoreClient` of your own writes both fields in `decide`'s same atomic write as the approval, or every approval reads both as absent. A record approved before the upgrade, or by a replica not yet upgraded, reads both as `undefined`, which reads as "cannot tell" and fails closed downstream. Nothing needs migrating. | — |
 | `FederationGrantIntent` | `resource`, `upstreamSubject` | #658 |
 | `FederationGrantAuthorization`, `FederationGrantUsage`, `FederationGrantCredentials` | `resource`; `lastUsedAt`, `ineligible`, `refreshFailure`; `accessToken` | #657 |
+| `FederationGrantCredentialsInput` (new: what `FederationGrantStore.activate` / `replaceCredentials` take) | the access token's `effectiveExpiresAt`, as a `Date`: when the token ends. What a store answers, `FederationGrantCredentials`, keeps it optional — a record written before the field, or rewritten by an earlier release during a rolling deploy, has none, and ends at `obtainedAt + issuedLifetime`. A store of your own keeps it as given and reads it back absent when it has none, as before. | — |
 | `FederationGrantRefreshFailure` (the stored stamp) | `retryAfterSeconds`, `upstreamCode`. It no longer `extends` `FederationGrantRefreshFailureInput`, whose fields stay optional. | #657 |
 | Redis `NoteFederationGrantRefreshFailureInput` | `retryAfterSeconds`, `upstreamCode` | #657 |
 | `UserSession`, `CreateUserSessionInput` | `amr` | #659 |
@@ -73,9 +74,10 @@ Inputs that were optional are now keys you name:
 - `PendingConsentStore.set` takes `state`;
 - the Redis consent client's `grant` takes `expiry`;
 - the Redis grant client's `noteRefreshFailure` takes `retryAfterSeconds` / `upstreamCode`;
-- `FederationGrantStore.activate` / `replaceCredentials` take `authorization.resource` / `credentials.accessToken`.
+- `FederationGrantStore.activate` / `replaceCredentials` take `authorization.resource` / `credentials.accessToken`;
+- and, later, an access token's `effectiveExpiresAt` as a `Date`. Build the token with `federationGrantAccessToken(token, lifetime)` from a lifetime reading, as the bundled writers do.
 
-Write `undefined` where you have nothing. That makes "no expiry", "no state" or "no access token" something the code says, not something it arrives at by leaving a field out.
+Write `undefined` where you have nothing. That makes "no expiry", "no state" or "no access token" something the code says, not something it arrives at by leaving a field out. The one exception is an access token's `effectiveExpiresAt` on what you write: it is a `Date`, never `undefined`.
 
 ## What is observable at runtime, not only in the types
 

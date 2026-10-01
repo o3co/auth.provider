@@ -196,6 +196,7 @@ const seed = async (store: FederationGrantStore, spent = false): Promise<void> =
 				// spent and inside the refresh buffer.
 				obtainedAt: spent ? new Date(at.getTime() - 3_600_000) : at,
 				issuedLifetime: 3600,
+				effectiveExpiresAt: spent ? at : new Date(at.getTime() + 3_600_000),
 				scopes: [...SCOPES],
 			},
 		},
