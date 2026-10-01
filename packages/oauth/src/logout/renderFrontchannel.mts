@@ -89,26 +89,32 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
 type PostLogoutRedirectRefusal = RedirectUriRejection["reason"] | "not-a-string" | "unreadable";
 
 /**
- * A trailing `state` pair as `URLSearchParams` writes it, the way the logout
- * route appends the RP's `state` to a registered URI: `?` or `&`, then
- * `state=`, then only what form encoding emits (letters, digits, `*-._`, `%`
- * escapes and `+`). It is last: a registered URI has no fragment and no
- * `state` of its own.
+ * A parsed query that ends in a `state` pair as `URLSearchParams` writes it,
+ * the way the logout route appends the RP's `state` to a registered URI:
+ * `state=` and only what form encoding emits (letters, digits, `*-._`, `%`
+ * escapes and `+`), last, since a registered URI carries no `state` of its
+ * own. Group 1 is the query before it, if any.
  */
-const APPENDED_STATE = /[?&]state=[A-Za-z0-9*._%+-]*$/;
+const APPENDED_STATE_QUERY = /^\?(?:(.+)&)?state=[A-Za-z0-9*._%+-]*$/;
 
 /**
  * `raw` with the `state` pair the caller appends set aside, when it is
- * exactly that pair; otherwise `raw` itself. The rest is kept byte for byte,
- * and anything else in the query, another `state` included, stays for the
- * check to judge.
+ * exactly that pair; otherwise `raw` itself. The query is located by the URL
+ * parser, never by searching the string, and only when `raw` ends in it
+ * byte for byte (no fragment, nothing the parser rewrote). The rest is kept
+ * as written, another `state` included, for the check to judge.
  */
 function withoutAppendedState(raw: string): string {
-	const appended = APPENDED_STATE.exec(raw);
-	if (appended === null) return raw;
-	const rest = raw.slice(0, appended.index);
-	// An empty pair left behind is the check's to refuse, so keep it in view.
-	return rest.endsWith("?") || rest.endsWith("&") ? raw : rest;
+	let search: string;
+	try {
+		search = new URL(raw).search;
+	} catch {
+		return raw;
+	}
+	const appended = APPENDED_STATE_QUERY.exec(search);
+	if (appended === null || !raw.endsWith(search)) return raw;
+	const before = appended[1];
+	return raw.slice(0, raw.length - search.length) + (before === undefined ? "" : `?${before}`);
 }
 
 /**
