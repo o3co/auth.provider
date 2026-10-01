@@ -15,6 +15,7 @@
  */
 
 import {
+	DEFAULT_CLOCK_SKEW_MS,
 	getBoundMfaTransaction,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_WEEKLY_WINDOW_MS,
@@ -1655,8 +1656,9 @@ export function runMfaTransactionStoreContract(
 	describe("MfaTransactionStore contract: a subject's first-binding mark", () => {
 		// When a first counting factor was last bound for a subject, or its
 		// witness marked (the MFA ADR's D12): a session or a login authenticated
-		// no later than it may hold a stale witness. It stands until its end on
-		// the store's clock, and the latest mark is the one kept.
+		// no later than it may hold a stale witness. A mark distrusts, so every
+		// doubt keeps it: it stands until its end on the store's clock alone,
+		// and of two marks the store keeps the later time and the later end.
 
 		/** A whole millisecond at or after both clocks: the host's, which a write is checked against, and the store's. */
 		const nowOnBoth = async (): Promise<number> =>
@@ -1668,48 +1670,56 @@ export function runMfaTransactionStoreContract(
 			expect(await store.firstBindingAt("user-1", now)).toBeNull();
 			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
 			expect(await store.firstBindingAt("user-1", now)).toBe(now);
-			expect(await store.firstBindingAt("user-1", now + 10 * MINUTE - 1)).toBe(now);
 		});
 
-		it("keeps the latest mark: a later one replaces an earlier one, its end with it, and an earlier one never replaces a later one", async () => {
-			const store = await factory();
-			const now = await nowOnBoth();
-			await store.noteFirstBinding("user-1", now - 2 * MINUTE, now + 20 * MINUTE);
-			await store.noteFirstBinding("user-1", now - MINUTE, now + 10 * MINUTE);
-			expect(await store.firstBindingAt("user-1", now)).toBe(now - MINUTE);
-			expect(await store.firstBindingAt("user-1", now + 10 * MINUTE)).toBeNull();
-			// An earlier one changes nothing, however long it would stand.
-			await store.noteFirstBinding("user-1", now - 3 * MINUTE, now + 30 * MINUTE);
-			expect(await store.firstBindingAt("user-1", now)).toBe(now - MINUTE);
-			expect(await store.firstBindingAt("user-1", now + 10 * MINUTE)).toBeNull();
-		});
-
-		it("keeps, of two marks noted at the same time, the one that stands longer", async () => {
-			const store = await factory();
-			const now = await nowOnBoth();
-			await store.noteFirstBinding("user-1", now - MINUTE, now + 5 * MINUTE);
-			await store.noteFirstBinding("user-1", now - MINUTE, now + 10 * MINUTE);
-			expect(await store.firstBindingAt("user-1", now + 6 * MINUTE)).toBe(now - MINUTE);
-			await store.noteFirstBinding("user-1", now - MINUTE, now + 3 * MINUTE);
-			expect(await store.firstBindingAt("user-1", now + 6 * MINUTE)).toBe(now - MINUTE);
-		});
-
-		it("keeps the latest of N notes in flight", async () => {
-			const store = await factory();
-			const now = await nowOnBoth();
-			const times = [3, 9, 1, 7, 5, 0, 8, 2, 6, 4].map((i) => now - (10 - i) * 1_000);
-			await Promise.all(times.map((at) => store.noteFirstBinding("user-1", at, at + 10 * MINUTE)));
-			expect(await store.firstBindingAt("user-1", now)).toBe(now - 1_000);
-		});
-
-		it("answers no mark at a time at or past its end, though the store still holds it", async () => {
+		it("answers a mark while it stands on the store's clock, whatever time a caller asks about", async () => {
+			// A caller whose clock runs ahead never ends a mark early.
 			const store = await factory();
 			const now = await nowOnBoth();
 			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
-			expect(await store.firstBindingAt("user-1", now + 10 * MINUTE)).toBeNull();
-			expect(await store.firstBindingAt("user-1", now + 11 * MINUTE)).toBeNull();
-			// Still held for a caller whose time is inside it.
-			expect(await store.firstBindingAt("user-1", now)).toBe(now);
+			expect(await store.firstBindingAt("user-1", now + 10 * MINUTE)).toBe(now);
+			expect(await store.firstBindingAt("user-1", now + 11 * MINUTE)).toBe(now);
+		});
+
+		it("keeps the later time of the mark held and the one noted: an earlier note never moves it back", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.noteFirstBinding("user-1", now - 2 * MINUTE, now + 10 * MINUTE);
+			await store.noteFirstBinding("user-1", now - MINUTE, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - MINUTE);
+			await store.noteFirstBinding("user-1", now - 3 * MINUTE, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - MINUTE);
+		});
+
+		it("keeps the later end of the mark held and the one noted: a note that ends sooner never shortens it", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.noteFirstBinding("user-1", now - 2 * MINUTE, now + 2_000);
+			// Later, and ending sooner: its time is kept, the held end stands.
+			await store.noteFirstBinding("user-1", now - MINUTE, now + 1_000);
+			await expiry.passed(now + 1_000);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - MINUTE);
+			await expiry.passed(now + 2_000);
+			expect(await store.firstBindingAt("user-1", now)).toBeNull();
+		});
+
+		it("keeps the latest time and the latest end of N notes in flight", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			// The latest time is the last step's; the latest end is the first's.
+			const steps = [3, 9, 1, 7, 5, 0, 8, 2, 6, 4];
+			await Promise.all(
+				steps.map((i) =>
+					store.noteFirstBinding(
+						"user-1",
+						now - (10 - i) * 1_000,
+						i === 0 ? now + 10 * MINUTE : now + 2_000,
+					),
+				),
+			);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - 1_000);
+			await expiry.passed(now + 2_000);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - 1_000);
 		});
 
 		it("forgets a mark once the store's clock passes its end, whatever time a caller asks about", async () => {
@@ -1750,6 +1760,7 @@ export function runMfaTransactionStoreContract(
 			await store.noteFirstBinding("user-2", now - MINUTE, now + 10 * MINUTE);
 			expect(await store.firstBindingAt("user-1", now)).toBe(now);
 			expect(await store.firstBindingAt("user-2", now)).toBe(now - MINUTE);
+			// The mark is not lock state: clearing the lock trusts no stale session.
 			await store.clearSubjectState("user-1");
 			expect(await store.firstBindingAt("user-1", now)).toBe(now);
 			// Nor is a session's proof of a subject its mark.
@@ -1775,10 +1786,16 @@ export function runMfaTransactionStoreContract(
 				["an end that is not whole", "user-1", now, later + 0.5],
 				["an end past the Date range", "user-1", now, 1e17],
 				[
-					"a time further ahead of the store's clock than the skew allowance",
+					"a time further ahead of the store's clock than the clock skew allowed",
 					"user-1",
-					now + MFA_CLOCK_SKEW_ALLOWANCE_MS + MINUTE,
-					now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 10 * MINUTE,
+					now + DEFAULT_CLOCK_SKEW_MS + MINUTE,
+					now + DEFAULT_CLOCK_SKEW_MS + 10 * MINUTE,
+				],
+				[
+					"a time further behind the store's clock than the clock skew allowed",
+					"user-1",
+					now - DEFAULT_CLOCK_SKEW_MS - MINUTE,
+					later,
 				],
 			] as const) {
 				await expect(

@@ -24,10 +24,10 @@
 
 import { describe, expect, it } from "vitest";
 import * as core from "#/index.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import { isMfaFactorUpdateWritten, type MfaFactorRecord } from "#/mfa/factorStore.mjs";
 import {
 	isConsumedMfaTransaction,
-	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	type MfaTransaction,
 	readFirstBindingAt,
 	readMfaAttemptReservation,
@@ -267,17 +267,15 @@ describe("readFirstBindingAt", () => {
 		expect(readFirstBindingAt(0, NOW)).toBe(0);
 	});
 
-	it("reads a mark noted ahead of the time asked about, up to the skew allowance, as noted", () => {
+	it("reads a mark noted ahead of the time asked about, up to the clock skew allowed, as noted", () => {
 		// The mark bounds which sessions are trusted: read earlier, it would
 		// trust one it should not.
 		expect(readFirstBindingAt(NOW + 60_000, NOW)).toBe(NOW + 60_000);
-		expect(readFirstBindingAt(NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS, NOW)).toBe(
-			NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS,
-		);
+		expect(readFirstBindingAt(NOW + DEFAULT_CLOCK_SKEW_MS, NOW)).toBe(NOW + DEFAULT_CLOCK_SKEW_MS);
 	});
 
 	it.each<[string, unknown]>([
-		["a time further ahead than the skew allowance", NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1],
+		["a time further ahead than the clock skew allowed", NOW + DEFAULT_CLOCK_SKEW_MS + 1],
 		["a time before the epoch", -1],
 		["a time that is not whole", NOW - 0.5],
 		["a time that is not a number", Number.NaN],

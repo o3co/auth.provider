@@ -231,7 +231,7 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		expect(store.firstBindingMarks).toBe(1);
 	});
 
-	it("takes a subject's later note at its cap, and answers an earlier one at its cap without a refusal: neither is a new entry", async () => {
+	it("takes a subject's later note, and an earlier one, at its cap: a note for a subject with a mark is no new entry", async () => {
 		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 1 });
 		await store.noteFirstBinding("user-1", T0, T0 + 300_000);
 		await store.noteFirstBinding("user-1", T0 + 1_000, T0 + 300_000);
