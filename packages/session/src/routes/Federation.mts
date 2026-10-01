@@ -66,11 +66,9 @@ import { consentedScope } from "../federations/consented-scope.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
 import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
 import {
-	createFederationTransactionStore,
 	DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
 	deriveFederationTransactionCookieName,
 	type FederationTransactionEnvelope,
-	type FederationTransactionSessionStore,
 	type FederationTransactionStore,
 	type LinkIntent,
 	mintFederationTransactionId,
@@ -93,6 +91,7 @@ import {
 	logMisconfigured,
 	logStoreUnavailable,
 } from "./FederationLog.mjs";
+import { createTransactionCookie, readSessionCookieName } from "./FederationTransactionCookie.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -156,24 +155,6 @@ const upstreamAmrOf = (profile: Readonly<Record<string, unknown>>): readonly str
 const recordedTokenType = (named: unknown): string | undefined => {
 	if (named === undefined) return undefined;
 	return typeof named === "string" ? named : "";
-};
-
-/**
- * The session cookie name assumed when neither
- * `federationTransactionCookieName` nor the configuration's
- * `session-store.name` is given (a router built by hand; the session module
- * passes the name the `sessionCookiePolicy` slot carries): the package
- * default without `__Host-`.
- */
-const FALLBACK_SESSION_COOKIE_NAME = "auth.session";
-
-/** Read `session-store.name` without assuming the caller supplied a full configuration. */
-const readSessionCookieName = (config: unknown): string => {
-	if (config == null || typeof config !== "object") return FALLBACK_SESSION_COOKIE_NAME;
-	const store = (config as { "session-store"?: unknown })["session-store"];
-	if (store == null || typeof store !== "object") return FALLBACK_SESSION_COOKIE_NAME;
-	const name = (store as { name?: unknown }).name;
-	return typeof name === "string" && name.length > 0 ? name : FALLBACK_SESSION_COOKIE_NAME;
 };
 
 /** Read `config.session.csrf.trustedOrigins` without assuming a full AppConfig. */
@@ -312,64 +293,12 @@ export const createRouter = (
 		deriveFederationTransactionCookieName(readSessionCookieName(config));
 	const linkTrustedOrigins = readCsrfTrustedOrigins(config);
 
-	/**
-	 * The federation transaction store, over the express-session store the
-	 * session middleware mounted (taken off the request, not injected, so it
-	 * cannot point elsewhere). Absent means no session middleware — a
-	 * composition error the `form_post` start refuses.
-	 */
-	const transactionStore = (req: Request): FederationTransactionStore | undefined => {
-		const store = (req as unknown as { sessionStore?: unknown }).sessionStore;
-		if (store == null || typeof store !== "object") return undefined;
-		const candidate = store as Partial<FederationTransactionSessionStore>;
-		if (
-			typeof candidate.get !== "function" ||
-			typeof candidate.set !== "function" ||
-			typeof candidate.destroy !== "function"
-		) {
-			return undefined;
-		}
-		return createFederationTransactionStore(candidate as FederationTransactionSessionStore);
-	};
-
-	/**
-	 * The path the transaction cookie is scoped to: the provider's callback
-	 * route only. A `SameSite=None` cookie rides every cross-site request to a
-	 * matching path, so the narrower the better.
-	 */
-	const transactionCookiePath = (provider: FederationProvider): string | undefined => {
-		const callbackUrl = providerCallbackUrls.get(provider.name);
-		if (!callbackUrl) return undefined;
-		try {
-			return new URL(callbackUrl).pathname;
-		} catch {
-			return undefined;
-		}
-	};
-
-	/** Attributes shared by the `Set-Cookie` that issues the cookie and the one that clears it. */
-	const transactionCookieAttributes = (path: string) =>
-		({
-			httpOnly: true,
-			// `SameSite=None` is what makes the cookie reach a cross-site POST,
-			// and every current browser drops such a cookie unless it is also
-			// `Secure`. Apple refuses a non-`https` redirect URI anyway, so a
-			// form_post federation is HTTPS-only regardless.
-			secure: true,
-			sameSite: "none",
-			path,
-		}) as const;
-
-	/**
-	 * Drop the transaction cookie. Called on every callback exit — success,
-	 * refusal and error alike — so a consumed or unusable transaction never
-	 * leaves a cookie behind for the next attempt to trip over.
-	 */
-	const clearTransactionCookie = (provider: FederationProvider, res: Response): void => {
-		const path = transactionCookiePath(provider);
-		if (path === undefined) return;
-		res.clearCookie(transactionCookieName, transactionCookieAttributes(path));
-	};
+	const {
+		transactionStore,
+		transactionCookiePath,
+		transactionCookieAttributes,
+		clearTransactionCookie,
+	} = createTransactionCookie(providerCallbackUrls, transactionCookieName);
 
 	/**
 	 * Link a federated identity to the account the browser is signed in as,
