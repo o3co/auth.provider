@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 import {
 	createMemoryFederationGrantIntentStore,
 	type MemoryFederationGrantIntentStore,
@@ -27,6 +27,8 @@ import {
 import {
 	type FederationGrantAcquisitionConnection,
 	type FederationGrantLodgingDeps,
+	type FederationGrantLodgingResult,
+	type FederationGrantReauthorizationResult,
 	federationGrantRedirectUriReservedParameter,
 	lodgeFederationGrantIntent,
 	lodgeFederationGrantReauthorization,
@@ -755,6 +757,14 @@ describe("lodging a reauthorization", () => {
 			ok: false,
 			reason: "authorization_pending",
 		});
+	});
+
+	it("admits no connection_not_configured in its result type: a removed connection is not permitted", () => {
+		type ReasonOf<R> = R extends { readonly ok: false; readonly reason: infer X } ? X : never;
+		type Admits<R> = "connection_not_configured" extends ReasonOf<R> ? true : false;
+		expectTypeOf<Admits<FederationGrantReauthorizationResult>>().toEqualTypeOf<false>();
+		// The control: a first intent still answers it.
+		expectTypeOf<Admits<FederationGrantLodgingResult>>().toEqualTypeOf<true>();
 	});
 
 	it("refuses a client that may no longer use the grant's connection", async () => {
