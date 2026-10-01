@@ -115,13 +115,11 @@ export function createConnectHandler({
 					if (location === undefined) {
 						// Registration holds a page to the issuer's origin; a resolver built
 						// without the issuer does not. A composition fault, never followed.
-						log
-							.bound({
-								grantId: intent.grantId,
-								correlationId: requestIdOf(res),
-								requirement: judged.stepUp.requirement,
-							})
-							.error({}, "federation_grant_step_up_page_off_origin");
+						log.misconfigured("federation_grant_step_up_page_off_origin", {
+							grantId: intent.grantId,
+							correlationId: requestIdOf(res),
+							requirement: judged.stepUp.requirement,
+						});
 						plain(res, 500, "Something went wrong.");
 						return;
 					}

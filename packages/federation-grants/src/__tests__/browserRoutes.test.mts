@@ -3931,13 +3931,12 @@ describe("the browser half on session admission", () => {
 		}
 	});
 
-	it("answers a step-up at connect with the plain 403 a dead session gets, and parks nothing", async () => {
-		// Treated as reauthentication_required in this release: the MFA ADR's
-		// step 14 decides whether connect sends the browser on a trip instead.
+	it("answers a step-up at connect, on the return from its trip, with the plain 403 a dead session gets, and parks nothing", async () => {
+		// The trip itself: browserConnect.stepUp.test.mts.
 		const w = world({ requirements: [fixture(on("federation_grants.connect", STEP_UP))] });
 		const { handle, grantId } = await w.lodge();
 		w.signIn("b-1");
-		const response = await w.connect(handle, "b-1");
+		const response = await w.connect(handle, "b-1").query({ stepped_up: "1" });
 		expect(response.status).toBe(403);
 		isPlain(response);
 		expect(response.text).toBe("Sign in again to continue.");
