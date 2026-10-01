@@ -406,8 +406,9 @@ return 1
  * while it stands, and this one, as core's `laterFirstBindingMark` does, written to expire at
  * that end (`PXAT`): `{1, now}`.
  *
- * A held mark is judged on its shape alone: a time whole and from the epoch, an end after it
- * by no more than `ARGV[4]`, within the Date range. One that has it is merged, however its
+ * A held mark is judged on its shape alone: `atMs` and `untilMs` and no other field, as the
+ * adapter's read-back requires, a time whole and from the epoch, an end after it by no more
+ * than `ARGV[4]`, within the Date range. One that has it is merged, however its
  * time sits on the server's clock, since a clock stepped back makes a sound mark look ahead.
  * A value without it, or a key of another type, is replaced: what does not read back is never
  * kept over a mark that does, and a key nothing can read is healed.
@@ -422,6 +423,9 @@ local MAX = 8640000000000000
 local function mark_of(text)
   local ok, mark = pcall(cjson.decode, text)
   if not ok or type(mark) ~= 'table' then return nil end
+  for key in pairs(mark) do
+    if key ~= 'atMs' and key ~= 'untilMs' then return nil end
+  end
   local h_at, h_until = mark.atMs, mark.untilMs
   if type(h_at) ~= 'number' or type(h_until) ~= 'number' then return nil end
   if h_at ~= h_at or h_at < 0 or math.floor(h_at) ~= h_at or math.floor(h_until) ~= h_until then
