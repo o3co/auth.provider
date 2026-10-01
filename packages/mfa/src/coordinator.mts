@@ -76,8 +76,9 @@
  *   unmarked, so no session's recorded witness goes stale unmarked; a
  *   directory that cannot write the witness gets no note. Neither failure
  *   fails the login (`reconcileWitness`). The mark is `factorSet.mts`'s,
- *   which clears the witness again when the records read after it hold none
- *   that may count.
+ *   held to the subject's generation read before the proof is checked: it
+ *   reads the records first, and clears the witness again when the records
+ *   read after it hold none that may count.
  * - A factor is handed its records opened and digests under the ring; it
  *   never sees a key, a store, a transaction or the mail sender. A code it
  *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
