@@ -42,12 +42,18 @@
  * for its enrolled data, the same at each reading, through a JSON round trip
  * and for a verification's next data, and over data it cannot read a
  * non-empty string or `undefined`, never one string for two such data
- * unless it is the enrolled data's own, never a throw. The suite enrolls one
- * authenticator alone, so it cannot tell an identity too coarse — a
- * constant, or one two authenticators share — from a sound one: such an
- * identity judges every second enrollment of the kind a duplicate, and the
- * factor's own tests must show two authenticators answer two identities. The
- * suite enrolls at one instant and verifies an hour later, so a factor that
+ * unless it is the enrolled data's own, never a throw. Given a second
+ * authenticator's enrollment proof, the suite enrolls it through the same
+ * factor beside the first one's record, and holds their data to two
+ * different identities, neither `undefined`, each the same however and in
+ * whatever order a factor reads it once both are enrolled: an identity too
+ * coarse — a constant, or one two authenticators share — judges every second
+ * enrollment of the kind a duplicate, and `undefined` is a duplicate of
+ * none, never a distinct authenticator. Without that proof it enrolls one
+ * authenticator alone and cannot tell. An identity is a duplicate key, not
+ * an assurance signal: two identities do not show two devices, since one
+ * authenticator can hold two credentials. The suite enrolls at one instant
+ * and verifies an hour later, so a factor that
  * refuses reuse within a time step is not asked to verify at the
  * step it enrolled. Every call is made for the account's `User.id` as its
  * subject, and handed core's test digests (`createTestMfaDigests`), made for
@@ -91,6 +97,17 @@ export interface MfaFactorContractInput {
 		context: MfaCeremonyContext,
 	) => unknown;
 	/**
+	 * The proof of possession of an authenticator other than the one
+	 * `enrollmentProof` proves, completing the enrollment `start` began. Given
+	 * it, a factor with `identity` must answer the two enrolled data two
+	 * different identities. Distinct identities name distinct records, not
+	 * distinct devices.
+	 */
+	readonly secondEnrollmentProof?: (
+		start: MfaFactorEnrollmentStart,
+		context: MfaCeremonyContext,
+	) => unknown;
+	/**
 	 * A proof that verifies `enrolled` at the context's time — after `challenge`,
 	 * which the suite passes, when the factor has one.
 	 */
@@ -126,6 +143,7 @@ const UNREADABLE_MEMBERS: readonly unknown[] = [null, 7, "x", [], {}];
 const ENROLLED_AT_MS = Date.UTC(2026, 0, 1);
 const VERIFIED_AT_MS = ENROLLED_AT_MS + 3_600_000;
 const FACTOR_ID = "contract-factor-1";
+const SECOND_FACTOR_ID = "contract-factor-2";
 
 const DEFAULT_MALFORMED: readonly unknown[] = [undefined, null, 1234, {}];
 
@@ -440,16 +458,22 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 	const malformed = input.malformedProofs ?? DEFAULT_MALFORMED;
 
 	/**
-	 * The start of an enrollment, and — when it asks for a code to be mailed —
-	 * the digest of the address the code goes to, as the coordinator keeps it
-	 * at the send.
+	 * The start of an enrollment beside the factors the subject `held`, under
+	 * its own transaction and a minute after the last, as the coordinator opens
+	 * each, and — when it asks for a code to be mailed — the digest of the
+	 * address the code goes to, as the coordinator keeps it at the send.
 	 */
-	const begin = async (factor: MfaFactor) => {
-		const context = contextAt(factor, subjectOf(input.user), ENROLLED_AT_MS, "contract-enrollment");
-		const start = await factor.beginEnrollment({ ...context, user: input.user, factors: [] });
+	const begin = async (factor: MfaFactor, held: readonly MfaEnrolledFactor[] = []) => {
+		const context = contextAt(
+			factor,
+			subjectOf(input.user),
+			ENROLLED_AT_MS + held.length * 60_000,
+			`contract-enrollment-${held.length + 1}`,
+		);
+		const start = await factor.beginEnrollment({ ...context, user: input.user, factors: held });
 		const sentTo =
 			start.mail === undefined ? undefined : digestOfAddress(context.digests, input.user);
-		return { context, start, sentTo };
+		return { context, start, sentTo, held };
 	};
 
 	/** The completion of `begun` with `proof`, for `user` as the Store answers by then, as the coordinator hands it. */
@@ -462,28 +486,32 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 		factor.completeEnrollment({
 			...begun.context,
 			user,
-			factors: [],
+			factors: begun.held,
 			state: reopened(begun.start.state),
 			proof,
 			...(begun.sentTo === undefined ? {} : { addressDigest: begun.sentTo }),
 		});
 
-	/** The factor enrolled through its own ceremony, its data as the coordinator opens it. */
-	const enroll = async (factor: MfaFactor): Promise<MfaEnrolledFactor> => {
-		const begun = await begin(factor);
-		const done = await complete(
-			factor,
-			begun,
-			await input.enrollmentProof(begun.start, begun.context),
-		);
+	/**
+	 * The factor enrolled through its own ceremony with `proofOf`'s proof,
+	 * beside the factor the subject holds when there is one, its data as the
+	 * coordinator opens it.
+	 */
+	const enroll = async (
+		factor: MfaFactor,
+		proofOf: MfaFactorContractInput["enrollmentProof"] = input.enrollmentProof,
+		held?: MfaEnrolledFactor,
+	): Promise<MfaEnrolledFactor> => {
+		const begun = await begin(factor, held === undefined ? [] : [held]);
+		const done = await complete(factor, begun, await proofOf(begun.start, begun.context));
 		assert.ok(
 			done.ok,
 			`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
 		);
 		return {
-			id: FACTOR_ID,
+			id: held === undefined ? FACTOR_ID : SECOND_FACTOR_ID,
 			label: done.label,
-			createdAt: new Date(ENROLLED_AT_MS),
+			createdAt: new Date(begun.context.nowMs),
 			lastUsedAt: undefined,
 			data: reopened(done.data),
 		};
@@ -1038,6 +1066,46 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 						`identity answers ${JSON.stringify(answered)} both ${earlier} and ${what}: records it cannot read would be judged one authenticator`,
 					);
 					answeredBy.set(answered, what);
+				}
+			},
+		},
+		{
+			name: "identity, when present and given a second authenticator's enrollment proof, answers the enrolled data of the two authenticators two different non-empty strings, each the same once both are enrolled through the factor that enrolled it or a fresh one, in either order: an absent identity is a duplicate of none, never a distinct authenticator",
+			run: async () => {
+				const factor = input.build();
+				const { secondEnrollmentProof } = input;
+				if (factor.identity === undefined || secondEnrollmentProof === undefined) return;
+				// As the coordinator enrolls a second authenticator, beside the record it holds.
+				const held = await enroll(factor);
+				const first = factor.identity(reopened(held.data));
+				const added = await enroll(factor, secondEnrollmentProof, held);
+				const second = factor.identity(reopened(added.data));
+				for (const identity of [first, second]) {
+					assert.ok(
+						typeof identity === "string" && identity.length > 0,
+						`identity answers ${JSON.stringify(identity)} for an authenticator's enrolled data: an absent identity is a duplicate of none, so it cannot count as a distinct authenticator`,
+					);
+				}
+				assert.notEqual(
+					first,
+					second,
+					"identity answers two authenticators' enrolled data one string: every second enrollment would be judged a duplicate",
+				);
+				// An identity is its data's alone: no later enrollment, object, factor
+				// instance or reading order changes it. A fresh factor reads the second first.
+				const fresh = input.build();
+				const readings: readonly [MfaFactor, MfaEnrolledFactor, string | undefined][] = [
+					[factor, held, first],
+					[factor, added, second],
+					[fresh, added, second],
+					[fresh, held, first],
+				];
+				for (const [reader, record, identity] of readings) {
+					assert.equal(
+						reader.identity?.(reopened(record.data)),
+						identity,
+						"identity answers a record another string once another is enrolled, through another factor, or read in another order: duplicates would be judged by what the factor last did, not by the record",
+					);
 				}
 			},
 		},
