@@ -44,6 +44,7 @@ import {
 	configFor,
 	directoryEntries,
 	disposeAll,
+	events,
 	refusal,
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
@@ -158,12 +159,13 @@ async function setup(
 }
 
 describe("resetMfaForSubject", () => {
-	it("ends the sessions, then under one lease resets the lock state, removes every record and clears the witness, then releases the lease — in that order", async () => {
+	it("ends the sessions, then under one lease sets D25's flag, mints its authorization, resets the lock state, removes every record and clears the witness, then releases the lease — in that order", async () => {
 		const { reset, factorStore, transactionStore, users, service } = await setup();
 		const order = (mock: { mock: { invocationCallOrder: number[] } }) =>
 			mock.mock.invocationCallOrder[0] ?? Number.NaN;
 		const flag = vi.spyOn(transactionStore, "requireEmailProofAtNextBinding");
 		const acquire = vi.spyOn(transactionStore, "acquireSubjectLease");
+		const authorize = vi.spyOn(transactionStore, "authorizeSubjectRecovery");
 		const apply = vi.spyOn(transactionStore, "applySubjectRecovery");
 		const removeAll = vi.spyOn(factorStore, "removeAllForSubject");
 		const mark = vi.spyOn(users, "markMfaEnrolled");
@@ -173,9 +175,10 @@ describe("resetMfaForSubject", () => {
 
 		expect(report.complete).toBe(true);
 		const steps = [
-			flag,
 			service.revokeAllForSubject,
 			acquire,
+			flag,
+			authorize,
 			apply,
 			removeAll,
 			mark,
@@ -226,6 +229,7 @@ describe("resetMfaForSubject", () => {
 			complete: true,
 			requireEmailProof: false,
 			sessions: revocationReport(),
+			sessionsAgain: revocationReport(),
 			removed: { kinds: ["a-kind-nobody-installed", "recovery_code", "totp"], count: 3 },
 			generation: 1,
 			witness: "cleared",
@@ -248,6 +252,7 @@ describe("resetMfaForSubject", () => {
 					count: 3,
 					requireEmailProof: true,
 					sessions: true,
+					sessionsAgain: true,
 					complete: true,
 					requestedBy: "ticket-42",
 				},
@@ -268,7 +273,7 @@ describe("resetMfaForSubject", () => {
 		});
 	});
 
-	it("sets D25's flag when asked, before the sessions end", async () => {
+	it("sets D25's flag when asked", async () => {
 		const { reset, transactionStore } = await setup();
 
 		await reset.resetMfaForSubject(ALICE.id, { requireEmailProof: true });
@@ -389,6 +394,147 @@ describe("resetMfaForSubject", () => {
 		expect(await factorStore.list(ALICE.id)).toHaveLength(3);
 	});
 
+	it("starts no write with less than one Store call's time of its lease left: nothing reset when the time runs out after the read", async () => {
+		let monotonic = 0;
+		const { reset, transactionStore, factorStore } = await setup({ monotonicNow: () => monotonic });
+		const list = factorStore.list.bind(factorStore);
+		vi.spyOn(factorStore, "list").mockImplementation(async (subject) => {
+			const listed = await list(subject);
+			monotonic = 1e9;
+			return listed;
+		});
+		const authorize = vi.spyOn(transactionStore, "authorizeSubjectRecovery");
+		const apply = vi.spyOn(transactionStore, "applySubjectRecovery");
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: false, stoppedAt: "lease" });
+		expect(authorize).not.toHaveBeenCalled();
+		expect(apply).not.toHaveBeenCalled();
+		expect(await factorStore.list(ALICE.id)).toHaveLength(3);
+	});
+
+	it("starts no removal with less than one Store call's time left once the lock state was reset: stopped at the factors, run again to finish", async () => {
+		let monotonic = 0;
+		const { reset, transactionStore, factorStore, users } = await setup({
+			monotonicNow: () => monotonic,
+		});
+		const apply = transactionStore.applySubjectRecovery.bind(transactionStore);
+		vi.spyOn(transactionStore, "applySubjectRecovery").mockImplementation(async (...args) => {
+			const answer = await apply(...args);
+			monotonic = 1e9;
+			return answer;
+		});
+		const removeAll = vi.spyOn(factorStore, "removeAllForSubject");
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: false, stoppedAt: "factors", generation: 1 });
+		expect(report).not.toHaveProperty("removed");
+		expect(removeAll).not.toHaveBeenCalled();
+		expect(users.marks).toEqual([]);
+	});
+
+	it("sets D25's flag under its lease: a binding that held the lease when the reset began cannot clear it", async () => {
+		const { reset, transactionStore } = await setup();
+		const held = await transactionStore.acquireSubjectLease(ALICE.id, {
+			ttlMs: 60_000,
+			generation: 0,
+		});
+		if (held.outcome !== "acquired") throw new Error("not held");
+		setTimeout(() => {
+			void transactionStore
+				.consumeEmailProofRequirement(ALICE.id)
+				.then(() => transactionStore.releaseSubjectLease(ALICE.id, held.token));
+		}, 200);
+
+		const report = await reset.resetMfaForSubject(ALICE.id, { requireEmailProof: true });
+
+		expect(report.complete).toBe(true);
+		expect(await transactionStore.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
+	});
+
+	it("moves the generation once for each of two resets run at once: each mints its own authorization under its lease", async () => {
+		const { reset, transactionStore } = await setup();
+
+		const reports = await Promise.all([
+			reset.resetMfaForSubject(ALICE.id),
+			reset.resetMfaForSubject(ALICE.id),
+		]);
+
+		expect(reports.map((report) => report.complete)).toEqual([true, true]);
+		expect(reports.map((report) => report.generation).sort()).toEqual([1, 2]);
+		expect(await transactionStore.subjectGeneration(ALICE.id)).toBe(2);
+	});
+
+	it("is not complete when the store answers its authorization applied before: nothing removed", async () => {
+		const { reset, transactionStore, factorStore } = await setup();
+		vi.spyOn(transactionStore, "applySubjectRecovery").mockResolvedValue({
+			outcome: "already_applied",
+			recoveryId: "an-earlier-one",
+			generation: 1,
+			hard: false,
+		});
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: false, stoppedAt: "lock" });
+		expect(await factorStore.list(ALICE.id)).toHaveLength(3);
+	});
+
+	it("reports and audits nothing removed when it stopped before the removal", async () => {
+		const { reset, transactionStore, audit } = await setup();
+		vi.spyOn(transactionStore, "applySubjectRecovery").mockRejectedValue(new Error("down"));
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: false, stoppedAt: "lock" });
+		expect(report).not.toHaveProperty("removed");
+		const details = audit.of("mfa.reset")[0]?.details ?? {};
+		expect(details).not.toHaveProperty("kinds");
+		expect(details).not.toHaveProperty("count");
+	});
+
+	it("is not complete when its lease ended before it released it", async () => {
+		const { reset, transactionStore } = await setup();
+		vi.spyOn(transactionStore, "releaseSubjectLease").mockResolvedValue(false);
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: false, overran: true });
+	});
+
+	it("ends the sessions again once every record is removed: a session signed in with a factor before its removal does not survive a reset that reports complete", async () => {
+		const { reset, factorStore, service } = await setup();
+		const removeAll = vi.spyOn(factorStore, "removeAllForSubject");
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(service.revokeAllForSubject).toHaveBeenCalledTimes(2);
+		expect(service.revokeAllForSubject.mock.invocationCallOrder[1]).toBeGreaterThan(
+			removeAll.mock.invocationCallOrder[0] as number,
+		);
+		expect(report).toMatchObject({ complete: true, sessionsAgain: revocationReport() });
+	});
+
+	it("is not complete, stopped at the sessions, when the second revocation is not", async () => {
+		const service = revocationService();
+		service.revokeAllForSubject
+			.mockResolvedValueOnce(revocationReport(true))
+			.mockResolvedValueOnce(revocationReport(false));
+		const { reset, factorStore, audit } = await setup({ service });
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: false, stoppedAt: "sessions", generation: 1 });
+		expect(await factorStore.list(ALICE.id)).toEqual([]);
+		expect(audit.of("mfa.reset")[0]?.details).toMatchObject({
+			sessions: true,
+			sessionsAgain: false,
+			complete: false,
+		});
+	});
+
 	it("stops, the witness left, when the records cannot be removed", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		vi.spyOn(factorStore, "removeAllForSubject").mockRejectedValue(new Error("down"));
@@ -443,7 +589,7 @@ describe("mfaResetModule", () => {
 		expect(report.complete).toBe(true);
 		expect(await factorStore.list(ALICE.id)).toEqual([]);
 		expect(users.marks).toEqual([{ subject: ALICE.id, enrolled: false }]);
-		expect(service.revokeAllForSubject).toHaveBeenCalledTimes(1);
+		expect(service.revokeAllForSubject).toHaveBeenCalledTimes(2);
 	});
 
 	it("refuses the boot without a subject revocation service", async () => {
@@ -569,5 +715,29 @@ describe("a factor-set write begun before a reset or a recovery", () => {
 		await setup.transactionStore.releaseSubjectLease(ALICE.id, lease.token);
 		const done = await completeEnrollment(setup.agent, transaction, proof);
 		expect(done.status, JSON.stringify(done.body)).toBe(200);
+	});
+
+	it("answers what it wrote, never busy, when the lease's time runs out after the transaction was spent: 503, the overrun said, the transaction gone", async () => {
+		const setup = await enrollmentBegun();
+		const realNow = performance.now.bind(performance);
+		let skew = 0;
+		vi.spyOn(performance, "now").mockImplementation(() => realNow() + skew);
+		const consume = setup.transactionStore.consume.bind(setup.transactionStore);
+		vi.spyOn(setup.transactionStore, "consume").mockImplementation(async (...args) => {
+			const consumed = await consume(...args);
+			skew = 3_600_000;
+			return consumed;
+		});
+		const create = vi.spyOn(setup.factorStore, "create");
+		const transaction = setup.begun.body.transaction as string;
+		const proof = totpProofOf(setup.begun.body.secret);
+
+		const done = await completeEnrollment(setup.agent, transaction, proof);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(503);
+		expect(create).not.toHaveBeenCalled();
+		expect(events(setup.logger, "error")).toContain("mfa_subject_lease_overrun");
+		skew = 0;
+		expect((await completeEnrollment(setup.agent, transaction, proof)).status).toBe(400);
 	});
 });

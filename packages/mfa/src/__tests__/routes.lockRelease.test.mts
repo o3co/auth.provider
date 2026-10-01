@@ -396,7 +396,7 @@ describe("the release's answers", () => {
 });
 
 describe("a login that has not passed its second factor", () => {
-	it("takes no lease of the subject's while its codes fail: a release in another session is never kept waiting by one", async () => {
+	it("acquires no lease of the subject's while its codes fail", async () => {
 		const setup = await composed();
 		const acquire = vi.spyOn(setup.transactionStore, "acquireSubjectLease");
 

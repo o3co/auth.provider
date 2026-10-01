@@ -363,7 +363,7 @@ describe("a release", () => {
 		});
 	});
 
-	it("reads, as the guessable records' earliest time, every record of an installed guessable kind — one whose data does not open included — and leaves out an exempt kind and a kind not installed", async () => {
+	it("reads, as the guessable records' earliest time, every record of a kind that is not exempt — one whose data does not open, and one of a kind not installed, included — and leaves out an exempt kind", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await factorStore.create(recordOf("exempt", "key", T - 9_000));
 		await factorStore.create(recordOf("uninstalled", "gone", T - 8_000));
@@ -383,14 +383,25 @@ describe("a release", () => {
 				sid: SID,
 				nowMs: clock,
 				sessionsBoundaryMs: AFTER_THE_ATTACK.getTime(),
-				guessableBoundSinceMs: T - 3_000,
+				guessableBoundSinceMs: T - 8_000,
 			}),
 		);
 	});
 
-	it("hands null as the guessable records' earliest time when none remains", async () => {
+	it("keeps the hard hold while a record of a kind not installed stands from before it: an uninstalled kind could be installed again", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("uninstalled", "gone", T - 8_000));
+		await factorStore.create(recordOf("uninstalled", "gone", T - 1_000));
+		const { store, recovery } = setup({ factorStore });
+		await latch(store);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+
+		expect(await recovery.release(SUBJECT, SID)).toMatchObject({ outcome: "held", hold: "hard" });
+	});
+
+	it("hands null as the guessable records' earliest time when only exempt records remain", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await factorStore.create(recordOf("exempt", "key", T - 8_000));
 		const { store, recovery } = setup({ boundary: async () => null, factorStore });
 		const apply = vi.spyOn(store, "applySubjectRecovery");
 		await recovery.authorize(SUBJECT, SID, "key", clock);
