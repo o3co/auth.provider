@@ -648,7 +648,7 @@ The fields are defined on core's `Client` record ([`repositories/types.mts`](../
 6. Otherwise, refresh it:
    - Acquire an advisory lock (when `FederationTokenStore` implements `SupportsLock`) to prevent concurrent refresh fan-out.
    - Re-read after the lock — another waiter may have refreshed during the wait.
-   - Call `provider.refreshToken(refreshToken)`; persist the result. Its lifetime is read through core's `readUpstreamTokenLifetime`. An answer whose stated lifetime is malformed or contradicts the other field, or leaves less than a second, is `500 refresh_failed` (`invalid_expiry`). An answer stating no lifetime is stored with no finite expiry, and the maximum does not apply to it. A finite end is capped at `maxTokenLifetimeMs` (24 hours by default) from when the answer is read: a longer lifetime is shortened, never refused, so such a token is refreshed at least that often.
+   - Call `provider.refreshToken(refreshToken)`; persist the result. Its lifetime is read through core's `readUpstreamTokenLifetime`. An answer whose stated lifetime is malformed or contradicts the other field, or leaves less than a second, is `500 refresh_failed` (`invalid_expiry`). An answer stating no lifetime is stored with no finite expiry, and the maximum does not apply to it. A finite end is capped at `maxTokenLifetimeMs` (24 hours by default) from when the answer is read: a longer lifetime is shortened, never refused, so such a token becomes due for refresh within that time; the refresh itself happens on the next request once it is due.
    - Release the lock.
 
 ### Response
