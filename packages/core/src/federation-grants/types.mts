@@ -302,12 +302,13 @@ export type EffectiveFederationGrantStatus =
 	  };
 
 /**
- * What the sealed credential record holds. `accessToken` is `undefined` when
- * an ineligible token was withheld, and is a required key so a copy cannot
- * drop it (which would force a refresh on every request). The token ends at
- * `effectiveExpiresAt`, never after `obtainedAt` + `issuedLifetime`, and at
- * that instant when the record has no `effectiveExpiresAt`
- * (`federationGrantHeldToken`).
+ * What the sealed credential record holds, as a store answers it.
+ * `accessToken` is `undefined` when an ineligible token was withheld, and is
+ * a required key so a copy cannot drop it (which would force a refresh on
+ * every request). The token ends at `effectiveExpiresAt`, never after
+ * `obtainedAt` + `issuedLifetime`, and at that instant when the record has no
+ * `effectiveExpiresAt` (`federationGrantHeldToken`). What a writer hands a
+ * store is {@link FederationGrantCredentialsInput}.
  */
 export interface FederationGrantCredentials {
 	readonly refreshToken: string;
@@ -321,17 +322,32 @@ export interface FederationGrantCredentials {
 				readonly issuedLifetime: number;
 				/**
 				 * When the token ends: never after `obtainedAt` + `issuedLifetime`,
-				 * and earlier when the adapter's expiry ended it sooner. Every
-				 * refresh writes it. A record without it ends at `obtainedAt` +
+				 * and earlier when the adapter's expiry ended it sooner. Every write
+				 * states it ({@link FederationGrantCredentialsInput}), yet a record
+				 * may still lack it: one written before the field existed, one
+				 * rewritten by a release that does not keep it, or one whose store
+				 * could not read it back. Such a record ends at `obtainedAt` +
 				 * `issuedLifetime`, which serves a token past the adapter's stated
-				 * end by up to the difference: it fails open. Optional for now,
-				 * until the Redis store and the connect callback write it too; then
-				 * a required `Date | undefined` key like every other field.
+				 * end by up to the difference: it fails open.
 				 */
 				readonly effectiveExpiresAt?: Date;
 				/** What this token carries. A refresh response that omits `scope` means the grant's scopes (RFC 6749 §6). */
 				readonly scopes: readonly string[];
 		  }
+		| undefined;
+}
+
+/**
+ * The credentials a writer hands a store: an access token always states when
+ * it ends, so that no writer leaves it out and fails open. A store answers
+ * {@link FederationGrantCredentials}, where it may be absent.
+ */
+export interface FederationGrantCredentialsInput {
+	readonly refreshToken: string;
+	readonly accessToken:
+		| (NonNullable<FederationGrantCredentials["accessToken"]> & {
+				readonly effectiveExpiresAt: Date;
+		  })
 		| undefined;
 }
 

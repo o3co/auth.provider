@@ -26,6 +26,8 @@ import { fgNumber, hashFields } from "../codec.mjs";
 import { runScript } from "../commands.mjs";
 import { redisDurability } from "../durability.mjs";
 import {
+	MFA_BINDING_INDEX,
+	MFA_BINDING_UNINDEX,
 	MFA_FACTOR_UPDATE,
 	MFA_FIRST_BINDING_NOTE,
 	MFA_FIRST_BINDING_READ,
@@ -39,6 +41,7 @@ import {
 	MFA_SUBJECT_SETTLE,
 	MFA_TX_CONSUME,
 	MFA_TX_CREATE,
+	MFA_TX_EVICT,
 	MFA_TX_RESERVE_ATTEMPT,
 	MFA_TX_TAKE_CHALLENGE,
 	MFA_TX_UPDATE,
@@ -130,8 +133,11 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				[key],
 				[String(max), String(nowMs)],
 			);
-			const [ok, attempts] = Array.isArray(reply) ? reply : [0, 0];
-			return { ok: ok === 1, attempts: Number(attempts) };
+			const [ok, attempts, index, incarnation] = Array.isArray(reply) ? reply : [0, 0];
+			const answer = { ok: ok === 1, attempts: Number(attempts) };
+			return typeof index === "string" && typeof incarnation === "string"
+				? { ...answer, removed: { index, incarnation } }
+				: answer;
 		},
 		async takeChallenge(key, expectedVersion, nowMs) {
 			const reply = await runScript(
@@ -145,6 +151,23 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 		async consume(key, expectedVersion) {
 			const reply = await runScript(io, MFA_TX_CONSUME, [key], [expectedVersion]);
 			return Array.isArray(reply) ? hashFields(reply) : null;
+		},
+		async indexTransaction(key, member, expiresAtMs, max) {
+			const reply = await runScript(
+				io,
+				MFA_BINDING_INDEX,
+				[key],
+				[member, String(expiresAtMs), String(max)],
+			);
+			return Array.isArray(reply)
+				? reply.filter((removed): removed is string => typeof removed === "string")
+				: [];
+		},
+		async unindexTransaction(key, member) {
+			await runScript(io, MFA_BINDING_UNINDEX, [key], [member]);
+		},
+		async evictTransaction(key, incarnation) {
+			return (await runScript(io, MFA_TX_EVICT, [key], [incarnation])) === 1;
 		},
 		async reserveSubjectAttempt(keys, input) {
 			const { policy } = input;

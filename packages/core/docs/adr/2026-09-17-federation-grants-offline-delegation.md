@@ -2460,6 +2460,17 @@ the token it activates by the earlier clamp and writes no
 `effectiveExpiresAt`, until it reads the answer through the same function
 (#1020).
 
+**Amended 2026-10-02 (#1075): a writer must state the end; a reader must not
+count on it.** Once the connect callback wrote `effectiveExpiresAt` (#1073),
+it did not become a required key of the record, as planned above: a record
+activated before then, one rewritten by a 0.15 or 0.16 replica during a
+rolling deploy, and one whose sealed extension does not open (D16's amendment)
+still have none. The types split instead. What a writer hands the store,
+`FederationGrantCredentialsInput`, requires it as a `Date`; what the store
+answers, `FederationGrantCredentials`, keeps it optional, read as ending at
+`obtainedAt + issuedLifetime`. A refresh that keeps the stored token writes it
+back with the end it is read to have, which changes nothing a reader sees.
+
 ### D18 — Audit, with a correlation ID
 
 New event types, each added to `BUILT_IN_AUDIT_EVENT_TYPES`:

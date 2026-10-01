@@ -26,7 +26,7 @@
 
 import type {
 	FederationGrantAuthorization,
-	FederationGrantCredentials,
+	FederationGrantCredentialsInput,
 	FederationGrantStore,
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
@@ -102,25 +102,30 @@ const authorization = (): FederationGrantAuthorization => ({
 	expiresAt: at(30 * DAY),
 });
 
-/** A token obtained at +2 min, issued for an hour, that the upstream said ends at `end`. */
-const credentials = (end: Date | undefined, tag = "1"): FederationGrantCredentials => ({
-	refreshToken: `rt-${tag}`,
-	accessToken: {
-		value: `at-${tag}`,
-		tokenType: "Bearer",
-		obtainedAt: at(2 * MIN),
-		issuedLifetime: 3600,
-		...(end === undefined ? {} : { effectiveExpiresAt: end }),
-		scopes: [...SCOPES],
-	},
-});
+/**
+ * A token obtained at +2 min, issued for an hour, that the upstream said ends
+ * at `end`. Without `end` it is what an earlier release wrote, which no writer
+ * of this one compiles, so it is cast.
+ */
+const credentials = (end: Date | undefined, tag = "1"): FederationGrantCredentialsInput =>
+	({
+		refreshToken: `rt-${tag}`,
+		accessToken: {
+			value: `at-${tag}`,
+			tokenType: "Bearer",
+			obtainedAt: at(2 * MIN),
+			issuedLifetime: 3600,
+			...(end === undefined ? {} : { effectiveExpiresAt: end }),
+			scopes: [...SCOPES],
+		},
+	}) as FederationGrantCredentialsInput;
 
 const END = (): Date => at(12 * MIN);
 
 /** A grant taken to `active` (version 2) with `credentials`. */
 const activated = async (
 	held: FederationGrantStore,
-	given: FederationGrantCredentials,
+	given: FederationGrantCredentialsInput,
 	id = "g-1",
 ): Promise<void> => {
 	await held.createPending({
@@ -253,7 +258,11 @@ describe("the token's end, kept beside the credential", () => {
 		const replaced = await held.replaceCredentials({
 			grantId: "g-1",
 			expectedVersion: 2,
-			credentials: { refreshToken: "rt-rotated", accessToken: kept },
+			// Read back with its end, as a refresh writes back the token it keeps.
+			credentials: {
+				refreshToken: "rt-rotated",
+				accessToken: kept as FederationGrantCredentialsInput["accessToken"],
+			},
 			ineligible: null,
 			now: at(3 * MIN),
 		});
@@ -346,7 +355,7 @@ describe("the token's end, kept beside the credential", () => {
 		const changing = {
 			...next,
 			accessToken: { ...(next.accessToken as object), obtainedAt: obtained },
-		} as FederationGrantCredentials;
+		} as FederationGrantCredentialsInput;
 		const writing = held.replaceCredentials({
 			grantId: "g-1",
 			expectedVersion: 3,
@@ -480,7 +489,11 @@ describe("keys it does not know", () => {
 		await held.replaceCredentials({
 			grantId: "g-1",
 			expectedVersion: 2,
-			credentials: { refreshToken: "rt-rotated", accessToken: kept },
+			// Read back with its end, as a refresh writes back the token it keeps.
+			credentials: {
+				refreshToken: "rt-rotated",
+				accessToken: kept as FederationGrantCredentialsInput["accessToken"],
+			},
 			ineligible: null,
 			now: at(3 * MIN),
 		});

@@ -41,7 +41,7 @@ import {
 	MfaTransactionStoreFullError,
 } from "#/mfa/memoryTransactionStore.mjs";
 import { memoryMfaTransactionStoreModule } from "#/mfa/module.mjs";
-import type { MfaTransaction } from "#/mfa/transactionStore.mjs";
+import { MFA_MAX_TRANSACTIONS_PER_BINDING, type MfaTransaction } from "#/mfa/transactionStore.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
 import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
@@ -360,6 +360,73 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 				"createMemoryMfaTransactionStore: sweepInterval must be a positive whole number (got 0)",
 			),
 		);
+	});
+});
+
+describe("createMemoryMfaTransactionStore — the live transactions one binding holds", () => {
+	const N = MFA_MAX_TRANSACTIONS_PER_BINDING;
+
+	/** `TX(id)` bound to the session `session`. */
+	const BOUND = (id: string, session: string, expiresAtMs = T0 + 600_000): MfaTransaction => ({
+		...TX(id, expiresAtMs),
+		binding: { kind: "session", id: session },
+	});
+
+	it("is five, a core constant", () => {
+		expect(N).toBe(5);
+	});
+
+	it("takes one more at its cap for a binding at N: replacing the binding's oldest is no new entry", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: N });
+		for (let i = 0; i < N; i++) await store.create(BOUND(`tab-${i}`, "s", T0 + 600_000 + i));
+		await store.create(BOUND("next", "s", T0 + 700_000));
+		expect(store.transactions).toBe(N);
+		expect(await store.get("tab-0")).toBeNull();
+		expect(await store.get("next")).not.toBeNull();
+		// A binding below N still asks for a new entry, and is refused.
+		expect(await refusalOf(store.create(BOUND("else", "t")))).toBeInstanceOf(
+			MfaTransactionStoreFullError,
+		);
+		expect(store.transactions).toBe(N);
+	});
+
+	it("keeps no binding with no transaction: consumed, ended by its attempts, expired or swept", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			sweepInterval: 1,
+			minSweepIntervalMs: 0,
+		});
+		await store.create(BOUND("consumed", "a"));
+		await store.create(BOUND("spent", "b"));
+		await store.create(BOUND("read-late", "c", T0 + 1_000));
+		await store.create(BOUND("swept", "d", T0 + 1_000));
+		expect(store.bindings).toBe(4);
+
+		await store.consume("consumed", 1);
+		await store.reserveAttempt("spent", 1);
+		await store.reserveAttempt("spent", 1);
+		expect(store.bindings).toBe(2);
+
+		now = T0 + 2_000;
+		expect(await store.get("read-late")).toBeNull();
+		// A write sweeps "swept" away; the binding it opens is the one left.
+		await store.create(BOUND("last", "e"));
+		expect(store.transactions).toBe(1);
+		expect(store.bindings).toBe(1);
+		await store.consume("last", 1);
+		expect(store.bindings).toBe(0);
+	});
+
+	it("ends at most the one binding's oldest, and holds N per binding across many bindings", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0 });
+		for (let s = 0; s < 3; s++) {
+			for (let i = 0; i <= N; i++)
+				await store.create(BOUND(`s${s}-${i}`, `s${s}`, T0 + 600_000 + i));
+		}
+		expect(store.transactions).toBe(3 * N);
+		expect(store.bindings).toBe(3);
+		for (let s = 0; s < 3; s++) expect(await store.get(`s${s}-0`)).toBeNull();
 	});
 });
 
