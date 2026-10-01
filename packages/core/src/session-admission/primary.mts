@@ -272,9 +272,12 @@ function userSnapshot(
 ): Readonly<Record<string, unknown>> {
 	if (!isPlainObject(user)) return refuse("user must be an object");
 	const snapshot: Record<string, unknown> = {};
-	// One map for every field: an object two fields share is read once, and a
-	// field that refers back to the user is the snapshot.
-	const copies = new Map<object, unknown>([[user, snapshot]]);
+	// One map for every field: an object two fields share is read once. A
+	// field that refers back to the user is the snapshot when the user is a
+	// plain object, and not plain data when it is an instance, as any is.
+	const prototype = Reflect.getPrototypeOf(user);
+	const plainUser = prototype === Object.prototype || prototype === null;
+	const copies = new Map<object, unknown>([[user, plainUser ? snapshot : NOT_PLAIN]]);
 	const keep = (key: string, value: unknown): void => {
 		Object.defineProperty(snapshot, key, {
 			value,

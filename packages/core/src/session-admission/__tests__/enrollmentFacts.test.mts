@@ -492,6 +492,17 @@ describe("a malformed user — still refused before anything is derived from it"
 			() => ormEntity({ id: "user-1", mfaEnrolled: new Date(0) }),
 			/user\.mfaEnrolled must be plain data/,
 		],
+		[
+			"an email that is the class instance the user is",
+			() =>
+				new (class {
+					id = "user-1";
+					get email() {
+						return this;
+					}
+				})(),
+			/user\.email must be plain data/,
+		],
 	];
 
 	it.each(MALFORMED)(
