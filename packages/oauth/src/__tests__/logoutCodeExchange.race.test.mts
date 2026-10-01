@@ -474,18 +474,20 @@ describe("a logout and a code exchange on the same session", () => {
 	});
 });
 
-describe("the logout route and a code exchange: the relying party it tells", () => {
+describe("the logout route and a code exchange: the relying parties it lists", () => {
 	const ISSUER = "https://auth.example";
 	const SECRET = "logout-route-race-secret-at-least-32-chars";
 
 	/**
 	 * `POST /oauth/logout` over the world's logout stores, with an id_token
 	 * hint for the session: the client ids of the relying parties each RP
-	 * listing returned are pushed on `listed`.
+	 * listing returned are pushed on `listed`; with `held`, the route waits
+	 * there once its listing has answered.
 	 */
 	const logoutRoute = async (
 		w: Awaited<ReturnType<typeof world>>,
 		listed: string[][],
+		held?: Checkpoint,
 	): Promise<request.Response> => {
 		const registry = w.logoutStores.sessionRPRegistry;
 		const app = express();
@@ -500,6 +502,7 @@ describe("the logout route and a code exchange: the relying party it tells", () 
 					listRPs: async (sid: string) => {
 						const rps = await registry.listRPs(sid);
 						listed.push(rps.map((rp) => rp.clientId));
+						await held?.pass();
 						return rps;
 					},
 				},
@@ -533,12 +536,28 @@ describe("the logout route and a code exchange: the relying party it tells", () 
 			const result = await exchange;
 
 			const told = listed.flat().includes(CLIENT_ID);
-			const refused = result.status === 400;
+			const refused =
+				"errorDescription" in result && result.errorDescription === "session_invalidated";
 			expect({ told, refused, status: result.status }).toMatchObject(
 				told ? { told: true } : { refused: true },
 			);
 		});
 	}
+
+	it("an exchange that runs while the logout is held after its RP listing is refused as ended", async () => {
+		const w = await world();
+		const held = checkpoint();
+		const listed: string[][] = [];
+		const logout = logoutRoute(w, listed, held);
+		await held.arrived;
+
+		const result = await w.exchange();
+		held.release();
+
+		expectSessionInvalidated(result);
+		expect(listed).toEqual([[]]);
+		expect((await logout).status).toBe(200);
+	});
 });
 
 describe("the composition's family index", () => {
