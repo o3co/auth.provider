@@ -27,6 +27,8 @@
  * `amr` sees one answer per authentication.
  */
 
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
+
 /** A password login (RFC 8176 `pwd`): what `POST /session/login` records. */
 export const PASSWORD_AMR = "pwd";
 
@@ -97,10 +99,24 @@ export function wellFormedAuthTime(value: unknown): number | undefined {
 
 /**
  * An authentication instant as `auth_time`: its whole seconds since the epoch, rounded down;
- * undefined for an invalid `Date` or an instant before the epoch.
+ * undefined for an invalid `Date` or an instant before the epoch. For an instant the caller
+ * computed on its own clock; a recorded one is read through {@link authTimeAt}.
  */
 export function authTimeClaim(instant: Date): number | undefined {
 	return wellFormedAuthTime(Math.floor(instant.getTime() / 1000));
+}
+
+/**
+ * A recorded authentication instant as `auth_time`, read against the clock
+ * `nowMs` that mints or judges with it: never later than that clock. An
+ * instant up to `DEFAULT_CLOCK_SKEW_MS` ahead reads as `nowMs`; one further
+ * ahead, an invalid `Date`, an instant before the epoch, or a `nowMs` that is
+ * not a number, is undefined. Whole seconds, rounded down.
+ */
+export function authTimeAt(instant: Date, nowMs: number): number | undefined {
+	const instantMs = instant.getTime();
+	if (!(instantMs <= nowMs + DEFAULT_CLOCK_SKEW_MS)) return undefined;
+	return wellFormedAuthTime(Math.floor(Math.min(instantMs, nowMs) / 1000));
 }
 
 /**

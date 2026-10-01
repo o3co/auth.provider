@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	authTimeAt,
 	authTimeClaim,
 	composeAmr,
 	EMAIL_OTP_AMR,
@@ -30,6 +31,7 @@ import {
 	wellFormedAmr,
 	wellFormedAuthTime,
 } from "#/grants/authenticationClaims.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 
 describe("wellFormedAmr — the amr a token may carry", () => {
 	it("is a non-empty array of non-empty strings, copied", () => {
@@ -118,6 +120,42 @@ describe("authTimeClaim — an authentication instant as auth_time", () => {
 		["an instant before the epoch", new Date(-1_500)],
 	])("is undefined for %s", (_label, instant) => {
 		expect(authTimeClaim(instant)).toBeUndefined();
+	});
+});
+
+describe("authTimeAt — an authentication instant as auth_time, read against a clock", () => {
+	const nowMs = Date.UTC(2026, 9, 1, 12, 0, 0, 500);
+	const nowSeconds = Math.floor(nowMs / 1000);
+
+	it("is an instant at or before the clock in whole seconds since the epoch, rounded down", () => {
+		expect(authTimeAt(new Date("2026-04-21T00:00:00.999Z"), nowMs)).toBe(
+			Date.UTC(2026, 3, 21) / 1000,
+		);
+		expect(authTimeAt(new Date(nowMs), nowMs)).toBe(nowSeconds);
+		expect(authTimeAt(new Date(0), nowMs)).toBe(0);
+	});
+
+	it("is the clock's own second for an instant ahead of it by up to DEFAULT_CLOCK_SKEW_MS", () => {
+		expect(authTimeAt(new Date(nowMs + 1), nowMs)).toBe(nowSeconds);
+		expect(authTimeAt(new Date(nowMs + 60_000), nowMs)).toBe(nowSeconds);
+		expect(authTimeAt(new Date(nowMs + DEFAULT_CLOCK_SKEW_MS), nowMs)).toBe(nowSeconds);
+	});
+
+	it.each([
+		["a Date that is not valid", new Date("not a date")],
+		["an instant before the epoch", new Date(-1_500)],
+		["an instant 1 ms before the epoch", new Date(-1)],
+		[
+			"an instant ahead of the clock by DEFAULT_CLOCK_SKEW_MS + 1 ms",
+			new Date(nowMs + DEFAULT_CLOCK_SKEW_MS + 1),
+		],
+		["an instant an hour ahead of the clock", new Date(nowMs + 3_600_000)],
+	])("is undefined for %s", (_label, instant) => {
+		expect(authTimeAt(instant, nowMs)).toBeUndefined();
+	});
+
+	it("is undefined when the clock is NaN", () => {
+		expect(authTimeAt(new Date("2026-04-21T00:00:00Z"), Number.NaN)).toBeUndefined();
 	});
 });
 
