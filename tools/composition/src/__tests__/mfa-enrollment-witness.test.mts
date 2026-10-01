@@ -21,10 +21,9 @@
  * mark endpoint; the factors kept by the same Store or in memory. A first
  * binding marks the witness after the factor is written, a mark that failed
  * is written at the next login, a removal that leaves no record that may
- * count clears it after the removal, and a witness that says the subject
- * enrolled beside no factor stops a password login (`503`, recorded) and
- * sends every first binding of a federated session to log in again — never a
- * binding the lost factors would open.
+ * count clears it after the removal, and a witness that says the subject enrolled
+ * beside no factor stops a password login and every first binding of a
+ * federated session — never a binding the lost factors would open.
  */
 
 import type {
@@ -409,17 +408,24 @@ describe.each(["store", "memory"] as const)(
 		}
 
 		it.each([
-			["true", true],
-			['"true", which is not a boolean', "true"],
+			["true", true, "enrolled"],
+			['"true", which is not a boolean', "true", "malformed"],
 		] as const)(
-			"sends every first binding to log in again (401) when it answers mfaEnrolled %s beside no factor, recording nothing",
-			async (_what, witness) => {
+			"refuses every first binding 503 when it answers mfaEnrolled %s beside no factor, recording the inconsistency",
+			async (_what, witness, read) => {
 				const signedIn = await federatedDave(witness);
 				const answers = await firstBindings(signedIn);
 				for (const [binding, answer] of Object.entries(answers)) {
-					expect(answer.status, `${binding}: ${JSON.stringify(answer.body)}`).toBe(401);
+					expect(answer.status, `${binding}: ${JSON.stringify(answer.body)}`).toBe(503);
 				}
-				expect(signedIn.set.audit.of("mfa.enrollment_state_inconsistent")).toEqual([]);
+				const recorded = signedIn.set.audit.of("mfa.enrollment_state_inconsistent");
+				expect(recorded).toHaveLength(3);
+				for (const event of recorded) {
+					expect(event).toMatchObject({
+						subject: DAVE.id,
+						details: expect.objectContaining({ purpose: "session", witness: read }),
+					});
+				}
 				expect(await storesOf(signedIn.set).mfaFactorStore.list(DAVE.id)).toEqual([]);
 			},
 		);
