@@ -1,0 +1,596 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * A session's step-up verified (the MFA ADR's F2, D21, D27): a factor the
+ * subject holds, challenged and verified on the session's `step_up`
+ * transaction through `POST /session/mfa/challenge` and `/verify`, held to
+ * the subject lock like a login's, and finished on the session itself — its
+ * express id renewed, then the second factor recorded on its `UserSession`
+ * with the renewal nonce — never through a login's completion.
+ */
+
+import {
+	type AppConfig,
+	createInMemoryUserSessionStore,
+	createMemoryMfaFactorStore,
+	createMemoryMfaTransactionStore,
+	EMAIL_OTP_AMR,
+	InMemoryUserRepository,
+	MFA_AMR,
+	type MfaFactorStore,
+	type Module,
+	OTP_AMR,
+	PASSWORD_AMR,
+	RECOVERY_CODE_AMR,
+	type UserRepository,
+	type UserSession,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
+import { createRecordingMailSender } from "@o3co/auth-provider-core/testing";
+import request from "supertest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
+import { mfaEmailFactorConfigForTests } from "#/testing/index.mjs";
+import {
+	ALICE,
+	boot,
+	configFor,
+	directoryEntries,
+	disposeAll,
+	events,
+	login,
+	sessionIdSet,
+	WitnessingUserRepository,
+} from "./moduleHarness.mjs";
+import {
+	type Agent,
+	completeEnrollment,
+	enrollFromAccount,
+	freezeClock,
+	loggedText,
+	mfaPost,
+	readTransaction,
+	recordingAuditSink,
+	seedFactor,
+	seedTotp,
+	setsCsrfToken,
+	signInWithTotp,
+	stepUp,
+	suiteSealing,
+	T0,
+	thawClock,
+	totpCode,
+	verify,
+	wrongCode,
+} from "./routesHarness.mjs";
+
+beforeEach(() => freezeClock());
+afterEach(async () => {
+	await disposeAll();
+	thawClock();
+});
+
+const UNKNOWN = {
+	error: "invalid_request",
+	error_description: "Unknown or expired MFA transaction",
+};
+const UNKNOWN_FACTOR = { error: "invalid_request", error_description: "Unknown second factor" };
+const NOT_OPEN = {
+	error: "invalid_request",
+	error_description: "No enrollment is open in this MFA transaction",
+};
+const FACTOR_REFUSED = {
+	error: "mfa_factor_refused",
+	error_description: "This second factor cannot be used: use another",
+};
+
+interface Setup {
+	readonly mode?: "optional" | "required";
+	readonly mfa?: Record<string, unknown>;
+	/** The email factor switched on, adding `mfa` as said. */
+	readonly email?: { readonly addsMfa: boolean };
+	readonly users?: UserRepository;
+	readonly userSessionStore?: UserSessionStore;
+	readonly extraModules?: readonly Module[];
+}
+
+/** Boots `optional` (unless `setup` says otherwise) with a recording sender, an audit sink and a witnessing directory. */
+async function composed(setup: Setup = {}) {
+	const factorStore = createMemoryMfaFactorStore();
+	const transactionStore = createMemoryMfaTransactionStore();
+	const userSessionStore = setup.userSessionStore ?? createInMemoryUserSessionStore();
+	const users = setup.users ?? new WitnessingUserRepository(directoryEntries());
+	const sender = createRecordingMailSender();
+	const audit = recordingAuditSink();
+	const config = {
+		...configFor(setup.mode ?? "optional", setup.mfa ?? {}),
+		...(setup.email === undefined
+			? {}
+			: mfaEmailFactorConfigForTests({ enabled: true, addsMfa: setup.email.addsMfa })),
+	} as AppConfig;
+	const booted = await boot({
+		config,
+		factorStore,
+		transactionStore,
+		userSessionStore,
+		auditSink: audit,
+		mailSender: sender,
+		userRepository: users,
+		...(setup.extraModules === undefined ? {} : { extraModules: setup.extraModules }),
+	});
+	return { ...booted, factorStore, transactionStore, userSessionStore, users, sender, audit };
+}
+
+/** The `auth.session` cookie a response sets, as a `Cookie` header carries it. */
+const sessionCookie = (res: request.Response): string => {
+	const line = ([] as string[])
+		.concat(res.headers["set-cookie"] ?? [])
+		.find((candidate) => candidate.startsWith("auth.session="));
+	if (line === undefined) throw new Error("the response set no session cookie");
+	return line.split(";")[0] as string;
+};
+
+/** A password sign-in with no second factor asked: the agent, the sid its login wrote, and its session cookie. */
+async function signedIn(app: Parameters<typeof login>[0], store: UserSessionStore) {
+	const create = vi.spyOn(store, "create");
+	const { agent, res } = await login(app);
+	expect(res.status, JSON.stringify(res.body)).toBe(200);
+	const sid = (create.mock.calls.at(-1)?.[0] as { sid?: unknown } | undefined)?.sid;
+	create.mockRestore();
+	if (typeof sid !== "string") throw new Error("the login wrote no session");
+	return { agent, sid, cookie: sessionCookie(res) };
+}
+
+/** Whether the cookie session `cookie` names is admitted as a live session: a transaction read that gets as far as the transaction. */
+const admitted = async (app: Parameters<typeof login>[0], cookie: string): Promise<boolean> => {
+	const res = await request(app)
+		.get("/session/mfa/transaction")
+		.set("Cookie", cookie)
+		.set("MFA-Transaction", "A".repeat(43));
+	if (res.status !== 400 && res.status !== 401) throw new Error(`answered ${res.status}`);
+	return res.status === 400;
+};
+
+/** A step-up opened in the agent's session: its transaction. */
+const openedStepUp = async (agent: Agent): Promise<string> => {
+	const res = await stepUp(agent);
+	expect(res.status, JSON.stringify(res.body)).toBe(200);
+	expect(res.body.email_proof).toBe(false);
+	return res.body.transaction as string;
+};
+
+/** The session record `sid`, as the store now holds it. */
+const stored = async (store: UserSessionStore, sid: string): Promise<UserSession> => {
+	const session = await store.get(sid);
+	if (session === null) throw new Error("the session is gone");
+	return session;
+};
+
+/** A recovery-code set of `count` codes as the suite's ring digests them, seeded for alice. */
+async function seedRecoveryCodes(factorStore: MfaFactorStore, count = 3) {
+	const set = generateRecoveryCodes(
+		createRecoveryCodeFactor({ count }),
+		suiteSealing().digestsFor("recovery_code"),
+	);
+	if (set === undefined) throw new Error("no set");
+	const record = await seedFactor(factorStore, "recovery_code", set.data);
+	return { record, codes: set.codes };
+}
+
+/** The digest the email factor records for `address`, under the suite's ring. */
+const recordedDigest = (address: string) => suiteSealing().digestsFor("email").digest([address]);
+
+describe("a TOTP step-up verified in a password session", () => {
+	it("adds the factor's amr and mfa to the session, dated by the verification, its authTime and sid kept, its express id renewed, and answers 200 with a fresh CSRF token", async () => {
+		const { app, handle, factorStore, userSessionStore, audit } = await composed();
+		const { agent, sid, cookie } = await signedIn(app, userSessionStore);
+		const before = await stored(userSessionStore, sid);
+		const totp = await seedTotp(factorStore);
+		const transaction = await openedStepUp(agent);
+		const create = vi.spyOn(userSessionStore, "create");
+
+		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.body).toEqual({ step_up: "verified" });
+		const guard = handle.components.csrfGuard;
+		if (guard === undefined) throw new Error("no csrf guard");
+		expect(setsCsrfToken(res, guard)).toBe(true);
+		const renewedId = sessionIdSet(res);
+		expect(renewedId).toBeDefined();
+		expect(cookie).not.toContain(renewedId as string);
+		const after = await stored(userSessionStore, sid);
+		expect(after.amr).toEqual([PASSWORD_AMR, OTP_AMR, MFA_AMR]);
+		expect(after.authentication?.mfaAt).toEqual(new Date(T0));
+		expect(after.authTime).toEqual(before.authTime);
+		expect(after.expiresAt).toEqual(before.expiresAt);
+		expect(after.renewalNonce).toEqual(expect.any(String));
+		expect(create).not.toHaveBeenCalled();
+		expect(audit.of("mfa.verified")).toEqual([
+			expect.objectContaining({
+				subject: ALICE.id,
+				details: { kind: "totp", purpose: "step_up" },
+			}),
+		]);
+	});
+
+	it("admits the renewed cookie for mfa.manage, and refuses the old one", async () => {
+		const { app, factorStore, userSessionStore } = await composed();
+		const { agent, cookie } = await signedIn(app, userSessionStore);
+		const totp = await seedTotp(factorStore);
+		expect((await enrollFromAccount(agent, "totp")).status).toBe(403);
+		const transaction = await openedStepUp(agent);
+
+		expect((await verify(agent, transaction, totp.record.id, totpCode(totp.secret))).status).toBe(
+			200,
+		);
+
+		expect((await enrollFromAccount(agent, "totp")).status).toBe(200);
+		expect(await admitted(app, cookie)).toBe(false);
+	});
+
+	it("meets mfa.manage under required again once a session's MFA is no longer recent", async () => {
+		const { app, factorStore, userSessionStore } = await composed({ mode: "required" });
+		const totp = await seedTotp(factorStore);
+		const { agent, sid } = await signInWithTotp(app, userSessionStore, totp);
+		freezeClock(T0 + 301_000);
+		const refused = await enrollFromAccount(agent, "totp");
+		expect(refused.status).toBe(403);
+		expect(refused.body.error).toBe("step_up_required");
+		const transaction = await openedStepUp(agent);
+
+		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret, 1));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect((await stored(userSessionStore, sid)).authentication?.mfaAt).toEqual(
+			new Date(T0 + 301_000),
+		);
+		expect((await enrollFromAccount(agent, "totp")).status).toBe(200);
+	});
+
+	it("is spent by its verification: verified again, its transaction is unknown", async () => {
+		const { app, factorStore, userSessionStore } = await composed();
+		const { agent } = await signedIn(app, userSessionStore);
+		const totp = await seedTotp(factorStore);
+		const transaction = await openedStepUp(agent);
+		expect((await verify(agent, transaction, totp.record.id, totpCode(totp.secret))).status).toBe(
+			200,
+		);
+
+		const again = await verify(agent, transaction, totp.record.id, totpCode(totp.secret, 1));
+
+		expect(again.status).toBe(400);
+		expect(again.body).toEqual(UNKNOWN);
+	});
+});
+
+describe("the subject lock on a step-up", () => {
+	it("answers a held subject's proof 429 mfa_locked with Retry-After, recorded as mfa.locked and mfa.locked.first with the step_up purpose", async () => {
+		const { app, factorStore, userSessionStore, audit } = await composed({
+			mfa: { lockout: { threshold: 2 } },
+		});
+		const { agent } = await signedIn(app, userSessionStore);
+		const totp = await seedTotp(factorStore);
+		const transaction = await openedStepUp(agent);
+		for (let n = 0; n < 2; n++) {
+			expect(
+				(await verify(agent, transaction, totp.record.id, wrongCode(totp.secret))).status,
+			).toBe(401);
+		}
+
+		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(429);
+		expect(res.headers["retry-after"]).toMatch(/^[1-9][0-9]*$/);
+		expect(res.body).toMatchObject({ error: "mfa_locked", hold: "backoff" });
+		const held = { kind: "totp", purpose: "step_up", hold: "backoff" };
+		expect(audit.of("mfa.locked")).toEqual([expect.objectContaining({ details: held })]);
+		expect(audit.of("mfa.locked.first")).toEqual([
+			expect.objectContaining({ details: { ...held, binding: "password" } }),
+		]);
+		expect(audit.of("mfa.verify.failure")).toEqual([
+			expect.objectContaining({ details: expect.objectContaining({ purpose: "step_up" }) }),
+			expect.objectContaining({ details: expect.objectContaining({ purpose: "step_up" }) }),
+		]);
+	});
+
+	it("spends one subject attempt for each of several wrong codes sent at once", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+		const { agent } = await signedIn(app, userSessionStore);
+		const totp = await seedTotp(factorStore);
+		const transaction = await openedStepUp(agent);
+		const settle = vi.spyOn(transactionStore, "settleSubjectAttempt");
+
+		const answers = await Promise.all(
+			[0, 1, 2].map(() => verify(agent, transaction, totp.record.id, wrongCode(totp.secret))),
+		);
+
+		expect(answers.map((res) => res.status)).toEqual([401, 401, 401]);
+		expect(settle.mock.calls.map((call) => call[2])).toEqual(["failure", "failure", "failure"]);
+	});
+
+	it("settles a right proof whose transaction another verification consumed first as void", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+		const { agent } = await signedIn(app, userSessionStore);
+		const totp = await seedTotp(factorStore);
+		const transaction = await openedStepUp(agent);
+		vi.spyOn(transactionStore, "consume").mockResolvedValueOnce(null);
+		const settle = vi.spyOn(transactionStore, "settleSubjectAttempt");
+
+		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
+
+		expect(res.status).toBe(400);
+		expect(settle.mock.calls.map((call) => call[2])).toEqual(["void"]);
+	});
+});
+
+describe("a recovery code at a step-up", () => {
+	/** Under required: alice signed in with TOTP at T0, her TOTP then replaced by one whose data does not open, beside a set of codes; the clock past mfa.manage.maxAgeSeconds. */
+	async function withCodesOnly() {
+		const setup = await composed({ mode: "required" });
+		const totp = await seedTotp(setup.factorStore);
+		const { agent, sid } = await signInWithTotp(setup.app, setup.userSessionStore, totp);
+		await setup.factorStore.remove(ALICE.id, totp.record.id);
+		await seedTotp(setup.factorStore, ALICE.id, { sealedFor: "u-someone-else" });
+		const codes = await seedRecoveryCodes(setup.factorStore);
+		freezeClock(T0 + 301_000);
+		return { ...setup, agent, sid, codes };
+	}
+
+	it("is accepted under required beside no counting factor that can be used: it adds recovery and mfa, opens no binding, and answers the codes left", async () => {
+		const { agent, sid, codes, transactionStore, userSessionStore, audit } =
+			await withCodesOnly();
+		expect((await enrollFromAccount(agent, "totp")).body.error).toBe("step_up_required");
+		const transaction = await openedStepUp(agent);
+		const create = vi.spyOn(transactionStore, "create");
+
+		const res = await verify(agent, transaction, codes.record.id, codes.codes[0]);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body).toEqual({ step_up: "verified", recovery_codes_remaining: 2 });
+		const after = await stored(userSessionStore, sid);
+		expect(after.amr).toEqual(expect.arrayContaining([RECOVERY_CODE_AMR, MFA_AMR]));
+		expect(after.authentication?.mfaAt).toEqual(new Date(T0 + 301_000));
+		expect(create).not.toHaveBeenCalled();
+		expect(audit.of("mfa.verified").at(-1)).toMatchObject({
+			details: { kind: "recovery_code", purpose: "step_up" },
+		});
+		expect(audit.of("mfa.recovery_code.used")).toEqual([
+			expect.objectContaining({
+				details: { kind: "recovery_code", purpose: "step_up", remaining: 2 },
+			}),
+		]);
+		expect((await enrollFromAccount(agent, "totp")).status).toBe(200);
+	});
+
+	it("records its exempt success, and the session's mfaAt, at the verification's time, however long the request then takes", async () => {
+		const { agent, sid, codes, factorStore, transactionStore, userSessionStore } =
+			await withCodesOnly();
+		const transaction = await openedStepUp(agent);
+		const exempt = vi.spyOn(transactionStore, "noteExemptSuccess");
+		const update = factorStore.update.bind(factorStore);
+		vi.spyOn(factorStore, "update").mockImplementation(async (...args) => {
+			freezeClock(T0 + 309_000);
+			return update(...args);
+		});
+
+		const res = await verify(agent, transaction, codes.record.id, codes.codes[0]);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(exempt).toHaveBeenCalledWith(ALICE.id, T0 + 301_000, expect.anything());
+		expect((await stored(userSessionStore, sid)).authentication?.mfaAt).toEqual(
+			new Date(T0 + 301_000),
+		);
+	});
+});
+
+describe("an email step-up", () => {
+	/** Alice signed in by password, then holding an email factor that recorded `address`'s digest. */
+	async function withEmail(addsMfa: boolean, address: string = ALICE.email) {
+		const setup = await composed({ email: { addsMfa } });
+		const session = await signedIn(setup.app, setup.userSessionStore);
+		const record = await seedFactor(setup.factorStore, "email", {
+			addressDigest: recordedDigest(address),
+		});
+		const transaction = await openedStepUp(session.agent);
+		return { ...setup, ...session, record, transaction };
+	}
+
+	const challenge = (agent: Agent, transaction: string, factorId: string) =>
+		mfaPost(agent, "/challenge", { transaction_id: transaction, factor_id: factorId });
+
+	it("mails the code to the session's own address as a login code, and adds email alone", async () => {
+		const { agent, sid, record, transaction, sender, userSessionStore, audit } =
+			await withEmail(false);
+
+		const challenged = await challenge(agent, transaction, record.id);
+
+		expect(challenged.status, JSON.stringify(challenged.body)).toBe(200);
+		expect(challenged.body).toEqual({ sent_to: "a***@example.com", expires_in: 600 });
+		expect(sender.sent).toEqual([
+			expect.objectContaining({ purpose: "login_code", subject: ALICE.id, to: ALICE.email }),
+		]);
+		expect(audit.of("mfa.challenge.sent")).toEqual([
+			expect.objectContaining({ details: { kind: "email", purpose: "step_up" } }),
+		]);
+		const res = await verify(agent, transaction, record.id, sender.sent.at(-1)?.code);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR, EMAIL_OTP_AMR]);
+	});
+
+	it("adds mfa beside email when the email factor adds it", async () => {
+		const { agent, sid, record, transaction, sender, userSessionStore } = await withEmail(true);
+		expect((await challenge(agent, transaction, record.id)).status).toBe(200);
+
+		const res = await verify(agent, transaction, record.id, sender.sent.at(-1)?.code);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect((await stored(userSessionStore, sid)).amr).toEqual([
+			PASSWORD_AMR,
+			EMAIL_OTP_AMR,
+			MFA_AMR,
+		]);
+	});
+
+	it("refuses 403 a factor that recorded another address, recorded as mfa.email_address_mismatch with the step_up purpose, mailing nothing", async () => {
+		const { agent, record, transaction, sender, audit } = await withEmail(
+			false,
+			"someone@example.com",
+		);
+
+		const res = await challenge(agent, transaction, record.id);
+
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(FACTOR_REFUSED);
+		expect(sender.sent).toEqual([]);
+		expect(audit.of("mfa.email_address_mismatch")).toEqual([
+			expect.objectContaining({
+				subject: ALICE.id,
+				details: { kind: "email", purpose: "step_up" },
+			}),
+		]);
+	});
+});
+
+describe("what a step_up transaction refuses", () => {
+	it("refuses the account-email proof, and an enrollment begun or completed on it, as unknown — spending nothing", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+		const totp = await seedTotp(factorStore);
+		const { agent } = await signInWithTotp(app, userSessionStore, totp);
+		const transaction = await openedStepUp(agent);
+
+		for (const path of ["/challenge", "/verify"]) {
+			const res = await mfaPost(agent, path, {
+				transaction_id: transaction,
+				factor_id: "account-email",
+				proof: "0000-0000-0000-0000",
+			});
+			expect(res.status, path).toBe(400);
+			expect(res.body, path).toEqual(UNKNOWN_FACTOR);
+		}
+		const begun = await mfaPost(agent, "/enrollment", { transaction_id: transaction, kind: "totp" });
+		expect(begun.status).toBe(400);
+		expect(begun.body).toEqual(NOT_OPEN);
+		const completed = await completeEnrollment(agent, transaction, "123456");
+		expect(completed.status).toBe(400);
+		expect(completed.body).toEqual(NOT_OPEN);
+		expect((await transactionStore.get(transaction))?.attempts).toBe(0);
+		expect((await readTransaction(agent, transaction)).body.purpose).toBe("step_up");
+	});
+});
+
+describe("the enrollment witness at a step-up", () => {
+	/** A TOTP step-up verified in a password session whose record `change` rewrites as read. */
+	async function steppedUp(
+		setup: Setup = {},
+		change: (session: UserSession) => UserSession = (session) => session,
+	) {
+		const booted = await composed(setup);
+		const { agent } = await signedIn(booted.app, booted.userSessionStore);
+		const totp = await seedTotp(booted.factorStore);
+		const read = booted.userSessionStore.get.bind(booted.userSessionStore);
+		vi.spyOn(booted.userSessionStore, "get").mockImplementation(async (sid) => {
+			const session = await read(sid);
+			return session === null ? null : change(session);
+		});
+		const transaction = await openedStepUp(agent);
+		const note = vi.spyOn(booted.transactionStore, "noteFirstBinding");
+		return {
+			...booted,
+			note,
+			verified: () => verify(agent, transaction, totp.record.id, totpCode(totp.secret)),
+		};
+	}
+
+	it("notes the first-binding mark, then marks the witness, when the session recorded its User as not enrolled — or recorded nothing", async () => {
+		for (const recorded of ["not_enrolled", "nothing"] as const) {
+			const { users, note, verified } = await steppedUp({}, (session) => {
+				if (recorded === "not_enrolled") return session;
+				const { enrollmentFacts: _facts, ...without } = session;
+				return without as UserSession;
+			});
+
+			const res = await verified();
+
+			expect(res.status, recorded).toBe(200);
+			expect(note, recorded).toHaveBeenCalledTimes(1);
+			expect((users as WitnessingUserRepository).marks, recorded).toEqual([
+				{ subject: ALICE.id, enrolled: true },
+			]);
+		}
+	});
+
+	it("neither notes nor marks when the session recorded its User as enrolled", async () => {
+		const { users, note, verified } = await steppedUp({}, (session) => ({
+			...session,
+			enrollmentFacts: { witness: "enrolled", mailAddress: "address" },
+		}));
+
+		expect((await verified()).status).toBe(200);
+
+		expect(note).not.toHaveBeenCalled();
+		expect((users as WitnessingUserRepository).marks).toEqual([]);
+	});
+
+	it("leaves the witness unmarked when the mark cannot be noted, said at warn, and still steps up", async () => {
+		const { users, transactionStore, logger, verified } = await steppedUp();
+		vi.spyOn(transactionStore, "noteFirstBinding").mockRejectedValue(new Error("unreachable"));
+
+		expect((await verified()).status).toBe(200);
+
+		expect((users as WitnessingUserRepository).marks).toEqual([]);
+		expect(events(logger, "warn")).toContain("mfa_first_binding_unnoted");
+	});
+
+	it("says a witness mark that fails at warn, and still steps up", async () => {
+		const { users, logger, verified } = await steppedUp();
+		(users as WitnessingUserRepository).failWith(new Error("directory down"));
+
+		expect((await verified()).status).toBe(200);
+
+		expect(events(logger, "warn")).toContain("mfa_enrollment_witness_unwritten");
+	});
+
+	it("notes nothing for a directory that cannot write the witness", async () => {
+		const { note, verified } = await steppedUp({
+			users: new InMemoryUserRepository(directoryEntries()),
+		});
+
+		expect((await verified()).status).toBe(200);
+
+		expect(note).not.toHaveBeenCalled();
+	});
+});
+
+describe("what a step-up logs", () => {
+	it("never logs the code, the address, the transaction id or the renewal nonce", async () => {
+		const { app, factorStore, userSessionStore, logger } = await composed();
+		const { agent, sid } = await signedIn(app, userSessionStore);
+		const totp = await seedTotp(factorStore);
+		const transaction = await openedStepUp(agent);
+		const code = totpCode(totp.secret);
+		await verify(agent, transaction, totp.record.id, wrongCode(totp.secret));
+		expect((await verify(agent, transaction, totp.record.id, code)).status).toBe(200);
+
+		const text = loggedText(logger);
+		const nonce = (await stored(userSessionStore, sid)).renewalNonce as string;
+		for (const secret of [code, ALICE.email, transaction, nonce]) {
+			expect(text).not.toContain(secret);
+		}
+	});
+});
