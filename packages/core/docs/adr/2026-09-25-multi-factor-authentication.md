@@ -31,7 +31,7 @@
 - Amended 2026-10-01 (build-order step 16, owner decision): an email challenge is not refused while the subject is held; the hold is enforced at verification (F5's amendment of that date). The email factor's listing carries no hint (D23's amendment of that date).
 - Amended 2026-10-01 (build-order step 11, owner decision): the regeneration after a step-up, and after a binding in a session, is the session package's `LoginCompletion.renewSession`, and the escalation is bound to the renewed cookie session by a renewal nonce (D27's amendment of that date).
 - Amended 2026-10-01 (build-order step 11-0c, owner decision): an authorization code carries the `amr` `/authorize` vouched for, and its tokens carry that, not the session's at exchange (D27's amendment of that date).
-- Amended 2026-10-01 (build-order step 11-A, owner decision): a step-up offers every factor the subject can use and keeps `acr_values` as a hint, a recovery code included and opening no binding; its finish renews the session id, then records the factor once (F2's amendment of that date).
+- Amended 2026-10-01 (build-order step 11-A, owner decision): a step-up offers every factor the subject can use, a recovery code included, which opens no binding. It keeps `acr_values` as a hint. Its finish renews the session id, then records the factor once (F2's amendment of that date).
 
 ## Context
 
