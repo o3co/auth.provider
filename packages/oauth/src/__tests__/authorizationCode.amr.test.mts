@@ -250,16 +250,52 @@ describe("an authorization code carries the amr /authorize vouched for", () => {
 		expect(decodeJwt(res.body.refresh_token as string).amr).toEqual(["pwd"]);
 	});
 
-	it("records on the code what the session vouches for, not its own amr", async () => {
-		// A session written before `authentication` existed, carrying `fed`,
-		// vouches for `fed` alone: `hwk` was the upstream IdP's.
-		const w = await world({ amr: ["hwk", "fed"], authentication: undefined });
+	it.each([
+		[
+			"a federated session from before the upstream split: fed alone, its upstream IdP's values left off",
+			{ amr: ["hwk", "fed"], authentication: undefined },
+			["fed"],
+		],
+		[
+			"a trusted federation's session: its IdP's values beside fed",
+			{
+				amr: ["hwk", "fed"],
+				authentication: {
+					primary: "fed",
+					federation: "google",
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+			},
+			["hwk", "fed"],
+		],
+		[
+			"an untrusted federation's session: fed, never what was kept apart",
+			{
+				amr: ["fed"],
+				authentication: {
+					primary: "fed",
+					federation: "google",
+					upstreamAmr: ["hwk"],
+					mfaAt: undefined,
+				},
+			},
+			["fed"],
+		],
+	] as const)(
+		"records on the code, and stamps, what the session vouches for — %s",
+		async (_, recorded, vouched) => {
+			const w = await world(recorded);
 
-		await w.authorize();
+			const code = await w.authorize();
+			const res = await w.exchange(code);
 
-		expect(w.createCode).toHaveBeenCalledTimes(1);
-		expect(w.createCode.mock.calls[0]?.[0]).toMatchObject({ amr: ["fed"] });
-	});
+			expect(w.createCode).toHaveBeenCalledTimes(1);
+			expect(w.createCode.mock.calls[0]?.[0]).toMatchObject({ amr: vouched });
+			expect(res.status, JSON.stringify(res.body)).toBe(200);
+			expect(amrOf(res.body)).toEqual({ access: vouched, refresh: vouched, id: vouched });
+		},
+	);
 
 	it.each([
 		["no amr (one minted before codes carried it)", undefined],

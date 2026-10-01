@@ -1392,14 +1392,14 @@ describe("createAuthorizationGrant", () => {
 				expect(idPayload.name).toBeUndefined();
 			});
 
-			it("carries amr from the session and acr from the code record, and mirrors both into the access and refresh tokens", async () => {
+			it("carries amr and acr from the code record, not the session's, and mirrors both into the access and refresh tokens", async () => {
 				const authTime = new Date("2026-04-21T00:00:00Z");
 				const userSessionStore = makeUserSessionStore({
 					sid: "sid-1",
 					sub: "u-1",
 					authTime,
 					claims: {},
-					amr: ["pwd", "mfa"],
+					amr: ["pwd"],
 				});
 				const deps = {
 					...makeDepsWithIssuer(
@@ -1412,6 +1412,7 @@ describe("createAuthorizationGrant", () => {
 							sid: "sid-1",
 							grantedScope: ["openid"],
 							acr: "urn:example:mfa",
+							amr: ["pwd", "otp", "mfa"],
 						}),
 					),
 					userSessionStore,
@@ -1434,98 +1435,25 @@ describe("createAuthorizationGrant", () => {
 				expect(result.status).toBe(200);
 				if (!("tokens" in result)) throw new Error("expected tokens");
 				const id = decodeJwt(result.tokens.id_token as string) as Record<string, unknown>;
-				expect(id.amr).toEqual(["pwd", "mfa"]);
+				expect(id.amr).toEqual(["pwd", "otp", "mfa"]);
 				expect(id.acr).toBe("urn:example:mfa");
 				expect(id.auth_time).toBe(Math.floor(authTime.getTime() / 1000));
 				const at = decodeJwt(result.tokens.access_token as string) as Record<string, unknown>;
-				expect(at.amr).toEqual(["pwd", "mfa"]);
+				expect(at.amr).toEqual(["pwd", "otp", "mfa"]);
 				expect(at.acr).toBe("urn:example:mfa");
-				// The refresh token carries them too: `acr` lives on the code, which is
-				// spent here, so the refresh grant has nowhere else to read it from, and
-				// a resource server gating on `amr` must not see it vanish at the first
-				// refresh.
+				// The refresh token carries them too: `amr` and `acr` live on the code,
+				// which is spent here, so the refresh grant has nowhere else to read
+				// them from, and a resource server gating on `amr` must not see it
+				// vanish at the first refresh.
 				const rt = decodeJwt(result.tokens.refresh_token as string) as Record<string, unknown>;
-				expect(rt.amr).toEqual(["pwd", "mfa"]);
+				expect(rt.amr).toEqual(["pwd", "otp", "mfa"]);
 				expect(rt.acr).toBe("urn:example:mfa");
 			});
 
 			it.each([
-				[
-					"a federated session from before the upstream split: fed alone, its upstream IdP's values left off",
-					["hwk", "fed"],
-					undefined,
-					["fed"],
-				],
-				[
-					"a trusted federation's session: its IdP's values beside fed",
-					["hwk", "fed"],
-					{ primary: "fed", federation: "google", upstreamAmr: undefined, mfaAt: undefined },
-					["hwk", "fed"],
-				],
-				[
-					"an untrusted federation's session: fed, never what was kept apart",
-					["fed"],
-					{ primary: "fed", federation: "google", upstreamAmr: ["hwk"], mfaAt: undefined },
-					["fed"],
-				],
-			] as const)(
-				"stamps what the session vouches for — %s",
-				async (_label, amr, authentication, stamped) => {
-					// `/token` reads `amr` through `vouchedAmr`, never off the record: a
-					// value an untrusted IdP asserted is on no token.
-					const userSessionStore = makeUserSessionStore({
-						sid: "sid-1",
-						sub: "u-1",
-						authTime: new Date("2026-04-21T00:00:00Z"),
-						claims: {},
-						amr,
-						...(authentication ? { authentication } : {}),
-					});
-					const deps = {
-						...makeDepsWithIssuer(
-							vi.fn().mockResolvedValue({
-								code: "c1",
-								client_id: "client1",
-								redirect_uri: RP_URI,
-								code_challenge: S256_CHALLENGE,
-								code_challenge_method: "S256",
-								sid: "sid-1",
-								grantedScope: ["openid"],
-							}),
-						),
-						userSessionStore,
-						sessionFamilyIndex: makeSessionFamilyIndex(),
-						sessionRPRegistry: makeSessionRPRegistry(),
-					};
-					const handler = createAuthorizationGrant(deps);
-					const { result } = await handler.handle({
-						body: {
-							code: "c1",
-							client_id: "client1",
-							redirect_uri: RP_URI,
-							code_verifier: CODE_VERIFIER,
-						},
-						session: { code: "c1", code_client_id: "client1" },
-						issuer: "https://auth.example.com",
-						metadata: { ip: "127.0.0.1" },
-						authenticatedClient: DEFAULT_AUTH_CLIENT,
-					});
-					expect(result.status).toBe(200);
-					if (!("tokens" in result)) throw new Error("expected tokens");
-					for (const token of [
-						result.tokens.id_token,
-						result.tokens.access_token,
-						result.tokens.refresh_token,
-					]) {
-						expect((decodeJwt(token as string) as Record<string, unknown>).amr).toEqual(stamped);
-					}
-				},
-			);
-
-			it.each([
 				["an empty amr", []],
 				["an amr with an empty element", ["pwd", ""]],
-			])("stamps no amr on any token for a session recording %s", async (_label, amr) => {
+			])("stamps no amr on any token for a code carrying %s", async (_label, amr) => {
 				// Every grant reads `amr` through one predicate, so the first refresh
 				// token cannot carry an `amr: []` the refresh grant then drops.
 				const userSessionStore = makeUserSessionStore({
@@ -1533,7 +1461,7 @@ describe("createAuthorizationGrant", () => {
 					sub: "u-1",
 					authTime: new Date("2026-04-21T00:00:00Z"),
 					claims: {},
-					amr: amr as string[],
+					amr: ["pwd"],
 				});
 				const deps = {
 					...makeDepsWithIssuer(
@@ -1545,6 +1473,7 @@ describe("createAuthorizationGrant", () => {
 							code_challenge_method: "S256",
 							sid: "sid-1",
 							grantedScope: ["openid"],
+							amr,
 						}),
 					),
 					userSessionStore,
