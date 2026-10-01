@@ -297,9 +297,9 @@ export interface SessionView {
 	 * (`supportsSecondFactorUpdate`) and `canRecordSecondFactor` is true of
 	 * the record. Admission decides it once per admission over a live record,
 	 * when it reads the record into this view, and sets it on every view it
-	 * builds; a requirement chooses `step_up` or `reauthenticate` on it, and a
-	 * route refuses to open a step-up it is `false` for, without either
-	 * reading the store or the record's shape. Optional only so a view built
+	 * builds, so a requirement can choose `step_up` or `reauthenticate` on it,
+	 * and a route can refuse to open a step-up it is `false` for, without
+	 * either reading the store or the record's shape. Optional only so a view built
 	 * by hand still type-checks: absent reads as `false`. It becomes required
 	 * once every view built by hand sets it.
 	 */
