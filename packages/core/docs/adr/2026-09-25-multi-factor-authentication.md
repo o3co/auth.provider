@@ -822,6 +822,8 @@ Core's reference and schema hold what core's consumers read with the MFA package
 
 **Amended 2026-10-01 (build-order step 10, owner decision):** the account-email proof is not an exempt success: it ends no run and lifts no hold. The exempt successes are a recovery code and a WebAuthn assertion.
 
+**Amended 2026-10-01 (build-order step 10, owner decision):** the lock answer's `usable_kinds` does not "let the page say which factors still work": it names the exempt factors the subject holds, and whether one works shows at its verify (`401` / `503`). A recovery set with no code left, or whose digest key left the ring, is named.
+
 ### D22 — Codes: entropy, lifetime, single use, replay
 
 - **TOTP**: a secret of the algorithm's output length (F6); 6 digits; window ±1 step (configurable 0–2); **no automatic drift resynchronisation** (RFC 6238 §6); the provider's clock NTP-synced (runbook). Reuse within a step refused by `lastUsedStep` (F6).
