@@ -361,6 +361,7 @@ export {
 } from "./federations/types.mjs";
 // The authentication claims a token may carry
 export {
+	authTimeAt,
 	authTimeClaim,
 	composeAmr,
 	EMAIL_OTP_AMR,
@@ -647,6 +648,7 @@ export {
 	toMfaStoreUpdateRequest,
 } from "./mfa/storeWire.mjs";
 export {
+	checkConfiguredMfaLockoutPolicy,
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
@@ -667,7 +669,9 @@ export {
 	isMfaTransactionBoundTo,
 	laterFirstBindingMark,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_LOCKOUT_MAX_BACKOFF_SECONDS,
 	MFA_LOCKOUT_MAX_HARD_LIMIT,
+	MFA_LOCKOUT_MIN_HARD_LIMIT,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
@@ -1422,6 +1426,7 @@ export {
 } from "./federation-grants/lifetime.mjs";
 export {
 	type FederationGrantAcquisitionConnection,
+	type FederationGrantConnectionNotConfigured,
 	type FederationGrantLodged,
 	type FederationGrantLodgingAbsorbedCarrier,
 	type FederationGrantLodgingClient,

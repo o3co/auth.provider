@@ -15,8 +15,8 @@
  */
 import { newRenewalNonce } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import type { UserSessionStoreClient } from "../src/clients.mjs";
-import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
+import type { UserSessionStoreClient } from "#/clients.mjs";
+import { createRedisUserSessionStore } from "#/userSessionStore.mjs";
 import {
 	PRE_UPGRADE_FEDERATED_ENVELOPE,
 	PRE_UPGRADE_FEDERATED_SID,

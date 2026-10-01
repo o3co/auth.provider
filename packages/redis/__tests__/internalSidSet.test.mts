@@ -24,9 +24,9 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { RedisSidSetClient } from "../src/internal/redisSidSet.mjs";
-import { createRedisSidSet } from "../src/internal/redisSidSet.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
+import type { RedisSidSetClient } from "#/internal/redisSidSet.mjs";
+import { createRedisSidSet } from "#/internal/redisSidSet.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 import { relativeDeadline, serverPasses, testRedis } from "./support/redis.mjs";
 
 let raw: Redis;

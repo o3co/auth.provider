@@ -32,10 +32,15 @@ updates:
           - "*"
         group-by: dependency-name
 
+  # A release is proposed only once it has been public for `default-days`, so
+  # a compromised release can be caught upstream before it reaches a lockfile.
+  # Cooldown applies to version updates only: security updates stay immediate.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 3
     open-pull-requests-limit: 10
     # Group routine minor/patch churn into few PRs. Many separate lockfile-
     # touching PRs race at merge time: GitHub's server-side squash/merge does
@@ -78,6 +83,8 @@ updates:
     directory: "/templates/standalone/tests"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 3
     open-pull-requests-limit: 5
     groups:
       minor-patch:

@@ -18,11 +18,11 @@
 // 2026-09-17-federation-grants-offline-delegation, D16).
 
 import { describe, expect, it } from "vitest";
-import type { FederationGrantIntentStoreClient } from "../src/clients.mjs";
+import type { FederationGrantIntentStoreClient } from "#/clients.mjs";
 import {
 	redisFederationGrantIntentStoreModule,
 	resolveRedisFederationGrantIntentStoreOptions,
-} from "../src/federation-grant-intent-store.mjs";
+} from "#/federation-grant-intent-store.mjs";
 
 const client = {} as FederationGrantIntentStoreClient;
 
