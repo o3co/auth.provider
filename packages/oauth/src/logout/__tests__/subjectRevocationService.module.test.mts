@@ -26,6 +26,7 @@ import {
 	type AuditEvent,
 	BootError,
 	createApp,
+	createInMemorySessionFamilyIndex,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
 	createMemoryFederationGrantStore,
@@ -263,7 +264,7 @@ describe("subjectRevocationServiceModule", () => {
 			expect(result.sessionsRevoked).toEqual(["sid-1"]);
 		});
 
-		it("still revokes the families of a session whose store cannot answer, and leaves the sid for a retry", async () => {
+		it("still revokes the families of a session whose store cannot answer, and leaves the sid, its index entries and the session for a retry", async () => {
 			const index = createInMemorySubjectSessionIndex();
 			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
 			const stores = endingStores();
@@ -277,12 +278,56 @@ describe("subjectRevocationServiceModule", () => {
 			expect(stores.sessionFamilyIndex.endSession).not.toHaveBeenCalled();
 			expect(stores.sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-1");
 			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+			expect(stores.sessionFamilyIndex.removeBySid).not.toHaveBeenCalled();
+			expect(stores.sessionRPRegistry.removeBySid).not.toHaveBeenCalled();
+			expect(stores.sessionFederationIndex.removeBySid).not.toHaveBeenCalled();
+			expect(stores.userSessionStore.delete).not.toHaveBeenCalled();
 			expect(result.sessionsFailed).toEqual(["sid-1"]);
 			expect(await index.listSids("u-1")).toEqual(["sid-1"]);
 			expect(logger.error).toHaveBeenCalledWith(
 				expect.objectContaining({ subject: "u-1", sid: "sid-1" }),
 				"revoke_all_cascade_failed",
 			);
+		});
+	});
+
+	describe("a failed session read racing a code exchange", () => {
+		it("keeps a family added after the listing indexed, and the retry with the session revokes it", async () => {
+			const subjects = createInMemorySubjectSessionIndex();
+			await subjects.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
+			const families = createInMemorySessionFamilyIndex();
+			await families.addFamilyId("sid-1", "fam-1", SESSION_EXPIRES_AT);
+			// A code exchange past its revalidation adds its family right after
+			// the subject cascade's listing, which wrote no ended mark.
+			let raced = false;
+			const sessionFamilyIndex = {
+				...families,
+				listFamilyIds: vi.fn(async (sid: string) => {
+					const listed = await families.listFamilyIds(sid);
+					if (!raced) {
+						raced = true;
+						await families.addFamilyIdUnlessEnded(sid, "fam-late", SESSION_EXPIRES_AT);
+					}
+					return listed;
+				}),
+				removeBySid: vi.fn(families.removeBySid),
+			};
+			const stores = { ...cascadeStores(), sessionFamilyIndex };
+			stores.userSessionStore.get.mockRejectedValueOnce(new Error("session store is down"));
+			const service = build({ ...stores, subjectSessionIndex: subjects });
+
+			const first = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(first.sessionsFailed).toEqual(["sid-1"]);
+			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+			expect(stores.refreshTokenFamilyRevocation.revokeFamily).not.toHaveBeenCalledWith("fam-late");
+			expect(await families.listFamilyIds("sid-1")).toEqual(["fam-1", "fam-late"]);
+
+			const retry = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(retry.sessionsRevoked).toEqual(["sid-1"]);
+			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-late");
+			expect(stores.userSessionStore.delete).toHaveBeenCalledWith("sid-1");
 		});
 	});
 
