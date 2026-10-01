@@ -28,7 +28,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SET_REVOCATION_BOUNDARIES } from "../src/ioredis/scripts/user-sessions.mjs";
+import { SET_REVOCATION_BOUNDARIES } from "#/ioredis/scripts/user-sessions.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
 import {

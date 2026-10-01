@@ -22,10 +22,11 @@
  */
 
 import {
+	consoleLogger,
 	DEFAULT_CLOCK_SKEW_MS,
 	SUBJECT_REVOCATION_MIN_RETENTION_MS,
 } from "@o3co/auth-provider-core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubjectRevocationClient } from "#/clients.mjs";
 import { redisSessionStoresModule } from "#/modules/redisSessionStores.mjs";
 import {
@@ -226,6 +227,22 @@ describe("createRedisSubjectRevocation — a client that cannot clamp", () => {
 });
 
 describe("the clamp's logger, as the module and the builder hand it", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("is core's consoleLogger when none is given, for the clamp and for a client that cannot clamp", async () => {
+		const warn = vi.spyOn(consoleLogger, "warn").mockImplementation(() => undefined);
+		const store = createRedisSubjectRevocation({ client: recordingClient([]), keyPrefix: "p:" });
+		await store.revokeBefore("u", AHEAD, UNTIL);
+		const { advanceRevocationBoundaries: _absent, ...unclamping } = recordingClient([]);
+		createRedisSubjectRevocation({ client: unclamping, keyPrefix: "p:" });
+		expect(warn.mock.calls.map((call) => call[1])).toEqual([
+			"subject_revocation_boundary_clamped",
+			"subject_revocation_clamp_unsupported",
+		]);
+	});
+
 	it("is the composition's logger in redisSessionStoresModule", async () => {
 		const events: Event[] = [];
 		const provide = redisSessionStoresModule.provides?.subjectRevocation as unknown as (
