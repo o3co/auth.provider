@@ -30,6 +30,7 @@ import {
 	type Logger,
 	type LoginEntry,
 	type PendingConsentStore,
+	readSpaceDelimitedParameter,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
 	type UserSessionStore,
@@ -137,4 +138,25 @@ export const authorizeRequestUrl = (issuerOrigin: string, req: Request): URL => 
 		}
 	}
 	return url;
+};
+
+/**
+ * `url` less `prompt=consent`, which the consent round trip answers — carried
+ * back, it would park the request again forever. Other prompt values stay,
+ * read as `resolvePrompt` reads them; a malformed `prompt` was refused there
+ * and is left as it is. The request the consent step resumes, and the one a
+ * re-authentication ask is bound to, so the two agree.
+ */
+export const withoutConsentPrompt = (url: URL): URL => {
+	const out = new URL(url);
+	const prompt = out.searchParams.get("prompt");
+	const prompts = prompt === null ? null : readSpaceDelimitedParameter(prompt);
+	if (prompts === null) return out;
+	const remaining = prompts.filter((value) => value !== "consent");
+	if (remaining.length === 0) {
+		out.searchParams.delete("prompt");
+	} else {
+		out.searchParams.set("prompt", remaining.join(" "));
+	}
+	return out;
 };

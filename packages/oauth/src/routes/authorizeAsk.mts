@@ -39,6 +39,7 @@ import {
 	type AuthorizeContext,
 	authorizeParams,
 	authorizeRequestUrl,
+	withoutConsentPrompt,
 } from "./authorizeContext.mjs";
 import { REAUTH_ASK_PARAM, type ReauthAskRecord, type ReauthAskStore } from "./reauthAsk.mjs";
 
@@ -140,18 +141,28 @@ export const parseAcrValues = (ctx: AuthorizeContext): readonly string[] | null 
 export const REDIRECT_TO_PARAM = LOGIN_RETURN_PARAMETER;
 
 /**
- * The authorize request an ask is minted for and returned to: this request
- * as a GET URL (`authorizeRequestUrl` — a POST's form body written as the
- * query) without the ask parameter, so both sides agree by construction —
- * the POST that sends the browser away and the GET it comes back as.
+ * The authorize request a trip returns the browser to: this request as a GET
+ * URL (`authorizeRequestUrl` — a POST's form body written as the query)
+ * without the ask parameter, as it was sent.
  */
-const askRequestFor = (issuerOrigin: string, req: Request): string => {
+const askReturnFor = (issuerOrigin: string, req: Request): string => {
 	const url = authorizeRequestUrl(issuerOrigin, req);
 	url.searchParams.delete(REAUTH_ASK_PARAM);
 	return url.toString();
 };
 
+/**
+ * The request an ask is bound to: the return less `prompt=consent`
+ * (`withoutConsentPrompt`), so the POST that sends the browser away, the GET
+ * it comes back as, and the request the consent step resumes all agree by
+ * construction.
+ */
+const askRequestFor = (issuerOrigin: string, req: Request): string =>
+	withoutConsentPrompt(new URL(askReturnFor(issuerOrigin, req))).toString();
+
 const askRequestOf = (ctx: AuthorizeContext): string => askRequestFor(ctx.issuerOrigin, ctx.req);
+
+const askReturnOf = (ctx: AuthorizeContext): string => askReturnFor(ctx.issuerOrigin, ctx.req);
 
 /**
  * An ask store that cannot answer: not a decision either way, the same rule
@@ -307,7 +318,7 @@ export const loginReturnWithAsk = async (
 			loginAskedAt: now,
 			stepUpAskedAt: {},
 		});
-		return returnWithAsk(askRequest, askId);
+		return returnWithAsk(askReturnFor(issuerOrigin, req), askId);
 	} catch (err) {
 		logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
 		return asIs;
@@ -428,7 +439,7 @@ export const sendToLogin = async (
 	});
 	if (askId === "spent") return "spent";
 	if (askId === null) return "answered";
-	loginRedirect(ctx.res, ctx.opts.login, returnWithAsk(askRequest, askId));
+	loginRedirect(ctx.res, ctx.opts.login, returnWithAsk(askReturnOf(ctx), askId));
 	return "sent";
 };
 
@@ -560,7 +571,7 @@ export const stepUpTrip = async (
 	});
 	if (askId === "spent") return "spent";
 	if (askId === null) return "answered";
-	target.searchParams.set(REDIRECT_TO_PARAM, returnWithAsk(askRequest, askId));
+	target.searchParams.set(REDIRECT_TO_PARAM, returnWithAsk(askReturnOf(ctx), askId));
 	ctx.res.redirect(target.toString());
 	return "sent";
 };
