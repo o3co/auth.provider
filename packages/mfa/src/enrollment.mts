@@ -45,11 +45,14 @@
  * - The subject's generation is read where the enrollment begins — before the
  *   session's admission, or at a login's begin — and carried, sealed, in the
  *   pending enrollment (`factorSet.mts`). A completion's writes run whole
- *   under the subject's lease acquired at it: a reset or a recovery since the
- *   begin refuses the binding, nothing spent but the attempt, as a binding the
- *   records no longer allow; another write holding the lease past the wait is
- *   `factors_busy`, nothing written nor spent. Writes that ran past the lease
- *   say so (`overran`).
+ *   under the subject's lease acquired at it, every one of them — the
+ *   transaction store's included — through the writes the lease hands it,
+ *   each started only with time of the lease left: a reset or a recovery
+ *   since the begin refuses the binding, nothing spent but the attempt, as a
+ *   binding the records no longer allow; another write holding the lease past
+ *   the wait, or too little of it left before the first write, is
+ *   `factors_busy`, nothing written nor spent. Writes that ran out of the
+ *   lease, or past it, answer what they wrote, and say so (`overran`).
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, under the lease, in this order: for a first binding notes the
  *   subject's first-binding mark — a note that fails refuses it, nothing
@@ -665,12 +668,18 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				// Noted before the factor is written: a first binding the mark misses
 				// would leave a stale session trusted.
 				if (first) {
-					const unnoted = await kit.noteFirstBinding(tx.subject);
+					const unnoted = await writes.run(
+						() => kit.noteFirstBinding(tx.subject),
+						(cause) => outage("mfa_transaction", "noteFirstBinding", cause),
+					);
 					if (unnoted !== undefined) return unnoted;
 				}
 				// Consumed before anything is written: a lost race spends the
 				// transaction, never a factor.
-				const consumed = await kit.consume(tx);
+				const consumed = await writes.run(
+					() => kit.consume(tx),
+					(cause) => outage("mfa_transaction", "consume", cause),
+				);
 				if ("outcome" in consumed) return consumed;
 				const binding: NonNullable<MfaFactorRecord["binding"]> = first ? firstBy : "mfa";
 				try {
@@ -727,7 +736,10 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				// given and the first counting factor written.
 				const flagCleared =
 					binding === "email_proof"
-						? await kit.consumeEmailProofRequirement(tx.subject)
+						? await writes.run(
+								() => kit.consumeEmailProofRequirement(tx.subject),
+								(failed) => ({ failed }),
+							)
 						: undefined;
 				const recoveryCodes = await issueRecoveryCodes({
 					factors,

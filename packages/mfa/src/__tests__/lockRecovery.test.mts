@@ -391,7 +391,7 @@ describe("a release", () => {
 	it("keeps the hard hold while a record of a kind not installed stands from before it: an uninstalled kind could be installed again", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await factorStore.create(recordOf("uninstalled", "gone", T - 1_000));
-		const { store, recovery } = setup({ factorStore });
+		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
 		await latch(store);
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
 		await recovery.authorize(SUBJECT, SID, "key", clock);

@@ -28,9 +28,10 @@
  * - A release, in that session, reads the subjects' sessions boundary
  *   (`revokedBefore`) — none wired, none is handed — then, under the
  *   subject's lease (`factorSet.mts`), reads the subject's records and hands
- *   the store the earliest creation time of those of an installed guessable
- *   kind (a record whose data does not open included; a kind not installed
- *   left out; a time that cannot be read as the earliest there is), and the
+ *   the store the earliest creation time of those of any kind but an
+ *   installed exempt one (a record whose data does not open included, and
+ *   one of a kind not installed, which may be installed again — fail-closed;
+ *   a time that cannot be read as the earliest there is), and the
  *   store judges the rest in one step: whether the authorization stands,
  *   whether the boundary is later than the attack's first counted failure,
  *   and whether every guessable factor was bound after the hard hold.
@@ -137,14 +138,15 @@ export async function mintSubjectRecovery(
 	});
 }
 
-/** The earliest of `records` a guessable factor installed here reads, `null` for none; a time that cannot be read as the earliest there is. */
+/** The earliest of `records` not of an exempt kind installed here — a kind not installed counts — `null` for none; a time that cannot be read as the earliest there is. */
 const guessableBoundSince =
 	(factors: MfaFactorResolver) =>
 	(records: readonly MfaFactorRecord[]): number | null => {
 		let earliest: number | null = null;
 		for (const record of records) {
 			const factor = factors.get(record.kind);
-			if (factor === undefined || factor.guessable === false) continue;
+			// A kind not installed may be installed again: its record counts, fail-closed.
+			if (factor?.guessable === false) continue;
 			const at = record.createdAt instanceof Date ? record.createdAt.getTime() : Number.NaN;
 			const since = Number.isSafeInteger(at) && at >= 0 ? at : 0;
 			earliest = earliest === null ? since : Math.min(earliest, since);

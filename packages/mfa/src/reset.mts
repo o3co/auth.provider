@@ -24,18 +24,23 @@
  *   characters, or `requireEmailProof` with no mail sender wired — nobody
  *   could give the proof, so nobody could bind. A Store must also not ask it
  *   for an account with no address.
- * - Then, in this order: D25's flag set when asked; every session and token
- *   of the subject's ended (`revokeAllForSubject`, the federation grants as
- *   asked) — a revocation that throws or is not complete stops it, nothing
- *   more done; a one-time `reset` authorization recorded
- *   (`lockRecovery.mts`); and, under one lease of the subject's, waited for
- *   (`factorSet.mts`): the lock state reset whole — the hard hold, every
- *   authorization of the subject's, and the generation moved on, so a
- *   factor-set write begun before stops at its commit — every record removed
- *   (`removeAllForSubject`: one sealed under a retired key, of a kind not
- *   installed, or a recovery-code set alike), and the witness cleared last.
- * - Answers a report: whether it completed, where it stopped, the sessions'
- *   report, the kinds and count of the records removed as read before, the
+ * - Then, in this order: every session and token of the subject's ended
+ *   (`revokeAllForSubject`, the federation grants as asked) — a revocation
+ *   that throws or is not complete stops it, nothing more done; then, under
+ *   one lease of the subject's, waited for (`factorSet.mts`), each write held
+ *   to the lease's time: D25's flag set when asked — under the lease, so no
+ *   binding that held it before can clear it — the reset's own one-time
+ *   authorization recorded (`lockRecovery.mts`) and applied: the lock state
+ *   reset whole — the hard hold, every authorization of the subject's, and
+ *   the generation moved on, so a factor-set write begun before stops at its
+ *   commit — then every record removed (`removeAllForSubject`: one sealed
+ *   under a retired key, of a kind not installed, or a recovery-code set
+ *   alike), and the witness cleared last; and, once the lease part is done,
+ *   every session and token ended again: a login made with a factor before
+ *   its removal ends too.
+ * - Answers a report: whether it completed — both revocations complete, the
+ *   lease held throughout — where it stopped, both sessions' reports, the
+ *   kinds and count of the records removed (once the removal succeeded), the
  *   generation, the witness. It is idempotent: run again, it does it all
  *   again. Emits one `mfa.reset`, and no `mfa.lock.recovered`.
  * - Residual: a write admitted before the revocation that ran past its lease
@@ -78,16 +83,18 @@ export type MfaResetStop = "email_proof" | "sessions" | "lease" | "lock" | "fact
 /** What a reset did. */
 export interface MfaResetReport {
 	readonly subject: string;
-	/** Every step done: the sessions ended, the lock state reset, every record removed, the witness cleared or not writable here. */
+	/** Every step done under a lease held throughout: the sessions ended twice, the lock state reset, every record removed, the witness cleared or not writable here. */
 	readonly complete: boolean;
-	/** Where it stopped, when it did not complete: run it again. */
+	/** Where it stopped, when a step did not complete: run it again. One whose lease ended before its release says `overran` alone. */
 	readonly stoppedAt?: MfaResetStop;
 	/** Why it stopped there. */
 	readonly cause?: unknown;
 	readonly requireEmailProof: boolean;
 	/** What the revocation reported; none when it stopped before, or the revocation threw. */
 	readonly sessions?: SubjectRevocationReport;
-	/** The kinds, each once in code-unit order, and the count of the records removed, as read just before; none when they could not be read. */
+	/** What the revocation once the lease part was done reported; none when it did not run, or threw. */
+	readonly sessionsAgain?: SubjectRevocationReport;
+	/** Once the removal succeeded: the kinds, each once in code-unit order, and the count of the records removed, as read just before; none when they could not be read. */
 	readonly removed?: { readonly kinds: readonly string[]; readonly count: number };
 	/** The subject's generation once the lock state was reset. */
 	readonly generation?: number;
@@ -192,7 +199,7 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 			/** `report` audited once, said once, and answered. */
 			const finish = (report: MfaResetReport): MfaResetReport => {
 				emitAuditEvent(auditSink, {
-					timestamp: new Date(nowMs),
+					timestamp: new Date(now()),
 					type: "mfa.reset",
 					subject,
 					details: {
@@ -202,6 +209,9 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 							: { kinds: [...report.removed.kinds], count: report.removed.count }),
 						requireEmailProof: asked.requireEmailProof,
 						sessions: report.sessions?.complete === true,
+						...(report.sessionsAgain === undefined
+							? {}
+							: { sessionsAgain: report.sessionsAgain.complete === true }),
 						complete: report.complete,
 						...(asked.requestedBy === undefined ? {} : { requestedBy: asked.requestedBy }),
 					},
@@ -212,7 +222,7 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 					logger?.warn(
 						{
 							sub: subject,
-							stoppedAt: report.stoppedAt,
+							...(report.stoppedAt === undefined ? {} : { stoppedAt: report.stoppedAt }),
 							...(report.cause === undefined ? {} : { err: loggableError(report.cause) }),
 						},
 						"mfa_reset_incomplete",
@@ -224,74 +234,99 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 				return report;
 			};
 			const base = { subject, requireEmailProof: asked.requireEmailProof };
-			const stopped = (
-				at: MfaResetStop,
-				more: Omit<MfaResetReport, "subject" | "complete" | "requireEmailProof" | "stoppedAt">,
-			): MfaResetReport => finish({ ...base, complete: false, stoppedAt: at, ...more });
 
-			if (asked.requireEmailProof) {
+			/** Every session and token of the subject's ended: the report, or why not. */
+			const revoke = async (): Promise<
+				| { readonly report: SubjectRevocationReport }
+				| { readonly cause: unknown; readonly report?: SubjectRevocationReport }
+			> => {
+				let report: SubjectRevocationReport;
 				try {
-					await transactionStore.requireEmailProofAtNextBinding(subject);
+					report = await subjectRevocationService.revokeAllForSubject({
+						subject,
+						...(asked.federationGrants === undefined
+							? {}
+							: { federationGrants: asked.federationGrants }),
+					});
 				} catch (cause) {
-					return stopped("email_proof", { cause });
+					return { cause };
 				}
-			}
+				return report.complete === true
+					? { report }
+					: { report, cause: new Error("the subject's sessions could not all be ended") };
+			};
 
-			let sessions: SubjectRevocationReport;
-			try {
-				sessions = await subjectRevocationService.revokeAllForSubject({
-					subject,
-					...(asked.federationGrants === undefined
-						? {}
-						: { federationGrants: asked.federationGrants }),
-				});
-			} catch (cause) {
-				return stopped("sessions", { cause });
-			}
-			if (sessions.complete !== true) {
-				return stopped("sessions", {
-					sessions,
-					cause: new Error("the subject's sessions could not all be ended"),
+			const first = await revoke();
+			if ("cause" in first) {
+				return finish({
+					...base,
+					complete: false,
+					stoppedAt: "sessions",
+					cause: first.cause,
+					...(first.report === undefined ? {} : { sessions: first.report }),
 				});
 			}
 
-			try {
-				await mintSubjectRecovery(transactionStore, subject, {
-					operation: "reset",
-					sid: undefined,
-					nowMs,
-					lifetimeMs: MFA_RECOVERY_AUTHORIZATION_MAX_MS,
-				});
-			} catch (cause) {
-				return stopped("lock", { sessions, cause });
-			}
+			const done = await underLease.reset(subject, {
+				nowMs,
+				...(asked.requireEmailProof
+					? { requireEmailProof: () => transactionStore.requireEmailProofAtNextBinding(subject) }
+					: {}),
+				authorize: () =>
+					mintSubjectRecovery(transactionStore, subject, {
+						operation: "reset",
+						sid: undefined,
+						nowMs,
+						lifetimeMs: MFA_RECOVERY_AUTHORIZATION_MAX_MS,
+					}),
+			});
 
-			const done = await underLease.reset(subject, nowMs);
+			// A login made with a factor before its removal ends too.
+			const again = await revoke();
 			const removed =
-				done.records === undefined
+				done.removed === undefined
 					? undefined
 					: {
-							kinds: [...new Set(done.records.map((record) => record.kind))].sort(),
-							count: done.records.length,
+							kinds: [...new Set(done.removed.map((record) => record.kind))].sort(),
+							count: done.removed.length,
 						};
 			const after = {
-				sessions,
+				sessions: first.report,
+				...(again.report === undefined ? {} : { sessionsAgain: again.report }),
 				...(removed === undefined ? {} : { removed }),
 				...(done.generation === undefined ? {} : { generation: done.generation }),
 				...(done.overran === true ? { overran: true as const } : {}),
 			};
-			if (done.outcome === "stopped") return stopped(done.at, { ...after, cause: done.cause });
-			switch (done.witness.outcome) {
-				case "marked":
-					return finish({ ...base, complete: true, ...after, witness: "cleared" });
-				case "unwritable":
-					return finish({ ...base, complete: true, ...after, witness: "unwritable" });
-				default:
-					return stopped("witness", {
-						...after,
-						cause: done.witness.outcome === "unwritten" ? done.witness.cause : undefined,
-					});
+			if (done.outcome === "stopped") {
+				return finish({
+					...base,
+					complete: false,
+					stoppedAt: done.at,
+					cause: done.cause,
+					...after,
+				});
 			}
+			if (done.witness.outcome !== "marked" && done.witness.outcome !== "unwritable") {
+				return finish({
+					...base,
+					complete: false,
+					stoppedAt: "witness",
+					cause: done.witness.outcome === "unwritten" ? done.witness.cause : undefined,
+					...after,
+				});
+			}
+			const witness = done.witness.outcome === "marked" ? "cleared" : "unwritable";
+			if ("cause" in again) {
+				return finish({
+					...base,
+					complete: false,
+					stoppedAt: "sessions",
+					cause: again.cause,
+					...after,
+					witness,
+				});
+			}
+			return finish({ ...base, complete: done.overran !== true, ...after, witness });
 		},
 	};
 }

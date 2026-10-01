@@ -35,7 +35,8 @@
  *   here.
  * - `409 mfa_factors_busy` with `Retry-After`; `503` for an outage, logged
  *   once at error.
- * - Logged `mfa_lock_released` and `mfa_lock_release_refused` at info; an
+ * - Logged `mfa_lock_released`, `mfa_lock_release_held` (the hard hold
+ *   stands) and `mfa_lock_release_refused` at info; an
  *   authorization applied now is audited `mfa.lock.recovered` with the
  *   operation, the generation and what it cleared.
  */
@@ -104,6 +105,7 @@ export function createMfaLockReleaseRouter(options: MfaLockReleaseOptions): Rout
 		switch (released.outcome) {
 			case "released":
 			case "held": {
+				// A standing hard hold is never said as released.
 				logger.info(
 					{
 						sub: session.subject,
@@ -111,7 +113,7 @@ export function createMfaLockReleaseRouter(options: MfaLockReleaseOptions): Rout
 						applied: released.applied,
 						...(released.outcome === "held" ? { hold: released.hold } : {}),
 					},
-					"mfa_lock_released",
+					released.outcome === "held" ? "mfa_lock_release_held" : "mfa_lock_released",
 				);
 				if (released.applied) {
 					emitAuditEvent(auditSink, {
