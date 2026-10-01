@@ -109,7 +109,7 @@ const storeAnswering = (
 		create: vi.fn(async () => {}),
 		get: vi.fn(impl),
 		delete: vi.fn(async () => {}),
-		// A store that can record a second factor, so a step-up stays a step-up.
+		// A store that can record a second factor: the second-factor authority's step-up is answered as a trip, not a new login.
 		recordSecondFactor: vi.fn(async () => null),
 	}) as unknown as UserSessionStore & { get: ReturnType<typeof vi.fn> };
 
