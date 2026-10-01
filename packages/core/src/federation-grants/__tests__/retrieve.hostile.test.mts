@@ -549,6 +549,42 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			expect(reads()).toBe(1);
 		});
 
+		const readable: Array<[keyof DelegatedTokens, unknown]> = [
+			["accessToken", "at-1"],
+			["expiresIn", 3600],
+			["expiresAt", new Date(DUE.getTime() + HOUR)],
+			["tokenType", "Bearer"],
+			["scope", SCOPES.join(" ")],
+		];
+		for (const [field, value] of readable) {
+			it(`judges and stores the ${field} it read, when a later read of the field would throw`, async () => {
+				await h.seed();
+				setNow(DUE);
+				const { answer, reads } = readableOnce(refreshed("1", DUE), field, value);
+				h.refresh.mockResolvedValue(answer);
+				expect(await retrieve()).toStrictEqual({
+					ok: true,
+					accessToken: "at-1",
+					tokenType: "Bearer",
+					expiresIn: 3600,
+					scopes: [...SCOPES],
+					refreshed: true,
+				});
+				expect(await stored()).toStrictEqual({
+					refreshToken: `${SECRET}-1`,
+					accessToken: {
+						value: "at-1",
+						tokenType: "Bearer",
+						obtainedAt: DUE,
+						issuedLifetime: 3600,
+						effectiveExpiresAt: new Date(DUE.getTime() + HOUR),
+						scopes: [...SCOPES],
+					},
+				});
+				expect(reads()).toBe(1);
+			});
+		}
+
 		/** A real Date holding `ms`, whose own methods answer `lie`. */
 		const lyingDate = (ms: number, lie: number): Date => {
 			const date = new Date(ms);
