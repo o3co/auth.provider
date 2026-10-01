@@ -346,9 +346,13 @@ describe("deviceGrantModule — boot", () => {
 	])(
 		"refuses to boot enabled with a csrfGuard whose %s cannot be read, naming the slot",
 		async (_, guard) => {
-			await expect(bootWithGuard(guard())).rejects.toThrow(
-				/csrfGuard\.middleware could not be read/,
-			);
+			// The getter's own error stays reachable as the refusal's `cause`.
+			await expect(bootWithGuard(guard())).rejects.toMatchObject({
+				cause: {
+					message: expect.stringMatching(/csrfGuard\.middleware could not be read/),
+					cause: { message: "adapter unavailable" },
+				},
+			});
 		},
 	);
 
