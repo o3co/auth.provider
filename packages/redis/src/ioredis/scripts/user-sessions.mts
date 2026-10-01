@@ -84,7 +84,7 @@ local MAX_SKEW = 86400000
 local skew = tonumber(ARGV[5])
 if not (wholeMs(before) and wholeMs(expiresAt) and wholeMs(retention) and retention >= 0
   and wholeMs(skew) and skew >= 0 and skew <= MAX_SKEW) then
-  return redis.error_reply("subject revocation: non-numeric argument")
+  return redis.error_reply("subject revocation: invalid argument")
 end
 local t = redis.call("TIME")
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)

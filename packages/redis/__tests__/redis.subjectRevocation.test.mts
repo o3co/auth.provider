@@ -287,7 +287,7 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 					String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
 					skew,
 				),
-			).rejects.toThrow(/non-numeric argument/);
+			).rejects.toThrow(/subject revocation: invalid argument/);
 			expect(await raw.get(key)).toBe("1000");
 		},
 	);
@@ -307,7 +307,7 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 				String(now + 600_000),
 				String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
 			),
-		).rejects.toThrow(/non-numeric argument/);
+		).rejects.toThrow(/subject revocation: invalid argument/);
 		expect(await raw.get(key)).toBe("1000");
 	});
 
@@ -351,7 +351,7 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 				args.retention,
 				String(DEFAULT_CLOCK_SKEW_MS),
 			),
-		).rejects.toThrow(/non-numeric argument/);
+		).rejects.toThrow(/subject revocation: invalid argument/);
 		expect(await raw.get(key)).toBe("1000");
 		expect(await raw.pexpiretime(key)).toBe(expiry);
 	});
