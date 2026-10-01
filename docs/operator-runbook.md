@@ -807,11 +807,12 @@ wires it.
   password the boundary a release asks for; require the second factor for it.
   **The operator reset** — after confirming the account holder out of band,
   as the reset is the account-takeover path otherwise: install
-  `mfaResetModule` (with the oauth package's `subjectRevocationServiceModule`)
-  and call `handle.components.mfaReset.resetMfaForSubject(subject, { requireEmailProof?, federationGrants?, requestedBy? })`.
+  `mfaResetModule` beside `mfaModule` (with the oauth package's
+  `subjectRevocationServiceModule`) and call `handle.components.mfaReset.resetMfaForSubject(subject, { requireEmailProof?, federationGrants?, requestedBy? })`.
   It ends all of the user's logins — every session and token, and the
   federation grants as `federationGrants` asks and policy allows — then,
-  under the subject's lease (a minute, waited for up to two), sets D25's
+  under the subject's lease (six `mfa.storeTimeoutMs`, as every MFA write
+  holds it, waited for up to two of them), sets D25's
   flag when asked, resets the lock state whole, removes every factor record
   and clears the enrollment witness, in that order, and then ends all of the
   user's logins again, so a login made with a factor before its removal ends
@@ -827,6 +828,10 @@ wires it.
   An `mfa_subject_lease_overrun` line for the same `sub` with
   `route: "enrollment"` around the reset is a binding whose write stalled past
   its lease and may have landed after the reset: run the reset again.
+  The reset needs `mfaModule` installed: under `mfa.mode = "off"` it is not,
+  and the reset is unavailable (the boot refuses `mfaResetModule` without it,
+  naming `mfaSubjectLeases`). Where a reset is needed, run with `mfaModule`
+  installed (`mfa.mode` `optional` or `required`).
   The reset leaves D25's email-proof flag (`proof:{<s>}`) to the next first
   binding. On the in-process memory store a restart forgets every subject's
   lock — and every MFA transaction, generation and recovery-set floor — as
@@ -1659,7 +1664,7 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `enrollment`, `emailProof`, `challenge` and `pendingEnrollment` when set, `record` (the rest as JSON, the login's continuation among it) and `incarnation` | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification | `packages/redis/src/mfa-transaction-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_TX_*`) |
 | `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted or the hard hold stands (the hash's `hard` field) — a run ends only at a success, an exempt success before the hard hold, or an applied recovery, and D21's hard limit counts it across weeks; the hard hold ends only at an applied recovery; otherwise a day past the last failure to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
 | `mfat:recovery:{<subject>}` | hash — the subject's generation (`g`), moved by every applied recovery and reset; its recovery-set floor (`floor`), below which no recovery-code set verifies; one field per recovery authorization, `a:<operation>:<sid>` | **none** once it holds a generation or a floor: losing the generation refuses a write in flight and lets through a writer that captured 0 before a recovery, losing the floor brings an older recovery-code set back; before that, a day past its latest authorization's end. Keep it where nothing evicts it, as `mfaf:` | same (`LUA_MFA_SUBJECT_RECOVERY_*`, `LUA_MFA_RECOVERY_SET_FLOOR_RAISE`) |
-| `mfat:lease:{<subject>}` | string — the token of the writer holding the subject's lease over its factor set | the lease's end on the server's clock (`SET … NX PX`, a minute by default); its holder deletes it when done. Evicting it lets a second writer in: run `noeviction` | same (`LUA_MFA_SUBJECT_LEASE_ACQUIRE`) |
+| `mfat:lease:{<subject>}` | string — the token of the writer holding the subject's lease over its factor set | the lease's end on the server's clock (`SET … NX PX`, six of `mfa.storeTimeoutMs`); its holder deletes it when done. Evicting it lets a second writer in: run `noeviction` | same (`LUA_MFA_SUBJECT_LEASE_ACQUIRE`) |
 | `mfat:proof:{<subject>}` | string `"1"` — an operator reset's `requireEmailProof: true` (D25) | **none**, until the subject's next first binding consumes it; no revocation touches it, and an applied recovery, the reset included, leaves it. As durable as `mfaf:` (D12's step-3 amendment): the transaction store's module runs the same boot check | same |
 | `mfat:session-proof:{<subject>}:<sid>` | string, JSON `{provedAtMs, untilMs}` — the account-email proof (D24) given in one session of a subject: written when the MFA page's step-up proof is verified, `untilMs` `mfa.manage.maxAgeSeconds` later; read by the `mfa` requirement at each first binding in that session that asks the proof | `untilMs` less the store's clock (`SET … PX`), set when it is recorded; a later proof for the session replaces it. Losing one fails closed — the user proves again — so no durability is required of it, and a `volatile-*` policy evicting one costs only a re-proof | same |
 | `mfat:first-binding:{<subject>}` | string, JSON `{atMs, untilMs}` — the subject's first-binding mark (D12): when a first counting factor was last bound for the subject, or its witness marked. A session or a login continuation authenticated no later than it may hold a stale enrollment witness; the mark does not stand in for the witness, and covers only the window in which one can be stale | its `untilMs` on the server's clock (`SET … PXAT`), which alone judges the mark: one script keeps the later time and the later end of the mark held and the one noted, so a note never moves it back or shortens it. A mark the store cannot read back is an outage, never absent — `DEL` the key, as for the lock keys, and the next first binding notes it again. Losing it together with the subject's `mfaf:` records — one Redis flushed inside its lifetime — reopens that window, so it is kept as `mfat:proof:` is, under the same boot check; it always carries a TTL, so a `volatile-*` policy may evict it, and an evicted mark fails open — the module warns (`mfa_transaction_store_lock_evictable`). At `maxmemory`, `volatile-lru` and `volatile-random` were seen to evict nearly every mark, while `volatile-lfu` and `volatile-ttl` spared them in the same probe; run `noeviction` | same (`LUA_MFA_FIRST_BINDING_*`) |
