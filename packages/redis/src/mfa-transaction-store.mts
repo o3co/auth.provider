@@ -49,8 +49,12 @@
  *
  * A binding holds at most `MFA_MAX_TRANSACTIONS_PER_BINDING` live
  * transactions, kept in its index: one member per transaction,
- * `<incarnation>:<id key part>`, scored by its `expiresAtMs` (so the one
- * ended is the one core's in-process store ends). `create` writes the
+ * `<incarnation>:<id key part>`, scored by its `expiresAtMs` exactly (so the
+ * one ended is the one core's in-process store ends, within one millisecond
+ * too; at one instant, which goes is either store's choice). This adapter
+ * holds the cap's policy — N, which goes, the order of the steps and what a
+ * failed step costs — and the client only its three one-script primitives.
+ * `create` writes the
  * transaction, then one script adds its member and takes out those with the
  * soonest expiries past the cap, never the new one; each taken out is
  * deleted by a script that compares its `incarnation`, so a member left
@@ -61,14 +65,22 @@
  * the transactions it names. An expired transaction's
  * member stays until it is taken out first: its deadline is the soonest. The
  * transactions sit on slots of their own, so these are separate steps, not
- * one atomic one: while creates race, or after a step that failed, a binding
- * may hold more than the cap until the excess expires; a member that failed
- * to leave, or one added after its transaction was already consumed (a
- * consume landing between a create's write and its index step, which no
- * caller can do before `create` hands it the id), may count for its
- * transaction until its deadline. A server whose clock runs ahead of this
- * side's by more than a new transaction's lifetime counts it though it
- * expired as written: callers' clocks must agree (NTP).
+ * one atomic one. While creates are in flight a binding may hold more than
+ * the cap; once they have answered it holds at most the cap, and only a step
+ * that failed leaves an excess, until it expires: a create refused at its
+ * index step has already written its transaction, and an eviction that fails
+ * (warned, `mfa_transaction_evict_failed`; the create still answers) leaves
+ * the one it would have ended. A member that failed to leave (warned,
+ * `mfa_transaction_unindex_failed`), or one added after its transaction was
+ * already consumed (a consume landing between a create's write and its index
+ * step, which no caller can do before `create` hands it the id), scores late
+ * and counts for a transaction that is gone until its deadline: meanwhile a
+ * create past the cap may end a live transaction early. A server whose clock
+ * runs ahead of the callers' by more than a transaction's lifetime finds
+ * every deadline in an index past, so `PEXPIREAT` drops the index as it is
+ * written and the binding goes unbounded while that lasts, each transaction
+ * still ending at its own expiry: callers' clocks and the server's must
+ * agree (NTP).
  *
  * A transaction is written and read back through core's
  * `newMfaTransactionRecord`, so it has the in-process store's shape and rules.

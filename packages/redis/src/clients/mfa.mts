@@ -273,10 +273,15 @@ export interface MfaFirstBindingRead {
  *
  * A binding's index is a sorted set of its own, one member per transaction
  * scored by the transaction's `expiresAtMs`. It shares no hash tag with the
- * transactions, so it and they change in separate steps: the store adds a
- * member after the transaction is written, ends what the index removed
+ * transactions, so it and they change in separate steps. The client offers
+ * one atomic primitive per step — `indexTransaction`, `unindexTransaction`,
+ * `evictTransaction` — and holds no policy: the store decides the cap, which
+ * transaction goes, the order of the steps and what a failed one costs. It
+ * adds a member after the transaction is written, ends what the index removed
  * through `evictTransaction`, and removes a member after the transaction is
- * gone.
+ * gone (told which by `reserveAttempt`'s `removed`). While creates are in
+ * flight a binding may hold more than the cap; only a step that failed leaves
+ * an excess, until it expires.
  *
  * The subject state's decisions — backoff, weekly budget and hard limit —
  * are the port's rules, judged on the caller's `nowMs`;
@@ -317,7 +322,10 @@ export interface MfaTransactionStoreClient {
 	 * transaction's, whatever the server's says, and the key is left to its
 	 * deadline on the server's. A reservation that deleted the transaction
 	 * answers, as `removed`, the `index` and `incarnation` it held, when it
-	 * held both.
+	 * held both, so the store can take it out of its binding's index; one that
+	 * deleted nothing, or a transaction holding neither, answers no `removed`.
+	 * A client that never answers it leaves each such member to count until
+	 * its transaction's expiry.
 	 */
 	reserveAttempt(
 		key: string,

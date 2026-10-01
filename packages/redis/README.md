@@ -790,6 +790,8 @@ in-process store's `structuredClone` keeps both.
 `MFA_MAX_TRANSACTIONS_PER_BINDING` (5) live transactions, and one more ends
 the one of them that expires first, as core's port says. Its index is the
 `mfat:binding:` sorted set, which shares no hash tag with the transactions:
+the adapter holds the cap's policy and the client three one-script
+primitives (`indexTransaction`, `unindexTransaction`, `evictTransaction`).
 `create` writes the transaction, then one script adds its member and takes
 out those that expire soonest past the cap — never the new one — and
 the adapter deletes each taken out through a script that compares its
@@ -798,9 +800,15 @@ under its id, for this binding or another. `consume`, and a reservation past
 `max`, take the member out. The key expires at the latest deadline it holds,
 set again whenever a member is added or removed.
 These are separate steps, not one atomic one: while creates for one session
-race, or after a step that failed, the session may hold more than five until
-the excess expires. The bound manages the state the store keeps; abuse is
-bounded by the routes' rate limits.
+are in flight it may hold more than five; only a step that failed leaves an
+excess, until it expires. A create refused at its index step has already
+written its transaction. An eviction that fails is warned
+(`mfa_transaction_evict_failed`) and the create still answers; a member that
+cannot leave is warned (`mfa_transaction_unindex_failed`) and counts until its
+transaction's expiry, so a later create may end a live one early meanwhile.
+The bound is the store managing the state the Provider owns; abuse and DoS
+defence stay outside the Provider, and the login path is bounded by the login
+limiter and a correct password, not by this cap.
 
 **The subject lock.** `reserveSubjectAttempt`, `settleSubjectAttempt` and
 `noteExemptSuccess` are one script each that applies the port's rules exactly

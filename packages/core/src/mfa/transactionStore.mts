@@ -1296,11 +1296,13 @@ export interface MfaTransactionStore {
 	 * goes is the store's choice. A consumed transaction, one its attempts
 	 * ended and an expired one do not count, and no other binding's is ever
 	 * ended. Replacing one this way is no new entry against a store's own
-	 * cap. The cap is reached as creates arrive one after another: a store
-	 * whose create and its binding's count are not one atomic step (the Redis
-	 * adapter's, whose transactions sit on slots of their own) may, while
-	 * creates race or after a step that failed, leave the binding more than
-	 * the cap — the excess until it expires.
+	 * cap. A store whose create and its binding's count are not one atomic
+	 * step (the Redis adapter's, whose transactions sit on slots of their own)
+	 * may hold more while creates are in flight, and settles at the cap once
+	 * they have answered; only a step that failed leaves an excess, until it
+	 * expires. Such a store may also reject a create after it has written the
+	 * transaction (an outage at a later step): the transaction stands, unknown
+	 * to the caller, until it expires.
 	 */
 	create(tx: MfaTransaction): Promise<void>;
 	/** The transaction, or `null` once it expired. */
