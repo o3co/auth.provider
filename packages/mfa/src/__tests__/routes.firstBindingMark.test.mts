@@ -536,6 +536,60 @@ describe("noting the mark", () => {
 		}
 	});
 
+	it("dates the mark when it is noted, not when the request began: a sign-in in the skew after a stalled first binding's note, past the skew after its start, is distrusted", async () => {
+		const { app, factorStore, transactionStore, userSessionStore, users } =
+			await composed("optional");
+		const { agent } = await signIn(app, userSessionStore);
+		const begun = await enrollFromAccount(agent, "totp");
+		const proof = totpProofOf(begun.body.secret);
+		const note = vi.spyOn(transactionStore, "noteFirstBinding");
+		// Admission lists first; the completion's own listing then stalls a minute.
+		const list = factorStore.list.bind(factorStore);
+		let reads = 0;
+		let stalled = false;
+		vi.spyOn(factorStore, "list").mockImplementation(async (subject) => {
+			if (++reads === 2) {
+				stalled = true;
+				vi.setSystemTime(T0 + 60_000);
+			}
+			return list(subject);
+		});
+
+		const done = await completeEnrollment(agent, begun.body.transaction as string, proof);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(stalled).toBe(true);
+		expect(note.mock.calls).toEqual([[ALICE.id, T0 + 60_000, T0 + 60_000 + LIFETIME_MS]]);
+		vi.mocked(factorStore.list).mockRestore();
+		await loseFactors(factorStore);
+		await forgetWitness(users);
+		// Signed in past T0 + skew, within the skew after the note.
+		freezeClock(T0 + DEFAULT_CLOCK_SKEW_MS + 30_000);
+		const later = await signIn(app, userSessionStore);
+
+		const res = await enrollFromAccount(later.agent, "totp");
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toEqual(LOGIN_REQUIRED);
+	});
+
+	it("dates a verification's mark when it is noted, not when the request began", async () => {
+		const { app, factorStore, transactionStore } = await composed("required");
+		const seeded = await seedTotp(factorStore);
+		const note = vi.spyOn(transactionStore, "noteFirstBinding");
+		const update = factorStore.update.bind(factorStore);
+		vi.spyOn(factorStore, "update").mockImplementation(async (...args) => {
+			vi.setSystemTime(T0 + 60_000);
+			return update(...args);
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, seeded.record.id, totpCode(seeded.secret));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(note.mock.calls).toEqual([[ALICE.id, T0 + 60_000, T0 + 60_000 + LIFETIME_MS]]);
+	});
+
 	it("notes it before a verification marks the witness of a login whose User does not say it enrolled", async () => {
 		const { app, factorStore, transactionStore, users } = await composed("required");
 		const seeded = await seedTotp(factorStore);
