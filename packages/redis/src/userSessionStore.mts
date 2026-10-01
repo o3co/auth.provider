@@ -24,6 +24,7 @@ import {
 	type Logger,
 	loggableError,
 	readEnrollmentFacts,
+	readRenewalNonces,
 	recordableEnrollmentFacts,
 	recordableSessionAuthentication,
 	type SessionAuthentication,
@@ -356,6 +357,7 @@ export function createRedisUserSessionStore(
 			// its time judged on the host's clock.
 			const nowMs = Date.now();
 			checkSecondFactorEvent(event, nowMs);
+			const nonces = readRenewalNonces(event);
 			for (let attempt = 0; attempt < RECORD_SECOND_FACTOR_ATTEMPTS; attempt++) {
 				const raw = await opts.client.get(k(sid));
 				if (raw === null) return null;
@@ -364,7 +366,7 @@ export function createRedisUserSessionStore(
 				if (stored === null || stored.expiresAtMs <= Date.now()) return null;
 				// Judged on the bytes the compare-and-set below writes over: a
 				// completion another one overtook finds that one's nonce.
-				if (!expectsRenewalNonce(stored.renewalNonce, event)) return null;
+				if (!expectsRenewalNonce(stored.renewalNonce, nonces)) return null;
 				const next = sessionAfterSecondFactor(fromEnvelope(stored), event, nowMs);
 				if (next === null) return null;
 				// The known fields are rewritten; what a newer release added beside
@@ -377,7 +379,7 @@ export function createRedisUserSessionStore(
 						...toEnvelopeAuthentication(next.authentication),
 					},
 					// In the same write as the escalation; an event without one keeps it.
-					...(event.renewalNonce === undefined ? {} : { renewalNonce: event.renewalNonce }),
+					...(nonces.renewalNonce === undefined ? {} : { renewalNonce: nonces.renewalNonce }),
 				};
 				if (await opts.client.replaceIfUnchanged(k(sid), raw, JSON.stringify(written))) {
 					return fromEnvelope(written);

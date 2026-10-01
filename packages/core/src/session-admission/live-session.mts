@@ -25,7 +25,7 @@ import { emitAuditEvent } from "../audit/factory.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
-import type { UserSession } from "../user-sessions/types.mjs";
+import type { UserSession, UserSessionStore } from "../user-sessions/types.mjs";
 import { nonEmptyString } from "./input-values.mjs";
 import type { CheckedRequest } from "./request-check.mjs";
 import type { Admission, AdmissionInfrastructureStore } from "./requirement.mjs";
@@ -39,6 +39,21 @@ const isValidDate = (value: unknown): value is Date =>
  * `sid`.
  */
 export type LiveSession = { readonly answer: Admission } | { readonly session: UserSession | null };
+
+/**
+ * Whether a record bound to `bound` — its renewal nonce, read once by the
+ * caller — is bound to a cookie session other than the one holding
+ * `presented`. A record without one (`undefined`, `null`) is bound to none;
+ * a value that is not a nonce binds it to no cookie session at all.
+ */
+export const renewedAway = (bound: unknown, presented: string | undefined): boolean =>
+	bound != null && (!isRenewalNonce(bound) || bound !== presented);
+
+/** The one read of a session record admission makes: the store's answer, or its rejection. */
+export const readRecord = (
+	store: UserSessionStore,
+	sid: string,
+): Promise<UserSession | null | undefined> => store.get(sid);
 
 /** Reads the session `checked.claim` names, as `admitSession`'s steps 1 to 4. */
 export async function readLiveSession(
@@ -64,7 +79,7 @@ export async function readLiveSession(
 	} else if (userSessionStore !== undefined && presented.sid !== undefined) {
 		let record: UserSession | null | undefined;
 		try {
-			record = await userSessionStore.get(presented.sid);
+			record = await readRecord(userSessionStore, presented.sid);
 		} catch (err) {
 			return { answer: unavailable("user_session" satisfies AdmissionInfrastructureStore, err) };
 		}
@@ -109,8 +124,7 @@ export async function readLiveSession(
 		// Read once: a store's accessor cannot answer one value to the check
 		// and another to the comparison. A value that is not a nonce binds the
 		// record to no cookie session, whatever the cookie session holds.
-		const bound: unknown = session.renewalNonce;
-		if (bound != null && (!isRenewalNonce(bound) || bound !== presented.renewalNonce)) {
+		if (renewedAway(session.renewalNonce, presented.renewalNonce)) {
 			return { answer: { outcome: "not_live", reason: "renewed" } };
 		}
 	}

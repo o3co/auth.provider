@@ -168,10 +168,9 @@ const notAfter = (ms: number, nowMs: number): Date => new Date(Math.min(ms, nowM
  * `fed`: a second factor must not change the primary the baseline is
  * decided on); `mfa` alone (it comes beside a factor's own values, and alone
  * names no factor); a time `isRecordableVerificationTime` refuses on
- * `nowMs`, the store's clock; or a `renewalNonce` or `expectedRenewalNonce`
- * that is not one (`isRenewalNonce`). Every bundled store's `recordSecondFactor`
- * runs this before it reads anything. The message quotes nothing but a
- * primary's marker.
+ * `nowMs`, the store's clock. Every bundled store's `recordSecondFactor`
+ * runs this, and {@link readRenewalNonces}, before it reads anything. The
+ * message quotes nothing but a primary's marker.
  */
 export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number): void {
 	const amr: unknown = event?.amr;
@@ -193,29 +192,51 @@ export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number):
 			`recordSecondFactor: "${MFA_AMR}" comes beside a factor's own amr values, never alone`,
 		);
 	}
-	const atMs = event.at instanceof Date ? event.at.getTime() : Number.NaN;
+	const at: unknown = event.at;
+	const atMs = at instanceof Date ? at.getTime() : Number.NaN;
 	if (!isRecordableVerificationTime(atMs, nowMs)) {
 		throw new RangeError(
 			"recordSecondFactor: at must be a valid date at or after the epoch, and no further ahead than hosts' clocks drift",
 		);
 	}
-	if (event.renewalNonce !== undefined && !isRenewalNonce(event.renewalNonce)) {
+}
+
+/** An event's two renewal nonces, as {@link readRenewalNonces} read them. */
+export interface RenewalNonces {
+	readonly renewalNonce?: string;
+	readonly expectedRenewalNonce?: string;
+}
+
+/**
+ * The event's `renewalNonce` and `expectedRenewalNonce`, each read once and
+ * answered as a frozen copy: what a store compares and records is what was
+ * checked. Refuses, with a `RangeError`, one that is not a nonce
+ * (`isRenewalNonce`).
+ */
+export function readRenewalNonces(event: SecondFactorEvent): RenewalNonces {
+	const renewalNonce: unknown = event?.renewalNonce;
+	if (renewalNonce !== undefined && !isRenewalNonce(renewalNonce)) {
 		throw new RangeError("recordSecondFactor: renewalNonce must be one newRenewalNonce spells");
 	}
-	if (event.expectedRenewalNonce !== undefined && !isRenewalNonce(event.expectedRenewalNonce)) {
+	const expectedRenewalNonce: unknown = event?.expectedRenewalNonce;
+	if (expectedRenewalNonce !== undefined && !isRenewalNonce(expectedRenewalNonce)) {
 		throw new RangeError(
 			"recordSecondFactor: expectedRenewalNonce must be one newRenewalNonce spells",
 		);
 	}
+	return Object.freeze({
+		...(renewalNonce === undefined ? {} : { renewalNonce }),
+		...(expectedRenewalNonce === undefined ? {} : { expectedRenewalNonce }),
+	});
 }
 
 /**
- * Whether a session holding `held` may record `event`: its renewal nonce is
- * the one the event expects, absent matching absent. Every bundled store
- * asks it in the same atomic step as its write.
+ * Whether a session holding `held` may record an event whose nonces are
+ * `nonces`: its renewal nonce is the one expected, absent matching absent.
+ * Every bundled store asks it in the same atomic step as its write.
  */
-export function expectsRenewalNonce(held: string | undefined, event: SecondFactorEvent): boolean {
-	return held === event.expectedRenewalNonce;
+export function expectsRenewalNonce(held: string | undefined, nonces: RenewalNonces): boolean {
+	return held === nonces.expectedRenewalNonce;
 }
 
 /**
@@ -322,15 +343,38 @@ export function sessionAfterSecondFactor(
  */
 export function requirementSession(session: UserSession | null): RequirementSession | null {
 	if (session === null) return null;
-	return { authentication: sessionAuthentication(session), amr: vouchedAmr(session) };
+	return frozenRequirementSession(sessionAuthentication(session), vouchedAmr(session));
 }
+
+/**
+ * A requirement's reading, frozen with its `amr` and `upstreamAmr`: each
+ * call's own copy (its `mfaAt` a `Date` of its own), so what one holder does
+ * to it reaches no other.
+ */
+const frozenRequirementSession = (
+	authentication: SessionAuthentication | undefined,
+	amr: readonly string[],
+): RequirementSession =>
+	Object.freeze({
+		authentication:
+			authentication === undefined
+				? undefined
+				: Object.freeze({
+						...authentication,
+						upstreamAmr:
+							authentication.upstreamAmr === undefined
+								? undefined
+								: Object.freeze([...authentication.upstreamAmr]),
+					}),
+		amr: Object.freeze([...amr]),
+	});
 
 /**
  * What a session requirement is asked about a token that carries no live
  * session: the primary read from the token's `amr` (`fed`, else `pwd`, else
  * unknown, as for an older token that carries no `amr`), no second factor
  * on record, and the `amr` as vouched, since a token is minted from
- * `vouchedAmr` and carries nothing an IdP asserted. Copied.
+ * `vouchedAmr` and carries nothing an IdP asserted. A frozen copy.
  */
 export function requirementSessionFromAmr(amr: readonly string[] | undefined): RequirementSession {
 	const held = amr === undefined ? [] : [...amr];
@@ -339,13 +383,12 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
 		: held.includes(PASSWORD_AMR)
 			? PASSWORD_AMR
 			: undefined;
-	return {
-		authentication:
-			primary === undefined
-				? undefined
-				: { primary, federation: undefined, upstreamAmr: undefined, mfaAt: undefined },
-		amr: held,
-	};
+	return frozenRequirementSession(
+		primary === undefined
+			? undefined
+			: { primary, federation: undefined, upstreamAmr: undefined, mfaAt: undefined },
+		held,
+	);
 }
 
 /**

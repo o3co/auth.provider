@@ -18,6 +18,7 @@ import {
 	checkSecondFactorEvent,
 	copySessionAuthentication,
 	expectsRenewalNonce,
+	readRenewalNonces,
 	recordableSessionAuthentication,
 	sessionAfterSecondFactor,
 } from "../authentication.mjs";
@@ -158,16 +159,17 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 			// its time judged on this store's clock.
 			const nowMs = Date.now();
 			checkSecondFactorEvent(event, nowMs);
+			const nonces = readRenewalNonces(event);
 			const s = readLive(sid);
 			if (!s) return null;
 			// A completion another one overtook: the session moved to its nonce.
-			if (!expectsRenewalNonce(s.renewalNonce, event)) return null;
+			if (!expectsRenewalNonce(s.renewalNonce, nonces)) return null;
 			const next = sessionAfterSecondFactor(toSession(s), event, nowMs);
 			if (next === null) return null;
 			// A field write: `expiresAt`, and everything else, stay as they were.
 			s.amr = [...next.amr];
 			s.authentication = copySessionAuthentication(next.authentication);
-			if (event.renewalNonce !== undefined) s.renewalNonce = event.renewalNonce;
+			if (nonces.renewalNonce !== undefined) s.renewalNonce = nonces.renewalNonce;
 			return toSession(s);
 		},
 		async delete(sid: string) {

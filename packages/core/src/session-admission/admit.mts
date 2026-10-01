@@ -36,11 +36,11 @@ import {
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
-import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
+import type { UserSession, UserSessionClaims, UserSessionStore } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
-import { readLiveSession } from "./live-session.mjs";
+import { readLiveSession, readRecord, renewedAway } from "./live-session.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -253,6 +253,27 @@ export const viewOf = (session: UserSession): SessionView => {
 	});
 };
 
+/**
+ * Whether the record a cookie claim names is bound to another cookie
+ * session: it carries a renewal nonce the cookie session does not hold, or
+ * one that is not a nonce (the record's nonce read once). `false` for a
+ * claim that is not a cookie's, one without a `sid`, and a record that is
+ * gone or bound to none. Rejects with the store's own error. For a route
+ * that acts on the record without admitting the session — a logout — so a
+ * copy the record was renewed away from cannot end it.
+ */
+export async function cookieRenewedAway(
+	store: UserSessionStore,
+	claim: SessionClaim,
+): Promise<boolean> {
+	if (!isObject(claim) || claim.carrier !== "cookie") return false;
+	const sid = nonEmptyString(claim.sid);
+	if (sid === undefined) return false;
+	const record = await readRecord(store, sid);
+	if (record == null) return false;
+	return renewedAway(record.renewalNonce, nonEmptyString(claim.renewalNonce));
+}
+
 /** A copy of `view` with Dates of its own; the facts are frozen and shared. */
 const copyView = (view: SessionView): SessionView =>
 	Object.freeze({
@@ -314,7 +335,9 @@ export async function admitSession(
 	const requirements = [...resolver.entries()];
 	const effective = effectiveAction(requirements, checked.action, logger);
 	// A token carrier's authentication is the token's own, whether or not a
-	// record was read: the record is only the view.
+	// record was read: the record is only the view. Each reading is a frozen
+	// copy of its own: the merge's here, and each requirement's below, so what
+	// one does to its copy reaches no other.
 	const authentication =
 		presented.carrier === "token"
 			? requirementSessionFromAmr(presented.tokenAmr)
@@ -322,7 +345,6 @@ export async function admitSession(
 	let verdict: RequirementOutcome = { outcome: "met" };
 	if (effective.grade !== "remediation") {
 		const shared = {
-			authentication,
 			carrier: presented.carrier,
 			// The record's sub when read — step 3 made it the claim's — else the claim's.
 			subject: session === null ? presented.subject : session.sub,
@@ -333,6 +355,10 @@ export async function admitSession(
 		for (const [name, requirement] of requirements) {
 			const input: RequirementInput = Object.freeze({
 				...shared,
+				authentication:
+					presented.carrier === "token"
+						? requirementSessionFromAmr(presented.tokenAmr)
+						: requirementSession(session),
 				session: live === null ? null : copyView(live.view),
 			});
 			let answer: unknown;
@@ -383,7 +409,7 @@ export async function admitSession(
 		live,
 		noneConfigured,
 		requirements,
-		// What step 5 handed the requirements, the same reading the selection took.
+		// What step 5 handed the requirements, from a reading no requirement was handed.
 		held: authentication?.amr ?? [],
 		table: checked.acrTable,
 	});
