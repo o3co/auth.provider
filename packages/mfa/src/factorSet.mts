@@ -44,7 +44,7 @@
  *   none that may count, or none readable, writes nothing (`in_step`, or
  *   `unwritten`); else the witness marked, the records read again, and the
  *   witness cleared when a write outside the lease left none — a clear that
- *   fails is `unwritten`. One that cannot hold the lease, or overran it, is
+ *   fails, or a read again that fails, is `unwritten`. One that cannot hold the lease, or overran it, is
  *   `unwritten`; a directory that cannot write the witness takes no lease.
  * - `remove`: the records read, the caller's refusal asked, the record
  *   removed — a store that fails after its write is read again, and a record
@@ -371,7 +371,13 @@ export function createMfaFactorSet(options: {
 					after = await time.read(() => list(subject));
 				} catch (cause) {
 					if (cause instanceof OutOfTime) throw cause;
-					return marked;
+					// Marked, and whether a write outside the lease left none since cannot be told.
+					return {
+						outcome: "unwritten",
+						cause: new Error("the records could not be read again after the witness mark", {
+							cause,
+						}),
+					};
 				}
 				if (!noneCounts(after)) return marked;
 				time.beforeWrite();
