@@ -862,7 +862,7 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 });
 
 describe("the shapes the contract names", () => {
-	it("RequirementInput is a session view, the requirement session, the carrier and now, and a verdict names no page", () => {
+	it("RequirementInput is a session view — whether a second factor can be recorded on it included — the requirement session, the carrier and now, and a verdict names no page", () => {
 		expectTypeOf<RequirementInput["session"]>().toEqualTypeOf<SessionView | null>();
 		expectTypeOf<SessionView>().toEqualTypeOf<{
 			readonly sid: string;
@@ -870,6 +870,7 @@ describe("the shapes the contract names", () => {
 			readonly authTime: Date;
 			readonly expiresAt: Date;
 			readonly enrollmentFacts?: SessionEnrollmentFacts;
+			readonly secondFactorRecordable?: boolean;
 		}>();
 		expectTypeOf<SessionEnrollmentFacts>().toEqualTypeOf<{
 			readonly witness: MfaEnrollmentWitness;
