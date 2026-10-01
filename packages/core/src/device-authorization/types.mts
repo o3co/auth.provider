@@ -134,7 +134,8 @@ export interface ApproveDeviceAuthorizationInput {
 	readonly amr?: readonly string[];
 	/**
 	 * When the approving session authenticated: a valid `Date` at or after the
-	 * epoch. Omitted, the record holds none.
+	 * epoch, no further ahead of `nowMs` than `DEFAULT_CLOCK_SKEW_MS`. Omitted,
+	 * the record holds none.
 	 */
 	readonly authTime?: Date;
 }
@@ -170,12 +171,14 @@ export interface DeviceCodeStore {
 	findPendingByUserCode(userCode: string, nowMs: number): Promise<DeviceAuthorization | null>;
 
 	/**
-	 * Atomically move `pending` → `approved`, recording `amr` and `authTime`
-	 * when handed them and neither otherwise.
+	 * Atomically move `pending` → `approved`, recording what
+	 * `recordableDeviceApproval(input, input.nowMs)` answers for `amr` and
+	 * `authTime` (absent stays absent; `authTime` no later than `nowMs`).
 	 *
 	 * @throws `RangeError`, recording nothing, when `amr` is present and not a
 	 * non-empty list of non-empty strings (`wellFormedAmr`), or `authTime` is
-	 * present and not a valid `Date` at or after the epoch.
+	 * present and not a valid `Date` at or after the epoch, or is further
+	 * ahead of `nowMs` than `DEFAULT_CLOCK_SKEW_MS`.
 	 */
 	approve(input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome>;
 
