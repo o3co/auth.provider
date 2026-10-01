@@ -845,6 +845,16 @@ wires it.
   first — a long code mailed to the address the login's `User` carried; with
   no mail sender the boot says once that first bindings go without it
   (`mfa_first_binding_without_email_proof`), and `always` refuses the boot.
+  Where no proof is asked — `requireEmailProof = "never"`, or `when-mail`
+  with no sender or no address — whoever holds the password and one
+  recovery code of a user whose counting factor is gone binds the first
+  factor, by `password`, at the login the code reopens. The owner keeps
+  their remaining codes and still signs in with them; the factor stands
+  until the owner removes it (step 12) or an operator does. The trail is
+  `mfa.recovery_code.used`, then `mfa.factor.enrolled {purpose: "login",
+  binding: "password"}`, then `mfa.recovery_codes.generated {regenerated:
+  true, binding: "password", kept: "password_binding"}`; a Store that keeps
+  the witness (`markMfaEnrolled`) refuses it (D12).
   The provider marks the enrollment witness (`markMfaEnrolled`) after the
   factor is written; a directory without it is said once at boot
   (`mfa_enrollment_witness_unwritable`), and D12's defence is then what the
@@ -879,7 +889,10 @@ wires it.
   and tells the account holder — by mail, a chat message, anything — of every
   factor enrolled (`mfa.factor.enrolled`) or removed (`mfa.factor.removed`),
   recovery codes regenerated (`mfa.recovery_codes.generated`,
-  `regenerated: true`), an operator reset (`mfa.reset`), the first lock of
+  `regenerated: true`; with `unreplaced: true` the older codes still work —
+  word the notice "new recovery codes were issued; your earlier codes still
+  work until you regenerate them", never "your old codes no longer work"),
+  an operator reset (`mfa.reset`), the first lock of
   an episode (`mfa.locked.first`) and an email factor refused at a changed
   address (`mfa.email_address_mismatch`). Wire it: it is how a user learns that a
   leaked password bound a factor first (D24). Route one event to an operator
@@ -1045,7 +1058,7 @@ stream — its level is fixed at `info`.
 | `mfa_first_binding_factor_standing` (error — `sub`, `kind`, the removal's failure) | `mfa/src/routes.mts` | a first binding that could not stand — its records read again did not show its own as the only one that may count (another login of the subject bound one at once), or could not be read to tell — could not remove its own factor after three tries: the factor may be a password holder's, and it stands. Beside audit `mfa.first_binding_conflict` with `removed: false` (Investigate): remove the subject's factors, or set D25's flag and reset them |
 | `mfa_enrollment_factor_standing` (error — `sub`, `kind`, the removal's failure) | `mfa/src/routes.mts` | another factor added from the account page found the subject's records past `mfa.maxFactorsPerSubject` — enrollments made at once — or could not read them again, and could not be removed after three tries: it **stands and is usable**, and the user was answered `503`. Its enrollment is audited (`mfa.factor.enrolled`, `binding: "mfa"`), so the account holder's notice goes out as for any factor added; a failed read is the `mfa_store_unavailable` line beside it. The subject holds one record past the limit until a factor is removed. Sustained, the factor store is refusing removals |
 | `mfa_recovery_codes_unwritten` (error — `sub`, the error's projection) | `mfa/src/routes.mts` | a first binding wrote its factor and could not write the recovery codes: the user holds a factor and no codes, and was told so. Once the factor store answers, have them regenerate their codes |
-| `mfa_recovery_codes_unreplaced` (error — `sub`, the error's projection) | `mfa/src/routes.mts` | a first binding over a subject's standing recovery codes wrote the new set, and could not list or remove the old one: **the old set still works** beside the new one, which the user was shown. Once the factor store answers, remove the subject's older `recovery_code` record (the one created before the binding), or have the user regenerate their codes |
+| `mfa_recovery_codes_unreplaced` (error — `sub`, the error's projection) + audit `mfa.recovery_codes.generated` with `unreplaced: true` | `mfa/src/routes.mts` | a first binding over a subject's standing recovery codes wrote the new set, and could not list or remove the old one: **the old set still works** beside the new one, which the user was shown. Once the factor store answers, remove the subject's older `recovery_code` record (the one created before the binding), or have the user regenerate their codes. The audit's `unreplaced: true` **without** this line, and with `kept: "password_binding"`, is on purpose: a login reopened after a recovery code bound its first factor by `password` (no account-email proof was asked) and kept the owner's set, so the owner's remaining codes stay usable. If the account holder did not bind that factor, the password and one of their codes are in other hands: remove the factor (or reset the subject) and have them change the password |
 | `mfa_enrollment_state_inconsistent` (error — `route`, `sub`, `witness`) + audit `mfa.enrollment_state_inconsistent` (`purpose: "login"`) | `mfa/src/routes.mts` | a recovery code was verified for a subject with no record that may count while the login's `User` says it enrolled (`witness: "enrolled"`) or says nothing readable (`malformed`): answered `503`, the code and the transaction unspent — never a first binding (D12). The factor store lost the subject's records, or the Store answers `mfaEnrolled` wrongly: see the row for the same audit event at a login |
 | `rate_limiter_failed_closed` / `rate_limiter_failed_open` (error) + audit `rate_limit.unavailable` | `core/src/ratelimit/guard.mts` | the limiter backend is erroring; closed means you are shedding login/token traffic, open means brute-force protection is off |
 | `standalone_redis_clients_error` (error) | `templates/standalone/src/modules.mts` | the shared socket's `error` events — fires during reconnects too, so alert on rate or duration, not on one line |
@@ -1150,7 +1163,7 @@ stream — its level is fixed at `info`.
 | Event | Where | What to do |
 | --- | --- | --- |
 | `mfa_enrollment_witness_unwritable` (warn — `slot: "userRepository"`; once at boot) | `mfa/src/module.mts` | the composition's directory has no `markMfaEnrolled` (core's `supportsMfaEnrollmentWitness`), so the MFA package cannot write the enrollment witness, and a lost factor store is caught only if the Store answers `mfaEnrolled` on `authenticate` and `authenticateByToken` by other means (the MFA ADR's D12). With foundation's user repository, set `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` (`repositories.user.http.markMfaEnrolledUrl`) to the Store's witness endpoint; the line is then not said |
-| `mfa_first_binding_without_email_proof` (warn — `setting: "mfa.enrollment.requireEmailProof"`, `value: "when-mail"`; once at boot) | `mfa/src/module.mts` | no mail sender is wired, so a first binding asks for no account-email proof: whoever holds a user's password before the user enrolls can bind the first factor (the MFA ADR's D24). Wire a mail sender; and notify account holders of `mfa.factor.enrolled` from the audit events (above), which is how a user learns of a binding they did not make |
+| `mfa_first_binding_without_email_proof` (warn — `setting: "mfa.enrollment.requireEmailProof"`, `value: "when-mail"`; once at boot) | `mfa/src/module.mts` | no mail sender is wired, so a first binding asks for no account-email proof: whoever holds a user's password before the user enrolls can bind the first factor (the MFA ADR's D24). Wire a mail sender; and notify account holders of `mfa.factor.enrolled` from the audit events (above), which is how a user learns of a binding they did not make — and whoever holds the password and one recovery code of a user whose counting factor is gone (a lost or retired authenticator, or recovery codes alone) binds the first factor at a login reopened after the code, unless the Store keeps the witness (D12). The owner keeps their remaining codes and signs in with them; the factor stands until the owner removes it (step 12) or you do. The trail: `mfa.recovery_code.used`, then `mfa.factor.enrolled {purpose: "login", binding: "password"}`, then `mfa.recovery_codes.generated {regenerated: true, binding: "password", kept: "password_binding"}`. The same holds under `mfa.enrollment.requireEmailProof = "never"` |
 | `refresh_token_family_rotation_without_revocation` (warn — `slot: "refreshTokenFamilyRevocation"`, `grant: "authorization_code"`; once at boot) | `oauth/src/oauthAuthorization.mts` | the `authorization_code` grant registers families through a `refreshTokenFamilyRotation` and no `refreshTokenFamilyRevocation` is wired (a valid authorization_code-only composition): a code exchange refused because a logout ended its session leaves the family it registered active. No token of that family was served. Wire core's `defaultRefreshTokenFamilyRevocationModule` to have it revoked |
 | `session_family_index_without_session_end` (warn — `slot: "sessionFamilyIndex"`, the index's `kind`; once at boot) | `oauth/src/oauthAuthorization.mts` | the `authorization_code` grant links families to sessions through an index without core's session-end capability (`supportsSessionEnd`), so a logout that runs while a code is exchanged can miss the family the exchange opens, and its tokens outlive the logout. Both bundled indexes have it, the Redis one over a client with `writeEndedMark` and `hasEndedMark` (`makeIoredisClients` has them); `redisSessionFamilyIndexBuilder` given a `keyPrefix` of its own needs an `endedKeyPrefix` too. Give a custom index `endSession` and `addFamilyIdUnlessEnded` |
 | `session_admission_remediation_undeclared` (warn — `action`, the remediation's name; once per process per name) | `core/src/session-admission/requirement-verdict.mts` | a route presented a remediation core issued to a requirement this composition does not hold — one another boot registered; it was treated as `credential_change`, so every requirement was asked. Have the route take the remediation its own requirement was issued in this boot, `issuedRemediationActions(requirement)[route]`. A literal or a copy is refused with a `RangeError` rather than logged |
@@ -1278,8 +1291,9 @@ account-email proof's among them, with `kind: "account-email"`;
 longer matches the login's; `mfa.factor.enrolled` (`binding`: `password` or
 `email_proof` at a first binding, `mfa` beside another factor; `purpose`
 `login` or `enroll`; `by: "user"`) and `mfa.recovery_codes.generated`
-(`regenerated: true` when the set replaces one that stood) at a first
-binding, and `mfa.first_binding_conflict`
+(`regenerated: true` when a set stood, or may have; `unreplaced: true` when
+an older set may still stand beside the new one — kept, with `kept:
+"password_binding"`, or not removed) at a first binding, and `mfa.first_binding_conflict`
 (`kind`) for one dropped because another binding of the subject stood at
 once; `mfa.locked` (`hold`) for each proof the subject lock held, and
 `mfa.locked.first` (`hold`, `binding`) for the first of an episode;
@@ -1287,7 +1301,9 @@ once; `mfa.locked` (`hold`) for each proof the subject lock held, and
 code that reopens a login for a binding included. The `mfa` requirement
 emits `mfa.enrollment_state_inconsistent` (`witness`; `purpose` `login`, or
 `session` with the admitted `action`), and so do the routes for a recovery
-code that would reopen a login for a first binding (`purpose: "login"`). The rest are declared ahead
+code that would reopen a login for a first binding (`purpose: "login"`).
+`mfa.verified` for a recovery code that reopens a login for a binding
+carries `reopened: true`. The rest are declared ahead
 of the build steps that emit them. `sign_count_regression` is
 the WebAuthn factor's clone event, and names the factor's record id as
 `factorId` — see

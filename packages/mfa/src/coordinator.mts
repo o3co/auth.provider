@@ -50,10 +50,13 @@
  *   on a transaction that owes it; a first binding is `enrollment.mts`'s.
  *   Both are handed the coordinator's reads and writes as the kit; what the
  *   three share is `ceremony.mts`'s contract.
- * - Under `required`, a verified factor that does not count, for a subject
- *   with no counting factor it can use, completes no login: once the
- *   transaction is consumed and the proof spent, the login is reopened for a
- *   binding (`reopen.mts`), settled before anything is spent.
+ * - Under `required`, a login's factor that does not count, for a subject
+ *   with no counting factor it can use, completes no login: what the login
+ *   reopens for — or why not — is settled before the transaction's attempt is
+ *   reserved (`reopen.mts`), and settled again after a lost compare-and-set
+ *   round; once the transaction is consumed and the proof spent, the login is
+ *   reopened for a binding. A login transaction opened for a binding
+ *   verifies no factor.
  * - A verified counting factor marks the enrollment witness of a login whose
  *   `User` does not carry it (D12); a mark that fails never fails the login.
  * - A factor is handed its records opened and digests under the ring; it

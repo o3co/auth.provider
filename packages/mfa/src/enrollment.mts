@@ -47,7 +47,8 @@
  *   one at once, or a reset removed its own, so it removes its own, trying
  *   three times, and the user signs in again; one it cannot remove is
  *   reported standing. It then clears D25's flag where the proof was given,
- *   issues the recovery codes — replacing a set that stood — and marks the
+ *   issues the recovery codes — replacing the sets that stood, except that a
+ *   reopened login's binding by `password` keeps them — and marks the
  *   witness. So at most one first binding stands, and a lost race
  *   spends the transaction, never a factor. The caller resumes a login; a
  *   session is left as it was.
