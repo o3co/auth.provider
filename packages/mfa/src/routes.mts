@@ -818,14 +818,17 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					return;
 				case "begun": {
 					const opened = outcome.transaction;
-					// A session's enrollment names its transaction, which the page completes on.
-					res
-						.status(200)
-						.json(
-							opened === undefined
-								? outcome.response
-								: { ...outcome.response, transaction: opened.id, expires_in: opened.expiresIn },
-						);
+					// A session's enrollment names its transaction, which the page completes on,
+					// and how long it can: a mailed code's life, else the transaction's.
+					res.status(200).json(
+						opened === undefined
+							? outcome.response
+							: {
+									...outcome.response,
+									transaction: opened.id,
+									expires_in: outcome.expiresIn ?? opened.expiresIn,
+								},
+					);
 					return;
 				}
 			}

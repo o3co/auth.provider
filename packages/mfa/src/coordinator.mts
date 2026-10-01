@@ -60,7 +60,9 @@
  *   never sees a key, a store, a transaction or the mail sender. A code it
  *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
  *   login's address, and the digest of that address is kept with the pending
- *   challenge and handed back to the verification.
+ *   challenge and handed back to the verification. The page is answered the
+ *   factor's response with where the code went, masked (`sent_to`), and how
+ *   long it lives (`expires_in`), as kept.
  * - A refusal carries the factor id the factor named only when it is one of
  *   the subject's factors of the kind verified: nothing else reaches the audit.
  *   Another is dropped and flagged, never quoted.
@@ -109,7 +111,7 @@ import {
 import { createMfaEnrollment } from "./enrollment.mjs";
 import type { RequireEmailProof } from "./firstBinding.mjs";
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
-import { keptState, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
+import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import { recoveryCodesLeft } from "./recovery/factor.mjs";
 import { createLoginReopen } from "./reopen.mjs";
@@ -696,7 +698,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				});
 				switch (mailed.outcome) {
 					case "sent":
-						return sent;
+						// Where the code went and how long it lives, as kept: never the factor's to say.
+						return {
+							...sent,
+							response: { ...sent.response, ...mailedAnswer(mailed, nowMs) },
+						};
 					case "not_kept":
 						return mailed.refusal;
 					case "address_mismatch":
