@@ -783,7 +783,7 @@ Core's reference and schema hold what core's consumers read with the MFA package
 | `redisMfaFactorStore.keyPrefix`, `redisMfaTransactionStore.keyPrefix` (core) | `REDIS_MFA_*_KEY_PREFIX` | `mfaf:`, `mfat:` | as for the other Redis stores |
 | `mfa.encryptionKeys` | the first entry's `key` is `${?MFA_ENCRYPTION_KEY}` | none (development: the sample key, D11) | D11 |
 | `mfa.transactionTtlSeconds` / `maxAttemptsPerTransaction` | — | 600 / 5 | D8, D21 |
-| `mfa.lockout { threshold, baseSeconds, maxSeconds, memorySeconds, weeklyBudget, hardLimit, trustedBrowsers, trustedBrowserDays }` | — | 5 / 900 / 86400 / 86400 / 10 / 100 / 5 / 30 | D21 |
+| `mfa.lockout { threshold, baseSeconds, maxSeconds, memorySeconds, weeklyBudget, hardLimit }` | — | 5 / 900 / 86400 / 86400 / 10 / 100 | D21 |
 | `mfa.rateLimit.routes { limit, windowSeconds }` | — | 60 / 300 | seeded under prefix `mfa` (core `ratelimit/mfaSpec.mts`) |
 | `mfa.manage.maxAgeSeconds` | — | 300 | recent MFA (F4, D16) |
 | `mfa.enrollment { maxPrimaryAgeSeconds, requireEmailProof }` | `MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF` | 600, `"when-mail"` | D24 |
@@ -953,7 +953,6 @@ A "trust this browser for 30 days" cookie turns the second factor into possessio
 - **Transaction ids stay out of URLs** (§2).
 - **Fixation.** The express session id is regenerated when the password is accepted, when the login completes, and after a step-up (a copy of the id taken before the step-up does not gain it). A session id planted before the login is dead by the first step.
 - **What regeneration on step-up costs.** Records bound to the express session id are orphaned: a consent parked by `/authorize` (#552) and a federation-grant browser binding. Inside one flow the order prevents it — D17 decides before consent is parked, and the grants' connect gate runs before anything is bound. A consent or connect flow in another tab is lost and starts again.
-- **The trusted-browser cookie** (D21) is `httpOnly`, `Secure`, `SameSite=Lax`, path `/session/mfa`, and useless without the subject state that names its digest.
 - **Cache and framing.** `no-store` on every MFA response; the TOTP secret, the URI and recovery codes appear in exactly one response each. The page contract requires `frame-ancestors 'none'`.
 - **Redirects.** `redirect_to` from `/authorize` is followed by the page only on the provider's origin; the login's `redirect_to` keeps its exact-match allowlist.
 
@@ -964,7 +963,7 @@ A "trust this browser for 30 days" cookie turns the second factor into possessio
 ### D28 — Outages, logs and audit
 
 - **Outages.** Every store the MFA routes read or write — the factor store, the transaction store, the `UserSession` store, the cookie session, the mail sender, the Store's witness — is `503 temporarily_unavailable`, logged once at error with `store`, `step` and `loggableError`'s projection. An outage is never "no factors", never "wrong code", never "sent". `/authorize` gains no new store read beyond the ask it already writes; device verification's new session read is `503` on an outage. A failed witness *write* after a successful binding is one warning and heals at the next login (D12).
-- **Logs never carry** a code, a secret, an `otpauth://` URI, a recovery code, an address, factor data, a transaction id, a trusted-browser cookie, or a username.
+- **Logs never carry** a code, a secret, an `otpauth://` URI, a recovery code, an address, factor data, a transaction id, or a username.
 - **Audit** (added to `BUILT_IN_AUDIT_EVENT_TYPES` and the runbook inventory): `mfa.challenge.sent`, `mfa.verified`, `mfa.verify.failure` (`reason`: `invalid` / `expired` / `replayed` / `sign_count_regression` / `exhausted`), `mfa.locked` (`hold`: `backoff` / `weekly` / `hard`), `mfa.factor.enrolled` (`binding`), `mfa.factor.removed` (`by`), `mfa.recovery_code.used` (`remaining`), `mfa.recovery_codes.generated`, `mfa.enrollment_state_inconsistent`. Each carries `subject`, `ip`, `userAgent`, `kind` and `purpose`; the MFA module declares `auditSink` optional under `AUDIT_SINK_ABSENCE_POLICY`.
 
 ---
