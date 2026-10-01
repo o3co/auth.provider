@@ -317,12 +317,14 @@ of scope (below) — because a renewal changes nothing a client can see until
 the user finishes it.
 
 Ownership first, with the same `404 grant_not_found` for an unknown id,
-another client's grant and another subject's. Then the subject's grants
-boundary: a grant a subject-wide revocation covers is revoked here, durably,
-before anything else is asked of it, and answers `410 grant_revoked/backstop`.
-Then the rest in `/token`'s order, each with the status `/token` gives it. A
-grant that is over comes first: `410 grant_revoked/<by>`,
-`410 grant_expired/<reason>`, `400 authorization_pending`. Then the
+another client's grant and another subject's. Then what the record itself
+says, as `/token` answers it: a stored revocation is `410 grant_revoked/<by>`
+and a pending grant `400 authorization_pending`, whether or not the subject's
+grants boundary can be read. Then that boundary: one that cannot be read is
+`503 temporarily_unavailable/storage`, and a grant a subject-wide revocation
+covers is revoked here, durably, before anything else is asked of it, and
+answers `410 grant_revoked/backstop`. Then the rest in `/token`'s order, each
+with the status `/token` gives it: `410 grant_expired/<reason>` first. Then the
 configuration: a connection the deployment no longer configures and one the
 client may no longer use are one answer, `403 access_denied/connection_not_permitted`
 — a client is never sent to its operator about a grant that is over, and one

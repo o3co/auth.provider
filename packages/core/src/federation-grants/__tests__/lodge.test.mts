@@ -601,6 +601,33 @@ describe("lodging a reauthorization", () => {
 		expect((await grants.find("g-est", at(3 * MIN)))?.status).toBe("active");
 	});
 
+	it("answers a stored revocation and a pending grant from the record, as /token does, when the boundary cannot be read", async () => {
+		const down = async (): Promise<Date | null> => {
+			throw new Error("down");
+		};
+		await establish();
+		await grants.revoke("g-est", "operator", clock);
+		expect(
+			await lodgeFederationGrantReauthorization(deps({ grantsRevokedBefore: down }), renewal()),
+		).toEqual({ ok: false, reason: "grant_revoked", revokedBy: "operator", revokedNow: false });
+
+		await grants.createPending({
+			id: "g-pend",
+			subject: "u-1",
+			clientId: "agent",
+			connection: CONNECTION.name,
+			intent: { handle: "h-pend", expiresAt: at(FEDERATION_GRANT_FLOW_BUDGET_MS) },
+			now: T0,
+		});
+		expect(
+			await lodgeFederationGrantReauthorization(
+				deps({ grantsRevokedBefore: down }),
+				renewal({ grantId: "g-pend" }),
+			),
+		).toEqual({ ok: false, reason: "authorization_pending" });
+		expect(intents.size).toBe(0);
+	});
+
 	it("refuses what a reauthorization cannot mend, each for its own reason", async () => {
 		await establish();
 		// Expired: the operator's maximum has passed.

@@ -583,11 +583,12 @@ async function secondWrite(
 }
 
 /**
- * Lodges a renewal of an existing grant: ownership, then the revocation
- * backstop before anything else is asked of it, then the grant's lifecycle and
- * the configuration in retrieval's order (`admission`), then a key missing from
- * the ring, the asserted connection and the request, and only then the two
- * writes.
+ * Lodges a renewal of an existing grant: ownership, then a revocation or a
+ * pending grant as stored, then the subject's grants boundary and the
+ * revocation backstop before anything else is asked of it, then the grant's
+ * lifecycle and the configuration in retrieval's order (`admission`), then a
+ * key missing from the ring, the asserted connection and the request, and only
+ * then the two writes.
  */
 export async function lodgeFederationGrantReauthorization(
 	deps: FederationGrantLodgingDeps,
@@ -612,6 +613,18 @@ export async function lodgeFederationGrantReauthorization(
 	) {
 		return { ok: false, reason: "grant_not_found" };
 	}
+	// A revocation or a pending grant as stored is answered from the record alone, as
+	// retrieval does: a boundary that cannot be read must not turn it into an outage.
+	const stored = inspection.grant;
+	if (stored.status === "revoked") {
+		return {
+			ok: false,
+			reason: "grant_revoked",
+			revokedBy: stored.revocation.by,
+			revokedNow: false,
+		};
+	}
+	if (stored.status === "pending") return { ok: false, reason: "authorization_pending" };
 
 	let boundary: Date | null;
 	try {
