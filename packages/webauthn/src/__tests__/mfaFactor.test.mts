@@ -458,6 +458,27 @@ describe("registration", () => {
 			).rejects.toThrow(/pending enrollment/);
 		}
 	});
+
+	it.each([
+		["not base64url canonical", "AB"],
+		["the subject's, written with its padding bits set", `${HANDLE.slice(0, -1)}d`],
+		["longer than 64 bytes", b64url(new Uint8Array(65).fill(7))],
+	])(
+		"throws for a pending state whose user handle the factor's data could not hold: %s, checking nothing",
+		async (_what, userHandle) => {
+			attested();
+			await expect(
+				factorWith().completeEnrollment({
+					...ceremony(),
+					user: USER,
+					factors: [],
+					state: { challenge: "Y2g", userHandle, expiresAtMs: NOW_MS + 1 },
+					proof: registration(),
+				}),
+			).rejects.toThrow(/pending enrollment.*userHandle/);
+			expect(mockAttestation).not.toHaveBeenCalled();
+		},
+	);
 });
 
 describe("an assertion's challenge", () => {
