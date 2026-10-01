@@ -448,8 +448,8 @@ const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 	let usable: boolean;
 	try {
 		middleware = (guard as { readonly middleware?: unknown } | null)?.middleware;
-		// Express runs a function of at most three parameters on a request; one
-		// of four is an error handler, skipped on every request.
+		// A function of at most three parameters; Express skips one of four or
+		// more as an error handler.
 		usable = typeof middleware === "function" && middleware.length <= 3;
 	} catch (cause) {
 		throw new Error(`deviceGrantModule: csrfGuard.middleware could not be read. ${install}`, {
