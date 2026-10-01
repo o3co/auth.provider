@@ -1,6 +1,6 @@
 # auth.provider
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -11,6 +11,8 @@ Last updated: 2026-10-01
 > This repository handles **authentication and token issuance** in the three-layer separation of concerns (authentication & token issuance / [authorization decision](https://github.com/o3co/auth.policy-verifier) / [authorization enforcement](https://github.com/o3co/protobuf.interceptors)) of the [auth](https://github.com/o3co/auth) stack.
 
 OAuth 2.0 / OpenID Connect provider. It signs users in — with a password your user service checks, through an upstream identity provider, or with a passkey — and issues JWT access tokens, refresh tokens and ID tokens that downstream services verify offline against its published keys. Session login and the authorization code flow produce the same token format, answer at the same introspection endpoint, and are verified the same way downstream.
+
+**Stability.** The packages are on the 0.x line, where a minor release may carry breaking changes. Each one is marked `!` in its commit and PR title and listed in the [CHANGELOG](CHANGELOG.md) under the release it ships in; see the [release policy](docs/release-policy.md).
 
 ## Responsibility
 
