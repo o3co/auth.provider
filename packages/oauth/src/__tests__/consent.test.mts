@@ -515,7 +515,7 @@ describe("POST /oauth/consent", () => {
 		expect(await store.find("user-1", CLIENT_ID)).not.toBeNull();
 	});
 
-	it("deny sends the browser to the client with access_denied and the state, and records nothing", async () => {
+	it("deny sends the browser to the client with access_denied, the state and iss, and records nothing", async () => {
 		const store = createMemoryConsentStore();
 		const { sink, events } = collectingSink();
 		const { app, pending } = await makeApp({ consentStore: store, auditSink: sink });
@@ -527,6 +527,8 @@ describe("POST /oauth/consent", () => {
 		expect(location.origin + location.pathname).toBe(REDIRECT_URI);
 		expect(location.searchParams.get("error")).toBe("access_denied");
 		expect(location.searchParams.get("state")).toBe("xyz");
+		// RFC 9207: the issuer as discovery advertises it, once.
+		expect(location.searchParams.getAll("iss")).toEqual(["https://issuer.example"]);
 		expect(pending.size).toBe(0);
 		expect(await store.find("user-1", CLIENT_ID)).toBeNull();
 		expect(events.map((e) => e.type)).toContain("consent.denied");

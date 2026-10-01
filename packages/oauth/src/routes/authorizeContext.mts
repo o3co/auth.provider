@@ -46,6 +46,8 @@ export interface AuthorizeHandlerOptions {
 	readonly logger: Logger;
 	/** The canonical issuer, config-only: never request-derived (Host is attacker-controlled). */
 	readonly issuer: string;
+	/** The `iss` every authorization response carries (RFC 9207): the issuer as discovery advertises it. */
+	readonly authorizationResponseIssuer: string;
 	/**
 	 * The login trip for a browser that must log in: `urlFor(returnTo)` is the
 	 * login page with the request to come back to — the `loginEntry` slot's.

@@ -29,6 +29,7 @@ import {
 	type AppConfig,
 	type AuditEvent,
 	type AuditSink,
+	advertisedIssuer,
 	type ClientRepository,
 	type CodeRepository,
 	type CreateCodeInput,
@@ -54,6 +55,7 @@ import {
 	vouchableAcrValues,
 } from "#/acrValues.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
@@ -892,6 +894,7 @@ describe("/authorize — policy evaluation edges", () => {
 				error: "server_error",
 				error_description: "policy_decision_invalid",
 				state: "xyz",
+				iss: "https://issuer.example",
 			});
 			expect(createCode).not.toHaveBeenCalled();
 			expect(
@@ -957,6 +960,7 @@ describe("/authorize — the grant policy's refusals, audited", () => {
 			error: "access_denied",
 			error_description: "not for you",
 			state: "xyz",
+			iss: "https://issuer.example",
 		});
 		expect(createCode).not.toHaveBeenCalled();
 		expect(audited).toEqual([
@@ -1032,6 +1036,7 @@ describe("/authorize — the grant policy's refusals, audited", () => {
 			error,
 			error_description: errorDescription,
 			state: "xyz",
+			iss: "https://issuer.example",
 		});
 		expect(createCode).not.toHaveBeenCalled();
 		expect(audited).toEqual([]);
@@ -2494,5 +2499,79 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 				ACR_VALUE_UNSATISFIABLE,
 			],
 		]);
+	});
+});
+
+describe("/authorize — every authorization response names its issuer (RFC 9207)", () => {
+	/** Discovery's `issuer` for the suite's configured issuer. */
+	const ISS = advertisedIssuer("https://issuer.example");
+
+	/** The one `iss` the redirect carries. */
+	const issOf = (params: URLSearchParams): string[] => params.getAll("iss");
+
+	it("carries iss, equal to discovery's issuer, on the code redirect", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, baseQuery));
+		expect(params.get("code")).toBe("code-x");
+		expect(params.get("state")).toBe("xyz");
+		expect(issOf(params)).toEqual([ISS]);
+	});
+
+	it.each([
+		[
+			"a request that fails validation (unsupported_response_type)",
+			{},
+			{ ...baseQuery, response_type: "token" },
+			"unsupported_response_type",
+		],
+		[
+			"login_required under prompt=none",
+			{ session: { isAuthenticated: false } },
+			{ ...baseQuery, prompt: "none" },
+			"login_required",
+		],
+		[
+			"temporarily_unavailable (the code store down)",
+			{ createCodeThrows: true },
+			baseQuery,
+			"temporarily_unavailable",
+		],
+		[
+			"a grant policy's deny",
+			{
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () => ({ outcome: "deny" as const, error: "access_denied" }),
+				},
+			},
+			baseQuery,
+			"access_denied",
+		],
+	] as const)(
+		"carries iss, equal to discovery's issuer, on the error redirect for %s",
+		async (_label, appOptions, query, error) => {
+			const { app } = await makeApp(appOptions as Parameters<typeof makeApp>[0]);
+			const params = redirectParams(await authorize(app, query as Query));
+			expect(params.get("error")).toBe(error);
+			expect(issOf(params)).toEqual([ISS]);
+		},
+	);
+
+	it("carries no iss on the JSON 400 answered before redirect_uri is trusted", async () => {
+		const { app } = await makeApp({ clientNotFound: true });
+		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(400);
+		expect(res.headers.location).toBeUndefined();
+		expect(res.body).not.toHaveProperty("iss");
+	});
+
+	it("names the issuer as discovery advertises it when the configured one ends in a slash", async () => {
+		const configured = "https://issuer.example/tenant/";
+		const { app } = await makeApp({
+			oauth: { jwt: oauthConfigForTests({ issuer: configured }).oauth.jwt },
+		});
+		const params = redirectParams(await authorize(app, baseQuery));
+		expect(issOf(params)).toEqual([advertisedIssuer(configured)]);
+		expect(issOf(params)).toEqual(["https://issuer.example/tenant"]);
 	});
 });

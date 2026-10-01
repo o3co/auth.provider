@@ -23,6 +23,7 @@
 
 import { emitAuditEvent, type LoginEntry, sanitizeErrorText } from "@o3co/auth-provider-core";
 import type { Response } from "express";
+import { authorizationResponseUrl } from "./authorizationResponse.mjs";
 import type { AuthorizeContext } from "./authorizeContext.mjs";
 
 /** The login-page redirect with the request to come back to. */
@@ -43,11 +44,13 @@ export const redirectError = (
 	error: string,
 	errorDescription: string,
 ): Response => {
-	const url = new URL(ctx.redirectUri);
-	url.searchParams.append("error", error);
-	url.searchParams.append("error_description", sanitizeErrorText(errorDescription));
-	if (typeof ctx.state === "string") url.searchParams.append("state", ctx.state);
-	return ctx.res.redirect(url.toString()) as unknown as Response;
+	const location = authorizationResponseUrl(
+		ctx.redirectUri,
+		{ error, error_description: sanitizeErrorText(errorDescription) },
+		ctx.state,
+		ctx.opts.authorizationResponseIssuer,
+	);
+	return ctx.res.redirect(location) as unknown as Response;
 };
 
 /**

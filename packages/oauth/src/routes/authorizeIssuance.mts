@@ -33,6 +33,7 @@ import {
 	vouchedAmr,
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
+import { authorizationResponseUrl } from "./authorizationResponse.mjs";
 import { redirectError } from "./authorizeAnswers.mjs";
 import type { AuthorizeContext } from "./authorizeContext.mjs";
 
@@ -138,11 +139,12 @@ export const mintCode = async (
 // concurrent requests sharing a session cannot race. `consumeByCode`'s atomic
 // read-and-delete is the sole authenticity gate.
 export const redirectWithCode = async (ctx: AuthorizeContext, code: string): Promise<Response> => {
-	const url = new URL(ctx.redirectUri);
-	url.searchParams.append("code", code);
-	if (typeof ctx.state === "string") {
-		url.searchParams.append("state", ctx.state);
-	}
+	const location = authorizationResponseUrl(
+		ctx.redirectUri,
+		{ code },
+		ctx.state,
+		ctx.opts.authorizationResponseIssuer,
+	);
 
 	await emitAuditEvent(ctx.opts.auditSink, {
 		timestamp: new Date(),
@@ -153,5 +155,5 @@ export const redirectWithCode = async (ctx: AuthorizeContext, code: string): Pro
 		userAgent: ctx.req.get("user-agent"),
 		details: { response_type: "code" },
 	});
-	return ctx.res.redirect(url.toString()) as unknown as Response;
+	return ctx.res.redirect(location) as unknown as Response;
 };
