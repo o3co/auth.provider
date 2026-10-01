@@ -35,9 +35,15 @@
  *   code went to when it mailed one (`sendMfaMail`); the page is then
  *   answered where it went, masked (`sent_to`), and how long it lives
  *   (`expires_in`), which is how long the enrollment can be completed.
+ * - A login's first binding is refused, before anything is spent, when the
+ *   subject's first-binding mark distrusts its continuation's `authTime`
+ *   (`firstBindingMark.mts`): another first binding came after the login
+ *   began, so its `User`'s witness may be stale. A session's is admission's.
  * - A completion reserves an attempt before the proof is checked, seals the
- *   factor's data, and then, in this order: consumes the transaction, writes
- *   the factor. Another factor then reads the subject's records again, and
+ *   factor's data, and then, in this order: for a first binding notes the
+ *   subject's first-binding mark — a note that fails refuses it, nothing
+ *   written — consumes the transaction, writes the factor. Another factor
+ *   then reads the subject's records again, and
  *   one past `mfa.maxFactorsPerSubject` — bindings made at once — removes
  *   its own, so the limit holds; one it cannot remove is reported standing,
  *   for the caller to audit as bound. A first binding — `binding` `email_proof` when the proof was
@@ -79,6 +85,7 @@ import {
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
 import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
+import { distrustedByFirstBinding } from "./firstBindingMark.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes } from "./recovery/issue.mjs";
 
@@ -494,6 +501,13 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const firstBy: FirstBindingBy = proved ? "email_proof" : "password";
 			const refused = refusedBy(tx.purpose, first, records, firstBy);
 			if (refused !== undefined) return refused;
+			if (first && tx.purpose === "login") {
+				const mark = await kit.firstBindingAt(tx.subject);
+				if (typeof mark === "object" && mark !== null) return mark;
+				if (distrustedByFirstBinding(tx.continuation?.primary.authTimeMs, mark)) {
+					return closed(tx.purpose);
+				}
+			}
 
 			const about: MfaCeremonySubject = {
 				subject: tx.subject,
@@ -572,6 +586,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				return unreadable("enrollment", { cause });
 			}
 
+			// Noted before the factor is written: a first binding the mark misses
+			// would leave a stale session trusted.
+			if (first) {
+				const unnoted = await kit.noteFirstBinding(tx.subject, nowMs);
+				if (unnoted !== undefined) return unnoted;
+			}
 			// Consumed before anything is written: a lost race spends the
 			// transaction, never a factor.
 			const consumed = await kit.consume(tx);

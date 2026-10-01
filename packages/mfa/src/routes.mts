@@ -28,7 +28,8 @@
  *   (`mfa:ip:<ip>`), before anything is read.
  * - The transaction id is read from the body or the `MFA-Transaction` header,
  *   never from the URL, and never logged; a missing, malformed, foreign,
- *   spent or expired one is answered alike.
+ *   spent or expired one is answered alike. A login's begun at or before
+ *   its subject's sessions boundary is `401 login_required`.
  * - A signed-in session is admitted before its transaction is read: as
  *   `mfa.manage` to enroll, and through the step-up's remediation for its
  *   proof; its `User` is the one its cookie holds (`cookieSessionUser`).
@@ -405,6 +406,15 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		logger.warn({ sub, err: loggableError(mark.cause) }, "mfa_enrollment_witness_unwritten");
 	};
 
+	/** A first-binding mark a verification could not note: once at warn; the witness was left unmarked, and the next login heals it. */
+	const firstBindingUnnoted = (sub: string, unnoted: MfaStoreOutage | undefined): void => {
+		if (unnoted === undefined) return;
+		logger.warn(
+			{ sub, store: unnoted.store, step: unnoted.step, err: loggableError(unnoted.cause) },
+			"mfa_first_binding_unnoted",
+		);
+	};
+
 	/** A mail the ceremony could not send: `429` at the sender's limit; else logged once and `503`. */
 	const answerMail = (route: RouteName, res: Response, refusal: MfaMailRefusal): void => {
 		if (refusal.outcome === "mail_refused_at_limit") {
@@ -531,6 +541,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				res.status(400).json(UNKNOWN_TRANSACTION);
 				return;
 			}
+			if (outcome.outcome === "revoked") {
+				res.status(401).json(LOGIN_REQUIRED);
+				return;
+			}
 			if (outcome.outcome === "unavailable") {
 				answerOutage("transaction", res, outcome);
 				return;
@@ -555,6 +569,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			switch (outcome.outcome) {
 				case "unknown_transaction":
 					res.status(400).json(UNKNOWN_TRANSACTION);
+					return;
+				case "revoked":
+					res.status(401).json(LOGIN_REQUIRED);
 					return;
 				case "unknown_factor":
 					res.status(400).json(UNKNOWN_FACTOR);
@@ -656,6 +673,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				case "unknown_transaction":
 				case "spent":
 					res.status(400).json(UNKNOWN_TRANSACTION);
+					return;
+				case "revoked":
+					res.status(401).json(LOGIN_REQUIRED);
 					return;
 				case "unknown_factor":
 					res.status(400).json(UNKNOWN_FACTOR);
@@ -771,6 +791,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					return;
 				case "verified":
 					verifiedEvents(outcome);
+					firstBindingUnnoted(outcome.subject, outcome.firstBindingUnnoted);
 					witnessUnwritten(outcome.subject, outcome.witness);
 					await completeLogin(
 						"verify",
@@ -809,6 +830,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			switch (outcome.outcome) {
 				case "unknown_transaction":
 					res.status(400).json(UNKNOWN_TRANSACTION);
+					return;
+				case "revoked":
+					res.status(401).json(LOGIN_REQUIRED);
 					return;
 				case "enrollment_not_open":
 					res.status(400).json(NOT_OPEN);
@@ -869,6 +893,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				case "unknown_transaction":
 				case "spent":
 					res.status(400).json(UNKNOWN_TRANSACTION);
+					return;
+				case "revoked":
+					res.status(401).json(LOGIN_REQUIRED);
 					return;
 				case "enrollment_not_open":
 					res.status(400).json(NOT_OPEN);

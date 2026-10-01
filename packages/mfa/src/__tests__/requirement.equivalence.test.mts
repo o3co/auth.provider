@@ -44,9 +44,9 @@ import {
 	FACTORS,
 	factorRecord,
 	factorStoreHolding,
+	NO_FIRST_BINDING_MARK,
 	NOT_ENROLLED_FACTS,
 	resolverOver,
-	NO_FIRST_BINDING_MARK,
 	WITHOUT_MAIL,
 } from "./requirementHarness.mjs";
 

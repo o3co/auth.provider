@@ -59,7 +59,10 @@ export function createMfaStepUp(kit: MfaCeremonyKit): {
 			}
 			if (call.transactionId !== undefined) {
 				const tx = await kit.bound(call);
-				if (tx === null) return UNKNOWN_TRANSACTION;
+				// A login's transaction, past the boundary or not, is no step-up's.
+				if (tx === null || ("outcome" in tx && tx.outcome === "revoked")) {
+					return UNKNOWN_TRANSACTION;
+				}
 				if ("outcome" in tx) return tx;
 				if (tx.purpose !== "enroll" || tx.enrollment !== "required") return UNKNOWN_TRANSACTION;
 				if (tx.emailProof === "required") return opened(tx);

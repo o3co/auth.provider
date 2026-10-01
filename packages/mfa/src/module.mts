@@ -25,7 +25,8 @@
  * sample key and the routes' per-process limiter are refused under `multi`,
  * so a mode read as absent must not lift that); reads `rateLimiter`,
  * `auditSink` and `subjectRevocation` (each absence declared; the routes'
- * admission of a signed-in session reads the boundary), `logger`,
+ * admission of a signed-in session, and every use of a login's transaction,
+ * reads the boundary), `logger`,
  * `mailSender` — where the account-email proof and a factor's codes go — and
  * `userRepository`, for the enrollment witness's write alone
  * (`markMfaEnrolled`). Nothing it keeps forks per replica; without a shared
@@ -97,6 +98,7 @@ import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
+import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
@@ -442,6 +444,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							deps.mfaTransactionStore.emailProofRequiredAtNextBinding(subject),
 						sessionEmailProofAt: (subject, sid, nowMs) =>
 							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
+						firstBindingAt: (subject, nowMs) =>
+							deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,
@@ -497,6 +501,13 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
 								requireEmailProof: settings.enrollment.requireEmailProof,
 								sessionProofSeconds: settings.manage.maxAgeSeconds,
+								firstBindingMarkMs: firstBindingMarkLifetimeMs({
+									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
+									transactionTtlSeconds: settings.transactionTtlSeconds,
+								}),
+								...(deps.subjectRevocation === undefined
+									? {}
+									: { revocation: deps.subjectRevocation }),
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,
