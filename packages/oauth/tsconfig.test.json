@@ -3,34 +3,9 @@
 	"compilerOptions": {
 		"noEmit": true
 	},
-	// #626: the build config excludes `__tests__`, so a type assertion made in
-	// a test was never compiled. Paired with vitest.config.mts's `typecheck`
-	// block, as core's tsconfig.test.json requires: vitest decides which test
-	// files it collects, this decides what tsc is given, and a file in only
-	// one of the two looks checked but is not.
+	// The build config leaves `__tests__` out. vitest's typecheck runs tsc on
+	// this program, and an error in any of its files fails the run; every test
+	// file and helper comes in by glob, so a new one is compiled unlisted.
 	"include": ["src/**/*.mts"],
-	// The files below are the same list as `typecheck.exclude` in
-	// vitest.config.mts, where each one's error count and cause are recorded.
-	// They have to be kept out of tsc's program as well: vitest reports an
-	// error in a file it did not collect as an "Unhandled Source Error" and
-	// fails the run. TODO(#626): remove a file here and there as it is fixed.
-	"exclude": [
-		"node_modules",
-		"dist",
-		"src/__tests__/authorization.test.mts",
-		"src/__tests__/authorizationCode.userinfo.integration.test.mts",
-		"src/__tests__/authorizeEndpoint.test.mts",
-		"src/__tests__/clientCredentials.integration.test.mts",
-		"src/__tests__/dpop.clientCredentials.integration.test.mts",
-		"src/__tests__/hooks.test.mts",
-		"src/__tests__/jwtBearer.test.mts",
-		"src/__tests__/module.test.mts",
-		"src/__tests__/mtls.clientCredentials.integration.test.mts",
-		"src/__tests__/oauthAuthorization.test.mts",
-		"src/__tests__/resourceIndicator.stage2.authorize.test.mts",
-		"src/__tests__/resourceIndicator.stage2.test.mts",
-		"src/__tests__/senderConstrained.integration.test.mts",
-		"src/__tests__/tokenBinding.dispatchPolicy.integration.test.mts",
-		"src/__tests__/tokenBinding.introspect.integration.test.mts"
-	]
+	"exclude": ["node_modules", "dist"]
 }

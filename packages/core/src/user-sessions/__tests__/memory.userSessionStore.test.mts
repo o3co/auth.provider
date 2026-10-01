@@ -13,12 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { describe } from "vitest";
 import { createInMemoryUserSessionStore } from "../memory/userSessionStore.mjs";
 import {
 	runSecondFactorUpdateContract,
 	runUserSessionStoreContract,
 } from "./userSessionStore.contract.mjs";
 
-runUserSessionStoreContract(async () => createInMemoryUserSessionStore());
-// The step-up capability, which the memory store claims (the MFA ADR's D9).
-runSecondFactorUpdateContract(async () => createInMemoryUserSessionStore());
+describe("the memory user session store", () => {
+	runUserSessionStoreContract(async () => createInMemoryUserSessionStore());
+	// The step-up capability, which the memory store claims (the MFA ADR's D9).
+	runSecondFactorUpdateContract(async () => createInMemoryUserSessionStore());
+});

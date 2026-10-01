@@ -107,6 +107,10 @@ describe("the generic OIDC adapter's delegated authorization", () => {
 				expect(() => authorize(provider, { authorizationParams: { [key]: "x" } }), key).toThrow(
 					new RegExp(key),
 				);
+				// The refusal states the rule, with no issue number or design label.
+				expect(() => authorize(provider, { authorizationParams: { [key]: "x" } }), key).not.toThrow(
+					/#\d|\bD\d+\b/,
+				);
 			}
 		});
 

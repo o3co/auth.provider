@@ -55,7 +55,7 @@ const makeReq = (
 	headers: Record<string, string | undefined>,
 	remoteAddress: string | undefined = TRUSTED_PEER,
 ): Partial<Request> => ({
-	get: (name: string) => headers[name.toLowerCase()],
+	get: ((name: string) => headers[name.toLowerCase()]) as Request["get"],
 	socket: { remoteAddress } as unknown as Request["socket"],
 });
 
@@ -537,13 +537,15 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		// The narrow PKI mode takes its intermediates from the XFCC `Chain=`
 		// parameter, so it cannot read them from the TLS layer (`full-pki` reads
 		// the chain from the TLS session). Reject at construction.
-		expect(() =>
+		const construct = () =>
 			createMtlsMechanism({
 				source: "tls-layer",
 				mode: "pki",
 				trustedCas: [ROOT_PEM],
-			}),
-		).toThrow(/tls-layer/i);
+			});
+		expect(construct).toThrow(/tls-layer/i);
+		expect(construct).toThrow(/mode = "full-pki"/);
+		expect(construct).not.toThrow(/phase|#\d/i);
 	});
 
 	it("self-signed mode + empty trustedCas is allowed (trustedCas is unused)", () => {

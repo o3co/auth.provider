@@ -22,16 +22,8 @@
 
 import type { Redis } from "ioredis";
 import type { FederationTokenStoreClient } from "../../clients.mjs";
-import { assertPipelineSucceeded, isNoScriptError } from "../commands.mjs";
-import { LUA_COMPARE_AND_DELETE, LUA_COMPARE_AND_DELETE_SHA } from "../scripts/lock.mjs";
-
-/**
- * Whether `LUA_COMPARE_AND_DELETE` is expected in the server's script cache: `true` lets the
- * next call use `EVALSHA`; a `NOSCRIPT` (after `SCRIPT FLUSH` or a failover) clears it, and the
- * `EVAL` fallback reloads the script and sets it again. Module-scoped, like every such flag here,
- * because the script is constant: clients in one process share the server's cache state.
- */
-let scriptCached = false;
+import { assertPipelineSucceeded, runScript } from "../commands.mjs";
+import { COMPARE_AND_DELETE } from "../scripts/lock.mjs";
 
 export function makeIoredisFederationTokenStoreClient(io: Redis): FederationTokenStoreClient {
 	const federationTokenStoreClient: FederationTokenStoreClient = {
@@ -72,23 +64,9 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 					for (const key of batch as string[]) yield key;
 				}
 			})(),
-		// Atomic compare-and-delete (advisory-lock release), EVALSHA-first; see `scriptCached`.
-		async compareAndDelete(key, expectedValue) {
-			if (scriptCached) {
-				try {
-					const r = (await io.evalsha(LUA_COMPARE_AND_DELETE_SHA, 1, key, expectedValue)) as number;
-					return r === 1;
-				} catch (err) {
-					if (!isNoScriptError(err)) throw err;
-					scriptCached = false;
-					// Fall through to EVAL.
-				}
-			}
-			const r = (await io.eval(LUA_COMPARE_AND_DELETE, 1, key, expectedValue)) as number;
-			// EVAL loads the script into the server's cache, so the next EVALSHA hits.
-			scriptCached = true;
-			return r === 1;
-		},
+		// Atomic compare-and-delete (advisory-lock release).
+		compareAndDelete: async (key, expectedValue) =>
+			(await runScript(io, COMPARE_AND_DELETE, [key], [expectedValue])) === 1,
 	};
 	return federationTokenStoreClient;
 }

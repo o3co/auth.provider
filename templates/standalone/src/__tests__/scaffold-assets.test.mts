@@ -461,7 +461,7 @@ describe("the shipped suite carries what it needs to run outside this repository
 			default: { test?: { setupFiles?: string | readonly string[] } };
 		};
 		const setupFiles = [config.test?.setupFiles ?? []].flat();
-		expect(setupFiles, "the #556 supertest loopback guard is not wired in").not.toHaveLength(0);
+		expect(setupFiles, "the supertest loopback guard is not wired in").not.toHaveLength(0);
 
 		const copied = copiedIntoStage(read("/Dockerfile"), "test");
 		const dockerignore = read("/.dockerignore");

@@ -66,6 +66,12 @@ import {
 	unparseableCriticalKeyUsage,
 } from "./pkiFactory.mjs";
 
+/** What `new Response` takes as its body. */
+type ResponseBody = ConstructorParameters<typeof Response>[0];
+
+/** What `fetch` takes as its first argument. */
+type FetchInput = Parameters<typeof fetch>[0];
+
 const NOW = new Date("2027-01-01T00:00:00Z");
 /** The intermediate issues the leaf, so the leaf's CRL is published by it. */
 const INT_CRL_URL = "http://crl.test/int.crl";
@@ -96,7 +102,7 @@ type StubAnswer = Uint8Array | number | ((init: RequestInit | undefined) => Prom
 const stubFetch = (table: Record<string, StubAnswer>) => {
 	const calls: string[] = [];
 	const inits: (RequestInit | undefined)[] = [];
-	const impl = (async (input: URL | RequestInfo, init?: RequestInit) => {
+	const impl = (async (input: FetchInput, init?: RequestInit) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 		calls.push(url);
 		inits.push(init);
@@ -104,7 +110,7 @@ const stubFetch = (table: Record<string, StubAnswer>) => {
 		if (entry === undefined) return new Response(null, { status: 404 });
 		if (typeof entry === "number") return new Response(null, { status: entry });
 		if (typeof entry === "function") return entry(init);
-		return new Response(entry as unknown as BodyInit, { status: 200 });
+		return new Response(entry as unknown as ResponseBody, { status: 200 });
 	}) as unknown as typeof globalThis.fetch;
 	return { impl, calls, inits };
 };
@@ -120,7 +126,7 @@ const ocspAnswer =
 		const body = init?.body;
 		const nonce = body instanceof Uint8Array ? nonceOf(body) : undefined;
 		const bytes = await mintOcspResponse({ ...options, ...(nonce === undefined ? {} : { nonce }) });
-		return new Response(bytes as unknown as BodyInit, {
+		return new Response(bytes as unknown as ResponseBody, {
 			status: 200,
 			headers: { "content-type": "application/ocsp-response" },
 		});
@@ -137,7 +143,7 @@ const deferredFetch = (table: Record<string, Uint8Array | number>) => {
 	const opened = new Promise<void>((resolve) => {
 		gate.release = resolve;
 	});
-	const impl = (async (input: URL | RequestInfo, init?: RequestInit) => {
+	const impl = (async (input: FetchInput, init?: RequestInit) => {
 		calls.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
 		await opened;
 		return inner.impl(input, init);
@@ -1357,7 +1363,7 @@ const ROOT_OCSP_URL = "http://ocsp.test/root";
 const fetchingPolicy = (
 	mode: "crl" | "ocsp" | "both",
 	onUnavailable: "reject" | "allow",
-): RevocationPolicy => ({
+): Exclude<RevocationPolicy, { readonly mode: "disabled" }> => ({
 	mode,
 	onUnavailable,
 	allowedHosts: ["crl.test", "ocsp.test"],
@@ -1718,7 +1724,7 @@ describe("full-pki revocation — mode = ocsp", () => {
 			stubFetch({
 				[INT_OCSP_URL]: async () =>
 					new Response(
-						(await mintOcspResponse({ issuer: int, subject: leaf })) as unknown as BodyInit,
+						(await mintOcspResponse({ issuer: int, subject: leaf })) as unknown as ResponseBody,
 						{
 							status: 200,
 							headers: { "content-type": "application/ocsp-response" },
@@ -2288,7 +2294,7 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 
 	/** An OCSP answer with the right media type and the bytes given. */
 	const ocspBytes = (bytes: Uint8Array) => async (): Promise<Response> =>
-		new Response(bytes as unknown as BodyInit, {
+		new Response(bytes as unknown as ResponseBody, {
 			status: 200,
 			headers: { "content-type": "application/ocsp-response" },
 		});

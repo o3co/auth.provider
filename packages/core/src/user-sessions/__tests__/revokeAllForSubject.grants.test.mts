@@ -38,7 +38,7 @@ const base = () => ({
 		addSid: async () => undefined,
 		removeSid: async () => undefined,
 	} as never,
-	subjectRevocation: createInMemorySubjectRevocation(),
+	subjectRevocation: createInMemorySubjectRevocation({ now: () => now().getTime() }),
 });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -77,7 +77,7 @@ describe("revokeAllForSubject with a grant store", () => {
 		const h = harness();
 		await h.seed();
 		const order: string[] = [];
-		const revocation = createInMemorySubjectRevocation();
+		const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 		vi.spyOn(revocation, "revokeBefore").mockImplementation(async () => {
 			order.push("stamp");
 		});
@@ -99,7 +99,7 @@ describe("revokeAllForSubject with a grant store", () => {
 	it("still runs the grant pass when the stamp failed", async () => {
 		const h = harness();
 		await h.seed();
-		const revocation = createInMemorySubjectRevocation();
+		const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 		vi.spyOn(revocation, "revokeBefore").mockRejectedValue(new Error("store is down"));
 
 		const result = await revokeAllForSubject({

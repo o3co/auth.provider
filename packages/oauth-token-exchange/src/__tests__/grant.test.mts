@@ -35,7 +35,13 @@ import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import {
+	ISSUER,
+	keyStore,
+	makeFamilyRevocation,
+	signSelfIssuedAccessToken,
+	tokensOf,
+} from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -50,6 +56,7 @@ const mockConfig = {
 
 const publicClient = (overrides: Partial<PublicClient> = {}): PublicClient => ({
 	clientId: "client-a",
+	tokenEndpointAuthMethod: "client_secret_basic",
 	allowedRedirectUris: [],
 	// The registration is a ceiling on both axes: it must name the scopes
 	// this client may receive (an empty list grants none) and it must name the
@@ -722,12 +729,11 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status === 200) {
-			expect(result.tokens.access_token).toBeDefined();
-			expect(result.tokens.issued_token_type).toBe(ACCESS_TOKEN_TYPE);
-			expect(result.tokens.token_type).toBe("Bearer");
-			expect(result.tokens.refresh_token).toBeFalsy();
-		}
+		const tokens = tokensOf(result);
+		expect(tokens.access_token).toBeDefined();
+		expect(tokens).toHaveProperty("issued_token_type", ACCESS_TOKEN_TYPE);
+		expect(tokens.token_type).toBe("Bearer");
+		expect(tokens.refresh_token).toBeFalsy();
 	});
 
 	it("mints a token when multi-value audience entries are in allowlist ∪ {clientId}", async () => {
@@ -850,9 +856,9 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
+		const tokens = tokensOf(result);
 		// Scope was explicitly empty → normalized to "omitted" → inherited.
-		expect(result.tokens.scope).toBe("read write");
+		expect(tokens.scope).toBe("read write");
 	});
 
 	it("treats scope='  ' (whitespace-only) as omitted (inherits subject scope)", async () => {
@@ -868,8 +874,8 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBe("read write");
+		const tokens = tokensOf(result);
+		expect(tokens.scope).toBe("read write");
 	});
 });
 
@@ -915,8 +921,7 @@ describe("createTokenExchangeGrant — the scope grammar (RFC 6749 §3.3)", () =
 				}),
 			);
 		const nulled = (await exchange(null)).result;
-		if (nulled.status === 200) expect(nulled.tokens.scope).toBe("read write");
-		else expect.fail(`expected 200, got ${nulled.status}`);
+		expect(tokensOf(nulled).scope).toBe("read write");
 
 		for (const scope of [42, {}, true]) {
 			expect((await exchange(scope)).result, JSON.stringify(scope)).toMatchObject({
@@ -973,12 +978,11 @@ describe("createTokenExchangeGrant — the scope grammar (RFC 6749 §3.3)", () =
 		});
 		const inherited = (await exchange(legacy)).result;
 		expect(inherited.status).toBe(200);
-		if (inherited.status === 200) expect(inherited.tokens.scope).toBeUndefined();
+		expect(tokensOf(inherited).scope).toBeUndefined();
 
 		const spaced = await signSelfIssuedAccessToken({ scope: "read  write", family_id: "fam-1" });
 		const canonical = (await exchange(spaced)).result;
-		if (canonical.status === 200) expect(canonical.tokens.scope).toBe("read write");
-		else expect.fail(`expected 200, got ${canonical.status}`);
+		expect(tokensOf(canonical).scope).toBe("read write");
 	});
 });
 
@@ -1112,8 +1116,8 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		// aud must be the clientId (fallback), NOT the inherited subject.aud
 		expect(payload.aud).toBe("client-a");
 	});
@@ -1133,8 +1137,8 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.aud).toBe("billing");
 	});
 
@@ -1154,8 +1158,8 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.aud).toBe("client-a");
 	});
 
@@ -1176,8 +1180,8 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.aud).toBe("billing");
 	});
 
@@ -1202,8 +1206,8 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.aud).toBe("client-a");
 	});
 
@@ -1222,8 +1226,8 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.aud).toBe("client-a");
 	});
 });
@@ -1259,11 +1263,11 @@ describe("createTokenExchangeGrant — happy path", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.access_token).toBeDefined();
-		expect(result.tokens.issued_token_type).toBe(ACCESS_TOKEN_TYPE);
-		expect(result.tokens.refresh_token).toBeFalsy();
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		expect(tokens.access_token).toBeDefined();
+		expect(tokens).toHaveProperty("issued_token_type", ACCESS_TOKEN_TYPE);
+		expect(tokens.refresh_token).toBeFalsy();
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.sub).toBe("user-1");
 		expect(payload.family_id).toBe("fam-1");
 		expect(payload.act).toBeUndefined();
@@ -1281,8 +1285,8 @@ describe("createTokenExchangeGrant — happy path", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBe("read write");
+		const tokens = tokensOf(result);
+		expect(tokens.scope).toBe("read write");
 	});
 
 	it("narrows scope to requested subset", async () => {
@@ -1298,8 +1302,8 @@ describe("createTokenExchangeGrant — happy path", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBe("read");
+		const tokens = tokensOf(result);
+		expect(tokens.scope).toBe("read");
 	});
 
 	it("adds act claim when actor_token is provided (delegation)", async () => {
@@ -1317,8 +1321,8 @@ describe("createTokenExchangeGrant — happy path", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.act).toEqual({ sub: "svc-a" });
 	});
 
@@ -1340,8 +1344,8 @@ describe("createTokenExchangeGrant — happy path", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.act).toEqual({ sub: "svc-b", act: { sub: "svc-upstream" } });
 	});
 
@@ -1387,8 +1391,8 @@ describe("createTokenExchangeGrant — happy path", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.act).toEqual({ sub: "svc-a" });
 	});
 
@@ -1514,8 +1518,8 @@ describe("createTokenExchangeGrant — happy path", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.family_id).toBe("fam-xyz");
 	});
 });
@@ -1558,9 +1562,9 @@ describe("createTokenExchangeGrant — policy hook", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBe("read");
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		expect(tokens.scope).toBe("read");
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.aud).toBe("billing");
 	});
 
@@ -1585,7 +1589,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 	});
 
 	it("passes resource parameter through to the policy hook request", async () => {
-		let captured: GrantPolicyRequest | null = null;
+		let captured = null as GrantPolicyRequest | null;
 		const capturing: GrantPolicyHook = {
 			kind: "capture",
 			async evaluate(req) {
@@ -1717,8 +1721,8 @@ describe("createTokenExchangeGrant — policy hook", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		const payload = decodeJwt(result.tokens.access_token);
+		const tokens = tokensOf(result);
+		const payload = decodeJwt(tokens.access_token);
 		expect(payload.aud).toBe("https://api.example.com/users");
 	});
 });
@@ -1768,9 +1772,9 @@ describe("createTokenExchangeGrant — ctx.authenticatedClient route-bound flow"
 			),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
+		const tokens = tokensOf(result);
 		// `azp` is bound to the authenticated client id.
-		const at = decodeJwt((result.tokens as { access_token: string }).access_token) as Record<
+		const at = decodeJwt((tokens as { access_token: string }).access_token) as Record<
 			string,
 			unknown
 		>;

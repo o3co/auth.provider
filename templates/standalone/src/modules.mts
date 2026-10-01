@@ -317,7 +317,7 @@ export const inMemorySessionStoresModule: Module = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it (#321)",
+			"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it",
 	},
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),

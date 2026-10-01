@@ -39,6 +39,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "#/middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -56,11 +57,12 @@ const fullConfig = {
 } as unknown as AppConfig;
 
 const codeRepoStub: CodeRepository = {
-	createCode: async () => ({
-		code: "code-x",
-		client_id: TEST_CLIENT_ID,
-		redirect_uri: "",
-	}),
+	createCode: async () =>
+		codeRecord({
+			code: "code-x",
+			client_id: TEST_CLIENT_ID,
+			redirect_uri: "",
+		}),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
@@ -228,8 +230,6 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 			clientRepoWith({
 				allowedGrantTypes: ["client_credentials"],
 				allowedScopes: ["scope:a"],
-				// What an omitted `scope` grants: nothing is granted implicitly.
-				defaultScopes: ["scope:a"],
 			}),
 		);
 		const res = await request(app)

@@ -201,7 +201,6 @@ describe("createAuthorizationGrant — lifetimes are fixed when it is built", ()
 			oauth: { accessToken: { expiresIn: number }; refreshToken: { expiresIn: number } };
 		};
 		const handler = createAuthorizationGrant({
-			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			config: config as unknown as GrantDependencies["config"],
 		});
@@ -235,7 +234,7 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { client_id: "client1" },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -252,23 +251,7 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "wrong-code", client_id: "client1", code_verifier: CODE_VERIFIER },
-				session: { code: "abc", code_client_id: "client1" },
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-				authenticatedClient: DEFAULT_AUTH_CLIENT,
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
-		});
-
-		it("returns 400 when client_id does not match session code_client_id", async () => {
-			const deps = makeDeps(vi.fn().mockResolvedValue(null));
-			const handler = createAuthorizationGrant(deps);
-			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "wrong-client", code_verifier: CODE_VERIFIER },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -289,7 +272,7 @@ describe("createAuthorizationGrant", () => {
 					redirect_uri: RP_URI,
 					code_verifier: CODE_VERIFIER,
 				},
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -314,8 +297,6 @@ describe("createAuthorizationGrant", () => {
 				},
 				session: {
 					code: "abc",
-					code_client_id: "client1",
-					granted_scopes: ["read"],
 					user: { id: "u1" },
 				},
 				issuer: "localhost",
@@ -366,7 +347,7 @@ describe("createAuthorizationGrant", () => {
 					code_verifier: CODE_VERIFIER,
 					expires_in: "7200",
 				},
-				session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
+				session: { code: "abc", user: { id: "u1" } },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -398,8 +379,6 @@ describe("createAuthorizationGrant", () => {
 				},
 				session: {
 					code: "abc",
-					code_client_id: "client1",
-					granted_scopes: ["read"],
 					user: { id: "u1" },
 				},
 				issuer: "localhost",
@@ -447,8 +426,6 @@ describe("createAuthorizationGrant", () => {
 				},
 				session: {
 					code: "abc",
-					code_client_id: "client1",
-					granted_scopes: ["read"],
 					user: { id: "u1" },
 				},
 				issuer: "localhost",
@@ -475,8 +452,6 @@ describe("createAuthorizationGrant", () => {
 				},
 				session: {
 					code: "abc",
-					code_client_id: "client1",
-					granted_scopes: ["read"],
 					user: { id: "u1" },
 				},
 				issuer: "localhost",
@@ -500,8 +475,6 @@ describe("createAuthorizationGrant", () => {
 				},
 				session: {
 					code: "abc",
-					code_client_id: "client1",
-					granted_scopes: ["read"],
 					user: { id: "u1" },
 				},
 				issuer: "localhost",
@@ -524,7 +497,7 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("answers no empty-string scope, and mints no scope claim, when granted scopes is empty", async () => {
-			// Code has neither grantedScope nor session.granted_scopes.
+			// The code carries no grantedScope.
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
 			);
@@ -538,8 +511,6 @@ describe("createAuthorizationGrant", () => {
 				},
 				session: {
 					code: "abc",
-					code_client_id: "client1",
-					// granted_scopes intentionally omitted
 					user: { id: "u1" },
 				},
 				issuer: "localhost",
@@ -613,8 +584,6 @@ describe("createAuthorizationGrant", () => {
 				},
 				session: {
 					code: "abc",
-					code_client_id: "client1",
-					granted_scopes: ["read"],
 					user: { id: "u1" },
 				},
 				issuer: "localhost",
@@ -644,7 +613,7 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -674,7 +643,7 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({
 				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: "" },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -699,7 +668,7 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1", code_verifier: "too-short" },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -725,7 +694,7 @@ describe("createAuthorizationGrant", () => {
 			const verifier = "a".repeat(43);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -754,7 +723,7 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -783,7 +752,7 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: { ...DEFAULT_AUTH_CLIENT, allowPlainPkce: true },
@@ -809,7 +778,7 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -858,7 +827,7 @@ describe("createAuthorizationGrant", () => {
 					redirect_uri: RP_URI,
 					code_verifier: verifier,
 				},
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -943,7 +912,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -975,7 +943,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -1009,7 +976,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -1047,7 +1013,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: "http://127.0.0.1:51000/cb",
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "abc", code_client_id: "client1" },
+					session: { code: "abc" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1078,7 +1044,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: RP_URI,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "abc", code_client_id: "client1" },
+					session: { code: "abc" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1198,7 +1164,7 @@ describe("createAuthorizationGrant", () => {
 					redirect_uri: RP_URI,
 					code_verifier: verifier,
 				},
-				session: { code: "abc", code_client_id: "client1" },
+				session: { code: "abc" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
 				authenticatedClient,
@@ -1369,7 +1335,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: RP_URI,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "c1", code_client_id: "client1" },
+					session: { code: "c1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1427,7 +1393,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: RP_URI,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "c1", code_client_id: "client1" },
+					session: { code: "c1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1487,7 +1453,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: RP_URI,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "c1", code_client_id: "client1" },
+					session: { code: "c1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1529,7 +1495,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: RP_URI,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "c1", code_client_id: "client1", user: { id: "u-1" } },
+					session: { code: "c1", user: { id: "u-1" } },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1611,7 +1577,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: RP_URI,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "c-noiss", code_client_id: "client1" },
+					session: { code: "c-noiss" },
 					// issuer intentionally omitted
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1655,7 +1621,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: RP_URI,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "c2", code_client_id: "client1" },
+					session: { code: "c2" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1688,7 +1654,7 @@ describe("createAuthorizationGrant", () => {
 						redirect_uri: RP_URI,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "c3", code_client_id: "client1" },
+					session: { code: "c3" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1706,6 +1672,11 @@ describe("createAuthorizationGrant", () => {
 		// authenticity gate, and client_id and redirect_uri are verified against
 		// codeData fields populated at /authorize time.
 		describe("identity gates derive from codeData, not session", () => {
+			/** A session carrying `code_client_id`, a key no writer sets: no gate may read it. */
+			const withCodeClientId = (
+				session: GrantContext["session"] & { readonly code_client_id: string },
+			): GrantContext["session"] => session;
+
 			it("rejects when body.redirect_uri is missing, though the session matches the body", async () => {
 				// session.code / session.code_client_id match the body, so a
 				// session-based gate would let this through; only the redirect_uri
@@ -1727,7 +1698,7 @@ describe("createAuthorizationGrant", () => {
 						client_id: "client1" /* no redirect_uri */,
 						code_verifier: CODE_VERIFIER,
 					},
-					session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
+					session: withCodeClientId({ code: "abc", code_client_id: "client1", user: { id: "u1" } }),
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1757,7 +1728,7 @@ describe("createAuthorizationGrant", () => {
 						client_id: "client1",
 						redirect_uri: "https://attacker.example/steal",
 					},
-					session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
+					session: withCodeClientId({ code: "abc", code_client_id: "client1", user: { id: "u1" } }),
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1790,12 +1761,12 @@ describe("createAuthorizationGrant", () => {
 						client_id: "spoofed-client",
 						redirect_uri: "https://rp.example/cb",
 					},
-					session: {
+					session: withCodeClientId({
 						code: "abc",
 						// matches body.client_id: a session-based gate would pass.
 						code_client_id: "spoofed-client",
 						user: { id: "u1" },
-					},
+					}),
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
 					authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -1823,8 +1794,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
-						granted_scopes: ["read"],
 						user: { id: "u1" },
 					},
 					issuer: "localhost",
@@ -1874,7 +1843,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
 						user: { id: "u1" },
 					},
 					issuer: "localhost",
@@ -1904,8 +1872,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
-						granted_scopes: ["read"],
 						user: { id: "u1" },
 					},
 					issuer: "localhost",
@@ -1962,8 +1928,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
-						granted_scopes: ["read"],
 						user: { id: "u1" },
 					},
 					issuer: "localhost",
@@ -2054,8 +2018,6 @@ describe("createAuthorizationGrant", () => {
 						},
 						session: {
 							code: "abc",
-							code_client_id: "client1",
-							granted_scopes: ["read"],
 							user: { id: "u1" },
 						},
 						issuer: "localhost",
@@ -2090,8 +2052,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
-						granted_scopes: ["read"],
 						user: { id: "u1" },
 					},
 					issuer: "localhost",
@@ -2133,8 +2093,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
-						granted_scopes: ["read"],
 						user: { id: "u1" },
 					},
 					issuer: "localhost",
@@ -2172,8 +2130,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
-						granted_scopes: ["read"],
 						user: { id: "u1" },
 					},
 					issuer: "localhost",
@@ -2228,8 +2184,6 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						code_client_id: "client1",
-						granted_scopes: ["read"],
 						user: { id: "u1" },
 					},
 					issuer: "localhost",
@@ -2304,8 +2258,6 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 			},
 			session: {
 				code: "abc",
-				code_client_id: "client1",
-				granted_scopes: ["read"],
 				user: { id: "u1" },
 			},
 			issuer: "localhost",
@@ -2383,8 +2335,6 @@ describe("TOCTOU re-check of the session before returning tokens", () => {
 			},
 			session: {
 				code: "abc",
-				code_client_id: "client1",
-				granted_scopes: ["read"],
 				user: { id: "u1" },
 			},
 			issuer: "localhost",
@@ -2470,7 +2420,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 				redirect_uri: RP_URI,
 				code_verifier: CODE_VERIFIER,
 			},
-			session: { code: "abc", code_client_id: "client1" },
+			session: { code: "abc" },
 			issuer: ISSUER,
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -2508,7 +2458,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 				redirect_uri: RP_URI,
 				code_verifier: CODE_VERIFIER,
 			},
-			session: { code: "abc", code_client_id: "client1", user: { id: "other-user" } },
+			session: { code: "abc", user: { id: "other-user" } },
 			issuer: ISSUER,
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -2565,7 +2515,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 				redirect_uri: RP_URI,
 				code_verifier: CODE_VERIFIER,
 			},
-			session: { code: "abc", code_client_id: "client1" },
+			session: { code: "abc" },
 			issuer: ISSUER,
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -2615,7 +2565,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 				code_verifier: CODE_VERIFIER,
 			},
 			// A cookie IS present and names a different user — the BFF topology.
-			session: { code: "abc", code_client_id: "client1", user: { id: "cookie-user" } },
+			session: { code: "abc", user: { id: "cookie-user" } },
 			issuer: ISSUER,
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -2637,7 +2587,7 @@ describe("AT/RT subject derives from the code-bound UserSession", () => {
 				redirect_uri: RP_URI,
 				code_verifier: CODE_VERIFIER,
 			},
-			session: { code: "abc", code_client_id: "client1", user: { id: "u-legacy" } },
+			session: { code: "abc", user: { id: "u-legacy" } },
 			issuer: "localhost",
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -2674,7 +2624,7 @@ describe("corrupt code records + PKCE branches", () => {
 				redirect_uri: RP_URI,
 				code_verifier: CODE_VERIFIER,
 			},
-			session: { code: "abc", code_client_id: "client1" },
+			session: { code: "abc" },
 			issuer: "localhost",
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -2703,7 +2653,7 @@ describe("corrupt code records + PKCE branches", () => {
 		const verifier = "a".repeat(43);
 		const ctx: GrantContext = {
 			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
-			session: { code: "abc", code_client_id: "client1" },
+			session: { code: "abc" },
 			issuer: "localhost",
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -2739,7 +2689,7 @@ describe("corrupt code records + PKCE branches", () => {
 				redirect_uri: RP_URI,
 				code_verifier: "too-short",
 			},
-			session: { code: "abc", code_client_id: "client1" },
+			session: { code: "abc" },
 			issuer: "localhost",
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
@@ -2775,7 +2725,7 @@ describe("corrupt code records + PKCE branches", () => {
 		const handler = createAuthorizationGrant(deps);
 		const ctx: GrantContext = {
 			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
-			session: { code: "abc", code_client_id: "client1" },
+			session: { code: "abc" },
 			issuer: "localhost",
 			metadata: { ip: "127.0.0.1" },
 			authenticatedClient: { ...DEFAULT_AUTH_CLIENT, allowPlainPkce: true },
@@ -2834,8 +2784,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 			},
 			session: {
 				code: "abc",
-				code_client_id: "client1",
-				granted_scopes: ["read"],
 				user: { id: "u1" },
 			},
 			issuer: "localhost",
@@ -2866,7 +2814,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 	it("the code store's consume: 503, not the terminal handler's 500", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
-			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			...makeDeps(vi.fn().mockRejectedValue(outage())),
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
@@ -2886,7 +2833,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 	it("the session read before any token is signed: admission's line, the grant's own is not written", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
-			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			userSessionStore: sessionStore(async () => {
 				throw outage();
@@ -2905,7 +2851,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		const logger = createMockLogger();
 		const longId = "c".repeat(256);
 		const handler = createAuthorizationGrant({
-			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			// The grant's own line: the code store's consume. A session store's
 			// outage is admission's line, which names no client.
 			...makeDeps(vi.fn().mockRejectedValue(outage())),
@@ -2915,8 +2860,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 			body: { code: "abc", client_id: longId, redirect_uri: RP_URI, code_verifier: CODE_VERIFIER },
 			session: {
 				code: "abc",
-				code_client_id: longId,
-				granted_scopes: ["read"],
 				user: { id: "u1" },
 			},
 			issuer: "localhost",
@@ -2932,7 +2875,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 	it("the refresh-token family registration", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
-			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			refreshTokenFamilyRotation: {
 				register: async () => {
@@ -2955,7 +2897,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		const logger = createMockLogger();
 		let reads = 0;
 		const handler = createAuthorizationGrant({
-			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			userSessionStore: sessionStore(async () => {
 				reads++;
@@ -2977,7 +2918,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 	it("the client lookup for logout metadata, as client_repository_unavailable", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
-			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode }), {
 				findById: vi.fn().mockRejectedValue(outage()),
 				authenticate: vi.fn(),
@@ -3021,7 +2961,6 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		it(`linking the family to the session: ${store}`, async () => {
 			const logger = createMockLogger();
 			const handler = createAuthorizationGrant({
-				sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 				userSessionStore: sessionStore(async () => liveSession("sid-1")),
 				...stores,

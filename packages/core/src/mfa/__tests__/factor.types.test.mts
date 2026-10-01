@@ -42,6 +42,7 @@ import type {
 	MfaEnrollmentContext,
 	MfaEnrollmentStart,
 	MfaFactor,
+	MfaFactorData,
 	MfaFactorMail,
 	MfaFactorMailPurpose,
 	MfaFactorState,
@@ -108,6 +109,13 @@ describe("the MfaFactor contract", () => {
 	it("may say a user cannot enroll one, without throwing", () => {
 		expectTypeOf<MfaFactor["enrollable"]>().toEqualTypeOf<
 			((user: Readonly<Record<string, unknown>>) => boolean) | undefined
+		>();
+		expect(true).toBe(true);
+	});
+
+	it("may answer the identity of the authenticator a record's data holds, or none", () => {
+		expectTypeOf<MfaFactor["identity"]>().toEqualTypeOf<
+			((data: MfaFactorData) => string | undefined) | undefined
 		>();
 		expect(true).toBe(true);
 	});
