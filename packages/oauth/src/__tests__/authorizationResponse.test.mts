@@ -16,8 +16,9 @@
 
 /**
  * The authorization-response builder on its own: what it appends, that it
- * rewrites nothing in the query it is handed, and that every name it appends
- * is one core's `checkRedirectUri` refuses in a registered query.
+ * rewrites nothing in the query it is handed, and, as a pin, that the names
+ * it appends for the parameters these tests hand it are ones core's
+ * `checkRedirectUri` refuses in a registered query.
  */
 
 import { checkRedirectUri } from "@o3co/auth-provider-core";
@@ -53,7 +54,10 @@ describe("authorizationResponseUrl", () => {
 	});
 });
 
-describe("the names the builder appends", () => {
+// A pin: `state` and `iss` are the builder's own, the rest are what these
+// tests hand it. The route suites (authorizeEndpoint, consent) read every
+// name from real responses.
+describe("pin: the names the builder appends for the parameters these tests hand it", () => {
 	/** The names a code response and an error response carry, both with state. */
 	const appended = [
 		...new URL(

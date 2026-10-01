@@ -28,6 +28,7 @@ import {
 	type CodeRepository,
 	type ConsentStore,
 	type CreateCodeInput,
+	checkRedirectUri,
 	createMemoryConsentStore,
 	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
@@ -532,6 +533,24 @@ describe("POST /oauth/consent", () => {
 		expect(pending.size).toBe(0);
 		expect(await store.find("user-1", CLIENT_ID)).toBeNull();
 		expect(events.map((e) => e.type)).toContain("consent.denied");
+	});
+
+	// Read from a real deny, not from the names a test hands the builder: a
+	// name the deny starts appending fails here until core reserves it.
+	it("deny appends only names checkRedirectUri refuses in a registered query", async () => {
+		const { app } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const challenge = atConsentPage(await authorize(app));
+
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "deny" });
+		expect(res.status).toBe(303);
+		const names = [...new URL(res.headers.location as string).searchParams.keys()];
+		expect(names).toContain("error");
+		for (const name of names) {
+			expect(checkRedirectUri(`${REDIRECT_URI}?${name}=x`), name).toEqual({
+				reason: "reserved-parameter",
+				parameter: name,
+			});
+		}
 	});
 
 	it("deny answers 400 with no redirect when the parked redirect_uri is one checkRedirectUri refuses", async () => {

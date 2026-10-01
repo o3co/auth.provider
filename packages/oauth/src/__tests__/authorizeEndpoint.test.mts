@@ -33,6 +33,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	type CreateCodeInput,
+	checkRedirectUri,
 	createSymmetricKeyStore,
 	type FederationProvider,
 	type GrantPolicyDecision,
@@ -2693,5 +2694,38 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		expect(params.getAll("state")).toEqual(["xyz"]);
 		expect(params.getAll("iss")).toEqual([advertisedIssuer("https://issuer.example")]);
 		expect(logger.warn).not.toHaveBeenCalled();
+	});
+});
+
+// Read from real responses, not from the names a test hands the builder: a
+// caller that starts passing another name fails here until core reserves it.
+describe("/authorize — every name a redirect appends is one checkRedirectUri refuses", () => {
+	/** Each name `location` carries beyond the registered `redirect_uri`'s own query (none here). */
+	const appendedNames = (res: request.Response): string[] => {
+		expect(res.status).toBe(302);
+		return [...new URL(res.headers.location as string).searchParams.keys()];
+	};
+
+	const expectEachReserved = (names: readonly string[]) => {
+		for (const name of names) {
+			expect(checkRedirectUri(`${REDIRECT_URI}?${name}=x`), name).toEqual({
+				reason: "reserved-parameter",
+				parameter: name,
+			});
+		}
+	};
+
+	it("on the code redirect", async () => {
+		const { app } = await makeApp({});
+		const names = appendedNames(await authorize(app, baseQuery));
+		expect(names).toContain("code");
+		expectEachReserved(names);
+	});
+
+	it("on an error redirect (unsupported_response_type)", async () => {
+		const { app } = await makeApp({});
+		const names = appendedNames(await authorize(app, { ...baseQuery, response_type: "token" }));
+		expect(names).toContain("error");
+		expectEachReserved(names);
 	});
 });
