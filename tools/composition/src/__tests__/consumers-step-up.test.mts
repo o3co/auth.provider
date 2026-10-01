@@ -20,9 +20,11 @@
  * federation-grant connect — through the full set's boot with the MFA
  * package's own requirement under `mfa.mode = "required"` and the TOTP
  * factor: each one's answer to a session the requirement steps up, the MFA
- * page's step-up and the consumer admitting the session after it, a dead
- * session, an outage of the factor store the requirement reads, a second
- * factor older than recent MFA, and the same consumers with no MFA module.
+ * page's step-up and the consumer admitting the session after it, connect's
+ * one trip, a dead session, an outage of the factor store the requirement
+ * reads, a sign-in or a second factor older than recent MFA, the same
+ * consumers with no MFA module, and what a WebAuthn registration leaves on
+ * the session.
  *
  * A password session without a second factor exists under `required` only
  * when it was signed in before the deployment required MFA: those cases run
@@ -33,7 +35,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { UserSessionStore } from "@o3co/auth-provider-core";
+import type { UserSessionStore, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
 import {
 	mfaConfigForTests,
 	mfaTotpFactorConfigForTests,
@@ -46,6 +48,7 @@ import {
 	ISSUER,
 	MULTI_ENV,
 	type Outage,
+	SINGLE_ENV,
 	WORKER,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import type { Switches } from "@o3co/auth-provider-standalone/src/configPath.mts";
@@ -66,6 +69,9 @@ import { softwarePasskey } from "./software-passkey.mts";
 
 /** The MFA page the MFA package's reference configuration registers as its step-up page. */
 const MFA_PAGE = new URL("/mfa", ISSUER).href;
+
+/** Where the template's fake Google takes an authorization request. */
+const GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 
 /** A user of the test's own, in the in-memory directory every replica of the boot is built with. */
 interface User {
@@ -202,8 +208,8 @@ interface Consumer {
 	readonly arrange: (app: Express, user: User) => Promise<Visit>;
 	/** Checks the consumer's step-up answer, and answers the visit the browser makes once the page is done. */
 	readonly steppedUp: (res: request.Response, visit: Visit) => Visit;
-	/** Checks the consumer's answer to an admitted session. */
-	readonly admitted: (res: request.Response) => void;
+	/** Checks the consumer's answer to an admitted session, and what it left for the browser on `app`. */
+	readonly admitted: (res: request.Response, app: Express, page: Browser) => Promise<void>;
 	/** Checks the consumer's answer to a dead session. */
 	readonly dead: (res: request.Response) => void;
 	/** Checks the consumer's answer to an outage. */
@@ -236,7 +242,7 @@ const deviceApproval: Consumer = {
 			page.post(on, "/oauth/device/verification", { action: "approve", user_code: userCode });
 	},
 	steppedUp: jsonStepUp,
-	admitted: (res) => {
+	admitted: async (res) => {
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(res.body.status).toBe("approved");
 	},
@@ -253,9 +259,12 @@ const linkStart: Consumer = {
 	arrange: async () => (on, page) =>
 		page.get(on, "/session/oauth/federation/google?link=1", { "Sec-Fetch-Site": "same-origin" }),
 	steppedUp: jsonStepUp,
-	// The upstream's authorization request.
-	admitted: (res) => {
+	// Google's authorization request, as the full set's fake Google answers it, for this link.
+	admitted: async (res) => {
 		expect(res.status, JSON.stringify(res.body)).toBe(302);
+		const upstream = new URL(res.headers.location as string);
+		expect(upstream.origin + upstream.pathname).toBe(GOOGLE_AUTHORIZATION_ENDPOINT);
+		expect(upstream.searchParams.get("state")).toEqual(expect.any(String));
 	},
 	dead: (res) => {
 		expect(res.status, JSON.stringify(res.body)).toBe(401);
@@ -269,7 +278,7 @@ const webauthnRegistration: Consumer = {
 	grade: "credential_change",
 	arrange: async () => (on, page) => page.post(on, "/oauth/webauthn/registration/options", {}),
 	steppedUp: jsonStepUp,
-	admitted: (res) => {
+	admitted: async (res) => {
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(typeof res.body.challenge).toBe("string");
 	},
@@ -323,12 +332,18 @@ const grantConnect: Consumer = {
 		expect(marked.search).not.toBe(connect.search);
 		return (on, browserPage) => browserPage.get(on, marked.pathname + marked.search);
 	},
-	// The consent page, the question parked for this browser.
-	admitted: (res) => {
+	// The deployment's consent page, and the question parked there for this browser.
+	admitted: async (res, on, page) => {
 		expect(res.status, res.text).toBe(303);
 		const consent = onIssuer(res.headers.location as string);
-		expect(consent.origin + consent.pathname).not.toBe(MFA_PAGE);
-		expect(consent.searchParams.get("challenge")).toEqual(expect.any(String));
+		expect(consent.pathname).toBe(SINGLE_ENV.FEDERATION_GRANTS_CONSENT_URL);
+		const challenge = consent.searchParams.get("challenge");
+		if (challenge === null) throw new Error(`no challenge on ${consent.href}`);
+		const question = await page.get(
+			on,
+			`/session/federation-grants/consent?${new URLSearchParams({ challenge })}`,
+		);
+		expect(question.status, JSON.stringify(question.body)).toBe(200);
 	},
 	dead: (res) => {
 		expect(res.status, res.text).toBe(403);
@@ -403,7 +418,7 @@ describe.each(CONSUMERS)(
 			const retry = consumer.steppedUp(await visit(after.app, page), visit);
 			await stepUp(after.app, page, factor);
 
-			consumer.admitted(await retry(after.app, page));
+			await consumer.admitted(await retry(after.app, page), after.app, page);
 		});
 
 		it("answers 503 when the factor store the requirement reads is down, never admitting the session", async () => {
@@ -417,9 +432,25 @@ describe.each(CONSUMERS)(
 
 			outage.down = true;
 			consumer.unavailable(await visit(after.app, page));
+
+			// Nothing was admitted or recorded: with the store back, the same visit is still stepped up.
+			outage.down = false;
+			consumer.steppedUp(await visit(after.app, page), visit);
 		});
 	},
 );
+
+describe("the federation-grant connect, for a session signed in before MFA was required (two replicas over Redis)", () => {
+	it("answers the marked return of a session still unmet with a 403 and no redirect: one trip, never sent again", async () => {
+		const user = newUser();
+		const { before, after } = await rollout([user]);
+		const { page } = await unmetSession(before, after, user);
+		const visit = await grantConnect.arrange(after.app, user);
+		const back = grantConnect.steppedUp(await visit(after.app, page), visit);
+
+		grantConnect.dead(await back(after.app, page));
+	});
+});
 
 // ---------------------------------------------------------------------------
 // Under required, one replica in memory
@@ -454,33 +485,48 @@ describe.each(CONSUMERS)("$name, under mfa.mode = required", (consumer) => {
 			const visit = await consumer.arrange(set.app, user);
 
 			// The same session, read as if it signed in and verified its factor six minutes ago.
-			const store = sessionStoreOf(set);
-			const read = store.get.bind(store);
-			const aged = (at: Date | undefined) =>
-				at === undefined ? undefined : new Date(at.getTime() - 6 * 60_000);
-			vi.spyOn(store, "get").mockImplementation(async (sid) => {
-				const session = await read(sid);
-				if (session === null) return null;
-				return {
-					...session,
-					authTime: aged(session.authTime) as Date,
-					...(session.authentication === undefined
-						? {}
-						: {
-								authentication: {
-									...session.authentication,
-									mfaAt: aged(session.authentication.mfaAt),
-								},
-							}),
-				};
-			});
+			readAged(set, { authTime: true, mfaAt: true });
 
 			const res = await visit(set.app, page);
-			if (consumer.grade === "use") consumer.admitted(res);
+			if (consumer.grade === "use") await consumer.admitted(res, set.app, page);
 			else consumer.steppedUp(res, visit);
 		},
 	);
+
+	it("admits a session whose sign-in is older than mfa.manage.maxAgeSeconds and whose second factor is recent: recent MFA reads the second factor", async () => {
+		const user = newUser();
+		const set = await boot([user]);
+		const factor = await seedTotp(set.handle.components, set.config, user.id);
+		const page = browser();
+		await signInWithFactor(set.app, page, user, factor);
+		const visit = await consumer.arrange(set.app, user);
+
+		// The same session, read as if it signed in six minutes ago and verified its factor now.
+		readAged(set, { authTime: true, mfaAt: false });
+
+		await consumer.admitted(await visit(set.app, page), set.app, page);
+	});
 });
+
+/** Every read of a session record on `set` from here on, with the named times six minutes older. */
+function readAged(set: FullSet, which: { readonly authTime: boolean; readonly mfaAt: boolean }) {
+	const store = sessionStoreOf(set);
+	const read = store.get.bind(store);
+	const aged = (at: Date) => new Date(at.getTime() - 6 * 60_000);
+	vi.spyOn(store, "get").mockImplementation(async (sid) => {
+		const session = await read(sid);
+		if (session === null) return null;
+		const authentication = session.authentication;
+		const mfaAt = authentication?.mfaAt;
+		return {
+			...session,
+			authTime: which.authTime ? aged(session.authTime) : session.authTime,
+			...(authentication === undefined || mfaAt === undefined || !which.mfaAt
+				? {}
+				: { authentication: { ...authentication, mfaAt: aged(mfaAt) } }),
+		};
+	});
+}
 
 // ---------------------------------------------------------------------------
 // With no MFA module
@@ -494,7 +540,7 @@ describe.each(CONSUMERS)("$name, with no MFA module (mfa.mode = off)", (consumer
 		await signIn(set.app, page, user);
 		const visit = await consumer.arrange(set.app, user);
 
-		consumer.admitted(await visit(set.app, page));
+		await consumer.admitted(await visit(set.app, page), set.app, page);
 	});
 });
 
@@ -503,8 +549,9 @@ describe.each(CONSUMERS)("$name, with no MFA module (mfa.mode = off)", (consumer
 // ---------------------------------------------------------------------------
 
 describe("a WebAuthn registration under mfa.mode = required", () => {
-	/** Registers a software passkey for the signed-in browser on `app`. */
-	async function register(app: Express, page: Browser): Promise<void> {
+	/** Registers a software passkey for the signed-in browser of `subject` on `set`, and checks the store holds it for them. */
+	async function register(set: FullSet, page: Browser, subject: string): Promise<void> {
+		const app = set.app;
 		const passkey = softwarePasskey({ rpId: "auth.test", origin: ISSUER });
 		const options = await page.post(app, "/oauth/webauthn/registration/options", {});
 		expect(options.status, JSON.stringify(options.body)).toBe(200);
@@ -512,6 +559,13 @@ describe("a WebAuthn registration under mfa.mode = required", () => {
 			response: passkey.register(options.body.challenge as string),
 		});
 		expect(registered.status, JSON.stringify(registered.body)).toBe(200);
+		const credentials = (
+			set.handle.components as unknown as {
+				readonly webauthnCredentialStore: WebAuthnCredentialStore;
+			}
+		).webauthnCredentialStore;
+		const held = await credentials.listByUserId(subject);
+		expect(held.map((credential) => credential.credentialId)).toContain(passkey.credentialId);
 	}
 
 	it("leaves a session's second-factor time as it was: present, after a login with the TOTP factor", async () => {
@@ -523,7 +577,7 @@ describe("a WebAuthn registration under mfa.mode = required", () => {
 		const before = (await sessionStoreOf(set).get(sid))?.authentication?.mfaAt;
 		expect(before).toBeInstanceOf(Date);
 
-		await register(set.app, page);
+		await register(set, page, user.id);
 
 		const after = await sessionStoreOf(set).get(sid);
 		expect(after?.authentication?.mfaAt).toEqual(before);
@@ -553,7 +607,7 @@ describe("a WebAuthn registration under mfa.mode = required", () => {
 		expect(before?.sub).toBe(ALICE.sub);
 		expect(before?.authentication?.mfaAt).toBeUndefined();
 
-		await register(set.app, page);
+		await register(set, page, ALICE.sub);
 
 		const after = await sessionStoreOf(set).get(sid);
 		expect(after).not.toBeNull();
