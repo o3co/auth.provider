@@ -34,7 +34,9 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	type GrantError,
 	type GrantPolicyHook,
+	type GrantResult,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
@@ -71,6 +73,10 @@ const makePolicy = (evaluate: GrantPolicyHook["evaluate"]): GrantPolicyHook => (
 	kind: "stub",
 	evaluate,
 });
+
+/** The result as a refusal; a result that issued tokens fails the test. */
+const refusalOf = (result: GrantResult): GrantError =>
+	"error" in result ? result : expect.fail(`expected a refusal, got ${result.status} with tokens`);
 
 // ----- client_credentials -----
 
@@ -237,8 +243,8 @@ describe("RFC 8707 resource → audience binding — client_credentials", () => 
 		const out = await grant.handle(makeCCCtx({ resource: "https://evil.example" }));
 
 		expect(out.result.status).toBe(400);
-		expect(out.result.error).toBe("invalid_target");
-		expect(out.result.errorDescription).toContain("https://evil.example");
+		expect(refusalOf(out.result).error).toBe("invalid_target");
+		expect(refusalOf(out.result).errorDescription).toContain("https://evil.example");
 	});
 
 	it("allows when the derived audience represents the request", async () => {
@@ -253,7 +259,7 @@ describe("RFC 8707 resource → audience binding — client_credentials", () => 
 		const out = await grant.handle(makeCCCtx({ resource: [API, OTHER] }));
 
 		expect(out.result.status).toBe(400);
-		expect(out.result.error).toBe("invalid_target");
+		expect(refusalOf(out.result).error).toBe("invalid_target");
 	});
 
 	it("honours a policy that narrows the audience to the requested resource", async () => {
@@ -278,7 +284,7 @@ describe("RFC 8707 resource → audience binding — client_credentials", () => 
 		const out = await grant.handle(makeCCCtx({ resource: OTHER }));
 
 		expect(out.result.status).toBe(400);
-		expect(out.result.error).toBe("invalid_target");
+		expect(refusalOf(out.result).error).toBe("invalid_target");
 	});
 
 	it("flag off: a request naming an allowed resource succeeds", async () => {
@@ -319,7 +325,7 @@ describe("RFC 8707 resource → audience binding — refresh_token", () => {
 		);
 
 		expect(out.result.status).toBe(400);
-		expect(out.result.error).toBe("invalid_target");
+		expect(refusalOf(out.result).error).toBe("invalid_target");
 	});
 
 	it("honours a policy that narrows the audience to the requested resource", async () => {
@@ -342,7 +348,7 @@ describe("RFC 8707 resource → audience binding — refresh_token", () => {
 		const out = await grant.handle(makeRefreshCtx(await makeRefreshToken(), { resource: API }));
 
 		expect(out.result.status).toBe(400);
-		expect(out.result.error).toBe("invalid_target");
+		expect(refusalOf(out.result).error).toBe("invalid_target");
 	});
 
 	it("flag off: a request naming an allowed resource succeeds", async () => {
@@ -372,8 +378,8 @@ describe("RFC 8707 resource → audience binding — authorization_code (enforce
 		const out = await grant.handle(makeAuthzCtx({ resource: OTHER }));
 
 		expect(out.result.status).toBe(400);
-		expect(out.result.error).toBe("invalid_target");
-		expect(out.result.errorDescription).toContain(OTHER);
+		expect(refusalOf(out.result).error).toBe("invalid_target");
+		expect(refusalOf(out.result).errorDescription).toContain(OTHER);
 	});
 
 	it("does NOT invoke the policy hook at the token endpoint", async () => {
@@ -381,11 +387,13 @@ describe("RFC 8707 resource → audience binding — authorization_code (enforce
 		// /authorize, where the policy was evaluated once.
 		const evaluate = vi.fn(async () => ({ outcome: "allow" as const }));
 		const deps = makeAuthzDeps([API]);
-		const grant = createAuthorizationGrant({ ...deps, grantPolicy: makePolicy(evaluate) });
+		// Offered beside the grant's own deps, which name no policy: never consulted.
+		const offered = { ...deps, grantPolicy: makePolicy(evaluate) };
+		const grant = createAuthorizationGrant(offered);
 		const out = await grant.handle(makeAuthzCtx({ resource: OTHER }));
 
 		expect(out.result.status).toBe(400);
-		expect(out.result.error).toBe("invalid_target");
+		expect(refusalOf(out.result).error).toBe("invalid_target");
 		expect(evaluate).not.toHaveBeenCalled();
 	});
 
@@ -395,7 +403,7 @@ describe("RFC 8707 resource → audience binding — authorization_code (enforce
 		const out = await grant.handle(makeAuthzCtx({ resource: API }));
 
 		expect(out.result.status).toBe(400);
-		expect(out.result.error).toBe("invalid_target");
+		expect(refusalOf(out.result).error).toBe("invalid_target");
 	});
 
 	it("flag off: resource at /token stays ignored", async () => {

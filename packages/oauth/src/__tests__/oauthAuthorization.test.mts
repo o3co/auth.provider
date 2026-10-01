@@ -47,6 +47,7 @@ import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { capturing, withGrants } from "./_helpers/sections.mjs";
 
@@ -71,11 +72,12 @@ const fakeClientRepository: ClientRepository = {
 
 const fakeCodeRepository: CodeRepository = {
 	// Code requires client_id + redirect_uri.
-	createCode: async () => ({
-		code: "fake-code",
-		client_id: "client1",
-		redirect_uri: "https://rp.example/cb",
-	}),
+	createCode: async () =>
+		codeRecord({
+			code: "fake-code",
+			client_id: "client1",
+			redirect_uri: "https://rp.example/cb",
+		}),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
@@ -135,6 +137,7 @@ const authorizeConfig = {
 const authorizeClientRepo: ClientRepository = {
 	findById: async () => ({
 		clientId: "client-1",
+		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedRedirectUris: ["https://example.test/cb"],
 		firstParty: true,
 		allowedScopes: ["openid", "profile"],
@@ -179,7 +182,11 @@ async function buildAuthorizeApp(opts: {
 			opts.captureCode(params);
 			// Echo back the required identity fields (client_id + redirect_uri)
 			// so the returned `Code` satisfies its shape.
-			return { code: "auth-code", client_id: params.client_id, redirect_uri: params.redirect_uri };
+			return codeRecord({
+				code: "auth-code",
+				client_id: params.client_id,
+				redirect_uri: params.redirect_uri,
+			});
 		},
 		findByCode: async () => null,
 		consumeByCode: async () => null,
@@ -672,8 +679,6 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			},
 			session: {
 				code: "auth-code",
-				code_client_id: "client1",
-				granted_scopes: ["read"],
 				user: { id: "u1" },
 			},
 			issuer: "localhost",
@@ -723,8 +728,6 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 			body: { code: "auth-code", client_id: "client1" },
 			session: {
 				code: "auth-code",
-				code_client_id: "client1",
-				granted_scopes: ["read"],
 				user: { id: "u1" },
 			},
 			issuer: "localhost",
@@ -794,7 +797,7 @@ describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 		const handler = createAuthorizationGrant(deps);
 		const { result } = await handler.handle({
 			body: { code: "bad-code", client_id: "c1" },
-			session: { code: "different-code", code_client_id: "c1" },
+			session: { code: "different-code" },
 			issuer: "localhost",
 			metadata: {},
 			authenticatedClient: { clientId: "client1", tokenEndpointAuthMethod: "client_secret_basic" },
@@ -908,6 +911,7 @@ describe("/authorize openid scope gate", () => {
 		const restrictedClientRepo: ClientRepository = {
 			findById: async () => ({
 				clientId: "client-1",
+				tokenEndpointAuthMethod: "client_secret_basic",
 				allowedRedirectUris: ["https://example.test/cb"],
 				firstParty: true,
 				// openid is intentionally absent — emulates a non-OIDC client.
@@ -1434,11 +1438,11 @@ describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () =
 		const codeRepo: CodeRepository = {
 			createCode: async (params) => {
 				opts.captureCode?.(params);
-				return {
+				return codeRecord({
 					code: "auth-code-public",
 					client_id: params.client_id,
 					redirect_uri: params.redirect_uri,
-				};
+				});
 			},
 			findByCode: async () => null,
 			consumeByCode: async () => null,
