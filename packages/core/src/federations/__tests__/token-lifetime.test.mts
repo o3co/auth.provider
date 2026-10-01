@@ -51,6 +51,16 @@ const flipping = (first: number, then: number): (() => number) => {
 	return () => (reads++ === 0 ? first : then);
 };
 
+/** Clock values that are not numbers: none may be coerced into one, and none may throw anything but a RangeError. */
+const NOT_NUMBERS: ReadonlyArray<readonly [string, unknown]> = [
+	["a numeric string", "0"],
+	["null", null],
+	["undefined", undefined],
+	["a bigint", 1n],
+	["a symbol", Symbol()],
+	["a boxed number", Object(0)],
+];
+
 type Finite = Extract<UpstreamTokenLifetime, { verdict: "finite" }>;
 const finite = (reading: UpstreamTokenLifetime): Finite => {
 	expect(reading.verdict).toBe("finite");
@@ -286,6 +296,20 @@ describe("readUpstreamTokenLifetime — the clock is the consumer's to get right
 		).toThrow(RangeError);
 	});
 
+	it.each(
+		(["calledAt", "now", "floorMs"] as const).flatMap((field) =>
+			NOT_NUMBERS.map(([label, value]) => [field, label, value] as const),
+		),
+	)("%s as %s throws a RangeError", (field, _, value) => {
+		const clock = { calledAt: CALLED_AT, now: NOW, floorMs: 1000, [field]: value };
+		expect(() =>
+			readUpstreamTokenLifetime(
+				{ expiresIn: 3600, expiresAt: undefined },
+				clock as unknown as { calledAt: number; now: number; floorMs: number },
+			),
+		).toThrow(RangeError);
+	});
+
 	it("reads each clock field once: a floor that answers differently later cannot be skipped", () => {
 		const floorMs = flipping(1000, Number.NaN);
 		const clock = {
@@ -476,5 +500,16 @@ describe("judgeHeldUpstreamToken — the age of a token already held", () => {
 		["allowanceMs Infinity", { now: OBTAINED, allowanceMs: Number.POSITIVE_INFINITY }],
 	])("%s throws a RangeError", (_, clock) => {
 		expect(() => judgeHeldUpstreamToken(held, clock)).toThrow(RangeError);
+	});
+
+	it.each(
+		(["now", "allowanceMs"] as const).flatMap((field) =>
+			NOT_NUMBERS.map(([label, value]) => [field, label, value] as const),
+		),
+	)("%s as %s throws a RangeError", (field, _, value) => {
+		const clock = { now: OBTAINED, allowanceMs: 0, [field]: value };
+		expect(() =>
+			judgeHeldUpstreamToken(held, clock as unknown as { now: number; allowanceMs: number }),
+		).toThrow(RangeError);
 	});
 });

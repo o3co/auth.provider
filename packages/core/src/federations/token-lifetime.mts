@@ -112,14 +112,18 @@ const readExpiresAt = (value: unknown): Field<number> => {
 /** The largest epoch ms a `Date` holds, either side of the epoch (ECMA-262 §21.4.1.1). */
 const MAX_INSTANT_MS = 8.64e15;
 
-const assertFiniteInstant = (name: string, value: number): void => {
-	if (!(Math.abs(value) <= MAX_INSTANT_MS)) {
+/** A primitive finite number: nothing is coerced, and no other type reaches arithmetic that could throw. */
+const isFiniteNumber = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value);
+
+const assertFiniteInstant = (name: string, value: unknown): void => {
+	if (!(isFiniteNumber(value) && Math.abs(value) <= MAX_INSTANT_MS)) {
 		throw new RangeError(`${name} must be an epoch ms within the Date range`);
 	}
 };
 
-const assertDuration = (name: string, value: number): void => {
-	if (!(Number.isFinite(value) && value >= 0)) {
+const assertDuration = (name: string, value: unknown): void => {
+	if (!(isFiniteNumber(value) && value >= 0)) {
 		throw new RangeError(`${name} must be a finite number of ms, at least 0`);
 	}
 };
