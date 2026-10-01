@@ -66,8 +66,6 @@ import type { FederationRedirectPolicy } from "../federations/redirect-policy.mj
 import {
 	DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
 	deriveFederationTransactionCookieName,
-	type FederationTransactionEnvelope,
-	type FederationTransactionStore,
 	type LinkIntent,
 	mintFederationTransactionId,
 } from "../federations/transaction.mjs";
@@ -77,10 +75,10 @@ import {
 	SESSION_STORE_UNAVAILABLE,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
-import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
+import { consumeCallbackState } from "./FederationCallbackState.mjs";
 import { type FederationRouterContext, recordedTokenType } from "./FederationContext.mjs";
 import { completeLink } from "./FederationLinkCallback.mjs";
 import {
@@ -323,160 +321,9 @@ export const createRouter = (
 		// so subsequent calls do not need to repeat either field.
 		let log = logger.child({ provider: provider.name });
 
-		const responseMode = resolveFederationResponseMode(provider);
-
-		// Where the ephemeral state lives: a `"query"` federation's in the
-		// session (its callback is a same-site top-level GET carrying the
-		// session cookie); a `"form_post"` federation's in a transaction record
-		// addressed by its own cookie, because a cross-site POST does not carry
-		// a `SameSite=Lax` session cookie. Without that cookie the callback is
-		// refused before `state` is read, so a stolen `state` alone is worthless.
-		let fed: FederationTransactionEnvelope | undefined;
-		let transactions: FederationTransactionStore | undefined;
-		let transactionId: string | undefined;
-
-		/**
-		 * Consume the transaction (cookie and record). Returns the store's error
-		 * rather than throwing, so a refusal path can clean up best effort while
-		 * irreversible work fails closed. A no-op for a `"query"` federation.
-		 */
-		const consumeTransaction = async (): Promise<unknown> => {
-			if (!transactions || transactionId === undefined) return null;
-			clearTransactionCookie(provider, res);
-			const id = transactionId;
-			transactionId = undefined;
-			try {
-				await transactions.delete(id);
-				return null;
-			} catch (err) {
-				return err;
-			}
-		};
-
-		/**
-		 * Consume the transaction on a path that is refusing anyway: a failed
-		 * delete is one `federation_cleanup_failed` warn, and the request's
-		 * cookie session is dropped so express-session does not write to that
-		 * store again.
-		 */
-		const discardTransaction = async (): Promise<void> => {
-			const discardErr = await consumeTransaction();
-			if (discardErr) {
-				log.warn(
-					{ store: "federation_transaction", step: "delete", err: loggableError(discardErr) },
-					"federation_cleanup_failed",
-				);
-				abandonCookieSession(req);
-			}
-		};
-
-		/**
-		 * The cookie session's store (or a transaction in it) could not answer:
-		 * log the outage first, then optionally discard the transaction (so a
-		 * cleanup warn never precedes its cause), drop the cookie session, and
-		 * answer `503`.
-		 */
-		const refuseCookieStoreOutage = async (
-			store: "cookie_session" | "federation_transaction",
-			step: FederationStoreStep,
-			cause: unknown,
-			{ discard = false }: { readonly discard?: boolean } = {},
-		): Promise<unknown> => {
-			logStoreUnavailable(log, "federation_callback_store_unavailable", store, step, cause);
-			if (discard) await discardTransaction();
-			abandonCookieSession(req);
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-		};
-
-		if (responseMode === "form_post") {
-			transactions = transactionStore(req);
-			transactionId = readCookie(req, transactionCookieName);
-			if (!transactions || transactionId === undefined || transactionId.length === 0) {
-				// No transaction cookie, no transaction. This is the refusal an
-				// attacker replaying a `state` from another browser meets.
-				clearTransactionCookie(provider, res);
-				return res.status(400).json({
-					error: "invalid_session",
-					error_description: "No active federation session for this provider",
-				});
-			}
-			try {
-				fed = (await transactions.get(transactionId)) ?? undefined;
-			} catch (err) {
-				return refuseCookieStoreOutage("federation_transaction", "get", err, { discard: true });
-			}
-		} else {
-			fed = req.session.federation;
-		}
-
-		// Check the envelope is present and names this provider
-		if (!fed || fed.name !== String(req.params.name)) {
-			await discardTransaction();
-			return res.status(400).json({
-				error: "invalid_session",
-				error_description: "No active federation session for this provider",
-			});
-		}
-
-		// A refusal spends the transaction when the request made a claim about
-		// it (presented a `state`, right or wrong: one guess is all there is),
-		// and leaves it alone when it made none. The `form_post` transaction
-		// cookie is `SameSite=None`, so it rides any cross-site request (an
-		// `<img>` GET included); if a parameterless request spent it, a third
-		// party could kill a victim's in-flight flow.
-		//
-		// A `query` federation's envelope lives in the session and is retired
-		// only after `state` matches, so a wrong `state` leaves it in place: the
-		// `SameSite=Lax` session cookie rides a top-level cross-site GET, so
-		// retiring on a mismatch would hand any third party that same
-		// availability attack. Unlimited guesses at a 128-bit CSPRNG `state` are
-		// worth no more than one.
-		if (typeof params.state !== "string" || params.state.length === 0) {
-			return res.status(400).json({
-				error: "invalid_request",
-				error_description: "Missing state parameter",
-			});
-		}
-
-		// CSRF state check — unchanged, and deliberately so: the transaction
-		// cookie is an addition to this comparison, never a replacement for it.
-		if (params.state !== fed.state) {
-			await discardTransaction();
-			return res.status(400).json({
-				error: "invalid_state",
-				error_description: "CSRF state mismatch",
-			});
-		}
-
-		// Copy ephemeral state to locals, then retire it BEFORE any async work, so
-		// a replay arriving after this callback finds nothing — including when
-		// `exchangeCode` throws.
+		const fed = await consumeCallbackState(ctx, provider, params, req, res, log);
+		if (fed === null) return;
 		const { codeVerifier, redirectTo, nonce } = fed;
-
-		// Retirement is a read then a delete: the express-session Store API has
-		// no atomic read-and-consume. A callback after an earlier one's delete
-		// is refused (a replayed `code`/`state`, the back button, a retry), but
-		// overlapping callbacks can both reach `exchangeCode`
-		// (`Federation.transactionConcurrency.test.mts` pins this). The IdP
-		// bounds that: an authorization code is single-use, and PKCE binds it to
-		// the verifier in the record. A dedicated atomic store would need its
-		// own component slot in every deployment, for a property the IdP already
-		// provides. If the state cannot be retired at all, fail closed (503): a
-		// forced delete failure plus a replay would otherwise face no reuse check.
-		if (responseMode === "form_post") {
-			const consumeErr = await consumeTransaction();
-			if (consumeErr) {
-				return refuseCookieStoreOutage("federation_transaction", "delete", consumeErr);
-			}
-		} else {
-			delete req.session.federation;
-			const reusePrevSaveErr = await new Promise<unknown>((resolve) => {
-				req.session.save((err) => resolve(err ?? null));
-			});
-			if (reusePrevSaveErr) {
-				return refuseCookieStoreOutage("cookie_session", "save", reusePrevSaveErr);
-			}
-		}
 
 		// A missing or empty `code` is a 400, not an empty string sent to the IdP
 		// (which would surface as a 502).
