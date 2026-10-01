@@ -135,12 +135,27 @@ const regenerateCookieSession = (
 	});
 
 /**
- * A new login, for `not_live`, `revoked`, `reauthenticate` and
- * `unauthenticated`. Under `prompt=none` the answer is `login_required` (OIDC
- * Core §3.1.2.6). Otherwise the cookie session is regenerated first, so a
- * login page that forwards signed-in users cannot loop on the refused
- * session's flag; if regeneration fails, answer `temporarily_unavailable` and
- * abandon the session so express-session does not write to that store again.
+ * Regenerates the cookie session before a login trip, so a login page that
+ * forwards signed-in users cannot loop on the refused session's flag. A
+ * failure answers `temporarily_unavailable` and abandons the session, so
+ * express-session does not write to that store again; `false` then.
+ */
+const signedOut = async (ctx: AuthorizeContext): Promise<boolean> => {
+	const regenerated = await regenerateCookieSession(ctx.req);
+	if (!regenerated.failed) return true;
+	ctx.opts.logger.error(
+		{ store: "cookie_session", step: "regenerate", err: loggableError(regenerated.cause) },
+		"authorize_cookie_session_unavailable",
+	);
+	(ctx.req as { session?: unknown }).session = undefined;
+	redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+	return false;
+};
+
+/**
+ * A new login, for `not_live`, `revoked` and `unauthenticated`. Under
+ * `prompt=none` the answer is `login_required` (OIDC Core §3.1.2.6).
+ * Otherwise the cookie session is regenerated first (`signedOut`).
  */
 const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise<void> => {
 	if (prompt.silent) {
@@ -151,24 +166,76 @@ const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise
 		);
 		return;
 	}
-	const regenerated = await regenerateCookieSession(ctx.req);
-	if (regenerated.failed) {
-		ctx.opts.logger.error(
-			{ store: "cookie_session", step: "regenerate", err: loggableError(regenerated.cause) },
-			"authorize_cookie_session_unavailable",
+	if (!(await signedOut(ctx))) return;
+	loginRedirect(ctx.res, ctx.opts.login, authorizeRequestUrl(ctx.issuerOrigin, ctx.req).toString());
+};
+
+/**
+ * A `reauthenticate` admission: one login trip, with the ask recorded (and a
+ * step-up trip already asked carried), after the cookie session is
+ * regenerated. A session that comes back from that login — authenticated
+ * after the ask — and is still `reauthenticate` is refused rather than sent
+ * round again: `unmet_authentication_requirements` for `acr` (a new login
+ * could not carry what the request asked for), `login_required` for a
+ * requirement. `prompt=none` is `login_required`; no session store to
+ * record the ask in is a composition error.
+ */
+const reauthenticate = async (
+	ctx: AuthorizeContext,
+	admission: Extract<Admission, { outcome: "reauthenticate" }>,
+	prompt: PromptDirective,
+	requested: readonly string[],
+	askStore: ReauthAskStore | undefined,
+): Promise<void> => {
+	if (prompt.silent) {
+		redirectError(
+			ctx,
+			"login_required",
+			"prompt=none was requested but the session must log in again",
 		);
-		(ctx.req as { session?: unknown }).session = undefined;
-		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
 		return;
 	}
-	loginRedirect(ctx.res, ctx.opts.login, authorizeRequestUrl(ctx.issuerOrigin, ctx.req).toString());
+	if (askStore === undefined) {
+		// As a step-up is refused without a store to record the ask in: the
+		// login trip could not be bounded.
+		redirectError(
+			ctx,
+			"invalid_request",
+			"a re-authentication needs a session store, which this deployment does not wire",
+		);
+		return;
+	}
+	const ask = await presentedAsk(ctx, askStore);
+	if (ask === undefined) return;
+	const loginAskedAt = ask?.loginAskedAt;
+	// Strictly after the ask, to the millisecond, as freshness reads it. With
+	// no record to read an authentication from, the trip already asked is
+	// the one this request gets.
+	const cameBack =
+		loginAskedAt !== undefined &&
+		(admission.session === null || admission.session.authTime.getTime() > loginAskedAt);
+	if (cameBack) {
+		if (admission.requirement === "acr") {
+			refuseUnmet(ctx, "acr", requested);
+		} else {
+			redirectError(
+				ctx,
+				"login_required",
+				`the session still does not meet the ${admission.requirement} requirement after the login it was sent to`,
+			);
+		}
+		return;
+	}
+	if (!(await signedOut(ctx))) return;
+	await sendToLogin(ctx, askStore, ask);
 };
 
 /**
  * Acts on the admission, or returns `null` once answered. An outage is
  * `temporarily_unavailable` on the validated redirect URI — never the login
  * page, whose forwarding of signed-in users would loop. A dead or
- * unauthenticated session gets a new login. For the outcomes that carry a
+ * unauthenticated session gets a new login; `reauthenticate` gets one login
+ * trip (`reauthenticate`). For the outcomes that carry a
  * session, freshness (`max_age`, `prompt=login`) is decided first, so
  * `prompt=none` with a stale `max_age` is `login_required` whatever the
  * verdict; then `unmet` is refused, `step_up` is a trip, and `admitted`
@@ -193,12 +260,14 @@ export const decideOnAdmission = async (
 			return null;
 		case "not_live":
 		case "revoked":
-		case "reauthenticate":
 		// Never reached: a cookie whose flag is not exactly `true` was sent to
 		// log in, or answered `login_required`, before admission. Listed so the
 		// switch stays exhaustive over core's `Admission`.
 		case "unauthenticated":
 			await newLogin(ctx, prompt);
+			return null;
+		case "reauthenticate":
+			await reauthenticate(ctx, admission, prompt, requested, askStore);
 			return null;
 		case "admitted":
 		case "step_up":
