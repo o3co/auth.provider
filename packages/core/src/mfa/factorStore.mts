@@ -38,8 +38,13 @@ export interface MfaFactorRecord {
 	readonly kind: string;
 	/** What the user called it: at most 64 printable characters, checked by the coordinator. */
 	readonly label: string | undefined;
-	/** What authorized the binding: recorded for audit, not enforced. */
-	readonly binding: "password" | "email_proof" | "mfa" | undefined;
+	/**
+	 * What authorized the binding: recorded for audit, not enforced.
+	 * `password`: a password sign-in alone; `federated`: a federated sign-in
+	 * alone, at the upstream IdP; `email_proof`: the account-email proof;
+	 * `mfa`: recent MFA, beside another factor.
+	 */
+	readonly binding: "password" | "email_proof" | "federated" | "mfa" | undefined;
 	readonly createdAt: Date;
 	readonly lastUsedAt: Date | undefined;
 	/** Bumped by every update; the compare-and-set token. */
