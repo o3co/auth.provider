@@ -490,8 +490,9 @@ and freshness ([what the Store must enforce itself](#what-the-store-must-enforce
 
 With `markMfaEnrolledUrl`, `HttpUserRepository.markMfaEnrolled(subject,
 enrolled)` posts `{ subject, enrolled }` to it
-([`src/mfa/markEnrolled.mts`](src/mfa/markEnrolled.mts)), on the user
-repository's credential, deadline and cap. `204` is done; `404` throws an
+([`src/mfa/markEnrolled.mts`](src/mfa/markEnrolled.mts)), with the user
+repository's credential and deadline; it reads no body, so the response cap
+does not apply. `204` is done; `404` throws an
 `MfaStoreError` `unknown_subject`, and any other status — a `200` and a
 redirect included — `unexpected_status`, the body released unread. A
 transport failure, the deadline and a refused credential throw the user
@@ -499,9 +500,13 @@ repository's errors. A subject that is not a non-empty string, or a value
 that is not a boolean, is a `RangeError`, and nothing is sent.
 
 The MFA package marks a subject `true` once its first counting factor is
-written, and again at a login whose `User` does not say it is enrolled, so a
-mark that failed is written at the subject's next login; a mark that fails
-is one warning (`mfa_enrollment_witness_unwritten`) and the login completes.
+written — a first binding at a login or in a signed-in session — and again
+whenever a counting factor is verified where the login's `User` does not say
+the subject enrolled, a step-up included, so a mark that failed is written at
+the subject's next such verification; a mark that fails is one warning
+(`mfa_enrollment_witness_unwritten`) and the login completes. A Store that
+takes the marks but never answers `mfaEnrolled` back is therefore marked once
+per counting verification.
 The witness then stops a lost factor store from opening a first binding: a
 login whose `User` says the subject enrolled, beside no factor that counts,
 is `503` (`mfa.enrollment_state_inconsistent`), never a password-only login
@@ -512,6 +517,12 @@ Without the URL nothing is written, and the provider reads back whatever
 subject's factor list whole: a Store that drops a subject's records lets a
 password-only login through under `mfa.mode = "optional"`, and opens a first
 binding to whoever holds the password under `required`.
+
+**Turning it on.** A subject that enrolled before
+`REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` was set has no witness until
+its next counting verification, and until then a lost factor store reads it
+as never enrolled. When you set the URL, backfill `mfaEnrolled = true` in the
+Store for every subject that holds a counting factor.
 
 ### Testing against the contract
 

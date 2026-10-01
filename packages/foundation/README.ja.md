@@ -189,11 +189,13 @@ const modules = [
 
 ### ユーザーリポジトリを通して書かれる証人
 
-`markMfaEnrolledUrl` があれば、`HttpUserRepository.markMfaEnrolled(subject, enrolled)` はそこに `{ subject, enrolled }` を送る（[`src/mfa/markEnrolled.mts`](src/mfa/markEnrolled.mts)）。資格情報・期限・上限はユーザーリポジトリのもの。`204` は完了。`404` は `MfaStoreError` の `unknown_subject` を、他のすべてのステータス — `200` やリダイレクトも — は `unexpected_status` を投げ、ボディは読まずに解放する。通信の失敗・期限・拒否された資格情報は、ユーザーリポジトリのエラーを投げる。空でない文字列でない主体や真偽値でない値は `RangeError` で、何も送らない。
+`markMfaEnrolledUrl` があれば、`HttpUserRepository.markMfaEnrolled(subject, enrolled)` はそこに `{ subject, enrolled }` を送る（[`src/mfa/markEnrolled.mts`](src/mfa/markEnrolled.mts)）。資格情報と期限はユーザーリポジトリのもの。ボディを読まないので、レスポンス上限は掛からない。`204` は完了。`404` は `MfaStoreError` の `unknown_subject` を、他のすべてのステータス — `200` やリダイレクトも — は `unexpected_status` を投げ、ボディは読まずに解放する。通信の失敗・期限・拒否された資格情報は、ユーザーリポジトリのエラーを投げる。空でない文字列でない主体や真偽値でない値は `RangeError` で、何も送らない。
 
-MFA パッケージは、最初の数える要素を書いたあとに主体を `true` と印付けし、`User` が登録済みと言わないログインでもう一度印付けするので、失敗した印付けはその主体の次のログインで書かれる。失敗した印付けは警告一行（`mfa_enrollment_witness_unwritten`）で、ログインは完了する。そのうえで証人は、失われた要素ストアが最初の紐付けを開くのを止める: `User` が登録済みと言い、数える要素が無いログインは `503`（`mfa.enrollment_state_inconsistent`）で、パスワードだけのログインにも最初の紐付けにもならない。
+MFA パッケージは、最初の数える要素を書いたあと — ログインでも、サインイン済みのセッションでも、最初の紐付けのあと — に主体を `true` と印付けし、ログインの `User` が登録済みと言わないところで数える要素が検証されるたびに — ステップアップも含め — もう一度印付けするので、失敗した印付けはその主体の次のそのような検証で書かれる。失敗した印付けは警告一行（`mfa_enrollment_witness_unwritten`）で、ログインは完了する。したがって、印付けを受け取るが `mfaEnrolled` を返さない Store は、数える要素の検証のたびに一度印付けされる。そのうえで証人は、失われた要素ストアが最初の紐付けを開くのを止める: `User` が登録済みと言い、数える要素が無いログインは `503`（`mfa.enrollment_state_inconsistent`）で、パスワードだけのログインにも最初の紐付けにもならない。
 
 URL が無ければ何も書かれず、プロバイダーは Store が返す `mfaEnrolled` をそのまま読む。そのとき主体の要素一覧を欠けなく保つのは Store だけである: 主体のレコードを落とした Store は、`mfa.mode = "optional"` ではパスワードだけのログインを通し、`required` ではパスワードを持つ誰にでも最初の紐付けを開く。
+
+**有効にするとき。** `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` を設定する前に登録した主体は、次に数える要素を検証するまで証人を持たず、それまで失われた要素ストアはその主体を一度も登録していないものとして読む。URL を設定するときは、数える要素を持つすべての主体について、Store に `mfaEnrolled = true` を書き込んでおく（バックフィル）。
 
 ### 契約に対するテスト
 
