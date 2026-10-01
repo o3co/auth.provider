@@ -74,6 +74,7 @@
  */
 
 import {
+	DEFAULT_MFA_SUBJECT_LEASE_MS,
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
 	type MfaFactorRecord,
@@ -815,8 +816,11 @@ export function createMfaFactorSetReset(options: {
 	readonly factorStore: MfaFactorStore;
 	readonly witness: MfaEnrollmentWitness;
 	readonly leases: Leases;
-	/** `mfa.storeTimeoutMs`, held to {@link checkFactorSetStoreTimeout}. */
-	readonly storeTimeoutMs: number;
+	/**
+	 * One Store call's time, held to {@link checkFactorSetStoreTimeout}; by
+	 * default the one whose lease is core's `DEFAULT_MFA_SUBJECT_LEASE_MS`.
+	 */
+	readonly storeTimeoutMs?: number;
 	/** A monotonic clock, in milliseconds. Defaults to `performance.now`. */
 	readonly monotonicNow?: () => number;
 }): { reset(subject: string, nowMs: number): Promise<MfaFactorSetResetOutcome> } {
@@ -824,7 +828,9 @@ export function createMfaFactorSetReset(options: {
 	const monotonicNow = options.monotonicNow ?? (() => performance.now());
 	const subjectLease = subjectLeases({
 		leases,
-		storeTimeoutMs: options.storeTimeoutMs,
+		storeTimeoutMs:
+			options.storeTimeoutMs ??
+			Math.floor(DEFAULT_MFA_SUBJECT_LEASE_MS / (STORE_CALLS_PER_WRITE + 1)),
 		monotonicNow,
 	});
 	const { storeTimeoutMs, ttlMs } = subjectLease;

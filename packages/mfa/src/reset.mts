@@ -110,8 +110,11 @@ export interface MfaResetOptions {
 	readonly userRepository?: UserRepository;
 	/** Whether a mail sender is wired: `requireEmailProof` needs one. */
 	readonly mailWired: boolean;
-	/** `mfa.storeTimeoutMs`. */
-	readonly storeTimeoutMs: number;
+	/**
+	 * One Store call's time under the reset's lease; by default the one whose
+	 * lease is core's `DEFAULT_MFA_SUBJECT_LEASE_MS` (a minute).
+	 */
+	readonly storeTimeoutMs?: number;
 	readonly auditSink?: AuditSink;
 	readonly logger?: Logger;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
@@ -172,7 +175,7 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 		factorStore,
 		witness,
 		leases: transactionStore,
-		storeTimeoutMs: options.storeTimeoutMs,
+		...(options.storeTimeoutMs === undefined ? {} : { storeTimeoutMs: options.storeTimeoutMs }),
 		...(options.monotonicNow === undefined ? {} : { monotonicNow: options.monotonicNow }),
 	});
 

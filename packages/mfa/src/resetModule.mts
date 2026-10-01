@@ -21,16 +21,14 @@
  *
  * Installed beside `mfaModule`, apart from it: the reset ends every session
  * of the subject's, so it requires `subjectRevocationService` — a module of
- * its own — which the MFA routes do not. Requires the two MFA stores and the
- * configuration, whose `mfa.storeTimeoutMs` (`mfaModule`'s reference.conf)
- * bounds the lease the reset holds; reads `userRepository`, for the witness's
- * clear alone (`markMfaEnrolled`), `mailSender` (`requireEmailProof` needs
- * one), `auditSink` and `logger`. Eager, so its refusals are the boot's.
+ * its own — which the MFA routes do not. Requires the two MFA stores; reads
+ * `userRepository`, for the witness's clear alone (`markMfaEnrolled`),
+ * `mailSender` (`requireEmailProof` needs one), `auditSink` and `logger`. It
+ * reads no section: its lease is core's `DEFAULT_MFA_SUBJECT_LEASE_MS`. Eager,
+ * so its refusals are the boot's.
  */
 
 import { defineModule, type ProviderDeps } from "@o3co/auth-provider-core";
-import { mfaConfigSchema } from "./config.mjs";
-import { checkFactorSetStoreTimeout } from "./factorSet.mjs";
 import { createMfaReset, type MfaReset } from "./reset.mjs";
 
 declare module "@o3co/auth-provider-core" {
@@ -40,29 +38,11 @@ declare module "@o3co/auth-provider-core" {
 	}
 }
 
-const REQUIRES = [
-	"config",
-	"mfaFactorStore",
-	"mfaTransactionStore",
-	"subjectRevocationService",
-] as const;
+const REQUIRES = ["mfaFactorStore", "mfaTransactionStore", "subjectRevocationService"] as const;
 const OPTIONAL = ["userRepository", "mailSender", "auditSink", "logger"] as const;
 
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
-
-/** `mfa.storeTimeoutMs` as `mfaModule` reads it; a `RangeError` naming the key for one it would refuse, or none. */
-function storeTimeoutOf(config: unknown): number {
-	const given = (config as { mfa?: { storeTimeoutMs?: unknown } } | null | undefined)?.mfa
-		?.storeTimeoutMs;
-	const read = mfaConfigSchema.shape.storeTimeoutMs.safeParse(given);
-	if (!read.success) {
-		throw new RangeError(
-			"mfa.storeTimeoutMs is not a whole number of milliseconds from 1000: mfaResetModule reads it from mfaModule's section — install mfaModule beside it",
-		);
-	}
-	return checkFactorSetStoreTimeout(read.data);
-}
 
 /** The operator reset's module (see this file's header). */
 export const mfaResetModule = defineModule<Requires, Optional>({
@@ -78,7 +58,6 @@ export const mfaResetModule = defineModule<Requires, Optional>({
 				subjectRevocationService: deps.subjectRevocationService,
 				...(deps.userRepository === undefined ? {} : { userRepository: deps.userRepository }),
 				mailWired: deps.mailSender !== undefined,
-				storeTimeoutMs: storeTimeoutOf(deps.config),
 				...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
 				...(deps.logger === undefined ? {} : { logger: deps.logger }),
 			}),
