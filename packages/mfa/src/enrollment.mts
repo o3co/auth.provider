@@ -42,8 +42,16 @@
  *   since its `User`'s recorded witness may be stale. A completion checks
  *   whenever the records it lists allow a first binding, whatever admission
  *   saw before it.
+ * - The subject's generation is read where the enrollment begins — before the
+ *   session's admission, or at a login's begin — and carried, sealed, in the
+ *   pending enrollment (`factorSet.mts`). A completion's writes run whole
+ *   under the subject's lease acquired at it: a reset or a recovery since the
+ *   begin refuses the binding, nothing spent but the attempt, as a binding the
+ *   records no longer allow; another write holding the lease past the wait is
+ *   `factors_busy`, nothing written nor spent. Writes that ran past the lease
+ *   say so (`overran`).
  * - A completion reserves an attempt before the proof is checked, seals the
- *   factor's data, and then, in this order: for a first binding notes the
+ *   factor's data, and then, under the lease, in this order: for a first binding notes the
  *   subject's first-binding mark — a note that fails refuses it, nothing
  *   written — consumes the transaction, writes the factor. Another factor
  *   then reads the subject's records again, and
@@ -73,6 +81,7 @@ import {
 	type MfaEnrollmentStart,
 	type MfaFactor,
 	type MfaFactorRecord,
+	type MfaFactorStore,
 	type MfaTransaction,
 } from "@o3co/auth-provider-core";
 import {
@@ -84,9 +93,11 @@ import {
 	type MfaEnrollmentRefusal,
 	type MfaFactorUnreadable,
 	type MfaStoreOutage,
+	OUTSIDE_CONTRACT,
 	outage,
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
+import type { MfaFactorSetCarried, MfaFactorSetWrites } from "./factorSet.mjs";
 import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes } from "./recovery/issue.mjs";
@@ -114,6 +125,27 @@ const UNTIL_COMPLETION: FirstBindingBy = "email_proof";
 const REMOVAL_TRIES = 3;
 const INVALID_LABEL = Object.freeze({ outcome: "invalid_label" as const });
 
+/** The pending enrollment as sealed: the kept state, and where the binding's writes begin (`factorSet.mts`). */
+const sealedPending = (
+	kept: Readonly<Record<string, unknown>>,
+	carried: MfaFactorSetCarried,
+): Readonly<Record<string, unknown>> => ({ ...kept, factorSet: carried });
+
+/**
+ * A sealed pending enrollment opened: its kept state, and what it carries of
+ * where the binding's writes begin, unread here; `undefined` when it is not
+ * what {@link sealedPending} seals.
+ */
+const openedPending = (
+	opened: Readonly<Record<string, unknown>>,
+):
+	| { readonly kept: NonNullable<ReturnType<typeof readKeptState>>; readonly carried: unknown }
+	| undefined => {
+	const { factorSet: carried, ...rest } = opened;
+	const kept = readKeptState(rest);
+	return kept === undefined ? undefined : { kept, carried };
+};
+
 /** Whether `tx` binds the subject's first counting factor: one opened `required`, a login's or an `enroll` one. */
 const isFirstBinding = (tx: MfaTransaction): boolean => tx.enrollment === "required";
 
@@ -128,7 +160,22 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		call: MfaCeremonyCall & { readonly proof: unknown; readonly label: unknown },
 	): Promise<MfaEnrollmentCompleteOutcome>;
 } {
-	const { factors, factorStore, sealing } = kit;
+	const { factors, sealing, factorSet } = kit;
+
+	/** The subject's records as `store` reads them: what a binding's writes read again under the lease. */
+	const recordsIn = async (
+		store: MfaFactorStore,
+		subject: string,
+	): Promise<readonly MfaFactorRecord[] | MfaStoreOutage> => {
+		try {
+			const listed: unknown = await store.list(subject);
+			return Array.isArray(listed)
+				? (listed as MfaFactorRecord[])
+				: outage("mfa_factor", "list", OUTSIDE_CONTRACT);
+		} catch (cause) {
+			return outage("mfa_factor", "list", cause);
+		}
+	};
 
 	/**
 	 * The transaction `call` names when it opened an enrollment, with its
@@ -294,6 +341,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 	 * one it cannot remove is reported standing, with the read's outage.
 	 */
 	const pastLimit = async (
+		store: MfaFactorStore,
 		subject: string,
 		id: string,
 	): Promise<
@@ -304,23 +352,24 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		  }
 		| undefined
 	> => {
-		const records = await kit.recordsOf(subject);
+		const records = await recordsIn(store, subject);
 		if (!("outcome" in records) && records.length <= kit.maxFactorsPerSubject) return undefined;
 		const listing = "outcome" in records ? records : undefined;
-		const standing = await removeOwn(subject, id);
+		const standing = await removeOwn(store, subject, id);
 		if (standing !== undefined) return { listing, standing };
 		return listing ?? FACTOR_LIMIT;
 	};
 
 	/** This binding's factor `id` removed, tried {@link REMOVAL_TRIES} times: `undefined` once removed, else the last failure. */
 	const removeOwn = async (
+		store: MfaFactorStore,
 		subject: string,
 		id: string,
 	): Promise<{ readonly cause: unknown } | undefined> => {
 		let standing: { readonly cause: unknown } | undefined;
 		for (let tried = 0; tried < REMOVAL_TRIES; tried++) {
 			try {
-				await factorStore.remove(subject, id);
+				await store.remove(subject, id);
 				return undefined;
 			} catch (cause) {
 				standing = { cause };
@@ -338,11 +387,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 	 * and a factor that cannot be removed is reported standing.
 	 */
 	const conflict = async (
+		store: MfaFactorStore,
 		about: MfaCeremonySubject,
 		id: string,
 		binding: FirstBindingBy,
 	): Promise<MfaEnrollmentCompleteOutcome | undefined> => {
-		const records = await kit.recordsOf(about.subject);
+		const records = await recordsIn(store, about.subject);
 		const alone =
 			!("outcome" in records) &&
 			records.some((record) => record.id === id) &&
@@ -353,7 +403,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				return undefined;
 			}
 			// Past the limit, as bindings made at once can take it: its own is removed.
-			const standing = await removeOwn(about.subject, id);
+			const standing = await removeOwn(store, about.subject, id);
 			return standing === undefined
 				? FACTOR_LIMIT
 				: {
@@ -365,7 +415,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 						...about,
 					};
 		}
-		const standing = await removeOwn(about.subject, id);
+		const standing = await removeOwn(store, about.subject, id);
 		if ("outcome" in records) {
 			return { outcome: "first_binding_unchecked", listing: records, standing, ...about };
 		}
@@ -378,6 +428,13 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const open = await beginning(call);
 			if ("outcome" in open) return open;
 			const { tx, user, factor, records } = open;
+			// Where the binding's writes begin: the session's, read before its admission, or read now.
+			const start =
+				tx.purpose === "enroll" && call.session?.factorSetStart !== undefined
+					? call.session.factorSetStart
+					: await factorSet.begin(tx.subject, "change");
+			const carried = factorSet.carry(start);
+			if ("outcome" in carried) return carried;
 			const failed = (cause: unknown): MfaEnrollmentBeginOutcome => ({
 				outcome: "enrollment_failed",
 				kind: factor.kind,
@@ -425,7 +482,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				kind: factor.kind,
 				state: sealing.sealState(
 					{ transactionId: tx.id, kind: factor.kind, use: "enrollment" },
-					keptState({ state: started.state, addressDigest }),
+					sealedPending(keptState({ state: started.state, addressDigest }), carried),
 				),
 				expiresAtMs,
 			});
@@ -551,8 +608,11 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			if (sealed.state === "key_unavailable") {
 				return unreadable("key_unavailable", { keyId: sealed.keyId });
 			}
-			const kept = sealed.state === "ok" ? readKeptState(sealed.value) : undefined;
-			if (kept?.state === undefined) return unreadable("enrollment");
+			const pendingOpened = sealed.state === "ok" ? openedPending(sealed.value) : undefined;
+			const kept = pendingOpened?.kept;
+			if (pendingOpened === undefined || kept?.state === undefined) {
+				return unreadable("enrollment");
+			}
 
 			let completion: MfaEnrollmentCompletion;
 			let amr: readonly string[] | undefined;
@@ -598,82 +658,112 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				return unreadable("enrollment", { cause });
 			}
 
-			// Noted before the factor is written: a first binding the mark misses
-			// would leave a stale session trusted.
-			if (first) {
-				const unnoted = await kit.noteFirstBinding(tx.subject);
-				if (unnoted !== undefined) return unnoted;
-			}
-			// Consumed before anything is written: a lost race spends the
-			// transaction, never a factor.
-			const consumed = await kit.consume(tx);
-			if ("outcome" in consumed) return consumed;
-			const binding: NonNullable<MfaFactorRecord["binding"]> = first ? firstBy : "mfa";
-			try {
-				await factorStore.create({
-					id,
-					subject: tx.subject,
-					kind: factor.kind,
-					label: named,
-					binding,
-					createdAt: new Date(nowMs),
-					lastUsedAt: undefined,
-					version: 0,
-					data,
-				});
-			} catch (cause) {
-				return outage("mfa_factor", "create", cause);
-			}
-			const enrolled = {
-				outcome: "enrolled" as const,
-				continuation: consumed.continuation,
-				adds: {
-					amr: [...new Set([...amr, ...(factor.addsMfa ? [MFA_AMR] : [])])],
-					mfaAt: new Date(nowMs),
-				},
-				factor: { id, kind: factor.kind, ...(named === undefined ? {} : { label: named }) },
-				binding,
-				...about,
-			};
-			if (!first) {
-				const over = await pastLimit(tx.subject, id);
-				if (over !== undefined && "standing" in over) {
-					return {
-						outcome: "factor_standing",
-						factor: enrolled.factor,
+			/** The binding's writes, run whole under the subject's lease (`factorSet.mts`). */
+			const writePhase = async (
+				writes: MfaFactorSetWrites,
+			): Promise<MfaEnrollmentCompleteOutcome> => {
+				// Noted before the factor is written: a first binding the mark misses
+				// would leave a stale session trusted.
+				if (first) {
+					const unnoted = await kit.noteFirstBinding(tx.subject);
+					if (unnoted !== undefined) return unnoted;
+				}
+				// Consumed before anything is written: a lost race spends the
+				// transaction, never a factor.
+				const consumed = await kit.consume(tx);
+				if ("outcome" in consumed) return consumed;
+				const binding: NonNullable<MfaFactorRecord["binding"]> = first ? firstBy : "mfa";
+				try {
+					await writes.factorStore.create({
+						id,
+						subject: tx.subject,
+						kind: factor.kind,
+						label: named,
 						binding,
-						listing: over.listing,
-						standing: over.standing,
-						...about,
+						createdAt: new Date(nowMs),
+						lastUsedAt: undefined,
+						version: 0,
+						data,
+					});
+				} catch (cause) {
+					return outage("mfa_factor", "create", cause);
+				}
+				const enrolled = {
+					outcome: "enrolled" as const,
+					continuation: consumed.continuation,
+					adds: {
+						amr: [...new Set([...amr, ...(factor.addsMfa ? [MFA_AMR] : [])])],
+						mfaAt: new Date(nowMs),
+					},
+					factor: { id, kind: factor.kind, ...(named === undefined ? {} : { label: named }) },
+					binding,
+					...about,
+				};
+				if (!first) {
+					const over = await pastLimit(writes.factorStore, tx.subject, id);
+					if (over !== undefined && "standing" in over) {
+						return {
+							outcome: "factor_standing",
+							factor: enrolled.factor,
+							binding,
+							listing: over.listing,
+							standing: over.standing,
+							...about,
+						};
+					}
+					if (over !== undefined) return over;
+					return {
+						...enrolled,
+						recoveryCodes: undefined,
+						witness: undefined,
+						flagUncleared: undefined,
 					};
 				}
-				if (over !== undefined) return over;
-				return {
-					...enrolled,
-					recoveryCodes: undefined,
-					witness: undefined,
-					flagUncleared: undefined,
-				};
-			}
-			// Another transaction of the subject's may have bound one at once:
-			// nothing follows the factor until it is known to stand alone.
-			const conflicted = await conflict(about, id, firstBy);
-			if (conflicted !== undefined) return conflicted;
-			// D25: the flag an operator reset set is cleared only once the proof was
-			// given and the first counting factor written.
-			const flagCleared =
-				binding === "email_proof" ? await kit.consumeEmailProofRequirement(tx.subject) : undefined;
-			const recoveryCodes = await issueRecoveryCodes({
-				factors,
-				factorStore,
-				sealing,
-				subject: tx.subject,
-				binding,
-				nowMs,
-			});
-			const witness = await kit.witness.mark(tx.subject);
+				// Another transaction of the subject's may have bound one at once:
+				// nothing follows the factor until it is known to stand alone.
+				const conflicted = await conflict(writes.factorStore, about, id, firstBy);
+				if (conflicted !== undefined) return conflicted;
+				// D25: the flag an operator reset set is cleared only once the proof was
+				// given and the first counting factor written.
+				const flagCleared =
+					binding === "email_proof"
+						? await kit.consumeEmailProofRequirement(tx.subject)
+						: undefined;
+				const recoveryCodes = await issueRecoveryCodes({
+					factors,
+					factorStore: writes.factorStore,
+					sealing,
+					subject: tx.subject,
+					binding,
+					nowMs,
+				});
+				const witness = await writes.witness.mark(tx.subject);
 
-			return { ...enrolled, recoveryCodes, witness, flagUncleared: flagCleared?.failed };
+				return { ...enrolled, recoveryCodes, witness, flagUncleared: flagCleared?.failed };
+			};
+			const bound = await factorSet.bind(
+				factorSet.resume(tx.subject, pendingOpened.carried),
+				tx.subject,
+				writePhase,
+			);
+			switch (bound.outcome) {
+				case "bound":
+					return bound.overran === true ? { ...bound.done, overran: true } : bound.done;
+				// A reset or a recovery since the begin: the records it began over are gone.
+				case "changed":
+					return closed(tx.purpose);
+				case "busy":
+					return {
+						outcome: "factors_busy",
+						retryAfterSeconds: bound.retryAfterSeconds,
+						...(bound.overran === true ? { overran: true as const } : {}),
+					};
+				default:
+					return {
+						...outage(bound.store, bound.step, bound.cause),
+						...(bound.overran === true ? { overran: true as const } : {}),
+					};
+			}
 		},
 	};
 }

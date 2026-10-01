@@ -25,6 +25,7 @@ import {
 	createInMemorySubjectRevocation,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	DEFAULT_CLOCK_SKEW_MS,
 	type MfaFactorStore,
 	type MfaTransactionStore,
 	type SubjectRevocation,
@@ -142,12 +143,17 @@ async function stepUpWithCode(setup: Composed, agent: Agent, n: number): Promise
 
 const release = (agent: Agent) => mfaPost(agent, "/lock/release", {});
 
-/** Brings alice to the hard hold and checks it holds her right TOTP code. */
+/**
+ * Brings alice to the hard hold and checks it holds her right TOTP code, then
+ * moves the clock past the clock-skew allowance: a factor bound within it of
+ * the hold is not read as bound after it.
+ */
 async function hardHeld(setup: Composed, totp: SeededTotp): Promise<void> {
 	const third = await wrongCodesToTheHardLimit(setup.app, totp);
 	const held = await verify(third.agent, third.transaction, totp.record.id, totpCode(totp.secret));
 	expect(held.status, JSON.stringify(held.body)).toBe(429);
 	expect(held.body.hold).toBe("hard");
+	freezeClock(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000);
 }
 
 describe("the release, end to end", () => {

@@ -584,7 +584,22 @@ function notingTogether(store: MfaTransactionStore, n: number): void {
 	});
 }
 
-describe("two transactions of one subject racing the first binding", () => {
+/**
+ * Lets every acquire of the subject's lease on `store` through, as a store
+ * that dropped a lease early would (an evicting Redis): two completions can
+ * then write past each other, and only the checks after the write stand
+ * between them.
+ */
+function leaseAdmittingEveryWriter(store: MfaTransactionStore): void {
+	let tokens = 0;
+	vi.spyOn(store, "acquireSubjectLease").mockImplementation(async () => ({
+		outcome: "acquired",
+		token: `admitted-${++tokens}`,
+	}));
+	vi.spyOn(store, "releaseSubjectLease").mockResolvedValue(true);
+}
+
+describe("two transactions of one subject racing the first binding past a lease the store does not hold", () => {
 	it("leaves at most one first factor: a completion that finds another record beside its own after writing it removes its own, answers 401 login_required and records mfa.first_binding_conflict", async () => {
 		const memory = createMemoryMfaFactorStore();
 		const arrive = barrier(2);
@@ -603,6 +618,7 @@ describe("two transactions of one subject racing the first binding", () => {
 			auditSink: audit,
 			userRepository: directory,
 		});
+		leaseAdmittingEveryWriter(transactionStore);
 		notingTogether(transactionStore, 2);
 		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
 		const owner = await beginFirstBinding(app);
@@ -656,6 +672,7 @@ describe("two transactions of one subject racing the first binding", () => {
 			},
 			auditSink: audit,
 		});
+		leaseAdmittingEveryWriter(booted.transactionStore);
 		notingTogether(booted.transactionStore, 2);
 		const logins = [await beginFirstBinding(booted.app), await beginFirstBinding(booted.app)];
 		const begun = await Promise.all(

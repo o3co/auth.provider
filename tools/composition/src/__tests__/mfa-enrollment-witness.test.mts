@@ -386,9 +386,9 @@ describe.each(["store", "memory"] as const)(
 			const report = await reset.resetMfaForSubject(ALICE.id);
 
 			expect(report.complete, JSON.stringify(report)).toBe(true);
-			expect(await stores.mfaFactorStore.list(ALICE.id)).toEqual([]);
 			const endpoints = endpointsSince(from);
 			expect(endpoints.at(-1)).toBe("markMfaEnrolled");
+			expect(await stores.mfaFactorStore.list(ALICE.id)).toEqual([]);
 			const marks = store.requests
 				.slice(from)
 				.filter(({ endpoint }) => endpoint === "markMfaEnrolled");

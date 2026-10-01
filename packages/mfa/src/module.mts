@@ -66,7 +66,10 @@
  * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
  * session middleware. Their factory runs after every factor has registered,
  * so it checks the installed factors (`checkInstalledFactors`) first, and
- * the resolver holds `mfa.manage` (core's `checkResolver`).
+ * the resolver holds `mfa.manage` (core's `checkResolver`). Without
+ * `subjectRevocation` the subject's own release can lift the hard hold on a
+ * rebind but never give the week or the backoff back early: said once at
+ * warn (`mfa_lock_release_unavailable`).
  */
 
 import {
@@ -102,6 +105,7 @@ import { mfaEmailFactorModule } from "./email/module.mjs";
 import { createMfaFactorSet } from "./factorSet.mjs";
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
+import { createMfaLockRecovery } from "./lockRecovery.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
 import { createMfaRouter } from "./routes.mjs";
@@ -481,6 +485,19 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						"mfaModule",
 						Object.keys(MFA_ADMISSION_ACTIONS),
 					);
+					// The authorized-recovery entry: an exempt verification mints, the subject's release applies.
+					const lockRecovery = createMfaLockRecovery({
+						store: deps.mfaTransactionStore,
+						factorSet,
+						factors: deps.mfaFactorResolver,
+						...(deps.subjectRevocation === undefined
+							? {}
+							: { subjectRevocation: deps.subjectRevocation }),
+						manageMaxAgeMs: settings.manage.maxAgeSeconds * 1000,
+					});
+					if (deps.subjectRevocation === undefined) {
+						logger.warn({ slot: "subjectRevocation" }, "mfa_lock_release_unavailable");
+					}
 					const stepUp = issuedRemediationActions(requirement)?.step_up;
 					if (stepUp === undefined) {
 						throw new Error("core issued the mfa requirement no mfa.step_up remediation");
@@ -555,6 +572,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								sealing,
 								mode,
 							},
+							lockRecovery,
 						}),
 					};
 				},

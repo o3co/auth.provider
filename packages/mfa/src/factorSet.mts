@@ -16,29 +16,33 @@
 
 /**
  * A subject's factor set as the enrollment witness follows it: the records
- * read, oldest first, and the two writes after which the witness is brought in
+ * read, oldest first, and the writes after which the witness is brought in
  * step with them. The one place the subject's lease and generation are used:
  * callers hold an opaque start and read an answer, never the lease.
  *
  * - A write's start (`begin`) reads the subject's generation before the request
  *   that writes is admitted, or before a verification's proof is checked;
- *   ceremonies that write later carry theirs from their begin.
+ *   a ceremony that writes in a later request carries its start from its
+ *   begin, sealed in its own pending state (`carry`, then `resume`), opaque
+ *   to it.
  * - The write acquires the subject's lease at that generation — waiting a
  *   bounded while for another holder, then `busy` with the holder's whole
  *   seconds left; `changed` when the generation moved since the start, a
  *   recovery or a reset in between — runs whole under it, and releases it.
  * - The lease stands six of `mfa.storeTimeoutMs`, one more than the most Store
- *   calls a write makes; a timeout whose six pass core's longest lease is
+ *   calls a removal makes; a timeout whose six pass core's longest lease is
  *   refused (`checkFactorSetStoreTimeout`). From the acquire, a local monotonic
  *   deadline: a read under the lease is given up when it would leave less than
  *   one Store timeout, and so is a write that would start with less — before
  *   the first write, `busy` with nothing written; after it, an overrun.
- * - A transaction-store call (generation, acquire, release) not answered within
- *   one Store timeout is an outage; a write to the factor store or the
- *   directory is never abandoned once started.
+ * - A transaction-store call (generation, acquire, apply, release) not
+ *   answered within one Store timeout is an outage; a write to the factor
+ *   store or the directory is never abandoned once started.
  * - A release the store answers `false`, or cannot take, is an overrun: the
  *   lease ended, or another holder moved the generation, while the write ran.
- *   Every answer of a write that overran says so.
+ *   A generation the write itself moved under the lease (an applied recovery
+ *   or reset) is no overrun: the release still finds the lease held. Every
+ *   answer of a write that overran says so.
  * - `markEnrolled`, a verification's reconciliation: the records read first;
  *   none that may count writes nothing and the witness is in step (`in_step`),
  *   none readable writes nothing (`unwritten`); else the witness marked, the
@@ -52,6 +56,17 @@
  *   removal — then the records read again (or, unreadable, those read before
  *   less the removed one) and, when none may count (`mayCount`), the witness
  *   cleared.
+ * - `bind`, an enrollment's completion: the caller's writes run whole under
+ *   the lease, through the factor store and the witness this file hands it,
+ *   each held to the lease's time as above.
+ * - `recover`, the subject's own authorized recovery: the records read under
+ *   the lease, the caller's reading of them handed to the store's apply with
+ *   the lease. It needs no start of the caller's: the store judges the apply
+ *   on its own authorization, and a generation that moved between its read
+ *   and its acquire is read again.
+ * - The operator reset (`createMfaFactorSetReset`): one lease, waited for —
+ *   never gone on without — across the lock state's reset, the removal of
+ *   every record and the witness's clear, in that order.
  *
  * The lease is logical: it cannot fence a write the factor store or the
  * directory applies after the deadline check. Never throws for a store's
@@ -64,9 +79,11 @@ import {
 	type MfaFactorRecord,
 	type MfaFactorResolver,
 	type MfaFactorStore,
+	type MfaSubjectRecoveryAnswer,
 	type MfaTransactionStore,
 	readMfaSubjectCount,
 	readMfaSubjectLeaseAnswer,
+	readMfaSubjectRecoveryAnswer,
 } from "@o3co/auth-provider-core";
 import { OUTSIDE_CONTRACT } from "./ceremony.mjs";
 import { mayCount } from "./firstBinding.mjs";
@@ -75,8 +92,17 @@ import type { MfaEnrollmentWitness, MfaWitnessMark } from "./witness.mjs";
 /** The pauses, in milliseconds, between tries for a lease another write holds: then `busy`. */
 const LEASE_WAITS_MS = [25, 50, 100, 200, 400] as const;
 
-/** The most Store calls one write makes: a removal's read, removal, read after a failed removal, read again and clear (a mark makes four). */
+/** The most Store calls one removal makes: its read, removal, read after a failed removal, read again and clear (a mark makes four). */
 const STORE_CALLS_PER_WRITE = 5;
+
+/** How many times a recovery reads the generation again when it moved before the acquire. */
+const RECOVERY_TRIES = 3;
+
+/** How many of a write's leases the operator reset waits for another holder's to end. */
+const RESET_WAIT_LEASES = 2;
+
+/** The longest pause, in milliseconds, between the operator reset's tries for the lease. */
+const RESET_PAUSE_MS = 250;
 
 /** The lease a write takes when one Store call may take `storeTimeoutMs`: one more than the most a write makes, at least core's shortest. */
 const leaseMsFor = (storeTimeoutMs: number): number =>
@@ -104,6 +130,11 @@ const byAge = (a: MfaFactorRecord, b: MfaFactorRecord): number =>
 /** Where a write began: opaque to its holder, read by this file alone. */
 export interface MfaFactorSetStart {
 	readonly __mfaFactorSetStart: never;
+}
+
+/** A start as a ceremony carries it from one request to the next, sealed in its own pending state: opaque to it. */
+export interface MfaFactorSetCarried {
+	readonly __mfaFactorSetCarried: never;
 }
 
 /** What a start is taken for: a change to the factor set, or a verification's witness mark. */
@@ -145,6 +176,37 @@ export type MfaFactorRemoval<Refusal> = (
 	readonly overran?: true;
 };
 
+/** What a bind's writes go through: the factor store and the witness, each held to the lease's time. */
+export interface MfaFactorSetWrites {
+	readonly factorStore: MfaFactorStore;
+	readonly witness: MfaEnrollmentWitness;
+}
+
+/** What a bind came to: the caller's own answer once its writes ran under the lease; `overran` on any answer when they ran past it. */
+export type MfaFactorSetBound<Done> = (
+	| MfaFactorSetRefusal
+	| { readonly outcome: "bound"; readonly done: Done }
+) & {
+	readonly overran?: true;
+};
+
+/** What a recovery is applied with, beside the lease this file holds. */
+export interface MfaFactorSetRecovery {
+	/** The session the authorization was minted in. */
+	readonly sid: string;
+	/** The caller's time, which the lock state is judged on. */
+	readonly nowMs: number;
+	/** The subject's sessions boundary, `undefined` when there is none. */
+	readonly sessionsBoundaryMs: number | undefined;
+	/** What the store is handed as `guessableBoundSinceMs`, read from the subject's records as read under the lease. */
+	readonly guessableBoundSince: (records: readonly MfaFactorRecord[]) => number | null;
+}
+
+/** What a recovery came to: the store's answer, read as its port promises it. */
+export type MfaFactorSetRecovered =
+	| Exclude<MfaFactorSetRefusal, { readonly outcome: "changed" }>
+	| { readonly outcome: "answered"; readonly answer: MfaSubjectRecoveryAnswer };
+
 export interface MfaFactorSet {
 	/**
 	 * Where a write of `subject`'s begins — `change`, one that changes the
@@ -152,11 +214,20 @@ export interface MfaFactorSet {
 	 * request is admitted, or before a proof is checked. Never throws.
 	 */
 	begin(subject: string, write: MfaFactorSetWrite): Promise<MfaFactorSetStart>;
+	/**
+	 * `start` as a ceremony carries it to a later request; the outage of the
+	 * read that took it, when it read no generation.
+	 */
+	carry(
+		start: MfaFactorSetStart,
+	): MfaFactorSetCarried | Extract<MfaFactorSetRefusal, { readonly outcome: "unavailable" }>;
+	/** The start `carried` was, for `subject`; one that is not what `carry` answered is answered `changed` by the write. */
+	resume(subject: string, carried: unknown): MfaFactorSetStart;
 	/** The subject's records, oldest first; throws for a store that cannot answer, or answers anything but a list of records. */
 	list(subject: string): Promise<MfaFactorRecord[]>;
 	/**
 	 * The witness marked under the subject's lease when the records read first
-	 * hold one that may count; a directory that cannot write it takes no lease,
+	 * hold one that may count; a directory that cannot write the witness takes no lease,
 	 * and needs no start.
 	 */
 	markEnrolled(start: MfaFactorSetStart | undefined, subject: string): Promise<MfaWitnessMark>;
@@ -167,6 +238,14 @@ export interface MfaFactorSet {
 		factorId: unknown,
 		refuse: (record: MfaFactorRecord, records: readonly MfaFactorRecord[]) => Refusal | undefined,
 	): Promise<MfaFactorRemoval<Refusal>>;
+	/** Under the subject's lease acquired at `start`, `write` run whole through the writes it is handed. */
+	bind<Done>(
+		start: MfaFactorSetStart,
+		subject: string,
+		write: (writes: MfaFactorSetWrites) => Promise<Done>,
+	): Promise<MfaFactorSetBound<Done>>;
+	/** Under the subject's lease, the subject's authorized recovery applied (see this file's header). */
+	recover(subject: string, recovery: MfaFactorSetRecovery): Promise<MfaFactorSetRecovered>;
 }
 
 /** A call not answered in the time it was given. */
@@ -201,89 +280,77 @@ interface LeaseTime {
 	beforeWrite(): void;
 }
 
-/** The factor set over `options` (see this file's header). */
-export function createMfaFactorSet(options: {
-	readonly factors: MfaFactorResolver;
-	readonly factorStore: MfaFactorStore;
-	readonly witness: MfaEnrollmentWitness;
-	/** Where the subject's generation and lease are kept. */
-	readonly leases: Pick<
-		MfaTransactionStore,
-		"subjectGeneration" | "acquireSubjectLease" | "releaseSubjectLease"
-	>;
-	/** `mfa.storeTimeoutMs`, held to {@link checkFactorSetStoreTimeout}. */
+/** The leases' port as this file uses it. */
+type Leases = Pick<
+	MfaTransactionStore,
+	"subjectGeneration" | "acquireSubjectLease" | "releaseSubjectLease" | "applySubjectRecovery"
+>;
+
+/** A transaction-store outage at `step`. */
+const leaseOutage = (
+	step: string,
+	cause: unknown,
+): Extract<MfaFactorSetRefusal, { readonly outcome: "unavailable" }> => ({
+	outcome: "unavailable",
+	store: "mfa_transaction",
+	step,
+	cause,
+});
+
+/** What holding a subject's lease for a write came to. */
+type Held<T> =
+	| { readonly outcome: "held"; readonly done: T; readonly overran: boolean }
+	/** Out of time after a write was started: what was written stands. */
+	| { readonly outcome: "ran_out" }
+	| (MfaFactorSetRefusal & { readonly overran?: true });
+
+/**
+ * The subject's lease over `leases`: its generation read, and a write run
+ * under the lease acquired at a generation — the one place either is done.
+ */
+function subjectLeases(options: {
+	readonly leases: Leases;
 	readonly storeTimeoutMs: number;
-	/** A monotonic clock, in milliseconds. Defaults to `performance.now`. */
-	readonly monotonicNow?: () => number;
-}): MfaFactorSet {
-	const { factors, factorStore, witness, leases } = options;
+	readonly monotonicNow: () => number;
+}) {
+	const { leases, monotonicNow } = options;
 	const storeTimeoutMs = checkFactorSetStoreTimeout(options.storeTimeoutMs);
 	const ttlMs = leaseMsFor(storeTimeoutMs);
-	const monotonicNow = options.monotonicNow ?? (() => performance.now());
-	const starts = new WeakMap<MfaFactorSetStart, Started>();
 
-	const list = async (subject: string): Promise<MfaFactorRecord[]> => {
-		const records: unknown = await factorStore.list(subject);
-		if (!Array.isArray(records)) {
-			throw new TypeError("MfaFactorStore.list answered something that is not a list");
-		}
-		return [...(records as MfaFactorRecord[])].sort(byAge);
+	/** The subject's generation; throws for one that cannot be read, or is outside the port. */
+	const generationOf = async (subject: string): Promise<number> => {
+		const generation = readMfaSubjectCount(
+			await within(() => leases.subjectGeneration(subject), storeTimeoutMs, "subjectGeneration"),
+		);
+		if (generation === undefined) throw OUTSIDE_CONTRACT;
+		return generation;
 	};
 
-	/** Whether none of `records` may count. */
-	const noneCounts = (records: readonly MfaFactorRecord[]): boolean =>
-		!records.some((record) => mayCount(factors, record));
-
-	const leaseOutage = (step: string, cause: unknown): MfaFactorSetRefusal => ({
-		outcome: "unavailable",
-		store: "mfa_transaction",
-		step,
-		cause,
-	});
-
-	const begin = async (subject: string, write: MfaFactorSetWrite): Promise<MfaFactorSetStart> => {
-		const start = Object.freeze({}) as MfaFactorSetStart;
-		// A mark a directory cannot write takes no lease: it needs no generation.
-		if (write === "mark" && !witness.writable) {
-			starts.set(start, {
-				subject,
-				cause: new Error("no lease is taken for a mark nobody can write"),
-			});
-			return start;
-		}
-		let started: Started;
+	/** The lease `token` holds released: `true` when the store found it held. */
+	const release = async (subject: string, token: string): Promise<boolean> => {
 		try {
-			const generation = readMfaSubjectCount(
-				await within(() => leases.subjectGeneration(subject), storeTimeoutMs, "subjectGeneration"),
+			return (
+				(await within(
+					() => leases.releaseSubjectLease(subject, token),
+					storeTimeoutMs,
+					"releaseSubjectLease",
+				)) === true
 			);
-			started =
-				generation === undefined ? { subject, cause: OUTSIDE_CONTRACT } : { subject, generation };
-		} catch (cause) {
-			started = { subject, cause };
+		} catch {
+			return false;
 		}
-		starts.set(start, started);
-		return start;
 	};
 
 	/**
-	 * `write` run under the subject's lease, acquired at `start`'s generation;
+	 * `write` run under the subject's lease, acquired at `generation`;
 	 * `overran` when the release did not find the lease held, or the write
 	 * ran out of the time it had after it wrote.
 	 */
 	const underLease = async <T,>(
-		start: MfaFactorSetStart | undefined,
 		subject: string,
-		write: (time: LeaseTime) => Promise<T>,
-	): Promise<
-		| { readonly outcome: "held"; readonly done: T; readonly overran: boolean }
-		/** Out of time after a write was started: what was written stands. */
-		| { readonly outcome: "ran_out" }
-		| (MfaFactorSetRefusal & { readonly overran?: true })
-	> => {
-		const started = start === undefined ? undefined : starts.get(start);
-		// A start for another subject, or none, began nowhere this write can tell.
-		if (started === undefined || started.subject !== subject) return { outcome: "changed" };
-		if ("cause" in started) return leaseOutage("subjectGeneration", started.cause);
+		generation: number,
+		write: (time: LeaseTime, token: string) => Promise<T>,
+	): Promise<Held<T>> => {
 		let token: string | undefined;
 		let acquiredFrom = 0;
 		for (let tries = 0; token === undefined; tries++) {
@@ -292,7 +359,7 @@ export function createMfaFactorSet(options: {
 			try {
 				answer = readMfaSubjectLeaseAnswer(
 					await within(
-						() => leases.acquireSubjectLease(subject, { ttlMs, generation: started.generation }),
+						() => leases.acquireSubjectLease(subject, { ttlMs, generation }),
 						storeTimeoutMs,
 						"acquireSubjectLease",
 					),
@@ -318,43 +385,36 @@ export function createMfaFactorSet(options: {
 				await new Promise((resolve) => setTimeout(resolve, pause));
 			}
 		}
+		const held = token;
 		const deadline = acquiredFrom + ttlMs;
 		const left = () => deadline - monotonicNow() - storeTimeoutMs;
 		let wrote = false;
+		let ranOut = false;
+		const outOfTime = (): OutOfTime => {
+			ranOut = true;
+			return new OutOfTime();
+		};
 		const time: LeaseTime = {
 			read: async (call) => {
 				const budget = left();
-				if (budget <= 0) throw new OutOfTime();
+				if (budget <= 0) throw outOfTime();
 				try {
 					return await within(call, budget, "a read under the lease");
 				} catch (cause) {
-					if (cause instanceof NotAnswered) throw new OutOfTime();
+					if (cause instanceof NotAnswered) throw outOfTime();
 					throw cause;
 				}
 			},
 			beforeWrite: () => {
-				if (left() < 0) throw new OutOfTime();
+				if (left() < 0) throw outOfTime();
 				wrote = true;
 			},
 		};
-		const release = async (): Promise<boolean> => {
-			try {
-				return (
-					(await within(
-						() => leases.releaseSubjectLease(subject, token),
-						storeTimeoutMs,
-						"releaseSubjectLease",
-					)) === true
-				);
-			} catch {
-				return false;
-			}
-		};
 		let done: T;
 		try {
-			done = await write(time);
+			done = await write(time, held);
 		} catch (cause) {
-			const kept = await release();
+			const kept = await release(subject, held);
 			if (!(cause instanceof OutOfTime)) throw cause;
 			// Out of time before any write: nothing was written, and a release that lost the lease is still an overrun.
 			if (wrote) return { outcome: "ran_out" };
@@ -362,7 +422,83 @@ export function createMfaFactorSet(options: {
 				? { outcome: "busy", retryAfterSeconds: 1 }
 				: { outcome: "busy", retryAfterSeconds: 1, overran: true };
 		}
-		return { outcome: "held", done, overran: !(await release()) };
+		const kept = await release(subject, held);
+		// A write that answered after it ran out of time before writing anything wrote nothing.
+		if (ranOut && !wrote) {
+			return kept
+				? { outcome: "busy", retryAfterSeconds: 1 }
+				: { outcome: "busy", retryAfterSeconds: 1, overran: true };
+		}
+		return { outcome: "held", done, overran: ranOut || !kept };
+	};
+
+	return { storeTimeoutMs, ttlMs, generationOf, release, underLease };
+}
+
+/** The factor set over `options` (see this file's header). */
+export function createMfaFactorSet(options: {
+	readonly factors: MfaFactorResolver;
+	readonly factorStore: MfaFactorStore;
+	readonly witness: MfaEnrollmentWitness;
+	/** Where the subject's generation and lease are kept, and its recovery applied. */
+	readonly leases: Leases;
+	/** `mfa.storeTimeoutMs`, held to {@link checkFactorSetStoreTimeout}. */
+	readonly storeTimeoutMs: number;
+	/** A monotonic clock, in milliseconds. Defaults to `performance.now`. */
+	readonly monotonicNow?: () => number;
+}): MfaFactorSet {
+	const { factors, factorStore, witness, leases } = options;
+	const subjectLease = subjectLeases({
+		leases,
+		storeTimeoutMs: options.storeTimeoutMs,
+		monotonicNow: options.monotonicNow ?? (() => performance.now()),
+	});
+	const { storeTimeoutMs } = subjectLease;
+	const starts = new WeakMap<MfaFactorSetStart, Started>();
+
+	const list = async (subject: string): Promise<MfaFactorRecord[]> => {
+		const records: unknown = await factorStore.list(subject);
+		if (!Array.isArray(records)) {
+			throw new TypeError("MfaFactorStore.list answered something that is not a list");
+		}
+		return [...(records as MfaFactorRecord[])].sort(byAge);
+	};
+
+	/** Whether none of `records` may count. */
+	const noneCounts = (records: readonly MfaFactorRecord[]): boolean =>
+		!records.some((record) => mayCount(factors, record));
+
+	const begin = async (subject: string, write: MfaFactorSetWrite): Promise<MfaFactorSetStart> => {
+		const start = Object.freeze({}) as MfaFactorSetStart;
+		// A mark a directory cannot write takes no lease: it needs no generation.
+		if (write === "mark" && !witness.writable) {
+			starts.set(start, {
+				subject,
+				cause: new Error("no lease is taken for a mark nobody can write"),
+			});
+			return start;
+		}
+		let started: Started;
+		try {
+			started = { subject, generation: await subjectLease.generationOf(subject) };
+		} catch (cause) {
+			started = { subject, cause };
+		}
+		starts.set(start, started);
+		return start;
+	};
+
+	/** `write` under the lease acquired at `start`'s generation (`subjectLeases`). */
+	const underLease = async <T,>(
+		start: MfaFactorSetStart | undefined,
+		subject: string,
+		write: (time: LeaseTime, token: string) => Promise<T>,
+	): Promise<Held<T>> => {
+		const started = start === undefined ? undefined : starts.get(start);
+		// A start for another subject, or none, began nowhere this write can tell.
+		if (started === undefined || started.subject !== subject) return { outcome: "changed" };
+		if ("cause" in started) return leaseOutage("subjectGeneration", started.cause);
+		return subjectLease.underLease(subject, started.generation, write);
 	};
 
 	/** What a mark is answered when it could not run, or ran, outside a lease it held. */
@@ -371,8 +507,61 @@ export function createMfaFactorSet(options: {
 		cause: new Error(`the witness mark ${why}`),
 	});
 
+	/** The factor store and the witness as a bind's writes go through them: each held to `time`. */
+	const writesUnder = (time: LeaseTime): MfaFactorSetWrites => {
+		const write = async <T,>(call: () => Promise<T>): Promise<T> => {
+			time.beforeWrite();
+			return call();
+		};
+		/** A witness write the lease's time cannot cover is unwritten: the witness never throws. */
+		const witnessWrite = async (call: () => Promise<MfaWitnessMark>): Promise<MfaWitnessMark> => {
+			try {
+				time.beforeWrite();
+			} catch {
+				return unwritten("found too little of the subject's lease left");
+			}
+			return call();
+		};
+		return {
+			factorStore: {
+				kind: factorStore.kind,
+				list: (subject) => time.read(() => factorStore.list(subject)),
+				create: (record) => write(() => factorStore.create(record)),
+				update: (subject, id, expectedVersion, next) =>
+					write(() => factorStore.update(subject, id, expectedVersion, next)),
+				remove: (subject, id) => write(() => factorStore.remove(subject, id)),
+				removeAllForSubject: (subject) => write(() => factorStore.removeAllForSubject(subject)),
+			},
+			witness: {
+				writable: witness.writable,
+				mark: (subject) => witnessWrite(() => witness.mark(subject)),
+				clear: (subject) => witnessWrite(() => witness.clear(subject)),
+			},
+		};
+	};
+
 	return {
 		begin,
+
+		carry(start) {
+			const started = starts.get(start);
+			if (started === undefined) {
+				return leaseOutage("subjectGeneration", new Error("the start was not taken here"));
+			}
+			if ("cause" in started) return leaseOutage("subjectGeneration", started.cause);
+			return { generation: started.generation } as unknown as MfaFactorSetCarried;
+		},
+
+		resume(subject, carried) {
+			const start = Object.freeze({}) as MfaFactorSetStart;
+			const generation =
+				typeof carried === "object" && carried !== null && !Array.isArray(carried)
+					? readMfaSubjectCount((carried as { readonly generation?: unknown }).generation)
+					: undefined;
+			// One that is not what `carry` answered is left unknown: the write answers it `changed`.
+			if (generation !== undefined) starts.set(start, { subject, generation });
+			return start;
+		},
 
 		list,
 
@@ -502,6 +691,261 @@ export function createMfaFactorSet(options: {
 			}
 			if (held.outcome !== "held") return held;
 			return held.overran ? { ...held.done, overran: true } : held.done;
+		},
+
+		async bind(start, subject, write) {
+			const held = await underLease(start, subject, (time) => write(writesUnder(time)));
+			if (held.outcome === "ran_out") {
+				// The writes ran out of time after one was written, and did not answer what they came to.
+				return {
+					outcome: "unavailable",
+					store: "mfa_factor",
+					step: "bind",
+					cause: new Error("a bind's writes ran out of the subject's lease after writing"),
+					overran: true,
+				};
+			}
+			if (held.outcome !== "held") return held;
+			return held.overran
+				? { outcome: "bound", done: held.done, overran: true }
+				: { outcome: "bound", done: held.done };
+		},
+
+		async recover(subject, recovery) {
+			for (let tries = 1; ; tries++) {
+				let generation: number;
+				try {
+					generation = await subjectLease.generationOf(subject);
+				} catch (cause) {
+					return leaseOutage("subjectGeneration", cause);
+				}
+				const held = await subjectLease.underLease(
+					subject,
+					generation,
+					async (time, token): Promise<MfaFactorSetRecovered> => {
+						let records: MfaFactorRecord[];
+						try {
+							records = await time.read(() => list(subject));
+						} catch (cause) {
+							if (cause instanceof OutOfTime) throw cause;
+							return { outcome: "unavailable", store: "mfa_factor", step: "list", cause };
+						}
+						const guessableBoundSinceMs = recovery.guessableBoundSince(records);
+						time.beforeWrite();
+						let answer: unknown;
+						try {
+							answer = await within(
+								() =>
+									leases.applySubjectRecovery(subject, {
+										operation: "recover",
+										sid: recovery.sid,
+										nowMs: recovery.nowMs,
+										leaseToken: token,
+										sessionsBoundaryMs: recovery.sessionsBoundaryMs,
+										guessableBoundSinceMs,
+									}),
+								storeTimeoutMs,
+								"applySubjectRecovery",
+							);
+						} catch (cause) {
+							return leaseOutage("applySubjectRecovery", cause);
+						}
+						const read = readMfaSubjectRecoveryAnswer(answer);
+						return read === undefined
+							? leaseOutage("applySubjectRecovery", OUTSIDE_CONTRACT)
+							: { outcome: "answered", answer: read };
+					},
+				);
+				switch (held.outcome) {
+					// The store judged the apply under the lease: an overrun after it changes nothing of it.
+					case "held":
+						return held.done;
+					case "changed":
+						if (tries < RECOVERY_TRIES) continue;
+						return { outcome: "busy", retryAfterSeconds: 1 };
+					case "ran_out":
+						return { outcome: "busy", retryAfterSeconds: 1 };
+					case "busy":
+						return { outcome: "busy", retryAfterSeconds: held.retryAfterSeconds };
+					default:
+						return { outcome: held.outcome, store: held.store, step: held.step, cause: held.cause };
+				}
+			}
+		},
+	};
+}
+
+/** Where the operator reset stopped: before the lease, at the lock state's reset, or at the removal. */
+export type MfaFactorSetResetStop = "lease" | "lock" | "factors";
+
+/** What the operator reset under the lease came to. */
+export type MfaFactorSetResetOutcome =
+	| {
+			readonly outcome: "reset";
+			/** The subject's generation the reset moved it to. */
+			readonly generation: number;
+			/** The records as read under the lease before the removal; `undefined` when they could not be read. */
+			readonly records: readonly MfaFactorRecord[] | undefined;
+			/** The witness's clear, written last. */
+			readonly witness: MfaWitnessMark;
+			/** The lease ended before the reset released it: another writer may have run beside it. */
+			readonly overran?: true;
+	  }
+	| {
+			readonly outcome: "stopped";
+			readonly at: MfaFactorSetResetStop;
+			readonly cause: unknown;
+			/** Once the lock state was reset: the generation it moved to. */
+			readonly generation?: number;
+			readonly records?: readonly MfaFactorRecord[];
+			readonly overran?: true;
+	  };
+
+/**
+ * The operator reset's writes under one lease of the subject's (see this
+ * file's header): the lease waited for up to two of a write's leases —
+ * then `stopped` at `lease`, nothing written — then, in this order, the
+ * records read for the report, the lock state reset by the authorization the
+ * caller recorded (`applySubjectRecovery` with the lease), every record
+ * removed, the witness cleared, and the lease released. A store that cannot
+ * remove stops it, the witness left as it was; the removal and the clear are
+ * never abandoned once started.
+ */
+export function createMfaFactorSetReset(options: {
+	readonly factorStore: MfaFactorStore;
+	readonly witness: MfaEnrollmentWitness;
+	readonly leases: Leases;
+	/** `mfa.storeTimeoutMs`, held to {@link checkFactorSetStoreTimeout}. */
+	readonly storeTimeoutMs: number;
+	/** A monotonic clock, in milliseconds. Defaults to `performance.now`. */
+	readonly monotonicNow?: () => number;
+}): { reset(subject: string, nowMs: number): Promise<MfaFactorSetResetOutcome> } {
+	const { factorStore, witness, leases } = options;
+	const monotonicNow = options.monotonicNow ?? (() => performance.now());
+	const subjectLease = subjectLeases({
+		leases,
+		storeTimeoutMs: options.storeTimeoutMs,
+		monotonicNow,
+	});
+	const { storeTimeoutMs, ttlMs } = subjectLease;
+
+	const stopped = (
+		at: MfaFactorSetResetStop,
+		cause: unknown,
+		after: {
+			readonly generation?: number;
+			readonly records?: readonly MfaFactorRecord[] | undefined;
+			readonly overran?: boolean;
+		} = {},
+	): MfaFactorSetResetOutcome => ({
+		outcome: "stopped",
+		at,
+		cause,
+		...(after.generation === undefined ? {} : { generation: after.generation }),
+		...(after.records === undefined ? {} : { records: after.records }),
+		...(after.overran === true ? { overran: true as const } : {}),
+	});
+
+	/** The lease acquired, waiting while another holds it, the generation read again when it moved; or why not. */
+	const acquire = async (
+		subject: string,
+	): Promise<{ readonly token: string } | MfaFactorSetResetOutcome> => {
+		const until = monotonicNow() + RESET_WAIT_LEASES * ttlMs;
+		for (;;) {
+			let answer: ReturnType<typeof readMfaSubjectLeaseAnswer>;
+			try {
+				const generation = await subjectLease.generationOf(subject);
+				answer = readMfaSubjectLeaseAnswer(
+					await within(
+						() => leases.acquireSubjectLease(subject, { ttlMs, generation }),
+						storeTimeoutMs,
+						"acquireSubjectLease",
+					),
+				);
+			} catch (cause) {
+				return stopped("lease", cause);
+			}
+			if (answer === undefined) return stopped("lease", OUTSIDE_CONTRACT);
+			if (answer.outcome === "acquired") return { token: answer.token };
+			if (monotonicNow() >= until) {
+				return stopped(
+					"lease",
+					new Error("the subject's lease stayed held past the reset's wait: run it again"),
+				);
+			}
+			if (answer.outcome === "busy") {
+				const pause = Math.min(answer.retryAfterMs, RESET_PAUSE_MS);
+				await new Promise((resolve) => setTimeout(resolve, pause));
+			}
+		}
+	};
+
+	return {
+		async reset(subject, nowMs) {
+			const acquired = await acquire(subject);
+			if ("outcome" in acquired) return acquired;
+			const { token } = acquired;
+			let records: MfaFactorRecord[] | undefined;
+			try {
+				const listed: unknown = await within(
+					() => factorStore.list(subject),
+					storeTimeoutMs,
+					"list",
+				);
+				records = Array.isArray(listed)
+					? [...(listed as MfaFactorRecord[])].sort(byAge)
+					: undefined;
+			} catch {
+				records = undefined;
+			}
+			let answer: ReturnType<typeof readMfaSubjectRecoveryAnswer>;
+			try {
+				answer = readMfaSubjectRecoveryAnswer(
+					await within(
+						() =>
+							leases.applySubjectRecovery(subject, {
+								operation: "reset",
+								sid: undefined,
+								nowMs,
+								leaseToken: token,
+								sessionsBoundaryMs: undefined,
+								guessableBoundSinceMs: undefined,
+							}),
+						storeTimeoutMs,
+						"applySubjectRecovery",
+					),
+				);
+			} catch (cause) {
+				const kept = await subjectLease.release(subject, token);
+				return stopped("lock", cause, { records, overran: !kept });
+			}
+			if (answer === undefined || answer.outcome === "refused") {
+				const kept = await subjectLease.release(subject, token);
+				return stopped(
+					"lock",
+					answer === undefined
+						? OUTSIDE_CONTRACT
+						: new Error(`the store refused the reset: ${answer.reason}`),
+					{ records, overran: !kept },
+				);
+			}
+			const { generation } = answer;
+			try {
+				await factorStore.removeAllForSubject(subject);
+			} catch (cause) {
+				const kept = await subjectLease.release(subject, token);
+				return stopped("factors", cause, { generation, records, overran: !kept });
+			}
+			const cleared = await witness.clear(subject);
+			// The reset moved the generation under its own lease: a release that finds it held is no overrun.
+			const kept = await subjectLease.release(subject, token);
+			return {
+				outcome: "reset",
+				generation,
+				records,
+				witness: cleared,
+				...(kept ? {} : { overran: true as const }),
+			};
 		},
 	};
 }

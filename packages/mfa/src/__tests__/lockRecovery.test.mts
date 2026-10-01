@@ -87,7 +87,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-/** The entry over memory stores, the boundary `boundary` answers when given. */
+/** The entry over memory stores on the suite's clock, the boundary `boundary` answers when given. */
 function setup(
 	options: {
 		readonly boundary?: () => Promise<Date | null>;
@@ -95,7 +95,7 @@ function setup(
 		readonly factorStore?: MfaFactorStore;
 	} = {},
 ) {
-	const store = options.store ?? createMemoryMfaTransactionStore();
+	const store = options.store ?? createMemoryMfaTransactionStore({ now: () => clock });
 	const factorStore = options.factorStore ?? createMemoryMfaFactorStore();
 	const factorSet = createMfaFactorSet({
 		factors: FACTORS,
@@ -198,7 +198,7 @@ describe("minting at an exempt verification", () => {
 
 describe("the entry's configuration", () => {
 	it("refuses an authorization lifetime past core's longest, MFA_RECOVERY_AUTHORIZATION_MAX_MS, and takes that one", () => {
-		const store = createMemoryMfaTransactionStore();
+		const store = createMemoryMfaTransactionStore({ now: () => clock });
 		const factorSet = createMfaFactorSet({
 			factors: FACTORS,
 			factorStore: createMemoryMfaFactorStore(),
