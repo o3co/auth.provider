@@ -239,6 +239,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// 2026-09-17-federation-grants-offline-delegation).
 	REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL:
 		"https://users.example.com/find-subject-by-federated-identity",
+	// The Store's MFA enrollment witness endpoint (the MFA ADR's D12).
+	REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL: "https://users.example.com/mfa/enrolled",
 	REPOSITORIES_USER_HTTP_TIMEOUT: "5000",
 	REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES: "1048576",
 	// The credential the http user adapter presents to the Store; >= 32 bytes.
