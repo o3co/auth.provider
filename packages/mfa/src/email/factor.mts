@@ -30,6 +30,9 @@
  *   `null` when the data holds none it can read, which the coordinator
  *   refuses. A verification handed a digest under another key than the one
  *   recorded keeps the handed one, so the old key can leave the ring.
+ * - A completion is refused as a duplicate when one of the records it is
+ *   handed holds the same digest under the same key. That is the records as
+ *   read before the create: it does not see another completion at once.
  * - A kept code whose key left the ring, or a pending state that is not a
  *   kept code, throws: an outage, never a code refused.
  */
@@ -151,6 +154,7 @@ export function createEmailFactor(settings: EmailFactorSettings): MfaFactor {
 			// The address the code went to, as the coordinator kept it at the send.
 			const handed = keyedDigest(ctx.addressDigest);
 			if (handed === undefined) return { ok: false, reason: "expired" };
+			// Among the records handed, read before the create: not another completion at once.
 			const held = ctx.factors.some((enrolled) => {
 				const recorded = keyedDigest(enrolled.data.addressDigest);
 				return recorded?.keyId === handed.keyId && recorded.digest === handed.digest;
