@@ -33,6 +33,8 @@ import {
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
+	type MfaSubjectRecoveryAnswer,
+	type MfaSubjectRecoveryApplication,
 	type MfaTransaction,
 	type MfaTransactionStore,
 } from "@o3co/auth-provider-core";
@@ -109,7 +111,6 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 		settleSubjectAttempt: (subject, reservation, outcome) =>
 			pick().settleSubjectAttempt(subject, reservation, outcome),
 		noteExemptSuccess: (subject, nowMs, policy) => pick().noteExemptSuccess(subject, nowMs, policy),
-		clearSubjectState: (subject) => pick().clearSubjectState(subject),
 		requireEmailProofAtNextBinding: (subject) => pick().requireEmailProofAtNextBinding(subject),
 		emailProofRequiredAtNextBinding: (subject) => pick().emailProofRequiredAtNextBinding(subject),
 		consumeEmailProofRequirement: (subject) => pick().consumeEmailProofRequirement(subject),
@@ -185,6 +186,47 @@ const storeAt = (keyPrefix: string, connection: Redis = first()): MfaTransaction
 		client: makeIoredisMfaTransactionStoreClient(connection),
 		keyPrefix,
 	});
+
+let resets = 0;
+
+/** Applies `operation` for `subject` under a lease of its own, authorized first: the answer. */
+async function applied(
+	store: MfaTransactionStore,
+	subject: string,
+	application: Partial<MfaSubjectRecoveryApplication> = {},
+): Promise<MfaSubjectRecoveryAnswer> {
+	resets += 1;
+	const operation = application.operation ?? "reset";
+	const sid = operation === "reset" ? undefined : "sid-1";
+	const lease = await store.acquireSubjectLease(subject, { ttlMs: 60_000 });
+	if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
+	try {
+		await store.authorizeSubjectRecovery(subject, {
+			operation,
+			sid,
+			recoveryId: `recovery-${resets}`,
+			expiresAtMs: Date.now() + 10 * MINUTE,
+		});
+		return await store.applySubjectRecovery(subject, {
+			operation,
+			sid,
+			nowMs: Date.now(),
+			leaseToken: lease.token,
+			sessionsBoundaryMs: undefined,
+			guessableBoundSinceMs: undefined,
+			...application,
+		});
+	} finally {
+		await store.releaseSubjectLease(subject, lease.token);
+	}
+}
+
+/** The operator reset of `subject`: its lock state ends whole. */
+async function resetSubject(store: MfaTransactionStore, subject: string): Promise<void> {
+	const answer = await applied(store, subject);
+	if (answer.outcome !== "applied")
+		throw new Error(`expected the reset applied: ${answer.outcome}`);
+}
 
 /** The absolute deadline of `key` on the server's clock, in epoch ms; -1 for none, -2 for no key. */
 const deadlineOf = async (key: string): Promise<number> =>
@@ -479,7 +521,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		expect(await deadlineOf(lock)).toBe(t + MINUTE + WEEK + DAY);
 		expect(await deadlineOf(week)).toBe(t + MINUTE + WEEK + DAY);
 
-		await store.clearSubjectState("user-1");
+		await resetSubject(store, "user-1");
 		expect(await first().exists(lock, week)).toBe(0);
 	});
 
@@ -929,9 +971,22 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 				} else if (roll < 0.97) {
 					await memory.noteExemptSuccess("user-1", at, SMALL);
 					await redis.noteExemptSuccess("user-1", at, SMALL);
+				} else if (roll < 0.985) {
+					// A recover at this step's time, a boundary somewhere before it or none,
+					// and a rebind before or after the hard hold, or none.
+					const recover = {
+						operation: "recover" as const,
+						nowMs: at,
+						sessionsBoundaryMs: choose([undefined, at - choose(STEPS_MS.filter((s) => s >= 0))]),
+						guessableBoundSinceMs: choose([undefined, at - DAY, at + DAY]),
+					};
+					const expected = await applied(memory, "user-1", recover);
+					const actual = await applied(redis, "user-1", recover);
+					const shape = (answer: MfaSubjectRecoveryAnswer) => ({ ...answer, recoveryId: "" });
+					expect(shape(actual), `step ${step}`).toEqual(shape(expected));
 				} else {
-					await memory.clearSubjectState("user-1");
-					await redis.clearSubjectState("user-1");
+					await resetSubject(memory, "user-1");
+					await resetSubject(redis, "user-1");
 					pending.length = 0;
 				}
 			}
@@ -1026,15 +1081,17 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 });
 
 describe("createRedisMfaTransactionStore — the email proof at the next first binding", () => {
-	it("keeps it in a key of its own with no TTL, which clearSubjectState leaves and a consume removes", async () => {
+	it("keeps it in a key of its own with no TTL, which a reset leaves and a consume removes", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const key = `${prefix}proof:{${keyPart("user-1")}}`;
 		await store.requireEmailProofAtNextBinding("user-1");
 		expect(await first().pttl(key)).toBe(-1);
 		await store.reserveSubjectAttempt("user-1", Date.now(), POLICY);
-		await store.clearSubjectState("user-1");
-		expect(await first().keys(`${prefix}*`)).toEqual([key]);
+		await resetSubject(store, "user-1");
+		expect((await first().keys(`${prefix}*`)).sort()).toEqual(
+			[key, `${prefix}recovery:{${keyPart("user-1")}}`].sort(),
+		);
 		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
 		expect(await first().exists(key)).toBe(0);
 	});
@@ -1118,10 +1175,12 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 		expect(await store.consume("tx-1", 1)).not.toBeNull();
 		await store.requireEmailProofAtNextBinding("user-1");
 		await store.reserveSubjectAttempt("user-1", now, POLICY);
-		await store.clearSubjectState("user-1");
+		await resetSubject(store, "user-1");
 		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
 		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
-		expect(await first().keys(`${prefix}*`)).toEqual([proofKey(prefix, "user-1", "sid-1")]);
+		expect((await first().keys(`${prefix}*`)).sort()).toEqual(
+			[proofKey(prefix, "user-1", "sid-1"), `${prefix}recovery:{${keyPart("user-1")}}`].sort(),
+		);
 	});
 });
 
@@ -1365,7 +1424,7 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		expect(await store.consume("tx-1", 1)).not.toBeNull();
 		await store.requireEmailProofAtNextBinding("user-1");
 		await store.reserveSubjectAttempt("user-1", now, POLICY);
-		await store.clearSubjectState("user-1");
+		await resetSubject(store, "user-1");
 		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
 		expect(await store.firstBindingAt("user-1", now)).toBe(now);
 		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
@@ -1373,7 +1432,114 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 			[
 				markKey(prefix, "user-1"),
 				`${prefix}session-proof:{${keyPart("user-1")}}:${keyPart("sid-1")}`,
+				`${prefix}recovery:{${keyPart("user-1")}}`,
 			].sort(),
 		);
+	});
+});
+
+describe("createRedisMfaTransactionStore — a subject's lease, recovery and floor", () => {
+	const keysOf = (prefix: string, subject = "user-1") => {
+		const tag = `{${keyPart(subject)}}`;
+		return {
+			lock: `${prefix}lock:${tag}`,
+			week: `${prefix}week:${tag}`,
+			recovery: `${prefix}recovery:${tag}`,
+			lease: `${prefix}lease:${tag}`,
+		};
+	};
+
+	it("has no clearSubjectState, on the store or its client: an applied recovery is the one way the lock state ends", () => {
+		const client = makeIoredisMfaTransactionStoreClient(first());
+		expect("clearSubjectState" in storeAt(freshPrefix())).toBe(false);
+		expect("clearSubjectState" in client).toBe(false);
+	});
+
+	it("keeps the lease and the recovery hash under the subject's tag beside its lock and week", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const keys = keysOf(prefix);
+		await store.reserveSubjectAttempt("user-1", Date.now() - MINUTE, POLICY);
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
+		if (lease.outcome !== "acquired") throw new Error("expected a lease");
+		await store.raiseRecoverySetFloor("user-1", 2);
+		expect((await first().keys(`${prefix}*`)).sort()).toEqual(Object.values(keys).sort());
+		expect(await first().get(keys.lease)).toBe(lease.token);
+		const ttl = await first().pttl(keys.lease);
+		expect(ttl).toBeGreaterThan(0);
+		expect(ttl).toBeLessThanOrEqual(60_000);
+		expect(await first().hgetall(keys.recovery)).toEqual({ floor: "2" });
+	});
+
+	it("gives the recovery hash a deadline while it holds authorizations alone, and none once it holds a generation or a floor", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const { recovery } = keysOf(prefix);
+		const ends = Math.floor(Date.now()) + 10 * MINUTE;
+		await store.authorizeSubjectRecovery("user-1", {
+			operation: "recover",
+			sid: "sid-1",
+			recoveryId: "r-1",
+			expiresAtMs: ends,
+		});
+		expect(await deadlineOf(recovery)).toBe(ends + MFA_CLOCK_SKEW_ALLOWANCE_MS);
+		expect(await applied(store, "user-1", { operation: "recover" })).toMatchObject({
+			outcome: "applied",
+		});
+		expect(await deadlineOf(recovery)).toBe(-1);
+
+		const other = keysOf(prefix, "user-2").recovery;
+		await store.raiseRecoverySetFloor("user-2", 1);
+		expect(await deadlineOf(other)).toBe(-1);
+	});
+
+	it("answers a generation, a floor or an authorization it cannot read as an outage, never as none", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const { recovery } = keysOf(prefix);
+		await first().hset(recovery, "g", "x");
+		await expect(store.subjectGeneration("user-1")).rejects.toThrow(/generation/);
+		await expect(
+			store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 }),
+		).rejects.toThrow(/subject state/);
+		await first().hset(recovery, "g", "1", "floor", "x");
+		await expect(store.recoverySetFloor("user-1")).rejects.toThrow(/floor/);
+		await expect(store.raiseRecoverySetFloor("user-1", 2)).rejects.toThrow(/subject state/);
+		await first().hset(recovery, "floor", "1", `a:recover:${keyPart("sid-1")}`, "garbage");
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
+		if (lease.outcome !== "acquired") throw new Error("expected a lease");
+		await expect(
+			store.applySubjectRecovery("user-1", {
+				operation: "recover",
+				sid: "sid-1",
+				nowMs: Date.now(),
+				leaseToken: lease.token,
+				sessionsBoundaryMs: undefined,
+				guessableBoundSinceMs: undefined,
+			}),
+		).rejects.toThrow(/subject state/);
+	});
+
+	it("answers a lease with no deadline, which it never writes, as an outage", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await first().set(keysOf(prefix).lease, "someone");
+		await expect(store.acquireSubjectLease("user-1", { ttlMs: 60_000 })).rejects.toThrow(
+			/lease script/,
+		);
+	});
+
+	it("ends at a reset a lock state the scripts cannot read", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const { lock, week } = keysOf(prefix);
+		await store.reserveSubjectAttempt("user-1", Date.now(), POLICY);
+		await first().hset(lock, "r:x", "garbage");
+		await expect(store.reserveSubjectAttempt("user-1", Date.now(), POLICY)).rejects.toThrow(
+			/subject state/,
+		);
+		await resetSubject(store, "user-1");
+		expect(await first().exists(lock, week)).toBe(0);
+		expect((await store.reserveSubjectAttempt("user-1", Date.now(), POLICY)).ok).toBe(true);
 	});
 });

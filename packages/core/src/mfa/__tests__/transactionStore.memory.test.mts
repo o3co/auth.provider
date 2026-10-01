@@ -190,7 +190,22 @@ describe("the in-process MfaTransactionStore", () => {
 		const failed = await store.reserveSubjectAttempt("user-1", T0, POLICY);
 		if (failed.ok) await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
 		expect(store.subjects).toBe(1);
-		await store.clearSubjectState("user-1");
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
+		if (lease.outcome !== "acquired") throw new Error("expected a lease");
+		await store.authorizeSubjectRecovery("user-1", {
+			operation: "reset",
+			sid: undefined,
+			recoveryId: "reset-1",
+			expiresAtMs: Date.now() + 600_000,
+		});
+		await store.applySubjectRecovery("user-1", {
+			operation: "reset",
+			sid: undefined,
+			nowMs: T0,
+			leaseToken: lease.token,
+			sessionsBoundaryMs: undefined,
+			guessableBoundSinceMs: undefined,
+		});
 		expect(store.subjects).toBe(0);
 	});
 

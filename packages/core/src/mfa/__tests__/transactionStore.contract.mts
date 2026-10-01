@@ -149,6 +149,31 @@ export function runMfaTransactionStoreContract(
 ): void {
 	const expiry = options.expiry ?? hostExpiry;
 
+	let resets = 0;
+	/** The operator reset of `subject`, authorized and applied under its lease: its lock state ends whole. */
+	async function resetSubject(store: MfaTransactionStore, subject: string): Promise<void> {
+		resets += 1;
+		const lease = await store.acquireSubjectLease(subject, { ttlMs: 60_000 });
+		if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
+		await store.authorizeSubjectRecovery(subject, {
+			operation: "reset",
+			sid: undefined,
+			recoveryId: `reset-${resets}`,
+			expiresAtMs: Date.now() + 10 * MINUTE,
+		});
+		const answer = await store.applySubjectRecovery(subject, {
+			operation: "reset",
+			sid: undefined,
+			nowMs: Date.now(),
+			leaseToken: lease.token,
+			sessionsBoundaryMs: undefined,
+			guessableBoundSinceMs: undefined,
+		});
+		await store.releaseSubjectLease(subject, lease.token);
+		if (answer.outcome !== "applied")
+			throw new Error(`expected the reset applied: ${answer.outcome}`);
+	}
+
 	describe("MfaTransactionStore contract: the transaction", () => {
 		it("refuses a login transaction whose subject or redirectTo is not the continuation's primary's: one record, one login", async () => {
 			const store = await factory();
@@ -999,7 +1024,7 @@ export function runMfaTransactionStoreContract(
 			expect(first(await check(store, t + 7))).toBe(false);
 		});
 
-		it("begins another episode after an attempt is let through, and after clearSubjectState", async () => {
+		it("begins another episode after an attempt is let through, and after a reset", async () => {
 			const store = await factory();
 			const t = start();
 			for (let i = 0; i < 5; i++) await fail(store, t + i);
@@ -1010,7 +1035,7 @@ export function runMfaTransactionStoreContract(
 			await fail(store, after);
 			expect(first(await check(store, after + 1))).toBe(true);
 			expect(first(await check(store, after + 2))).toBe(false);
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			for (let i = 0; i < 5; i++) await fail(store, after + 10 + i);
 			expect(first(await check(store, after + 15))).toBe(true);
 		});
@@ -1225,7 +1250,7 @@ export function runMfaTransactionStoreContract(
 			hardLimit: 6,
 		};
 
-		it("holds guessable proofs at hardLimit consecutive failures: an exempt success does not lift it, clearSubjectState does", async () => {
+		it("holds guessable proofs at hardLimit consecutive failures: an exempt success does not lift it, a reset does", async () => {
 			const store = await factory();
 			let at = start();
 			for (let i = 0; i < 6; i++) {
@@ -1242,13 +1267,13 @@ export function runMfaTransactionStoreContract(
 				hold: "hard",
 				retryAfterMs: null,
 			});
-			// Nor does another, a week on: the run stands until the subject is cleared.
+			// Nor does another, a week on: the run stands until the subject is reset.
 			await store.noteExemptSuccess("user-1", at + WEEK, SMALL_HARD);
 			expect(held(await check(store, at + WEEK + 1, SMALL_HARD))).toEqual({
 				hold: "hard",
 				retryAfterMs: null,
 			});
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			expect((await check(store, at + WEEK + 2, SMALL_HARD)).ok).toBe(true);
 		});
 
@@ -1468,19 +1493,24 @@ export function runMfaTransactionStoreContract(
 			expect(last && held(last)).toEqual({ hold: "hard", retryAfterMs: null });
 		});
 
-		it("clears the run and the week on clearSubjectState", async () => {
+		it("clears the run and the week on a reset", async () => {
 			const store = await factory();
 			const t = start();
 			let at = await fillTheWeek(store, t);
-			await store.clearSubjectState("user-1");
-			await store.clearSubjectState("user-1");
-			await store.clearSubjectState("nobody");
+			await resetSubject(store, "user-1");
+			await resetSubject(store, "user-1");
+			await resetSubject(store, "nobody");
 			// The week starts empty: five failures reach the backoff, not the
-			// weekly hold, and clearing again lifts the backoff.
+			// weekly hold, and resetting again lifts the backoff.
 			for (let i = 0; i < 5; i++) await fail(store, ++at);
 			expect(held(await check(store, at + 1))).toMatchObject({ hold: "backoff" });
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			await settled(store, at + 1, "void");
+		});
+
+		it("offers no way to end the lock state but an applied recovery: there is no clearSubjectState", async () => {
+			const store = await factory();
+			expect("clearSubjectState" in store).toBe(false);
 		});
 
 		it("keeps subjects apart", async () => {
@@ -1497,7 +1527,7 @@ export function runMfaTransactionStoreContract(
 			});
 			// Clearing one subject leaves the other held.
 			const next = await fillTheWeek(store, at + MINUTE, "user-2");
-			await store.clearSubjectState("user-2");
+			await resetSubject(store, "user-2");
 			expect(held(await check(store, next, POLICY, "user-1"))).toMatchObject({ hold: "weekly" });
 			await settled(store, next, "void", "user-2");
 		});
@@ -2160,10 +2190,10 @@ export function runMfaTransactionStoreContract(
 			expect(await store.emailProofRequiredAtNextBinding("user-2")).toBe(false);
 		});
 
-		it("keeps it through clearSubjectState, which the reset calls", async () => {
+		it("keeps it through a reset", async () => {
 			const store = await factory();
 			await store.requireEmailProofAtNextBinding("user-1");
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
 		});
 
@@ -2430,7 +2460,7 @@ export function runMfaTransactionStoreContract(
 			expect(await store.firstBindingAt("user-1", now)).toBe(now + MINUTE);
 		});
 
-		it("keeps each subject's mark apart, and through clearSubjectState", async () => {
+		it("keeps each subject's mark apart, and through a reset", async () => {
 			const store = await factory();
 			const now = await nowOnBoth();
 			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
@@ -2439,7 +2469,7 @@ export function runMfaTransactionStoreContract(
 			expect(await store.firstBindingAt("user-1", now)).toBe(now);
 			expect(await store.firstBindingAt("user-2", now)).toBe(now - MINUTE);
 			// The mark is not lock state: clearing the lock trusts no stale session.
-			await store.clearSubjectState("user-1");
+			await resetSubject(store, "user-1");
 			expect(await store.firstBindingAt("user-1", now)).toBe(now);
 			// Nor is a session's proof of a subject its mark.
 			await store.recordSessionEmailProof("user-3", "sid-1", now, now + 10 * MINUTE);
