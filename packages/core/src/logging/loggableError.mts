@@ -363,6 +363,23 @@ export const isError = (value: unknown): value is object => {
 };
 
 /**
+ * A thrown value's text: an Error's string `message`, anything else as
+ * `String` makes it; empty when that cannot be read. Never throws. A
+ * flattening, so the log projection's drift guard counts every call.
+ */
+export const thrownText = (value: unknown): string => {
+	if (isError(value)) {
+		const message = read(value, "message");
+		return typeof message === "string" ? message : "";
+	}
+	try {
+		return String(value);
+	} catch {
+		return "";
+	}
+};
+
+/**
  * Where the header written for `name`, a string `code` and `message` ends in
  * `stack` — `name: message` or `name [code]: message`, and for an empty
  * message also `name` or `name [code]` — when the stack starts with it and it
