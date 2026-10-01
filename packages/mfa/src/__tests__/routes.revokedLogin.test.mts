@@ -257,6 +257,34 @@ describe("the boundary's edge", () => {
 	});
 });
 
+describe("a login transaction carrying no continuation", () => {
+	it("cannot show it began after a boundary in force: 401, nothing spent; with none in force it is read as before", async () => {
+		for (const [boundaryMs, status] of [
+			[T0 - 60_000, 401],
+			[undefined, 200],
+		] as const) {
+			const revocation = createInMemorySubjectRevocation();
+			const { app, transactionStore, totp } = await composed({ revocation });
+			if (totp === undefined) throw new Error("nothing seeded");
+			const { agent, transaction } = await beginLogin(app);
+			if (boundaryMs !== undefined) {
+				await revocation.revokeBefore(ALICE.id, new Date(boundaryMs), new Date(T0 + 86_400_000));
+			}
+			const read = transactionStore.get.bind(transactionStore);
+			vi.spyOn(transactionStore, "get").mockImplementation(async (id) => {
+				const tx = await read(id);
+				return tx === null ? null : { ...tx, continuation: undefined };
+			});
+
+			const res = await readTransaction(agent, transaction);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(status);
+			expect(await read(transaction)).toMatchObject({ attempts: 0 });
+			await disposeAll();
+		}
+	});
+});
+
 describe("a boundary that cannot be read", () => {
 	it("answers 503, logged once with the store and step, spending nothing — an outage, or an answer that is neither a date nor none", async () => {
 		for (const answer of [
