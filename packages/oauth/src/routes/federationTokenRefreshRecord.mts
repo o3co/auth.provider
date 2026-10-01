@@ -50,6 +50,7 @@ export const recordRefresh = async (
 		rotatedRefreshToken,
 		rotatedIdToken,
 		derivedExpiry,
+		obtainedAt,
 		lifetimeIsBroken,
 		tokenTypeIsBroken,
 		nextTokenType,
@@ -152,6 +153,9 @@ export const recordRefresh = async (
 		// out as well — it came from a store, and a store is another thing
 		// this route does not own.
 		grantedScope: canonicalScope(currentTokens.grantedScope),
+		// From this answer alone, like the expiry: the stored one dates the
+		// token being replaced. Absent with no finite expiry.
+		...(obtainedAt === undefined ? {} : { obtainedAt }),
 	};
 
 	// The refresh worked but its token may not be handed on. Keep the

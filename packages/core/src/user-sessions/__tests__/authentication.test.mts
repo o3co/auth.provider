@@ -28,6 +28,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import {
+	canRecordSecondFactor,
 	checkSecondFactorEvent,
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
@@ -197,6 +198,154 @@ describe("vouchedAmr — the amr this provider vouches for", () => {
 			expect(vouchedAmr(recorded(amr, FEDERATED))).toEqual([]);
 		},
 	);
+});
+
+describe("a pre-upgrade session whose stored amr is not well formed — its primary cannot be told", () => {
+	it.each([
+		["a string holding fed", "confed"],
+		["a string holding pwd", "xpwdx"],
+		["a string that is pwd", "pwd"],
+		["an object", { 0: "pwd", length: 1 }],
+		["an array holding a non-string", ["pwd", 1]],
+		["an array holding an empty string", ["pwd", ""]],
+		["an array with a hole", Object.assign(new Array<string>(3), { 0: "pwd", 2: "mfa" })],
+	])(
+		"sessionAuthentication answers undefined for an amr that is %s, and does not throw",
+		(_label, stored) => {
+			// The baseline re-authenticates a primary it cannot tell; a throw would
+			// reach every request that admits the session instead.
+			const amr = stored as unknown as readonly string[];
+			expect(sessionAuthentication(session(amr))).toBeUndefined();
+			expect(requirementSession(session(amr))).toEqual({ authentication: undefined, amr: [] });
+		},
+	);
+
+	it.each([
+		["an empty string", ["", "fed"]],
+		["a non-string", ["fed", 1]],
+		["a hole", Object.assign(new Array<string>(3), { 0: "fed", 2: "hwk" })],
+	])(
+		"reads a federated session whose amr also holds %s as federated, as vouchedAmr does, keeping no upstream value",
+		(_label, stored) => {
+			// The split comes first for both readers; what is beside `fed` is kept
+			// for the record only when it is an amr.
+			const amr = stored as unknown as readonly string[];
+			expect(sessionAuthentication(session(amr))).toStrictEqual({
+				primary: "fed",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			});
+			expect(vouchedAmr(session(amr))).toEqual(["fed"]);
+		},
+	);
+});
+
+describe("a session whose recorded authentication is not one SessionAuthentication admits — it cannot be told", () => {
+	const PASSWORD: SessionAuthentication = {
+		primary: "pwd",
+		federation: undefined,
+		upstreamAmr: undefined,
+		mfaAt: undefined,
+	};
+
+	it.each([
+		["an empty object", {}],
+		["null", null],
+		["a string", "pwd"],
+		["a list", []],
+		["a null primary", { ...PASSWORD, primary: null }],
+		["an empty primary", { ...PASSWORD, primary: "" }],
+		["a federation that is a number", { ...PASSWORD, federation: 1 }],
+		["a null upstreamAmr", { ...PASSWORD, upstreamAmr: null }],
+		["an upstreamAmr that is a string", { ...PASSWORD, upstreamAmr: "hwk" }],
+		["an upstreamAmr holding a number", { ...PASSWORD, upstreamAmr: ["hwk", 1] }],
+		["a null mfaAt", { ...PASSWORD, mfaAt: null }],
+		["an mfaAt that is a number", { ...PASSWORD, mfaAt: Date.now() }],
+		["an Invalid Date mfaAt", { ...PASSWORD, mfaAt: new Date(Number.NaN) }],
+		["an mfaAt before 1970", { ...PASSWORD, mfaAt: new Date(-1) }],
+	])(
+		"%s: sessionAuthentication answers undefined and vouchedAmr vouches for nothing, without a throw",
+		(_label, stored) => {
+			// A store that maps a pre-upgrade row's empty columns to `{}` must not
+			// make it read as recorded, which would vouch for an untrusted `hwk`.
+			const s: UserSession = {
+				...session(["fed", "hwk"]),
+				authentication: stored as unknown as SessionAuthentication,
+			};
+			expect(sessionAuthentication(s)).toBeUndefined();
+			expect(vouchedAmr(s)).toEqual([]);
+			expect(requirementSession(s)).toEqual({ authentication: undefined, amr: [] });
+			expect(
+				sessionAfterSecondFactor(s, { amr: ["otp", "mfa"], at: new Date() }, Date.now()),
+			).toBeNull();
+		},
+	);
+
+	it("reads a null federation as none: a store may map an empty column to null, and the federation grants nothing", () => {
+		const s: UserSession = {
+			...session(["pwd"]),
+			authentication: { ...PASSWORD, federation: null } as unknown as SessionAuthentication,
+		};
+		expect(sessionAuthentication(s)).toStrictEqual(PASSWORD);
+		expect(vouchedAmr(s)).toEqual(["pwd"]);
+		expect(canRecordSecondFactor(s)).toBe(true);
+		expect(
+			sessionAfterSecondFactor(s, { amr: ["otp", "mfa"], at: new Date() }, Date.now())
+				?.authentication.federation,
+		).toBeUndefined();
+	});
+
+	it("reads an mfaAt ahead of any clock as recorded: the readers hold no clock, and its consumers cap it", () => {
+		const mfaAt = new Date(Date.now() + 24 * 60 * 60_000);
+		expect(sessionAuthentication(recorded(["pwd"], { ...PASSWORD, mfaAt }))?.mfaAt).toStrictEqual(
+			mfaAt,
+		);
+	});
+});
+
+describe("canRecordSecondFactor — whether a second factor can be recorded on a session", () => {
+	const PASSWORD: SessionAuthentication = {
+		primary: "pwd",
+		federation: undefined,
+		upstreamAmr: undefined,
+		mfaAt: undefined,
+	};
+	const at = new Date("2026-09-28T00:10:00Z");
+	const event = { amr: ["otp", "mfa"], at };
+	const withAmr = (stored: unknown): UserSession => ({
+		...session(undefined),
+		amr: stored as readonly string[],
+	});
+	const withAuthentication = (amr: unknown, stored: unknown): UserSession => ({
+		...withAmr(amr),
+		authentication: stored as SessionAuthentication,
+	});
+
+	it.each([
+		["a pre-upgrade password session", session(["pwd"]), true],
+		["a pre-upgrade federated session", session(["hwk", "fed"]), true],
+		["a pre-upgrade federated session with a non-string beside fed", withAmr(["fed", 1]), true],
+		["a recorded session", recorded(["pwd"], PASSWORD), true],
+		["a recorded session with no amr", recorded(undefined, PASSWORD), true],
+		["a recorded session with an empty amr", recorded([], PASSWORD), true],
+		["a pre-upgrade session with no amr", session(undefined), false],
+		["a pre-upgrade session naming no primary", session(["hwk"]), false],
+		["a pre-upgrade session whose amr is a string", withAmr("confed"), false],
+		["a pre-upgrade session whose amr holds a non-string", withAmr(["pwd", 1]), false],
+		["a recorded session whose amr holds an empty string", recorded(["pwd", ""], PASSWORD), false],
+		["a recorded session whose amr is a string", withAuthentication("pwd", PASSWORD), false],
+		["a session whose authentication is an empty object", withAuthentication(["pwd"], {}), false],
+		["a session whose authentication is null", withAuthentication(["pwd"], null), false],
+		[
+			"a session whose authentication has a null mfaAt",
+			withAuthentication(["pwd"], { ...PASSWORD, mfaAt: null }),
+			false,
+		],
+	])("agrees with sessionAfterSecondFactor on %s", (_label, s, can) => {
+		expect(canRecordSecondFactor(s)).toBe(can);
+		expect(sessionAfterSecondFactor(s, event, at.getTime()) !== null).toBe(can);
+	});
 });
 
 describe("sessionAfterSecondFactor — a recorded session whose stored amr is not well formed", () => {
@@ -558,6 +707,7 @@ describe("recordableSessionAuthentication — what a session may record as authe
 		["no primary", { federation: undefined }, "authentication.primary"],
 		["an empty primary", { ...PASSWORD, primary: "" }, "authentication.primary"],
 		["a federation that is a number", { ...PASSWORD, federation: 1 }, "authentication.federation"],
+		["a null federation", { ...PASSWORD, federation: null }, "authentication.federation"],
 		[
 			"an upstreamAmr that is a string",
 			{ ...PASSWORD, upstreamAmr: "hwk" },
@@ -566,6 +716,11 @@ describe("recordableSessionAuthentication — what a session may record as authe
 		[
 			"an upstreamAmr holding a number",
 			{ ...PASSWORD, upstreamAmr: ["hwk", 1] },
+			"authentication.upstreamAmr",
+		],
+		[
+			"an upstreamAmr with a hole",
+			{ ...PASSWORD, upstreamAmr: Object.assign(new Array<string>(2), { 1: "hwk" }) },
 			"authentication.upstreamAmr",
 		],
 		["an mfaAt that is a number", { ...PASSWORD, mfaAt: NOW }, "authentication.mfaAt"],

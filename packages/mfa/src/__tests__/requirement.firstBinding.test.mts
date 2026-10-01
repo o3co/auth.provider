@@ -57,6 +57,7 @@ import {
 	factorRecord,
 	factorStoreHolding,
 	resolverOver,
+	SEALING,
 	stubFactor,
 } from "./requirementHarness.mjs";
 
@@ -189,6 +190,7 @@ function build(options: BuildOptions = {}) {
 		sessionEmailProofAt: (subject, sid, nowMs) =>
 			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
 		firstBindingAt: (subject, nowMs) => transactionStore.firstBindingAt(subject, nowMs),
+		sealing: SEALING,
 	});
 	return { requirement, transactionStore };
 }
@@ -277,51 +279,59 @@ describe("a subject with no counting factor, in a session that recorded no facts
 
 describe("a subject with no counting factor whose session recorded a witness that says it enrolled, or nothing readable", () => {
 	for (const mode of MODES) {
-		for (const kind of KINDS) {
-			it(`${mode} · ${kind}: is an outage for each first binding — unavailable, naming the requirement, the event recorded, nothing else read`, async () => {
-				for (const witness of ["enrolled", "malformed"] as const) {
-					const events: AuditEvent[] = [];
-					const transactionStore = createMemoryMfaTransactionStore();
-					const flag = vi.spyOn(transactionStore, "emailProofRequiredAtNextBinding");
-					const proof = vi.spyOn(transactionStore, "sessionEmailProofAt");
-					const { requirement } = build({ mode, transactionStore, events });
-					for (const action of ACTIONS) {
-						const session = sessionOf(kind, facts(witness));
-						await expect(
-							requirement.admit(inputFor(session, action)),
-							action,
-						).rejects.toMatchObject({
-							name: "MfaEnrollmentStateInconsistentError",
-							reason: "mfa_enrollment_state_inconsistent",
-							witness,
-						});
-						expect(await admit(requirement, session, action), action).toEqual({
-							outcome: "unavailable",
-							store: "mfa",
-						});
-					}
-					expect(events.map((event) => [event.type, event.subject, event.details])).toEqual(
-						ACTIONS.flatMap((action) => [
-							[
-								"mfa.enrollment_state_inconsistent",
-								SUBJECT,
-								{ purpose: "session", action, witness },
-							],
-							[
-								"mfa.enrollment_state_inconsistent",
-								SUBJECT,
-								{ purpose: "session", action, witness },
-							],
-						]),
+		it(`${mode} · pwd: sends the session to log in again for each first binding, recording nothing and reading nothing else`, async () => {
+			for (const witness of ["enrolled", "malformed"] as const) {
+				const events: AuditEvent[] = [];
+				const transactionStore = createMemoryMfaTransactionStore();
+				const flag = vi.spyOn(transactionStore, "emailProofRequiredAtNextBinding");
+				const proof = vi.spyOn(transactionStore, "sessionEmailProofAt");
+				const mark = vi.spyOn(transactionStore, "firstBindingAt");
+				const { requirement } = build({ mode, transactionStore, events });
+				for (const action of ACTIONS) {
+					const session = sessionOf("pwd", facts(witness));
+					expect(await requirement.admit(inputFor(session, action)), action).toEqual(
+						REAUTHENTICATE,
 					);
-					expect(flag).not.toHaveBeenCalled();
-					expect(proof).not.toHaveBeenCalled();
 				}
-			});
-		}
+				expect(events).toEqual([]);
+				expect(flag).not.toHaveBeenCalled();
+				expect(proof).not.toHaveBeenCalled();
+				expect(mark).not.toHaveBeenCalled();
+			}
+		});
+
+		it(`${mode} · fed: is an outage for each first binding — unavailable, naming the requirement, the event recorded, nothing else read`, async () => {
+			for (const witness of ["enrolled", "malformed"] as const) {
+				const events: AuditEvent[] = [];
+				const transactionStore = createMemoryMfaTransactionStore();
+				const flag = vi.spyOn(transactionStore, "emailProofRequiredAtNextBinding");
+				const proof = vi.spyOn(transactionStore, "sessionEmailProofAt");
+				const { requirement } = build({ mode, transactionStore, events });
+				for (const action of ACTIONS) {
+					const session = sessionOf("fed", facts(witness));
+					await expect(requirement.admit(inputFor(session, action)), action).rejects.toMatchObject({
+						name: "MfaEnrollmentStateInconsistentError",
+						reason: "mfa_enrollment_state_inconsistent",
+						witness,
+					});
+					expect(await admit(requirement, session, action), action).toEqual({
+						outcome: "unavailable",
+						store: "mfa",
+					});
+				}
+				expect(events.map((event) => [event.type, event.subject, event.details])).toEqual(
+					ACTIONS.flatMap((action) => [
+						["mfa.enrollment_state_inconsistent", SUBJECT, { purpose: "session", action, witness }],
+						["mfa.enrollment_state_inconsistent", SUBJECT, { purpose: "session", action, witness }],
+					]),
+				);
+				expect(flag).not.toHaveBeenCalled();
+				expect(proof).not.toHaveBeenCalled();
+			}
+		});
 	}
 
-	it("compares the witness with the records that may count: recovery codes alone, or a kind every installed factor declares non-counting, beside it are the same outage", async () => {
+	it("compares the witness with the records that may count: recovery codes alone, or a kind every installed factor declares non-counting, beside it send a password session to log in again, and are a federated session's outage", async () => {
 		const paper = stubFactor("paper", ["paper"], { counting: false });
 		for (const records of [
 			[factorRecord(SUBJECT, "recovery_code")],
@@ -332,10 +342,15 @@ describe("a subject with no counting factor whose session recorded a witness tha
 				records,
 				factors: [FACTORS.totp(), FACTORS.recovery(), paper],
 			});
+			const kinds = JSON.stringify(records.map((record) => record.kind));
 			for (const action of ACTIONS) {
+				expect(
+					await requirement.admit(inputFor(sessionOf("pwd", facts("enrolled")), action)),
+					kinds,
+				).toEqual(REAUTHENTICATE);
 				await expect(
 					requirement.admit(inputFor(sessionOf("fed", facts("enrolled")), action)),
-					JSON.stringify(records.map((record) => record.kind)),
+					kinds,
 				).rejects.toMatchObject({ reason: "mfa_enrollment_state_inconsistent" });
 			}
 		}
@@ -378,7 +393,15 @@ describe("a subject with no counting factor whose primary is older than mfa.mana
 			}
 		});
 
-		it(`${mode}: is still an outage when its session's witness says it enrolled: the witness is read before the primary's age`, async () => {
+		it(`${mode}: is sent to log in again, recording nothing, when its password session's witness says it enrolled`, async () => {
+			const events: AuditEvent[] = [];
+			const { requirement } = build({ mode, events });
+			const stale = sessionOf("pwd", facts("enrolled"), { ageMs: 301_000 });
+			expect(await requirement.admit(inputFor(stale))).toEqual(REAUTHENTICATE);
+			expect(events).toEqual([]);
+		});
+
+		it(`${mode}: is still an outage when its federated session's witness says it enrolled: the witness is read before the primary's age`, async () => {
 			const events: AuditEvent[] = [];
 			const { requirement } = build({ mode, events });
 			const stale = sessionOf("fed", facts("enrolled"), { ageMs: 301_000 });
@@ -757,6 +780,9 @@ describe("a subject with no counting factor whose first-binding mark distrusts t
 		await expect(
 			stale.requirement.admit(inputFor(sessionOf("fed", facts("enrolled")))),
 		).rejects.toMatchObject({ name: "MfaEnrollmentStateInconsistentError" });
+		expect(await stale.requirement.admit(inputFor(sessionOf("pwd", facts("enrolled"))))).toEqual(
+			REAUTHENTICATE,
+		);
 		expect(stale.read).not.toHaveBeenCalled();
 	});
 

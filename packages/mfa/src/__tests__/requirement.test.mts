@@ -59,6 +59,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { resolverForTests, sessionRequirementContract } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, type Mock, vi } from "vitest";
+import { createRecoveryCodeFactor } from "#/recovery/factor.mjs";
 import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
 import {
@@ -70,6 +71,7 @@ import {
 	stubFactor,
 	unreachableFactorStore,
 } from "./requirementHarness.mjs";
+import { recoverySet, suiteSealing } from "./routesHarness.mjs";
 
 const ISSUER = "https://auth.example";
 
@@ -136,6 +138,7 @@ function build(
 		sessionEmailProofAt: (subject, sid, nowMs) =>
 			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
 		firstBindingAt: (subject, nowMs) => transactionStore.firstBindingAt(subject, nowMs),
+		sealing: suiteSealing(),
 	});
 	return { requirement, transactionStore };
 }
@@ -1177,6 +1180,55 @@ describe("admitPrimary — after a password login", () => {
 				expect(admission.outcome, `${mode} ${kind}`).toBe("interrupt");
 				if (admission.outcome !== "interrupt") return;
 				expect((await admission.open("sess-1")).body.error, `${mode} ${kind}`).toBe("mfa_required");
+			}
+		}
+	});
+
+	it("reads a recovery set with no code left as no record: established under optional, a first binding under required", async () => {
+		const exhausted = {
+			...factorRecord("u-alice", "recovery_code"),
+			data: suiteSealing().sealFactorData(
+				{ subject: "u-alice", id: "f-1", kind: "recovery_code" },
+				recoverySet(0).data,
+			),
+		};
+		for (const mode of ["optional", "required"] as const) {
+			const { requirement } = build(mode, {
+				factors: [FACTORS.totp(), createRecoveryCodeFactor({ count: 2 })],
+				factorStore: factorStoreHolding(exhausted),
+			});
+			const admission = await admitPrimary(depsFor(requirement), primaryOf("u-alice"));
+			if (mode === "optional") {
+				expect(admission.outcome, mode).toBe("establish");
+				continue;
+			}
+			if (admission.outcome !== "interrupt") throw new Error("not interrupted");
+			expect((await admission.open("sess-1")).body.error, mode).toBe("mfa_enrollment_required");
+		}
+	});
+
+	it("still interrupts for a second factor over a recovery set with a code left, or one whose data does not open", async () => {
+		const sealedFor = (subject: string, count: number) => ({
+			...factorRecord("u-alice", "recovery_code"),
+			data: suiteSealing().sealFactorData(
+				{ subject, id: "f-1", kind: "recovery_code" },
+				recoverySet(count).data,
+			),
+		});
+		for (const [what, record] of [
+			["a code left", sealedFor("u-alice", 1)],
+			["data that does not open", sealedFor("u-bob", 0)],
+		] as const) {
+			for (const mode of ["optional", "required"] as const) {
+				const { requirement } = build(mode, {
+					factors: [FACTORS.totp(), createRecoveryCodeFactor({ count: 2 })],
+					factorStore: factorStoreHolding(record),
+				});
+				const admission = await admitPrimary(depsFor(requirement), primaryOf("u-alice"));
+				if (admission.outcome !== "interrupt") throw new Error(`${what}, ${mode}: not interrupted`);
+				expect((await admission.open("sess-1")).body.error, `${what}, ${mode}`).toBe(
+					"mfa_required",
+				);
 			}
 		}
 	});

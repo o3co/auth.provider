@@ -41,7 +41,9 @@ import {
 import {
 	federationGrantAccessToken,
 	federationGrantHeldToken,
+	federationGrantKeptAccessToken,
 	type StoredAccessToken,
+	type WrittenAccessToken,
 } from "./held-token.mjs";
 import { federationGrantEffectiveExpiry } from "./lifetime.mjs";
 import type { FederationGrantStore } from "./store.mjs";
@@ -50,6 +52,7 @@ import {
 	type FederationGrant,
 	type FederationGrantConnection,
 	type FederationGrantCredentials,
+	type FederationGrantCredentialsInput,
 	type FederationGrantDenial,
 	type FederationGrantIneligibilityMarker,
 	type FederationGrantRefreshFailureInput,
@@ -487,7 +490,7 @@ type Evaluation =
 			 * eligible under the current maximum, alive, and dated believably. A
 			 * refresh that brings nothing usable keeps it.
 			 */
-			readonly keep?: StoredAccessToken;
+			readonly keep?: WrittenAccessToken;
 			/** The access token that is stored, whether or not it could be disclosed. */
 			readonly stored?: string;
 	  };
@@ -761,8 +764,11 @@ async function evaluate(
 		};
 	}
 	const credentials = opened.credentials.value;
-	const token = credentials.accessToken;
-	let keep: StoredAccessToken | undefined;
+	// Read once, here: what is judged is what a refresh keeps, and nothing of a
+	// store's answer is read again once the upstream has been asked.
+	const stored = credentials.accessToken;
+	const token = stored === undefined ? undefined : federationGrantKeptAccessToken(stored);
+	let keep: WrittenAccessToken | undefined;
 	if (token !== undefined) {
 		// The same predicate guards every disclosure, cached or fresh, against
 		// the CURRENT maximum.
@@ -1332,7 +1338,7 @@ async function refreshUnderLock(
 	// written — and the stored one that still can be is kept: a refresh that
 	// brought nothing usable must not cost the grant the token that worked. It
 	// is judged again, against the maximum and the clock, at every disclosure.
-	let credentials: FederationGrantCredentials = {
+	let credentials: FederationGrantCredentialsInput = {
 		refreshToken: response.refreshToken,
 		accessToken: held.keep,
 	};

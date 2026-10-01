@@ -39,6 +39,7 @@ import type {
 	MfaVerification,
 	PrimaryContinuation,
 } from "@o3co/auth-provider-core";
+import type { MfaFactorSetStart } from "./factorSet.mjs";
 import type { RequireEmailProof, UnprovableReason } from "./firstBinding.mjs";
 import type { MfaMailRefusal } from "./mail.mjs";
 import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
@@ -135,6 +136,8 @@ export interface MfaCeremonySession {
 	readonly user: Readonly<Record<string, unknown>>;
 	readonly authTimeMs: number | undefined;
 	readonly witness: "enrolled" | "not_enrolled" | "malformed" | undefined;
+	/** Where a write to the subject's factor set begins, taken before the session was admitted for one (`factorSet.mts`); none for an action that writes none. */
+	readonly factorSetStart?: MfaFactorSetStart;
 }
 
 /** One call's request: the transaction named, the binding the browser presents, and what a factor may read of the request. */
@@ -457,10 +460,14 @@ export interface MfaCeremonyKit {
 	/**
 	 * D12's reconciliation for `subject`, just verified with a counting factor
 	 * its `User` does not say it enrolled: the first-binding mark noted, then
-	 * the witness marked — only once the mark was noted, and never by a
-	 * directory that cannot write it. Never throws.
+	 * the witness marked — only once the mark was noted, never by a directory
+	 * that cannot write it, and held to `started`, read before the proof was
+	 * checked. Never throws.
 	 */
-	readonly reconcileWitness: (subject: string) => Promise<{
+	readonly reconcileWitness: (
+		subject: string,
+		started: MfaFactorSetStart | undefined,
+	) => Promise<{
 		readonly witness: MfaWitnessMark | undefined;
 		readonly firstBindingUnnoted: MfaStoreOutage | undefined;
 	}>;
@@ -480,8 +487,9 @@ export interface MfaCeremonyKit {
 		acrValues: readonly string[] | undefined,
 	) => Promise<MfaTransaction | MfaStoreOutage>;
 	/**
-	 * Whether `subject` holds a factor of an installed kind whose data opens
-	 * among `records` — one that counts, when `options.counting` asks it.
+	 * Whether `subject` holds a usable record among `records` (`factorState.mts`:
+	 * a factor of an installed kind whose data opens, but a recovery set with no
+	 * code left) — one that counts, when `options.counting` asks it.
 	 */
 	readonly holdsUsable: (
 		subject: string,

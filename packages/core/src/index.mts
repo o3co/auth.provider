@@ -685,6 +685,7 @@ export {
 	MFA_LOCKOUT_MAX_BACKOFF_SECONDS,
 	MFA_LOCKOUT_MAX_HARD_LIMIT,
 	MFA_LOCKOUT_MIN_HARD_LIMIT,
+	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
@@ -844,10 +845,10 @@ export {
 	normalizeAllowedOrigins,
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
-// The registered-redirect-URI shape vocabulary — enforced by
-// ClientEntrySchema at boot; exported so a custom ClientRepository, which
-// bypasses that schema by design, can hold its registrations to the same
-// rules and refuse in the same words.
+// The registered-redirect-URI shape vocabulary, the query's parameter names
+// included — enforced by ClientEntrySchema at boot; exported so a custom
+// ClientRepository, which bypasses that schema by design, can hold its
+// registrations to the same rules and refuse in the same words.
 // `matchesRegisteredRedirectUri` is the runtime half of the same
 // vocabulary — the /authorize allowlist comparison, exact except for the RFC
 // 8252 §7.3 loopback port. Exported alongside the shape checker so a custom
@@ -1408,6 +1409,9 @@ export {
 	type FederationGrantStoreFactory,
 	registerBuiltinFederationGrantStores,
 } from "./federation-grants/factory.mjs";
+// The access token a grant's credential stores, from a finite lifetime reading:
+// every writer of a credential builds it here, so each keeps the same three facts.
+export { federationGrantAccessToken } from "./federation-grants/held-token.mjs";
 export {
 	createFederationGrantIntentStoreFactory,
 	type FederationGrantIntentStoreFactory,
@@ -1523,6 +1527,7 @@ export {
 	type FederationGrantConnection,
 	type FederationGrantConsent,
 	type FederationGrantCredentials,
+	type FederationGrantCredentialsInput,
 	type FederationGrantDenial,
 	type FederationGrantExpiredReason,
 	type FederationGrantIneligibilityMarker,

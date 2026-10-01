@@ -23,8 +23,10 @@ import {
 	type FederationTokenStore,
 	type FederationTokens,
 	type Logger,
+	memoryFederationTokenStoreModule,
 	type RefreshTokenFamilyRevocation,
 	type SessionFederationIndex,
+	type SupportsLock,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -172,6 +174,7 @@ interface BuildAppOpts {
 	logger?: Logger;
 	auditSink?: AuditSink;
 	refreshBufferMs?: number;
+	maxTokenLifetimeMs?: number;
 }
 
 function buildApp(opts: BuildAppOpts = {}) {
@@ -187,6 +190,7 @@ function buildApp(opts: BuildAppOpts = {}) {
 		logger: opts.logger,
 		auditSink: opts.auditSink,
 		refreshBufferMs: opts.refreshBufferMs,
+		maxTokenLifetimeMs: opts.maxTokenLifetimeMs,
 	});
 	app.use("/oauth", router);
 	return app;
@@ -1639,6 +1643,51 @@ describe("POST /oauth/federation/:name/token", () => {
 					});
 				});
 
+				it("refuses an expiresIn whose milliseconds overflow to Infinity, even beside a usable expiresAt", async () => {
+					// A lifetime with no finite end in milliseconds names no lifetime: it
+					// is malformed whatever the other field says.
+					const { app, fedTokenStore, auditSink } = auditedApp({
+						accessToken: "new-at",
+						refreshToken: "rotated-rt",
+						expiresIn: 1e306,
+						expiresAt: new Date(Date.now() + 3_600_000),
+					});
+					const res = await postFedToken(app, "google", await mintAccessToken());
+
+					expect(res.status).toBe(500);
+					expect(res.body.error).toBe("refresh_failed");
+					expect(auditSink.record).toHaveBeenCalledWith(
+						expect.objectContaining({
+							type: "federation.token.refresh_failed",
+							details: expect.objectContaining({ reason: "invalid_expiry" }),
+						}),
+					);
+					expect(fedTokenStore.update).toHaveBeenCalledTimes(1);
+					expect(fedTokenStore.update).toHaveBeenCalledWith(
+						expect.any(String),
+						"google",
+						expect.objectContaining({ accessToken: "upstream-at-xyz", refreshToken: "rotated-rt" }),
+					);
+				});
+
+				it("stores the instant for an expiresIn whose start would lie before the Date range, beside a usable expiresAt", async () => {
+					// Nothing is dated back to fit the issued lifetime, so no instant
+					// outside the Date range is ever derived: the earlier field stands.
+					await withFrozenDate(async () => {
+						const expiresAt = new Date(Date.now() + 3_600_000);
+						const { app, fedTokenStore } = auditedApp({
+							accessToken: "new-at",
+							expiresIn: 2e13,
+							expiresAt,
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(3600);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(expiresAt.getTime());
+					});
+				});
+
 				it("takes expiresAt when it ends before expiresIn", async () => {
 					await withFrozenDate(async () => {
 						const expiresAt = new Date(Date.now() + 600_000);
@@ -1652,6 +1701,151 @@ describe("POST /oauth/federation/:name/token", () => {
 						expect(res.status).toBe(200);
 						expect(res.body.expires_in).toBe(600);
 						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(expiresAt.getTime());
+					});
+				});
+
+				it.each([
+					["an object that only inherits from Date", () => Object.create(Date.prototype)],
+					["a Proxy around a Date", () => new Proxy(new Date(Date.now() + 3_600_000), {})],
+					[
+						"a revoked Proxy",
+						() => {
+							const { proxy, revoke } = Proxy.revocable(new Date(Date.now() + 3_600_000), {});
+							revoke();
+							return proxy;
+						},
+					],
+				])(
+					"refuses an expiresAt that is %s, and still keeps the rotated refresh token",
+					async (_label, expiresAt) => {
+						// Reading such a value must not throw out of the answer's reading:
+						// the refusal is what keeps the rotated refresh token.
+						const { app, fedTokenStore, auditSink } = auditedApp({
+							accessToken: "new-at",
+							refreshToken: "rotated-rt",
+							expiresAt: expiresAt(),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(500);
+						expect(res.body.error).toBe("refresh_failed");
+						expect(auditSink.record).toHaveBeenCalledWith(
+							expect.objectContaining({
+								type: "federation.token.refresh_failed",
+								details: expect.objectContaining({ reason: "invalid_expiry" }),
+							}),
+						);
+						expect(fedTokenStore.update).toHaveBeenCalledTimes(1);
+						expect(fedTokenStore.update).toHaveBeenCalledWith(
+							expect.any(String),
+							"google",
+							expect.objectContaining({
+								accessToken: "upstream-at-xyz",
+								refreshToken: "rotated-rt",
+							}),
+						);
+					},
+				);
+			});
+
+			describe("caps what it stores at the maximum lifetime, and never refuses over it", () => {
+				const DAY_MS = 86_400_000;
+				const cappedApp = (
+					answer: unknown,
+					options: Pick<BuildAppOpts, "maxTokenLifetimeMs"> = {},
+				) => {
+					const fedTokenStore = makeFedTokenStore({
+						get: vi.fn().mockResolvedValue({
+							...baseFedTokens,
+							expiresAt: new Date(Date.now() - 1000),
+						}),
+					});
+					const refreshProvider = {
+						...federationBase("google"),
+						refreshToken: vi.fn(async () =>
+							typeof answer === "function" ? (answer as () => unknown)() : answer,
+						),
+					} as unknown as FederationProvider;
+					const app = buildApp({
+						fedTokenStore,
+						getFederationProviders: () =>
+							new Map<string, FederationProvider>([["google", refreshProvider]]),
+						...options,
+					});
+					return { app, fedTokenStore };
+				};
+				const withFrozenDate = async (run: () => Promise<void>) => {
+					vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+					try {
+						await run();
+					} finally {
+						vi.useRealTimers();
+					}
+				};
+
+				it("caps an expiresAt far in the future at 24 hours by default", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = cappedApp({
+							accessToken: "new-at",
+							expiresAt: new Date("2100-01-01T00:00:00Z"),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(DAY_MS / 1000);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + DAY_MS);
+					});
+				});
+
+				it("caps an absurd expiresIn at 24 hours by default", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = cappedApp({ accessToken: "new-at", expiresIn: 1e12 });
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + DAY_MS);
+					});
+				});
+
+				it("caps at the configured maximum", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = cappedApp(
+							{ accessToken: "new-at", expiresIn: 7200 },
+							{ maxTokenLifetimeMs: 3_600_000 },
+						);
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(3600);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + 3_600_000);
+					});
+				});
+
+				it("leaves a lifetime under the maximum as it is", async () => {
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore } = cappedApp(
+							{ accessToken: "new-at", expiresIn: 3599 },
+							{ maxTokenLifetimeMs: 3_600_000 },
+						);
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + 3_599_000);
+					});
+				});
+
+				it("counts the maximum from when the answer is read, so a slow call never leaves a capped token without its full maximum", async () => {
+					await withFrozenDate(async () => {
+						const CALL_MS = 120_000;
+						const { app, fedTokenStore } = cappedApp(() => {
+							vi.setSystemTime(Date.now() + CALL_MS);
+							return { accessToken: "new-at", expiresIn: (2 * DAY_MS) / 1000 };
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(DAY_MS / 1000);
+						expect(storedExpiry(fedTokenStore)?.getTime()).toBe(Date.now() + DAY_MS);
 					});
 				});
 			});
@@ -4176,6 +4370,291 @@ describe("POST /oauth/federation/:name/token — a refused access token is logge
 	});
 });
 
+describe("POST /oauth/federation/:name/token — a token is never refreshed before it is half spent", () => {
+	const SHORT_S = 5;
+	/** Core's in-memory store, as a composition installs it: it keeps `obtainedAt` as written. */
+	const memoryStore = () =>
+		memoryFederationTokenStoreModule.provides?.federationTokenStore?.({} as never) as
+			| FederationTokenStore
+			| undefined;
+	const withFrozenDate = async (run: () => Promise<void>) => {
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+		try {
+			await run();
+		} finally {
+			vi.useRealTimers();
+		}
+	};
+	const appWith = (fedTokenStore: FederationTokenStore, refreshToken: () => Promise<unknown>) => {
+		const provider = {
+			...federationBase("google"),
+			refreshToken: vi.fn(refreshToken),
+		} as unknown as FederationProvider;
+		const app = buildApp({
+			fedTokenStore,
+			getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+		});
+		return { app, provider: provider as unknown as { refreshToken: ReturnType<typeof vi.fn> } };
+	};
+	const seeded = async (tokens: FederationTokens) => {
+		const store = memoryStore();
+		if (store === undefined) throw new Error("core's memory module provides no store");
+		await store.attach("sid-1", "google", tokens);
+		return store;
+	};
+
+	it("does not refresh again a lifetime shorter than the buffer it just stored", async () => {
+		// An upstream that issues 5-second tokens would otherwise be asked again,
+		// and rotate its refresh token, on every request.
+		await withFrozenDate(async () => {
+			const store = await seeded({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) });
+			let issued = 0;
+			const { app, provider } = appWith(store, async () => {
+				issued += 1;
+				return {
+					accessToken: `short-at-${issued}`,
+					expiresIn: SHORT_S,
+					refreshToken: `rt-${issued}`,
+				};
+			});
+
+			const first = await postFedToken(app, "google", await mintAccessToken());
+			vi.setSystemTime(Date.now() + 1000);
+			const second = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(first.status).toBe(200);
+			expect(second.status).toBe(200);
+			expect(second.body.access_token).toBe("short-at-1");
+			expect(second.body.expires_in).toBe(SHORT_S - 1);
+			expect(provider.refreshToken).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	it("refreshes a token with less than a second left, even before it is half spent", async () => {
+		await withFrozenDate(async () => {
+			const store = await seeded({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) });
+			let issued = 0;
+			const { app, provider } = appWith(store, async () => {
+				issued += 1;
+				return {
+					accessToken: `one-second-at-${issued}`,
+					expiresIn: 1,
+					refreshToken: `rt-${issued}`,
+				};
+			});
+
+			await postFedToken(app, "google", await mintAccessToken());
+			vi.setSystemTime(Date.now() + 100);
+			const second = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(second.body.access_token).toBe("one-second-at-2");
+			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
+		});
+	});
+
+	it("refreshes it once half of it is spent", async () => {
+		await withFrozenDate(async () => {
+			const store = await seeded({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) });
+			let issued = 0;
+			const { app, provider } = appWith(store, async () => {
+				issued += 1;
+				return {
+					accessToken: `short-at-${issued}`,
+					expiresIn: SHORT_S,
+					refreshToken: `rt-${issued}`,
+				};
+			});
+
+			await postFedToken(app, "google", await mintAccessToken());
+			vi.setSystemTime(Date.now() + (SHORT_S * 1000) / 2);
+			const second = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(second.body.access_token).toBe("short-at-2");
+			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
+		});
+	});
+
+	it("records when the refresh call began as obtainedAt, and the capped end beyond it", async () => {
+		// The cap counts from when the answer is read, so the recorded life
+		// (`expiresAt − obtainedAt`) exceeds the maximum by the call's duration.
+		// The replaced token's obtainedAt is not carried forward.
+		await withFrozenDate(async () => {
+			const CALL_MS = 120_000;
+			const calledAt = Date.now();
+			const store = await seeded({
+				...baseFedTokens,
+				obtainedAt: new Date(Date.now() - 3_600_000),
+				expiresAt: new Date(Date.now() - 1000),
+			});
+			const { app } = appWith(store, async () => {
+				vi.setSystemTime(Date.now() + CALL_MS);
+				return { accessToken: "new-at", expiresIn: 2 * 86_400 };
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+
+			expect(res.status).toBe(200);
+			expect(stored?.obtainedAt?.getTime()).toBe(calledAt);
+			expect(stored?.expiresAt?.getTime()).toBe(calledAt + CALL_MS + 86_400_000);
+		});
+	});
+
+	it("records no obtainedAt for an end the upstream stated only as an instant, so it is not damped", async () => {
+		// An absolute `expiresAt` is on the upstream's clock, which no
+		// requirement keeps in step with this server's: only an end counted
+		// from the call is aged.
+		await withFrozenDate(async () => {
+			const store = await seeded({
+				...baseFedTokens,
+				obtainedAt: new Date(Date.now() - 3_600_000),
+				expiresAt: new Date(Date.now() - 1000),
+			});
+			let issued = 0;
+			const { app, provider } = appWith(store, async () => {
+				issued += 1;
+				return {
+					accessToken: `instant-at-${issued}`,
+					expiresAt: new Date(Date.now() + SHORT_S * 1000),
+					refreshToken: `rt-${issued}`,
+				};
+			});
+
+			await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+			vi.setSystemTime(Date.now() + 1000);
+			const second = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(stored !== null && "obtainedAt" in stored).toBe(false);
+			expect(second.body.access_token).toBe("instant-at-2");
+			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
+		});
+	});
+
+	it("records no obtainedAt for a token with no finite expiry, and drops the replaced token's", async () => {
+		const store = await seeded({
+			...baseFedTokens,
+			obtainedAt: new Date(Date.now() - 3_600_000),
+			expiresAt: new Date(Date.now() - 1000),
+		});
+		const { app } = appWith(store, async () => ({ accessToken: "new-at" }));
+
+		const res = await postFedToken(app, "google", await mintAccessToken());
+		const stored = await store.get("sid-1", "google");
+
+		expect(res.status).toBe(200);
+		expect(stored?.expiresAt).toBeNull();
+		expect(stored !== null && "obtainedAt" in stored).toBe(false);
+	});
+
+	it.each([
+		["a record without obtainedAt (linked, or written before the field)", undefined],
+		["a record whose obtainedAt names no instant", new Date(Number.NaN)],
+	])("refreshes %s within the buffer, as before", async (_label, obtainedAt) => {
+		const store = await seeded({
+			...baseFedTokens,
+			expiresAt: new Date(Date.now() + SHORT_S * 1000),
+			...(obtainedAt === undefined ? {} : { obtainedAt }),
+		});
+		const { app, provider } = appWith(store, async () => ({
+			accessToken: "new-at",
+			expiresIn: 3600,
+		}));
+
+		const res = await postFedToken(app, "google", await mintAccessToken());
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("new-at");
+		expect(provider.refreshToken).toHaveBeenCalledTimes(1);
+	});
+
+	it("a waiter on the lock that re-reads a token not yet half spent answers it without calling the upstream", async () => {
+		// N requests queued on the lock would otherwise make N serial rotations.
+		const now = Date.now();
+		const ended = { ...baseFedTokens, expiresAt: new Date(now - 1000) };
+		const justRefreshed = {
+			...baseFedTokens,
+			accessToken: "refreshed-by-the-holder",
+			obtainedAt: new Date(now - 1000),
+			expiresAt: new Date(now + (SHORT_S - 1) * 1000),
+		};
+		const release = vi.fn().mockResolvedValue(undefined);
+		const store = {
+			...makeFedTokenStore({
+				get: vi.fn().mockResolvedValueOnce(ended).mockResolvedValueOnce(justRefreshed),
+			}),
+			acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
+		};
+		const { app, provider } = appWith(store, async () => ({
+			accessToken: "new-at",
+			expiresIn: 3600,
+		}));
+
+		const res = await postFedToken(app, "google", await mintAccessToken());
+
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("refreshed-by-the-holder");
+		expect(provider.refreshToken).not.toHaveBeenCalled();
+		expect(release).toHaveBeenCalled();
+	});
+});
+
+describe("POST /oauth/federation/:name/token — a record removed while the refresh waits for the lock is never refreshed", () => {
+	// A logout or an unlink that removes the record while a refresh waits for
+	// the lock asked for its refresh token to be dropped: the refresh answers
+	// as if the link were gone, and writes no record back.
+	it("is answered unlinked, with no upstream call and no record written back", async () => {
+		const store = memoryFederationTokenStoreModule.provides?.federationTokenStore?.({} as never) as
+			| (FederationTokenStore & SupportsLock)
+			| undefined;
+		if (store === undefined) throw new Error("core's memory module provides no store");
+		await store.attach("sid-1", "google", {
+			...baseFedTokens,
+			expiresAt: new Date(Date.now() - 1000),
+		});
+		const release = vi.fn();
+		const lockingStore: FederationTokenStore & SupportsLock = {
+			...store,
+			attach: vi.fn(store.attach),
+			update: vi.fn(store.update),
+			// The logout lands while this request waits for the lock.
+			acquireLock: async (opts) => {
+				await store.delete("sid-1", "google");
+				const result = await store.acquireLock(opts);
+				if (!result.acquired) return result;
+				return {
+					acquired: true,
+					release: async () => {
+						release();
+						await result.release();
+					},
+				};
+			},
+		};
+		const index = makeSessionFederationIndex();
+		const refreshToken = vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: 3600 });
+		const provider = { ...federationBase("google"), refreshToken } as unknown as FederationProvider;
+		const app = buildApp({
+			fedTokenStore: lockingStore,
+			sessionFederationIndex: index,
+			getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+		});
+
+		const res = await postFedToken(app, "google", await mintAccessToken());
+
+		// The answer the first read gives a missing record.
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("federation_not_linked");
+		expect(res.body.error_description).toBe("federation 'google' tokens not found");
+		expect(index.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+		expect(refreshToken).not.toHaveBeenCalled();
+		expect(lockingStore.update).not.toHaveBeenCalled();
+		expect(lockingStore.attach).not.toHaveBeenCalled();
+		expect(await store.get("sid-1", "google")).toBeNull();
+		expect(release).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe("createRouter — refreshBufferMs", () => {
 	it.each([
 		["zero", 0],
@@ -4196,7 +4675,46 @@ describe("createRouter — refreshBufferMs", () => {
 
 	it("accepts a positive buffer, and defaults when none is given", () => {
 		expect(() => buildApp({ refreshBufferMs: 1000 })).not.toThrow();
-		expect(() => buildApp({ refreshBufferMs: 2 ** 31 - 1 })).not.toThrow();
+		expect(() =>
+			buildApp({ refreshBufferMs: 2 ** 31 - 1, maxTokenLifetimeMs: 365 * 86_400_000 }),
+		).not.toThrow();
 		expect(() => buildApp()).not.toThrow();
+	});
+});
+
+describe("createRouter — maxTokenLifetimeMs", () => {
+	it.each([
+		["zero", 0],
+		["a negative maximum", -1],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a numeric string", "86400000" as unknown as number],
+		["null", null as unknown as number],
+		["a fraction of a millisecond", 60_000.5],
+		["equal to the refresh buffer", 30_000],
+		["below the refresh buffer", 29_999],
+		["more than 365 days", 365 * 86_400_000 + 1],
+	])("refuses %s when the route is built", (_label, maxTokenLifetimeMs) => {
+		// A maximum at or below the buffer stores every refreshed token already
+		// due, so every request would refresh upstream.
+		expect(() => buildApp({ refreshBufferMs: 30_000, maxTokenLifetimeMs })).toThrow(RangeError);
+	});
+
+	it("refuses a refresh buffer the default maximum does not exceed, naming the fix", () => {
+		expect(() => buildApp({ refreshBufferMs: 86_400_000 })).toThrow(
+			/maxTokenLifetimeMs.*greater than refreshBufferMs.*with a refreshBufferMs of 24 h or more, pass a larger maxTokenLifetimeMs/,
+		);
+	});
+
+	it("names the value it refused and the upper bound in days", () => {
+		expect(() => buildApp({ refreshBufferMs: 30_000, maxTokenLifetimeMs: 30_000 })).toThrow(
+			/at most 365 days \(31536000000\).*got 30000/,
+		);
+	});
+
+	it("accepts a maximum above the buffer up to 365 days, and defaults when none is given", () => {
+		expect(() => buildApp({ refreshBufferMs: 30_000, maxTokenLifetimeMs: 30_001 })).not.toThrow();
+		expect(() => buildApp({ maxTokenLifetimeMs: 365 * 86_400_000 })).not.toThrow();
+		expect(() => buildApp({ refreshBufferMs: 86_399_999 })).not.toThrow();
 	});
 });

@@ -18,8 +18,8 @@
 export { type WebAuthnConfig, webauthnConfigSchema } from "./config.mjs";
 export { WEBAUTHN_GRANT_TYPE } from "./grant.mjs";
 export { WEBAUTHN_ALGORITHM_IDS } from "./internal/options.mjs";
-// The WebAuthn second factor, contributed as `mfaFactors.webauthn` (the MFA
-// ADR's D4, F7), with its section `webauthn-mfa-factor`.
+// The WebAuthn second factor, contributed as `mfaFactors.webauthn`, with its
+// section `webauthn-mfa-factor`.
 export { webauthnMfaFactorModule } from "./mfaFactor/module.mjs";
 export { webauthnModule } from "./module.mjs";
 // WebAuthnSubject + Express Request augmentation — consumers importing this
@@ -29,8 +29,8 @@ export type { WebAuthnSubject } from "./request.mjs";
 // Operator-facing: it is what a `limits` entry on a RateLimiter adapter is
 // keyed by when overriding the per-endpoint spec.
 export { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "./routes/authenticationOptions.mjs";
-// The session-admission ADR's D8: the bridge from the admitted browser session
-// to `req.webauthnSubject`, as a module the deployment installs.
+// The bridge from the browser session core's session admission admits to
+// `req.webauthnSubject`, as a module the deployment installs.
 export {
 	WEBAUTHN_SESSION_SUBJECT_ROUTE_ID,
 	type WebAuthnSessionSubjectOptions,

@@ -2175,6 +2175,49 @@ so neither reader takes the other's. The in-memory adapter declares
 representation carries the user's absence, distinguished by its kind and code.
 The port gains no operation; `noteRefreshFailure` gains the guard D2 names.
 
+**Amended 2026-10-02 (#1037): a strict credential, and a sealed extension
+beside it.** The credential at `fg:{<id>}:cred` stays exactly as v0.15 and
+v0.16 read it: the same tuple, the same authenticated data, `format` `"1"`. A
+release that reads it rejects a tuple of any other length, so the tuple does
+not grow. Facts about the credential that it cannot hold go into one more
+field of the grant HASH, `ext`: a JSON object of named keys, of which a reader
+reads the ones it knows and ignores the rest. `effectiveExpiresAt` (D17's
+amendment) is the first key. Later additive facts go here, not into the tuple.
+
+- **Sealed beside the credential, and bound to it.** `ext` is sealed under the
+  same key ring as the credential, in its own envelope. Its authenticated
+  data is its own label (`o3co.auth-provider.federation-grant-ext`), the
+  credential's whole
+  binding (the key, the record's identity, the authorization text), and the
+  SHA-256 of the exact credential envelope written with it. Both come from one
+  preparation, and the script that sets the credential sets `ext` or removes
+  it in the same step. So `ext` opens only beside that envelope. It does not
+  open beside another grant's credential, beside an earlier or later one of
+  its own grant, or in place of a credential. Any rewrite of a sealed
+  credential, by a release that does not know `ext` included, orphans it,
+  since every seal draws a new IV. Under `allow-plaintext`, `ext` carries that
+  digest as `bind` and is compared with the credential read in the same
+  snapshot; a plaintext credential's spelling is deterministic, so a
+  byte-identical rewrite (the same token) by a release that does not know
+  `ext` leaves it readable, and plaintext authenticates nothing. Binding to
+  the record's `version` was considered and rejected: activation writes
+  `version + 1` without comparing it, so a refresh or a reauthorization
+  between the preparation and the script would orphan a fresh `ext`.
+- **Every key is safe to lose.** An `ext` that is absent, too long, does not
+  open (a key not in the ring included) or does not parse reads as absent,
+  and never changes what the credential itself reads as. A credential rewrite
+  drops unknown keys, rebuilding known ones from the credentials written. So
+  no key may be the only place a limit on what the grant allows is kept. For
+  `effectiveExpiresAt`, absent means the released end,
+  `obtainedAt + issuedLifetime`, which core bounds the key by anyway. Losing
+  it, or deleting the field, restores the released behaviour. That is not a
+  fail-closed expiry, and it is no wider than what a release before the key
+  allowed.
+- `ext` is a HASH field, not a key: it expires with the record, and a
+  revocation or a reauthorization removes it with the credential. That
+  removal is cleanup; correctness does not rest on it, since an old release's
+  scripts do not remove it.
+
 ### D17 — The federation adapter surface gains one capability, in three methods
 
 Every adapter fixes its authorization parameters today, so `offline_access`
@@ -2375,7 +2418,8 @@ answer arrives and again at every disclosure; and a new optional field,
 `effectiveExpiresAt` ends at `obtainedAt + issuedLifetime`, as every record
 did before, and no record ends later than that: the end is bounded by
 `obtainedAt + issuedLifetime`. `effectiveExpiresAt` is optional only until
-the Redis store (#1037) and the connect callback (#1020) write it; leaving
+the connect callback (#1020) writes it, as the Redis store now does (D16's
+amendment of 2026-10-02); leaving
 it out serves a token past its adapter's stated end, so it then becomes a
 required key.
 
@@ -2408,12 +2452,24 @@ both fields state it, and anything else has no finite lifetime. A held
 token's age (D10's believed date, the life it has left, and half-spent) is
 `judgeHeldUpstreamToken`, beside the reading. A stored credential without
 `effectiveExpiresAt` whose issued lifetime would end beyond any instant a
-`Date` holds is not believed, and so it is refreshed. The Redis adapter does not keep `effectiveExpiresAt`
-yet, so a record it holds ends at `obtainedAt + issuedLifetime`, which now
-counts from the call's start. The connect callback (D7 check 6) still dates
+`Date` holds is not believed, and so it is refreshed. The Redis adapter
+keeps `effectiveExpiresAt` in the credential's sealed extension (D16's
+amendment of 2026-10-02); a record whose extension is absent ends at
+`obtainedAt + issuedLifetime`, which now counts from the call's start. The connect callback (D7 check 6) still dates
 the token it activates by the earlier clamp and writes no
 `effectiveExpiresAt`, until it reads the answer through the same function
 (#1020).
+
+**Amended 2026-10-02 (#1075): a writer must state the end; a reader must not
+count on it.** Once the connect callback wrote `effectiveExpiresAt` (#1073),
+it did not become a required key of the record, as planned above: a record
+activated before then, one rewritten by a 0.15 or 0.16 replica during a
+rolling deploy, and one whose sealed extension does not open (D16's amendment)
+still have none. The types split instead. What a writer hands the store,
+`FederationGrantCredentialsInput`, requires it as a `Date`; what the store
+answers, `FederationGrantCredentials`, keeps it optional, read as ending at
+`obtainedAt + issuedLifetime`. A refresh that keeps the stored token writes it
+back with the end it is read to have, which changes nothing a reader sees.
 
 ### D18 — Audit, with a correlation ID
 

@@ -36,6 +36,7 @@ import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import { checkLinkStart } from "./FederationLinkStart.mjs";
 import { logMisconfigured, logStoreUnavailable } from "./FederationLog.mjs";
+import { answerNoRedirectPolicy } from "./FederationRedirectAnswer.mjs";
 
 /** The start route's handler, over the router's context. */
 export const createStartHandler =
@@ -78,11 +79,7 @@ export const createStartHandler =
 			if (!policy) {
 				// Pairing invariant fires at boot; this branch is defence-in-depth
 				// against a hypothetical bug bypassing the invariant at runtime.
-				logMisconfigured(logger, "no_redirect_policy", { provider: provider.name });
-				return res.status(500).json({
-					error: "internal_error",
-					error_description: "redirect policy not registered for provider",
-				});
+				return answerNoRedirectPolicy(res, logger, { provider: provider.name });
 			}
 			const validation = policy.validateRedirect(redirect_to);
 			if (!validation.ok) {

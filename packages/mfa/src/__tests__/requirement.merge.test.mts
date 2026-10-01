@@ -57,6 +57,7 @@ import {
 	factorStoreHolding,
 	NO_FIRST_BINDING_MARK,
 	resolverOver,
+	SEALING,
 	WITHOUT_MAIL,
 } from "./requirementHarness.mjs";
 
@@ -108,6 +109,7 @@ const realRequirement = (
 		logger: consoleLogger,
 		...WITHOUT_MAIL,
 		...NO_FIRST_BINDING_MARK,
+		sealing: SEALING,
 	});
 
 /**

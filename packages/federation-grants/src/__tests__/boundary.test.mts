@@ -216,6 +216,7 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 				// only way the module's own refresher wiring is exercised.
 				obtainedAt: spent ? new Date(at.getTime() - 3_590_000) : at,
 				issuedLifetime: 3600,
+				effectiveExpiresAt: new Date(at.getTime() + (spent ? 10_000 : 3_600_000)),
 				scopes: [...connection.scopes],
 			},
 		},

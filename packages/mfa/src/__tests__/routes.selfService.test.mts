@@ -312,7 +312,7 @@ describe("a first factor from the account page, where no proof is asked", () => 
 		expect(create).not.toHaveBeenCalled();
 	});
 
-	it("answers 503 to a session whose login's User said it enrolled, or said nothing readable, while no counting factor is on record — the event recorded, nothing opened", async () => {
+	it("answers 401 login_required to a session whose login's User said it enrolled, or said nothing readable, while no counting factor is on record — nothing recorded, nothing opened", async () => {
 		for (const witness of ["enrolled", "malformed"] as const) {
 			const { app, transactionStore, userSessionStore, audit } = await composed();
 			const { agent } = await signIn(app, userSessionStore);
@@ -327,18 +327,10 @@ describe("a first factor from the account page, where no proof is asked", () => 
 
 			const res = await enrollFromAccount(agent, "totp");
 
-			expect(res.status, witness).toBe(503);
-			expect(res.body, witness).toEqual({
-				error: "temporarily_unavailable",
-				error_description: "session requirement unavailable",
-			});
+			expect(res.status, witness).toBe(401);
+			expect(res.body, witness).toEqual(LOGIN_REQUIRED);
 			expect(create, witness).not.toHaveBeenCalled();
-			expect(audit.of("mfa.enrollment_state_inconsistent"), witness).toEqual([
-				expect.objectContaining({
-					subject: ALICE.id,
-					details: { purpose: "session", action: "mfa.manage", witness },
-				}),
-			]);
+			expect(audit.of("mfa.enrollment_state_inconsistent"), witness).toEqual([]);
 		}
 	});
 });

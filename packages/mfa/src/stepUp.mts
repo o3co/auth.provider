@@ -28,7 +28,8 @@
  *   is verified on — the one the call names, when it is that session's own;
  *   a new one otherwise, recording the `acr_values` hinted, which choose
  *   nothing here. Every factor the subject can use is offered, one that does
- *   not count included; none of an installed kind whose data opens is
+ *   not count included; none usable (`factorState.mts`: of an installed kind,
+ *   its data opening, a recovery set with a code left) is
  *   `no_qualifying_factor`. A session store that cannot record the step-up
  *   opens none, whatever the session already holds.
  */

@@ -47,6 +47,11 @@
  *   strictly — at most 16 values of at most 256 characters, else none — as a
  *   hint only; `403 mfa_no_qualifying_factor` when no factor can be used, and
  *   `401` where the session store cannot record a step-up.
+ * - The account page's management of the subject's factors, under
+ *   `/factors`, is `management.mts`'s, mounted here behind the same guards
+ *   and admitted through `sessionFor`, which takes a session admitted as
+ *   `mfa.manage` with where its factor-set write begins (`factorSet.mts`),
+ *   read before the admission.
  * - A session is escalated (`escalateSession`) behind its admission, by the
  *   renewal nonce of the claim admission compared: the express id renewed,
  *   then the second factor recorded on its `UserSession` once, never
@@ -118,6 +123,7 @@ import {
 } from "./ceremony.mjs";
 import type { MfaCoordinator } from "./coordinator.mjs";
 import { type MfaMailRefusal, mailFailureOf } from "./mail.mjs";
+import { createMfaManagementRouter, type MfaManagementOptions } from "./management.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
 import { MFA_REQUIREMENT_NAME } from "./requirement.mjs";
 import type { MfaWitnessMark } from "./witness.mjs";
@@ -255,6 +261,8 @@ export interface MfaRoutesOptions {
 	readonly floodGuard: RequestHandler;
 	readonly logger: Logger;
 	readonly auditSink: AuditSink | undefined;
+	/** What the account page's management of the subject's factors reads and writes (`management.mts`). */
+	readonly management: Omit<MfaManagementOptions, "admit" | "logger" | "auditSink">;
 }
 
 /** The express session id the request presents; empty when it presents none, which no binding matches. */
@@ -358,6 +366,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		floodGuard,
 		logger,
 		auditSink,
+		management,
 	} = options;
 	const router = express.Router();
 
@@ -424,6 +433,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		res: Response,
 		action: MfaAdmissionAction | IssuedRemediationAction,
 	): Promise<SignedInSession | undefined> => {
+		// A session admitted to change the factor set is held to the subject's generation read before its admission.
+		const claim = cookieClaim(req as unknown as CookieCarrier);
+		const factorSetStart =
+			action === MFA_MANAGE && claim.authenticated && claim.subject !== undefined
+				? await management.factorSet.begin(claim.subject, "change")
+				: undefined;
 		const { admitted, expectedRenewalNonce } = await admitCookie(req, action);
 		if (admitted.outcome === "step_up") {
 			answerStepUp(res, admitted);
@@ -446,7 +461,14 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			witness = view.enrollmentFacts?.witness;
 		}
 		return {
-			session: { sid: session.sid, subject: session.sub, user, authTimeMs, witness },
+			session: {
+				sid: session.sid,
+				subject: session.sub,
+				user,
+				authTimeMs,
+				witness,
+				...(factorSetStart === undefined ? {} : { factorSetStart }),
+			},
 			expectedRenewalNonce,
 		};
 	};
@@ -780,17 +802,44 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 
 	router
 		.all(
-			["/transaction", "/challenge", "/verify", "/enrollment", "/enrollment/complete", "/step-up"],
+			[
+				"/transaction",
+				"/challenge",
+				"/verify",
+				"/enrollment",
+				"/enrollment/complete",
+				"/step-up",
+				"/factors",
+				"/factors/rename",
+				"/factors/remove",
+			],
 			noStore,
 		)
 		// These paths' own bodies, parsed here: the mount is under `/session`,
 		// where other modules mount routes too.
 		.post(
-			["/challenge", "/verify", "/enrollment", "/enrollment/complete", "/step-up"],
+			[
+				"/challenge",
+				"/verify",
+				"/enrollment",
+				"/enrollment/complete",
+				"/step-up",
+				"/factors/rename",
+				"/factors/remove",
+			],
 			express.json(),
 			express.urlencoded({ extended: false }),
 			csrfGuard.middleware,
 			floodGuard,
+		)
+		.use(
+			createMfaManagementRouter({
+				...management,
+				admit: (async (req: Request, res: Response, action: MfaAdmissionAction) =>
+					(await sessionFor(req, res, action))?.session) as MfaManagementOptions["admit"],
+				logger,
+				auditSink,
+			}),
 		)
 		.get("/transaction", async (req: Request, res: Response) => {
 			// The id travels in the header alone: a GET has no body, and never a URL.

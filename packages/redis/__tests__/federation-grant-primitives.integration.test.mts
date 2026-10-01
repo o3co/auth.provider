@@ -675,6 +675,113 @@ describe("revoke", () => {
 	});
 });
 
+describe("the credential's extension", () => {
+	const activate = (extension?: string) =>
+		client.activate(grantKey("g-1"), credKey("g-1"), {
+			nowMs: at(2 * MIN),
+			handle: JSON.stringify("h-g-1"),
+			authorization: authorization(),
+			expiresAtMs: at(30 * DAY),
+			identityRevision: "identity-1",
+			upstreamIssuer: "https://dev-1.okta.test",
+			upstreamSubject: "00u-alice",
+			credential: "v2.sealed-1",
+			...(extension === undefined ? {} : { extension }),
+		});
+	const replace = (expectedVersion: number, extension?: string) =>
+		client.replaceCredentials(grantKey("g-1"), credKey("g-1"), {
+			nowMs: at(DAY),
+			expectedVersion,
+			credential: "v2.sealed-2",
+			ineligible: null,
+			...(extension === undefined ? {} : { extension }),
+		});
+
+	it("is written by activate in the step that writes the credential, and taken away when none is given", async () => {
+		await pending();
+		await redis.hset(grantKey("g-1"), "ext", "left-over");
+		const fields = await activate("v2.ext-1");
+		expect(fields?.ext).toBe("v2.ext-1");
+		expect(await redis.hget(grantKey("g-1"), "ext")).toBe("v2.ext-1");
+
+		await pending("g-2");
+		await redis.hset(grantKey("g-2"), "ext", "left-over");
+		const plain = await client.activate(grantKey("g-2"), credKey("g-2"), {
+			nowMs: at(2 * MIN),
+			handle: JSON.stringify("h-g-2"),
+			authorization: authorization(),
+			expiresAtMs: at(30 * DAY),
+			identityRevision: "identity-1",
+			upstreamIssuer: "https://dev-1.okta.test",
+			upstreamSubject: "00u-alice",
+			credential: "v2.sealed-1",
+		});
+		expect(plain?.status).toBe("active");
+		expect(plain?.ext).toBeUndefined();
+		expect(await redis.hexists(grantKey("g-2"), "ext")).toBe(0);
+	});
+
+	it("is replaced with the credential, and taken away when the new credential has none", async () => {
+		await pending();
+		await activate("v2.ext-1");
+		expect((await replace(2, "v2.ext-2"))?.ext).toBe("v2.ext-2");
+		expect(await redis.get(credKey("g-1"))).toBe("v2.sealed-2");
+
+		const fields = await replace(3);
+		expect(fields?.version).toBe("4");
+		expect(fields?.ext).toBeUndefined();
+		expect(await redis.hexists(grantKey("g-1"), "ext")).toBe(0);
+	});
+
+	it("is left exactly as it was by a refused activation or replacement", async () => {
+		await pending();
+		await activate("v2.ext-1");
+		const refused = await client.replaceCredentials(grantKey("g-1"), credKey("g-1"), {
+			nowMs: at(DAY),
+			expectedVersion: 7,
+			credential: "v2.sealed-2",
+			ineligible: null,
+			extension: "v2.ext-2",
+		});
+		expect(refused).toBeNull();
+		expect(await redis.hget(grantKey("g-1"), "ext")).toBe("v2.ext-1");
+		expect(await redis.get(credKey("g-1"))).toBe("v2.sealed-1");
+	});
+
+	it("goes with the credential when the user is asked again, and when the grant is revoked", async () => {
+		await pending();
+		await activate("v2.ext-1");
+		await client.requireReauthorization(grantKey("g-1"), credKey("g-1"), {
+			nowMs: at(DAY),
+			expectedVersion: 2,
+		});
+		expect(await redis.hexists(grantKey("g-1"), "ext")).toBe(0);
+
+		await pending("g-2");
+		await client.activate(grantKey("g-2"), credKey("g-2"), {
+			nowMs: at(2 * MIN),
+			handle: JSON.stringify("h-g-2"),
+			authorization: authorization(),
+			expiresAtMs: at(30 * DAY),
+			identityRevision: "identity-1",
+			upstreamIssuer: "https://dev-1.okta.test",
+			upstreamSubject: "00u-alice",
+			credential: "v2.sealed-1",
+			extension: "v2.ext-1",
+		});
+		await client.revoke(grantKey("g-2"), credKey("g-2"), { atMs: at(DAY), by: "client" });
+		expect(await redis.hexists(grantKey("g-2"), "ext")).toBe(0);
+	});
+
+	it("is read in the same snapshot as the record and the credential", async () => {
+		await pending();
+		await activate("v2.ext-1");
+		const snapshot = await client.snapshot(grantKey("g-1"), credKey("g-1"));
+		expect(snapshot?.fields.ext).toBe("v2.ext-1");
+		expect(snapshot?.credential).toBe("v2.sealed-1");
+	});
+});
+
 describe("noteRefreshFailure", () => {
 	const stamp = (over: Record<string, unknown> = {}) =>
 		client.noteRefreshFailure(grantKey("g-1"), {

@@ -28,8 +28,11 @@ import { MFA_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import * as entry from "#/index.mjs";
 
 describe("the MFA package's admission actions", () => {
-	it("declare mfa.manage, graded credential_change", () => {
-		expect(MFA_ADMISSION_ACTIONS).toEqual({ "mfa.manage": { grade: "credential_change" } });
+	it("declare mfa.manage, graded credential_change, and mfa.view, graded use", () => {
+		expect(MFA_ADMISSION_ACTIONS).toEqual({
+			"mfa.manage": { grade: "credential_change" },
+			"mfa.view": { grade: "use" },
+		});
 		expect(Object.isFrozen(MFA_ADMISSION_ACTIONS)).toBe(true);
 	});
 
@@ -39,6 +42,7 @@ describe("the MFA package's admission actions", () => {
 			name: "mfa.manage",
 			grade: "credential_change",
 		});
+		expect(resolver.action("mfa.view")).toEqual({ name: "mfa.view", grade: "use" });
 	});
 
 	it("are registered by the MFA module alone on the package's entry", () => {
