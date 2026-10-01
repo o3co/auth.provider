@@ -39,9 +39,10 @@ return 0
  * The subject revocation record's only write: both boundaries (sessions, grants) in one key,
  * one atomic step. `KEYS[1]` = the record; `ARGV` = mode (`all` | `sessions`), `before` and the
  * proposed expiry (epoch ms), the grant retention (ms), and optionally the clock skew (whole ms,
- * at most a day).
- * Returns the value written and the server's `TIME` in epoch ms; a stored value it cannot read is
- * refused with an error.
+ * at most a day). The instants and the retention are whole milliseconds a `Date` can hold, the
+ * retention not negative.
+ * Returns the value written and the server's `TIME` in epoch ms; an argument outside that, or a
+ * stored value it cannot read, is refused with an error before anything is written.
  *
  * Given the skew, `before` is clamped to `TIME` plus the skew before anything else reads it: a
  * boundary further ahead is no replica's clock reading. One behind `TIME` is kept as given.
@@ -69,6 +70,11 @@ local MAX_DATE = 8640000000000000
 local function readable(n)
   return n ~= nil and n == n and n >= -MAX_DATE and n <= MAX_DATE
 end
+-- An argument is whole milliseconds a Date can hold: tonumber also takes
+-- nan and inf, which no record can carry and no expiry can be sized from.
+local function wholeMs(n)
+  return readable(n) and math.floor(n) == n
+end
 local before = tonumber(ARGV[2])
 local expiresAt = tonumber(ARGV[3])
 local retention = tonumber(ARGV[4])
@@ -78,7 +84,8 @@ local MAX_SKEW = 86400000
 local skew = ARGV[5] and tonumber(ARGV[5])
 local skewInvalid = ARGV[5] ~= nil and not (skew ~= nil and skew == skew and skew >= 0
   and skew <= MAX_SKEW and math.floor(skew) == skew)
-if before == nil or expiresAt == nil or retention == nil or skewInvalid then
+if not (wholeMs(before) and wholeMs(expiresAt) and wholeMs(retention) and retention >= 0)
+  or skewInvalid then
   return redis.error_reply("subject revocation: non-numeric argument")
 end
 local t = redis.call("TIME")

@@ -292,6 +292,51 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		},
 	);
 
+	const unreadableInstants = [
+		"NaN",
+		"nan",
+		"Infinity",
+		"inf",
+		"-Infinity",
+		"-inf",
+		// One millisecond past what a Date can hold, either side.
+		"8640000000000001",
+		"-8640000000000001",
+		"0.5",
+	];
+	it.each([
+		...unreadableInstants.map((value) => ["before", value] as const),
+		...unreadableInstants.map((value) => ["expiresAt", value] as const),
+		...[...unreadableInstants, "-1"].map((value) => ["retention", value] as const),
+	])("refuses %s = %s, leaving the record as it was", async (argument, value) => {
+		// The script is driven directly: what it took would be written as a
+		// record nothing can read, or would size the record's expiry from it.
+		const key = `t593e:args:${argument}:${value}`;
+		await raw.set(key, "1000", "PX", 600_000);
+		const expiry = await raw.pexpiretime(key);
+		const now = await serverClock(() => raw)();
+		const args = {
+			before: String(now),
+			expiresAt: String(now + 600_000),
+			retention: String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
+			[argument]: value,
+		};
+		await expect(
+			raw.eval(
+				SET_REVOCATION_BOUNDARIES.source,
+				1,
+				key,
+				"all",
+				args.before,
+				args.expiresAt,
+				args.retention,
+				String(DEFAULT_CLOCK_SKEW_MS),
+			),
+		).rejects.toThrow(/non-numeric argument/);
+		expect(await raw.get(key)).toBe("1000");
+		expect(await raw.pexpiretime(key)).toBe(expiry);
+	});
+
 	it("refuses to write over a record it cannot read", async () => {
 		// The script fails the whole call rather than starting a fresh record:
 		// a value nobody can decode may be a newer release's, and overwriting
