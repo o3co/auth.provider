@@ -70,3 +70,17 @@ updates:
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
+
+  # The template's API test project is its own npm project with its own
+  # lockfile, outside the pnpm workspace, so the root entry never reaches it.
+  # Every scaffolded project inherits that lockfile.
+  - package-ecosystem: "npm"
+    directory: "/templates/standalone/tests"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
