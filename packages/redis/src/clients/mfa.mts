@@ -348,7 +348,10 @@ export interface MfaTransactionStoreClient {
 		expiresAtMs: number,
 		max: number,
 	): Promise<readonly string[]>;
-	/** Remove `member` from the binding's index at `key` (`ZREM`). Idempotent. */
+	/**
+	 * Atomically: remove `member` from the binding's index at `key`, and set the key to expire at
+	 * the latest `expiresAtMs` left, rounded up; the last member gone, the key goes. Idempotent.
+	 */
 	unindexTransaction(key: string, member: string): Promise<void>;
 	/**
 	 * Atomically: delete the transaction at `key` only while its `incarnation` field is

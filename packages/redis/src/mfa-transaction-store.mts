@@ -56,13 +56,19 @@
  * deleted by a script that compares its `incarnation`, so a member left
  * behind never deletes a transaction created again under its id, for any
  * binding. `consume`, and a reservation past `max`, take the member out.
- * The index key expires at the latest deadline it holds, and an empty one is
- * gone, so it never outlives its transactions. An expired transaction's
+ * The index key expires at the latest deadline it holds, set again whenever a
+ * member is added or removed, and an empty one is gone, so it never outlives
+ * the transactions it names. An expired transaction's
  * member stays until it is taken out first: its deadline is the soonest. The
  * transactions sit on slots of their own, so these are separate steps, not
  * one atomic one: while creates race, or after a step that failed, a binding
  * may hold more than the cap until the excess expires; a member that failed
- * to leave may count for its transaction until its deadline.
+ * to leave, or one added after its transaction was already consumed (a
+ * consume landing between a create's write and its index step, which no
+ * caller can do before `create` hands it the id), may count for its
+ * transaction until its deadline. A server whose clock runs ahead of this
+ * side's by more than a new transaction's lifetime counts it though it
+ * expired as written: callers' clocks must agree (NTP).
  *
  * A transaction is written and read back through core's
  * `newMfaTransactionRecord`, so it has the in-process store's shape and rules.

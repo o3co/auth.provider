@@ -795,7 +795,8 @@ out those that expire soonest past the cap — never the new one — and
 the adapter deletes each taken out through a script that compares its
 `incarnation`, so a member left behind never ends a transaction created again
 under its id, for this binding or another. `consume`, and a reservation past
-`max`, take the member out. The key expires at the latest deadline it holds.
+`max`, take the member out. The key expires at the latest deadline it holds,
+set again whenever a member is added or removed.
 These are separate steps, not one atomic one: while creates for one session
 race, or after a step that failed, the session may hold more than five until
 the excess expires. The bound manages the state the store keeps; abuse is

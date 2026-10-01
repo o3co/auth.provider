@@ -180,6 +180,21 @@ return ended
 `.trim();
 
 /**
+ * `MfaTransactionStoreClient.unindexTransaction`. `KEYS[1]` = the binding's index; `ARGV[1]` = the
+ * member to remove. Removes it and sets the key to expire at the highest score left, rounded up,
+ * so the index never outlives the transactions it still names; the last member gone, the key is
+ * gone with it.
+ */
+const LUA_MFA_BINDING_UNINDEX = `
+redis.call('ZREM', KEYS[1], ARGV[1])
+local latest = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
+if latest[2] then
+  redis.call('PEXPIREAT', KEYS[1], string.format('%.0f', math.ceil(tonumber(latest[2]))))
+end
+return 1
+`.trim();
+
+/**
  * `MfaTransactionStoreClient.evictTransaction`. `KEYS[1]` = the transaction; `ARGV[1]` = the
  * incarnation its index member names. Deletes it only while its `incarnation` field holds that
  * one: a transaction created again under the id, for this binding or another, is left alone.
@@ -819,6 +834,7 @@ export const MFA_TX_TAKE_CHALLENGE = defineScript(LUA_MFA_TX_TAKE_CHALLENGE);
 export const MFA_TX_CONSUME = defineScript(LUA_MFA_TX_CONSUME);
 export const MFA_TX_EVICT = defineScript(LUA_MFA_TX_EVICT);
 export const MFA_BINDING_INDEX = defineScript(LUA_MFA_BINDING_INDEX);
+export const MFA_BINDING_UNINDEX = defineScript(LUA_MFA_BINDING_UNINDEX);
 export const MFA_SUBJECT_RESERVE = defineScript(LUA_MFA_SUBJECT_RESERVE);
 export const MFA_SUBJECT_SETTLE = defineScript(LUA_MFA_SUBJECT_SETTLE);
 export const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);

@@ -27,6 +27,7 @@ import { runScript } from "../commands.mjs";
 import { redisDurability } from "../durability.mjs";
 import {
 	MFA_BINDING_INDEX,
+	MFA_BINDING_UNINDEX,
 	MFA_FACTOR_UPDATE,
 	MFA_FIRST_BINDING_NOTE,
 	MFA_FIRST_BINDING_READ,
@@ -163,7 +164,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				: [];
 		},
 		async unindexTransaction(key, member) {
-			await io.zrem(key, member);
+			await runScript(io, MFA_BINDING_UNINDEX, [key], [member]);
 		},
 		async evictTransaction(key, incarnation) {
 			return (await runScript(io, MFA_TX_EVICT, [key], [incarnation])) === 1;

@@ -559,6 +559,18 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 		expect(await first().exists(index)).toBe(0);
 	});
 
+	it("brings the index's deadline back to the latest left when the latest-expiring transaction leaves", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const expiries = await opened(store, "tab", 3, A);
+		const index = bindingKey(prefix, A);
+		await store.consume("tab-2", 1);
+		expect(await deadlineOf(index)).toBe(Math.ceil(expiries[1] as number));
+		await store.reserveAttempt("tab-1", 1);
+		await store.reserveAttempt("tab-1", 1);
+		expect(await deadlineOf(index)).toBe(Math.ceil(expiries[0] as number));
+	});
+
 	it("never ends another binding's transaction: an eviction deletes a key only while it holds the incarnation the index took", async () => {
 		// A member left behind (its transaction removed without it), and the
 		// id taken again by another binding: evicting the member must leave
