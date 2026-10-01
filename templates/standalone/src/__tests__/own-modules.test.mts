@@ -1226,11 +1226,22 @@ describe("repositories", () => {
 	it.each([
 		["ADAPTERS_CLIENT_REPOSITORY", "repositories.client.static.path"],
 		["ADAPTERS_USER_REPOSITORY", "repositories.user.static.path"],
-	])("refuses %s=static without %s, naming it", async (variable, path) => {
-		await expect(
-			bootTemplate({ repositories: true, env: { [variable]: "static" } }),
-		).rejects.toThrow(path);
-	});
+	])(
+		"refuses %s=static without %s at the section's parse, before any repository is built, naming it",
+		async (variable, path) => {
+			// The client registry's file is absent, as in a fresh copy of the
+			// template: the refusal comes before any repository reads a file.
+			await expect(
+				bootTemplate({
+					repositories: true,
+					env: { [variable]: "static", REPOSITORIES_CLIENT_YAML_PATH: "/nonexistent/clients.yaml" },
+				}),
+			).rejects.toMatchObject({
+				reason: "config-validation-failed",
+				message: expect.stringContaining(path),
+			});
+		},
+	);
 
 	it("refuses a key the section does not declare, naming it", async () => {
 		await expect(

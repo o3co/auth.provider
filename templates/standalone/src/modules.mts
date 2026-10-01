@@ -63,7 +63,7 @@ import {
 	keyStoreSectionSchema,
 	loggingSectionSchema,
 	redisClientsSectionSchema,
-	repositoriesSectionSchema,
+	repositoriesSectionSchemaFor,
 } from "./sections.mjs";
 
 /**
@@ -200,9 +200,10 @@ export interface RepositorySelection {
 }
 
 /**
- * `block`, the settings `repositories.<repository>.<adapter>` holds, or an
- * `Error` naming its path when the selected adapter has none: `static` ships
- * no block.
+ * `block`, the settings `repositories.<repository>.<adapter>` holds. The
+ * section's schema (`repositoriesSectionSchemaFor`) has refused a selected
+ * `static` without its block, so an absent one is a composition that built
+ * the section otherwise: an `Error` naming its path.
  */
 function requiredBlock<B>(block: B | undefined, repository: string, adapter: string): B {
 	if (block === undefined) {
@@ -227,7 +228,7 @@ export function repositoriesModuleFor(selection: RepositorySelection): Module {
 	return defineModule({
 		name: "repositories",
 		section: {
-			schema: repositoriesSectionSchema,
+			schema: repositoriesSectionSchemaFor(selection),
 			reference: templateReference(),
 			renamedVariables: {
 				CLIENT_PATH: "repositories.client.yaml.path",
@@ -258,7 +259,6 @@ export function repositoriesModuleFor(selection: RepositorySelection): Module {
 			userRepository: async ({ section, lifecycleRegistrar }) => {
 				const { userFactory } = createRepositoryFactories({ lifecycle: lifecycleRegistrar });
 				registerBuiltinAdapters({ userFactory });
-				if (selection.user === "static") requiredBlock(section.user.static, "user", "static");
 				return userFactory.create(
 					flattenAdapterConfig({
 						type: selection.user,

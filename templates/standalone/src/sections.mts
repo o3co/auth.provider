@@ -290,6 +290,29 @@ export const repositoriesSectionSchema = z
 	})
 	.strict();
 
+/**
+ * `repositories` for the adapters `selection` names: `repositoriesSectionSchema`,
+ * and the `static` block's path required for a repository that selects
+ * `static`, since the block has no default. Refused at the section's parse,
+ * naming the path, before any repository is built.
+ */
+export function repositoriesSectionSchemaFor(selection: {
+	readonly client: Adapters["clientRepository"];
+	readonly user: Adapters["userRepository"];
+}) {
+	return repositoriesSectionSchema.superRefine((section, ctx) => {
+		for (const repository of ["client", "user"] as const) {
+			if (selection[repository] === "static" && section[repository].static === undefined) {
+				ctx.addIssue({
+					code: "custom",
+					path: [repository, "static", "path"],
+					message: `required when adapters.${repository}Repository is "static": the static block has no default`,
+				});
+			}
+		}
+	});
+}
+
 /** The in-process code repository's section: the default lifetime, in positive whole seconds. */
 export const inMemoryCodeRepositorySectionSchema = z
 	.object({ defaultExpiresIn: z.coerce.number().int().positive() })
