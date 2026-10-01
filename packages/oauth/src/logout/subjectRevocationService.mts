@@ -42,7 +42,7 @@ import {
 	resolveFederationGrantKeepPolicy,
 	resolveSubjectRevocationHorizonMs,
 } from "@o3co/auth-provider-core";
-import { cascadeLogout } from "./cascadeLogout.mjs";
+import { cascadeLogout, runLogoutFanout } from "./cascadeLogout.mjs";
 
 const NAME = "subjectRevocationServiceModule";
 
@@ -208,27 +208,8 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				subjectSessionIndex: deps.subjectSessionIndex,
 				subjectRevocation,
 				cascadeSession: async (sid: string) => {
-					// The session's own `expiresAt`, for the cascade's ended mark; a
-					// session already gone has none. A read that fails still runs the
-					// cascade without it, so the families are revoked now, and then
-					// throws: the helper counts the sid failed, keeps it for a retry,
-					// and logs the read's error.
-					let expiresAt: Date | undefined;
-					let readFailed = false;
-					let readError: unknown;
-					try {
-						expiresAt = (await deps.userSessionStore.get(sid))?.expiresAt;
-					} catch (err) {
-						readFailed = true;
-						readError = err;
-					}
-					// `cascadeLogout` answers with its own union, and its `step` is
-					// what makes a failure retryable. What this needs is the one bit
-					// the helper's loop branches on; the detail is already in the log
-					// the cascade wrote.
-					const cascade = await cascadeLogout({
+					const stores = {
 						sid,
-						...(expiresAt === undefined ? {} : { expiresAt }),
 						refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
 						federationTokenStore: deps.federationTokenStore,
 						userSessionStore: deps.userSessionStore,
@@ -236,8 +217,29 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 						sessionFamilyIndex: deps.sessionFamilyIndex,
 						sessionFederationIndex: deps.sessionFederationIndex,
 						...(deps.logger === undefined ? {} : { logger: deps.logger }),
+					};
+					// The session's own `expiresAt`, for the cascade's ended mark; a
+					// session already gone has none.
+					let expiresAt: Date | undefined;
+					try {
+						expiresAt = (await deps.userSessionStore.get(sid))?.expiresAt;
+					} catch (readError) {
+						// Without the mark, a family added after the listing would be
+						// dropped from the index by the clean-up, unrevoked. So only the
+						// listed families are revoked now; the index entries and the
+						// session stay, and the throw makes the helper count the sid
+						// failed, keep it for a retry with the mark, and log the error.
+						await runLogoutFanout(stores);
+						throw readError;
+					}
+					// `cascadeLogout` answers with its own union, and its `step` is
+					// what makes a failure retryable. What this needs is the one bit
+					// the helper's loop branches on; the detail is already in the log
+					// the cascade wrote.
+					const cascade = await cascadeLogout({
+						...stores,
+						...(expiresAt === undefined ? {} : { expiresAt }),
 					});
-					if (readFailed) throw readError;
 					return { ok: cascade.outcome === "done" };
 				},
 				// The boundary must outlive the longest-lived thing it covers,

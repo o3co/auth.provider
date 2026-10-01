@@ -143,7 +143,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	/**
 	 * Revoke the family a refused exchange registered, whose tokens were never
 	 * served. Never throws: a failure is one error line, and the refusal
-	 * stands.
+	 * stands. With a rotation and no revocation wired, the record stays
+	 * active; `oauthAuthorizationModule` warns of that at boot.
 	 */
 	const revokeRefusedFamily = async (
 		familyId: string,

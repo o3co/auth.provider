@@ -260,6 +260,27 @@ function warnWithoutSessionEnd(deps: OAuthAuthorizationModuleDeps): void {
 }
 
 /**
+ * Say once, at boot, that a code exchange the authorization_code grant
+ * refuses because a logout ended its session leaves its family record
+ * active: the rotation registers it, and no revocation is wired to revoke
+ * it. No token of that family was served.
+ */
+function warnRotationWithoutRevocation(deps: OAuthAuthorizationModuleDeps): void {
+	if (
+		deps.userSessionStore === undefined ||
+		!supportsSessionEnd(deps.sessionFamilyIndex) ||
+		deps.refreshTokenFamilyRotation === undefined ||
+		deps.refreshTokenFamilyRevocation !== undefined
+	) {
+		return;
+	}
+	(deps.logger ?? consoleLogger).warn(
+		{ slot: "refreshTokenFamilyRevocation", grant: "authorization_code" },
+		"refresh_token_family_rotation_without_revocation",
+	);
+}
+
+/**
  * The deps every contribution of {@link oauthAuthorizationModule} receives:
  * exactly its `requires` / `optional`, typed. Each grant factory
  * declares the subset it reads, so the wiring below is checked, not trusted.
@@ -294,6 +315,7 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 				codeRepository: requireCodeRepository(deps),
 			});
 			warnWithoutSessionEnd(deps);
+			warnRotationWithoutRevocation(deps);
 			return grant;
 		};
 		Object.assign(admissionActions, AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS);

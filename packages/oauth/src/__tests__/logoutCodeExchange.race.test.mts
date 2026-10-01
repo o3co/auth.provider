@@ -82,6 +82,8 @@ const INVALIDATED_LINE = "authorization_grant_rejected_session_invalidated_durin
 const REVOCATION_FAILED_LINE = "authorization_grant_refused_family_revocation_failed";
 /** The boot line for a family index without the session-end capability. */
 const NO_SESSION_END_LINE = "session_family_index_without_session_end";
+/** The boot line for a family rotation wired without a family revocation. */
+const NO_REVOCATION_LINE = "refresh_token_family_rotation_without_revocation";
 
 /**
  * One store call held open: `arrived` settles when the call reaches it, and
@@ -505,8 +507,14 @@ describe("the composition's family index", () => {
 	const boot = async (
 		overrideComponents: Record<string, unknown> = {},
 		sessionStores: readonly Module[] = [memorySessionStoresModule],
+		revocation: readonly Module[] = [defaultRefreshTokenFamilyRevocationModule],
 	) => {
-		const appConfig = withGrants(makeValidAppConfig(), { authorizationCode: true });
+		// The refresh grant refuses to boot without both family slots, so it is
+		// off when revocation is not wired.
+		const appConfig = withGrants(makeValidAppConfig(), {
+			authorizationCode: true,
+			refreshToken: revocation.length > 0,
+		});
 		const logger = createMockLogger();
 		const handle = await createTestApp({
 			modules: [
@@ -514,7 +522,7 @@ describe("the composition's family index", () => {
 				...sessionStores,
 				memoryRefreshTokenFamilyStoreModule,
 				defaultRefreshTokenFamilyRotationModule,
-				defaultRefreshTokenFamilyRevocationModule,
+				...revocation,
 				keyStoreModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
@@ -556,11 +564,12 @@ describe("the composition's family index", () => {
 			return result;
 		};
 		const lines = logger.warn.mock.calls.filter((call) => call[1] === NO_SESSION_END_LINE);
-		return { handle, expiresAt, exchange, lines };
+		const revocationLines = logger.warn.mock.calls.filter((call) => call[1] === NO_REVOCATION_LINE);
+		return { handle, expiresAt, exchange, lines, revocationLines };
 	};
 
 	it("the memory index: the exchange refuses a session the index marked ended, and boot says nothing", async () => {
-		const { handle, expiresAt, exchange, lines } = await boot();
+		const { handle, expiresAt, exchange, lines, revocationLines } = await boot();
 		try {
 			const index = handle.components.sessionFamilyIndex;
 			if (!supportsSessionEnd(index)) throw new Error("the memory index has the capability");
@@ -568,6 +577,7 @@ describe("the composition's family index", () => {
 
 			expectSessionInvalidated(await exchange());
 			expect(lines).toEqual([]);
+			expect(revocationLines).toEqual([]);
 		} finally {
 			await handle.dispose();
 		}
@@ -593,6 +603,23 @@ describe("the composition's family index", () => {
 		try {
 			expect(handle.components.userSessionStore).toBeUndefined();
 			expect(lines).toEqual([]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("rotation without revocation: boot warns once that a refused exchange's family stays unrevoked, and the exchange is still refused", async () => {
+		const { handle, expiresAt, exchange, revocationLines } = await boot({}, undefined, []);
+		try {
+			expect(handle.components.refreshTokenFamilyRevocation).toBeUndefined();
+			expect(revocationLines).toEqual([
+				[{ slot: "refreshTokenFamilyRevocation", grant: "authorization_code" }, NO_REVOCATION_LINE],
+			]);
+			const index = handle.components.sessionFamilyIndex;
+			if (!supportsSessionEnd(index)) throw new Error("the memory index has the capability");
+			await index.endSession(SID, expiresAt);
+
+			expectSessionInvalidated(await exchange());
 		} finally {
 			await handle.dispose();
 		}

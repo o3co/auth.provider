@@ -322,10 +322,13 @@ describe("subjectRevocationServiceModule", () => {
 			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 			expect(stores.refreshTokenFamilyRevocation.revokeFamily).not.toHaveBeenCalledWith("fam-late");
 			expect(await families.listFamilyIds("sid-1")).toEqual(["fam-1", "fam-late"]);
+			// The session stays, so the retry can read its expiresAt.
+			expect(stores.userSessionStore.delete).not.toHaveBeenCalled();
 
 			const retry = await service.revokeAllForSubject({ subject: "u-1" });
 
 			expect(retry.sessionsRevoked).toEqual(["sid-1"]);
+			expect(stores.userSessionStore.get).toHaveBeenCalledTimes(2);
 			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-late");
 			expect(stores.userSessionStore.delete).toHaveBeenCalledWith("sid-1");
 		});
