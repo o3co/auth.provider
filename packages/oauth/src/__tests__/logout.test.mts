@@ -693,6 +693,54 @@ describe("POST /oauth/logout", () => {
 			expect(res.text).toContain("<iframe");
 			expect(res.text).toContain("rp1.example.com");
 		});
+
+		it.each([
+			["text/html", /text\/html/],
+			["application/json", /application\/json/],
+		])(
+			"a registered RP whose frontchannelLogoutUri read throws does not fail the logout (Accept: %s)",
+			async (accept, contentType) => {
+				const logger = createMockLogger();
+				const rpData = [
+					{
+						clientId: "rp-throws",
+						registeredAt: new Date(),
+						backchannelLogoutUri: undefined,
+						backchannelLogoutSessionRequired: undefined,
+						get frontchannelLogoutUri(): string | undefined {
+							throw new Error("field unavailable");
+						},
+						frontchannelLogoutSessionRequired: undefined,
+					},
+					{
+						clientId: "rp-1",
+						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+						registeredAt: new Date(),
+						backchannelLogoutUri: undefined,
+						backchannelLogoutSessionRequired: undefined,
+						frontchannelLogoutSessionRequired: undefined,
+					},
+				];
+				const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+				const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+				const app = buildApp({ sessionStore, sessionRPRegistry, logger });
+				const token = await mintIdToken();
+
+				const res = await postLogout(app, { id_token_hint: token }, { Accept: accept });
+
+				expect(res.status).toBe(200);
+				expect(res.headers["content-type"]).toMatch(contentType);
+				if (accept === "text/html") {
+					expect(res.text).toContain("rp1.example.com");
+					expectBestEffortWarn(
+						logger,
+						"logout_frontchannel_uri_refused",
+						{ site: "logout", clientId: "rp-throws", reason: "unreadable" },
+						null,
+					);
+				}
+			},
+		);
 	});
 
 	describe("HTML branch open-redirect defense", () => {

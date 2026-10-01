@@ -250,6 +250,29 @@ describe("renderFrontchannelLogoutHtml", () => {
 			);
 		});
 
+		it("refuses a URI for an RP whose clientId read throws, logging it without one", () => {
+			const logger = createMockLogger();
+			const html = render(
+				[
+					{
+						get clientId(): string {
+							throw new Error("field unavailable");
+						},
+						frontchannelLogoutUri: "ftp://rp.example/fc",
+					},
+				],
+				logger,
+			);
+
+			expect(iframeCount(html)).toBe(1);
+			expectBestEffortWarn(
+				logger,
+				"logout_frontchannel_uri_refused",
+				{ site: "logout", clientId: undefined, reason: "scheme-not-reverse-domain" },
+				null,
+			);
+		});
+
 		it("renders a loopback http URI and skips an absent one, without a warn", () => {
 			const logger = createMockLogger();
 			const html = render(
