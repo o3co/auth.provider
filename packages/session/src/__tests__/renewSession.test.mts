@@ -156,23 +156,39 @@ function setup() {
 		(req.session as unknown as Record<string, unknown>).parkedByAnotherFlow = "parked";
 		res.json(result);
 	});
+	// The step-up's finish: renew, then record the escalation on the record
+	// the renewed session names — expecting the nonce the cookie session held
+	// when the request came in, with the renewal's nonce ("bound"), or (to
+	// show the race) without either ("unbound"). `?held` holds the request,
+	// its session loaded, until the test releases it.
 	app.post("/renew", async (req, res) => {
 		const sid = req.session?.sid;
+		const expected = cookieClaim(req).renewalNonce;
+		if (req.query.held !== undefined) {
+			entered();
+			await held;
+		}
 		const result: SessionRenewalResult = await completion.renewSession({
 			req,
 			reporter: { storeUnavailable: (store, step) => reported.push(`${store}:${step}`) },
 		});
-		// The step-up's finish: the escalation, recorded on the record the
-		// renewed session names — with the renewal's nonce, or (to show the
-		// race) without it.
+		let recorded: readonly string[] | null | undefined;
 		if (result.outcome === "renewed" && sid !== undefined && req.query.record !== undefined) {
-			await userSessionStore.recordSecondFactor(sid, {
-				amr: ["otp", "mfa"],
+			const answer = await userSessionStore.recordSecondFactor(sid, {
+				amr: String(req.query.amr ?? "otp,mfa").split(","),
 				at: new Date(),
-				...(req.query.record === "bound" ? { renewalNonce: result.renewalNonce } : {}),
+				...(req.query.record === "bound"
+					? {
+							renewalNonce: result.renewalNonce,
+							...(expected === undefined ? {} : { expectedRenewalNonce: expected }),
+						}
+					: {}),
 			});
+			recorded = answer === null ? null : (answer.amr ?? []);
 		}
-		res.status(result.outcome === "renewed" ? 200 : 503).json(result);
+		res
+			.status(result.outcome === "renewed" ? 200 : 503)
+			.json(recorded === undefined ? result : { ...result, recorded });
 	});
 	app.post("/in-flight", async (req, res) => {
 		entered();
@@ -356,6 +372,57 @@ describe("the renewal race: a request in flight on the old id saves after the re
 		expect((await request(app).get("/admit").set("Cookie", old)).body).toEqual({
 			outcome: "admitted",
 			amr: ["pwd", "otp", "mfa"],
+		});
+	});
+});
+
+describe("two step-ups, and two completions of one", () => {
+	it("a second step-up from the renewed session records, expecting the first's nonce; the first renewed id then names nothing", async () => {
+		const { app } = setup();
+		const signedIn = await signIn(app);
+		const first = await request(app)
+			.post("/renew?record=bound&amr=otp,mfa")
+			.set("Cookie", cookieOf(signedIn.raw));
+		expect(first.body).toMatchObject({ outcome: "renewed", recorded: ["pwd", "otp", "mfa"] });
+		const second = await request(app)
+			.post("/renew?record=bound&amr=hwk,mfa")
+			.set("Cookie", cookieOf(first));
+		expect(second.body).toMatchObject({
+			outcome: "renewed",
+			recorded: ["pwd", "otp", "mfa", "hwk"],
+		});
+		expect((await request(app).get("/admit").set("Cookie", cookieOf(second))).body).toEqual({
+			outcome: "admitted",
+			amr: ["pwd", "otp", "mfa", "hwk"],
+		});
+		expect((await request(app).get("/admit").set("Cookie", cookieOf(first))).body).toEqual({
+			outcome: "unauthenticated",
+		});
+	});
+
+	it("of two step-ups started from one cookie, the one that records second is refused, and its renewed id never gains the first's factor", async () => {
+		const { app, inFlightEntered, release } = setup();
+		const signedIn = await signIn(app);
+		const old = cookieOf(signedIn.raw);
+		// B loads the old session and is held; A renews and records hwk.
+		const b = request(app)
+			.post("/renew?held=1&record=bound&amr=otp,mfa")
+			.set("Cookie", old)
+			.then((res) => res);
+		await inFlightEntered;
+		const a = await request(app).post("/renew?record=bound&amr=hwk,mfa").set("Cookie", old);
+		expect(a.body).toMatchObject({ outcome: "renewed", recorded: ["pwd", "hwk", "mfa"] });
+		release();
+		const bAnswer = await b;
+		// B renewed from the session it had loaded, and its completion is refused.
+		expect(bAnswer.body).toMatchObject({ outcome: "renewed", recorded: null });
+		expect((await request(app).get("/admit").set("Cookie", cookieOf(bAnswer))).body).toEqual({
+			outcome: "not_live",
+			reason: "renewed",
+		});
+		expect((await request(app).get("/admit").set("Cookie", cookieOf(a))).body).toEqual({
+			outcome: "admitted",
+			amr: ["pwd", "hwk", "mfa"],
 		});
 	});
 });

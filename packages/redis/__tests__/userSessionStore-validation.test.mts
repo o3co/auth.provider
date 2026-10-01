@@ -401,8 +401,46 @@ describe("RedisUserSessionStore — what the store needs from its client, and wh
 		const written = JSON.parse(client.read(`${keyPrefix}sid-1`) as string);
 		expect(written.renewalNonce).toBe(renewalNonce);
 		expect(written.amr).toEqual(["pwd", "otp", "mfa"]);
-		await store.recordSecondFactor("sid-1", { amr: ["hwk", "mfa"], at: new Date() });
+		await store.recordSecondFactor("sid-1", {
+			amr: ["hwk", "mfa"],
+			at: new Date(),
+			expectedRenewalNonce: renewalNonce,
+		});
 		expect(JSON.parse(client.read(`${keyPrefix}sid-1`) as string).renewalNonce).toBe(renewalNonce);
+	});
+
+	it("answers null, and writes nothing, when the compare-and-set it lost leaves a nonce it did not expect", async () => {
+		// Another completion's write lands between this one's read and its
+		// write: the re-read finds that completion's nonce, not the one expected.
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		client.seed(`${keyPrefix}sid-1`, JSON.stringify({ ...validEnvelope, amr: ["pwd"] }));
+		const overtaking = newRenewalNonce();
+		const replace = client.replaceIfUnchanged;
+		let raced = false;
+		client.replaceIfUnchanged = async (k, expected, next) => {
+			if (!raced) {
+				raced = true;
+				client.seed(
+					k,
+					JSON.stringify({
+						...validEnvelope,
+						amr: ["pwd", "hwk", "mfa"],
+						renewalNonce: overtaking,
+					}),
+				);
+			}
+			return replace(k, expected, next);
+		};
+		const answer = await store.recordSecondFactor("sid-1", {
+			amr: ["otp", "mfa"],
+			at: new Date(),
+			renewalNonce: newRenewalNonce(),
+		});
+		expect(answer).toBeNull();
+		const stored = JSON.parse(client.read(`${keyPrefix}sid-1`) as string);
+		expect(stored.renewalNonce).toBe(overtaking);
+		expect(stored.amr).toEqual(["pwd", "hwk", "mfa"]);
 	});
 
 	it("keeps what a newer release added to the envelope — beside the session and inside authentication — when it records a second factor", async () => {

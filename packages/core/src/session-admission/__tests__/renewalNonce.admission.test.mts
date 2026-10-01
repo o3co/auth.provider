@@ -122,7 +122,7 @@ describe("admission over a session bound to a renewed cookie session", () => {
 		}
 	});
 
-	it("refuses a record whose nonce a store answers in another shape, unless the cookie holds that very value", async () => {
+	it("refuses a record whose nonce a store answers in another shape", async () => {
 		const inner = await holding();
 		const odd: UserSessionStore = {
 			...inner,
@@ -132,6 +132,49 @@ describe("admission over a session bound to a renewed cookie session", () => {
 			},
 		};
 		expect(await admit(odd, cookie())).toEqual({ outcome: "not_live", reason: "renewed" });
+	});
+
+	it("refuses a record whose nonce is not one, even when the cookie session holds that very value", async () => {
+		const inner = await holding();
+		const malformed = "not-a-nonce";
+		const odd: UserSessionStore = {
+			...inner,
+			get: async (sid) => {
+				const session = await inner.get(sid);
+				return session === null ? null : { ...session, renewalNonce: malformed };
+			},
+		};
+		expect(await admit(odd, cookie(malformed))).toEqual({ outcome: "not_live", reason: "renewed" });
+	});
+
+	it("reads the record's nonce once: a getter that answers another value on a second read changes nothing", async () => {
+		const inner = await holding();
+		const presented = newRenewalNonce();
+		for (const [first, later] of [
+			["not-a-nonce", presented],
+			[newRenewalNonce(), presented],
+		] as const) {
+			let reads = 0;
+			const odd: UserSessionStore = {
+				...inner,
+				get: async (sid) => {
+					const session = await inner.get(sid);
+					if (session === null) return null;
+					return Object.defineProperty({ ...session }, "renewalNonce", {
+						enumerable: true,
+						get: () => {
+							reads++;
+							return reads === 1 ? first : later;
+						},
+					});
+				},
+			};
+			expect(await admit(odd, cookie(presented)), first).toEqual({
+				outcome: "not_live",
+				reason: "renewed",
+			});
+			expect(reads, first).toBe(1);
+		}
 	});
 
 	it("never compares a token or a code carrier's claim: the nonce is the cookie session's", async () => {

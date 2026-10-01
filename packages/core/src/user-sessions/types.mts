@@ -227,6 +227,15 @@ export interface SecondFactorEvent {
 	 * earlier one. Absent: the session's nonce is left as it is.
 	 */
 	readonly renewalNonce?: string;
+	/**
+	 * The renewal nonce the admitted cookie session held before its renewal;
+	 * absent when it held none (a first step-up). The store records the event
+	 * only while the session's nonce is this one — absent matching absent —
+	 * in the same atomic write; otherwise it answers `null` and writes
+	 * nothing, so of two completions started from one cookie session only the
+	 * first is recorded.
+	 */
+	readonly expectedRenewalNonce?: string;
 }
 
 /**
@@ -250,10 +259,11 @@ export interface SupportsSecondFactorUpdate {
 	 * `authentication` existed is split first (`sessionAfterSecondFactor`), so
 	 * an untrusted upstream IdP's value never becomes a vouched one.
 	 *
-	 * `null`, nothing written, when the session is gone, or predates
-	 * `authentication` and its primary cannot be told: such a session logs in
-	 * again (`/authorize` sends it to the login page rather than asking a
-	 * step-up).
+	 * `null`, nothing written, when the session is gone, when its renewal
+	 * nonce is not the event's `expectedRenewalNonce` (a completion another
+	 * one overtook), or when it predates `authentication` and its primary
+	 * cannot be told: such a session logs in again (`/authorize` sends it to
+	 * the login page rather than asking a step-up).
 	 *
 	 * A `RangeError` before anything is read, nothing written, for an event
 	 * with no values, an empty value, a primary's marker (`pwd`, `fed`), only
