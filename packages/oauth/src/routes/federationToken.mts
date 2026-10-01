@@ -185,6 +185,18 @@ const checkCallerStanding = async (
  * Mounted under /oauth → POST /oauth/federation/:name/token.
  */
 export function createRouter(express: ExpressLike, opts: FederationTokenRouterOptions): Router {
+	// Refused, never repaired: 0 or less serves a token with no life left, and
+	// NaN never serves the stored token, so every request refreshes upstream.
+	const refreshBufferMs = opts.refreshBufferMs ?? 30_000;
+	if (
+		typeof refreshBufferMs !== "number" ||
+		!Number.isFinite(refreshBufferMs) ||
+		refreshBufferMs <= 0
+	) {
+		throw new RangeError(
+			"federation token route: refreshBufferMs must be a positive finite number",
+		);
+	}
 	const router = express.Router();
 
 	router.post("/federation/:name/token", async (req: Request, res: Response) => {
@@ -196,7 +208,6 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		const federation = auditErrorText(name);
 		const logger = opts.logger ?? console;
 		const storeUnavailable = createStoreUnavailableLog(logger);
-		const refreshBufferMs = opts.refreshBufferMs ?? 30_000;
 
 		// RFC 6749 §5.1 / RFC 9207: cache headers on every response path.
 		res.setHeader("Cache-Control", "no-store");

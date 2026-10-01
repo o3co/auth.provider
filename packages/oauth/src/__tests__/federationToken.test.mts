@@ -4010,3 +4010,22 @@ describe("POST /oauth/federation/:name/token — a refused access token is logge
 		expect(line).toEqual({ federation: "google", reason: "typ" });
 	});
 });
+
+describe("createRouter — refreshBufferMs", () => {
+	it.each([
+		["zero", 0],
+		["a negative buffer", -60_000],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a numeric string", "30000" as unknown as number],
+	])("refuses %s when the route is built", (_label, refreshBufferMs) => {
+		// A buffer of 0 or less serves a token with no life left; NaN never
+		// serves the stored token, so every request refreshes upstream.
+		expect(() => buildApp({ refreshBufferMs })).toThrow(RangeError);
+	});
+
+	it("accepts a positive buffer, and defaults when none is given", () => {
+		expect(() => buildApp({ refreshBufferMs: 1 })).not.toThrow();
+		expect(() => buildApp()).not.toThrow();
+	});
+});
