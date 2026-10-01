@@ -696,7 +696,7 @@ describe("step 2 — the live read", () => {
 		expect(admission).toEqual({
 			outcome: "admitted",
 			session: record,
-			view: viewOf(record, holding(record)),
+			view: viewOf(record, false),
 			acr: undefined,
 		});
 	});
@@ -1213,7 +1213,7 @@ describe("step 5 — the requirements", () => {
 			outcome: "step_up",
 			requirement: "r",
 			session: record,
-			view: viewOf(record, holding(record)),
+			view: viewOf(record, false),
 			// As registered: resolved once, on the issuer, to the URL a
 			// consumer answers.
 			page: { url: "/r", params: { v: "1" }, href: `${ISSUER}/r?v=1` },
@@ -1708,7 +1708,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 		expect(await ask(plain, ["pwd", "otp", "mfa"])).toEqual({
 			outcome: "admitted",
 			session: plain,
-			view: viewOf(plain, holding(plain)),
+			view: viewOf(plain, false),
 			acr: "urn:o3co:acr:mfa",
 		});
 	});
@@ -1788,7 +1788,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 			).toEqual({
 				outcome: "admitted",
 				session: session(),
-				view: viewOf(session(), holding(session())),
+				view: viewOf(session(), false),
 				acr: undefined,
 			});
 		}

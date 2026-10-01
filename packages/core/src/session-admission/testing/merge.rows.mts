@@ -25,7 +25,11 @@
  * list. Nothing here runs a test.
  */
 
-import type { UserSession, UserSessionStore } from "../../user-sessions/types.mjs";
+import {
+	supportsSecondFactorUpdate,
+	type UserSession,
+	type UserSessionStore,
+} from "../../user-sessions/types.mjs";
 import { type AcrTable, readAcrTable } from "../acr.mjs";
 import { viewOf } from "../admit.mjs";
 import {
@@ -569,9 +573,10 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
  * Each row's session, by identity, to whether its row's store records a
  * second factor: the store `mergeAdmission` builds its view over when it is
  * handed none. A session no row holds is read over a store that records, the
- * rows' default. A fallback only, kept while a caller hands `mergeAdmission`
- * the row's session without the store it ran the row over; it goes once
- * every caller hands the store, and the store becomes required.
+ * rows' default — a guess, so a caller holding a session of its own must
+ * hand `mergeAdmission` the store. A fallback only, kept while a caller hands
+ * `mergeAdmission` the row's session without the store it ran the row over;
+ * it goes once every caller hands the store, and the store becomes required.
  */
 const ROW_STORE_RECORDS = new WeakMap<UserSession, boolean>();
 
@@ -585,7 +590,8 @@ const ROW_STORE_RECORDS = new WeakMap<UserSession, boolean>();
  * admission ran over (`mergeSessionStore(row)`, or the test's own), its
  * `secondFactorRecordable` included. Without one, it is built over the store
  * of the row that holds `session` — `row.session` as the rows hold it — so a
- * row varied to another store needs its store handed in. Throws for an
+ * row varied to another store, and a session no row holds, need the store
+ * handed in. Throws for an
  * `authority` that is not a registered requirement declaring it, and for a
  * row that names it when none is given.
  */
@@ -606,7 +612,12 @@ export function mergeAdmission(
 		}
 	}
 	const viewOver = (read: UserSession) =>
-		viewOf(read, store ?? storeHolding(read, ROW_STORE_RECORDS.get(read) ?? true));
+		viewOf(
+			read,
+			store === undefined
+				? (ROW_STORE_RECORDS.get(read) ?? true)
+				: supportsSecondFactorUpdate(store),
+		);
 	const named = (): RegisteredRequirement => {
 		if (authority === undefined) {
 			throw new Error(

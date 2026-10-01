@@ -37,12 +37,7 @@ import {
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
-import {
-	supportsSecondFactorUpdate,
-	type UserSession,
-	type UserSessionClaims,
-	type UserSessionStore,
-} from "../user-sessions/types.mjs";
+import type { UserSession, UserSessionClaims, UserSessionStore } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
@@ -246,11 +241,13 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
  * The view a requirement is handed, and an admitted or `step_up` admission
  * carries: a copy of four fields, and of the record's `enrollmentFacts` when
  * it holds ones the type admits — never the record — with whether a second
- * factor can be recorded on the session read over `store`, the store it was
- * read from: the one place admission decides it. Each call is a fresh copy.
+ * factor can be recorded on the session: `storeRecords`, whether the store
+ * it was read from has the step-up capability (`readLiveSession` reads it),
+ * and `canRecordSecondFactor` over the record. The one place admission
+ * decides it. Each call is a fresh copy.
  * @internal
  */
-export const viewOf = (session: UserSession, store: UserSessionStore | undefined): SessionView => {
+export const viewOf = (session: UserSession, storeRecords: boolean): SessionView => {
 	const enrollmentFacts = readEnrollmentFacts(session.enrollmentFacts);
 	return Object.freeze({
 		sid: session.sid,
@@ -258,7 +255,7 @@ export const viewOf = (session: UserSession, store: UserSessionStore | undefined
 		authTime: new Date(session.authTime.getTime()),
 		expiresAt: new Date(session.expiresAt.getTime()),
 		...(enrollmentFacts === undefined ? {} : { enrollmentFacts: Object.freeze(enrollmentFacts) }),
-		secondFactorRecordable: supportsSecondFactorUpdate(store) && canRecordSecondFactor(session),
+		secondFactorRecordable: storeRecords && canRecordSecondFactor(session),
 	});
 };
 
@@ -339,14 +336,14 @@ export async function admitSession(
 	// Steps 1 to 4: the claim, the live read, the subject and the renewal nonce, the revocation boundary.
 	const read = await readLiveSession(checked, unavailable);
 	if ("answer" in read) return read.answer;
-	const { session } = read;
+	const { session, storeRecords } = read;
 	// The record is read into one view; each requirement is handed its own
 	// copy of it, so what one does to its Dates reaches neither the next nor
 	// the consumer. Whether a second factor can be recorded on the session is
 	// decided here, in the view, once: the requirements, the merge and the
 	// consumer all read it there.
 	const live: LiveRecord | null =
-		session === null ? null : { session, view: viewOf(session, checked.userSessionStore) };
+		session === null ? null : { session, view: viewOf(session, storeRecords) };
 
 	// Step 5: the requirements, by the action's effective grade: only the
 	// issued remediation keeps its grade and skips them.
