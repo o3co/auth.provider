@@ -51,7 +51,15 @@ const ONE_OF_CONCURRENT =
 	"lets exactly one of N concurrent registrations of one credential id through, the rest throwing duplicate-credential, and keeps that one's";
 const SIGN_COUNT_REFUSED =
 	"refuses a sign count update at another current count: false, and the count unchanged";
+const SIGN_COUNT_LAST_USED = "writes, with the sign count it updates, the lastUsedAt it is given";
+const SIGN_COUNT_UNKNOWN =
+	"refuses a sign count update of a credential id it does not hold: false, and nothing found";
 const REMOVED = "removes a credential: it is found no more";
+const REMOVED_FROM_LIST =
+	"removes a credential from its user's list, and leaves the user's other credentials";
+const REMOVED_UNKNOWN = "removes a credential id it does not hold as a no-op: what it holds stays";
+const KEPT_AS_REGISTERED =
+	"keeps a credential's transports, backup state and nickname as registered, found and listed";
 
 /** Core's in-process store with `change` laid over it. */
 function broken(
@@ -236,6 +244,137 @@ describe("the suite refuses a store that breaks the contract", () => {
 		const refused = await refusedBy(() => broken(() => ({ remove: async () => {} })));
 		expect(refused).toContain(REMOVED);
 	});
+
+	it("one whose sign count update keeps the lastUsedAt it held", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				updateSignCount: async (credentialId, args) => {
+					const current = await store.findByCredentialId(credentialId);
+					return store.updateSignCount(credentialId, {
+						...args,
+						lastUsedAt: current?.lastUsedAt ?? current?.createdAt ?? args.lastUsedAt,
+					});
+				},
+			})),
+		);
+		expect(refused).toContain(SIGN_COUNT_LAST_USED);
+	});
+
+	it("one whose sign count update of a credential id it does not hold answers true", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				updateSignCount: async (credentialId, args) =>
+					(await store.findByCredentialId(credentialId)) === null
+						? true
+						: store.updateSignCount(credentialId, args),
+			})),
+		);
+		expect(refused).toContain(SIGN_COUNT_UNKNOWN);
+	});
+
+	it("one whose removal of a credential id it does not hold throws", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				remove: async (credentialId) => {
+					if ((await store.findByCredentialId(credentialId)) === null) {
+						throw new Error("no such credential");
+					}
+					await store.remove(credentialId);
+				},
+			})),
+		);
+		expect(refused).toContain(REMOVED_UNKNOWN);
+	});
+
+	it("one whose removal of a credential id it does not hold removes what it holds", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => {
+				const held: string[] = [];
+				return {
+					registerCredential: async (record) => {
+						await store.registerCredential(record);
+						held.push(record.credentialId);
+					},
+					remove: async (credentialId) => {
+						const targets = held.includes(credentialId) ? [credentialId] : held;
+						await Promise.all(targets.map((id) => store.remove(id)));
+					},
+				};
+			}),
+		);
+		expect(refused).toContain(REMOVED_UNKNOWN);
+	});
+
+	it("one whose removal leaves the credential in its user's list", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => {
+				const listed = new Map<string, WebAuthnCredential[]>();
+				return {
+					registerCredential: async (record) => {
+						await store.registerCredential(record);
+						listed.set(record.userId, [...(listed.get(record.userId) ?? []), record]);
+					},
+					listByUserId: async (userId) => listed.get(userId) ?? [],
+				};
+			}),
+		);
+		expect(refused).toContain(REMOVED_FROM_LIST);
+		expect(refused).not.toContain(REMOVED);
+	});
+
+	it("one whose removal takes every credential of the user", async () => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				remove: async (credentialId) => {
+					const found = await store.findByCredentialId(credentialId);
+					if (found === null) return;
+					const all = await store.listByUserId(found.userId);
+					await Promise.all(all.map((credential) => store.remove(credential.credentialId)));
+				},
+			})),
+		);
+		expect(refused).toContain(REMOVED_FROM_LIST);
+		expect(refused).not.toContain(REMOVED);
+	});
+
+	it.each([
+		["its transports", { transports: undefined }],
+		["its backup state", { backedUp: false }],
+		["its nickname", { nickname: undefined }],
+	] as const)("one that drops %s from what it answers", async (_what, dropped) => {
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				findByCredentialId: async (credentialId) => {
+					const found = await store.findByCredentialId(credentialId);
+					return found === null ? null : { ...found, ...dropped };
+				},
+				listByUserId: async (userId) =>
+					(await store.listByUserId(userId)).map((credential) => ({ ...credential, ...dropped })),
+			})),
+		);
+		expect(refused).toContain(KEPT_AS_REGISTERED);
+	});
+});
+
+describe("the suite accepts a store that keeps the contract", () => {
+	it("one that answers a credential's transports in another order", async () => {
+		const reversed = (credential: WebAuthnCredential): WebAuthnCredential => ({
+			...credential,
+			...(credential.transports === undefined
+				? {}
+				: { transports: [...credential.transports].reverse() }),
+		});
+		const refused = await refusedBy(() =>
+			broken((store) => ({
+				findByCredentialId: async (credentialId) => {
+					const found = await store.findByCredentialId(credentialId);
+					return found === null ? null : reversed(found);
+				},
+				listByUserId: async (userId) => (await store.listByUserId(userId)).map(reversed),
+			})),
+		);
+		expect(refused).toEqual([]);
+	});
 });
 
 describe("the suite's cases", () => {
@@ -253,7 +392,7 @@ describe("each case", () => {
 		let built = 0;
 		let closed = 0;
 		const failed: string[] = [];
-		// A store whose removal leaves the credential: the removal's case fails, the others pass.
+		// A store whose removal leaves the credential: the removal's cases fail, the others pass.
 		const cases = webAuthnCredentialStoreContract({
 			build: async () => {
 				built += 1;
@@ -268,7 +407,7 @@ describe("each case", () => {
 		for (const contractCase of cases) {
 			await contractCase.run().catch(() => failed.push(contractCase.name));
 		}
-		expect(failed).toEqual([REMOVED]);
+		expect(failed).toEqual([REMOVED, REMOVED_FROM_LIST]);
 		expect(built).toBe(cases.length);
 		expect(closed).toBe(cases.length);
 	});

@@ -473,6 +473,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 					if (stepUp === undefined) {
 						throw new Error("core issued the mfa requirement no mfa.step_up remediation");
 					}
+					// The session store's step-up capability, read once: what records an escalation, and whether a step-up opens.
+					const secondFactorStore = supportsSecondFactorUpdate(deps.userSessionStore)
+						? deps.userSessionStore
+						: undefined;
 					return {
 						id: MFA_ROUTES_ID,
 						mountPath: MFA_ROUTES_MOUNT_PATH,
@@ -508,6 +512,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								...(deps.subjectRevocation === undefined
 									? {}
 									: { subjectRevocation: deps.subjectRevocation }),
+								stepUpRecordable: secondFactorStore !== undefined,
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,
@@ -519,6 +524,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							},
 							stepUp,
 							loginCompletion: deps.loginCompletion,
+							secondFactorStore,
 							csrfGuard: deps.csrfGuard,
 							floodGuard: mfaFloodGuard({
 								rateLimiter: deps.rateLimiter,
