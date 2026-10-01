@@ -263,10 +263,11 @@ export interface SupportsSecondFactorUpdate {
 	 * nonce is not the event's `expectedRenewalNonce` (a completion another
 	 * one overtook), or whenever `sessionAfterSecondFactor` answers `null`
 	 * (`canRecordSecondFactor` is false): its primary cannot be told, or its
-	 * `authentication` or `amr` is not in a shape the types admit. Admission
-	 * never offers such a session a step-up through the second-factor
-	 * authority for `acr_values`: `/authorize` sends it to the login page
-	 * instead. One whose primary cannot be told logs in again on every path.
+	 * `authentication` or `amr` is not in a shape the types admit. Where
+	 * admission itself picks the second-factor authority to step a session up
+	 * for `acr_values`, it reads the same condition and answers a new login
+	 * (`reauthenticate`) instead; a requirement's own step-up is its to
+	 * answer.
 	 *
 	 * A `RangeError` before anything is read, nothing written, for an event
 	 * with no values, an empty value, a primary's marker (`pwd`, `fed`), only
