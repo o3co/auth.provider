@@ -22,15 +22,29 @@
  * wrong primitive and an atomic read-compare-write the right one.
  */
 
+import {
+	DEFAULT_CLOCK_SKEW_MS,
+	SUBJECT_REVOCATION_MIN_RETENTION_MS,
+} from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
 import {
+	runSessionsOnlyRevocationClockContract,
+	runSubjectRevocationClockContract,
+} from "./subjectRevocation.clock.contract.mjs";
+import {
 	runSessionsOnlyRevocationContract,
 	runSubjectRevocationContract,
 } from "./subjectRevocation.contract.mjs";
-import { aheadOfServer, serverDeadlines, serverPasses, testRedis } from "./support/redis.mjs";
+import {
+	aheadOfServer,
+	serverClock,
+	serverDeadlines,
+	serverPasses,
+	testRedis,
+} from "./support/redis.mjs";
 
 let raw: Redis;
 
@@ -69,6 +83,32 @@ runSessionsOnlyRevocationContract(
 		});
 	},
 	{ expiry: serverDeadlines(() => raw) },
+);
+
+// The boundary is bounded by the server's `TIME`, read in the write's own
+// script, so the suites judge it on that clock rather than the host's.
+const serverTime = { now: serverClock(() => raw) };
+
+runSubjectRevocationClockContract(
+	async () => {
+		suiteCounter += 1;
+		return createRedisSubjectRevocation({
+			client: makeIoredisClients(raw).subjectRevocationClient,
+			keyPrefix: `clock-all:${suiteCounter}:`,
+		});
+	},
+	{ clock: serverTime },
+);
+
+runSessionsOnlyRevocationClockContract(
+	async () => {
+		suiteCounter += 1;
+		return createRedisSubjectRevocation({
+			client: makeIoredisClients(raw).subjectRevocationClient,
+			keyPrefix: `clock-sessions:${suiteCounter}:`,
+		});
+	},
+	{ clock: serverTime },
 );
 
 describe("SubjectRevocation — Redis-specific behaviour", () => {
@@ -112,6 +152,20 @@ describe("SubjectRevocation — Redis-specific behaviour", () => {
 			),
 		);
 		expect((await s.revokedBefore("u3"))?.getTime()).toBe(1_000_000 + 49 * 1_000);
+	});
+
+	it("retains a clamped full revocation for the grant retention past the boundary it recorded", async () => {
+		// The floor runs from the recorded boundary, not the one asked for: a
+		// boundary years ahead must not keep its record years longer.
+		const s = store("t321r:clamp:");
+		const now = serverClock(() => raw);
+		const asked = new Date((await now()) + 10 * SUBJECT_REVOCATION_MIN_RETENTION_MS);
+		await s.revokeBefore("u5", asked, new Date((await now()) + 600_000));
+		const recorded = (await s.revokedBefore("u5"))?.getTime() as number;
+		expect(recorded).toBeLessThanOrEqual((await now()) + DEFAULT_CLOCK_SKEW_MS);
+		expect(await raw.pexpiretime("t321r:clamp:u5")).toBe(
+			recorded + SUBJECT_REVOCATION_MIN_RETENTION_MS,
+		);
 	});
 
 	it("never truncates an in-force watermark's TTL under a shorter write", async () => {

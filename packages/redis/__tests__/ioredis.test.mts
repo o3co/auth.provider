@@ -723,7 +723,7 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 		},
 		{
 			name: "subjectRevocationClient.setRevocationBoundaries",
-			reply: "stored",
+			reply: ["stored", "5000"],
 			answer: "stored",
 			run: (io: Redis) =>
 				makeIoredisClients(io).subjectRevocationClient.setRevocationBoundaries(
@@ -734,6 +734,19 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 					3_000,
 				),
 			wire: [1, "rev", "sessions", "1000", "2000", "3000"],
+		},
+		{
+			name: "subjectRevocationClient.advanceRevocationBoundaries",
+			reply: ["stored", "5000"],
+			answer: { value: "stored", serverNowMs: 5_000 },
+			run: (io: Redis) =>
+				makeIoredisClients(io).subjectRevocationClient.advanceRevocationBoundaries?.("rev", "all", {
+					beforeMs: 1_000,
+					expiresAtMs: 2_000,
+					grantRetentionMs: 3_000,
+					skewMs: 4_000,
+				}),
+			wire: [1, "rev", "all", "1000", "2000", "3000", "4000"],
 		},
 	] as const;
 
