@@ -182,18 +182,18 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			});
 		});
 
-		it("shortens a token whose adapter expiry is earlier than its issued lifetime says, and still judges the lifetime as issued", async () => {
+		it("shortens a token whose adapter expiry is earlier than its issued lifetime says, and still dates it from the call", async () => {
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockResolvedValue(
 				refreshed("1", DUE, { expiresAt: new Date(DUE.getTime() + 30 * MIN) }),
 			);
 			// Neither field can lengthen the other: the token ends at the earlier
-			// instant, and is dated back by as much.
+			// instant, and what is stored is the life it has from the call.
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1", expiresIn: 1800 });
 			expect((await stored())?.accessToken).toMatchObject({
-				obtainedAt: new Date(DUE.getTime() - 30 * MIN),
-				issuedLifetime: 3600,
+				obtainedAt: DUE,
+				issuedLifetime: 1800,
 			});
 		});
 
@@ -326,11 +326,16 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			["a lifetime without the adapter's anchor", { expiresAt: null }, "no_finite_lifetime"],
 			["an anchor without a lifetime", { expiresIn: undefined }, "no_finite_lifetime"],
 			["an expiry already past", { expiresAt: new Date(0) }, "no_finite_lifetime"],
-			// Dated so far back that no Date holds the instant it was obtained.
+			// Judged as issued, though the adapter's expiry ends it within the maximum.
 			[
-				"an issued lifetime whose start lies outside the Date range",
+				"a lifetime over the maximum, beside an expiry that ends it sooner",
+				{ expiresIn: 7200, expiresAt: at(HOUR + 30 * MIN) },
+				"lifetime_over_maximum",
+			],
+			[
+				"an absurd lifetime, beside an expiry that ends it sooner",
 				{ expiresIn: 1e13 },
-				"no_finite_lifetime",
+				"lifetime_over_maximum",
 			],
 			["scopes beyond the consent", { scope: "openid files.readwrite" }, "scope_exceeded"],
 			// Named, but naming no scope-token, is not silence: it must not read as

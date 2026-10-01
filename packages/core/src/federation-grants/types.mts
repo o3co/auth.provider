@@ -312,8 +312,13 @@ export interface FederationGrantCredentials {
 		| {
 				readonly value: string;
 				readonly tokenType: string;
+				/** When the refresh call that obtained it began. */
 				readonly obtainedAt: Date;
-				/** Seconds, as the upstream issued it — not what remains of it. */
+				/**
+				 * Seconds from `obtainedAt` to when the token ends: the reading's
+				 * `effectiveLifetime`, never more than the `expires_in` issued, and
+				 * shorter when the adapter's expiry ended it earlier. Not what remains.
+				 */
 				readonly issuedLifetime: number;
 				/** What this token carries. A refresh response that omits `scope` means the grant's scopes (RFC 6749 §6). */
 				readonly scopes: readonly string[];

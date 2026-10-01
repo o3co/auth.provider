@@ -20,6 +20,15 @@
  * held. Every consumer applies its own policy to the verdict: whether a
  * finite lifetime is required, whether both fields are, and any maximum.
  * Pure: no clock, no I/O, and no throw on any field value.
+ *
+ * A finite lifetime is always dated from `calledAt`, and `effectiveLifetime`
+ * is the life from then to the earlier instant the fields name: never more
+ * than a stated `expiresIn`. A consumer that judges the lifetime as issued
+ * judges `expiresIn` itself. A record that keeps a start and a lifetime
+ * keeps these two, so the start plus the lifetime is when the token ends
+ * and its age counts from when it was obtained. The federation-grant
+ * credential keeps `effectiveLifetime` under its released name,
+ * `issuedLifetime`.
  */
 
 /** The lifetime fields of an adapter's answer, each as the consumer read it once. */
@@ -48,14 +57,14 @@ export type UpstreamTokenLifetime =
 	| { readonly verdict: "spent" }
 	| {
 			readonly verdict: "finite";
-			/** Which fields named it. `issuedLifetime` is exactly as issued only when `expiresIn` is among them. */
+			/** Which fields named it. */
 			readonly stated: "both" | "expiresIn" | "expiresAt";
-			/** When the lifetime counts from: never after `calledAt`. */
+			/** When the lifetime counts from: `calledAt`. */
 			readonly obtainedAt: Date;
-			/** `obtainedAt` + `issuedLifetime` seconds, to the ms: neither field can lengthen the other. */
+			/** The earlier instant the fields name, to the ms: neither field can lengthen the other. */
 			readonly expiresAt: Date;
-			/** Seconds, above zero. */
-			readonly issuedLifetime: number;
+			/** Seconds from `obtainedAt` to `expiresAt`, above zero, and never more than a stated `expiresIn`. */
+			readonly effectiveLifetime: number;
 	  };
 
 /** A token already held: when it was obtained and when it ends. */
@@ -132,7 +141,7 @@ const assertDuration = (name: string, value: unknown): void => {
  * Read an adapter's `expiresIn` / `expiresAt`. A finite lifetime is dated
  * from `calledAt`, so time the upstream took is not counted as life left:
  * the derived instant is `min(expiresAt, calledAt + expiresIn)`, and
- * `obtainedAt` is `min(expiresAt − expiresIn, calledAt)`. Throws a
+ * `obtainedAt` is `calledAt`. Throws a
  * `RangeError` only for a clock that is not a finite instant, or a floor
  * that is not a finite duration ≥ 0. Each clock field is read once.
  */
@@ -158,29 +167,28 @@ export function readUpstreamTokenLifetime(
 		return { verdict: "contradictory" };
 	}
 
-	const lifetimeMs = lifetime === undefined ? undefined : lifetime * 1000;
-	const anchor =
-		instant !== undefined && lifetimeMs !== undefined ? instant - lifetimeMs : calledAt;
-	const obtainedAt = dateWithin(Math.min(anchor, calledAt));
 	// The earlier of what each stated field names; an absent one names no bound.
 	const derived = dateWithin(
 		Math.min(
 			instant ?? Number.POSITIVE_INFINITY,
-			calledAt + (lifetimeMs ?? Number.POSITIVE_INFINITY),
+			calledAt + (lifetime === undefined ? Number.POSITIVE_INFINITY : lifetime * 1000),
 		),
 	);
-	if (obtainedAt === undefined || derived === undefined) return { verdict: "malformed" };
+	if (derived === undefined) return { verdict: "malformed" };
 
 	const remainingMs = derived.getTime() - now;
-	if (remainingMs <= 0 || remainingMs < floorMs || derived.getTime() <= obtainedAt.getTime()) {
+	if (remainingMs <= 0 || remainingMs < floorMs || derived.getTime() <= calledAt) {
 		return { verdict: "spent" };
 	}
 	return {
 		verdict: "finite",
 		stated: lifetime === undefined ? "expiresAt" : instant === undefined ? "expiresIn" : "both",
-		obtainedAt,
+		obtainedAt: new Date(calledAt),
 		expiresAt: derived,
-		issuedLifetime: lifetime ?? (derived.getTime() - obtainedAt.getTime()) / 1000,
+		effectiveLifetime: Math.min(
+			(derived.getTime() - calledAt) / 1000,
+			lifetime ?? Number.POSITIVE_INFINITY,
+		),
 	};
 }
 

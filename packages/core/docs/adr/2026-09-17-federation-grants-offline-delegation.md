@@ -2365,9 +2365,12 @@ held between the call's start and the answer's arrival, so an `expiresAt`
 earlier than that window was clamped up and the token lived its full
 `expiresIn`. Core now has one reading of an upstream token's lifetime,
 `readUpstreamTokenLifetime` (`federations/token-lifetime.mts`), and the
-retrieval reads every refresh answer through it:
-`obtainedAt = min(expiresAt − expiresIn, calledAt)`, and the token ends at
-`min(expiresAt, calledAt + expiresIn)`.
+retrieval reads every refresh answer through it. `obtainedAt` is
+`calledAt`, the token ends at `min(expiresAt, calledAt + expiresIn)`, and
+the credential's `issuedLifetime` is the life between the two, never more
+than the `expires_in` issued. The name is kept because it is in a release;
+its meaning is that effective life. The answer's `expiresIn`, as issued, is
+still what D5 judges when the answer arrives.
 
 Why: two readers of the same answer, the retrieval and the oauth federation
 token route, applied different rules to it. This is the route's rule, and it
@@ -2375,16 +2378,16 @@ is the more conservative one. It never dates a token later than the call
 began, it never counts the time the upstream took as life left, and neither
 field can lengthen the other. What it changes:
 
-- An `expiresAt` earlier than `calledAt + expiresIn` shortens the token. D5
-  still judges the `expiresIn` as issued.
+- An `expiresAt` earlier than `calledAt + expiresIn` shortens the token. The
+  token is still dated from the call, not back to fit its issued lifetime:
+  dated back, it would be half spent at once, and a client asking for more
+  than it has could force a rotation on every request (D10).
 - An `expiresAt` that leaves no life when the answer is read, the past
   included, makes the refresh `upstream_token_ineligible` /
   `no_finite_lifetime`, with the rotated refresh token kept. The clamp used
   to give such a token its full lifetime. A token the grant already had is
   kept and served while it lasts, as after any refresh that brought nothing
   usable (D5).
-- An `expiresIn` that would date the token outside the Date range is
-  `no_finite_lifetime`, not `lifetime_over_maximum`.
 - The `expires_in` cache hint and the half-spent point (D10) come up to one
   call's duration earlier.
 

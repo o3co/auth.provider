@@ -1299,7 +1299,8 @@ async function refreshUnderLock(
 	} else {
 		const { expiresIn, expiresAt, scopes } = response.token;
 		// A lifetime both fields state, with life left when the answer is read,
-		// or none that is finite: the raw `expires_in` is what is judged.
+		// or none that is finite. The `expires_in` as issued is what is judged;
+		// the life the token has from the call is what is stored.
 		const reading = readUpstreamTokenLifetime(
 			{ expiresIn, expiresAt },
 			{ calledAt, now: receivedAt, floorMs: 0 },
@@ -1307,7 +1308,7 @@ async function refreshUnderLock(
 		const lifetime =
 			reading.verdict === "finite" && reading.stated === "both" ? reading : undefined;
 		const judgement = judgeUpstreamAccessToken({
-			issuedLifetime: lifetime?.issuedLifetime ?? null,
+			issuedLifetime: lifetime === undefined ? null : expiresIn,
 			scopes,
 			consentedScopes: grant.consent.scopes,
 			maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
@@ -1322,7 +1323,7 @@ async function refreshUnderLock(
 					value: response.token.accessToken,
 					tokenType: response.token.tokenType,
 					obtainedAt: lifetime.obtainedAt,
-					issuedLifetime: lifetime.issuedLifetime,
+					issuedLifetime: lifetime.effectiveLifetime,
 					scopes: [...scopes],
 				},
 			};
