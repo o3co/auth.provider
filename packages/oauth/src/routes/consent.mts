@@ -25,7 +25,9 @@
  * - `POST /oauth/consent` takes the answer. `accept` records the union of
  *   granted and asked scopes and returns the browser to the parked
  *   `/authorize` request; `deny` redirects to the client's `redirect_uri`
- *   with `access_denied` (RFC 6749 §4.1.2.1).
+ *   with `access_denied` (RFC 6749 §4.1.2.1), or answers `400
+ *   invalid_request` without redirecting when `checkRedirectUri` refuses
+ *   the parked URI.
  *
  * CSRF: the challenge is 32 random bytes, bound to the parking session and
  * handed to the page only in the redirect URL, which a cross-site page cannot
