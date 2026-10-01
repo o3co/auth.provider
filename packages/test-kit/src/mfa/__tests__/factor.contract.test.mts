@@ -58,6 +58,8 @@ const RULES = {
 		"challenge, over data whose address digest is gone or is no digest, still asks for its login code, with a null address digest, and never throws: the coordinator refuses the factor",
 	noAddress:
 		"nothing kept carries the account's address, whatever its case or escaping: the pending enrollment's state, the enrolled data and label, a challenge's state, and a verification's next data",
+	quietErrors:
+		"an error the factor throws — over an account without a username, or a pending state or data it cannot read — quotes neither the account's address nor its username",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
 		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
@@ -525,6 +527,48 @@ describe("mfaFactorContract", () => {
 				},
 			}));
 			expect(await failing({ ...encoding, user }), user.email).toEqual([RULES.noAddress]);
+		}
+	});
+
+	it("fails a factor whose error quotes the account's address or its username, percent-encoded or not, at any call", async () => {
+		const NAMED = { ...USER, username: USER.email };
+		const unreadable = (value: unknown) =>
+			typeof value === "object" && value !== null && Object.keys(value).length === 0;
+		const quoting: [string, (factor: MfaFactor) => Partial<MfaFactor>][] = [
+			[
+				"beginEnrollment",
+				(factor) => ({
+					beginEnrollment: async (ctx) => {
+						if (ctx.user.username === undefined) {
+							throw new Error(`no username for ${encodeURIComponent(String(ctx.user.email))}`);
+						}
+						return factor.beginEnrollment(ctx);
+					},
+				}),
+			],
+			[
+				"completeEnrollment",
+				(factor) => ({
+					completeEnrollment: async (ctx) => {
+						if (unreadable(ctx.state))
+							throw new Error(`no enrollment of ${String(ctx.user.username)}`);
+						return factor.completeEnrollment(ctx);
+					},
+				}),
+			],
+			[
+				"verify",
+				(factor) => ({
+					verify: async (ctx) => {
+						if (unreadable(ctx.factor.data)) throw new Error(`no factor of ${USER.email}`);
+						return factor.verify(ctx);
+					},
+				}),
+			],
+		];
+		for (const [where, change] of quoting) {
+			const input = inputFor({}, (factor) => ({ ...factor, ...change(factor) }));
+			expect(await failing({ ...input, user: NAMED }), where).toEqual([RULES.quietErrors]);
 		}
 	});
 

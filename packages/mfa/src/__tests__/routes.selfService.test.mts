@@ -31,6 +31,7 @@ import {
 	createInMemorySubjectRevocation,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	type MfaFactor,
 	type MfaFactorRecord,
 	type UserSession,
 	type UserSessionStore,
@@ -49,8 +50,10 @@ import {
 	disposeAll,
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
+import { stubFactor } from "./requirementHarness.mjs";
 import {
 	completeEnrollment,
+	contributing,
 	csrfOf,
 	enrollFromAccount,
 	freezeClock,
@@ -770,5 +773,108 @@ describe("the account page's calls", () => {
 			(await agent.post("/session/mfa/enrollment").set(header, token).send({ kind: "totp" }))
 				.status,
 		).toBe(200);
+	});
+});
+
+describe("a factor bound past the limit that cannot be removed", () => {
+	/** Alice with a TOTP factor and a session that verified it, a limit of 2, and another TOTP begun: its completion writes the third record. */
+	async function pastTheLimit() {
+		const { app, factorStore, userSessionStore, audit, logger } = await composed({
+			maxFactorsPerSubject: 2,
+		});
+		const seeded = await seedTotp(factorStore);
+		const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const other = (await seedTotp(createMemoryMfaFactorStore())).record;
+		const list = factorStore.list.bind(factorStore);
+		const create = factorStore.create.bind(factorStore);
+		let written = false;
+		vi.spyOn(factorStore, "create").mockImplementation(async (record) => {
+			await create(record);
+			written = true;
+		});
+		vi.spyOn(factorStore, "remove").mockRejectedValue(new Error("factor store unreachable"));
+		return { agent, begun, factorStore, audit, logger, list, other, written: () => written };
+	}
+
+	it("is answered 503 with the enrollment audited and one error line naming the account and the kind — the factor stands — when the records read again are past the limit", async () => {
+		const { agent, begun, factorStore, audit, logger, list, other, written } = await pastTheLimit();
+		// A binding made at once beside it: the read after the write finds three records.
+		vi.spyOn(factorStore, "list").mockImplementation(async (subject) =>
+			written() ? [...(await list(subject)), other] : list(subject),
+		);
+
+		const res = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		const standing = (await list(ALICE.id)).filter((record) => record.binding === "mfa");
+		expect(standing).toHaveLength(1);
+		expect(audit.of("mfa.factor.enrolled")).toEqual([
+			expect.objectContaining({
+				subject: ALICE.id,
+				details: { kind: "totp", purpose: "enroll", binding: "mfa", by: "user" },
+			}),
+		]);
+		const lines = logger.error.mock.calls.filter(
+			(call) => call[1] === "mfa_enrollment_factor_standing",
+		);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]?.[0]).toMatchObject({ sub: ALICE.id, kind: "totp", err: expect.anything() });
+		expect(JSON.stringify(lines)).not.toContain(standing[0]?.data as string);
+	});
+
+	it("is answered 503 the same way when the records cannot be read again, the read's outage said too", async () => {
+		const { agent, begun, factorStore, audit, logger, list, written } = await pastTheLimit();
+		vi.spyOn(factorStore, "list").mockImplementation(async (subject) => {
+			if (written()) throw new Error("factor store unreachable");
+			return list(subject);
+		});
+
+		const res = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(res.status).toBe(503);
+		expect((await list(ALICE.id)).filter((record) => record.binding === "mfa")).toHaveLength(1);
+		expect(audit.of("mfa.factor.enrolled")).toHaveLength(1);
+		const said = logger.error.mock.calls.map((call) => call[1]);
+		expect(said).toContain("mfa_store_unavailable");
+		expect(said.filter((name) => name === "mfa_enrollment_factor_standing")).toHaveLength(1);
+	});
+});
+
+describe("a factor's own failure", () => {
+	it("is logged by its name and code alone, never its message, which may quote the account", async () => {
+		const throwing: MfaFactor = {
+			...stubFactor("acme", ["hwk"]),
+			beginEnrollment: async (ctx) => {
+				throw Object.assign(new Error(`no key for ${String(ctx.user.email)}`), {
+					code: "E_ACME",
+				});
+			},
+		};
+		const booted = await boot({
+			config: configFor("optional"),
+			userRepository: directory(),
+			extraModules: [contributing(throwing)],
+		});
+		const { agent } = await signIn(booted.app, booted.userSessionStore as UserSessionStore);
+
+		const res = await enrollFromAccount(agent, "acme");
+
+		expect(res.status).toBe(503);
+		const line = booted.logger.error.mock.calls.find(
+			(call) => call[1] === "mfa_factor_enrollment_unavailable",
+		);
+		expect(line?.[0]).toMatchObject({ kind: "acme", err: { name: "Error", code: "E_ACME" } });
+		expect(loggedText(booted.logger)).not.toContain(ALICE.email);
 	});
 });
