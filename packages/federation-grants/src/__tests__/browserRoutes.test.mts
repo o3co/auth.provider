@@ -3356,6 +3356,32 @@ describe("consent — what an outage audits", () => {
 		},
 	);
 
+	it("audits a client registry that could not describe the client as unavailable with the flow's grant, client, subject and connection", async () => {
+		const w = world();
+		const { challenge, grantId } = await asked(w);
+		// The judgement's own read succeeds; the description's fails.
+		w.state.faults.set("findById", 1);
+		const response = await w.page(challenge, "b-1");
+		expect(response.status).toBe(503);
+		expect(response.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "client registry unavailable",
+		});
+		expect(await failures(w)).toEqual([
+			{
+				clientId: CLIENT.clientId,
+				subject: "alice",
+				details: {
+					correlationId: "corr-1",
+					grantId,
+					connection: CONNECTION.name,
+					outcome: "unavailable",
+					operation: "connect",
+				},
+			},
+		]);
+	});
+
 	/** Another flow, already upstream, holding the state the next answer is given. */
 	const collidingState = async (w: World) => {
 		const first = await asked(w);

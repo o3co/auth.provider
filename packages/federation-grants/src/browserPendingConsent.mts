@@ -147,7 +147,7 @@ export const pendingFor = async (
 
 /** `GET /consent`: what the page shows the user, as data. */
 export function createPendingConsentHandler(flow: BrowserFlow): RequestHandler {
-	const { options, now, log } = flow;
+	const { options, now, log, failed } = flow;
 	return async (req, res) => {
 		try {
 			const found = await pendingFor(flow, req, res, req.query.challenge);
@@ -158,6 +158,7 @@ export function createPendingConsentHandler(flow: BrowserFlow): RequestHandler {
 				client = await options.clientRepository.findById(intent.clientId);
 			} catch (error) {
 				log.clientRepositoryUnavailable("federation_grant_consent", intent.clientId, error);
+				failed(req, res, "unavailable", intent);
 				jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
 				return;
 			}
