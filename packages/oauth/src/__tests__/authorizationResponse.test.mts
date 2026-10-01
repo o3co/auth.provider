@@ -15,10 +15,12 @@
  */
 
 /**
- * The authorization-response builder on its own: what it appends, and that
- * it rewrites nothing a registered `redirect_uri` holds.
+ * The authorization-response builder on its own: what it appends, that it
+ * rewrites nothing in the query it is handed, and that every name it appends
+ * is one core's `checkRedirectUri` refuses in a registered query.
  */
 
+import { checkRedirectUri } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import {
 	authorizationResponseFor,
@@ -43,10 +45,45 @@ describe("authorizationResponseUrl", () => {
 		expect(url.searchParams.getAll("iss")).toEqual([ISS]);
 	});
 
-	it("rewrites no registered query: a registered iss is kept beside the response's", () => {
+	// Refusing such a URI is `checkRedirectUri`'s job, at registration and on
+	// each path that answers; the builder appends and checks nothing.
+	it("rewrites nothing in the query it is handed, a name it appends included", () => {
 		const url = new URL(authorizationResponseUrl("https://c/cb?iss=x", { code: "c" }, "s", ISS));
 		expect(url.searchParams.getAll("iss")).toEqual(["x", ISS]);
 	});
+});
+
+describe("the names the builder appends", () => {
+	/** The names a code response and an error response carry, both with state. */
+	const appended = [
+		...new URL(
+			authorizationResponseUrl("https://c/cb", { code: "c" }, "s", ISS),
+		).searchParams.keys(),
+		...new URL(
+			authorizationResponseUrl(
+				"https://c/cb",
+				{ error: "access_denied", error_description: "d" },
+				"s",
+				ISS,
+			),
+		).searchParams.keys(),
+	];
+
+	it("are the response parameters: code, state, iss, error, error_description", () => {
+		expect(new Set(appended)).toEqual(
+			new Set(["code", "state", "iss", "error", "error_description"]),
+		);
+	});
+
+	it.each([...new Set(appended)])(
+		"%s is a name checkRedirectUri refuses in a registered query",
+		(name) => {
+			expect(checkRedirectUri(`https://c/cb?${name}=x`)).toEqual({
+				reason: "reserved-parameter",
+				parameter: name,
+			});
+		},
+	);
 });
 
 describe("authorizationResponseFor", () => {
