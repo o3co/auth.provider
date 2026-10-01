@@ -134,14 +134,19 @@ describe("mfaModules", () => {
 		expect(module.absencePolicies?.subjectRevocation).toBe(SUBJECT_REVOCATION_ABSENCE_POLICY);
 	});
 
-	it("registers the action its routes admit a session for, mfa.manage, graded credential_change", async () => {
+	it("registers the actions its routes admit a session for: mfa.manage, graded credential_change, and mfa.view, graded use", async () => {
 		expect(mfaModule().contributes?.admissionActions).toEqual({
 			"mfa.manage": { grade: "credential_change" },
+			"mfa.view": { grade: "use" },
 		});
 		const { handle } = await boot();
 		expect(handle.components.sessionRequirementResolver?.action("mfa.manage")).toMatchObject({
 			name: "mfa.manage",
 			grade: "credential_change",
+		});
+		expect(handle.components.sessionRequirementResolver?.action("mfa.view")).toMatchObject({
+			name: "mfa.view",
+			grade: "use",
 		});
 	});
 
