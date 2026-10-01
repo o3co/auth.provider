@@ -28,6 +28,7 @@ import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	type MfaFactorRecord,
+	type MfaTransactionStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createRecordingMailSender } from "@o3co/auth-provider-core/testing";
@@ -59,6 +60,7 @@ import {
 	suiteSealing,
 	T0,
 	thawClock,
+	totpCode,
 	verify,
 } from "./routesHarness.mjs";
 
@@ -77,6 +79,14 @@ const UNAVAILABLE = {
 const LAST_FACTOR = {
 	error: "mfa_last_factor",
 	error_description: "The last second factor that counts cannot be removed",
+};
+const FACTORS_CHANGED = {
+	error: "mfa_factors_changed",
+	error_description: "The account's second factors changed: read them again",
+};
+const FACTORS_BUSY = {
+	error: "mfa_factors_busy",
+	error_description: "The account's second factors are being changed: try again",
 };
 const FACTOR_CONFLICT = {
 	error: "mfa_factor_conflict",
@@ -674,5 +684,183 @@ describe("POST /session/mfa/factors/remove", () => {
 			"mfa_store_unavailable",
 		);
 		expect(marked).not.toHaveBeenCalled();
+	});
+});
+
+/** The operator reset's step on the transaction store alone: the subject's generation moved on by one, under its lease. */
+async function moveGeneration(store: MfaTransactionStore, subject: string): Promise<void> {
+	await store.authorizeSubjectRecovery(subject, {
+		operation: "reset",
+		sid: undefined,
+		recoveryId: newFactorId(),
+		expiresAtMs: Date.now() + 60_000,
+	});
+	const lease = await store.acquireSubjectLease(subject, {
+		ttlMs: 10_000,
+		generation: await store.subjectGeneration(subject),
+	});
+	if (lease.outcome !== "acquired") throw new Error(`no lease: ${lease.outcome}`);
+	await store.applySubjectRecovery(subject, {
+		operation: "reset",
+		sid: undefined,
+		nowMs: Date.now(),
+		leaseToken: lease.token,
+		sessionsBoundaryMs: undefined,
+		guessableBoundSinceMs: undefined,
+	});
+	await store.releaseSubjectLease(subject, lease.token);
+}
+
+/** A gate a test opens: `wait` resolves once `open` is called, or after `fallbackMs`. */
+function gate(fallbackMs = 300) {
+	let open: () => void = () => {};
+	const opened = new Promise<void>((resolve) => {
+		open = resolve;
+		setTimeout(resolve, fallbackMs);
+	});
+	return { wait: () => opened, open: () => open() };
+}
+
+describe("the subject's factor-set writes, one at a time", () => {
+	it("refuses at commit a removal a reset overtook before its lease: 409 mfa_factors_changed, nothing removed, nothing audited", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		const store = built.transactionStore;
+		const acquire = store.acquireSubjectLease.bind(store);
+		vi.spyOn(store, "acquireSubjectLease").mockImplementationOnce(async (subject, request) => {
+			await moveGeneration(store, subject);
+			return acquire(subject, request);
+		});
+		const marked = vi.spyOn(built.users, "markMfaEnrolled");
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(FACTORS_CHANGED);
+		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
+		expect(built.audit.of("mfa.factor.removed")).toEqual([]);
+		expect(marked).not.toHaveBeenCalled();
+	});
+
+	it("under required, lets one of two removals of the last two counting factors through: the other is 409 mfa_last_factor", async () => {
+		const built = await composed("required");
+		const { agent, totp } = await signedIn(built);
+		const other = await seedTotp(built.factorStore);
+		const held = gate();
+		const removeFor = built.factorStore.remove.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "remove").mockImplementationOnce(async (subject, id) => {
+			await held.wait();
+			return removeFor(subject, id);
+		});
+		const store = built.transactionStore;
+		const acquire = store.acquireSubjectLease.bind(store);
+		vi.spyOn(store, "acquireSubjectLease").mockImplementation(async (subject, request) => {
+			const answer = await acquire(subject, request);
+			if (answer.outcome === "busy") held.open();
+			return answer;
+		});
+
+		const answers = await Promise.all([
+			remove(agent, totp.record.id),
+			remove(agent, other.record.id),
+		]);
+
+		expect(answers.map((res) => res.status).sort()).toEqual([200, 409]);
+		expect(answers.find((res) => res.status === 409)?.body).toEqual(LAST_FACTOR);
+		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
+	});
+
+	it("runs a login's witness mark and a removal of the last factor one after the other: the mark, then the removal's clear", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		await built.users.markMfaEnrolled(ALICE.id, false);
+		const from = built.users.marks.length;
+		const held = gate();
+		let entered: () => void = () => {};
+		const marking = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const mark = built.users.markMfaEnrolled.bind(built.users);
+		vi.spyOn(built.users, "markMfaEnrolled").mockImplementationOnce(async (subject, enrolled) => {
+			entered();
+			await held.wait();
+			return mark(subject, enrolled);
+		});
+		const store = built.transactionStore;
+		const acquire = store.acquireSubjectLease.bind(store);
+		vi.spyOn(store, "acquireSubjectLease").mockImplementation(async (subject, request) => {
+			const answer = await acquire(subject, request);
+			if (answer.outcome === "busy") held.open();
+			return answer;
+		});
+		const login = await beginLogin(built.app);
+
+		const verifying = verify(
+			login.agent,
+			login.transaction,
+			totp.record.id,
+			totpCode(totp.secret, 1),
+		);
+		await marking;
+		const removed = await remove(agent, totp.record.id);
+		const verified = await verifying;
+
+		expect(verified.status, JSON.stringify(verified.body)).toBe(200);
+		expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+		expect(built.users.marks.slice(from)).toEqual([
+			{ subject: ALICE.id, enrolled: true },
+			{ subject: ALICE.id, enrolled: false },
+		]);
+	});
+
+	it("answers 409 mfa_factors_busy, with Retry-After, when another write holds the subject's lease past the wait, removing nothing", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		const store = built.transactionStore;
+		const lease = await store.acquireSubjectLease(ALICE.id, {
+			ttlMs: 60_000,
+			generation: await store.subjectGeneration(ALICE.id),
+		});
+		expect(lease.outcome).toBe("acquired");
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(FACTORS_BUSY);
+		expect(res.headers["retry-after"]).toBe("1");
+		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
+	});
+
+	it("says a lease that ended before its release at error, and answers 409 mfa_factors_changed for the removal it made, audited", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		vi.spyOn(built.transactionStore, "releaseSubjectLease").mockResolvedValue(false);
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(FACTORS_CHANGED);
+		expect(await built.factorStore.list(ALICE.id)).toEqual([]);
+		expect(built.audit.of("mfa.factor.removed")).toHaveLength(1);
+		expect(built.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sub: ALICE.id, route: "factors" }),
+			"mfa_subject_lease_overrun",
+		);
+	});
+
+	it("answers 503, removing nothing, when the transaction store cannot give the lease", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		vi.spyOn(built.transactionStore, "acquireSubjectLease").mockRejectedValue(new Error("down"));
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(UNAVAILABLE);
+		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
+		expect(built.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "factors", store: "mfa_transaction" }),
+			"mfa_store_unavailable",
+		);
 	});
 });
