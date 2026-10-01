@@ -26,9 +26,12 @@
  * user — registering one another user holds, or its own user, throws
  * `WebAuthnCredentialStorageError` `duplicate-credential` and changes nothing; one of N
  * concurrent registrations of one id let through, the rest `duplicate-credential`, and the
- * record the one that went through; a sign count updated at the expected current count, and
- * refused, unchanged, at another; and a removed credential found no more. Each case builds a
- * fresh harness and closes it.
+ * record the one that went through; a sign count updated at the expected current count, with
+ * the `lastUsedAt` it was given, and refused, unchanged, at another; a sign count update of an
+ * id it does not hold refused; a removed credential found no more, and gone from its user's list
+ * while the user's others stay; a removal of an id it does not hold a no-op; and a credential's
+ * transports, backup state and nickname kept as registered. Each case builds a fresh harness and
+ * closes it.
  */
 
 import assert from "node:assert/strict";
@@ -193,10 +196,58 @@ export function webAuthnCredentialStoreContract(
 			assert.equal((await store.findByCredentialId("cid-1"))?.signCount, 5);
 		}),
 
+		test("writes, with the sign count it updates, the lastUsedAt it is given", async (store) => {
+			await store.registerCredential(CREDENTIAL({ signCount: 5 }));
+			await store.updateSignCount("cid-1", {
+				expectedCurrentSignCount: 5,
+				newSignCount: 6,
+				lastUsedAt: new Date("2026-05-13T00:00:00Z"),
+			});
+			const found = await store.findByCredentialId("cid-1");
+			assert.equal(found?.lastUsedAt?.toISOString(), "2026-05-13T00:00:00.000Z");
+		}),
+
+		test("refuses a sign count update of a credential id it does not hold: false, and nothing found", async (store) => {
+			const updated = await store.updateSignCount("missing", {
+				expectedCurrentSignCount: 0,
+				newSignCount: 1,
+				lastUsedAt: new Date("2026-05-13T00:00:00Z"),
+			});
+			assert.equal(updated, false);
+			assert.equal(await store.findByCredentialId("missing"), null);
+		}),
+
 		test("removes a credential: it is found no more", async (store) => {
 			await store.registerCredential(CREDENTIAL());
 			await store.remove("cid-1");
 			assert.equal(await store.findByCredentialId("cid-1"), null);
+		}),
+
+		test("removes a credential from its user's list, and leaves the user's other credentials", async (store) => {
+			await store.registerCredential(CREDENTIAL());
+			await store.registerCredential(CREDENTIAL({ credentialId: "cid-2" }));
+			await store.remove("cid-1");
+			assert.deepEqual(idsOf(await store.listByUserId("u-opaque-1")), ["cid-2"]);
+			assert.equal((await store.findByCredentialId("cid-2"))?.userId, "u-opaque-1");
+		}),
+
+		test("removes a credential id it does not hold as a no-op: what it holds stays", async (store) => {
+			await store.registerCredential(CREDENTIAL());
+			await store.remove("missing");
+			await holdsTheFirst(store, "u-opaque-1");
+		}),
+
+		test("keeps a credential's transports, backup state and nickname as registered, found and listed", async (store) => {
+			await store.registerCredential(
+				CREDENTIAL({ transports: ["hybrid", "internal"], backedUp: true, nickname: "laptop" }),
+			);
+			const found = await store.findByCredentialId("cid-1");
+			const [listed] = await store.listByUserId("u-opaque-1");
+			for (const credential of [found, listed]) {
+				assert.deepEqual(credential?.transports, ["hybrid", "internal"]);
+				assert.equal(credential?.backedUp, true);
+				assert.equal(credential?.nickname, "laptop");
+			}
 		}),
 	];
 }

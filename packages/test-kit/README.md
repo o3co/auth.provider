@@ -176,9 +176,13 @@ changes nothing, the holder's record kept and the other user listing
 nothing; one of fifty concurrent registrations of one id let through, the
 rest `duplicate-credential`, and the record the one that went through; a
 sign count updated by compare-and-set at the expected current count,
-answering `true`, and at another count answering `false`, the count
-unchanged; and a removed credential found no more. Core's in-process store
-runs it.
+answering `true` and writing the `lastUsedAt` it was given, and at another
+count answering `false`, the count unchanged; a sign count update of an id
+it does not hold answering `false`; a removed credential found no more, and
+gone from its user's list while the user's other credentials stay; a
+removal of an id it does not hold a no-op; and a credential's `transports`,
+`backedUp` and `nickname` kept as registered. Core's in-process store runs
+it.
 
 ## A second factor's contract suite
 
