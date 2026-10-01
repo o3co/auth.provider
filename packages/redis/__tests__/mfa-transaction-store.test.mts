@@ -1603,6 +1603,22 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		["a floor with a leading zero", "floor", "01"],
 		["another session's authorization it cannot read", `a:recover:${keyPart("sid-2")}`, "garbage"],
 		["an applied authorization at generation 0", `a:recover:${keyPart("sid-2")}`, "a|0|1|r"],
+		["a generation past the safe integers", "g", "9007199254740992"],
+		[
+			"an applied authorization past the safe integers",
+			`a:recover:${keyPart("sid-2")}`,
+			"a|9007199254740992|1|r",
+		],
+		[
+			"a pending authorization ending past the Date range",
+			`a:recover:${keyPart("sid-2")}`,
+			"p|8640000000000001|r",
+		],
+		[
+			"an applied authorization ending past the Date range",
+			`a:recover:${keyPart("sid-2")}`,
+			"a|1|8640000000000001|r",
+		],
 	])(
 		"answers a recover and a reset an outage when the recovery hash holds %s, leaving the lock, week and recovery keys as they were",
 		async (_label, field, value) => {
@@ -1654,6 +1670,23 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 			store.raiseRecoverySetFloor("user-1", { setGeneration: 3, leaseToken: lease.token }),
 		).rejects.toThrow(/subject state/);
 		expect(await first().hget(recovery, "floor")).toBe("02");
+	});
+
+	it("answers a release, and an acquire under a generation past the safe integers, an outage", async () => {
+		const prefix = freshPrefix();
+		const { store, token } = await primed(prefix);
+		const { lease, recovery } = keysOf(prefix);
+		await first().persist(lease);
+		await expect(store.releaseSubjectLease("user-1", token)).rejects.toThrow(/lease/);
+		expect(await first().get(lease)).toBe(token);
+		await first().hset(recovery, "g", "9007199254740992");
+		await expect(
+			store.acquireSubjectLease("user-2", { ttlMs: 60_000, generation: 0 }),
+		).resolves.toMatchObject({ outcome: "acquired" });
+		await first().del(lease);
+		await expect(
+			store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 }),
+		).rejects.toThrow(/subject state/);
 	});
 
 	it("refuses an apply, and a floor raise, under a lease key with no deadline, which it never writes", async () => {
