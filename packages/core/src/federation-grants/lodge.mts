@@ -201,10 +201,18 @@ export interface FederationGrantLodgingAbsorbedCarrier {
 	readonly absorbed?: readonly FederationGrantLodgingStepFailure[];
 }
 
-/** A refusal; on `storage`, carrying what failed. */
-export interface FederationGrantLodgingRefused extends FederationGrantLodgingAbsorbedCarrier {
+/**
+ * The refusals a first intent and a renewal share: all but
+ * `connection_not_configured`, which a renewal answers as `connection_not_permitted`.
+ */
+type SharedLodgingRefusal = Exclude<FederationGrantLodgingRefusal, "connection_not_configured">;
+
+/** A refusal, narrowed to `R`; on `storage`, carrying what failed. */
+export interface FederationGrantLodgingRefused<
+	R extends FederationGrantLodgingRefusal = FederationGrantLodgingRefusal,
+> extends FederationGrantLodgingAbsorbedCarrier {
 	readonly ok: false;
-	readonly reason: FederationGrantLodgingRefusal;
+	readonly reason: R;
 	/** On `storage`: what failed — a `FederationGrantLodgingFailure`, not enumerable (`carry.mts`). */
 	readonly failure?: FederationGrantLodgingFailure;
 	/**
@@ -225,7 +233,7 @@ export type FederationGrantReauthorizationResult =
 			 */
 			readonly status: FederationGrantRenewableStatus;
 	  })
-	| FederationGrantLodgingRefused
+	| FederationGrantLodgingRefused<SharedLodgingRefusal>
 	| ((
 			| {
 					readonly ok: false;
@@ -288,10 +296,12 @@ type RequestCheck =
 			readonly scopes: readonly string[];
 			readonly lifetimeMs: number;
 	  }
-	| FederationGrantLodgingRefused;
+	| FederationGrantLodgingRefused<SharedLodgingRefusal>;
 
 /** `storage`, carrying what failed where nothing enumerates it (`carry.mts`). */
-const storage = (failure: FederationGrantLodgingFailure): FederationGrantLodgingRefused =>
+const storage = (
+	failure: FederationGrantLodgingFailure,
+): FederationGrantLodgingRefused<"storage"> =>
 	carryingFailure({ ok: false, reason: "storage" }, failure);
 
 /** Every answer a renewal refuses with. */
@@ -408,7 +418,7 @@ function intentRecord(input: {
 	};
 }
 
-type Admitted = { readonly ok: true } | FederationGrantLodgingRefused;
+type Admitted = { readonly ok: true } | FederationGrantLodgingRefused<"storage" | "intent_limit">;
 
 async function admit(
 	store: FederationGrantIntentStore,
@@ -583,11 +593,12 @@ async function secondWrite(
 }
 
 /**
- * Lodges a renewal of an existing grant: ownership, then the revocation
- * backstop before anything else is asked of it, then the grant's lifecycle and
- * the configuration in retrieval's order (`admission`), then a key missing from
- * the ring, the asserted connection and the request, and only then the two
- * writes.
+ * Lodges a renewal of an existing grant: ownership, then a revocation or a
+ * pending grant as stored, then the subject's grants boundary and the
+ * revocation backstop before anything else is asked of it, then the grant's
+ * lifecycle and the configuration in retrieval's order (`admission`), then a
+ * key missing from the ring, the asserted connection and the request, and only
+ * then the two writes.
  */
 export async function lodgeFederationGrantReauthorization(
 	deps: FederationGrantLodgingDeps,
@@ -612,6 +623,18 @@ export async function lodgeFederationGrantReauthorization(
 	) {
 		return { ok: false, reason: "grant_not_found" };
 	}
+	// A revocation or a pending grant as stored is answered from the record alone, as
+	// retrieval does: a boundary that cannot be read must not turn it into an outage.
+	const stored = inspection.grant;
+	if (stored.status === "revoked") {
+		return {
+			ok: false,
+			reason: "grant_revoked",
+			revokedBy: stored.revocation.by,
+			revokedNow: false,
+		};
+	}
+	if (stored.status === "pending") return { ok: false, reason: "authorization_pending" };
 
 	let boundary: Date | null;
 	try {
@@ -738,7 +761,7 @@ async function judgeAndLodge(
 	const configured = deps.connections.get(grant.connection);
 	const status = statusOf(deps, inspection, configured, boundary, now());
 
-	if (status.status === "revoked" && status.reason === "backstop" && grant.status !== "revoked") {
+	if (status.status === "revoked" && status.reason === "backstop") {
 		// Written down, not only reported: a revocation that lived only in the
 		// comparison would vanish the day the boundary is lost.
 		let written: Awaited<ReturnType<FederationGrantStore["revoke"]>>;

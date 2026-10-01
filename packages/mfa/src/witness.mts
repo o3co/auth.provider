@@ -23,8 +23,9 @@
  *   factor was written, so a crash between them leaves a factor without a
  *   witness, never a witness without a factor.
  * - Reconciliation: a verified counting factor marks a subject whose login's
- *   `User` does not say it is enrolled, so a mark that failed heals at the
- *   next login.
+ *   `User` does not say it is enrolled — at a login, or at a session's
+ *   step-up, as the session recorded that `User` — so a mark that failed
+ *   heals at the next login or step-up.
  * - A mark that fails never undoes what it follows: the caller warns once.
  * - Read only through core's `readMfaEnrollmentWitness`.
  */
@@ -35,6 +36,7 @@ import {
 	supportsMfaEnrollmentWitness,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
+import type { MfaCeremonySession } from "./ceremony.mjs";
 
 /** What marking the witness came to. */
 export type MfaWitnessMark =
@@ -77,6 +79,17 @@ export const reconciles = (factor: MfaFactor, user: unknown): boolean =>
 	(typeof user !== "object" ||
 		user === null ||
 		readMfaEnrollmentWitness(user as Readonly<Record<string, unknown>>) !== "enrolled");
+
+/**
+ * Whether a verification of `factor` in a session whose login's `User`
+ * carried `witness`, as the session recorded it, marks the witness: a
+ * counting factor, a witness that does not say enrolled — none recorded
+ * included.
+ */
+export const reconcilesSession = (
+	factor: MfaFactor,
+	witness: MfaCeremonySession["witness"],
+): boolean => factor.counting === true && witness !== "enrolled";
 
 /**
  * A login whose `User` says the subject enrolled — or says something

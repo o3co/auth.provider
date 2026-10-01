@@ -35,11 +35,8 @@ import {
  */
 
 /** A credential the client could actually present: present, a string, not empty. */
-const isNonEmptyString = (value: unknown): value is string =>
+export const isUsableToken = (value: unknown): value is string =>
 	typeof value === "string" && value !== "";
-
-/** Alias at the call sites where the string is a token rather than a scope. */
-export const isUsableToken = isNonEmptyString;
 
 /** Seconds a token has left: finite and in the future. `NaN` and `-5` are neither. */
 const isUsableLifetime = (value: unknown): value is number =>

@@ -22,7 +22,6 @@
  */
 
 import {
-	BEARER_TOKEN_TYPE,
 	canonicalScope,
 	emitAuditEvent,
 	type FederationTokens,
@@ -40,6 +39,7 @@ import {
 	narrowedScope,
 	type RefreshReading,
 } from "./federationTokenRefreshAnswer.mjs";
+import { answerToken } from "./federationTokenSuccess.mjs";
 
 /**
  * The refusals of an answer, then steps 11f and 11h. `currentTokens` is the
@@ -181,27 +181,8 @@ export const recordRefresh = async (
 		});
 	}
 
-	// 11h: return the refreshed token; `expires_in` is omitted when there is
-	// no finite expiry.
-	const expiresIn =
-		nextExpiresAt === null
-			? undefined
-			: Math.max(0, Math.floor((nextExpiresAt.getTime() - Date.now()) / 1000));
-	emitAuditEvent(opts.auditSink, {
-		timestamp: new Date(),
-		type: "federation.token.success",
-		subject: sub ?? undefined,
-		ip: req.ip,
-		userAgent: req.get("user-agent"),
-		details: { federation, refreshed: true },
-	});
-	return res.status(200).json({
-		// `updatedTokens`, not the adapter's object: the answer was read once,
-		// and a getter read a second time may answer differently from what was
-		// just written to the store.
-		access_token: updatedTokens.accessToken,
-		token_type: BEARER_TOKEN_TYPE,
-		...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
-		...(updatedTokens.scope ? { scope: updatedTokens.scope } : {}),
-	});
+	// 11h: `updatedTokens`, not the adapter's object: the answer was read
+	// once, and a getter read a second time may answer differently from what
+	// was just written to the store.
+	return answerToken(ctx, caller, updatedTokens, true);
 };

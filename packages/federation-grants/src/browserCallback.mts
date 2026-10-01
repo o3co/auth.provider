@@ -19,6 +19,9 @@
  * the flow's checks asked before the exchange and again before the write, the code
  * exchanged, and the grant activated under the store's guard. Once the transaction
  * is spent, every outcome finishes the intent and returns the browser to the client.
+ * An unknown transaction, one that could not be spent, and every failure after it
+ * are audited as `federation.grant.authorization_failed`, an outage as
+ * `temporarily_unavailable`.
  */
 
 import {
@@ -86,6 +89,8 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 					},
 					error,
 				);
+				// No transaction, so no flow to name: the audit carries this request alone.
+				failed(req, res, "temporarily_unavailable");
 				plain(res, 503, "Temporarily unavailable.");
 				return;
 			}
