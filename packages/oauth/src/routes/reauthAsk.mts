@@ -16,8 +16,9 @@
 
 /**
  * The re-authentication ask: the record `/authorize` writes when it sends a
- * browser to the login page for `max_age` or `prompt=login` (or to a step-up
- * page), and consumes when the browser comes back.
+ * browser to the login page (`max_age`, `prompt=login`, a new login asked
+ * for) or to a step-up page, reads on every pass of that request, and
+ * spends on the pass that mints the code.
  *
  * Not a request parameter: the caller could forge it and skip the round trip
  * OIDC Core §3.1.2.1 puts on the OP. Not a session field: the login it asks
@@ -26,9 +27,12 @@
  *
  * An opaque 32-byte CSPRNG id on the URL names a record in the session store
  * under its own prefix: a caller cannot invent one that exists, it survives
- * session regeneration, `consume` is one store operation so a replay finds
- * nothing, and it is honoured only on a return to the request it was minted
- * for. The store is taken off the request (the one the session middleware
+ * session regeneration and renewal, and it is honoured only on a return to
+ * the request it was minted for (presented with another, it is spent).
+ * `read` leaves it for the next pass; `consume` removes it, so a replay after
+ * the mint finds nothing. Each write lives `REAUTH_ASK_TTL_MS`, and a chain of
+ * writes for one request no longer than `REAUTH_ASK_MAX_CHAIN_MS` from its
+ * first. The store is taken off the request (the one the session middleware
  * mounted) rather than injected, so it cannot point elsewhere. A login page
  * that rebuilds the authorize URL instead of returning `redirect_to` verbatim
  * drops the id, and the user is asked again.
@@ -198,7 +202,10 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 			const id = randomBytes(32).toString("base64url");
 			const now = Date.now();
 			// This write's window, and never past the chain's cap.
-			const expiresAt = Math.min(now + REAUTH_ASK_TTL_MS, record.createdAt + REAUTH_ASK_MAX_CHAIN_MS);
+			const expiresAt = Math.min(
+				now + REAUTH_ASK_TTL_MS,
+				record.createdAt + REAUTH_ASK_MAX_CHAIN_MS,
+			);
 			const maxAge = Math.max(0, expiresAt - now);
 			await new Promise<void>((resolve, reject) => {
 				store.set(

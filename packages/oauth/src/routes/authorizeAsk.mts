@@ -17,7 +17,10 @@
 /**
  * What the request asks of the session — `prompt`, `max_age`, `acr_values` —
  * and the trips that answer it: the login trip and the step-up trip, each
- * recorded as a re-authentication ask bound to this request (`./reauthAsk.mts`).
+ * recorded as a re-authentication ask bound to this request
+ * (`./reauthAsk.mts`). The ask is read on every pass, spent by the next trip's
+ * write and by the pass that mints; a session that comes back from a trip it
+ * was already sent on is refused, never sent again.
  */
 
 import {

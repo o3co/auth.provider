@@ -239,7 +239,8 @@ const applyGrantPolicy = async (
  *    consentable, verified email, PKCE (mandatory, S256) and `nonce`;
  * 6. narrow scope (allowlist, openid), ask for consent when not first-party,
  *    apply the grant policy, check RFC 8707 resources;
- * 7. issue the code and redirect with `code` and `state` (§4.1.2).
+ * 7. spend the re-authentication ask the request presents, issue the code
+ *    and redirect with `code` and `state` (§4.1.2).
  */
 export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHandler => {
 	// The login round-trip target is built from the configured origin, never
