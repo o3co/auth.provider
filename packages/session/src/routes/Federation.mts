@@ -85,6 +85,14 @@ import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
+import {
+	cleanUp,
+	type FederationStore,
+	type FederationStoreStep,
+	logCleanupFailed,
+	logMisconfigured,
+	logStoreUnavailable,
+} from "./FederationLog.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -189,119 +197,6 @@ const readCallbackParams = (source: unknown): Readonly<Record<string, string>> =
 			(entry): entry is [string, string] => typeof entry[1] === "string",
 		),
 	);
-};
-
-/**
- * The stores the federation routes read or write, as their log lines name
- * them. `cookie_session` is the express-session store behind `req.session`;
- * `federation_transaction` is a `form_post` federation's transaction record,
- * kept in that same store under a key of its own.
- */
-type FederationStore =
-	| "user_repository"
-	| "user_session"
-	| "session_federation_index"
-	| "federation_token"
-	| "subject_session_index"
-	| "federation_transaction"
-	| "cookie_session";
-
-/** The operation on a {@link FederationStore} that failed, as a log line names it. */
-type FederationStoreStep =
-	| "get"
-	| "set"
-	| "delete"
-	| "save"
-	| "regenerate"
-	| "destroy"
-	| "create"
-	| "authenticate_by_token"
-	| "link"
-	| "list"
-	| "add"
-	| "attach"
-	| "remove"
-	| "remove_by_sid"
-	| "remove_sid";
-
-/** Which leg of a federation a store outage stopped. */
-type FederationOutageEvent =
-	| "federation_start_store_unavailable"
-	| "federation_callback_store_unavailable"
-	| "federation_link_store_unavailable";
-
-/**
- * A store a federation route cannot do without could not answer: the
- * server's outage, never a verdict on the user or the IdP. One error line
- * named for the leg, with `store`, `step` and the error's projection — never
- * the error, which can carry a token record. The caller answers `503`.
- */
-const logStoreUnavailable = (
-	log: Logger,
-	event: FederationOutageEvent,
-	store: FederationStore,
-	step: FederationStoreStep,
-	cause: unknown,
-	context: Readonly<Record<string, unknown>> = {},
-): void => {
-	log.error({ ...context, store, step, err: loggableError(cause) }, event);
-};
-
-/** A composition fault a federation route can meet, as its log line names it. */
-type FederationMisconfiguration =
-	| "no_callback_url"
-	| "no_redirect_policy"
-	| "no_session_store"
-	| "no_callback_path";
-
-/**
- * A federation route met a composition fault — a provider with no callback URL
- * or no redirect policy, a `form_post` federation with no express-session
- * store on its requests or a callback URL with no path to scope its cookie
- * to. No client causes it and no retry fixes it: one line at error level,
- * `federation_misconfigured`, with the `reason`; the caller answers `500`.
- */
-const logMisconfigured = (
-	log: Logger,
-	reason: FederationMisconfiguration,
-	context: Readonly<Record<string, unknown>> = {},
-): void => {
-	log.error({ ...context, reason }, "federation_misconfigured");
-};
-
-/**
- * The warn line a best-effort step that failed is logged as,
- * `federation_cleanup_failed`: `store`, `step` and the error's projection.
- * {@link cleanUp} emits it for the steps this router runs itself; the login
- * tail's reporter emits it for the ones `establishSession` runs.
- */
-const logCleanupFailed = (
-	log: Logger,
-	store: FederationStore,
-	step: FederationStoreStep,
-	cause: unknown,
-	context: Readonly<Record<string, unknown>> = {},
-): void => {
-	log.warn({ ...context, store, step, err: loggableError(cause) }, "federation_cleanup_failed");
-};
-
-/**
- * Run one best-effort cleanup step — a rollback after a failed link, the
- * discard of a refused transaction. A step that fails is one
- * {@link logCleanupFailed} line; the request's own answer stands either way.
- */
-const cleanUp = async (
-	log: Logger,
-	store: FederationStore,
-	step: FederationStoreStep,
-	run: () => Promise<unknown>,
-	context: Readonly<Record<string, unknown>> = {},
-): Promise<void> => {
-	try {
-		await run();
-	} catch (err) {
-		logCleanupFailed(log, store, step, err, context);
-	}
 };
 
 export const createRouter = (
