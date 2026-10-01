@@ -519,7 +519,13 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// than it, and the same on the access, refresh and id tokens (RFC 9470
 			// §6.1). One this clock cannot read — further ahead than the skew
 			// allows — refuses the exchange before anything is signed.
+			// One issuance instant for the exchange: `authTime` is read against it
+			// and every token signed here carries it as `iat` (the id_token's own
+			// `auth_time` is read against the clock it signs with, never later than
+			// its `iat`), so a wall clock moved back before the signing cannot put
+			// `auth_time` after `iat`.
 			const mintingNow = Date.now();
+			const issuedAt = Math.floor(mintingNow / 1000);
 			const authTime =
 				userSession === null ? undefined : authTimeAt(userSession.authTime, mintingNow);
 			if (userSession !== null && authTime === undefined) {
@@ -638,6 +644,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					issuedAt,
 					...(confirmation ? { confirmation } : {}),
 				},
 			);
@@ -645,7 +652,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// family below is registered under exactly the `jti` and `exp` the
 			// token carries. Never read back from the signer's output, which a
 			// `KeyStore` may return in a form this grant cannot decode.
-			const refreshTokenIssuedAt = Math.floor(Date.now() / 1000);
+			const refreshTokenIssuedAt = issuedAt;
 			const refreshTokenJti = crypto.randomUUID();
 			const refreshToken = await generateToken(
 				{

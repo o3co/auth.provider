@@ -764,6 +764,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						authorizedParty: authenticatedClientId,
 						scope: scopeClaim,
 						tokenType: "at+jwt",
+						// The rotation's issuance instant, which `auth_time` is capped at.
+						issuedAt,
 						...(presentedConfirmation ? { confirmation: presentedConfirmation } : {}),
 					},
 				);
