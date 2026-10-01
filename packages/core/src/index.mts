@@ -473,6 +473,7 @@ export type {
 	SessionMutation,
 } from "./grants/types.mjs";
 export {
+	advertisedIssuer,
 	checkCanonicalIssuer,
 	describeIssuerRejection,
 	type IssuerRejection,
