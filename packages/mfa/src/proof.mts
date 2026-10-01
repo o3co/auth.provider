@@ -48,7 +48,7 @@ import {
 	UNKNOWN_FACTOR,
 } from "./ceremony.mjs";
 import { generateLongCode, readLongCode } from "./codes.mjs";
-import { keptState, mailRefusalOf, maskMailAddress, readKeptState, sendMfaMail } from "./mail.mjs";
+import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 
 /** The `factor_id` that names the proof, and the kind its code is digested and sealed under. */
 export const ACCOUNT_EMAIL_FACTOR_ID = "account-email";
@@ -137,10 +137,7 @@ export function createAccountEmailProof(kit: MfaCeremonyKit): {
 				case "sent":
 					return {
 						outcome: "sent",
-						response: {
-							sent_to: maskMailAddress(mailed.to),
-							expires_in: Math.max(1, Math.ceil((mailed.expiresAtMs - nowMs) / 1000)),
-						},
+						response: mailedAnswer(mailed, nowMs),
 						...about(tx),
 					};
 				case "not_kept":
