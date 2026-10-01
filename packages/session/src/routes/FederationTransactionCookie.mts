@@ -46,17 +46,25 @@ export const readSessionCookieName = (config: unknown): string => {
 	return typeof name === "string" && name.length > 0 ? name : FALLBACK_SESSION_COOKIE_NAME;
 };
 
+/** Attributes shared by the `Set-Cookie` that issues the cookie and the one that clears it. */
+const transactionCookieAttributes = (path: string) =>
+	({
+		httpOnly: true,
+		// `SameSite=None` is what makes the cookie reach a cross-site POST,
+		// and every current browser drops such a cookie unless it is also
+		// `Secure`. Apple refuses a non-`https` redirect URI anyway, so a
+		// form_post federation is HTTPS-only regardless.
+		secure: true,
+		sameSite: "none",
+		path,
+	}) as const;
+
 /** The transaction's store and cookie, as the start writes them and the callback reads and clears them. */
 export interface FederationTransactionCookie {
 	readonly transactionCookieName: string;
 	readonly transactionStore: (req: Request) => FederationTransactionStore | undefined;
 	readonly transactionCookiePath: (provider: FederationProvider) => string | undefined;
-	readonly transactionCookieAttributes: (path: string) => {
-		readonly httpOnly: true;
-		readonly secure: true;
-		readonly sameSite: "none";
-		readonly path: string;
-	};
+	readonly transactionCookieAttributes: typeof transactionCookieAttributes;
 	readonly clearTransactionCookie: (provider: FederationProvider, res: Response) => void;
 }
 
@@ -99,19 +107,6 @@ export const createTransactionCookie = (
 			return undefined;
 		}
 	};
-
-	/** Attributes shared by the `Set-Cookie` that issues the cookie and the one that clears it. */
-	const transactionCookieAttributes = (path: string) =>
-		({
-			httpOnly: true,
-			// `SameSite=None` is what makes the cookie reach a cross-site POST,
-			// and every current browser drops such a cookie unless it is also
-			// `Secure`. Apple refuses a non-`https` redirect URI anyway, so a
-			// form_post federation is HTTPS-only regardless.
-			secure: true,
-			sameSite: "none",
-			path,
-		}) as const;
 
 	/**
 	 * Drop the transaction cookie. Called on every callback exit — success,

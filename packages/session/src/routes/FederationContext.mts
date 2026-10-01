@@ -16,8 +16,7 @@
 
 /**
  * What the federation stages share: the router's context, built once when the
- * router is, and the token type a stored upstream token record keeps. A stage
- * reads the context and never changes it.
+ * router is. A stage reads the context and never changes it.
  */
 
 import type {
@@ -54,15 +53,3 @@ export interface FederationRouterContext extends FederationTransactionCookie {
 		log: Logger,
 	) => Promise<Admission>;
 }
-
-/**
- * The record's `tokenType` for what an adapter answered: the upstream's
- * spelling verbatim, even when it is not a token type, because the
- * disclosing route reads only an absent field as `Bearer` — erasing an
- * unusable value would turn a refusal into a 200. A non-string is recorded
- * as `""`, which that route also refuses.
- */
-export const recordedTokenType = (named: unknown): string | undefined => {
-	if (named === undefined) return undefined;
-	return typeof named === "string" ? named : "";
-};

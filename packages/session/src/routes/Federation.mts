@@ -62,8 +62,8 @@ import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { identifyFederatedUser } from "./FederationCallbackIdentity.mjs";
 import { readCallbackParams, resolveCallbackProvider } from "./FederationCallbackRequest.mjs";
 import { consumeCallbackState } from "./FederationCallbackState.mjs";
-import { type FederationRouterContext, recordedTokenType } from "./FederationContext.mjs";
-import { completeLink } from "./FederationLinkCallback.mjs";
+import type { FederationRouterContext } from "./FederationContext.mjs";
+import { completeLink, recordedTokenType } from "./FederationLinkCallback.mjs";
 import { readCsrfTrustedOrigins } from "./FederationLinkStart.mjs";
 import {
 	type FederationStore,

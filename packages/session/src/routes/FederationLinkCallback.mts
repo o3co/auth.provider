@@ -40,7 +40,7 @@ import {
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
-import { type FederationRouterContext, recordedTokenType } from "./FederationContext.mjs";
+import type { FederationRouterContext } from "./FederationContext.mjs";
 import {
 	cleanUp,
 	type FederationStore,
@@ -48,6 +48,18 @@ import {
 	logMisconfigured,
 	logStoreUnavailable,
 } from "./FederationLog.mjs";
+
+/**
+ * The record's `tokenType` for what an adapter answered: the upstream's
+ * spelling verbatim, even when it is not a token type, because the
+ * disclosing route reads only an absent field as `Bearer` — erasing an
+ * unusable value would turn a refusal into a 200. A non-string is recorded
+ * as `""`, which that route also refuses.
+ */
+export const recordedTokenType = (named: unknown): string | undefined => {
+	if (named === undefined) return undefined;
+	return typeof named === "string" ? named : "";
+};
 
 /**
  * Link a federated identity to the account the browser is signed in as,

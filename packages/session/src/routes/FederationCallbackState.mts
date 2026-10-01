@@ -17,8 +17,8 @@
 /**
  * The callback's state check, its security boundary: the ephemeral state read
  * from where the start kept it, `state` compared with it, and the state
- * retired before any async work. A refusal spends a `form_post` transaction
- * only when the request presented a `state`.
+ * retired before any async work. A request with no `state` leaves the
+ * transaction in place; a wrong `state` spends it.
  */
 
 import {

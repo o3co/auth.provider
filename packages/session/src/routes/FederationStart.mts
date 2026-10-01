@@ -18,7 +18,8 @@
  * The start leg, `GET /oauth/federation/:name`: the `redirect_to` and a link
  * start checked, then the state, PKCE verifier and nonce minted and kept —
  * in the session, or a `form_post` federation's transaction and its cookie —
- * before the browser is sent to the IdP. Nothing is sent before they are kept.
+ * before the browser is sent to the IdP. The browser is sent to the IdP only
+ * after they are kept.
  */
 
 import { randomBytes } from "node:crypto";
