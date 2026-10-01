@@ -711,6 +711,8 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 | `mfat:tx:{<id>}` | hash | one MFA transaction, expiring at its `expiresAtMs` |
 | `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, and whether a hold's first refusal was answered (`held`) |
 | `mfat:week:{<subject>}` | sorted set | the weekly window: one member per failure, scored by its time |
+| `mfat:recovery:{<subject>}` | hash | the subject's generation (`g`), its recovery-set floor (`floor`), and one field per recovery authorization, `a:<operation>:<sid>` |
+| `mfat:lease:{<subject>}` | string | the token of the subject's lease holder, expiring at the lease's end |
 | `mfat:proof:{<subject>}` | string | the email proof an operator reset requires at the next first binding |
 | `mfat:session-proof:{<subject>}:<sid>` | string | the account-email proof given in one session, JSON `{provedAtMs, untilMs}`, expiring at `untilMs` |
 | `mfat:first-binding:{<subject>}` | string | the subject's first-binding mark, JSON `{atMs, untilMs}`, expiring at `untilMs` |
@@ -718,8 +720,9 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 Subjects and ids are base64url of their JSON, as the federation grant store
 spells its ids, so no brace moves a hash tag and no two values share a key.
 Neither prefix may contain a brace. A subject's factors are one key; a
-subject's lock hash and week share the subject's tag, so each of D21's
-operations is one script on one Cluster slot.
+subject's lock hash, week, recovery hash and lease share the subject's tag,
+so each of D21's operations, and each recovery and lease operation, is one
+script on one Cluster slot.
 
 **The factors.** `create` is `HSETNX`; `update` is one script that compares
 the version as text and carries the fixed part over byte for byte — it never
@@ -769,9 +772,9 @@ the run — reservations in flight counted — at the `hardLimit` it is handed
 writes it (`HSETNX`) in the same step, the reservation that reaches it being
 let through; from then every reservation is refused `hard` whatever
 `hardLimit` it is handed, the exempt script ends nothing, and a settle
-lifts nothing; only `clearSubjectState` removes it. While a run is counted
+lifts nothing; only an applied recovery removes it. While a run is counted
 or the hold stands the keys carry no TTL — only a success, an exempt
-success before the hold, or `clearSubjectState` ends a run — and once
+success before the hold, or an applied recovery ends a run — and once
 neither is they expire a day after the last failure stops counting. A
 `hard` field the scripts cannot read refuses every lock operation, as any
 other field does. A missing or non-numeric `hardLimit` argument is refused
@@ -793,8 +796,32 @@ nothing. A lock-hash field of a kind the scripts
 do not read (`t:<digest>` among them) is ignored and goes with the keys, and
 a transaction hash's `sends` and `lastSentAtMs`, where present, are not read:
 neither loosens a limit the store keeps. The email-proof requirement is a key of
-its own with no TTL: `clearSubjectState` leaves it, and consuming it is one
+its own with no TTL: an applied recovery leaves it, and consuming it is one
 `DEL`.
+
+**Recovery, the generation, the lease and the floor.** `authorizeSubjectRecovery`
+and `applySubjectRecovery` are one script each. An authorization is a field of
+the subject's recovery hash, `p|<expiresAtMs>|<recoveryId>` while pending and
+`a|<generation>|<expiresAtMs>|<recoveryId>` once applied, ending on the server's
+clock; the authorize script refuses an end not after that clock or further
+ahead than an hour and the skew, and drops the authorizations ended on it. The
+apply script runs over the lock hash, the week, the recovery hash and the
+lease: it checks the lease's token, then the authorization, then judges the
+lock state exactly as core's in-process store does, and moves the generation
+(`HINCRBY g`) in the same step; a reset deletes the lock and week keys unread,
+so it ends a lock state the other scripts cannot read. The acquire script
+compares the generation a writer captured with `g` (absent is `0`) and writes
+the lease with `SET NX PX`; the release is the compare-and-delete script the
+federation stores' locks use. The floor is the recovery hash's `floor`, raised
+by one script that never lowers it. The recovery hash carries no TTL once it
+holds a generation or a floor — losing the generation refuses a writer that
+captured it, losing the floor brings an older recovery-code set back — and
+before that expires a day after its latest authorization ends. A generation,
+floor or authorization the store cannot read is an outage, never none, and so
+is a lease key with no deadline. The lease is logical: a write that outlives
+it is told so at its release (`false`), never stopped. Evicting a lease lets a
+second writer at the subject's factor set, so the server must not evict it:
+run it on `noeviction`.
 
 **A session's account-email proof.** One string per session of a subject,
 written with one `SET … PX`, whose lifetime is `untilMs` less the store's own
@@ -841,7 +868,8 @@ pass the factor store, whose keys carry no TTL, and are one warning from the
 transaction store (`mfa_transaction_store_lock_evictable`, with
 `evictableFamilies`) — its lock and week keys carry a TTL once no run is
 counted, and an evicted one lifts a D21 hold early; a first-binding mark
-always carries one, and an evicted mark fails open. RDB snapshots without AOF (`mfa_factor_store_lossy`,
+always carries one, and an evicted mark fails open; a lease always carries
+one, and an evicted lease lets a second writer in. RDB snapshots without AOF (`mfa_factor_store_lossy`,
 `mfa_transaction_store_lossy`) and no persistence (`…_volatile`) are each one
 warning. A part that could not be read — a question the server refused
 (`NOPERM`, an unknown or renamed command, a disabled one), or answered without
