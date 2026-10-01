@@ -22,26 +22,22 @@
  * never answered `200`.
  */
 
-import {
-	BEARER_TOKEN_TYPE,
-	canonicalScope,
-	emitAuditEvent,
-	type FederationTokens,
-} from "@o3co/auth-provider-core";
+import { BEARER_TOKEN_TYPE, canonicalScope, emitAuditEvent } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
+import type { DisclosableToken } from "./federationTokenDisclosure.mjs";
 import { isUsableToken } from "./federationTokenRefreshAnswer.mjs";
 import { answerUnlinkedRecord } from "./federationTokenUnlinked.mjs";
 
 /**
- * Hands `token` to the caller, whose type the path has already judged
- * disclosable. `expires_in` is computed last, just before the answer is sent,
+ * Hands `token` to the caller; only the disclosure check produces one.
+ * `expires_in` is computed last, just before the answer is sent,
  * so time spent before it (the audit call included) is not counted as lifetime left.
  */
 export const answerToken = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
-	token: Pick<FederationTokens, "accessToken" | "expiresAt" | "scope">,
+	token: DisclosableToken,
 	refreshed: boolean,
 ): Promise<Response> => {
 	// Answered as a store that judges its records answers such a record: as none.

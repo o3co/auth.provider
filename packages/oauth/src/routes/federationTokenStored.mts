@@ -23,10 +23,7 @@
 import type { FederationTokens } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
-import {
-	mayDiscloseTokenType,
-	refuseUndisclosableTokenType,
-} from "./federationTokenDisclosure.mjs";
+import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
 import { answerUnlinkedRecord } from "./federationTokenUnlinked.mjs";
 
@@ -71,7 +68,7 @@ export const answerStoredToken = async (
 ): Promise<Response> => {
 	// The type is judged before the token is read and before the success
 	// is audited, so a refused disclosure is not counted as one.
-	if (!mayDiscloseTokenType(tokens.tokenType)) {
+	if (!isDisclosable(tokens)) {
 		return refuseUndisclosableTokenType(ctx, caller, tokens.tokenType);
 	}
 	return answerToken(ctx, caller, tokens, false);

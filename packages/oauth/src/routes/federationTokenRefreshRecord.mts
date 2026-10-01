@@ -29,10 +29,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
-import {
-	mayDiscloseTokenType,
-	refuseUndisclosableTokenType,
-} from "./federationTokenDisclosure.mjs";
+import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import {
 	isUsableToken,
 	narrowedScope,
@@ -126,14 +123,7 @@ export const recordRefresh = async (
 		});
 	}
 
-	// The refresh worked but its token may not be handed on. Keep the
-	// rotated refresh token so fixing the upstream needs no re-consent.
-	if (!mayDiscloseTokenType(nextTokenType)) {
-		await keepRotatedRefreshToken();
-		return refuseUndisclosableTokenType(ctx, caller, nextTokenType);
-	}
-
-	// 11f: store the refreshed tokens, falling back to the post-lock
+	// 11f: the refreshed record, falling back to the post-lock
 	// snapshot for fields the IdP did not rotate. The expiry comes only
 	// from this answer (`derivedExpiry`): the stored one belongs to the
 	// expired token, and copying it forward would refresh on every
@@ -151,7 +141,7 @@ export const recordRefresh = async (
 		idToken: isUsableToken(answer.idToken) ? answer.idToken : currentTokens.idToken,
 		expiresAt: nextExpiresAt,
 		// What the upstream last named, else what the record carried; judged
-		// above, so the write and the response agree.
+		// below, before the write, so the write and the response agree.
 		tokenType: nextTokenType,
 		// The three readings and the bound they are judged against are
 		// `narrowedScope`'s, next to its own reasoning. Nothing about the
@@ -163,6 +153,14 @@ export const recordRefresh = async (
 		// this route does not own.
 		grantedScope: canonicalScope(currentTokens.grantedScope),
 	};
+
+	// The refresh worked but its token may not be handed on. Keep the
+	// rotated refresh token so fixing the upstream needs no re-consent.
+	if (!isDisclosable(updatedTokens)) {
+		await keepRotatedRefreshToken();
+		return refuseUndisclosableTokenType(ctx, caller, nextTokenType);
+	}
+
 	try {
 		await opts.federationTokenStore.update(sid, name, updatedTokens);
 	} catch (error) {

@@ -30,10 +30,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
-import {
-	mayDiscloseTokenType,
-	refuseUndisclosableTokenType,
-} from "./federationTokenDisclosure.mjs";
+import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import { readRefreshAnswer } from "./federationTokenRefreshAnswer.mjs";
 import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
 import { recordRefresh } from "./federationTokenRefreshRecord.mjs";
@@ -126,7 +123,7 @@ export const refreshStoredTokens = async (
 				// Another caller refreshed, or there is no finite expiry: return
 				// the stored token without calling the IdP, judging its type as on
 				// the fast path.
-				if (!mayDiscloseTokenType(freshTokens.tokenType)) {
+				if (!isDisclosable(freshTokens)) {
 					return refuseUndisclosableTokenType(ctx, caller, freshTokens.tokenType);
 				}
 				// Awaited inside the `try`, so the lock is released after the answer.
