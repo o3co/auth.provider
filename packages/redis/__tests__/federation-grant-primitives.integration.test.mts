@@ -23,8 +23,8 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { FederationGrantStoreClient } from "../src/clients.mjs";
-import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+import type { FederationGrantStoreClient } from "#/clients.mjs";
+import { makeIoredisFederationGrantStoreClient } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let redis: Redis;

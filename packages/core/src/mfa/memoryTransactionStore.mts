@@ -24,27 +24,33 @@
  * subject state is judged on the times callers pass, the sweep included (it
  * uses the latest). Sweeps run on writes, paced like the challenge store's,
  * and drop subject state once nothing in it can hold an attempt again (see
- * `prune`; the consecutive run lasts until a success). The email-proof
+ * `prune`; the consecutive run lasts until a success, and the hard hold
+ * until an applied recovery lifts it). The email-proof
  * requirement the operator reset records is not lock state: only its
  * consumption at the next first binding removes it.
  *
- * A session's account-email proof and a subject's first-binding mark expire
- * on this store's clock too, and are swept with the transactions.
+ * A session's account-email proof, a subject's first-binding mark and a
+ * subject's lease and recovery authorizations expire on this store's clock
+ * too, and are swept with the transactions. A subject's generation and
+ * recovery-set floor are never swept.
  *
- * At most `maxEntries` entries are held: transactions, session email proofs
- * and first-binding marks together. At the cap the store reclaims expired
+ * At most `maxEntries` entries are held: transactions, session email proofs,
+ * first-binding marks, subject leases and recovery authorizations together. At the cap the store reclaims expired
  * entries (no more often than the sweep floor) and, if still full, refuses a
  * new one with {@link MfaTransactionStoreFullError}, never evicting a live one
  * (that would end the ceremony of a user typing a code, send them to prove
  * again, or trust a session a mark distrusts). Replacing a session's proof,
- * or noting a subject's mark again, is no new entry. Subject state is uncapped:
- * only a login the Store accepted creates a subject (an open sign-up lets
- * anyone mint them). The cap is global: nothing caps the transactions one
+ * or noting a subject's mark again, is no new entry. Subject state is uncapped,
+ * and so are a subject's generation and recovery-set floor, which the cap
+ * does not count: only a login the Store accepted creates a subject (an open
+ * sign-up lets anyone mint them). At the cap a new lease is refused too, so a
+ * recovery or a reset waits until room frees. The cap is global: nothing caps the transactions one
  * session holds, so a client within the routes' rate limits can fill it.
  */
 
 import { randomBytes } from "node:crypto";
 import { isStorableExpiry } from "../adapters/expiry.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import { usableMaxEntries } from "../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import {
@@ -52,17 +58,28 @@ import {
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	checkRecoverySetFloorRaise,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
+	checkSubjectLeaseRelease,
+	checkSubjectLeaseRequest,
+	checkSubjectQuestion,
+	checkSubjectRecoveryApplication,
+	checkSubjectRecoveryAuthorization,
 	type FirstBindingMark,
 	firstBindingAnswer,
 	laterFirstBindingMark,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
+	type MfaRecoverySetFloorAnswer,
 	type MfaSubjectAttemptOutcome,
 	type MfaSubjectAttemptReservation,
 	type MfaSubjectHold,
+	type MfaSubjectLeaseAnswer,
+	type MfaSubjectRecoveryAnswer,
+	type MfaSubjectRecoveryOperation,
+	type MfaSubjectRecoveryRefusal,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
@@ -93,8 +110,9 @@ export interface MemoryMfaTransactionStoreOptions extends AmortizedSweepOptions 
 	/** The clock a transaction expires by, in epoch milliseconds. Default `Date.now`. */
 	readonly now?: () => number;
 	/**
-	 * The most entries held — transactions, session email proofs and
-	 * first-binding marks, expired-but-unswept included; default
+	 * The most entries held — transactions, session email proofs,
+	 * first-binding marks, subject leases and recovery authorizations,
+	 * expired-but-unswept included; default
 	 * {@link DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES}. Anything but a
 	 * positive whole number up to 2^24 (a `Map`'s limit) is a `RangeError`,
 	 * never read as no cap.
@@ -113,7 +131,7 @@ export class MfaTransactionStoreFullError extends Error {
 
 	constructor(maxEntries: number) {
 		super(
-			`memory MfaTransactionStore is at its cap of ${maxEntries} resident entries — transactions, session email proofs and first-binding marks, expired ones not yet swept included; refusing a new one rather than evicting one`,
+			`memory MfaTransactionStore is at its cap of ${maxEntries} resident entries — transactions, session email proofs, first-binding marks, subject leases and recovery authorizations, expired ones not yet swept included; refusing a new one rather than evicting one`,
 		);
 		this.name = "MfaTransactionStoreFullError";
 	}
@@ -129,7 +147,9 @@ export interface MemoryMfaTransactionStore extends MfaTransactionStore {
 	readonly sessionEmailProofs: number;
 	/** First-binding marks resident, expired-but-unswept included. */
 	readonly firstBindingMarks: number;
-	/** The most entries it holds (`maxEntries`), transactions, proofs and marks together; at it, a new one is refused. */
+	/** Subject leases resident, expired-but-unswept included. */
+	readonly subjectLeases: number;
+	/** The most entries it holds (`maxEntries`), transactions, proofs, marks, leases and authorizations together; at it, a new one is refused. */
 	readonly maxEntries: number;
 }
 
@@ -149,7 +169,30 @@ interface SubjectState {
 	readonly pending: Map<string, number>;
 	/** Whether a refusal was answered since an attempt was last let through: an episode is under way. */
 	refusing: boolean;
+	/**
+	 * When the hard hold was fixed: the later of the fixing call's time and the
+	 * run's newest attempt, so no attempt of the run is dated after it. From
+	 * then the hold stands until the state is cleared.
+	 */
+	hard?: number;
 }
+
+/** A subject's lease: its holder's token, standing until `untilMs` on this store's clock. */
+interface SubjectLease {
+	readonly token: string;
+	readonly untilMs: number;
+}
+
+/** A recovery authorization, pending or applied (at the generation `appliedAt`). */
+interface RecoverySlot {
+	readonly recoveryId: string;
+	readonly expiresAtMs: number;
+	readonly appliedAt?: number;
+}
+
+/** Where an authorization is kept for its subject: the operation and the `sid` as one unambiguous key. */
+const slotKeyOf = (operation: MfaSubjectRecoveryOperation, sid: string | undefined): string =>
+	JSON.stringify([operation, sid ?? null]);
 
 /** Where a session's proof is kept: the subject and the `sid` as one unambiguous key. */
 const proofKeyOf = (subject: string, sid: string): string => JSON.stringify([subject, sid]);
@@ -194,6 +237,10 @@ function backoffUntil(
 	return lockUntil !== undefined && nowMs < lockUntil ? lockUntil : undefined;
 }
 
+/** The time a hold fixed at `nowMs` records: never before the run's newest attempt. */
+const fixedAt = (run: readonly Attempt[], nowMs: number): number =>
+	run.reduce((latest, a) => Math.max(latest, a.atMs), nowMs);
+
 /** The failures the rolling week counts at `nowMs`. The store keeps them a while longer (see `prune`). */
 const inWeek = (week: readonly Attempt[], nowMs: number): Attempt[] =>
 	week.filter((a) => a.atMs + MFA_WEEKLY_WINDOW_MS > nowMs);
@@ -235,6 +282,16 @@ export function createMemoryMfaTransactionStore(
 	const proofs = new Map<string, SessionEmailProof>();
 	/** Each subject's first-binding mark. */
 	const marks = new Map<string, FirstBindingMark>();
+	/** Each subject's lease. */
+	const leases = new Map<string, SubjectLease>();
+	/** Each subject's generation, once a recovery moved it: never swept. */
+	const generations = new Map<string, number>();
+	/** Each subject's recovery-set floor, once raised: never swept. */
+	const floors = new Map<string, number>();
+	/** Each subject's recovery authorizations, by `slotKeyOf`. */
+	const recoveries = new Map<string, Map<string, RecoverySlot>>();
+	/** The authorizations held across subjects, for the cap. */
+	let slotCount = 0;
 	/** Subjects whose next first binding requires the email proof: no expiry, never swept. */
 	const emailProofRequired = new Set<string>();
 	/** The order of the next reservation. */
@@ -281,6 +338,14 @@ export function createMemoryMfaTransactionStore(
 		for (const [subject, mark] of marks) {
 			if (mark.untilMs <= storeNowMs) marks.delete(subject);
 		}
+		for (const [subject, lease] of leases) {
+			if (lease.untilMs <= storeNowMs) leases.delete(subject);
+		}
+		for (const [subject, slots] of recoveries) {
+			for (const [key, slot] of slots) {
+				if (slot.expiresAtMs <= storeNowMs) dropSlot(subject, slots, key);
+			}
+		}
 		if (latestCallerMs === undefined) return;
 		for (const [subject, state] of subjects) {
 			prune(state, latestCallerMs);
@@ -305,7 +370,10 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	const isEmpty = (state: SubjectState): boolean =>
-		state.run.length === 0 && state.week.length === 0 && state.pending.size === 0;
+		state.hard === undefined &&
+		state.run.length === 0 &&
+		state.week.length === 0 &&
+		state.pending.size === 0;
 
 	function stateOf(subject: string): SubjectState {
 		let state = subjects.get(subject);
@@ -321,7 +389,68 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	/** At the cap: reclaims expired entries, then refuses if still full. */
-	const resident = (): number => transactions.size + proofs.size + marks.size;
+	const resident = (): number =>
+		transactions.size + proofs.size + marks.size + leases.size + slotCount;
+
+	/** Whether `token` holds the subject's lease, standing on this store's clock. */
+	function holds(subject: string, token: string): boolean {
+		const lease = leases.get(subject);
+		return lease !== undefined && lease.untilMs > clock() && lease.token === token;
+	}
+
+	function dropSlot(subject: string, slots: Map<string, RecoverySlot>, key: string): void {
+		if (slots.delete(key)) slotCount -= 1;
+		if (slots.size === 0) recoveries.delete(subject);
+	}
+
+	/**
+	 * A `recover` of `state` at `nowMs`, past its authorization: what it ends,
+	 * or the refusal. The week is given back when its earliest failure up to
+	 * `nowMs` comes before the sessions boundary by more than the skew. The
+	 * hard hold is lifted on a rebind (no guessable record from before it, by
+	 * more than the skew), ending the run it counted; while it stands, that
+	 * run stays.
+	 */
+	function recover(
+		state: SubjectState | undefined,
+		nowMs: number,
+		sessionsBoundaryMs: number | undefined,
+		guessableBoundSinceMs: number | null | undefined,
+	):
+		| { readonly week: boolean; readonly run: boolean; readonly hard: boolean }
+		| "not_revoked_since" {
+		// What this recovery would give back: the week's failures up to its time.
+		const counted =
+			state === undefined ? [] : inWeek(state.week, nowMs).filter((a) => a.atMs <= nowMs);
+		const earliest = Math.min(...counted.map((a) => a.atMs));
+		const revokedSince =
+			counted.length === 0 ||
+			(sessionsBoundaryMs !== undefined && sessionsBoundaryMs > earliest + DEFAULT_CLOCK_SKEW_MS);
+		const hard = state?.hard;
+		const rebound =
+			hard !== undefined &&
+			(guessableBoundSinceMs === null ||
+				(guessableBoundSinceMs !== undefined &&
+					guessableBoundSinceMs > hard + DEFAULT_CLOCK_SKEW_MS));
+		if (!revokedSince && !rebound) return "not_revoked_since";
+		if (state === undefined) return { week: true, run: true, hard: false };
+		let run = false;
+		if (rebound) {
+			delete state.hard;
+			state.run = [];
+			run = true;
+		}
+		if (revokedSince) {
+			state.week = state.week.filter((a) => a.atMs > nowMs);
+			if (state.hard === undefined) {
+				state.run = state.run.filter((a) => a.atMs > nowMs);
+				run = true;
+			}
+		}
+		if (state.hard === undefined) state.refusing = false;
+		prune(state, nowMs);
+		return { week: revokedSince, run, hard: rebound };
+	}
 
 	function makeRoom(nowMs: number): void {
 		if (resident() < maxEntries) return;
@@ -348,6 +477,10 @@ export function createMemoryMfaTransactionStore(
 
 		get firstBindingMarks() {
 			return marks.size;
+		},
+
+		get subjectLeases() {
+			return leases.size;
 		},
 
 		maxEntries,
@@ -435,7 +568,8 @@ export function createMemoryMfaTransactionStore(
 			nowMs: number,
 			policy: MfaLockoutPolicy,
 		): Promise<MfaSubjectAttemptReservation> {
-			checkMfaLockoutPolicy(policy);
+			// One read of the policy: the values it checks are the values it applies.
+			const checked = checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "reserveSubjectAttempt");
 			sawCallerTime(nowMs);
 			const state = stateOf(subject);
@@ -451,10 +585,13 @@ export function createMemoryMfaTransactionStore(
 				return { ok: false, hold, retryAfterMs, first };
 			};
 
-			if (state.run.length >= policy.hardLimit) return refuse("hard", null);
+			if (state.hard === undefined && state.run.length >= checked.hardLimit) {
+				state.hard = fixedAt(state.run, nowMs);
+			}
+			if (state.hard !== undefined) return refuse("hard", null);
 
-			const backoff = backoffUntil(state.run, policy, nowMs);
-			const weekly = weeklyUntil(state.week, policy, nowMs);
+			const backoff = backoffUntil(state.run, checked, nowMs);
+			const weekly = weeklyUntil(state.week, checked, nowMs);
 			if (backoff !== undefined || weekly !== undefined) {
 				// The hold that ends later is the one that decides when to come back.
 				return (weekly ?? Number.NEGATIVE_INFINITY) >= (backoff ?? Number.NEGATIVE_INFINITY)
@@ -471,6 +608,9 @@ export function createMemoryMfaTransactionStore(
 			state.week.push(attempt);
 			state.pending.set(attempt.id, attempt.seq);
 			state.refusing = false;
+			// The attempt that brings the run to the limit holds it in the same
+			// step: no later settle or exempt success can bring it back below.
+			if (state.run.length >= checked.hardLimit) state.hard = fixedAt(state.run, nowMs);
 			return { ok: true, reservation: attempt.id };
 		},
 
@@ -511,19 +651,17 @@ export function createMemoryMfaTransactionStore(
 			const state = subjects.get(subject);
 			if (state === undefined) return;
 			prune(state, nowMs);
-			// The attempts up to this success end while fewer than the hard
-			// limit; at it they stand until cleared. A later attempt stays.
-			const upTo = state.run.filter((a) => a.atMs <= nowMs);
-			if (upTo.length < hardLimit) {
+			// A run at the limit holds, as at a reservation; held, nothing
+			// ends. Otherwise the attempts up to this success end, and a later
+			// one stays.
+			if (state.hard === undefined && state.run.length >= hardLimit) {
+				state.hard = fixedAt(state.run, nowMs);
+			}
+			if (state.hard === undefined) {
 				state.run = state.run.filter((a) => a.atMs > nowMs);
 			}
 			settleEmpty(subject, state);
 			if (schedule.wrote()) sweep(clock());
-		},
-
-		async clearSubjectState(subject: string): Promise<void> {
-			// The email-proof requirement is not lock state: it stays.
-			subjects.delete(subject);
 		},
 
 		async requireEmailProofAtNextBinding(subject: string): Promise<void> {
@@ -585,6 +723,124 @@ export function createMemoryMfaTransactionStore(
 			// Gone on this store's clock: reclaimed now rather than at a sweep.
 			if (mark.untilMs <= storeNowMs) marks.delete(subject);
 			return firstBindingAnswer(mark, storeNowMs);
+		},
+
+		async subjectGeneration(subject: string): Promise<number> {
+			checkSubjectQuestion("subjectGeneration", subject);
+			return generations.get(subject) ?? 0;
+		},
+
+		async acquireSubjectLease(subject, request): Promise<MfaSubjectLeaseAnswer> {
+			const { ttlMs, generation } = checkSubjectLeaseRequest(subject, request);
+			if (generation !== (generations.get(subject) ?? 0)) {
+				return { outcome: "stale" };
+			}
+			const nowMs = clock();
+			const held = leases.get(subject);
+			if (held !== undefined && held.untilMs > nowMs) {
+				return { outcome: "busy", retryAfterMs: held.untilMs - nowMs };
+			}
+			if (held === undefined) makeRoom(nowMs);
+			const token = randomBytes(16).toString("base64url");
+			leases.set(subject, { token, untilMs: nowMs + ttlMs });
+			if (schedule.wrote()) sweep(nowMs);
+			return { outcome: "acquired", token };
+		},
+
+		async authorizeSubjectRecovery(subject, authorization): Promise<void> {
+			const nowMs = clock();
+			const checked = checkSubjectRecoveryAuthorization(subject, authorization, nowMs);
+			const key = slotKeyOf(checked.operation, checked.sid);
+			if (recoveries.get(subject)?.has(key) !== true) makeRoom(nowMs);
+			let slots = recoveries.get(subject);
+			if (slots === undefined) {
+				slots = new Map();
+				recoveries.set(subject, slots);
+			}
+			if (!slots.has(key)) slotCount += 1;
+			slots.set(key, { recoveryId: checked.recoveryId, expiresAtMs: checked.expiresAtMs });
+			if (schedule.wrote()) sweep(nowMs);
+		},
+
+		async applySubjectRecovery(subject, application): Promise<MfaSubjectRecoveryAnswer> {
+			const { operation, sid, nowMs, leaseToken, sessionsBoundaryMs, guessableBoundSinceMs } =
+				checkSubjectRecoveryApplication(subject, application);
+			sawCallerTime(nowMs);
+			const storeNowMs = clock();
+			const hard = (): boolean => subjects.get(subject)?.hard !== undefined;
+			const refused = (reason: MfaSubjectRecoveryRefusal): MfaSubjectRecoveryAnswer => ({
+				outcome: "refused",
+				reason,
+				hard: hard(),
+			});
+			if (!holds(subject, leaseToken)) return refused("lease_not_held");
+			const slots = recoveries.get(subject);
+			const key = slotKeyOf(operation, sid);
+			const slot = slots?.get(key);
+			if (slots === undefined || slot === undefined) return refused("unauthorized");
+			if (slot.expiresAtMs <= storeNowMs) {
+				dropSlot(subject, slots, key);
+				return refused("unauthorized");
+			}
+			if (slot.appliedAt !== undefined) {
+				return {
+					outcome: "already_applied",
+					recoveryId: slot.recoveryId,
+					generation: slot.appliedAt,
+					hard: hard(),
+				};
+			}
+			if (slot.expiresAtMs <= nowMs) return refused("expired");
+			if (sessionsBoundaryMs !== undefined && sessionsBoundaryMs > nowMs + DEFAULT_CLOCK_SKEW_MS) {
+				return refused("boundary_ahead");
+			}
+			let cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean };
+			if (operation === "reset") {
+				// The lock state whole, and every other authorization of the subject.
+				subjects.delete(subject);
+				for (const other of slots.keys()) if (other !== key) dropSlot(subject, slots, other);
+				cleared = { week: true, run: true, hard: true };
+			} else {
+				const state = subjects.get(subject);
+				const recovered = recover(state, nowMs, sessionsBoundaryMs, guessableBoundSinceMs);
+				if (recovered === "not_revoked_since") return refused(recovered);
+				if (state !== undefined) settleEmpty(subject, state);
+				cleared = recovered;
+			}
+			const generation = (generations.get(subject) ?? 0) + 1;
+			generations.set(subject, generation);
+			slots.set(key, { ...slot, appliedAt: generation });
+			return {
+				outcome: "applied",
+				recoveryId: slot.recoveryId,
+				generation,
+				cleared,
+				hard: hard(),
+			};
+		},
+
+		async raiseRecoverySetFloor(subject, raise): Promise<MfaRecoverySetFloorAnswer> {
+			const { setGeneration, leaseToken } = checkRecoverySetFloorRaise(subject, raise);
+			if (!holds(subject, leaseToken)) return { outcome: "refused", reason: "lease_not_held" };
+			const floor = Math.max(floors.get(subject) ?? 0, setGeneration);
+			floors.set(subject, floor);
+			return { outcome: "raised", floor };
+		},
+
+		async recoverySetFloor(subject: string): Promise<number> {
+			checkSubjectQuestion("recoverySetFloor", subject);
+			return floors.get(subject) ?? 0;
+		},
+
+		async releaseSubjectLease(subject: string, token: string): Promise<boolean> {
+			checkSubjectLeaseRelease(subject, token);
+			const held = leases.get(subject);
+			if (held === undefined) return false;
+			const standing = held.untilMs > clock();
+			if (!standing) leases.delete(subject);
+			if (!standing || held.token !== token) return false;
+			leases.delete(subject);
+			return true;
 		},
 	};
 }

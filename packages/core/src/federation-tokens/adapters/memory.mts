@@ -18,6 +18,8 @@ const cloneTokens = (t: FederationTokens): FederationTokens => ({
 	tokenType: t.tokenType,
 	scope: t.scope,
 	grantedScope: t.grantedScope,
+	// Copied like `expiresAt`; a record without it stays without the key.
+	...(t.obtainedAt === undefined ? {} : { obtainedAt: new Date(t.obtainedAt.getTime()) }),
 });
 
 /**

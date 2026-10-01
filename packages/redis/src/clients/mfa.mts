@@ -24,6 +24,7 @@ import type {
 	MfaLockoutPolicy,
 	MfaSubjectAttemptOutcome,
 	MfaSubjectHold,
+	MfaSubjectRecoveryOperation,
 } from "@o3co/auth-provider-core";
 
 // --- MfaFactorStoreClient --------------------------------------------------
@@ -31,7 +32,7 @@ import type {
 /**
  * What a Redis server says about keeping what it is written — read at boot
  * by the two MFA store modules (ADR 2026-09-25-multi-factor-authentication,
- * D12). Each part is `undefined` when it could not be read: the server
+ * on durability). Each part is `undefined` when it could not be read: the server
  * refused the question (`refusal`), or answered without the value.
  */
 export interface RedisDurability {
@@ -60,7 +61,7 @@ export interface MfaFactorRecordUpdateInput {
 
 /**
  * Backing client for the `MfaFactorStore` adapter (ADR
- * 2026-09-25-multi-factor-authentication, D7): one hash per subject, a field
+ * 2026-09-25-multi-factor-authentication): one hash per subject, a field
  * per factor.
  *
  * A factor's value is three lines — `<version>\n<fixed>\n<mutable>` — where
@@ -117,8 +118,8 @@ export interface MfaTransactionUpdateInput {
 }
 
 /**
- * A subject's lock-state keys. Both carry the subject's hash tag: every
- * operation on the state is one script over the two.
+ * A subject's keys. Each carries the subject's hash tag: every operation on
+ * them is one command or one script on one Cluster slot.
  */
 export interface MfaSubjectKeys {
 	/**
@@ -130,7 +131,76 @@ export interface MfaSubjectKeys {
 	readonly lock: string;
 	/** ZSET: the attempts the rolling week counts, each scored by its time. */
 	readonly week: string;
+	/**
+	 * HASH: `g`, the subject's generation, and `floor`, its recovery-set floor,
+	 * each as decimal text (absent is `0`);
+	 * `a:<operation>:<sid>` → `p|<expiresAtMs>|<recoveryId>` for each
+	 * authorization pending, `a|<generation>|<expiresAtMs>|<recoveryId>` once applied.
+	 */
+	readonly recovery: string;
+	/** STRING: the lease holder's token, expiring at the lease's end on the server's clock. */
+	readonly lease: string;
 }
+
+export interface AcquireMfaSubjectLeaseInput {
+	/** The token the lease is written with when it is free. */
+	readonly token: string;
+	readonly ttlMs: number;
+	/** The generation the writer captured. */
+	readonly generation: number;
+}
+
+export interface AuthorizeMfaSubjectRecoveryInput {
+	/** The recovery hash's field for the authorization's operation and sid. */
+	readonly field: string;
+	readonly recoveryId: string;
+	readonly expiresAtMs: number;
+	/** How far ahead of the server's clock its end may lie. */
+	readonly maxAheadMs: number;
+}
+
+/** What an authorize answers: written, or refused on the server's clock, which it names. */
+export type AuthorizeMfaSubjectRecoveryReply =
+	| { readonly authorized: true }
+	| { readonly authorized: false; readonly serverNowMs: number };
+
+export interface RaiseMfaRecoverySetFloorInput {
+	/** A recovery-code set's generation, not the subject's. */
+	readonly setGeneration: number;
+	readonly leaseToken: string;
+}
+
+/** What a floor raise answers: the floor after it, as the hash keeps it, or nothing raised without the lease. */
+export type RaiseMfaRecoverySetFloorReply =
+	| { readonly raised: true; readonly floor: string }
+	| { readonly raised: false };
+
+export interface ApplyMfaSubjectRecoveryInput {
+	readonly operation: MfaSubjectRecoveryOperation;
+	/** The recovery hash's field for the operation and sid. */
+	readonly field: string;
+	readonly nowMs: number;
+	readonly leaseToken: string;
+	readonly sessionsBoundaryMs: number | undefined;
+	/** A recover's earliest guessable record's time, or `null` when none remains; a reset's `undefined`. */
+	readonly guessableBoundSinceMs: number | null | undefined;
+	/** The clock skew allowed between the caller's times (`DEFAULT_CLOCK_SKEW_MS`). */
+	readonly clockSkewMs: number;
+}
+
+/**
+ * What the apply script answers, each part as its text: `refused, reason, hard`;
+ * `already, recoveryId, generation, hard`; or
+ * `applied, recoveryId, generation, week, run, liftedHard, hard`, each flag `1` or `0`. The
+ * adapter reads it into the port's answer.
+ */
+export type ApplyMfaSubjectRecoveryReply = readonly string[];
+
+/** What an acquire answers, as the port's `acquireSubjectLease` but for the token, which the caller made. */
+export type AcquireMfaSubjectLeaseReply =
+	| { readonly outcome: "acquired" }
+	| { readonly outcome: "busy"; readonly retryAfterMs: number }
+	| { readonly outcome: "stale" };
 
 export interface ReserveMfaSubjectAttemptInput {
 	/** The caller's time, which every hold is judged on. */
@@ -152,9 +222,9 @@ export type ReserveMfaSubjectAttemptReply =
 	  };
 
 export interface NoteMfaExemptSuccessInput {
-	/** The time of the exempt success: the attempts up to it are counted, and end below the hard limit. */
+	/** The time of the exempt success: before the hard hold is fixed, the attempts up to it end. */
 	readonly nowMs: number;
-	/** The lockout policy; a run at or past its `hardLimit` up to `nowMs` stands. */
+	/** The lockout policy; a run already at or past its `hardLimit` fixes the hard hold instead. */
 	readonly policy: MfaLockoutPolicy;
 }
 
@@ -182,7 +252,9 @@ export interface MfaFirstBindingRead {
 
 /**
  * Backing client for the `MfaTransactionStore` adapter (ADR
- * 2026-09-25-multi-factor-authentication, D8, D21, D25).
+ * 2026-09-25-multi-factor-authentication): the transactions, the subject
+ * lock state and its recovery, the lease, the email-proof requirement, a
+ * session's proof and a subject's first-binding mark.
  *
  * Semantic operations: every one the port calls atomic is a read, a decision
  * and a write, which Redis makes one step only as a script (see
@@ -255,8 +327,6 @@ export interface MfaTransactionStoreClient {
 	): Promise<void>;
 	/** The port's `noteExemptSuccess`, one script over both keys. */
 	noteExemptSuccess(keys: MfaSubjectKeys, input: NoteMfaExemptSuccessInput): Promise<void>;
-	/** Remove both keys. */
-	clearSubjectState(keys: MfaSubjectKeys): Promise<void>;
 	/** Record the email-proof requirement at `key`, with no TTL. Idempotent. */
 	requireEmailProof(key: string): Promise<void>;
 	/** Whether the requirement is recorded at `key`. */
@@ -279,6 +349,44 @@ export interface MfaTransactionStoreClient {
 	noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<NoteMfaFirstBindingReply>;
 	/** The subject's first-binding mark at `key`, and the server's clock, in one step. */
 	firstBindingMark(key: string): Promise<MfaFirstBindingRead>;
+	/** The recovery hash's `g` field (`HGET`); `null` when there is none. */
+	subjectGeneration(keys: MfaSubjectKeys): Promise<string | null>;
+	/**
+	 * Atomically: `stale` when `input.generation` is not the recovery hash's `g`
+	 * (absent is `0`); else `busy`, with the lease's time left, while one stands; else the lease
+	 * written with `input.token` for `input.ttlMs` (`SET NX PX`).
+	 */
+	acquireSubjectLease(
+		keys: MfaSubjectKeys,
+		input: AcquireMfaSubjectLeaseInput,
+	): Promise<AcquireMfaSubjectLeaseReply>;
+	/** Atomically: delete the lease while it holds `token`; resolves whether it did. One at its last millisecond has lapsed (`false`); one holding it with no deadline rejects, nothing deleted. */
+	releaseSubjectLease(keys: MfaSubjectKeys, token: string): Promise<boolean>;
+	/**
+	 * Atomically, on the server's clock: refuse an authorization whose end is not after it or
+	 * lies further ahead than `input.maxAheadMs`, writing nothing; otherwise drop the
+	 * authorizations ended on it and write this one, pending, over whatever its field held.
+	 */
+	authorizeSubjectRecovery(
+		keys: MfaSubjectKeys,
+		input: AuthorizeMfaSubjectRecoveryInput,
+	): Promise<AuthorizeMfaSubjectRecoveryReply>;
+	/** The recovery hash's `floor` field (`HGET`); `null` when there is none. */
+	recoverySetFloor(keys: MfaSubjectKeys): Promise<string | null>;
+	/**
+	 * Atomically, while the lease holds `input.leaseToken`: raise the recovery hash's `floor` to
+	 * `input.setGeneration` — a recovery-code set's generation, not the subject's — when it is
+	 * higher, and resolve the floor after, as decimal text; otherwise write nothing.
+	 */
+	raiseRecoverySetFloor(
+		keys: MfaSubjectKeys,
+		input: RaiseMfaRecoverySetFloorInput,
+	): Promise<RaiseMfaRecoverySetFloorReply>;
+	/** The port's `applySubjectRecovery`, one script over the four keys, its reply as text; one that is not a list of text rejects. */
+	applySubjectRecovery(
+		keys: MfaSubjectKeys,
+		input: ApplyMfaSubjectRecoveryInput,
+	): Promise<ApplyMfaSubjectRecoveryReply>;
 	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }

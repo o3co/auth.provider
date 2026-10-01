@@ -17,18 +17,30 @@
 /**
  * What the request asks of the session — `prompt`, `max_age`, `acr_values` —
  * and the trips that answer it: the login trip and the step-up trip, each
- * recorded as a re-authentication ask bound to this request (`./reauthAsk.mts`).
+ * recorded as a re-authentication ask bound to this request
+ * (`./reauthAsk.mts`). The ask is read on every pass, spent by the next trip's
+ * write and by the pass that mints; a session that comes back from a trip it
+ * was already sent on is refused, never sent again.
  */
 
 import {
 	type Admission,
+	authTimeAt,
+	isWellFormedClientId,
 	LOGIN_RETURN_PARAMETER,
+	type Logger,
 	loggableError,
 	readSpaceDelimitedParameter,
 	type UserSession,
 } from "@o3co/auth-provider-core";
+import type { Request } from "express";
 import { loginRedirect, redirectError } from "./authorizeAnswers.mjs";
-import { type AuthorizeContext, authorizeRequestUrl } from "./authorizeContext.mjs";
+import {
+	type AuthorizeContext,
+	authorizeParams,
+	authorizeRequestUrl,
+	withoutConsentPrompt,
+} from "./authorizeContext.mjs";
 import { REAUTH_ASK_PARAM, type ReauthAskRecord, type ReauthAskStore } from "./reauthAsk.mjs";
 
 /** The `prompt` values this server honours. */
@@ -129,53 +141,133 @@ export const parseAcrValues = (ctx: AuthorizeContext): readonly string[] | null 
 export const REDIRECT_TO_PARAM = LOGIN_RETURN_PARAMETER;
 
 /**
- * The authorize request an ask is minted for and returned to: this request
- * as a GET URL (`authorizeRequestUrl` — a POST's form body written as the
- * query) without the ask parameter, so both sides agree by construction —
- * the POST that sends the browser away and the GET it comes back as.
+ * The authorize request a trip returns the browser to: this request as a GET
+ * URL (`authorizeRequestUrl` — a POST's form body written as the query)
+ * without the ask parameter, as it was sent.
  */
-const askRequestOf = (ctx: AuthorizeContext): string => {
-	const url = authorizeRequestUrl(ctx.issuerOrigin, ctx.req);
+const askReturnFor = (issuerOrigin: string, req: Request): string => {
+	const url = authorizeRequestUrl(issuerOrigin, req);
 	url.searchParams.delete(REAUTH_ASK_PARAM);
 	return url.toString();
 };
 
 /**
- * The presented ask, consumed so a replayed URL asks again rather than
- * minting twice: `null` when absent, unknown, bound to another request or
- * expired; `undefined` after an outage has been answered. Read only when a
- * decision needs it.
+ * The request an ask is bound to: the return less `prompt=consent`
+ * (`withoutConsentPrompt`), so the POST that sends the browser away, the GET
+ * it comes back as, and the request the consent step resumes all agree by
+ * construction.
+ */
+const askRequestFor = (issuerOrigin: string, req: Request): string =>
+	withoutConsentPrompt(new URL(askReturnFor(issuerOrigin, req))).toString();
+
+const askRequestOf = (ctx: AuthorizeContext): string => askRequestFor(ctx.issuerOrigin, ctx.req);
+
+const askReturnOf = (ctx: AuthorizeContext): string => askReturnFor(ctx.issuerOrigin, ctx.req);
+
+/**
+ * An ask store that cannot answer: not a decision either way, the same rule
+ * the session read applies.
+ */
+const answerAskOutage = (ctx: AuthorizeContext, err: unknown): void => {
+	ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
+	redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+};
+
+/** The ask id this request presents, if any. */
+const presentedId = (ctx: AuthorizeContext): string | undefined => {
+	const presented = ctx.params[REAUTH_ASK_PARAM];
+	return typeof presented === "string" && presented.length > 0 ? presented : undefined;
+};
+
+/**
+ * The presented ask, read without spending it, so a later pass of this
+ * request (after consent, or another trip) finds it too: `null` when absent,
+ * unknown, bound to another request or expired; `undefined` after an outage
+ * has been answered. Read only when a decision needs it.
  */
 export const presentedAsk = async (
 	ctx: AuthorizeContext,
 	askStore: ReauthAskStore | undefined,
 ): Promise<ReauthAskRecord | null | undefined> => {
-	const presented = ctx.params[REAUTH_ASK_PARAM];
-	if (typeof presented !== "string" || presented.length === 0 || askStore === undefined) {
-		return null;
-	}
+	const presented = presentedId(ctx);
+	if (presented === undefined || askStore === undefined) return null;
 	try {
-		return await askStore.consume(presented, askRequestOf(ctx));
+		return await askStore.read(presented, askRequestOf(ctx));
 	} catch (err) {
-		// The same rule the session read applies: an outage is not a decision
-		// either way.
-		ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
-		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+		answerAskOutage(ctx, err);
 		return undefined;
 	}
 };
 
-/** Writes an ask, or answers the outage and returns `null`. */
+/**
+ * Spends the presented ask: the record, `null` when there was none to spend,
+ * or `undefined` after an outage has been answered.
+ */
+const spendPresented = async (
+	ctx: AuthorizeContext,
+	askStore: ReauthAskStore,
+): Promise<ReauthAskRecord | null | undefined> => {
+	const presented = presentedId(ctx);
+	if (presented === undefined) return null;
+	try {
+		return await askStore.consume(presented, askRequestOf(ctx));
+	} catch (err) {
+		answerAskOutage(ctx, err);
+		return undefined;
+	}
+};
+
+/**
+ * The pass that mints spends the presented ask, so the ask cannot carry its
+ * login into a second code; a replayed URL is then decided as a request with
+ * no ask. An ask gone by now — spent by another pass of the same request —
+ * refuses with `login_required` when the session's freshness rested on it,
+ * and is ignored otherwise. `false` once answered.
+ */
+export const spendAskAtMint = async (
+	ctx: AuthorizeContext,
+	askStore: ReauthAskStore | undefined,
+	freshByAsk: boolean,
+): Promise<boolean> => {
+	if (askStore === undefined) return true;
+	const spent = await spendPresented(ctx, askStore);
+	if (spent === undefined) return false;
+	if (spent === null && freshByAsk) {
+		redirectError(ctx, "login_required", "the re-authentication ask was already used");
+		return false;
+	}
+	return true;
+};
+
+/**
+ * How a trip ended: the browser sent, or answered (an outage, a refusal);
+ * or `spent` — the ask it was presented was spent by another pass of the
+ * request between this pass's read and its write, nothing was written or
+ * answered, and the request is to be judged again with no ask.
+ */
+export type TripOutcome = "sent" | "answered" | "spent";
+
+/**
+ * Writes the ask that follows `ask`, spending `ask` first so a chain of trips
+ * leaves one record: the new id, `null` once an outage is answered, or
+ * `spent` when `ask` was spent elsewhere — then no successor carries its
+ * instants.
+ */
 const recordAsk = async (
 	ctx: AuthorizeContext,
 	askStore: ReauthAskStore,
+	ask: ReauthAskRecord | null,
 	record: ReauthAskRecord,
-): Promise<string | null> => {
+): Promise<string | null | "spent"> => {
+	if (ask !== null) {
+		const spent = await spendPresented(ctx, askStore);
+		if (spent === undefined) return null;
+		if (spent === null) return "spent";
+	}
 	try {
 		return await askStore.ask(record);
 	} catch (err) {
-		ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
-		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+		answerAskOutage(ctx, err);
 		return null;
 	}
 };
@@ -187,7 +279,97 @@ const returnWithAsk = (askRequest: string, askId: string): string => {
 	return back.toString();
 };
 
-type ReauthOutcome = "proceed" | "login" | "answered";
+/**
+ * The longest authorize request, as the canonical URL an ask binds, for
+ * which an ask is recorded before the client is looked up: the record holds
+ * that URL, and an anonymous caller chooses its size.
+ */
+export const ANONYMOUS_ASK_MAX_REQUEST_BYTES = 8 * 1024;
+
+/**
+ * Where the login page returns a browser that is not signed in — or whose
+ * dead session was just signed out — and sent `prompt=login`: this request with a login ask recorded before the login,
+ * so the login it makes meets the prompt on the way back. Recorded only for
+ * a request of the shape a client sends — a well-formed `client_id`, the
+ * canonical request within `ANONYMOUS_ASK_MAX_REQUEST_BYTES` — a check of its
+ * shape, not a lookup. Otherwise, without an ask store, or when the ask
+ * cannot be recorded (logged), the request as it came: the user is then
+ * asked to log in again on the way back.
+ */
+export const loginReturnWithAsk = async (
+	req: Request,
+	issuerOrigin: string,
+	askStore: ReauthAskStore | undefined,
+	logger: Logger,
+): Promise<string> => {
+	const asIs = authorizeRequestUrl(issuerOrigin, req).toString();
+	if (askStore === undefined) return asIs;
+	const askRequest = askRequestFor(issuerOrigin, req);
+	if (
+		!isWellFormedClientId(authorizeParams(req).client_id) ||
+		Buffer.byteLength(askRequest, "utf8") > ANONYMOUS_ASK_MAX_REQUEST_BYTES
+	) {
+		return asIs;
+	}
+	const now = Date.now();
+	try {
+		const askId = await askStore.ask({
+			request: askRequest,
+			createdAt: now,
+			loginAskedAt: now,
+			stepUpAskedAt: {},
+		});
+		return returnWithAsk(askReturnFor(issuerOrigin, req), askId);
+	} catch (err) {
+		logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
+		return asIs;
+	}
+};
+
+/**
+ * How far ahead of this clock a session's authentication instant may be and
+ * still be compared with an ask: the skew tolerated between replicas for an
+ * instant one of them recorded — a login on one replica whose return reaches
+ * another moments later, whose clock runs a little behind. Read as now
+ * within it. Not core's `DEFAULT_CLOCK_SKEW_MS` (five minutes), which would
+ * let a session stamped that far ahead meet an ask without a new login.
+ */
+export const ASK_REPLICA_SKEW_MS = 1_000;
+
+/**
+ * The session's authentication instant in milliseconds, for comparing with
+ * an ask's, capped at the clock: `undefined` when core's `authTimeAt` cannot
+ * read it against the clock, or when it is more than `ASK_REPLICA_SKEW_MS`
+ * ahead — stamped by a clock this one cannot check, so it shows no login
+ * made since an ask. Unreadable is a login trip, or `login_required` once a
+ * login was asked for or under `prompt=none`.
+ */
+export const readableAuthTime = (session: UserSession, nowMs: number): number | undefined => {
+	if (authTimeAt(session.authTime, nowMs) === undefined) return undefined;
+	const at = session.authTime.getTime();
+	return at > nowMs + ASK_REPLICA_SKEW_MS ? undefined : Math.min(at, nowMs);
+};
+
+/**
+ * Whether a login was made since `instant` (an ask's, in milliseconds):
+ * the session authenticated strictly after it — an authentication earlier
+ * in the same second is not one made since — or `unreadable` when its
+ * authentication time cannot be read (`readableAuthTime`).
+ */
+export const loginSince = (
+	session: UserSession,
+	instant: number,
+	nowMs: number,
+): boolean | "unreadable" => {
+	const at = readableAuthTime(session, nowMs);
+	return at === undefined ? "unreadable" : at > instant;
+};
+
+/**
+ * `fresh_by_ask`: the session is fresh because of the login the presented
+ * ask asked for, which the pass that mints then holds it to.
+ */
+type ReauthOutcome = "proceed" | "fresh_by_ask" | "login" | "answered";
 
 /**
  * Whether the session's authentication is fresh enough. `prompt=login`, or a
@@ -229,10 +411,13 @@ export const evaluateReauthentication = (
 		);
 		return "answered";
 	}
+	const now = Date.now();
+	const authSeconds = authTimeAt(session.authTime, now);
 	if (ask !== null && ask.loginAskedAt !== undefined) {
 		// Strictly after the ask, to the millisecond: an authentication made
-		// before it — even earlier in the same second — is not the one it asked for.
-		if (session.authTime.getTime() > ask.loginAskedAt) return "proceed";
+		// before it — even earlier in the same second — is not the one it
+		// asked for, and one that cannot be read is not shown to be.
+		if (loginSince(session, ask.loginAskedAt, now) === true) return "fresh_by_ask";
 		redirectError(
 			ctx,
 			"login_required",
@@ -243,10 +428,11 @@ export const evaluateReauthentication = (
 	// An id that names no ask, names one for another request, or has expired,
 	// is simply not an ask — and one that records a step-up trip alone asked
 	// for no login: evaluate the request on its merits, which asks again
-	// rather than proceeding.
-	const nowSeconds = Math.floor(Date.now() / 1000);
-	const authTimeSeconds = Math.floor(session.authTime.getTime() / 1000);
-	const stale = maxAge !== undefined && nowSeconds - authTimeSeconds > maxAge;
+	// rather than proceeding. An authentication time that cannot be read is
+	// stale for any `max_age`.
+	const stale =
+		maxAge !== undefined &&
+		(authSeconds === undefined || Math.floor(now / 1000) - authSeconds > maxAge);
 	if (!prompt.login && !stale) return "proceed";
 	if (prompt.silent) {
 		redirectError(
@@ -270,18 +456,20 @@ export const sendToLogin = async (
 	ctx: AuthorizeContext,
 	askStore: ReauthAskStore,
 	ask: ReauthAskRecord | null,
-): Promise<void> => {
+): Promise<TripOutcome> => {
 	const now = Date.now();
 	const askRequest = askRequestOf(ctx);
-	const askId = await recordAsk(ctx, askStore, {
+	const askId = await recordAsk(ctx, askStore, ask, {
 		request: askRequest,
 		// Kept across the trips of one request, which caps a chain of them.
 		createdAt: ask?.createdAt ?? now,
 		loginAskedAt: now,
 		stepUpAskedAt: { ...ask?.stepUpAskedAt },
 	});
-	if (askId === null) return;
-	loginRedirect(ctx.res, ctx.opts.login, returnWithAsk(askRequest, askId));
+	if (askId === "spent") return "spent";
+	if (askId === null) return "answered";
+	loginRedirect(ctx.res, ctx.opts.login, returnWithAsk(askReturnOf(ctx), askId));
+	return "sent";
 };
 
 /**
@@ -332,12 +520,28 @@ export const stepUpTrip = async (
 	prompt: PromptDirective,
 	askStore: ReauthAskStore | undefined,
 	ask: ReauthAskRecord | null,
-): Promise<void> => {
+): Promise<TripOutcome> => {
 	const { requirement, page } = admission;
 	const trips = ask?.stepUpAskedAt;
 	const askedAt =
 		trips !== undefined && Object.hasOwn(trips, requirement) ? trips[requirement] : undefined;
-	if (askedAt !== undefined && admission.session.authTime.getTime() <= askedAt) {
+	const since =
+		askedAt === undefined ? undefined : loginSince(admission.session, askedAt, Date.now());
+	if (since === "unreadable") {
+		// Back from a trip with an authentication time that cannot be read: no
+		// telling whether a new login was made since. One login trip, then a
+		// refusal.
+		if (prompt.silent || ask?.loginAskedAt !== undefined || askStore === undefined) {
+			redirectError(
+				ctx,
+				"login_required",
+				"the session's authentication time cannot be read; a new login is required",
+			);
+			return "answered";
+		}
+		return sendToLogin(ctx, askStore, ask);
+	}
+	if (since === false) {
 		if (admission.whenStillUnmet === "unmet") {
 			redirectError(
 				ctx,
@@ -351,7 +555,7 @@ export const stepUpTrip = async (
 				`the session came back from ${requirement} still not meeting it; a new login is required`,
 			);
 		}
-		return;
+		return "answered";
 	}
 	if (prompt.silent) {
 		redirectError(
@@ -359,7 +563,7 @@ export const stepUpTrip = async (
 			"interaction_required",
 			`prompt=none was requested but the session must step up through ${requirement}`,
 		);
-		return;
+		return "answered";
 	}
 	if (askStore === undefined) {
 		// As a login trip is refused without a store to record the ask in: a
@@ -369,7 +573,7 @@ export const stepUpTrip = async (
 			"invalid_request",
 			"a step-up needs a session store, which this deployment does not wire",
 		);
-		return;
+		return "answered";
 	}
 	// The page as registered; this trip's own parameters are set on it below.
 	const target = new URL(page.href);
@@ -380,21 +584,23 @@ export const stepUpTrip = async (
 	if (target.origin !== ctx.issuerOrigin) {
 		ctx.opts.logger.error({ requirement }, "authorize_step_up_page_off_origin");
 		redirectError(ctx, "server_error", "the step-up page is not on this server's origin");
-		return;
+		return "answered";
 	}
 	if (admission.acrValues.length > 0) {
 		target.searchParams.set("acr_values", admission.acrValues.join(" "));
 	}
 	const now = Date.now();
 	const askRequest = askRequestOf(ctx);
-	const askId = await recordAsk(ctx, askStore, {
+	const askId = await recordAsk(ctx, askStore, ask, {
 		request: askRequest,
 		// Kept across the trips of one request, as the login trip keeps it.
 		createdAt: ask?.createdAt ?? now,
 		loginAskedAt: ask?.loginAskedAt,
 		stepUpAskedAt: { ...trips, [requirement]: now },
 	});
-	if (askId === null) return;
-	target.searchParams.set(REDIRECT_TO_PARAM, returnWithAsk(askRequest, askId));
+	if (askId === "spent") return "spent";
+	if (askId === null) return "answered";
+	target.searchParams.set(REDIRECT_TO_PARAM, returnWithAsk(askReturnOf(ctx), askId));
 	ctx.res.redirect(target.toString());
+	return "sent";
 };

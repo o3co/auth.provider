@@ -314,6 +314,18 @@ export {
 	readIssuedScope,
 	readSpaceDelimitedParameter,
 } from "./federations/scope.mjs";
+// The one reading of an upstream token's lifetime, and the age of one held.
+export type {
+	HeldUpstreamToken,
+	HeldUpstreamTokenAge,
+	UpstreamLifetimeClock,
+	UpstreamLifetimeFields,
+	UpstreamTokenLifetime,
+} from "./federations/token-lifetime.mjs";
+export {
+	judgeHeldUpstreamToken,
+	readUpstreamTokenLifetime,
+} from "./federations/token-lifetime.mjs";
 export type {
 	FederationTokenResponse,
 	FederationTokenSnapshot,
@@ -361,6 +373,7 @@ export {
 } from "./federations/types.mjs";
 // The authentication claims a token may carry
 export {
+	authTimeAt,
 	authTimeClaim,
 	composeAmr,
 	EMAIL_OTP_AMR,
@@ -460,6 +473,7 @@ export type {
 	SessionMutation,
 } from "./grants/types.mjs";
 export {
+	advertisedIssuer,
 	checkCanonicalIssuer,
 	describeIssuerRejection,
 	type IssuerRejection,
@@ -647,12 +661,20 @@ export {
 	toMfaStoreUpdateRequest,
 } from "./mfa/storeWire.mjs";
 export {
+	checkConfiguredMfaLockoutPolicy,
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	checkRecoverySetFloorRaise,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
+	checkSubjectLeaseRelease,
+	checkSubjectLeaseRequest,
+	checkSubjectQuestion,
+	checkSubjectRecoveryApplication,
+	checkSubjectRecoveryAuthorization,
+	DEFAULT_MFA_SUBJECT_LEASE_MS,
 	type FirstBindingMark,
 	firstBindingAnswer,
 	getBoundMfaTransaction,
@@ -660,14 +682,28 @@ export {
 	isMfaTransactionBoundTo,
 	laterFirstBindingMark,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_LOCKOUT_MAX_BACKOFF_SECONDS,
 	MFA_LOCKOUT_MAX_HARD_LIMIT,
+	MFA_LOCKOUT_MIN_HARD_LIMIT,
+	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
+	MFA_SUBJECT_LEASE_MAX_MS,
+	MFA_SUBJECT_LEASE_MIN_MS,
 	MFA_TRANSACTION_PATCH_KEYS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
+	type MfaRecoverySetFloorAnswer,
+	type MfaRecoverySetFloorRaise,
 	type MfaSessionBinding,
 	type MfaSubjectAttemptOutcome,
 	type MfaSubjectAttemptReservation,
 	type MfaSubjectHold,
+	type MfaSubjectLeaseAnswer,
+	type MfaSubjectLeaseRequest,
+	type MfaSubjectRecoveryAnswer,
+	type MfaSubjectRecoveryApplication,
+	type MfaSubjectRecoveryAuthorization,
+	type MfaSubjectRecoveryOperation,
+	type MfaSubjectRecoveryRefusal,
 	type MfaTransaction,
 	type MfaTransactionBinding,
 	type MfaTransactionPatch,
@@ -677,7 +713,11 @@ export {
 	newMfaTransactionRecord,
 	readFirstBindingAt,
 	readMfaAttemptReservation,
+	readMfaRecoverySetFloorAnswer,
 	readMfaSubjectAttemptReservation,
+	readMfaSubjectCount,
+	readMfaSubjectLeaseAnswer,
+	readMfaSubjectRecoveryAnswer,
 	readSessionEmailProof,
 	type SessionEmailProof,
 	sessionEmailProofAnswer,
@@ -1402,6 +1442,7 @@ export {
 } from "./federation-grants/lifetime.mjs";
 export {
 	type FederationGrantAcquisitionConnection,
+	type FederationGrantConnectionNotConfigured,
 	type FederationGrantLodged,
 	type FederationGrantLodgingAbsorbedCarrier,
 	type FederationGrantLodgingClient,

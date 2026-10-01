@@ -42,6 +42,7 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../../..");
  * that emits it deletes it here.
  */
 const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {
+	"mfa.lock.recovered": "the MFA ADR's build-order step 12",
 	"mfa.reset": "the MFA ADR's build-order step 12",
 };
 
@@ -216,6 +217,7 @@ describe("built-in audit event inventory", () => {
 				"mfa.recovery_code.used",
 				"mfa.recovery_codes.generated",
 				"mfa.enrollment_state_inconsistent",
+				"mfa.lock.recovered",
 			]),
 		);
 	});

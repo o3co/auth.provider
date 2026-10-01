@@ -32,8 +32,8 @@
 
 import { createHmac } from "node:crypto";
 import {
+	checkConfiguredMfaLockoutPolicy,
 	checkDeploymentMode,
-	checkMfaLockoutPolicy,
 	checkSealingKeyRing,
 	coerceBooleanFromEnv,
 	type DeploymentMode,
@@ -168,10 +168,10 @@ const positiveWhole = z
 
 /**
  * `mfa.lockout`, the subject lock: each field a positive whole number here;
- * how the fields relate — `threshold` at most `hardLimit`, `hardLimit` at
+ * how the fields relate — `hardLimit` at least 10, above `threshold` and at
  * most NIST's cap, `maxSeconds` at least `baseSeconds`, every duration within
- * the Date range — is core's `checkMfaLockoutPolicy`, which `readMfaSettings`
- * applies under the key.
+ * the Date range — is core's `checkConfiguredMfaLockoutPolicy`, which
+ * `readMfaSettings` applies under the key.
  */
 const lockoutSchema = z.object(
 	{
@@ -520,7 +520,7 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
  * and whether it carries the development sample key, a transaction's life
  * and attempts, recent MFA's window, the first binding's proof, the records
  * a subject may hold, and the subject lock — held to core's
- * `checkMfaLockoutPolicy` under `mfa.lockout`. Not the mode, which the
+ * `checkConfiguredMfaLockoutPolicy` under `mfa.lockout`. Not the mode, which the
  * module's section schema reads, and no factor's section: the TOTP factor's
  * is {@link readMfaTotpSettings}'s. `options.environment` is the name the
  * composition root selected its configuration by, and
@@ -531,7 +531,7 @@ export function readMfaSettings(section: unknown, options: MfaSettingsOptions): 
 	checkDeploymentMode(options.deploymentMode, "mfa settings: deploymentMode");
 	const settings = parseSection(mfaModuleSettingsSchema, section, "mfa");
 	const { ring, developmentSampleKeyAccepted } = readKeyRing(settings.encryptionKeys, options);
-	checkMfaLockoutPolicy(settings.lockout, "mfa.lockout");
+	checkConfiguredMfaLockoutPolicy(settings.lockout, "mfa.lockout");
 	return {
 		encryptionKeys: ring,
 		developmentSampleKeyAccepted,

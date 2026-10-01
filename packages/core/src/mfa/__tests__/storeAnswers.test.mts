@@ -31,7 +31,11 @@ import {
 	type MfaTransaction,
 	readFirstBindingAt,
 	readMfaAttemptReservation,
+	readMfaRecoverySetFloorAnswer,
 	readMfaSubjectAttemptReservation,
+	readMfaSubjectCount,
+	readMfaSubjectLeaseAnswer,
+	readMfaSubjectRecoveryAnswer,
 	readSessionEmailProof,
 } from "#/mfa/transactionStore.mjs";
 
@@ -435,8 +439,242 @@ describe("isMfaFactorUpdateWritten", () => {
 	});
 });
 
+describe("readMfaSubjectLeaseAnswer", () => {
+	it("reads a lease acquired with its token, busy with the time left, and stale", () => {
+		expect(readMfaSubjectLeaseAnswer({ outcome: "acquired", token: "t" })).toEqual({
+			outcome: "acquired",
+			token: "t",
+		});
+		expect(readMfaSubjectLeaseAnswer({ outcome: "busy", retryAfterMs: 1 })).toEqual({
+			outcome: "busy",
+			retryAfterMs: 1,
+		});
+		expect(readMfaSubjectLeaseAnswer({ outcome: "stale" })).toEqual({ outcome: "stale" });
+	});
+
+	it("copies only the fields its outcome has", () => {
+		expect(readMfaSubjectLeaseAnswer({ outcome: "stale", token: "t" })).toEqual({
+			outcome: "stale",
+		});
+	});
+
+	it.each<[string, unknown]>([
+		["a lease with no token", { outcome: "acquired" }],
+		["a lease with an empty token", { outcome: "acquired", token: "" }],
+		["a lease whose token is not text", { outcome: "acquired", token: 7 }],
+		["busy with no time left", { outcome: "busy", retryAfterMs: 0 }],
+		["busy with a time that is not a number", { outcome: "busy", retryAfterMs: Number.NaN }],
+		["busy for ever", { outcome: "busy", retryAfterMs: Number.POSITIVE_INFINITY }],
+		["busy with a time as text", { outcome: "busy", retryAfterMs: "1" }],
+		["an outcome it does not know", { outcome: "granted", token: "t" }],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaSubjectLeaseAnswer(answer)).toBeUndefined();
+	});
+
+	it("reads each field once, and a getter that throws as no answer", () => {
+		let reads = 0;
+		const answer = {
+			outcome: "acquired",
+			get token() {
+				reads++;
+				return reads === 1 ? "t" : "";
+			},
+		};
+		expect(readMfaSubjectLeaseAnswer(answer)).toEqual({ outcome: "acquired", token: "t" });
+		expect(
+			readMfaSubjectLeaseAnswer({
+				get outcome(): string {
+					throw new Error("boom");
+				},
+			}),
+		).toBeUndefined();
+	});
+});
+
+describe("readMfaSubjectRecoveryAnswer", () => {
+	const applied = (
+		cleared: { week: boolean; run: boolean; hard: boolean },
+		hard: boolean,
+	): Record<string, unknown> => ({
+		outcome: "applied",
+		recoveryId: "r",
+		generation: 1,
+		cleared,
+		hard,
+	});
+
+	it.each<[string, Record<string, unknown>]>([
+		["the budget given back", applied({ week: true, run: true, hard: false }, false)],
+		["everything given back", applied({ week: true, run: true, hard: true }, false)],
+		[
+			"the week given back while the hard hold stands",
+			applied({ week: true, run: false, hard: false }, true),
+		],
+		[
+			"the hard hold lifted while the week stands",
+			applied({ week: false, run: true, hard: true }, false),
+		],
+	])("reads an apply: %s", (_label, answer) => {
+		expect(readMfaSubjectRecoveryAnswer(answer)).toEqual(answer);
+	});
+
+	it("reads an apply already made and each refusal, copied to their fields", () => {
+		expect(
+			readMfaSubjectRecoveryAnswer({
+				outcome: "already_applied",
+				recoveryId: "r",
+				generation: 3,
+				hard: true,
+				cleared: { week: true, run: true, hard: true },
+			}),
+		).toEqual({ outcome: "already_applied", recoveryId: "r", generation: 3, hard: true });
+		for (const reason of [
+			"unauthorized",
+			"expired",
+			"not_revoked_since",
+			"boundary_ahead",
+			"lease_not_held",
+		]) {
+			expect(readMfaSubjectRecoveryAnswer({ outcome: "refused", reason, hard: false })).toEqual({
+				outcome: "refused",
+				reason,
+				hard: false,
+			});
+		}
+	});
+
+	it.each<[string, unknown]>([
+		[
+			"the hard hold lifted and still standing",
+			applied({ week: true, run: true, hard: true }, true),
+		],
+		[
+			"the run kept with no hard hold standing",
+			applied({ week: true, run: false, hard: false }, false),
+		],
+		[
+			"the hard hold lifted with the run kept",
+			applied({ week: true, run: false, hard: true }, false),
+		],
+		[
+			"the run ended under a hard hold that stands",
+			applied({ week: true, run: true, hard: false }, true),
+		],
+		["nothing given back", applied({ week: false, run: false, hard: false }, false)],
+		[
+			"the run ended and the week kept, with no hard hold lifted",
+			applied({ week: false, run: true, hard: false }, false),
+		],
+		[
+			"an apply at generation 0",
+			{ ...applied({ week: true, run: true, hard: false }, false), generation: 0 },
+		],
+		[
+			"a generation that is not whole",
+			{ ...applied({ week: true, run: true, hard: false }, false), generation: 1.5 },
+		],
+		[
+			"an empty recoveryId",
+			{ ...applied({ week: true, run: true, hard: false }, false), recoveryId: "" },
+		],
+		[
+			"a cleared part that is not a boolean",
+			applied({ week: true, run: 1 as never, hard: false }, false),
+		],
+		["no cleared parts", { outcome: "applied", recoveryId: "r", generation: 1, hard: false }],
+		[
+			"a hard hold that is not a boolean",
+			applied({ week: true, run: true, hard: false }, "no" as never),
+		],
+		[
+			"an apply already made at generation 0",
+			{ outcome: "already_applied", recoveryId: "r", generation: 0, hard: false },
+		],
+		["a refusal it does not know", { outcome: "refused", reason: "busy", hard: false }],
+		["a refusal with no hard hold named", { outcome: "refused", reason: "expired" }],
+		["an outcome it does not know", { outcome: "released", hard: false }],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaSubjectRecoveryAnswer(answer)).toBeUndefined();
+	});
+
+	it("reads each field once, and a getter that throws as no answer", () => {
+		let reads = 0;
+		const answer = {
+			outcome: "refused",
+			reason: "expired",
+			get hard() {
+				reads++;
+				return reads === 1 ? true : "no";
+			},
+		};
+		expect(readMfaSubjectRecoveryAnswer(answer)).toEqual({
+			outcome: "refused",
+			reason: "expired",
+			hard: true,
+		});
+		expect(
+			readMfaSubjectRecoveryAnswer({
+				get outcome(): string {
+					throw new Error("boom");
+				},
+			}),
+		).toBeUndefined();
+	});
+});
+
+describe("readMfaRecoverySetFloorAnswer", () => {
+	it("reads a raise with the floor after it, and the refusal without the lease", () => {
+		expect(readMfaRecoverySetFloorAnswer({ outcome: "raised", floor: 3 })).toEqual({
+			outcome: "raised",
+			floor: 3,
+		});
+		expect(readMfaRecoverySetFloorAnswer({ outcome: "refused", reason: "lease_not_held" })).toEqual(
+			{ outcome: "refused", reason: "lease_not_held" },
+		);
+	});
+
+	it.each<[string, unknown]>([
+		["a floor of 0 after a raise", { outcome: "raised", floor: 0 }],
+		["a floor that is not whole", { outcome: "raised", floor: 1.5 }],
+		["a floor as text", { outcome: "raised", floor: "3" }],
+		["a refusal it does not know", { outcome: "refused", reason: "unauthorized" }],
+		["an outcome it does not know", { outcome: "lowered", floor: 1 }],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaRecoverySetFloorAnswer(answer)).toBeUndefined();
+	});
+});
+
+describe("readMfaSubjectCount", () => {
+	it("reads a safe whole number from 0", () => {
+		expect(readMfaSubjectCount(0)).toBe(0);
+		expect(readMfaSubjectCount(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+	});
+
+	it.each<[string, unknown]>([
+		["a negative number", -1],
+		["a number that is not whole", 1.5],
+		["a number past the safe integers", 2 ** 53],
+		["not a number", Number.NaN],
+		["text", "1"],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaSubjectCount(answer)).toBeUndefined();
+	});
+});
+
 describe("on the package's root", () => {
-	it("are the six readings", () => {
+	it("are the readings", () => {
+		expect(core.readMfaSubjectLeaseAnswer).toBe(readMfaSubjectLeaseAnswer);
+		expect(core.readMfaSubjectCount).toBe(readMfaSubjectCount);
+		expect(core.readMfaSubjectRecoveryAnswer).toBe(readMfaSubjectRecoveryAnswer);
+		expect(core.readMfaRecoverySetFloorAnswer).toBe(readMfaRecoverySetFloorAnswer);
 		expect(core.readMfaAttemptReservation).toBe(readMfaAttemptReservation);
 		expect(core.readMfaSubjectAttemptReservation).toBe(readMfaSubjectAttemptReservation);
 		expect(core.isConsumedMfaTransaction).toBe(isConsumedMfaTransaction);

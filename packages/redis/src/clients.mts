@@ -57,6 +57,12 @@ import type {
 } from "./clients/federation-grant-intent.mjs";
 import type { FederationTokenStoreClient } from "./clients/federation-tokens.mjs";
 import type {
+	AcquireMfaSubjectLeaseInput,
+	AcquireMfaSubjectLeaseReply,
+	ApplyMfaSubjectRecoveryInput,
+	ApplyMfaSubjectRecoveryReply,
+	AuthorizeMfaSubjectRecoveryInput,
+	AuthorizeMfaSubjectRecoveryReply,
 	MfaFactorRecordUpdateInput,
 	MfaFactorStoreClient,
 	MfaFirstBindingRead,
@@ -66,6 +72,8 @@ import type {
 	NoteMfaExemptSuccessInput,
 	NoteMfaFirstBindingInput,
 	NoteMfaFirstBindingReply,
+	RaiseMfaRecoverySetFloorInput,
+	RaiseMfaRecoverySetFloorReply,
 	RedisDurability,
 	ReserveMfaSubjectAttemptInput,
 	ReserveMfaSubjectAttemptReply,
@@ -96,7 +104,13 @@ import type {
 
 export type {
 	AccessTokenDenylistClient,
+	AcquireMfaSubjectLeaseInput,
+	AcquireMfaSubjectLeaseReply,
 	ActivateFederationGrantInput,
+	ApplyMfaSubjectRecoveryInput,
+	ApplyMfaSubjectRecoveryReply,
+	AuthorizeMfaSubjectRecoveryInput,
+	AuthorizeMfaSubjectRecoveryReply,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
 	ConsentRecordFields,
@@ -132,6 +146,8 @@ export type {
 	ParkPendingConsentInput,
 	PendingConsentKeyspace,
 	PendingConsentStoreClient,
+	RaiseMfaRecoverySetFloorInput,
+	RaiseMfaRecoverySetFloorReply,
 	RateLimiterClient,
 	RateLimitIncrement,
 	RedisDurability,

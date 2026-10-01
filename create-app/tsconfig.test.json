@@ -1,0 +1,15 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true,
+		// The tests import `scripts/*.mjs`, which run before tsc and carry no
+		// declarations: tsc reads their types from the JavaScript, outside `src/`.
+		"allowJs": true,
+		"rootDir": "."
+	},
+	// The build config leaves `__tests__` out. vitest's typecheck runs tsc on
+	// this program, and an error in any of its files fails the run; every test
+	// file and helper comes in by glob, so a new one is compiled unlisted.
+	"include": ["src/**/*.mts"],
+	"exclude": ["node_modules", "dist", "templates"]
+}

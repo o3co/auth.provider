@@ -33,7 +33,7 @@ import {
 	redisRefreshTokenFamilyStoreModule,
 	redisReplaySeenSetModule,
 	redisSessionStoresModule,
-} from "../src/index.mjs";
+} from "#/index.mjs";
 
 /** The package's defaults, as a composition root finds them. */
 const REFERENCE = new URL("../config/reference.conf", import.meta.url);

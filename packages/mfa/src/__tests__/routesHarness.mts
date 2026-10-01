@@ -228,6 +228,47 @@ export async function beginLogin(
 	return { agent, transaction: res.body.transaction as string, boundTo };
 }
 
+/**
+ * A lockout whose hard hold the smallest configured `hardLimit` (10) reaches:
+ * the backoff at the ninth consecutive failure, and no weekly hold before it.
+ */
+export const HARD_AT_TEN = {
+	threshold: 9,
+	hardLimit: 10,
+	weeklyBudget: 100,
+	baseSeconds: 900,
+} as const;
+
+/**
+ * Brings alice's run to {@link HARD_AT_TEN}'s hard limit through the routes,
+ * Date frozen: five wrong TOTP codes in one login, four in a second (the
+ * ninth starts the 900-second backoff), then, past the backoff, one in a
+ * third. Answers that third login, one of its attempts spent. The
+ * five-and-four split assumes the default five attempts per transaction.
+ */
+export async function wrongCodesToTheHardLimit(
+	app: express.Express,
+	totp: SeededTotp,
+): Promise<BegunLogin> {
+	for (const count of [5, 4]) {
+		const { agent, transaction } = await beginLogin(app);
+		for (let n = 0; n < count; n++) {
+			const res = await verify(agent, transaction, totp.record.id, wrongCode(totp.secret));
+			expect(res.status, JSON.stringify(res.body)).toBe(401);
+		}
+	}
+	vi.setSystemTime(Date.now() + HARD_AT_TEN.baseSeconds * 1000 + 1000);
+	const third = await beginLogin(app);
+	const tenth = await verify(
+		third.agent,
+		third.transaction,
+		totp.record.id,
+		wrongCode(totp.secret),
+	);
+	expect(tenth.status, JSON.stringify(tenth.body)).toBe(401);
+	return third;
+}
+
 /** `POST /session/login` answered `403 mfa_enrollment_required`, as the page receives it: a first binding begun. */
 export async function beginFirstBinding(
 	app: express.Express,

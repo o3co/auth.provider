@@ -21,16 +21,16 @@ import {
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FederationGrantStoreClient, FederationTokenStoreClient } from "../src/clients.mjs";
+import type { FederationGrantStoreClient, FederationTokenStoreClient } from "#/clients.mjs";
 import {
 	redisFederationGrantStoreModule,
 	resolveRedisFederationGrantStoreOptions,
-} from "../src/federation-grant-store.mjs";
+} from "#/federation-grant-store.mjs";
 import {
 	createRedisFederationTokenStore,
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
-} from "../src/federation-tokens.mjs";
+} from "#/federation-tokens.mjs";
 import { capturing, withSection } from "./support/section.mjs";
 
 const tokenClient = {

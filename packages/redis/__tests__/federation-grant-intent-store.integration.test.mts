@@ -28,9 +28,9 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createRedisFederationGrantIntentStore } from "../src/federation-grant-intent-store.mjs";
-import { federationGrantIntentPairText } from "../src/internal/federation-grant-intent-codec.mjs";
-import { makeIoredisFederationGrantIntentStoreClient } from "../src/ioredis.mjs";
+import { createRedisFederationGrantIntentStore } from "#/federation-grant-intent-store.mjs";
+import { federationGrantIntentPairText } from "#/internal/federation-grant-intent-codec.mjs";
+import { makeIoredisFederationGrantIntentStoreClient } from "#/ioredis.mjs";
 import { runFederationGrantIntentStoreContract } from "./adapters.federation-grant-intent-store.contract.mjs";
 import { testRedis } from "./support/redis.mjs";
 

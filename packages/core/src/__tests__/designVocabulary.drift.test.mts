@@ -90,6 +90,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isLoopbackHostname\b/,
 	},
 	{
+		concept: "the issuer as discovery advertises it (RFC 8414 §2, RFC 9207)",
+		home: "packages/core/src/issuer/canonical.mts",
+		definition: /(?:function|const)\s+advertisedIssuer\b/,
+	},
+	{
 		concept: "trusted-proxy address vocabulary — one entry (#292)",
 		home: "packages/core/src/net/trusted-proxy.mts",
 		definition: /(?:function|const)\s+checkTrustedProxyEntry\b/,
@@ -164,6 +169,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		concept: "an authentication instant as the auth_time claim (the MFA ADR's D18)",
 		home: "packages/core/src/grants/authenticationClaims.mts",
 		definition: /(?:function|const)\s+authTimeClaim\b/,
+	},
+	{
+		concept:
+			"a recorded authentication instant as auth_time, never later than the clock reading it (the MFA ADR's D18)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+authTimeAt\b/,
 	},
 	{
 		concept: "the amr a federated login records — fed (#481, the MFA ADR's D13)",

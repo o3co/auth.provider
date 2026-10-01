@@ -175,6 +175,28 @@ describe("classifyFederationRefreshError", () => {
 				).toMatchObject({ reason: "invalid_grant", structured: true });
 			});
 
+			it("reads an outage on the Error or Response a thrown plain object carries as its cause, and nothing off a plain cause", () => {
+				// A hand-written adapter's own object over a library's error: the
+				// error is read as the walk reads it anywhere. A plain cause is
+				// peer-written data, as openid-client's parsed body is.
+				for (const cause of [
+					Object.assign(new Error("upstream"), { status: 503 }),
+					new Response(null, { status: 502 }),
+					new TypeError("fetch failed", {
+						cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+					}),
+				]) {
+					expect(classifyFederationRefreshError({ error: "invalid_grant", cause })).toEqual({
+						reason: "network",
+						structured: true,
+						upstreamCode: "invalid_grant",
+					});
+				}
+				expect(
+					classifyFederationRefreshError({ error: "invalid_grant", cause: { status: 503 } }),
+				).toMatchObject({ reason: "invalid_grant", structured: true });
+			});
+
 			it("still reads a network code on the thrown value itself, and on causes that are Errors", () => {
 				// What a hand-written adapter may throw, and what fetch raises.
 				expect(classifyFederationRefreshError({ code: "ETIMEDOUT" })).toMatchObject({
@@ -375,6 +397,83 @@ describe("classifyFederationRefreshError", () => {
 				reason: "rate_limited",
 				structured: true,
 			});
+		});
+	});
+
+	describe("a thrown value it cannot read", () => {
+		const UNKNOWN = { reason: "unknown", structured: false };
+
+		/** `target`, with `key` a getter that throws, as an adapter's value may have. */
+		const throwingOn = <T extends object>(target: T, key: string): T =>
+			Object.defineProperty(target, key, {
+				get() {
+					throw new Error("unreadable");
+				},
+			});
+
+		it("is unknown when a field it reads throws, and the classifier does not throw", () => {
+			for (const key of ["error", "status", "code", "cause"]) {
+				expect(classifyFederationRefreshError(throwingOn({}, key)), key).toEqual(UNKNOWN);
+			}
+			expect(classifyFederationRefreshError(throwingOn(new Error("x"), "message"))).toEqual(
+				UNKNOWN,
+			);
+		});
+
+		it("is unknown, not invalid_grant, when a field beside the code cannot be read", () => {
+			for (const key of ["status", "cause"]) {
+				expect(
+					classifyFederationRefreshError(throwingOn({ error: "invalid_grant" }, key)),
+					key,
+				).toEqual(UNKNOWN);
+			}
+		});
+
+		it("is unknown, not invalid_grant, when a field the outage check reads along the chain cannot be read", () => {
+			const response = throwingOn(new Response(null, { status: 400 }), "status");
+			for (const [label, cause] of [
+				["an Error cause's status", throwingOn(new Error("cause"), "status")],
+				["an Error cause's name", throwingOn(new Error("cause"), "name")],
+				["the Response it was raised over's status", response],
+			] as const) {
+				const error = Object.assign(new Error("rejected"), { error: "invalid_grant", cause });
+				expect(classifyFederationRefreshError(error), label).toEqual(UNKNOWN);
+			}
+		});
+
+		it("is unknown, not invalid_grant, when the Error or Response a thrown plain object carries as its cause cannot be read", () => {
+			// What a hand-written adapter may throw: its own object over a library's error.
+			for (const [label, cause] of [
+				["an Error cause's status", throwingOn(new Error("cause"), "status")],
+				["an Error cause's name", throwingOn(new Error("cause"), "name")],
+				["a Response cause's status", throwingOn(new Response(null, { status: 400 }), "status")],
+			] as const) {
+				expect(classifyFederationRefreshError({ error: "invalid_grant", cause }), label).toEqual(
+					UNKNOWN,
+				);
+			}
+		});
+
+		it("is network when the outage walk finds an outage beside a field it cannot read", () => {
+			for (const key of ["error", "status", "code"]) {
+				const timedOut = throwingOn(Object.assign(new Error("x"), { name: "TimeoutError" }), key);
+				expect(classifyFederationRefreshError(timedOut), key).toEqual({
+					reason: "network",
+					structured: true,
+				});
+			}
+		});
+
+		it("classifies a Proxy whose getPrototypeOf trap throws, and does not throw", () => {
+			const proxy = new Proxy(
+				{},
+				{
+					getPrototypeOf() {
+						throw new Error("trap");
+					},
+				},
+			);
+			expect(classifyFederationRefreshError(proxy)).toEqual(UNKNOWN);
 		});
 	});
 });

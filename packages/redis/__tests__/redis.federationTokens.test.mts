@@ -22,12 +22,9 @@
 import type { FederationTokens } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createRedisFederationTokenStore, type EncryptionConfig } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
-import {
-	createRedisFederationTokenStore,
-	type EncryptionConfig,
-} from "../src/federation-tokens.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let raw: Redis;
@@ -223,4 +220,108 @@ describe("mode=required over a real Redis", () => {
 		// The original is still readable under the key it was sealed for.
 		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
 	});
+});
+
+// `obtainedAt` is one optional field inside the sealed envelope: written only
+// when the record has one, read back as a fresh Date, absent as no key, and a
+// value this store would never write takes the same self-heal as any
+// unreadable record. The wrapper stays `v: 2`.
+describe("obtainedAt over a real Redis", () => {
+	const encryptionKey = Buffer.alloc(32, 7);
+	const obtainedAt = new Date(1_899_999_000_000);
+	const encryptions: ReadonlyArray<EncryptionConfig> = [
+		{ mode: "required", key: encryptionKey },
+		{ mode: "allow-plaintext" },
+	];
+
+	for (const encryption of encryptions) {
+		describe(`mode=${encryption.mode}`, () => {
+			// A v2 wrapper around `innerJson`, sealed for `key` under `required`.
+			// Spliced in verbatim, so `1e999` reaches the reader as written.
+			const wrap = (key: string, innerJson: string) =>
+				encryption.mode === "required"
+					? JSON.stringify({ v: 2, c: encryptTokenField(innerJson, encryptionKey, key) })
+					: `{"v":2,"p":${innerJson}}`;
+
+			it("round-trips obtainedAt through attach, update and get", async () => {
+				const { store } = makeStore(false, encryption);
+				await store.attach("sid-1", "google", { ...tokens, obtainedAt });
+				expect(await store.get("sid-1", "google")).toStrictEqual({ ...tokens, obtainedAt });
+
+				const later = new Date(obtainedAt.getTime() + 60_000);
+				await store.update("sid-1", "google", { ...tokens, obtainedAt: later });
+				expect((await store.get("sid-1", "google"))?.obtainedAt).toStrictEqual(later);
+			});
+
+			it("a record without obtainedAt reads back with the key absent, not undefined", async () => {
+				const { store } = makeStore(false, encryption);
+				await store.attach("sid-1", "google", tokens);
+				const read = await store.get("sid-1", "google");
+				expect(read).toStrictEqual(tokens);
+				expect(Object.hasOwn(read ?? {}, "obtainedAt")).toBe(false);
+
+				// An update without it removes a value an earlier write held.
+				await store.attach("sid-2", "google", { ...tokens, obtainedAt });
+				await store.update("sid-2", "google", tokens);
+				expect(Object.hasOwn((await store.get("sid-2", "google")) ?? {}, "obtainedAt")).toBe(false);
+			});
+
+			it("hands out a copy: mutating either Date leaves the stored value", async () => {
+				const { store } = makeStore(false, encryption);
+				const callers = new Date(obtainedAt.getTime());
+				await store.attach("sid-1", "google", { ...tokens, obtainedAt: callers });
+				callers.setTime(0);
+				(await store.get("sid-1", "google"))?.obtainedAt?.setTime(0);
+				expect((await store.get("sid-1", "google"))?.obtainedAt).toStrictEqual(obtainedAt);
+			});
+
+			it("keeps the v2 wrapper", async () => {
+				const { keyPrefix, store } = makeStore(false, encryption);
+				await store.attach("sid-1", "google", { ...tokens, obtainedAt });
+				const record = JSON.parse((await raw.get(`${keyPrefix}sid-1:google`)) as string) as Record<
+					string,
+					unknown
+				>;
+				expect(record.v).toBe(2);
+				expect(Object.keys(record).sort()).toEqual(
+					encryption.mode === "required" ? ["c", "v"] : ["p", "v"],
+				);
+			});
+
+			it("writes an Invalid Date obtainedAt as absent: the tokens stay readable", async () => {
+				const { store } = makeStore(false, encryption);
+				await store.attach("sid-1", "google", { ...tokens, obtainedAt: new Date(Number.NaN) });
+				const read = await store.get("sid-1", "google");
+				expect(read).toStrictEqual(tokens);
+			});
+
+			it.each([
+				["a string", '"soon"'],
+				// JSON.stringify writes NaN as null.
+				["null, as NaN is written", "null"],
+				["not finite", "1e999"],
+				["past the Date range", "8640000000000001"],
+				["before the Date range", "-8640000000000001"],
+			])(
+				"a corrupt obtainedAtMs (%s) self-heals: key and index member gone, null returned",
+				async (_label, value) => {
+					const { keyPrefix, store } = makeStore(false, encryption);
+					await store.attach("sid-1", "github", tokens);
+					const key = `${keyPrefix}sid-1:google`;
+					await raw.set(
+						key,
+						wrap(key, `{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":${value}}`),
+						"PX",
+						3600_000,
+					);
+					await raw.sadd(`${keyPrefix}idx:sid-1`, "google");
+
+					expect(await store.get("sid-1", "google")).toBeNull();
+					expect(await raw.exists(key)).toBe(0);
+					expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(0);
+					expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "github")).toBe(1);
+				},
+			);
+		});
+	}
 });

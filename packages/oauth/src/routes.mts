@@ -145,6 +145,13 @@ export const oauthRoutePaths = (mounted: {
 	...(mounted.consent ? ["/consent"] : []),
 ];
 
+/** A token's `auth_time`, capped at its `iat` when it has one. */
+const authTimeNoLaterThan = (
+	authTime: number | undefined,
+	iat: number | undefined,
+): number | undefined =>
+	authTime !== undefined && typeof iat === "number" ? Math.min(authTime, iat) : authTime;
+
 /**
  * `/oauth/introspect` once the caller check let the request through: verifies
  * the token, its audience pinned to the calling client when one authenticated;
@@ -326,7 +333,9 @@ const createIntrospectHandler = ({
 				// and `auth_time`, and its `amr`.
 				acr: wellFormedAcr(claims.acr),
 				amr: wellFormedAmr(claims.amr),
-				auth_time: wellFormedAuthTime(claims.auth_time),
+				// Never later than the token's own `iat`: an authentication
+				// precedes the token that records it.
+				auth_time: authTimeNoLaterThan(wellFormedAuthTime(claims.auth_time), iat),
 			};
 			return res.status(200).json(formatObject(response));
 		} catch (cause) {

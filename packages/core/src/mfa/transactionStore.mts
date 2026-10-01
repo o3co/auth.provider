@@ -15,9 +15,10 @@
  */
 
 /**
- * The MFA transaction, the subject lock state that bounds guessable proofs, a
- * session's account-email proof, a subject's first-binding mark, the port
- * that keeps them, and its `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
+ * The MFA transaction, the subject lock state that bounds guessable proofs and
+ * its authorized recovery, a subject's generation, lease and recovery-set
+ * floor, a session's account-email proof, a subject's first-binding mark, the
+ * port that keeps them, and its `mfaTransactionStore` slot. See ADR 2026-09-25-multi-factor-authentication
  * (the MFA transaction; attempts, lockout and rate limits; D24).
  *
  * A transaction is the short-lived, single-use record of one second-factor
@@ -28,9 +29,18 @@
  * Subject state is judged on the time each caller passes, not the store's
  * clock, so callers' clocks must agree (NTP); see
  * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} for what a fast clock can erase. A
- * subject's run never expires (only a success, an exempt success below
- * `hardLimit` or `clearSubjectState` ends it), and an open sign-up lets anyone
- * mint subjects.
+ * subject's run never expires (only a success, an exempt success before the
+ * hard hold or an applied recovery ends it), nor does the hard hold (only
+ * an applied recovery lifts it), and an open sign-up lets anyone mint
+ * subjects.
+ *
+ * Every mechanism a subject's factor-set writes rely on is state of this
+ * store, judged in its atomic operations: a writer captures the subject's
+ * generation, writes under the subject's lease acquired at that generation,
+ * and the generation moves only under the lease, at an applied recovery or
+ * reset. The lease is logical: a write that outlives it is told so at its
+ * release, never stopped.
+ *
  * Transactions are bounded by their expiry alone, not per subject and not
  * per session: nothing caps the transactions one session holds, and how many
  * are open is bounded only by the rate limits of the routes that open them.
@@ -707,7 +717,10 @@ export interface MfaLockoutPolicy {
 	readonly threshold: number;
 	/** The first backoff lock, in seconds (900); each further failure doubles it. */
 	readonly baseSeconds: number;
-	/** The longest backoff lock, in seconds (86400). */
+	/**
+	 * The longest backoff lock, in seconds (86400); a configured policy, at
+	 * most {@link MFA_LOCKOUT_MAX_BACKOFF_SECONDS}.
+	 */
 	readonly maxSeconds: number;
 	/**
 	 * How long after the last lock ends the backoff is forgotten, in seconds
@@ -718,10 +731,19 @@ export interface MfaLockoutPolicy {
 	/** Failures allowed in any rolling seven days (10). */
 	readonly weeklyBudget: number;
 	/**
-	 * Consecutive failures (100) that hold guessable proofs until the subject's
-	 * lock state is cleared (`clearSubjectState`); no time and no exempt success
-	 * lifts the hold (NIST SP 800-63B-4 §3.2.2). At most
-	 * {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
+	 * Consecutive attempts (100), reservations in flight counted, at which
+	 * guessable proofs are held until the subject's lock state is cleared
+	 * (`applySubjectRecovery`): the attempt that is the hardLimit-th since the
+	 * last success holds, whatever its outcome. This is one stricter than
+	 * NIST's '100 failed attempts': a correct hardLimit-th attempt still signs
+	 * in, but guessable factors stay held until re-enrolled. The hold is fixed
+	 * when the run reaches it: no time, no settle, no exempt success and no
+	 * higher `hardLimit` lifts it. NIST SP 800-63B-4's cap on consecutive
+	 * failed attempts is per authenticator and a ceiling; the per-subject
+	 * latch, and holding at the hardLimit-th attempt whatever its outcome, are
+	 * this product's choice. At most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}; a
+	 * configured policy, at least {@link MFA_LOCKOUT_MIN_HARD_LIMIT} and above
+	 * `threshold` ({@link checkConfiguredMfaLockoutPolicy}).
 	 */
 	readonly hardLimit: number;
 }
@@ -741,8 +763,21 @@ export const MFA_CLOCK_SKEW_ALLOWANCE_MS = 86_400_000;
 export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
 
 /**
- * Which hold refused a guessable attempt. No time and no exempt success lifts
- * `hard`; clearing the subject's lock state does (`clearSubjectState`).
+ * The smallest `hardLimit` a configured policy may set
+ * ({@link checkConfiguredMfaLockoutPolicy}).
+ */
+export const MFA_LOCKOUT_MIN_HARD_LIMIT = 10;
+
+/**
+ * The longest `maxSeconds` a configured policy may set, a week
+ * ({@link checkConfiguredMfaLockoutPolicy}).
+ */
+export const MFA_LOCKOUT_MAX_BACKOFF_SECONDS = MFA_WEEKLY_WINDOW_MS / 1000;
+
+/**
+ * Which hold refused a guessable attempt. Once fixed, no time, no settle, no
+ * exempt success and no higher `hardLimit` lifts `hard`; an applied recovery
+ * does (`applySubjectRecovery`).
  */
 export type MfaSubjectHold = "backoff" | "weekly" | "hard";
 
@@ -763,7 +798,7 @@ export type MfaSubjectAttemptReservation =
 			readonly retryAfterMs: number | null;
 			/**
 			 * Whether this refusal begins an episode: the refusals from the first
-			 * after an attempt was let through, or after `clearSubjectState`, to
+			 * after an attempt was let through, or after an applied recovery, to
 			 * the next attempt let through. One refusal among any in flight is first.
 			 */
 			readonly first: boolean;
@@ -774,13 +809,462 @@ export type MfaSubjectAttemptReservation =
  * proof verified; it ends the consecutive run up to and including this
  * reservation (a later one still in flight starts the next). `void`: the proof
  * was right but the factor's write lost or failed; the attempt is removed and
- * the run goes on.
+ * the run goes on. Neither lifts a hard hold already fixed.
  */
 export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 
+/** The shortest subject lease a store gives. */
+export const MFA_SUBJECT_LEASE_MIN_MS = 1_000;
+
+/** The longest subject lease a store gives. */
+export const MFA_SUBJECT_LEASE_MAX_MS = 600_000;
+
 /**
- * Where MFA transactions, the subject lock state, a session's account-email
- * proof and a subject's first-binding mark are kept.
+ * The lease a factor-set write takes when its configuration names none: above
+ * the few Store calls one write makes at the Store transport's default timeout.
+ */
+export const DEFAULT_MFA_SUBJECT_LEASE_MS = 60_000;
+
+/** What a subject lease is asked for with. */
+export interface MfaSubjectLeaseRequest {
+	/** How long it stands on the store's clock, from {@link MFA_SUBJECT_LEASE_MIN_MS} to {@link MFA_SUBJECT_LEASE_MAX_MS}. */
+	readonly ttlMs: number;
+	/** The subject's generation the writer captured before it began. */
+	readonly generation: number;
+}
+
+/** What `acquireSubjectLease` answers. */
+export type MfaSubjectLeaseAnswer =
+	| {
+			readonly outcome: "acquired";
+			/** What `releaseSubjectLease` and `applySubjectRecovery` are handed: a non-empty string. */
+			readonly token: string;
+	  }
+	| {
+			readonly outcome: "busy";
+			/** Milliseconds until another holder's lease ends, above 0. */
+			readonly retryAfterMs: number;
+	  }
+	| { readonly outcome: "stale" };
+
+/** A non-empty string, read once by the caller. */
+const isSubject = (value: unknown): value is string =>
+	typeof value === "string" && value.length > 0;
+
+/**
+ * The request {@link MfaTransactionStore.acquireSubjectLease} acts on, its
+ * fields read once, or a `RangeError`: `subject` a non-empty string, `ttlMs`
+ * a whole number from {@link MFA_SUBJECT_LEASE_MIN_MS} to
+ * {@link MFA_SUBJECT_LEASE_MAX_MS}, `generation` a safe whole number from 0.
+ * Every adapter calls it first.
+ */
+export function checkSubjectLeaseRequest(
+	subject: unknown,
+	request: unknown,
+): MfaSubjectLeaseRequest {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.acquireSubjectLease: ${what}`);
+	};
+	if (!isSubject(subject)) refuse("subject must be a non-empty string");
+	if (!isRecord(request)) return refuse("the request must be an object");
+	const { ttlMs, generation } = request;
+	if (
+		typeof ttlMs !== "number" ||
+		!Number.isSafeInteger(ttlMs) ||
+		ttlMs < MFA_SUBJECT_LEASE_MIN_MS ||
+		ttlMs > MFA_SUBJECT_LEASE_MAX_MS
+	) {
+		refuse(
+			`ttlMs must be a whole number from MFA_SUBJECT_LEASE_MIN_MS (${MFA_SUBJECT_LEASE_MIN_MS}) to MFA_SUBJECT_LEASE_MAX_MS (${MFA_SUBJECT_LEASE_MAX_MS})`,
+		);
+	}
+	if (!isCount(generation)) {
+		refuse("generation, the one the writer captured, must be a safe whole number from 0");
+	}
+	return { ttlMs: ttlMs as number, generation: generation as number };
+}
+
+/**
+ * Refuses, with a `RangeError` naming `operation`, a subject that is not a
+ * non-empty string. Every adapter runs it first for the operations that take
+ * a subject alone.
+ */
+export function checkSubjectQuestion(operation: string, subject: unknown): void {
+	if (!isSubject(subject)) {
+		throw new RangeError(`MfaTransactionStore.${operation}: subject must be a non-empty string`);
+	}
+}
+
+/**
+ * Refuses, with a `RangeError`, a release `releaseSubjectLease` cannot make:
+ * `subject` and `token` non-empty strings. Every adapter runs it first.
+ */
+export function checkSubjectLeaseRelease(subject: unknown, token: unknown): void {
+	checkSubjectQuestion("releaseSubjectLease", subject);
+	if (!isSubject(token)) {
+		throw new RangeError(
+			"MfaTransactionStore.releaseSubjectLease: the token must be a non-empty string",
+		);
+	}
+}
+
+/**
+ * `answer`, what `acquireSubjectLease` answered, as the port promises it,
+ * copied to its outcome's fields, each read once; `undefined` for anything
+ * else, which the caller answers as the store's outage: never a lease, never
+ * a refusal.
+ */
+export function readMfaSubjectLeaseAnswer(answer: unknown): MfaSubjectLeaseAnswer | undefined {
+	try {
+		if (!isRecord(answer)) return undefined;
+		const { outcome } = answer;
+		if (outcome === "acquired") {
+			const { token } = answer;
+			return isSubject(token) ? { outcome, token } : undefined;
+		}
+		if (outcome === "busy") {
+			const { retryAfterMs } = answer;
+			return typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs > 0
+				? { outcome, retryAfterMs }
+				: undefined;
+		}
+		return outcome === "stale" ? { outcome } : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * `answer`, a subject's generation or recovery-set floor as the port promises
+ * it: a safe whole number from 0. `undefined` for anything else, which the
+ * caller answers as the store's outage.
+ */
+export function readMfaSubjectCount(answer: unknown): number | undefined {
+	return isCount(answer) ? answer : undefined;
+}
+
+/** What `raiseRecoverySetFloor` is asked to raise, and under which lease. */
+export interface MfaRecoverySetFloorRaise {
+	/** A recovery-code set's generation, not the subject's: a safe whole number from 1. */
+	readonly setGeneration: number;
+	/** The subject's lease the caller holds. */
+	readonly leaseToken: string;
+}
+
+/** What `raiseRecoverySetFloor` answers: the floor after the raise, or the refusal without the lease. */
+export type MfaRecoverySetFloorAnswer =
+	| { readonly outcome: "raised"; readonly floor: number }
+	| { readonly outcome: "refused"; readonly reason: "lease_not_held" };
+
+/**
+ * The raise `raiseRecoverySetFloor` makes, its fields read once, or a
+ * `RangeError`: `subject` a non-empty string, `setGeneration` a safe whole
+ * number from 1, `leaseToken` a non-empty string. Every adapter calls it
+ * first.
+ */
+export function checkRecoverySetFloorRaise(
+	subject: unknown,
+	raise: unknown,
+): MfaRecoverySetFloorRaise {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.raiseRecoverySetFloor: ${what}`);
+	};
+	checkSubjectQuestion("raiseRecoverySetFloor", subject);
+	if (!isRecord(raise)) return refuse("the raise must be an object");
+	const { setGeneration, leaseToken } = raise;
+	if (!isCount(setGeneration) || setGeneration < 1) {
+		refuse("setGeneration, a recovery-code set's generation, must be a safe whole number from 1");
+	}
+	if (!isSubject(leaseToken)) refuse("leaseToken must be a non-empty string");
+	return { setGeneration: setGeneration as number, leaseToken: leaseToken as string };
+}
+
+/**
+ * `answer`, what `raiseRecoverySetFloor` answered, as the port promises it:
+ * a raise with the floor after it, a safe whole number from 1, or the
+ * refusal without the lease. `undefined` for anything else, which the caller
+ * answers as the store's outage.
+ */
+export function readMfaRecoverySetFloorAnswer(
+	answer: unknown,
+): MfaRecoverySetFloorAnswer | undefined {
+	try {
+		if (!isRecord(answer)) return undefined;
+		const { outcome } = answer;
+		if (outcome === "raised") {
+			const { floor } = answer;
+			return isCount(floor) && floor >= 1 ? { outcome, floor } : undefined;
+		}
+		if (outcome === "refused") {
+			const { reason } = answer;
+			return reason === "lease_not_held" ? { outcome, reason } : undefined;
+		}
+		return undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The two authorized recoveries: `recover`, the subject's own after an exempt proof; `reset`, the operator's. */
+export type MfaSubjectRecoveryOperation = "recover" | "reset";
+
+/** The furthest an authorization may end ahead of the store's clock: the most `mfa.manage.maxAgeSeconds` allows. */
+export const MFA_RECOVERY_AUTHORIZATION_MAX_MS = 3_600_000;
+
+/**
+ * A one-time authorization to apply one recovery to one subject: `recover`,
+ * minted when an exempt proof verified in the `UserSession` `sid`; `reset`,
+ * by the operator reset, with no `sid`. `recoveryId` is a fresh CSPRNG value.
+ */
+export interface MfaSubjectRecoveryAuthorization {
+	readonly operation: MfaSubjectRecoveryOperation;
+	/** `recover`: the session the proof was given in; `reset`: `undefined`. */
+	readonly sid: string | undefined;
+	readonly recoveryId: string;
+	/** After the store's clock, and no further ahead of it than {@link MFA_RECOVERY_AUTHORIZATION_MAX_MS} plus `DEFAULT_CLOCK_SKEW_MS`. */
+	readonly expiresAtMs: number;
+}
+
+/** What `applySubjectRecovery` is asked to apply. */
+export interface MfaSubjectRecoveryApplication {
+	readonly operation: MfaSubjectRecoveryOperation;
+	readonly sid: string | undefined;
+	/** The caller's time, which the lock state is judged on. */
+	readonly nowMs: number;
+	/** The subject's lease the caller holds: the generation moves only under it. */
+	readonly leaseToken: string;
+	/** `recover`: the subject's sessions boundary (`revokedBefore`), `undefined` when there is none. `reset`: `undefined`. */
+	readonly sessionsBoundaryMs: number | undefined;
+	/**
+	 * `recover`, required: the earliest `createdAt` of the subject's records
+	 * of an installed guessable kind, unreadable ones included, or `null`
+	 * when none remains; records of a kind not installed are left out. A
+	 * value the caller could not read is never `null`. `reset`: `undefined`.
+	 */
+	readonly guessableBoundSinceMs: number | null | undefined;
+}
+
+/** Why an apply changed nothing. */
+export type MfaSubjectRecoveryRefusal =
+	| "unauthorized"
+	| "expired"
+	| "not_revoked_since"
+	| "boundary_ahead"
+	| "lease_not_held";
+
+/**
+ * What `applySubjectRecovery` answers. `hard` is whether the hard hold
+ * stands after the call, read in the same step, on every outcome: an answer
+ * never reads as released while it stands.
+ */
+export type MfaSubjectRecoveryAnswer =
+	| {
+			readonly outcome: "applied";
+			readonly recoveryId: string;
+			/** The subject's generation this apply moved it to. */
+			readonly generation: number;
+			/**
+			 * What this apply gave back, each possibly empty: the week's failures,
+			 * the run's (and its backoff), the hard hold. A recover with nothing to
+			 * give back still applies, using up its authorization and moving the
+			 * generation.
+			 */
+			readonly cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean };
+			readonly hard: boolean;
+	  }
+	| {
+			readonly outcome: "already_applied";
+			readonly recoveryId: string;
+			/** The generation it was applied at. */
+			readonly generation: number;
+			readonly hard: boolean;
+	  }
+	| {
+			readonly outcome: "refused";
+			readonly reason: MfaSubjectRecoveryRefusal;
+			readonly hard: boolean;
+	  };
+
+const RECOVERY_REFUSALS: ReadonlySet<unknown> = new Set<MfaSubjectRecoveryRefusal>([
+	"unauthorized",
+	"expired",
+	"not_revoked_since",
+	"boundary_ahead",
+	"lease_not_held",
+]);
+
+const isWellFormedText = (value: unknown): value is string =>
+	isSubject(value) && value.isWellFormed();
+
+/** Whole epoch milliseconds within the Date range. */
+const isRecoveryInstant = (value: unknown): value is number =>
+	isEpochMs(value) && isStorableExpiry(value);
+
+/** The `sid` an operation takes: a well-formed string for `recover`, none for `reset`. */
+function recoverySid(
+	operation: unknown,
+	sid: unknown,
+	refuse: (what: string) => never,
+): string | undefined {
+	if (operation === "recover") {
+		return isWellFormedText(sid)
+			? sid
+			: refuse("a recover's sid must be a non-empty, well-formed string");
+	}
+	if (operation === "reset") return sid === undefined ? undefined : refuse("a reset has no sid");
+	return refuse("operation must be recover or reset");
+}
+
+/**
+ * The authorization {@link MfaTransactionStore.authorizeSubjectRecovery}
+ * records, its fields read once, or a `RangeError` naming what is wrong:
+ * `subject` a non-empty string; `operation` and `sid` as
+ * {@link MfaSubjectRecoveryAuthorization} says; `recoveryId` a non-empty,
+ * well-formed string; `expiresAtMs` whole epoch milliseconds within the Date
+ * range. On `storeNowMs`, the store's clock, when it is given: `expiresAtMs`
+ * after it, and no further ahead than {@link MFA_RECOVERY_AUTHORIZATION_MAX_MS}
+ * plus `DEFAULT_CLOCK_SKEW_MS`. An adapter whose store judges the clock in a
+ * script runs the shape first and the rest on the clock that script answers.
+ */
+export function checkSubjectRecoveryAuthorization(
+	subject: unknown,
+	authorization: unknown,
+	storeNowMs?: number,
+): MfaSubjectRecoveryAuthorization {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.authorizeSubjectRecovery: ${what}`);
+	};
+	if (!isSubject(subject)) refuse("subject must be a non-empty string");
+	if (!isRecord(authorization)) return refuse("the authorization must be an object");
+	const { operation, sid, recoveryId, expiresAtMs } = authorization;
+	const checkedSid = recoverySid(operation, sid, refuse);
+	if (!isWellFormedText(recoveryId)) refuse("recoveryId must be a non-empty, well-formed string");
+	if (!isRecoveryInstant(expiresAtMs)) {
+		refuse("expiresAtMs must be whole epoch milliseconds within the Date range");
+	}
+	const ends = expiresAtMs as number;
+	if (storeNowMs !== undefined) {
+		if (!(ends > storeNowMs)) refuse("expiresAtMs must be after the store's clock");
+		if (!(ends <= storeNowMs + MFA_RECOVERY_AUTHORIZATION_MAX_MS + DEFAULT_CLOCK_SKEW_MS)) {
+			refuse(
+				"expiresAtMs must be no further ahead of the store's clock than MFA_RECOVERY_AUTHORIZATION_MAX_MS and DEFAULT_CLOCK_SKEW_MS",
+			);
+		}
+	}
+	return {
+		operation: operation as MfaSubjectRecoveryOperation,
+		sid: checkedSid,
+		recoveryId: recoveryId as string,
+		expiresAtMs: ends,
+	};
+}
+
+/**
+ * The application {@link MfaTransactionStore.applySubjectRecovery} acts on,
+ * its fields read once, or a `RangeError` naming what is wrong: `subject` a
+ * non-empty string; `operation` and `sid` as for an authorization; `nowMs` an
+ * instant from the epoch within the Date range; `leaseToken` a non-empty
+ * string; for `recover`, `sessionsBoundaryMs` `undefined` or whole epoch
+ * milliseconds within the Date range, and `guessableBoundSinceMs` whole epoch
+ * milliseconds within the Date range or `null` (none remains), never
+ * absent; for `reset` both `undefined`. Every adapter calls it first.
+ */
+export function checkSubjectRecoveryApplication(
+	subject: unknown,
+	application: unknown,
+): MfaSubjectRecoveryApplication {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.applySubjectRecovery: ${what}`);
+	};
+	if (!isSubject(subject)) refuse("subject must be a non-empty string");
+	if (!isRecord(application)) return refuse("the application must be an object");
+	const { operation, sid, nowMs, leaseToken, sessionsBoundaryMs, guessableBoundSinceMs } =
+		application;
+	const checkedSid = recoverySid(operation, sid, refuse);
+	if (typeof nowMs !== "number" || !isStorableExpiry(nowMs) || nowMs < 0) {
+		refuse("nowMs must be an instant from the epoch within the Date range");
+	}
+	if (!isSubject(leaseToken)) refuse("leaseToken must be a non-empty string");
+	if (operation === "reset") {
+		if (sessionsBoundaryMs !== undefined) refuse("a reset takes no sessionsBoundaryMs");
+		if (guessableBoundSinceMs !== undefined) refuse("a reset takes no guessableBoundSinceMs");
+	} else {
+		if (sessionsBoundaryMs !== undefined && !isRecoveryInstant(sessionsBoundaryMs)) {
+			refuse(
+				"sessionsBoundaryMs must be undefined or whole epoch milliseconds within the Date range",
+			);
+		}
+		if (guessableBoundSinceMs !== null && !isRecoveryInstant(guessableBoundSinceMs)) {
+			refuse(
+				"a recover's guessableBoundSinceMs must be whole epoch milliseconds within the Date range, or null when no guessable record remains",
+			);
+		}
+	}
+	return {
+		operation: operation as MfaSubjectRecoveryOperation,
+		sid: checkedSid,
+		nowMs: nowMs as number,
+		leaseToken: leaseToken as string,
+		sessionsBoundaryMs: sessionsBoundaryMs as number | undefined,
+		guessableBoundSinceMs: guessableBoundSinceMs as number | null | undefined,
+	};
+}
+
+/**
+ * Whether `cleared` and `hard` are what one apply can answer. A lifted hard
+ * hold ends its run and leaves none standing; otherwise the week ended, and
+ * the run with it exactly when no hard hold stands (a standing hold keeps
+ * the run it counted).
+ */
+const isAppliedState = (
+	cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean },
+	hard: boolean,
+): boolean => (cleared.hard ? cleared.run && !hard : cleared.week && cleared.run === !hard);
+
+/**
+ * `answer`, what `applySubjectRecovery` answered, as the port promises it,
+ * copied to its outcome's fields, each read once: a non-empty `recoveryId`,
+ * a generation from 1, booleans, a refusal the port names, and an applied
+ * answer whose `cleared` and `hard` one apply can give — never one that has
+ * lifted the hard hold while it still stands. `undefined` for anything else,
+ * which the caller answers as the store's outage: never released.
+ */
+export function readMfaSubjectRecoveryAnswer(
+	answer: unknown,
+): MfaSubjectRecoveryAnswer | undefined {
+	try {
+		if (!isRecord(answer)) return undefined;
+		const { outcome, hard } = answer;
+		if (typeof hard !== "boolean") return undefined;
+		if (outcome === "refused") {
+			const { reason } = answer;
+			return RECOVERY_REFUSALS.has(reason)
+				? { outcome, reason: reason as MfaSubjectRecoveryRefusal, hard }
+				: undefined;
+		}
+		if (outcome !== "applied" && outcome !== "already_applied") return undefined;
+		const { recoveryId, generation } = answer;
+		if (!isSubject(recoveryId) || !isCount(generation) || generation < 1) return undefined;
+		if (outcome === "already_applied") return { outcome, recoveryId, generation, hard };
+		const { cleared } = answer;
+		if (!isRecord(cleared)) return undefined;
+		const { week, run, hard: lifted } = cleared;
+		if (typeof week !== "boolean" || typeof run !== "boolean" || typeof lifted !== "boolean") {
+			return undefined;
+		}
+		const parts = { week, run, hard: lifted };
+		return isAppliedState(parts, hard)
+			? { outcome, recoveryId, generation, cleared: parts, hard }
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Where MFA transactions, the subject lock state and its authorized recovery,
+ * a subject's generation, lease and recovery-set floor, a session's
+ * account-email proof and a subject's first-binding mark are kept.
  *
  * Every operation is atomic on its own. A store that cannot answer throws:
  * an outage is `503`, never a verdict on a proof.
@@ -831,11 +1315,25 @@ export interface MfaTransactionStore {
 	consume(id: string, expectedVersion: number): Promise<MfaTransaction | null>;
 
 	/**
-	 * Refuse while a hold applies at `nowMs` — the hard limit, the short
+	 * Refuse while a hold applies at `nowMs` — the hard hold, the short
 	 * backoff or the weekly budget, for every attempt alike — and otherwise
 	 * count a pending failure, which stands until settled. A refusal records
 	 * only that its episode began (`first`); an attempt let through ends the
 	 * episode.
+	 *
+	 * The hard hold is fixed, in the same atomic step, the first time the
+	 * run — reservations in flight counted — reaches `policy.hardLimit`: at
+	 * the reservation that brings it there, which is let through, or at the
+	 * first call that finds it there under a lower `hardLimit`. The store
+	 * records its time as the later of that call's `nowMs` and the run's
+	 * newest attempt, so no attempt of the run is dated after it. From then
+	 * until an applied recovery lifts it every reservation is refused `hard`,
+	 * whatever policy it is handed, and no settle, exempt success or sweep
+	 * lifts it.
+	 * The policy is read once, by {@link checkMfaLockoutPolicy}, and its
+	 * copy is what the call applies.
+	 * Of reservations racing to the limit, the one that reaches it is let
+	 * through and fixes the hold; those after it are refused `hard`.
 	 */
 	reserveSubjectAttempt(
 		subject: string,
@@ -845,7 +1343,9 @@ export interface MfaTransactionStore {
 	/**
 	 * Settle a reservation, once, under the subject that made it; settling one
 	 * already settled, one never made, or one under another subject changes
-	 * nothing. An outcome it does not know is a `RangeError`.
+	 * nothing. An outcome it does not know is a `RangeError`. A success or a
+	 * void settled once the hard hold is fixed — for the reservation that
+	 * fixed it included — lifts nothing of it.
 	 */
 	settleSubjectAttempt(
 		subject: string,
@@ -853,29 +1353,24 @@ export interface MfaTransactionStore {
 		outcome: MfaSubjectAttemptOutcome,
 	): Promise<void>;
 	/**
-	 * An exempt success (a recovery code, a WebAuthn assertion). While the
-	 * attempts up to `nowMs`, reservations in flight among them, are fewer than
-	 * `policy.hardLimit`, it ends the run up to `nowMs`; at or past it they, and
-	 * the hard hold, stand. An attempt reserved after `nowMs` always stays. The
+	 * An exempt success (a recovery code, a WebAuthn assertion). Before the
+	 * hard hold is fixed it ends the run up to `nowMs`, reservations in flight
+	 * among them; an attempt reserved after `nowMs` always stays. A run already
+	 * at `policy.hardLimit` or past it fixes the hold instead, as a reservation
+	 * would. Once the hold is fixed it ends nothing, whether `nowMs` is before,
+	 * at or after the last failure and whatever `hardLimit` it is handed. The
 	 * week stands, and lets no attempt through. Call it only after the
 	 * transaction holding the exempt proof was consumed. A `RangeError` for what
 	 * {@link checkMfaLockoutPolicy} refuses.
 	 */
 	noteExemptSuccess(subject: string, nowMs: number, policy: MfaLockoutPolicy): Promise<void>;
-	/**
-	 * Forget `subject`'s lock state (the run and the week). No revocation and
-	 * no credential change calls it. It leaves the subject's first-binding
-	 * mark: that is not lock state, and clearing it would trust a stale
-	 * session.
-	 */
-	clearSubjectState(subject: string): Promise<void>;
 
 	// The email proof the operator reset requires.
 	/**
 	 * Record that `subject`'s next first binding requires the 80-bit email proof,
 	 * whatever `mfa.enrollment.requireEmailProof` says (the operator reset's
-	 * `requireEmailProof: true`). Idempotent. No expiry, and `clearSubjectState`
-	 * leaves it: the reset that clears the lock may not lift it.
+	 * `requireEmailProof: true`). Idempotent. No expiry, and an applied
+	 * recovery leaves it: the reset that clears the lock may not lift it.
 	 */
 	requireEmailProofAtNextBinding(subject: string): Promise<void>;
 	/** Whether the requirement is recorded for `subject`. */
@@ -922,7 +1417,7 @@ export interface MfaTransactionStore {
 	 * witness marked, at `atMs`, standing until `untilMs` on the store's clock.
 	 * The store keeps {@link laterFirstBindingMark} of the mark held and this
 	 * one: the later `atMs` and the later `untilMs`, so no note moves a mark
-	 * back or shortens it. `clearSubjectState` leaves it. A `RangeError`,
+	 * back or shortens it. An applied recovery leaves it. A `RangeError`,
 	 * nothing noted, for what {@link checkFirstBindingNote} refuses on the
 	 * store's clock.
 	 */
@@ -937,6 +1432,108 @@ export interface MfaTransactionStore {
 	 * mark trusts the session.
 	 */
 	firstBindingAt(subject: string, nowMs: number): Promise<number | null>;
+
+	// A subject's generation and lease: one writer at a time to the subject's
+	// factor set, and a write begun before a recovery or a reset refused.
+	/**
+	 * The subject's generation: 0 until a recovery or a reset is first
+	 * applied, then one more for each. A writer captures it before the
+	 * request that writes is admitted, or at the begin of the ceremony and
+	 * carried with it, and acquires the lease under it. A `RangeError` for
+	 * what {@link checkSubjectQuestion} refuses.
+	 */
+	subjectGeneration(subject: string): Promise<number>;
+	/**
+	 * In one step: `stale` when `request.generation` is not the subject's
+	 * generation; else `busy` while another holder's lease stands;
+	 * else a lease standing `ttlMs` on the store's clock, under a fresh token.
+	 * The generation moves only under the lease
+	 * (`applySubjectRecovery`), so it stays the one acquired under until the
+	 * lease ends. A `RangeError`, nothing held, for what
+	 * {@link checkSubjectLeaseRequest} refuses.
+	 */
+	acquireSubjectLease(
+		subject: string,
+		request: MfaSubjectLeaseRequest,
+	): Promise<MfaSubjectLeaseAnswer>;
+	/**
+	 * Ends the lease `token` holds: `true` when it still held it, so no other
+	 * holder moved the generation while it stood; `false` when the lease had
+	 * ended, or another holds it, which it leaves. A `RangeError` for what
+	 * {@link checkSubjectLeaseRelease} refuses.
+	 */
+	releaseSubjectLease(subject: string, token: string): Promise<boolean>;
+
+	// Authorized recovery: the one way the lock state is given back early.
+	/**
+	 * Records `authorization` in the subject's slot for its operation and
+	 * `sid`, replacing whatever the slot held, pending or applied. It touches
+	 * no lock state, generation or lease. A `RangeError`, nothing recorded,
+	 * for what {@link checkSubjectRecoveryAuthorization} refuses on the
+	 * store's clock.
+	 */
+	authorizeSubjectRecovery(
+		subject: string,
+		authorization: MfaSubjectRecoveryAuthorization,
+	): Promise<void>;
+	/**
+	 * Applies the authorization in the slot for `application`'s operation and
+	 * `sid`, in one step, refusing in this order:
+	 *
+	 * - `lease_not_held`: the subject's lease is not held under `leaseToken`.
+	 * - `unauthorized`: the slot is empty, or its authorization has ended on
+	 *   the store's clock. A slot already applied answers `already_applied`,
+	 *   with the generation it was applied at. `expired`: it ends at or before
+	 *   `nowMs`.
+	 * - `recover` only. `boundary_ahead`: `sessionsBoundaryMs` is later than
+	 *   `nowMs` plus `DEFAULT_CLOCK_SKEW_MS`. `not_revoked_since`: the week
+	 *   counts a failure dated up to `nowMs` (a reservation in flight is one) and
+	 *   `sessionsBoundaryMs` is absent or not later than the earliest such
+	 *   failure by more than `DEFAULT_CLOCK_SKEW_MS`, and no hard hold is
+	 *   lifted.
+	 *
+	 * A `recover` lifts the hard hold on a rebind: `guessableBoundSinceMs` is
+	 * `null` or later than the hold's time by more than `DEFAULT_CLOCK_SKEW_MS`.
+	 * No sessions boundary is asked for, and the run the hold counted ends
+	 * with it, its backoff included: every attempt in it was against the
+	 * replaced authenticators. The week stands unless the boundary gives it
+	 * back. With the boundary, a `recover` ends the week's and the run's
+	 * attempts dated up to `nowMs`; while the hard hold stands, the week's
+	 * alone. A `reset` asks for neither: it ends the subject's lock state
+	 * whole, the hard hold included, and every other authorization of the
+	 * subject. A refusal changes nothing, and the authorization stays pending
+	 * until it ends. Applied, the slot is marked applied (kept until it ends)
+	 * and the subject's generation moves on by one. The email-proof
+	 * requirement, the first-binding mark, session proofs and transactions
+	 * are not lock state and stay. A `RangeError`, nothing changed, for what
+	 * {@link checkSubjectRecoveryApplication} refuses.
+	 */
+	applySubjectRecovery(
+		subject: string,
+		application: MfaSubjectRecoveryApplication,
+	): Promise<MfaSubjectRecoveryAnswer>;
+
+	// The recovery-set floor: kept apart from the sets, so that deleting a
+	// set never brings an older one back.
+	/**
+	 * Under the subject's lease held by `raise.leaseToken`, raises the
+	 * subject's recovery-set floor to `raise.setGeneration` — a recovery-code
+	 * set's generation, not the subject's — when it is higher, and answers
+	 * the floor after; without the lease, refuses `lease_not_held`, raising
+	 * nothing. Nothing lowers it: not a deleted set, a reset or a sweep. A
+	 * `RangeError`, nothing raised, for what {@link checkRecoverySetFloorRaise}
+	 * refuses.
+	 */
+	raiseRecoverySetFloor(
+		subject: string,
+		raise: MfaRecoverySetFloorRaise,
+	): Promise<MfaRecoverySetFloorAnswer>;
+	/**
+	 * The subject's recovery-set floor, 0 when none was raised: a set of a
+	 * lower set generation verifies no code. A `RangeError` for what
+	 * {@link checkSubjectQuestion} refuses.
+	 */
+	recoverySetFloor(subject: string): Promise<number>;
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaTransactionStore}. */
@@ -946,14 +1543,16 @@ const isPositiveWhole = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 
 /**
- * Refuses a lockout policy a store cannot apply as written, with a `RangeError`
- * naming `setting` and the field: an object, every field a positive whole
- * number, `maxSeconds` ≥ `baseSeconds`, `threshold` ≤ `hardLimit` (else the
- * backoff never engages before the hard hold), `hardLimit` ≤
- * {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every duration ending within the
- * Date range. Called at boot and again by every store operation taking a policy.
- * Answers the policy it checked, each field read once: a store applies that
- * copy, so what it applies is what was checked.
+ * The store's port check. Refuses a lockout policy a store cannot apply as
+ * written, with a `RangeError` naming `setting` and the field: an object,
+ * every field a positive whole number, `maxSeconds` ≥ `baseSeconds`,
+ * `threshold` ≤ `hardLimit` (a threshold above it is never reached),
+ * `hardLimit` ≤ {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every duration ending
+ * within the Date range. Every store operation taking a policy calls it. A
+ * policy a deployment configures is checked by
+ * {@link checkConfiguredMfaLockoutPolicy}, which runs this first and adds its
+ * own bounds (a `hardLimit` floor, a `maxSeconds` cap). Answers the policy it checked, each field read once: a store applies
+ * that copy, so what it applies is what was checked.
  *
  * @param setting - where the policy was read from, for the message.
  */
@@ -1004,6 +1603,39 @@ export function checkMfaLockoutPolicy(
 		}
 	}
 	return Object.freeze(checked);
+}
+
+/**
+ * Checks a lockout policy a deployment configures: the store's port check
+ * ({@link checkMfaLockoutPolicy}), then its own bounds. A `RangeError`
+ * naming `setting` and the reason refuses a `hardLimit` below
+ * {@link MFA_LOCKOUT_MIN_HARD_LIMIT}, one not above `threshold`, or a
+ * `maxSeconds` above {@link MFA_LOCKOUT_MAX_BACKOFF_SECONDS}. Answers the
+ * port check's copy.
+ *
+ * @param setting - where the policy was read from, for the message.
+ */
+export function checkConfiguredMfaLockoutPolicy(
+	policy: MfaLockoutPolicy,
+	setting = "mfa.lockout",
+): Readonly<MfaLockoutPolicy> {
+	const checked = checkMfaLockoutPolicy(policy, setting);
+	if (checked.hardLimit < MFA_LOCKOUT_MIN_HARD_LIMIT) {
+		throw new RangeError(
+			`${setting}.hardLimit must be at least ${MFA_LOCKOUT_MIN_HARD_LIMIT}: the hardLimit-th attempt since the last success fixes the hard hold whatever its outcome, so a small value holds guessable factors even after a correct code`,
+		);
+	}
+	if (checked.hardLimit <= checked.threshold) {
+		throw new RangeError(
+			`${setting}.hardLimit must be above ${setting}.threshold: the staged backoff must act before the hard hold`,
+		);
+	}
+	if (checked.maxSeconds > MFA_LOCKOUT_MAX_BACKOFF_SECONDS) {
+		throw new RangeError(
+			`${setting}.maxSeconds must be at most ${MFA_LOCKOUT_MAX_BACKOFF_SECONDS} (a week): standing failures are counted over the week, so a longer backoff can outlast every failure that justified it`,
+		);
+	}
+	return checked;
 }
 
 // ---------------------------------------------------------------------------

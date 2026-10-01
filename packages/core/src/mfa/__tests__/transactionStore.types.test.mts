@@ -28,6 +28,8 @@ import {
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
 	type MfaSubjectHold,
+	type MfaSubjectRecoveryAnswer,
+	type MfaSubjectRecoveryApplication,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
@@ -85,6 +87,17 @@ describe("the MfaTransactionStore port", () => {
 		>();
 		expectTypeOf<MfaTransactionStore["firstBindingAt"]>().toEqualTypeOf<
 			(subject: string, nowMs: number) => Promise<number | null>
+		>();
+		expect(true).toBe(true);
+	});
+
+	it("has no clearSubjectState: an applied recovery is the one way the lock state ends early", () => {
+		expectTypeOf<MfaTransactionStore>().not.toHaveProperty("clearSubjectState");
+		expectTypeOf<MfaTransactionStore["applySubjectRecovery"]>().toEqualTypeOf<
+			(
+				subject: string,
+				application: MfaSubjectRecoveryApplication,
+			) => Promise<MfaSubjectRecoveryAnswer>
 		>();
 		expect(true).toBe(true);
 	});

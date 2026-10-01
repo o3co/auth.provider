@@ -190,7 +190,22 @@ describe("the in-process MfaTransactionStore", () => {
 		const failed = await store.reserveSubjectAttempt("user-1", T0, POLICY);
 		if (failed.ok) await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
 		expect(store.subjects).toBe(1);
-		await store.clearSubjectState("user-1");
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
+		if (lease.outcome !== "acquired") throw new Error("expected a lease");
+		await store.authorizeSubjectRecovery("user-1", {
+			operation: "reset",
+			sid: undefined,
+			recoveryId: "reset-1",
+			expiresAtMs: Date.now() + 600_000,
+		});
+		await store.applySubjectRecovery("user-1", {
+			operation: "reset",
+			sid: undefined,
+			nowMs: T0,
+			leaseToken: lease.token,
+			sessionsBoundaryMs: undefined,
+			guessableBoundSinceMs: undefined,
+		});
 		expect(store.subjects).toBe(0);
 	});
 
@@ -253,6 +268,32 @@ describe("the in-process MfaTransactionStore", () => {
 		await store.create(TX({ id: "sweeps", createdAtMs: now, expiresAtMs: now + 600_000 }));
 		const next = await store.reserveSubjectAttempt("user-1", T0 + 1, oneAWeek);
 		expect(next).toMatchObject({ ok: false, hold: "weekly" });
+	});
+
+	it("keeps a subject held hard through every sweep, after its run was ended and its week let go", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			sweepInterval: 1,
+			minSweepIntervalMs: 0,
+		});
+		const two: MfaLockoutPolicy = { ...POLICY, threshold: 2, hardLimit: 2 };
+		const failed = await store.reserveSubjectAttempt("user-1", T0, two);
+		if (!failed.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
+		// The second reservation brings the run to the hard limit; its success
+		// ends the run, and the week lets the failure go three weeks on.
+		const second = await store.reserveSubjectAttempt("user-1", T0 + 1, two);
+		if (!second.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", second.reservation, "success");
+		now = T0 + 3 * WEEK;
+		await store.reserveSubjectAttempt("user-2", now, two);
+		await store.create(TX({ id: "sweeps", createdAtMs: now, expiresAtMs: now + 600_000 }));
+		expect(store.subjects).toBe(2);
+		expect(await store.reserveSubjectAttempt("user-1", now, two)).toMatchObject({
+			ok: false,
+			hold: "hard",
+		});
 	});
 
 	it("keeps an email-proof requirement through every sweep: it has no expiry", async () => {

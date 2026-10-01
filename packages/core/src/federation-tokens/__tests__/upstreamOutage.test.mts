@@ -24,7 +24,10 @@
 
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { isFederationUpstreamOutage } from "#/federation-tokens/upstreamOutage.mjs";
+import {
+	isFederationUpstreamOutage,
+	readFederationUpstreamOutage,
+} from "#/federation-tokens/upstreamOutage.mjs";
 
 /**
  * A Response from another copy of the fetch implementation — npm `undici`'s,
@@ -56,6 +59,13 @@ describe("isFederationUpstreamOutage", () => {
 			new TypeError("fetch failed", { cause: coded("ECONNRESET") }),
 		],
 		["undici's own socket code", new TypeError("fetch failed", { cause: coded("UND_ERR_SOCKET") })],
+		[
+			"an adapter's own object over undici's fetch failure",
+			{
+				error: "invalid_grant",
+				cause: new TypeError("fetch failed", { cause: coded("ECONNRESET") }),
+			},
+		],
 		[
 			"a token endpoint answering 503, as openid-client raises it",
 			clientError("OAUTH_RESPONSE_IS_NOT_CONFORM", new Response("down", { status: 503 })),
@@ -294,5 +304,70 @@ describe("isFederationUpstreamOutage", () => {
 			},
 		);
 		expect(isFederationUpstreamOutage(hostile)).toBe(false);
+	});
+});
+
+describe("readFederationUpstreamOutage — the walk, saying when a field it reads cannot be read", () => {
+	const throwingOn = <T extends object>(target: T, key: string): T =>
+		Object.defineProperty(target, key, {
+			get() {
+				throw new Error("unreadable");
+			},
+		});
+	const raisedOver = (cause: unknown): Error => Object.assign(new Error("rejected"), { cause });
+
+	it("is outage or none where every field it reads can be read", () => {
+		expect(readFederationUpstreamOutage(Object.assign(new Error("x"), { status: 503 }))).toBe(
+			"outage",
+		);
+		expect(readFederationUpstreamOutage(Object.assign(new Error("x"), { status: 400 }))).toBe(
+			"none",
+		);
+		expect(readFederationUpstreamOutage({ status: 503 })).toBe("none");
+	});
+
+	it("is unreadable when a name, code, status or cause it reads throws, along the chain and on a Response", () => {
+		for (const key of ["name", "code", "status", "cause"]) {
+			expect(readFederationUpstreamOutage(throwingOn(new Error("x"), key)), key).toBe("unreadable");
+			expect(readFederationUpstreamOutage(raisedOver(throwingOn(new Error("x"), key))), key).toBe(
+				"unreadable",
+			);
+		}
+		const response = throwingOn(new Response(null, { status: 400 }), "status");
+		expect(readFederationUpstreamOutage(raisedOver(response))).toBe("unreadable");
+	});
+
+	it("follows a thrown non-Error's cause only into an Error or a Response, reading nothing else of it", () => {
+		expect(readFederationUpstreamOutage({ cause: coded("ECONNRESET") })).toBe("outage");
+		expect(readFederationUpstreamOutage({ cause: new Response(null, { status: 503 }) })).toBe(
+			"outage",
+		);
+		expect(
+			readFederationUpstreamOutage({ cause: Object.assign(new Error("x"), { status: 400 }) }),
+		).toBe("none");
+		expect(readFederationUpstreamOutage({ cause: { code: "ECONNRESET" } })).toBe("none");
+		expect(readFederationUpstreamOutage({ code: "ECONNRESET", status: 503 })).toBe("none");
+		expect(readFederationUpstreamOutage({ cause: throwingOn(new Error("x"), "status") })).toBe(
+			"unreadable",
+		);
+		expect(readFederationUpstreamOutage(throwingOn({}, "cause"))).toBe("unreadable");
+	});
+
+	it("is outage when an outage is read after a field that cannot be read, as isFederationUpstreamOutage answers", () => {
+		const reset = throwingOn(Object.assign(new Error("x"), { code: "ECONNRESET" }), "name");
+		const overServerError = throwingOn(
+			raisedOver(Object.assign(new Error("x"), { status: 503 })),
+			"name",
+		);
+		for (const error of [reset, overServerError]) {
+			expect(readFederationUpstreamOutage(error)).toBe("outage");
+			expect(isFederationUpstreamOutage(error)).toBe(true);
+		}
+	});
+
+	it("leaves isFederationUpstreamOutage false for what cannot be read", () => {
+		expect(isFederationUpstreamOutage(raisedOver(throwingOn(new Error("x"), "status")))).toBe(
+			false,
+		);
 	});
 });

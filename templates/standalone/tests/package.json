@@ -11,6 +11,6 @@
 		"jsonwebtoken": "^9.0.3"
 	},
 	"devDependencies": {
-		"vitest": "^3.2.6"
+		"vitest": "^5.0.2"
 	}
 }

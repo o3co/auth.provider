@@ -10,12 +10,12 @@ import {
 	supportsLock,
 } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { encryptTokenField } from "#/internal/crypto.mjs";
-import type { FederationTokenStoreClient } from "../src/clients.mjs";
+import type { FederationTokenStoreClient } from "#/clients.mjs";
 import {
 	createRedisFederationTokenStore,
 	redisFederationTokenStoreBuilder,
-} from "../src/federation-tokens.mjs";
+} from "#/federation-tokens.mjs";
+import { encryptTokenField } from "#/internal/crypto.mjs";
 
 function createFakeRedis() {
 	const data = new Map<string, string>();
@@ -1023,6 +1023,18 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 		["idToken not a string", '{"accessToken":"at","expiresAtMs":null,"idToken":{}}'],
 		["tokenType not a string", '{"accessToken":"at","expiresAtMs":null,"tokenType":1}'],
 		["scope not a string", '{"accessToken":"at","expiresAtMs":null,"scope":["openid"]}'],
+		["obtainedAtMs a string", '{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":"soon"}'],
+		// JSON.stringify writes NaN as null.
+		["obtainedAtMs null", '{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":null}'],
+		["obtainedAtMs not finite", '{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":1e999}'],
+		[
+			"obtainedAtMs past the Date range",
+			'{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":8640000000000001}',
+		],
+		[
+			"obtainedAtMs not a whole millisecond",
+			'{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":1.5}',
+		],
 	];
 
 	for (const mode of ["required", "allow-plaintext"] as const) {
@@ -1076,6 +1088,49 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 					expect(read && "rawParams" in read).toBe(false);
 				},
 			);
+
+			it("reads an envelope carrying a key it does not know, and drops it", async () => {
+				// What lets a replica read a record a newer release wrote: an added
+				// envelope field is ignored, and the wrapper version stays.
+				const store = storeFor(mode);
+				writeV2(
+					mode,
+					"ft:sid-1:google",
+					'{"accessToken":"at","expiresAtMs":null,"addedLater":{"x":1}}',
+				);
+				const read = await store.get("sid-1", "google");
+				expect(read?.accessToken).toBe("at");
+				expect(read && "addedLater" in read).toBe(false);
+			});
+
+			it("reads obtainedAtMs as obtainedAt, and its absence as no key", async () => {
+				const store = storeFor(mode);
+				writeV2(
+					mode,
+					"ft:sid-1:google",
+					'{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":1899999000000}',
+				);
+				const read = await store.get("sid-1", "google");
+				expect(read?.accessToken).toBe("at");
+				expect(read?.obtainedAt).toEqual(new Date(1_899_999_000_000));
+				writeV2(mode, "ft:sid-2:google", '{"accessToken":"at","expiresAtMs":null}');
+				expect(Object.hasOwn((await store.get("sid-2", "google")) ?? {}, "obtainedAt")).toBe(false);
+			});
+
+			it.each([
+				["the end of the Date range", 8_640_000_000_000_000],
+				["the start of the Date range", -8_640_000_000_000_000],
+				["an instant before 1970", -86_400_000],
+			])("reads obtainedAtMs at %s as a Date", async (_label, ms) => {
+				const store = storeFor(mode);
+				writeV2(
+					mode,
+					"ft:sid-1:google",
+					`{"accessToken":"at","expiresAtMs":null,"obtainedAtMs":${ms}}`,
+				);
+				expect((await store.get("sid-1", "google"))?.obtainedAt).toEqual(new Date(ms));
+				expect(redis.data.has("ft:sid-1:google")).toBe(true);
+			});
 
 			it("still reads a finite expiresAtMs as a Date", async () => {
 				const store = storeFor(mode);

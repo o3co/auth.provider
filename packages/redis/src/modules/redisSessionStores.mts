@@ -49,8 +49,7 @@ import { createRedisUserSessionStore } from "../userSessionStore.mjs";
  * cannot read, the user-session store (`user_session_corrupt_envelope`) and
  * the RP registry (`session_rp_registry_corrupt_envelope`), and to the
  * revocation store, which says a clamped boundary
- * (`subject_revocation_boundary_clamped`) and a client that cannot clamp
- * (`subject_revocation_clamp_unsupported`); `consoleLogger` when it is empty.
+ * (`subject_revocation_boundary_clamped`); `consoleLogger` when it is empty.
  */
 export const redisSessionStoresModule = defineModule({
 	name: "redis-session-stores",
