@@ -21,11 +21,15 @@
  *
  * Installed beside `mfaModule`, apart from it: the reset ends every session
  * of the subject's, so it requires `subjectRevocationService` — a module of
- * its own — which the MFA routes do not. Requires the two MFA stores; reads
- * `userRepository`, for the witness's clear alone (`markMfaEnrolled`),
- * `mailSender` (`requireEmailProof` needs one), `auditSink` and `logger`. It
- * reads no section: its lease is core's `DEFAULT_MFA_SUBJECT_LEASE_MS`. Eager,
- * so its refusals are the boot's.
+ * its own — which the MFA routes do not. Requires the two MFA stores and
+ * `mfaSubjectLeases`, the lease owner `mfaModule` builds from
+ * `mfa.storeTimeoutMs` and every writer of a subject's factor set holds: so
+ * the reset needs `mfaModule` installed, and where `mfa.mode = off` leaves it
+ * out, the reset is unavailable — the boot refuses this module without it,
+ * naming the slot. Reads `userRepository`, for the witness's clear alone
+ * (`markMfaEnrolled`), `mailSender` (`requireEmailProof` needs one),
+ * `auditSink` and `logger`, and no section. Eager, so its refusals are the
+ * boot's.
  */
 
 import { defineModule, type ProviderDeps } from "@o3co/auth-provider-core";
@@ -38,7 +42,12 @@ declare module "@o3co/auth-provider-core" {
 	}
 }
 
-const REQUIRES = ["mfaFactorStore", "mfaTransactionStore", "subjectRevocationService"] as const;
+const REQUIRES = [
+	"mfaFactorStore",
+	"mfaTransactionStore",
+	"mfaSubjectLeases",
+	"subjectRevocationService",
+] as const;
 const OPTIONAL = ["userRepository", "mailSender", "auditSink", "logger"] as const;
 
 type Requires = (typeof REQUIRES)[number];
@@ -56,6 +65,7 @@ export const mfaResetModule = defineModule<Requires, Optional>({
 				factorStore: deps.mfaFactorStore,
 				transactionStore: deps.mfaTransactionStore,
 				subjectRevocationService: deps.subjectRevocationService,
+				leases: deps.mfaSubjectLeases,
 				...(deps.userRepository === undefined ? {} : { userRepository: deps.userRepository }),
 				mailWired: deps.mailSender !== undefined,
 				...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),

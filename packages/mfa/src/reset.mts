@@ -60,7 +60,7 @@ import {
 	type SubjectRevocationService,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import { createMfaFactorSetReset } from "./factorSet.mjs";
+import { createMfaFactorSetReset, type MfaSubjectLeases } from "./factorSet.mjs";
 import { mintSubjectRecovery } from "./lockRecovery.mjs";
 import { createMfaEnrollmentWitness } from "./witness.mjs";
 
@@ -117,17 +117,12 @@ export interface MfaResetOptions {
 	readonly userRepository?: UserRepository;
 	/** Whether a mail sender is wired: `requireEmailProof` needs one. */
 	readonly mailWired: boolean;
-	/**
-	 * One Store call's time under the reset's lease; by default the one whose
-	 * lease is core's `DEFAULT_MFA_SUBJECT_LEASE_MS` (a minute).
-	 */
-	readonly storeTimeoutMs?: number;
+	/** The boot's lease owner, the one every writer of a subject's factor set holds (`mfaModule`'s `mfaSubjectLeases`). */
+	readonly leases: MfaSubjectLeases;
 	readonly auditSink?: AuditSink;
 	readonly logger?: Logger;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
-	/** A monotonic clock, in milliseconds. Defaults to `performance.now`. */
-	readonly monotonicNow?: () => number;
 }
 
 /** `request` read once, or a `RangeError` naming what is wrong. */
@@ -181,9 +176,7 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 	const underLease = createMfaFactorSetReset({
 		factorStore,
 		witness,
-		leases: transactionStore,
-		...(options.storeTimeoutMs === undefined ? {} : { storeTimeoutMs: options.storeTimeoutMs }),
-		...(options.monotonicNow === undefined ? {} : { monotonicNow: options.monotonicNow }),
+		leases: options.leases,
 	});
 
 	return {

@@ -63,6 +63,12 @@
  * action its routes admit a signed-in session's enrollment, rename or removal
  * for, and `mfa.view`, graded `use`, for the list of its factors.
  *
+ * Provides `mfaSubjectLeases`, the subject's lease owner over the MFA
+ * transaction store and `mfa.storeTimeoutMs` (`factorSet.mts`): built once per
+ * boot and transaction store, the one the routes' writes hold too, and the
+ * one `mfaResetModule` requires — so the operator reset is available only
+ * where this module is installed.
+ *
  * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
  * session middleware. Their factory runs after every factor has registered,
  * so it checks the installed factors (`checkInstalledFactors`) first, and
@@ -88,6 +94,7 @@ import {
 	type Logger,
 	loggableError,
 	type MfaFactorResolver,
+	type MfaTransactionStore,
 	type Module,
 	type RateLimiter,
 	type RateLimitSpec,
@@ -102,7 +109,7 @@ import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
-import { createMfaFactorSet } from "./factorSet.mjs";
+import { createMfaFactorSet, createMfaSubjectLeases, type MfaSubjectLeases } from "./factorSet.mjs";
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { createMfaLockRecovery } from "./lockRecovery.mjs";
@@ -113,6 +120,35 @@ import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
 import { createLoginTransactions } from "./transactions.mjs";
 import { createMfaEnrollmentWitness, type MfaEnrollmentWitness } from "./witness.mjs";
+
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		/** The subject's lease owner `mfaModule` builds from `mfa.storeTimeoutMs`: what every writer of a subject's factor set holds. */
+		readonly mfaSubjectLeases?: MfaSubjectLeases;
+	}
+}
+
+/**
+ * Each boot's lease owner, by the transaction store it holds and the
+ * timeout it was built with: the routes and the `mfaSubjectLeases` slot get
+ * the same one. A module cannot require a slot it provides, so they meet here.
+ */
+const leaseOwners = new WeakMap<object, Map<number, MfaSubjectLeases>>();
+
+/** The lease owner over `store` at `storeTimeoutMs`, built on first use. */
+function leaseOwnerFor(store: MfaTransactionStore, storeTimeoutMs: number): MfaSubjectLeases {
+	let byTimeout = leaseOwners.get(store);
+	if (byTimeout === undefined) {
+		byTimeout = new Map();
+		leaseOwners.set(store, byTimeout);
+	}
+	let owner = byTimeout.get(storeTimeoutMs);
+	if (owner === undefined) {
+		owner = createMfaSubjectLeases({ store, storeTimeoutMs });
+		byTimeout.set(storeTimeoutMs, owner);
+	}
+	return owner;
+}
 
 /** The id of the MFA routes' contribution: what another route orders itself against. */
 export const MFA_ROUTES_ID = "mfa-routes";
@@ -377,6 +413,14 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
 		},
+		provides: {
+			mfaSubjectLeases: (deps) =>
+				leaseOwnerFor(
+					deps.mfaTransactionStore,
+					readMfaSettings(deps.section, { ...options, deploymentMode: deps.deploymentMode })
+						.storeTimeoutMs,
+				),
+		},
 		contributes: {
 			admissionActions: MFA_ADMISSION_ACTIONS,
 			rateLimitBudgets: {
@@ -477,8 +521,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						factors: deps.mfaFactorResolver,
 						factorStore: deps.mfaFactorStore,
 						witness,
-						leases: deps.mfaTransactionStore,
-						storeTimeoutMs: settings.storeTimeoutMs,
+						leases: leaseOwnerFor(deps.mfaTransactionStore, settings.storeTimeoutMs),
 					});
 					const requirements = checkResolver(
 						deps.sessionRequirementResolver,

@@ -64,6 +64,10 @@
  *   the lease. It needs no start of the caller's: the store judges the apply
  *   on its own authorization, and a generation that moved between its read
  *   and its acquire is read again.
+ * - One lease owner per boot (`createMfaSubjectLeases`, over the MFA
+ *   transaction store and `mfa.storeTimeoutMs`), handed to every writer as
+ *   an opaque handle: the factor set's writes and the operator reset hold the
+ *   same lease length, per-call bound and wait rules.
  * - The operator reset (`createMfaFactorSetReset`): one lease, waited for —
  *   never gone on without — across the lock state's reset, the removal of
  *   every record and the witness's clear, in that order.
@@ -74,7 +78,6 @@
  */
 
 import {
-	DEFAULT_MFA_SUBJECT_LEASE_MS,
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
 	type MfaFactorRecord,
@@ -485,7 +488,53 @@ function subjectLeases(options: {
 		return { outcome: "held", done, overran: ranOut || !kept };
 	};
 
-	return { storeTimeoutMs, ttlMs, release, underLease, generationOf };
+	return { leases, monotonicNow, storeTimeoutMs, ttlMs, release, underLease, generationOf };
+}
+
+/**
+ * The subject's lease owner a boot builds once — over the MFA transaction
+ * store and `mfa.storeTimeoutMs` — and every writer of a subject's factor set
+ * holds: the factor set's writes and the operator reset. Opaque to its
+ * holders, read by this file alone.
+ */
+export interface MfaSubjectLeases {
+	readonly __mfaSubjectLeases: never;
+}
+
+/** What each owner holds, by the handle its holders are given. */
+const owners = new WeakMap<MfaSubjectLeases, ReturnType<typeof subjectLeases>>();
+
+/**
+ * A lease owner over `options.store`, its per-call bound `storeTimeoutMs`
+ * (held to {@link checkFactorSetStoreTimeout}: a `RangeError` naming
+ * `mfa.storeTimeoutMs` for one whose lease would pass core's longest) and its
+ * lease six of it.
+ */
+export function createMfaSubjectLeases(options: {
+	/** Where the subject's generation and lease are kept, and its recovery applied. */
+	readonly store: Leases;
+	/** `mfa.storeTimeoutMs`. */
+	readonly storeTimeoutMs: number;
+	/** A monotonic clock, in milliseconds. Defaults to `performance.now`. */
+	readonly monotonicNow?: () => number;
+}): MfaSubjectLeases {
+	const owner = subjectLeases({
+		leases: options.store,
+		storeTimeoutMs: options.storeTimeoutMs,
+		monotonicNow: options.monotonicNow ?? (() => performance.now()),
+	});
+	const handle = Object.freeze({}) as MfaSubjectLeases;
+	owners.set(handle, owner);
+	return handle;
+}
+
+/** The owner `handle` stands for; a `TypeError` for a value this file did not build. */
+function ownerOf(handle: MfaSubjectLeases): ReturnType<typeof subjectLeases> {
+	const owner = owners.get(handle);
+	if (owner === undefined) {
+		throw new TypeError("the subject's lease owner is not one createMfaSubjectLeases built");
+	}
+	return owner;
 }
 
 /** The factor set over `options` (see this file's header). */
@@ -493,20 +542,12 @@ export function createMfaFactorSet(options: {
 	readonly factors: MfaFactorResolver;
 	readonly factorStore: MfaFactorStore;
 	readonly witness: MfaEnrollmentWitness;
-	/** Where the subject's generation and lease are kept, and its recovery applied. */
-	readonly leases: Leases;
-	/** `mfa.storeTimeoutMs`, held to {@link checkFactorSetStoreTimeout}. */
-	readonly storeTimeoutMs: number;
-	/** A monotonic clock, in milliseconds. Defaults to `performance.now`. */
-	readonly monotonicNow?: () => number;
+	/** The boot's lease owner ({@link createMfaSubjectLeases}). */
+	readonly leases: MfaSubjectLeases;
 }): MfaFactorSet {
-	const { factors, factorStore, witness, leases } = options;
-	const subjectLease = subjectLeases({
-		leases,
-		storeTimeoutMs: options.storeTimeoutMs,
-		monotonicNow: options.monotonicNow ?? (() => performance.now()),
-	});
-	const { storeTimeoutMs } = subjectLease;
+	const { factors, factorStore, witness } = options;
+	const subjectLease = ownerOf(options.leases);
+	const { storeTimeoutMs, leases } = subjectLease;
 	const starts = new WeakMap<MfaFactorSetStart, Started>();
 
 	const list = async (subject: string): Promise<MfaFactorRecord[]> => {
@@ -893,25 +934,12 @@ export type MfaFactorSetResetOutcome =
 export function createMfaFactorSetReset(options: {
 	readonly factorStore: MfaFactorStore;
 	readonly witness: MfaEnrollmentWitness;
-	readonly leases: Leases;
-	/**
-	 * One Store call's time, held to {@link checkFactorSetStoreTimeout}; by
-	 * default the one whose lease is core's `DEFAULT_MFA_SUBJECT_LEASE_MS`.
-	 */
-	readonly storeTimeoutMs?: number;
-	/** A monotonic clock, in milliseconds. Defaults to `performance.now`. */
-	readonly monotonicNow?: () => number;
+	/** The boot's lease owner ({@link createMfaSubjectLeases}): the same every writer holds. */
+	readonly leases: MfaSubjectLeases;
 }): { reset(subject: string, steps: MfaFactorSetResetSteps): Promise<MfaFactorSetResetOutcome> } {
-	const { factorStore, witness, leases } = options;
-	const monotonicNow = options.monotonicNow ?? (() => performance.now());
-	const subjectLease = subjectLeases({
-		leases,
-		storeTimeoutMs:
-			options.storeTimeoutMs ??
-			Math.floor(DEFAULT_MFA_SUBJECT_LEASE_MS / (STORE_CALLS_PER_WRITE + 1)),
-		monotonicNow,
-	});
-	const { storeTimeoutMs, ttlMs } = subjectLease;
+	const { factorStore, witness } = options;
+	const subjectLease = ownerOf(options.leases);
+	const { storeTimeoutMs, ttlMs, leases, monotonicNow } = subjectLease;
 
 	const stopped = (
 		at: MfaFactorSetResetStop,

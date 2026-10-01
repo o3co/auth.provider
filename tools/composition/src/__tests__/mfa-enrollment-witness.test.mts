@@ -27,14 +27,12 @@
  * lost factors would open.
  */
 
-import {
-	type AuditEvent,
-	type AuditSink,
-	defineModule,
-	type MfaFactorStore,
-	type SubjectRevocationService,
-	type SupportsMfaEnrollmentWitness,
-	type UserSessionStore,
+import type {
+	AuditEvent,
+	AuditSink,
+	MfaFactorStore,
+	SupportsMfaEnrollmentWitness,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { type MfaReset, mfaResetModule } from "@o3co/auth-provider-mfa";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
@@ -350,31 +348,8 @@ describe.each(["store", "memory"] as const)(
 	"the witness at the operator reset, the factors kept in %s",
 	(factors) => {
 		it("sends {enrolled: false} to the Store last, after every record was removed", async () => {
-			const ended: SubjectRevocationService = {
-				revokeAllForSubject: async () => ({
-					sessionsRevoked: [],
-					sessionsFailed: [],
-					tokensRevoked: true,
-					grantsRequested: false,
-					grantsRevoked: [],
-					grantsFailed: [],
-					grantsRetired: [],
-					grantsRetireFailed: [],
-					unavailable: [],
-					failures: [],
-					complete: true,
-					federationGrants: { requested: "revoke", applied: "revoke" },
-				}),
-			};
-			const set = await boot(factors, {
-				modules: [
-					mfaResetModule,
-					defineModule({
-						name: "test:subject-revocation-service",
-						provides: { subjectRevocationService: () => ended } as never,
-					}),
-				],
-			});
+			// The full set installs core's subject revocation service: the reset ends the sessions through it.
+			const set = await boot(factors, { modules: [mfaResetModule] });
 			const { done } = await firstBinding(set.app);
 			expect(done.status, JSON.stringify(done.body)).toBe(200);
 			expect(store.enrolled(ALICE.id)).toBe(true);
