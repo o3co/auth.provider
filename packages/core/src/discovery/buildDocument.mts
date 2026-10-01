@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { advertisedIssuer } from "../issuer/canonical.mjs";
 import type { OidcDiscoveryContribution } from "./types.mjs";
 
 /**
@@ -143,7 +144,7 @@ export function buildDiscoveryDocument(
 	items: readonly OidcDiscoveryContribution[],
 	opts: { readonly issuer: string; readonly signingAlgs: readonly string[] },
 ): Record<string, unknown> {
-	const issuer = opts.issuer.replace(/\/+$/, "");
+	const issuer = advertisedIssuer(opts.issuer);
 	// An all-slashes issuer (e.g. "/", "//") passes `planDiscoveryDocument`'s own
 	// gate (`issuer.length > 0`, on the RAW value) but normalizes to "" here,
 	// which would emit `issuer: ""` and origin-less endpoint URLs. That is a

@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDiscoveryDocument, DiscoveryDocumentError } from "#/discovery/buildDocument.mjs";
 import type { OidcDiscoveryContribution } from "#/discovery/types.mjs";
+import { advertisedIssuer } from "#/issuer/canonical.mjs";
 
 const OPTS = { issuer: "https://auth.example.com", signingAlgs: ["ES256"] };
 
@@ -47,6 +48,18 @@ describe("buildDiscoveryDocument", () => {
 		});
 		expect(doc.issuer).toBe("https://auth.example.com");
 		expect(doc.id_token_signing_alg_values_supported).toEqual(["ES256"]);
+	});
+
+	it.each([
+		"https://auth.example.com",
+		"https://auth.example.com/",
+		"https://auth.example.com/tenant-a/",
+	])("advertises as issuer advertisedIssuer(%s)", (configured) => {
+		const doc = buildDiscoveryDocument(completeItems(), {
+			issuer: configured,
+			signingAlgs: ["ES256"],
+		});
+		expect(doc.issuer).toBe(advertisedIssuer(configured));
 	});
 
 	it("prefixes endpoint paths with the issuer identifier", () => {

@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
+import * as core from "#/index.mjs";
 import {
+	advertisedIssuer,
 	checkCanonicalIssuer,
 	describeIssuerRejection,
 	type IssuerRejection,
@@ -80,5 +82,21 @@ describe("describeIssuerRejection", () => {
 
 	it("names the loopback exception when https is missing", () => {
 		expect(describeIssuerRejection("insecure-scheme")).toContain("localhost");
+	});
+});
+
+describe("advertisedIssuer — the issuer as discovery advertises it", () => {
+	it("is exported from core", () => {
+		expect(core.advertisedIssuer).toBe(advertisedIssuer);
+	});
+
+	it.each([
+		["https://auth.example.com", "https://auth.example.com"],
+		["https://auth.example.com/", "https://auth.example.com"],
+		["https://auth.example.com//", "https://auth.example.com"],
+		["https://auth.example.com/tenant-a", "https://auth.example.com/tenant-a"],
+		["https://auth.example.com/tenant-a/", "https://auth.example.com/tenant-a"],
+	])("reads %s as %s: every trailing slash removed", (configured, advertised) => {
+		expect(advertisedIssuer(configured)).toBe(advertised);
 	});
 });
