@@ -448,6 +448,8 @@ describe("a release", () => {
 				throw new Error("down");
 			},
 			async () => "yesterday" as unknown as Date,
+			// A proxied Date, as an ORM may hand one: its reads throw.
+			async () => new Proxy(new Date(T), {}),
 		]) {
 			const { store, recovery } = setup({ boundary });
 			const apply = vi.spyOn(store, "applySubjectRecovery");
