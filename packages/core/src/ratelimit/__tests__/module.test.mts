@@ -5,6 +5,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { memoryRateLimiterModule } from "../module.mjs";
+import type { RateLimiter } from "../types.mjs";
 
 describe("memoryRateLimiterModule", () => {
 	it("has the canonical name", () => {
@@ -58,7 +59,9 @@ describe("memoryRateLimiterModule", () => {
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 			maxBuckets: 10_000,
 		};
-		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ section: cfg } as never);
+		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ section: cfg } as never) as
+			| RateLimiter
+			| undefined;
 		expect(limiter).toBeDefined();
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		const a = await limiter.check("test.ip:1.2.3.4", { ip: "1.2.3.4" });
@@ -82,7 +85,7 @@ describe("memoryRateLimiterModule", () => {
 				get: (prefix: string) => budgets.get(prefix),
 				entries: () => budgets.entries(),
 			},
-		} as never);
+		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		budgets.set("mfa", { limit: 2, windowSeconds: 300 });
 		budgets.set("login", { limit: 20, windowSeconds: 900 });
@@ -109,7 +112,7 @@ describe("memoryRateLimiterModule", () => {
 				},
 			},
 			rateLimitBudgetResolver: { get: () => undefined, entries: () => new Map().entries() },
-		} as never);
+		} as never) as RateLimiter | undefined;
 		if (!limiter) throw new Error("rateLimiter provider missing");
 		for (const key of [
 			"login:ip:1.2.3.4",
@@ -132,7 +135,9 @@ describe("memoryRateLimiterModule", () => {
 				defaultLimit: { limit: 2, windowSeconds: 60 },
 				maxBuckets: 2,
 			};
-			const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ section: cfg } as never);
+			const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ section: cfg } as never) as
+				| RateLimiter
+				| undefined;
 			expect(limiter).toBeDefined();
 			if (!limiter) throw new Error("rateLimiter provider missing");
 

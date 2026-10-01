@@ -17,7 +17,9 @@ describe("memoryFederationTokenStoreModule", () => {
 
 	it("provides federationTokenStore", () => {
 		expect(typeof memoryFederationTokenStoreModule.provides?.federationTokenStore).toBe("function");
-		const store = memoryFederationTokenStoreModule.provides?.federationTokenStore?.({} as never);
+		const store = memoryFederationTokenStoreModule.provides?.federationTokenStore?.({} as never) as
+			| { kind: string }
+			| undefined;
 		expect(store?.kind).toBe("memory");
 	});
 });

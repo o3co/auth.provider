@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
+import type { MemoryChallengeStore } from "../adapters/memory.mjs";
 import { createChallengeStoreFactory, registerBuiltinChallengeStores } from "../factory.mjs";
 
 describe("ChallengeStoreFactory", () => {
@@ -21,15 +22,17 @@ describe("ChallengeStoreFactory", () => {
 	it("builds the 'memory' adapter with the cap its config gives, and the default without one", async () => {
 		const factory = createChallengeStoreFactory();
 		registerBuiltinChallengeStores(factory);
-		const capped = (await factory.create({ type: "memory", maxEntries: 5 })) as {
-			maxEntries: number;
-		};
+		const capped = (await factory.create({
+			type: "memory",
+			maxEntries: 5,
+		})) as MemoryChallengeStore;
 		expect(capped.maxEntries).toBe(5);
-		const fromText = (await factory.create({ type: "memory", maxEntries: "7" })) as {
-			maxEntries: number;
-		};
+		const fromText = (await factory.create({
+			type: "memory",
+			maxEntries: "7",
+		})) as MemoryChallengeStore;
 		expect(fromText.maxEntries).toBe(7);
-		const plain = (await factory.create({ type: "memory" })) as { maxEntries: number };
+		const plain = (await factory.create({ type: "memory" })) as MemoryChallengeStore;
 		expect(plain.maxEntries).toBe(1_000_000);
 	});
 

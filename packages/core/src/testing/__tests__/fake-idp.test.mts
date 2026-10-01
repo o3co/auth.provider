@@ -23,7 +23,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { createLocalJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
+import { createLocalJWKSet, decodeProtectedHeader, type JSONWebKeySet, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
 import { createFakeIdp } from "#/testing/fake-idp.mjs";
 
@@ -35,6 +35,12 @@ const ENDPOINTS = {
 	userinfoEndpoint: "https://api.idp.test/userinfo",
 };
 
+/** A JSON answer, as far as these tests read it; `id_token` is what `jwtVerify` is handed. */
+interface Answer {
+	readonly id_token: string;
+	readonly [member: string]: unknown;
+}
+
 const post = (form: Record<string, string>): RequestInit => ({
 	method: "POST",
 	headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -42,16 +48,16 @@ const post = (form: Record<string, string>): RequestInit => ({
 });
 
 const jwksAt = async (idp: Awaited<ReturnType<typeof createFakeIdp>>, uri: string) =>
-	createLocalJWKSet(await (await idp.fetch(uri)).json());
+	createLocalJWKSet((await (await idp.fetch(uri)).json()) as JSONWebKeySet);
 const jwks = (idp: Awaited<ReturnType<typeof createFakeIdp>>) => jwksAt(idp, ENDPOINTS.jwksUri);
 
 describe("createFakeIdp", () => {
 	it("answers a code with tokens whose id_token verifies against the published JWKS", async () => {
 		const idp = await createFakeIdp({ ...ENDPOINTS, clientId: "client-1", sub: "user-1" });
 		idp.nonce = "n-1";
-		const answer = await (
+		const answer = (await (
 			await idp.fetch(ENDPOINTS.tokenEndpoint, post({ grant_type: "authorization_code" }))
-		).json();
+		).json()) as Answer;
 		expect(answer).toMatchObject({
 			access_token: "at-1",
 			token_type: "Bearer",
@@ -68,9 +74,9 @@ describe("createFakeIdp", () => {
 	it("answers a refresh with rotated tokens and an id_token without a nonce", async () => {
 		const idp = await createFakeIdp(ENDPOINTS);
 		idp.nonce = "n-1";
-		const answer = await (
+		const answer = (await (
 			await idp.fetch(ENDPOINTS.tokenEndpoint, post({ grant_type: "refresh_token" }))
-		).json();
+		).json()) as Answer;
 		expect(answer).toMatchObject({ access_token: "at-refreshed", refresh_token: "rt-2" });
 		const { payload } = await jwtVerify(answer.id_token, await jwks(idp));
 		expect(payload.nonce).toBeUndefined();
@@ -101,12 +107,12 @@ describe("createFakeIdp", () => {
 		const idp = await createFakeIdp(ENDPOINTS);
 		idp.codeAnswer = { expires_in: undefined, scope: "openid email" };
 		idp.refreshAnswer = { refresh_token: undefined, token_type: "DPoP" };
-		const code = await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json();
+		const code = (await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()) as Answer;
 		expect("expires_in" in code).toBe(false);
 		expect(code.scope).toBe("openid email");
-		const refresh = await (
+		const refresh = (await (
 			await idp.fetch(ENDPOINTS.tokenEndpoint, post({ grant_type: "refresh_token" }))
-		).json();
+		).json()) as Answer;
 		expect("refresh_token" in refresh).toBe(false);
 		expect(refresh.token_type).toBe("DPoP");
 		expect(refresh.expires_in).toBe(1800);
@@ -150,7 +156,7 @@ describe("createFakeIdp", () => {
 			expect(answer).toEqual({ code: "authorized-code-1", state: "s-1", iss: ENDPOINTS.issuer });
 			// The nonce is the authorization's, not a global another one overwrites.
 			expect(idp.nonce).toBeUndefined();
-			const token = await (await redeem(idp, answer.code)).json();
+			const token = (await (await redeem(idp, answer.code)).json()) as Answer;
 			const { payload } = await jwtVerify(token.id_token, await jwks(idp));
 			expect(payload.nonce).toBe("n-1");
 		});
@@ -210,8 +216,8 @@ describe("createFakeIdp", () => {
 			const idp = await createFakeIdp(ENDPOINTS);
 			const a = idp.authorize(request({ nonce: "nonce-A" }));
 			const b = idp.authorize(request({ nonce: "nonce-B" }));
-			const tokenA = await (await redeem(idp, a.code)).json();
-			const tokenB = await (await redeem(idp, b.code)).json();
+			const tokenA = (await (await redeem(idp, a.code)).json()) as Answer;
+			const tokenB = (await (await redeem(idp, b.code)).json()) as Answer;
 			expect((await jwtVerify(tokenA.id_token, await jwks(idp))).payload.nonce).toBe("nonce-A");
 			expect((await jwtVerify(tokenB.id_token, await jwks(idp))).payload.nonce).toBe("nonce-B");
 		});
@@ -222,35 +228,43 @@ describe("createFakeIdp", () => {
 			const offline = { access_type: "offline" };
 
 			const first = idp.authorize(request(offline));
-			expect((await (await redeem(idp, first.code)).json()).refresh_token).toBe("rt-1");
+			expect(((await (await redeem(idp, first.code)).json()) as Answer).refresh_token).toBe("rt-1");
 			// The user has consented: no screen, so no refresh token.
 			const returning = idp.authorize(request(offline));
-			expect((await (await redeem(idp, returning.code)).json()).refresh_token).toBeUndefined();
+			expect(
+				((await (await redeem(idp, returning.code)).json()) as Answer).refresh_token,
+			).toBeUndefined();
 			// A consent screen asked for again brings one.
 			const prompted = idp.authorize(request({ ...offline, prompt: "consent" }));
-			expect((await (await redeem(idp, prompted.code)).json()).refresh_token).toBe("rt-1");
+			expect(((await (await redeem(idp, prompted.code)).json()) as Answer).refresh_token).toBe(
+				"rt-1",
+			);
 			// Online access never does, consent or not.
 			const online = idp.authorize(request({ prompt: "consent" }));
-			expect((await (await redeem(idp, online.code)).json()).refresh_token).toBeUndefined();
+			expect(
+				((await (await redeem(idp, online.code)).json()) as Answer).refresh_token,
+			).toBeUndefined();
 		});
 	});
 
 	it("leaves the id_token out when told to", async () => {
 		const idp = await createFakeIdp(ENDPOINTS);
 		idp.omitIdToken = true;
-		const answer = await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json();
+		const answer = (await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()) as Answer;
 		expect(answer.id_token).toBeUndefined();
 	});
 
 	it("signs under an unpublished key or a claimed kid only when told to", async () => {
 		const idp = await createFakeIdp(ENDPOINTS);
 		idp.signWithUnpublishedKey = true;
-		const forged = (await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()).id_token;
+		const forged = ((await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()) as Answer)
+			.id_token;
 		await expect(jwtVerify(forged, await jwks(idp))).rejects.toThrow();
 
 		idp.signWithUnpublishedKey = false;
 		idp.signingKid = "kid-ghost";
-		const ghost = (await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()).id_token;
+		const ghost = ((await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()) as Answer)
+			.id_token;
 		expect(decodeProtectedHeader(ghost).kid).toBe("kid-ghost");
 	});
 
@@ -258,8 +272,8 @@ describe("createFakeIdp", () => {
 		const idp = await createFakeIdp(ENDPOINTS);
 		expect(idp.currentKid()).toBe("kid-1");
 		expect(await idp.rotateKey()).toBe("kid-2");
-		const published = await (await idp.fetch(ENDPOINTS.jwksUri)).json();
-		expect(published.keys.map((k: { kid: string }) => k.kid)).toEqual(["kid-2"]);
+		const published = (await (await idp.fetch(ENDPOINTS.jwksUri)).json()) as JSONWebKeySet;
+		expect(published.keys.map((k) => k.kid)).toEqual(["kid-2"]);
 	});
 
 	it("records every request, and finds them by endpoint whatever the query string", async () => {
@@ -302,7 +316,7 @@ describe("createFakeIdp as a discoverable OpenID Provider", () => {
 
 	it("publishes no userinfo or end-session endpoint it was not given", async () => {
 		const idp = await createFakeIdp({ issuer: ISSUER, discovery: true });
-		const metadata = await (await idp.fetch(DISCOVERY)).json();
+		const metadata = (await (await idp.fetch(DISCOVERY)).json()) as Answer;
 		expect("userinfo_endpoint" in metadata).toBe(false);
 		expect("end_session_endpoint" in metadata).toBe(false);
 	});
@@ -311,7 +325,8 @@ describe("createFakeIdp as a discoverable OpenID Provider", () => {
 		const idp = await createFakeIdp({ issuer: ISSUER, discovery: true });
 		idp.metadata.authorization_response_iss_parameter_supported = true;
 		expect(
-			(await (await idp.fetch(DISCOVERY)).json()).authorization_response_iss_parameter_supported,
+			((await (await idp.fetch(DISCOVERY)).json()) as Answer)
+				.authorization_response_iss_parameter_supported,
 		).toBe(true);
 		idp.discoveryStatus = 503;
 		expect((await idp.fetch(DISCOVERY)).status).toBe(503);
@@ -351,7 +366,7 @@ describe("createFakeIdp as a discoverable OpenID Provider", () => {
 	it("puts an at_hash in the code exchange's id_token that is right, or wrong, when told to", async () => {
 		const idp = await createFakeIdp({ issuer: ISSUER });
 		const atHash = async () => {
-			const answer = await (await idp.fetch(`${ISSUER}/token`, post({}))).json();
+			const answer = (await (await idp.fetch(`${ISSUER}/token`, post({}))).json()) as Answer;
 			return (await jwtVerify(answer.id_token, await jwksAt(idp, `${ISSUER}/jwks`))).payload
 				.at_hash;
 		};
@@ -366,9 +381,9 @@ describe("createFakeIdp as a discoverable OpenID Provider", () => {
 	it("leaves the id_token out of a refresh unless refreshWithIdToken is on", async () => {
 		const idp = await createFakeIdp({ issuer: ISSUER });
 		idp.refreshWithIdToken = false;
-		const plain = await (
+		const plain = (await (
 			await idp.fetch(`${ISSUER}/token`, post({ grant_type: "refresh_token" }))
-		).json();
+		).json()) as Answer;
 		expect(plain.id_token).toBeUndefined();
 	});
 

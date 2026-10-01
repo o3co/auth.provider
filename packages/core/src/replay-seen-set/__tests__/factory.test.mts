@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
+import type { MemoryReplaySeenSet } from "../adapters/memory.mjs";
 import { createReplaySeenSetFactory, registerBuiltinReplaySeenSets } from "../factory.mjs";
 
 describe("ReplaySeenSetFactory", () => {
@@ -21,15 +22,14 @@ describe("ReplaySeenSetFactory", () => {
 	it("builds the 'memory' adapter with the cap its config gives, and the default without one", async () => {
 		const factory = createReplaySeenSetFactory();
 		registerBuiltinReplaySeenSets(factory);
-		const capped = (await factory.create({ type: "memory", maxEntries: 5 })) as {
-			maxEntries: number;
-		};
+		const capped = (await factory.create({ type: "memory", maxEntries: 5 })) as MemoryReplaySeenSet;
 		expect(capped.maxEntries).toBe(5);
-		const fromText = (await factory.create({ type: "memory", maxEntries: "7" })) as {
-			maxEntries: number;
-		};
+		const fromText = (await factory.create({
+			type: "memory",
+			maxEntries: "7",
+		})) as MemoryReplaySeenSet;
 		expect(fromText.maxEntries).toBe(7);
-		const plain = (await factory.create({ type: "memory" })) as { maxEntries: number };
+		const plain = (await factory.create({ type: "memory" })) as MemoryReplaySeenSet;
 		expect(plain.maxEntries).toBe(1_000_000);
 	});
 

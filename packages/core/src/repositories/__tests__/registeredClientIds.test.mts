@@ -33,6 +33,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MAX_CLIENT_ID_LENGTH } from "#/repositories/clientId.mjs";
 import { InMemoryClientRepository } from "#/repositories/InMemoryClientRepository.mjs";
 import { createRepositoryFactories } from "#/repositories/RepositoryFactory.mjs";
+import { clientEntries } from "./clientEntries.fixture.mjs";
 
 const ENTRY = {
 	tokenEndpointAuthMethod: "client_secret_basic" as const,
@@ -42,7 +43,7 @@ const ENTRY = {
 };
 
 const build = (...ids: string[]) =>
-	new InMemoryClientRepository(new Map(ids.map((id) => [id, { ...ENTRY }])));
+	new InMemoryClientRepository(clientEntries(ids.map((id) => [id, { ...ENTRY }])));
 
 describe("InMemoryClientRepository — a registered client id no request can reach", () => {
 	for (const [label, id] of [

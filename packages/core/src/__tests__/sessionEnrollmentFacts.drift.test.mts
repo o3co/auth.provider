@@ -87,6 +87,11 @@ const ALLOWED_RAW_READS: readonly AllowedRawRead[] = [
 	},
 ];
 
+/** `skipOuterExpressions` ships in TypeScript's runtime but is marked internal, so its typings leave it out. */
+interface InternalTs {
+	skipOuterExpressions(node: ts.Expression): ts.Expression;
+}
+
 /** One read of the field: its line, what it is read off, whether that is core's copy, and the names of the functions and constants around it. */
 interface FactsRead {
 	readonly line: number;
@@ -112,7 +117,7 @@ function declaredTypeOf(checker: ts.TypeChecker, name: ts.Identifier): string | 
 
 /** Whether `receiver`, what the field is read off, is an identifier declared as one of {@link COPIES}. */
 function readsCopy(checker: ts.TypeChecker, receiver: ts.Expression): boolean {
-	const bare = ts.skipOuterExpressions(receiver);
+	const bare = (ts as unknown as InternalTs).skipOuterExpressions(receiver);
 	if (!ts.isIdentifier(bare)) return false;
 	const type = declaredTypeOf(checker, bare);
 	return type !== undefined && COPIES.has(type);

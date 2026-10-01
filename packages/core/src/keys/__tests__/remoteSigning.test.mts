@@ -139,26 +139,26 @@ describe("createRemoteSigningKeyStore — the private key stays out of process",
 		// Pointing an EdDSA operator at a DER conversion sends them to look at
 		// the one thing that cannot be their problem.
 		const wrongKey = generateKeyPairSync("ed25519");
-		const err = await build({
+		const err = (await build({
 			signer: {
 				async sign(_kid: string, data: Uint8Array) {
 					return new Uint8Array(nodeSign(null, data, wrongKey.privateKey));
 				},
 			},
-		}).catch((e: unknown) => e as Error);
+		}).catch((e: unknown) => e)) as Error;
 		expect(err.message).toMatch(/EdDSA expects the raw signature bytes/);
 		expect(err.message).not.toMatch(/DER/);
 	});
 
 	it("names the two causes that account for almost all of these", async () => {
 		const wrongKey = generateKeyPairSync("ed25519");
-		const err = await build({
+		const err = (await build({
 			signer: {
 				async sign(_kid: string, data: Uint8Array) {
 					return new Uint8Array(nodeSign(null, data, wrongKey.privateKey));
 				},
 			},
-		}).catch((e: unknown) => e as Error);
+		}).catch((e: unknown) => e)) as Error;
 		expect(err.message).toMatch(/JWS form/);
 		expect(err.message).toMatch(/different key/);
 	});
