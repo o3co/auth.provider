@@ -731,20 +731,23 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				}
 			}
 
+			// A carried `auth_time` is never later than the presented token's own
+			// `iat` — an authentication precedes the token that records it — nor
+			// than this issuance, so `max_age` never reads a negative age.
+			const presentedIat = wellFormedAuthTime(tokenPayload.iat);
+			const authenticationClaims = {
+				...(carriedAmr ? { amr: carriedAmr } : {}),
+				...(carriedAcr ? { acr: carriedAcr } : {}),
+				...(carriedAuthTime !== undefined
+					? { auth_time: Math.min(carriedAuthTime, presentedIat ?? issuedAt, issuedAt) }
+					: {}),
+			};
+
 			// From here the rotation is committed, so a signer failure orphans
 			// the family's newest token: the client's retry with the old token
 			// reads as a replay and revokes the family — the price of reserving
 			// before signing. Answer `503` and log the family so the orphan is
 			// traceable, rather than an unhandled 500.
-			// A carried `auth_time` is never later than this issuance: one a clock
-			// ahead stamped is capped at it, so `max_age` never reads a negative age.
-			const authenticationClaims = {
-				...(carriedAmr ? { amr: carriedAmr } : {}),
-				...(carriedAcr ? { acr: carriedAcr } : {}),
-				...(carriedAuthTime !== undefined
-					? { auth_time: Math.min(carriedAuthTime, issuedAt) }
-					: {}),
-			};
 			let newAccessToken: Awaited<ReturnType<typeof generateToken>>;
 			let newRefreshToken: Awaited<ReturnType<typeof generateToken>>;
 			try {

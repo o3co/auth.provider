@@ -167,9 +167,14 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// 9470 §6.1), read against the minting clock (core's `authTimeAt`):
 			// never later than it. One this clock cannot read — further ahead than
 			// the skew allows — refuses the grant before anything is minted.
+			const mintingNow = Date.now();
 			const trackedAuthTime =
-				tracked === null ? undefined : authTimeAt(tracked.authTime, Date.now());
+				tracked === null ? undefined : authTimeAt(tracked.authTime, mintingNow);
 			if (tracked !== null && trackedAuthTime === undefined) {
+				deps.logger?.warn(
+					{ sid, clientId: client.clientId, aheadMs: tracked.authTime.getTime() - mintingNow },
+					"auth_time_ahead_of_clock",
+				);
 				return {
 					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
 				};

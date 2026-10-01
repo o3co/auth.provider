@@ -519,9 +519,18 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// than it, and the same on the access, refresh and id tokens (RFC 9470
 			// §6.1). One this clock cannot read — further ahead than the skew
 			// allows — refuses the exchange before anything is signed.
+			const mintingNow = Date.now();
 			const authTime =
-				userSession === null ? undefined : authTimeAt(userSession.authTime, Date.now());
+				userSession === null ? undefined : authTimeAt(userSession.authTime, mintingNow);
 			if (userSession !== null && authTime === undefined) {
+				logger?.warn(
+					{
+						sid,
+						clientId: authenticatedClientId,
+						aheadMs: userSession.authTime.getTime() - mintingNow,
+					},
+					"auth_time_ahead_of_clock",
+				);
 				return {
 					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
 				};
@@ -705,7 +714,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// this read and the add is caught by the add itself (below).
 					//
 					// The claim carries the first read's `sub`: the tokens were signed
-					// from it and the id_token is minted from this read, so a different
+					// from it and the id_token's other claims are read from this one, so a different
 					// subject under the same `sid` would yield tokens that disagree on
 					// the user. That is a store invariant violation, refused by
 					// admission (`subject_mismatch`, audited).
@@ -724,7 +733,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 							}),
 						};
 					}
-					// The revalidated session drives the TTLs below and the id_token.
+					// The revalidated session drives the TTLs below and the id_token's other claims.
 					userSession = revalidation.session;
 
 					// Composition-root invariant: the session-stores module wires its
