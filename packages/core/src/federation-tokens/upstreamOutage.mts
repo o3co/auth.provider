@@ -26,8 +26,10 @@
  * data: openid-client puts the IdP's parsed error body on a
  * `ResponseBodyError` as `cause`, where `status`, `code` and `name` are the
  * IdP's to choose. So the walk follows a cause only into an Error (of any
- * realm), reads a status only on an Error or a `Response`, and a thrown
- * non-Error is no outage. Recognised shapes, pinned to the real openid-client,
+ * realm) or a `Response`, and reads fields only on those. A thrown non-Error
+ * is no outage itself; only its `cause` is read, and followed by that rule:
+ * an adapter may throw its own object over a library's error. Recognised
+ * shapes, pinned to the real openid-client,
  * oauth4webapi and undici by federation-oidc's `delegated-outage.test.mts`:
  * - `AbortError` / `TimeoutError`, bare or as the cause of openid-client's
  *   `OAUTH_TIMEOUT`;
@@ -138,8 +140,8 @@ const serverError = (status: unknown): boolean =>
  * deployment's own `fetch` answers with and oauth4webapi accepts by its tag.
  * Recognised as oauth4webapi recognises one: the global class, or the
  * `Response` tag. A parsed body cannot carry the tag — it is symbol-keyed,
- * and JSON has no symbols — and the walk reaches this only through an Error's
- * cause, so peer-written data still decides nothing. Asking never throws.
+ * and JSON has no symbols — so peer-written data still decides nothing.
+ * Asking never throws.
  */
 const isResponse = (value: unknown): value is object => {
 	try {
@@ -164,7 +166,7 @@ export type FederationUpstreamOutageReading = "outage" | "none" | "unreadable";
 export function readFederationUpstreamOutage(error: unknown): FederationUpstreamOutageReading {
 	let unreadable = false;
 	// `value[key]`, read as absent when the read throws, and remembered.
-	// Only ever asked of an Error or a Response.
+	// Asked of an Error or a Response, and of a thrown non-Error for its `cause` alone.
 	const field = (value: object, key: string): unknown => {
 		const read = guardedRead(value, key);
 		if (read === null) unreadable = true;
@@ -173,6 +175,14 @@ export function readFederationUpstreamOutage(error: unknown): FederationUpstream
 	const found = (outage: boolean): FederationUpstreamOutageReading =>
 		outage ? "outage" : unreadable ? "unreadable" : "none";
 	let current = error;
+	if (
+		typeof current === "object" &&
+		current !== null &&
+		!isError(current) &&
+		!isResponse(current)
+	) {
+		current = field(current, "cause");
+	}
 	for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
 		// The Response an error was raised over says what the upstream answered.
 		if (isResponse(current)) return found(serverError(field(current, "status")));

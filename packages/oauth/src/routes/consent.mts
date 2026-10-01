@@ -61,6 +61,7 @@ import {
 import type { Request, RequestHandler, Response, Router } from "express";
 import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
+import type { AuthorizationResponse } from "./authorizationResponse.mjs";
 
 /** The action the consent step admits, as `oauthModule` registers it. */
 const CONSENT_ACTION = "oauth.consent" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
@@ -105,6 +106,8 @@ export interface ConsentRouterOptions {
 	readonly requirements: SessionRequirementResolver;
 	readonly auditSink?: AuditSink;
 	readonly logger: Logger;
+	/** Builds the deny's response to `redirect_uri`, its `iss` (RFC 9207) bound. */
+	readonly authorizationResponse: AuthorizationResponse;
 }
 
 const jsonError = (res: Response, status: number, error: string, description: string): Response =>
@@ -370,11 +373,12 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 				userAgent: req.get("user-agent"),
 				details: { scopes: pending.scopes },
 			});
-			const url = new URL(pending.redirectUri);
-			url.searchParams.append("error", "access_denied");
-			url.searchParams.append("error_description", "the resource owner denied the request");
-			if (pending.state !== undefined) url.searchParams.append("state", pending.state);
-			return res.redirect(303, url.toString());
+			const location = opts.authorizationResponse(
+				pending.redirectUri,
+				{ error: "access_denied", error_description: "the resource owner denied the request" },
+				pending.state,
+			);
+			return res.redirect(303, location);
 		}
 
 		// The union, not the request: consenting to `write` today must not

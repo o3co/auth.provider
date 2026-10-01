@@ -175,6 +175,28 @@ describe("classifyFederationRefreshError", () => {
 				).toMatchObject({ reason: "invalid_grant", structured: true });
 			});
 
+			it("reads an outage on the Error or Response a thrown plain object carries as its cause, and nothing off a plain cause", () => {
+				// A hand-written adapter's own object over a library's error: the
+				// error is read as the walk reads it anywhere. A plain cause is
+				// peer-written data, as openid-client's parsed body is.
+				for (const cause of [
+					Object.assign(new Error("upstream"), { status: 503 }),
+					new Response(null, { status: 502 }),
+					new TypeError("fetch failed", {
+						cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+					}),
+				]) {
+					expect(classifyFederationRefreshError({ error: "invalid_grant", cause })).toEqual({
+						reason: "network",
+						structured: true,
+						upstreamCode: "invalid_grant",
+					});
+				}
+				expect(
+					classifyFederationRefreshError({ error: "invalid_grant", cause: { status: 503 } }),
+				).toMatchObject({ reason: "invalid_grant", structured: true });
+			});
+
 			it("still reads a network code on the thrown value itself, and on causes that are Errors", () => {
 				// What a hand-written adapter may throw, and what fetch raises.
 				expect(classifyFederationRefreshError({ code: "ETIMEDOUT" })).toMatchObject({
@@ -416,6 +438,19 @@ describe("classifyFederationRefreshError", () => {
 			] as const) {
 				const error = Object.assign(new Error("rejected"), { error: "invalid_grant", cause });
 				expect(classifyFederationRefreshError(error), label).toEqual(UNKNOWN);
+			}
+		});
+
+		it("is unknown, not invalid_grant, when the Error or Response a thrown plain object carries as its cause cannot be read", () => {
+			// What a hand-written adapter may throw: its own object over a library's error.
+			for (const [label, cause] of [
+				["an Error cause's status", throwingOn(new Error("cause"), "status")],
+				["an Error cause's name", throwingOn(new Error("cause"), "name")],
+				["a Response cause's status", throwingOn(new Response(null, { status: 400 }), "status")],
+			] as const) {
+				expect(classifyFederationRefreshError({ error: "invalid_grant", cause }), label).toEqual(
+					UNKNOWN,
+				);
 			}
 		});
 
