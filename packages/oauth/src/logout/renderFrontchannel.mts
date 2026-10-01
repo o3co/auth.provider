@@ -69,7 +69,8 @@ const DEFAULT_REDIRECT_DELAY_MS = 2_000;
 
 /**
  * `baseUri` with `iss` (and optionally `sid`) set as query parameters,
- * through `URL` so an existing query is kept.
+ * through `URL` so an existing query is kept and a fragment stays last (RFC
+ * 3986 §3.5) instead of swallowing the new parameters.
  */
 function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined): string {
 	const url = new URL(baseUri);
@@ -82,8 +83,8 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
 
 /**
  * Renders an OIDC Front-Channel Logout 1.0 page: one hidden `<iframe>` per RP
- * with a `frontchannelLogoutUri` core's `checkRedirectUri` accepts (any other
- * is skipped with a warn), its URL carrying `iss` and, unless
+ * with an http(s) `frontchannelLogoutUri` (any other is skipped with a warn),
+ * its URL carrying `iss` and, unless
  * `frontchannelLogoutSessionRequired` is `false`, `sid`. With
  * `postLogoutRedirectUri`, a `<script>` redirects after `redirectDelayMs` so
  * the iframes can load. Pure; callers MUST send it as
@@ -93,20 +94,16 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 	const logger = opts.logger ?? console;
 	const iframes = opts.rps
 		.flatMap((rp) => {
-			// Read once and guarded: it is only ever logged.
+			// Read once and guarded: it is only logged, when the iframe is skipped.
 			let clientId: unknown;
 			try {
 				clientId = rp.clientId;
 			} catch {
 				clientId = undefined;
 			}
-			// Held to the redirect-URI rules: a registry entry made before the
+			// http(s) only, whoever calls this: a registry entry made before the
 			// code exchange checked it, or by a custom registry, is checked here.
-			const uri = usableFrontchannelLogoutUri(
-				() => rp.frontchannelLogoutUri,
-				{ site: "logout", clientId },
-				logger,
-			);
+			const uri = usableFrontchannelLogoutUri(rp, "logout", logger);
 			if (uri === undefined) return [];
 			// A failure building the iframe URL skips that RP's iframe: throwing
 			// after cascadeLogout has cleared session state would answer a 500

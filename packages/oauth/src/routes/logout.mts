@@ -46,6 +46,7 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
 import { cascadeLogoutFrom } from "../logout/cascadeLogout.mjs";
+import { usableFrontchannelLogoutUri } from "../logout/frontchannelLogoutUri.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
 import { beginLogout, type LogoutLeftState } from "../logout/sessionEnd.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
@@ -879,24 +880,20 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			postLogoutRedirectTarget = redirectUrl.toString();
 		}
 
-		// 7a: Front-channel logout — if Accept: text/html AND any RP has a frontchannelLogoutUri.
+		// 7a: Front-channel logout — if Accept: text/html AND any RP has an http(s) frontchannelLogoutUri.
 		// Use q-weighted negotiation: application/json is first so Accept: */* defaults to JSON.
 		// Only when text/html explicitly outranks json (e.g. browser requests) do we serve HTML.
 		const negotiated = accepts(req).type(["application/json", "text/html"]);
 		const acceptsHtml = negotiated === "text/html";
-		// Whether any RP names a front-channel URI; the renderer judges each one
-		// and logs one it refuses. A read that throws counts as named, so the
-		// renderer logs it instead of the logout failing here.
-		const hasFrontchannel = rps.some((rp) => {
-			try {
-				return typeof rp.frontchannelLogoutUri === "string" && rp.frontchannelLogoutUri.length > 0;
-			} catch {
-				return true;
-			}
-		});
-		if (acceptsHtml && hasFrontchannel) {
+		// Only RPs with an http(s) front-channel URI get an iframe; one refused
+		// is logged once here and skipped. With none, the logout answers as
+		// without front-channel logout (7b–7d). Read only for an HTML answer.
+		const frontchannelRps = acceptsHtml
+			? rps.filter((rp) => usableFrontchannelLogoutUri(rp, "logout", opts.logger) !== undefined)
+			: [];
+		if (frontchannelRps.length > 0) {
 			const html = renderFrontchannelLogoutHtml({
-				rps,
+				rps: frontchannelRps,
 				issuer: opts.issuer,
 				sid,
 				// The allowlist-validated URI, with state — prevents open redirect via HTML branch.

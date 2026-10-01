@@ -759,12 +759,12 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 								// from the logout cascade.
 								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
 								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-								// Held to the redirect-URI rules here, before the page that
-								// renders it: a refused URI leaves this RP without a
-								// front-channel entry, and the exchange goes on.
+								// http(s) only, checked here as at logout: a refused URI
+								// leaves this RP without a front-channel entry, and the
+								// exchange goes on.
 								frontchannelLogoutUri: usableFrontchannelLogoutUri(
-									() => clientRecord?.frontchannelLogoutUri,
-									{ site: "authorization_code", clientId: authenticatedClientId },
+									clientRecord,
+									"authorization_code",
 									logger,
 								),
 								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,

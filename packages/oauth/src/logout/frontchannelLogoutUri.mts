@@ -13,55 +13,84 @@
  * limitations under the License.
  */
 
-import type { Logger, RedirectUriRejection } from "@o3co/auth-provider-core";
-import { auditErrorText, checkRedirectUri } from "@o3co/auth-provider-core";
+import type { Logger } from "@o3co/auth-provider-core";
+import { auditErrorText } from "@o3co/auth-provider-core";
 
 /**
- * Why a front-channel logout URI was not used: a {@link RedirectUriRejection}
- * reason, `not-a-string` for a value of another type, or `unreadable` when
- * reading the field threw.
+ * Why a front-channel logout URI was not used: `not-http` for a parsed
+ * protocol other than `http:` / `https:`, `unparsable` for a value `URL`
+ * cannot parse, `not-a-string` for a value of another type, `unreadable`
+ * when reading the field threw.
  */
 export type FrontchannelLogoutUriRefusal =
-	| RedirectUriRejection["reason"]
+	| "not-http"
+	| "unparsable"
 	| "not-a-string"
 	| "unreadable";
 
-/** Where the URI is used: the code exchange's RP registration, or the logout page. */
+/** Where the URI is used: the code exchange's RP registration, or logout. */
 export type FrontchannelLogoutUriSite = "authorization_code" | "logout";
 
+/** What a front-channel logout URI is read from: a client record or a registered RP. */
+export interface FrontchannelLogoutUriSource {
+	readonly clientId?: unknown;
+	readonly frontchannelLogoutUri?: unknown;
+}
+
+const HTTP_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:"]);
+
+/** `read()`, or `fallback` when the read throws. */
+function guardedRead(read: () => unknown, fallback: unknown): unknown {
+	try {
+		return read();
+	} catch {
+		return fallback;
+	}
+}
+
+/** Marks a read that threw, apart from every value a field can hold. */
+const UNREADABLE = Symbol("unreadable");
+
 /**
- * The front-channel logout URI `read` yields, when it may be used; otherwise
+ * The source's front-channel logout URI, when it may be used; otherwise
  * `undefined`. Absent (`undefined`, `null`, `""`) is silent. Anything else
- * must be a string `checkRedirectUri` accepts, the whole check: its shape and
- * scheme rules, and its query-name rules, which hold for a URI this server
- * appends parameters to as much as for a redirect target. A refused value is
- * one warn with the reason and never the value.
+ * must be a string whose parsed protocol is `http:` or `https:`, on any host,
+ * the rule the bundled client schema applies at registration. A refused
+ * value is one warn with the reason, never the value. Every read is guarded
+ * and this never throws: front-channel logout is best-effort, so a refusal
+ * drops only this URI.
  *
- * A custom `ClientRepository` or session RP registry bypasses the boot schema,
- * so the value is checked where it is used. Never throws: front-channel
- * logout is best-effort, so a refusal drops only this URI.
+ * Interim: a custom `ClientRepository` or session RP registry bypasses the
+ * registration schema, so the value is checked where it is used. Exit
+ * condition: #1095, core validating client records at the repository
+ * boundary. Once that lands the rule moves to core and this helper goes.
  */
 export function usableFrontchannelLogoutUri(
-	read: () => unknown,
-	at: { readonly site: FrontchannelLogoutUriSite; readonly clientId: unknown },
+	source: FrontchannelLogoutUriSource | null | undefined,
+	site: FrontchannelLogoutUriSite,
 	logger: Pick<Logger, "warn"> | undefined,
 ): string | undefined {
+	if (source === null || source === undefined) return undefined;
 	const refuse = (reason: FrontchannelLogoutUriRefusal): undefined => {
+		const clientId = guardedRead(() => source.clientId, undefined);
 		logger?.warn(
-			{ site: at.site, clientId: auditErrorText(at.clientId), reason },
+			{ site, clientId: auditErrorText(clientId), reason },
 			"logout_frontchannel_uri_refused",
 		);
 		return undefined;
 	};
-	let value: unknown;
-	try {
-		value = read();
-	} catch {
-		// The error is not logged: its message could carry the value.
-		return refuse("unreadable");
-	}
+	// The error is not logged: its message could carry the value.
+	const value = guardedRead(() => source.frontchannelLogoutUri, UNREADABLE);
+	if (value === UNREADABLE) return refuse("unreadable");
 	if (value === undefined || value === null || value === "") return undefined;
 	if (typeof value !== "string") return refuse("not-a-string");
-	const rejection = checkRedirectUri(value);
-	return rejection === null ? value : refuse(rejection.reason);
+	let protocol: string;
+	try {
+		// Parsed, never prefix-matched: the parser lowercases the scheme and
+		// strips tab and newline, as a browser resolving the value does.
+		protocol = new URL(value).protocol;
+	} catch {
+		return refuse("unparsable");
+	}
+	return HTTP_PROTOCOLS.has(protocol) ? value : refuse("not-http");
 }
