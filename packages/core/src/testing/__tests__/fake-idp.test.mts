@@ -35,11 +35,14 @@ const ENDPOINTS = {
 	userinfoEndpoint: "https://api.idp.test/userinfo",
 };
 
-/** A JSON answer, as far as these tests read it; `id_token` is what `jwtVerify` is handed. */
+/** A token answer whose `id_token` these tests hand to `jwtVerify`. */
 interface Answer {
 	readonly id_token: string;
 	readonly [member: string]: unknown;
 }
+
+/** Any other JSON answer: token answers without an `id_token`, and the discovery metadata. */
+type JsonFields = Readonly<Record<string, unknown>>;
 
 const post = (form: Record<string, string>): RequestInit => ({
 	method: "POST",
@@ -107,12 +110,12 @@ describe("createFakeIdp", () => {
 		const idp = await createFakeIdp(ENDPOINTS);
 		idp.codeAnswer = { expires_in: undefined, scope: "openid email" };
 		idp.refreshAnswer = { refresh_token: undefined, token_type: "DPoP" };
-		const code = (await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()) as Answer;
+		const code = (await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()) as JsonFields;
 		expect("expires_in" in code).toBe(false);
 		expect(code.scope).toBe("openid email");
 		const refresh = (await (
 			await idp.fetch(ENDPOINTS.tokenEndpoint, post({ grant_type: "refresh_token" }))
-		).json()) as Answer;
+		).json()) as JsonFields;
 		expect("refresh_token" in refresh).toBe(false);
 		expect(refresh.token_type).toBe("DPoP");
 		expect(refresh.expires_in).toBe(1800);
@@ -228,21 +231,23 @@ describe("createFakeIdp", () => {
 			const offline = { access_type: "offline" };
 
 			const first = idp.authorize(request(offline));
-			expect(((await (await redeem(idp, first.code)).json()) as Answer).refresh_token).toBe("rt-1");
+			expect(((await (await redeem(idp, first.code)).json()) as JsonFields).refresh_token).toBe(
+				"rt-1",
+			);
 			// The user has consented: no screen, so no refresh token.
 			const returning = idp.authorize(request(offline));
 			expect(
-				((await (await redeem(idp, returning.code)).json()) as Answer).refresh_token,
+				((await (await redeem(idp, returning.code)).json()) as JsonFields).refresh_token,
 			).toBeUndefined();
 			// A consent screen asked for again brings one.
 			const prompted = idp.authorize(request({ ...offline, prompt: "consent" }));
-			expect(((await (await redeem(idp, prompted.code)).json()) as Answer).refresh_token).toBe(
+			expect(((await (await redeem(idp, prompted.code)).json()) as JsonFields).refresh_token).toBe(
 				"rt-1",
 			);
 			// Online access never does, consent or not.
 			const online = idp.authorize(request({ prompt: "consent" }));
 			expect(
-				((await (await redeem(idp, online.code)).json()) as Answer).refresh_token,
+				((await (await redeem(idp, online.code)).json()) as JsonFields).refresh_token,
 			).toBeUndefined();
 		});
 	});
@@ -250,7 +255,9 @@ describe("createFakeIdp", () => {
 	it("leaves the id_token out when told to", async () => {
 		const idp = await createFakeIdp(ENDPOINTS);
 		idp.omitIdToken = true;
-		const answer = (await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json()) as Answer;
+		const answer = (await (
+			await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))
+		).json()) as JsonFields;
 		expect(answer.id_token).toBeUndefined();
 	});
 
@@ -316,7 +323,7 @@ describe("createFakeIdp as a discoverable OpenID Provider", () => {
 
 	it("publishes no userinfo or end-session endpoint it was not given", async () => {
 		const idp = await createFakeIdp({ issuer: ISSUER, discovery: true });
-		const metadata = (await (await idp.fetch(DISCOVERY)).json()) as Answer;
+		const metadata = (await (await idp.fetch(DISCOVERY)).json()) as JsonFields;
 		expect("userinfo_endpoint" in metadata).toBe(false);
 		expect("end_session_endpoint" in metadata).toBe(false);
 	});
@@ -325,7 +332,7 @@ describe("createFakeIdp as a discoverable OpenID Provider", () => {
 		const idp = await createFakeIdp({ issuer: ISSUER, discovery: true });
 		idp.metadata.authorization_response_iss_parameter_supported = true;
 		expect(
-			((await (await idp.fetch(DISCOVERY)).json()) as Answer)
+			((await (await idp.fetch(DISCOVERY)).json()) as JsonFields)
 				.authorization_response_iss_parameter_supported,
 		).toBe(true);
 		idp.discoveryStatus = 503;
@@ -383,7 +390,7 @@ describe("createFakeIdp as a discoverable OpenID Provider", () => {
 		idp.refreshWithIdToken = false;
 		const plain = (await (
 			await idp.fetch(`${ISSUER}/token`, post({ grant_type: "refresh_token" }))
-		).json()) as Answer;
+		).json()) as JsonFields;
 		expect(plain.id_token).toBeUndefined();
 	});
 
