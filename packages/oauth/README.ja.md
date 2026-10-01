@@ -561,7 +561,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 フロー: `id_token_hint` を検証 → `post_logout_redirect_uri` をクライアントのリストと照合 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
 
-- `http`/`https` の `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（[クライアントレコードのログアウトメタデータ](#クライアントレコードのログアウトメタデータ)を参照。q 値付きネゴシエーションで `Accept: text/html` が勝った場合）。`post_logout_redirect_uri` が一致したときは、続いてブラウザーを `state` 付きでそこへ送るスクリプトを含む（下の `303` と同じ）。`renderFrontchannelLogoutHtml` は呼び出し元を問わず、この URI を（`state` を除いて）core の `checkRedirectUri` で確かめる。チェックが拒む値、文字列でない値、読み取りが失敗する値ならスクリプトを出さず、`logout_frontchannel_redirect_refused` として warn で 1 回、`reason` とともに記録する（URI は記録しない）
+- `http`/`https` の `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（[クライアントレコードのログアウトメタデータ](#クライアントレコードのログアウトメタデータ)を参照。q 値付きネゴシエーションで `Accept: text/html` が勝った場合）。`post_logout_redirect_uri` が一致したときは、続いてブラウザーを `state` 付きでそこへ送るスクリプトを含む（下の `303` と同じ）。`renderFrontchannelLogoutHtml` は呼び出し元を問わず、この URI を core の `checkRedirectUri` で確かめる（除くのは、ルートが付け加える形の、`URLSearchParams` が書いたとおりの末尾の `state` だけ）。チェックが拒む値、文字列でない値、読み取りが失敗する値ならスクリプトを出さず、`logout_frontchannel_redirect_refused` として warn で 1 回、`reason` とともに記録する（URI は記録しない）
 - 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
