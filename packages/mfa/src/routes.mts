@@ -21,7 +21,8 @@
  * and a session's step-up, `POST /step-up`, over the coordinator; a
  * verified second factor, or a factor bound at a login, resumes the login
  * through core's `resumePrimary` and finishes it through the
- * `loginCompletion` slot. See README, "The routes".
+ * `loginCompletion` slot; one verified on a session's step-up, or bound in
+ * a session, escalates that session. See README, "The routes".
  *
  * - Every answer is `no-store`. Bodies are parsed on these paths alone.
  * - Every POST sits behind the deployment's CSRF guard, then the flood guard
@@ -41,6 +42,18 @@
  *   a later requirement is asked, and that one may still hold the binding
  *   back once the proof is given. A binding in a session that the subject's
  *   factors no longer allow is `409`: the session stands.
+ * - For a subject holding a record that may count, the step-up opens a
+ *   `step_up` transaction, with the `acr_values` the body hints read
+ *   strictly — at most 16 values of at most 256 characters, else none — as a
+ *   hint only; `403 mfa_no_qualifying_factor` when no factor can be used, and
+ *   `401` where the session store cannot record a step-up.
+ * - A session is escalated (`escalateSession`) behind its admission, by the
+ *   renewal nonce of the claim admission compared: the express id renewed,
+ *   then the second factor recorded on its `UserSession` once, never
+ *   retried. A step-up answers `200` only once recorded with that renewal's
+ *   nonce, and each failure as its own (`ESCALATION_REFUSALS`); a binding in
+ *   a session answers its factor and codes, shown once, whatever the
+ *   escalation came to. Neither reaches a login's completion.
  * - A factor bound beside another that cannot stand — past the limit, or
  *   its records unreadable — and cannot be removed stands: it is audited as
  *   enrolled and said once at error before the `503`.
