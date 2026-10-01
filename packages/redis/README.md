@@ -763,11 +763,15 @@ success before the hold, or `clearSubjectState` ends a run — and once
 neither is they expire a day after the last failure stops counting. A
 `hard` field the scripts cannot read refuses every lock operation, as any
 other field does. A missing or non-numeric `hardLimit` argument is refused
-before anything is read. During a rolling deploy, a replica of a release
-that does not write `hard` neither reads nor keeps it: its exempt script
-can end a run at the limit, its reserve script lets attempts through below
-the limit, and once its keys expire the field goes with them. Drain the old
-replicas before relying on the hard hold.
+before anything is read. The field holds the later of the fixing script's
+`now` and the run's newest attempt. A refusal on a held subject whose lock
+hash carries a deadline takes it off (one `PTTL` read; a write only then).
+v0.16.0 ships no subject-lock scripts; between pre-release builds, a
+replica of one that does not write `hard` neither reads nor keeps it: its
+exempt script can end a run at the limit, its reserve script lets attempts
+through below the limit, and its `keep()`, finding no run and no week, can
+delete both keys, the field with them. Drain the old replicas before
+relying on the hard hold.
 A refusal answers whether it is the first since an attempt was
 let through (`first`) from the lock hash's `held` field, which the first
 refusal of a hold writes and an attempt let through deletes, so a subject

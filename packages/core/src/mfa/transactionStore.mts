@@ -719,11 +719,17 @@ export interface MfaLockoutPolicy {
 	/** Failures allowed in any rolling seven days (10). */
 	readonly weeklyBudget: number;
 	/**
-	 * Consecutive failures (100), reservations in flight counted, that hold
-	 * guessable proofs until the subject's lock state is cleared
-	 * (`clearSubjectState`). The hold is fixed when the run reaches it: no
-	 * time, no settle, no exempt success and no higher `hardLimit` lifts it
-	 * (NIST SP 800-63B-4 §3.2.2). At most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
+	 * Consecutive attempts (100), reservations in flight counted, at which
+	 * guessable proofs are held until the subject's lock state is cleared
+	 * (`clearSubjectState`): the attempt that is the hardLimit-th since the
+	 * last success holds, whatever its outcome. This is one stricter than
+	 * NIST's '100 failed attempts': a correct hardLimit-th attempt still signs
+	 * in, but guessable factors stay held until re-enrolled. The hold is fixed
+	 * when the run reaches it: no time, no settle, no exempt success and no
+	 * higher `hardLimit` lifts it. NIST SP 800-63B-4's cap on consecutive
+	 * failed attempts is per authenticator and a ceiling; the per-subject
+	 * latch, and holding at the hardLimit-th attempt whatever its outcome, are
+	 * this product's choice. At most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
 	 */
 	readonly hardLimit: number;
 }

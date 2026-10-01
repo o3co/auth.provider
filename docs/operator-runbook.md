@@ -731,7 +731,11 @@ wires it.
   passes during every lock and ends a consecutive run before the hard hold;
   it lifts no hard hold and refunds no weekly failure. The hard hold is
   fixed the moment the run, attempts in flight counted, reaches the limit:
-  no later success, exempt proof or raised `hardLimit` lifts it. The account-email
+  no later success, exempt proof or raised `hardLimit` lifts it. So the
+  attempt that is the hardLimit-th since the last success holds, whatever
+  its outcome. This is one stricter than NIST's '100 failed attempts': a
+  correct hardLimit-th attempt still signs in, but guessable factors stay
+  held until re-enrolled. The account-email
   proof is never held, and ends nothing. **A held subject can still be
   mailed an email code**: the challenge does not read the lock, so a code
   goes out up to the mail sender's limit (`429 rate_limited` beyond it), and
@@ -1950,16 +1954,16 @@ before you flip — and a relying party holding the secret can also mint.
    one also turns on `private_key_jwt` wherever client authentication runs
    ([§1](#1-deployment-shapes)).
 
-   **The MFA hard hold during a rolling deploy.** From the release whose
-   exempt success stops lifting the hard hold (D21), an exempt success
-   routed to a replica of an earlier release still ends the subject's
-   consecutive run, a hard hold included. From the release that fixes the
-   hold in the lock hash's `hard` field, a new replica refuses a held
-   subject whatever an old one did to the run, but an old replica neither
-   reads the field nor keeps the keys for it, so it can let attempts through
-   and let the keys, the field with them, expire. Drain the old replicas
-   before relying on the hard hold. A release that does not yet record
-   exempt successes exposes nothing.
+   **The MFA hard hold during a rolling deploy.** v0.16.0 ships no
+   subject-lock scripts, so an upgrade from it has nothing to drain; this
+   concerns pre-release builds only. A replica of a build that does not
+   write the lock hash's `hard` field neither reads nor keeps it: it can
+   end a run at the limit at an exempt success, let attempts through below
+   the limit, set a deadline on the keys, and — its `keep()` finding no run
+   and no week — delete both keys, the hold with them. A new replica refuses
+   a held subject whatever an old one did to the run, and its refusal takes
+   off a deadline the held hash carries; a hold already deleted is not
+   restored. Drain the old replicas before relying on the hard hold.
 
 3. **The upstream `amr` split (the MFA ADR's D13).** From this release an
    upstream IdP's `amr` counts only for a federation with
