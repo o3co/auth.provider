@@ -15,17 +15,17 @@
  */
 
 /**
- * Every test file vitest collects in a package is compiled by the program
- * that package's vitest typecheck runs tsc on, and that typecheck is on and
+ * Every test file vitest collects in a workspace is compiled by the program
+ * that workspace's vitest typecheck runs tsc on, and that typecheck is on and
  * fails the run on a source error. A test outside that program runs without
  * its types ever being checked: a `@ts-expect-error` or `satisfies` in it
  * proves nothing.
  *
  * For each workspace under `packages/`, and for `create-app`, everything is
- * asked of vitest itself, from the workspace's own config: whether typecheck is enabled, whether it
- * ignores source errors, the files it collects, and the tsconfig it names,
- * whose files TypeScript lists. A collected file outside that program fails,
- * naming the package and the file. There is no list of exceptions. The
+ * asked of vitest itself, from the workspace's own config: whether typecheck
+ * is enabled, whether it ignores source errors, the files it collects, and the
+ * tsconfig it names, whose files TypeScript lists. A collected file outside
+ * that program fails, naming the workspace and the file. There is no list of exceptions. The
  * fixtures under `fixtures/testProgram` hold the guard to each refusal.
  */
 
@@ -77,8 +77,8 @@ function programFiles(configPath: string): Set<string> {
 }
 
 /**
- * What keeps the package's collected test files from being type-checked;
- * empty when nothing does. Everything is read from the package's own vitest
+ * What keeps the workspace's collected test files from being type-checked;
+ * empty when nothing does. Everything is read from the workspace's own vitest
  * config: whether its typecheck runs, whether source errors fail it, and the
  * tsconfig it hands tsc.
  */
@@ -129,7 +129,7 @@ describe("the guard itself", () => {
 	});
 });
 
-describe("every test file vitest collects is in the program its package's typecheck compiles", () => {
+describe("every test file vitest collects is in the program its workspace's typecheck compiles", () => {
 	it("finds the workspaces to check", () => {
 		expect(workspaces).toContain("packages/core");
 		expect(existsSync(join(repoRoot, "create-app", "package.json"))).toBe(true);
