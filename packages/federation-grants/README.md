@@ -177,6 +177,11 @@ say what each one means and what to do.
   verdict outside its contract, which is refused too — the request's
   `correlationId`, and the `origin` its `Origin` header named, when it named
   one.
+- **A step-up page off the issuer's origin** is
+  `federation_grant_step_up_page_off_origin`, at error, with `requirement`,
+  `grantId` and `correlationId`: connect answered `500` rather than follow it.
+  Registration holds a page to the issuer's origin, so this is a resolver
+  built without the issuer.
 - **What escaped a handler** is `federation_grants_unexpected_error`, at error,
   with `site` and `err`: the handler that caught it (`token`, `status`,
   `revoke`, `create`, `reauthorize`, `connect`, `consent`, `callback`), or the
@@ -534,9 +539,10 @@ here is the flow's own: the intent's subject, the browser binding (the
 express session and the durable `sid` a challenge was issued to), the
 grant's current intent, the client's permission, the connection's pins and
 the grants boundary. Every session admission refuses is one a new login is
-the remedy for, and gets the answer a dead session gets below — including a
-requirement's step-up, in this release: whether these routes send the
-browser on a step-up trip instead is the MFA ADR's step 14 to decide. The
+the remedy for, and gets the answer a dead session gets below — except a
+requirement's step-up at connect, which sends the browser on that
+requirement's trip once (step 5 below). Consent and the callback come after
+connect has gated, and answer a step-up as a dead session. The
 module requires `sessionRequirementResolver`, so a composition that installs
 it declares `core.sessionRequirements.expected`; the router refuses to be built
 with any resolver the planner did not build (core's `checkResolver`).
@@ -566,10 +572,24 @@ and plain text, never a JSON body.
    redirect anywhere.
 5. Session admission does not admit the session — the durable session is
    gone or expired, authenticated at or before the subject's sessions
-   boundary, or a session requirement asks for a new login, a step-up, or
-   what it cannot meet: `403` "Sign in again to continue.", plain, and no
-   redirect. `authTime` never changes, so signing in again is the remedy.
+   boundary, or a session requirement asks for a new login or what it cannot
+   meet: `403` "Sign in again to continue.", plain, and no redirect.
+   `authTime` never changes, so signing in again is the remedy.
    Admission could not answer: `503`, plain.
+   A requirement asks for a step-up: `303` to the requirement's page
+   (`page.href`) with `redirect_to` naming this link, built on the issuer from
+   the handle alone, plus the one-trip marker `stepped_up=1`. Nothing is
+   parked or audited. The page returns the browser there once the step-up is
+   recorded. A marked return still asked to step up gets the `403` above,
+   audited as `reauthentication_required`, and is never sent again. The marker
+   only narrows: a forged one makes the user's own connect refuse once. A
+   login drops it, since step 3 returns to the handle alone, so a new login
+   gets one more trip, as `/oauth/authorize` allows. A page off the issuer's
+   origin is never followed: `500`, plain, and
+   `federation_grant_step_up_page_off_origin`. If a consent was parked before
+   the step-up, it stays bound to the express session the step-up renewed
+   away, so the return is answered as step 7 answers another browser's
+   question: `400` "Start again".
 6. The grant no longer names this intent, the client may no longer use the
    connection, or the connection changed since the intent was lodged: `400` /
    `403`, plain.

@@ -441,6 +441,8 @@ Every cookie consumer in the inventory calls `admitSession` with its own slots a
 
 **Amended 2026-10-01 (MFA build-order step 13):** `/authorize` can be answered `reauthenticate` (`acr`) where it was answered `step_up`, when the second-factor authority's step-up could not be recorded on the session (D2's note of this date); and the `authorization_code` grant's admission is held no stricter than `/authorize`'s (D4's note of this date).
 
+**Amended 2026-10-02 (MFA build-order step 14):** federation-grants connect answers a requirement's `step_up` with that requirement's trip: `303` to `page.href`, with `redirect_to` naming connect plus a stateless one-trip marker. A marked return still answered `step_up` keeps the plain `403`. Consent and the callback keep the dead-session answer.
+
 ### D9 — Sessions read from a token: the refresh grant moves now, the rest later
 
 The refresh grant, the `device_code` grant, introspection, userinfo, the federation-token route, token exchange and the logout routes read a session by a `sid` taken from a token or a record, with the subject-revocation boundary applied through `verifyJwt` where it applies. Their reads are already fail-closed and consistent (`session_invalid`, `503`), and they hold no cookie.
