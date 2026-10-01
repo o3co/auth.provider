@@ -2287,8 +2287,9 @@ before you flip — and a relying party holding the secret can also mint.
      allowed`) with no redirect, after the login step, and warns
      `authorize_registered_redirect_uri_refused` ([§4](#4-alerts)). A consent
      request parked with such a URI before the upgrade gets the same `400` on
-     deny. A `postLogoutRedirectUris` entry it refuses was already dropped at
-     logout (`logout_registered_redirect_uri_refused`).
+     deny. A `postLogoutRedirectUris` entry it refuses is dropped at logout
+     (`logout_registered_redirect_uri_refused`); the query shapes are new in
+     this release, the mechanism is not.
 
    Rename or remove such parameters, and carry the client's context in
    `state` or in the path. The rule covers names as written and the common

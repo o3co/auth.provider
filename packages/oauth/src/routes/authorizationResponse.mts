@@ -25,9 +25,11 @@
 
 /**
  * `redirectUri` with `params` appended, then `state` when the request carried
- * one, then `iss` = `responseIssuer`. The registered query's parameters are
- * kept, names and values: nothing in it is removed or replaced, though
- * serializing the query may re-encode a value's bytes (`%20` as `+`).
+ * one, then `iss` = `responseIssuer`. Nothing in the registered query is
+ * removed or replaced: its names are kept, in order, with their values as
+ * WHATWG URL parsing decodes them. Serializing the query as a form may change
+ * the bytes (`%20` as `+`), a percent-sequence that is not UTF-8 becomes
+ * U+FFFD (`%FF` as `%EF%BF%BD`), and a name with no value gains `=`.
  */
 export function authorizationResponseUrl(
 	redirectUri: string,
