@@ -196,19 +196,38 @@ describe("an exempt proof", () => {
 		expect(reserve).not.toHaveBeenCalled();
 	});
 
-	it("ends the run and a hard hold once it succeeds, and refunds nothing of the week", async () => {
-		const { lock } = lockOver({ threshold: 3, hardLimit: 3, weeklyBudget: 4 });
-		for (let n = 0; n < 3; n++) await settled(lock, "failure");
-		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({ hold: "hard" });
+	it("ends a run below the hard limit; the hard hold stands", async () => {
+		const below = lockOver({ threshold: 3, hardLimit: 10 });
+		await settled(below.lock, "failure");
+		await settled(below.lock, "failure");
+		await settled(below.lock, "success", EXEMPT);
+		// Ended, the run starts again: two more failures stay below the backoff's threshold.
+		await settled(below.lock, "failure");
+		await settled(below.lock, "failure");
+		expect((await below.lock.enter(SUBJECT, GUESSABLE)).outcome).toBe("entered");
 
-		await settled(lock, "success", EXEMPT);
+		const at = lockOver({ threshold: 3, hardLimit: 3 });
+		for (let n = 0; n < 3; n++) await settled(at.lock, "failure");
+		await settled(at.lock, "success", EXEMPT);
+		expect(await at.lock.enter(SUBJECT, GUESSABLE)).toMatchObject({
+			outcome: "locked",
+			hold: "hard",
+			retryAfterMs: null,
+		});
+	});
 
+	it("refunds nothing of the week when it ends a run", async () => {
+		const { lock } = lockOver({ threshold: 100, weeklyBudget: 3 });
 		await settled(lock, "failure");
+		await settled(lock, "failure");
+		await settled(lock, "success", EXEMPT);
+		await settled(lock, "failure");
+
 		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({ hold: "weekly" });
 	});
 
 	it("dates its success by its verification's time: an attempt reserved after that stays in the run", async () => {
-		const { lock, advance } = lockOver({ threshold: 3, hardLimit: 3 });
+		const { lock, advance } = lockOver({ threshold: 3, hardLimit: 10 });
 		await settled(lock, "failure");
 		await settled(lock, "failure");
 		advance(1000);
@@ -220,14 +239,16 @@ describe("an exempt proof", () => {
 
 		await exempt.settle("success");
 
-		// The run holds the failure reserved after the exempt proof's time, and two more make it three.
+		// The run keeps the failure reserved after the exempt proof's time, and two more make it
+		// three: the backoff's threshold. Dated at the settle, the run would hold two.
 		await settled(lock, "failure");
 		await settled(lock, "failure");
-		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({ hold: "hard" });
+		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({ hold: "backoff" });
 	});
 
 	it("records an exempt success only for a success: a refusal or a void leaves the run as it was", async () => {
-		const { lock, store } = lockOver({ threshold: 3, hardLimit: 3 });
+		// Below the hard limit, where an exempt success would end the run and its backoff.
+		const { lock, store } = lockOver({ threshold: 3, hardLimit: 10 });
 		for (let n = 0; n < 3; n++) await settled(lock, "failure");
 		const note = vi.spyOn(store, "noteExemptSuccess");
 
@@ -235,7 +256,7 @@ describe("an exempt proof", () => {
 		await settled(lock, "void", EXEMPT);
 
 		expect(note).not.toHaveBeenCalled();
-		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({ hold: "hard" });
+		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({ hold: "backoff" });
 	});
 });
 

@@ -17,7 +17,7 @@
 /**
  * A recovery code at a login (the MFA ADR's D21, D25), through the composed
  * application: it passes while the subject's guessable factors are held,
- * ends the consecutive run and refunds nothing of the week; the code is
+ * lifts no hard hold and refunds nothing of the week; the code is
  * spent, the answer says how many are left, and `mfa.recovery_code.used`
  * records it; no code reaches a log or an audit event.
  */
@@ -114,7 +114,7 @@ describe("a recovery code while TOTP is held", () => {
 		expect(after.body).toMatchObject({ hold: "weekly" });
 	});
 
-	it("logs in during the hard hold, and lifts it", async () => {
+	it("logs in during the hard hold; the next TOTP login is still `hard`", async () => {
 		const {
 			app,
 			totp: seeded,
@@ -136,7 +136,9 @@ describe("a recovery code while TOTP is held", () => {
 
 		const next = await beginLogin(app);
 		const after = await verify(next.agent, next.transaction, totp.record.id, totpCode(totp.secret));
-		expect(after.status, JSON.stringify(after.body)).toBe(200);
+		expect(after.status, JSON.stringify(after.body)).toBe(429);
+		expect(after.body).toMatchObject({ hold: "hard" });
+		expect(after.headers["retry-after"]).toBeUndefined();
 	});
 });
 

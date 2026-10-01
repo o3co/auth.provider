@@ -21,7 +21,9 @@
  * - A guessable proof reserves one of its subject's attempts before it is
  *   checked, and settles it once. Only a factor that says it is not
  *   guessable is exempt: it reserves nothing, passes during every hold, and
- *   records an exempt success when it settles a success. Each is judged at
+ *   records an exempt success when it settles a success, which ends a run
+ *   below `hardLimit` and never the hard hold (the store's rule, handed the
+ *   policy). Each is judged at
  *   the time its verification passes, so one verification has one time.
  * - A refusal names its hold, when an attempt may come back (none for the
  *   hard hold), and whether it begins an episode.
@@ -124,7 +126,7 @@ export function createMfaSubjectLock(options: MfaSubjectLockOptions): MfaSubject
 			if (factor.guessable === false) {
 				return once(subject, factor.kind, "noteExemptSuccess", async (outcome) => {
 					// Called after the consume, as the port requires: a success is settled only then.
-					if (outcome === "success") await store.noteExemptSuccess(subject, nowMs);
+					if (outcome === "success") await store.noteExemptSuccess(subject, nowMs, policy);
 				});
 			}
 			let answer: unknown;
