@@ -33,7 +33,7 @@ export interface RenderFrontchannelLogoutHtmlOptions {
 	 * the validated `post_logout_redirect_uri` with the RP's `state` already
 	 * on it, exactly as the route's own redirect would carry it. Checked here
 	 * with core's `checkRedirectUri`, the rule the route accepts it by, with
-	 * the `state` parameter set aside since the caller appends it: a value
+	 * a trailing `state` pair as `URLSearchParams` writes it set aside: a value
 	 * the check refuses, one that is not a string, or a read that throws
 	 * leaves the page without its redirect, logged once at warn as
 	 * `logout_frontchannel_redirect_refused` with the reason, never the URI.
@@ -89,33 +89,44 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
 type PostLogoutRedirectRefusal = RedirectUriRejection["reason"] | "not-a-string" | "unreadable";
 
 /**
- * `raw` without its `state` query parameters, the one parameter the caller
- * appends to the registered URI. Everything else is kept as written, so the
- * check sees the rest of the value byte for byte.
+ * A trailing `state` pair as `URLSearchParams` writes it, the way the logout
+ * route appends the RP's `state` to a registered URI: `?` or `&`, then
+ * `state=`, then only what form encoding emits (letters, digits, `*-._`, `%`
+ * escapes and `+`). It is last: a registered URI has no fragment and no
+ * `state` of its own.
  */
-function withoutState(raw: string): string {
-	const query = raw.indexOf("?");
-	if (query === -1) return raw;
-	const hash = raw.indexOf("#", query);
-	const end = hash === -1 ? raw.length : hash;
-	const kept = raw
-		.slice(query + 1, end)
-		.split("&")
-		.filter((pair) => pair.split("=", 1)[0] !== "state");
-	return raw.slice(0, query) + (kept.length > 0 ? `?${kept.join("&")}` : "") + raw.slice(end);
+const APPENDED_STATE = /[?&]state=[A-Za-z0-9*._%+-]*$/;
+
+/**
+ * `raw` with the `state` pair the caller appends set aside, when it is
+ * exactly that pair; otherwise `raw` itself. The rest is kept byte for byte,
+ * and anything else in the query, another `state` included, stays for the
+ * check to judge.
+ */
+function withoutAppendedState(raw: string): string {
+	const appended = APPENDED_STATE.exec(raw);
+	if (appended === null) return raw;
+	const rest = raw.slice(0, appended.index);
+	// An empty pair left behind is the check's to refuse, so keep it in view.
+	return rest.endsWith("?") || rest.endsWith("&") ? raw : rest;
 }
 
 /**
  * `opts.postLogoutRedirectUri` when core's `checkRedirectUri` accepts it with
- * its `state` set aside; otherwise `undefined`. Absent is silent; a refusal is
- * one warn with the reason, never the value. Never throws.
+ * its appended `state` set aside; otherwise `undefined`. Absent is silent; a
+ * refusal is one warn with the reason, never the value. The option's read and
+ * the warn are guarded, so this never throws.
  */
 function checkedPostLogoutRedirectUri(
 	opts: RenderFrontchannelLogoutHtmlOptions,
 	logger: Pick<Logger, "warn">,
 ): string | undefined {
 	const refuse = (reason: PostLogoutRedirectRefusal): undefined => {
-		logger.warn({ reason }, "logout_frontchannel_redirect_refused");
+		try {
+			logger.warn({ reason }, "logout_frontchannel_redirect_refused");
+		} catch {
+			// A logger that throws costs the line, never the page.
+		}
 		return undefined;
 	};
 	let value: unknown;
@@ -127,7 +138,7 @@ function checkedPostLogoutRedirectUri(
 	}
 	if (value === undefined || value === null || value === "") return undefined;
 	if (typeof value !== "string") return refuse("not-a-string");
-	const rejection = checkRedirectUri(withoutState(value));
+	const rejection = checkRedirectUri(withoutAppendedState(value));
 	return rejection === null ? value : refuse(rejection.reason);
 }
 
