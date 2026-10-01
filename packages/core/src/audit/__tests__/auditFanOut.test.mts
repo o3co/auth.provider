@@ -147,6 +147,37 @@ describe("createAuditFanOut", () => {
 		expect([before.events.length, after.events.length]).toEqual([1, 1]);
 	});
 
+	it("still delivers to the next hook when a sink answers a promise whose then throws, and resolves", async () => {
+		const after = createRecordingAuditSink();
+		const broken: AuditSink = {
+			kind: "broken-then",
+			record: () => {
+				const answer = Promise.resolve();
+				answer.then = () => {
+					throw new Error("broken then");
+				};
+				return answer;
+			},
+		};
+		const fanOut = createAuditFanOut({
+			hooks: () => [broken, after],
+			logger: () => spyLogger().logger,
+		});
+
+		await expect(fanOut.record(event())).resolves.toBeUndefined();
+
+		expect(after.events).toHaveLength(1);
+	});
+
+	it("logs no type that is not a string", async () => {
+		const { logger, error } = spyLogger();
+		const fanOut = createAuditFanOut({ hooks: () => [rejecting()], logger: () => logger });
+
+		await fanOut.record({ ...event(), type: { subject: "event-content" } as never });
+
+		expect(error.mock.calls).toEqual([[{ sink: 1, type: undefined }, "audit_sink_failed"]]);
+	});
+
 	it("resolves when every sink fails", async () => {
 		const { logger } = spyLogger();
 		const fanOut = createAuditFanOut({

@@ -364,5 +364,8 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		await expect(
 			materializeComponents(plan, validated.bootstrapComponents, undefined),
 		).rejects.toThrow(/invariant violated/);
+		await expect(
+			materializeComponents(plan, validated.bootstrapComponents, undefined, {}),
+		).rejects.toThrow(/invariant violated/);
 	});
 });
