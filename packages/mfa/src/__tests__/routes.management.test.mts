@@ -934,6 +934,56 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		expect(removed).not.toHaveBeenCalled();
 	});
 
+	it("says an overrun beside a removal that gave up for time before writing when its release finds the lease gone, or cannot be taken: 409 mfa_factors_busy, nothing removed", async () => {
+		for (const release of ["false", "throws"] as const) {
+			const built = await composed();
+			const { agent, totp } = await signedIn(built);
+			const clock = monotonicClock();
+			const read = built.factorStore.list.bind(built.factorStore);
+			const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
+			vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
+				if (acquire.mock.calls.length > 0) clock.advance(26_000);
+				return read(subject);
+			});
+			const releasing = vi.spyOn(built.transactionStore, "releaseSubjectLease");
+			if (release === "false") releasing.mockResolvedValue(false);
+			else releasing.mockRejectedValue(new Error("down"));
+			const removed = vi.spyOn(built.factorStore, "remove");
+
+			const res = await remove(agent, totp.record.id);
+
+			expect(res.status, release).toBe(409);
+			expect(res.body, release).toEqual(FACTORS_BUSY);
+			expect(removed, release).not.toHaveBeenCalled();
+			expect(built.logger.error, release).toHaveBeenCalledWith(
+				expect.objectContaining({ sub: ALICE.id, route: "factors" }),
+				"mfa_subject_lease_overrun",
+			);
+			await disposeAll();
+			vi.restoreAllMocks();
+		}
+	});
+
+	it("a login's witness mark that gives up for time before writing, its release finding the lease gone: said once at warn, nothing marked", async () => {
+		const built = await composed();
+		const totp = await seedTotp(built.factorStore);
+		const clock = monotonicClock();
+		const read = built.factorStore.list.bind(built.factorStore);
+		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
+		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
+			if (acquire.mock.calls.length > 0) clock.advance(26_000);
+			return read(subject);
+		});
+		vi.spyOn(built.transactionStore, "releaseSubjectLease").mockResolvedValue(false);
+
+		await signInWithTotp(built.app, built.userSessionStore, totp);
+
+		expect(built.users.marks).toEqual([]);
+		expect(
+			events(built.logger, "warn").filter((event) => event === "mfa_enrollment_witness_unwritten"),
+		).toHaveLength(1);
+	});
+
 	it("leaves the witness as it was when a slow removal left too little of the lease for its clear: the removal stands, an overrun, 409 mfa_factors_changed", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
