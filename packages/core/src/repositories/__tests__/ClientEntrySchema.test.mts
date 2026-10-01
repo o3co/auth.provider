@@ -266,6 +266,65 @@ describe("ClientEntrySchema — allowedRedirectUris shape", () => {
 	});
 });
 
+describe("ClientEntrySchema — redirect URI query names", () => {
+	const base = {
+		tokenEndpointAuthMethod: "client_secret_basic",
+		clientSecret: "s",
+	};
+	const issues = (input: Record<string, unknown>): string => {
+		const result = ClientEntrySchema.safeParse({ ...base, ...input });
+		return result.success ? "" : result.error.issues.map((issue) => issue.message).join("\n");
+	};
+
+	it("refuses an allowedRedirectUris entry that carries a response parameter, naming it", () => {
+		expect(issues({ allowedRedirectUris: ["https://app.example/cb?iss=x"] })).toContain(
+			'allowedRedirectUris entry "https://app.example/cb?iss=x": must not carry "iss" in its query',
+		);
+	});
+
+	it("refuses an allowedRedirectUris entry whose query name is outside the allowlist", () => {
+		expect(issues({ allowedRedirectUris: ["https://app.example/cb?filter[x]=1"] })).toContain(
+			'allowedRedirectUris entry "https://app.example/cb?filter[x]=1": query parameter names may use only letters, digits, "_" and "-"',
+		);
+	});
+
+	it("refuses a postLogoutRedirectUris entry that carries a response parameter", () => {
+		expect(issues({ postLogoutRedirectUris: ["https://app.example/out?state=x"] })).toContain(
+			'postLogoutRedirectUris entry "https://app.example/out?state=x": must not carry "state" in its query',
+		);
+	});
+
+	it("refuses a federationGrantRedirectUris entry by the same query rule", () => {
+		expect(issues({ federationGrantRedirectUris: ["https://app.example/cb?code=x"] })).toContain(
+			"federationGrantRedirectUris: reserved-parameter",
+		);
+		expect(issues({ federationGrantRedirectUris: ["https://app.example/cb?a[]=1"] })).toContain(
+			"federationGrantRedirectUris: query-name-invalid",
+		);
+	});
+
+	it("refuses a federationGrantRedirectUris entry that carries grant_id under another case or separators", () => {
+		for (const name of ["GRANT_ID", "grantId", "_grant_id", "grant-id"]) {
+			expect(
+				issues({ federationGrantRedirectUris: [`https://app.example/cb?${name}=x`] }),
+				name,
+			).toContain(
+				`https://app.example/cb?${name}=x already carries "grant_id" (compared ignoring case, "_" and "-")`,
+			);
+		}
+	});
+
+	it("accepts a query of allowed names on every list", () => {
+		expect(
+			issues({
+				allowedRedirectUris: ["https://app.example/cb?tenant=a"],
+				postLogoutRedirectUris: ["https://app.example/out?tenant=a"],
+				federationGrantRedirectUris: ["https://app.example/connected?tenant=a"],
+			}),
+		).toBe("");
+	});
+});
+
 describe("ClientEntrySchema — defaultScopes field", () => {
 	const base = {
 		tokenEndpointAuthMethod: "client_secret_basic",

@@ -844,10 +844,10 @@ export {
 	normalizeAllowedOrigins,
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
-// The registered-redirect-URI shape vocabulary — enforced by
-// ClientEntrySchema at boot; exported so a custom ClientRepository, which
-// bypasses that schema by design, can hold its registrations to the same
-// rules and refuse in the same words.
+// The registered-redirect-URI shape vocabulary, the query's parameter names
+// included — enforced by ClientEntrySchema at boot; exported so a custom
+// ClientRepository, which bypasses that schema by design, can hold its
+// registrations to the same rules and refuse in the same words.
 // `matchesRegisteredRedirectUri` is the runtime half of the same
 // vocabulary — the /authorize allowlist comparison, exact except for the RFC
 // 8252 §7.3 loopback port. Exported alongside the shape checker so a custom

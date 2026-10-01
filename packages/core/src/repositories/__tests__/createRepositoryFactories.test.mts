@@ -61,6 +61,23 @@ describe("createRepositoryFactories", () => {
 			expect(client?.allowedScopes).toEqual(["read"]);
 		});
 
+		it("refuses a yaml client whose redirect URI query carries a response parameter", async () => {
+			const yamlPath = writeYaml(
+				"clients.yaml",
+				`my-client:
+  tokenEndpointAuthMethod: "client_secret_basic"
+  clientSecret: "secret123"
+  allowedRedirectUris:
+    - "https://app.example/cb?iss=x"
+`,
+			);
+
+			const { clientFactory } = createRepositoryFactories();
+			await expect(clientFactory.create({ type: "yaml", path: yamlPath })).rejects.toThrow(
+				'allowedRedirectUris entry "https://app.example/cb?iss=x": must not carry "iss" in its query',
+			);
+		});
+
 		it("throws AdapterFactoryError for unregistered type", async () => {
 			const { clientFactory } = createRepositoryFactories();
 

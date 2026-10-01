@@ -215,7 +215,7 @@ describe("lodging a first-time intent", () => {
 		).toEqual({ ok: false, reason: "redirect_uri_not_registered" });
 	});
 
-	it("takes the redirect URI only by exact membership, and never one that would carry two answers", async () => {
+	it("takes the redirect URI only by exact membership, and refuses one that already carries grant_id", async () => {
 		for (const redirectUri of [
 			"https://client.test/connected/",
 			"https://client.test/connected?x=1",
@@ -228,14 +228,45 @@ describe("lodging a first-time intent", () => {
 		}
 		const registered = {
 			...CLIENT,
-			federationGrantRedirectUris: ["https://client.test/cb?state=x"],
+			federationGrantRedirectUris: ["https://client.test/cb?grant_id=x"],
 		};
 		expect(
 			await lodgeFederationGrantIntent(
 				deps(),
-				initial({ client: registered, redirectUri: "https://client.test/cb?state=x" }),
+				initial({ client: registered, redirectUri: "https://client.test/cb?grant_id=x" }),
 			),
 		).toEqual({ ok: false, reason: "redirect_uri_reserved_parameter" });
+		expect(intents.size).toBe(0);
+	});
+
+	it("refuses a registered URI that carries grant_id under another case or separators, and lodges nothing", async () => {
+		// ASP.NET Core reads query names case-insensitively and binds the first
+		// value, so `?GRANT_ID=FORGED` ahead of the appended `grant_id` would be
+		// what the client reads.
+		for (const redirectUri of [
+			"https://client.test/cb?GRANT_ID=x",
+			"https://client.test/cb?grantId=x",
+			"https://client.test/cb?_grant_id=x",
+			"https://client.test/cb?grant-id=x",
+			"https://client.test/cb?a=1&GrantId",
+		]) {
+			const client = { ...CLIENT, federationGrantRedirectUris: [redirectUri] };
+			expect(
+				await lodgeFederationGrantIntent(deps(), initial({ client, redirectUri })),
+				redirectUri,
+			).toEqual({ ok: false, reason: "redirect_uri_reserved_parameter" });
+		}
+		expect(intents.size).toBe(0);
+	});
+
+	it("answers redirect_uri_invalid for a registered URI whose query the redirect-URI grammar refuses", async () => {
+		for (const redirectUri of ["https://client.test/cb?state=x", "https://client.test/cb?a[]=1"]) {
+			const client = { ...CLIENT, federationGrantRedirectUris: [redirectUri] };
+			expect(await lodgeFederationGrantIntent(deps(), initial({ client, redirectUri }))).toEqual({
+				ok: false,
+				reason: "redirect_uri_invalid",
+			});
+		}
 		expect(intents.size).toBe(0);
 	});
 
@@ -401,6 +432,23 @@ describe("federationGrantRedirectUriReservedParameter", () => {
 		expect(federationGrantRedirectUriReservedParameter("https://c.test/cb?error=x")).toBe("error");
 		expect(federationGrantRedirectUriReservedParameter("not a url")).toBeUndefined();
 	});
+
+	it("compares names as the redirect-URI rule does, ignoring case, `_` and `-`, and names the canonical one", () => {
+		for (const name of ["GRANT_ID", "grantId", "_grant_id", "grant-id", "GrantId", "grant_id_"]) {
+			expect(federationGrantRedirectUriReservedParameter(`https://c.test/cb?${name}=x`), name).toBe(
+				"grant_id",
+			);
+		}
+		expect(federationGrantRedirectUriReservedParameter("https://c.test/cb?STATE=a")).toBe("state");
+		expect(federationGrantRedirectUriReservedParameter("https://c.test/cb?_error=a")).toBe("error");
+		// Different letters are a different name.
+		for (const name of ["grant_ids", "grant", "grant_idx", "grantid1"]) {
+			expect(
+				federationGrantRedirectUriReservedParameter(`https://c.test/cb?${name}=x`),
+				name,
+			).toBeUndefined();
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -486,6 +534,15 @@ describe("lodging a reauthorization", () => {
 		expect((await intents.getIntent("id-1", at(3 * MIN)))?.kind).toBe("reauthorization");
 		// A renewal takes no place against the bound.
 		expect(intents.reservations("agent", "u-1")).toBe(0);
+	});
+
+	it("refuses a renewal whose registered URI carries grant_id under another spelling", async () => {
+		await establish();
+		const redirectUri = "https://client.test/cb?Grant-Id=x";
+		const client = { ...CLIENT, federationGrantRedirectUris: [redirectUri] };
+		expect(
+			await lodgeFederationGrantReauthorization(deps(), renewal({ client, redirectUri })),
+		).toEqual({ ok: false, reason: "redirect_uri_reserved_parameter" });
 	});
 
 	it("answers one way for an unknown grant, another client's, and another subject's", async () => {

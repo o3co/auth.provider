@@ -236,6 +236,33 @@ each names:
 
 Module-level messages that arrive wrapped in a factory failure:
 
+- Client registrations (the `yaml` / `static` client repository, which holds
+  `allowedRedirectUris`, `postLogoutRedirectUris` and
+  `federationGrantRedirectUris` to core's `checkRedirectUri`,
+  `packages/core/src/net/redirect-uri.mts`): `Invalid entry "<client>" in
+  <file>: …`, naming each bad entry. Two of them are about the query:
+  `allowedRedirectUris entry "https://client.example/cb?iss=x": must not
+  carry "iss" in its query (compared ignoring case, "_" and "-"): …` — the
+  query names `code`, `state`, `iss`, `error` or `error_description`, the
+  names an authorization response carries, in any case and with `_` or `-`
+  anywhere in it (`_state`, `errorDescription`); and
+  `allowedRedirectUris entry "https://client.example/cb?filter[x]=1": query
+  parameter names may use only letters, digits, "_" and "-", each parameter
+  must have a name, and the query must not contain ";": …` — a name outside
+  `[A-Za-z0-9_-]`, a parameter with no name (`?=x`, `?a=1&&b=2`, a trailing
+  `&`), or a `;` anywhere in the query, values included.
+  `postLogoutRedirectUris` reads the same with its own field name;
+  `federationGrantRedirectUris` reports the reason alone
+  (`federationGrantRedirectUris: reserved-parameter` or
+  `… query-name-invalid`), and also refuses `grant_id`, compared the same
+  way (`GRANT_ID`, `grantId`, `_grant_id`): `federationGrantRedirectUris:
+  <uri> already carries "grant_id" (compared ignoring case, "_" and "-"),
+  …`. Rename or remove the parameter in
+  the registration, and carry the client's own context in `state` or in the
+  path. The comparison covers names as written and the common
+  normalizations (case, `_`, `-`), not a mapping a client configures, such
+  as an alias or a prefix its binder strips: a client must read the OAuth
+  fields by their canonical names.
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `redis-clients.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
 - Standalone federation grant intents on Redis: `redis-federation-grant-store.keyPrefix
@@ -2221,6 +2248,40 @@ before you flip — and a relying party holding the secret can also mint.
      federation checks, `key-store.local.*` and `KEY_STORE_LOCAL_*` for the key
      store's, `REPOSITORIES_USER_HTTP_BEARER_TOKEN` for the Store credential's:
      a log alert matching the old text needs the new one.
+
+7. **Registered redirect URIs: query names.** Check every
+   `allowedRedirectUris`, `postLogoutRedirectUris` and
+   `federationGrantRedirectUris` entry, and every Client ID Metadata Document
+   you depend on. Two cases:
+
+   - **Newly refused registrations.** A query name outside `[A-Za-z0-9_-]`
+     (`?filter[x]=1`, `?a.b=1`), a parameter with no name, a `;` anywhere in
+     the query, or one of `code`, `state`, `iss`, `error` and
+     `error_description` (compared ignoring case, `_` and `-`), on any of the
+     three lists; and, on `federationGrantRedirectUris`, `grant_id` under
+     another case or separators (`GRANT_ID`, `grantId`, `_grant_id`,
+     `grant-id`). Such an entry used to be accepted. Now a `yaml` / `static`
+     client fails boot, with the messages in
+     [§1](#boot-refusals-you-will-meet); a CIMD client cannot be resolved
+     (`400 invalid_client` at `/authorize`, with the
+     `cimd_document_rejected` warning); and a federation-grant return URI
+     held by a custom `ClientRepository`, which bypasses that check, is
+     refused when a grant is lodged: `400 invalid_request` with
+     `redirect_uri_invalid` (`redirect_uri_reserved_parameter` for a
+     `grant_id` spelling).
+   - **Refusals whose reason changed.** A `federationGrantRedirectUris`
+     entry carrying `state` or `error` was already refused, at boot and at
+     lodging. Boot still refuses it. Lodging now answers
+     `redirect_uri_invalid` where it answered
+     `redirect_uri_reserved_parameter`; both are `400 invalid_request`, so
+     only an alert or client keyed on the `error_description` text sees the
+     difference.
+
+   Rename or remove such parameters, and carry the client's context in
+   `state` or in the path. The rule covers names as written and the common
+   normalizations, not a mapping a client configures (an alias, a stripped
+   prefix): make sure each client reads the OAuth fields by their canonical
+   names.
 
 ### Rolling out
 
