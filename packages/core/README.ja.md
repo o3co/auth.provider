@@ -609,7 +609,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 
 ### フェデレーショングラント
 
-フェデレーショングラントのドメイン — グラントのレコード、そのストア、lodging、取得、失効 — は [`src/federation-grants/README.md`](src/federation-grants/README.md) に記述されています。グラントの credential を書き込むパッケージは、保存するアクセストークンを `federationGrantAccessToken(token, lifetime)`（[`src/federation-grants/held-token.mts`](src/federation-grants/held-token.mts)）で組み立てます。入力は `readUpstreamTokenLifetime` の `finite` な読み取りのうち、発行された寿命を持つものです。取得がリフレッシュしたトークンを保存するのとまったく同じく、`obtainedAt` は呼び出しの開始、`issuedLifetime` は発行されたままの `expiresIn`、`effectiveExpiresAt` は読み取りの終わり `min(expiresAt, calledAt + expiresIn)` になります。
+フェデレーショングラントのドメイン — グラントのレコード、そのストア、lodging、取得、失効 — は [`src/federation-grants/README.md`](src/federation-grants/README.md) に記述されています。グラントの credential を書き込むパッケージは、保存するアクセストークンを `federationGrantAccessToken(token, lifetime)`（[`src/federation-grants/held-token.mts`](src/federation-grants/held-token.mts)）で組み立てます。取得がリフレッシュしたトークンを保存するのとまったく同じ規則に従います。保存するのは `readUpstreamTokenLifetime` の読み取りが `verdict: "finite"` かつ `stated: "both"` のときだけで、それ以外の読み取り（`expiresIn` だけのものを含む）は `no_finite_lifetime` として拒否します。そうした読み取りから組み立てたトークンでは、`obtainedAt` は呼び出しの開始、`issuedLifetime` は発行されたままの `expiresIn`、`effectiveExpiresAt` は読み取りの終わり `min(expiresAt, calledAt + expiresIn)` になります。
 
 ### OIDC id_token とクレームフィルター
 

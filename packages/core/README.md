@@ -611,7 +611,7 @@ Two groups of optional slots for federation and OIDC support, provided by a modu
 
 ### Federation grants
 
-The federation grant domain — the grant record, its stores, lodging, retrieval and revocation — is described in [`src/federation-grants/README.md`](src/federation-grants/README.md). A package that writes a grant's credential builds the stored access token with `federationGrantAccessToken(token, lifetime)` ([`src/federation-grants/held-token.mts`](src/federation-grants/held-token.mts)), from a `finite` reading of `readUpstreamTokenLifetime` that names its issued lifetime, exactly as the retrieval stores a refreshed one: `obtainedAt` is the call's start, `issuedLifetime` the `expiresIn` as issued, and `effectiveExpiresAt` the reading's end, `min(expiresAt, calledAt + expiresIn)`.
+The federation grant domain — the grant record, its stores, lodging, retrieval and revocation — is described in [`src/federation-grants/README.md`](src/federation-grants/README.md). A package that writes a grant's credential builds the stored access token with `federationGrantAccessToken(token, lifetime)` ([`src/federation-grants/held-token.mts`](src/federation-grants/held-token.mts)), following the retrieval's rule exactly. The retrieval stores a refreshed token only from a `readUpstreamTokenLifetime` reading with `verdict: "finite"` and `stated: "both"`, and refuses any other reading — an `expiresIn`-only one included — as `no_finite_lifetime`. The token built from such a reading has `obtainedAt` the call's start, `issuedLifetime` the `expiresIn` as issued, and `effectiveExpiresAt` the reading's end, `min(expiresAt, calledAt + expiresIn)`.
 
 ### OIDC id_token and claim filter
 
