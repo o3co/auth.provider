@@ -13,7 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { describe } from "vitest";
 import { createInMemorySessionFederationIndex } from "../memory/sessionFederationIndex.mjs";
 import { runSessionFederationIndexContract } from "./sessionFederationIndex.contract.mjs";
 
-runSessionFederationIndexContract(async () => createInMemorySessionFederationIndex());
+describe("the memory session federation index", () => {
+	runSessionFederationIndexContract(async () => createInMemorySessionFederationIndex());
+});
