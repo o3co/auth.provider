@@ -303,6 +303,15 @@ describe("ClientEntrySchema — redirect URI query names", () => {
 		);
 	});
 
+	it("refuses a federationGrantRedirectUris entry that carries grant_id under another case or separators", () => {
+		for (const name of ["GRANT_ID", "grantId", "_grant_id", "grant-id"]) {
+			expect(
+				issues({ federationGrantRedirectUris: [`https://app.example/cb?${name}=x`] }),
+				name,
+			).toContain(`https://app.example/cb?${name}=x already carries "grant_id"`);
+		}
+	});
+
 	it("accepts a query of allowed names on every list", () => {
 		expect(
 			issues({
