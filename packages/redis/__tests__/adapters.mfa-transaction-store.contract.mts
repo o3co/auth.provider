@@ -2672,36 +2672,75 @@ export function runMfaTransactionStoreContract(
 	});
 
 	describe("MfaTransactionStore contract: a subject's recovery-set floor", () => {
-		// The generation below which no recovery-code set verifies. It is
-		// kept apart from the sets, so deleting a set never lowers it.
+		// The lowest recovery-code set generation that verifies: a set's
+		// generation, not the subject's. It is kept apart from the sets, so
+		// deleting a set never lowers it, and raised under the subject's lease.
+
+		/** The subject's lease, under the generation it is at. */
+		async function leased(store: MfaTransactionStore, subject = "user-1"): Promise<string> {
+			const generation = await store.subjectGeneration(subject);
+			const lease = await store.acquireSubjectLease(subject, { ttlMs: 60_000, generation });
+			if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
+			return lease.token;
+		}
+
+		const raised = (floor: number) => ({ outcome: "raised", floor });
 
 		it("answers floor 0 for a subject never issued a set", async () => {
 			const store = await factory();
 			expect(await store.recoverySetFloor("user-1")).toBe(0);
 		});
 
-		it("raises the floor and never lowers it, answering the floor after each raise", async () => {
+		it("raises the floor under the subject's lease and never lowers it, answering the floor after each raise", async () => {
 			const store = await factory();
-			expect(await store.raiseRecoverySetFloor("user-1", 3)).toBe(3);
-			expect(await store.raiseRecoverySetFloor("user-1", 2)).toBe(3);
+			const leaseToken = await leased(store);
+			const raise = (setGeneration: number) =>
+				store.raiseRecoverySetFloor("user-1", { setGeneration, leaseToken });
+			expect(await raise(3)).toEqual(raised(3));
+			expect(await raise(2)).toEqual(raised(3));
 			expect(await store.recoverySetFloor("user-1")).toBe(3);
-			expect(await store.raiseRecoverySetFloor("user-1", 5)).toBe(5);
+			expect(await raise(5)).toEqual(raised(5));
 			expect(await store.recoverySetFloor("user-1")).toBe(5);
 		});
 
-		it("keeps the highest of N raises in flight", async () => {
+		it("keeps the highest of N raises in flight under one lease", async () => {
 			const store = await factory();
+			const leaseToken = await leased(store);
 			await Promise.all(
-				[4, 9, 1, 7, 10, 2, 8, 3, 6, 5].map((n) => store.raiseRecoverySetFloor("user-1", n)),
+				[4, 9, 1, 7, 10, 2, 8, 3, 6, 5].map((setGeneration) =>
+					store.raiseRecoverySetFloor("user-1", { setGeneration, leaseToken }),
+				),
 			);
 			expect(await store.recoverySetFloor("user-1")).toBe(10);
 		});
 
+		it("refuses a raise without the subject's lease, raising nothing: none, another holder's token, or another subject's", async () => {
+			const store = await factory();
+			const refused = { outcome: "refused", reason: "lease_not_held" };
+			expect(
+				await store.raiseRecoverySetFloor("user-1", {
+					setGeneration: 2,
+					leaseToken: "no-such-lease",
+				}),
+			).toEqual(refused);
+			const other = await leased(store, "user-2");
+			expect(
+				await store.raiseRecoverySetFloor("user-1", { setGeneration: 2, leaseToken: other }),
+			).toEqual(refused);
+			const held = await leased(store);
+			expect(
+				await store.raiseRecoverySetFloor("user-1", { setGeneration: 2, leaseToken: `${held}x` }),
+			).toEqual(refused);
+			expect(await store.recoverySetFloor("user-1")).toBe(0);
+			expect(
+				await store.raiseRecoverySetFloor("user-1", { setGeneration: 2, leaseToken: held }),
+			).toEqual(raised(2));
+		});
+
 		it("keeps the floor through a reset, and each subject's apart", async () => {
 			const store = await factory();
-			await store.raiseRecoverySetFloor("user-1", 4);
-			const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
-			if (lease.outcome !== "acquired") throw new Error("expected a lease");
+			const leaseToken = await leased(store);
+			await store.raiseRecoverySetFloor("user-1", { setGeneration: 4, leaseToken });
 			await store.authorizeSubjectRecovery("user-1", {
 				operation: "reset",
 				sid: undefined,
@@ -2713,7 +2752,7 @@ export function runMfaTransactionStoreContract(
 					operation: "reset",
 					sid: undefined,
 					nowMs: Date.now(),
-					leaseToken: lease.token,
+					leaseToken,
 					sessionsBoundaryMs: undefined,
 					guessableBoundSinceMs: undefined,
 				}),
@@ -2724,16 +2763,23 @@ export function runMfaTransactionStoreContract(
 
 		it("refuses, with a RangeError, a raise it cannot make or a question it cannot answer, and raises nothing", async () => {
 			const store = await factory();
-			for (const [label, subject, generation] of [
-				["an empty subject", "", 1],
-				["a generation of 0", "user-1", 0],
-				["a negative generation", "user-1", -1],
-				["a generation that is not whole", "user-1", 1.5],
-				["a generation as text", "user-1", "1"],
-				["a generation past the safe integers", "user-1", 2 ** 53],
+			const leaseToken = await leased(store);
+			for (const [label, subject, raise] of [
+				["an empty subject", "", { setGeneration: 1, leaseToken }],
+				["no raise", "user-1", undefined],
+				["a set generation of 0", "user-1", { setGeneration: 0, leaseToken }],
+				["a negative set generation", "user-1", { setGeneration: -1, leaseToken }],
+				["a set generation that is not whole", "user-1", { setGeneration: 1.5, leaseToken }],
+				["a set generation as text", "user-1", { setGeneration: "1", leaseToken }],
+				[
+					"a set generation past the safe integers",
+					"user-1",
+					{ setGeneration: 2 ** 53, leaseToken },
+				],
+				["an empty lease token", "user-1", { setGeneration: 1, leaseToken: "" }],
 			] as const) {
 				await expect(
-					store.raiseRecoverySetFloor(subject as never, generation as never),
+					store.raiseRecoverySetFloor(subject as never, raise as never),
 					label,
 				).rejects.toThrow(RangeError);
 			}

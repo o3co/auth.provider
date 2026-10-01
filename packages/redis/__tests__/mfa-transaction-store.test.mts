@@ -126,8 +126,7 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 			pick().authorizeSubjectRecovery(subject, authorization),
 		applySubjectRecovery: (subject, application) =>
 			pick().applySubjectRecovery(subject, application),
-		raiseRecoverySetFloor: (subject, generation) =>
-			pick().raiseRecoverySetFloor(subject, generation),
+		raiseRecoverySetFloor: (subject, raise) => pick().raiseRecoverySetFloor(subject, raise),
 		recoverySetFloor: (subject) => pick().recoverySetFloor(subject),
 	};
 };
@@ -1460,9 +1459,9 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		const store = storeAt(prefix);
 		const keys = keysOf(prefix);
 		await store.reserveSubjectAttempt("user-1", Date.now() - MINUTE, POLICY);
-		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
 		if (lease.outcome !== "acquired") throw new Error("expected a lease");
-		await store.raiseRecoverySetFloor("user-1", 2);
+		await store.raiseRecoverySetFloor("user-1", { setGeneration: 2, leaseToken: lease.token });
 		expect((await first().keys(`${prefix}*`)).sort()).toEqual(Object.values(keys).sort());
 		expect(await first().get(keys.lease)).toBe(lease.token);
 		const ttl = await first().pttl(keys.lease);
@@ -1489,7 +1488,9 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		expect(await deadlineOf(recovery)).toBe(-1);
 
 		const other = keysOf(prefix, "user-2").recovery;
-		await store.raiseRecoverySetFloor("user-2", 1);
+		const lease = await store.acquireSubjectLease("user-2", { ttlMs: 60_000, generation: 0 });
+		if (lease.outcome !== "acquired") throw new Error("expected a lease");
+		await store.raiseRecoverySetFloor("user-2", { setGeneration: 1, leaseToken: lease.token });
 		expect(await deadlineOf(other)).toBe(-1);
 	});
 
@@ -1497,17 +1498,22 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const { recovery } = keysOf(prefix);
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
+		if (lease.outcome !== "acquired") throw new Error("expected a lease");
 		await first().hset(recovery, "g", "x");
 		await expect(store.subjectGeneration("user-1")).rejects.toThrow(/generation/);
+		await expect(
+			store.acquireSubjectLease("user-2", { ttlMs: 60_000, generation: 0 }),
+		).resolves.toMatchObject({ outcome: "acquired" });
 		await expect(
 			store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 }),
 		).rejects.toThrow(/subject state/);
 		await first().hset(recovery, "g", "1", "floor", "x");
 		await expect(store.recoverySetFloor("user-1")).rejects.toThrow(/floor/);
-		await expect(store.raiseRecoverySetFloor("user-1", 2)).rejects.toThrow(/subject state/);
+		await expect(
+			store.raiseRecoverySetFloor("user-1", { setGeneration: 2, leaseToken: lease.token }),
+		).rejects.toThrow(/subject state/);
 		await first().hset(recovery, "floor", "1", `a:recover:${keyPart("sid-1")}`, "garbage");
-		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
-		if (lease.outcome !== "acquired") throw new Error("expected a lease");
 		await expect(
 			store.applySubjectRecovery("user-1", {
 				operation: "recover",

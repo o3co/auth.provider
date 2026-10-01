@@ -31,6 +31,7 @@ import {
 	type MfaTransaction,
 	readFirstBindingAt,
 	readMfaAttemptReservation,
+	readMfaRecoverySetFloorAnswer,
 	readMfaSubjectAttemptReservation,
 	readMfaSubjectCount,
 	readMfaSubjectLeaseAnswer,
@@ -625,6 +626,30 @@ describe("readMfaSubjectRecoveryAnswer", () => {
 	});
 });
 
+describe("readMfaRecoverySetFloorAnswer", () => {
+	it("reads a raise with the floor after it, and the refusal without the lease", () => {
+		expect(readMfaRecoverySetFloorAnswer({ outcome: "raised", floor: 3 })).toEqual({
+			outcome: "raised",
+			floor: 3,
+		});
+		expect(readMfaRecoverySetFloorAnswer({ outcome: "refused", reason: "lease_not_held" })).toEqual(
+			{ outcome: "refused", reason: "lease_not_held" },
+		);
+	});
+
+	it.each<[string, unknown]>([
+		["a floor of 0 after a raise", { outcome: "raised", floor: 0 }],
+		["a floor that is not whole", { outcome: "raised", floor: 1.5 }],
+		["a floor as text", { outcome: "raised", floor: "3" }],
+		["a refusal it does not know", { outcome: "refused", reason: "unauthorized" }],
+		["an outcome it does not know", { outcome: "lowered", floor: 1 }],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaRecoverySetFloorAnswer(answer)).toBeUndefined();
+	});
+});
+
 describe("readMfaSubjectCount", () => {
 	it("reads a safe whole number from 0", () => {
 		expect(readMfaSubjectCount(0)).toBe(0);
@@ -649,6 +674,7 @@ describe("on the package's root", () => {
 		expect(core.readMfaSubjectLeaseAnswer).toBe(readMfaSubjectLeaseAnswer);
 		expect(core.readMfaSubjectCount).toBe(readMfaSubjectCount);
 		expect(core.readMfaSubjectRecoveryAnswer).toBe(readMfaSubjectRecoveryAnswer);
+		expect(core.readMfaRecoverySetFloorAnswer).toBe(readMfaRecoverySetFloorAnswer);
 		expect(core.readMfaAttemptReservation).toBe(readMfaAttemptReservation);
 		expect(core.readMfaSubjectAttemptReservation).toBe(readMfaSubjectAttemptReservation);
 		expect(core.isConsumedMfaTransaction).toBe(isConsumedMfaTransaction);
