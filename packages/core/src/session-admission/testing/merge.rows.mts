@@ -15,17 +15,17 @@
  */
 
 /**
- * The rows of the session-admission ADR's acceptance criterion 4 (the MFA
- * ADR's step-4 table), as data: a request, a session, the `mfa.mode` and
- * enabled factors, and the expected decision in the MFA rule's vocabulary,
- * which `mergeAdmission` maps onto an `Admission` for the registered
- * requirement that declares the second-factor authority, whatever its name.
- * Core's merge test runs them against a stand-in registered as boot registers
- * it, the MFA package's against the requirement it registers, so both are
- * held to one list. Nothing here runs a test.
+ * The second-factor authority's merge rows, as data: a request, a session,
+ * whether its store can record a second factor, the `mfa.mode` and enabled
+ * factors, and the expected decision in the MFA rule's vocabulary, which
+ * `mergeAdmission` maps onto an `Admission` for the registered requirement
+ * that declares the second-factor authority, whatever its name. Core's merge
+ * test runs them against a stand-in registered as boot registers it, the MFA
+ * package's against the requirement it registers, so both are held to one
+ * list. Nothing here runs a test.
  */
 
-import type { UserSession } from "../../user-sessions/types.mjs";
+import type { UserSession, UserSessionStore } from "../../user-sessions/types.mjs";
 import { type AcrTable, readAcrTable } from "../acr.mjs";
 import { viewOf } from "../admit.mjs";
 import {
@@ -74,7 +74,7 @@ export type MergeFactors = keyof typeof MERGE_REACH;
 /** A row's expected decision, in the MFA rule's vocabulary. */
 export type MergeDecision =
 	| { readonly outcome: "met"; readonly acr: string | undefined }
-	| { readonly outcome: "reauthenticate" }
+	| { readonly outcome: "reauthenticate"; readonly requirement: "acr" | "baseline" }
 	| {
 			readonly outcome: "step_up";
 			readonly requirement: "acr" | "baseline";
@@ -82,13 +82,15 @@ export type MergeDecision =
 	  }
 	| { readonly outcome: "unmet"; readonly requirement: "acr" | "baseline" };
 
-/** One row: what it pins, as the ADR words it; its mode, session, request and factors; and the rule's decision. */
+/** One row: what it checks; its mode, session, store, request and factors; and the rule's decision. */
 export interface MergeRow {
 	readonly row: string;
 	/** The MFA module's `mfa.mode` the row runs under. */
 	readonly mode: "off" | "optional" | "required";
 	/** The record admission reads, `sid-1` of `user-1`; `null` for no store. */
 	readonly session: UserSession | null;
+	/** `false` for a session store without the step-up capability (`recordSecondFactor`); absent, the store has it. */
+	readonly storeRecords?: false;
 	readonly acrValues?: readonly string[];
 	readonly factors: MergeFactors;
 	readonly expected: MergeDecision;
@@ -133,10 +135,10 @@ const recorded = (amr: readonly string[]): UserSession => record(amr, undefined)
 const primaryOf = (primary: string, amr: readonly string[]): UserSession =>
 	record(amr, { primary, federation: undefined, upstreamAmr: undefined, mfaAt: undefined });
 
-/** The rows, by group: the MFA ADR's rows, the baseline beside `acr_values`, and any-of entries with step-up targets. */
+/** The rows, by group: the MFA rule's decisions, the baseline beside `acr_values`, any-of entries with step-up targets, and a step-up the session cannot record. */
 export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 	{
-		title: "the merge — D17's rows (acceptance criterion 4)",
+		title: "the merge — what the MFA rule decides for a session and a request",
 		rows: [
 			{
 				row: "nothing requested · primary pwd, mfaAt set → proceed",
@@ -164,14 +166,14 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				mode: "required",
 				session: null,
 				factors: "installed",
-				expected: { outcome: "reauthenticate" },
+				expected: { outcome: "reauthenticate", requirement: "baseline" },
 			},
 			{
 				row: "nothing requested · primary unknown, required → re-authentication",
 				mode: "required",
 				session: recorded(["hwk"]),
 				factors: "installed",
-				expected: { outcome: "reauthenticate" },
+				expected: { outcome: "reauthenticate", requirement: "baseline" },
 			},
 			{
 				row: 'nothing requested · pre-upgrade, amr ["pwd"] → step-up (primary read as pwd)',
@@ -188,7 +190,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				expected: { outcome: "met", acr: undefined },
 			},
 			{
-				row: "acr_values=phr · pre-upgrade, holding fed and an upstream hwk → the hwk is not vouched for, whatever the federation (D9's split)",
+				row: "acr_values=phr · pre-upgrade, holding fed and an upstream hwk → the hwk is not vouched for, whatever the federation: a pre-upgrade federated session vouches for fed alone",
 				mode: "optional",
 				session: recorded(["hwk", "fed"]),
 				acrValues: [PHR],
@@ -196,7 +198,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				expected: { outcome: "unmet", requirement: "acr" },
 			},
 			{
-				row: "acr_values met · D15's preference order: one the session meets wins over stepping up to an earlier one",
+				row: "acr_values met · one the session meets wins over stepping up to one requested earlier",
 				mode: "optional",
 				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
 				acrValues: [PHR, MFA],
@@ -244,7 +246,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				expected: { outcome: "unmet", requirement: "acr" },
 			},
 			{
-				row: "nothing requested · an email-only login meets the baseline (O7)",
+				row: "nothing requested · an email-only login meets the baseline: the email code is a second factor, though it adds no mfa",
 				mode: "required",
 				session: passwordSession(["pwd", "email"], minutesAgo(1)),
 				factors: "installed",
@@ -285,7 +287,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 		],
 	},
 	{
-		title: "the merge — the baseline beside acr_values (D16)",
+		title: "the merge — the baseline beside acr_values",
 		rows: [
 			{
 				row: "a met acr does not meet the baseline: step up for the baseline alone",
@@ -331,7 +333,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				session: recorded(["hwk"]),
 				acrValues: [PHR],
 				factors: "installed",
-				expected: { outcome: "reauthenticate" },
+				expected: { outcome: "reauthenticate", requirement: "baseline" },
 			},
 			...["PWD", "", "magiclink", "hwk"].map(
 				(primary): MergeRow => ({
@@ -339,7 +341,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 					mode: "required",
 					session: primaryOf(primary, ["pwd"]),
 					factors: "installed",
-					expected: { outcome: "reauthenticate" },
+					expected: { outcome: "reauthenticate", requirement: "baseline" },
 				}),
 			),
 			{
@@ -367,7 +369,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				session: null,
 				acrValues: ["urn:nope", PWD],
 				factors: "installed",
-				expected: { outcome: "reauthenticate" },
+				expected: { outcome: "reauthenticate", requirement: "baseline" },
 			},
 			{
 				row: "optional has no baseline: a password session proceeds",
@@ -377,14 +379,14 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				expected: { outcome: "met", acr: undefined },
 			},
 			{
-				row: "off has no baseline: a password session proceeds (D20)",
+				row: "off has no baseline: a password session proceeds",
 				mode: "off",
 				session: passwordSession(["pwd"]),
 				factors: "none",
 				expected: { outcome: "met", acr: undefined },
 			},
 			{
-				row: "off answers acr_values needing a second factor unmet (D20)",
+				row: "off answers acr_values needing a second factor unmet: nothing is installed to step up with",
 				mode: "off",
 				session: passwordSession(["pwd"]),
 				acrValues: [MFA],
@@ -428,7 +430,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 		],
 	},
 	{
-		title: "the merge — any-of entries and step-up targets (D15, D16)",
+		title: "the merge — any-of entries and step-up targets",
 		rows: [
 			{
 				row: "one alternative of an any-of entry meets it: a synced passkey meets phr",
@@ -488,12 +490,77 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 			},
 		],
 	},
+	{
+		title: "the merge — a step-up the session cannot record",
+		rows: [
+			{
+				row: "an acr only the authority's step-up can finish, onto a store that cannot record one → a new login (acr)",
+				mode: "optional",
+				session: passwordSession(["pwd"]),
+				storeRecords: false,
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "reauthenticate", requirement: "acr" },
+			},
+			{
+				row: "an acr only the authority's step-up can finish, onto a pre-upgrade session whose primary cannot be told → a new login (acr)",
+				mode: "optional",
+				session: recorded(["kba"]),
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "reauthenticate", requirement: "acr" },
+			},
+			{
+				row: "a session that meets the baseline, asked an acr the store cannot record a step-up for → a new login (acr)",
+				mode: "required",
+				session: federatedSession(["fed"], ["mfa"]),
+				storeRecords: false,
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "reauthenticate", requirement: "acr" },
+			},
+			{
+				row: "a pre-upgrade session read as a password login is stepped up for an acr: its primary is told",
+				mode: "optional",
+				session: recorded(["pwd"]),
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "step_up", requirement: "acr", acrValues: [MFA] },
+			},
+			{
+				row: "an acr no step-up can reach stays unmet onto a store that cannot record: a new login would not meet it either",
+				mode: "optional",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
+				storeRecords: false,
+				acrValues: [PHR],
+				factors: "withoutWebAuthn",
+				expected: { outcome: "unmet", requirement: "acr" },
+			},
+			{
+				row: "an acr the session meets is met onto a store that cannot record",
+				mode: "optional",
+				session: passwordSession(["pwd", "otp", "mfa"], minutesAgo(1)),
+				storeRecords: false,
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "met", acr: MFA },
+			},
+			{
+				row: "the baseline onto a store that cannot record → a new login: the requirement answers for its own step-up",
+				mode: "required",
+				session: passwordSession(["pwd"]),
+				storeRecords: false,
+				factors: "installed",
+				expected: { outcome: "reauthenticate", requirement: "baseline" },
+			},
+		],
+	},
 ];
 
 /**
  * The ADR's mapping of a row's decision onto the admission, for `authority`,
  * the registered second-factor authority (`undefined` when none is
- * registered): `requirement: "acr"` stays `"acr"`, `"baseline"` becomes the
+ * registered): `requirement: "acr"` stays `"acr"` (a `reauthenticate`'s too), `"baseline"` becomes the
  * authority's name, and a `step_up`'s requirement becomes `whenStillUnmet`
  * (`"acr"` → `"unmet"`, `"baseline"` → `"reauthenticate"`) with its
  * registered page. Throws for an `authority` that is not a registered
@@ -531,7 +598,11 @@ export function mergeAdmission(
 				acr: expected.acr,
 			};
 		case "reauthenticate":
-			return { outcome: "reauthenticate", requirement: named().name, session };
+			return {
+				outcome: "reauthenticate",
+				requirement: expected.requirement === "acr" ? "acr" : named().name,
+				session,
+			};
 		case "step_up": {
 			if (session === null) throw new Error("a step-up needs a session");
 			const { name, stepUpPage } = named();
@@ -555,4 +626,24 @@ export function mergeAdmission(
 				session,
 			};
 	}
+}
+
+/**
+ * The session store a row runs over: one holding the row's record as
+ * `sid-1`, with the step-up capability unless the row's `storeRecords` is
+ * `false` — its `recordSecondFactor` records nothing (`null`) — and
+ * `undefined` for a row with no session, a composition without a store.
+ */
+export function mergeSessionStore(row: MergeRow): UserSessionStore | undefined {
+	const { session } = row;
+	if (session === null) return undefined;
+	const store: UserSessionStore = {
+		kind: "merge-rows",
+		create: async () => {},
+		get: async (sid) => (sid === session.sid ? session : null),
+		delete: async () => {},
+	};
+	return row.storeRecords === false
+		? store
+		: Object.assign(store, { recordSecondFactor: async () => null });
 }
