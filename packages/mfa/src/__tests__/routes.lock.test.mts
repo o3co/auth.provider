@@ -41,6 +41,7 @@ import {
 	beginLogin,
 	contributing,
 	freezeClock,
+	HARD_AT_TEN,
 	newFactorId,
 	recordingAuditSink,
 	seedFactor,
@@ -51,6 +52,7 @@ import {
 	totpCode,
 	verify,
 	wrongCode,
+	wrongCodesToTheHardLimit,
 } from "./routesHarness.mjs";
 
 beforeEach(() => freezeClock());
@@ -143,11 +145,8 @@ describe("a held subject's guessable proof", () => {
 	});
 
 	it("carries no Retry-After for the hard hold, which no time lifts, and offers no later try", async () => {
-		const { app, totp } = await held({ threshold: 2, hardLimit: 2 });
-		const { agent, transaction } = await beginLogin(app);
-		for (let n = 0; n < 2; n++) {
-			await verify(agent, transaction, totp.record.id, wrongCode(totp.secret));
-		}
+		const { app, totp } = await held(HARD_AT_TEN);
+		const { agent, transaction } = await wrongCodesToTheHardLimit(app, totp);
 
 		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
 
@@ -158,7 +157,7 @@ describe("a held subject's guessable proof", () => {
 			error_description: "Too many failed attempts: use another second factor",
 			hold: "hard",
 			usable_kinds: [],
-			attempts_remaining: 2,
+			attempts_remaining: 3,
 		});
 	});
 
