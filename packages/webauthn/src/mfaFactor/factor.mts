@@ -149,8 +149,6 @@ function readData(data: unknown): WebAuthnFactorData {
 	}
 	if (typeof backupEligible !== "boolean") throw unreadable(what, "backupEligible");
 	if (typeof backedUp !== "boolean") throw unreadable(what, "backedUp");
-	const handleBytes = isBase64url(userHandle) ? Buffer.from(userHandle, "base64url").length : 0;
-	if (handleBytes < 1 || handleBytes > MAX_USER_HANDLE_BYTES) throw unreadable(what, "userHandle");
 	return {
 		credentialId,
 		publicKey,
@@ -158,8 +156,19 @@ function readData(data: unknown): WebAuthnFactorData {
 		transports: knownTransports(transports),
 		backupEligible,
 		backedUp,
-		userHandle: userHandle as string,
+		userHandle: readUserHandle(userHandle, what),
 	};
+}
+
+/**
+ * A stored user handle: canonical base64url of 1 to 64 bytes (WebAuthn §5.4.3), the only form
+ * the factor writes, since the handle an assertion is held to is the bytes it decodes to.
+ */
+function readUserHandle(value: unknown, what: string): string {
+	const handle = isBase64url(value) ? Buffer.from(value, "base64url") : Buffer.alloc(0);
+	const canonical = handle.length > 0 && handle.toString("base64url") === value;
+	if (!canonical || handle.length > MAX_USER_HANDLE_BYTES) throw unreadable(what, "userHandle");
+	return value as string;
 }
 
 /** The factors among `factors` whose data reads, each with it. */
@@ -206,8 +215,7 @@ function readEnrollment(state: unknown): {
 	const what = "the pending enrollment";
 	const ceremony = readCeremony(state, what);
 	const { userHandle } = state as Readonly<Record<string, unknown>>;
-	if (!isBase64url(userHandle)) throw unreadable(what, "userHandle");
-	return { ...ceremony, userHandle };
+	return { ...ceremony, userHandle: readUserHandle(userHandle, what) };
 }
 
 const isText = (value: unknown): value is string => typeof value === "string" && value.length > 0;
