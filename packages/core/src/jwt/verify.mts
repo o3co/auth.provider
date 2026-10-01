@@ -26,7 +26,7 @@ import { auditErrorText } from "../errors/envelope.mjs";
 import { ExpiredKidError, type KeyStore, UnknownKidError } from "../keys/KeyStore.mjs";
 import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import type { Logger } from "../logging/Logger.mjs";
-import { isError, lineSafeText, thrownText } from "../logging/loggableError.mjs";
+import { lineSafeText, thrownText } from "../logging/loggableError.mjs";
 import type { SubjectRevocation } from "../user-sessions/types.mjs";
 
 /**
@@ -714,36 +714,39 @@ export async function verifyJwt(
 }
 
 function classifyJoseError(cause: unknown): JwtVerificationReason {
-	// jose raises Errors; anything else came from the key an adapter answered,
-	// and asking its prototype (`instanceof`) may throw.
-	if (!isError(cause)) return "signature";
-	if (cause instanceof joseErrors.JWTExpired) {
-		return "expired";
-	}
-	if (cause instanceof joseErrors.JOSEAlgNotAllowed) {
-		return "alg";
-	}
-	if (cause instanceof joseErrors.JWTClaimValidationFailed) {
-		switch (cause.claim) {
-			case "iss":
-				return "iss";
-			case "aud":
-				return "aud";
-			case "nbf":
-			case "iat":
-				return "not_yet_valid";
-			case "exp":
-				return "expired";
-			default:
-				// Unrecognized claim validation — fall through to generic
-				// signature reason rather than invent a new bucket.
-				return "signature";
+	// What jose throws may come from the key an adapter answered, and asking
+	// its prototype chain (`instanceof`) may throw.
+	try {
+		if (cause instanceof joseErrors.JWTExpired) {
+			return "expired";
 		}
-	}
-	if (cause instanceof joseErrors.JWSSignatureVerificationFailed) {
-		return "signature";
-	}
-	if (cause instanceof joseErrors.JWSInvalid || cause instanceof joseErrors.JWTInvalid) {
+		if (cause instanceof joseErrors.JOSEAlgNotAllowed) {
+			return "alg";
+		}
+		if (cause instanceof joseErrors.JWTClaimValidationFailed) {
+			switch (cause.claim) {
+				case "iss":
+					return "iss";
+				case "aud":
+					return "aud";
+				case "nbf":
+				case "iat":
+					return "not_yet_valid";
+				case "exp":
+					return "expired";
+				default:
+					// Unrecognized claim validation — fall through to generic
+					// signature reason rather than invent a new bucket.
+					return "signature";
+			}
+		}
+		if (cause instanceof joseErrors.JWSSignatureVerificationFailed) {
+			return "signature";
+		}
+		if (cause instanceof joseErrors.JWSInvalid || cause instanceof joseErrors.JWTInvalid) {
+			return "signature";
+		}
+	} catch {
 		return "signature";
 	}
 	return "signature";

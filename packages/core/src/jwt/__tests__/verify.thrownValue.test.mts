@@ -99,4 +99,22 @@ describe("verifyJwt — a thrown value it cannot inspect", () => {
 			reason: "signature",
 		});
 	});
+
+	it("refuses the token when what is thrown is an Error whose prototype chain holds such a Proxy", async () => {
+		const trap = new Proxy(
+			{},
+			{
+				getPrototypeOf() {
+					throw new Error("trap");
+				},
+			},
+		);
+		const thrown = Object.setPrototypeOf(new Error("x"), trap);
+		await expect(
+			verifyJwt(await mint(), keyStoreWhoseKeyThrows(thrown), options),
+		).rejects.toMatchObject({
+			name: "JwtVerificationError",
+			reason: "signature",
+		});
+	});
 });
