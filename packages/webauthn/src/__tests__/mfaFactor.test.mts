@@ -58,8 +58,9 @@ import { createTestWebAuthnConfig, webauthnMfaFactorDataForTests } from "#/testi
 const mockAttestation = vi.mocked(verifyWebAuthnAttestationWithBackupState);
 const mockAssertion = vi.mocked(verifyWebAuthnAssertionWithBackupState);
 
+// Resets, not clears: an answer one test queued and left unused is never served to the next.
 beforeEach(() => {
-	vi.clearAllMocks();
+	vi.resetAllMocks();
 });
 
 const RELYING_PARTY = createTestWebAuthnConfig({

@@ -16,9 +16,9 @@
 
 /**
  * A response's client data read with `@simplewebauthn/server`'s own decoder, base64url canonical
- * or not. The registration route reads the challenge it consumes here, and the registration
- * top-origin check the top origin, so each is read from the text the library verifies. Not
- * exported from the package barrel.
+ * or not. The registration route and the grant read the challenge they consume here, and the
+ * registration top-origin check the top origin, so each is read from the text the library
+ * verifies. Not exported from the package barrel.
  */
 
 import { decodeClientDataJSON } from "@simplewebauthn/server/helpers";
