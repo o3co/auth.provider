@@ -474,6 +474,11 @@ export interface SubjectRevocation {
 	 * that never calls the sessions-only variant behaves as one watermark did.
 	 * Keeping grants takes the deliberate call on
 	 * {@link SupportsSessionsOnlyRevocation}.
+	 *
+	 * A `RangeError`, nothing written, for a `before` that
+	 * `checkSubjectRevocationBoundary` refuses on the store's clock: one later
+	 * than it by more than `DEFAULT_CLOCK_SKEW_MS` would revoke sign-ins that
+	 * have not happened yet. One behind the store's clock is recorded.
 	 */
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
 	/** The sessions watermark, or `null` when this subject has none in force. */
@@ -499,7 +504,8 @@ export interface SupportsSessionsOnlyRevocation {
 	/**
 	 * Advance the sessions boundary alone, leaving the grants boundary exactly
 	 * as it was — including absent. It is never a way back: a grant an earlier
-	 * revocation ended stays ended.
+	 * revocation ended stays ended. Its `before` is checked as
+	 * {@link SubjectRevocation.revokeBefore}'s is.
 	 */
 	revokeSessionsBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
 	/** The grants watermark, or `null` when this subject has none in force. */

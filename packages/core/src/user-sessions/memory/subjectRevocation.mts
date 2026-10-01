@@ -15,6 +15,7 @@
  */
 
 import { SUBJECT_REVOCATION_MIN_RETENTION_MS } from "../retention.mjs";
+import { checkSubjectRevocationBoundary } from "../subjectRevocationBoundary.mjs";
 import type { SubjectRevocation, SupportsSessionsOnlyRevocation } from "../types.mjs";
 
 interface Watermark {
@@ -45,16 +46,21 @@ const instant = (value: Date, name: string): number => {
  * one killed. The fields take their maxima independently, so a sessions-only
  * stamp cannot drag the grants boundary forward, nor a late full revocation
  * drag the sessions boundary back.
+ *
+ * One clock, `now` (default the wall clock), judges a boundary
+ * (`checkSubjectRevocationBoundary`) and lets a record lapse.
  */
-export function createInMemorySubjectRevocation(): SubjectRevocation &
-	SupportsSessionsOnlyRevocation {
+export function createInMemorySubjectRevocation(
+	options: { readonly now?: () => number } = {},
+): SubjectRevocation & SupportsSessionsOnlyRevocation {
+	const clock = options.now ?? Date.now;
 	const entries = new Map<string, Watermark>();
 
 	/** The record as it stands, or nothing when it has lapsed. */
 	const live = (subject: string): Watermark | undefined => {
 		const entry = entries.get(subject);
 		if (entry === undefined) return undefined;
-		if (entry.expiresAtMs <= Date.now()) {
+		if (entry.expiresAtMs <= clock()) {
 			entries.delete(subject);
 			return undefined;
 		}
@@ -102,12 +108,13 @@ export function createInMemorySubjectRevocation(): SubjectRevocation &
 		kind: "memory",
 
 		async revokeBefore(subject, before, expiresAt) {
-			const beforeMs = instant(before, "before");
+			const beforeMs = checkSubjectRevocationBoundary(before, clock());
 			write(subject, beforeMs, beforeMs, instant(expiresAt, "expiresAt"));
 		},
 
 		async revokeSessionsBefore(subject, before, expiresAt) {
-			write(subject, instant(before, "before"), null, instant(expiresAt, "expiresAt"));
+			const beforeMs = checkSubjectRevocationBoundary(before, clock());
+			write(subject, beforeMs, null, instant(expiresAt, "expiresAt"));
 		},
 
 		async revokedBefore(subject) {

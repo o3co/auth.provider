@@ -37,7 +37,7 @@ const HORIZON_MS = 400 * 24 * 3_600_000;
 /** Everything the service needs, with nothing kept and no grants. */
 const deps = (over: Record<string, unknown> = {}) => ({
 	subjectSessionIndex: createInMemorySubjectSessionIndex(),
-	subjectRevocation: createInMemorySubjectRevocation(),
+	subjectRevocation: createInMemorySubjectRevocation({ now: () => now().getTime() }),
 	cascadeSession: async () => ({ ok: true }),
 	watermarkTtlMs: HORIZON_MS,
 	allowKeep: false,
@@ -47,7 +47,7 @@ const deps = (over: Record<string, unknown> = {}) => ({
 
 /** A subject revocation with the older, single-boundary surface and nothing more. */
 const sessionsOnlyUnaware = (): SubjectRevocation => {
-	const inner = createInMemorySubjectRevocation();
+	const inner = createInMemorySubjectRevocation({ now: () => now().getTime() });
 	return {
 		kind: "legacy",
 		revokeBefore: (subject, before, expiresAt) => inner.revokeBefore(subject, before, expiresAt),
@@ -112,7 +112,7 @@ describe("createSubjectRevocationService", () => {
 		it("ends the grants and stamps both boundaries", async () => {
 			const h = harness();
 			await h.seed();
-			const revocation = createInMemorySubjectRevocation();
+			const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 			const service = createSubjectRevocationService(
 				deps({ subjectRevocation: revocation, federationGrantStore: h.store }),
 			);
@@ -129,7 +129,7 @@ describe("createSubjectRevocationService", () => {
 		it("revokes anyway when keeping was asked for and policy forbids it", async () => {
 			const h = harness();
 			await h.seed();
-			const revocation = createInMemorySubjectRevocation();
+			const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 			const service = createSubjectRevocationService(
 				deps({ subjectRevocation: revocation, federationGrantStore: h.store }),
 			);
@@ -169,7 +169,7 @@ describe("createSubjectRevocationService", () => {
 		const keeping = (over: Record<string, unknown> = {}) => deps({ allowKeep: true, ...over });
 
 		it("stamps the sessions boundary and leaves the grants boundary alone", async () => {
-			const revocation = createInMemorySubjectRevocation();
+			const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 			const service = createSubjectRevocationService(keeping({ subjectRevocation: revocation }));
 
 			const result = await service.revokeAllForSubject({
@@ -190,7 +190,7 @@ describe("createSubjectRevocationService", () => {
 			// boundary only an adapter that supports keeping has.
 			const h = harness();
 			await h.seed();
-			const revocation = createInMemorySubjectRevocation();
+			const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 			vi.spyOn(revocation, "revokeSessionsBefore").mockRejectedValue(new Error("store is down"));
 			const service = createSubjectRevocationService(
 				keeping({ subjectRevocation: revocation, federationGrantStore: h.store }),
@@ -523,7 +523,7 @@ describe("createSubjectRevocationService", () => {
 		});
 
 		it("runs on the real clock when no clock is injected", async () => {
-			const revocation = createInMemorySubjectRevocation();
+			const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 			const { now: _injected, ...withoutClock } = keeping({ subjectRevocation: revocation });
 			const service = createSubjectRevocationService(
 				withoutClock as Parameters<typeof createSubjectRevocationService>[0],
@@ -551,7 +551,7 @@ describe("createSubjectRevocationService", () => {
 		});
 
 		it("cannot rescue a grant an earlier revocation already covered", async () => {
-			const revocation = createInMemorySubjectRevocation();
+			const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 			const before = new Date(now().getTime() - MIN);
 			await revocation.revokeBefore("u-1", before, new Date(now().getTime() + HORIZON_MS));
 			const service = createSubjectRevocationService(keeping({ subjectRevocation: revocation }));
@@ -563,7 +563,7 @@ describe("createSubjectRevocationService", () => {
 		});
 
 		it("refuses a consent instant that is not one, before it writes anything", async () => {
-			const revocation = createInMemorySubjectRevocation();
+			const revocation = createInMemorySubjectRevocation({ now: () => now().getTime() });
 			const service = createSubjectRevocationService(keeping({ subjectRevocation: revocation }));
 
 			await expect(
