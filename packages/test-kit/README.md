@@ -1,6 +1,6 @@
 # @o3co/auth-provider-test-kit
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 Contract suites for what code outside `@o3co/auth-provider-core` implements
 of auth.provider's ports, and the fakes they run against. Test code imports
@@ -219,11 +219,17 @@ verifies the factor it enrolled; and, for a factor that answers `identity`, a
 non-empty string for its enrolled data, the same at each reading, through a
 JSON round trip and for a verification's next data, and over data it cannot
 read a non-empty string or `undefined`, never one string for two such data
-unless it is the enrolled data's own, never a throw. The suite enrolls one
-authenticator alone, so it cannot tell an identity too coarse — a constant,
-or one two authenticators share — from a sound one: such an identity judges
-every second enrollment of the kind a duplicate, and the factor's own tests
-must show two authenticators answer two identities. A code and an address are looked for in the
+unless it is the enrolled data's own, never a throw. Given
+`secondEnrollmentProof` — the proof of possession of an authenticator other
+than the one `enrollmentProof` proves — the suite enrolls both through one
+factor and holds their data to two different identities, neither
+`undefined`: an identity too coarse — a constant, or one two authenticators
+share — judges every second enrollment of the kind a duplicate, and
+`undefined` is a duplicate of none, never a distinct authenticator. Without
+it the suite enrolls one authenticator alone and cannot tell, so the
+factor's own tests must show two authenticators answer two identities. An
+identity is a duplicate key, not an assurance signal: two identities do not
+show two devices, since one authenticator can hold two credentials. A code and an address are looked for in the
 strings an answer holds as a reader decodes them — object keys, map and set
 entries included — in any case, an address with its percent-escapes decoded
 too, never in its JSON text, so no escaping hides one. It enrolls at one instant and verifies an hour later,
@@ -241,6 +247,8 @@ describe("my factor keeps the MFA factor contract", () => {
     user: { id: "u-1", username: "alice", email: "alice@example.com" },
     enrollmentProof: (start, context) => proofOfPossession(start, context.nowMs),
     verificationProof: (enrolled, challenge, context) => proofFor(enrolled, challenge, context.nowMs),
+    // Optional, for a factor with `identity`: another authenticator's proof.
+    secondEnrollmentProof: (start, context) => otherAuthenticatorProof(start, context.nowMs),
   })) {
     it(contractCase.name, contractCase.run);
   }
@@ -345,7 +353,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject, or whose `authenticateByToken` answers no witness, answers it as text, resolves no token or answers another user, among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
 | [`factorStore.contract.test.mts`](src/mfa/__tests__/factorStore.contract.test.mts) | the factor store's suite over core's in-process store; each broken store — one that drops an undefined field, rewrites data, overwrites a duplicate, lets every writer win, changes a field an update does not carry, reaches another subject's record, removes every subject's records, writes the same id under another subject or the subject's other factors on a successful update, or answers an update at `Number.MAX_SAFE_INTEGER` with `null` rather than a `RangeError` — refused by the case that names what it breaks; every record id in the provider's shape; a harness built and closed per case |
 | [`credentialStore.contract.test.mts`](src/webauthn/__tests__/credentialStore.contract.test.mts) | the WebAuthn credential store's suite over core's in-process store; each broken store — one that lets a registration take a credential id another user holds, overwrites a held credential's record and then throws `duplicate-credential`, refuses a held id with another error, lists a credential under the user it refused, lets a user register a held id again over its record, checks for a held id and inserts in two steps, finds a credential with a sign count of 0, lists every credential whoever's, updates a sign count whatever the count it expects, leaves a removed credential, keeps the `lastUsedAt` it held, answers `true` to a sign count update of an id it does not hold, throws on or empties itself at a removal of an id it does not hold, keeps a removed credential in its user's list, removes every credential of the user, or drops a credential's transports, backup state or nickname — refused by the case that names what it breaks; a store that answers transports in another order accepted; a harness built and closed per case |
-| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges — refused by the case that names what it breaks |
+| [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges, an identity two authenticators share or one that answers none for the second — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 

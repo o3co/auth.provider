@@ -68,6 +68,8 @@ const RULES = {
 		"identity, when present, answers the enrolled data a non-empty string, the same at a second reading, through another JSON round trip, and for the next data a verification answers",
 	identityUnreadable:
 		"identity, when present, answers a non-empty string or undefined over data it cannot read, never one string for two of them unless it is the enrolled data's own, and never throws",
+	identityDistinct:
+		"identity, when present and given a second authenticator's enrollment proof, answers the enrolled data of the two authenticators two different non-empty strings: no identity is a duplicate of none, never a distinct authenticator",
 } as const;
 
 const USER = { id: "u-contract", username: "contract", email: "contract@example.com" };
@@ -101,6 +103,12 @@ const identityOf = (data: MfaFactorData): string | undefined => {
 
 /** The double, answering `identity` as {@link identityOf} does. */
 const identified = (factor: MfaFactor): MfaFactor => ({ ...factor, identity: identityOf });
+
+/** `input` given a second authenticator: each enrollment of the double makes a new secret. */
+const withSecond = (input: MfaFactorContractInput): MfaFactorContractInput => ({
+	...input,
+	secondEnrollmentProof: testMfaFactorProofs.enrollmentProof,
+});
 
 /** The names of the cases the factors `input` builds fail. */
 const failing = async (input: MfaFactorContractInput): Promise<string[]> => {
@@ -921,5 +929,43 @@ describe("mfaFactorContract", () => {
 			},
 		});
 		expect(await failing(inputFor({ mail: true }, careless))).toEqual([RULES.identityUnreadable]);
+	});
+
+	it("passes the double with an identity and a second authenticator, with and without a challenge, and one with no identity", async () => {
+		expect(await failing(withSecond(inputFor({}, identified)))).toEqual([]);
+		expect(await failing(withSecond(inputFor({ challenge: true }, identified)))).toEqual([]);
+		expect(await failing(withSecond(inputFor()))).toEqual([]);
+	});
+
+	it("fails an identity that answers one string for two authenticators", async () => {
+		const constant = (factor: MfaFactor): MfaFactor => ({ ...factor, identity: () => "one" });
+		expect(await failing(withSecond(inputFor({}, constant)))).toEqual([RULES.identityDistinct]);
+		// Without a second authenticator the suite cannot tell.
+		expect(await failing(inputFor({}, constant))).toEqual([]);
+	});
+
+	it("fails an identity that answers none for the second authenticator: none is no distinct authenticator", async () => {
+		const secondUnnamed = (factor: MfaFactor): MfaFactor => {
+			let completed = 0;
+			return {
+				...factor,
+				completeEnrollment: async (ctx) => {
+					const done = await factor.completeEnrollment(ctx);
+					if (!done.ok) return done;
+					completed += 1;
+					return completed === 2 ? { ...done, data: { ...done.data, unnamed: true } } : done;
+				},
+				identity: (data) => (data.unnamed === true ? undefined : identityOf(data)),
+			};
+		};
+		expect(await failing(withSecond(inputFor({}, secondUnnamed)))).toEqual([
+			RULES.identityDistinct,
+		]);
+	});
+
+	it("fails a second authenticator's proof that completes no enrollment", async () => {
+		expect(
+			await failing({ ...inputFor({}, identified), secondEnrollmentProof: () => "not-the-secret" }),
+		).toEqual([RULES.identityDistinct]);
 	});
 });

@@ -42,11 +42,15 @@
  * for its enrolled data, the same at each reading, through a JSON round trip
  * and for a verification's next data, and over data it cannot read a
  * non-empty string or `undefined`, never one string for two such data
- * unless it is the enrolled data's own, never a throw. The suite enrolls one
- * authenticator alone, so it cannot tell an identity too coarse — a
- * constant, or one two authenticators share — from a sound one: such an
- * identity judges every second enrollment of the kind a duplicate, and the
- * factor's own tests must show two authenticators answer two identities. The
+ * unless it is the enrolled data's own, never a throw. Given a second
+ * authenticator's enrollment proof, the suite enrolls both through one factor
+ * and holds their data to two different identities, neither `undefined`: an
+ * identity too coarse — a constant, or one two authenticators share — judges
+ * every second enrollment of the kind a duplicate, and `undefined` is a
+ * duplicate of none, never a distinct authenticator. Without that proof it
+ * enrolls one authenticator alone and cannot tell. An identity is a duplicate
+ * key, not an assurance signal: two identities do not show two devices, since
+ * one authenticator can hold two credentials. The
  * suite enrolls at one instant and verifies an hour later, so a factor that
  * refuses reuse within a time step is not asked to verify at the
  * step it enrolled. Every call is made for the account's `User.id` as its
@@ -87,6 +91,17 @@ export interface MfaFactorContractInput {
 	readonly user: Readonly<Record<string, unknown>>;
 	/** The proof of possession that completes the enrollment `start` began, as a request carries it. */
 	readonly enrollmentProof: (
+		start: MfaFactorEnrollmentStart,
+		context: MfaCeremonyContext,
+	) => unknown;
+	/**
+	 * The proof of possession of an authenticator other than the one
+	 * `enrollmentProof` proves, completing the enrollment `start` began. Given
+	 * it, a factor with `identity` must answer the two enrolled data two
+	 * different identities. Distinct identities name distinct records, not
+	 * distinct devices.
+	 */
+	readonly secondEnrollmentProof?: (
 		start: MfaFactorEnrollmentStart,
 		context: MfaCeremonyContext,
 	) => unknown;
@@ -468,14 +483,13 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			...(begun.sentTo === undefined ? {} : { addressDigest: begun.sentTo }),
 		});
 
-	/** The factor enrolled through its own ceremony, its data as the coordinator opens it. */
-	const enroll = async (factor: MfaFactor): Promise<MfaEnrolledFactor> => {
+	/** The factor enrolled through its own ceremony with `proofOf`'s proof, its data as the coordinator opens it. */
+	const enroll = async (
+		factor: MfaFactor,
+		proofOf: MfaFactorContractInput["enrollmentProof"] = input.enrollmentProof,
+	): Promise<MfaEnrolledFactor> => {
 		const begun = await begin(factor);
-		const done = await complete(
-			factor,
-			begun,
-			await input.enrollmentProof(begun.start, begun.context),
-		);
+		const done = await complete(factor, begun, await proofOf(begun.start, begun.context));
 		assert.ok(
 			done.ok,
 			`the proof of possession did not complete the enrollment: ${JSON.stringify(done)}`,
@@ -1039,6 +1053,27 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					);
 					answeredBy.set(answered, what);
 				}
+			},
+		},
+		{
+			name: "identity, when present and given a second authenticator's enrollment proof, answers the enrolled data of the two authenticators two different non-empty strings: no identity is a duplicate of none, never a distinct authenticator",
+			run: async () => {
+				const factor = input.build();
+				const { secondEnrollmentProof } = input;
+				if (factor.identity === undefined || secondEnrollmentProof === undefined) return;
+				const first = factor.identity((await enroll(factor)).data);
+				const second = factor.identity((await enroll(factor, secondEnrollmentProof)).data);
+				for (const identity of [first, second]) {
+					assert.ok(
+						typeof identity === "string" && identity.length > 0,
+						`identity answers ${JSON.stringify(identity)} for an authenticator's enrolled data: no identity is a duplicate of none, so it cannot count as a distinct authenticator`,
+					);
+				}
+				assert.notEqual(
+					first,
+					second,
+					"identity answers two authenticators' enrolled data one string: every second enrollment would be judged a duplicate",
+				);
 			},
 		},
 	];
