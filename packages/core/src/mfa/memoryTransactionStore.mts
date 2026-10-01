@@ -30,11 +30,12 @@
  * consumption at the next first binding removes it.
  *
  * A session's account-email proof, a subject's first-binding mark and a
- * subject's lease expire on this store's clock too, and are swept with the
- * transactions. A subject's generation is never swept.
+ * subject's lease and recovery authorizations expire on this store's clock
+ * too, and are swept with the transactions. A subject's generation is never
+ * swept.
  *
  * At most `maxEntries` entries are held: transactions, session email proofs,
- * first-binding marks and subject leases together. At the cap the store reclaims expired
+ * first-binding marks, subject leases and recovery authorizations together. At the cap the store reclaims expired
  * entries (no more often than the sweep floor) and, if still full, refuses a
  * new one with {@link MfaTransactionStoreFullError}, never evicting a live one
  * (that would end the ceremony of a user typing a code, send them to prove
@@ -47,6 +48,7 @@
 
 import { randomBytes } from "node:crypto";
 import { isStorableExpiry } from "../adapters/expiry.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import { usableMaxEntries } from "../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import {
@@ -59,6 +61,8 @@ import {
 	checkSubjectLeaseRelease,
 	checkSubjectLeaseRequest,
 	checkSubjectQuestion,
+	checkSubjectRecoveryApplication,
+	checkSubjectRecoveryAuthorization,
 	type FirstBindingMark,
 	firstBindingAnswer,
 	laterFirstBindingMark,
@@ -69,6 +73,9 @@ import {
 	type MfaSubjectAttemptReservation,
 	type MfaSubjectHold,
 	type MfaSubjectLeaseAnswer,
+	type MfaSubjectRecoveryAnswer,
+	type MfaSubjectRecoveryOperation,
+	type MfaSubjectRecoveryRefusal,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
@@ -100,7 +107,8 @@ export interface MemoryMfaTransactionStoreOptions extends AmortizedSweepOptions 
 	readonly now?: () => number;
 	/**
 	 * The most entries held — transactions, session email proofs,
-	 * first-binding marks and subject leases, expired-but-unswept included; default
+	 * first-binding marks, subject leases and recovery authorizations,
+	 * expired-but-unswept included; default
 	 * {@link DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES}. Anything but a
 	 * positive whole number up to 2^24 (a `Map`'s limit) is a `RangeError`,
 	 * never read as no cap.
@@ -119,7 +127,7 @@ export class MfaTransactionStoreFullError extends Error {
 
 	constructor(maxEntries: number) {
 		super(
-			`memory MfaTransactionStore is at its cap of ${maxEntries} resident entries — transactions, session email proofs, first-binding marks and subject leases, expired ones not yet swept included; refusing a new one rather than evicting one`,
+			`memory MfaTransactionStore is at its cap of ${maxEntries} resident entries — transactions, session email proofs, first-binding marks, subject leases and recovery authorizations, expired ones not yet swept included; refusing a new one rather than evicting one`,
 		);
 		this.name = "MfaTransactionStoreFullError";
 	}
@@ -137,7 +145,7 @@ export interface MemoryMfaTransactionStore extends MfaTransactionStore {
 	readonly firstBindingMarks: number;
 	/** Subject leases resident, expired-but-unswept included. */
 	readonly subjectLeases: number;
-	/** The most entries it holds (`maxEntries`), transactions, proofs, marks and leases together; at it, a new one is refused. */
+	/** The most entries it holds (`maxEntries`), transactions, proofs, marks, leases and authorizations together; at it, a new one is refused. */
 	readonly maxEntries: number;
 }
 
@@ -170,6 +178,17 @@ interface SubjectLease {
 	readonly token: string;
 	readonly untilMs: number;
 }
+
+/** A recovery authorization, pending or applied (at the generation `appliedAt`). */
+interface RecoverySlot {
+	readonly recoveryId: string;
+	readonly expiresAtMs: number;
+	readonly appliedAt?: number;
+}
+
+/** Where an authorization is kept for its subject: the operation and the `sid` as one unambiguous key. */
+const slotKeyOf = (operation: MfaSubjectRecoveryOperation, sid: string | undefined): string =>
+	JSON.stringify([operation, sid ?? null]);
 
 /** Where a session's proof is kept: the subject and the `sid` as one unambiguous key. */
 const proofKeyOf = (subject: string, sid: string): string => JSON.stringify([subject, sid]);
@@ -263,6 +282,10 @@ export function createMemoryMfaTransactionStore(
 	const leases = new Map<string, SubjectLease>();
 	/** Each subject's generation, once a recovery moved it: never swept. */
 	const generations = new Map<string, number>();
+	/** Each subject's recovery authorizations, by `slotKeyOf`. */
+	const recoveries = new Map<string, Map<string, RecoverySlot>>();
+	/** The authorizations held across subjects, for the cap. */
+	let slotCount = 0;
 	/** Subjects whose next first binding requires the email proof: no expiry, never swept. */
 	const emailProofRequired = new Set<string>();
 	/** The order of the next reservation. */
@@ -312,6 +335,11 @@ export function createMemoryMfaTransactionStore(
 		for (const [subject, lease] of leases) {
 			if (lease.untilMs <= storeNowMs) leases.delete(subject);
 		}
+		for (const [subject, slots] of recoveries) {
+			for (const [key, slot] of slots) {
+				if (slot.expiresAtMs <= storeNowMs) dropSlot(subject, slots, key);
+			}
+		}
 		if (latestCallerMs === undefined) return;
 		for (const [subject, state] of subjects) {
 			prune(state, latestCallerMs);
@@ -355,7 +383,45 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	/** At the cap: reclaims expired entries, then refuses if still full. */
-	const resident = (): number => transactions.size + proofs.size + marks.size + leases.size;
+	const resident = (): number =>
+		transactions.size + proofs.size + marks.size + leases.size + slotCount;
+
+	function dropSlot(subject: string, slots: Map<string, RecoverySlot>, key: string): void {
+		if (slots.delete(key)) slotCount -= 1;
+		if (slots.size === 0) recoveries.delete(subject);
+	}
+
+	/**
+	 * A `recover` of `state` at `nowMs`, past its authorization: what it ends,
+	 * or the refusal. The week's earliest failure it still counts must come
+	 * before the sessions boundary by more than the skew. While the hard hold
+	 * stands, the run it counted stays.
+	 */
+	function recover(
+		state: SubjectState | undefined,
+		nowMs: number,
+		sessionsBoundaryMs: number | undefined,
+	):
+		| { readonly week: boolean; readonly run: boolean; readonly hard: boolean }
+		| "not_revoked_since" {
+		// What this recovery would give back: the week's failures up to its time.
+		const counted =
+			state === undefined ? [] : inWeek(state.week, nowMs).filter((a) => a.atMs <= nowMs);
+		const earliest = Math.min(...counted.map((a) => a.atMs));
+		const revokedSince =
+			counted.length === 0 ||
+			(sessionsBoundaryMs !== undefined && sessionsBoundaryMs > earliest + DEFAULT_CLOCK_SKEW_MS);
+		if (!revokedSince) return "not_revoked_since";
+		if (state === undefined) return { week: true, run: true, hard: false };
+		state.week = state.week.filter((a) => a.atMs > nowMs);
+		const run = state.hard === undefined;
+		if (run) {
+			state.run = state.run.filter((a) => a.atMs > nowMs);
+			state.refusing = false;
+		}
+		prune(state, nowMs);
+		return { week: true, run, hard: false };
+	}
 
 	function makeRoom(nowMs: number): void {
 		if (resident() < maxEntries) return;
@@ -655,6 +721,72 @@ export function createMemoryMfaTransactionStore(
 			leases.set(subject, { token, untilMs: nowMs + ttlMs });
 			if (schedule.wrote()) sweep(nowMs);
 			return { outcome: "acquired", token };
+		},
+
+		async authorizeSubjectRecovery(subject, authorization): Promise<void> {
+			const nowMs = clock();
+			const checked = checkSubjectRecoveryAuthorization(subject, authorization, nowMs);
+			const key = slotKeyOf(checked.operation, checked.sid);
+			if (recoveries.get(subject)?.has(key) !== true) makeRoom(nowMs);
+			let slots = recoveries.get(subject);
+			if (slots === undefined) {
+				slots = new Map();
+				recoveries.set(subject, slots);
+			}
+			if (!slots.has(key)) slotCount += 1;
+			slots.set(key, { recoveryId: checked.recoveryId, expiresAtMs: checked.expiresAtMs });
+			if (schedule.wrote()) sweep(nowMs);
+		},
+
+		async applySubjectRecovery(subject, application): Promise<MfaSubjectRecoveryAnswer> {
+			const { operation, sid, nowMs, leaseToken, sessionsBoundaryMs } =
+				checkSubjectRecoveryApplication(subject, application);
+			sawCallerTime(nowMs);
+			const storeNowMs = clock();
+			const hard = (): boolean => subjects.get(subject)?.hard !== undefined;
+			const refused = (reason: MfaSubjectRecoveryRefusal): MfaSubjectRecoveryAnswer => ({
+				outcome: "refused",
+				reason,
+				hard: hard(),
+			});
+			const lease = leases.get(subject);
+			if (lease === undefined || lease.untilMs <= storeNowMs || lease.token !== leaseToken) {
+				return refused("lease_not_held");
+			}
+			const slots = recoveries.get(subject);
+			const key = slotKeyOf(operation, sid);
+			const slot = slots?.get(key);
+			if (slots === undefined || slot === undefined) return refused("unauthorized");
+			if (slot.expiresAtMs <= storeNowMs) {
+				dropSlot(subject, slots, key);
+				return refused("unauthorized");
+			}
+			if (slot.appliedAt !== undefined) {
+				return {
+					outcome: "already_applied",
+					recoveryId: slot.recoveryId,
+					generation: slot.appliedAt,
+					hard: hard(),
+				};
+			}
+			if (slot.expiresAtMs <= nowMs) return refused("expired");
+			if (sessionsBoundaryMs !== undefined && sessionsBoundaryMs > nowMs + DEFAULT_CLOCK_SKEW_MS) {
+				return refused("boundary_ahead");
+			}
+			const state = subjects.get(subject);
+			const cleared = recover(state, nowMs, sessionsBoundaryMs);
+			if (cleared === "not_revoked_since") return refused(cleared);
+			if (state !== undefined) settleEmpty(subject, state);
+			const generation = (generations.get(subject) ?? 0) + 1;
+			generations.set(subject, generation);
+			slots.set(key, { ...slot, appliedAt: generation });
+			return {
+				outcome: "applied",
+				recoveryId: slot.recoveryId,
+				generation,
+				cleared,
+				hard: hard(),
+			};
 		},
 
 		async releaseSubjectLease(subject: string, token: string): Promise<boolean> {

@@ -427,6 +427,137 @@ keep()
 return 1
 `;
 
+// A subject's recovery hash, under the subject's hash tag: `g`, its generation, and one field per
+// authorization, `a:<operation>:<sid>` → `p|<expiresAtMs>|<recoveryId>` while pending, or
+// `a|<generation>|<expiresAtMs>|<recoveryId>` once applied. An authorization ends on the
+// server's clock. The hash has no TTL while it holds a generation; before that it expires the
+// skew allowance after its latest authorization ends.
+
+const LUA_MFA_RECOVERY_PRELUDE = `
+local function slot_of(value)
+  local ends, id = string.match(value, '^p|(%d+)|(.+)$')
+  if ends ~= nil then return {ends = num(ends), id = id} end
+  local gen, applied_ends, applied_id = string.match(value, '^a|(%d+)|(%d+)|(.+)$')
+  if gen == nil then corrupt() end
+  return {applied = gen, ends = num(applied_ends), id = applied_id}
+end
+
+local function recovery_keep(key, allowance)
+  local latest = nil
+  local flat = redis.call('HGETALL', key)
+  for i = 1, #flat, 2 do
+    local field = flat[i]
+    if field == 'g' then
+      redis.call('PERSIST', key)
+      return
+    end
+    if string.sub(field, 1, 2) == 'a:' then
+      local ends = slot_of(flat[i + 1]).ends
+      if latest == nil or ends > latest then latest = ends end
+    end
+  end
+  if latest == nil then
+    redis.call('DEL', key)
+    return
+  end
+  redis.call('PEXPIREAT', key, string.format('%.0f', latest + allowance))
+end
+`;
+
+/**
+ * `MfaTransactionStoreClient.authorizeSubjectRecovery`. `KEYS[1]` = the recovery hash;
+ * `ARGV[1]` = the authorization's field, `ARGV[2]` = its recoveryId, `ARGV[3]` = its end,
+ * `ARGV[4]` = how far ahead of the server's clock an end may lie, `ARGV[5]` = the skew
+ * allowance. Refuses, writing nothing, an end not after the server's clock or further ahead
+ * than `ARGV[4]`: `{0, now}`. Otherwise drops the authorizations ended on that clock, writes
+ * this one pending over whatever its field held, and answers `{1, now}`.
+ */
+const LUA_MFA_SUBJECT_RECOVERY_AUTHORIZE = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
+local now = server_ms()
+local stamp = string.format('%.0f', now)
+local ends = tonumber(ARGV[3])
+if not (ends > now) or ends > now + tonumber(ARGV[4]) then return {0, stamp} end
+local flat = redis.call('HGETALL', KEYS[1])
+for i = 1, #flat, 2 do
+  if string.sub(flat[i], 1, 2) == 'a:' and slot_of(flat[i + 1]).ends <= now then
+    redis.call('HDEL', KEYS[1], flat[i])
+  end
+end
+redis.call('HSET', KEYS[1], ARGV[1], 'p|' .. ARGV[3] .. '|' .. ARGV[2])
+recovery_keep(KEYS[1], tonumber(ARGV[5]))
+return {1, stamp}
+`;
+
+/**
+ * `MfaTransactionStoreClient.applySubjectRecovery`. `KEYS`: the lock hash, the week, the
+ * recovery hash, the lease. `ARGV`: the operation, the authorization's field, now, the lease
+ * token, the sessions boundary or empty, the earliest guessable record's time or empty, the
+ * clock skew (`DEFAULT_CLOCK_SKEW_MS`), the skew allowance. Refuses, in the port's order, with
+ * `{'refused', reason, hard}`; answers `{'already', recoveryId, generation, hard}` for an
+ * authorization applied, and `{'applied', recoveryId, generation, week, run, liftedHard, hard}`
+ * once it applies, each flag `1` or `0`, `hard` read after the apply.
+ */
+const LUA_MFA_SUBJECT_RECOVERY_APPLY = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
+local field, token = ARGV[2], ARGV[4]
+local now, skew, allowance = tonumber(ARGV[3]), tonumber(ARGV[7]), tonumber(ARGV[8])
+local function hard_flag()
+  if redis.call('HEXISTS', KEYS[1], 'hard') == 1 then return '1' end
+  return '0'
+end
+local function refused(reason) return {'refused', reason, hard_flag()} end
+
+if redis.call('GET', KEYS[4]) ~= token then return refused('lease_not_held') end
+local held = redis.call('HGET', KEYS[3], field)
+if not held then return refused('unauthorized') end
+local slot = slot_of(held)
+if slot.ends <= server_ms() then
+  redis.call('HDEL', KEYS[3], field)
+  recovery_keep(KEYS[3], allowance)
+  return refused('unauthorized')
+end
+if slot.applied ~= nil then return {'already', slot.id, slot.applied, hard_flag()} end
+if slot.ends <= now then return refused('expired') end
+
+local boundary = nil
+if ARGV[5] ~= '' then boundary = tonumber(ARGV[5]) end
+if boundary ~= nil and boundary > now + skew then return refused('boundary_ahead') end
+local run, pending, week, held_hard = load()
+
+-- The earliest failure the week counts up to now must come before the boundary by more than the skew.
+local earliest = nil
+for _, a in ipairs(week) do
+  if a.at <= now and a.at + WEEK > now and (earliest == nil or a.at < earliest) then earliest = a.at end
+end
+if not (earliest == nil or (boundary ~= nil and boundary > earliest + skew)) then
+  return refused('not_revoked_since')
+end
+
+-- The attempts up to now end: the week's, and the run's unless the hard hold keeps it.
+local kept = {}
+for _, a in ipairs(week) do
+  if a.at <= now then redis.call('ZREM', KEYS[2], a.id) else kept[a.id] = true end
+end
+local ended_run = '0'
+if held_hard == nil then
+  for _, a in ipairs(run) do
+    if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) else kept[a.id] = true end
+  end
+  redis.call('HDEL', KEYS[1], 'held')
+  ended_run = '1'
+else
+  for _, a in ipairs(run) do kept[a.id] = true end
+end
+for id in pairs(pending) do
+  if not kept[id] then redis.call('HDEL', KEYS[1], 'p:' .. id) end
+end
+keep()
+
+local gen = string.format('%.0f', redis.call('HINCRBY', KEYS[3], 'g', 1))
+redis.call('HSET', KEYS[3], field, 'a|' .. gen .. '|' .. string.format('%.0f', slot.ends) .. '|' .. slot.id)
+recovery_keep(KEYS[3], allowance)
+return {'applied', slot.id, gen, '1', ended_run, '0', hard_flag()}
+`;
+
 // A subject's first-binding mark is judged on one clock, the server's (`TIME`): its end, which
 // mark a note keeps, and the key's deadline. A replica's clock decides none of them.
 
@@ -523,3 +654,5 @@ export const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);
 export const MFA_FIRST_BINDING_NOTE = defineScript(LUA_MFA_FIRST_BINDING_NOTE);
 export const MFA_FIRST_BINDING_READ = defineScript(LUA_MFA_FIRST_BINDING_READ);
 export const MFA_SUBJECT_LEASE_ACQUIRE = defineScript(LUA_MFA_SUBJECT_LEASE_ACQUIRE);
+export const MFA_SUBJECT_RECOVERY_AUTHORIZE = defineScript(LUA_MFA_SUBJECT_RECOVERY_AUTHORIZE);
+export const MFA_SUBJECT_RECOVERY_APPLY = defineScript(LUA_MFA_SUBJECT_RECOVERY_APPLY);

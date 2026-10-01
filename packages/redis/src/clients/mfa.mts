@@ -24,6 +24,8 @@ import type {
 	MfaLockoutPolicy,
 	MfaSubjectAttemptOutcome,
 	MfaSubjectHold,
+	MfaSubjectRecoveryAnswer,
+	MfaSubjectRecoveryOperation,
 } from "@o3co/auth-provider-core";
 
 // --- MfaFactorStoreClient --------------------------------------------------
@@ -130,7 +132,11 @@ export interface MfaSubjectKeys {
 	readonly lock: string;
 	/** ZSET: the attempts the rolling week counts, each scored by its time. */
 	readonly week: string;
-	/** HASH: `g`, the subject's generation, as decimal text; absent is `0`. */
+	/**
+	 * HASH: `g`, the subject's generation, as decimal text (absent is `0`);
+	 * `a:<operation>:<sid>` → `p|<expiresAtMs>|<recoveryId>` for each
+	 * authorization pending, `a|<generation>|<expiresAtMs>|<recoveryId>` once applied.
+	 */
 	readonly recovery: string;
 	/** STRING: the lease holder's token, expiring at the lease's end on the server's clock. */
 	readonly lease: string;
@@ -142,6 +148,36 @@ export interface AcquireMfaSubjectLeaseInput {
 	readonly ttlMs: number;
 	/** The generation the writer captured; absent, none is compared. */
 	readonly generation: number | undefined;
+}
+
+export interface AuthorizeMfaSubjectRecoveryInput {
+	/** The recovery hash's field for the authorization's operation and sid. */
+	readonly field: string;
+	readonly recoveryId: string;
+	readonly expiresAtMs: number;
+	/** How far ahead of the server's clock its end may lie. */
+	readonly maxAheadMs: number;
+	/** How long past its latest authorization's end a hash with no generation stays (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). */
+	readonly allowanceMs: number;
+}
+
+/** What an authorize answers: written, or refused on the server's clock, which it names. */
+export type AuthorizeMfaSubjectRecoveryReply =
+	| { readonly authorized: true }
+	| { readonly authorized: false; readonly serverNowMs: number };
+
+export interface ApplyMfaSubjectRecoveryInput {
+	readonly operation: MfaSubjectRecoveryOperation;
+	/** The recovery hash's field for the operation and sid. */
+	readonly field: string;
+	readonly nowMs: number;
+	readonly leaseToken: string;
+	readonly sessionsBoundaryMs: number | undefined;
+	readonly guessableBoundSinceMs: number | undefined;
+	/** `DEFAULT_CLOCK_SKEW_MS`. */
+	readonly skewMs: number;
+	/** `MFA_CLOCK_SKEW_ALLOWANCE_MS`. */
+	readonly allowanceMs: number;
 }
 
 /** What an acquire answers, as the port's `acquireSubjectLease` but for the token, which the caller made. */
@@ -310,6 +346,20 @@ export interface MfaTransactionStoreClient {
 	): Promise<AcquireMfaSubjectLeaseReply>;
 	/** Atomically: delete the lease while it holds `token`; resolves whether it did. */
 	releaseSubjectLease(keys: MfaSubjectKeys, token: string): Promise<boolean>;
+	/**
+	 * Atomically, on the server's clock: refuse an authorization whose end is not after it or
+	 * lies further ahead than `input.maxAheadMs`, writing nothing; otherwise drop the
+	 * authorizations ended on it and write this one, pending, over whatever its field held.
+	 */
+	authorizeSubjectRecovery(
+		keys: MfaSubjectKeys,
+		input: AuthorizeMfaSubjectRecoveryInput,
+	): Promise<AuthorizeMfaSubjectRecoveryReply>;
+	/** The port's `applySubjectRecovery`, one script over the four keys; a reply it does not know rejects. */
+	applySubjectRecovery(
+		keys: MfaSubjectKeys,
+		input: ApplyMfaSubjectRecoveryInput,
+	): Promise<MfaSubjectRecoveryAnswer>;
 	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }

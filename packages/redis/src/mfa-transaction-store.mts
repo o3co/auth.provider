@@ -88,6 +88,8 @@ import {
 	checkSubjectLeaseRelease,
 	checkSubjectLeaseRequest,
 	checkSubjectQuestion,
+	checkSubjectRecoveryApplication,
+	checkSubjectRecoveryAuthorization,
 	consoleLogger,
 	DEFAULT_CLOCK_SKEW_MS,
 	defineModule,
@@ -95,6 +97,8 @@ import {
 	firstBindingAnswer,
 	isStorableExpiry,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
+	type MfaSubjectRecoveryOperation,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
@@ -293,6 +297,10 @@ function firstBindingMarkOf(text: string | null, subject: string): FirstBindingM
 	}
 	return { atMs: atMs as number, untilMs: untilMs as number };
 }
+
+/** An authorization's field in the recovery hash: its operation and its sid (`-` for none). */
+const recoveryField = (operation: MfaSubjectRecoveryOperation, sid: string | undefined): string =>
+	`a:${operation}:${sid === undefined ? "-" : mfaKeyPart(sid)}`;
 
 /** A subject's generation as the recovery hash keeps it: absent is 0; anything but decimal text of a safe whole number is an outage. */
 function generationOf(text: string | null): number {
@@ -512,6 +520,37 @@ export function createRedisMfaTransactionStore(
 		async releaseSubjectLease(subject, token) {
 			checkSubjectLeaseRelease(subject, token);
 			return client.releaseSubjectLease(subjectKeys(subject), token);
+		},
+
+		async authorizeSubjectRecovery(subject, authorization) {
+			// The shape here; the clock's bounds in the script, on the server's clock.
+			const checked = checkSubjectRecoveryAuthorization(subject, authorization);
+			const reply = await client.authorizeSubjectRecovery(subjectKeys(subject), {
+				field: recoveryField(checked.operation, checked.sid),
+				recoveryId: checked.recoveryId,
+				expiresAtMs: checked.expiresAtMs,
+				maxAheadMs: MFA_RECOVERY_AUTHORIZATION_MAX_MS + DEFAULT_CLOCK_SKEW_MS,
+				allowanceMs: MFA_CLOCK_SKEW_ALLOWANCE_MS,
+			});
+			if (reply.authorized) return;
+			checkSubjectRecoveryAuthorization(subject, authorization, reply.serverNowMs);
+			throw new RangeError(
+				"MfaTransactionStore.authorizeSubjectRecovery: the authorization does not stand on the store's clock",
+			);
+		},
+
+		async applySubjectRecovery(subject, application) {
+			const checked = checkSubjectRecoveryApplication(subject, application);
+			return client.applySubjectRecovery(subjectKeys(subject), {
+				operation: checked.operation,
+				field: recoveryField(checked.operation, checked.sid),
+				nowMs: checked.nowMs,
+				leaseToken: checked.leaseToken,
+				sessionsBoundaryMs: checked.sessionsBoundaryMs,
+				guessableBoundSinceMs: checked.guessableBoundSinceMs,
+				skewMs: DEFAULT_CLOCK_SKEW_MS,
+				allowanceMs: MFA_CLOCK_SKEW_ALLOWANCE_MS,
+			});
 		},
 	};
 }

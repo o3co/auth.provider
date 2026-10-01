@@ -1841,8 +1841,9 @@ export function runMfaTransactionStoreContract(
 				const later = await reserved(store, now + MINUTE);
 				expect(await recover(store, now)).toEqual(RELEASED);
 				await store.settleSubjectAttempt("user-1", later, "failure");
-				// The later one and nine more: the week is full.
-				const at = await failures(store, now + 2 * MINUTE, 9);
+				// A success ends the run, not the week: the later one and nine more fill it.
+				await settled(store, now + 2 * MINUTE, "success");
+				const at = await failures(store, now + 3 * MINUTE, 9);
 				expect(held(await check(store, at))).toMatchObject({ hold: "weekly" });
 			});
 

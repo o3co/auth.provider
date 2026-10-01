@@ -113,7 +113,7 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		expect(refusal).not.toBeInstanceOf(RangeError);
 		expect(refusal).toMatchObject({ name: "MfaTransactionStoreFullError", reason: "full" });
 		expect((refusal as Error).message).toBe(
-			"memory MfaTransactionStore is at its cap of 2 resident entries — transactions, session email proofs, first-binding marks and subject leases, expired ones not yet swept included; refusing a new one rather than evicting one",
+			"memory MfaTransactionStore is at its cap of 2 resident entries — transactions, session email proofs, first-binding marks, subject leases and recovery authorizations, expired ones not yet swept included; refusing a new one rather than evicting one",
 		);
 
 		expect(store.transactions).toBe(2);

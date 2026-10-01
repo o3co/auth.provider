@@ -917,6 +917,251 @@ export function readMfaSubjectCount(answer: unknown): number | undefined {
 	return isCount(answer) ? answer : undefined;
 }
 
+/** The two authorized recoveries: `recover`, the subject's own after an exempt proof; `reset`, the operator's. */
+export type MfaSubjectRecoveryOperation = "recover" | "reset";
+
+/** The furthest an authorization may end ahead of the store's clock: the most `mfa.manage.maxAgeSeconds` allows. */
+export const MFA_RECOVERY_AUTHORIZATION_MAX_MS = 3_600_000;
+
+/**
+ * A one-time authorization to apply one recovery to one subject: `recover`,
+ * minted when an exempt proof verified in the `UserSession` `sid`; `reset`,
+ * by the operator reset, with no `sid`. `recoveryId` is a fresh CSPRNG value.
+ */
+export interface MfaSubjectRecoveryAuthorization {
+	readonly operation: MfaSubjectRecoveryOperation;
+	/** `recover`: the session the proof was given in; `reset`: `undefined`. */
+	readonly sid: string | undefined;
+	readonly recoveryId: string;
+	/** After the store's clock, and no further ahead of it than {@link MFA_RECOVERY_AUTHORIZATION_MAX_MS} plus `DEFAULT_CLOCK_SKEW_MS`. */
+	readonly expiresAtMs: number;
+}
+
+/** What `applySubjectRecovery` is asked to apply. */
+export interface MfaSubjectRecoveryApplication {
+	readonly operation: MfaSubjectRecoveryOperation;
+	readonly sid: string | undefined;
+	/** The caller's time, which the lock state is judged on. */
+	readonly nowMs: number;
+	/** The subject's lease the caller holds: the generation moves only under it. */
+	readonly leaseToken: string;
+	/** `recover`: the subject's sessions boundary (`revokedBefore`), `undefined` when there is none. `reset`: `undefined`. */
+	readonly sessionsBoundaryMs: number | undefined;
+	/**
+	 * `recover`: the earliest `createdAt` of the subject's records of an
+	 * installed guessable kind, unreadable ones included, `undefined` when
+	 * none remains; records of a kind not installed are left out. `reset`:
+	 * `undefined`.
+	 */
+	readonly guessableBoundSinceMs: number | undefined;
+}
+
+/** Why an apply changed nothing. */
+export type MfaSubjectRecoveryRefusal =
+	| "unauthorized"
+	| "expired"
+	| "not_revoked_since"
+	| "boundary_ahead"
+	| "lease_not_held";
+
+/**
+ * What `applySubjectRecovery` answers. `hard` is whether the hard hold
+ * stands after the call, read in the same step, on every outcome: an answer
+ * never reads as released while it stands.
+ */
+export type MfaSubjectRecoveryAnswer =
+	| {
+			readonly outcome: "applied";
+			readonly recoveryId: string;
+			/** The subject's generation this apply moved it to. */
+			readonly generation: number;
+			/** What this apply ended: the week's failures, the run's (and its backoff), the hard hold. */
+			readonly cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean };
+			readonly hard: boolean;
+	  }
+	| {
+			readonly outcome: "already_applied";
+			readonly recoveryId: string;
+			/** The generation it was applied at. */
+			readonly generation: number;
+			readonly hard: boolean;
+	  }
+	| {
+			readonly outcome: "refused";
+			readonly reason: MfaSubjectRecoveryRefusal;
+			readonly hard: boolean;
+	  };
+
+const RECOVERY_REFUSALS: ReadonlySet<unknown> = new Set<MfaSubjectRecoveryRefusal>([
+	"unauthorized",
+	"expired",
+	"not_revoked_since",
+	"boundary_ahead",
+	"lease_not_held",
+]);
+
+const isWellFormedText = (value: unknown): value is string =>
+	isSubject(value) && value.isWellFormed();
+
+/** Whole epoch milliseconds within the Date range. */
+const isRecoveryInstant = (value: unknown): value is number =>
+	isEpochMs(value) && isStorableExpiry(value);
+
+/** The `sid` an operation takes: a well-formed string for `recover`, none for `reset`. */
+function recoverySid(
+	operation: unknown,
+	sid: unknown,
+	refuse: (what: string) => never,
+): string | undefined {
+	if (operation === "recover") {
+		return isWellFormedText(sid)
+			? sid
+			: refuse("a recover's sid must be a non-empty, well-formed string");
+	}
+	if (operation === "reset") return sid === undefined ? undefined : refuse("a reset has no sid");
+	return refuse("operation must be recover or reset");
+}
+
+/**
+ * The authorization {@link MfaTransactionStore.authorizeSubjectRecovery}
+ * records, its fields read once, or a `RangeError` naming what is wrong:
+ * `subject` a non-empty string; `operation` and `sid` as
+ * {@link MfaSubjectRecoveryAuthorization} says; `recoveryId` a non-empty,
+ * well-formed string; `expiresAtMs` whole epoch milliseconds within the Date
+ * range. On `storeNowMs`, the store's clock, when it is given: `expiresAtMs`
+ * after it, and no further ahead than {@link MFA_RECOVERY_AUTHORIZATION_MAX_MS}
+ * plus `DEFAULT_CLOCK_SKEW_MS`. An adapter whose store judges the clock in a
+ * script runs the shape first and the rest on the clock that script answers.
+ */
+export function checkSubjectRecoveryAuthorization(
+	subject: unknown,
+	authorization: unknown,
+	storeNowMs?: number,
+): MfaSubjectRecoveryAuthorization {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.authorizeSubjectRecovery: ${what}`);
+	};
+	if (!isSubject(subject)) refuse("subject must be a non-empty string");
+	if (!isRecord(authorization)) return refuse("the authorization must be an object");
+	const { operation, sid, recoveryId, expiresAtMs } = authorization;
+	const checkedSid = recoverySid(operation, sid, refuse);
+	if (!isWellFormedText(recoveryId)) refuse("recoveryId must be a non-empty, well-formed string");
+	if (!isRecoveryInstant(expiresAtMs)) {
+		refuse("expiresAtMs must be whole epoch milliseconds within the Date range");
+	}
+	const ends = expiresAtMs as number;
+	if (storeNowMs !== undefined) {
+		if (!(ends > storeNowMs)) refuse("expiresAtMs must be after the store's clock");
+		if (!(ends <= storeNowMs + MFA_RECOVERY_AUTHORIZATION_MAX_MS + DEFAULT_CLOCK_SKEW_MS)) {
+			refuse(
+				"expiresAtMs must be no further ahead of the store's clock than MFA_RECOVERY_AUTHORIZATION_MAX_MS and DEFAULT_CLOCK_SKEW_MS",
+			);
+		}
+	}
+	return {
+		operation: operation as MfaSubjectRecoveryOperation,
+		sid: checkedSid,
+		recoveryId: recoveryId as string,
+		expiresAtMs: ends,
+	};
+}
+
+/**
+ * The application {@link MfaTransactionStore.applySubjectRecovery} acts on,
+ * its fields read once, or a `RangeError` naming what is wrong: `subject` a
+ * non-empty string; `operation` and `sid` as for an authorization; `nowMs` an
+ * instant from the epoch within the Date range; `leaseToken` a non-empty
+ * string; for `recover`, `sessionsBoundaryMs` and `guessableBoundSinceMs`
+ * each `undefined` or whole epoch milliseconds within the Date range, and for
+ * `reset` both `undefined`. Every adapter calls it first.
+ */
+export function checkSubjectRecoveryApplication(
+	subject: unknown,
+	application: unknown,
+): MfaSubjectRecoveryApplication {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.applySubjectRecovery: ${what}`);
+	};
+	if (!isSubject(subject)) refuse("subject must be a non-empty string");
+	if (!isRecord(application)) return refuse("the application must be an object");
+	const { operation, sid, nowMs, leaseToken, sessionsBoundaryMs, guessableBoundSinceMs } =
+		application;
+	const checkedSid = recoverySid(operation, sid, refuse);
+	if (typeof nowMs !== "number" || !isStorableExpiry(nowMs) || nowMs < 0) {
+		refuse("nowMs must be an instant from the epoch within the Date range");
+	}
+	if (!isSubject(leaseToken)) refuse("leaseToken must be a non-empty string");
+	for (const [name, value] of [
+		["sessionsBoundaryMs", sessionsBoundaryMs],
+		["guessableBoundSinceMs", guessableBoundSinceMs],
+	] as const) {
+		if (value === undefined) continue;
+		if (operation === "reset") refuse(`a reset takes no ${name}`);
+		if (!isRecoveryInstant(value)) {
+			refuse(`${name} must be undefined or whole epoch milliseconds within the Date range`);
+		}
+	}
+	return {
+		operation: operation as MfaSubjectRecoveryOperation,
+		sid: checkedSid,
+		nowMs: nowMs as number,
+		leaseToken: leaseToken as string,
+		sessionsBoundaryMs: sessionsBoundaryMs as number | undefined,
+		guessableBoundSinceMs: guessableBoundSinceMs as number | undefined,
+	};
+}
+
+/**
+ * Whether `cleared` and `hard` are what one apply can answer. A lifted hard
+ * hold ends its run and leaves none standing; otherwise the week ended, and
+ * the run with it exactly when no hard hold stands (a standing hold keeps
+ * the run it counted).
+ */
+const isAppliedState = (
+	cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean },
+	hard: boolean,
+): boolean => (cleared.hard ? cleared.run && !hard : cleared.week && cleared.run === !hard);
+
+/**
+ * `answer`, what `applySubjectRecovery` answered, as the port promises it,
+ * copied to its outcome's fields, each read once: a non-empty `recoveryId`,
+ * a generation from 1, booleans, a refusal the port names, and an applied
+ * answer whose `cleared` and `hard` one apply can give — never one that has
+ * lifted the hard hold while it still stands. `undefined` for anything else,
+ * which the caller answers as the store's outage: never released.
+ */
+export function readMfaSubjectRecoveryAnswer(
+	answer: unknown,
+): MfaSubjectRecoveryAnswer | undefined {
+	try {
+		if (!isRecord(answer)) return undefined;
+		const { outcome, hard } = answer;
+		if (typeof hard !== "boolean") return undefined;
+		if (outcome === "refused") {
+			const { reason } = answer;
+			return RECOVERY_REFUSALS.has(reason)
+				? { outcome, reason: reason as MfaSubjectRecoveryRefusal, hard }
+				: undefined;
+		}
+		if (outcome !== "applied" && outcome !== "already_applied") return undefined;
+		const { recoveryId, generation } = answer;
+		if (!isSubject(recoveryId) || !isCount(generation) || generation < 1) return undefined;
+		if (outcome === "already_applied") return { outcome, recoveryId, generation, hard };
+		const { cleared } = answer;
+		if (!isRecord(cleared)) return undefined;
+		const { week, run, hard: lifted } = cleared;
+		if (typeof week !== "boolean" || typeof run !== "boolean" || typeof lifted !== "boolean") {
+			return undefined;
+		}
+		const parts = { week, run, hard: lifted };
+		return isAppliedState(parts, hard)
+			? { outcome, recoveryId, generation, cleared: parts, hard }
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Where MFA transactions, the subject lock state, a session's account-email
  * proof and a subject's first-binding mark are kept.
@@ -1124,6 +1369,48 @@ export interface MfaTransactionStore {
 	 * {@link checkSubjectLeaseRelease} refuses.
 	 */
 	releaseSubjectLease(subject: string, token: string): Promise<boolean>;
+
+	// Authorized recovery: the one way the lock state is given back early.
+	/**
+	 * Records `authorization` in the subject's slot for its operation and
+	 * `sid`, replacing whatever the slot held, pending or applied. It touches
+	 * no lock state, generation or lease. A `RangeError`, nothing recorded,
+	 * for what {@link checkSubjectRecoveryAuthorization} refuses on the
+	 * store's clock.
+	 */
+	authorizeSubjectRecovery(
+		subject: string,
+		authorization: MfaSubjectRecoveryAuthorization,
+	): Promise<void>;
+	/**
+	 * Applies the authorization in the slot for `application`'s operation and
+	 * `sid`, in one step, refusing in this order:
+	 *
+	 * - `lease_not_held`: the subject's lease is not held under `leaseToken`.
+	 * - `unauthorized`: the slot is empty, or its authorization has ended on
+	 *   the store's clock. A slot already applied answers `already_applied`,
+	 *   with the generation it was applied at. `expired`: it ends at or before
+	 *   `nowMs`.
+	 * - `recover` only. `boundary_ahead`: `sessionsBoundaryMs` is later than
+	 *   `nowMs` plus `DEFAULT_CLOCK_SKEW_MS`. `not_revoked_since`: the week
+	 *   counts a failure dated up to `nowMs` (a reservation in flight is one) and
+	 *   `sessionsBoundaryMs` is absent or not later than the earliest such
+	 *   failure by more than `DEFAULT_CLOCK_SKEW_MS`, and no hard hold is
+	 *   lifted.
+	 *
+	 * A `recover` that passes ends the week's and the run's attempts dated up
+	 * to `nowMs`, while no hard hold stands; while one stands, the week's
+	 * alone. A refusal changes nothing, and the authorization stays pending
+	 * until it ends. Applied, the slot is marked applied (kept until it ends)
+	 * and the subject's generation moves on by one. The email-proof
+	 * requirement, the first-binding mark, session proofs and transactions
+	 * are not lock state and stay. A `RangeError`, nothing changed, for what
+	 * {@link checkSubjectRecoveryApplication} refuses.
+	 */
+	applySubjectRecovery(
+		subject: string,
+		application: MfaSubjectRecoveryApplication,
+	): Promise<MfaSubjectRecoveryAnswer>;
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaTransactionStore}. */
