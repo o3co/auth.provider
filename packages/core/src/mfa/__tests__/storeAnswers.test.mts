@@ -32,6 +32,8 @@ import {
 	readFirstBindingAt,
 	readMfaAttemptReservation,
 	readMfaSubjectAttemptReservation,
+	readMfaSubjectCount,
+	readMfaSubjectLeaseAnswer,
 	readSessionEmailProof,
 } from "#/mfa/transactionStore.mjs";
 
@@ -435,8 +437,83 @@ describe("isMfaFactorUpdateWritten", () => {
 	});
 });
 
+describe("readMfaSubjectLeaseAnswer", () => {
+	it("reads a lease acquired with its token, busy with the time left, and stale", () => {
+		expect(readMfaSubjectLeaseAnswer({ outcome: "acquired", token: "t" })).toEqual({
+			outcome: "acquired",
+			token: "t",
+		});
+		expect(readMfaSubjectLeaseAnswer({ outcome: "busy", retryAfterMs: 1 })).toEqual({
+			outcome: "busy",
+			retryAfterMs: 1,
+		});
+		expect(readMfaSubjectLeaseAnswer({ outcome: "stale" })).toEqual({ outcome: "stale" });
+	});
+
+	it("copies only the fields its outcome has", () => {
+		expect(readMfaSubjectLeaseAnswer({ outcome: "stale", token: "t" })).toEqual({
+			outcome: "stale",
+		});
+	});
+
+	it.each<[string, unknown]>([
+		["a lease with no token", { outcome: "acquired" }],
+		["a lease with an empty token", { outcome: "acquired", token: "" }],
+		["a lease whose token is not text", { outcome: "acquired", token: 7 }],
+		["busy with no time left", { outcome: "busy", retryAfterMs: 0 }],
+		["busy with a time that is not a number", { outcome: "busy", retryAfterMs: Number.NaN }],
+		["busy for ever", { outcome: "busy", retryAfterMs: Number.POSITIVE_INFINITY }],
+		["busy with a time as text", { outcome: "busy", retryAfterMs: "1" }],
+		["an outcome it does not know", { outcome: "granted", token: "t" }],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaSubjectLeaseAnswer(answer)).toBeUndefined();
+	});
+
+	it("reads each field once, and a getter that throws as no answer", () => {
+		let reads = 0;
+		const answer = {
+			outcome: "acquired",
+			get token() {
+				reads++;
+				return reads === 1 ? "t" : "";
+			},
+		};
+		expect(readMfaSubjectLeaseAnswer(answer)).toEqual({ outcome: "acquired", token: "t" });
+		expect(
+			readMfaSubjectLeaseAnswer({
+				get outcome(): string {
+					throw new Error("boom");
+				},
+			}),
+		).toBeUndefined();
+	});
+});
+
+describe("readMfaSubjectCount", () => {
+	it("reads a safe whole number from 0", () => {
+		expect(readMfaSubjectCount(0)).toBe(0);
+		expect(readMfaSubjectCount(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+	});
+
+	it.each<[string, unknown]>([
+		["a negative number", -1],
+		["a number that is not whole", 1.5],
+		["a number past the safe integers", 2 ** 53],
+		["not a number", Number.NaN],
+		["text", "1"],
+		["nothing", undefined],
+		["null", null],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readMfaSubjectCount(answer)).toBeUndefined();
+	});
+});
+
 describe("on the package's root", () => {
-	it("are the six readings", () => {
+	it("are the readings", () => {
+		expect(core.readMfaSubjectLeaseAnswer).toBe(readMfaSubjectLeaseAnswer);
+		expect(core.readMfaSubjectCount).toBe(readMfaSubjectCount);
 		expect(core.readMfaAttemptReservation).toBe(readMfaAttemptReservation);
 		expect(core.readMfaSubjectAttemptReservation).toBe(readMfaSubjectAttemptReservation);
 		expect(core.isConsumedMfaTransaction).toBe(isConsumedMfaTransaction);

@@ -1958,4 +1958,136 @@ export function runMfaTransactionStoreContract(
 			}
 		});
 	});
+
+	describe("MfaTransactionStore contract: a subject's lease and generation", () => {
+		// One writer at a time to a subject's factor set: a lease on the
+		// store's clock, freed by its holder's token alone. The generation is
+		// what a writer captured before it began; a lease asked for under any
+		// other is refused.
+		const TTL = 60_000;
+
+		const token = async (
+			store: MfaTransactionStore,
+			subject = "user-1",
+			generation?: number,
+		): Promise<string> => {
+			const answer = await store.acquireSubjectLease(subject, {
+				ttlMs: TTL,
+				...(generation === undefined ? {} : { generation }),
+			});
+			if (answer.outcome !== "acquired") throw new Error(`expected a lease: ${answer.outcome}`);
+			return answer.token;
+		};
+
+		it("answers generation 0 for a subject that never recovered", async () => {
+			const store = await factory();
+			expect(await store.subjectGeneration("user-1")).toBe(0);
+		});
+
+		it("lets one holder at a time: busy while it stands, with the time left, and free again once its holder releases it", async () => {
+			const store = await factory();
+			const held = await token(store);
+			expect(held).toEqual(expect.any(String));
+			expect(held.length).toBeGreaterThan(0);
+			const busy = await store.acquireSubjectLease("user-1", { ttlMs: TTL });
+			expect(busy.outcome).toBe("busy");
+			if (busy.outcome !== "busy") return;
+			expect(busy.retryAfterMs).toBeGreaterThan(0);
+			expect(busy.retryAfterMs).toBeLessThanOrEqual(TTL);
+			expect(await store.releaseSubjectLease("user-1", `${held}x`)).toBe(false);
+			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe("busy");
+			expect(await store.releaseSubjectLease("user-1", held)).toBe(true);
+			expect(await store.releaseSubjectLease("user-1", held)).toBe(false);
+			const next = await token(store);
+			expect(next).not.toBe(held);
+		});
+
+		it("gives the lease to exactly one of N acquires in flight", async () => {
+			const store = await factory();
+			const answers = await Promise.all(
+				Array.from({ length: 10 }, () => store.acquireSubjectLease("user-1", { ttlMs: TTL })),
+			);
+			expect(answers.filter((a) => a.outcome === "acquired")).toHaveLength(1);
+			expect(answers.filter((a) => a.outcome === "busy")).toHaveLength(9);
+		});
+
+		it("lets a lease lapse at its end on the store's clock: another acquires it, and the first holder's release answers false", async () => {
+			const store = await factory();
+			const answer = await store.acquireSubjectLease("user-1", { ttlMs: 1_000 });
+			if (answer.outcome !== "acquired") throw new Error("expected a lease");
+			const after = await expiry.now();
+			await expiry.passed(after + 1_000);
+			const next = await token(store);
+			expect(await store.releaseSubjectLease("user-1", answer.token)).toBe(false);
+			expect(await store.releaseSubjectLease("user-1", next)).toBe(true);
+		});
+
+		it("keeps each subject's lease apart", async () => {
+			const store = await factory();
+			const one = await token(store, "user-1");
+			const two = await token(store, "user-2");
+			expect(await store.releaseSubjectLease("user-2", one)).toBe(false);
+			expect(await store.releaseSubjectLease("user-1", two)).toBe(false);
+			expect(await store.releaseSubjectLease("user-1", one)).toBe(true);
+			expect((await store.acquireSubjectLease("user-2", { ttlMs: TTL })).outcome).toBe("busy");
+		});
+
+		it("acquires under the generation the caller captured, and answers stale under any other, holding nothing", async () => {
+			const store = await factory();
+			const held = await token(store, "user-1", 0);
+			expect(await store.releaseSubjectLease("user-1", held)).toBe(true);
+			for (const generation of [1, 7]) {
+				expect(
+					await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation }),
+					String(generation),
+				).toEqual({ outcome: "stale" });
+			}
+			// Stale is answered before busy: a writer that will never commit is not asked to wait.
+			const other = await token(store);
+			expect(await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 1 })).toEqual({
+				outcome: "stale",
+			});
+			expect(await store.releaseSubjectLease("user-1", other)).toBe(true);
+			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe(
+				"acquired",
+			);
+		});
+
+		it("refuses, with a RangeError, a lease it cannot give or a question it cannot answer, and holds nothing", async () => {
+			const store = await factory();
+			for (const [label, subject, request] of [
+				["an empty subject", "", { ttlMs: TTL }],
+				["a subject that is not a string", 7, { ttlMs: TTL }],
+				["no request", "user-1", undefined],
+				["a lease shorter than MFA_SUBJECT_LEASE_MIN_MS", "user-1", { ttlMs: 999 }],
+				["a lease longer than MFA_SUBJECT_LEASE_MAX_MS", "user-1", { ttlMs: 600_001 }],
+				["a lease that is not whole", "user-1", { ttlMs: 1_000.5 }],
+				["a lease that is not a number", "user-1", { ttlMs: Number.NaN }],
+				["a lease as text", "user-1", { ttlMs: "60000" }],
+				["a negative generation", "user-1", { ttlMs: TTL, generation: -1 }],
+				["a generation that is not whole", "user-1", { ttlMs: TTL, generation: 0.5 }],
+				["a generation as text", "user-1", { ttlMs: TTL, generation: "0" }],
+				["a generation past the safe integers", "user-1", { ttlMs: TTL, generation: 2 ** 53 }],
+			] as const) {
+				await expect(
+					store.acquireSubjectLease(subject as never, request as never),
+					label,
+				).rejects.toThrow(RangeError);
+			}
+			for (const [label, subject, held] of [
+				["an empty subject", "", "token"],
+				["an empty token", "user-1", ""],
+				["a token that is not a string", "user-1", 7],
+			] as const) {
+				await expect(
+					store.releaseSubjectLease(subject as never, held as never),
+					`release: ${label}`,
+				).rejects.toThrow(RangeError);
+			}
+			await expect(store.subjectGeneration("" as never)).rejects.toThrow(RangeError);
+			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe(
+				"acquired",
+			);
+		});
+	});
 }

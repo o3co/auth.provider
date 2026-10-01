@@ -118,6 +118,9 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 		sessionEmailProofAt: (subject, sid, nowMs) => pick().sessionEmailProofAt(subject, sid, nowMs),
 		noteFirstBinding: (subject, atMs, untilMs) => pick().noteFirstBinding(subject, atMs, untilMs),
 		firstBindingAt: (subject, nowMs) => pick().firstBindingAt(subject, nowMs),
+		subjectGeneration: (subject) => pick().subjectGeneration(subject),
+		acquireSubjectLease: (subject, request) => pick().acquireSubjectLease(subject, request),
+		releaseSubjectLease: (subject, token) => pick().releaseSubjectLease(subject, token),
 	};
 };
 
