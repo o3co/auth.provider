@@ -352,9 +352,12 @@ describe("InMemoryCodeRepository", () => {
 			const created = await repo.createCode({ ...minimalParams, amr });
 			amr.push("otp", "mfa");
 			// What it answers is frozen, from `createCode` and from each read.
+			expect(Object.isFrozen(created.amr)).toBe(true);
 			expect(() => (created.amr as string[]).push("otp")).toThrow(TypeError);
 			const found = await repo.findByCode(created.code);
-			expect(() => (found?.amr as string[]).push("otp")).toThrow(TypeError);
+			if (found === null) throw new Error("the code was not found");
+			expect(Object.isFrozen(found.amr)).toBe(true);
+			expect(() => (found.amr as string[]).push("otp")).toThrow(TypeError);
 			expect((await repo.consumeByCode(created.code))?.amr).toEqual(["pwd"]);
 		});
 
