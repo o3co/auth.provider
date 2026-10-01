@@ -1272,6 +1272,62 @@ describe("/authorize on admission — a reauthenticate verdict is answered with 
 	};
 	const acrTable = { authorize: { acrValues: { "urn:example:mfa": ["mfa"] } } };
 
+	it("keeps a live session through its login trip: three requests with fresh states, as a cross-site page sends them, sign nobody out", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [fixture("fixture", () => ({ outcome: "reauthenticate" }))],
+		});
+		for (const state of ["cross-site-1", "cross-site-2", "cross-site-3"]) {
+			loginRedirectTo(await authorize(harness.app, { ...baseQuery, state }));
+		}
+		expect(harness.regenerated).toBe(0);
+		expect(harness.session).toMatchObject({ isAuthenticated: true, sid: SID });
+	});
+
+	it("a login page that forwards the signed-in browser straight back gets the refusal, not another trip", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [fixture("fixture", () => ({ outcome: "reauthenticate" }))],
+		});
+		const back = loginRedirectTo(await authorize(harness.app, baseQuery));
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+		expect(harness.regenerated).toBe(0);
+	});
+
+	it("acr onto a store that cannot record a second factor, forwarded straight back with no new login: unmet_authentication_requirements", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record(), { recordsSecondFactor: false }),
+			requirements: [authority],
+			oauth: acrTable,
+		});
+		const back = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, acr_values: "urn:example:mfa" }),
+		);
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("unmet_authentication_requirements");
+		expect(harness.regenerated).toBe(0);
+	});
+
+	it("a real login that meets the requirement gets the code", async () => {
+		const state = { verdict: "reauthenticate" as "reauthenticate" | "met" };
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [fixture("fixture", () => ({ outcome: state.verdict }))],
+		});
+		const back = loginRedirectTo(await authorize(harness.app, baseQuery));
+		await loggedInNow(harness, clock);
+		state.verdict = "met";
+		expect(
+			codeOf(await authorize(harness.app, Object.fromEntries(back.searchParams.entries()))),
+		).toBe("code-x");
+	});
+
 	it("a session still reauthenticate after the login it was sent to is refused with login_required, not sent again", async () => {
 		const clock = { authTime: minutesAgo(5) };
 		const harness = await makeApp({
