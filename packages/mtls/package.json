@@ -55,7 +55,6 @@
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-dpop": "workspace:*",
-		"@o3co/auth-provider-test-kit": "workspace:*",
 		"@o3co/ts.hocon": "^1.13.0",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",

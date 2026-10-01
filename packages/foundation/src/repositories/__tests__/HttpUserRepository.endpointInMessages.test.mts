@@ -27,7 +27,6 @@
 import { createServer, type Server } from "node:http";
 import { createServer as createNetServer, type Server as NetServer, type Socket } from "node:net";
 import { loggableError } from "@o3co/auth-provider-core";
-import { refusedOrigin } from "@o3co/auth-provider-test-kit";
 import { afterEach, describe, expect, it } from "vitest";
 import { HttpUserRepository } from "#/repositories/HttpUserRepository.mjs";
 import { StoreCredentialRefusedError } from "#/repositories/storeErrors.mjs";
@@ -78,6 +77,15 @@ const serveGarbage = async (): Promise<string> => {
 	servers.push(server);
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 	return `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+};
+
+/** An origin nothing listens on. */
+const closedOrigin = async (): Promise<string> => {
+	const server = createServer();
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address() as { port: number };
+	await new Promise<void>((resolve) => server.close(() => resolve()));
+	return `http://127.0.0.1:${port}`;
 };
 
 /** A repository whose every URL carries a query and a fragment. */
@@ -188,7 +196,7 @@ const cases: readonly Case[] = [
 		label: "a Store nothing listens for",
 		call: authenticate,
 		path: "/authenticate",
-		origin: refusedOrigin,
+		origin: closedOrigin,
 	},
 	{
 		label: "a connection closed before the answer",
@@ -263,7 +271,7 @@ const cases: readonly Case[] = [
 		label: "the lookup: a Store nothing listens for",
 		call: lookup,
 		path: "/lookup",
-		origin: refusedOrigin,
+		origin: closedOrigin,
 	},
 	{
 		label: "the lookup: a connection closed before the answer",

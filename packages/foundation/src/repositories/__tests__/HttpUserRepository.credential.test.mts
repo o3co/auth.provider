@@ -44,7 +44,6 @@ import {
 	type FederatedIdentityLink,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import { refusedOrigin } from "@o3co/auth-provider-test-kit";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	registerBuiltinAdapters,
@@ -84,6 +83,15 @@ afterEach(async () => {
 	httpServers = [];
 	netServers = [];
 });
+
+/** A loopback origin nothing listens on: bound, then closed. */
+const closedOrigin = async (): Promise<string> => {
+	const server = createServer();
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address() as { port: number };
+	await new Promise<void>((resolve) => server.close(() => resolve()));
+	return `http://127.0.0.1:${port}`;
+};
 
 /** Starts a server on its own loopback port and returns its origin. */
 const serve = async (handler: Parameters<typeof createServer>[1]): Promise<string> => {
@@ -271,7 +279,7 @@ describe("the token is in nothing the repository throws, and in no inspection of
 			"a 2xx that is neither a User nor an answer": () =>
 				serve(answering(200, JSON.stringify({ status: "ok" }))),
 			"a redirect": () => serve(answering(307, "")),
-			"a refused connection": refusedOrigin,
+			"a refused connection": closedOrigin,
 			"a Store that never answers": () =>
 				serve((req) => {
 					req.resume();
@@ -629,7 +637,7 @@ describe("a transport failure carries nothing the request carried", () => {
 	);
 
 	it("names a transport code an operator can act on — and nothing else of the failure", async () => {
-		const origin = await refusedOrigin();
+		const origin = await closedOrigin();
 		const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });
 		for (const call of [
 			() => repo.authenticate("alice", "pass"),

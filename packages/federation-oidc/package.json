@@ -46,7 +46,6 @@
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-session": "workspace:*",
-		"@o3co/auth-provider-test-kit": "workspace:*",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",
 		"express": "^5.2.1",
