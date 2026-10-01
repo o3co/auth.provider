@@ -169,6 +169,15 @@ describe("the package's reference.conf", () => {
 		).toEqual({ requireEmailProof: "always" });
 	});
 
+	it("defaults one Store call's time, mfa.storeTimeoutMs, to 5000 milliseconds, which MFA_STORE_TIMEOUT_MS sets", () => {
+		const key = randomBytes(32).toString("base64");
+		expect(readSettings(resolve({ MFA_ENCRYPTION_KEY: key })).storeTimeoutMs).toBe(5_000);
+		expect(
+			readSettings(resolve({ MFA_ENCRYPTION_KEY: key, MFA_STORE_TIMEOUT_MS: "8000" }))
+				.storeTimeoutMs,
+		).toBe(8_000);
+	});
+
 	it("defaults a subject's factor limit, mfa.maxFactorsPerSubject, to 10 records", () => {
 		const settings = readSettings(
 			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),

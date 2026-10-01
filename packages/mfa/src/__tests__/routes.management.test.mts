@@ -27,6 +27,7 @@ import {
 	type AppConfig,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	InMemoryUserRepository,
 	type MfaFactorRecord,
 	type MfaTransactionStore,
 	type UserSessionStore,
@@ -103,6 +104,10 @@ async function composed(
 	options: {
 		readonly alice?: { readonly enrolled?: boolean; readonly noAddress?: boolean };
 		readonly requireEmailProof?: "when-mail" | "always" | "never";
+		/** `mfa.storeTimeoutMs`; the default unless given. */
+		readonly storeTimeoutMs?: number;
+		/** A directory that cannot write the enrollment witness. */
+		readonly witnessless?: boolean;
 	} = {},
 ) {
 	const factorStore = createMemoryMfaFactorStore();
@@ -115,18 +120,18 @@ async function composed(
 	const logger = spyLogger();
 	const booted = await boot({
 		config: {
-			...configFor(
-				mode,
-				options.requireEmailProof === undefined
+			...configFor(mode, {
+				...(options.requireEmailProof === undefined
 					? {}
-					: { enrollment: { requireEmailProof: options.requireEmailProof } },
-			),
+					: { enrollment: { requireEmailProof: options.requireEmailProof } }),
+				...(options.storeTimeoutMs === undefined ? {} : { storeTimeoutMs: options.storeTimeoutMs }),
+			}),
 			...mfaEmailFactorConfigForTests({ enabled: true }),
 		} as AppConfig,
 		factorStore,
 		transactionStore: createMemoryMfaTransactionStore(),
 		auditSink: audit,
-		userRepository: users,
+		userRepository: options.witnessless === true ? new InMemoryUserRepository(entries) : users,
 		mailSender: createRecordingMailSender(),
 		logger,
 	});
@@ -722,7 +727,7 @@ function gate(fallbackMs = 300) {
 }
 
 describe("the subject's factor-set writes, one at a time", () => {
-	it("refuses at commit a removal a reset overtook before its lease: 409 mfa_factors_changed, nothing removed, nothing audited", async () => {
+	it("refuses before writing a removal a reset overtook before its lease: 409 mfa_factors_changed, nothing removed, nothing audited", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
 		const store = built.transactionStore;
@@ -813,7 +818,7 @@ describe("the subject's factor-set writes, one at a time", () => {
 		]);
 	});
 
-	it("answers 409 mfa_factors_busy, with Retry-After, when another write holds the subject's lease past the wait, removing nothing", async () => {
+	it("answers 409 mfa_factors_busy, with Retry-After in the whole seconds the holder's lease has left, when another write holds it past the wait, removing nothing", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
 		const store = built.transactionStore;
@@ -827,7 +832,7 @@ describe("the subject's factor-set writes, one at a time", () => {
 
 		expect(res.status, JSON.stringify(res.body)).toBe(409);
 		expect(res.body).toEqual(FACTORS_BUSY);
-		expect(res.headers["retry-after"]).toBe("1");
+		expect(res.headers["retry-after"]).toBe("60");
 		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
 	});
 
@@ -862,5 +867,160 @@ describe("the subject's factor-set writes, one at a time", () => {
 			expect.objectContaining({ route: "factors", store: "mfa_transaction" }),
 			"mfa_store_unavailable",
 		);
+	});
+});
+
+describe("a factor-set write held to the generation it began at, the lease it holds and the time it has left", () => {
+	it("refuses a removal whose subject a recovery or reset overtook between its admission and its lease: 409 mfa_factors_changed, nothing removed", async () => {
+		const built = await composed();
+		const { agent, totp } = await signedIn(built);
+		const read = built.factorStore.list.bind(built.factorStore);
+		// The admission's read of the records is the first: the reset lands just after it.
+		vi.spyOn(built.factorStore, "list").mockImplementationOnce(async (subject) => {
+			const records = await read(subject);
+			await moveGeneration(built.transactionStore, subject);
+			return records;
+		});
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(FACTORS_CHANGED);
+		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
+	});
+
+	it("takes a lease of six Store timeouts: one more than the most Store calls a write makes", async () => {
+		const built = await composed("optional", { storeTimeoutMs: 2_000 });
+		const { agent, totp } = await signedIn(built);
+		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
+
+		expect((await remove(agent, totp.record.id)).status).toBe(200);
+
+		expect(acquire.mock.calls.map(([, request]) => request.ttlMs)).toEqual([12_000]);
+	});
+
+	it("gives up before writing when a slow Store left less than one Store timeout of the lease: 409 mfa_factors_busy, nothing removed", async () => {
+		const built = await composed("optional", { storeTimeoutMs: 100 });
+		const { agent, totp } = await signedIn(built);
+		const read = built.factorStore.list.bind(built.factorStore);
+		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
+		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
+			// Slow once the lease is held: the read under it outlasts what the lease leaves.
+			if (acquire.mock.calls.length > 0) await new Promise((resolve) => setTimeout(resolve, 1_500));
+			return read(subject);
+		});
+		const removed = vi.spyOn(built.factorStore, "remove");
+
+		const res = await remove(agent, totp.record.id);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(FACTORS_BUSY);
+		expect(removed).not.toHaveBeenCalled();
+	});
+
+	it("says an overrun at error whatever the removal came to: an unknown factor is still 400", async () => {
+		const built = await composed();
+		const { agent } = await signedIn(built);
+		vi.spyOn(built.transactionStore, "releaseSubjectLease").mockResolvedValue(false);
+
+		const res = await remove(agent, "AAAAAAAAAAAAAAAAAAAAAA");
+
+		expect(res.status).toBe(400);
+		expect(built.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sub: ALICE.id, route: "factors" }),
+			"mfa_subject_lease_overrun",
+		);
+	});
+
+	it("a login's witness mark finds the lease held past its wait: the login completes, said once at warn, nothing marked", async () => {
+		const built = await composed();
+		const totp = await seedTotp(built.factorStore);
+		const store = built.transactionStore;
+		await store.acquireSubjectLease(ALICE.id, {
+			ttlMs: 60_000,
+			generation: await store.subjectGeneration(ALICE.id),
+		});
+
+		await signInWithTotp(built.app, built.userSessionStore, totp);
+
+		expect(built.users.marks).toEqual([]);
+		expect(
+			events(built.logger, "warn").filter((event) => event === "mfa_enrollment_witness_unwritten"),
+		).toHaveLength(1);
+	});
+
+	it("a login's witness mark whose acquire rejects, or whose release finds the lease gone: the login completes, said once at warn each", async () => {
+		for (const failing of ["acquire", "release"] as const) {
+			const built = await composed();
+			const totp = await seedTotp(built.factorStore);
+			if (failing === "acquire") {
+				vi.spyOn(built.transactionStore, "acquireSubjectLease").mockRejectedValue(
+					new Error("down"),
+				);
+			} else {
+				vi.spyOn(built.transactionStore, "releaseSubjectLease").mockResolvedValue(false);
+			}
+
+			await signInWithTotp(built.app, built.userSessionStore, totp);
+
+			expect(built.users.marks, failing).toEqual(
+				failing === "acquire" ? [] : [{ subject: ALICE.id, enrolled: true }],
+			);
+			expect(
+				events(built.logger, "warn").filter(
+					(event) => event === "mfa_enrollment_witness_unwritten",
+				),
+				failing,
+			).toHaveLength(1);
+			await disposeAll();
+		}
+	});
+
+	it("a login's witness mark whose subject a reset overtook after the proof was checked: nothing marked, said once at warn", async () => {
+		const built = await composed();
+		const totp = await seedTotp(built.factorStore);
+		const update = built.factorStore.update.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "update").mockImplementationOnce(async (...args) => {
+			const written = await update(...args);
+			await moveGeneration(built.transactionStore, ALICE.id);
+			return written;
+		});
+
+		await signInWithTotp(built.app, built.userSessionStore, totp);
+
+		expect(built.users.marks).toEqual([]);
+		expect(
+			events(built.logger, "warn").filter((event) => event === "mfa_enrollment_witness_unwritten"),
+		).toHaveLength(1);
+	});
+
+	it("a login's witness mark reads the records first: none that may count, or none it can read, marks nothing", async () => {
+		for (const records of ["gone", "unreadable"] as const) {
+			const built = await composed();
+			const totp = await seedTotp(built.factorStore);
+			const read = built.factorStore.list.bind(built.factorStore);
+			const update = vi.spyOn(built.factorStore, "update");
+			vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
+				// After the verification wrote its factor: the reconciliation's read.
+				if (update.mock.calls.length === 0) return read(subject);
+				if (records === "unreadable") throw new Error("factor store unreachable");
+				return [];
+			});
+
+			await signInWithTotp(built.app, built.userSessionStore, totp);
+
+			expect(built.users.marks, records).toEqual([]);
+			await disposeAll();
+		}
+	});
+
+	it("a directory that cannot write the witness takes no lease for a login's mark", async () => {
+		const built = await composed("optional", { witnessless: true });
+		const totp = await seedTotp(built.factorStore);
+		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
+
+		await signInWithTotp(built.app, built.userSessionStore, totp);
+
+		expect(acquire).not.toHaveBeenCalled();
 	});
 });
