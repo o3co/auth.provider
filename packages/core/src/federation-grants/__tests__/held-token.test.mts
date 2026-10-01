@@ -120,6 +120,15 @@ describe("federationGrantKeptAccessToken", () => {
 		).toEqual(at(3_600_000));
 	});
 
+	it("answers dates of its own: a store's answer changed later changes nothing kept", () => {
+		const given = { ...stored, obtainedAt: new Date(T0), effectiveExpiresAt: at(1_800_000) };
+		const kept = federationGrantKeptAccessToken(given);
+		given.obtainedAt.setTime(Number.NaN);
+		given.effectiveExpiresAt.setTime(Number.NaN);
+		expect(kept.obtainedAt).toEqual(T0);
+		expect(kept.effectiveExpiresAt).toEqual(at(1_800_000));
+	});
+
 	it("reads every field a store answers, an accessor on a prototype included", () => {
 		// A store of a deployment's own may answer a class instance; a spread
 		// would keep none of its fields, and the write would be refused.
