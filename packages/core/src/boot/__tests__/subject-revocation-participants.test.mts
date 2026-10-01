@@ -97,9 +97,7 @@ describe("subjectRevocationParticipants — registration", () => {
 	it("registers the run it checked: a run swapped afterwards is not the one called", async () => {
 		const runs: string[] = [];
 		const answered = participant(runs, "checked") as { run: SubjectRevocationParticipant["run"] };
-		const resolver = await resolverOf([
-			contributing("test:swap", { feature: () => answered }),
-		]);
+		const resolver = await resolverOf([contributing("test:swap", { feature: () => answered })]);
 		answered.run = async () => void runs.push("swapped");
 
 		await resolver?.get("feature")?.run({ subject: "u-1" });
@@ -140,9 +138,7 @@ describe("subjectRevocationParticipants — refusals", () => {
 	});
 
 	it("refuses an entry that is not a factory (contribution-malformed)", async () => {
-		const err = await refusal(
-			boot([contributing("test:bad", { feature: participant([], "x") })]),
-		);
+		const err = await refusal(boot([contributing("test:bad", { feature: participant([], "x") })]));
 		expect(err.reason).toBe("contribution-malformed");
 		expect(err.details).toMatchObject({
 			kind: "subjectRevocationParticipants",
@@ -157,7 +153,9 @@ describe("subjectRevocationParticipants — refusals", () => {
 		["with a control character", "feature\n"],
 		["longer than 64 characters", `a${"b".repeat(64)}`],
 	])("refuses a name that is %s (contribution-malformed)", async (_label, name) => {
-		const err = await refusal(boot([contributing("test:bad", { [name]: () => participant([], "x") })]));
+		const err = await refusal(
+			boot([contributing("test:bad", { [name]: () => participant([], "x") })]),
+		);
 		expect(err.reason).toBe("contribution-malformed");
 		expect(err.details).toMatchObject({ kind: "subjectRevocationParticipants", name });
 	});

@@ -27,6 +27,7 @@ import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { AdmissionActionDeclaration } from "../../session-admission/actions.mjs";
 import type { SessionRequirement as ConcreteSessionRequirement } from "../../session-admission/requirement.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
+import type { SubjectRevocationParticipant } from "../../user-sessions/subjectRevocationParticipants.mjs";
 import type { Contributed } from "./contributed.mjs";
 import type { ProviderDeps } from "./provider.mjs";
 import type { RouteContributionEntry } from "./route-contribution.mjs";
@@ -177,6 +178,15 @@ export type TokenBindingMechanismFactory<Deps> = (
 export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimitSpec | null>;
 
 /**
+ * A `subjectRevocationParticipants` entry: what clears the contributing
+ * feature's own state for a subject once a subject revocation completed.
+ * Never `null`: a participant is switched off by not installing it.
+ */
+export type SubjectRevocationParticipantFactory<Deps> = (
+	deps: Deps,
+) => Contributed<SubjectRevocationParticipant>;
+
+/**
  * Declaration-merged map of contribution kinds. Packages and consumer plugins
  * add kinds via `declare module` (the session package adds
  * `federationRedirectPolicies`).
@@ -184,7 +194,8 @@ export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimit
  * Collisions:
  * - Name-keyed (`grants`, `federations`, `tokenExchangeValidators`,
  *   `mfaFactors`, `sessionRequirements`, `rateLimitBudgets`,
- *   `federationTypes`, `admissionActions`): a duplicate refuses boot.
+ *   `federationTypes`, `admissionActions`, `subjectRevocationParticipants`):
+ *   a duplicate refuses boot.
  * - List-shaped (`auditHooks`, `routes`, `grantPolicyHooks`,
  *   `grantMiddleware`): duplicates allowed; routes still refuse a duplicate
  *   `id` or an undecorated-mountPath collision.
@@ -248,6 +259,22 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 */
 	readonly admissionActions?: {
 		readonly [name: string]: AdmissionActionDeclaration;
+	};
+	/**
+	 * What clears this module's own state for a subject once a subject
+	 * revocation completed, keyed by a name (lower-case words of letters and
+	 * digits joined by `.` or `-`, at most 64 characters). Projected, in
+	 * registration order, by the synthetic key
+	 * `subjectRevocationParticipantResolver`, which both subject-revocation
+	 * entries run. A container that is not a record, an entry that is not a
+	 * factory and a malformed name refuse boot at stage 1
+	 * (`contribution-malformed`); a name two modules contribute refuses it too
+	 * (`duplicate-contribute`); an override, and a host collector, are
+	 * `contribution-kind-guarded`. A factory that answers anything but a
+	 * participant fails its contribution.
+	 */
+	readonly subjectRevocationParticipants?: {
+		readonly [name: string]: SubjectRevocationParticipantFactory<Deps>;
 	};
 	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
 	readonly routes?: readonly RouteContributionEntry<Deps>[];

@@ -32,6 +32,7 @@ import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
 	RateLimitBudgetResolver,
+	SubjectRevocationParticipantResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
 import { readRateLimitFailMode } from "../ratelimit/guard.mjs";
@@ -46,6 +47,10 @@ import {
 	sealRegisteredReach,
 	secondFactorAuthorities,
 } from "../session-admission/requirement.mjs";
+import {
+	isSubjectRevocationParticipant,
+	type SubjectRevocationParticipant,
+} from "../user-sessions/subjectRevocationParticipants.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
@@ -262,6 +267,21 @@ function makeRateLimitBudgetResolver(
 }
 
 /**
+ * Instantiate a stable read-side `SubjectRevocationParticipantResolver` over
+ * the `subjectRevocationParticipants` collector, in registration order. Reads
+ * through at call time, like the other resolvers.
+ * @internal
+ */
+function makeSubjectRevocationParticipantResolver(
+	collector: NameKeyedCollector<SubjectRevocationParticipant>,
+): SubjectRevocationParticipantResolver {
+	return {
+		get: (name: string) => collector.get(name),
+		entries: () => collector.entries(),
+	};
+}
+
+/**
  * Whether the projections of one boot's working map may be read: closed while
  * stage 3 runs the `provides` factories, open from stage 4 on. Keyed by the
  * working map, which stages 3 and 4 share.
@@ -341,6 +361,7 @@ export function prepareSyntheticProjections(
 		sessionRequirements,
 		rateLimitBudgets,
 		admissionActions,
+		subjectRevocationParticipants,
 	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () =>
@@ -369,6 +390,11 @@ export function prepareSyntheticProjections(
 	}
 	if (rateLimitBudgets !== undefined) {
 		inject("rateLimitBudgetResolver", () => makeRateLimitBudgetResolver(rateLimitBudgets));
+	}
+	if (subjectRevocationParticipants !== undefined) {
+		inject("subjectRevocationParticipantResolver", () =>
+			makeSubjectRevocationParticipantResolver(subjectRevocationParticipants),
+		);
 	}
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
@@ -417,7 +443,10 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  *   origin; its `reach` is read later (`checkSessionRequirements`);
  * - a `rateLimitBudgets` budget no limiter can apply as written
  *   (`isUsableRateLimitSpec`). What registers is the frozen copy that was
- *   validated.
+ *   validated;
+ * - a `subjectRevocationParticipants` value that is not a participant
+ *   (`isSubjectRevocationParticipant`), `null` included. What registers is a
+ *   frozen participant over the `run` that was checked, called on the value.
  *
  * `null` (switched off by configuration) passes for `mfaFactors` and
  * `rateLimitBudgets` and keeps the name claimed.
@@ -499,6 +528,23 @@ function checkNameKeyedValue(
 			);
 		}
 		return Object.freeze(read);
+	}
+	if (kind === "subjectRevocationParticipants") {
+		// `run` read once, into what is checked and registered: a getter or a
+		// later assignment cannot swap what was checked for what is called.
+		const read =
+			typeof value === "object" && value !== null && !Array.isArray(value)
+				? { run: (value as { readonly run?: unknown }).run }
+				: value;
+		if (!isSubjectRevocationParticipant(read)) {
+			throw new RangeError(
+				`subjectRevocationParticipants "${name}": the factory must answer a participant, an object whose run is a function — a participant is switched off by not installing it`,
+			);
+		}
+		const run = read.run;
+		return Object.freeze({
+			run: (input: { readonly subject: string }) => run.call(value, input),
+		});
 	}
 	if (kind === "sessionRequirements") {
 		if (value === null || value === undefined) {

@@ -16,6 +16,7 @@
 
 import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { SessionRequirementResolver } from "../../session-admission/requirement.mjs";
+import type { SubjectRevocationParticipantResolver } from "../../user-sessions/subjectRevocationParticipants.mjs";
 import type {
 	ExchangeTokenValidator,
 	FederationProvider,
@@ -63,7 +64,8 @@ export interface RateLimitBudgetResolver {
 }
 
 /** Re-export for consumers that name the `federationProviders` slot's value type. */
-export type { FederationProvider };
+/** Re-export: the `subjectRevocationParticipantResolver` slot's value type, owned by `user-sessions/`. */
+export type { FederationProvider, SubjectRevocationParticipantResolver };
 
 /**
  * ComponentMap keys whose values the boot planner builds itself. Boot rejects
@@ -87,6 +89,7 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"mfaFactorResolver",
 		"sessionRequirementResolver",
 		"rateLimitBudgetResolver",
+		"subjectRevocationParticipantResolver",
 		// Boot-planner-owned (createApp pre-seeds it). A consumer-supplied
 		// registrar would diverge silently: the planner drains its own while
 		// builders register cleanups on the consumer's.
@@ -133,5 +136,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly sessionRequirementResolver?: SessionRequirementResolver;
 		/** Every module's rate-limit budget by prefix, read by a limiter at request time. */
 		readonly rateLimitBudgetResolver?: RateLimitBudgetResolver;
+		/** Every subject-revocation participant by name, in registration order, run by a subject revocation. */
+		readonly subjectRevocationParticipantResolver?: SubjectRevocationParticipantResolver;
 	}
 }

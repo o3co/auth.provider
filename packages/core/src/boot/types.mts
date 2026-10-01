@@ -48,6 +48,7 @@ import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
+import type { SubjectRevocationParticipant } from "../user-sessions/subjectRevocationParticipants.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap bootstrap slots
@@ -87,7 +88,7 @@ declare module "@o3co/auth-provider-core" {
 // ---------------------------------------------------------------------------
 
 /**
- * The contribution kinds the boot planner knows: the fourteen built-in kinds,
+ * The contribution kinds the boot planner knows: the fifteen built-in kinds,
  * plus consumer-defined kinds added by `declare module` augmentation of
  * ContributesMap. The branded `string` member admits those without widening
  * the union to plain `string`.
@@ -108,6 +109,7 @@ export type ContributionKind =
 	| "rateLimitBudgets"
 	| "federationTypes"
 	| "admissionActions"
+	| "subjectRevocationParticipants"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -427,6 +429,13 @@ export interface ContributionCollectorMap {
 	 * read it, which `sessionRequirementResolver` answers through `action`.
 	 */
 	readonly admissionActions?: NameKeyedCollector<AdmissionAction>;
+	/**
+	 * Collector for `subjectRevocationParticipants` contributions, by name:
+	 * the frozen copy of each participant's `run` as registration read it,
+	 * which `subjectRevocationParticipantResolver` projects in registration
+	 * order.
+	 */
+	readonly subjectRevocationParticipants?: NameKeyedCollector<SubjectRevocationParticipant>;
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;
@@ -1175,15 +1184,22 @@ export interface ComponentAbsenceUndeclaredDetails {
  * A host `contributionKinds` collector for a kind whose collector is the
  * planner's alone: `rateLimitBudgets` — a host collector could answer
  * a looser budget than the owning module contributed, on a prefix such as
- * RFC 8628 §5.1's device verification — `federationTypes`, and
- * `admissionActions`, whose grades admission hands the requirements. Refused
- * in `createApp`, before the kinds are merged. Also a module's
- * `overrides.admissionActions` entry, at stage 1 (`channel: "overrides"`,
- * naming the module and the action): an action's grade is its registrant's.
+ * RFC 8628 §5.1's device verification — `federationTypes`,
+ * `admissionActions`, whose grades admission hands the requirements, and
+ * `subjectRevocationParticipants`, which both subject-revocation entries run.
+ * Refused in `createApp`, before the kinds are merged. Also a module's
+ * `overrides.admissionActions` or `overrides.subjectRevocationParticipants`
+ * entry, at stage 1 (`channel: "overrides"`, naming the module and the
+ * entry): an action's grade is its registrant's, and a participant clears
+ * its own module's state.
  */
 export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
-	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions";
+	readonly kind:
+		| "rateLimitBudgets"
+		| "federationTypes"
+		| "admissionActions"
+		| "subjectRevocationParticipants";
 	/** Present for a module's override; absent for a host collector. */
 	readonly channel?: "overrides";
 	readonly module?: string;
@@ -1198,14 +1214,19 @@ export interface ContributionKindGuardedDetails {
  * `rateLimitBudgets` prefix that is empty or holds `:` — no limiter key
  * carries it — or names an `Object.prototype` member, a `federationTypes`
  * declaration that is not an object with a Zod `entrySchema` and a
- * `factory`, or an `admissionActions` entry whose name, declaration or grade
- * registration refuses. `problem` says which.
+ * `factory`, an `admissionActions` entry whose name, declaration or grade
+ * registration refuses, or a `subjectRevocationParticipants` entry that is
+ * not a factory or whose name is malformed. `problem` says which.
  */
 export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
 	readonly module: string;
-	readonly kind: "rateLimitBudgets" | "federationTypes" | "admissionActions";
-	/** The prefix, type or action name; absent when the container itself is refused. */
+	readonly kind:
+		| "rateLimitBudgets"
+		| "federationTypes"
+		| "admissionActions"
+		| "subjectRevocationParticipants";
+	/** The prefix, type or name; absent when the container itself is refused. */
 	readonly name?: string;
 	readonly channel: "contributes" | "overrides";
 	readonly problem: string;

@@ -41,11 +41,13 @@ import { loggableError } from "../logging/loggableError.mjs";
 import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
 import {
 	type CascadeSession,
+	participantsAfterRevocation,
 	type RevokeAllForSubjectCapability,
 	type RevokeAllForSubjectFailure,
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./revokeAllForSubject.mjs";
+import type { SubjectRevocationParticipantResolver } from "./subjectRevocationParticipants.mjs";
 import {
 	type SubjectRevocation,
 	type SubjectSessionIndex,
@@ -128,6 +130,11 @@ export interface SubjectRevocationServiceDeps {
 	readonly allowKeep: boolean;
 	readonly federationGrantAudit?: (event: FederationGrantAuditEvent) => void | Promise<void>;
 	readonly correlationId?: string;
+	/**
+	 * Run after either path's revocation completed, as `revokeAllForSubject`
+	 * runs them; omitting it runs none.
+	 */
+	readonly subjectRevocationParticipantResolver?: SubjectRevocationParticipantResolver;
 	readonly logger?: Logger;
 	/** Injectable for tests; defaults to `Date.now`. */
 	readonly now?: () => number;
@@ -189,6 +196,7 @@ export function createSubjectRevocationService(
 					federationGrantStore: deps.federationGrantStore,
 					federationGrantAudit: deps.federationGrantAudit,
 					correlationId,
+					subjectRevocationParticipantResolver: deps.subjectRevocationParticipantResolver,
 					logger: deps.logger,
 					now,
 				});
@@ -214,8 +222,9 @@ export function createSubjectRevocationService(
 /**
  * Sessions and tokens end; established grants stay. Same order as the full
  * revocation, for the same reason: the boundary is written before anything
- * is enumerated. Only the sessions boundary moves (`revokeSessionsBefore`),
- * so a grant covered by an earlier full revocation stays covered.
+ * is enumerated, and the participants run last, once the rest completed. Only
+ * the sessions boundary moves (`revokeSessionsBefore`), so a grant covered by
+ * an earlier full revocation stays covered.
  */
 async function keep(
 	deps: SubjectRevocationServiceDeps,
@@ -319,6 +328,16 @@ async function keep(
 		}
 	}
 
+	const revocationComplete =
+		unavailable.length === 0 && failures.length === 0 && sessions.failed.length === 0;
+	const participants = await participantsAfterRevocation({
+		subject,
+		participants: deps.subjectRevocationParticipantResolver,
+		revocationComplete,
+		logger: deps.logger,
+	});
+	if (participants.failure !== undefined) failures.push(participants.failure);
+
 	return {
 		sessionsRevoked: sessions.revoked,
 		sessionsFailed: sessions.failed,
@@ -330,7 +349,9 @@ async function keep(
 		grantsRetireFailed,
 		unavailable,
 		failures,
-		complete: unavailable.length === 0 && failures.length === 0 && sessions.failed.length === 0,
+		participantsHeldBack: participants.participantsHeldBack,
+		participantFailures: participants.participantFailures,
+		complete: participants.complete,
 	};
 }
 

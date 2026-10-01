@@ -67,6 +67,7 @@ import {
 	lifetimeBeyondConfiguration,
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
+import { isSubjectRevocationParticipantName } from "../user-sessions/subjectRevocationParticipants.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
@@ -266,6 +267,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"rateLimitBudgets",
 	"federationTypes",
 	"admissionActions",
+	"subjectRevocationParticipants",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -705,11 +707,23 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
  * for `rateLimitBudgets` could answer a looser budget than the owning module
  * contributed — on RFC 8628 §5.1's device-verification prefix, say —
  * `federationTypes` is what the dispatch of configured federations will read,
- * and `admissionActions` is where admission reads the grade it hands the
- * requirements. Unlike `GUARDED_KINDS`, a module may override an entry of the
- * first two.
+ * `admissionActions` is where admission reads the grade it hands the
+ * requirements, and `subjectRevocationParticipants` is what both
+ * subject-revocation entries run. Unlike `GUARDED_KINDS`, a module may
+ * override an entry of the first two.
  */
-const PLANNER_OWNED_KINDS = ["rateLimitBudgets", "federationTypes", "admissionActions"] as const;
+const PLANNER_OWNED_KINDS = [
+	"rateLimitBudgets",
+	"federationTypes",
+	"admissionActions",
+	"subjectRevocationParticipants",
+] as const;
+
+/** The planner-owned kinds no module may override an entry of. */
+const NOT_OVERRIDABLE_KINDS: ReadonlySet<string> = new Set([
+	"admissionActions",
+	"subjectRevocationParticipants",
+]);
 
 /**
  * A requirement is switched off by not installing it, never removed from
@@ -766,7 +780,7 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	for (const kind of PLANNER_OWNED_KINDS) {
 		if (Object.hasOwn(host, kind)) {
 			throw new BootError({
-				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${kind === "admissionActions" ? "and no module overrides one" : "and a module may override one"}.`,
+				message: `contributionKinds replaces the collector for "${kind}", which is the planner's: the modules that own its entries contribute them, ${NOT_OVERRIDABLE_KINDS.has(kind) ? "and no module overrides one" : "and a module may override one"}.`,
 				reason: "contribution-kind-guarded",
 				stage: "validateManifests",
 				details: { reason: "contribution-kind-guarded", kind },
@@ -799,7 +813,11 @@ const containerShape = (container: unknown): string =>
  *   (`admissionActionSnapshots`), are what registration admits
  *   (`admissionActionProblem`); an action is registered by the module that
  *   admits it, so an override of one is refused as the kind guarded
- *   (`contribution-kind-guarded`).
+ *   (`contribution-kind-guarded`);
+ * - a participant's name is what a report and a log line can carry
+ *   (`isSubjectRevocationParticipantName`), and its entry is a factory; a
+ *   participant clears its own module's state, so an override of one is
+ *   refused as the kind guarded (`contribution-kind-guarded`).
  *
  * Throws `contribution-malformed`; `name` is absent for a container.
  * @internal
@@ -810,7 +828,11 @@ function checkContributionShapes(
 ): void {
 	const refuse = (
 		m: Module,
-		kind: "rateLimitBudgets" | "federationTypes" | "admissionActions",
+		kind:
+			| "rateLimitBudgets"
+			| "federationTypes"
+			| "admissionActions"
+			| "subjectRevocationParticipants",
 		name: string | undefined,
 		channel: "contributes" | "overrides",
 		problem: string,
@@ -836,6 +858,7 @@ function checkContributionShapes(
 				["rateLimitBudgets", "prefix"],
 				["federationTypes", "type"],
 				["admissionActions", "action name"],
+				["subjectRevocationParticipants", "name"],
 			] as const) {
 				const container = map?.[kind];
 				if (container === undefined) continue;
@@ -891,6 +914,43 @@ function checkContributionShapes(
 				const snapshot = admissionActionSnapshots.get(entry.factory as object);
 				const problem = admissionActionProblem(entry.key, snapshot ?? entry.factory);
 				if (problem !== undefined) refuse(m, "admissionActions", entry.key, channel, problem);
+			}
+			for (const entry of entries ?? []) {
+				if (entry.kind !== "subjectRevocationParticipants" || typeof entry.key !== "string") {
+					continue;
+				}
+				if (channel === "overrides") {
+					throw new BootError({
+						message: `Module "${m.name}" overrides subjectRevocationParticipants "${entry.key}", which no module may: a participant clears its own module's state, and replacing it would leave that state behind.`,
+						reason: "contribution-kind-guarded",
+						stage: "validateManifests",
+						details: {
+							reason: "contribution-kind-guarded",
+							kind: "subjectRevocationParticipants",
+							channel: "overrides",
+							module: m.name,
+							name: entry.key,
+						},
+					});
+				}
+				if (!isSubjectRevocationParticipantName(entry.key)) {
+					refuse(
+						m,
+						"subjectRevocationParticipants",
+						entry.key,
+						channel,
+						'a name is lower-case words of letters and digits joined by "." or "-", at most 64 characters',
+					);
+				}
+				if (typeof entry.factory !== "function") {
+					refuse(
+						m,
+						"subjectRevocationParticipants",
+						entry.key,
+						channel,
+						"a participant is contributed through a factory, a function of the module's deps",
+					);
+				}
 			}
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "federationTypes" || typeof entry.key !== "string") continue;

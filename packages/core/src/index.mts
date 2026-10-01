@@ -755,6 +755,8 @@ export type {
 	SectionDeps,
 	SectionSchema,
 	SessionRequirementFactory,
+	// What clears a feature's own state once a subject revocation completed.
+	SubjectRevocationParticipantFactory,
 	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,
 } from "./modules/index.mjs";
@@ -1097,6 +1099,15 @@ export {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./user-sessions/revokeAllForSubject.mjs";
+// What another feature runs to clean up after a subject revocation, and the
+// read side the composition hands both subject-revocation entries.
+export {
+	isSubjectRevocationParticipant,
+	type SubjectRevocationParticipant,
+	type SubjectRevocationParticipantError,
+	type SubjectRevocationParticipantFailure,
+	type SubjectRevocationParticipantResolver,
+} from "./user-sessions/subjectRevocationParticipants.mjs";
 export {
 	createSubjectRevocationService,
 	type FederationGrantDisposition,

@@ -40,6 +40,7 @@ import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import { createReadinessRegistrar } from "../readiness/registrar.mjs";
 import type { AdmissionAction } from "../session-admission/actions.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
+import type { SubjectRevocationParticipant } from "../user-sessions/subjectRevocationParticipants.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
 import { assembleApp } from "./assemble-app.mjs";
 import { freezeWorld } from "./freeze-world.mjs";
@@ -78,7 +79,8 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
  * `mergeWithBuiltins` seeds the built-in contribution kinds and consumer kinds
  * overlay them, except `sessionRequirements` and `mfaFactors`
  * (`session-requirement-kind-guarded`) and `rateLimitBudgets`,
- * `federationTypes` and `admissionActions` (`contribution-kind-guarded`),
+ * `federationTypes`, `admissionActions` and `subjectRevocationParticipants`
+ * (`contribution-kind-guarded`),
  * which `createApp` refuses to see replaced before the merge
  * (`refuseGuardedHostKinds`).
  *
@@ -234,6 +236,7 @@ export function mergeWithBuiltins(
 		rateLimitBudgets: makeMapNameKeyedCollector<RateLimitSpec | null>(),
 		federationTypes: makeMapNameKeyedCollector<RegisteredFederationType>(),
 		admissionActions: makeMapNameKeyedCollector<AdmissionAction>(),
+		subjectRevocationParticipants: makeMapNameKeyedCollector<SubjectRevocationParticipant>(),
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),

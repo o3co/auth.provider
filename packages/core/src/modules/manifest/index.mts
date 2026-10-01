@@ -49,6 +49,8 @@ export type {
 	// A module's budget for a rate-limit prefix it owns.
 	RateLimitBudgetFactory,
 	SessionRequirementFactory,
+	// What clears a feature's own state once a subject revocation completed.
+	SubjectRevocationParticipantFactory,
 	TokenBindingMechanismFactory,
 } from "./contributes-map.mjs";
 export {
@@ -83,6 +85,7 @@ export type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
 	RateLimitBudgetResolver,
+	SubjectRevocationParticipantResolver,
 	TokenExchangeValidatorResolver,
 } from "./synthetic-keys.mjs";
 export { SYNTHETIC_COMPONENT_KEYS } from "./synthetic-keys.mjs";

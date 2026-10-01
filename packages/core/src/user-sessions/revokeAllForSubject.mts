@@ -25,6 +25,12 @@ import type { FederationGrant } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
+import {
+	runSubjectRevocationParticipants,
+	type SubjectRevocationParticipantFailure,
+	type SubjectRevocationParticipantResolver,
+	type SubjectRevocationParticipantsOutcome,
+} from "./subjectRevocationParticipants.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
 /**
@@ -37,14 +43,15 @@ export type CascadeSession = (sid: string) => Promise<{ readonly ok: boolean }>;
 
 /**
  * The optional slots this helper consumes, named so a caller can branch on
- * them. `federationGrantStore` appears only for the failures it can report:
- * leaving it out is a decision, not an omission, so it is never listed in
- * `unavailable`.
+ * them. `federationGrantStore` and `subjectRevocationParticipantResolver`
+ * appear only for the failures they can report: leaving either out is a
+ * decision, not an omission, so neither is ever listed in `unavailable`.
  */
 export type RevokeAllForSubjectCapability =
 	| "subjectSessionIndex"
 	| "subjectRevocation"
-	| "federationGrantStore";
+	| "federationGrantStore"
+	| "subjectRevocationParticipantResolver";
 
 /**
  * One store call that was attempted and threw. Distinct from
@@ -62,7 +69,9 @@ export interface RevokeAllForSubjectFailure {
 		| "revoke"
 		/** The subject revocation service's two: a sessions-only stamp, and a renewal it could not end. */
 		| "revokeSessionsBefore"
-		| "retireIntent";
+		| "retireIntent"
+		/** The participants could not be listed, so none ran. */
+		| "entries";
 	/** The session the failing call concerned, for the per-session operations. */
 	readonly sid?: string;
 	/** The grant the failing call concerned, for the per-grant operations. */
@@ -99,6 +108,12 @@ export interface RevokeAllForSubjectOptions {
 	readonly federationGrantAudit?: (event: FederationGrantAuditEvent) => void | Promise<void>;
 	/** Carried into the grant audit events when the caller has one. */
 	readonly correlationId?: string;
+	/**
+	 * The features that clear their own state for the subject once the
+	 * revocation completed (`subjectRevocationParticipants`). Omitting it runs
+	 * none, and is not a missing capability.
+	 */
+	readonly subjectRevocationParticipantResolver?: SubjectRevocationParticipantResolver;
 	readonly logger?: Logger;
 	/** Injectable for tests; defaults to `Date.now`. */
 	readonly now?: () => number;
@@ -138,11 +153,66 @@ export interface RevokeAllForSubjectResult {
 	 */
 	readonly failures: readonly RevokeAllForSubjectFailure[];
 	/**
+	 * Participants not called because the revocation was incomplete, by name.
+	 * A retry that completes runs them.
+	 */
+	readonly participantsHeldBack: readonly string[];
+	/** Participants that threw or rejected, by name; each makes `complete` false. */
+	readonly participantFailures: readonly SubjectRevocationParticipantFailure[];
+	/**
 	 * Everything that was asked for actually happened: the one field a caller
-	 * has to check. Computed here once, since a four-way condition each
+	 * has to check. Computed here once, since a five-way condition each
 	 * integrator derives on its own reads as success when gotten wrong.
 	 */
 	readonly complete: boolean;
+}
+
+/**
+ * The participants' pass for a revocation whose own stages ended
+ * `revocationComplete`, and the report's `complete`: none run unless it is,
+ * and a resolver that cannot be listed is reported as a failure of its slot
+ * rather than thrown. Both subject-revocation entries call it last.
+ * @internal
+ */
+export async function participantsAfterRevocation(opts: {
+	readonly subject: string;
+	readonly participants: SubjectRevocationParticipantResolver | undefined;
+	readonly revocationComplete: boolean;
+	readonly logger?: Logger;
+}): Promise<
+	SubjectRevocationParticipantsOutcome & {
+		readonly failure?: RevokeAllForSubjectFailure;
+		readonly complete: boolean;
+	}
+> {
+	if (opts.participants === undefined) {
+		return {
+			participantsHeldBack: [],
+			participantFailures: [],
+			complete: opts.revocationComplete,
+		};
+	}
+	try {
+		const outcome = await runSubjectRevocationParticipants({
+			...opts,
+			participants: opts.participants,
+		});
+		return {
+			...outcome,
+			complete: opts.revocationComplete && outcome.participantFailures.length === 0,
+		};
+	} catch (error) {
+		opts.logger?.error(
+			{ err: loggableError(error), subject: opts.subject },
+			"revoke_all_list_participants_failed",
+		);
+		return {
+			participantsHeldBack: [],
+			participantFailures: [],
+			failure: { capability: "subjectRevocationParticipantResolver", operation: "entries", error },
+			complete: false,
+		};
+	}
 }
 
 /**
@@ -166,9 +236,12 @@ export interface RevokeAllForSubjectResult {
  * act on (retry these sids, alert on that outage) with nothing. Every store
  * failure is reported, and `complete` is the one field to check.
  *
- * Federation grants are ended last, and only when a store is supplied, so a
- * grant store's outage cannot cost the watermark and session passes. An
- * outage in any pass still leaves the other two done.
+ * Federation grants are ended after the sessions, and only when a store is
+ * supplied, so a grant store's outage cannot cost the watermark and session
+ * passes. An outage in any pass still leaves the other two done.
+ *
+ * The participants run last, and only once the three passes completed
+ * (`subjectRevocationParticipants.mts`).
  */
 export async function revokeAllForSubject(
 	opts: RevokeAllForSubjectOptions,
@@ -216,8 +289,8 @@ export async function revokeAllForSubject(
 		failures.push(...sessions.failures);
 	}
 
-	// Step 3 — end every federation grant the subject has. Last: an outage
-	// here must not cost the two passes above.
+	// Step 3 — end every federation grant the subject has. After the two
+	// passes above, so an outage here cannot cost them.
 	const grantsRevoked: string[] = [];
 	const grantsFailed: string[] = [];
 	const grantStore = opts.federationGrantStore;
@@ -281,8 +354,17 @@ export async function revokeAllForSubject(
 	// alongside the failure that produced it, which `failures` already carries.
 	// `sessionsFailed` is a term because a cascade that answers `{ ok: false }`
 	// reports no failure at all.
-	const complete =
+	const revocationComplete =
 		unavailable.length === 0 && failures.length === 0 && sessions.failed.length === 0;
+
+	// Step 4 — the participants, after a revocation that completed.
+	const participants = await participantsAfterRevocation({
+		subject: opts.subject,
+		participants: opts.subjectRevocationParticipantResolver,
+		revocationComplete,
+		logger: opts.logger,
+	});
+	if (participants.failure !== undefined) failures.push(participants.failure);
 
 	return {
 		sessionsRevoked: sessions.revoked,
@@ -293,6 +375,8 @@ export async function revokeAllForSubject(
 		grantsFailed,
 		unavailable,
 		failures,
-		complete,
+		participantsHeldBack: participants.participantsHeldBack,
+		participantFailures: participants.participantFailures,
+		complete: participants.complete,
 	};
 }
