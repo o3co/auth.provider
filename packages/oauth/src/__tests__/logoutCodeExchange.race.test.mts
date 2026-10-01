@@ -308,7 +308,7 @@ describe("a logout and a code exchange on the same session", () => {
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 	});
 
-	it("end before add: the add answers ended, the exchange refuses with no tokens, registers no RP, and the family is revoked", async () => {
+	it("end before add: the add answers ended, the exchange refuses with no tokens, and the family is revoked; the RP it registered first goes with the session's clean-up", async () => {
 		const w = await world();
 		const held = checkpoint();
 		const logout = w.logout({
@@ -326,9 +326,10 @@ describe("a logout and a code exchange on the same session", () => {
 
 		expectSessionInvalidated(result);
 		expect(w.answers).toEqual(["ended"]);
-		expect(registered).toEqual([]);
+		expect(registered.map((rp) => rp.clientId)).toEqual([CLIENT_ID]);
 		expect(await w.revocation.isFamilyRevoked(w.familyId())).toBe(true);
 		expect(await logout).toEqual({ outcome: "done" });
+		expect(await w.grantStores.sessionRPRegistry.listRPs(SID)).toEqual([]);
 	});
 
 	it("an add between the listing and the clean-up: the add answers ended", async () => {

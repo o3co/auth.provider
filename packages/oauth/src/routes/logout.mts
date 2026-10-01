@@ -39,6 +39,7 @@ import {
 	loggableError,
 	sanitizeErrorText,
 	supportsLogout,
+	supportsSessionEnd,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import accepts from "accepts";
@@ -255,8 +256,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 	};
 	const logoutStoreUnavailable = (
 		logger: EventLogger,
-		store: "user_session" | "session_rp_registry" | "session_federation_index",
-		step: "get" | "list",
+		store:
+			| "user_session"
+			| "session_rp_registry"
+			| "session_federation_index"
+			| "session_family_index",
+		step: "get" | "list" | "endSession",
 		error: unknown,
 		/** A second store that failed in the same read, already projected. */
 		also: { readonly alsoUnavailable?: { readonly store: string; readonly err: unknown } } = {},
@@ -705,6 +710,23 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// no cascade to run, but the cookie still has to end.
 			await endBrowserSession(req, sid, opts.logger ?? console);
 			return res.status(200).json({ logged_out: true });
+		}
+
+		// End the session before the RPs are read: a code exchange registers
+		// its RP before it joins the session's families, so one that joins
+		// after this mark is refused as ended, and one that joined before it
+		// is in the listing below. The cascade ends it again (idempotent).
+		// Without the session-end capability there is no mark to order by.
+		if (supportsSessionEnd(opts.sessionFamilyIndex)) {
+			try {
+				await opts.sessionFamilyIndex.endSession(sid, session.expiresAt);
+			} catch (err) {
+				logoutStoreUnavailable(opts.logger ?? console, "session_family_index", "endSession", err);
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "session store unavailable",
+				});
+			}
 		}
 
 		// Read the RP registry (for back-channel broadcast) and the federation

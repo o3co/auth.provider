@@ -746,8 +746,30 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// Composition-root invariant: the session-stores module wires its
 					// sibling stores together, so with userSessionStore present these
 					// two are too. `?.` would silently no-op on a misconfigured root.
+					//
+					// The RP is registered before the family joins the session: a
+					// logout ends the session before it lists the RPs, so either this
+					// RP is in that listing or the guarded add below answers "ended"
+					// and no token is served. An RP registered for a session that
+					// then ends is cleaned up with it, or lapses with its TTL.
+					linking = "session_rp_registry";
+					// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
+					await deps.sessionRPRegistry!.registerRP(
+						sid,
+						{
+							clientId: authenticatedClientId,
+							// Typed reads: a misspelt field would silently drop the RP
+							// from the logout cascade.
+							backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
+							backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
+							frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
+							frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
+							registeredAt: new Date(),
+						},
+						userSession.expiresAt,
+					);
 					linking = "session_family_index";
-					// biome-ignore lint/style/noNonNullAssertion: intentional — see invariant comment above
+					// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
 					const familyIndex = deps.sessionFamilyIndex!;
 					// With the session-end capability, either the logout's listing
 					// includes this family or the add answers "ended"; no token is
@@ -768,22 +790,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					} else {
 						await familyIndex.addFamilyId(sid, familyId, userSession.expiresAt);
 					}
-					linking = "session_rp_registry";
-					// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
-					await deps.sessionRPRegistry!.registerRP(
-						sid,
-						{
-							clientId: authenticatedClientId,
-							// Typed reads: a misspelt field would silently drop the RP
-							// from the logout cascade.
-							backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
-							backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-							frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
-							frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
-							registeredAt: new Date(),
-						},
-						userSession.expiresAt,
-					);
 				} catch (err) {
 					// Fail closed on any throw here. The errorDescription is generic
 					// because the try spans the client lookup and the store writes; the
