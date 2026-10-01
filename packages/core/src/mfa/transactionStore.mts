@@ -28,9 +28,10 @@
  * Subject state is judged on the time each caller passes, not the store's
  * clock, so callers' clocks must agree (NTP); see
  * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} for what a fast clock can erase. A
- * subject's run never expires (only a success, an exempt success below
- * `hardLimit` or `clearSubjectState` ends it), and an open sign-up lets anyone
- * mint subjects.
+ * subject's run never expires (only a success, an exempt success before the
+ * hard hold or `clearSubjectState` ends it), nor does the hard hold (only
+ * `clearSubjectState` lifts it), and an open sign-up lets anyone mint
+ * subjects.
  * Transactions are bounded by their expiry alone, not per subject and not
  * per session: nothing caps the transactions one session holds, and how many
  * are open is bounded only by the rate limits of the routes that open them.
@@ -718,10 +719,17 @@ export interface MfaLockoutPolicy {
 	/** Failures allowed in any rolling seven days (10). */
 	readonly weeklyBudget: number;
 	/**
-	 * Consecutive failures (100) that hold guessable proofs until the subject's
-	 * lock state is cleared (`clearSubjectState`); no time and no exempt success
-	 * lifts the hold (NIST SP 800-63B-4 §3.2.2). At most
-	 * {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
+	 * Consecutive attempts (100), reservations in flight counted, at which
+	 * guessable proofs are held until the subject's lock state is cleared
+	 * (`clearSubjectState`): the attempt that is the hardLimit-th since the
+	 * last success holds, whatever its outcome. This is one stricter than
+	 * NIST's '100 failed attempts': a correct hardLimit-th attempt still signs
+	 * in, but guessable factors stay held until re-enrolled. The hold is fixed
+	 * when the run reaches it: no time, no settle, no exempt success and no
+	 * higher `hardLimit` lifts it. NIST SP 800-63B-4's cap on consecutive
+	 * failed attempts is per authenticator and a ceiling; the per-subject
+	 * latch, and holding at the hardLimit-th attempt whatever its outcome, are
+	 * this product's choice. At most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
 	 */
 	readonly hardLimit: number;
 }
@@ -741,8 +749,9 @@ export const MFA_CLOCK_SKEW_ALLOWANCE_MS = 86_400_000;
 export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
 
 /**
- * Which hold refused a guessable attempt. No time and no exempt success lifts
- * `hard`; clearing the subject's lock state does (`clearSubjectState`).
+ * Which hold refused a guessable attempt. Once fixed, no time, no settle, no
+ * exempt success and no higher `hardLimit` lifts `hard`; clearing the
+ * subject's lock state does (`clearSubjectState`).
  */
 export type MfaSubjectHold = "backoff" | "weekly" | "hard";
 
@@ -774,7 +783,7 @@ export type MfaSubjectAttemptReservation =
  * proof verified; it ends the consecutive run up to and including this
  * reservation (a later one still in flight starts the next). `void`: the proof
  * was right but the factor's write lost or failed; the attempt is removed and
- * the run goes on.
+ * the run goes on. Neither lifts a hard hold already fixed.
  */
 export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 
@@ -831,11 +840,24 @@ export interface MfaTransactionStore {
 	consume(id: string, expectedVersion: number): Promise<MfaTransaction | null>;
 
 	/**
-	 * Refuse while a hold applies at `nowMs` — the hard limit, the short
+	 * Refuse while a hold applies at `nowMs` — the hard hold, the short
 	 * backoff or the weekly budget, for every attempt alike — and otherwise
 	 * count a pending failure, which stands until settled. A refusal records
 	 * only that its episode began (`first`); an attempt let through ends the
 	 * episode.
+	 *
+	 * The hard hold is fixed, in the same atomic step, the first time the
+	 * run — reservations in flight counted — reaches `policy.hardLimit`: at
+	 * the reservation that brings it there, which is let through, or at the
+	 * first call that finds it there under a lower `hardLimit`. The store
+	 * records its time as the later of that call's `nowMs` and the run's
+	 * newest attempt, so no attempt of the run is dated after it. From then
+	 * until `clearSubjectState` every reservation is refused `hard`, whatever
+	 * policy it is handed, and no settle, exempt success or sweep lifts it.
+	 * The policy is read once, by {@link checkMfaLockoutPolicy}, and its
+	 * copy is what the call applies.
+	 * Of reservations racing to the limit, the one that reaches it is let
+	 * through and fixes the hold; those after it are refused `hard`.
 	 */
 	reserveSubjectAttempt(
 		subject: string,
@@ -845,7 +867,9 @@ export interface MfaTransactionStore {
 	/**
 	 * Settle a reservation, once, under the subject that made it; settling one
 	 * already settled, one never made, or one under another subject changes
-	 * nothing. An outcome it does not know is a `RangeError`.
+	 * nothing. An outcome it does not know is a `RangeError`. A success or a
+	 * void settled once the hard hold is fixed — for the reservation that
+	 * fixed it included — lifts nothing of it.
 	 */
 	settleSubjectAttempt(
 		subject: string,
@@ -853,18 +877,20 @@ export interface MfaTransactionStore {
 		outcome: MfaSubjectAttemptOutcome,
 	): Promise<void>;
 	/**
-	 * An exempt success (a recovery code, a WebAuthn assertion). While the
-	 * attempts up to `nowMs`, reservations in flight among them, are fewer than
-	 * `policy.hardLimit`, it ends the run up to `nowMs`; at or past it they, and
-	 * the hard hold, stand. An attempt reserved after `nowMs` always stays. The
+	 * An exempt success (a recovery code, a WebAuthn assertion). Before the
+	 * hard hold is fixed it ends the run up to `nowMs`, reservations in flight
+	 * among them; an attempt reserved after `nowMs` always stays. A run already
+	 * at `policy.hardLimit` or past it fixes the hold instead, as a reservation
+	 * would. Once the hold is fixed it ends nothing, whether `nowMs` is before,
+	 * at or after the last failure and whatever `hardLimit` it is handed. The
 	 * week stands, and lets no attempt through. Call it only after the
 	 * transaction holding the exempt proof was consumed. A `RangeError` for what
 	 * {@link checkMfaLockoutPolicy} refuses.
 	 */
 	noteExemptSuccess(subject: string, nowMs: number, policy: MfaLockoutPolicy): Promise<void>;
 	/**
-	 * Forget `subject`'s lock state (the run and the week). No revocation and
-	 * no credential change calls it. It leaves the subject's first-binding
+	 * Forget `subject`'s lock state (the run, the week and the hard hold). No
+	 * revocation and no credential change calls it. It leaves the subject's first-binding
 	 * mark: that is not lock state, and clearing it would trust a stale
 	 * session.
 	 */

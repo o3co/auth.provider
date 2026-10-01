@@ -157,9 +157,12 @@ return fields
 //
 // Answers are judged on the caller's `now`; what a script forgets is judged no later than the
 // server's clock less a day (MFA_CLOCK_SKEW_ALLOWANCE_MS), so a caller far ahead erases nothing.
-// While a run is counted the keys have no TTL; otherwise they expire a day after the last
-// failure stops counting. A stored value a script cannot read is an error (an outage), never
-// read as an empty state; a lock-hash field of a kind the scripts do not read is ignored.
+// The lock hash's `hard` field is the hard hold, fixed (`HSETNX`) by the script that finds the
+// run at the hard limit and removed by nothing but clearing the subject. It holds the later of
+// that script's `now` and the run's newest attempt, so no attempt of the run is dated after it.
+// While a run is counted or the hold stands the keys have no TTL; otherwise they expire a day
+// after the last failure stops counting. A stored value a script cannot read is an error (an outage), never read as an
+// empty state; a lock-hash field of a kind the scripts do not read is ignored.
 
 const LUA_MFA_SUBJECT_PRELUDE = `
 local WEEK = 604800000
@@ -182,15 +185,18 @@ local function server_ms()
   return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 end
 
--- The state: the run, the reservations in flight, and the week in time
--- order. A field of any other kind is not read.
+-- The state: the run, the reservations in flight, the week in time order,
+-- and when the hard hold was fixed (nil while it is not). A field of any
+-- other kind is not read.
 local function load()
-  local run, pending, week = {}, {}, {}
+  local run, pending, week, held_hard = {}, {}, {}, nil
   local flat = redis.call('HGETALL', KEYS[1])
   for i = 1, #flat, 2 do
     local field, value = flat[i], flat[i + 1]
     local kind, id = string.sub(field, 1, 2), string.sub(field, 3)
-    if kind == 'r:' then
+    if field == 'hard' then
+      held_hard = num(value)
+    elseif kind == 'r:' then
       local seq, at = string.match(value, '^(%d+)|(.+)$')
       if seq == nil then corrupt() end
       run[#run + 1] = {id = id, seq = num(seq), at = num(at)}
@@ -201,7 +207,7 @@ local function load()
   end
   local z = redis.call('ZRANGE', KEYS[2], 0, -1, 'WITHSCORES')
   for i = 1, #z, 2 do week[#week + 1] = {id = z[i], at = num(z[i + 1])} end
-  return run, pending, week
+  return run, pending, week, held_hard
 end
 
 -- Forgets what no longer counts at horizon: the week's failures that ended
@@ -231,12 +237,22 @@ local function prune(run, pending, week, horizon)
   return kept_week, forgot
 end
 
--- Sets what Redis reclaims: no TTL while a run is counted; else a day past
--- the last failure to stop counting; nothing left, both keys go.
+-- The time a hold fixed at now records: never before the run's newest attempt.
+local function fixed_at(run, now)
+  local latest = now
+  for _, a in ipairs(run) do
+    if a.at > latest then latest = a.at end
+  end
+  return fmt(latest)
+end
+
+-- Sets what Redis reclaims: no TTL while a run is counted or the hard hold
+-- stands; else a day past the last failure to stop counting; nothing left,
+-- both keys go.
 local function keep()
   local flat = redis.call('HGETALL', KEYS[1])
   for i = 1, #flat, 2 do
-    if string.sub(flat[i], 1, 2) == 'r:' then
+    if flat[i] == 'hard' or string.sub(flat[i], 1, 2) == 'r:' then
       redis.call('PERSIST', KEYS[1])
       redis.call('PERSIST', KEYS[2])
       return
@@ -260,28 +276,42 @@ end
  * weeklyBudget, hardLimit, the reservation's id. Returns `{'ok'}`, or
  * `{'held', hold, retryAfterMs, first}` with an empty retry for the hard
  * hold and `first` `1` for the refusal that begins an episode, `0` after.
+ * The reservation that brings the run to hardLimit, or a call that finds it
+ * there, fixes the hard hold in the same step, at the later of now and the
+ * run's newest attempt; once fixed, every reservation is refused `hard`,
+ * whatever hardLimit it is handed, and a refusal takes off a deadline the
+ * lock hash carries.
  */
 const LUA_MFA_SUBJECT_RESERVE = `${LUA_MFA_SUBJECT_PRELUDE}
 local now = num(ARGV[1])
 local threshold, base, max_s, memory_s = num(ARGV[2]), num(ARGV[3]), num(ARGV[4]), num(ARGV[5])
 local budget, hard = num(ARGV[6]), num(ARGV[7])
 local id = ARGV[8]
-local run, pending, week = load()
+local run, pending, week, held_hard = load()
 local forgot
 week, forgot = prune(run, pending, week, math.min(now, server_ms()) - SKEW)
 
--- A refusal writes only the mark that its episode began, once: the deadlines
--- are set again only then or when the prune forgot something, so a held
+-- A refusal writes only the mark that its episode began, once, and the hard
+-- hold when it fixes it: the deadlines are set again only then, when the
+-- prune forgot something, or when a held hash carries a deadline, so a held
 -- subject hammered is no write load.
+local rekeep = false
 local function refuse(hold, retry)
   local first = redis.call('HSETNX', KEYS[1], 'held', '1') == 1
-  if forgot or first then keep() end
+  if forgot or first or rekeep then keep() end
   local mark = '0'
   if first then mark = '1' end
   return {'held', hold, retry, mark}
 end
 
-if #run >= hard then
+if held_hard == nil and #run >= hard then
+  redis.call('HSETNX', KEYS[1], 'hard', fixed_at(run, now))
+  rekeep = true
+elseif held_hard ~= nil and redis.call('PTTL', KEYS[1]) >= 0 then
+  -- A deadline set by a script that does not keep the hold: taken off here.
+  rekeep = true
+end
+if held_hard ~= nil or #run >= hard then
   return refuse('hard', '')
 end
 
@@ -332,6 +362,8 @@ local seq = redis.call('HINCRBY', KEYS[1], 'seq', 1)
 redis.call('HSET', KEYS[1], 'r:' .. id, seq .. '|' .. ARGV[1], 'p:' .. id, seq)
 redis.call('HDEL', KEYS[1], 'held')
 redis.call('ZADD', KEYS[2], ARGV[1], id)
+-- The attempt that brings the run to the limit fixes the hold in this step.
+if #run + 1 >= hard then redis.call('HSETNX', KEYS[1], 'hard', fixed_at(run, now)) end
 keep()
 return {'ok'}
 `;
@@ -341,8 +373,9 @@ return {'ok'}
  *
  * `ARGV`: the reservation, the outcome. `void` removes the attempt; `success`
  * ends the run up to and including it, and takes it out of the week;
- * `failure` leaves it standing. A reservation not in flight changes nothing.
- * The whole state is read and validated before anything is written.
+ * `failure` leaves it standing. None touches the hard hold. A reservation
+ * not in flight changes nothing. The whole state is read and validated
+ * before anything is written.
  */
 const LUA_MFA_SUBJECT_SETTLE = `${LUA_MFA_SUBJECT_PRELUDE}
 local id, outcome = ARGV[1], ARGV[2]
@@ -368,10 +401,12 @@ return 1
 /**
  * `MfaTransactionStoreClient.noteExemptSuccess`.
  *
- * `ARGV`: now, hardLimit. Ends the run up to now while the attempts up to now
- * are fewer than hardLimit; at or past it they, and the hard hold, stand. An
- * attempt after now stays, and the week stands. A hardLimit that is missing or
- * not a number is refused before anything is read.
+ * `ARGV`: now, hardLimit. Before the hard hold is fixed, ends the run up to
+ * now; a run already at hardLimit or past it fixes the hold instead, at the
+ * later of now and its newest attempt.
+ * Once fixed, nothing ends. An attempt after now stays, and the week stands.
+ * A hardLimit that is missing or not a number is refused before anything is
+ * read.
  */
 const LUA_MFA_SUBJECT_EXEMPT = `${LUA_MFA_SUBJECT_PRELUDE}
 local hard = tonumber(ARGV[2])
@@ -379,13 +414,11 @@ if hard == nil or hard ~= hard or hard == math.huge or hard == -math.huge then
   error({err = 'MFA subject state: the hardLimit argument is missing or not a number'})
 end
 local now = num(ARGV[1])
-local run, pending, week = load()
+local run, pending, week, held_hard = load()
 prune(run, pending, week, math.min(now, server_ms()) - SKEW)
-local up_to = 0
-for _, a in ipairs(run) do
-  if a.at <= now then up_to = up_to + 1 end
-end
-if up_to < hard then
+if held_hard == nil and #run >= hard then
+  redis.call('HSETNX', KEYS[1], 'hard', fixed_at(run, now))
+elseif held_hard == nil then
   for _, a in ipairs(run) do
     if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
   end
