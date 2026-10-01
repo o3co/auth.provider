@@ -25,7 +25,7 @@
  * that account.
  */
 
-import type { AppConfig, AuditEvent, AuditSink, MfaFactorStore } from "@o3co/auth-provider-core";
+import type { AuditEvent, AuditSink, MfaFactorStore } from "@o3co/auth-provider-core";
 import { seedMfaFactor } from "@o3co/auth-provider-mfa/testing";
 import {
 	ALICE,
@@ -85,7 +85,7 @@ async function boot(): Promise<{
 	const audit = recordingAuditSink();
 	current = await composeFullSet({
 		adjust: (config) =>
-			({ ...config, ...webauthnMfaFactorConfigForTests({ enabled: true }) }) as AppConfig,
+			({ ...config, ...webauthnMfaFactorConfigForTests({ enabled: true }) }) as typeof config,
 		extraOverrides: () => ({ auditSink: audit }),
 		extraUsers: { [MALLORY.username]: { id: MALLORY.sub, password: MALLORY.password } },
 		extraClients: {
