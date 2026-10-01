@@ -24,6 +24,7 @@
 import { emitAuditEvent } from "../audit/factory.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
+import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
 import type { UserSession } from "../user-sessions/types.mjs";
 import { nonEmptyString } from "./input-values.mjs";
 import type { CheckedRequest } from "./request-check.mjs";
@@ -104,13 +105,14 @@ export async function readLiveSession(
 	// id a concurrent request saved back after the renewal holds another or
 	// none. A record without one is bound to nothing; other carriers hold no
 	// cookie session to compare.
-	if (
-		session !== null &&
-		presented.carrier === "cookie" &&
-		session.renewalNonce != null &&
-		session.renewalNonce !== presented.renewalNonce
-	) {
-		return { answer: { outcome: "not_live", reason: "renewed" } };
+	if (session !== null && presented.carrier === "cookie") {
+		// Read once: a store's accessor cannot answer one value to the check
+		// and another to the comparison. A value that is not a nonce binds the
+		// record to no cookie session, whatever the cookie session holds.
+		const bound: unknown = session.renewalNonce;
+		if (bound != null && (!isRenewalNonce(bound) || bound !== presented.renewalNonce)) {
+			return { answer: { outcome: "not_live", reason: "renewed" } };
+		}
 	}
 
 	// Step 4: the revocation boundary, against a live record; a token's is

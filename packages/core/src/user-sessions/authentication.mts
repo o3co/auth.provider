@@ -168,8 +168,8 @@ const notAfter = (ms: number, nowMs: number): Date => new Date(Math.min(ms, nowM
  * `fed`: a second factor must not change the primary the baseline is
  * decided on); `mfa` alone (it comes beside a factor's own values, and alone
  * names no factor); a time `isRecordableVerificationTime` refuses on
- * `nowMs`, the store's clock; or a `renewalNonce` that is not one
- * (`isRenewalNonce`). Every bundled store's `recordSecondFactor`
+ * `nowMs`, the store's clock; or a `renewalNonce` or `expectedRenewalNonce`
+ * that is not one (`isRenewalNonce`). Every bundled store's `recordSecondFactor`
  * runs this before it reads anything. The message quotes nothing but a
  * primary's marker.
  */
@@ -202,6 +202,20 @@ export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number):
 	if (event.renewalNonce !== undefined && !isRenewalNonce(event.renewalNonce)) {
 		throw new RangeError("recordSecondFactor: renewalNonce must be one newRenewalNonce spells");
 	}
+	if (event.expectedRenewalNonce !== undefined && !isRenewalNonce(event.expectedRenewalNonce)) {
+		throw new RangeError(
+			"recordSecondFactor: expectedRenewalNonce must be one newRenewalNonce spells",
+		);
+	}
+}
+
+/**
+ * Whether a session holding `held` may record `event`: its renewal nonce is
+ * the one the event expects, absent matching absent. Every bundled store
+ * asks it in the same atomic step as its write.
+ */
+export function expectsRenewalNonce(held: string | undefined, event: SecondFactorEvent): boolean {
+	return held === event.expectedRenewalNonce;
 }
 
 /**

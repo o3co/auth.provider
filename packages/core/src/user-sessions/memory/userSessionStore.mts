@@ -17,6 +17,7 @@
 import {
 	checkSecondFactorEvent,
 	copySessionAuthentication,
+	expectsRenewalNonce,
 	recordableSessionAuthentication,
 	sessionAfterSecondFactor,
 } from "../authentication.mjs";
@@ -159,6 +160,8 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 			checkSecondFactorEvent(event, nowMs);
 			const s = readLive(sid);
 			if (!s) return null;
+			// A completion another one overtook: the session moved to its nonce.
+			if (!expectsRenewalNonce(s.renewalNonce, event)) return null;
 			const next = sessionAfterSecondFactor(toSession(s), event, nowMs);
 			if (next === null) return null;
 			// A field write: `expiresAt`, and everything else, stay as they were.

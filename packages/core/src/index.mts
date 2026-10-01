@@ -1066,6 +1066,7 @@ export type { OAuthTokenSettings } from "./token-settings/types.mjs";
 // way by every consumer of a session.
 export {
 	checkSecondFactorEvent,
+	expectsRenewalNonce,
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,

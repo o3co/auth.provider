@@ -19,6 +19,7 @@ import {
 	type CreateUserSessionInput,
 	checkSecondFactorEvent,
 	consoleLogger,
+	expectsRenewalNonce,
 	isRenewalNonce,
 	type Logger,
 	loggableError,
@@ -240,7 +241,9 @@ const RECORD_SECOND_FACTOR_ATTEMPTS = 5;
  *   `sessionAfterSecondFactor` (which first splits a session recorded without
  *   `authentication`), and writes it with the client's `replaceIfUnchanged`
  *   (`KEEPTTL`, only while the stored bytes are the ones read), re-reading on
- *   a loss at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times. Only `amr`, the
+ *   a loss at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times, and answering
+ *   `null` when the envelope read holds a renewal nonce the event does not
+ *   expect (`expectsRenewalNonce`). Only `amr`, the
  *   `authentication` fields this release knows, and `renewalNonce` when the
  *   event carries one are rewritten; everything
  *   else, keys a newer release added included, is written back as read, so a
@@ -359,6 +362,9 @@ export function createRedisUserSessionStore(
 				// Read as `get` reads: a corrupt envelope is a session that is gone.
 				const stored = readEnvelope(sid, raw);
 				if (stored === null || stored.expiresAtMs <= Date.now()) return null;
+				// Judged on the bytes the compare-and-set below writes over: a
+				// completion another one overtook finds that one's nonce.
+				if (!expectsRenewalNonce(stored.renewalNonce, event)) return null;
 				const next = sessionAfterSecondFactor(fromEnvelope(stored), event, nowMs);
 				if (next === null) return null;
 				// The known fields are rewritten; what a newer release added beside
