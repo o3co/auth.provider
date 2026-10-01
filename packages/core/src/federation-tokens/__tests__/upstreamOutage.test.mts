@@ -60,6 +60,13 @@ describe("isFederationUpstreamOutage", () => {
 		],
 		["undici's own socket code", new TypeError("fetch failed", { cause: coded("UND_ERR_SOCKET") })],
 		[
+			"an adapter's own object over undici's fetch failure",
+			{
+				error: "invalid_grant",
+				cause: new TypeError("fetch failed", { cause: coded("ECONNRESET") }),
+			},
+		],
+		[
 			"a token endpoint answering 503, as openid-client raises it",
 			clientError("OAUTH_RESPONSE_IS_NOT_CONFORM", new Response("down", { status: 503 })),
 		],
@@ -328,6 +335,22 @@ describe("readFederationUpstreamOutage — the walk, saying when a field it read
 		}
 		const response = throwingOn(new Response(null, { status: 400 }), "status");
 		expect(readFederationUpstreamOutage(raisedOver(response))).toBe("unreadable");
+	});
+
+	it("follows a thrown non-Error's cause only into an Error or a Response, reading nothing else of it", () => {
+		expect(readFederationUpstreamOutage({ cause: coded("ECONNRESET") })).toBe("outage");
+		expect(readFederationUpstreamOutage({ cause: new Response(null, { status: 503 }) })).toBe(
+			"outage",
+		);
+		expect(
+			readFederationUpstreamOutage({ cause: Object.assign(new Error("x"), { status: 400 }) }),
+		).toBe("none");
+		expect(readFederationUpstreamOutage({ cause: { code: "ECONNRESET" } })).toBe("none");
+		expect(readFederationUpstreamOutage({ code: "ECONNRESET", status: 503 })).toBe("none");
+		expect(readFederationUpstreamOutage({ cause: throwingOn(new Error("x"), "status") })).toBe(
+			"unreadable",
+		);
+		expect(readFederationUpstreamOutage(throwingOn({}, "cause"))).toBe("unreadable");
 	});
 
 	it("is outage when an outage is read after a field that cannot be read, as isFederationUpstreamOutage answers", () => {
