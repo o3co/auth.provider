@@ -259,7 +259,18 @@ describe("redis DeviceCodeStore — the approving session's amr and authenticati
 		if (polled.status === "approved") expect(polled.authorization).toHaveProperty("amr", undefined);
 	});
 
-	it("reads a stored authentication time that is not a number as absent", async () => {
+	it.each([
+		["not a number", "soon"],
+		["empty", ""],
+		["blank", " "],
+		["negative", "-1"],
+		["fractional", "1.5"],
+		["in exponent form", "1e3"],
+		["past the Date range", "8640000000000001"],
+	])("reads a stored authentication time that is %s as absent", async (_label, value) => {
+		// Only an approval writes the field, as the whole epoch milliseconds of a
+		// valid Date at or after the epoch; anything else reads as "cannot tell",
+		// never as an instant of its own (an empty string is not epoch zero).
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		await store.create(seed);
@@ -269,7 +280,7 @@ describe("redis DeviceCodeStore — the approving session's amr and authenticati
 			nowMs: NOW,
 			authTime: new Date(NOW - 60_000),
 		});
-		await raw.hset(keysAt(prefix).codeKey, "authTimeMs", "soon");
+		await raw.hset(keysAt(prefix).codeKey, "authTimeMs", value);
 		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
 		expect(polled.status).toBe("approved");
 		if (polled.status === "approved") {

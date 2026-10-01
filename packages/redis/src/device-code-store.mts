@@ -104,6 +104,18 @@ const parseInstant = (value: string | undefined): number | undefined => {
 };
 
 /**
+ * A stored authentication instant, or `undefined` when there is none to read.
+ * Only an approval writes it, as the whole epoch milliseconds of a `Date`
+ * `approve` accepts; any other spelling (empty, signed, fractional, exponent
+ * form, past the Date range) reads as absent rather than as an instant.
+ */
+const parseAuthTimeMs = (value: string | undefined): number | undefined => {
+	if (value === undefined || !/^(?:0|[1-9][0-9]*)$/.test(value)) return undefined;
+	const ms = Number(value);
+	return authTimeClaim(new Date(ms)) === undefined ? undefined : ms;
+};
+
+/**
  * A stored `amr`, or `undefined` when there is none to read. Only an approval
  * writes it, and only as a well-formed list; any other value was written
  * around the store and reads as absent, which the grant reads as "cannot tell".
@@ -137,7 +149,7 @@ const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization =>
 	// Absent unless an approval was handed them, and on records an older
 	// release approved.
 	amr: parseAmr(fields.amr),
-	authTimeMs: parseInstant(fields.authTimeMs),
+	authTimeMs: parseAuthTimeMs(fields.authTimeMs),
 });
 
 /**
