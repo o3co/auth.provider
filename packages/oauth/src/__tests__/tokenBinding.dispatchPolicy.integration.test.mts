@@ -33,14 +33,13 @@ import {
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { clientEntries, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
-import { clientEntries } from "./_helpers/clientEntries.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 // ---------------------------------------------------------------------------
