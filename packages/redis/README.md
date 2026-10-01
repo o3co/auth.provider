@@ -653,7 +653,7 @@ as two keys:
 
 | Key | Type | Holds |
 | --- | --- | --- |
-| `${keyPrefix}{devauth}:code:${device_code}` | hash | the record — status, expiry, interval, scope, subject, and the approval's instant (`approvedAtMs`, written by the approving script in the same `HSET`; a record approved before it was written reads it as absent) |
+| `${keyPrefix}{devauth}:code:${device_code}` | hash | the record — status, expiry, interval, scope, subject, the approval's instant (`approvedAtMs`), and the approving session's `amr` (a JSON array) and authentication instant (`authTimeMs`) when the approval was handed them. The approving script writes them in the same `HSET` as the approval; one it was not handed is not written. |
 | `${keyPrefix}{devauth}:user:${user_code}` | string | the `device_code` it belongs to |
 
 `keyPrefix` is `redis-device-code-store.keyPrefix` (default `devauth:`); the
@@ -677,6 +677,12 @@ carry the authorization's `expiresAtMs`, rounded up to a whole millisecond,
 as their deadline so Redis reclaims them, but `poll` still answers `expired`
 from the record's own exact timestamp: a record inside its TTL whose deadline
 has passed on the caller's clock expires, and is dropped.
+
+*Rolling upgrade.* A record approved before an upgrade, or by a replica that
+has not been upgraded yet, holds no `approvedAtMs`, `amr` or `authTimeMs`, and
+reads each as absent. So does a stored `amr` that is not a non-empty JSON
+list of non-empty strings, or an instant that is not a number. Nothing needs
+migrating.
 
 ## Consent records and parked requests
 

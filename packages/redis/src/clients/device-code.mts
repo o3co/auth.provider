@@ -63,6 +63,10 @@ export interface DeviceCodeRecordFields {
 	readonly grantedScope?: string;
 	/** Epoch milliseconds, set by an approval: the `now` the decision was made at. */
 	readonly approvedAtMs?: string;
+	/** JSON array, set by an approval handed the approving session's `amr`. */
+	readonly amr?: string;
+	/** Epoch milliseconds, set by an approval handed when the approving session authenticated. */
+	readonly authTimeMs?: string;
 	/** Epoch milliseconds of the previous poll. Absent until the first. */
 	readonly lastPolledAtMs?: string;
 }
@@ -95,6 +99,10 @@ export type DeviceCodeDecisionInput =
 			 * client-side would be the second read the port rules out.
 			 */
 			readonly grantedScope?: readonly string[];
+			/** The approving session's `amr`, written as handed. Omitted, the record holds none. */
+			readonly amr?: readonly string[];
+			/** When the approving session authenticated, in epoch milliseconds. Omitted, the record holds none. */
+			readonly authTimeMs?: number;
 	  };
 
 export type DeviceCodeDecisionReply =

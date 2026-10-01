@@ -1611,6 +1611,8 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 					subject: "user-1",
 					grantedScope: ["openid"],
 					approvedAtMs: Date.now(),
+					amr: undefined,
+					authTimeMs: undefined,
 				},
 			}),
 		} satisfies DeviceCodeStore;
@@ -1664,6 +1666,8 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 					subject: "user-1",
 					grantedScope: ["openid"],
 					approvedAtMs: Date.now(),
+					amr: undefined,
+					authTimeMs: undefined,
 				},
 			}),
 		} satisfies DeviceCodeStore;

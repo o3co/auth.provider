@@ -63,6 +63,7 @@ export function makeIoredisDeviceCodeStoreClient(io: Redis): DeviceCodeStoreClie
 		},
 		async decide(keys, userCode, nowMs, input) {
 			const approval = input.decision === "approved" ? input : undefined;
+			const amr = approval?.amr;
 			const reply = (await runScript(
 				io,
 				DEVICE_CODE_DECIDE,
@@ -74,6 +75,8 @@ export function makeIoredisDeviceCodeStoreClient(io: Redis): DeviceCodeStoreClie
 					approval?.subject ?? "",
 					approval?.grantedScope === undefined ? "requested" : "narrow",
 					JSON.stringify(approval?.grantedScope ?? []),
+					amr === undefined ? "" : JSON.stringify(amr),
+					approval?.authTimeMs === undefined ? "" : String(approval.authTimeMs),
 				],
 			)) as [string, unknown?];
 			switch (reply[0]) {

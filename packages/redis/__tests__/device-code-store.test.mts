@@ -179,6 +179,105 @@ describe("createRedisDeviceCodeStore — what is Redis-specific", () => {
 	});
 });
 
+describe("redis DeviceCodeStore — the approving session's amr and authentication time", () => {
+	const keysAt = (prefix: string) => ({
+		codeKey: `${prefix}{devauth}:code:${seed.deviceCode}`,
+	});
+
+	it("writes neither field for an approval handed neither, and each as handed otherwise", async () => {
+		const absentPrefix = freshPrefix();
+		const absent = storeAt(absentPrefix);
+		await absent.create(seed);
+		await absent.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW });
+		const absentFields = await raw.hkeys(keysAt(absentPrefix).codeKey);
+		expect(absentFields).toContain("approvedAtMs");
+		expect(absentFields).not.toContain("amr");
+		expect(absentFields).not.toContain("authTimeMs");
+
+		const presentPrefix = freshPrefix();
+		const present = storeAt(presentPrefix);
+		await present.create(seed);
+		await present.approve({
+			userCode: seed.userCode,
+			subject: "user-1",
+			nowMs: NOW,
+			amr: ["pwd", "mfa"],
+			authTime: new Date(NOW - 60_000),
+		});
+		const { codeKey } = keysAt(presentPrefix);
+		expect(await raw.hget(codeKey, "amr")).toBe('["pwd","mfa"]');
+		expect(await raw.hget(codeKey, "authTimeMs")).toBe(String(NOW - 60_000));
+	});
+
+	it("reads a record approved without the two fields, as by an older release, as holding neither", async () => {
+		// A replica not yet upgraded runs its own approval script, which writes
+		// neither field; the record is still a whole one, with both keys named.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await store.create(seed);
+		await raw.hset(keysAt(prefix).codeKey, {
+			status: "approved",
+			subject: "user-1",
+			grantedScope: '["openid"]',
+			approvedAtMs: String(NOW),
+		});
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		expect(polled.status).toBe("approved");
+		if (polled.status === "approved") {
+			expect(polled.authorization).toHaveProperty("amr", undefined);
+			expect(polled.authorization).toHaveProperty("authTimeMs", undefined);
+			expect(polled.authorization.subject).toBe("user-1");
+		}
+	});
+
+	it("round-trips an amr value holding a comma, a quote and non-ASCII text", async () => {
+		const amr = ["a,b", 'say "hi"', "認証", "\\u0000-not-an-escape", "[]"];
+		const store = storeAt(freshPrefix());
+		await store.create(seed);
+		await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW, amr });
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		expect(polled.status === "approved" && polled.authorization.amr).toEqual(amr);
+	});
+
+	it.each([
+		["not JSON", "pwd,mfa"],
+		["an empty list", "[]"],
+		["a list holding an empty string", '["pwd",""]'],
+		["a list holding a number", '["pwd",1]'],
+		["a JSON string", '"pwd"'],
+		["a JSON object", '{"0":"pwd"}'],
+	])("reads a stored amr that is %s as absent, never as part of one", async (_label, value) => {
+		// Only an approval writes the field, and only a well-formed list; any
+		// other value was written around the store, and reads as "cannot tell".
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await store.create(seed);
+		await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW, amr: ["pwd"] });
+		await raw.hset(keysAt(prefix).codeKey, "amr", value);
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		expect(polled.status).toBe("approved");
+		if (polled.status === "approved") expect(polled.authorization).toHaveProperty("amr", undefined);
+	});
+
+	it("reads a stored authentication time that is not a number as absent", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		await store.create(seed);
+		await store.approve({
+			userCode: seed.userCode,
+			subject: "user-1",
+			nowMs: NOW,
+			authTime: new Date(NOW - 60_000),
+		});
+		await raw.hset(keysAt(prefix).codeKey, "authTimeMs", "soon");
+		const polled = await store.poll(seed.deviceCode, NOW + 10_000);
+		expect(polled.status).toBe("approved");
+		if (polled.status === "approved") {
+			expect(polled.authorization).toHaveProperty("authTimeMs", undefined);
+		}
+	});
+});
+
 /**
  * What this adapter does with an untyped caller's falsy `requestedScope`: it
  * reads as a scopeless request, as in both bundled stores, which test the

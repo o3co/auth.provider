@@ -37,6 +37,7 @@
  */
 
 import { isStorableExpiry } from "../adapters/expiry.mjs";
+import { authTimeClaim, wellFormedAmr } from "../grants/authenticationClaims.mjs";
 import { DeviceCodeStoreError } from "./errors.mjs";
 import type {
 	ApproveDeviceAuthorizationInput,
@@ -58,6 +59,8 @@ interface Entry {
 	subject: string | undefined;
 	grantedScope: readonly string[] | undefined;
 	approvedAtMs: number | undefined;
+	amr: readonly string[] | undefined;
+	authTimeMs: number | undefined;
 	lastPolledAtMs?: number;
 }
 
@@ -71,6 +74,8 @@ const toAuthorization = (entry: Entry): DeviceAuthorization => ({
 	subject: entry.subject,
 	grantedScope: entry.grantedScope,
 	approvedAtMs: entry.approvedAtMs,
+	amr: entry.amr,
+	authTimeMs: entry.authTimeMs,
 });
 
 /**
@@ -121,6 +126,39 @@ export interface MemoryDeviceCodeStoreOptions {
 
 const positiveIntegerOr = (value: number | undefined, fallback: number): number =>
 	typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+
+/**
+ * An approval's `amr` as recorded: a frozen copy, so no reader writes through
+ * to what the poll hands on. Absent stays absent.
+ *
+ * @throws `RangeError` for one that is not a non-empty list of non-empty strings.
+ */
+const approvedAmr = (amr: readonly string[] | undefined): readonly string[] | undefined => {
+	if (amr === undefined) return undefined;
+	const copy = wellFormedAmr(amr);
+	if (copy === undefined) {
+		throw new RangeError(
+			"DeviceCodeStore.approve: amr must be a non-empty list of non-empty strings",
+		);
+	}
+	return Object.freeze(copy);
+};
+
+/**
+ * An approval's authentication instant as recorded, in epoch milliseconds.
+ * Absent stays absent.
+ *
+ * @throws `RangeError` for one that is not a valid `Date` at or after the epoch.
+ */
+const approvedAuthTimeMs = (authTime: Date | undefined): number | undefined => {
+	if (authTime === undefined) return undefined;
+	if (!(authTime instanceof Date && authTimeClaim(authTime) !== undefined)) {
+		throw new RangeError(
+			"DeviceCodeStore.approve: authTime must be a valid Date at or after the epoch",
+		);
+	}
+	return authTime.getTime();
+};
 
 export interface MemoryDeviceCodeStore extends DeviceCodeStore {
 	/** Entry count, for tests and for the sweep's own coverage. */
@@ -235,6 +273,8 @@ export const createMemoryDeviceCodeStore = (
 				subject: undefined,
 				grantedScope: undefined,
 				approvedAtMs: undefined,
+				amr: undefined,
+				authTimeMs: undefined,
 			};
 			byDeviceCode.set(entry.deviceCode, entry);
 			byUserCode.set(entry.userCode, entry);
@@ -248,6 +288,9 @@ export const createMemoryDeviceCodeStore = (
 		},
 
 		approve: async (input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome> => {
+			// Refused before the lookup, so a refused approval changes nothing.
+			const amr = approvedAmr(input.amr);
+			const authTimeMs = approvedAuthTimeMs(input.authTime);
 			const entry = livePendingByUserCode(input.userCode, input.nowMs);
 			if (entry === null) return { status: "not_found" };
 			if (entry === "expired") return { status: "expired" };
@@ -257,6 +300,8 @@ export const createMemoryDeviceCodeStore = (
 			entry.status = "approved";
 			entry.subject = input.subject;
 			entry.approvedAtMs = input.nowMs;
+			entry.amr = amr;
+			entry.authTimeMs = authTimeMs;
 			// Omitted means "grant what was asked for". When supplied it is
 			// intersected rather than trusted: a caller may narrow what the
 			// user approved, never widen it past the allowlist the device

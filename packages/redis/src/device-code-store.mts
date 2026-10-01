@@ -42,6 +42,7 @@
 import {
 	type AdapterBuilder,
 	type ApproveDeviceAuthorizationInput,
+	authTimeClaim,
 	type CreateDeviceAuthorizationInput,
 	type DeviceAuthorization,
 	type DeviceCodeStore,
@@ -50,6 +51,7 @@ import {
 	type DevicePollOutcome,
 	defineModule,
 	isStorableExpiry,
+	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type {
 	DeviceCodeDecisionReply,
@@ -102,6 +104,20 @@ const parseInstant = (value: string | undefined): number | undefined => {
 };
 
 /**
+ * A stored `amr`, or `undefined` when there is none to read. Only an approval
+ * writes it, and only as a well-formed list; any other value was written
+ * around the store and reads as absent, which the grant reads as "cannot tell".
+ */
+const parseAmr = (json: string | undefined): readonly string[] | undefined => {
+	if (json === undefined) return undefined;
+	try {
+		return wellFormedAmr(JSON.parse(json));
+	} catch {
+		return undefined;
+	}
+};
+
+/**
  * The authorization the hash fields hold; a field the hash lacks is
  * `undefined`. Every field is named, so one this copy forgets is a compile
  * error rather than a silent drop.
@@ -118,7 +134,43 @@ const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization =>
 	// Absent before an approval and on older records; a non-finite value reads
 	// as absent too, which a poll under a sessions boundary refuses.
 	approvedAtMs: parseInstant(fields.approvedAtMs),
+	// Absent unless an approval was handed them, and on records an older
+	// release approved.
+	amr: parseAmr(fields.amr),
+	authTimeMs: parseInstant(fields.authTimeMs),
 });
+
+/**
+ * An approval's `amr` as the script is handed it. Absent stays absent.
+ *
+ * @throws `RangeError` for one that is not a non-empty list of non-empty strings.
+ */
+const approvedAmr = (amr: readonly string[] | undefined): readonly string[] | undefined => {
+	if (amr === undefined) return undefined;
+	const copy = wellFormedAmr(amr);
+	if (copy === undefined) {
+		throw new RangeError(
+			"DeviceCodeStore.approve: amr must be a non-empty list of non-empty strings",
+		);
+	}
+	return copy;
+};
+
+/**
+ * An approval's authentication instant as the script is handed it, in epoch
+ * milliseconds. Absent stays absent.
+ *
+ * @throws `RangeError` for one that is not a valid `Date` at or after the epoch.
+ */
+const approvedAuthTimeMs = (authTime: Date | undefined): number | undefined => {
+	if (authTime === undefined) return undefined;
+	if (!(authTime instanceof Date && authTimeClaim(authTime) !== undefined)) {
+		throw new RangeError(
+			"DeviceCodeStore.approve: authTime must be a valid Date at or after the epoch",
+		);
+	}
+	return authTime.getTime();
+};
 
 const decisionOutcome = (reply: DeviceCodeDecisionReply): DeviceDecisionOutcome => {
 	switch (reply.kind) {
@@ -190,6 +242,9 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 		},
 
 		async approve(input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome> {
+			// Refused before the script runs, so a refused approval writes nothing.
+			const amr = approvedAmr(input.amr);
+			const authTimeMs = approvedAuthTimeMs(input.authTime);
 			// Omitted means "grant what was asked for"; supplied is narrowed
 			// against `requestedScope` inside the script, never widened.
 			return decisionOutcome(
@@ -197,6 +252,8 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 					decision: "approved",
 					subject: input.subject,
 					...(input.grantedScope === undefined ? {} : { grantedScope: input.grantedScope }),
+					...(amr === undefined ? {} : { amr }),
+					...(authTimeMs === undefined ? {} : { authTimeMs }),
 				}),
 			);
 		},
