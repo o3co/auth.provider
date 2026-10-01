@@ -1590,6 +1590,10 @@ export {
 // ===========================================================================
 
 export {
+	type RecordableDeviceApproval,
+	recordableDeviceApproval,
+} from "./device-authorization/approval.mjs";
+export {
 	DeviceCodeStoreError,
 	type DeviceCodeStoreErrorReason,
 } from "./device-authorization/errors.mjs";

@@ -21,6 +21,7 @@ import {
 import { isFederationUpstreamOutage } from "../federation-tokens/upstreamOutage.mjs";
 import { parseScopeTokens } from "../federations/scope.mjs";
 import {
+	instantOf,
 	judgeHeldUpstreamToken,
 	readUpstreamTokenLifetime,
 } from "../federations/token-lifetime.mjs";
@@ -969,9 +970,75 @@ interface ReadResponse {
 		readonly accessToken: string;
 		readonly tokenType: string;
 		readonly expiresIn: number | null;
-		/** As answered; read for its instant only by the lifetime reading. */
+		/** Of this module's own making: the instant the answer's Date held, or none when it held none. */
 		readonly expiresAt: Date | null;
 		readonly scopes: readonly string[];
+	};
+}
+
+/** A field whose reading threw, or that is an object where a primitive must be. */
+const MALFORMED = Symbol("malformed");
+
+type Primitive = string | number | bigint | boolean | symbol | null | undefined;
+
+/**
+ * The adapter's answer, each field read exactly once and reduced to
+ * primitives. Nothing reads the adapter's objects after this.
+ */
+interface AnswerSnapshot {
+	/** `undefined` when absent, unusable, or its reading threw. */
+	readonly refreshToken: string | undefined;
+	readonly accessToken: Primitive;
+	readonly tokenType: Primitive;
+	readonly expiresIn: Primitive;
+	/** Epoch ms; `NaN` for a Date that holds no instant. */
+	readonly expiresAt: number | null | undefined | typeof MALFORMED;
+	readonly scope: Primitive;
+}
+
+/** `answer[key]`, read once; `MALFORMED` when reading it throws. */
+function readField(answer: unknown, key: keyof DelegatedTokens): unknown {
+	try {
+		return (answer as Record<string, unknown>)[key];
+	} catch {
+		return MALFORMED;
+	}
+}
+
+/** `value`, or `MALFORMED` for an object: no adapter object outlives the snapshot. */
+const primitive = (value: unknown): Primitive =>
+	(typeof value === "object" && value !== null) || typeof value === "function"
+		? MALFORMED
+		: (value as Primitive);
+
+/** An answered expiry by the instant its Date holds, never by a method it may override. */
+function readExpiry(value: unknown): AnswerSnapshot["expiresAt"] {
+	if (value === undefined || value === null || value === MALFORMED) return value;
+	const ms = instantOf(value);
+	if (ms !== undefined) return ms;
+	// Refused either way: whether it is a Date at all only names why.
+	try {
+		return value instanceof Date ? Number.NaN : MALFORMED;
+	} catch {
+		return MALFORMED;
+	}
+}
+
+/**
+ * Anything at all may have been answered: `null` throws when it is read, a
+ * field may be a getter, and a getter may throw. Each field is read once, on
+ * its own, so a read that throws costs only its field.
+ */
+function snapshotAnswer(answer: unknown): AnswerSnapshot {
+	const refreshToken = readField(answer, "refreshToken");
+	return {
+		refreshToken:
+			typeof refreshToken === "string" && refreshToken !== "" ? refreshToken : undefined,
+		accessToken: primitive(readField(answer, "accessToken")),
+		tokenType: primitive(readField(answer, "tokenType")),
+		expiresIn: primitive(readField(answer, "expiresIn")),
+		expiresAt: readExpiry(readField(answer, "expiresAt")),
+		scope: primitive(readField(answer, "scope")),
 	};
 }
 
@@ -986,35 +1053,13 @@ function readResponse(
 	grant: AuthorizedFederationGrant,
 	storedRefreshToken: string,
 ): ReadResponse {
-	// Anything at all may have been answered: `null` throws when it is read, a
-	// field may be a getter, and a getter may throw. The refresh token is read
-	// on its own, so that another read that throws does not cost it.
-	const fields = response as Record<string, unknown>;
-	let refreshToken = storedRefreshToken;
-	try {
-		if (typeof fields.refreshToken === "string" && fields.refreshToken !== "") {
-			refreshToken = fields.refreshToken;
-		}
-	} catch {
-		// Kept as it is stored.
-	}
-	let rest: Record<string, unknown>;
-	try {
-		const { accessToken, tokenType, expiresIn, expiresAt, scope } = fields;
-		rest = { accessToken, tokenType, expiresIn, expiresAt, scope };
-	} catch {
-		return { refreshToken };
-	}
-	const { accessToken, tokenType = "Bearer", expiresIn = null, expiresAt = null, scope } = rest;
+	const answer = snapshotAnswer(response);
+	const refreshToken = answer.refreshToken ?? storedRefreshToken;
+	const { accessToken, tokenType = "Bearer", expiresIn = null, expiresAt = null, scope } = answer;
 	if (typeof accessToken !== "string" || accessToken === "") return { refreshToken };
 	if (typeof tokenType !== "string" || tokenType === "") return { refreshToken };
 	if (expiresIn !== null && typeof expiresIn !== "number") return { refreshToken };
-	try {
-		// A Proxy's prototype trap may throw: such an answer is malformed.
-		if (expiresAt !== null && !(expiresAt instanceof Date)) return { refreshToken };
-	} catch {
-		return { refreshToken };
-	}
+	if (expiresAt === MALFORMED) return { refreshToken };
 	if (scope !== undefined && typeof scope !== "string") return { refreshToken };
 
 	// RFC 6749 §3.3, read as every upstream answer is (`parseScopeTokens`):
@@ -1030,7 +1075,7 @@ function readResponse(
 			accessToken,
 			tokenType,
 			expiresIn,
-			expiresAt,
+			expiresAt: expiresAt === null ? null : new Date(expiresAt),
 			scopes: named.length === 0 ? [...grant.scopes] : named,
 		},
 	};
