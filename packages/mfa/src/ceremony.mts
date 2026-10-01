@@ -241,6 +241,11 @@ export type MfaEnrollmentBeginOutcome =
 			readonly response: object;
 			/** An `enroll` transaction's, which the page completes the enrollment on. */
 			readonly transaction?: MfaOpenedTransaction;
+			/**
+			 * How long the enrollment begun can be completed, in seconds, when that
+			 * is shorter than its transaction's life: a mailed code's.
+			 */
+			readonly expiresIn?: number;
 	  } & MfaCeremonySubject);
 
 export type MfaEnrollmentCompleteOutcome =
