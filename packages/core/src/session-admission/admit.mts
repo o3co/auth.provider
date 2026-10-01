@@ -43,7 +43,6 @@ import {
 	PASSWORD_AMR,
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
-import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import {
 	copySessionAuthentication,
@@ -55,7 +54,6 @@ import {
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
 import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
-import type { AdmissionAction } from "./actions.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
 import { readLiveSession } from "./live-session.mjs";
 import {
@@ -78,21 +76,24 @@ import {
 	type InterruptionAnswer,
 	isHintKey,
 	isHintToken,
-	isIssuedAction,
-	issuedActionsOf,
 	type PrimaryAdmission,
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
 	type RegisteredRequirement,
-	type RegisteredStepUpPage,
 	type RequirementInput,
 	type RequirementInterruption,
-	type RequirementVerdict,
 	type SessionClaim,
 	type SessionRequirementResolver,
 	type SessionView,
 } from "./requirement.mjs";
 import { checkResolver } from "./requirement-resolver.mjs";
+import {
+	copyVerdict,
+	effectiveAction,
+	isVerdict,
+	type RequirementOutcome,
+	stepUpVerdict,
+} from "./requirement-verdict.mjs";
 
 export {
 	checkResolver,
@@ -247,22 +248,6 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 }
 
 // ---------------------------------------------------------------------------
-// The actions: each a consumer's registration (`actions.mts`) or a
-// remediation core issued to a requirement (`requirement.mts`).
-// ---------------------------------------------------------------------------
-
-/** The `remediation` names already said to be undeclared, once per process each, up to the cap; past it, once for all. */
-const undeclaredRemediations = new Set<string>();
-const UNDECLARED_REMEDIATION_CAP = 256;
-let undeclaredRemediationsOverflowed = false;
-
-/** The requirements already said to have stepped up without a page, once per process each. */
-const pagelessStepUps = new Set<string>();
-
-/** The requirements already said to have stepped up over no session, once per process each. */
-const sessionlessStepUps = new Set<string>();
-
-// ---------------------------------------------------------------------------
 // admitSession
 // ---------------------------------------------------------------------------
 
@@ -281,40 +266,6 @@ const viewOf = (session: UserSession): SessionView => {
 		...(enrollmentFacts === undefined ? {} : { enrollmentFacts: Object.freeze(enrollmentFacts) }),
 	});
 };
-
-const VERDICTS: ReadonlySet<string> = new Set(["met", "reauthenticate", "step_up", "unmet"]);
-
-/** A requirement's answer read once — `outcome` and `whenStillUnmet` — into a plain object; anything that is not an object as it is. */
-const copyVerdict = (answer: unknown): unknown =>
-	isObject(answer) ? { outcome: answer.outcome, whenStillUnmet: answer.whenStillUnmet } : answer;
-
-/** Whether `value` is one of the four verdicts, its `step_up` with a `whenStillUnmet` (and no page: the registered one answers). */
-const isVerdict = (value: unknown): value is RequirementVerdict =>
-	isObject(value) &&
-	typeof value.outcome === "string" &&
-	VERDICTS.has(value.outcome) &&
-	(value.outcome !== "step_up" ||
-		value.whenStillUnmet === "reauthenticate" ||
-		value.whenStillUnmet === "unmet");
-
-/**
- * Step 5's verdict, with the requirement that gave it. An outage never gets
- * here — step 5 answers `unavailable` itself — and a `step_up` carries the
- * live session it was taken over and the requirement whose reach bounds its
- * hint: `stepUpVerdict` makes one over no session `reauthenticate`.
- */
-type RequirementOutcome =
-	| { readonly outcome: "met" }
-	| { readonly outcome: "reauthenticate"; readonly requirement: string }
-	| {
-			readonly outcome: "step_up";
-			readonly requirement: string;
-			readonly stepping: RegisteredRequirement;
-			readonly session: UserSession;
-			readonly page: RegisteredStepUpPage;
-			readonly whenStillUnmet: "reauthenticate" | "unmet";
-	  }
-	| { readonly outcome: "unmet"; readonly requirement: string };
 
 /**
  * Whether the session `request.claim` names may proceed with
@@ -433,81 +384,6 @@ export async function admitSession(
 		held: authentication?.amr ?? [],
 		table: checked.acrTable,
 	});
-}
-
-/**
- * A requirement's `step_up` as admission takes it: over no session (no
- * store, or a token carrier without a record) it is `reauthenticate`, since
- * nothing can be stepped up onto no session and a login can; from a
- * requirement that registered no page it is `unmet`, since nothing could
- * finish the trip. Each is logged once per process per name. So a `step_up`
- * always carries a live session and a page.
- */
-function stepUpVerdict(
-	name: string,
-	requirement: RegisteredRequirement,
-	whenStillUnmet: "reauthenticate" | "unmet",
-	session: UserSession | null,
-	deps: AdmissionDeps,
-): RequirementOutcome {
-	if (session === null) {
-		if (!sessionlessStepUps.has(name)) {
-			sessionlessStepUps.add(name);
-			deps.logger?.warn({ requirement: name }, "session_admission_step_up_without_session");
-		}
-		return { outcome: "reauthenticate", requirement: name };
-	}
-	const page = requirement.stepUpPage;
-	if (page === undefined) {
-		if (!pagelessStepUps.has(name)) {
-			pagelessStepUps.add(name);
-			deps.logger?.warn({ requirement: name }, "session_admission_step_up_without_page");
-		}
-		return { outcome: "unmet", requirement: name };
-	}
-	return {
-		outcome: "step_up",
-		requirement: name,
-		stepping: requirement,
-		session,
-		page,
-		whenStillUnmet,
-	};
-}
-
-/**
- * The action as the requirements see it: a registered action as registered;
- * `remediation` only for an object core issued to one of these requirements —
- * else, one issued to a requirement another composition registered, as
- * `credential_change`, the strictest grade, said once per process per name.
- */
-function effectiveAction(
-	requirements: readonly (readonly [string, RegisteredRequirement])[],
-	asked: AdmissionAction,
-	logger: Logger | undefined,
-): AdmissionAction {
-	if (asked.grade !== "remediation") return { name: asked.name, grade: asked.grade };
-	if (
-		isIssuedAction(asked) &&
-		// Every registered copy was issued its actions ({} when it declared none).
-		requirements.some(([, r]) => Object.values(issuedActionsOf(r) as object).includes(asked))
-	) {
-		return asked;
-	}
-	// Once per name, and once for all past the cap, so the log stays bounded.
-	if (undeclaredRemediations.size < UNDECLARED_REMEDIATION_CAP) {
-		if (!undeclaredRemediations.has(asked.name)) {
-			undeclaredRemediations.add(asked.name);
-			logger?.warn({ action: asked.name }, "session_admission_remediation_undeclared");
-		}
-	} else if (!undeclaredRemediations.has(asked.name) && !undeclaredRemediationsOverflowed) {
-		undeclaredRemediationsOverflowed = true;
-		logger?.warn(
-			{ action: asked.name, overflow: true },
-			"session_admission_remediation_undeclared",
-		);
-	}
-	return { name: asked.name, grade: "credential_change" };
 }
 
 interface MergeContext {
