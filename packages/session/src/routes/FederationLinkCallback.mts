@@ -39,13 +39,12 @@ import {
 	SESSION_STORE_UNAVAILABLE,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
-import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
+import { redirectAfterCallback } from "./FederationCallbackRedirect.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import {
 	cleanUp,
 	type FederationStore,
 	type FederationStoreStep,
-	logMisconfigured,
 	logStoreUnavailable,
 } from "./FederationLog.mjs";
 
@@ -85,14 +84,8 @@ export const completeLink = async (
 	res: Response,
 	log: Logger,
 ): Promise<unknown> => {
-	const {
-		admitLink,
-		auditSink,
-		userRepository,
-		sessionFederationIndex,
-		federationTokenStore,
-		federationRedirectPolicyResolver,
-	} = ctx;
+	const { admitLink, auditSink, userRepository, sessionFederationIndex, federationTokenStore } =
+		ctx;
 	// The link belongs to the session the start recorded, not whichever
 	// session the browser holds now: a `form_post` callback arrives without
 	// the session cookie (SameSite=Lax), so the recorded `sid` is the only
@@ -273,19 +266,5 @@ export const completeLink = async (
 		}
 		return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 	}
-	const policy = federationRedirectPolicyResolver.get(provider.name);
-	if (!policy) {
-		logMisconfigured(log, "no_redirect_policy");
-		return res.status(500).json({
-			error: "internal_error",
-			error_description: "redirect policy not registered for provider",
-		});
-	}
-	const redirect = policy.resolveCallbackRedirect({ redirectTo });
-	if (!redirect.ok) {
-		// A policy's refusal, in its words, held to RFC 6749's characters, and
-		// a client error kept one (`refusalEnvelope`).
-		return res.status(redirect.status).json(refusalEnvelope(redirect, log));
-	}
-	return res.redirect(redirect.value);
+	return redirectAfterCallback(ctx, provider, redirectTo, res, log);
 };
