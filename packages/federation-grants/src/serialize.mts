@@ -25,6 +25,7 @@
  */
 
 import type {
+	FederationGrantLodgingResult,
 	FederationGrantReauthorizationResult,
 	FederationGrantTokenResult,
 } from "@o3co/auth-provider-core";
@@ -115,7 +116,11 @@ export function serializeFederationGrantTokenResult(
 // `error_description` a stable identifier, never prose.
 // ---------------------------------------------------------------------------
 
-type LodgingRefusal = Exclude<FederationGrantReauthorizationResult, { ok: true }>;
+/** A first intent's refusals and a renewal's: `connection_not_configured` is a first intent's alone. */
+type LodgingRefusal = Exclude<
+	FederationGrantLodgingResult | FederationGrantReauthorizationResult,
+	{ ok: true }
+>;
 
 /** Exhaustive: a new refusal is a compile error here, not a 500 in production. */
 export function serializeFederationGrantLodgingRefusal(

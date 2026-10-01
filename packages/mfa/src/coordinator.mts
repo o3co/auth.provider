@@ -25,21 +25,23 @@
  * - Every operation starts with the bound read (`getBoundMfaTransaction`), and
  *   after it calls only operations that carry the version it read, and
  *   `reserveAttempt` once it held. A transaction bound to anything else,
- *   spent, expired, neither a login's nor an `enroll` one of the session the
- *   call was admitted in — its `sid` and subject — reads as unknown, and
- *   spends nothing. An `enroll` transaction verifies the account-email proof
- *   alone.
+ *   spent, expired, neither a login's nor an `enroll` or `step_up` one of
+ *   the session the call was admitted in — its `sid` and subject — reads as
+ *   unknown, and spends nothing. An `enroll` transaction verifies the
+ *   account-email proof alone.
  * - A login's transaction is held to its subject's sessions boundary
  *   (`revokedBefore`) at every bound read: a continuation authenticated at or
  *   before it, the revocation skew allowed, is `revoked` and spends nothing;
  *   a boundary that cannot be read is an outage; none wired, none is read.
- *   The step-up reads only its session's `enroll` transactions, so it never
- *   reads a login's boundary. The boundary is read once per call: a
+ *   The step-up reads only its session's `enroll` and `step_up`
+ *   transactions, so it never reads a login's boundary. The boundary is read once per call: a
  *   revocation landing during that call can still let it bind.
  * - The step-up of a subject with no record that may count opens, or uses,
  *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
  *   on one is recorded for its session alone, standing
- *   `mfa.manage.maxAgeSeconds`.
+ *   `mfa.manage.maxAgeSeconds`. The step-up of a subject holding one opens,
+ *   or uses, a `step_up` transaction, opened only when the session store can
+ *   record it.
  * - A verification reserves its attempt before the proof is checked, consumes
  *   the transaction before the factor moves on, and on a lost compare-and-set
  *   reads the factor again and checks the proof again: a code used twice at
@@ -64,8 +66,12 @@
  *   round; once the transaction is consumed and the proof spent, the login is
  *   reopened for a binding. A login transaction opened for a binding
  *   verifies no factor.
- * - A verified counting factor marks the enrollment witness of a login whose
- *   `User` does not carry it (D12), after noting the subject's first-binding
+ * - A verified proof on a session's `step_up` transaction is answered
+ *   `stepped_up`, naming the session and what the proof adds, dated by the
+ *   verification's time: the caller records it on the session. The factor's
+ *   mailed code goes to the session's own address.
+ * - A verified counting factor marks the enrollment witness of a login — or
+ *   a step-up's session — whose `User` does not carry it (D12), after noting the subject's first-binding
  *   mark (`firstBindingMark.mts`): a note that fails leaves the witness
  *   unmarked, so no session's recorded witness goes stale unmarked; a
  *   directory that cannot write the witness gets no note. Neither failure
@@ -142,8 +148,8 @@ import { createLoginReopen } from "./reopen.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import { createMfaStepUp } from "./stepUp.mjs";
-import { openEnrollTransaction, openLoginBinding } from "./transactions.mjs";
-import { type MfaEnrollmentWitness, reconciles } from "./witness.mjs";
+import { openEnrollTransaction, openLoginBinding, openStepUpTransaction } from "./transactions.mjs";
+import { type MfaEnrollmentWitness, reconciles, reconcilesSession } from "./witness.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */
 const TRANSACTION_ID = /^[A-Za-z0-9_-]{43}$/;
@@ -189,12 +195,15 @@ export interface MfaCoordinator {
 		call: MfaCeremonyCall & { readonly proof: unknown; readonly label: unknown },
 	): Promise<MfaEnrollmentCompleteOutcome>;
 	/**
-	 * The step-up of `call.session`'s subject when it holds no record that may
-	 * count: the `enroll` transaction the account-email proof is owed on — the
-	 * one `call` names, when it is that session's first binding's and its
-	 * proof is not met, else a new one.
+	 * The step-up of `call.session`'s subject (`stepUp.mts`): with no record
+	 * that may count, the `enroll` transaction the account-email proof is
+	 * owed on; holding one, the `step_up` transaction its factor is verified
+	 * on, recording `acrValues` — each the one `call` names when it is that
+	 * session's own and still usable, else a new one.
 	 */
-	stepUp(call: MfaCeremonyCall): Promise<MfaStepUpOutcome>;
+	stepUp(
+		call: MfaCeremonyCall & { readonly acrValues: readonly string[] | undefined },
+	): Promise<MfaStepUpOutcome>;
 }
 
 export interface MfaCoordinatorOptions {
@@ -224,6 +233,8 @@ export interface MfaCoordinatorOptions {
 	readonly firstBindingMarkMs: number;
 	/** The subjects' sessions boundary a login's transaction is held to; none wired, none is read. */
 	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
+	/** Whether the session store can record a second factor verified in a session (`supportsSecondFactorUpdate`). */
+	readonly stepUpRecordable: boolean;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -257,6 +268,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		sessionProofSeconds,
 		firstBindingMarkMs,
 		subjectRevocation,
+		stepUpRecordable,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
@@ -291,9 +303,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 	/**
 	 * The transaction `call` names, bound to its binding: a login's, held to
-	 * its subject's sessions boundary, or an `enroll` one recording the `sid`
-	 * and subject of the session the call was admitted in; `null` when there
-	 * is none to use.
+	 * its subject's sessions boundary, or an `enroll` or `step_up` one
+	 * recording the `sid` and subject of the session the call was admitted
+	 * in; `null` when there is none to use.
 	 */
 	const bound = async (
 		call: MfaCeremonyCall,
@@ -308,10 +320,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return inSession(tx, call);
 	};
 
-	/** An `enroll` transaction of the session `call` was admitted in — its `sid` and subject — else none. */
+	/** An `enroll` or `step_up` transaction of the session `call` was admitted in — its `sid` and subject — else none. */
 	const inSession = (tx: MfaTransaction, call: MfaCeremonyCall): MfaTransaction | null => {
 		const session = call.session;
-		return tx.purpose === "enroll" &&
+		return (tx.purpose === "enroll" || tx.purpose === "step_up") &&
 			session !== undefined &&
 			tx.sid === session.sid &&
 			tx.subject === session.subject
@@ -358,14 +370,24 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return record === undefined || factor === undefined ? undefined : { record, factor };
 	};
 
-	/** Whether `subject` holds a factor that counts, of an installed kind, whose data opens. */
-	const holdsUsableCounting = (subject: string, records: readonly MfaFactorRecord[]): boolean =>
-		records.some(
-			(candidate) =>
-				factors.get(candidate.kind)?.counting === true &&
+	/**
+	 * Whether `subject` holds a factor of an installed kind whose data opens
+	 * — one that counts, when `options.counting` asks it.
+	 */
+	const holdsUsable = (
+		subject: string,
+		records: readonly MfaFactorRecord[],
+		options: { readonly counting: boolean },
+	): boolean =>
+		records.some((candidate) => {
+			const factor = factors.get(candidate.kind);
+			return (
+				factor !== undefined &&
+				(!options.counting || factor.counting === true) &&
 				sealing.openFactorData({ subject, id: candidate.id, kind: candidate.kind }, candidate.data)
-					.state === "ok",
-		);
+					.state === "ok"
+			);
+		});
 
 	/**
 	 * The named record and every record of its kind, opened for `subject`: the
@@ -572,6 +594,22 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "create", cause);
 			}
 		},
+		openStepUp: async (call, session, acrValues) => {
+			try {
+				return await openStepUpTransaction(transactions, {
+					sessionId: call.binding.id,
+					sid: session.sid,
+					subject: session.subject,
+					acrValues,
+					nowMs: now(),
+					ttlSeconds: transactionTtlSeconds,
+				});
+			} catch (cause) {
+				return outage("mfa_transaction", "create", cause);
+			}
+		},
+		stepUpRecordable,
+		holdsUsable,
 		openLoginBinding: async (binding, continuation, shape) => {
 			try {
 				return await openLoginBinding(transactions, {
@@ -801,7 +839,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					mail: issued.mail,
 					purpose: "login_code",
 					subject: tx.subject,
-					address: tx.continuation?.primary.user.email,
+					// A step-up's code goes to the session's own address; the bound read held the session to it.
+					address:
+						tx.purpose === "step_up"
+							? call.session?.user.email
+							: tx.continuation?.primary.user.email,
 					nowMs,
 					notAfterMs: tx.expiresAtMs,
 					digests: sealing.digestsFor(record.kind),
@@ -923,7 +965,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				mode === "required" &&
 				tx.purpose === "login" &&
 				!factor.counting &&
-				!holdsUsableCounting(tx.subject, current)
+				!holdsUsable(tx.subject, current, { counting: true })
 					? reopen.plan(tx, current)
 					: undefined;
 			let reopening = await planOver(records);
@@ -1107,16 +1149,17 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						: { outcome: "binding_reopened", answer, recoveryCodesRemaining, ...about };
 				}
 
-				// D12: a counting factor verified for a login's `User` that does not
-				// say it enrolled marks it, so a mark that failed heals here.
-				const user = consumed.continuation?.primary.user;
-				const reconciled = reconciles(factor, user)
+				// D12: a counting factor verified for a `User` that does not say it
+				// enrolled — the login's, or the one the session recorded — marks it,
+				// so a mark that failed heals here.
+				const reconciled = (
+					tx.purpose === "step_up"
+						? reconcilesSession(factor, call.session?.witness)
+						: reconciles(factor, consumed.continuation?.primary.user)
+				)
 					? await kit.reconcileWitness(tx.subject)
 					: undefined;
-
-				return {
-					outcome: "verified",
-					continuation: consumed.continuation,
+				const verified = {
 					adds: {
 						amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
 						mfaAt: new Date(nowMs),
@@ -1126,6 +1169,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					recoveryCodesRemaining: recoveryCodesLeft(factor, checked.next),
 					...about,
 				};
+				// A step-up's session is escalated by the caller; a login is resumed by it.
+				if (tx.purpose === "step_up") {
+					// The bound read held its sid to the session's: one without is none to escalate.
+					return tx.sid === undefined
+						? UNKNOWN_TRANSACTION
+						: { outcome: "stepped_up", sid: tx.sid, ...verified };
+				}
+				return { outcome: "verified", continuation: consumed.continuation, ...verified };
 			} finally {
 				await entered.settle(settled);
 			}
