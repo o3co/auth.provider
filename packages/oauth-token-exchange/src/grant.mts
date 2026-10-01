@@ -42,6 +42,7 @@ import {
 	logGrantPolicyUnavailable,
 	loggableError,
 	policyOutOfBounds,
+	policyUnavailable,
 	readGrantPolicyDecision,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
@@ -266,15 +267,7 @@ async function applyGrantPolicy(
 				{ grantType: GRANT_TYPE, policy: deps.grantPolicy.kind },
 				err,
 			);
-			return {
-				result: {
-					status: 503,
-					error: "temporarily_unavailable",
-					// Core's `evaluateGrantPolicy` text for a policy that throws, repeated
-					// until core exports that answer.
-					errorDescription: "policy evaluation unavailable",
-				},
-			};
+			return { result: policyUnavailable() };
 		}
 		// Core's reading: a decision that is neither allow nor deny is its 500.
 		const reading = readGrantPolicyDecision(answer, deps.logger, {
