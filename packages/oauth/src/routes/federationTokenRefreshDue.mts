@@ -16,19 +16,38 @@
 
 /**
  * Whether a stored token is refreshed before it is handed on: one with no
- * finite expiry never is, one that ends within the refresh buffer always is.
+ * finite expiry never is; one that ends within the refresh buffer is, unless
+ * it is known to be obtained less than half its lifetime ago and has at least
+ * the refresh floor left. That rule only ever delays a refresh: an
+ * `obtainedAt` that is absent, or that core's `judgeHeldUpstreamToken` does
+ * not believe (dated more than the floor ahead of this replica's clock, or
+ * not before its own end), leaves the buffer rule alone. It reads the
+ * record's instants on this replica's clock, so it assumes replicas' clocks
+ * agree to within the floor.
  */
 
-import type { FederationTokens } from "@o3co/auth-provider-core";
+import { type FederationTokens, judgeHeldUpstreamToken } from "@o3co/auth-provider-core";
 import type { FederationTokenContext } from "./federationTokenContext.mjs";
+import { REFRESH_FLOOR_MS } from "./federationTokenRefreshAnswer.mjs";
 
 export const refreshIsDue = (
 	ctx: Pick<FederationTokenContext, "refreshBufferMs">,
-	tokens: Pick<FederationTokens, "expiresAt">,
+	tokens: Pick<FederationTokens, "expiresAt" | "obtainedAt">,
 ): boolean => {
-	const { expiresAt } = tokens;
+	const { expiresAt, obtainedAt } = tokens;
 	// `null` is an upstream issuing no finite expiry (e.g. GitHub OAuth App
 	// tokens). An expiry that names no instant compares false: it is due.
 	if (expiresAt === null) return false;
-	return !(expiresAt.getTime() - Date.now() > ctx.refreshBufferMs);
+	const now = Date.now();
+	const remainingMs = expiresAt.getTime() - now;
+	if (remainingMs > ctx.refreshBufferMs) return false;
+	// Never handed on with less left than a refresh answer is accepted with.
+	if (obtainedAt === undefined || remainingMs < REFRESH_FLOOR_MS) return true;
+	// Never refreshed before it is half spent, so a lifetime shorter than the
+	// buffer is not refreshed on every request. A token not believed reads as
+	// half spent: the buffer rule stands. The allowance is the replicas' clock
+	// agreement, not the buffer: a writer dated further ahead would keep its
+	// token from being refreshed until it reached the floor.
+	return judgeHeldUpstreamToken({ obtainedAt, expiresAt }, { now, allowanceMs: REFRESH_FLOOR_MS })
+		.halfSpent;
 };

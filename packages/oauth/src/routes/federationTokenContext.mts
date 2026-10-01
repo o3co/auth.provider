@@ -62,9 +62,14 @@ export interface FederationTokenRouterOptions {
 	/** Structured logger. Defaults to console when undefined. */
 	logger?: Logger;
 	/**
-	 * Tokens within this many milliseconds of expiry are proactively refreshed.
-	 * Default: 30_000 (30 seconds). A whole number from 1000 to 2^31 - 1, or
-	 * building the route throws a `RangeError`.
+	 * How far ahead of its expiry a stored token becomes due for refresh. A
+	 * token whose record says when it was obtained is refreshed within it only
+	 * once half spent, except that one with less than a second left is
+	 * refreshed whether half spent or not. It is the
+	 * refresh margin only: the clock skew tolerated between replicas is the
+	 * runbook's one second, not this value. Default: 30_000 (30 seconds). A
+	 * whole number from 1000 to 2^31 - 1, or building the route throws a
+	 * `RangeError`.
 	 */
 	refreshBufferMs?: number;
 	/**
@@ -114,7 +119,7 @@ export interface FederationTokenContext {
 	readonly federation: string;
 	readonly logger: Logger | Console;
 	readonly storeUnavailable: ReturnType<typeof createStoreUnavailableLog>;
-	/** Tokens expiring within this many milliseconds are refreshed. */
+	/** Tokens expiring within this many milliseconds are refreshed, once half spent when their age is known. */
 	readonly refreshBufferMs: number;
 	/** A refreshed token is stored for at most this many milliseconds. */
 	readonly maxTokenLifetimeMs: number;

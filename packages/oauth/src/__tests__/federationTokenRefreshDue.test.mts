@@ -49,4 +49,70 @@ describe("refreshIsDue", () => {
 		expect(refreshIsDue({ refreshBufferMs: 120_000 }, at(NOW + 60_000))).toBe(true);
 		expect(refreshIsDue({ refreshBufferMs: 1000 }, at(NOW + 60_000))).toBe(false);
 	});
+
+	describe("a token known to be obtained at a time: never refreshed before it is half spent", () => {
+		const LIFE_MS = 10_000;
+		const held = (obtainedAt: number, lifeMs = LIFE_MS) => ({
+			obtainedAt: new Date(obtainedAt),
+			expiresAt: new Date(obtainedAt + lifeMs),
+		});
+		const due = (tokens: { obtainedAt?: Date; expiresAt: Date | null }) =>
+			refreshIsDue({ refreshBufferMs: BUFFER_MS }, tokens);
+
+		it("does not refresh a lifetime shorter than the buffer before its midpoint", () => {
+			expect(due(held(NOW))).toBe(false);
+			expect(due(held(NOW - LIFE_MS / 2 + 1))).toBe(false);
+		});
+
+		it("refreshes it from its midpoint", () => {
+			expect(due(held(NOW - LIFE_MS / 2))).toBe(true);
+			expect(due(held(NOW - LIFE_MS + 1))).toBe(true);
+		});
+
+		it("refreshes it once it has ended", () => {
+			expect(due(held(NOW - LIFE_MS))).toBe(true);
+			expect(due(held(NOW - 2 * LIFE_MS))).toBe(true);
+		});
+
+		it("only ever delays a refresh: a half-spent token outside the buffer is not due", () => {
+			expect(due(held(NOW - 3_600_000, 2 * 3_600_000))).toBe(false);
+		});
+
+		it("never refreshes a token with no finite expiry, whatever its obtainedAt", () => {
+			expect(due({ obtainedAt: new Date(NOW - 3_600_000), expiresAt: null })).toBe(false);
+		});
+
+		it("keeps the buffer rule for a record without obtainedAt", () => {
+			expect(due({ expiresAt: new Date(NOW + LIFE_MS) })).toBe(true);
+		});
+
+		it("keeps the buffer rule for an obtainedAt that names no instant, as for an absent one", () => {
+			expect(due({ obtainedAt: new Date(Number.NaN), expiresAt: new Date(NOW + LIFE_MS) })).toBe(
+				true,
+			);
+		});
+
+		it("refreshes a token with less than a second left, half spent or not", () => {
+			// Never handed on with no whole second left: the floor a refresh answer is held to.
+			expect(due({ obtainedAt: new Date(NOW - 100), expiresAt: new Date(NOW + 999) })).toBe(true);
+			expect(due({ obtainedAt: new Date(NOW - 100), expiresAt: new Date(NOW + 1000) })).toBe(false);
+		});
+
+		it("believes an obtainedAt up to a second ahead of now, as replicas' clocks may differ", () => {
+			expect(due(held(NOW + 1000))).toBe(false);
+		});
+
+		it("keeps the buffer rule for an obtainedAt more than a second ahead of now", () => {
+			// Believing it would let a skewed writer keep a token from being
+			// refreshed until it reached the floor.
+			expect(due(held(NOW + 1001))).toBe(true);
+			expect(due(held(NOW + 5000))).toBe(true);
+		});
+
+		it("keeps the buffer rule for an obtainedAt it does not believe: one not before its own end", () => {
+			expect(due({ obtainedAt: new Date(NOW + 500), expiresAt: new Date(NOW + 500) })).toBe(true);
+			expect(due({ obtainedAt: new Date(NOW + 5000), expiresAt: new Date(NOW + 5000) })).toBe(true);
+			expect(due({ obtainedAt: new Date(NOW + 6000), expiresAt: new Date(NOW + 5000) })).toBe(true);
+		});
+	});
 });
