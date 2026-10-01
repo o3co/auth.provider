@@ -963,6 +963,75 @@ describe("mfaFactorContract", () => {
 		]);
 	});
 
+	it("fails an identity read from what the subject already holds: the second enrollment is begun and completed beside the first record", async () => {
+		// As a user handle every credential of one account shares.
+		const accountWide = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				const held = ctx.factors[0]?.data.handle;
+				const handle = typeof held === "string" ? held : randomBytes(8).toString("hex");
+				return { ...start, state: { ...start.state, handle } };
+			},
+			completeEnrollment: async (ctx) => {
+				const done = await factor.completeEnrollment(ctx);
+				return done.ok ? { ...done, data: { ...done.data, handle: ctx.state.handle } } : done;
+			},
+			identity: (data) => (typeof data.handle === "string" ? data.handle : undefined),
+		});
+		expect(await failing(withSecond(inputFor({}, accountWide)))).toEqual([RULES.identityDistinct]);
+	});
+
+	it("fails an identity that answers every record the latest enrollment's: both are read once both are enrolled", async () => {
+		const latestOnly = (factor: MfaFactor): MfaFactor => {
+			let latest: string | undefined;
+			return {
+				...factor,
+				completeEnrollment: async (ctx) => {
+					const done = await factor.completeEnrollment(ctx);
+					if (done.ok) latest = identityOf(done.data);
+					return done;
+				},
+				identity: () => latest,
+			};
+		};
+		expect(await failing(withSecond(inputFor({}, latestOnly)))).toEqual([RULES.identityDistinct]);
+	});
+
+	it("fails an identity that a later enrollment changes, or that remembers the record objects it was handed", async () => {
+		const latestApart = (factor: MfaFactor): MfaFactor => {
+			let latest: string | undefined;
+			return {
+				...factor,
+				completeEnrollment: async (ctx) => {
+					const done = await factor.completeEnrollment(ctx);
+					if (done.ok) latest = identityOf(done.data);
+					return done;
+				},
+				identity: (data) => {
+					const own = identityOf(data);
+					return own === undefined ? undefined : own === latest ? "latest" : "older";
+				},
+			};
+		};
+		const rememberingHeld = (factor: MfaFactor): MfaFactor => {
+			const seen = new WeakSet<object>();
+			return {
+				...factor,
+				beginEnrollment: async (ctx) => {
+					for (const held of ctx.factors) seen.add(held.data);
+					return factor.beginEnrollment(ctx);
+				},
+				identity: (data) =>
+					identityOf(data) === undefined ? undefined : seen.has(data) ? "held" : "account",
+			};
+		};
+		expect(await failing(withSecond(inputFor({}, latestApart)))).toEqual([RULES.identityDistinct]);
+		expect(await failing(withSecond(inputFor({}, rememberingHeld)))).toEqual([
+			RULES.identityDistinct,
+		]);
+	});
+
 	it("fails a second authenticator's proof that completes no enrollment", async () => {
 		expect(
 			await failing({ ...inputFor({}, identified), secondEnrollmentProof: () => "not-the-secret" }),
