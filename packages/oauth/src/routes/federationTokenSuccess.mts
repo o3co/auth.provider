@@ -17,25 +17,36 @@
 /**
  * The one success answer of the federation token route, whichever path the
  * token came by: audited as `federation.token.success`, then answered `200`
- * as `Bearer`, with `expires_in` omitted when there is no finite expiry.
+ * as `Bearer`, with the scope in its canonical form and `expires_in` omitted
+ * when there is no finite expiry. A record holding no usable access token is
+ * never answered `200`.
  */
 
-import { BEARER_TOKEN_TYPE, emitAuditEvent, type FederationTokens } from "@o3co/auth-provider-core";
+import { BEARER_TOKEN_TYPE, canonicalScope, emitAuditEvent } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
+import { isUsableToken } from "./federationTokenCredential.mjs";
+import type { DisclosableToken } from "./federationTokenDisclosure.mjs";
+import { answerUnlinkedRecord } from "./federationTokenUnlinked.mjs";
 
 /**
- * Hands `token` to the caller, whose type the path has already judged
- * disclosable. `expires_in` is computed last, just before the answer is sent,
+ * Hands `token` to the caller; only the disclosure check produces one.
+ * `expires_in` is computed last, just before the answer is sent,
  * so time spent before it (the audit call included) is not counted as lifetime left.
  */
-export const answerToken = (
+export const answerToken = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
-	token: Pick<FederationTokens, "accessToken" | "expiresAt" | "scope">,
+	token: DisclosableToken,
 	refreshed: boolean,
-): Response => {
-	const { opts, req, res, federation } = ctx;
+): Promise<Response> => {
+	const { opts, req, res, federation, logger } = ctx;
+	// Answered as a store that judges its records answers such a record: as
+	// none. Logged with the federation alone, never what the record holds.
+	if (!isUsableToken(token.accessToken)) {
+		logger.warn({ federation }, "federation_token_record_unusable");
+		return answerUnlinkedRecord(ctx, caller);
+	}
 	emitAuditEvent(opts.auditSink, {
 		timestamp: new Date(),
 		type: "federation.token.success",
@@ -48,10 +59,11 @@ export const answerToken = (
 		token.expiresAt === null
 			? undefined
 			: Math.max(0, Math.floor((token.expiresAt.getTime() - Date.now()) / 1000));
+	const scope = canonicalScope(token.scope);
 	return res.status(200).json({
 		access_token: token.accessToken,
 		token_type: BEARER_TOKEN_TYPE,
 		...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
-		...(token.scope ? { scope: token.scope } : {}),
+		...(scope !== undefined ? { scope } : {}),
 	});
 };

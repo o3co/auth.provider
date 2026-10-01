@@ -1104,15 +1104,7 @@ async function refreshUnderLock(
 
 	if (!settled.ok) {
 		const upstreamFailure = failed("upstream", settled.error);
-		// The classifier is shared with the session-bound route, and it can
-		// throw on a thing that cannot be made a string. The failure ARRIVED all
-		// the same, which is what matters below.
-		let classified: ReturnType<typeof classifyFederationRefreshError>;
-		try {
-			classified = classifyFederationRefreshError(settled.error);
-		} catch {
-			classified = { reason: "unknown", structured: false };
-		}
+		const classified = classifyFederationRefreshError(settled.error);
 		// An outage, read before anything the body said: unreachable, timed out
 		// or 5xx, on the error, its causes or its Response
 		// (`isFederationUpstreamOutage`), or a structural 5xx status or

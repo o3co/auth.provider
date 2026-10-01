@@ -34,6 +34,7 @@ import { boot, configFor, disposeAll } from "./moduleHarness.mjs";
 import {
 	beginLogin,
 	freezeClock,
+	HARD_AT_TEN,
 	loggedText,
 	recordingAuditSink,
 	type SeededTotp,
@@ -45,6 +46,7 @@ import {
 	totpCode,
 	verify,
 	wrongCode,
+	wrongCodesToTheHardLimit,
 } from "./routesHarness.mjs";
 
 beforeEach(() => freezeClock());
@@ -115,18 +117,9 @@ describe("a recovery code while TOTP is held", () => {
 	});
 
 	it("logs in during the hard hold; the next TOTP login is still `hard`", async () => {
-		const {
-			app,
-			totp: seeded,
-			set,
-		} = await withCodes({
-			lockout: { threshold: 2, hardLimit: 2 },
-		});
+		const { app, totp: seeded, set } = await withCodes({ lockout: HARD_AT_TEN });
 		const totp = totpOf(seeded);
-		const { agent, transaction } = await beginLogin(app);
-		for (let n = 0; n < 2; n++) {
-			await verify(agent, transaction, totp.record.id, wrongCode(totp.secret));
-		}
+		const { agent, transaction } = await wrongCodesToTheHardLimit(app, totp);
 		expect(
 			(await verify(agent, transaction, totp.record.id, totpCode(totp.secret))).body,
 		).toMatchObject({ hold: "hard" });

@@ -27,16 +27,13 @@ import {
 	parseScopeTokens,
 	type RefreshedTokens,
 } from "@o3co/auth-provider-core";
+import { isUsableToken } from "./federationTokenCredential.mjs";
 
 /*
  * An adapter's refresh answer is unverified third-party data: every field of
  * `RefreshedTokens` is optional, and core holds the same contract to the same
  * bar in `federation-grants/retrieve.mts`.
  */
-
-/** A credential the client could actually present: present, a string, not empty. */
-export const isUsableToken = (value: unknown): value is string =>
-	typeof value === "string" && value !== "";
 
 /** Seconds a token has left: finite and in the future. `NaN` and `-5` are neither. */
 const isUsableLifetime = (value: unknown): value is number =>
@@ -94,7 +91,7 @@ type AnsweredScope =
  * is unusable, not omitted: omitted means the full grant, so collapsing the
  * two would let an adapter widen the scope by failing to be read.
  */
-export const classifyAnsweredScope = (
+const classifyAnsweredScope = (
 	answer: Partial<RefreshedTokens>,
 	unreadable: ReadonlySet<string>,
 ): AnsweredScope => {
@@ -133,25 +130,35 @@ export const narrowedScope = (
 	return asked.every((entry) => within.has(entry)) ? asked.join(" ") : keep;
 };
 
-/** A refresh answer as `readRefreshAnswer` read it, and how it judged it. */
+/**
+ * A refresh answer as `readRefreshAnswer` read it, and how it judged it. Every
+ * verdict on the answer is here, so the code that acts on it judges nothing.
+ */
 export interface RefreshReading {
-	/** Each field as read once; one whose getter threw is `undefined` and named in `unreadable`. */
-	readonly answer: Partial<RefreshedTokens>;
-	readonly unreadable: ReadonlySet<string>;
+	/** The answered access token when it is usable; `undefined` is a failed refresh. */
+	readonly accessToken: string | undefined;
+	/** The answered refresh token when it is usable, whether or not it differs from the stored one. */
+	readonly rotatedRefreshToken: string | undefined;
+	/** The answered id token when it is usable. */
+	readonly rotatedIdToken: string | undefined;
 	readonly derivedExpiry: Date | null;
 	readonly lifetimeIsBroken: boolean;
 	readonly tokenTypeIsBroken: boolean;
 	/** The type the record carries next. */
 	readonly nextTokenType: string | undefined;
+	/** How the answer named the scope, for `narrowedScope`. */
+	readonly answeredScope: AnsweredScope;
 }
 
 /**
  * Reads `refreshed` once. `currentTokens` is the freshest snapshot of the
- * record, whose type stands when the answer names none.
+ * record, whose type stands when the answer names none. `calledAt` is when
+ * the refresh was asked for (epoch ms): an `expiresIn` counts from it.
  */
 export const readRefreshAnswer = (
 	refreshed: RefreshedTokens,
 	currentTokens: FederationTokens,
+	calledAt: number,
 ): RefreshReading => {
 	// The adapter's answer is unverified third-party data, read field by
 	// field behind guards: it may be `null`, a getter may throw, and an
@@ -182,13 +189,24 @@ export const readRefreshAnswer = (
 	// judge it. `null` is the upstream committing to no finite
 	// lifetime; `undefined` on both fields is it saying nothing, which this
 	// route has always stored as `null`.
-	const derivedExpiry: Date | null = isUsableDate(answer.expiresAt)
-		? answer.expiresAt
-		: answer.expiresAt === null
-			? null
-			: isUsableLifetime(answer.expiresIn)
-				? new Date(Date.now() + answer.expiresIn * 1000)
-				: null;
+	const now = Date.now();
+	const instant = isUsableDate(answer.expiresAt) ? answer.expiresAt : undefined;
+	// Dated from the call, so time the upstream took is not counted as life left.
+	const fromLifetime = isUsableLifetime(answer.expiresIn)
+		? new Date(calledAt + answer.expiresIn * 1000)
+		: undefined;
+	// Both usable: the earlier stands, so neither field can lengthen the
+	// other. A lifetime past the Date range is later than any instant.
+	const derivedExpiry: Date | null =
+		instant !== undefined
+			? fromLifetime !== undefined &&
+				isUsableDate(fromLifetime) &&
+				fromLifetime.getTime() < instant.getTime()
+				? fromLifetime
+				: instant
+			: answer.expiresAt === null
+				? null
+				: (fromLifetime ?? null);
 
 	// The derived instant is judged too: a finite `expiresIn` can overflow
 	// the Date range, and the Invalid Date stores as `null`. A lifetime in
@@ -207,7 +225,12 @@ export const readRefreshAnswer = (
 		contradictsItself ||
 		(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
 		(statedInstant && !isUsableDate(answer.expiresAt)) ||
-		((statedLifetime || statedInstant) && derivedExpiry !== null && !isUsableDate(derivedExpiry));
+		((statedLifetime || statedInstant) && derivedExpiry !== null && !isUsableDate(derivedExpiry)) ||
+		// Judged as the answer is read: no token is accepted with less than a
+		// second left now. `expires_in`, computed after the write and the audit,
+		// can still be `0` at that boundary; the refresh buffer refreshes such a
+		// token on the next request.
+		(derivedExpiry !== null && derivedExpiry.getTime() < now + 1000);
 
 	// The refreshed token's type: unreadable or not a type name is broken
 	// (joins the refusals of an unusable answer, as core's `retrieve.mts`
@@ -222,12 +245,19 @@ export const readRefreshAnswer = (
 	// Bearer. The disclosure check refuses it instead.
 	const nextTokenType = answeredType ?? currentTokens.tokenType;
 
+	const usable = (value: unknown): string | undefined => (isUsableToken(value) ? value : undefined);
 	return {
-		answer,
-		unreadable,
+		// No (or an empty) access token is a failed refresh, never a 200
+		// without `access_token` (RFC 6749 §5.1).
+		accessToken: usable(answer.accessToken),
+		// `??` on the raw field would let `""` through, and an empty string
+		// overwriting a usable stored token strands the connection.
+		rotatedRefreshToken: usable(answer.refreshToken),
+		rotatedIdToken: usable(answer.idToken),
 		derivedExpiry,
 		lifetimeIsBroken,
 		tokenTypeIsBroken,
 		nextTokenType,
+		answeredScope: classifyAnsweredScope(answer, unreadable),
 	};
 };

@@ -63,7 +63,8 @@ export interface FederationTokenRouterOptions {
 	logger?: Logger;
 	/**
 	 * Tokens within this many milliseconds of expiry are proactively refreshed.
-	 * Default: 30_000 (30 seconds).
+	 * Default: 30_000 (30 seconds). A whole number from 1000 to 2^31 - 1, or
+	 * building the route throws a `RangeError`.
 	 */
 	refreshBufferMs?: number;
 	/** Configured issuer, pinned by the central verifier. */

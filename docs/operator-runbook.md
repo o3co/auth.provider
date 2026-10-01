@@ -313,8 +313,9 @@ Module-level messages that arrive wrapped in a factory failure:
   key ring and the development sample key as `packages/mfa/README.md` lists
   them, `mfa.transactionTtlSeconds` outside 60 to 1800 seconds,
   `mfa.maxAttemptsPerTransaction` outside 2 to 10, an
-  `mfa.lockout` core's `checkMfaLockoutPolicy` refuses (`mfa.lockout.threshold
-  must be at most mfa.lockout.hardLimit`, …), and an
+  `mfa.lockout` core's `checkConfiguredMfaLockoutPolicy` refuses
+  (`mfa.lockout.hardLimit must be at least 10: …`, `mfa.lockout.hardLimit
+  must be above mfa.lockout.threshold: …`, …), and an
   `mfa.enrollment.requireEmailProof` other than `when-mail`, `always` or
   `never`; `mfa.enrollment.requireEmailProof is "always" and no mail sender is
   wired` — nobody could give the account-email proof, so nobody could bind a
@@ -731,17 +732,18 @@ wires it.
   fifth consecutive failure a lock of 15 minutes, doubling to 24 hours. Ten
   failures in any seven days hold guessable proofs (TOTP, an emailed code)
   for the subject, whatever succeeds between them, from every browser.
-  `mfa.lockout.hardLimit` consecutive failures (100) hold them with no time
-  to come back (`mfa.lockout`). An exempt proof (a recovery code, WebAuthn)
-  passes during every lock and ends a consecutive run before the hard hold;
-  it lifts no hard hold and refunds no weekly failure. The hard hold is
-  fixed the moment the run, attempts in flight counted, reaches the limit:
-  no later success, exempt proof or raised `hardLimit` lifts it. So the
-  attempt that is the hardLimit-th since the last success holds, whatever
-  its outcome. This is one stricter than NIST's '100 failed attempts': a
-  correct hardLimit-th attempt still signs in, but guessable factors stay
-  held until re-enrolled. The account-email
-  proof is never held, and ends nothing. **A held subject can still be
+  The `mfa.lockout.hardLimit`-th attempt since the last success (100; at
+  least 10 and above `threshold`) holds them with no time to come back
+  (`mfa.lockout`), whatever its outcome. An
+  exempt proof (a recovery code, WebAuthn) passes during every lock and
+  ends a consecutive run before the hard hold; it lifts no hard hold and
+  refunds no weekly failure. The hard hold is fixed the moment the run,
+  attempts in flight counted, reaches the limit: no later success, exempt
+  proof or raised `hardLimit` lifts it. So the attempt that is the
+  hardLimit-th since the last success holds, whatever its outcome. This is
+  one stricter than NIST's '100 failed attempts': a correct hardLimit-th
+  attempt still signs in, but guessable factors stay held until
+  re-enrolled. The account-email proof is never held, and ends nothing. **A held subject can still be
   mailed an email code**: the challenge does not read the lock, so a code
   goes out up to the mail sender's limit (`429 rate_limited` beyond it), and
   is refused where it is verified (`429 mfa_locked`, spending one of the
@@ -1232,7 +1234,8 @@ stream — its level is fixed at `info`.
 | `device_code_grant_revocation_unavailable` (error) | `device-grant/src/grant.mts` | a device's poll could not read the subject's sessions boundary to hold its approval against (`store: "revocation_boundary"`) and was answered `503` "the revocation boundary is unavailable; start a new device authorization request"; the approval it read is consumed, so the device starts again |
 | `federation_token_keep_rotated_failed` (warn) by `step`; `federation_token_keep_rotated_skipped` (warn) by `reason` | `oauth/src/routes/federationTokenRefreshRecord.mts` | a refresh the upstream refused still rotated the refresh token, and the route tried, best effort, to keep the rotated one. `keep_rotated_failed`: the federation token store could not re-read the record (`step: "get"`) or write it (`step: "update"`), with the error's projection. The upstream has invalidated the refresh token the record still holds (RFC 6749 §6), so the next refresh of that connection fails and the user has to connect the federation again. `keep_rotated_skipped`: nothing was written on purpose, because a concurrent logout removed the record (`reason: "record_gone"`) or a concurrent refresh already rotated it (`"rotated_concurrently"`). The client got the refresh's own refusal either way, never a `503` |
 | `federation_token_jwt_verify_failed`, `federation_logout_jwt_verify_failed` (warn) by `reason` | `oauth/src/routes/federationTokenCaller.mts`, `oauth/src/routes/logout.mts` | an access token presented to the federation token or federation logout route was refused (`401 invalid_token`). The line carries the verifier's `reason` alone, never what the token carries; the verifier's own `jwt_verify_rejected` has the rest. A keystore or revocation-store outage is not this line but `token_verification_unavailable` |
-| `federation_token_index_self_heal_failed`, `federation_token_cleanup_failed` (warn) by `store` and `step`; `federation_token_lock_release_failed` (warn) | `oauth/src/routes/federationTokenStored.mts`, `oauth/src/routes/federationTokenRefreshFailure.mts`, `oauth/src/routes/federationTokenRefresh.mts` | a best-effort write on the federation token route failed, with the error's projection; the client got the answer it would have got. `index_self_heal_failed`: a federation link with no token record could not be removed from the session's index (`404 federation_not_linked` either way; the next request tries again). `cleanup_failed`: after an upstream `invalid_grant`, the token record (`store: "federation_token"`, `step: "delete"`) or the link (`store: "session_federation_index"`, `step: "remove"`) was left behind (`410` either way). `lock_release_failed`: the refresh lock could not be released and holds until its TTL, so refreshes of that record wait (`federation_token_lock_timeout`) until then |
+| `federation_token_index_self_heal_failed`, `federation_token_cleanup_failed` (warn) by `store` and `step`; `federation_token_lock_release_failed` (warn) | `oauth/src/routes/federationTokenUnlinked.mts`, `oauth/src/routes/federationTokenRefreshFailure.mts`, `oauth/src/routes/federationTokenRefresh.mts` | a best-effort write on the federation token route failed, with the error's projection; the client got the answer it would have got. `index_self_heal_failed`: a federation link with no token record, or with one holding no usable access token, could not be removed from the session's index (`404 federation_not_linked` either way; the next request tries again). `cleanup_failed`: after an upstream `invalid_grant`, the token record (`store: "federation_token"`, `step: "delete"`) or the link (`store: "session_federation_index"`, `step: "remove"`) was left behind (`410` either way). `lock_release_failed`: the refresh lock could not be released and holds until its TTL, so refreshes of that record wait (`federation_token_lock_timeout`) until then |
+| `federation_token_record_unusable` (warn) | `oauth/src/routes/federationTokenSuccess.mts` | the federation token store handed back a record with no usable access token, which the route answers as no record (`404 federation_not_linked`, the link removed from the session's index). The line carries `federation` alone. A store that judges its records (the Redis one) never hands such a record back; seen with another store, that store is writing or keeping unusable records |
 | `federation_token_lock_timeout` (warn), sustained | `oauth/src/routes/federationTokenRefresh.mts` | refreshes of one federation record keep waiting on each other's advisory lock and answering `503 lock_timeout`: a slow IdP refresh holding the lock, or a lock TTL shorter than the IdP's refresh time |
 | `federation_token_refresh_unsupported` (error) | `oauth/src/routes/federationTokenRefresh.mts` | a federation whose provider cannot refresh is answering every expired token `503 refresh_not_supported`: configure the provider |
 | `logout_federation_token_read_failed` (warn) | `oauth/src/routes/logout.mts` | RP-initiated logout could not read the first federation's token record (`store: "federation_token"`, `step: "get"`, the error's projection) before redirecting to that IdP's end-session endpoint. The logout proceeds; what is lost is the `id_token_hint` on the upstream call, so the IdP may ask the user to confirm the logout or to pick the account, or may not end the upstream session at all. The same outage as the other federation-token-store lines |

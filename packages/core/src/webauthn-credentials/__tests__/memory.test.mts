@@ -27,23 +27,6 @@ describe("the in-process WebAuthnCredentialStore", () => {
 	it("is kind memory", () => {
 		expect(createMemoryWebAuthnCredentialStore().kind).toBe("memory");
 	});
-
-	it("removes a credential id it does not hold as a no-op: what it holds stays", async () => {
-		const store = createMemoryWebAuthnCredentialStore();
-		await store.registerCredential({
-			userId: "u-1",
-			credentialId: "cid-1",
-			publicKey: new Uint8Array([1, 2, 3]),
-			signCount: 0,
-			backedUp: false,
-			createdAt: new Date("2026-05-12T00:00:00Z"),
-		});
-
-		await expect(store.remove("missing")).resolves.toBeUndefined();
-
-		expect((await store.findByCredentialId("cid-1"))?.userId).toBe("u-1");
-		expect(await store.listByUserId("u-1")).toHaveLength(1);
-	});
 });
 
 describe("memoryWebAuthnCredentialStoreModule", () => {

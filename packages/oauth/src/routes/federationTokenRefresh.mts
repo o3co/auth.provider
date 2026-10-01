@@ -30,10 +30,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
-import {
-	mayDiscloseTokenType,
-	refuseUndisclosableTokenType,
-} from "./federationTokenDisclosure.mjs";
+import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import { readRefreshAnswer } from "./federationTokenRefreshAnswer.mjs";
 import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
 import { recordRefresh } from "./federationTokenRefreshRecord.mjs";
@@ -126,10 +123,11 @@ export const refreshStoredTokens = async (
 				// Another caller refreshed, or there is no finite expiry: return
 				// the stored token without calling the IdP, judging its type as on
 				// the fast path.
-				if (!mayDiscloseTokenType(freshTokens.tokenType)) {
+				if (!isDisclosable(freshTokens)) {
 					return refuseUndisclosableTokenType(ctx, caller, freshTokens.tokenType);
 				}
-				return answerToken(ctx, caller, freshTokens, false);
+				// Awaited inside the `try`, so the lock is released after the answer.
+				return await answerToken(ctx, caller, freshTokens, false);
 			}
 			// Update to the post-lock re-read value (may be freshTokens or null if
 			// the store returned null; in either case currentTokens keeps the pre-lock
@@ -154,6 +152,7 @@ export const refreshStoredTokens = async (
 		// also calls the IdP — harmless, since `update` is atomic and the last
 		// write wins.
 		let refreshed: Awaited<ReturnType<typeof provider.refreshToken>>;
+		const calledAt = Date.now();
 		try {
 			refreshed = await provider.refreshToken(currentTokens.refreshToken);
 		} catch (error) {
@@ -166,7 +165,7 @@ export const refreshStoredTokens = async (
 			ctx,
 			caller,
 			currentTokens,
-			readRefreshAnswer(refreshed, currentTokens),
+			readRefreshAnswer(refreshed, currentTokens, calledAt),
 		);
 	} finally {
 		// 11g: Release lock if acquired.

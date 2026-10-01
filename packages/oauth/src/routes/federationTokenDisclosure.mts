@@ -18,9 +18,16 @@
  * Whether an upstream token may be handed to the caller, and the refusal when
  * it may not: this route delegates by value, so only `Bearer` goes out; any
  * other type is `502 upstream_token_ineligible`, audited, with `Retry-After`.
+ * The check alone marks a token `DisclosableToken`, the only kind the success
+ * answer takes.
  */
 
-import { auditErrorText, emitAuditEvent, isBearerTokenType } from "@o3co/auth-provider-core";
+import {
+	auditErrorText,
+	emitAuditEvent,
+	type FederationTokens,
+	isBearerTokenType,
+} from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
 
@@ -44,10 +51,24 @@ const UPSTREAM_INELIGIBLE_RETRY_AFTER_SECONDS = 300;
  * it). Anything present is read — `null`, `""` or a number included — so a
  * malformed record never answers `Bearer`.
  */
-export const mayDiscloseTokenType = (stored: unknown): boolean => {
+const mayDiscloseTokenType = (stored: unknown): boolean => {
 	if (stored === undefined) return true;
 	return isBearerTokenType(stored);
 };
+
+declare const disclosableBrand: unique symbol;
+
+/** A token whose type `isDisclosable` judged: nothing else produces one. */
+export type DisclosableToken = Pick<FederationTokens, "accessToken" | "expiresAt" | "scope"> & {
+	readonly [disclosableBrand]: true;
+};
+
+/** Whether `token` may be handed to the caller, by its type (`mayDiscloseTokenType`). */
+export const isDisclosable = <
+	T extends Pick<FederationTokens, "accessToken" | "expiresAt" | "scope" | "tokenType">,
+>(
+	token: T,
+): token is T & DisclosableToken => mayDiscloseTokenType(token.tokenType);
 
 /**
  * Refuses a token whose type this route may not delegate. `502`: what

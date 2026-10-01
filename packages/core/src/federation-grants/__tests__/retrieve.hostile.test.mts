@@ -624,24 +624,43 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 	});
 
 	describe("what is reported, and what is waited for", () => {
-		it("answers a failure the classifier cannot even read like any other that arrived: a typed answer, and the lock let go of", async () => {
-			await h.seed();
-			setNow(GONE);
-			// `String()` of this throws, and so does the classifier.
-			h.refresh.mockRejectedValue(Object.create(null));
-			expect(await retrieve()).toStrictEqual({
-				ok: false,
-				code: "upstream_rejected",
-				reason: "unknown",
-			});
-			await Promise.all(h.background);
-			// Audited as the failure it is, and not as a bug in the worker — which
-			// would keep the lock, as for something still in flight.
-			expect(h.events.map((event) => `${event.type} ${event.outcome}`)).toContain(
-				"federation.grant.refresh_failed upstream_rejected/unknown",
-			);
-			expect(await lockIsFree(h)).toBe(true);
-		});
+		const unreadable = (): never => {
+			throw new Error("unreadable");
+		};
+		it.each([
+			["a value String() cannot make text of", () => Object.create(null)],
+			[
+				"a value whose error field throws as it is read",
+				() => Object.defineProperty({}, "error", { get: unreadable }),
+			],
+			[
+				"a Proxy whose getPrototypeOf trap throws",
+				() => new Proxy({}, { getPrototypeOf: unreadable }),
+			],
+			[
+				"an Error whose prototype chain holds such a Proxy",
+				() => Object.setPrototypeOf(new Error("x"), new Proxy({}, { getPrototypeOf: unreadable })),
+			],
+		])(
+			"answers a failure it cannot read, %s, like any other that arrived: a typed answer, and the lock let go of",
+			async (_label, thrown) => {
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockRejectedValue(thrown());
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "upstream_rejected",
+					reason: "unknown",
+				});
+				await Promise.all(h.background);
+				// Audited as the failure it is, and not as a bug in the worker — which
+				// would keep the lock, as for something still in flight.
+				expect(h.events.map((event) => `${event.type} ${event.outcome}`)).toContain(
+					"federation.grant.refresh_failed upstream_rejected/unknown",
+				);
+				expect(await lockIsFree(h)).toBe(true);
+			},
+		);
 
 		it("hands over nothing that can never settle: a sink, a store or a lock that does not answer is waited for so long, and no longer", async () => {
 			await h.seed();
