@@ -31,7 +31,7 @@ import type {
 	ClientRepository,
 	FederationGrantConnection,
 	FederationGrantCredentialState,
-	FederationGrantCredentials,
+	FederationGrantCredentialsInput,
 	FederationGrantRefresher,
 	FederationGrantRetrievalLimits,
 	FederationGrantStore,
@@ -131,7 +131,7 @@ export interface Harness {
 		lifetimes: { defaultLifetimeMs: number; maxLifetimeMs: number };
 	};
 	seed(over?: {
-		credentials?: FederationGrantCredentials;
+		credentials?: FederationGrantCredentialsInput;
 		expiresAt?: Date;
 		id?: string;
 		subject?: string;
@@ -329,6 +329,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 						tokenType: "Bearer",
 						obtainedAt: at,
 						issuedLifetime: 3600,
+						effectiveExpiresAt: new Date(at.getTime() + 3_600_000),
 						scopes: [...SCOPES],
 					},
 				},

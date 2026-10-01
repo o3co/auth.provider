@@ -298,6 +298,64 @@ describe("deviceGrantModule — boot", () => {
 		);
 	});
 
+	/** Boot the enabled grant with `csrfGuard` in the slot, filled by hand. */
+	const bootWithGuard = (csrfGuard: unknown) => {
+		const bootstrapComponents = {
+			...makeBoot({ deviceGrant: ENABLED }),
+			csrfGuard,
+		} as unknown as BootstrapMap;
+		return createApp({
+			modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
+			bootstrapComponents,
+		});
+	};
+
+	it.each([
+		["absent", undefined],
+		["not a function", "middleware"],
+		// Express skips a four-parameter function on every request: it is an error handler.
+		["an error handler", (_err: unknown, _req: unknown, _res: unknown, next: () => void) => next()],
+	])(
+		"refuses to boot enabled with a csrfGuard whose middleware is %s, naming the slot",
+		async (_, middleware) => {
+			// The verification route mounts the guard's `middleware`; a guard filled
+			// by hand without a usable one is refused by name, before the route is built.
+			await expect(bootWithGuard({ ...createTestCsrfGuard(), middleware })).rejects.toThrow(
+				/csrfGuard\.middleware is not a request handler.*sessionModule/s,
+			);
+		},
+	);
+
+	const throwing = {
+		get: () => {
+			throw new Error("adapter unavailable");
+		},
+	};
+	it.each([
+		[
+			"middleware",
+			() => Object.defineProperty({ ...createTestCsrfGuard() }, "middleware", throwing),
+		],
+		[
+			"middleware's arity",
+			() => ({
+				...createTestCsrfGuard(),
+				middleware: Object.defineProperty(() => undefined, "length", throwing),
+			}),
+		],
+	])(
+		"refuses to boot enabled with a csrfGuard whose %s cannot be read, naming the slot",
+		async (_, guard) => {
+			// The getter's own error stays reachable as the refusal's `cause`.
+			await expect(bootWithGuard(guard())).rejects.toMatchObject({
+				cause: {
+					message: expect.stringMatching(/csrfGuard\.middleware could not be read/),
+					cause: { message: "adapter unavailable" },
+				},
+			});
+		},
+	);
+
 	it("boots disabled without a csrfGuard", async () => {
 		// The slot is optional in the manifest: a deployment that installs the
 		// package and leaves the grant off mounts no verification route.

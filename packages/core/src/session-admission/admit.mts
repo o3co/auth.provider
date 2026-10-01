@@ -29,20 +29,15 @@ import {
 } from "../grants/authenticationClaims.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import {
+	canRecordSecondFactor,
 	copySessionAuthentication,
 	federatedSessionAuthentication,
 	passwordSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,
-	sessionAuthentication,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
-import {
-	supportsSecondFactorUpdate,
-	type UserSession,
-	type UserSessionClaims,
-	type UserSessionStore,
-} from "../user-sessions/types.mjs";
+import type { UserSession, UserSessionClaims, UserSessionStore } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
@@ -245,10 +240,14 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 /**
  * The view a requirement is handed, and an admitted or `step_up` admission
  * carries: a copy of four fields, and of the record's `enrollmentFacts` when
- * it holds ones the type admits — never the record. Each call is a fresh copy.
+ * it holds ones the type admits — never the record — with whether a second
+ * factor can be recorded on the session: `storeRecords`, whether the store
+ * it was read from has the step-up capability (`readLiveSession` reads it),
+ * and `canRecordSecondFactor` over the record. The one place admission
+ * decides it. Each call is a fresh copy.
  * @internal
  */
-export const viewOf = (session: UserSession): SessionView => {
+export const viewOf = (session: UserSession, storeRecords: boolean): SessionView => {
 	const enrollmentFacts = readEnrollmentFacts(session.enrollmentFacts);
 	return Object.freeze({
 		sid: session.sid,
@@ -256,6 +255,7 @@ export const viewOf = (session: UserSession): SessionView => {
 		authTime: new Date(session.authTime.getTime()),
 		expiresAt: new Date(session.expiresAt.getTime()),
 		...(enrollmentFacts === undefined ? {} : { enrollmentFacts: Object.freeze(enrollmentFacts) }),
+		secondFactorRecordable: storeRecords && canRecordSecondFactor(session),
 	});
 };
 
@@ -311,9 +311,12 @@ const copyView = (view: SessionView): SessionView =>
  * 6. `acr_values`: `selectAcr` over the vouched `amr`, with reach the union
  *    of every requirement's when the session is live.
  * 7. `merge` of 5 and 6. In the met + step_up row, a step-up through the
- *    second-factor authority is never offered for `acr_values` onto a store
- *    without `recordSecondFactor` or a record whose primary cannot be told:
- *    the answer is a new login (`reauthenticate`, `acr`).
+ *    second-factor authority is never offered for `acr_values` onto a
+ *    session the view says no second factor can be recorded on
+ *    (`secondFactorRecordable`: a store without `recordSecondFactor`, or a
+ *    record `canRecordSecondFactor` refuses): the answer is a new login
+ *    (`reauthenticate`, `acr`). The requirements of step 5 were handed the
+ *    same answer, on their copy of the view.
  */
 export async function admitSession(
 	deps: AdmissionDeps,
@@ -333,11 +336,14 @@ export async function admitSession(
 	// Steps 1 to 4: the claim, the live read, the subject and the renewal nonce, the revocation boundary.
 	const read = await readLiveSession(checked, unavailable);
 	if ("answer" in read) return read.answer;
-	const { session } = read;
+	const { session, storeRecords } = read;
 	// The record is read into one view; each requirement is handed its own
 	// copy of it, so what one does to its Dates reaches neither the next nor
-	// the consumer.
-	const live: LiveRecord | null = session === null ? null : { session, view: viewOf(session) };
+	// the consumer. Whether a second factor can be recorded on the session is
+	// decided here, in the view, once: the requirements, the merge and the
+	// consumer all read it there.
+	const live: LiveRecord | null =
+		session === null ? null : { session, view: viewOf(session, storeRecords) };
 
 	// Step 5: the requirements, by the action's effective grade: only the
 	// issued remediation keeps its grade and skips them.
@@ -413,9 +419,7 @@ export async function admitSession(
 	const noneConfigured =
 		requested.length > 0 && requested.every((acr: string) => !Object.hasOwn(checked.acrTable, acr));
 
-	// Step 7: the merge. Whether the session can record a second factor is
-	// read once, and only when the merge would step up through the authority.
-	let recordable: boolean | undefined;
+	// Step 7: the merge.
 	return merge(verdict, selection, {
 		live,
 		noneConfigured,
@@ -423,11 +427,6 @@ export async function admitSession(
 		// What step 5 handed the requirements, from a reading no requirement was handed.
 		held: authentication?.amr ?? [],
 		table: checked.acrTable,
-		recordable: () =>
-			(recordable ??=
-				session !== null &&
-				supportsSecondFactorUpdate(checked.userSessionStore) &&
-				sessionAuthentication(session) !== undefined),
 	});
 }
 

@@ -15,8 +15,8 @@
  */
 
 /**
- * The section of the WebAuthn second factor's module, `webauthn-mfa-factor`
- * (the MFA ADR's D4, D19, F7): its switch, and the user verification its
+ * The section of the WebAuthn second factor's module, `webauthn-mfa-factor`:
+ * its switch, and the user verification its
  * ceremonies ask for — `required`, `preferred` or `discouraged`, WebAuthn's
  * values. Strict: a key the section does not know is refused. Every leaf
  * reads the string an environment variable carries: `enabled` through core's

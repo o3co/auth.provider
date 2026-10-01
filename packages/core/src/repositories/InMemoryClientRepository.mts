@@ -147,8 +147,9 @@ export const ClientEntrySchema = z
 		jwks: z.object({ keys: z.array(publicJwkSchema).min(1) }).optional(),
 		jwksUri: jwksUriSchema.optional(),
 		// Held to the registered-redirect-URI grammar (net/redirect-uri.mts) at
-		// boot: a `javascript:` target, a fragment, userinfo or plain http off
-		// loopback is refused.
+		// boot: a `javascript:` target, a fragment, userinfo, plain http off
+		// loopback, and a query name outside the allowlist or one the
+		// authorization response appends are refused.
 		allowedRedirectUris: z.array(redirectUriEntrySchema("allowedRedirectUris")).default([]),
 		allowedScopes: z.array(z.string()).default([]),
 		// What an omitted `scope` parameter grants. Absent plus a non-empty
@@ -285,8 +286,9 @@ export const ClientEntrySchema = z
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					message:
-						`federationGrantRedirectUris: ${uri} already carries "${reserved}", which the end of ` +
-						"a grant flow appends — the client would receive it twice",
+						`federationGrantRedirectUris: ${uri} already carries "${reserved}" (compared ignoring ` +
+						'case, "_" and "-"), which the end of a grant flow appends — the client would receive ' +
+						"it twice",
 					path: ["federationGrantRedirectUris"],
 				});
 			}

@@ -15,8 +15,8 @@
  */
 
 /**
- * `webauthnSessionSubjectModule` through `createApp` (the session-admission
- * ADR's D8): its route mounts between the session middleware and the two
+ * `webauthnSessionSubjectModule` through `createApp`: its route mounts
+ * between the session middleware and the two
  * registration routes, and a composition missing either side of that order
  * — `webauthnModule`, or the module contributing `session-middleware` — is
  * refused at boot as `route-order-target-missing`, naming the target, rather

@@ -15,7 +15,7 @@
  */
 
 /**
- * `webauthnMfaFactorModule` (the MFA ADR's D2, D4, D20): contributes the
+ * `webauthnMfaFactorModule`: contributes the
  * `webauthn` second factor under core's `mfaFactors` kind, where the MFA
  * package's coordinator reads it through `mfaFactorResolver`; this package
  * imports nothing of the MFA package. Built from the relying party the

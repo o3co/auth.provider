@@ -120,6 +120,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token", 
 						tokenType: "DPoP",
 						obtainedAt: T0,
 						issuedLifetime: 3600,
+						effectiveExpiresAt: at(HOUR),
 						scopes: [...SCOPES],
 					},
 				},
@@ -134,7 +135,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token", 
 			// hand-built maximum that admitted it: its end is no instant at all,
 			// so its age cannot be believed.
 			h.world.connections.set(connection.name, { ...connection, maxAccessTokenLifetime: 1e15 });
-			await h.seed({
+			await h.seedLegacy({
 				credentials: {
 					refreshToken: SECRET,
 					accessToken: {
@@ -171,7 +172,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token", 
 		it("reads a record without an effective end as before: it ends its issued lifetime after it was obtained", async () => {
 			// Written before the field, by a store that does not keep it, or dated
 			// back by an earlier reading: nothing is invented for it.
-			await h.seed({
+			await h.seedLegacy({
 				credentials: {
 					refreshToken: SECRET,
 					accessToken: {
@@ -437,6 +438,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token", 
 						tokenType: "Bearer",
 						obtainedAt: T0,
 						issuedLifetime: 3600,
+						effectiveExpiresAt: at(HOUR),
 						scopes: ["openid"],
 					},
 				},
@@ -655,6 +657,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token", 
 						tokenType: "Bearer",
 						obtainedAt: T0,
 						issuedLifetime: 3600,
+						effectiveExpiresAt: at(HOUR),
 						scopes: [...CONSENTED],
 					},
 				},

@@ -261,6 +261,7 @@ async function seedGrant(store: MemoryFederationGrantStore): Promise<void> {
 				tokenType: "Bearer",
 				obtainedAt: at,
 				issuedLifetime: 3600,
+				effectiveExpiresAt: new Date(at.getTime() + 3_600_000),
 				scopes: [...SCOPES],
 			},
 		},

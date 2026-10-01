@@ -236,6 +236,33 @@ each names:
 
 Module-level messages that arrive wrapped in a factory failure:
 
+- Client registrations (the `yaml` / `static` client repository, which holds
+  `allowedRedirectUris`, `postLogoutRedirectUris` and
+  `federationGrantRedirectUris` to core's `checkRedirectUri`,
+  `packages/core/src/net/redirect-uri.mts`): `Invalid entry "<client>" in
+  <file>: …`, naming each bad entry. Two of them are about the query:
+  `allowedRedirectUris entry "https://client.example/cb?iss=x": must not
+  carry "iss" in its query (compared ignoring case, "_" and "-"): …` — the
+  query names `code`, `state`, `iss`, `error` or `error_description`, the
+  names an authorization response carries, in any case and with `_` or `-`
+  anywhere in it (`_state`, `errorDescription`); and
+  `allowedRedirectUris entry "https://client.example/cb?filter[x]=1": query
+  parameter names may use only letters, digits, "_" and "-", each parameter
+  must have a name, and the query must not contain ";": …` — a name outside
+  `[A-Za-z0-9_-]`, a parameter with no name (`?=x`, `?a=1&&b=2`, a trailing
+  `&`), or a `;` anywhere in the query, values included.
+  `postLogoutRedirectUris` reads the same with its own field name;
+  `federationGrantRedirectUris` reports the reason alone
+  (`federationGrantRedirectUris: reserved-parameter` or
+  `… query-name-invalid`), and also refuses `grant_id`, compared the same
+  way (`GRANT_ID`, `grantId`, `_grant_id`): `federationGrantRedirectUris:
+  <uri> already carries "grant_id" (compared ignoring case, "_" and "-"),
+  …`. Rename or remove the parameter in
+  the registration, and carry the client's own context in `state` or in the
+  path. The comparison covers names as written and the common
+  normalizations (case, `_`, `-`), not a mapping a client configures, such
+  as an alias or a prefix its binder strips: a client must read the OAuth
+  fields by their canonical names.
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `redis-clients.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
 - Standalone federation grant intents on Redis: `redis-federation-grant-store.keyPrefix
@@ -374,7 +401,7 @@ Module-level messages that arrive wrapped in a factory failure:
   off, the module boots without a sender.
 - Per-process rate-limit fallbacks under `core.deployment.mode = "multi"` (#474): `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login`, the same for `POST /oauth/webauthn/authentication/options`, and `… for the MFA routes` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `adapters.rateLimiter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`, `packages/mfa/src/module.mts`).
 - DPoP with no seen-set: `dpopModule: dpop.enabled = true requires a replaySeenSet component`, in every `core.deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
-- Device grant: the six refusals for `verificationUri`, the `session` slice, a `rateLimiter` component, a usable `device-grant.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `device-grant.store = "unsupported"` does not stand in for (#626), and a `userSessionStore` component (`enabled = true requires a userSessionStore component`: the verification route approves only from the live `UserSession` behind the cookie; install `memorySessionStoresModule` on one replica or `redisSessionStoresModule`); and a seventh, `built from a configuration with the grant on, but the configuration createApp parsed has device-grant.enabled off` (or the reverse) — hand `deviceGrantModule({ config })` the configuration read from the same files and environment as `bootstrapComponents.config` (`packages/device-grant/src/module.mts`). The factory listed uncalled is `module-factory-not-called`, in the table above. There is no refusal for an enabled grant without `oauthModule`: it boots, but nothing can redeem the device codes it hands out, so compose it with the token endpoint.
+- Device grant: the six refusals for `verificationUri`, the `session` slice, a `rateLimiter` component, a usable `device-grant.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `device-grant.store = "unsupported"` does not stand in for (#626), and a `userSessionStore` component (`enabled = true requires a userSessionStore component`: the verification route approves only from the live `UserSession` behind the cookie; install `memorySessionStoresModule` on one replica or `redisSessionStoresModule`); and a seventh, `built from a configuration with the grant on, but the configuration createApp parsed has device-grant.enabled off` (or the reverse) — hand `deviceGrantModule({ config })` the configuration read from the same files and environment as `bootstrapComponents.config` (`packages/device-grant/src/module.mts`). The factory listed uncalled is `module-factory-not-called`, in the table above. There is no refusal for an enabled grant without `oauthModule`: it boots, but nothing can redeem the device codes it hands out, so compose it with the token endpoint. Enabled without a `csrfGuard` it is refused as `requires a csrfGuard component`, and with one filled by hand whose `middleware` is unusable as `csrfGuard.middleware is not a request handler` (or `could not be read`): install `sessionModule`'s guard, or one that keeps core's `CsrfGuard` contract.
 - mTLS: `source = "header"` with empty `trustedProxies`; `mode = "pki"`/`"full-pki"` with empty `trustedCas`; `mode = "pki"` with `source = "tls-layer"`; `full-pki` without `fullPki.revocation.mode` + `onUnavailable`; `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` with empty `allowedHosts` (`packages/mtls/README.md` "Boot-time fail-loud invariants", `packages/mtls/src/module.mts`).
 - Remote signing: `the signer's output does not verify against publicKeyPem for kid "…"` — the boot self-check in `createRemoteSigningKeyStore` (`packages/core/src/keys/remoteSigning.mts`).
 - A library's refusal at boot — OIDC discovery (`discovery of <issuer> failed …`), a private key (`privateKey could not be parsed`, `privateKey cannot sign <alg>`), an mTLS trust anchor (`trustedCas[<i>] is not a parseable X.509 certificate`, `… failed to read file at <path>`) — says what failed in fixed words; the library's own error (openid-client's, OpenSSL's, jose's, the file read's `ENOENT`) is the error's `cause`, which Node prints below it (`packages/federation-oidc/src/oidc.mts`, `client-auth.mts`, `packages/mtls/src/extractor.mts`).
@@ -1273,6 +1300,31 @@ A key dropped too early reads as `503 key_unavailable` on every grant it
 sealed — recoverable by putting it back, which is why the store never deletes
 on that answer.
 
+The credential's extension (`ext` in the grant hash, which holds the token's
+`effectiveExpiresAt`) is sealed under the same ring at the same write, and
+needs no step of its own. One that names a key not in the ring reads as
+absent, never as `key_unavailable`.
+
+### Upgrading the Redis federation-grant store to a release that keeps a token's end (#1037)
+
+A refresh stores when the upstream said the token ends (`effectiveExpiresAt`),
+and the Redis store keeps it in the grant hash's `ext` field, beside a
+credential that every earlier release still reads. No migration, and a
+rolling upgrade or a rollback is safe. Until the last replica runs the new
+release:
+
+- **A replica on an earlier release serves a token to the released end**
+  (`obtainedAt + issuedLifetime`), as that release always did. A token whose
+  upstream said it ends sooner can be handed out after that, and the upstream
+  answers it with `401`: availability, not wider access.
+- **A credential written by an earlier replica orphans the `ext` beside it**
+  (under `allow-plaintext`, unless it is byte for byte the credential already
+  there), and the new release reads it as absent: that token, too, ends at the
+  released end, until the next refresh on a new replica writes `ext` again.
+- **A `FederationGrantStoreClient` of your own** that ignores the new
+  `extension` input never writes `ext`. Its grants stay on the released end
+  indefinitely, which is the behaviour before this release.
+
 ---
 
 ## 4. Alerts
@@ -1326,6 +1378,7 @@ stream — its level is fixed at `info`.
 | `federation_token_refresh_unsupported` (error) | `oauth/src/routes/federationTokenRefresh.mts` | a federation whose provider cannot refresh is answering every expired token `503 refresh_not_supported`: configure the provider |
 | `logout_federation_token_read_failed` (warn) | `oauth/src/routes/logout.mts` | RP-initiated logout could not read the first federation's token record (`store: "federation_token"`, `step: "get"`, the error's projection) before redirecting to that IdP's end-session endpoint. The logout proceeds; what is lost is the `id_token_hint` on the upstream call, so the IdP may ask the user to confirm the logout or to pick the account, or may not end the upstream session at all. The same outage as the other federation-token-store lines |
 | `logout_registered_redirect_uri_refused` (warn) | `oauth/src/routes/logout.mts` | a logout's `post_logout_redirect_uri` matched an entry of the client's `postLogoutRedirectUris` that fails core's `checkRedirectUri` — not a URL, or an executable scheme such as `javascript:`, or any other shape `ClientEntrySchema` refuses at boot. Only a custom `ClientRepository`, which bypasses that schema, can hold one. The logout completed without the redirect. With `site` (`logout` / `federation_logout`), the sanitised `clientId` and the rejection's `reason`; fix the registration |
+| `authorize_registered_redirect_uri_refused` (warn) | `oauth/src/routes/authorizeClient.mts` | an `/oauth/authorize` request's `redirect_uri` (GET or POST) matched an entry of the client's `allowedRedirectUris` that fails core's `checkRedirectUri` — any shape `ClientEntrySchema` refuses at boot, the query-name rule included. Only a custom `ClientRepository`, which bypasses that schema, can hold one. The client was answered `400 invalid_request` (`redirect_uri not allowed`) and the browser was not redirected. With `site: "authorize"`, the sanitised `clientId` and the rejection's `reason`; fix the registration |
 | `federation_logout_end_session_failed`, `logout_federation_end_session_failed` (warn) | `oauth/src/routes/logout.mts` | the upstream IdP's end-session call failed after this server's own state was cleared: the user is logged out here but may still be signed in at the IdP (an orphan IdP session). With the error's projection and the sanitised `federation`. The federation logout route also emits audit `federation.logout.idp_unreachable`. Not every line involved an IdP: an Apple federation with no `endSessionEndpoint` refuses locally whenever it is handed no `post_logout_redirect_uri` — including one the request named but the client has not registered, which the routes drop — and that refusal is logged, and audited, the same way. Read those with the error's projection (a plain `Error`, no status) before paging anyone about the IdP |
 | `logout_backchannel_rejected` (warn) by `status`; `logout_backchannel_failed` (warn) by `step`; `logout_frontchannel_iframe_skipped` (warn) | `oauth/src/logout/broadcastBackchannel.mts`, `oauth/src/logout/renderFrontchannel.mts` | an RP was not told about a logout, by `clientId` (sanitised, capped at 200 characters). `rejected`: its back-channel endpoint answered a non-2xx `status` (the RP's own status text is not logged). `failed`: the POST failed (`step: "post"`) or the logout token could not be built or signed (`"logout_token"`), with the error's projection. `iframe_skipped`: its front-channel URI could not be turned into an iframe URL. Logout proceeds either way; that RP's session may outlive it |
 | `logout_store_unavailable` (error) by `store`; `logout_cascade_operation_failed`, `logout_cascade_cleanup_failed` (warn) | `oauth/src/routes/logout.mts`, `oauth/src/logout/sessionEnd.mts`, `oauth/src/logout/cascadeLogout.mts` | RP-initiated logout is answering `503` because a session store could not be read or marked (`left` says what that left: `unchanged`, `half_ended`, `unknown`) or the cascade stopped (`store: "logout_cascade"`, `cascadeStep`); the warn lines name each operation that failed. A listing that failed after the ended mark (`left: "half_ended"`), a mark whose outcome is `unknown`, or a cascade that stopped after step 1 may leave the session half-ended: it still exists, but the family index has marked it ended, so its code exchanges are refused (`session_invalidated`) until a retry of the logout completes or the mark lapses at the session's `expiresAt` plus five minutes (fail-closed) |
@@ -1341,7 +1394,7 @@ stream — its level is fixed at `info`.
 | `session_middleware_store_unavailable` (error) by `step` | `session/src/internal/cookieSession.mts` | the cookie-session store (connect-redis) cannot answer express-session: `step: "load"` — requests carrying a session cookie are answered `503` before any route runs, so every browser session is unusable while it lasts; `step: "save"` — a route answered, but the session it changed (or its refreshed expiry) was not written, so the browser's next request sees the session as it was. The same Redis as `session_store_redis_error`. Replaces `unhandled_request_error` 500s and stack traces on stderr |
 | `login_store_unavailable`, `session_logout_store_unavailable` (error) by `store` and `step` | `session/src/routes/Session.mts` | password logins (`store`: `user_repository`, `user_session`, `cookie_session`; or an interrupting session requirement's name with `step: "open"` — it could not open its ceremony, its own store's outage) or browser logouts (`cookie_session`, `step: "destroy"`) are answering `503` because a store cannot answer. `login_cleanup_failed` (warn) is a rollback step after a failed regeneration or save that failed too: an orphan `UserSession` or subject-index entry, bounded by its TTL. Replaces the warn `local login authenticate failed` |
 | `federation_start_store_unavailable`, `federation_callback_store_unavailable`, `federation_link_store_unavailable` (error) by `store` and `step` | `session/src/routes/FederationLog.mts`, from the start (`FederationStart.mts`), the callback (`FederationCallbackState.mts`, `FederationCallbackIdentity.mts`, the login in `Federation.mts`) and the link (`FederationLinkCallback.mts`) | federated logins, or `?link=1` links, are answering `503` because a store cannot answer — the cookie session or a `form_post` transaction, the user directory, the `UserSession`, the federation index or the federation token store (a link's read of its session is `session_admission_unavailable`). `federation_cleanup_failed` (warn) is a rollback or discard step that failed too, by `store`. Replaces the warns `user repository lookup failed`, `userSession create failed`, `sessionFederationIndex.addFederation failed`, `federation transaction lookup failed` / `delete failed` / `save failed`, `reuse-prevention session save failed`, `federation start session save failed`, `federation link: …`, and the errors `session regeneration failed after userSessionStore.create`, `session post-create failed` |
-| `federation_misconfigured` (error) by `reason` | `session/src/routes/FederationLog.mts`, from `FederationStart.mts`, `FederationCallbackIdentity.mts`, `FederationLinkCallback.mts` and the login in `Federation.mts` | a federation start or callback is answering `500` for a composition fault: no express-session store mounted on a `form_post` federation's requests (`no_session_store`), a callback URL with no path to scope its transaction cookie to (`no_callback_path`), a provider with no callback URL (`no_callback_url`) or no redirect policy (`no_redirect_policy`). Fix the composition; a retry cannot. The `form_post` case replaces a sentence-long message; the others were not logged |
+| `federation_misconfigured` (error) by `reason` | `session/src/routes/FederationLog.mts`, from `FederationStart.mts`, `FederationCallbackIdentity.mts` and `FederationRedirectAnswer.mts` (the start's and the callbacks' `no_redirect_policy`) | a federation start or callback is answering `500` for a composition fault: no express-session store mounted on a `form_post` federation's requests (`no_session_store`), a callback URL with no path to scope its transaction cookie to (`no_callback_path`), a provider with no callback URL (`no_callback_url`) or no redirect policy (`no_redirect_policy`). Fix the composition; a retry cannot. The `form_post` case replaces a sentence-long message; the others were not logged |
 | `webauthn_session_subject_invalid` (error — `reason`: `threw` with `err`, or `shape`) | `webauthn/src/sessionSubject.mts` | the `subjectFor` given to `webauthnSessionSubjectModule` threw, answered a subject whose fields throw when read (`threw`), or answered something that is not a WebAuthn subject (`shape`: an object with a non-empty string `userId`, and string `userName` / `userDisplayName` when present — synchronously, not a Promise) for an admitted session, so passkey registration answers `500 server_error`. The line never carries the answer. Fix the mapper |
 | `webauthn_subject_user_handle_invalid` (error) by `site` | `webauthn/src/routes/registrationOptions.mts`, `registrationVerify.mts` | the `subjectFor` given to `webauthnSessionSubjectModule` — or the deployment's own middleware that sets `req.webauthnSubject` — hands the registration routes a `userId` outside WebAuthn's 1–64-byte user handle, and they answer `500 server_error`: the line carries the `byteLength`, never the value. Map the account to an opaque handle (see the webauthn README) |
 | `webauthn_grant_store_unavailable`, `webauthn_ceremony_store_unavailable` (error) by `store`, `step` and `site` | `webauthn/src/grant.mts`, `webauthn/src/internal/storeUnavailable.mts` | passkey sign-ins at `/oauth/token`, or the ceremony routes, are answering `503` because the credential store, the challenge store or ceremony, or the refresh-token family store cannot answer. These used to be `unhandled_request_error` 500s, or (the family) nothing |
@@ -1378,6 +1431,8 @@ stream — its level is fixed at `info`.
 | `mfa_subject_lease_overrun` (error — `route`, `sub`) | `mfa/src/management.mts` | a removal from the account page ran past the subject's lease — six `mfa.storeTimeoutMs`, 30 s by default — or its release found another holder, or it ran out of the lease's time after it wrote (the witness then not cleared). Said whatever the removal answered: a removal it made stands, is audited and is answered `409 mfa_factors_changed`; a `400` or a `503` is answered as itself. A recovery or a reset may have run beside it: check the subject's factors and the Store's witness. Sustained, a store is slower than `mfa.storeTimeoutMs`, which must be at least every store's own per-call timeout |
 | `mfa_factor_removal_unread` (warn — `sub`, the error's projection) | `mfa/src/management.mts` | after a removal from the account page the factor store could not answer a read of the subject's records: the records read before the removal, less the removed one, decided whether to clear the enrollment witness. The removal stands. Sustained, the factor store is failing |
 | `mfa_enrollment_witness_uncleared` (warn — `sub`, the error's projection) | `mfa/src/management.mts` | a removal from the account page left the subject no factor record that may count, and the Store could not clear the enrollment witness (`markMfaEnrolled(subject, false)`): the removal stands, and the witness still says enrolled beside no counting record, so the subject's next password login is `503` with `mfa.enrollment_state_inconsistent`. Clear the flag in the Store for that subject; sustained, the endpoint at `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` is failing |
+| `mfa_transaction_evict_failed` (warn — the error's projection) | `redis/src/mfa-transaction-store.mts` | a create past its session's cap of five MFA transactions (`MFA_MAX_TRANSACTIONS_PER_BINDING`) could not end the session's oldest (`LUA_MFA_TX_EVICT`): the new transaction stands and the create answers; the one not ended stays, one past the cap, until it expires. Sustained, the Redis behind `mfaTransactionStoreClient` is failing |
+| `mfa_transaction_unindex_failed` (warn — `operation`: `consume` or `reserveAttempt`, the error's projection) | `redis/src/mfa-transaction-store.mts` | a consumed transaction, or one ended by its attempts, could not be taken out of its session's `mfat:binding:` index: the operation answered as usual, and the member counts toward the session's cap until it is taken out: while the session's live ceremonies expire sooner, a later create ends one of them first, so a live ceremony may end early; once the gone transaction's expiry has passed, its member goes first. Sustained, the Redis is failing |
 | `mfa_first_binding_unnoted` (warn — `sub`, `store`, `step: "noteFirstBinding"`, the error's projection) | `mfa/src/routes.mts` | a verification of a counting factor, for a login whose `User` does not say it enrolled, could not note the subject's first-binding mark in the MFA transaction store, so it left the enrollment witness unmarked: a witness marked without the mark would leave the sessions signed in before it trusted. The login completed, and the next such verification notes the mark and marks the witness. Sustained, the transaction store is failing or full (a memory store at its cap: `MfaTransactionStoreFullError` in the error's projection) |
 | `mfa_login_revoked` (info — `sub`, `route`) | `mfa/src/routes.mts` | a call on a login's MFA transaction whose sign-in is at or before the subject's sessions boundary (a revocation or a password change since the login began): answered `401 login_required`, nothing spent. Expected after a password change; a burst for one subject is someone holding an old login open |
 | `mfa_first_binding_distrusted` (info — `sub`, and `route`, or `action` from a session's admission) | `mfa/src/routes.mts`, `mfa/src/requirement.mts` | a first binding refused by the subject's first-binding mark: its sign-in is no later than a mark noted within `DEFAULT_CLOCK_SKEW_MS` before it (the re-login wait, under "The first binding"). The user signs in again after the `Retry-After`; repeated for one subject, its factors vanish right after binding — look for `mfa_store_unavailable` around the mark |
@@ -1661,7 +1716,8 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `consent:{pending}:ch:<challenge>` | hash `{record (JSON), sessionId, expiresAt}` | the parked request's `expiresAt` (10 minutes, `PENDING_CONSENT_TTL_MS`) plus the same slack; consumed with its index entry in one script | `packages/redis/src/consent-store.mts`, `ioredis/scripts/consent.mts` (`LUA_PENDING_CONSENT_*`) |
 | `consent:{pending}:sess:<sessionId>` | sorted set of challenges, score = the order they were parked | raised to its longest-lived member's; at most `PENDING_CONSENT_PER_SESSION_LIMIT` (16) members, the first-parked evicted past it. `{pending}` is a Cluster hash tag: every parked request shares one slot | same |
 | `mfaf:{<subject>}` | hash — one field per enrolled second factor (its id), value `<version>\n<fixed JSON>\n<mutable JSON>`; the factor's `data` sealed by the MFA package before it arrives (D11). `<subject>` and the id are base64url of their JSON | **none**: an enrolled factor does not expire, and losing one lets whoever holds the password bind their own (D12). Keep it where nothing evicts it and a restart keeps it — `noeviction` is recommended for every MFA key family (a `volatile-*` policy never picks this one, which has no TTL), AOF on, preferably a database or instance of its own; the module refuses an `allkeys-*` policy at boot and warns without AOF | `packages/redis/src/mfa-factor-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_FACTOR_UPDATE`) |
-| `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `enrollment`, `emailProof`, `challenge` and `pendingEnrollment` when set, `record` (the rest as JSON, the login's continuation among it) and `incarnation` | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification | `packages/redis/src/mfa-transaction-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_TX_*`) |
+| `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `enrollment`, `emailProof`, `challenge` and `pendingEnrollment` when set, `record` (the rest as JSON, the login's continuation among it), `incarnation` and `index` (its binding's digest) | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification, or ended when its binding opens one more past `MFA_MAX_TRANSACTIONS_PER_BINDING` (5) — the ceremony that expires first goes | `packages/redis/src/mfa-transaction-store.mts`, `ioredis/scripts/mfa.mts` (`LUA_MFA_TX_*`) |
+| `mfat:binding:{<digest>}` | sorted set — one binding's transactions (a browser session's, for the session kind), one member `<incarnation>:<id>` per transaction, score = its `expiresAtMs`; `<digest>` is base64url of the SHA-256 of the binding's kind and id, so the express session id is in no key. At most five members: a create past them takes out those that expire soonest, and each is deleted only while it holds the incarnation its member names, so no other binding's transaction is ever ended | set at each create and each removal to the latest expiry it holds, rounded up, so it never outlives the transactions it names; a consume or a reservation past `max` removes the member, and the key goes with its last. The transactions sit on slots of their own, so the index and they change in separate steps: while creates are in flight a binding may hold more than five; only a step that failed leaves an excess, until it expires. A failed eviction is warned (`mfa_transaction_evict_failed`) and the create still answers; a member that cannot leave is warned (`mfa_transaction_unindex_failed`) and counts toward the cap until it is taken out: while live ones expire sooner, a later create ends one of them first; once its transaction's expiry has passed, it goes first. A Redis clock ahead of the replicas' by more than `mfa.transactionTtlSeconds` expires what it is written at once: on one server the transaction too, so nothing stands; on Cluster, an index node ahead of the transactions' nodes drops each index while the transactions stand, so sessions go unbounded while that lasts (keep NTP). Losing the key (a `volatile-*` eviction, a flush) loses only the bound: the next create starts it again. During a rolling deploy from a release without the cap, old instances neither index nor unindex: their transactions are not counted and their consumes leave members behind, an effect bounded by `mfa.transactionTtlSeconds` | same (`LUA_MFA_BINDING_INDEX`, `LUA_MFA_BINDING_UNINDEX`, `LUA_MFA_TX_EVICT`) |
 | `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted or the hard hold stands (the hash's `hard` field) — a run ends only at a success, an exempt success before the hard hold, or an applied recovery, and D21's hard limit counts it across weeks; the hard hold ends only at an applied recovery; otherwise a day past the last failure to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early — the module warns (`mfa_transaction_store_lock_evictable`); run `noeviction` | same (`LUA_MFA_SUBJECT_*`) |
 | `mfat:recovery:{<subject>}` | hash — the subject's generation (`g`), moved by every applied recovery and reset; its recovery-set floor (`floor`), below which no recovery-code set verifies; one field per recovery authorization, `a:<operation>:<sid>` | **none** once it holds a generation or a floor: losing the generation refuses a write in flight and lets through a writer that captured 0 before a recovery, losing the floor brings an older recovery-code set back; before that, a day past its latest authorization's end. Keep it where nothing evicts it, as `mfaf:` | same (`LUA_MFA_SUBJECT_RECOVERY_*`, `LUA_MFA_RECOVERY_SET_FLOOR_RAISE`) |
 | `mfat:lease:{<subject>}` | string — the token of the writer holding the subject's lease over its factor set | the lease's end on the server's clock (`SET … NX PX`, six of `mfa.storeTimeoutMs`); its holder deletes it when done. Evicting it lets a second writer in: run `noeviction` | same (`LUA_MFA_SUBJECT_LEASE_ACQUIRE`) |
@@ -1705,7 +1761,9 @@ lifetime) per family:
   for 24 h plus one index set per session, only when federation is enabled.
 - **MFA** — only with the MFA stores on Redis. Per enrolled subject, one
   `mfaf:` hash, kept for good. Per second-factor ceremony, one `mfat:tx:` hash
-  carrying the login's user snapshot, for at most `mfa.transactionTtlSeconds`.
+  carrying the login's user snapshot, for at most `mfa.transactionTtlSeconds`,
+  at most five live per session; per session holding one, one small
+  `mfat:binding:` sorted set for as long as its latest lives.
   Per session whose subject proved the account's address before a first
   binding, one small `mfat:session-proof:` string until the proof ends.
   Per subject that bound a first factor or had its witness marked, one
@@ -1801,7 +1859,10 @@ Store answers on `authenticate`. At the default ten-minute lifetime the cap
 is about 170 new transactions a second on one replica. At the cap it
 reclaims what has expired and otherwise refuses a new transaction or proof
 with `MfaTransactionStoreFullError` rather than end a ceremony in flight or
-drop a proof a user gave. The
+drop a proof a user gave. One session holds at most five live transactions
+(`MFA_MAX_TRANSACTIONS_PER_BINDING`): a sixth ends the session's ceremony that
+expires first, and is no new entry against the cap, so it is many sessions,
+not one, that fill it. The
 subject lock state is not counted: it is kept per subject a login created,
 and a subject's consecutive run is kept until a success ends it.
 
@@ -2262,6 +2323,53 @@ before you flip — and a relying party holding the secret can also mint.
      federation checks, `key-store.local.*` and `KEY_STORE_LOCAL_*` for the key
      store's, `REPOSITORIES_USER_HTTP_BEARER_TOKEN` for the Store credential's:
      a log alert matching the old text needs the new one.
+
+7. **Registered redirect URIs: query names.** Check every
+   `allowedRedirectUris`, `postLogoutRedirectUris` and
+   `federationGrantRedirectUris` entry, and every Client ID Metadata Document
+   you depend on, and every entry a custom `ClientRepository` returns. Three
+   cases:
+
+   - **Newly refused registrations.** A query name outside `[A-Za-z0-9_-]`
+     (`?filter[x]=1`, `?a.b=1`), a parameter with no name, a `;` anywhere in
+     the query, or one of `code`, `state`, `iss`, `error` and
+     `error_description` (compared ignoring case, `_` and `-`), on any of the
+     three lists; and, on `federationGrantRedirectUris`, `grant_id` under
+     another case or separators (`GRANT_ID`, `grantId`, `_grant_id`,
+     `grant-id`). Such an entry used to be accepted. Now a `yaml` / `static`
+     client fails boot, with the messages in
+     [§1](#boot-refusals-you-will-meet); a CIMD client cannot be resolved
+     (`400 invalid_client` at `/authorize`, with the
+     `cimd_document_rejected` warning); and a federation-grant return URI
+     held by a custom `ClientRepository`, which bypasses that check, is
+     refused when a grant is lodged: `400 invalid_request` with
+     `redirect_uri_invalid` (`redirect_uri_reserved_parameter` for a
+     `grant_id` spelling).
+   - **Refusals whose reason changed.** A `federationGrantRedirectUris`
+     entry carrying `state` or `error` was already refused, at boot and at
+     lodging. Boot still refuses it. Lodging now answers
+     `redirect_uri_invalid` where it answered
+     `redirect_uri_reserved_parameter`; both are `400 invalid_request`, so
+     only an alert or client keyed on the `error_description` text sees the
+     difference.
+   - **A custom `ClientRepository`'s entries.** Such a repository bypasses
+     the boot check, so its entries are held to `checkRedirectUri` where they
+     are used. An `allowedRedirectUris` entry that `checkRedirectUri`
+     refuses — any shape, the query rules included — used to be redirected
+     to; now
+     `/oauth/authorize` answers it `400 invalid_request` (`redirect_uri not
+     allowed`) with no redirect, after the login step, and warns
+     `authorize_registered_redirect_uri_refused` ([§4](#4-alerts)). A consent
+     request parked with such a URI before the upgrade gets the same `400` on
+     deny. A `postLogoutRedirectUris` entry it refuses is dropped at logout
+     (`logout_registered_redirect_uri_refused`); the query shapes are new in
+     this release, the mechanism is not.
+
+   Rename or remove such parameters, and carry the client's context in
+   `state` or in the path. The rule covers names as written and the common
+   normalizations, not a mapping a client configures (an alias, a stripped
+   prefix): make sure each client reads the OAuth fields by their canonical
+   names.
 
 ### Rolling out
 

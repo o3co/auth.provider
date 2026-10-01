@@ -108,6 +108,7 @@ describe("the token route — a disclosed token", () => {
 					// buys a rotation per request and nothing else.
 					obtainedAt: new Date(h.world.now.getTime() - 60_000),
 					issuedLifetime: 100,
+					effectiveExpiresAt: new Date(h.world.now.getTime() + 40_000),
 					scopes: [...SCOPES],
 				},
 			},
