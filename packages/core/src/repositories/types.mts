@@ -266,8 +266,8 @@ export interface User {
  * Every field is a required key, holding `undefined` where `/authorize`
  * recorded nothing. `/token` reads the record back without deciding anything
  * again, and a repository copies it field by field; a required key makes a
- * copy that forgets `nonce`, `acr` or `sid` a compile error at the object
- * literal, instead of an id_token silently missing the claim.
+ * copy that forgets `nonce`, `acr`, `amr` or `sid` a compile error at the
+ * object literal, instead of a token silently missing the claim.
  */
 export interface CodeData {
 	readonly client_id: string;
@@ -279,6 +279,11 @@ export interface CodeData {
 	readonly sid: string | undefined;
 	/** The acr `/authorize` satisfied for this request; the id_token's `acr`. */
 	readonly acr: string | undefined;
+	/**
+	 * The `amr` the session vouched for when `/authorize` admitted it; what
+	 * the code's tokens carry. A step-up recorded later does not reach them.
+	 */
+	readonly amr: readonly string[] | undefined;
 }
 
 export interface Code extends CodeData {

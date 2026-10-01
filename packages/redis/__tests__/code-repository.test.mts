@@ -60,6 +60,7 @@ const minimalParams: CreateCodeInput = {
 	nonce: undefined,
 	sid: undefined,
 	acr: undefined,
+	amr: undefined,
 	grantedScope: undefined,
 	grantedAudience: undefined,
 };

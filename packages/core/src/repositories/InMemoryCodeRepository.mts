@@ -80,6 +80,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			nonce: params.nonce,
 			sid: params.sid,
 			acr: params.acr,
+			amr: params.amr,
 		};
 		this.codes.set(code, stored);
 		return {
@@ -94,6 +95,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			nonce: params.nonce,
 			sid: params.sid,
 			acr: params.acr,
+			amr: params.amr,
 		};
 	}
 
@@ -116,6 +118,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			nonce: stored.nonce,
 			sid: stored.sid,
 			acr: stored.acr,
+			amr: stored.amr,
 		};
 	}
 
@@ -136,6 +139,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			nonce: stored.nonce,
 			sid: stored.sid,
 			acr: stored.acr,
+			amr: stored.amr,
 		};
 	}
 

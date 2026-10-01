@@ -16,8 +16,10 @@
 
 /**
  * Issuing the code (RFC 6749 §4.1.2): the audience it carries (RFC 8707 §2),
- * the code record, which alone carries the identity binding, and the redirect
- * that delivers it with `state` and the `authorize.granted` audit event.
+ * the code record, which alone carries the identity binding and how the
+ * session had authenticated when the code was issued (`acr`, `amr`), and the
+ * redirect that delivers it with `state` and the `authorize.granted` audit
+ * event.
  */
 
 import {
@@ -26,7 +28,9 @@ import {
 	emitAuditEvent,
 	loggableError,
 	type PublicClient,
+	type UserSession,
 	unrepresentedResources,
+	vouchedAmr,
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import { redirectError } from "./authorizeAnswers.mjs";
@@ -92,6 +96,8 @@ export const mintCode = async (
 		grantedAudience: readonly string[] | undefined;
 		/** The `acr` the session met. */
 		acr: string | undefined;
+		/** The record admission admitted the request on; `null` without a user-session store. */
+		session: UserSession | null;
 	},
 ): Promise<{ code: string } | null> => {
 	let issue: Awaited<ReturnType<CodeRepository["createCode"]>>;
@@ -107,6 +113,10 @@ export const mintCode = async (
 			nonce: typeof ctx.params.nonce === "string" ? ctx.params.nonce : undefined,
 			sid: typeof ctx.req.session?.sid === "string" ? ctx.req.session.sid : undefined,
 			acr: params.acr,
+			// Decided here, as `acr` is: what the admitted session vouches for
+			// now. `/token` stamps it, so a step-up recorded after this does
+			// not reach the code's tokens.
+			amr: params.session === null ? undefined : vouchedAmr(params.session),
 		});
 	} catch (err) {
 		ctx.opts.logger.error(

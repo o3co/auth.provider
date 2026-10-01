@@ -143,6 +143,7 @@ describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 					nonce: undefined,
 					sid: undefined,
 					acr: undefined,
+					amr: undefined,
 				});
 				const deps = {
 					...makeDeps(vi.fn()),

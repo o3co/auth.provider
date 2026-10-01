@@ -45,7 +45,6 @@ import {
 	type Token,
 	type UserSession,
 	unrepresentedResources,
-	vouchedAmr,
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
@@ -586,11 +585,14 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			const bindRefreshToken =
 				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
-			// How, and to which acr, the user authenticated: read once and stamped
-			// on the id_token, the access token and the refresh token alike. `amr`
-			// is what the session vouches for, never a value an untrusted upstream
-			// IdP asserted (see ADR 2026-09-25-multi-factor-authentication).
-			const amr = wellFormedAmr(userSession ? vouchedAmr(userSession) : undefined);
+			// How, and to which acr, the user authenticated: read off the code and
+			// stamped on the id_token, the access token and the refresh token
+			// alike. Both were decided at `/authorize`; `amr` is what the session
+			// vouched for then (`vouchedAmr`), so a second factor recorded on the
+			// session since reaches none of them, and a code that carries none
+			// yields tokens without one. The record admission read above decides
+			// liveness, the subject, `auth_time` and the id_token's claims.
+			const amr = wellFormedAmr(codeData.amr);
 			const acr = wellFormedAcr(codeData.acr);
 			// The primary authentication's time, which a step-up never moves: the
 			// id_token's `auth_time`, on the access and refresh tokens too (RFC 9470 §6.1).
@@ -631,7 +633,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					family_id: familyId,
 					...(sid ? { sid } : {}),
 					// For the refresh grant to mirror onto the access tokens it mints:
-					// `acr` lives on the code, spent here, so nowhere else holds it.
+					// `amr` and `acr` live on the code, spent here, so nowhere else
+					// holds them.
 					...(amr ? { amr } : {}),
 					...(acr ? { acr } : {}),
 					...(authTime !== undefined ? { auth_time: authTime } : {}),

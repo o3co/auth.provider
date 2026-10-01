@@ -91,6 +91,7 @@ export class RedisCodeRepository implements CodeRepository {
 		nonce,
 		sid,
 		acr,
+		amr,
 		expiresIn = this.defaultExpiresIn,
 		grantedScope,
 		grantedAudience,
@@ -113,6 +114,7 @@ export class RedisCodeRepository implements CodeRepository {
 			nonce,
 			sid,
 			acr,
+			amr: amr ? [...amr] : undefined,
 			expiresIn,
 			grantedScope: grantedScope ? [...grantedScope] : undefined,
 			grantedAudience: grantedAudience ? [...grantedAudience] : undefined,
@@ -174,6 +176,7 @@ export class RedisCodeRepository implements CodeRepository {
 			// then reject naturally on the missing claim.
 			const grantedScope = Array.isArray(p.grantedScope) ? p.grantedScope : undefined;
 			const grantedAudience = Array.isArray(p.grantedAudience) ? p.grantedAudience : undefined;
+			const amr = Array.isArray(p.amr) ? p.amr : undefined;
 			return {
 				code,
 				client_id: p.client_id,
@@ -183,6 +186,7 @@ export class RedisCodeRepository implements CodeRepository {
 				nonce: p.nonce,
 				sid: p.sid,
 				acr: p.acr,
+				amr,
 				expiresIn: p.expiresIn,
 				grantedScope,
 				grantedAudience,
