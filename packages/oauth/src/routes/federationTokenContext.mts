@@ -64,7 +64,8 @@ export interface FederationTokenRouterOptions {
 	/**
 	 * How far ahead of its expiry a stored token becomes due for refresh. A
 	 * token whose record says when it was obtained is refreshed within it only
-	 * once half spent, and always with less than a second left. It is the
+	 * once half spent, except that one with less than a second left is
+	 * refreshed whether half spent or not. It is the
 	 * refresh margin only: the clock skew tolerated between replicas is the
 	 * runbook's one second, not this value. Default: 30_000 (30 seconds). A
 	 * whole number from 1000 to 2^31 - 1, or building the route throws a
