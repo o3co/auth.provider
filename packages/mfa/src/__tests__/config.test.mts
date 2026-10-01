@@ -42,9 +42,11 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
+import { MFA_RECOVERY_AUTHORIZATION_MAX_MS } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
+	MFA_RECENT_WINDOW_SECONDS,
 	type MfaSettingsOptions,
 	mfaConfigSchema,
 	mfaSectionSchema,
@@ -769,6 +771,10 @@ describe("the transaction's life and attempts, and the lock", () => {
 			expect(message, String(value)).toContain("mfa.manage.maxAgeSeconds");
 			expect(message, String(value)).toContain("60 to 3600 seconds");
 		}
+	});
+
+	it("ends recent MFA's window where core's longest recovery authorization ends: a release authorization lives that long", () => {
+		expect(MFA_RECENT_WINDOW_SECONDS.max * 1000).toBe(MFA_RECOVERY_AUTHORIZATION_MAX_MS);
 	});
 
 	it("refuses a configuration without the lock's section, naming the reference.conf that carries it", () => {
