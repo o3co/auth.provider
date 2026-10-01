@@ -216,7 +216,7 @@ export class MfaFactorKindUnhintableError extends RangeError {
 
 /**
  * The most kinds a hint list carries: core's cap on a hint's list
- * (`HINT_LIST_MAX` in `session-admission/admit.mts`, which core does not
+ * (`HINT_LIST_MAX` in `session-admission/interruption-answer.mts`, which core does not
  * export; `module.test.mts` holds the two to each other).
  */
 const HINT_LIST_MAX = 16;
