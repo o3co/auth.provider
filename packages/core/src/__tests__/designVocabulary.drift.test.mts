@@ -533,6 +533,18 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept:
+			"the first-binding mark as the MFA package reads it — which authentication it distrusts (the MFA ADR's D12)",
+		home: "packages/mfa/src/firstBindingMark.mts",
+		definition: /(?:function|const)\s+distrustedByFirstBinding\b/,
+	},
+	{
+		concept:
+			"the boundary check of a login transaction — its continuation's authTime held against the subject's sessions boundary (the MFA ADR's D8, F3)",
+		home: "packages/mfa/src/coordinator.mts",
+		definition: /(?:function|const)\s+pastSessionsBoundary\b/,
+	},
+	{
+		concept:
 			"a session's enrollment facts — derived from the login's User by core's primary builders (the MFA ADR's D12, D24)",
 		home: "packages/core/src/session-admission/primary.mts",
 		definition: /(?:function|const)\s+enrollmentFactsOf\b/,
