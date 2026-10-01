@@ -15,7 +15,7 @@
  */
 
 /**
- * Refreshing a token that expires within the buffer: the provider has to be
+ * Refreshing a token that is due (`refreshIsDue`): the provider has to be
  * able to refresh and the record to hold a refresh token. The record's lock,
  * when the store has one, is taken before the re-read and released, always,
  * once the answer is sent.
@@ -117,7 +117,7 @@ export const refreshStoredTokens = async (
 				});
 			}
 			if (freshTokens && !refreshIsDue(ctx, freshTokens)) {
-				// Another caller refreshed, or there is no finite expiry: return
+				// Another caller refreshed, or the token is not due: return
 				// the stored token without calling the IdP, judging its type as on
 				// the fast path.
 				if (!isDisclosable(freshTokens)) {

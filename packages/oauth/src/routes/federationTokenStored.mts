@@ -17,7 +17,7 @@
 /**
  * The user's stored upstream tokens: read before any refresh, a link with no
  * record removed from the session's index (best effort) and answered `404`,
- * and handed on as stored while they do not expire within the refresh buffer.
+ * and handed on as stored while they are not due for refresh.
  */
 
 import type { FederationTokens } from "@o3co/auth-provider-core";
@@ -59,7 +59,7 @@ export const readStoredTokens = async (
 
 /**
  * Step 10's answer: the stored token, once its type may be disclosed. The
- * handler has judged that it does not expire within the refresh buffer.
+ * handler has judged that it is not due for refresh.
  */
 export const answerStoredToken = async (
 	ctx: FederationTokenContext,

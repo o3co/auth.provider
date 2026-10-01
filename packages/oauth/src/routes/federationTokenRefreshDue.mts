@@ -16,19 +16,31 @@
 
 /**
  * Whether a stored token is refreshed before it is handed on: one with no
- * finite expiry never is, one that ends within the refresh buffer always is.
+ * finite expiry never is; one that ends within the refresh buffer is, unless
+ * it is known to be obtained less than half its lifetime ago. That rule only
+ * ever delays a refresh: an `obtainedAt` that is absent, or that core's
+ * `judgeHeldUpstreamToken` does not believe, leaves the buffer rule alone.
  */
 
-import type { FederationTokens } from "@o3co/auth-provider-core";
+import { type FederationTokens, judgeHeldUpstreamToken } from "@o3co/auth-provider-core";
 import type { FederationTokenContext } from "./federationTokenContext.mjs";
 
 export const refreshIsDue = (
 	ctx: Pick<FederationTokenContext, "refreshBufferMs">,
-	tokens: Pick<FederationTokens, "expiresAt">,
+	tokens: Pick<FederationTokens, "expiresAt" | "obtainedAt">,
 ): boolean => {
-	const { expiresAt } = tokens;
+	const { expiresAt, obtainedAt } = tokens;
 	// `null` is an upstream issuing no finite expiry (e.g. GitHub OAuth App
 	// tokens). An expiry that names no instant compares false: it is due.
 	if (expiresAt === null) return false;
-	return !(expiresAt.getTime() - Date.now() > ctx.refreshBufferMs);
+	const now = Date.now();
+	if (expiresAt.getTime() - now > ctx.refreshBufferMs) return false;
+	if (obtainedAt === undefined) return true;
+	// Never refreshed before it is half spent, so a lifetime shorter than the
+	// buffer is not refreshed on every request. A token not believed reads as
+	// half spent: the buffer rule stands.
+	return judgeHeldUpstreamToken(
+		{ obtainedAt, expiresAt },
+		{ now, allowanceMs: ctx.refreshBufferMs },
+	).halfSpent;
 };

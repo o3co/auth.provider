@@ -49,4 +49,58 @@ describe("refreshIsDue", () => {
 		expect(refreshIsDue({ refreshBufferMs: 120_000 }, at(NOW + 60_000))).toBe(true);
 		expect(refreshIsDue({ refreshBufferMs: 1000 }, at(NOW + 60_000))).toBe(false);
 	});
+
+	describe("a token known to be obtained at a time: never refreshed before it is half spent", () => {
+		const LIFE_MS = 10_000;
+		const held = (obtainedAt: number, lifeMs = LIFE_MS) => ({
+			obtainedAt: new Date(obtainedAt),
+			expiresAt: new Date(obtainedAt + lifeMs),
+		});
+		const due = (tokens: { obtainedAt?: Date; expiresAt: Date | null }) =>
+			refreshIsDue({ refreshBufferMs: BUFFER_MS }, tokens);
+
+		it("does not refresh a lifetime shorter than the buffer before its midpoint", () => {
+			expect(due(held(NOW))).toBe(false);
+			expect(due(held(NOW - LIFE_MS / 2 + 1))).toBe(false);
+		});
+
+		it("refreshes it from its midpoint", () => {
+			expect(due(held(NOW - LIFE_MS / 2))).toBe(true);
+			expect(due(held(NOW - LIFE_MS + 1))).toBe(true);
+		});
+
+		it("refreshes it once it has ended", () => {
+			expect(due(held(NOW - LIFE_MS))).toBe(true);
+			expect(due(held(NOW - 2 * LIFE_MS))).toBe(true);
+		});
+
+		it("only ever delays a refresh: a half-spent token outside the buffer is not due", () => {
+			expect(due(held(NOW - 3_600_000, 2 * 3_600_000))).toBe(false);
+		});
+
+		it("never refreshes a token with no finite expiry, whatever its obtainedAt", () => {
+			expect(due({ obtainedAt: new Date(NOW - 3_600_000), expiresAt: null })).toBe(false);
+		});
+
+		it("keeps the buffer rule for a record without obtainedAt", () => {
+			expect(due({ expiresAt: new Date(NOW + LIFE_MS) })).toBe(true);
+		});
+
+		it("keeps the buffer rule for an obtainedAt that names no instant, as for an absent one", () => {
+			expect(due({ obtainedAt: new Date(Number.NaN), expiresAt: new Date(NOW + LIFE_MS) })).toBe(
+				true,
+			);
+		});
+
+		it("believes an obtainedAt a little ahead of now, as another replica's clock may be", () => {
+			expect(due(held(NOW + 5000))).toBe(false);
+		});
+
+		it("keeps the buffer rule for an obtainedAt it does not believe: one not before its own end", () => {
+			// Within the buffer, an obtainedAt further ahead than the buffer's
+			// allowance is never before the end, so this is the one shape left.
+			expect(due({ obtainedAt: new Date(NOW + 5000), expiresAt: new Date(NOW + 5000) })).toBe(true);
+			expect(due({ obtainedAt: new Date(NOW + 6000), expiresAt: new Date(NOW + 5000) })).toBe(true);
+		});
+	});
 });

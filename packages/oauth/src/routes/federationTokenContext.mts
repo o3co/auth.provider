@@ -114,7 +114,7 @@ export interface FederationTokenContext {
 	readonly federation: string;
 	readonly logger: Logger | Console;
 	readonly storeUnavailable: ReturnType<typeof createStoreUnavailableLog>;
-	/** Tokens expiring within this many milliseconds are refreshed. */
+	/** Tokens expiring within this many milliseconds are refreshed, once half spent when their age is known. */
 	readonly refreshBufferMs: number;
 	/** A refreshed token is stored for at most this many milliseconds. */
 	readonly maxTokenLifetimeMs: number;

@@ -644,7 +644,7 @@ The fields are defined on core's `Client` record ([`repositories/types.mts`](../
 2. Deny if its family is revoked or the session no longer exists.
 3. Deny unless `client.allowedAzpForFederationToken === true`.
 4. Deny unless the federation is linked to the session.
-5. Return the stored upstream access token if it has more than the refresh buffer (`refreshBufferMs`, 30 seconds by default) of validity remaining, or no finite expiry.
+5. Return the stored upstream access token if it has more than the refresh buffer (`refreshBufferMs`, 30 seconds by default) of validity remaining, or no finite expiry. Within the buffer, a token whose record says when it was obtained (`obtainedAt`) is still returned until half its lifetime has passed, so an upstream that issues lifetimes shorter than the buffer is not asked again, and its refresh token rotated, on every request. Core's `judgeHeldUpstreamToken` judges the age; an `obtainedAt` that is absent or that it does not believe leaves the buffer rule as it is. This damps refreshes, it does not bound them.
 6. Otherwise, refresh it:
    - Acquire an advisory lock (when `FederationTokenStore` implements `SupportsLock`) to prevent concurrent refresh fan-out.
    - Re-read after the lock — another waiter may have refreshed during the wait.
@@ -708,10 +708,11 @@ guarantee.
 
 ### What this route needs from the federation token store
 
-The store's contract is core's `FederationTokenStore` and `FederationTokens` ([`federation-tokens/types.mts`](../core/src/federation-tokens/types.mts)); every field of a record is a required key, as [Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md) describes for anyone implementing or calling a store. What this route depends on:
+The store's contract is core's `FederationTokenStore` and `FederationTokens` ([`federation-tokens/types.mts`](../core/src/federation-tokens/types.mts)); every field of a record but `obtainedAt` is a required key, as [Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md) describes for anyone implementing or calling a store. `obtainedAt` is optional: this route writes it on every refreshed record with a finite expiry, as the instant the refresh call began, and link-time records have none. What this route depends on:
 
 - **Every field survives `attach`, `update` and `get`.** Losing `tokenType` fails **open**: the record comes back silent, silence is read as `Bearer`, and a sender-constrained token is handed on as one. Losing `refreshToken` makes the connection unrefreshable (`410 refresh_token_absent`); losing `idToken` drops the upstream's `id_token_hint` at logout; losing `grantedScope` makes the current scope the refresh bound, which under-reports.
-- **An adapter's own storage shape names every field too.** The required keys reach `FederationTokens`, not a row or document an adapter converts it to: declare the same required keys on that shape, as the bundled Redis store does for its envelope, or the conversion can forget a field and still compile.
+- **An adapter's own storage shape names every field too.** The required keys reach `FederationTokens`, not a row or document an adapter converts it to: declare the same required keys on that shape, as the bundled Redis store does for its envelope, or the conversion can forget a field and still compile. Declare `obtainedAt` there as well, even though it is optional on the record.
+- **`obtainedAt` survives too, as a `Date`, or stays absent.** Dropping it fails closed: such a record loses the half-spent damping and is refreshed within the buffer, as one written before the field.
 - **An unset value comes back as `undefined` or absent, never `null`.** This route refuses a stored `null`, so a serialiser that writes `undefined` as `null` — MongoDB's driver does unless `ignoreUndefined` is set — turns every connection whose adapter names no type into a `502`. The bundled Redis codec refuses a record holding `null`.
 
 Both bundled stores meet these and are pinned on them.

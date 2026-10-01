@@ -627,7 +627,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 2. そのファミリーが失効済みか、セッションがもう存在しなければ拒否する。
 3. `client.allowedAzpForFederationToken === true` でなければ拒否する。
 4. フェデレーションがセッションに紐付いていなければ拒否する。
-5. 保存済みの上流アクセストークンの有効期間がリフレッシュバッファ（`refreshBufferMs`、既定 30 秒）を超えて残っているか、有限の有効期限を持たなければ、それを返す。
+5. 保存済みの上流アクセストークンの有効期間がリフレッシュバッファ（`refreshBufferMs`、既定 30 秒）を超えて残っているか、有限の有効期限を持たなければ、それを返す。バッファ内でも、レコードが取得時刻（`obtainedAt`）を持つトークンは有効期間の半分が過ぎるまでそのまま返す。これにより、バッファより短い有効期間を発行する上流に、リクエストのたびに問い合わせてリフレッシュトークンをローテーションさせることはない。経過は core の `judgeHeldUpstreamToken` で判定し、`obtainedAt` が不在か、それが信じない値なら、バッファの規則のままとなる。これはリフレッシュを抑えるもので、上限を保証するものではない。
 6. そうでなければリフレッシュする:
    - 同時リフレッシュのファンアウトを防ぐため advisory lock を取得する（`FederationTokenStore` が `SupportsLock` を実装している場合）。
    - ロック取得後に再読み込みする — 待機中に別のウェイターがリフレッシュしたかもしれない。
@@ -686,10 +686,11 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 
 ### フェデレーショントークンストアに求めること
 
-ストアの契約は core の `FederationTokenStore` と `FederationTokens`（[`federation-tokens/types.mts`](../core/src/federation-tokens/types.mts)）である。レコードのすべてのフィールドは必須キーで、ストアを実装する・呼ぶ人向けには [Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md) が説明している。このルートが依存すること:
+ストアの契約は core の `FederationTokenStore` と `FederationTokens`（[`federation-tokens/types.mts`](../core/src/federation-tokens/types.mts)）である。レコードの `obtainedAt` 以外のすべてのフィールドは必須キーで、ストアを実装する・呼ぶ人向けには [Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md) が説明している。`obtainedAt` は省略可能: このルートは有限の有効期限を持つリフレッシュ済みレコードすべてに、リフレッシュ呼び出しの開始時刻として書き、リンク時のレコードは持たない。このルートが依存すること:
 
 - **すべてのフィールドが `attach`、`update`、`get` を通して保たれること。** `tokenType` を失うと**開いたまま**失敗する: レコードが沈黙して返り、沈黙は `Bearer` と読まれ、sender-constrained なトークンが Bearer として渡される。`refreshToken` を失うとコネクションはリフレッシュできなくなり（`410 refresh_token_absent`）、`idToken` を失うとログアウトで上流の `id_token_hint` が落ち、`grantedScope` を失うと現在のスコープがリフレッシュの上限になる（過小に報告する）。
-- **アダプター独自の保存形式もすべてのフィールドを名指すこと。** 必須キーが届くのは `FederationTokens` までで、アダプターがそれを変換する行やドキュメントには届かない: その形式にも同じ必須キーを宣言すること — 同梱の Redis ストアは envelope でそうしている — さもなければ変換がフィールドを落としたままコンパイルが通る。
+- **アダプター独自の保存形式もすべてのフィールドを名指すこと。** 必須キーが届くのは `FederationTokens` までで、アダプターがそれを変換する行やドキュメントには届かない: その形式にも同じ必須キーを宣言すること — 同梱の Redis ストアは envelope でそうしている — さもなければ変換がフィールドを落としたままコンパイルが通る。`obtainedAt` も、レコード上は省略可能だが、その形式に宣言すること。
+- **`obtainedAt` も `Date` として保たれるか、不在のままであること。** 落とすと閉じた側に失敗する: そのレコードは半分経過による抑制を失い、フィールド以前のレコードと同じくバッファ内でリフレッシュされる。
 - **未設定の値は `undefined` か不在で返し、決して `null` にしないこと。** このルートは保存された `null` を拒否するので、`undefined` を `null` として書くシリアライザー — MongoDB のドライバーは `ignoreUndefined` を設定しない限りそうする — では、型を名乗らないアダプターのコネクションがすべて `502` になる。同梱の Redis コーデックは `null` を含むレコードを拒否する。
 
 同梱の 2 つのストアはこれらを満たし、テストで固定されている。

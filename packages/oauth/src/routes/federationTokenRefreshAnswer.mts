@@ -140,6 +140,12 @@ export interface RefreshReading {
 	readonly rotatedIdToken: string | undefined;
 	/** When the record's token ends next: the derived end, capped at the maximum; `null` is no finite expiry. */
 	readonly derivedExpiry: Date | null;
+	/**
+	 * When the token's lifetime counts from: the start of the refresh call.
+	 * `undefined` with no finite expiry, or a broken lifetime. With the cap,
+	 * `derivedExpiry − obtainedAt` may exceed the maximum by the call's duration.
+	 */
+	readonly obtainedAt: Date | undefined;
 	readonly lifetimeIsBroken: boolean;
 	readonly tokenTypeIsBroken: boolean;
 	/** The type the record carries next. */
@@ -156,17 +162,23 @@ export interface RefreshLifetimePolicy {
 	readonly maxTokenLifetimeMs: number;
 }
 
+/** The lifetime a refresh answer gives the record. */
+interface RefreshedLifetime {
+	readonly expiresAt: Date | null;
+	readonly obtainedAt: Date | undefined;
+}
+
 /**
- * The end a refresh answer's lifetime fields give the record: `null` when
- * neither names a lifetime (never refresh), `undefined` when they name none
- * that can be used. A finite end is capped at `now + maxTokenLifetimeMs`,
- * never refused over it.
+ * The lifetime a refresh answer's fields give the record: `expiresAt: null`
+ * when neither names a lifetime (never refresh), `undefined` when they name
+ * none that can be used. A finite end is capped at `now + maxTokenLifetimeMs`,
+ * never refused over it, and is obtained at core's reading's `obtainedAt`.
  */
-const readRefreshedExpiry = (
+const readRefreshedLifetime = (
 	answer: Partial<RefreshedTokens>,
 	unreadable: ReadonlySet<string>,
 	policy: RefreshLifetimePolicy,
-): Date | null | undefined => {
+): RefreshedLifetime | undefined => {
 	// A lifetime field that would not be read is broken, not absent: absent
 	// is the never-refresh sentinel.
 	if (unreadable.has("expiresIn") || unreadable.has("expiresAt")) return undefined;
@@ -177,13 +189,18 @@ const readRefreshedExpiry = (
 	);
 	switch (lifetime.verdict) {
 		case "unstated":
-			return null;
+			return { expiresAt: null, obtainedAt: undefined };
 		case "malformed":
 		case "contradictory":
 		case "spent":
 			return undefined;
 		case "finite":
-			return new Date(Math.min(lifetime.expiresAt.getTime(), now + policy.maxTokenLifetimeMs));
+			return {
+				expiresAt: new Date(
+					Math.min(lifetime.expiresAt.getTime(), now + policy.maxTokenLifetimeMs),
+				),
+				obtainedAt: lifetime.obtainedAt,
+			};
 		default: {
 			// A verdict a newer core adds is not one this route can store.
 			const unknownVerdict: never = lifetime;
@@ -223,7 +240,7 @@ export const readRefreshAnswer = (
 	// A lifetime stated wrongly is not one never stated: `null` is stored as
 	// "no finite expiry" (never refresh), so a broken lifetime must not fall
 	// through to it.
-	const derivedExpiry = readRefreshedExpiry(answer, unreadable, policy);
+	const lifetime = readRefreshedLifetime(answer, unreadable, policy);
 
 	// The refreshed token's type: unreadable or not a type name is broken
 	// (joins the refusals of an unusable answer, as core's `retrieve.mts`
@@ -247,8 +264,9 @@ export const readRefreshAnswer = (
 		// overwriting a usable stored token strands the connection.
 		rotatedRefreshToken: usable(answer.refreshToken),
 		rotatedIdToken: usable(answer.idToken),
-		derivedExpiry: derivedExpiry ?? null,
-		lifetimeIsBroken: derivedExpiry === undefined,
+		derivedExpiry: lifetime?.expiresAt ?? null,
+		obtainedAt: lifetime?.obtainedAt,
+		lifetimeIsBroken: lifetime === undefined,
 		tokenTypeIsBroken,
 		nextTokenType,
 		answeredScope: classifyAnsweredScope(answer, unreadable),
