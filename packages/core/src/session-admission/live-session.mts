@@ -16,7 +16,7 @@
 
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
- * read, the subject and the revocation boundary. The session store and the
+ * read, the subject, the renewal nonce and the revocation boundary. The session store and the
  * boundary are read here and nowhere else in admission; an outage is
  * answered through admission's `unavailable`, which logs it.
  */
@@ -97,6 +97,20 @@ export async function readLiveSession(
 			},
 		});
 		return { answer: { outcome: "not_live", reason: "subject_mismatch" } };
+	}
+
+	// Step 3b: the renewal nonce. A record bound to a renewed cookie session
+	// is live only for the cookie session holding its nonce: an old express
+	// id a concurrent request saved back after the renewal holds another or
+	// none. A record without one is bound to nothing; other carriers hold no
+	// cookie session to compare.
+	if (
+		session !== null &&
+		presented.carrier === "cookie" &&
+		session.renewalNonce != null &&
+		session.renewalNonce !== presented.renewalNonce
+	) {
+		return { answer: { outcome: "not_live", reason: "renewed" } };
 	}
 
 	// Step 4: the revocation boundary, against a live record; a token's is

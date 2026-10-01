@@ -555,6 +555,13 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+renewSession\b/,
 	},
 	{
+		concept:
+			"the renewal nonce — what binds an escalated session to one cookie session (the MFA ADR's D27)",
+		home: "packages/core/src/user-sessions/renewalNonce.mts",
+		definition: /(?:function|const)\s+(?:newRenewalNonce|isRenewalNonce)\b/,
+		homeMatches: 2,
+	},
+	{
 		concept: "core.deployment.mode as core reads it — the deploymentMode slot's value",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+deploymentModeOf\b/,

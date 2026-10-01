@@ -92,23 +92,27 @@ export interface CookieCarrier {
 		readonly isAuthenticated?: unknown;
 		readonly sid?: unknown;
 		readonly user?: unknown;
+		readonly renewalNonce?: unknown;
 	} | null;
 }
 
 /**
  * The cookie's claim: `authenticated` is `isAuthenticated === true`, the one
- * reading of the flag; `sid` and `subject` (`user.id`) are copied when they
- * are non-empty strings. A request without a session claims nothing.
+ * reading of the flag; `sid`, `subject` (`user.id`) and the renewal nonce a
+ * renewal wrote (`renewalNonce`) are copied when they are non-empty strings.
+ * A request without a session claims nothing.
  */
 export function cookieClaim(req: CookieCarrier): SessionClaim {
 	if (!isObject(req)) throw new RangeError("cookieClaim: the request must be an object");
 	const session = isObject(req.session) ? req.session : undefined;
 	const user = session !== undefined && isObject(session.user) ? session.user : undefined;
+	const renewalNonce = nonEmptyString(session?.renewalNonce);
 	return brandClaim({
 		authenticated: session?.isAuthenticated === true,
 		sid: nonEmptyString(session?.sid),
 		subject: nonEmptyString(user?.id),
 		carrier: "cookie",
+		...(renewalNonce === undefined ? {} : { renewalNonce }),
 	} as SessionClaim);
 }
 
@@ -249,6 +253,14 @@ export const viewOf = (session: UserSession): SessionView => {
 	});
 };
 
+/** A copy of `view` with Dates of its own; the facts are frozen and shared. */
+const copyView = (view: SessionView): SessionView =>
+	Object.freeze({
+		...view,
+		authTime: new Date(view.authTime.getTime()),
+		expiresAt: new Date(view.expiresAt.getTime()),
+	});
+
 /**
  * Whether the session `request.claim` names may proceed with
  * `request.action`. The steps, in order, each failing closed:
@@ -260,7 +272,9 @@ export const viewOf = (session: UserSession): SessionView => {
  *    `not_live` (`gone`). Without a store the session is `null` and the
  *    requirements decide what that means.
  * 3. subject: a claim's subject that is not the record's → `not_live`
- *    (`subject_mismatch`), logged and audited.
+ *    (`subject_mismatch`), logged and audited. Then, for a cookie claim, a
+ *    record that carries a renewal nonce the cookie session does not hold →
+ *    `not_live` (`renewed`).
  * 4. revocation boundary, for a live record; skipped for a token carrier,
  *    whose boundary `verifyJwt` reads.
  * 5. requirements, for `use` and `credential_change`: each `admit` in
@@ -286,12 +300,13 @@ export async function admitSession(
 		return { outcome: "unavailable", store };
 	};
 
-	// Steps 1 to 4: the claim, the live read, the subject, the revocation boundary.
+	// Steps 1 to 4: the claim, the live read, the subject and the renewal nonce, the revocation boundary.
 	const read = await readLiveSession(checked, unavailable);
 	if ("answer" in read) return read.answer;
 	const { session } = read;
-	// The admission's own copy of the view: what a requirement does to the one
-	// it is handed never reaches the consumer.
+	// The record is read into one view; each requirement is handed its own
+	// copy of it, so what one does to its Dates reaches neither the next nor
+	// the consumer.
 	const live: LiveRecord | null = session === null ? null : { session, view: viewOf(session) };
 
 	// Step 5: the requirements, by the action's effective grade: only the
@@ -306,8 +321,7 @@ export async function admitSession(
 			: requirementSession(session);
 	let verdict: RequirementOutcome = { outcome: "met" };
 	if (effective.grade !== "remediation") {
-		const input: RequirementInput = Object.freeze({
-			session: session === null ? null : viewOf(session),
+		const shared = {
 			authentication,
 			carrier: presented.carrier,
 			// The record's sub when read — step 3 made it the claim's — else the claim's.
@@ -315,8 +329,12 @@ export async function admitSession(
 			action: effective,
 			asks,
 			now,
-		});
+		};
 		for (const [name, requirement] of requirements) {
+			const input: RequirementInput = Object.freeze({
+				...shared,
+				session: live === null ? null : copyView(live.view),
+			});
 			let answer: unknown;
 			try {
 				answer = await requirement.admit(input);

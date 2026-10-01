@@ -124,6 +124,9 @@ export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): Ch
 		...(Array.isArray(presented.tokenAmr)
 			? { tokenAmr: Object.freeze([...(presented.tokenAmr as readonly string[])]) }
 			: {}),
+		...(nonEmptyString(presented.renewalNonce) === undefined
+			? {}
+			: { renewalNonce: presented.renewalNonce }),
 	}) as SessionClaim;
 	const action = checkedAction(request.action, requirements);
 	const asksRead = request.asks;

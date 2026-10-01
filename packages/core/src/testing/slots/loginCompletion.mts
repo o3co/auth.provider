@@ -752,7 +752,8 @@ export interface RecordingLoginCompletionOptions {
  * `answerInterruption` regenerates, opens the ceremony on the new id,
  * saves and answers the requirement's `403`, with a fresh token from
  * `options.csrfGuard` when it is given one; `renewSession` regenerates,
- * writes back the signed-in fields the session held, and saves.
+ * writes back the signed-in fields the session held and a fresh renewal
+ * nonce, and saves.
  */
 export function createRecordingLoginCompletion(
 	options: RecordingLoginCompletionOptions = {},
@@ -850,6 +851,7 @@ export function createRecordingLoginCompletion(
 			return { outcome: "answered" };
 		},
 		async renewSession({ req, reporter }): Promise<SessionRenewalResult> {
+			const renewalNonce = newRenewalNonce();
 			const held = cookieSessionOf(req);
 			const kept = SIGNED_IN_FIELDS.flatMap((field) =>
 				held?.[field] === undefined ? [] : [[field, held[field]] as const],
@@ -861,10 +863,12 @@ export function createRecordingLoginCompletion(
 			};
 			const regenerated = await sessionOperation("regenerate", req);
 			if (regenerated.failed) return unavailable("regenerate", regenerated.cause);
-			Object.assign(cookieSessionOf(req) as CookieSession, Object.fromEntries(kept));
+			Object.assign(cookieSessionOf(req) as CookieSession, Object.fromEntries(kept), {
+				renewalNonce,
+			});
 			const saved = await sessionOperation("save", req);
 			if (saved.failed) return unavailable("save", saved.cause);
-			return { outcome: "renewed" };
+			return { outcome: "renewed", renewalNonce };
 		},
 	};
 }

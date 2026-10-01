@@ -44,6 +44,8 @@ interface Stored {
 	authentication: SessionAuthentication | undefined;
 	/** What `recordableEnrollmentFacts` answered at `create`; `undefined` for none. */
 	enrollmentFacts: SessionEnrollmentFacts | undefined;
+	/** The renewal nonce the last escalation carried; `undefined` for none. */
+	renewalNonce: string | undefined;
 }
 
 /**
@@ -72,6 +74,7 @@ const toSession = (s: Stored): UserSession => ({
 	authentication: s.authentication ? copySessionAuthentication(s.authentication) : undefined,
 	// Optional on the session: left out when none was recorded.
 	...(s.enrollmentFacts === undefined ? {} : { enrollmentFacts: { ...s.enrollmentFacts } }),
+	...(s.renewalNonce === undefined ? {} : { renewalNonce: s.renewalNonce }),
 });
 
 /**
@@ -141,6 +144,7 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 				// Already a copy, its `mfaAt` no later than this store's clock.
 				authentication,
 				enrollmentFacts,
+				renewalNonce: undefined,
 			});
 		},
 		async get(sid: string): Promise<UserSession | null> {
@@ -160,6 +164,7 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 			// A field write: `expiresAt`, and everything else, stay as they were.
 			s.amr = [...next.amr];
 			s.authentication = copySessionAuthentication(next.authentication);
+			if (event.renewalNonce !== undefined) s.renewalNonce = event.renewalNonce;
 			return toSession(s);
 		},
 		async delete(sid: string) {
