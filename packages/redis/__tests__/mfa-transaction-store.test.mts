@@ -19,8 +19,10 @@
  * contract on a real Redis, and below it: the key layout (a hash per
  * transaction expiring at its `expiresAtMs` on the server's clock; a hash per
  * subject for the lockout state beside the weekly window, a sorted set of
- * failure times; the email-proof requirement in a key with no TTL), what
- * reclaims the subject state, and the answer to a value it cannot read.
+ * failure times; the email-proof requirement in a key with no TTL; a
+ * session's proof and a subject's first-binding mark in strings expiring at
+ * their ends), what reclaims the subject state, and the answer to a value it
+ * cannot read.
  *
  * The contract's store alternates between two connections, so its races are
  * across sockets rather than queued on one client.
@@ -35,7 +37,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MFA_SUBJECT_EXEMPT } from "#/ioredis/scripts/mfa.mjs";
+import { MFA_FIRST_BINDING_NOTE, MFA_SUBJECT_EXEMPT } from "#/ioredis/scripts/mfa.mjs";
 import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
 import { createRedisMfaTransactionStore } from "#/mfa-transaction-store.mjs";
 import { runMfaTransactionStoreContract } from "./adapters.mfa-transaction-store.contract.mjs";
@@ -99,6 +101,8 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 		recordSessionEmailProof: (subject, sid, provedAtMs, untilMs) =>
 			pick().recordSessionEmailProof(subject, sid, provedAtMs, untilMs),
 		sessionEmailProofAt: (subject, sid, nowMs) => pick().sessionEmailProofAt(subject, sid, nowMs),
+		noteFirstBinding: (subject, atMs, untilMs) => pick().noteFirstBinding(subject, atMs, untilMs),
+		firstBindingAt: (subject, nowMs) => pick().firstBindingAt(subject, nowMs),
 	};
 };
 
@@ -950,5 +954,152 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
 		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
 		expect(await first().keys(`${prefix}*`)).toEqual([proofKey(prefix, "user-1", "sid-1")]);
+	});
+});
+
+describe("createRedisMfaTransactionStore — a subject's first-binding mark", () => {
+	const markKey = (prefix: string, subject: string): string =>
+		`${prefix}first-binding:{${keyPart(subject)}}`;
+
+	it("keeps it in a string of its own, <prefix>first-binding:{<subject>}, holding when it was noted and its end, expiring at its end on the store's clock", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Date.now();
+		const until = now + 10 * MINUTE;
+		await store.noteFirstBinding("user-1", now, until);
+		const key = markKey(prefix, "user-1");
+		expect(await first().keys(`${prefix}*`)).toEqual([key]);
+		expect(await first().type(key)).toBe("string");
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual({
+			atMs: now,
+			untilMs: until,
+		});
+		const ttl = await first().pttl(key);
+		expect(ttl).toBeGreaterThan(9 * MINUTE);
+		expect(ttl).toBeLessThanOrEqual(10 * MINUTE);
+	});
+
+	it("sets the key's lifetime from the store's own clock: a store whose clock runs behind keeps it longer, to the same end", async () => {
+		const prefix = freshPrefix();
+		const behind = createRedisMfaTransactionStore({
+			client: makeIoredisMfaTransactionStoreClient(first()),
+			keyPrefix: prefix,
+			now: () => Date.now() - 5 * MINUTE,
+		});
+		const now = Date.now();
+		await behind.noteFirstBinding("user-1", now - 5 * MINUTE, now + 10 * MINUTE);
+		expect(await first().pttl(markKey(prefix, "user-1"))).toBeGreaterThan(14 * MINUTE);
+	});
+
+	it("leaves the key and its lifetime as they were when an earlier note is not kept", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Date.now();
+		const key = markKey(prefix, "user-1");
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		const value = await first().get(key);
+		await store.noteFirstBinding("user-1", now - MINUTE, now + 30 * MINUTE);
+		expect(await first().get(key)).toBe(value);
+		expect(await first().pttl(key)).toBeLessThanOrEqual(10 * MINUTE);
+	});
+
+	it("answers a mark past its end on its own clock as absent, though the server still holds it, and takes a note over it", async () => {
+		const prefix = freshPrefix();
+		const onTime = storeAt(prefix);
+		const ahead = createRedisMfaTransactionStore({
+			client: makeIoredisMfaTransactionStoreClient(first()),
+			keyPrefix: prefix,
+			now: () => Date.now() + 11 * MINUTE,
+		});
+		const now = Date.now();
+		await onTime.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(await ahead.firstBindingAt("user-1", now)).toBeNull();
+		expect(await onTime.firstBindingAt("user-1", now)).toBe(now);
+		expect(await first().exists(markKey(prefix, "user-1"))).toBe(1);
+		// Ended on its clock, the mark held gives way to an earlier note.
+		await ahead.noteFirstBinding("user-1", now - MINUTE, now + 20 * MINUTE);
+		expect(await ahead.firstBindingAt("user-1", now + 11 * MINUTE)).toBe(now - MINUTE);
+	});
+
+	it("refuses to answer a mark it cannot read back: an outage, never no mark, quoting nothing it read", async () => {
+		// No mark lets a session's recorded witness stand: a mark read as
+		// absent would trust the session it is there to distrust.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Date.now();
+		for (const value of [
+			"not json",
+			"null",
+			JSON.stringify({ atMs: now }),
+			JSON.stringify({ atMs: String(now), untilMs: now + MINUTE }),
+			JSON.stringify({ atMs: now - 0.5, untilMs: now + MINUTE }),
+			JSON.stringify({ atMs: -1, untilMs: now + MINUTE }),
+			JSON.stringify({ atMs: now, untilMs: now + MINUTE + 0.5 }),
+			JSON.stringify({ atMs: now + MINUTE, untilMs: now + MINUTE }),
+		]) {
+			await first().set(key, value, "PX", MINUTE);
+			const read = store.firstBindingAt("user-1", now);
+			await expect(read, value).rejects.toThrow(/MfaTransactionStore/);
+			await expect(read, value).rejects.not.toThrow(RangeError);
+			await expect(read, value).rejects.not.toThrow(/not json|atMs|untilMs/);
+		}
+	});
+
+	it("replaces a mark it cannot read back with the next note", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Date.now();
+		for (const value of ["not json", JSON.stringify({ atMs: now + MINUTE })]) {
+			await first().set(key, value, "PX", MINUTE);
+			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now), value).toBe(now);
+		}
+	});
+
+	it("notes through EVAL once the server has forgotten the script", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Date.now();
+		await store.noteFirstBinding("user-1", now - MINUTE, now + 10 * MINUTE);
+		await first().script("FLUSH");
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(await first().script("EXISTS", MFA_FIRST_BINDING_NOTE.sha)).toEqual([1]);
+		expect(await store.firstBindingAt("user-1", now)).toBe(now);
+	});
+
+	it("rejects a note and a read when the server cannot be reached: an outage, never no mark", async () => {
+		const unreachable = first().duplicate({ lazyConnect: true, enableOfflineQueue: false });
+		try {
+			const store = storeAt(freshPrefix(), unreachable);
+			const now = Date.now();
+			await expect(store.noteFirstBinding("user-1", now, now + 10 * MINUTE)).rejects.toThrow();
+			await expect(store.firstBindingAt("user-1", now)).rejects.toThrow();
+		} finally {
+			unreachable.disconnect();
+		}
+	});
+
+	it("keeps it apart from the transactions, the subject lock, the requirement and a session's proof", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Date.now();
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+		await store.create(TX({ sid: "sid-1" }));
+		expect(await store.consume("tx-1", 1)).not.toBeNull();
+		await store.requireEmailProofAtNextBinding("user-1");
+		await store.reserveSubjectAttempt("user-1", now, POLICY);
+		await store.clearSubjectState("user-1");
+		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
+		expect(await store.firstBindingAt("user-1", now)).toBe(now);
+		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+		expect((await first().keys(`${prefix}*`)).sort()).toEqual(
+			[
+				markKey(prefix, "user-1"),
+				`${prefix}session-proof:{${keyPart("user-1")}}:${keyPart("sid-1")}`,
+			].sort(),
+		);
 	});
 });

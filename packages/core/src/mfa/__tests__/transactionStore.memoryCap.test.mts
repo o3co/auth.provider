@@ -113,7 +113,7 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		expect(refusal).not.toBeInstanceOf(RangeError);
 		expect(refusal).toMatchObject({ name: "MfaTransactionStoreFullError", reason: "full" });
 		expect((refusal as Error).message).toBe(
-			"memory MfaTransactionStore is at its cap of 2 resident entries — transactions and session email proofs, expired ones not yet swept included; refusing a new one rather than evicting one",
+			"memory MfaTransactionStore is at its cap of 2 resident entries — transactions, session email proofs and first-binding marks, expired ones not yet swept included; refusing a new one rather than evicting one",
 		);
 
 		expect(store.transactions).toBe(2);
@@ -212,6 +212,48 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		expect(store.sessionEmailProofs).toBe(1);
 		expect(store.transactions).toBe(1);
 		expect(await store.sessionEmailProofAt("user-1", "sid-next", now)).toBe(T0 + 2_000);
+	});
+
+	it("counts first-binding marks against its cap beside its transactions and proofs: at the cap a new mark is refused as a store fault, recording nothing", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 3 });
+		await store.create(TX("tx-1"));
+		await store.recordSessionEmailProof("user-1", "sid-1", T0, T0 + 300_000);
+		await store.noteFirstBinding("user-1", T0, T0 + 300_000);
+		expect(store.firstBindingMarks).toBe(1);
+		const refusal = await refusalOf(store.noteFirstBinding("user-2", T0, T0 + 300_000));
+		expect(refusal).toBeInstanceOf(MfaTransactionStoreFullError);
+		expect(await store.firstBindingAt("user-2", T0)).toBeNull();
+		// Nor is a transaction or a proof let past the cap the marks share.
+		expect(await refusalOf(store.create(TX("tx-2")))).toBeInstanceOf(MfaTransactionStoreFullError);
+		expect(
+			await refusalOf(store.recordSessionEmailProof("user-1", "sid-2", T0, T0 + 300_000)),
+		).toBeInstanceOf(MfaTransactionStoreFullError);
+		expect(store.firstBindingMarks).toBe(1);
+	});
+
+	it("takes a subject's later note at its cap, and answers an earlier one at its cap without a refusal: neither is a new entry", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 1 });
+		await store.noteFirstBinding("user-1", T0, T0 + 300_000);
+		await store.noteFirstBinding("user-1", T0 + 1_000, T0 + 300_000);
+		await store.noteFirstBinding("user-1", T0 - 1_000, T0 + 300_000);
+		expect(await store.firstBindingAt("user-1", T0)).toBe(T0 + 1_000);
+		expect(store.firstBindingMarks).toBe(1);
+	});
+
+	it("reclaims expired marks before it refuses", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			maxEntries: 2,
+			minSweepIntervalMs: 0,
+		});
+		await store.noteFirstBinding("user-short", T0, T0 + 1_000);
+		await store.create(TX("long"));
+		now = T0 + 2_000;
+		await store.noteFirstBinding("user-next", T0 + 2_000, T0 + 300_000);
+		expect(store.firstBindingMarks).toBe(1);
+		expect(store.transactions).toBe(1);
+		expect(await store.firstBindingAt("user-next", now)).toBe(T0 + 2_000);
 	});
 
 	it("refuses a cap above what a Map can hold, 2^24 entries", () => {
