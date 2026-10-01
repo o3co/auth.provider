@@ -29,6 +29,7 @@ import type {
 	AuditEvent,
 	AuditSink,
 	MfaFactorStore,
+	SupportsMfaEnrollmentWitness,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
@@ -138,6 +139,7 @@ const storesOf = ({ handle }: FullSet) =>
 	handle.components as unknown as {
 		readonly mfaFactorStore: MfaFactorStore;
 		readonly userSessionStore: UserSessionStore;
+		readonly userRepository: SupportsMfaEnrollmentWitness;
 	};
 
 /** What the MFA module logged at warn under `event`. */
@@ -181,10 +183,16 @@ describe.each(["store", "memory"] as const)(
 	(factors) => {
 		it("marks the subject enrolled in the Store once its first factor is written, and the login completes", async () => {
 			const set = await boot(factors);
+			const create = vi.spyOn(storesOf(set).mfaFactorStore, "create");
+			const mark = vi.spyOn(storesOf(set).userRepository, "markMfaEnrolled");
 			const { done } = await firstBinding(set.app);
 			expect(done.status, JSON.stringify(done.body)).toBe(200);
 			expect(done.body.factor).toMatchObject({ kind: "totp" });
 
+			expect(mark.mock.calls).toEqual([[ALICE.id, true]]);
+			const created = create.mock.invocationCallOrder;
+			expect(created.length).toBeGreaterThan(0);
+			expect(Math.max(...created)).toBeLessThan(mark.mock.invocationCallOrder[0] as number);
 			expect(store.enrolled(ALICE.id)).toBe(true);
 			const marks = store.requests.filter(({ endpoint }) => endpoint === "markMfaEnrolled");
 			expect(marks.map(({ body }) => body)).toEqual([{ subject: ALICE.id, enrolled: true }]);
@@ -192,8 +200,7 @@ describe.each(["store", "memory"] as const)(
 			expect(kept.map(({ kind }) => kind)).toContain("totp");
 			if (factors === "store") {
 				const endpoints = endpointsSince(0);
-				expect(endpoints.indexOf("create")).toBeGreaterThanOrEqual(0);
-				expect(endpoints.indexOf("create")).toBeLessThan(endpoints.indexOf("markMfaEnrolled"));
+				expect(endpoints.lastIndexOf("create")).toBeLessThan(endpoints.indexOf("markMfaEnrolled"));
 			}
 			expect(warned(set, "mfa_enrollment_witness_unwritten")).toEqual([]);
 		});

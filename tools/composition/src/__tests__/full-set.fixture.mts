@@ -43,9 +43,9 @@
  *   `foundationMfaFactorStoreModule` over those endpoints, handed the user
  *   repository's HTTP settings as a composition root hands them.
  * - With `userRepositoryAt`, the Store keeps the users: foundation's `"http"`
- *   user adapter over those endpoints, built from the
- *   `repositories.user.http` block the configuration carries, in place of the
- *   template fixture's in-memory directory. Given the witness's endpoint, it
+ *   user adapter over those endpoints, built from the `repositories.user.http`
+ *   block foundation's testing entry makes of them and the configuration
+ *   carries, in place of the template fixture's in-memory directory. Given the witness's endpoint, it
  *   writes the MFA enrollment witness.
  * - WebAuthn registration reads `req.webauthnSubject`, which the package's
  *   `webauthnSessionSubjectModule` sets from the admitted browser session;
@@ -91,7 +91,6 @@ import {
 	createRecordingMailSender,
 	type FakeIdp,
 	type RecordingMailSender,
-	userRepositoryHttpOf,
 	withUserRepositoryHttp,
 } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
@@ -102,7 +101,11 @@ import {
 	foundationMfaFactorStoreModule,
 	registerBuiltinAdapters,
 } from "@o3co/auth-provider-foundation";
-import { foundationMfaFactorStoreConfig } from "@o3co/auth-provider-foundation/testing";
+import {
+	type FoundationUserRepositoryUrls,
+	foundationMfaFactorStoreConfig,
+	foundationUserRepositoryHttpConfig,
+} from "@o3co/auth-provider-foundation/testing";
 import { mfaModules } from "@o3co/auth-provider-mfa";
 import { seedTotpFactor } from "@o3co/auth-provider-mfa/testing";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
@@ -723,38 +726,12 @@ function storeTransportUnder(env: Readonly<Record<string, string>>): Record<stri
 }
 
 /**
- * The Store endpoints a user repository is built over, named as the
- * configuration names them: a fake Store's `urls` (its witness endpoint left
- * out for a repository that writes no witness), and a link endpoint where a
- * test needs the capability present.
+ * The Store endpoints a user repository is built over, as foundation names
+ * them: a fake Store's `urls` (its witness endpoint left out for a repository
+ * that writes no witness), and a link endpoint where a test needs the
+ * capability present.
  */
-export interface UserRepositoryUrls {
-	readonly authenticateUrl: string;
-	readonly authenticateByTokenUrl: string;
-	readonly markMfaEnrolledUrl?: string;
-	readonly linkFederatedIdentityUrl?: string;
-}
-
-/**
- * The user repository's HTTP settings under `env` with `urls` laid over
- * them, set and read back through core's builder, so the block the
- * configuration carries is the one the repository is built from.
- */
-function userRepositoryHttpUnder(
-	env: Readonly<Record<string, string>>,
-	urls: UserRepositoryUrls,
-): Record<string, unknown> {
-	const { authenticateUrl, authenticateByTokenUrl, markMfaEnrolledUrl, linkFederatedIdentityUrl } =
-		urls;
-	const http = {
-		...storeTransportUnder(env),
-		authenticateUrl,
-		authenticateByTokenUrl,
-		...(markMfaEnrolledUrl === undefined ? {} : { markMfaEnrolledUrl }),
-		...(linkFederatedIdentityUrl === undefined ? {} : { linkFederatedIdentityUrl }),
-	};
-	return userRepositoryHttpOf(withUserRepositoryHttp({}, http)) as Record<string, unknown>;
-}
+export type UserRepositoryUrls = Partial<FoundationUserRepositoryUrls>;
 
 /** Foundation's `"http"` user adapter over `http`, built through the adapter factory as the template's repositories module builds it. */
 function httpUserRepository(http: Readonly<Record<string, unknown>>): Promise<UserRepository> {
@@ -906,10 +883,12 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	readonly mfaFactorStoreAt?: FakeStoreUrls;
 	/**
 	 * The Store's user endpoints: given, the user repository is foundation's
-	 * `"http"` adapter over them, on the user repository's HTTP settings, which
-	 * the configuration carries (`repositories.user.http`) and the
-	 * Store-backed factor store, when there is one, is handed too. It replaces
-	 * the template fixture's directory, so `extraUsers` are not consulted.
+	 * `"http"` adapter over them, built from the `http` block foundation's
+	 * testing entry makes of these URLs alone — no credential, the builder's
+	 * deadline and cap — which the configuration carries
+	 * (`repositories.user.http`) and the Store-backed factor store, when there
+	 * is one, is handed too. It replaces the template fixture's directory, so
+	 * `extraUsers` are not consulted.
 	 */
 	readonly userRepositoryAt?: UserRepositoryUrls;
 	/**
@@ -943,10 +922,11 @@ export async function fullSetOptions(
 	const stores = options.stores ?? "memory";
 	const f = await sharedFakes();
 	const env = options.env ?? SINGLE_ENV;
+	// From the URLs alone: the block holds no URL the environment sets.
 	const userHttp =
 		options.userRepositoryAt === undefined
 			? undefined
-			: userRepositoryHttpUnder(env, options.userRepositoryAt);
+			: foundationUserRepositoryHttpConfig(options.userRepositoryAt);
 	const userRepository = userHttp === undefined ? undefined : await httpUserRepository(userHttp);
 	const added: AddedStores = {
 		deviceCode: options.deviceCodeStore ?? stores,
