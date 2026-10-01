@@ -215,7 +215,7 @@ describe("lodging a first-time intent", () => {
 		).toEqual({ ok: false, reason: "redirect_uri_not_registered" });
 	});
 
-	it("takes the redirect URI only by exact membership, and never one that would carry two answers", async () => {
+	it("takes the redirect URI only by exact membership, and refuses one that already carries grant_id", async () => {
 		for (const redirectUri of [
 			"https://client.test/connected/",
 			"https://client.test/connected?x=1",

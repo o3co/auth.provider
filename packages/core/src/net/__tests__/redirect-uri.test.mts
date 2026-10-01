@@ -31,6 +31,7 @@ import {
 	checkRedirectUri,
 	describeRedirectUriRejection,
 	matchesRegisteredRedirectUri,
+	redirectUriQueryCarries,
 } from "#/net/redirect-uri.mjs";
 
 const reason = (raw: string) => checkRedirectUri(raw)?.reason;
@@ -246,10 +247,15 @@ describe("checkRedirectUri — query names", () => {
 		}
 	});
 
-	it("reports a shape problem before reading the query", () => {
-		expect(reason("https://app.example/cb?iss=x#f")).toBe("fragment");
-		expect(reason("https://app.example/cb?a=1#")).toBe("fragment");
-		expect(reason("https://app.example/cb?a[]=1#")).toBe("fragment");
+	it("reports a fragment before reading the query, on every base", () => {
+		for (const base of BASES) {
+			for (const query of ["iss=x#f", "a=1#", "a[]=1#", "x=1;y#z"]) {
+				expect(reason(`${base}?${query}`), `${base}?${query}`).toBe("fragment");
+			}
+		}
+	});
+
+	it("reports another shape problem before reading the query", () => {
 		expect(reason("http://evil.example/cb?iss=x")).toBe("http-non-loopback");
 		expect(reason("https://u@app.example/cb?state=x")).toBe("userinfo");
 		expect(reason("myapp://cb?code=x")).toBe("scheme-not-reverse-domain");
@@ -268,6 +274,42 @@ describe("checkRedirectUri — query names", () => {
 		for (const rejection of [reserved, invalid]) {
 			expect(rejection && describeRedirectUriRejection(rejection)).not.toMatch(/#\d/);
 		}
+	});
+});
+
+describe("redirectUriQueryCarries", () => {
+	const NAMES = ["grant_id", "state"];
+
+	it("finds a caller's name under any case and separators, answering the name as given", () => {
+		for (const query of ["grant_id=x", "GRANT_ID=x", "grantId", "_grant-id_=x", "a=1&GrantId=2"]) {
+			expect(redirectUriQueryCarries(`https://app.example/cb?${query}`, NAMES), query).toBe(
+				"grant_id",
+			);
+		}
+		expect(redirectUriQueryCarries("com.example.app:cb?STATE=x", NAMES)).toBe("state");
+		// The first match in query order.
+		expect(redirectUriQueryCarries("https://app.example/cb?state=1&grant_id=2", NAMES)).toBe(
+			"state",
+		);
+	});
+
+	it("answers undefined for different letters, a value, no query and an unparsable URI", () => {
+		for (const uri of [
+			"https://app.example/cb?grant_ids=x",
+			"https://app.example/cb?grantid1=x",
+			"https://app.example/cb?a=grant_id",
+			"https://app.example/cb?",
+			"https://app.example/cb",
+			"not a url",
+		]) {
+			expect(redirectUriQueryCarries(uri, NAMES), uri).toBeUndefined();
+		}
+	});
+
+	it("matches only allowlisted names, leaving the rest to checkRedirectUri", () => {
+		const uri = "https://app.example/cb?grant_id[]=x";
+		expect(redirectUriQueryCarries(uri, NAMES)).toBeUndefined();
+		expect(reason(uri)).toBe("query-name-invalid");
 	});
 });
 
