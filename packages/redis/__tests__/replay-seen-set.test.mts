@@ -5,8 +5,8 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll } from "vitest";
-import type { ReplaySeenSetClient } from "../src/clients.mjs";
-import { createRedisReplaySeenSet } from "../src/replay-seen-set.mjs";
+import type { ReplaySeenSetClient } from "#/clients.mjs";
+import { createRedisReplaySeenSet } from "#/replay-seen-set.mjs";
 import { runReplaySeenSetContract } from "./adapters.replay-seen-set.contract.mjs";
 import { keysExpire, testRedis } from "./support/redis.mjs";
 

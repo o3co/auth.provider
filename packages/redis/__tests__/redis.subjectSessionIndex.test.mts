@@ -23,8 +23,8 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisSubjectSessionIndex } from "../src/subjectSessionIndex.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisSubjectSessionIndex } from "#/subjectSessionIndex.mjs";
 import { runSubjectSessionIndexContract } from "./subjectSessionIndex.contract.mjs";
 import { aheadOfServer, serverPasses, testRedis } from "./support/redis.mjs";
 

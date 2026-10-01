@@ -19,11 +19,11 @@ import type {
 	DisposableRefreshTokenFamilyClient,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
-} from "../src/clients.mjs";
+} from "#/clients.mjs";
 import {
 	createRedisRefreshTokenFamilyStore,
 	redisRefreshTokenFamilyStoreBuilder,
-} from "../src/refresh-token-family.mjs";
+} from "#/refresh-token-family.mjs";
 
 // Lightweight in-memory mock — only `get` / `pttl` are exercised by the
 // `findFamily` corrupt-data tests below. The other methods are stubs that

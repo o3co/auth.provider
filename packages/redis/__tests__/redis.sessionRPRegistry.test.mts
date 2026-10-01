@@ -16,8 +16,8 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisSessionRPRegistry } from "../src/sessionRPRegistry.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisSessionRPRegistry } from "#/sessionRPRegistry.mjs";
 import { runSessionRPRegistryContract } from "./sessionRPRegistry.contract.mjs";
 import { serverDeadlines, testRedis } from "./support/redis.mjs";
 

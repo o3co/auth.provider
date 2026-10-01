@@ -23,8 +23,8 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisRefreshTokenFamilyStore } from "../src/refresh-token-family.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisRefreshTokenFamilyStore } from "#/refresh-token-family.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let io: Redis;

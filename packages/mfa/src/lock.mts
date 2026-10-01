@@ -22,8 +22,8 @@
  *   checked, and settles it once. Only a factor that says it is not
  *   guessable is exempt: it reserves nothing, passes during every hold, and
  *   records an exempt success when it settles a success, which ends a run
- *   below `hardLimit` and never the hard hold (the store's rule, handed the
- *   policy). Each is judged at
+ *   before the hard hold is fixed and never the hard hold (the store's rule,
+ *   handed the policy). Each is judged at
  *   the time its verification passes, so one verification has one time.
  * - A refusal names its hold, when an attempt may come back (none for the
  *   hard hold), and whether it begins an episode.

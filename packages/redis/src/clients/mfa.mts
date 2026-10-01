@@ -152,9 +152,9 @@ export type ReserveMfaSubjectAttemptReply =
 	  };
 
 export interface NoteMfaExemptSuccessInput {
-	/** The time of the exempt success: the attempts up to it are counted, and end below the hard limit. */
+	/** The time of the exempt success: before the hard hold is fixed, the attempts up to it end. */
 	readonly nowMs: number;
-	/** The lockout policy; a run at or past its `hardLimit` up to `nowMs` stands. */
+	/** The lockout policy; a run already at or past its `hardLimit` fixes the hard hold instead. */
 	readonly policy: MfaLockoutPolicy;
 }
 

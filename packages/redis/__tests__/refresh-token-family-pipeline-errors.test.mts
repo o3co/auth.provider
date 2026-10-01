@@ -30,8 +30,8 @@
 import type { RefreshTokenFamily } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import { describe, expect, it, vi } from "vitest";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisRefreshTokenFamilyStore } from "../src/refresh-token-family.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisRefreshTokenFamilyStore } from "#/refresh-token-family.mjs";
 
 const FAMILY: RefreshTokenFamily = Object.freeze({
 	familyId: "fam-1",

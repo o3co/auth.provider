@@ -166,6 +166,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+authTimeClaim\b/,
 	},
 	{
+		concept:
+			"a recorded authentication instant as auth_time, never later than the clock reading it (the MFA ADR's D18)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+authTimeAt\b/,
+	},
+	{
 		concept: "the amr a federated login records — fed (#481, the MFA ADR's D13)",
 		home: "packages/core/src/grants/authenticationClaims.mts",
 		definition: /(?:function|const)\s+FEDERATED_AMR\b/,

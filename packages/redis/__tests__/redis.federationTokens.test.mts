@@ -22,12 +22,9 @@
 import type { FederationTokens } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createRedisFederationTokenStore, type EncryptionConfig } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
-import {
-	createRedisFederationTokenStore,
-	type EncryptionConfig,
-} from "../src/federation-tokens.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let raw: Redis;

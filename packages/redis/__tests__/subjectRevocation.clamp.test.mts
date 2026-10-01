@@ -16,8 +16,8 @@
 
 /**
  * The Redis `SubjectRevocation` adapter around its client, with a recording
- * client: what it hands the server's clamp, how it says a clamp, and what it
- * does over a client that cannot clamp. The clamp itself runs against a real
+ * client: what it hands the server's clamp, how it says a clamp, and that it
+ * refuses a client that cannot clamp. The clamp itself runs against a real
  * Redis in `redis.subjectRevocation.test.mts`.
  */
 
@@ -45,10 +45,6 @@ type Event = { readonly kind: string; readonly args: readonly unknown[] };
 function recordingClient(events: Event[]): SubjectRevocationClient {
 	return {
 		get: async () => null,
-		setRevocationBoundaries: async (...args) => {
-			events.push({ kind: "setRevocationBoundaries", args });
-			return "stored";
-		},
 		advanceRevocationBoundaries: async (...args) => {
 			events.push({ kind: "advanceRevocationBoundaries", args });
 			return { value: "stored", serverNowMs: NOW };
@@ -175,54 +171,17 @@ describe("createRedisSubjectRevocation — the clamp on the server's clock", () 
 });
 
 describe("createRedisSubjectRevocation — a client that cannot clamp", () => {
-	const unclamping = (events: Event[]): SubjectRevocationClient => {
-		const { advanceRevocationBoundaries: _absent, ...rest } = recordingClient(events);
-		return rest;
-	};
-
-	it("writes through setRevocationBoundaries as given, and says once, at construction, that it cannot clamp", async () => {
+	it("is refused at construction, naming the method it lacks, with nothing said or sent", () => {
 		const events: Event[] = [];
-		const store = createRedisSubjectRevocation({
-			client: unclamping(events),
-			keyPrefix: "p:",
-			logger: recordingLogger(events),
-		});
-		expect(events).toEqual([
-			{ kind: "warn", args: [{ store: "redis" }, "subject_revocation_clamp_unsupported"] },
-		]);
-		events.length = 0;
-		await store.revokeBefore("u", AHEAD, UNTIL);
-		await store.revokeSessionsBefore("u", AHEAD, UNTIL);
-		expect(events).toEqual([
-			{
-				kind: "setRevocationBoundaries",
-				args: ["p:u", "all", AHEAD.getTime(), UNTIL.getTime(), SUBJECT_REVOCATION_MIN_RETENTION_MS],
-			},
-			{
-				kind: "setRevocationBoundaries",
-				args: [
-					"p:u",
-					"sessions",
-					AHEAD.getTime(),
-					UNTIL.getTime(),
-					SUBJECT_REVOCATION_MIN_RETENTION_MS,
-				],
-			},
-		]);
-	});
-
-	it("is constructed even when the logger throws", () => {
-		expect(() =>
+		const { advanceRevocationBoundaries: _absent, ...unclamping } = recordingClient(events);
+		const construct = () =>
 			createRedisSubjectRevocation({
-				client: unclamping([]),
+				client: unclamping as never,
 				keyPrefix: "p:",
-				logger: {
-					warn: () => {
-						throw new Error("log sink down");
-					},
-				},
-			}),
-		).not.toThrow();
+				logger: recordingLogger(events),
+			});
+		expect(construct).toThrow(/advanceRevocationBoundaries/);
+		expect(events).toEqual([]);
 	});
 });
 
@@ -231,16 +190,11 @@ describe("the clamp's logger, as the module and the builder hand it", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("is core's consoleLogger when none is given, for the clamp and for a client that cannot clamp", async () => {
+	it("is core's consoleLogger when none is given", async () => {
 		const warn = vi.spyOn(consoleLogger, "warn").mockImplementation(() => undefined);
 		const store = createRedisSubjectRevocation({ client: recordingClient([]), keyPrefix: "p:" });
 		await store.revokeBefore("u", AHEAD, UNTIL);
-		const { advanceRevocationBoundaries: _absent, ...unclamping } = recordingClient([]);
-		createRedisSubjectRevocation({ client: unclamping, keyPrefix: "p:" });
-		expect(warn.mock.calls.map((call) => call[1])).toEqual([
-			"subject_revocation_boundary_clamped",
-			"subject_revocation_clamp_unsupported",
-		]);
+		expect(warn.mock.calls.map((call) => call[1])).toEqual(["subject_revocation_boundary_clamped"]);
 	});
 
 	it("is the composition's logger in redisSessionStoresModule", async () => {

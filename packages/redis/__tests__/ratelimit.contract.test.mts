@@ -12,7 +12,7 @@
 
 import { rateLimiterContract } from "@o3co/auth-provider-core/testing";
 import { describe, it } from "vitest";
-import { createRedisRateLimiter } from "../src/ratelimit.mjs";
+import { createRedisRateLimiter } from "#/ratelimit.mjs";
 
 /** A Redis stand-in counting per key, as the script does within one window. */
 const answering = () => {

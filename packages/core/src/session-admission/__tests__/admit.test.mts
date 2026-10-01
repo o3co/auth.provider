@@ -1721,7 +1721,14 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 		);
 		expect(
 			await admitSession(
-				deps({ userSessionStore: holding(record), acrTable: both, requirements }),
+				deps({
+					// A store that records a step-up: the authority's trip is offered.
+					userSessionStore: Object.assign(holding(record), {
+						recordSecondFactor: async () => null,
+					}),
+					acrTable: both,
+					requirements,
+				}),
 				request({
 					claim: tokenClaim({ sid: "sid-1", sub: "user-1", amr: ["pwd", "kba"] }),
 					asks: { acrValues: ["urn:example:both"] },
