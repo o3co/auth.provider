@@ -32,7 +32,7 @@
  *   `required`, refused `409` when no other record of an installed counting
  *   kind stands. Audited `mfa.factor.removed`; once the records read again
  *   after it — or, unreadable, those read before less the one removed —
- *   hold none that may count (`mayCount`), the witness is cleared (D12), and
+ *   hold none that may count (`mayCount`), the enrollment witness is cleared, and
  *   a clear that fails is said at warn, the removal standing.
  * - A factor named that is not the subject's is `400`; a store that cannot
  *   answer, or answers outside its port's contract, is `503`, logged once.
@@ -272,7 +272,9 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 			let remaining: readonly MfaFactorRecord[] = others;
 			try {
 				const again: unknown = await factorStore.list(session.subject);
-				if (Array.isArray(again)) remaining = again as MfaFactorRecord[];
+				if (Array.isArray(again)) {
+					remaining = (again as MfaFactorRecord[]).filter((other) => other.id !== record.id);
+				}
 			} catch {
 				// The records read before, less the one removed, decide.
 			}

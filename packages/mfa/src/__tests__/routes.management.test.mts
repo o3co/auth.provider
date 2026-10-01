@@ -16,7 +16,7 @@
 
 /**
  * The account page's management of a subject's second factors under
- * `/session/mfa/factors` (the MFA ADR's F4): the list, admitted as
+ * `/session/mfa/factors`: the list, admitted as
  * `mfa.view`, each record with its state and never its data; a rename and a
  * removal, admitted as `mfa.manage`. A removal under `required` keeps a
  * record of an installed counting kind (`409 mfa_last_factor`), and one that

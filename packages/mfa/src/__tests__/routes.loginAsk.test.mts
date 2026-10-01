@@ -20,7 +20,7 @@
  * holds no code (`factorState.mts`). A TOTP factor whose key left the ring
  * still asks under `optional`, and its verification is the outage it was;
  * a subject holding only an exhausted set is sent under `required` to its
- * first binding, through the one gate (D24).
+ * first binding, through the one first-binding gate.
  */
 
 import { createMemoryMfaFactorStore } from "@o3co/auth-provider-core";
