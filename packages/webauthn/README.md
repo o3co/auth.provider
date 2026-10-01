@@ -1,6 +1,6 @@
 # @o3co/auth-provider-webauthn
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`. The package also contributes WebAuthn as a second factor to the MFA package — [WebAuthn as a second factor](#webauthn-as-a-second-factor).
 
@@ -283,6 +283,8 @@ The defaults are in [`config/reference.conf`](config/reference.conf); a composit
 **What it keeps.** Each factor's data is `{credentialId, publicKey, signCount, transports, backupEligible, backedUp, userHandle}`, which the MFA package seals before it reaches the factor store. `backupEligible` (BE) is fixed at registration and decides the `amr`; `backedUp` (BS) is the backup state the credential last reported, kept for the record and read by no decision. The factor writes its credentials to the MFA factor store only, and none to the grant's `WebAuthnCredentialStore`. Another account can register one there, though, by its id and public key, and the two ceremonies share the relying party's id (below).
 
 **Registration**, which the MFA package's enrollment drives (not yet built there): the options ask for a credential under the subject's WebAuthn user handle — 32 random bytes made at its first WebAuthn enrollment and kept in each such factor's data, never an account name — named for the authenticator by the account's username, never its address (the provider keeps none, and a page shows none), exclude every WebAuthn credential the subject holds, ask for no attestation, offer `WEBAUTHN_ALGORITHM_IDS`, ask for the section's user verification and a resident key `discouraged`. The proof is the `RegistrationResponseJSON`; its attestation is verified, its top origin is held to `webauthn.topOrigin` as an assertion's is ([Being framed](#being-framed-toporigin)), and a credential id the subject already holds is refused as a duplicate. A credential is only ever looked up among its own subject's factors, so one id held by two subjects is not refused.
+
+**Identity.** The factor's `identity` ([`MfaFactor`](../core/src/mfa/factor.mts)) is the credential id a record holds, read as the record's data is: two of a subject's WebAuthn records with one identity hold one credential enrolled twice. A verification leaves it as it was; a new sign count or backup state does not change it. Data the factor cannot read — any field above not as the factor writes it — has no identity, and is judged a duplicate of none; the identity never throws.
 
 **`residentKey: "discouraged"` is advisory.** A synced platform passkey is discoverable whatever is asked. It may then appear in the browser's passkey picker for this relying party and be chosen for the passwordless grant. The grant finds a record for it only if its own store holds that credential id, and a `none` attestation — made from the credential's id and public key alone — can register it there as another account's passkey. The authenticator answers with the subject's second-factor user handle, not that account's, so the grant refuses it ([SECURITY — an assertion's user handle](#security--an-assertions-user-handle)); the credential still works as the second factor.
 

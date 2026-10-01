@@ -48,6 +48,8 @@
  *   attestation `none` both flags are what the authenticator reports of
  *   itself: `hwk` means reported device-bound, not proven hardware. The
  *   backup state is kept for the record; no decision reads it.
+ * - A record's identity is its credential id, read as the record's data is.
+ *   Data the factor cannot read has none: the identity never throws.
  * - A ceremony's challenge lives until the relying party's
  *   `challengeTtlMs`; the transaction bounds it too.
  * - Data or a pending state that is not a WebAuthn record is thrown (the
@@ -324,6 +326,15 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 		counting: true,
 		guessable: false,
 		describe: () => ({}),
+		// The credential id, which an assertion leaves as it is. Never throws: data the factor
+		// cannot read names none.
+		identity: (data) => {
+			try {
+				return readData(data).credentialId;
+			} catch {
+				return undefined;
+			}
+		},
 
 		async challenge(ctx) {
 			readData(ctx.factor.data);
