@@ -28,7 +28,6 @@ import {
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
-	defineModule,
 	EMAIL_OTP_AMR,
 	InMemoryUserRepository,
 	MFA_AMR,
@@ -43,7 +42,6 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createRecordingMailSender } from "@o3co/auth-provider-core/testing";
-import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
@@ -62,6 +60,7 @@ import {
 import {
 	type Agent,
 	completeEnrollment,
+	cookieSessionTap,
 	enrollFromAccount,
 	freezeClock,
 	loggedText,
@@ -371,8 +370,7 @@ describe("a recovery code at a step-up", () => {
 	}
 
 	it("is accepted under required beside no counting factor that can be used: it adds recovery and mfa, opens no binding, and answers the codes left", async () => {
-		const { agent, sid, codes, transactionStore, userSessionStore, audit } =
-			await withCodesOnly();
+		const { agent, sid, codes, transactionStore, userSessionStore, audit } = await withCodesOnly();
 		expect((await enrollFromAccount(agent, "totp")).body.error).toBe("step_up_required");
 		const transaction = await openedStepUp(agent);
 		const create = vi.spyOn(transactionStore, "create");
@@ -501,7 +499,10 @@ describe("what a step_up transaction refuses", () => {
 			expect(res.status, path).toBe(400);
 			expect(res.body, path).toEqual(UNKNOWN_FACTOR);
 		}
-		const begun = await mfaPost(agent, "/enrollment", { transaction_id: transaction, kind: "totp" });
+		const begun = await mfaPost(agent, "/enrollment", {
+			transaction_id: transaction,
+			kind: "totp",
+		});
 		expect(begun.status).toBe(400);
 		expect(begun.body).toEqual(NOT_OPEN);
 		const completed = await completeEnrollment(agent, transaction, "123456");
@@ -613,52 +614,6 @@ describe("what a step-up logs", () => {
 	});
 });
 
-/** express-session's store, as far as these tests make it fail. */
-interface CookieSessionStore {
-	destroy(sid: string, done: (err?: unknown) => void): void;
-	set(sid: string, session: unknown, done: (err?: unknown) => void): void;
-}
-
-/**
- * A module mounted behind the session middleware that hands the tests the
- * cookie sessions' store, tells whether a cookie session is signed in, and
- * holds a request on a cookie session until released, then saves it back as
- * it was loaded.
- */
-function cookieSessionTap() {
-	const tapped: { store?: CookieSessionStore } = {};
-	let release: () => void = () => {};
-	let reached: () => void = () => {};
-	const held = { reached: new Promise<void>((resolve) => (reached = resolve)) };
-	const gate = new Promise<void>((resolve) => (release = resolve));
-	const router = express.Router();
-	router.get("/", (req, res) => {
-		tapped.store = (req as unknown as { sessionStore: CookieSessionStore }).sessionStore;
-		const session = (req as unknown as { session?: { isAuthenticated?: unknown } }).session;
-		res.json({ authenticated: session?.isAuthenticated === true });
-	});
-	router.get("/hold", async (req, res) => {
-		reached();
-		await gate;
-		const session = (req as unknown as { session: { save(done: () => void): void } }).session;
-		session.save(() => res.status(204).end());
-	});
-	const module = defineModule({
-		name: "test:cookie-session-tap",
-		contributes: {
-			routes: [
-				() => ({
-					id: "test-cookie-session-tap",
-					mountPath: "/test-tap",
-					after: ["session-middleware"],
-					handler: router,
-				}),
-			],
-		},
-	});
-	return { module, tapped, held, release: () => release() };
-}
-
 /** Whether the cookie session `cookie` names is signed in as express-session holds it, whatever admission makes of it. */
 const signedInAs = async (app: Parameters<typeof login>[0], cookie: string): Promise<boolean> =>
 	(await request(app).get("/test-tap").set("Cookie", cookie)).body.authenticated === true;
@@ -687,8 +642,7 @@ describe("the step-up's finish", () => {
 			transaction,
 			record,
 			recordUnwatched,
-			verified: () =>
-				verify(session.agent, transaction, totp.record.id, totpCode(totp.secret)),
+			verified: () => verify(session.agent, transaction, totp.record.id, totpCode(totp.secret)),
 		};
 	}
 
@@ -715,7 +669,12 @@ describe("the step-up's finish", () => {
 		expect(record).not.toHaveBeenCalled();
 		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR]);
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ route: "verify", sid, store: "cookie_session", step: "regenerate" }),
+			expect.objectContaining({
+				route: "verify",
+				sid,
+				store: "cookie_session",
+				step: "regenerate",
+			}),
 			"mfa_store_unavailable",
 		);
 		expect(await admitted(app, cookie)).toBe(true);
@@ -907,7 +866,10 @@ describe("the step-up's finish", () => {
 
 	it("refuses the old cookie session even when a request held on it saves it back after the step-up", async () => {
 		const { app, cookie, tap, verified } = await opened();
-		const held = request(app).get("/test-tap/hold").set("Cookie", cookie).then((res) => res);
+		const held = request(app)
+			.get("/test-tap/hold")
+			.set("Cookie", cookie)
+			.then((res) => res);
 		await tap.held.reached;
 
 		expect((await verified()).status).toBe(200);

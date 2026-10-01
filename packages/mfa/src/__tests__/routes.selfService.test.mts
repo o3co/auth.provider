@@ -24,16 +24,22 @@
  * recent MFA and binds by `mfa`; a first binding needs a recent sign-in and
  * the one gate — the account-email proof given in that session, where the
  * gate asks for it — and binds by `password` or `email_proof`, with its
- * recovery codes. The session is left as it was.
+ * recovery codes. A binding escalates the session it was made in: its
+ * express id renewed, then the factor's `amr` and `mfaAt` recorded on it;
+ * the factor and its codes are answered whether or not that lands.
  */
 
 import {
 	createInMemorySubjectRevocation,
+	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	MFA_AMR,
 	type MfaFactor,
 	type MfaFactorRecord,
 	type Module,
+	OTP_AMR,
+	PASSWORD_AMR,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -50,6 +56,8 @@ import {
 	configFor,
 	directoryEntries,
 	disposeAll,
+	events,
+	sessionIdSet,
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
 import { stubFactor } from "./requirementHarness.mjs";
@@ -57,6 +65,7 @@ import {
 	beginLogin,
 	completeEnrollment,
 	contributing,
+	cookieSessionTap,
 	csrfOf,
 	enrollFromAccount,
 	freezeClock,
@@ -125,6 +134,7 @@ interface Setup {
 	readonly maxFactorsPerSubject?: number;
 	readonly subjectRevocation?: ReturnType<typeof createInMemorySubjectRevocation>;
 	readonly extraModules?: readonly Module[];
+	readonly userSessionStore?: UserSessionStore;
 }
 
 /** Boots `mode` (optional by default) with no mail sender unless one is given, and alice's address as `address` says. */
@@ -150,6 +160,7 @@ async function composed(setup: Setup = {}) {
 			? {}
 			: { subjectRevocation: setup.subjectRevocation }),
 		...(setup.extraModules === undefined ? {} : { extraModules: setup.extraModules }),
+		...(setup.userSessionStore === undefined ? {} : { userSessionStore: setup.userSessionStore }),
 	});
 	return {
 		...booted,
@@ -177,7 +188,7 @@ const recordsOf = async (store: { list(subject: string): Promise<readonly MfaFac
 	Object.fromEntries((await store.list(ALICE.id)).map((record) => [record.kind, record]));
 
 describe("a first factor from the account page, where no proof is asked", () => {
-	it("binds TOTP on a recent sign-in: the transaction opened in the session, the factor bound by password with its recovery codes, the witness marked, the session as it was", async () => {
+	it("binds TOTP on a recent sign-in: the transaction opened in the session, the factor bound by password with its recovery codes, the witness marked, the session escalated by it", async () => {
 		const { app, factorStore, transactionStore, userSessionStore, audit, users } = await composed();
 		const { agent, sid } = await signIn(app, userSessionStore);
 		const before = await userSessionStore.get(sid);
@@ -229,7 +240,13 @@ describe("a first factor from the account page, where no proof is asked", () => 
 		expect(records.recovery_code).toMatchObject({ binding: "password" });
 		expect(users.marks).toEqual([{ subject: ALICE.id, enrolled: true }]);
 		expect(await transactionStore.get(transaction)).toBeNull();
-		expect(await userSessionStore.get(sid)).toEqual(before);
+		expect(sessionIdSet(done)).toBeDefined();
+		expect(await userSessionStore.get(sid)).toEqual({
+			...before,
+			amr: [PASSWORD_AMR, OTP_AMR, MFA_AMR],
+			authentication: { ...before?.authentication, mfaAt: new Date(T0) },
+			renewalNonce: expect.any(String),
+		});
 		expect(audit.of("mfa.factor.enrolled")).toEqual([
 			expect.objectContaining({
 				subject: ALICE.id,
@@ -772,12 +789,13 @@ describe("another factor from the account page, for a subject holding a counting
 		expect(create).not.toHaveBeenCalled();
 	});
 
-	it("binds by mfa with a second factor verified in the session: no recovery codes, no witness mark, the session as it was", async () => {
+	it("binds by mfa with a second factor verified in the session: no recovery codes, no witness mark, the session's mfaAt moved to the binding", async () => {
 		const { app, factorStore, transactionStore, userSessionStore, audit, users } = await composed();
 		const seeded = await seedTotp(factorStore);
 		const { agent, sid } = await signInWithTotp(app, userSessionStore, seeded);
 		const before = await userSessionStore.get(sid);
 		const marked = users.marks.length;
+		freezeClock(T0 + 60_000);
 
 		const begun = await enrollFromAccount(agent, "totp");
 		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
@@ -808,7 +826,12 @@ describe("another factor from the account page, for a subject holding a counting
 		expect(totps.map((record) => record.binding).sort()).toEqual(["mfa", "password"]);
 		expect((await factorStore.list(ALICE.id)).some((r) => r.kind === "recovery_code")).toBe(false);
 		expect(users.marks).toHaveLength(marked);
-		expect(await userSessionStore.get(sid)).toEqual(before);
+		expect(sessionIdSet(done)).toBeDefined();
+		expect(await userSessionStore.get(sid)).toEqual({
+			...before,
+			authentication: { ...before?.authentication, mfaAt: new Date(T0 + 60_000) },
+			renewalNonce: expect.any(String),
+		});
 		expect(audit.of("mfa.factor.enrolled")).toEqual([
 			expect.objectContaining({
 				details: { kind: "totp", purpose: "enroll", binding: "mfa", by: "user" },
@@ -1000,5 +1023,90 @@ describe("a factor's own failure", () => {
 		);
 		expect(line?.[0]).toMatchObject({ kind: "acme", err: { name: "Error", code: "E_ACME" } });
 		expect(loggedText(booted.logger)).not.toContain(ALICE.email);
+	});
+});
+
+describe("a first binding's escalation of its session, when it does not land", () => {
+	/** A first TOTP binding begun on a recent sign-in, with the cookie-session tap mounted. */
+	async function begunBinding(setup: Setup = {}) {
+		const tap = cookieSessionTap();
+		const booted = await composed({ ...setup, extraModules: [tap.module] });
+		const { agent, sid } = await signIn(booted.app, booted.userSessionStore);
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		await request(booted.app).get("/test-tap");
+		const before = await booted.userSessionStore.get(sid);
+		return {
+			...booted,
+			agent,
+			sid,
+			tap,
+			before,
+			completed: () =>
+				completeEnrollment(agent, begun.body.transaction as string, totpProofOf(begun.body.secret)),
+		};
+	}
+
+	/** What a first TOTP binding answers: the factor, and its codes. */
+	const BOUND = {
+		factor: { id: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/), kind: "totp" },
+		recovery_codes: expect.any(Array),
+	};
+
+	it("still answers 200 with the factor and its codes when the renewed cookie session cannot be saved — said once — and the browser is then signed out", async () => {
+		const { agent, sid, tap, before, userSessionStore, logger, completed } = await begunBinding();
+		const store = tap.tapped.store;
+		if (store === undefined) throw new Error("the tap saw no store");
+		vi.spyOn(store, "set").mockImplementationOnce((_sid, _session, done) =>
+			done(new Error("cookie store down")),
+		);
+
+		const done = await completed();
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body).toEqual(BOUND);
+		expect(done.body.recovery_codes).toHaveLength(10);
+		expect(await userSessionStore.get(sid)).toEqual(before);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "enrollment", store: "cookie_session", step: "save" }),
+			"mfa_store_unavailable",
+		);
+		expect((await stepUp(agent)).status).toBe(401);
+	});
+
+	it("still answers 200 with the factor and its codes when the session store cannot record, said once", async () => {
+		const { sid, before, userSessionStore, logger, completed } = await begunBinding();
+		const record = vi
+			.spyOn(
+				userSessionStore as ReturnType<typeof createInMemoryUserSessionStore>,
+				"recordSecondFactor",
+			)
+			.mockRejectedValueOnce(new Error("session store down"));
+
+		const done = await completed();
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body).toEqual(BOUND);
+		expect(record).toHaveBeenCalledTimes(1);
+		expect(await userSessionStore.get(sid)).toEqual(before);
+		expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ store: "user_session", step: "recordSecondFactor" }),
+			"mfa_store_unavailable",
+		);
+	});
+
+	it("leaves the session as it was, its express id kept, when the session store cannot record a second factor", async () => {
+		const { recordSecondFactor: _record, ...legacy } = createInMemoryUserSessionStore();
+		const { sid, before, userSessionStore, completed } = await begunBinding({
+			userSessionStore: { ...legacy, kind: "legacy-sessions" },
+		});
+
+		const done = await completed();
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body).toEqual(BOUND);
+		expect(sessionIdSet(done)).toBeUndefined();
+		expect(await userSessionStore.get(sid)).toEqual(before);
 	});
 });
