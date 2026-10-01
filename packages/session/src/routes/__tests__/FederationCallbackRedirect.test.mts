@@ -129,6 +129,23 @@ describe("redirectAfterCallback", () => {
 		expect(res.headers.location).toBeUndefined();
 	});
 
+	it("relays a policy's server fault and logs it once at error level", async () => {
+		const logger = spyLogger();
+		const policies = new Map([
+			["test", refusing(503, "temporarily_unavailable", "policy store down")],
+		]);
+
+		const res = await request(appFor(policies, "/dash", logger)).get("/callback");
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "policy store down",
+		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error.mock.calls[0]?.[1]).toBe("redirect_policy_server_fault");
+	});
+
 	it("answers a client-error refusal with a malformed code as invalid_request, never server_error", async () => {
 		const logger = spyLogger();
 		const policies = new Map([["test", refusing(400, 'not "allowed"', "no")]]);

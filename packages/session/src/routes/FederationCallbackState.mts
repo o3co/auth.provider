@@ -34,7 +34,11 @@ import type {
 import { abandonCookieSession, SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
-import { cleanUp, type FederationStoreStep, logStoreUnavailable } from "./FederationLog.mjs";
+import {
+	type FederationStoreStep,
+	logCleanupFailed,
+	logStoreUnavailable,
+} from "./FederationLog.mjs";
 
 /**
  * Read, check and retire the callback's ephemeral state. Answers and
@@ -87,14 +91,13 @@ export const consumeCallbackState = async (
 	 * cookie session is dropped so express-session does not write to that
 	 * store again.
 	 */
-	const discardTransaction = (): Promise<void> =>
-		cleanUp(log, "federation_transaction", "delete", async () => {
-			const discardErr = await consumeTransaction();
-			if (discardErr) {
-				abandonCookieSession(req);
-				throw discardErr;
-			}
-		});
+	const discardTransaction = async (): Promise<void> => {
+		const discardErr = await consumeTransaction();
+		if (discardErr) {
+			logCleanupFailed(log, "federation_transaction", "delete", discardErr);
+			abandonCookieSession(req);
+		}
+	};
 
 	/**
 	 * The cookie session's store (or a transaction in it) could not answer:

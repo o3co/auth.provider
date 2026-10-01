@@ -95,14 +95,17 @@ function spyLogger() {
 
 /**
  * The router over a per-request session and an express-session store backed
- * by `records`, whose `destroy` fails when `failDestroy` is set.
+ * by `records`, whose `destroy` fails when `failDestroy` is set. `trail`
+ * receives `"session_dropped"` when a route drops the request's session.
  */
 function buildApp({
 	failDestroy = false,
 	logger,
+	trail,
 }: {
 	failDestroy?: boolean;
 	logger?: ReturnType<typeof spyLogger>;
+	trail?: string[];
 } = {}) {
 	const records = new Map<string, unknown>();
 	const backing = makeRecordStore(records);
@@ -122,7 +125,7 @@ function buildApp({
 
 	const app = express();
 	app.use((req, _res, next) => {
-		(req as unknown as { session: Record<string, unknown> }).session = {
+		let session: Record<string, unknown> | undefined = {
 			cookie: { sameSite: "lax", secure: false, httpOnly: true },
 			save(cb?: (err: unknown) => void) {
 				cb?.(null);
@@ -134,6 +137,14 @@ function buildApp({
 				cb?.(null);
 			},
 		};
+		Object.defineProperty(req, "session", {
+			configurable: true,
+			get: () => session,
+			set: (value: Record<string, unknown> | undefined) => {
+				if (value === undefined) trail?.push("session_dropped");
+				session = value;
+			},
+		});
 		(req as unknown as { sessionStore: unknown }).sessionStore = sessionStore;
 		next();
 	});
@@ -228,11 +239,19 @@ describe("a callback's parameters are read from an object only", () => {
 });
 
 describe("a refused form_post callback whose transaction cannot be discarded", () => {
-	it("writes one federation_cleanup_failed warn with the store, the step and the error's projection", async () => {
+	it("writes one federation_cleanup_failed warn with the store, the step and the error's projection, then drops the session", async () => {
 		const { app, records } = buildApp();
 		const flow = await startFormPost(app);
 		const logger = spyLogger();
-		const { app: broken, records: brokenRecords } = buildApp({ failDestroy: true, logger });
+		const trail: string[] = [];
+		logger.warn.mockImplementation((_context: unknown, name: string) => {
+			trail.push(name);
+		});
+		const { app: broken, records: brokenRecords } = buildApp({
+			failDestroy: true,
+			logger,
+			trail,
+		});
 		for (const [key, value] of records) brokenRecords.set(key, value);
 
 		const res = await request(broken)
@@ -255,5 +274,26 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 		for (const level of ["trace", "debug", "info", "error", "fatal"] as const) {
 			expect(logger[level]).not.toHaveBeenCalled();
 		}
+		// The cookie session is dropped, after its cause is logged, so
+		// express-session does not write to the failing store again.
+		expect(trail).toEqual(["federation_cleanup_failed", "session_dropped"]);
+	});
+
+	it("keeps the session when the discard succeeds", async () => {
+		const trail: string[] = [];
+		const { app, records } = buildApp({ trail });
+		const flow = await startFormPost(app);
+		expect(records.has(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`)).toBe(true);
+
+		const res = await request(app)
+			.post("/oauth/federation/apple/callback")
+			.set("Cookie", flow.cookie)
+			.type("form")
+			.send({ state: "not-the-state", code: "c" });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_state");
+		expect(records.has(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`)).toBe(false);
+		expect(trail).toEqual([]);
 	});
 });
