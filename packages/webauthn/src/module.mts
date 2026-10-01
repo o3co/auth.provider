@@ -144,7 +144,7 @@ export const webauthnModule = defineModule<
 		"oauthTokenSettings",
 	],
 	// `auditSink` is optional to wire, not to decide: an unfilled slot needs
-	// audit.sink.type = "none" or boot refuses (the policy the oauth and session modules share).
+	// auditSink listed in core.declaredAbsent or boot refuses (the policy the oauth and session modules share).
 	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 	contributes: {
 		// The options route's budget, for every limiter to read; an operator's
@@ -248,7 +248,7 @@ export const webauthnModule = defineModule<
 						throw new BootError({
 							stage: "applyContributions",
 							reason: "replica-unsafe-adapter",
-							message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /oauth/webauthn/authentication/options: the route would fall back to a per-process limiter, so the configured ${spec.limit} / ${spec.windowSeconds}s is really ${spec.limit} × replicas and resets on every deploy. Wire a rateLimiter (rateLimiter.adapter = "redis"), or set core.deployment.mode = "single".`,
+							message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /oauth/webauthn/authentication/options: the route would fall back to a per-process limiter, so the configured ${spec.limit} / ${spec.windowSeconds}s is really ${spec.limit} × replicas and resets on every deploy. Wire a rateLimiter (adapters.rateLimiter = "redis" in the standalone template), or set core.deployment.mode = "single".`,
 							details: { reason: "replica-unsafe-adapter", modules: ["webauthn"] },
 						});
 					}

@@ -30,7 +30,7 @@ import type { AppConfig } from "../../config/application.schema.mjs";
 import type { Logger } from "../../logging/Logger.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import type { Module } from "../../modules/manifest/module-spec.mjs";
-import { makeValidAppConfig, makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -134,9 +134,9 @@ describe("one composed parse over the transitional base", () => {
 	});
 
 	it("refuses a value a mirrored section's schema refuses, naming the operator's path", async () => {
-		const err = await bootRefused([], resolved({ rateLimiter: { adapter: "several" } }));
+		const err = await bootRefused([], resolved({ webauthn: { attestationPreference: "several" } }));
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/rateLimiter\.adapter: /);
+		expect(err.message).toMatch(/webauthn\.attestationPreference: /);
 	});
 
 	it.each([
@@ -174,17 +174,18 @@ describe("one composed parse over the transitional base", () => {
 	it("refuses a configuration a read of which throws, rather than letting the error escape", async () => {
 		// A hand-built configuration with a getter that throws: core's own parse
 		// reads it.
-		const http = {
-			trustProxy: false,
-			readinessTimeoutMs: 1000,
-			get port(): number {
-				throw new Error("the port getter broke");
+		const nonce = {
+			get maxLength(): number {
+				throw new Error("the length getter broke");
 			},
 		};
-		const err = await bootRefused([], resolved({ http }));
+		const err = await bootRefused(
+			[],
+			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce } }),
+		);
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toMatch(/core's configuration schema threw instead of answering/);
-		expect(err.message).toMatch(/the port getter broke/);
+		expect(err.message).toMatch(/the length getter broke/);
 	});
 
 	it("names the configuration itself when it is not an object, when core declares no renamed variable", () => {
@@ -211,31 +212,35 @@ describe("one composed parse over the transitional base", () => {
 	it("names every refused path in the message", async () => {
 		const err = await bootRefused(
 			[],
-			resolved({ http: { port: "not-a-port", trustProxy: false, readinessTimeoutMs: 0 } }),
+			resolved({
+				webauthn: {
+					rateLimit: { authenticationOptions: { limit: "not-a-limit", windowSeconds: 0 } },
+				},
+			}),
 		);
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/http\.port: /);
-		expect(err.message).toMatch(/http\.readinessTimeoutMs: /);
+		expect(err.message).toMatch(/webauthn\.rateLimit\.authenticationOptions\.limit: /);
+		expect(err.message).toMatch(/webauthn\.rateLimit\.authenticationOptions\.windowSeconds: /);
 	});
 
 	it("keeps a key no schema declares under a section core declares", async () => {
 		const config = await bootAndRead(
 			[],
-			resolved({ http: { ...makeValidCoreConfig().http, extra: "kept" } }),
+			resolved({ oauth: { ...makeValidCoreConfig().oauth, extra: "kept" } }),
 		);
-		expect((config.http as Record<string, unknown>).extra).toBe("kept");
+		expect((config.oauth as Record<string, unknown>).extra).toBe("kept");
 	});
 
 	it("hands a module's configSchema the base's output: an environment string arrives coerced", async () => {
 		const strict = defineModule({
 			name: "strict-reader",
-			configSchema: z.object({ http: z.object({ port: z.number() }) }),
+			configSchema: z.object({ oauth: z.object({ nonce: z.object({ maxLength: z.number() }) }) }),
 		});
 		const config = await bootAndRead(
 			[strict],
-			resolved({ http: { port: "3000", trustProxy: false, readinessTimeoutMs: 1000 } }),
+			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } } }),
 		);
-		expect((config.http as Record<string, unknown>).port).toBe(3000);
+		expect((config.oauth as { nonce?: { maxLength?: unknown } }).nonce?.maxLength).toBe(128);
 	});
 
 	it("reports only the base's refusals when the base refuses, not a module's schema reading what the base would have coerced", async () => {
@@ -243,23 +248,23 @@ describe("one composed parse over the transitional base", () => {
 		// environment string the base reads as a number: an error nobody made.
 		const strict = defineModule({
 			name: "strict-reader",
-			configSchema: z.object({ http: z.object({ port: z.number() }) }),
+			configSchema: z.object({ oauth: z.object({ nonce: z.object({ maxLength: z.number() }) }) }),
 		});
 		const err = await bootRefused(
 			[strict],
 			resolved({
-				http: { port: "3000", trustProxy: false, readinessTimeoutMs: 1000 },
-				logging: { level: "loud" },
+				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } },
+				core: { ...makeValidCoreConfig().core, deployment: { mode: "loud" } },
 			}),
 		);
 		expect(err.reason).toBe("config-validation-failed");
-		expect(err.message).toMatch(/logging\.level: /);
-		expect(err.message).not.toMatch(/http\.port/);
+		expect(err.message).toMatch(/core\.deployment\.mode: /);
+		expect(err.message).not.toMatch(/oauth\.nonce\.maxLength/);
 		expect(
 			(err.details as unknown as { issues: { path: PropertyKey[] }[] }).issues.map((issue) =>
 				issue.path.join("."),
 			),
-		).toEqual(["logging.level"]);
+		).toEqual(["core.deployment.mode"]);
 	});
 
 	describe("two modules' configSchemas that make different values of one key", () => {
@@ -379,7 +384,11 @@ describe("a loaded module's section is never stripped", () => {
 		// A section schema that reads one key of a section core mirrors whole:
 		// written back in place of the section, it would take every other key
 		// from every module reading `config`.
-		const repositories = makeValidAppConfig().repositories;
+		const repositories = {
+			client: { type: "yaml" },
+			user: { type: "yaml" },
+			code: { type: "memory" },
+		};
 		const seen: Record<string, unknown> = {};
 		const config = await bootAndRead(
 			[

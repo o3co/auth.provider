@@ -30,15 +30,27 @@ import {
 
 describe("withUserRepositoryHttp", () => {
 	it("sets the user repository's http block and keeps every other key", () => {
-		const base = makeValidAppConfig();
+		const base = {
+			...makeValidAppConfig(),
+			repositories: {
+				client: { yaml: { path: "./clients.yaml" } },
+				user: { yaml: { path: "./users.yaml" } },
+			},
+		};
 		const http = { bearerToken: "t", timeout: 300, maxResponseBytes: 1024 };
 		const built = withUserRepositoryHttp(base, http);
 		expect(built.repositories.user).toEqual({ ...base.repositories.user, http });
 		expect(built.repositories.client).toEqual(base.repositories.client);
-		expect(built.repositories.code).toEqual(base.repositories.code);
 		const { repositories: _built, ...rest } = built;
 		const { repositories: _base, ...baseRest } = base;
 		expect(rest).toEqual(baseRest);
+	});
+
+	it("sets it on a configuration that holds no repositories", () => {
+		const http = { timeout: 300 };
+		expect(withUserRepositoryHttp(makeValidAppConfig(), http).repositories).toEqual({
+			user: { http },
+		});
 	});
 
 	it("leaves the configuration it was handed as it was", () => {

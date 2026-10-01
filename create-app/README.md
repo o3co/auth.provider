@@ -1,6 +1,6 @@
 # @o3co/create-auth-provider
 
-Last updated: 2026-09-29
+Last updated: 2026-10-01
 
 CLI scaffolder for auth.provider. Generates a new server project from one of the built-in templates.
 
@@ -81,8 +81,8 @@ The CLI's closing message suggests `pnpm run debug` next. On the scaffold's
 defaults alone that does not boot: it reads no `.env` file (only the compose
 files do), and needs from the shell's environment an issuer
 (`OAUTH_JWT_ISSUER`), a signing key pair, a session secret, the two URLs of
-your user service (`CLIENT_USER_AUTHENTICATE_URL`,
-`CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL`) and a Redis on `localhost:6379`. The
+your user service (`REPOSITORIES_USER_HTTP_AUTHENTICATE_URL`,
+`REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL`) and a Redis on `localhost:6379`. The
 template's README, which the project carries, gives the commands under
 [Usage](../templates/standalone/README.md#usage).
 

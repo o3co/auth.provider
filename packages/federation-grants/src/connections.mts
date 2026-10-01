@@ -27,6 +27,7 @@
 
 import type { FederationGrantConnection } from "@o3co/auth-provider-core";
 import {
+	federationsOf,
 	identityClaimsProblem,
 	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
 } from "@o3co/auth-provider-core";
@@ -195,7 +196,7 @@ const seconds = (value: unknown, name: string, key: string): number => {
 
 /**
  * Every connection `section` (`federation-grants {}`) configures, joined with
- * the federation it points at in `config.federations`.
+ * the federation it points at in `core.federations`.
  *
  * An empty map is valid and so is an absent one: removing the last connection
  * has to remain an operable change, and a deployment with none still answers
@@ -205,8 +206,7 @@ export function resolveFederationGrantConnections(
 	section: { readonly connections?: Readonly<Record<string, unknown>> } | undefined,
 	config: unknown,
 ): ReadonlyMap<string, FederationGrantConnection> {
-	const federations =
-		(config as { federations?: Record<string, FederationEntry> } | undefined)?.federations ?? {};
+	const federations = federationsOf(config) as Readonly<Record<string, FederationEntry>>;
 	const entries = section?.connections ?? {};
 	const resolved = new Map<string, FederationGrantConnection>();
 
@@ -229,7 +229,7 @@ export function resolveFederationGrantConnections(
 		if (upstream === undefined) {
 			refuse(name, `federation "${federation}" is not configured`);
 		}
-		if (boolean(upstream.enabled, name, `federations.${federation}.enabled`) !== true) {
+		if (boolean(upstream.enabled, name, `core.federations.${federation}.enabled`) !== true) {
 			refuse(name, `federation "${federation}" is configured but disabled`);
 		}
 		// Configured, never discovered: this pair is persisted into the grant's
@@ -238,12 +238,12 @@ export function resolveFederationGrantConnections(
 		if (typeof upstream.issuer !== "string" || upstream.issuer === "") {
 			refuse(
 				name,
-				`federations.${federation}.issuer must be configured — a grant's identity is pinned to it, ` +
+				`core.federations.${federation}.issuer must be configured — a grant's identity is pinned to it, ` +
 					"so it has to be a value an operator can see and change",
 			);
 		}
 		if (typeof upstream.clientId !== "string" || upstream.clientId === "") {
-			refuse(name, `federations.${federation}.clientId must be configured`);
+			refuse(name, `core.federations.${federation}.clientId must be configured`);
 		}
 		const boundary = entry.boundary;
 		if (typeof boundary !== "string" || boundary === "") {

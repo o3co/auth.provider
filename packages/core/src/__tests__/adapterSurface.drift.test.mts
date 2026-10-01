@@ -167,7 +167,9 @@ function absencePoliciesInSource(): AbsencePolicyInventory {
 				/export const (\w+_ABSENCE_POLICY)\b[^;]*?configKey:\s*\[([^\]]*)\][^;]*?absentValue:\s*"([^"]*)"/g,
 			)) {
 				const path = [...(match[2] ?? "").matchAll(/"([^"]+)"/g)].map((k) => k[1]).join(".");
-				declarations[match[1] as string] = `${path} = "${match[3]}"`;
+				// Core's list of declared absences takes the value as one of its entries.
+				declarations[match[1] as string] =
+					path === "core.declaredAbsent" ? `${path} = ["${match[3]}"]` : `${path} = "${match[3]}"`;
 			}
 		}
 	};

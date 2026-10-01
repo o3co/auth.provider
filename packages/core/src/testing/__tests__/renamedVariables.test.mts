@@ -104,6 +104,34 @@ describe("renamedVariableProblems", () => {
 		]);
 	});
 
+	it("holds modules installed in place of one another, each renaming one old name to its own section's, each to its own reference", () => {
+		const alternative = (name: string, reference: string) =>
+			defineModule({
+				name,
+				section: {
+					schema: z.object({ retries: z.coerce.number() }),
+					relocatedFrom: { legacy: "" },
+					renamedVariables: { LEGACY_RETRIES: "legacy.retries" },
+					reference: pathToFileURL(reference),
+				},
+			});
+		const upper = (name: string) => name.toUpperCase().replaceAll("-", "_");
+		const referenceOf = (name: string) =>
+			layer(
+				`${name} {\n  retries = 3\n  retries = \${?${upper(name)}_RETRIES}\n}\n${capture("LEGACY_RETRIES", `${upper(name)}_RETRIES`)}`,
+			);
+		const first = referenceOf("fixture-first");
+		const second = referenceOf("fixture-second");
+
+		expect(
+			renamedVariableProblems({
+				modules: [alternative("fixture-first", first), alternative("fixture-second", second)],
+				layers: [first, second],
+				read,
+			}),
+		).toEqual([]);
+	});
+
 	it("names a module that declares renames and no section.reference to capture them", () => {
 		const reference = layer(`${SECTION}${capture("LEGACY_RETRIES", "FIXTURE_RENAMING_RETRIES")}`);
 

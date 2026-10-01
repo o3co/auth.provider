@@ -441,11 +441,11 @@ describe("cascadeLogout", () => {
 	// -------------------------------------------------------------------------
 	// Post-step-4 sessionFamilyIndex cleanup
 	//
-	// Defense-in-depth: an addFamilyId call that raced into the family index
-	// between Step 3 and Step 4 (the TOCTOU window the authorization grant's
-	// second check narrows but does not fully close) leaves an orphan entry,
-	// which a second removeBySid AFTER the session delete clears. The order
-	// MUST be: Step 3 removeBySid → Step 4 delete → post-step-4 removeBySid.
+	// A family added between Step 3 and Step 4 (one the ended mark refused,
+	// or one added on an index without the mark) would stay in the index
+	// until its TTL; a second removeBySid AFTER the session delete clears it.
+	// The order MUST be: Step 3 removeBySid → Step 4 delete → post-step-4
+	// removeBySid.
 	// -------------------------------------------------------------------------
 
 	it("runs sessionFamilyIndex.removeBySid AFTER userSessionStore.delete (post-step-4 cleanup)", async () => {
@@ -510,5 +510,92 @@ describe("cascadeLogout", () => {
 		expect(calls).toBe(2);
 		// Failure surfaces via the structured logger.
 		expect(logger.warn).toHaveBeenCalled();
+	});
+});
+
+describe("cascadeLogout — an index with the session-end capability", () => {
+	const EXPIRES_AT = new Date(Date.now() + 3_600_000);
+
+	function makeEndingIndex(families: ReadonlyArray<string>) {
+		return {
+			...makeSessionFamilyIndex(),
+			endSession: vi.fn(async (_sid: string, _expiresAt: Date) => families),
+			addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+		};
+	}
+
+	it("marks the session ended at step 1 with its expiresAt, and revokes the families that answers", async () => {
+		const sessionFamilyIndex = makeEndingIndex(["fam-1", "fam-2"]);
+		const rts = makeFamilyRevocation();
+		const uss = makeUserSessionStore();
+
+		const result = await cascadeLogout({
+			sid: "sid-end",
+			expiresAt: EXPIRES_AT,
+			refreshTokenFamilyRevocation: rts,
+			federationTokenStore: makeFedStore(),
+			userSessionStore: uss,
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex,
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result).toEqual({ outcome: "done" });
+		expect(sessionFamilyIndex.endSession).toHaveBeenCalledTimes(1);
+		expect(sessionFamilyIndex.endSession).toHaveBeenCalledWith("sid-end", EXPIRES_AT);
+		expect(sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
+		expect(rts.revokeFamily).toHaveBeenCalledTimes(2);
+		expect(rts.revokeFamily).toHaveBeenCalledWith("fam-1");
+		expect(rts.revokeFamily).toHaveBeenCalledWith("fam-2");
+		// The clean-up before and after the delete still runs: it keeps the mark.
+		expect(sessionFamilyIndex.removeBySid).toHaveBeenCalledTimes(2);
+		expect(uss.delete).toHaveBeenCalledWith("sid-end");
+	});
+
+	it("lists the families without marking when it is given no expiresAt", async () => {
+		const sessionFamilyIndex = makeEndingIndex([]);
+		sessionFamilyIndex.listFamilyIds = vi.fn(async () => ["fam-1"]);
+		const rts = makeFamilyRevocation();
+
+		const result = await cascadeLogout({
+			sid: "sid-gone",
+			refreshTokenFamilyRevocation: rts,
+			federationTokenStore: makeFedStore(),
+			userSessionStore: makeUserSessionStore(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex,
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result).toEqual({ outcome: "done" });
+		expect(sessionFamilyIndex.endSession).not.toHaveBeenCalled();
+		expect(sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-gone");
+		expect(rts.revokeFamily).toHaveBeenCalledWith("fam-1");
+	});
+
+	it("an endSession that fails is a failed step 1, and nothing else runs", async () => {
+		const failure = new Error("index down");
+		const sessionFamilyIndex = makeEndingIndex([]);
+		sessionFamilyIndex.endSession = vi.fn(async () => {
+			throw failure;
+		});
+		const fts = makeFedStore();
+		const uss = makeUserSessionStore();
+
+		const result = await cascadeLogout({
+			sid: "sid-end",
+			expiresAt: EXPIRES_AT,
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
+			federationTokenStore: fts,
+			userSessionStore: uss,
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex,
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result).toEqual({ outcome: "failed", step: 1, errors: [failure] });
+		expect(fts.removeBySid).not.toHaveBeenCalled();
+		expect(sessionFamilyIndex.removeBySid).not.toHaveBeenCalled();
+		expect(uss.delete).not.toHaveBeenCalled();
 	});
 });

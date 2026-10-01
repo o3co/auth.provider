@@ -225,7 +225,7 @@ export const createRouter = (
 			throw new BootError({
 				stage: "applyContributions",
 				reason: "replica-unsafe-adapter",
-				message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login: the route would fall back to a per-process limiter, so the configured ${loginLimitSpec.limit} / ${loginLimitSpec.windowSeconds}s is really ${loginLimitSpec.limit} × replicas and resets on every deploy. Wire a rateLimiter (rateLimiter.adapter = "redis"), or set core.deployment.mode = "single".`,
+				message: `core.deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login: the route would fall back to a per-process limiter, so the configured ${loginLimitSpec.limit} / ${loginLimitSpec.windowSeconds}s is really ${loginLimitSpec.limit} × replicas and resets on every deploy. Wire a rateLimiter (adapters.rateLimiter = "redis" in the standalone template), or set core.deployment.mode = "single".`,
 				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
 			});
 		}

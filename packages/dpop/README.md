@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -247,7 +247,7 @@ both run it ([docs/adapter-surface.md](../../docs/adapter-surface.md)).
   The practical consequence: a deployment whose issuer is `https://auth.example.com` verifies proofs whose `htu` names `https://auth.example.com/...` regardless of what the proxy forwards, and **regardless of whether `trust proxy` is set at all**. If clients reach the AS at some other origin, that origin — not the internal one — is the issuer you should have configured. A path prefix on the issuer is ignored: the path comes from the request, which already carries the prefix the AS is mounted under.
 
   `http.trustProxy` still matters for IP-keyed rate limiting and for the CSRF origin check — it is simply not load-bearing for DPoP.
-- **Replay protection across replicas needs a shared seen-set.** A per-process seen-set is per process: with several replicas, a proof replayed to a replica that did not see it is accepted. Install `redisReplaySeenSetModule` from [`@o3co/auth-provider-redis`](../redis/README.md) — `replaySeenSet.adapter = "redis"` in the standalone template — and every replica records in, and refuses from, the same set.
+- **Replay protection across replicas needs a shared seen-set.** A per-process seen-set is per process: with several replicas, a proof replayed to a replica that did not see it is accepted. Install `redisReplaySeenSetModule` from [`@o3co/auth-provider-redis`](../redis/README.md) — `adapters.replaySeenSet = "redis"` in the standalone template — and every replica records in, and refuses from, the same set.
 
   With DPoP enabled and no seen-set wired, boot is refused in every `core.deployment.mode`: the mechanism would have nowhere to record a proof, so it could refuse no replay. There is no per-process fallback. Installed with `memoryReplaySeenSetModule`, the deployment gets core's replica-safety answer for that module, as for every other per-process store — DPoP adds no check of its own:
 

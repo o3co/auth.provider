@@ -19,35 +19,24 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * `federationTokenStore.type = "redis"` has to *reach* the composition root
- * before it can select anything, so the switch is declared. The Redis store's
- * own settings are its module's section, `redis-federation-token-store`,
- * which its schema parses; core keeps that section and the path it moved
- * from, `redisFederationTokenStore`, as written.
+ * Which module provides the federation token store is a composition root's
+ * choice, not core's: `federationTokenStore`, where the selection was, is
+ * presence-only, kept as written so a root that parses with `AppConfigSchema`
+ * before boot still hands it to the refusal of the path it moved from. The
+ * Redis store's own settings are its module's section,
+ * `redis-federation-token-store`, which its schema parses; core keeps that
+ * section and the path it moved from, `redisFederationTokenStore`, as written.
  */
 describe("federationTokenStore and the Redis store's sections survive AppConfigSchema", () => {
-	it("keeps the adapter switch", () => {
+	it("keeps where the selection was as written, whatever it holds: core reads nothing of it", () => {
 		const parsed = AppConfigSchema.parse({
 			...makeValidAppConfig(),
-			federationTokenStore: { type: "redis" },
+			federationTokenStore: { type: "postgres" },
 		});
-		expect(parsed.federationTokenStore?.type).toBe("redis");
+		expect(parsed.federationTokenStore).toEqual({ type: "postgres" });
 	});
 
-	it("accepts the memory adapter and refuses one that does not exist", () => {
-		expect(
-			AppConfigSchema.parse({ ...makeValidAppConfig(), federationTokenStore: { type: "memory" } })
-				.federationTokenStore?.type,
-		).toBe("memory");
-		expect(() =>
-			AppConfigSchema.parse({
-				...makeValidAppConfig(),
-				federationTokenStore: { type: "postgres" },
-			}),
-		).toThrow();
-	});
-
-	it("is absent when omitted — the default lives in reference.conf", () => {
+	it("is absent when omitted", () => {
 		expect(AppConfigSchema.parse(makeValidAppConfig()).federationTokenStore).toBeUndefined();
 	});
 

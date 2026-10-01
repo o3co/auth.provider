@@ -49,7 +49,7 @@ export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
  *   values once the MFA requirement is registered, `mfa` among them when an
  *   enabled factor adds it.
  * - An installed federation whose section is enabled and trusts its upstream
- *   IdP's `amr` (`federations.<name>.trustUpstreamAmr`) makes every entry
+ *   IdP's `amr` (`core.federations.<name>.trustUpstreamAmr`) makes every entry
  *   satisfiable: the callback records what that IdP asserts beside `fed`. One
  *   that does not adds `fed` alone; its IdP's values meet no `acr`.
  *

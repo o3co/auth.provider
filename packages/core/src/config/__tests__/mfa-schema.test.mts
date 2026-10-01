@@ -15,9 +15,11 @@
  */
 
 /**
- * The MFA configuration core owns (ADR 2026-09-25-multi-factor-authentication):
- * the two store switches a composition root installs MFA's stores from, and
- * the Redis stores' key prefixes, which the Redis package's modules read.
+ * Core owns none of the MFA configuration (ADR
+ * 2026-09-25-multi-factor-authentication): which modules provide MFA's stores
+ * is a composition root's choice, and the Redis stores' key prefixes are the
+ * Redis package's modules' sections. `mfaFactorStore` and
+ * `mfaTransactionStore`, where the selections were, are presence-only.
  *
  * `mfa.mode` and the step-up page, `mfa.page.url`, are not core's: they are
  * the MFA module's keys, which its package's `reference.conf` defaults. Core's
@@ -49,19 +51,13 @@ const issuesAt = (result: { success: boolean; error?: { issues: { path: Property
 	result.success ? [] : (result.error?.issues ?? []).map((issue) => issue.path.join("."));
 
 describe("the MFA configuration core owns", () => {
-	it("resolves from reference.conf: both stores in memory", () => {
-		const config = fromReference();
-		expect(config.mfaFactorStore?.adapter).toBe("memory");
-		expect(config.mfaTransactionStore?.adapter).toBe("memory");
-	});
-
-	it("reads each from its environment variable", () => {
+	it("ships no store selection: its reference.conf binds neither old variable", () => {
 		const config = fromReference({
 			MFA_FACTOR_STORE_ADAPTER: "store",
 			MFA_TRANSACTION_STORE_ADAPTER: "redis",
-		});
-		expect(config.mfaFactorStore?.adapter).toBe("store");
-		expect(config.mfaTransactionStore?.adapter).toBe("redis");
+		}) as Record<string, unknown>;
+		expect(config).not.toHaveProperty("mfaFactorStore");
+		expect(config).not.toHaveProperty("mfaTransactionStore");
 	});
 
 	it("names no mfa section: neither core's schema nor its reference.conf, which binds no MFA_MODE", () => {
@@ -117,36 +113,14 @@ describe("the MFA configuration core owns", () => {
 		expect(parsed).toMatchObject(written);
 	});
 
-	it("accepts the factor store's three adapters and the transaction store's two, and nothing else", () => {
-		for (const adapter of ["memory", "redis", "store"]) {
-			expect(
-				issuesAt(
-					AppConfigSchema.safeParse({ ...makeValidAppConfig(), mfaFactorStore: { adapter } }),
-				),
-				adapter,
-			).toEqual([]);
-		}
-		for (const adapter of ["memory", "redis"]) {
-			expect(
-				issuesAt(
-					AppConfigSchema.safeParse({ ...makeValidAppConfig(), mfaTransactionStore: { adapter } }),
-				),
-				adapter,
-			).toEqual([]);
-		}
-		// No Store variant for transactions: they are verification state.
-		expect(
-			issuesAt(
-				AppConfigSchema.safeParse({
-					...makeValidAppConfig(),
-					mfaTransactionStore: { adapter: "store" },
-				}),
-			),
-		).toContain("mfaTransactionStore.adapter");
-		expect(
-			issuesAt(
-				AppConfigSchema.safeParse({ ...makeValidAppConfig(), mfaFactorStore: { adapter: "sql" } }),
-			),
-		).toContain("mfaFactorStore.adapter");
+	it("keeps where the selections were as written, whatever they hold: core reads nothing of them", () => {
+		const written = {
+			mfaFactorStore: { adapter: "sql" },
+			mfaTransactionStore: { adapter: "store" },
+		};
+		expect(issuesAt(AppConfigSchema.safeParse({ ...makeValidAppConfig(), ...written }))).toEqual(
+			[],
+		);
+		expect(AppConfigSchema.parse({ ...makeValidAppConfig(), ...written })).toMatchObject(written);
 	});
 });

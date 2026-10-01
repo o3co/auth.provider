@@ -42,7 +42,7 @@ import {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import { coreConfigForTests, makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -127,17 +127,19 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
-				federations: {
-					upstream: {
-						enabled: true,
-						issuer: connection.upstreamIssuer,
-						// The pair the grant's identity is pinned to: a different client id
-						// here is a different upstream account, and the grant is retired.
-						clientId: connection.upstreamClientId,
-					},
-				},
 				rateLimit: { failMode: "closed" },
-				audit: { sink: { type: "none" } },
+				...coreConfigForTests({
+					declaredAbsent: ["auditSink"],
+					federations: {
+						upstream: {
+							enabled: true,
+							issuer: connection.upstreamIssuer,
+							// The pair the grant's identity is pinned to: a different client id
+							// here is a different upstream account, and the grant is retired.
+							clientId: connection.upstreamClientId,
+						},
+					},
+				}),
 				"federation-grants": {
 					enabled: true,
 					connections: {

@@ -22,10 +22,17 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { loggableError } from "@o3co/auth-provider-core";
+import { loggableError, supportsSessionEnd } from "@o3co/auth-provider-core";
 
 export interface CascadeLogoutOptions {
 	readonly sid: string;
+	/**
+	 * The session's `expiresAt`. Pass it whenever the caller holds the
+	 * session. With it, an index with the session-end capability marks the
+	 * session ended at step 1, so a family added after the listing is refused
+	 * rather than left unrevoked. Without it, the families are only listed.
+	 */
+	readonly expiresAt?: Date;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	readonly federationTokenStore: FederationTokenStore;
 	readonly userSessionStore: UserSessionStore;
@@ -52,17 +59,26 @@ export type CascadeLogoutResult =
 /**
  * Runs the logout store cascade in a fixed order:
  *
- *   1. Read the fanout context (`sessionFamilyIndex.listFamilyIds`). Failure
- *      returns `failed` step 1; nothing else ran, so a retry is safe.
+ *   1. Read the fanout context: `sessionFamilyIndex.endSession` when the
+ *      index has the session-end capability and `expiresAt` is given, which
+ *      marks the session ended before it lists; `listFamilyIds` otherwise.
+ *      Failure returns `failed` step 1; nothing else ran but, possibly, the
+ *      mark, and a retry is safe: `endSession` is idempotent.
  *   2. Fanout, collect-and-tally: `revokeFamily` per family, then
  *      `federationTokenStore.removeBySid`. Any failure returns `failed` step 2
  *      with every error, before step 3: cleanup would erase the bookkeeping a
  *      retry needs and mark the cascade complete over an un-revoked family.
  *   3. Reverse-index cleanup (RP registry, family index, federation index),
  *      best-effort: logged and continued, orphans bounded by TTL. Never fails,
- *      hence no step 3 in the result.
+ *      hence no step 3 in the result. Without the mark (no `expiresAt`, or an
+ *      index without the capability), a family a code exchange adds after
+ *      step 1 is dropped from the index here unrevoked.
  *   4. `userSessionStore.delete`, last, which must succeed; failure returns
  *      `failed` step 4.
+ *
+ * A cascade that fails after the mark is written leaves the session
+ * half-ended: it still exists, and its code exchanges are refused until a
+ * retry completes the logout or the mark lapses (fail-closed).
  *
  * The caller maps `failed` to 503, invokes `broadcastBackchannelLogout`
  * (best-effort, never throws) before this, and runs front-channel and IdP
@@ -74,9 +90,13 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	const logger = opts.logger ?? console;
 
 	// Step 1: read fanout context.
+	const index = opts.sessionFamilyIndex;
 	let familyIds: ReadonlyArray<string>;
 	try {
-		familyIds = await opts.sessionFamilyIndex.listFamilyIds(opts.sid);
+		familyIds =
+			opts.expiresAt !== undefined && supportsSessionEnd(index)
+				? await index.endSession(opts.sid, opts.expiresAt)
+				: await index.listFamilyIds(opts.sid);
 	} catch (error) {
 		return { outcome: "failed", step: 1, errors: [error] };
 	}
@@ -137,11 +157,10 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 		return { outcome: "failed", step: 4, errors: [error] };
 	}
 
-	// Clear the family index again after the delete: an `addFamilyId` from the
-	// authorization grant interleaved between step 3 and step 4 would leave an
-	// orphan (the grant's session re-check narrows that window, not closes
-	// it). Idempotent (`removeBySid` on a missing sid is a no-op) and
-	// best-effort; orphans are bounded by the index's TTL anyway.
+	// Clear the family index again after the delete: a family added between
+	// step 3 and step 4 (one the ended mark refused, or one added on an index
+	// without the mark) would otherwise stay until the index's TTL. Idempotent
+	// and best-effort; `removeBySid` keeps the ended mark.
 	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
 		logger.warn(
 			{ operation: "remove_family_index_after_delete", sid: opts.sid, err: loggableError(error) },

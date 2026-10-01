@@ -128,8 +128,8 @@ describe("mfaModules", () => {
 			"userRepository",
 		]);
 		expect(module.absencePolicies?.auditSink).toMatchObject({
-			configKey: ["audit", "sink", "type"],
-			absentValue: "none",
+			configKey: ["core", "declaredAbsent"],
+			absentValue: "auditSink",
 		});
 		expect(module.absencePolicies?.subjectRevocation).toBe(SUBJECT_REVOCATION_ABSENCE_POLICY);
 	});
@@ -603,6 +603,7 @@ describe("the MFA routes' flood guard without a shared rate limiter", () => {
 		...configFor("required"),
 		...coreConfigForTests({
 			expected: ["mfa"],
+			declaredAbsent: ["auditSink"],
 			...(deploymentMode === undefined ? {} : { deploymentMode }),
 		}),
 	});

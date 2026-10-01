@@ -46,6 +46,11 @@ import {
 	withoutRenamedVariables,
 } from "../config/removed-keys.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
+import { federationsOf } from "../federations/configured.mjs";
+import {
+	describeAbsenceDeclaration,
+	isAbsenceDeclared,
+} from "../modules/manifest/absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	FederationInstance,
@@ -1334,7 +1339,7 @@ const FEDERATION_REQUIRED_STORES = [
 ] as const;
 
 /**
- * If any `config.federations.<name>.enabled === true`, all six session,
+ * If any `core.federations.<name>.enabled === true`, all six session,
  * federation and refresh-token-family slots must be in the planned component
  * set. A missing one makes federation routes either fail at runtime with an
  * opaque 503 (the session and federation-token stores) or never mount,
@@ -1346,15 +1351,14 @@ export function checkFederationStoresWiring(
 	config: AppConfig,
 	plannedKeys: ReadonlySet<string>,
 ): void {
-	const federations = (config.federations ?? {}) as Record<string, { enabled?: boolean }>;
-	for (const [name, fed] of Object.entries(federations)) {
-		if (fed?.enabled !== true) continue;
+	for (const [name, fed] of Object.entries(federationsOf(config))) {
+		if ((fed as { enabled?: unknown } | null)?.enabled !== true) continue;
 		const missing = FEDERATION_REQUIRED_STORES.filter((k) => !plannedKeys.has(k));
 		if (missing.length > 0) {
 			throw new BootError({
 				stage: "validateManifests",
 				reason: "federation-stores-incomplete",
-				message: `federations.${name} is enabled but required federation stores are missing: ${missing.join(", ")}`,
+				message: `core.federations.${name} is enabled but required federation stores are missing: ${missing.join(", ")}`,
 				details: { reason: "federation-stores-incomplete", federationName: name, missing },
 			});
 		}
@@ -1484,7 +1488,7 @@ function checkDeclaredAbsence(
 
 	for (const [key, { policy }] of byKey) {
 		if (plannedKeys.has(key)) continue;
-		if (readConfigPath(config, policy.configKey) === policy.absentValue) continue;
+		if (isAbsenceDeclared(config, policy)) continue;
 
 		const consumedBy = modules
 			.filter(
@@ -1500,7 +1504,7 @@ function checkDeclaredAbsence(
 				`Component "${key}" is read by ` +
 				`${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
 				"but nothing provides it, and its absence is not declared. " +
-				`Wire a provider, or set ${configKeyDotted} = "${policy.absentValue}" to declare ` +
+				`Wire a provider, or ${describeAbsenceDeclaration(policy)} to declare ` +
 				`the capability absent on purpose. ${policy.hint}`,
 			reason: "component-absence-undeclared",
 			stage: "validateManifests",

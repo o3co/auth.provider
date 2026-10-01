@@ -265,13 +265,13 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 
 	// The guard above validated `config.callbackURL`, but the `redirect_uri`
 	// the flow sends is what the session module derived from
-	// `config.federations.<name>.callbackURL`. In every shipped composition
+	// `core.federations.<name>.callbackURL`. In every shipped composition
 	// they are one value; a composition where they drift fails loudly at the
 	// first request instead of sending Apple a return URL nobody validated.
 	const requireConfiguredCallback = (redirectUri: string): string => {
 		if (redirectUri !== config.callbackURL) {
 			throw new Error(
-				`Apple federation "apple" was handed a redirect URI (${redirectUri}) that is not the configured callbackURL (${config.callbackURL}) — the route derives it from federations.<name>.callbackURL, and the two must agree`,
+				`Apple federation "apple" was handed a redirect URI (${redirectUri}) that is not the configured callbackURL (${config.callbackURL}) — the route derives it from core.federations.<name>.callbackURL, and the two must agree`,
 			);
 		}
 		return redirectUri;

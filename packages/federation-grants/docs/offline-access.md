@@ -16,7 +16,7 @@ by how it is known:
 Only the generic OIDC adapter (`@o3co/auth-provider-federation-oidc`) carries
 the delegated capability; the Google, Apple and GitHub adapters do not (D17 —
 GitHub OAuth Apps issue no refresh token at all). So a grant connection names
-a `federations.<name>` entry of `type = "oidc"`, whatever the IdP, and the
+a `core.federations.<name>` entry of `type = "oidc"`, whatever the IdP, and the
 authorization request it builds is fixed (`packages/federation-oidc/src/oidc.mts`,
 `buildDelegatedAuthorizationUrl`):
 
@@ -73,7 +73,7 @@ And what the callback holds the answer to (`packages/federation-grants/README.md
 **Recipe** (code + the ADR's D19):
 
 ```hocon
-federations.entra-files {
+core.federations.entra-files {
   enabled = true
   type = "oidc"
   issuer = "https://login.microsoftonline.com/<tenant-id>/v2.0"

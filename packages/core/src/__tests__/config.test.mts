@@ -1,18 +1,7 @@
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.mjs";
-import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
-
-// jwtSchema describes the nested signingKey shape.
-// Schema only enforces shape; field-level validation lives in the local builder.
-const jwtSchema = CoreConfigSchema.shape.oauth.shape.jwt;
-
-function makeFactory() {
-	const factory = createKeyStoreFactory();
-	registerBuiltinKeyStores(factory);
-	return factory;
-}
+import { AppConfigSchema } from "#/config/application.schema.mjs";
 
 describe("provider config", () => {
 	it("loads and validates reference.conf with required env vars", () => {
@@ -26,9 +15,32 @@ describe("provider config", () => {
 		// The signing key, the log level, the HTTP settings, the Redis stores'
 		// settings and the session's are the sections of the modules that own
 		// them, with their defaults in those modules' package: core ships none.
+		const sections = config as unknown as Record<string, unknown>;
 		expect(config.oauth.jwt.signingKey).toBeUndefined();
-		expect(config.logging).toBeUndefined();
-		expect(config.http).toBeUndefined();
+		expect(sections["key-store"]).toBeUndefined();
+		expect(sections.logging).toBeUndefined();
+		expect(sections.http).toBeUndefined();
+		// Which adapter fills a slot is the composition root's (`adapters`), the
+		// repositories' and the audit sink's settings their modules': core ships
+		// none of them.
+		for (const section of [
+			"audit",
+			"repositories",
+			"rateLimiter",
+			"userSessionStores",
+			"accessTokenDenylist",
+			"replaySeenSet",
+			"consentStore",
+			"federationTokenStore",
+			"federationGrantStore",
+			"federationGrantIntentStore",
+			"mfaFactorStore",
+			"mfaTransactionStore",
+			"redisCodeRepository",
+		]) {
+			expect(sections[section], section).toBeUndefined();
+		}
+		expect((config.oauth as Record<string, unknown>).code).toBeUndefined();
 		expect(config["redis-session-stores"]).toBeUndefined();
 		expect(config.oauth.oidcMode).toBe("oidc-required");
 		expect(config.session).toBeUndefined();
@@ -74,44 +86,9 @@ describe("provider config", () => {
 		const config = validate(raw, AppConfigSchema);
 
 		expect(config.oauth.oidcMode).toBe("dual");
-		// federations.google.enabled env-var coercion is covered by the
+		// core.federations.google.enabled env-var coercion is covered by the
 		// HOCON reference.conf wiring; schema-level boolean coercion for
 		// federation entries is tested in federations-schema.test.mts.
-	});
-
-	it("repositories.client.type is yaml when reference.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-				CLIENT_USER_BASE_URL: "http://localhost:8080",
-				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
-			},
-		});
-		const config = validate(raw, AppConfigSchema);
-		expect(config.repositories.client.type).toBe("yaml");
-	});
-
-	it("repositories.user.type is yaml when reference.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-			},
-		});
-		const config = validate(raw, AppConfigSchema);
-		expect(config.repositories.user.type).toBe("yaml");
-	});
-
-	it("repositories.code.type is memory when reference.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
-			env: {
-				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
-				OAUTH_JWT_ISSUER: "https://auth.test",
-			},
-		});
-		const config = validate(raw, AppConfigSchema);
-		expect(config.repositories.code.type).toBe("memory");
 	});
 
 	it("loads core-rate-limiter-memory.maxBuckets default and CORE_RATE_LIMITER_MEMORY_MAX_BUCKETS", () => {
@@ -139,200 +116,5 @@ describe("provider config", () => {
 			AppConfigSchema,
 		);
 		expect(overridden["core-rate-limiter-memory"]).toMatchObject({ maxBuckets: "123" });
-	});
-});
-
-describe("jwt config schema", () => {
-	// Schema-level acceptance tests — verify the nested signingKey shape is
-	// accepted. Per ADR 2026-04-30 the schema is a pure type contract:
-	// algorithm/kid are required at the schema boundary, and hocon
-	// (`packages/core/config/reference.conf`) supplies the runtime
-	// defaults that production callers rely on. The schema is a
-	// discriminated union on `algorithm`, so a bare local sub-section
-	// fails the discriminator check before per-branch field validation.
-
-	it("rejects bare local sub-section (algorithm/kid are required at the schema boundary)", () => {
-		const result = jwtSchema.safeParse({
-			issuer: "https://auth.test",
-			signingKey: { provider: "local", local: { secret: "x" } },
-		});
-		expect(result.success).toBe(false);
-		if (!result.success) {
-			const paths = result.error.issues.map((i) => i.path.join("."));
-			// Discriminated union reports the discriminator error first; the
-			// branch-level kid check fires only once `algorithm` parses.
-			expect(paths).toEqual(expect.arrayContaining(["signingKey.local.algorithm"]));
-		}
-	});
-
-	it("accepts RS256 with key fields", () => {
-		const result = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "RS256",
-					kid: "v0",
-					previousKeys: [],
-					privateKey: "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
-					publicKey: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
-				},
-			},
-		});
-		const local = result.signingKey.local as Record<string, unknown>;
-		expect(local.algorithm).toBe("RS256");
-		expect(local.privateKey).toBeDefined();
-		expect(local.publicKey).toBeDefined();
-	});
-
-	it("accepts ES256 and EdDSA algorithms", () => {
-		const es256 = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "ES256",
-					kid: "v0",
-					previousKeys: [],
-					privateKey: "pk",
-					publicKey: "pub",
-				},
-			},
-		});
-		expect((es256.signingKey.local as Record<string, unknown>).algorithm).toBe("ES256");
-
-		const eddsa = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "EdDSA",
-					kid: "v0",
-					previousKeys: [],
-					privateKey: "pk",
-					publicKey: "pub",
-				},
-			},
-		});
-		expect((eddsa.signingKey.local as Record<string, unknown>).algorithm).toBe("EdDSA");
-	});
-
-	it("accepts previousKeys array with valid entries", () => {
-		const result = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "ES256",
-					kid: "v1",
-					privateKey: "pk",
-					publicKey: "pub",
-					previousKeys: [
-						{
-							kid: "v0",
-							publicKey: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
-							expiresAt: "2026-12-31T00:00:00Z",
-						},
-						{
-							kid: "v1",
-							publicKeyPath: "/path/to/key.pem",
-							expiresAt: "2027-06-01T00:00:00Z",
-						},
-					],
-				},
-			},
-		});
-		const local = result.signingKey.local as { previousKeys: Array<Record<string, unknown>> };
-		expect(local.previousKeys).toHaveLength(2);
-		expect(local.previousKeys[0].kid).toBe("v0");
-		expect(local.previousKeys[1].publicKeyPath).toBe("/path/to/key.pem");
-	});
-
-	it("secret is optional for asymmetric algorithms", () => {
-		const result = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "ES256",
-					kid: "v0",
-					previousKeys: [],
-					privateKey: "pk",
-					publicKey: "pub",
-				},
-			},
-		});
-		const local = result.signingKey.local as Record<string, unknown>;
-		expect(local.secret).toBeUndefined();
-	});
-
-	// Builder-level rejection tests — schema no longer rejects these shapes;
-	// the local builder validates field presence at factory.create() time.
-	// Error wording is preserved verbatim from the old superRefine messages (Tasks 3/4).
-
-	it("rejects HS256 without secret (builder-level)", async () => {
-		// Schema parse succeeds — no secret required at schema level.
-		const parsed = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: { algorithm: "HS256", kid: "v0", previousSecrets: [] },
-			},
-		});
-		const local = parsed.signingKey.local as Record<string, unknown>;
-		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
-			/secret is required for HS256 algorithm/i,
-		);
-	});
-
-	it("rejects asymmetric algorithm without privateKey (builder-level)", async () => {
-		const parsed = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: { algorithm: "ES256", kid: "v0", previousKeys: [], publicKey: "pub" },
-			},
-		});
-		const local = parsed.signingKey.local as Record<string, unknown>;
-		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
-			/privateKey or privateKeyPath is required/i,
-		);
-	});
-
-	it("rejects asymmetric algorithm without publicKey (builder-level)", async () => {
-		const parsed = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: { algorithm: "RS256", kid: "v0", previousKeys: [], privateKey: "pk" },
-			},
-		});
-		const local = parsed.signingKey.local as Record<string, unknown>;
-		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
-			/publicKey or publicKeyPath is required/i,
-		);
-	});
-
-	it("rejects previousKeys entry without publicKey or publicKeyPath (builder-level)", async () => {
-		// Schema accepts the shape; builder throws when a previous key has no public key source.
-		// We supply real-looking (but fake) inline PEM strings to pass the schema — the builder
-		// throws before it attempts to import them, so actual crypto validity is irrelevant here.
-		const parsed = jwtSchema.parse({
-			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "ES256",
-					kid: "v0",
-					privateKey: "pk",
-					publicKey: "pub",
-					previousKeys: [{ kid: "old", expiresAt: "2099-01-01T00:00:00Z" }],
-				},
-			},
-		});
-		const local = parsed.signingKey.local as Record<string, unknown>;
-		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
-			/publicKey or publicKeyPath is required for previous key old/i,
-		);
 	});
 });

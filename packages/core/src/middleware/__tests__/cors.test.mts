@@ -27,9 +27,9 @@ import { createApp } from "#/index.mjs";
 import { browserFacingCorsRoutes, corsMw } from "#/middleware/cors.mjs";
 import { defineModule } from "#/modules/manifest/index.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
+import { createTestHttpSettings } from "#/testing/slots/httpSettings.mjs";
 
 const ALLOWED = "https://app.example.com";
-const OTHER_ALLOWED = "https://admin.example.com";
 const UNLISTED = "https://evil.example.com";
 
 /** Every path the middleware guards answers 200 with a marker body. */
@@ -349,7 +349,7 @@ describe("corsMw — an exact-match allowlist on the browser-facing surface", ()
 	});
 });
 
-describe("assembleApp mounts the CORS middleware from config", () => {
+describe("assembleApp mounts the CORS middleware from the httpSettings slot", () => {
 	/** A module contributing the OAuth surface at the paths the table names. */
 	const surfaceModule = defineModule({
 		name: "cors-test-surface",
@@ -368,15 +368,14 @@ describe("assembleApp mounts the CORS middleware from config", () => {
 		},
 	});
 
-	const bootWith = async (allowedOrigins: unknown) => {
-		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
-		config.cors = { allowedOrigins };
+	const bootWith = async (allowedOrigins: readonly string[]) => {
 		const handle = await createApp({
 			modules: [surfaceModule],
 			bootstrapComponents: {
-				config: config as never,
+				config: makeValidAppConfig() as never,
 				pathResolver: (s: string) => s,
 			} as never,
+			overrideComponents: { httpSettings: createTestHttpSettings({ allowedOrigins }) },
 		});
 		const app = express();
 		app.use(handle.router);
@@ -411,48 +410,6 @@ describe("assembleApp mounts the CORS middleware from config", () => {
 		expect(res.headers["access-control-allow-origin"]).toBeUndefined();
 		expect(res.headers.vary).toBeUndefined();
 		await handle.dispose();
-	});
-
-	// The environment variable is the documented way to configure this, and it
-	// can only carry a list as a comma-separated string, which boot's composed
-	// parse reads into a list before `assembleApp` mounts from it.
-	it("mounts from a comma-separated string, the shape an env var carries", async () => {
-		const { app, handle } = await bootWith(`${ALLOWED}, ${OTHER_ALLOWED}`);
-		for (const origin of [ALLOWED, OTHER_ALLOWED]) {
-			const res = await request(app).post("/oauth/token").set("Origin", origin);
-			expect(res.status, origin).toBe(200);
-			expect(res.headers["access-control-allow-origin"], origin).toBe(origin);
-		}
-		const refused = await request(app).post("/oauth/token").set("Origin", UNLISTED);
-		expect(refused.headers["access-control-allow-origin"]).toBeUndefined();
-		await handle.dispose();
-	});
-
-	it("treats an exported-but-empty variable as CORS off", async () => {
-		const { app, handle } = await bootWith("");
-		const res = await request(app).post("/oauth/token").set("Origin", ALLOWED);
-		expect(res.headers["access-control-allow-origin"]).toBeUndefined();
-		expect(res.headers.vary).toBeUndefined();
-		await handle.dispose();
-	});
-
-	it("refuses to boot on a shape nothing can read, naming the key", async () => {
-		// AppConfigSchema refuses this shape by path, and boot's composed parse
-		// runs the schema core mirrors for `cors` whenever the section is
-		// present, so a hand-built composition that hands createApp its
-		// configuration unparsed is refused too, before the mount site (which
-		// could only warn).
-		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
-		config.cors = { allowedOrigins: 42 };
-		const refused = await createApp({
-			modules: [surfaceModule],
-			bootstrapComponents: { config: config as never, pathResolver: (s: string) => s } as never,
-		}).then(
-			() => undefined,
-			(err: unknown) => err,
-		);
-		expect(refused).toMatchObject({ reason: "config-validation-failed" });
-		expect((refused as Error).message).toMatch(/cors\.allowedOrigins: /);
 	});
 
 	it("leaves introspection and authorize alone after a real boot", async () => {

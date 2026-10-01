@@ -86,7 +86,7 @@ services:
       - jwt_public_key
       # The client registry (#705), for the same reason: `config/clients.yaml`
       # is per-deployment and may hold client secrets, so it is kept out of the
-      # image and mounted here. CLIENT_PATH below points the process at it.
+      # image and mounted here. REPOSITORIES_CLIENT_YAML_PATH below points the process at it.
       - client_registry
     environment:
       NODE_ENV: production
@@ -117,9 +117,9 @@ services:
       HTTP_TRUST_PROXY: ${HTTP_TRUST_PROXY:?set to your TLS terminator's address or CIDR range (e.g. 10.0.0.0/8, or `loopback` for a same-host sidecar) — never `true` behind an open network}
       # Point the process at the mounted secrets rather than the working-copy
       # paths `.env` carries for local runs.
-      OAUTH_JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
-      OAUTH_JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
-      CLIENT_PATH: /run/secrets/client_registry
+      KEY_STORE_LOCAL_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
+      KEY_STORE_LOCAL_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      REPOSITORIES_CLIENT_YAML_PATH: /run/secrets/client_registry
       # `environment` wins over `env_file`, which is the point here:
       # `.env.example` ships SESSION_STORE_SECURE=false / SESSION_STORE_NAME=auth.sid so a
       # plain-HTTP local run works, and this file requires that same `.env`.
@@ -132,13 +132,13 @@ services:
       # Every Redis-backed store shares the compose-network Redis below.
       #
       # These are stated in full rather than inherited from
-      # `config/application.conf`, so that the deployable file names its own
+      # `config/reference.conf`, so that the deployable file names its own
       # topology: an operator reading only this one can see which stores
-      # survive a restart. `OAUTH_CODE_ADAPTER` and
-      # `ACCESS_TOKEN_DENYLIST_ADAPTER` already ship as `redis` in that config
-      # layer and are left there on purpose — restating a value that agrees is
+      # survive a restart. `ADAPTERS_CODE_REPOSITORY` and
+      # `ADAPTERS_ACCESS_TOKEN_DENYLIST` already ship as `redis` in that file
+      # and are left there on purpose — restating a value that agrees is
       # a second place to forget to change.
-      REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: redis://redis:6379
+      REDIS_CLIENTS_URL: redis://redis:6379
       SESSION_STORE_STORAGE_TYPE: redis
       SESSION_STORE_STORAGE_REDIS_URL: redis://redis:6379
       # The UserSession stores: the provider's own record of who is signed in,
@@ -157,10 +157,10 @@ services:
       # `CORE_DEPLOYMENT_MODE: single` says nothing about it: the replica guard
       # answers "can these stores be shared", not "do these two stores have the
       # same lifetime".
-      USER_SESSION_STORES_ADAPTER: redis
+      ADAPTERS_USER_SESSION_STORES: redis
       # The memory rate limiter is per-process and evadable under bucket
       # exhaustion (see README) — production points it at Redis.
-      RATE_LIMITER_ADAPTER: redis
+      ADAPTERS_RATE_LIMITER: redis
       # The federation token store is deliberately left at its `memory`
       # default, and that is coherent here rather than an oversight: this
       # template ships every federation disabled, so nothing writes to the
@@ -168,7 +168,7 @@ services:
       # (REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY) that this file must not
       # invent — the records are long-lived upstream refresh tokens. Enabling
       # a federation means setting BOTH, together:
-      #   FEDERATION_TOKEN_STORE_TYPE: redis
+      #   ADAPTERS_FEDERATION_TOKEN_STORE: redis
       #   REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: <openssl rand -base64 32, from .env>
 
   redis:

@@ -1,6 +1,6 @@
 # @o3co/create-auth-provider
 
-最終更新: 2026-09-29
+最終更新: 2026-10-01
 
 auth.provider 用の CLI スキャフォルダーです。内包するテンプレートの 1 つから新しいサーバープロジェクトを生成します。
 
@@ -81,7 +81,7 @@ CLI は最後のメッセージで次に `pnpm run debug` を実行するよう�
 スキャフォールドのデフォルトのままでは、これは起動しません: `.env` ファイルは
 読まず（読むのは compose ファイルだけ）、シェルの環境変数から issuer
 （`OAUTH_JWT_ISSUER`）、署名鍵のペア、セッションシークレット、ユーザーサービスの
-2 つの URL（`CLIENT_USER_AUTHENTICATE_URL`、`CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL`）、
+2 つの URL（`REPOSITORIES_USER_HTTP_AUTHENTICATE_URL`、`REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL`）、
 そして `localhost:6379` の Redis を必要とします。コマンドは、プロジェクトに含まれる
 テンプレートの README の[使い方](../templates/standalone/README.ja.md#使い方)にあります。
 

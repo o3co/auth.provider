@@ -35,10 +35,10 @@ const SUPPORTED_ALGORITHMS = ["HS256", "RS256", "ES256", "EdDSA"] as const;
 /** The keys that carry the asymmetric key material, and the variables conventionally bound to them. */
 const ASYMMETRIC_KEY_HELP =
 	"Set BOTH of:\n" +
-	"  oauth.jwt.signingKey.local.privateKeyPath  (env OAUTH_JWT_PRIVATE_KEY_PATH)\n" +
-	"  oauth.jwt.signingKey.local.publicKeyPath   (env OAUTH_JWT_PUBLIC_KEY_PATH)\n" +
-	"or their inline-PEM equivalents oauth.jwt.signingKey.local.privateKey /\n" +
-	".publicKey (env OAUTH_JWT_PRIVATE_KEY / OAUTH_JWT_PUBLIC_KEY).\n" +
+	"  key-store.local.privateKeyPath  (env KEY_STORE_LOCAL_PRIVATE_KEY_PATH)\n" +
+	"  key-store.local.publicKeyPath   (env KEY_STORE_LOCAL_PUBLIC_KEY_PATH)\n" +
+	"or their inline-PEM equivalents key-store.local.privateKey /\n" +
+	".publicKey (env KEY_STORE_LOCAL_PRIVATE_KEY / KEY_STORE_LOCAL_PUBLIC_KEY).\n" +
 	"Generate an Ed25519 pair with:\n" +
 	"  openssl genpkey -algorithm ed25519 -out jwt-private.pem\n" +
 	"  openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem";
@@ -59,9 +59,9 @@ function describeMissingAsymmetricMaterial(
 			? `${missing} or ${missing}Path is required for ${algorithm} algorithm — no signing key is configured.`
 			: `${missing} or ${missing}Path is required for ${algorithm} algorithm.`;
 	const hs256Note = hasSecret
-		? "\n\noauth.jwt.signingKey.local.secret is set, but a shared secret cannot sign " +
+		? "\n\nkey-store.local.secret is set, but a shared secret cannot sign " +
 			`${algorithm}. To keep symmetric signing instead, set ` +
-			'oauth.jwt.signingKey.local.algorithm = "HS256" (env OAUTH_JWT_ALGORITHM=HS256). ' +
+			'key-store.local.algorithm = "HS256" (env KEY_STORE_LOCAL_ALGORITHM=HS256). ' +
 			"Note that HS256 publishes no JWKS, so every relying party must be handed the " +
 			"shared secret — which also lets it mint tokens."
 		: "";
@@ -159,8 +159,8 @@ function narrowPreviousSecretsArray(value: unknown): SymmetricPreviousSecret[] {
 		// overlap window, so it carries exactly the forgery risk the current
 		// secret does and clears exactly the same floor.
 		assertSecretEntropy(raw.secret, {
-			configKey: `oauth.jwt.signingKey.local.previousSecrets[${index}].secret`,
-			envVar: "OAUTH_JWT_SECRET",
+			configKey: `key-store.local.previousSecrets[${index}].secret`,
+			envVar: "KEY_STORE_LOCAL_SECRET",
 		});
 		if (typeof raw.expiresAt !== "string" || raw.expiresAt.length === 0) {
 			throw new Error(`previousSecrets[${index}].expiresAt must be a non-empty ISO string`);
@@ -191,7 +191,7 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 		// quietly weaker than the operator believes.
 		if (typeof rawAlgorithm !== "string" || rawAlgorithm.length === 0) {
 			throw new Error(
-				"oauth.jwt.signingKey.local.algorithm is not configured (env OAUTH_JWT_ALGORITHM). " +
+				"key-store.local.algorithm is not configured (env KEY_STORE_LOCAL_ALGORITHM). " +
 					`Supported values: ${SUPPORTED_ALGORITHMS.join(", ")}. ` +
 					`The shipped default is "${DEFAULT_SIGNING_ALGORITHM}"; there is no implicit fallback.`,
 			);
@@ -212,15 +212,15 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 			if (typeof secret !== "string" || secret.length === 0) {
 				throw new Error(
 					"secret is required for HS256 algorithm. Set " +
-						"oauth.jwt.signingKey.local.secret (env OAUTH_JWT_SECRET) to at least " +
+						"key-store.local.secret (env KEY_STORE_LOCAL_SECRET) to at least " +
 						"32 bytes of random material — `openssl rand -hex 32`.",
 				);
 			}
 			// Anyone who guesses an HS256 secret can MINT tokens for any subject,
 			// so it must clear the entropy floor, not merely be non-empty.
 			assertSecretEntropy(secret, {
-				configKey: "oauth.jwt.signingKey.local.secret",
-				envVar: "OAUTH_JWT_SECRET",
+				configKey: "key-store.local.secret",
+				envVar: "KEY_STORE_LOCAL_SECRET",
 			});
 			const rawKid = config.kid;
 			const kid = typeof rawKid === "string" && rawKid.length > 0 ? rawKid : "v0";
