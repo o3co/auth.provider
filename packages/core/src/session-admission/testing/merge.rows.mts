@@ -511,6 +511,14 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				expected: { outcome: "reauthenticate", requirement: "acr" },
 			},
 			{
+				row: "an acr only the authority's step-up can finish, onto a password login whose amr is not well formed → a new login (acr): it vouches for nothing, and no step-up can be recorded on it",
+				mode: "optional",
+				session: passwordSession(["pwd", ""]),
+				acrValues: [MFA],
+				factors: "installed",
+				expected: { outcome: "reauthenticate", requirement: "acr" },
+			},
+			{
 				row: "a session that meets the baseline, asked an acr the store cannot record a step-up for → a new login (acr)",
 				mode: "required",
 				session: federatedSession(["fed"], ["mfa"]),
