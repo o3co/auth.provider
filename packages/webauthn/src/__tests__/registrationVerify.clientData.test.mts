@@ -111,4 +111,19 @@ describe("the challenge the grant's registration consumes", () => {
 		expect(stored.status, JSON.stringify(stored.body)).toBe(200);
 		expect(await credentialStore.listByUserId("alice")).toHaveLength(1);
 	});
+
+	it("is not consumed for client data the library reads as an object with no string challenge: 400 invalid_request, and the challenge still completes a registration", async () => {
+		const { post, credentialStore } = await registration();
+
+		const refused = await post({ clientData: { challenge: 7 } });
+
+		expect(refused.status).toBe(400);
+		expect(refused.body).toMatchObject({ error: "invalid_request" });
+		expect(await credentialStore.listByUserId("alice")).toEqual([]);
+
+		const stored = await post();
+
+		expect(stored.status, JSON.stringify(stored.body)).toBe(200);
+		expect(await credentialStore.listByUserId("alice")).toHaveLength(1);
+	});
 });
