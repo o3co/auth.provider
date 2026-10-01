@@ -15,8 +15,8 @@
  */
 
 /**
- * The two manifests this package installs (the federation-grants ADR, D9–D12;
- * D9 says why a package of its own rather than `/oauth/token`).
+ * The two manifests this package installs. Why a package of its own rather than `/oauth/token`
+ * is recorded in `packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md`.
  *
  * Two modules, because their dependency edges point different ways:
  * `federationGrantBackgroundModule` provides the registry a shutdown drains,
@@ -140,9 +140,9 @@ const REQUIRES = [
 	"config",
 	"federationGrantBackground",
 	"clientRepository",
-	// The synthetic key every consumer of session admission takes (the
-	// session-admission ADR's D1): the browser half admits the browser's
-	// session through it at every step. Always present — the planner fills it.
+	// The synthetic key every consumer of session admission takes: the browser
+	// half admits the browser's session through it at every step. Always
+	// present — the planner fills it.
 	"sessionRequirementResolver",
 ] as const;
 const OPTIONAL = [
@@ -403,7 +403,7 @@ const boundaryFor =
 		throw new Error(
 			"federationGrantsModule: the subjectRevocation adapter answered something that is " +
 				"neither a date nor null for the subject's grants boundary. Fails closed: an " +
-				"answer that cannot be compared is not the same as no revocation (D13).",
+				"answer that cannot be compared is not the same as no revocation.",
 		);
 	};
 

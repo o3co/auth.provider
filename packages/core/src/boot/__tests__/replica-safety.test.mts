@@ -304,6 +304,8 @@ describe("replicaUnsafeReason — reads the manifest", () => {
 			memorySessionStoresModule.replicaSafety?.reason,
 		);
 		expect(replicaUnsafeReason(memorySessionStoresModule)).toMatch(/back-channel logout/);
+		// The reason states what forks, with no issue number.
+		expect(replicaUnsafeReason(memorySessionStoresModule)).not.toMatch(/#\d/);
 	});
 
 	it("is undefined for a module that declares nothing", () => {

@@ -101,6 +101,8 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 		expect(() => resolve({})).toThrow(/federation-grants\.consent\.url/);
 		expect(() => resolve({ consent: {} })).toThrow(/federation-grants\.consent\.url/);
 		expect(() => resolve({ consent: { url: "" } })).toThrow(/federation-grants\.consent\.url/);
+		// The refusal states the rule it enforces, with no design label.
+		expect(() => resolve({})).not.toThrow(/\bD\d+\b/);
 	});
 
 	it("takes a consent page on the provider's own origin, and refuses one anywhere else", () => {

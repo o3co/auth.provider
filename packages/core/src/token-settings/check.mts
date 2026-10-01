@@ -42,7 +42,7 @@ import type { OAuthTokenSettings } from "./types.mjs";
 const WHY =
 	"A reader reads every member from the oauthTokenSettings a composition holds, and the " +
 	"configuration only when it holds none, so a member the slot lacks or gets wrong is refused " +
-	"rather than taken from the configuration beside it (#728).";
+	"rather than taken from the configuration beside it.";
 
 /** The value a refusal names: `none` for a member the slot lacks, otherwise its kind. */
 const shown = (value: unknown): string => (value === undefined ? "none" : describeValue(value));

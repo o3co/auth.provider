@@ -1478,11 +1478,11 @@ against a managed Redis with TLS/AUTH this is connection churn — tracked as
 Requirements (`packages/redis/README.md`): Redis **7.2 LTS or later** — the
 session adapters issue `PEXPIREAT … NX` + `PEXPIREAT … GT`, `PEXPIRETIME` backs
 the monotonic watermark, `GETDEL` backs code consumption; and **Lua** — the
-rate-limit increment, the lock release, the watermark write and the subject
-sweep are `EVALSHA`/`EVAL` scripts with a `NOSCRIPT` fallback that re-loads
-after a `SCRIPT FLUSH` or a failover (`packages/redis/src/ioredis/`: the classifier
-in `commands.mts`, the fallbacks in `clients/federation-tokens.mts` and
-`clients/user-sessions.mts`). Redis
+lock release, the watermark write, the subject sweep and every other store
+script run `EVALSHA`-first with a `NOSCRIPT` fallback to `EVAL` that re-loads
+after a `SCRIPT FLUSH` or a failover (`runScript` in
+`packages/redis/src/ioredis/commands.mts`); the rate-limit increment is a plain
+`EVAL` every time. Redis
 Cluster with Lua disabled is not supported by `makeIoredisClients`. Nothing in
 the key layout groups a session's keys into one slot: the only Cluster-safety
 claim the code makes is for `sAddWithTtl`, a single-key `MULTI`.

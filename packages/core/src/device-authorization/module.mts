@@ -31,7 +31,7 @@ export const memoryDeviceCodeStoreModule = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"pending device authorizations fork per replica — the human approves a code on the replica that served the verification page, while the device polls a replica that has never heard of it and is told the code does not exist (#298)",
+			"pending device authorizations fork per replica — the human approves a code on the replica that served the verification page, while the device polls a replica that has never heard of it and is told the code does not exist",
 	},
 	optional: ["lifecycleRegistrar"] as const,
 	provides: {

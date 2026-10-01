@@ -243,11 +243,14 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 	it("refuses a driver that cannot express a sessions-only stamp", async () => {
 		// A driver with only the single-boundary primitive would answer every
 		// sessions-only stamp by revoking the subject's grants.
-		expect(() =>
+		const construct = () =>
 			createRedisSubjectRevocation({
 				client: { get: async () => null } as never,
 				keyPrefix: "t593e:9:",
-			}),
-		).toThrow(/setRevocationBoundaries/);
+			});
+		expect(construct).toThrow(/setRevocationBoundaries/);
+		// The refusal states the rule it enforces, with no issue number or design label.
+		expect(construct).toThrow(/can advance only one revocation boundary/);
+		expect(construct).not.toThrow(/#\d|\bD\d+\b/);
 	});
 });
