@@ -125,6 +125,9 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 			pick().authorizeSubjectRecovery(subject, authorization),
 		applySubjectRecovery: (subject, application) =>
 			pick().applySubjectRecovery(subject, application),
+		raiseRecoverySetFloor: (subject, generation) =>
+			pick().raiseRecoverySetFloor(subject, generation),
+		recoverySetFloor: (subject) => pick().recoverySetFloor(subject),
 	};
 };
 

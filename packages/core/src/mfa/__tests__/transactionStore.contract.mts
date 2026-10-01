@@ -2635,4 +2635,75 @@ export function runMfaTransactionStoreContract(
 			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe("acquired");
 		});
 	});
+
+	describe("MfaTransactionStore contract: a subject's recovery-set floor", () => {
+		// The generation below which no recovery-code set verifies. It is
+		// kept apart from the sets, so deleting a set never lowers it.
+
+		it("answers floor 0 for a subject never issued a set", async () => {
+			const store = await factory();
+			expect(await store.recoverySetFloor("user-1")).toBe(0);
+		});
+
+		it("raises the floor and never lowers it, answering the floor after each raise", async () => {
+			const store = await factory();
+			expect(await store.raiseRecoverySetFloor("user-1", 3)).toBe(3);
+			expect(await store.raiseRecoverySetFloor("user-1", 2)).toBe(3);
+			expect(await store.recoverySetFloor("user-1")).toBe(3);
+			expect(await store.raiseRecoverySetFloor("user-1", 5)).toBe(5);
+			expect(await store.recoverySetFloor("user-1")).toBe(5);
+		});
+
+		it("keeps the highest of N raises in flight", async () => {
+			const store = await factory();
+			await Promise.all(
+				[4, 9, 1, 7, 10, 2, 8, 3, 6, 5].map((n) => store.raiseRecoverySetFloor("user-1", n)),
+			);
+			expect(await store.recoverySetFloor("user-1")).toBe(10);
+		});
+
+		it("keeps the floor through a reset, and each subject's apart", async () => {
+			const store = await factory();
+			await store.raiseRecoverySetFloor("user-1", 4);
+			const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
+			if (lease.outcome !== "acquired") throw new Error("expected a lease");
+			await store.authorizeSubjectRecovery("user-1", {
+				operation: "reset",
+				sid: undefined,
+				recoveryId: "reset-1",
+				expiresAtMs: Date.now() + 10 * MINUTE,
+			});
+			expect(
+				await store.applySubjectRecovery("user-1", {
+					operation: "reset",
+					sid: undefined,
+					nowMs: Date.now(),
+					leaseToken: lease.token,
+					sessionsBoundaryMs: undefined,
+					guessableBoundSinceMs: undefined,
+				}),
+			).toMatchObject({ outcome: "applied" });
+			expect(await store.recoverySetFloor("user-1")).toBe(4);
+			expect(await store.recoverySetFloor("user-2")).toBe(0);
+		});
+
+		it("refuses, with a RangeError, a raise it cannot make or a question it cannot answer, and raises nothing", async () => {
+			const store = await factory();
+			for (const [label, subject, generation] of [
+				["an empty subject", "", 1],
+				["a generation of 0", "user-1", 0],
+				["a negative generation", "user-1", -1],
+				["a generation that is not whole", "user-1", 1.5],
+				["a generation as text", "user-1", "1"],
+				["a generation past the safe integers", "user-1", 2 ** 53],
+			] as const) {
+				await expect(
+					store.raiseRecoverySetFloor(subject as never, generation as never),
+					label,
+				).rejects.toThrow(RangeError);
+			}
+			await expect(store.recoverySetFloor("" as never)).rejects.toThrow(RangeError);
+			expect(await store.recoverySetFloor("user-1")).toBe(0);
+		});
+	});
 }
