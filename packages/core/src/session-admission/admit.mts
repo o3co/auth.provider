@@ -15,25 +15,10 @@
  */
 
 /**
- * Session admission: the one decision point every consumer of an
- * authenticated browser session calls, and the one the login route calls
- * before a session is written. See ADR 2026-09-28-session-admission.
- *
- * `admitSession` judges a session for an action; the claim builders are the
- * one reading of each carrier, and `cookieSessionUser` the one reading of the
- * cookie session's user. `admitPrimary` and `resumePrimary` ask the
- * requirements that interrupt a login and answer the `Establishment`
- * `establishSession` requires; `establishWithoutAsking` builds a federated
- * login's.
- *
- * Every step fails closed: a store that throws is `unavailable`, logged once
- * at error with `loggableError`'s projection, never the `sid`. A caller's
- * fault is a `RangeError` before anything is read. The brands are
- * module-private `WeakSet`s, so an `as` cast forges nothing.
- *
- * `selectAcr` is called only here in product code, over the vouched `amr`,
- * so a value an untrusted IdP asserted in a pre-upgrade session meets no
- * `acr`.
+ * Session admission's entry point, where core's drift guards pin it: the claim
+ * builders, `admitSession` running its steps in order, and a login's
+ * decisions. Product code calls `selectAcr` here alone, over the vouched `amr`,
+ * so a value an untrusted IdP asserted in a pre-upgrade session meets no `acr`.
  */
 
 import {

@@ -20,8 +20,10 @@
  * its input and verdict, the step-up page, and the establishment half
  * (`PrimaryAuthentication`, the interruption, the `PrimaryContinuation`,
  * the `Establishment` capability). Types and the registration checks only;
- * the decisions are `admit.mts`'s. The brands are type-level here and
- * runtime-checked there, so an `as` cast forges the type and nothing else.
+ * the decisions are `admit.mts`'s and its stage files'. The brands are
+ * type-level here and runtime-checked where each is built (`request-check.mts`,
+ * `requirement-resolver.mts`, `establishment.mts`, `admit.mts`), so an `as`
+ * cast forges the type and nothing else.
  */
 
 import type { AuditSink } from "../audit/types.mjs";
