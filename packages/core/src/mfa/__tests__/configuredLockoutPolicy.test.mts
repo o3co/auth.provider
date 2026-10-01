@@ -122,7 +122,7 @@ describe("checkConfiguredMfaLockoutPolicy — a lockout policy a deployment may 
 		}
 	});
 
-	it("answers with the store's port check where it would refuse a maxSeconds longer than a week too", () => {
+	it("answers with the store's port check where the port check refuses a maxSeconds longer than a week as well", () => {
 		expect(() =>
 			checkConfiguredMfaLockoutPolicy({ ...DEFAULTS, baseSeconds: 700_000, maxSeconds: 650_000 }),
 		).toThrow(/^mfa\.lockout\.maxSeconds must be at least mfa\.lockout\.baseSeconds$/);

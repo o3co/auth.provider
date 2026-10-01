@@ -763,7 +763,7 @@ export const MFA_LOCKOUT_MIN_HARD_LIMIT = 10;
  * The longest `maxSeconds` a configured policy may set, a week
  * ({@link checkConfiguredMfaLockoutPolicy}).
  */
-export const MFA_LOCKOUT_MAX_BACKOFF_SECONDS = 604_800;
+export const MFA_LOCKOUT_MAX_BACKOFF_SECONDS = MFA_WEEKLY_WINDOW_MS / 1000;
 
 /**
  * Which hold refused a guessable attempt. Once fixed, no time, no settle, no
@@ -996,8 +996,8 @@ const isPositiveWhole = (value: unknown): value is number =>
  * `hardLimit` ≤ {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every duration ending
  * within the Date range. Every store operation taking a policy calls it. A
  * policy a deployment configures is checked by
- * {@link checkConfiguredMfaLockoutPolicy}, which runs this first and adds a
- * floor. Answers the policy it checked, each field read once: a store applies
+ * {@link checkConfiguredMfaLockoutPolicy}, which runs this first and adds its
+ * own bounds (a `hardLimit` floor, a `maxSeconds` cap). Answers the policy it checked, each field read once: a store applies
  * that copy, so what it applies is what was checked.
  *
  * @param setting - where the policy was read from, for the message.
