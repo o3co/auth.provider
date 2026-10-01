@@ -27,6 +27,7 @@
 
 import type { UserSession } from "../../user-sessions/types.mjs";
 import { type AcrTable, readAcrTable } from "../acr.mjs";
+import { viewOf } from "../admit.mjs";
 import {
 	type Admission,
 	isRegisteredRequirement,
@@ -523,7 +524,12 @@ export function mergeAdmission(
 	};
 	switch (expected.outcome) {
 		case "met":
-			return { outcome: "admitted", session, acr: expected.acr };
+			return {
+				outcome: "admitted",
+				session,
+				view: session === null ? null : viewOf(session),
+				acr: expected.acr,
+			};
 		case "reauthenticate":
 			return { outcome: "reauthenticate", requirement: named().name, session };
 		case "step_up": {
@@ -536,6 +542,7 @@ export function mergeAdmission(
 				outcome: "step_up",
 				requirement: name,
 				session,
+				view: viewOf(session),
 				page: stepUpPage,
 				acrValues: expected.acrValues,
 				whenStillUnmet: expected.requirement === "acr" ? "unmet" : "reauthenticate",

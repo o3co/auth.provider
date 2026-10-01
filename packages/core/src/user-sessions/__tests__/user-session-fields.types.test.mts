@@ -27,9 +27,10 @@
  * path recorded nothing. See ADR 2026-09-25-multi-factor-authentication, "What
  * the session records".
  *
- * `enrollmentFacts` alone is optional: a session without it — written before
- * the key, or by a store that drops it — says nothing, and its reader fails
- * closed on that; the contract suite holds a store to round-tripping it.
+ * `enrollmentFacts` and `renewalNonce` alone are optional: a session without
+ * one — written before the key, or by a store that drops it — says nothing,
+ * and its reader decides what that means; the contract suite holds a store to
+ * round-tripping each.
  *
  * Asserted with conditional types rather than `@ts-expect-error`. This file
  * proves anything only under the TypeScript checker; `user-sessions/__tests__`
@@ -51,8 +52,9 @@ type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, 
 type OptionalKeys<T> = { [K in keyof T]-?: IsRequiredKey<T, K> extends true ? never : K }[keyof T];
 
 describe("UserSession — what a session store answers with", () => {
-	it("has no optional key but enrollmentFacts", () => {
-		expectTypeOf<OptionalKeys<UserSession>>().toEqualTypeOf<"enrollmentFacts">();
+	it("has no optional key but enrollmentFacts and renewalNonce", () => {
+		expectTypeOf<OptionalKeys<UserSession>>().toEqualTypeOf<"enrollmentFacts" | "renewalNonce">();
+		expectTypeOf<UserSession["renewalNonce"]>().toEqualTypeOf<string | undefined>();
 		expectTypeOf<UserSession["enrollmentFacts"]>().toEqualTypeOf<
 			SessionEnrollmentFacts | undefined
 		>();

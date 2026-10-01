@@ -34,6 +34,14 @@
  * - An outage (store `create`, cookie `regenerate` / `save`, ceremony
  *   `open`) is reported once, leaves no record and the browser not signed
  *   in; an interruption's is `503 temporarily_unavailable` with no token.
+ * - A renewal moves the session it established to a regenerated id, saved
+ *   with `isAuthenticated`, `user` and `sid` as they were, a fresh renewal
+ *   nonce it answers, and no other field, writing no session record; a
+ *   session not signed in stays so. A `regenerate` or `save` that fails, or
+ *   a request with no express session, is reported once, saves nothing, and
+ *   abandons the request's cookie session. The fake session has no store,
+ *   so the suite cannot see the old id destroyed: that is express-session's
+ *   regeneration, which the session package's own tests drive.
  *
  * `createRecordingLoginCompletion` keeps that contract with made-up `sid`s
  * and can stand in for a session store that is down. Published on
@@ -58,6 +66,9 @@ import type {
 	LoginInterruptionReporter,
 	LoginInterruptionResult,
 	LoginInterruptionStep,
+	SessionRenewalReporter,
+	SessionRenewalResult,
+	SessionRenewalStep,
 } from "../../session-admission/login-completion.mjs";
 import type {
 	AdmissionDeps,
@@ -70,9 +81,11 @@ import type {
 } from "../../session-admission/requirement.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
 import { resolverForTests } from "../../session-admission/testing/resolver.mjs";
+import { isRenewalNonce, newRenewalNonce } from "../../user-sessions/renewalNonce.mjs";
 import {
 	type FakeRequestOptions,
 	type FakeResponseRecord,
+	type FakeSessionRecord,
 	fakeRequest,
 	fakeResponse,
 } from "./fake-http.mjs";
@@ -215,6 +228,58 @@ function interruptionReporter(): {
 			},
 		},
 	};
+}
+
+/** A reporter for `renewSession` that records every report. */
+function renewalReporter(): {
+	readonly reporter: SessionRenewalReporter;
+	readonly unavailable: Array<readonly [string, string]>;
+} {
+	const unavailable: Array<readonly [string, string]> = [];
+	return {
+		unavailable,
+		reporter: {
+			storeUnavailable: (store, step) => {
+				unavailable.push([store, step]);
+			},
+		},
+	};
+}
+
+/** Fields a renewal must drop: what another flow left on the session beside its signed-in state. */
+const BESIDE_SIGNED_IN = Object.freeze({
+	redirectTo: "https://rp.contract.test/after",
+	parkedByAnotherFlow: "contract-parked",
+});
+
+/**
+ * A request whose express session carries the signed-in state `completion`
+ * established — its own fields, copied from the request it signed in — and
+ * fields beside it, on a fake session that fails where `options` says.
+ */
+async function signedInRequest(
+	completion: LoginCompletion,
+	options: FakeRequestOptions = {},
+): Promise<{
+	readonly req: Request;
+	readonly session: FakeSessionRecord;
+	readonly signedIn: Readonly<Record<string, unknown>>;
+}> {
+	const signing = fakeRequest();
+	const { reporter } = establishmentReporter();
+	const result = await completion.establishSession(await establishment(), {
+		req: signing.req,
+		reporter,
+	});
+	assert.equal(
+		result.outcome,
+		"established",
+		"the completion did not establish the session to renew",
+	);
+	const signedIn = Object.freeze({ ...cookieSessionOf(signing.req) });
+	const { req, session } = fakeRequest(options);
+	Object.assign(cookieSessionOf(req) as CookieSession, signedIn, BESIDE_SIGNED_IN);
+	return { req, session, signedIn };
 }
 
 /** The express session's id: express-session's field, which core's copy of Express's types does not carry. */
@@ -502,6 +567,116 @@ export function loginCompletionContract(
 				}
 			},
 		},
+		{
+			name: "renewSession moves a signed-in session to a regenerated id, saved with isAuthenticated, user and sid as they were, a fresh renewal nonce and no other field, writing no session record",
+			run: async () => {
+				const completion = build();
+				const { req, session, signedIn: kept } = await signedInRequest(completion);
+				// A nonce an earlier renewal left: the renewal mints another.
+				const earlier = newRenewalNonce();
+				(cookieSessionOf(req) as CookieSession).renewalNonce = earlier;
+				const held = records?.();
+				const before = sessionIdOf(req);
+				const { reporter, unavailable } = renewalReporter();
+				const result: SessionRenewalResult = await completion.renewSession({ req, reporter });
+				assert.equal(result.outcome, "renewed", `answered ${result.outcome}`);
+				const { renewalNonce } = result as { readonly renewalNonce?: unknown };
+				assert.ok(isRenewalNonce(renewalNonce), "the renewal answers no renewal nonce");
+				assert.notEqual(renewalNonce, earlier, "the renewal kept the nonce an earlier one left");
+				assert.deepEqual(unavailable, [], "a renewal reported an outage");
+				assert.equal(session.regenerated, 1, "the session id is regenerated once");
+				assert.notEqual(sessionIdOf(req), before, "the session is renewed on the id it had");
+				const renewed = { ...kept, renewalNonce };
+				assert.deepEqual(
+					{ ...cookieSessionOf(req) },
+					renewed,
+					"the renewed session holds the signed-in state as it was and the nonce answered, and nothing beside them",
+				);
+				const claim = cookieClaim(req as unknown as Parameters<typeof cookieClaim>[0]);
+				assert.equal(
+					claim.authenticated,
+					true,
+					"admission does not read the renewed session as signed in",
+				);
+				assert.equal(
+					claim.subject,
+					SUBJECT,
+					"the renewed session is signed in for another subject",
+				);
+				assert.equal(claim.sid, kept.sid, "the renewed session names another session record");
+				assert.equal(
+					claim.renewalNonce,
+					renewalNonce,
+					"admission does not read the nonce the renewal answered off the renewed session",
+				);
+				assert.ok(
+					session.saved >= 1,
+					"the renewed session was not saved before the outcome was answered",
+				);
+				assert.deepEqual(session.lastSaved, renewed, "the session saved is not the renewed one");
+				if (records !== undefined) {
+					assert.equal(records(), held, "a renewal wrote a session record");
+				}
+				const again = await completion.renewSession({ req, reporter });
+				assert.equal(again.outcome, "renewed", `a second renewal answered ${again.outcome}`);
+				assert.notEqual(
+					(again as { readonly renewalNonce?: unknown }).renewalNonce,
+					renewalNonce,
+					"two renewals answered one nonce",
+				);
+			},
+		},
+		{
+			name: "renewSession leaves a session that is not signed in so: no signed-in field is written",
+			run: async () => {
+				const { req } = fakeRequest();
+				const { reporter, unavailable } = renewalReporter();
+				const result = await build().renewSession({ req, reporter });
+				assert.equal(result.outcome, "renewed", `answered ${result.outcome}`);
+				assert.deepEqual(unavailable, []);
+				const fields = cookieSessionOf(req) as CookieSession;
+				for (const field of ["isAuthenticated", "user", "sid"]) {
+					assert.equal(Object.hasOwn(fields, field), false, `the renewal wrote ${field}`);
+				}
+				assert.equal(signedIn(req), false, "a session not signed in was signed in by a renewal");
+			},
+		},
+		{
+			name: "a renewal whose regenerate or save fails, or of a request with no express session, is the cookie session's outage: reported once, nothing saved, the request's cookie session abandoned",
+			run: async () => {
+				const failures: ReadonlyArray<readonly [FakeRequestOptions, SessionRenewalStep]> = [
+					[{ regenerateFails: OUTAGE }, "regenerate"],
+					[{ saveFails: OUTAGE }, "save"],
+				];
+				for (const [options, step] of failures) {
+					const completion = build();
+					const { req, session } = await signedInRequest(completion, options);
+					const { reporter, unavailable } = renewalReporter();
+					const result = await completion.renewSession({ req, reporter });
+					assert.deepEqual(
+						result,
+						{ outcome: "unavailable", store: "cookie_session", step },
+						`a renewal whose ${step} fails is answered as the cookie session's outage`,
+					);
+					assert.deepEqual(unavailable, [["cookie_session", step]], "the outage is reported once");
+					assert.equal(session.saved, 0, `the ${step} failure saved a session`);
+					assert.equal(
+						signedIn(req),
+						false,
+						`the request's cookie session is still signed in after the ${step} failed`,
+					);
+				}
+				const { req } = fakeRequest();
+				(req as unknown as { session?: unknown }).session = undefined;
+				const { reporter, unavailable } = renewalReporter();
+				assert.deepEqual(
+					await build().renewSession({ req, reporter }),
+					{ outcome: "unavailable", store: "cookie_session", step: "regenerate" },
+					"a request with no express session is not the cookie session's outage at regenerate",
+				);
+				assert.deepEqual(unavailable, [["cookie_session", "regenerate"]]);
+			},
+		},
 	);
 	return cases;
 }
@@ -545,6 +720,9 @@ const sessionOperation = (
 		}
 	});
 
+/** The signed-in state a renewal keeps: what `establishSession` writes and `cookieClaim` reads. */
+const SIGNED_IN_FIELDS = ["isAuthenticated", "user", "sid"] as const;
+
 /** Drops the request's cookie session after an outage, so nothing is saved or named by a cookie. */
 const abandon = (req: Request): void => {
 	(req as unknown as { session?: unknown }).session = undefined;
@@ -573,7 +751,9 @@ export interface RecordingLoginCompletionOptions {
  * `sid` — a failure after the record is counted rolls it back;
  * `answerInterruption` regenerates, opens the ceremony on the new id,
  * saves and answers the requirement's `403`, with a fresh token from
- * `options.csrfGuard` when it is given one.
+ * `options.csrfGuard` when it is given one; `renewSession` regenerates,
+ * writes back the signed-in fields the session held and a fresh renewal
+ * nonce, and saves.
  */
 export function createRecordingLoginCompletion(
 	options: RecordingLoginCompletionOptions = {},
@@ -669,6 +849,26 @@ export function createRecordingLoginCompletion(
 			options.csrfGuard?.issue(res);
 			res.status(answer.status).json(answer.body);
 			return { outcome: "answered" };
+		},
+		async renewSession({ req, reporter }): Promise<SessionRenewalResult> {
+			const renewalNonce = newRenewalNonce();
+			const held = cookieSessionOf(req);
+			const kept = SIGNED_IN_FIELDS.flatMap((field) =>
+				held?.[field] === undefined ? [] : [[field, held[field]] as const],
+			);
+			const unavailable = (step: SessionRenewalStep, cause: unknown): SessionRenewalResult => {
+				reporter.storeUnavailable("cookie_session", step, cause);
+				abandon(req);
+				return { outcome: "unavailable", store: "cookie_session", step };
+			};
+			const regenerated = await sessionOperation("regenerate", req);
+			if (regenerated.failed) return unavailable("regenerate", regenerated.cause);
+			Object.assign(cookieSessionOf(req) as CookieSession, Object.fromEntries(kept), {
+				renewalNonce,
+			});
+			const saved = await sessionOperation("save", req);
+			if (saved.failed) return unavailable("save", saved.cause);
+			return { outcome: "renewed", renewalNonce };
 		},
 	};
 }

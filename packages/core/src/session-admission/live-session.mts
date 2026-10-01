@@ -16,7 +16,7 @@
 
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
- * read, the subject and the revocation boundary. The session store and the
+ * read, the subject, the renewal nonce and the revocation boundary. The session store and the
  * boundary are read here and nowhere else in admission; an outage is
  * answered through admission's `unavailable`, which logs it.
  */
@@ -24,7 +24,8 @@
 import { emitAuditEvent } from "../audit/factory.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
-import type { UserSession } from "../user-sessions/types.mjs";
+import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
+import type { UserSession, UserSessionStore } from "../user-sessions/types.mjs";
 import { nonEmptyString } from "./input-values.mjs";
 import type { CheckedRequest } from "./request-check.mjs";
 import type { Admission, AdmissionInfrastructureStore } from "./requirement.mjs";
@@ -38,6 +39,21 @@ const isValidDate = (value: unknown): value is Date =>
  * `sid`.
  */
 export type LiveSession = { readonly answer: Admission } | { readonly session: UserSession | null };
+
+/**
+ * Whether a record bound to `bound` — its renewal nonce, read once by the
+ * caller — is bound to a cookie session other than the one holding
+ * `presented`. A record without one (`undefined`, `null`) is bound to none;
+ * a value that is not a nonce binds it to no cookie session at all.
+ */
+export const renewedAway = (bound: unknown, presented: string | undefined): boolean =>
+	bound != null && (!isRenewalNonce(bound) || bound !== presented);
+
+/** The one read of a session record admission makes: the store's answer, or its rejection. */
+export const readRecord = (
+	store: UserSessionStore,
+	sid: string,
+): Promise<UserSession | null | undefined> => store.get(sid);
 
 /** Reads the session `checked.claim` names, as `admitSession`'s steps 1 to 4. */
 export async function readLiveSession(
@@ -63,7 +79,7 @@ export async function readLiveSession(
 	} else if (userSessionStore !== undefined && presented.sid !== undefined) {
 		let record: UserSession | null | undefined;
 		try {
-			record = await userSessionStore.get(presented.sid);
+			record = await readRecord(userSessionStore, presented.sid);
 		} catch (err) {
 			return { answer: unavailable("user_session" satisfies AdmissionInfrastructureStore, err) };
 		}
@@ -97,6 +113,20 @@ export async function readLiveSession(
 			},
 		});
 		return { answer: { outcome: "not_live", reason: "subject_mismatch" } };
+	}
+
+	// Step 3b: the renewal nonce. A record bound to a renewed cookie session
+	// is live only for the cookie session holding its nonce: an old express
+	// id a concurrent request saved back after the renewal holds another or
+	// none. A record without one is bound to nothing; other carriers hold no
+	// cookie session to compare.
+	if (session !== null && presented.carrier === "cookie") {
+		// Read once: a store's accessor cannot answer one value to the check
+		// and another to the comparison. A value that is not a nonce binds the
+		// record to no cookie session, whatever the cookie session holds.
+		if (renewedAway(session.renewalNonce, presented.renewalNonce)) {
+			return { answer: { outcome: "not_live", reason: "renewed" } };
+		}
 	}
 
 	// Step 4: the revocation boundary, against a live record; a token's is

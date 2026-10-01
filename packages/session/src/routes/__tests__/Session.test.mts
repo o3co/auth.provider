@@ -14,15 +14,19 @@
  * limitations under the License.
  */
 
-import type {
-	AppConfig,
-	DeploymentMode,
-	FederationTokenStore,
-	Logger,
-	SessionFederationIndex,
-	SubjectSessionIndex,
-	UserRepository,
-	UserSessionStore,
+import {
+	type AppConfig,
+	admitSession,
+	cookieClaim,
+	createInMemoryUserSessionStore,
+	type DeploymentMode,
+	type FederationTokenStore,
+	type Logger,
+	newRenewalNonce,
+	type SessionFederationIndex,
+	type SubjectSessionIndex,
+	type UserRepository,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createTestCsrfTokenSigner, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -249,7 +253,7 @@ function buildApp(
 				// is what pins "read `sid` BEFORE destroying" — a handler that
 				// reads it afterwards finds `undefined` and invalidates nothing.
 				const bag = (req as unknown as { session: Record<string, unknown> }).session;
-				for (const key of ["sid", "user", "isAuthenticated", "redirectTo"]) {
+				for (const key of ["sid", "user", "isAuthenticated", "redirectTo", "renewalNonce"]) {
 					delete bag[key];
 				}
 				cb(null);
@@ -1250,6 +1254,104 @@ describe("Session routes — POST /session/logout invalidates the session record
 		// The record still went, so the token minted from this session is dead
 		// even though the cookie survived.
 		expect(store.live.has("sid-1")).toBe(false);
+	});
+});
+
+describe("Session routes — POST /session/logout from a cookie session the record was renewed away from", () => {
+	/** A record escalated with `nonce`, as a step-up's finish records it after renewing the cookie session. */
+	async function escalated(nonce: string) {
+		const store = createInMemoryUserSessionStore();
+		await store.create({
+			sid: "sid-1",
+			sub: "u-1",
+			authTime: new Date(Date.now() - 60_000),
+			expiresAt: new Date(Date.now() + 3_600_000),
+			claims: {},
+			amr: ["pwd"],
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+		});
+		await store.recordSecondFactor("sid-1", {
+			amr: ["otp", "mfa"],
+			at: new Date(),
+			renewalNonce: nonce,
+		});
+		return store;
+	}
+	const signedIn = (renewalNonce?: string) => ({
+		isAuthenticated: true,
+		sid: "sid-1",
+		user: { id: "u-1", username: "alice" },
+		...(renewalNonce === undefined ? {} : { renewalNonce }),
+	});
+	/** How admission reads the renewed browser's cookie session over `store`. */
+	const admitVictim = (store: UserSessionStore, nonce: string) =>
+		admitSession(
+			{
+				userSessionStore: store,
+				subjectRevocation: undefined,
+				requirements: resolverForTests([], { actions: { "test.use": { grade: "use" } } }),
+				acrTable: {},
+				logger: undefined,
+				auditSink: undefined,
+			},
+			{ claim: cookieClaim({ session: signedIn(nonce) }), action: "test.use" },
+		);
+
+	it("a stale copy — no nonce, or another — destroys only its own cookie session: the renewed session stays live", async () => {
+		const nonce = newRenewalNonce();
+		for (const stale of [undefined, newRenewalNonce()]) {
+			const store = await escalated(nonce);
+			const { app, capturedSession } = buildApp({
+				userSessionStore: store,
+				initialSession: signedIn(stale),
+			});
+			const res = await logoutRequest(app);
+			expect(res.status, String(stale)).toBe(200);
+			expect(res.body).toMatchObject({ message: "Logged out successfully" });
+			expect(await store.get("sid-1"), String(stale)).toMatchObject({ renewalNonce: nonce });
+			expect(await admitVictim(store, nonce), String(stale)).toMatchObject({ outcome: "admitted" });
+			expect(capturedSession.current, String(stale)).not.toHaveProperty("isAuthenticated");
+			expect(capturedSession.current, String(stale)).not.toHaveProperty("sid");
+		}
+	});
+
+	it("the renewed session itself logs out as any session does: the record is deleted", async () => {
+		const nonce = newRenewalNonce();
+		const store = await escalated(nonce);
+		const { app } = buildApp({ userSessionStore: store, initialSession: signedIn(nonce) });
+		expect((await logoutRequest(app)).status).toBe(200);
+		expect(await store.get("sid-1")).toBeNull();
+	});
+
+	it("a record that cannot be read is logged, and the logout invalidates as before", async () => {
+		const live = makeLiveUserSessionStore(["sid-1"]);
+		const store = {
+			...live,
+			get: async () => {
+				throw new Error("store down");
+			},
+		} as unknown as UserSessionStore;
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		} as unknown as Logger & { error: ReturnType<typeof vi.fn> };
+		const { app } = buildApp({ userSessionStore: store, initialSession: signedIn(), logger });
+		expect((await logoutRequest(app)).status).toBe(200);
+		expect(live.live.has("sid-1")).toBe(false);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: "sid-1" }),
+			"logout_user_session_read_failed",
+		);
 	});
 });
 

@@ -36,11 +36,11 @@ import {
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
-import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
+import type { UserSession, UserSessionClaims, UserSessionStore } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
-import { readLiveSession } from "./live-session.mjs";
+import { readLiveSession, readRecord, renewedAway } from "./live-session.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -69,6 +69,7 @@ import {
 	copyVerdict,
 	effectiveAction,
 	isVerdict,
+	type LiveRecord,
 	type RequirementOutcome,
 	stepUpVerdict,
 } from "./requirement-verdict.mjs";
@@ -91,23 +92,27 @@ export interface CookieCarrier {
 		readonly isAuthenticated?: unknown;
 		readonly sid?: unknown;
 		readonly user?: unknown;
+		readonly renewalNonce?: unknown;
 	} | null;
 }
 
 /**
  * The cookie's claim: `authenticated` is `isAuthenticated === true`, the one
- * reading of the flag; `sid` and `subject` (`user.id`) are copied when they
- * are non-empty strings. A request without a session claims nothing.
+ * reading of the flag; `sid`, `subject` (`user.id`) and the renewal nonce a
+ * renewal wrote (`renewalNonce`) are copied when they are non-empty strings.
+ * A request without a session claims nothing.
  */
 export function cookieClaim(req: CookieCarrier): SessionClaim {
 	if (!isObject(req)) throw new RangeError("cookieClaim: the request must be an object");
 	const session = isObject(req.session) ? req.session : undefined;
 	const user = session !== undefined && isObject(session.user) ? session.user : undefined;
+	const renewalNonce = nonEmptyString(session?.renewalNonce);
 	return brandClaim({
 		authenticated: session?.isAuthenticated === true,
 		sid: nonEmptyString(session?.sid),
 		subject: nonEmptyString(user?.id),
 		carrier: "cookie",
+		...(renewalNonce === undefined ? {} : { renewalNonce }),
 	} as SessionClaim);
 }
 
@@ -232,11 +237,12 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 // ---------------------------------------------------------------------------
 
 /**
- * The view a requirement is handed: a copy of four fields, and of the
- * record's `enrollmentFacts` when it holds ones the type admits — never the
- * record.
+ * The view a requirement is handed, and an admitted or `step_up` admission
+ * carries: a copy of four fields, and of the record's `enrollmentFacts` when
+ * it holds ones the type admits — never the record. Each call is a fresh copy.
+ * @internal
  */
-const viewOf = (session: UserSession): SessionView => {
+export const viewOf = (session: UserSession): SessionView => {
 	const enrollmentFacts = readEnrollmentFacts(session.enrollmentFacts);
 	return Object.freeze({
 		sid: session.sid,
@@ -246,6 +252,35 @@ const viewOf = (session: UserSession): SessionView => {
 		...(enrollmentFacts === undefined ? {} : { enrollmentFacts: Object.freeze(enrollmentFacts) }),
 	});
 };
+
+/**
+ * Whether the record a cookie claim names is bound to another cookie
+ * session: it carries a renewal nonce the cookie session does not hold, or
+ * one that is not a nonce (the record's nonce read once). `false` for a
+ * claim that is not a cookie's, one without a `sid`, and a record that is
+ * gone or bound to none. Rejects with the store's own error. For a route
+ * that acts on the record without admitting the session — a logout — so a
+ * copy the record was renewed away from cannot end it.
+ */
+export async function cookieRenewedAway(
+	store: UserSessionStore,
+	claim: SessionClaim,
+): Promise<boolean> {
+	if (!isObject(claim) || claim.carrier !== "cookie") return false;
+	const sid = nonEmptyString(claim.sid);
+	if (sid === undefined) return false;
+	const record = await readRecord(store, sid);
+	if (record == null) return false;
+	return renewedAway(record.renewalNonce, nonEmptyString(claim.renewalNonce));
+}
+
+/** A copy of `view` with Dates of its own; the facts are frozen and shared. */
+const copyView = (view: SessionView): SessionView =>
+	Object.freeze({
+		...view,
+		authTime: new Date(view.authTime.getTime()),
+		expiresAt: new Date(view.expiresAt.getTime()),
+	});
 
 /**
  * Whether the session `request.claim` names may proceed with
@@ -258,7 +293,9 @@ const viewOf = (session: UserSession): SessionView => {
  *    `not_live` (`gone`). Without a store the session is `null` and the
  *    requirements decide what that means.
  * 3. subject: a claim's subject that is not the record's → `not_live`
- *    (`subject_mismatch`), logged and audited.
+ *    (`subject_mismatch`), logged and audited. Then, for a cookie claim, a
+ *    record that carries a renewal nonce the cookie session does not hold →
+ *    `not_live` (`renewed`).
  * 4. revocation boundary, for a live record; skipped for a token carrier,
  *    whose boundary `verifyJwt` reads.
  * 5. requirements, for `use` and `credential_change`: each `admit` in
@@ -284,34 +321,46 @@ export async function admitSession(
 		return { outcome: "unavailable", store };
 	};
 
-	// Steps 1 to 4: the claim, the live read, the subject, the revocation boundary.
-	const live = await readLiveSession(checked, unavailable);
-	if ("answer" in live) return live.answer;
-	const { session } = live;
+	// Steps 1 to 4: the claim, the live read, the subject and the renewal nonce, the revocation boundary.
+	const read = await readLiveSession(checked, unavailable);
+	if ("answer" in read) return read.answer;
+	const { session } = read;
+	// The record is read into one view; each requirement is handed its own
+	// copy of it, so what one does to its Dates reaches neither the next nor
+	// the consumer.
+	const live: LiveRecord | null = session === null ? null : { session, view: viewOf(session) };
 
 	// Step 5: the requirements, by the action's effective grade: only the
 	// issued remediation keeps its grade and skips them.
 	const requirements = [...resolver.entries()];
 	const effective = effectiveAction(requirements, checked.action, logger);
 	// A token carrier's authentication is the token's own, whether or not a
-	// record was read: the record is only the view.
+	// record was read: the record is only the view. Each reading is a frozen
+	// copy of its own: the merge's here, and each requirement's below, so what
+	// one does to its copy reaches no other.
 	const authentication =
 		presented.carrier === "token"
 			? requirementSessionFromAmr(presented.tokenAmr)
 			: requirementSession(session);
 	let verdict: RequirementOutcome = { outcome: "met" };
 	if (effective.grade !== "remediation") {
-		const input: RequirementInput = Object.freeze({
-			session: session === null ? null : viewOf(session),
-			authentication,
+		const shared = {
 			carrier: presented.carrier,
 			// The record's sub when read — step 3 made it the claim's — else the claim's.
 			subject: session === null ? presented.subject : session.sub,
 			action: effective,
 			asks,
 			now,
-		});
+		};
 		for (const [name, requirement] of requirements) {
+			const input: RequirementInput = Object.freeze({
+				...shared,
+				authentication:
+					presented.carrier === "token"
+						? requirementSessionFromAmr(presented.tokenAmr)
+						: requirementSession(session),
+				session: live === null ? null : copyView(live.view),
+			});
 			let answer: unknown;
 			try {
 				answer = await requirement.admit(input);
@@ -330,7 +379,7 @@ export async function admitSession(
 			if (answer.outcome === "met") continue;
 			verdict =
 				answer.outcome === "step_up"
-					? stepUpVerdict(name, requirement, answer.whenStillUnmet, session, deps)
+					? stepUpVerdict(name, requirement, answer.whenStillUnmet, live, deps)
 					: { outcome: answer.outcome, requirement: name };
 			break;
 		}
@@ -357,10 +406,10 @@ export async function admitSession(
 
 	// Step 7: the merge.
 	return merge(verdict, selection, {
-		session,
+		live,
 		noneConfigured,
 		requirements,
-		// What step 5 handed the requirements, the same reading the selection took.
+		// What step 5 handed the requirements, from a reading no requirement was handed.
 		held: authentication?.amr ?? [],
 		table: checked.acrTable,
 	});

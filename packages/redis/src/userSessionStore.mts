@@ -19,9 +19,12 @@ import {
 	type CreateUserSessionInput,
 	checkSecondFactorEvent,
 	consoleLogger,
+	expectsRenewalNonce,
+	isRenewalNonce,
 	type Logger,
 	loggableError,
 	readEnrollmentFacts,
+	readRenewalNonces,
 	recordableEnrollmentFacts,
 	recordableSessionAuthentication,
 	type SessionAuthentication,
@@ -85,6 +88,12 @@ interface Envelope {
 	 * release wrote (which also reads one that has it, ignoring the key).
 	 */
 	enrollmentFacts?: SessionEnrollmentFacts;
+	/**
+	 * The renewal nonce the last escalation carried (the MFA ADR's D27). Left
+	 * out until one is recorded, and absent in an envelope an older release
+	 * wrote (which also reads one that has it, ignoring the key).
+	 */
+	renewalNonce?: string;
 }
 
 /**
@@ -152,7 +161,9 @@ const isValidEnvelope = (v: unknown): v is Envelope => {
 		(e.amr === undefined || isStringList(e.amr)) &&
 		isValidEnvelopeAuthentication(e.authentication) &&
 		// Absent, or the two facts: anything else is corrupt, never read as none.
-		(e.enrollmentFacts === undefined || readEnrollmentFacts(e.enrollmentFacts) !== undefined)
+		(e.enrollmentFacts === undefined || readEnrollmentFacts(e.enrollmentFacts) !== undefined) &&
+		// Absent, or a nonce: anything else is corrupt, never read as unbound.
+		(e.renewalNonce === undefined || isRenewalNonce(e.renewalNonce))
 	);
 };
 
@@ -203,6 +214,7 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 	...(e.enrollmentFacts === undefined
 		? {}
 		: { enrollmentFacts: readEnrollmentFacts(e.enrollmentFacts) }),
+	...(e.renewalNonce === undefined ? {} : { renewalNonce: e.renewalNonce }),
 });
 
 /**
@@ -230,8 +242,11 @@ const RECORD_SECOND_FACTOR_ATTEMPTS = 5;
  *   `sessionAfterSecondFactor` (which first splits a session recorded without
  *   `authentication`), and writes it with the client's `replaceIfUnchanged`
  *   (`KEEPTTL`, only while the stored bytes are the ones read), re-reading on
- *   a loss at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times. Only `amr` and
- *   the `authentication` fields this release knows are rewritten; everything
+ *   a loss at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times, and answering
+ *   `null` when the envelope read holds a renewal nonce the event does not
+ *   expect (`expectsRenewalNonce`). Only `amr`, the
+ *   `authentication` fields this release knows, and `renewalNonce` when the
+ *   event carries one are rewritten; everything
  *   else, keys a newer release added included, is written back as read, so a
  *   step-up on a replica not yet upgraded loses nothing a newer one recorded.
  * - `delete`: `DEL`.
@@ -342,12 +357,16 @@ export function createRedisUserSessionStore(
 			// its time judged on the host's clock.
 			const nowMs = Date.now();
 			checkSecondFactorEvent(event, nowMs);
+			const nonces = readRenewalNonces(event);
 			for (let attempt = 0; attempt < RECORD_SECOND_FACTOR_ATTEMPTS; attempt++) {
 				const raw = await opts.client.get(k(sid));
 				if (raw === null) return null;
 				// Read as `get` reads: a corrupt envelope is a session that is gone.
 				const stored = readEnvelope(sid, raw);
 				if (stored === null || stored.expiresAtMs <= Date.now()) return null;
+				// Judged on the bytes the compare-and-set below writes over: a
+				// completion another one overtook finds that one's nonce.
+				if (!expectsRenewalNonce(stored.renewalNonce, nonces)) return null;
 				const next = sessionAfterSecondFactor(fromEnvelope(stored), event, nowMs);
 				if (next === null) return null;
 				// The known fields are rewritten; what a newer release added beside
@@ -359,6 +378,8 @@ export function createRedisUserSessionStore(
 						...stored.authentication,
 						...toEnvelopeAuthentication(next.authentication),
 					},
+					// In the same write as the escalation; an event without one keeps it.
+					...(nonces.renewalNonce === undefined ? {} : { renewalNonce: nonces.renewalNonce }),
 				};
 				if (await opts.client.replaceIfUnchanged(k(sid), raw, JSON.stringify(written))) {
 					return fromEnvelope(written);

@@ -112,6 +112,8 @@ export interface SessionClaim {
 	readonly carrier: "cookie" | "code" | "link" | "token";
 	/** A token carrier only: the `amr` the verified token carries, for the requirements; absent when the token carries none. */
 	readonly tokenAmr?: readonly string[];
+	/** A cookie carrier only: the cookie session's renewal nonce, compared with the record's; absent when it holds none. */
+	readonly renewalNonce?: string;
 }
 
 /** What the request asks beyond the action: `acr_values`, at `/authorize` only. */
@@ -823,12 +825,15 @@ export type Admission =
 	| {
 			readonly outcome: "admitted";
 			readonly session: UserSession | null;
+			/** Admission's view of the record, equal to what the requirements are handed; `null` without a record. */
+			readonly view: SessionView | null;
 			readonly acr: string | undefined;
 	  }
 	| { readonly outcome: "unauthenticated" }
 	| {
 			readonly outcome: "not_live";
-			readonly reason: "no_subject" | "no_sid" | "gone" | "subject_mismatch";
+			/** `renewed`: the record is bound to another cookie session, one a renewal moved it to. */
+			readonly reason: "no_subject" | "no_sid" | "gone" | "subject_mismatch" | "renewed";
 	  }
 	| { readonly outcome: "revoked" }
 	| {
@@ -840,6 +845,8 @@ export type Admission =
 			readonly outcome: "step_up";
 			readonly requirement: string;
 			readonly session: UserSession;
+			/** Admission's view of the record, equal to what the requirements are handed. */
+			readonly view: SessionView;
 			/** The requirement's page as registered: `href` is where a consumer sends the browser. */
 			readonly page: RegisteredStepUpPage;
 			readonly acrValues: readonly string[];
