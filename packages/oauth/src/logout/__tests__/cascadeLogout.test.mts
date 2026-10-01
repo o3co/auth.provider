@@ -9,8 +9,8 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
 import {
-	cascadeLogout,
 	type CascadeLogoutOptions,
+	cascadeLogout,
 	cascadeLogoutFrom,
 	cascadeLogoutUnmarked,
 } from "../cascadeLogout.mjs";

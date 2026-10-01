@@ -45,9 +45,9 @@ import accepts from "accepts";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
-import { cascadeLogout } from "../logout/cascadeLogout.mjs";
+import { cascadeLogoutFrom } from "../logout/cascadeLogout.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
-import { beginLogout } from "../logout/sessionEnd.mjs";
+import { beginLogout, type LogoutLeftState } from "../logout/sessionEnd.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
@@ -205,7 +205,7 @@ export interface LogoutRouterOptions {
 	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
 	/** Override for unit tests. Defaults to the global `fetch`. */
 	fetchImpl?: typeof fetch;
-	/** Structured logger shared with broadcastBackchannelLogout and cascadeLogout. */
+	/** Structured logger shared with broadcastBackchannelLogout and the cascade. */
 	logger?: Logger;
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSink;
@@ -265,7 +265,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		error: unknown,
 		/** What the failure left of the session, and a second store that failed in the same read, already projected. */
 		also: {
-			readonly session?: string;
+			readonly left?: LogoutLeftState;
 			readonly alsoUnavailable?: { readonly store: string; readonly err: unknown };
 		} = {},
 	): void => {
@@ -720,18 +720,30 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// it left of the session.
 		const begun = await beginLogout(opts, sid, session.expiresAt);
 		if (begun.outcome === "unavailable") {
-			const { store, step, session: left, error, alsoUnavailable } = begun.outage;
-			logoutStoreUnavailable(opts.logger ?? console, store, step, error, {
-				session: left,
-				...(alsoUnavailable
+			const { outage } = begun;
+			logoutStoreUnavailable(opts.logger ?? console, outage.store, outage.step, outage.error, {
+				left: outage.left,
+				...("alsoUnavailable" in outage && outage.alsoUnavailable
 					? {
 							alsoUnavailable: {
-								store: alsoUnavailable.store,
-								err: loggableError(alsoUnavailable.error),
+								store: outage.alsoUnavailable.store,
+								err: loggableError(outage.alsoUnavailable.error),
 							},
 						}
 					: {}),
 			});
+			// A begin that left state behind is the logout's first step failing,
+			// audited as the cascade's step 1 has always been.
+			if (outage.left !== "unchanged") {
+				emitAuditEvent(opts.auditSink, {
+					timestamp: new Date(),
+					type: "logout.cascade_failed",
+					subject: sub ?? undefined,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { sid, step: 1, store: outage.store, left: outage.left },
+				});
+			}
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
@@ -798,10 +810,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		}
 
 		// Step 6: Cascade logout.
-		const cascade = await cascadeLogout({
+		const cascade = await cascadeLogoutFrom(begun, {
 			sid,
-			expiresAt: session.expiresAt,
-			familyIds: begun.familyIds,
 			refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
 			federationTokenStore: opts.federationTokenStore,
 			userSessionStore: opts.userSessionStore,
@@ -815,7 +825,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// The outage's one error-level line. Which step stopped the cascade,
 			// and how many operations failed there; the first failure's
 			// projection (each step-2 failure also has its own structured warn
-			// line from `cascadeLogout`).
+			// line from the cascade).
 			(opts.logger ?? console).error(
 				{
 					store: "logout_cascade",

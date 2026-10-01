@@ -773,12 +773,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						return { result: refusal };
 					}
 					if (joined.outcome === "unavailable") {
-						storeUnavailable(
-							joined.store,
-							joined.store === "session_family_index" ? "add" : "register",
-							authenticatedClientId,
-							joined.error,
-						);
+						storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
 						return {
 							result: {
 								status: 503,
