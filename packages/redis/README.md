@@ -627,7 +627,9 @@ the credential's whole binding and the SHA-256 of the exact credential
 envelope written with it (under `allow-plaintext`, that digest is carried as
 `bind`). The script that writes the credential writes or removes `ext` in the
 same step, so a rewrite of the credential by any release orphans the `ext`
-beside it. An `ext` that is absent, too long, does not open beside its
+beside it — except, under `allow-plaintext`, where a credential's spelling is
+deterministic, a byte-identical rewrite by a release that does not know `ext`:
+the same token, which keeps its end. An `ext` that is absent, too long, does not open beside its
 credential or does not parse reads as absent, and the credential reads as it
 would without it. Unknown keys are ignored on read and dropped on every
 rewrite, so every key must be safe to lose: an absent `effectiveExpiresAt`

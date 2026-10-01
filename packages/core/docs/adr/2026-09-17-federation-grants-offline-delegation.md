@@ -2192,10 +2192,13 @@ amendment) is the first key. Later additive facts go here, not into the tuple.
   preparation, and the script that sets the credential sets `ext` or removes
   it in the same step. So `ext` opens only beside that envelope. It does not
   open beside another grant's credential, beside an earlier or later one of
-  its own grant, or in place of a credential. Any rewrite of the credential,
-  by a release that does not know `ext` included, orphans it, since every seal
-  draws a new IV. Under `allow-plaintext`, `ext` carries that digest as `bind`
-  and is compared with the credential read in the same snapshot. Binding to
+  its own grant, or in place of a credential. Any rewrite of a sealed
+  credential, by a release that does not know `ext` included, orphans it,
+  since every seal draws a new IV. Under `allow-plaintext`, `ext` carries that
+  digest as `bind` and is compared with the credential read in the same
+  snapshot; a plaintext credential's spelling is deterministic, so a
+  byte-identical rewrite (the same token) by a release that does not know
+  `ext` leaves it readable, and plaintext authenticates nothing. Binding to
   the record's `version` was considered and rejected: activation writes
   `version + 1` without comparing it, so a refresh or a reauthorization
   between the preparation and the script would orphan a fresh `ext`.
