@@ -15,8 +15,10 @@
  */
 
 /**
- * The callback's last answer, for the login and the link alike: the redirect
- * the federation's redirect policy resolves from the start's `redirectTo`.
+ * The federation routes' answers that rest on a provider's redirect policy:
+ * the callback's last answer, for the login and the link alike (the redirect
+ * the policy resolves from the start's `redirectTo`), and the one answer for
+ * a provider with no policy, which the start gives too.
  */
 
 import type { FederationProvider, Logger } from "@o3co/auth-provider-core";
@@ -24,6 +26,22 @@ import type { Response } from "express";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import { logMisconfigured } from "./FederationLog.mjs";
+
+/**
+ * A provider with no redirect policy: a composition fault, `500
+ * internal_error`, logged once as `federation_misconfigured` with `context`.
+ */
+export const answerNoRedirectPolicy = (
+	res: Response,
+	log: Logger,
+	context: Readonly<Record<string, unknown>> = {},
+): void => {
+	logMisconfigured(log, "no_redirect_policy", context);
+	res.status(500).json({
+		error: "internal_error",
+		error_description: "redirect policy not registered for provider",
+	});
+};
 
 /**
  * Answer with the provider's policy's redirect. A provider with no policy is
@@ -39,11 +57,7 @@ export const redirectAfterCallback = (
 ): void => {
 	const policy = ctx.federationRedirectPolicyResolver.get(provider.name);
 	if (!policy) {
-		logMisconfigured(log, "no_redirect_policy");
-		res.status(500).json({
-			error: "internal_error",
-			error_description: "redirect policy not registered for provider",
-		});
+		answerNoRedirectPolicy(res, log);
 		return;
 	}
 	const redirect = policy.resolveCallbackRedirect({ redirectTo });

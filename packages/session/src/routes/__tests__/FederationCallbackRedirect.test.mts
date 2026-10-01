@@ -26,7 +26,10 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import type { FederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
-import { redirectAfterCallback } from "#/routes/FederationCallbackRedirect.mjs";
+import {
+	answerNoRedirectPolicy,
+	redirectAfterCallback,
+} from "#/routes/FederationCallbackRedirect.mjs";
 
 const provider = { name: "test" } as FederationProvider;
 
@@ -198,6 +201,33 @@ describe("redirectAfterCallback", () => {
 		expect(res.status).toBe(599);
 		expect(thrown).toMatchObject({ message: "policy broke" });
 		for (const level of ["trace", "debug", "info", "warn", "error", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
+	});
+});
+
+describe("answerNoRedirectPolicy", () => {
+	it("answers 500 internal_error and logs one federation_misconfigured line with the caller's context", async () => {
+		const logger = spyLogger();
+		const app = express();
+		app.get("/start", (_req, res) => {
+			answerNoRedirectPolicy(res, logger as unknown as Logger, { provider: "test" });
+		});
+
+		const res = await request(app).get("/start");
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toBe("application/json; charset=utf-8");
+		expect(res.text).toBe(
+			'{"error":"internal_error","error_description":"redirect policy not registered for provider"}',
+		);
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error.mock.calls[0]).toEqual([
+			{ provider: "test", reason: "no_redirect_policy" },
+			"federation_misconfigured",
+		]);
+		expect(Object.keys(logger.error.mock.calls[0]?.[0] as object)).toEqual(["provider", "reason"]);
+		for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
 			expect(logger[level]).not.toHaveBeenCalled();
 		}
 	});

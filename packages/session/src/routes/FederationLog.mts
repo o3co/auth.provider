@@ -103,8 +103,9 @@ export const logMisconfigured = (
 /**
  * The warn line a best-effort step that failed is logged as,
  * `federation_cleanup_failed`: `store`, `step` and the error's projection.
- * {@link cleanUp} emits it for the steps this router runs itself; the login
- * tail's reporter emits it for the ones `establishSession` runs.
+ * {@link cleanUp} emits it for a step that throws; a step that returns its
+ * error (the callback's discard of a refused transaction) calls it directly;
+ * the login tail's reporter emits it for the steps `establishSession` runs.
  */
 export const logCleanupFailed = (
 	log: Logger,
@@ -117,8 +118,8 @@ export const logCleanupFailed = (
 };
 
 /**
- * Run one best-effort cleanup step — a rollback after a failed link, the
- * discard of a refused transaction. A step that fails is one
+ * Run one best-effort cleanup step that throws when it fails, such as a
+ * rollback after a failed link. A step that fails is one
  * {@link logCleanupFailed} line; the request's own answer stands either way.
  */
 export const cleanUp = async (

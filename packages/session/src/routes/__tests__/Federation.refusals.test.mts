@@ -103,12 +103,15 @@ function buildApp({
 	logger,
 	trail,
 	dropThrows = false,
+	withoutPolicies = false,
 }: {
 	failDestroy?: boolean;
 	logger?: ReturnType<typeof spyLogger>;
 	trail?: string[];
 	/** Make dropping the request's session throw. */
 	dropThrows?: boolean;
+	/** Register no redirect policy for any provider. */
+	withoutPolicies?: boolean;
 } = {}) {
 	const records = new Map<string, unknown>();
 	const backing = makeRecordStore(records);
@@ -162,10 +165,14 @@ function buildApp({
 				["apple", makeFormPostProvider(exchangeCode)],
 				["query-idp", makeQueryProvider()],
 			]),
-			federationRedirectPolicyResolver: new Map([
-				["apple", makePermissivePolicy()],
-				["query-idp", makePermissivePolicy()],
-			]) as never,
+			federationRedirectPolicyResolver: new Map(
+				withoutPolicies
+					? []
+					: [
+							["apple", makePermissivePolicy()],
+							["query-idp", makePermissivePolicy()],
+						],
+			) as never,
 			providerCallbackUrls: new Map([
 				["apple", "https://app.example.com/oauth/federation/apple/callback"],
 				["query-idp", "https://app.example.com/oauth/federation/query-idp/callback"],
@@ -195,6 +202,32 @@ async function startFormPost(app: express.Express) {
 	const id = decodeURIComponent(header.split(";")[0]?.slice(COOKIE_NAME.length + 1) ?? "");
 	return { id, cookie: `${COOKIE_NAME}=${encodeURIComponent(id)}` };
 }
+
+describe("the start refuses a redirect_to it has no policy to judge", () => {
+	it("answers exactly 500 internal_error and logs one federation_misconfigured line naming the provider", async () => {
+		const logger = spyLogger();
+		const { app, records } = buildApp({ withoutPolicies: true, logger });
+
+		const res = await request(app).get("/oauth/federation/query-idp?redirect_to=%2Fdashboard");
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toBe("application/json; charset=utf-8");
+		expect(res.text).toBe(
+			'{"error":"internal_error","error_description":"redirect policy not registered for provider"}',
+		);
+		expect(res.headers.location).toBeUndefined();
+		expect(records.size).toBe(0);
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error.mock.calls[0]).toEqual([
+			{ provider: "query-idp", reason: "no_redirect_policy" },
+			"federation_misconfigured",
+		]);
+		expect(Object.keys(logger.error.mock.calls[0]?.[0] as object)).toEqual(["provider", "reason"]);
+		for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
+	});
+});
 
 describe("the start refuses a redirect_to that is not one string", () => {
 	it("answers 400 invalid_redirect for a repeated redirect_to, and starts nothing", async () => {
