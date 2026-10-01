@@ -789,18 +789,44 @@ wires it.
   minutes (`DEFAULT_CLOCK_SKEW_MS`) — when a release is refused although the
   user changed the password, the change came within those five minutes:
   have them change it again — and lifts the hard hold once every guessable
-  factor bound before it has been rebound; the operator reset ends every
-  hold. The MFA module's entry that authorizes and applies a recovery comes
-  with step 12's release route and reset, not this build. A backoff and a
-  weekly hold end on their own time; until that entry, the hard hold needs
-  the interim manual remedy below.
-  **Interim manual remedy** — after confirming the account
-  holder out of band, as for any reset: on the Redis transaction store
-  (`redisMfaTransactionStoreModule`), delete the subject's two lock keys,
-  `<keyPrefix>lock:{<s>}` and `<keyPrefix>week:{<s>}` (`mfat:` by default), where `<s>` is the subject as base64url of its JSON — `node -e 'console.log(Buffer.from(JSON.stringify(process.argv[1])).toString("base64url"))' <subject>` (`DEL` both); on the in-process memory store, restart the
-  process, which forgets every subject's lock and every MFA transaction —
-  and every subject's generation and recovery-set floor with them.
-  Neither touches the factors or D25's email-proof flag (`proof:{<s>}`). A right
+  factor bound before it has been rebound, more than five minutes after the
+  hold began; the operator reset ends every hold. The MFA module mints the
+  authorization when a recovery code or a passkey verifies — at a login, or a
+  step-up — for that session, lasting `mfa.manage.maxAgeSeconds`, and the
+  user's page releases it with `POST /session/mfa/lock/release` (the MFA
+  package README, "The lock's release"). The page's order is: change the
+  password, sign in with a recovery code or a passkey, replace every TOTP or
+  email factor where the hard hold stands, then release — one code spent. A
+  release before the replacement gives the week back and answers that the
+  hard hold stands; the next release needs another code. Without a sessions
+  boundary wired (`subjectRevocation`; the boot warns once,
+  `mfa_lock_release_unavailable`) a release can lift the hard hold on a
+  rebind but never give the week or a backoff back early: those end on their
+  own time, or at the operator reset. A host that lets a session that has
+  not passed its second factor sign out everywhere hands whoever holds the
+  password the boundary a release asks for; require the second factor for it.
+  **The operator reset** — after confirming the account holder out of band,
+  as the reset is the account-takeover path otherwise: install
+  `mfaResetModule` (with the oauth package's `subjectRevocationServiceModule`)
+  and call `handle.components.mfaReset.resetMfaForSubject(subject, { requireEmailProof?, federationGrants?, requestedBy? })`.
+  It ends all of the user's logins — every session and token, and the
+  federation grants as `federationGrants` asks and policy allows — then,
+  under the subject's lease, resets the lock state whole, removes every factor
+  record and clears the enrollment witness, in that order. Tell the user they
+  will sign in again and enroll again. It answers a report: `complete: false`
+  names where it stopped (`stoppedAt`: `email_proof`, `sessions`, `lease`,
+  `lock`, `factors`, `witness`) — fix what it names and run it again; it is
+  idempotent. `requireEmailProof: true` needs a mail sender (else a
+  `RangeError`, nothing done) and an account with an address, which the
+  provider cannot read by subject: check the address in the Store first.
+  Audited `mfa.reset`; logged `mfa_reset`, or `mfa_reset_incomplete` at warn.
+  An `mfa_subject_lease_overrun` line for the same `sub` with
+  `route: "enrollment"` around the reset is a binding whose write stalled past
+  its lease and may have landed after the reset: run the reset again.
+  The reset leaves D25's email-proof flag (`proof:{<s>}`) to the next first
+  binding. On the in-process memory store a restart forgets every subject's
+  lock — and every MFA transaction, generation and recovery-set floor — as
+  well as that flag: do not use it where operator resets are used. A right
   code whose write was lost, or that met a store outage after it was checked,
   never counts; an outage before a code is checked does — a sustained
   transaction-store outage can push users toward a hold, fail-closed.
@@ -1349,8 +1375,13 @@ stream — its level is fixed at `info`.
 | audit `mfa.first_binding_conflict` (`subject`, `details.kind`, `details.removed`) | `mfa/src/routes.mts` | two first bindings of one subject — at a login or from a signed-in session — stood at once, and this one dropped its own: both may, each answered — at a login `401 login_required`, from a signed-in session `409 mfa_enrollment_conflict`, the session standing — or `503` when it could not remove its factor. Once is a user with two tabs; a run for one `subject` is whoever holds that user's password racing the owner's first binding. It gains no way in, but it hinders the owner's: the remedy is a password change, which is the Store's. **`removed: false`** means the factor could not be removed after three tries, so a factor of a third party who holds the password may still stand. Pick it up through the notice wiring (the audit event to an operator — see "Notices to the account holder" under the MFA section), then remove the subject's factors, or set D25's flag and reset them (the operator reset, `resetMfaForSubject` with `requireEmailProof: true`). The same factor is logged `mfa_first_binding_factor_standing` |
 | `mfa_email_proof_unprovable` (warn — `sub`, `reason`: `no_sender`, `no_address` or `unreadable_address`; per such login, per admission of a first binding in a session, and per login reopened for a first binding after a recovery code) | `mfa/src/requirement.mts`, `mfa/src/routes.mts` | a first binding asks the account-email proof and nobody can give it — no mail sender (`always`, or D25's flag), an account without an address (`always`, or the flag), or one whose address the provider cannot read (any of those, or `when-mail` with a sender; see the spellings refused on purpose, under "The email factor's address"): the user cannot bind — a factor, a passkey or a linked identity — and cannot sign in under `required`. Fix the account's address in the Store, or wire a mail sender |
 | `mfa_mail_refused_at_limit` (warn — `route`, `purpose`, `kind`, `cleared`) | `mfa/src/routes.mts` | the mail sender refused a code at its limit, and the user was answered `429`. A run for one account, or overall, is the limit working — or a user resending — and the sender's to tune |
-| audit `mfa.locked` (`details.kind`, `purpose`, `hold`) and `mfa.locked.first` (with `binding`) | `mfa/src/routes.mts` | a guessable second factor was held by the subject lock (`429 mfa_locked`): someone holding the account's password is guessing its second factor, or the user mistyped often. `mfa.locked.first` is the first refusal of an episode — notify the account holder of it (the MFA ADR's D24). Tell them to sign in with a recovery code or a passkey, and to change the password. That locks out whoever holds it, but does not end the hold (D21): a hold ends on its own time, and the hard hold only through the operator (the interim manual remedy; step 12's reset). `hold: "hard"` is `mfa.lockout.hardLimit` failures in a row. Many subjects at once is a credential-stuffing run that got past the passwords |
-| `mfa_subject_lock_unsettled` (warn — `sub`, `kind`, `step`: `settleSubjectAttempt` or `noteExemptSuccess`, `outcome`, the error's projection) | `mfa/src/module.mts` (the lock in `mfa/src/lock.mts`) | the transaction store did not take how a second-factor attempt ended: the answer stood, and the attempt still counts as a failure — or an exempt proof did not end the run. Each one is a counted failure, the user's own successes included: a run of them holds healthy users after `mfa.lockout.threshold` logins, and the week after `weeklyBudget`. **Alert on its rate**, not on single lines. Remedy: repair the transaction store (see the MFA stores' outage row); then lift the holds it caused with the interim manual remedy under "Multi-factor authentication" (each `sub` named), until the authorized-recovery entry and the operator reset exist (step 12) |
+| audit `mfa.locked` (`details.kind`, `purpose`, `hold`) and `mfa.locked.first` (with `binding`) | `mfa/src/routes.mts` | a guessable second factor was held by the subject lock (`429 mfa_locked`): someone holding the account's password is guessing its second factor, or the user mistyped often. `mfa.locked.first` is the first refusal of an episode — notify the account holder of it (the MFA ADR's D24). Tell them to sign in with a recovery code or a passkey, and to change the password. That locks out whoever holds it, but does not end the hold (D21): a backoff or the week ends on its own time, or at the user's release after the password change and a recovery code or a passkey; the hard hold at the user's release once every guessable factor is replaced, or at the operator reset (`resetMfaForSubject`). `hold: "hard"` is `mfa.lockout.hardLimit` failures in a row. Many subjects at once is a credential-stuffing run that got past the passwords |
+| audit `mfa.lock.recovered` (`details.operation: "recover"`, `generation`, `cleared`) and `mfa_lock_released` (info — `sub`, `generation`, `applied`, `hold`) | `mfa/src/lockRelease.mts` | the user released their own lock after a recovery code or a passkey: `cleared.week` and `cleared.run` the attempts given back, `cleared.hard` the hard hold lifted on a rebind. Notify the account holder: a release they did not make means someone holds their password and an exempt factor. `hold: "hard"` on the log line means the hard hold still stands — the user has not yet replaced every TOTP or email factor |
+| `mfa_lock_release_refused` (info — `sub`, `reason`) | `mfa/src/lockRelease.mts` | a release refused: `exempt_proof_required` (no recovery code or passkey verified in that session within `mfa.manage.maxAgeSeconds`), `not_revoked_since` (no revocation of the subject's sessions more than five minutes after the attack's first failure — have the user change the password again), `no_revocation_boundary` (no `subjectRevocation` wired: only time or the operator reset gives the week back) |
+| `mfa_lock_recovery_unauthorized` (warn — `route`, `sub`, the error's projection) | `mfa/src/routes.mts` | a recovery code or a passkey verified, and the transaction store did not record the authorization a release takes: the login or step-up stood, and that session's release is `403`. Repair the transaction store (the MFA stores' outage row); the user verifies again |
+| `mfa_lock_release_unavailable` (warn — `slot: "subjectRevocation"`, once at boot) | `mfa/src/module.mts` | no subjects' sessions boundary is wired, so no release can show a revocation came after an attack: a user's release lifts the hard hold on a rebind but never gives the week or a backoff back early. Wire `subjectRevocation`, and have the Store call `revokeAllForSubject` on every password change |
+| audit `mfa.reset` (`details.by: "operator"`, `kinds`, `count`, `requireEmailProof`, `sessions`, `complete`, `requestedBy`), `mfa_reset` (info) and `mfa_reset_incomplete` (warn — `sub`, `stoppedAt`, the error's projection) | `mfa/src/reset.mts` | an operator reset ran (see "The operator reset" under "Multi-factor authentication"). Notify the account holder from `mfa.reset`. `complete: false` / `mfa_reset_incomplete`: it stopped at `stoppedAt` — `sessions`, a revocation not complete (the sessions' report says which store); `lease`, another write held the subject's factors past its wait; `lock` or `factors`, a store outage; `witness`, the directory refused `markMfaEnrolled` — fix it and run the reset again |
+| `mfa_subject_lock_unsettled` (warn — `sub`, `kind`, `step`: `settleSubjectAttempt` or `noteExemptSuccess`, `outcome`, the error's projection) | `mfa/src/module.mts` (the lock in `mfa/src/lock.mts`) | the transaction store did not take how a second-factor attempt ended: the answer stood, and the attempt still counts as a failure — or an exempt proof did not end the run. Each one is a counted failure, the user's own successes included: a run of them holds healthy users after `mfa.lockout.threshold` logins, and the week after `weeklyBudget`. **Alert on its rate**, not on single lines. Remedy: repair the transaction store (see the MFA stores' outage row); then lift the holds it caused with the operator reset under "Multi-factor authentication" (each `sub` named), or let each user release theirs |
 | `mfa_email_proof_flag_uncleared` (warn — `sub`, the error's projection) | `mfa/src/routes.mts` | a first binding given with the account-email proof could not clear the operator reset's flag (`requireEmailProof`): the binding stands, and the flag asks for the proof at that subject's next first binding too |
 | audit `device.rate_limited`; log `device_verification_rate_limited` (warn) | `device-grant/src/verificationEndpoint.mts` | an **account** (the key is the authenticated subject) is guessing device codes |
 | audit `device.decision_outcome_unknown` | `device-grant/src/verificationEndpoint.mts` | an approval or a denial met a device-code store outage and was answered `503`, but the store may have recorded it before the reply was lost. It carries the subject who decided and the `action`, but no client: the record could not be read. Read beside `device_verification_store_unavailable`: a device polling afterwards may have received tokens that no `device.approved` accounts for |
@@ -1489,7 +1520,8 @@ check this page, so when the two disagree, the constant is right:
 `logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
 `mfa.challenge.sent`, `mfa.email_address_mismatch`,
 `mfa.enrollment_state_inconsistent`,
-`mfa.factor.enrolled`, `mfa.factor.removed`, `mfa.first_binding_conflict`, `mfa.locked`,
+`mfa.factor.enrolled`, `mfa.factor.removed`, `mfa.first_binding_conflict`,
+`mfa.lock.recovered`, `mfa.locked`,
 `mfa.locked.first`, `mfa.recovery_code.used`,
 `mfa.recovery_codes.generated`, `mfa.reset`, `mfa.verified`,
 `mfa.verify.failure`,
