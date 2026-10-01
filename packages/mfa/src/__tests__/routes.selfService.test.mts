@@ -533,17 +533,30 @@ describe("the enroll transaction", () => {
 		expect(create).not.toHaveBeenCalled();
 	});
 
-	it("refuses a first factor 409 to a subject whose only records do not count, opening nothing", async () => {
-		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+	it("binds a first factor for a subject whose only records do not count, and replaces its recovery codes", async () => {
+		const { app, factorStore, userSessionStore, audit } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
-		await seedFactor(factorStore, "recovery_code", { codes: [] });
-		const create = vi.spyOn(transactionStore, "create");
+		const old = await seedFactor(factorStore, "recovery_code", { codes: [] });
 
-		const res = await enrollFromAccount(agent, "totp");
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
 
-		expect(res.status).toBe(409);
-		expect(res.body).toEqual(ENROLLMENT_CONFLICT);
-		expect(create).not.toHaveBeenCalled();
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body.recovery_codes).toHaveLength(10);
+		const records = await factorStore.list(ALICE.id);
+		expect(records.map((record) => [record.kind, record.binding]).sort()).toEqual([
+			["recovery_code", "password"],
+			["totp", "password"],
+		]);
+		expect(records.some((record) => record.id === old.id)).toBe(false);
+		expect(audit.of("mfa.recovery_codes.generated")[0]?.details).toMatchObject({
+			regenerated: true,
+		});
 	});
 
 	it("answers 400 when the body and the MFA-Transaction header name different transactions, opening none", async () => {
