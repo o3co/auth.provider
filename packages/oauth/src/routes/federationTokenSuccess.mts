@@ -40,9 +40,13 @@ export const answerToken = async (
 	token: DisclosableToken,
 	refreshed: boolean,
 ): Promise<Response> => {
-	// Answered as a store that judges its records answers such a record: as none.
-	if (!isUsableToken(token.accessToken)) return answerUnlinkedRecord(ctx, caller);
-	const { opts, req, res, federation } = ctx;
+	const { opts, req, res, federation, logger } = ctx;
+	// Answered as a store that judges its records answers such a record: as
+	// none. Logged with the federation alone, never what the record holds.
+	if (!isUsableToken(token.accessToken)) {
+		logger.warn({ federation }, "federation_token_record_unusable");
+		return answerUnlinkedRecord(ctx, caller);
+	}
 	emitAuditEvent(opts.auditSink, {
 		timestamp: new Date(),
 		type: "federation.token.success",

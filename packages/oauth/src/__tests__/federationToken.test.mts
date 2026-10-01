@@ -629,6 +629,37 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		});
 
+		it("logs an unusable stored record at warn, naming the federation and no token material", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({ ...baseFedTokens, accessToken: "" }),
+			});
+			const app = buildApp({ fedTokenStore, logger });
+
+			await postFedToken(app, "google", await mintAccessToken());
+
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ federation: "google" },
+				"federation_token_record_unusable",
+			);
+			expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(baseFedTokens.refreshToken);
+		});
+
+		it("does not log a missing record as an unusable one", async () => {
+			const logger = createMockLogger();
+			const app = buildApp({
+				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(null) }),
+				logger,
+			});
+
+			await postFedToken(app, "google", await mintAccessToken());
+
+			expect(logger.warn).not.toHaveBeenCalledWith(
+				expect.anything(),
+				"federation_token_record_unusable",
+			);
+		});
+
 		it("answers a re-read record with an empty access token as one with no record, then releases the lock", async () => {
 			// The clean-up is recorded when it settles, a macrotask after the
 			// call, and the release when it is called, so an early release lands first.
