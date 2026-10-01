@@ -534,6 +534,23 @@ describe("POST /oauth/consent", () => {
 		expect(events.map((e) => e.type)).toContain("consent.denied");
 	});
 
+	it("deny answers 400 with no redirect when the parked redirect_uri is one checkRedirectUri refuses", async () => {
+		// A record parked before such a URI was refused at registration: the
+		// same request, its redirect_uri carrying a response parameter.
+		const { app, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const challenge = atConsentPage(await authorize(app));
+		const parked = (await pending.consume(challenge)) as PendingConsentRecord;
+		await pending.set({ ...parked, redirectUri: `${REDIRECT_URI}?iss=x` });
+
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "deny" });
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({
+			error: "invalid_request",
+			error_description: "redirect_uri not allowed",
+		});
+		expect(res.headers.location).toBeUndefined();
+	});
+
 	it("refuses a foreign challenge, an unknown decision (keeping the parked request), and a replayed answer", async () => {
 		const store = createMemoryConsentStore();
 		const { app, pending } = await makeApp({ consentStore: store });
