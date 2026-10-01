@@ -1032,6 +1032,22 @@ describe("mfaFactorContract", () => {
 		]);
 	});
 
+	it("fails an identity that depends on which record a factor read first", async () => {
+		const firstRead = (factor: MfaFactor): MfaFactor => {
+			let first: string | undefined;
+			return {
+				...factor,
+				identity: (data) => {
+					const own = identityOf(data);
+					if (own === undefined) return undefined;
+					first ??= own;
+					return own === first ? "first" : "other";
+				},
+			};
+		};
+		expect(await failing(withSecond(inputFor({}, firstRead)))).toEqual([RULES.identityDistinct]);
+	});
+
 	it("fails a second authenticator's proof that completes no enrollment", async () => {
 		expect(
 			await failing({ ...inputFor({}, identified), secondEnrollmentProof: () => "not-the-secret" }),

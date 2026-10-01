@@ -45,14 +45,15 @@
  * unless it is the enrolled data's own, never a throw. Given a second
  * authenticator's enrollment proof, the suite enrolls it through the same
  * factor beside the first one's record, and holds their data to two
- * different identities, neither `undefined`, each the same however a factor
- * reads it once both are enrolled: an identity too coarse — a constant, or
- * one two authenticators share — judges every second enrollment of the kind
- * a duplicate, and `undefined` is a duplicate of none, never a distinct
- * authenticator. Without that proof it enrolls one authenticator alone and
- * cannot tell. An identity is a duplicate key, not an assurance signal: two
- * identities do not show two devices, since one authenticator can hold two
- * credentials. The suite enrolls at one instant and verifies an hour later, so a factor that
+ * different identities, neither `undefined`, each the same however and in
+ * whatever order a factor reads it once both are enrolled: an identity too
+ * coarse — a constant, or one two authenticators share — judges every second
+ * enrollment of the kind a duplicate, and `undefined` is a duplicate of
+ * none, never a distinct authenticator. Without that proof it enrolls one
+ * authenticator alone and cannot tell. An identity is a duplicate key, not
+ * an assurance signal: two identities do not show two devices, since one
+ * authenticator can hold two credentials. The suite enrolls at one instant
+ * and verifies an hour later, so a factor that
  * refuses reuse within a time step is not asked to verify at the
  * step it enrolled. Every call is made for the account's `User.id` as its
  * subject, and handed core's test digests (`createTestMfaDigests`), made for
@@ -1084,19 +1085,21 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 					second,
 					"identity answers two authenticators' enrolled data one string: every second enrollment would be judged a duplicate",
 				);
-				// An identity is its data's alone: no later enrollment, object or factor instance changes it.
+				// An identity is its data's alone: no later enrollment, object, factor
+				// instance or reading order changes it. A fresh factor reads the second first.
 				const fresh = input.build();
-				for (const [record, identity] of [
-					[held, first],
-					[added, second],
-				] as const) {
-					for (const reader of [factor, fresh]) {
-						assert.equal(
-							reader.identity?.(reopened(record.data)),
-							identity,
-							"identity answers a record another string once another is enrolled, or through another factor: duplicates would be judged by what the factor last did, not by the record",
-						);
-					}
+				const readings: readonly [MfaFactor, MfaEnrolledFactor, string | undefined][] = [
+					[factor, held, first],
+					[factor, added, second],
+					[fresh, added, second],
+					[fresh, held, first],
+				];
+				for (const [reader, record, identity] of readings) {
+					assert.equal(
+						reader.identity?.(reopened(record.data)),
+						identity,
+						"identity answers a record another string once another is enrolled, through another factor, or read in another order: duplicates would be judged by what the factor last did, not by the record",
+					);
 				}
 			},
 		},
