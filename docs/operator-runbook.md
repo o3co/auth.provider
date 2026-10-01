@@ -1071,11 +1071,20 @@ wires it.
   info); a sink that fails one event is `audit_sink_failed` (error) with
   that position (`sink`, 0 for the `auditSink`) and the event's `type`; an
   event a hook records while it runs reaches only the `auditSink`
-  (`audit_sink_reentered`, warn — a hook that emits). With hooks, the
+  (`audit_sink_reentered`, warn — see Investigate). With hooks, the
   `auditSink` is handed a frozen copy, so a sink that changes its event
   now fails with `audit_sink_failed` alone, and
   `federation_grant_audit_failed` no longer fires: alert on
-  `audit_sink_failed` instead.
+  `audit_sink_failed` instead. The loop guard is best effort, and its
+  limits are the hook author's: it ends a loop through an awaited record,
+  a detached `emitAuditEvent`, a timer or a promise chain started inside a
+  hook's `record`, and through another module's component; it does not see
+  work the hook hands to a queue consumer, a `setInterval`, a `MessagePort`
+  or worker, or a promise continuation created outside the hook, nor work
+  run through `AsyncLocalStorage.snapshot()` or
+  `AsyncResource.runInAsyncScope`. The `auditSink` must not record into
+  the slot, and a logger that turns `audit_sink_*` lines into audit events
+  loops without bound: do neither.
 
 ### Federation grants — what each answer means (#593)
 
@@ -1340,6 +1349,7 @@ stream — its level is fixed at `info`.
 | `introspect_non_access_token`, `introspect_compound_cnf_rejected` (warn) | `oauth/src/routes.mts`, `oauth/src/routes/introspectCaller.mts` | a refresh/id token presented as a bearer credential; a token with two bindings, which this server never mints |
 | audit `authorize.rejected`, `token.issued.failure` (by `details.reason` — the route's own refusals carry a code such as `grant_type_not_allowed`; at `/authorize`, the grant policy's refusals carry `policy_denied` (with the redirect's code as `details.error`), `policy_out_of_bounds` (a decision past the client's ceiling) or `policy_decision_invalid`; a grant handler's carries its `error_description`, sanitised and capped at 200 characters, beside `details.error`; some descriptions quote what the client sent — a scope, an audience, a token type — so group those by the text before the quoted value, e.g. `scope '…' is not in subject_token scope`), `introspect.family_revoked`, `logout.family_revoked`, `federation.token.forbidden`, `federation.token.family_revoked` | `oauth/src/routes.mts`, `routes/token.mts`, `routes/authorizeAnswers.mts`, `routes/logout.mts`, `routes/federationToken.mts` | refusals and revocations; a spike in `token.issued.failure` with one `reason` is either an attack or a broken client |
 | `http_request_duration_seconds{status="429"}` | `templates/standalone/src/metrics.mts` | rate limiting engaged; correlate with `HTTP_TRUST_PROXY` — one bucket for everyone is a misconfiguration that reads like an attack |
+| `audit_sink_reentered` (warn — `type`, the event's type when it is a string) | `core/src/audit/factory.mts` | an event recorded while an `auditHooks` hook's `record` ran, in its async context: it reached the `auditSink` alone, or, without one, no sink — the line is then its only trace. Either a hook that emits (a loop the fan-out ended), or a hook that created a long-lived resource — a timer, a pool, a client — inside `record`, whose later work carries the hook's context, so its events skip every hook. Fix the hook: emit nothing from `record`, and create such resources at factory time |
 
 ### Configuration drift — emitted once, at boot or on first use
 

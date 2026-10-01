@@ -438,7 +438,10 @@ describe("createAuditFanOut", () => {
 			},
 		} as unknown as AuditEvent;
 		let fanOut: AuditSink | undefined;
-		const loop = reentering(() => fanOut as AuditSink, (sink) => emitAuditEvent(sink, uncopyable));
+		const loop = reentering(
+			() => fanOut as AuditSink,
+			(sink) => emitAuditEvent(sink, uncopyable),
+		);
 		fanOut = createAuditFanOut({ hooks: () => [loop.hook], logger: () => logger });
 
 		await fanOut.record(event());
