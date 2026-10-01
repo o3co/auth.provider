@@ -776,8 +776,8 @@ export const MFA_LOCKOUT_MAX_BACKOFF_SECONDS = MFA_WEEKLY_WINDOW_MS / 1000;
 
 /**
  * Which hold refused a guessable attempt. Once fixed, no time, no settle, no
- * exempt success and no higher `hardLimit` lifts `hard`; clearing the
- * applied recovery does (`applySubjectRecovery`).
+ * exempt success and no higher `hardLimit` lifts `hard`; an applied recovery
+ * does (`applySubjectRecovery`).
  */
 export type MfaSubjectHold = "backoff" | "weekly" | "hard";
 
@@ -1063,7 +1063,12 @@ export type MfaSubjectRecoveryAnswer =
 			readonly recoveryId: string;
 			/** The subject's generation this apply moved it to. */
 			readonly generation: number;
-			/** What this apply ended: the week's failures, the run's (and its backoff), the hard hold. */
+			/**
+			 * What this apply gave back, each possibly empty: the week's failures,
+			 * the run's (and its backoff), the hard hold. A recover with nothing to
+			 * give back still applies, using up its authorization and moving the
+			 * generation.
+			 */
 			readonly cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean };
 			readonly hard: boolean;
 	  }

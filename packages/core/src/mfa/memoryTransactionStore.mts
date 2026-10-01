@@ -40,9 +40,11 @@
  * new one with {@link MfaTransactionStoreFullError}, never evicting a live one
  * (that would end the ceremony of a user typing a code, send them to prove
  * again, or trust a session a mark distrusts). Replacing a session's proof,
- * or noting a subject's mark again, is no new entry. Subject state is uncapped:
- * only a login the Store accepted creates a subject (an open sign-up lets
- * anyone mint them). The cap is global: nothing caps the transactions one
+ * or noting a subject's mark again, is no new entry. Subject state is uncapped,
+ * and so are a subject's generation and recovery-set floor, which the cap
+ * does not count: only a login the Store accepted creates a subject (an open
+ * sign-up lets anyone mint them). At the cap a new lease is refused too, so a
+ * recovery or a reset waits until room frees. The cap is global: nothing caps the transactions one
  * session holds, so a client within the routes' rate limits can fill it.
  */
 

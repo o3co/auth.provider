@@ -810,13 +810,16 @@ lock state exactly as core's in-process store does, and moves the generation
 so it ends a lock state the other scripts cannot read. The acquire script
 compares the generation a writer captured with `g` (absent is `0`) and writes
 the lease with `SET NX PX`; the release is the compare-and-delete script the
-federation stores' locks use. The floor is the recovery hash's `floor`, raised
-by one script that never lowers it. The recovery hash carries no TTL once it
+federation stores' locks use. The floor is the recovery hash's `floor` — a recovery-code set's generation,
+not the subject's — raised under the lease by one script that never lowers it. The recovery hash carries no TTL once it
 holds a generation or a floor — losing the generation refuses a writer that
-captured it, losing the floor brings an older recovery-code set back — and
-before that expires a day after its latest authorization ends. A generation,
-floor or authorization the store cannot read is an outage, never none, and so
-is a lease key with no deadline. The lease is logical: a write that outlives
+captured it and lets through one that captured 0 before a recovery, losing
+the floor brings an older recovery-code set back — and before that expires a
+day after its latest authorization ends. Every script reads and validates the
+whole recovery hash, and an apply the lock state too, before its first write,
+and holds counts to canonical decimal text, compared as numbers. A generation,
+floor or authorization the store cannot read is an outage, with nothing
+written, never none, and so is a lease key with no deadline. The lease is logical: a write that outlives
 it is told so at its release (`false`), never stopped. Evicting a lease lets a
 second writer at the subject's factor set, so the MFA stores require
 `noeviction`; the recovery hash, with no TTL once it holds a generation or a
