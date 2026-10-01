@@ -47,9 +47,8 @@
  *   one at once, or a reset removed its own, so it removes its own, trying
  *   three times, and the user signs in again; one it cannot remove is
  *   reported standing. It then clears D25's flag where the proof was given,
- *   issues the recovery codes — replacing the sets that stood, except that a
- *   reopened login's binding by `password` keeps them — and marks the
- *   witness. So at most one first binding stands, and a lost race
+ *   issues the recovery codes — replacing the sets that stood, unless bound
+ *   by `password` (`recovery/issue.mts`) — and marks the witness. So at most one first binding stands, and a lost race
  *   spends the transaction, never a factor. The caller resumes a login; a
  *   session is left as it was.
  * - A codes write or a witness mark that fails never undoes the factor:
@@ -598,11 +597,6 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				subject: tx.subject,
 				binding,
 				nowMs,
-				// A reopened login's first binding by `password` keeps the set that
-				// stood: the owner's remaining codes stay usable (D25).
-				...(tx.purpose === "login" && binding === "password"
-					? { keep: "password_binding" as const }
-					: {}),
 			});
 			const witness = await kit.witness.mark(tx.subject);
 

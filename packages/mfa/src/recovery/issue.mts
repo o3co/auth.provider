@@ -25,8 +25,12 @@
  * listed first, the new one is written, then those — and only those — are
  * removed, so a set written after the listing (another binding's) is never
  * removed. A listing or a removal that fails leaves an old set usable beside
- * the new one, answered with why; it never undoes the new set. Asked to keep
- * them (`keep`, with why), it removes none.
+ * the new one, answered with why; it never undoes the new set.
+ *
+ * A binding by `password` — no account-email proof was asked — replaces
+ * nothing: whoever holds the password and one code could make it, so the
+ * sets that stood are kept and the owner's remaining codes stay usable
+ * (D25's amendment). Wherever the binding is made, this is the one rule.
  */
 
 import { randomBytes } from "node:crypto";
@@ -34,7 +38,7 @@ import type { MfaFactorRecord, MfaFactorResolver, MfaFactorStore } from "@o3co/a
 import type { MfaSealing } from "../sealing.mjs";
 import { generateRecoveryCodes, RECOVERY_CODE_FACTOR_KIND } from "./factor.mjs";
 
-/** Why a set that stood may still stand beside the new one: kept as asked, or a listing or removal that failed. */
+/** Why a set that stood may still stand beside the new one: kept for a `password` binding, or a listing or removal that failed. */
 export type MfaUnreplacedRecoveryCodes =
 	| { readonly kept: "password_binding" }
 	| { readonly cause: unknown };
@@ -63,8 +67,6 @@ export interface IssueRecoveryCodesOptions {
 	/** What authorized the binding the set is issued beside. */
 	readonly binding: NonNullable<MfaFactorRecord["binding"]>;
 	readonly nowMs: number;
-	/** Keep the sets that stood, and why: a reopened login's first binding by `password`. */
-	readonly keep?: "password_binding";
 }
 
 /** A new set for `options.subject` (see this file's header). */
@@ -93,8 +95,8 @@ export async function issueRecoveryCodes(
 		const issued = { issued: true as const, codes: set.codes };
 		if ("cause" in standing) return { ...issued, regenerated: true, unreplaced: standing };
 		if (standing.ids.length === 0) return { ...issued, regenerated: false };
-		if (options.keep !== undefined) {
-			return { ...issued, regenerated: true, unreplaced: { kept: options.keep } };
+		if (options.binding === "password") {
+			return { ...issued, regenerated: true, unreplaced: { kept: "password_binding" } };
 		}
 		const failed = await removeEach(factorStore, subject, standing.ids);
 		return {

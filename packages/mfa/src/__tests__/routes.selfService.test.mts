@@ -42,6 +42,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
 import {
 	ALICE,
 	boot,
@@ -52,6 +53,7 @@ import {
 } from "./moduleHarness.mjs";
 import { stubFactor } from "./requirementHarness.mjs";
 import {
+	beginLogin,
 	completeEnrollment,
 	contributing,
 	csrfOf,
@@ -73,6 +75,7 @@ import {
 	T0,
 	thawClock,
 	totpProofOf,
+	verify,
 } from "./routesHarness.mjs";
 
 beforeEach(() => freezeClock());
@@ -533,7 +536,7 @@ describe("the enroll transaction", () => {
 		expect(create).not.toHaveBeenCalled();
 	});
 
-	it("binds a first factor for a subject whose only records do not count, and replaces its recovery codes", async () => {
+	it("binds a first factor by password for a subject whose only records do not count, and keeps its recovery codes beside the new ones", async () => {
 		const { app, factorStore, userSessionStore, audit } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
 		const old = await seedFactor(factorStore, "recovery_code", { codes: [] });
@@ -551,12 +554,49 @@ describe("the enroll transaction", () => {
 		const records = await factorStore.list(ALICE.id);
 		expect(records.map((record) => [record.kind, record.binding]).sort()).toEqual([
 			["recovery_code", "password"],
+			["recovery_code", "password"],
 			["totp", "password"],
 		]);
-		expect(records.some((record) => record.id === old.id)).toBe(false);
-		expect(audit.of("mfa.recovery_codes.generated")[0]?.details).toMatchObject({
+		expect(records.some((record) => record.id === old.id)).toBe(true);
+		expect(audit.of("mfa.recovery_codes.generated")[0]?.details).toEqual({
+			kind: "recovery_code",
+			purpose: "enroll",
+			binding: "password",
+			by: "user",
 			regenerated: true,
+			unreplaced: true,
+			kept: "password_binding",
 		});
+	});
+
+	it("keeps the owner's codes under optional with no proof asked: an old code still logs in after a first factor bound by password", async () => {
+		const { app, factorStore, userSessionStore } = await composed({
+			mode: "optional",
+			requireEmailProof: "never",
+		});
+		const { agent } = await signIn(app, userSessionStore);
+		const generated = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			suiteSealing().digestsFor("recovery_code"),
+		);
+		if (generated === undefined) throw new Error("no set");
+		const old = await seedFactor(factorStore, "recovery_code", generated.data);
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(
+			(
+				await completeEnrollment(
+					agent,
+					begun.body.transaction as string,
+					totpProofOf(begun.body.secret),
+				)
+			).status,
+		).toBe(200);
+
+		const { agent: next, transaction } = await beginLogin(app);
+		const res = await verify(next, transaction, old.id, generated.codes[0]);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body).toEqual({ message: "Logged in successfully", recovery_codes_remaining: 2 });
 	});
 
 	it("answers 400 when the body and the MFA-Transaction header name different transactions, opening none", async () => {

@@ -334,15 +334,17 @@ describe("issueRecoveryCodes, replacing the sets that stood", () => {
 		version: 0,
 		data: "sealed",
 	});
-	const issue = (factorStore: MfaFactorStore, keep?: "password_binding") =>
+	const issue = (
+		factorStore: MfaFactorStore,
+		binding: "email_proof" | "password" = "email_proof",
+	) =>
 		issueRecoveryCodes({
 			factors,
 			factorStore,
 			sealing,
 			subject: "u-alice",
-			binding: "email_proof",
+			binding,
 			nowMs: 1_900_000_000_000,
-			...(keep === undefined ? {} : { keep }),
 		});
 
 	it("writes the new set, then removes the sets that stood before it: regenerated", async () => {
@@ -390,12 +392,12 @@ describe("issueRecoveryCodes, replacing the sets that stood", () => {
 		expect(await factorStore.list("u-alice")).toHaveLength(1);
 	});
 
-	it("keeps the sets that stood when asked to, saying why", async () => {
+	it("keeps the sets that stood for a binding by password, saying why", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await factorStore.create(recordOf("old-set"));
 		const remove = vi.spyOn(factorStore, "remove");
 
-		expect(await issue(factorStore, "password_binding")).toEqual({
+		expect(await issue(factorStore, "password")).toEqual({
 			issued: true,
 			codes: expect.any(Array),
 			regenerated: true,
