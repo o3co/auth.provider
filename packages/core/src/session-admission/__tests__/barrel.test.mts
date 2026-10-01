@@ -96,4 +96,10 @@ describe("the barrel's session-admission surface", () => {
 		expect(typeof core.cookieSessionUser).toBe("function");
 		expect(Object.hasOwn(core, "enrollmentFactsOf")).toBe(false);
 	});
+
+	it("exports a continuation's enrollment facts, for the requirement holding it, and not their derivation from a user", () => {
+		expect(typeof core.enrollmentFactsOfContinuation).toBe("function");
+		expect(Object.hasOwn(core, "enrollmentFactsOf")).toBe(false);
+		expect(Object.hasOwn(core, "primaryFromDto")).toBe(false);
+	});
 });
