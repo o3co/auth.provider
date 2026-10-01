@@ -90,13 +90,12 @@ a user nobody marked read as not enrolled, through `authenticate` and through
 `authenticateByToken`; a mark resolving to nothing, and the next
 `authenticate` answering it, `true` and `false` alike; after each mark,
 `authenticateByToken` answering every user's witness as `authenticate` does;
-a mark of the
-value already held succeeding and keeping it; the last of successive marks
-holding; a mark reaching its own subject alone; concurrent marks of one value
-all succeeding; a mark of either value for a subject the backend does not
-hold throwing, with a witness held true and one held false both left as they
-were; and, with `withOutage`, a mark during an outage throwing. The
-witness is read as the provider reads it, through core's
+a mark of the value already held succeeding and keeping it; the last of
+successive marks holding; a mark reaching its own subject alone; concurrent
+marks of one value all succeeding; a mark of either value for a subject the
+backend does not hold throwing, with a witness held true and one held false
+both left as they were; and, with `withOutage`, a mark during an outage
+throwing. The witness is read as the provider reads it, through core's
 `readMfaEnrollmentWitness`, so a backend answering anything but a boolean
 fails.
 
@@ -280,8 +279,10 @@ the bodies of core's `mfa/storeWire.mts`:
   `authenticateUrl` and `authenticateByTokenUrl`;
 - `authenticateUrl` answers `{ email, password }` of a user in `users` with
   its `User` — `id`, `username`, its `claims`, and `mfaEnrolled` once marked —
-  and anything else `401`; `authenticateByTokenUrl` answers `{ token }` of a
-  user whose `tokens` hold it with the same `User`, and anything else `401`;
+  a body that is not a JSON object `400`, and anything else `401`;
+  `authenticateByTokenUrl` answers `{ token }` of a user whose `tokens` hold
+  it with the same `User`, a body that is not a JSON object `400`, and
+  anything else `401`;
 - every record it holds is answered back as held, one the provider cannot
   read included; an update writes its changes and nothing else at the
   expected version plus one; each request is answered from state it reads

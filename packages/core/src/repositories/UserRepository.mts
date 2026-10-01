@@ -159,8 +159,8 @@ export interface UserRepository {
 	/**
 	 * Persist whether `subject` has a second factor enrolled: the MFA enrollment
 	 * witness the Store answers on `authenticate` and on `authenticateByToken`
-	 * as `User.mfaEnrolled`.
-	 * Optional; detected by {@link supportsMfaEnrollmentWitness}.
+	 * as `User.mfaEnrolled`. Optional; detected by
+	 * {@link supportsMfaEnrollmentWitness}.
 	 *
 	 * The provider decides and the Store only persists: `true` after the first
 	 * counting factor has been written, `false` after the last one is removed or

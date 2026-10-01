@@ -148,8 +148,8 @@ const FULLY_POPULATED_USER = {
 	name: "Alice Example",
 	picture: "https://example.com/alice.png",
 	groups: ["staff"],
-	// The MFA enrollment witness a Store answers on `authenticate`
-	// (ADR 2026-09-25-multi-factor-authentication).
+	// The MFA enrollment witness a Store answers on `authenticate` and on
+	// `authenticateByToken` (ADR 2026-09-25-multi-factor-authentication).
 	mfaEnrolled: true,
 } satisfies Required<User>;
 

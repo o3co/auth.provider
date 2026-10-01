@@ -21,9 +21,9 @@
  * update is a compare-and-set that writes the changes and nothing else of
  * the record, at the expected version plus one; the witness mark is `204`,
  * idempotent, and `404` for a subject it does not hold, and both logins
- * answer it back. It refuses a body
- * not declared JSON, a request naming another host or an absolute target,
- * and a body over 1 MiB, before it records the request. Told to, it answers
+ * answer it back. It refuses a body not declared JSON, a request naming
+ * another host or an absolute target, and a body over 1 MiB, before it
+ * records the request. Told to, it answers
  * an endpoint otherwise — later, or never — so an adapter's reading of a
  * Store that breaks the contract can be tested.
  */
