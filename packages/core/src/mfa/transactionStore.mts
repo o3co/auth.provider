@@ -1036,12 +1036,12 @@ export interface MfaSubjectRecoveryApplication {
 	/** `recover`: the subject's sessions boundary (`revokedBefore`), `undefined` when there is none. `reset`: `undefined`. */
 	readonly sessionsBoundaryMs: number | undefined;
 	/**
-	 * `recover`: the earliest `createdAt` of the subject's records of an
-	 * installed guessable kind, unreadable ones included, `undefined` when
-	 * none remains; records of a kind not installed are left out. `reset`:
-	 * `undefined`.
+	 * `recover`, required: the earliest `createdAt` of the subject's records
+	 * of an installed guessable kind, unreadable ones included, or `null`
+	 * when none remains; records of a kind not installed are left out. A
+	 * value the caller could not read is never `null`. `reset`: `undefined`.
 	 */
-	readonly guessableBoundSinceMs: number | undefined;
+	readonly guessableBoundSinceMs: number | null | undefined;
 }
 
 /** Why an apply changed nothing. */
@@ -1159,9 +1159,10 @@ export function checkSubjectRecoveryAuthorization(
  * its fields read once, or a `RangeError` naming what is wrong: `subject` a
  * non-empty string; `operation` and `sid` as for an authorization; `nowMs` an
  * instant from the epoch within the Date range; `leaseToken` a non-empty
- * string; for `recover`, `sessionsBoundaryMs` and `guessableBoundSinceMs`
- * each `undefined` or whole epoch milliseconds within the Date range, and for
- * `reset` both `undefined`. Every adapter calls it first.
+ * string; for `recover`, `sessionsBoundaryMs` `undefined` or whole epoch
+ * milliseconds within the Date range, and `guessableBoundSinceMs` whole epoch
+ * milliseconds within the Date range or `null` (none remains), never
+ * absent; for `reset` both `undefined`. Every adapter calls it first.
  */
 export function checkSubjectRecoveryApplication(
 	subject: unknown,
@@ -1179,14 +1180,19 @@ export function checkSubjectRecoveryApplication(
 		refuse("nowMs must be an instant from the epoch within the Date range");
 	}
 	if (!isSubject(leaseToken)) refuse("leaseToken must be a non-empty string");
-	for (const [name, value] of [
-		["sessionsBoundaryMs", sessionsBoundaryMs],
-		["guessableBoundSinceMs", guessableBoundSinceMs],
-	] as const) {
-		if (value === undefined) continue;
-		if (operation === "reset") refuse(`a reset takes no ${name}`);
-		if (!isRecoveryInstant(value)) {
-			refuse(`${name} must be undefined or whole epoch milliseconds within the Date range`);
+	if (operation === "reset") {
+		if (sessionsBoundaryMs !== undefined) refuse("a reset takes no sessionsBoundaryMs");
+		if (guessableBoundSinceMs !== undefined) refuse("a reset takes no guessableBoundSinceMs");
+	} else {
+		if (sessionsBoundaryMs !== undefined && !isRecoveryInstant(sessionsBoundaryMs)) {
+			refuse(
+				"sessionsBoundaryMs must be undefined or whole epoch milliseconds within the Date range",
+			);
+		}
+		if (guessableBoundSinceMs !== null && !isRecoveryInstant(guessableBoundSinceMs)) {
+			refuse(
+				"a recover's guessableBoundSinceMs must be whole epoch milliseconds within the Date range, or null when no guessable record remains",
+			);
 		}
 	}
 	return {
@@ -1195,7 +1201,7 @@ export function checkSubjectRecoveryApplication(
 		nowMs: nowMs as number,
 		leaseToken: leaseToken as string,
 		sessionsBoundaryMs: sessionsBoundaryMs as number | undefined,
-		guessableBoundSinceMs: guessableBoundSinceMs as number | undefined,
+		guessableBoundSinceMs: guessableBoundSinceMs as number | null | undefined,
 	};
 }
 
@@ -1482,7 +1488,7 @@ export interface MfaTransactionStore {
 	 *   lifted.
 	 *
 	 * A `recover` lifts the hard hold on a rebind: `guessableBoundSinceMs` is
-	 * absent or later than the hold's time by more than `DEFAULT_CLOCK_SKEW_MS`.
+	 * `null` or later than the hold's time by more than `DEFAULT_CLOCK_SKEW_MS`.
 	 * No sessions boundary is asked for, and the run the hold counted ends
 	 * with it, its backoff included: every attempt in it was against the
 	 * replaced authenticators. The week stands unless the boundary gives it

@@ -85,6 +85,10 @@ const serverMs = (text: unknown): number | undefined =>
 		? Number(text)
 		: undefined;
 
+/** The apply script's rebind argument: the time, `none` when no guessable record remains, empty for a reset. */
+const rebindArgument = (since: number | null | undefined): string =>
+	since === null ? "none" : since === undefined ? "" : String(since);
+
 const flag = (text: unknown): boolean | undefined =>
 	text === "1" ? true : text === "0" ? false : undefined;
 
@@ -326,7 +330,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 					String(input.nowMs),
 					input.leaseToken,
 					input.sessionsBoundaryMs === undefined ? "" : String(input.sessionsBoundaryMs),
-					input.guessableBoundSinceMs === undefined ? "" : String(input.guessableBoundSinceMs),
+					rebindArgument(input.guessableBoundSinceMs),
 					String(input.skewMs),
 					String(input.allowanceMs),
 				],

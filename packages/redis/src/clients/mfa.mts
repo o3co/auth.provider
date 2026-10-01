@@ -185,7 +185,8 @@ export interface ApplyMfaSubjectRecoveryInput {
 	readonly nowMs: number;
 	readonly leaseToken: string;
 	readonly sessionsBoundaryMs: number | undefined;
-	readonly guessableBoundSinceMs: number | undefined;
+	/** A recover's earliest guessable record's time, or `null` when none remains; a reset's `undefined`. */
+	readonly guessableBoundSinceMs: number | null | undefined;
 	/** `DEFAULT_CLOCK_SKEW_MS`. */
 	readonly skewMs: number;
 	/** `MFA_CLOCK_SKEW_ALLOWANCE_MS`. */

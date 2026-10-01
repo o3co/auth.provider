@@ -413,7 +413,7 @@ export function createMemoryMfaTransactionStore(
 		state: SubjectState | undefined,
 		nowMs: number,
 		sessionsBoundaryMs: number | undefined,
-		guessableBoundSinceMs: number | undefined,
+		guessableBoundSinceMs: number | null | undefined,
 	):
 		| { readonly week: boolean; readonly run: boolean; readonly hard: boolean }
 		| "not_revoked_since" {
@@ -427,7 +427,9 @@ export function createMemoryMfaTransactionStore(
 		const hard = state?.hard;
 		const rebound =
 			hard !== undefined &&
-			(guessableBoundSinceMs === undefined || guessableBoundSinceMs > hard + DEFAULT_CLOCK_SKEW_MS);
+			(guessableBoundSinceMs === null ||
+				(guessableBoundSinceMs !== undefined &&
+					guessableBoundSinceMs > hard + DEFAULT_CLOCK_SKEW_MS));
 		if (!revokedSince && !rebound) return "not_revoked_since";
 		if (state === undefined) return { week: true, run: true, hard: false };
 		let run = false;

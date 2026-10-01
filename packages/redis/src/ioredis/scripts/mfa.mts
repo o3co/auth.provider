@@ -492,7 +492,8 @@ return {1, stamp}
 /**
  * `MfaTransactionStoreClient.applySubjectRecovery`. `KEYS`: the lock hash, the week, the
  * recovery hash, the lease. `ARGV`: the operation, the authorization's field, now, the lease
- * token, the sessions boundary or empty, the earliest guessable record's time or empty, the
+ * token, the sessions boundary or empty, the earliest guessable record's time or `none` when no
+ * guessable record remains (empty for a reset), the
  * clock skew (`DEFAULT_CLOCK_SKEW_MS`), the skew allowance. Refuses, in the port's order, with
  * `{'refused', reason, hard}`; answers `{'already', recoveryId, generation, hard}` for an
  * authorization applied, and `{'applied', recoveryId, generation, week, run, liftedHard, hard}`
@@ -539,7 +540,11 @@ end
 
 local boundary, since = nil, nil
 if ARGV[5] ~= '' then boundary = tonumber(ARGV[5]) end
-if ARGV[6] ~= '' then since = tonumber(ARGV[6]) end
+-- A recover names its rebind: the earliest guessable record's time, or 'none' when none remains.
+if ARGV[6] ~= 'none' then
+  since = tonumber(ARGV[6])
+  if since == nil then error({err = 'MFA subject recovery: a recover names its rebind'}) end
+end
 if boundary ~= nil and boundary > now + skew then return refused('boundary_ahead') end
 local run, pending, week, held_hard = load()
 
