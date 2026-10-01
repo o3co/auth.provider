@@ -310,8 +310,6 @@ export interface MfaTransactionStoreClient {
 	): Promise<void>;
 	/** The port's `noteExemptSuccess`, one script over both keys. */
 	noteExemptSuccess(keys: MfaSubjectKeys, input: NoteMfaExemptSuccessInput): Promise<void>;
-	/** Remove both keys. */
-	clearSubjectState(keys: MfaSubjectKeys): Promise<void>;
 	/** Record the email-proof requirement at `key`, with no TTL. Idempotent. */
 	requireEmailProof(key: string): Promise<void>;
 	/** Whether the requirement is recorded at `key`. */

@@ -25,7 +25,7 @@
  * uses the latest). Sweeps run on writes, paced like the challenge store's,
  * and drop subject state once nothing in it can hold an attempt again (see
  * `prune`; the consecutive run lasts until a success, and the hard hold
- * until the subject's state is cleared). The email-proof
+ * until an applied recovery lifts it). The email-proof
  * requirement the operator reset records is not lock state: only its
  * consumption at the next first binding removes it.
  *
@@ -651,11 +651,6 @@ export function createMemoryMfaTransactionStore(
 			}
 			settleEmpty(subject, state);
 			if (schedule.wrote()) sweep(clock());
-		},
-
-		async clearSubjectState(subject: string): Promise<void> {
-			// The email-proof requirement is not lock state: it stays.
-			subjects.delete(subject);
 		},
 
 		async requireEmailProofAtNextBinding(subject: string): Promise<void> {

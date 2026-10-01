@@ -51,8 +51,8 @@
  * Lockout answers are judged on the time the caller passes; what the scripts
  * forget and Redis reclaims is judged no later than the server's clock less
  * `MFA_CLOCK_SKEW_ALLOWANCE_MS`. While a run is counted (until a success, an
- * exempt success before the hard hold or `clearSubjectState`) or the hard
- * hold stands (until `clearSubjectState`) the subject's keys carry no TTL,
+ * exempt success before the hard hold or an applied recovery) or the hard
+ * hold stands (until an applied recovery) the subject's keys carry no TTL,
  * and a subject state a script cannot read is refused, never read as empty.
  *
  * The requirement must last as enrolled factors do: it has no TTL, and the
@@ -441,11 +441,6 @@ export function createRedisMfaTransactionStore(
 			const checked = checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "noteExemptSuccess");
 			await client.noteExemptSuccess(subjectKeys(subject), { nowMs, policy: checked });
-		},
-
-		async clearSubjectState(subject) {
-			// The email-proof requirement is not lock state: it stays.
-			await client.clearSubjectState(subjectKeys(subject));
 		},
 
 		async requireEmailProofAtNextBinding(subject) {

@@ -158,7 +158,7 @@ return fields
 // Answers are judged on the caller's `now`; what a script forgets is judged no later than the
 // server's clock less a day (MFA_CLOCK_SKEW_ALLOWANCE_MS), so a caller far ahead erases nothing.
 // The lock hash's `hard` field is the hard hold, fixed (`HSETNX`) by the script that finds the
-// run at the hard limit and removed by nothing but clearing the subject. It holds the later of
+// run at the hard limit and removed by nothing but an applied recovery. It holds the later of
 // that script's `now` and the run's newest attempt, so no attempt of the run is dated after it.
 // While a run is counted or the hold stands the keys have no TTL; otherwise they expire a day
 // after the last failure stops counting. A stored value a script cannot read is an error (an outage), never read as an

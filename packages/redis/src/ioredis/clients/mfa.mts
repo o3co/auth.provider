@@ -219,9 +219,6 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				[String(input.nowMs), String(input.policy.hardLimit)],
 			);
 		},
-		async clearSubjectState(keys) {
-			await io.del(keys.lock, keys.week);
-		},
 		async requireEmailProof(key) {
 			await io.set(key, "1");
 		},

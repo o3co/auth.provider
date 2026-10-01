@@ -29,8 +29,8 @@
  * clock, so callers' clocks must agree (NTP); see
  * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} for what a fast clock can erase. A
  * subject's run never expires (only a success, an exempt success before the
- * hard hold or `clearSubjectState` ends it), nor does the hard hold (only
- * `clearSubjectState` lifts it), and an open sign-up lets anyone mint
+ * hard hold or an applied recovery ends it), nor does the hard hold (only
+ * an applied recovery lifts it), and an open sign-up lets anyone mint
  * subjects.
  * Transactions are bounded by their expiry alone, not per subject and not
  * per session: nothing caps the transactions one session holds, and how many
@@ -721,7 +721,7 @@ export interface MfaLockoutPolicy {
 	/**
 	 * Consecutive attempts (100), reservations in flight counted, at which
 	 * guessable proofs are held until the subject's lock state is cleared
-	 * (`clearSubjectState`): the attempt that is the hardLimit-th since the
+	 * (`applySubjectRecovery`): the attempt that is the hardLimit-th since the
 	 * last success holds, whatever its outcome. This is one stricter than
 	 * NIST's '100 failed attempts': a correct hardLimit-th attempt still signs
 	 * in, but guessable factors stay held until re-enrolled. The hold is fixed
@@ -751,7 +751,7 @@ export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
 /**
  * Which hold refused a guessable attempt. Once fixed, no time, no settle, no
  * exempt success and no higher `hardLimit` lifts `hard`; clearing the
- * subject's lock state does (`clearSubjectState`).
+ * applied recovery does (`applySubjectRecovery`).
  */
 export type MfaSubjectHold = "backoff" | "weekly" | "hard";
 
@@ -772,7 +772,7 @@ export type MfaSubjectAttemptReservation =
 			readonly retryAfterMs: number | null;
 			/**
 			 * Whether this refusal begins an episode: the refusals from the first
-			 * after an attempt was let through, or after `clearSubjectState`, to
+			 * after an attempt was let through, or after an applied recovery, to
 			 * the next attempt let through. One refusal among any in flight is first.
 			 */
 			readonly first: boolean;
@@ -1241,8 +1241,9 @@ export interface MfaTransactionStore {
 	 * first call that finds it there under a lower `hardLimit`. The store
 	 * records its time as the later of that call's `nowMs` and the run's
 	 * newest attempt, so no attempt of the run is dated after it. From then
-	 * until `clearSubjectState` every reservation is refused `hard`, whatever
-	 * policy it is handed, and no settle, exempt success or sweep lifts it.
+	 * until an applied recovery lifts it every reservation is refused `hard`,
+	 * whatever policy it is handed, and no settle, exempt success or sweep
+	 * lifts it.
 	 * The policy is read once, by {@link checkMfaLockoutPolicy}, and its
 	 * copy is what the call applies.
 	 * Of reservations racing to the limit, the one that reaches it is let
@@ -1277,20 +1278,13 @@ export interface MfaTransactionStore {
 	 * {@link checkMfaLockoutPolicy} refuses.
 	 */
 	noteExemptSuccess(subject: string, nowMs: number, policy: MfaLockoutPolicy): Promise<void>;
-	/**
-	 * Forget `subject`'s lock state (the run, the week and the hard hold). No
-	 * revocation and no credential change calls it. It leaves the subject's first-binding
-	 * mark: that is not lock state, and clearing it would trust a stale
-	 * session.
-	 */
-	clearSubjectState(subject: string): Promise<void>;
 
 	// The email proof the operator reset requires.
 	/**
 	 * Record that `subject`'s next first binding requires the 80-bit email proof,
 	 * whatever `mfa.enrollment.requireEmailProof` says (the operator reset's
-	 * `requireEmailProof: true`). Idempotent. No expiry, and `clearSubjectState`
-	 * leaves it: the reset that clears the lock may not lift it.
+	 * `requireEmailProof: true`). Idempotent. No expiry, and an applied
+	 * recovery leaves it: the reset that clears the lock may not lift it.
 	 */
 	requireEmailProofAtNextBinding(subject: string): Promise<void>;
 	/** Whether the requirement is recorded for `subject`. */
@@ -1337,7 +1331,7 @@ export interface MfaTransactionStore {
 	 * witness marked, at `atMs`, standing until `untilMs` on the store's clock.
 	 * The store keeps {@link laterFirstBindingMark} of the mark held and this
 	 * one: the later `atMs` and the later `untilMs`, so no note moves a mark
-	 * back or shortens it. `clearSubjectState` leaves it. A `RangeError`,
+	 * back or shortens it. An applied recovery leaves it. A `RangeError`,
 	 * nothing noted, for what {@link checkFirstBindingNote} refuses on the
 	 * store's clock.
 	 */
