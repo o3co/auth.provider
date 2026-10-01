@@ -683,7 +683,7 @@ describe("the transaction's life and attempts, and the lock", () => {
 		}
 	});
 
-	it("holds mfa.lockout to core's checkMfaLockoutPolicy, naming the field under mfa.lockout", () => {
+	it("holds mfa.lockout to core's checkConfiguredMfaLockoutPolicy: the port check's refusals, naming the field under mfa.lockout", () => {
 		for (const [lockout, field] of [
 			[{ ...LOCKOUT, threshold: 0 }, "mfa.lockout.threshold"],
 			[{ ...LOCKOUT, weeklyBudget: 2.5 }, "mfa.lockout.weeklyBudget"],

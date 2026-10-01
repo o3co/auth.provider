@@ -217,13 +217,19 @@ export async function beginLogin(
  * A lockout whose hard hold the smallest configured `hardLimit` (10) reaches:
  * the backoff at the ninth consecutive failure, and no weekly hold before it.
  */
-export const HARD_AT_TEN = { threshold: 9, hardLimit: 10, weeklyBudget: 100 } as const;
+export const HARD_AT_TEN = {
+	threshold: 9,
+	hardLimit: 10,
+	weeklyBudget: 100,
+	baseSeconds: 900,
+} as const;
 
 /**
  * Brings alice's run to {@link HARD_AT_TEN}'s hard limit through the routes,
  * Date frozen: five wrong TOTP codes in one login, four in a second (the
  * ninth starts the 900-second backoff), then, past the backoff, one in a
- * third. Answers that third login, one of its attempts spent.
+ * third. Answers that third login, one of its attempts spent. The
+ * five-and-four split assumes the default five attempts per transaction.
  */
 export async function wrongCodesToTheHardLimit(
 	app: express.Express,
@@ -236,7 +242,7 @@ export async function wrongCodesToTheHardLimit(
 			expect(res.status, JSON.stringify(res.body)).toBe(401);
 		}
 	}
-	vi.setSystemTime(Date.now() + 901_000);
+	vi.setSystemTime(Date.now() + HARD_AT_TEN.baseSeconds * 1000 + 1000);
 	const third = await beginLogin(app);
 	const tenth = await verify(
 		third.agent,
