@@ -45,6 +45,7 @@ import {
 	admitSession,
 	type ClientRepository,
 	type ConsentStore,
+	checkRedirectUri,
 	checkResolver,
 	cookieClaim,
 	describeAdmissionOutage,
@@ -373,6 +374,11 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 				userAgent: req.get("user-agent"),
 				details: { scopes: pending.scopes },
 			});
+			// The parked URI passed /authorize's checks when it was parked, which
+			// may predate what `checkRedirectUri` refuses now: held to it again.
+			if (checkRedirectUri(pending.redirectUri) !== null) {
+				return jsonError(res, 400, "invalid_request", "redirect_uri not allowed");
+			}
 			const location = opts.authorizationResponse(
 				pending.redirectUri,
 				{ error: "access_denied", error_description: "the resource owner denied the request" },
