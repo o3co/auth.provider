@@ -21,8 +21,8 @@
 // Redis is in `internalSidSortedSet.test.mts`.
 
 import { describe, expect, it, vi } from "vitest";
-import type { SessionSidSortedSetClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
-import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
+import type { SessionSidSortedSetClient, SessionSidSortedSetMultiClient } from "#/clients.mjs";
+import { createRedisSidSortedSet } from "#/internal/redisSidSortedSet.mjs";
 
 function createClient(members: string[]) {
 	const multi: SessionSidSortedSetMultiClient = {

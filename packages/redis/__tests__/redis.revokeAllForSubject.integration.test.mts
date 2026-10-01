@@ -23,10 +23,10 @@
 import { revokeAllForSubject } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
-import { createRedisSubjectSessionIndex } from "../src/subjectSessionIndex.mjs";
-import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisSubjectRevocation } from "#/subjectRevocation.mjs";
+import { createRedisSubjectSessionIndex } from "#/subjectSessionIndex.mjs";
+import { createRedisUserSessionStore } from "#/userSessionStore.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let raw: Redis;

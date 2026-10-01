@@ -23,8 +23,8 @@ import {
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { redisRefreshTokenFamilyStoreModule } from "../src/index.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
+import { redisRefreshTokenFamilyStoreModule } from "#/index.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 import { capturing } from "./support/section.mjs";
 

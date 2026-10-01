@@ -11,13 +11,13 @@ import {
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FederationTokenStoreClient } from "../src/clients.mjs";
+import type { FederationTokenStoreClient } from "#/clients.mjs";
 import {
 	createRedisFederationTokenStore,
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
 	redisFederationTokenStoreModuleFor,
-} from "../src/federation-tokens.mjs";
+} from "#/federation-tokens.mjs";
 import { withSection } from "./support/section.mjs";
 
 const fakeClient = () => ({

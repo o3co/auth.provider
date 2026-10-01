@@ -13,12 +13,12 @@
 
 import type { FederationTokenStore, FederationTokens } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import type { FederationTokenStoreClient } from "../src/clients.mjs";
+import type { FederationTokenStoreClient } from "#/clients.mjs";
 import {
 	createRedisFederationTokenStore,
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
-} from "../src/federation-tokens.mjs";
+} from "#/federation-tokens.mjs";
 
 /**
  * Fake modelling the two Redis types the store uses: string keys for the

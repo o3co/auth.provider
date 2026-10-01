@@ -10,12 +10,12 @@ import {
 	supportsLock,
 } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { encryptTokenField } from "#/internal/crypto.mjs";
-import type { FederationTokenStoreClient } from "../src/clients.mjs";
+import type { FederationTokenStoreClient } from "#/clients.mjs";
 import {
 	createRedisFederationTokenStore,
 	redisFederationTokenStoreBuilder,
-} from "../src/federation-tokens.mjs";
+} from "#/federation-tokens.mjs";
+import { encryptTokenField } from "#/internal/crypto.mjs";
 
 function createFakeRedis() {
 	const data = new Map<string, string>();

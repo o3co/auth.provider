@@ -24,9 +24,9 @@ const KEY_PREFIX = "oauth:code:";
 const store = new Map<string, string>();
 
 import type { CreateCodeInput } from "@o3co/auth-provider-core";
-import type { CodeRepositoryClient } from "../src/clients.mjs";
-import { RedisCodeRepository } from "../src/code-repository.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
+import type { CodeRepositoryClient } from "#/clients.mjs";
+import { RedisCodeRepository } from "#/code-repository.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 
 // `RedisCodeRepository` takes a typed `CodeRepositoryClient`. The mock
 // implements only that interface (`set/get/getDel/del`) and ignores the

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { redisChallengeStoreBuilder } from "../src/challenges.mjs";
+import { redisChallengeStoreBuilder } from "#/challenges.mjs";
 import type {
 	ChallengeStoreClient,
 	ConsentStoreClient,
@@ -24,17 +24,14 @@ import type {
 	SessionRPRegistryClient,
 	SessionSidSortedSetClient,
 	UserSessionStoreClient,
-} from "../src/clients.mjs";
-import {
-	redisConsentStoreBuilder,
-	redisPendingConsentStoreBuilder,
-} from "../src/consent-store.mjs";
-import { redisDeviceCodeStoreBuilder } from "../src/device-code-store.mjs";
-import { redisReplaySeenSetBuilder } from "../src/replay-seen-set.mjs";
-import { redisSessionFamilyIndexBuilder } from "../src/sessionFamilyIndex.mjs";
-import { redisSessionFederationIndexBuilder } from "../src/sessionFederationIndex.mjs";
-import { redisSessionRPRegistryBuilder } from "../src/sessionRPRegistry.mjs";
-import { redisUserSessionStoreBuilder } from "../src/userSessionStore.mjs";
+} from "#/clients.mjs";
+import { redisConsentStoreBuilder, redisPendingConsentStoreBuilder } from "#/consent-store.mjs";
+import { redisDeviceCodeStoreBuilder } from "#/device-code-store.mjs";
+import { redisReplaySeenSetBuilder } from "#/replay-seen-set.mjs";
+import { redisSessionFamilyIndexBuilder } from "#/sessionFamilyIndex.mjs";
+import { redisSessionFederationIndexBuilder } from "#/sessionFederationIndex.mjs";
+import { redisSessionRPRegistryBuilder } from "#/sessionRPRegistry.mjs";
+import { redisUserSessionStoreBuilder } from "#/userSessionStore.mjs";
 
 // Boot-time guards on the builders AdapterFactory wiring calls with the merged
 // config slice: a slice without `client` is refused at build, by name, instead
