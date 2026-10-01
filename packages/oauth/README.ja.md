@@ -37,7 +37,7 @@
 | [`oauthModule`](./src/module.mts) | `/oauth` のルートとディスカバリーの一部。グラントは 1 つも登録しない: `/oauth/token` は core の `grantHandlerResolver` を引いて振り分け、それはインストールされた各モジュールの `grants` 提供で埋まる。 | トークンエンドポイントはどのグラントがインストールされていても同じで、セッションストアが 1 つも無くても動く。 |
 | [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれ有効化されたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` と `auditSink` の absence policy を宣言する。セッションを読む 2 つのグラントがそれを通してセッションを読む `sessionRequirementResolver` を要求する。`refresh_token` が有効なときは、トークンファミリーの 2 つのスロットが両方配線されていなければ起動を拒否する（[`refresh_token`](#refresh_token) を参照）。 |
 | [`oauthSessionModule`](./src/oauthSession.mts) | `session` グラント。有効化されたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `config`、`keyStore`、`sessionRequirementResolver` と、任意でアドミッションがその横で読むもの — `userSessionStore`、`subjectRevocation`、`auditSink`、障害の行を書き出す `logger` — だけで、`subjectRevocation` と `auditSink` の absence policy を付ける。 |
-| [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthModule` のルートはそれを要求しない。`federation-grants.enabled = true` のときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
+| [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthModule` のルートはそれを要求しない。`federation-grants.enabled = true` のときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。そのカスケードはセッションを読まず `expiresAt` を渡さないので、ファミリーを列挙するだけで終了の印は書かない。そのため `subjectRevocation` を配線しない構成では、失効と同時に交換されたコードがそのファミリーを失効させないまま残しうる。`subjectRevocation` を配線すれば、サブジェクトのウォーターマークがそれを覆う。core がカスケードに `expiresAt` を渡すのは MFA 後の後続作業である（#894）。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
 
 どれも明示的にインストールする: どのモジュールも他のモジュールを登録しない。
 
@@ -154,6 +154,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `broadcastBackchannelLogout`、`BroadcastBackchannelLogoutOptions`、`BroadcastRP` — [`logout/broadcastBackchannel.mts`](./src/logout/broadcastBackchannel.mts)
 - `renderFrontchannelLogoutHtml`、`RenderFrontchannelLogoutHtmlOptions`、`FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)
 
+**テスト用エントリー**（`src/index.mts` ではなく専用のサブパス）: `@o3co/auth-provider-oauth/testing` — [`testing/index.mts`](./src/testing/index.mts) — テストが組み立てる `oauth` セクション、`oauthConfigForTests`。
+
 **イントロスペクションの型。** `IntrospectResponse` — [`types/introspect.mts`](./src/types/introspect.mts)。リソースサーバーやプロキシが型付けに使える RFC 7662 の応答形 — と、そこから再 export される core の `cnf` ヘルパー `extractConfirmation` / `isCompoundConfirmation`。
 
 ## ソース構成
@@ -169,6 +171,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 | [`logout/`](./src/logout) | 順序の決まったセッションカスケード（`cascadeLogout`）、RP へのバックチャネル POST、フロントチャネルのページ、subject revocation service を配線するモジュール。 |
 | [`clients/`](./src/clients) | Client ID Metadata Documents の解決: クライアントが名指す URL からその登録を SSRF ガード越しに取得し、キャッシュする。 |
 | [`types/`](./src/types) | イントロスペクション応答の契約。 |
+| [`testing/`](./src/testing) | テスト用エントリー `@o3co/auth-provider-oauth/testing`: テストがこのパッケージの設定を組み立てるもの。 |
 
 ## グラント
 
@@ -205,6 +208,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `sid` の無いコードは `400 invalid_grant` — ログインの配線が記録しなかった;
 - 1 度目で、ストアが解決できない `sid`、`expiresAt` を過ぎたセッション、サブジェクトを持たないセッション、あるいは（`subjectRevocation` が配線されていれば）サブジェクトのセッションが失効される前に確立されたセッションは `400 invalid_grant` / `session_invalid`;
 - 2 度目で、トークンの発行中に消えた・期限切れになった・失効した・別のサブジェクトを答えるセッションは `400 invalid_grant` / `session_invalidated` で、warn レベルで `authorization_grant_rejected_session_invalidated_during_token_issuance`、別のサブジェクトなら `…_session_subject_changed_during_token_issuance` としてログに出す（アドミッションはこれを `session.admission.subject_mismatch` としても監査する）;
+- 2 度目の読み取りの後、ファミリーを結び付けている間にログアウトがセッションを終わらせたときも、ファミリーインデックスが core のセッション終了ケイパビリティ（`SupportsSessionEnd`。同梱の 2 つのインデックスはどちらも持つ）を持てば同じ答え `400 invalid_grant` / `session_invalidated` で、同じ warn の行としてログに出す。ログアウトはファミリーを列挙する前にセッションに終了の印を書き、グラントは印を読む前にファミリーを追加するので、ログアウトがファミリーを失効させるか、グラントがトークンを出さないかのどちらかになる。グラントはそのとき自分が登録したファミリーを失効させる。ただし `refreshTokenFamilyRotation` が `refreshTokenFamilyRevocation` 無しで配線された構成（authorization_code だけの構成）ではレコードは有効なまま残る。そのファミリーのトークンは出していない。boot は warn レベルで 1 度 `refresh_token_family_rotation_without_revocation` としてそう告げる。失効に失敗すれば error レベルで 1 度 `authorization_grant_refused_family_revocation_failed`（`sid`、`clientId`、`familyId`、エラーの射影）としてログに出し、答えは変えない。この保証は core が述べるとおりストアを信頼する（読み書きが線形化可能で、読み取りはプライマリーが答える）。ケイパビリティの無いインデックスではファミリーは守られずに追加され、コード交換と競合するログアウトはそれを取りこぼしうる。boot は warn レベルで 1 度 `session_family_index_without_session_end`（`slot`、インデックスの `kind`）としてそう告げる;
 - セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant`。ステップアップで満たせるなら `step_up: "<要件>"` を添える;
 - 答えられないストアは `503 temporarily_unavailable`: セッションの読み取りはアドミッションが `session_admission_unavailable` として 1 度だけ、結び付けの書き込みは `authorization_grant_store_unavailable` としてログに出す。
 
@@ -554,12 +558,12 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 **カスケード**は [`cascadeLogout`](./src/logout/cascadeLogout.mts) で、決まった順序の 4 ステップからなる。その doc コメントが完全な契約で、[`cascadeLogout.test.mts`](./src/logout/__tests__/cascadeLogout.test.mts) がそれを固定している:
 
-1. セッションのリフレッシュトークンファミリーを読む。失敗したらカスケードはそこで止まる。
+1. セッションに終了の印を書き、そのリフレッシュトークンファミリーを読む（ファミリーインデックスがセッション終了ケイパビリティを持ち、呼び出し元が `expiresAt` を渡せば `endSession`、そうでなければ — `expiresAt` を省いたときも — `listFamilyIds`）。この後にファミリーを結び付けるコード交換は拒否される（[`authorization_code`](#authorization_code-セッションsidfamily_id-と-id_token) を参照）。失敗したらカスケードはそこで止まる。印は既に書かれていることがあり、再試行は安全である。
 2. すべてのファミリーを失効させ、セッションのフェデレーショントークンを削除する。すべての操作を試み、**どれか 1 つでも**失敗すれば、再試行に必要な記録が消される前にカスケードはここで止まる。
 3. セッションの逆引きインデックスのエントリー（RP、ファミリー、フェデレーション）を削除する — ベストエフォートで、ログに出し、TTL で上限がある。
 4. 最後に `UserSession` を削除する。失敗したらカスケードはそこで止まる。
 
-止まったカスケードは `503 {"error": "temporarily_unavailable"}` を返し、同じログアウトの再試行は安全である。error レベルで 1 回、`store: "logout_cascade"`、`cascadeStep`、失敗した数 `failures` 付きの `logout_store_unavailable` としてログに出し、失敗した各操作は `logout_cascade_operation_failed`（warn）としても出す。カスケード前にセッションストアを読めなかったときも同じイベントで、`store` がそのストア（`user_session`、`session_rp_registry`、`session_federation_index`）を名指す。
+止まったカスケードは `503 {"error": "temporarily_unavailable"}` を返し、同じログアウトの再試行は安全である。ステップ 1 が印を書いた後に止まったカスケードは、セッションを半ば終わった状態で残す: セッションはまだ存在し、再試行がログアウトを終えるか印が失効するまで、そのコード交換は拒否される。error レベルで 1 回、`store: "logout_cascade"`、`cascadeStep`、失敗した数 `failures` 付きの `logout_store_unavailable` としてログに出し、失敗した各操作は `logout_cascade_operation_failed`（warn）としても出す。カスケード前にセッションストアを読めなかったときも同じイベントで、`store` がそのストア（`user_session`、`session_rp_registry`、`session_federation_index`）を名指す。
 
 成功時のどの形でも — そして既に無くなっているセッションへの何もしない応答でも — エンドポイントは**ブラウザー自身の express-session も終わらせる**。ただしそのセッションの `sid` がログアウト対象のものであるときだけである。RP-Initiated Logout は誰でもどのセッションについても行えるリクエストなので、別の `sid` を名指す Cookie や何も名指さない Cookie は、無関係なユーザーをサインアウトさせないよう手を付けない。これが無いと、ストアが空になった後も Cookie が `/authorize` で `req.session.isAuthenticated` を満たし続ける。セッションストアが完了できない破棄はログに出し、成功したカスケードを `503` にはしない。`/authorize` はいずれにせよ自分の判断で死んだ `sid` を拒否する（[OIDC の対応範囲](#oidc-の対応範囲-284)を参照）。`503` は意図して Cookie を残すので、再試行は引き続きそのセッションを名指せる。
 

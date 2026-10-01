@@ -344,6 +344,24 @@ describe("POST /oauth/logout", () => {
 			expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
 		});
 
+		it("marks the session ended in a family index with the session-end capability, with the session's own expiresAt", async () => {
+			const sessionFamilyIndex = {
+				...makeSessionFamilyIndex(),
+				endSession: vi.fn(async (_sid: string, _expiresAt: Date) => ["fam-1"]),
+				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+			};
+			const refreshFamilyRevocation = makeFamilyRevocation();
+			const app = buildApp({ sessionFamilyIndex, refreshFamilyRevocation });
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(200);
+			expect(sessionFamilyIndex.endSession).toHaveBeenCalledTimes(1);
+			expect(sessionFamilyIndex.endSession).toHaveBeenCalledWith("sid-1", baseSession.expiresAt);
+			expect(sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
+			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+		});
+
 		it("confirmed=1 form-submission shape (hint + confirmed + state) completes hint-based logout, not 400", async () => {
 			// The GET confirmation page posts `confirmed=1` plus the
 			// id_token_hint as a hidden input; that shape must reach the

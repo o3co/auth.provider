@@ -207,6 +207,34 @@ describe("subjectRevocationServiceModule", () => {
 		});
 	});
 
+	describe("the session's end", () => {
+		it("runs the cascade without expiresAt: the families are listed, not marked, and no session is read", async () => {
+			const index = createInMemorySubjectSessionIndex();
+			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
+			const stores = cascadeStores();
+			const userSessionStore = { ...stores.userSessionStore, get: vi.fn() };
+			const sessionFamilyIndex = {
+				...stores.sessionFamilyIndex,
+				endSession: vi.fn(async () => ["fam-1"]),
+				addFamilyIdUnlessEnded: vi.fn(async () => "added" as const),
+			};
+			const service = build({
+				...stores,
+				userSessionStore,
+				sessionFamilyIndex,
+				subjectSessionIndex: index,
+			});
+
+			const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+			expect(userSessionStore.get).not.toHaveBeenCalled();
+			expect(sessionFamilyIndex.endSession).not.toHaveBeenCalled();
+			expect(sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-1");
+			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+			expect(result.sessionsRevoked).toEqual(["sid-1"]);
+		});
+	});
+
 	describe("what it refuses when grants are on", () => {
 		it("refuses a deployment with nowhere to read the grants from", () => {
 			expect(() => build({ config: enabled() })).toThrow(

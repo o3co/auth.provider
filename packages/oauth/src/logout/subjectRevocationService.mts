@@ -207,6 +207,11 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 			return createSubjectRevocationService({
 				subjectSessionIndex: deps.subjectSessionIndex,
 				subjectRevocation,
+				// No `expiresAt`: this path reads no session, so the cascade lists
+				// the families and writes no ended mark. Without a
+				// `subjectRevocation` boundary, a code exchanged at the same moment
+				// can leave its family unrevoked; with one, the subject watermark
+				// covers it.
 				cascadeSession: async (sid: string) => ({
 					// `cascadeLogout` answers with its own union, and its `step`
 					// is what makes a failure retryable. What this needs is the
