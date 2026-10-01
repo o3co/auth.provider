@@ -23,10 +23,12 @@
 import {
 	type Admission,
 	LOGIN_RETURN_PARAMETER,
+	type Logger,
 	loggableError,
 	readSpaceDelimitedParameter,
 	type UserSession,
 } from "@o3co/auth-provider-core";
+import type { Request } from "express";
 import { loginRedirect, redirectError } from "./authorizeAnswers.mjs";
 import { type AuthorizeContext, authorizeRequestUrl } from "./authorizeContext.mjs";
 import { REAUTH_ASK_PARAM, type ReauthAskRecord, type ReauthAskStore } from "./reauthAsk.mjs";
@@ -134,11 +136,13 @@ export const REDIRECT_TO_PARAM = LOGIN_RETURN_PARAMETER;
  * query) without the ask parameter, so both sides agree by construction —
  * the POST that sends the browser away and the GET it comes back as.
  */
-const askRequestOf = (ctx: AuthorizeContext): string => {
-	const url = authorizeRequestUrl(ctx.issuerOrigin, ctx.req);
+const askRequestFor = (issuerOrigin: string, req: Request): string => {
+	const url = authorizeRequestUrl(issuerOrigin, req);
 	url.searchParams.delete(REAUTH_ASK_PARAM);
 	return url.toString();
 };
+
+const askRequestOf = (ctx: AuthorizeContext): string => askRequestFor(ctx.issuerOrigin, ctx.req);
 
 /**
  * An ask store that cannot answer: not a decision either way, the same rule
@@ -238,6 +242,37 @@ const returnWithAsk = (askRequest: string, askId: string): string => {
 	const back = new URL(askRequest);
 	back.searchParams.set(REAUTH_ASK_PARAM, askId);
 	return back.toString();
+};
+
+/**
+ * Where the login page returns a browser that is not signed in and sent
+ * `prompt=login`: this request with a login ask recorded before the login,
+ * so the login it makes meets the prompt on the way back. Without an ask
+ * store, or when the ask cannot be recorded (logged), the request as it
+ * came: the user is then asked to log in again on the way back.
+ */
+export const loginReturnWithAsk = async (
+	req: Request,
+	issuerOrigin: string,
+	askStore: ReauthAskStore | undefined,
+	logger: Logger,
+): Promise<string> => {
+	const asIs = authorizeRequestUrl(issuerOrigin, req).toString();
+	if (askStore === undefined) return asIs;
+	const askRequest = askRequestFor(issuerOrigin, req);
+	const now = Date.now();
+	try {
+		const askId = await askStore.ask({
+			request: askRequest,
+			createdAt: now,
+			loginAskedAt: now,
+			stepUpAskedAt: {},
+		});
+		return returnWithAsk(askRequest, askId);
+	} catch (err) {
+		logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
+		return asIs;
+	}
 };
 
 /**

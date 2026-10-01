@@ -34,6 +34,7 @@ import type { Request, Response } from "express";
 import { auditFailure, loginRedirect, redirectError } from "./authorizeAnswers.mjs";
 import {
 	evaluateReauthentication,
+	loginReturnWithAsk,
 	type PromptDirective,
 	presentedAsk,
 	refuseUnmet,
@@ -50,15 +51,17 @@ import type { ReauthAskStore } from "./reauthAsk.mjs";
 
 /**
  * The login check, before any lookup: an unauthenticated browser is sent to
- * the login page unless the request names `prompt=none`. Returns the cookie's
- * claim, or `null` once the browser has been sent.
+ * the login page unless the request names `prompt=none`, with the login ask
+ * recorded when it names `prompt=login`. Returns the cookie's claim, or
+ * `null` once the browser has been sent.
  */
-export const checkLogin = (
+export const checkLogin = async (
 	req: Request,
 	res: Response,
-	opts: Pick<AuthorizeHandlerOptions, "login">,
+	opts: Pick<AuthorizeHandlerOptions, "login" | "logger">,
 	issuerOrigin: string,
-): SessionClaim | null => {
+	askStore: ReauthAskStore | undefined,
+): Promise<SessionClaim | null> => {
 	// `prompt=none` must not get a login page (a hidden iframe cannot act on
 	// it); it falls through so `login_required` can be delivered at the
 	// validated `redirect_uri`. Any list naming `none` opens this gate —
@@ -67,8 +70,8 @@ export const checkLogin = (
 	// `invalid_request` belongs at the RP's `redirect_uri`. Every other
 	// unauthenticated request is answered before any lookup.
 	const promptRaw = authorizeParams(req).prompt;
-	const wantsSilentAuth =
-		typeof promptRaw === "string" && parseScopeTokens(promptRaw).includes("none");
+	const prompts = typeof promptRaw === "string" ? parseScopeTokens(promptRaw) : [];
+	const wantsSilentAuth = prompts.includes("none");
 
 	// The cookie's flag is checked first, with no store read, so an
 	// anonymous request costs no lookup. Whether the session behind it is
@@ -76,7 +79,14 @@ export const checkLogin = (
 	// are validated.
 	const claim = cookieClaim(req);
 	if (!claim.authenticated && !wantsSilentAuth) {
-		loginRedirect(res, opts.login, authorizeRequestUrl(issuerOrigin, req).toString());
+		// `prompt=login`: the login about to be made is the one asked for.
+		// Recorded before the client is looked up, as every unauthenticated
+		// request is answered before any lookup; the `/authorize` rate limit
+		// and the ask's window bound what an anonymous caller can write.
+		const target = prompts.includes("login")
+			? await loginReturnWithAsk(req, issuerOrigin, askStore, opts.logger)
+			: authorizeRequestUrl(issuerOrigin, req).toString();
+		loginRedirect(res, opts.login, target);
 		return null;
 	}
 	return claim;

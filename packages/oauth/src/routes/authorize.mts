@@ -258,7 +258,8 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		auditSink: opts.auditSink,
 	};
 	return async (req: Request, res: Response) => {
-		const claim = checkLogin(req, res, opts, issuerOrigin);
+		const askStore = reauthAskStoreFor(req);
+		const claim = await checkLogin(req, res, opts, issuerOrigin, askStore);
 		if (claim === null) return;
 
 		// No early `response_type` gate: once the redirect target is validated,
@@ -313,7 +314,6 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			action: AUTHORIZE_ACTION,
 			...(requested.length > 0 ? { asks: { acrValues: requested } } : {}),
 		});
-		const askStore = reauthAskStoreFor(req);
 		const decided = await decideOnAdmission(
 			ctx,
 			admission,
