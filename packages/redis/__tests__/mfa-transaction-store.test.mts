@@ -591,6 +591,51 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 		const store = storeAt(prefix);
 		await first().set(bindingKey(prefix, A), "not a sorted set");
 		await expect(store.create(TX({ binding: A }))).rejects.toThrow();
+		// Refused after the write: the transaction it wrote stands until it expires.
+		expect(await first().exists(`${prefix}tx:{${keyPart("tx-1")}}`)).toBe(1);
+	});
+
+	/** A store over a client whose `fail` operations reject, and the warnings it logs. */
+	function failing(prefix: string, fail: Partial<Record<keyof MfaTransactionStoreClient, true>>) {
+		const real = makeIoredisMfaTransactionStoreClient(first());
+		const down = async (): Promise<never> => {
+			throw new Error("connection lost");
+		};
+		const client: MfaTransactionStoreClient = {
+			...real,
+			...(fail.evictTransaction ? { evictTransaction: down } : {}),
+			...(fail.unindexTransaction ? { unindexTransaction: down } : {}),
+		};
+		const warned: [Record<string, unknown>, string][] = [];
+		const store = createRedisMfaTransactionStore({
+			client,
+			keyPrefix: prefix,
+			logger: { warn: (obj, msg) => warned.push([obj, msg]) },
+		});
+		return { store, warned };
+	}
+
+	it("keeps a create whose eviction fails: the new transaction stands, the one not ended stays until it expires, and it warns", async () => {
+		const prefix = freshPrefix();
+		const { store, warned } = failing(prefix, { evictTransaction: true });
+		await opened(store, "tab", N + 1, A);
+		expect(await store.get(`tab-${N}`)).not.toBeNull();
+		expect(await store.get("tab-0")).not.toBeNull();
+		expect(warned.map(([, msg]) => msg)).toEqual(["mfa_transaction_evict_failed"]);
+		expect(warned[0]?.[0]).toMatchObject({ err: expect.anything() });
+	});
+
+	it("answers a consume and a reservation past max as usual when the member cannot be taken out, and warns", async () => {
+		const prefix = freshPrefix();
+		const { store, warned } = failing(prefix, { unindexTransaction: true });
+		await opened(store, "tab", 2, A);
+		expect(await store.consume("tab-0", 1)).not.toBeNull();
+		expect(await store.reserveAttempt("tab-1", 1)).toEqual({ ok: true, attempts: 1 });
+		expect(await store.reserveAttempt("tab-1", 1)).toEqual({ ok: false, attempts: 1 });
+		expect(warned.map(([obj, msg]) => [msg, obj.operation])).toEqual([
+			["mfa_transaction_unindex_failed", "consume"],
+			["mfa_transaction_unindex_failed", "reserveAttempt"],
+		]);
 	});
 });
 
