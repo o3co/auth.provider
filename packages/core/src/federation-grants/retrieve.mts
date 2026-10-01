@@ -37,6 +37,7 @@ import {
 	judgeUpstreamAccessToken,
 	scopesWithin,
 } from "./eligibility.mjs";
+import { federationGrantAccessToken, federationGrantHeldToken } from "./held-token.mjs";
 import { federationGrantEffectiveExpiry } from "./lifetime.mjs";
 import type { FederationGrantStore } from "./store.mjs";
 import {
@@ -773,10 +774,7 @@ async function evaluate(
 		// replicas' clocks may differ where the buffer is set to less, is not
 		// believed; none has more life left than it was issued with.
 		const { believed, remainingMs, halfSpent } = judgeHeldUpstreamToken(
-			{
-				obtainedAt: token.obtainedAt,
-				expiresAt: new Date(token.obtainedAt.getTime() + token.issuedLifetime * 1000),
-			},
+			federationGrantHeldToken(token),
 			{ now: now.getTime(), allowanceMs: dateAllowanceMs(deps.limits) },
 		);
 		const tokenEndsAt = now.getTime() + remainingMs;
@@ -1299,8 +1297,7 @@ async function refreshUnderLock(
 	} else {
 		const { expiresIn, expiresAt, scopes } = response.token;
 		// A lifetime both fields state, with life left when the answer is read,
-		// or none that is finite. The `expires_in` as issued is what is judged;
-		// the life the token has from the call is what is stored.
+		// or none that is finite: the `expires_in` as issued is what is judged.
 		const reading = readUpstreamTokenLifetime(
 			{ expiresIn, expiresAt },
 			{ calledAt, now: receivedAt, floorMs: 0 },
@@ -1308,7 +1305,7 @@ async function refreshUnderLock(
 		const lifetime =
 			reading.verdict === "finite" && reading.stated === "both" ? reading : undefined;
 		const judgement = judgeUpstreamAccessToken({
-			issuedLifetime: lifetime === undefined ? null : expiresIn,
+			issuedLifetime: lifetime?.issuedLifetime ?? null,
 			scopes,
 			consentedScopes: grant.consent.scopes,
 			maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
@@ -1319,13 +1316,10 @@ async function refreshUnderLock(
 		} else if (lifetime !== undefined) {
 			credentials = {
 				refreshToken: response.refreshToken,
-				accessToken: {
-					value: response.token.accessToken,
-					tokenType: response.token.tokenType,
-					obtainedAt: lifetime.obtainedAt,
-					issuedLifetime: lifetime.effectiveLifetime,
-					scopes: [...scopes],
-				},
+				accessToken: federationGrantAccessToken(
+					{ value: response.token.accessToken, tokenType: response.token.tokenType, scopes },
+					lifetime,
+				),
 			};
 		}
 	}

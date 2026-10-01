@@ -133,6 +133,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 					tokenType: "Bearer",
 					obtainedAt: DUE,
 					issuedLifetime: 3600,
+					effectiveExpiresAt: new Date(DUE.getTime() + HOUR),
 					scopes: [...SCOPES],
 				},
 			});

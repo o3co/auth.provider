@@ -100,7 +100,9 @@ describe("what a grant store answers with", () => {
 	it("names the access token, and every field of one", () => {
 		expectTypeOf<OptionalKeys<FederationGrantCredentials>>().toEqualTypeOf<never>();
 		expectTypeOf<IsRequiredKey<FederationGrantCredentials, "accessToken">>().toEqualTypeOf<true>();
-		expectTypeOf<OptionalKeys<AccessToken>>().toEqualTypeOf<never>();
+		// The one optional key: a store or writer that drops it loses only how
+		// much earlier than its issued lifetime the token ends.
+		expectTypeOf<OptionalKeys<AccessToken>>().toEqualTypeOf<"effectiveExpiresAt">();
 	});
 });
 

@@ -21,14 +21,12 @@
  * finite lifetime is required, whether both fields are, and any maximum.
  * Pure: no clock, no I/O, and no throw on any field value.
  *
- * A finite lifetime is always dated from `calledAt`, and `effectiveLifetime`
- * is the life from then to the earlier instant the fields name: never more
- * than a stated `expiresIn`. A consumer that judges the lifetime as issued
- * judges `expiresIn` itself. A record that keeps a start and a lifetime
- * keeps these two, so the start plus the lifetime is when the token ends
- * and its age counts from when it was obtained. The federation-grant
- * credential keeps `effectiveLifetime` under its released name,
- * `issuedLifetime`.
+ * A finite lifetime answers three facts, none derived from another:
+ * `obtainedAt` is always `calledAt`; `expiresAt` is when the token ends, the
+ * earlier instant the fields name; `issuedLifetime` is the `expiresIn` as
+ * issued, which a maximum is judged against. The end may come before
+ * `obtainedAt + issuedLifetime`, never after it. A record that keeps the
+ * token keeps all three, or loses only what it drops.
  */
 
 /** The lifetime fields of an adapter's answer, each as the consumer read it once. */
@@ -57,14 +55,23 @@ export type UpstreamTokenLifetime =
 	| { readonly verdict: "spent" }
 	| {
 			readonly verdict: "finite";
-			/** Which fields named it. */
-			readonly stated: "both" | "expiresIn" | "expiresAt";
-			/** When the lifetime counts from: `calledAt`. */
+			/** `expiresIn` named it, alone or beside `expiresAt`. */
+			readonly stated: "both" | "expiresIn";
+			/** When the token was obtained: `calledAt`. */
 			readonly obtainedAt: Date;
-			/** The earlier instant the fields name, to the ms: neither field can lengthen the other. */
+			/** When the token ends: the earlier instant the fields name, to the ms, after `obtainedAt`. */
 			readonly expiresAt: Date;
-			/** Seconds from `obtainedAt` to `expiresAt`, above zero, and never more than a stated `expiresIn`. */
-			readonly effectiveLifetime: number;
+			/** Seconds, the `expiresIn` as issued: what a maximum is judged against. */
+			readonly issuedLifetime: number;
+	  }
+	| {
+			readonly verdict: "finite";
+			/** `expiresAt` alone named it: no lifetime was issued. */
+			readonly stated: "expiresAt";
+			/** When the token was obtained: `calledAt`. */
+			readonly obtainedAt: Date;
+			/** When the token ends: the instant `expiresAt` names, after `obtainedAt`. */
+			readonly expiresAt: Date;
 	  };
 
 /** A token already held: when it was obtained and when it ends. */
@@ -180,15 +187,16 @@ export function readUpstreamTokenLifetime(
 	if (remainingMs <= 0 || remainingMs < floorMs || derived.getTime() <= calledAt) {
 		return { verdict: "spent" };
 	}
+	const obtainedAt = new Date(calledAt);
+	if (lifetime === undefined) {
+		return { verdict: "finite", stated: "expiresAt", obtainedAt, expiresAt: derived };
+	}
 	return {
 		verdict: "finite",
-		stated: lifetime === undefined ? "expiresAt" : instant === undefined ? "expiresIn" : "both",
-		obtainedAt: new Date(calledAt),
+		stated: instant === undefined ? "expiresIn" : "both",
+		obtainedAt,
 		expiresAt: derived,
-		effectiveLifetime: Math.min(
-			(derived.getTime() - calledAt) / 1000,
-			lifetime ?? Number.POSITIVE_INFINITY,
-		),
+		issuedLifetime: lifetime,
 	};
 }
 

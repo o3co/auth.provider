@@ -303,8 +303,10 @@ export type EffectiveFederationGrantStatus =
 /**
  * What the sealed credential record holds. `accessToken` is `undefined` when
  * an ineligible token was withheld, and is a required key so a copy cannot
- * drop it (which would force a refresh on every request). Expiry is derived
- * (`obtainedAt` + `issuedLifetime`), never stored separately.
+ * drop it (which would force a refresh on every request). The token ends at
+ * `effectiveExpiresAt`, never after `obtainedAt` + `issuedLifetime`, and at
+ * that instant when the record has no `effectiveExpiresAt`
+ * (`federationGrantHeldToken`).
  */
 export interface FederationGrantCredentials {
 	readonly refreshToken: string;
@@ -312,14 +314,18 @@ export interface FederationGrantCredentials {
 		| {
 				readonly value: string;
 				readonly tokenType: string;
-				/** When the refresh call that obtained it began. */
+				/** When it was obtained; a refresh writes when its call began. */
 				readonly obtainedAt: Date;
-				/**
-				 * Seconds from `obtainedAt` to when the token ends: the reading's
-				 * `effectiveLifetime`, never more than the `expires_in` issued, and
-				 * shorter when the adapter's expiry ended it earlier. Not what remains.
-				 */
+				/** Seconds, as the upstream issued it — not what remains of it, and not cut by an earlier expiry. */
 				readonly issuedLifetime: number;
+				/**
+				 * When the token ends, where the adapter's expiry ended it no later
+				 * than its issued lifetime. The one optional key: absent on records
+				 * written before it, by the connect callback, and by a store that
+				 * does not keep it, which read as ending at `obtainedAt` +
+				 * `issuedLifetime`.
+				 */
+				readonly effectiveExpiresAt?: Date;
 				/** What this token carries. A refresh response that omits `scope` means the grant's scopes (RFC 6749 §6). */
 				readonly scopes: readonly string[];
 		  }

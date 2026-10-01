@@ -133,22 +133,30 @@ function copyCredentials(from: FederationGrantCredentials): FederationGrantCrede
 						tokenType: token.tokenType,
 						obtainedAt: new Date(token.obtainedAt),
 						issuedLifetime: token.issuedLifetime,
+						...(token.effectiveExpiresAt === undefined
+							? {}
+							: { effectiveExpiresAt: new Date(token.effectiveExpiresAt) }),
 						scopes: [...token.scopes],
 					},
 	};
 }
 
 /**
- * Whether the credentials are ones a store can keep: the access token's date
- * is a date, and its issued lifetime a finite number. A lifetime of NaN or
+ * Whether the credentials are ones a store can keep: the access token's dates
+ * are dates, and its issued lifetime a finite number. A lifetime of NaN or
  * infinity is refused at the write, where every adapter refuses it alike,
  * rather than kept here and read back as unreadable by an adapter that seals
  * what it stores.
  */
-const storableCredentials = (credentials: FederationGrantCredentials): boolean =>
-	credentials.accessToken === undefined ||
-	(isDate(credentials.accessToken.obtainedAt) &&
-		Number.isFinite(credentials.accessToken.issuedLifetime));
+const storableCredentials = (credentials: FederationGrantCredentials): boolean => {
+	const token = credentials.accessToken;
+	return (
+		token === undefined ||
+		(isDate(token.obtainedAt) &&
+			Number.isFinite(token.issuedLifetime) &&
+			(token.effectiveExpiresAt === undefined || isDate(token.effectiveExpiresAt)))
+	);
+};
 
 /**
  * In-process Map-backed {@link FederationGrantStore}.
