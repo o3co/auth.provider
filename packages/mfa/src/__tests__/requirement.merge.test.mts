@@ -36,8 +36,8 @@ import {
 	type MfaFactor,
 	type SessionRequirement,
 	type StepUpPage,
-	type UserSession,
 	type SupportsSecondFactorUpdate,
+	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -106,9 +106,11 @@ const realRequirement = (
 	});
 
 /**
- * Whether a row's store can record a second factor: every row's can, as
- * the coordinator's `stepUpRecordable: true` above says, unless the row
- * says its store cannot.
+ * Whether a row's store can record a second factor: every row's can,
+ * unless the row says its store cannot. The requirement is built able to
+ * record a step-up whatever the row says, so a row whose store cannot
+ * record one checks core's merge alone; the requirement's own answer
+ * without the capability (a new login) is held in its own tests.
  */
 const recordsSecondFactor = (row: MergeRow): boolean =>
 	!("storeRecords" in row && row.storeRecords === false);
