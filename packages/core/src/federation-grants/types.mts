@@ -201,10 +201,10 @@ export function hasFederationGrantAuthorization<G extends FederationGrant>(
  */
 export interface FederationGrantConnection {
 	readonly name: string;
-	/** Key under `federations`. */
+	/** Key under `core.federations`. */
 	readonly federation: string;
 	/**
-	 * The issuer exactly as `federations.<name>.issuer` is configured — not the
+	 * The issuer exactly as `core.federations.<name>.issuer` is configured — not the
 	 * string a discovery document happens to return. It goes into a persisted
 	 * fingerprint, and what goes into that must only change when an operator
 	 * changes it.

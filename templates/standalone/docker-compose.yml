@@ -37,7 +37,7 @@ services:
       # debug it. Redis is already running and already required by three other
       # stores, so this costs nothing: the shared ioredis socket is open
       # either way.
-      USER_SESSION_STORES_ADAPTER: redis
+      ADAPTERS_USER_SESSION_STORES: redis
 
   redis:
     # Tag-pinned, not digest-pinned. The Dockerfile argues for digests (#289)

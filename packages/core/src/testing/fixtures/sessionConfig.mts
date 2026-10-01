@@ -14,9 +14,11 @@
  * limitations under the License.
  */
 
+import { federationsOf } from "../../federations/configured.mjs";
+
 /**
  * The builders a test sets the session cookie (the session store's section,
- * `session-store`) and core's `federations` section with, so a test that
+ * `session-store`) and core's `core.federations` map with, so a test that
  * logs in over plain HTTP, or through a federation, writes neither by hand.
  */
 
@@ -60,20 +62,28 @@ export interface FederationEntryForTests {
 }
 
 /**
- * A copy of `config` whose `federations.<name>` is an enabled entry with
+ * A copy of `config` whose `core.federations.<name>` is an enabled entry with
  * `entry`'s callback URL and client credentials, every other federation and
- * key kept; `config` itself is left as it was.
+ * key of `core` and of `config` kept; `config` itself is left as it was.
  */
-export function withFederation<C extends { readonly federations: object }>(
+export function withFederation<C extends object>(
 	config: C,
 	name: string,
 	entry: FederationForTests,
-): C & { readonly federations: Readonly<Record<string, FederationEntryForTests>> } {
+): C & {
+	readonly core: { readonly federations: Readonly<Record<string, FederationEntryForTests>> };
+} {
 	const federation: FederationEntryForTests = {
 		enabled: true,
 		clientId: entry.clientId ?? `${name}-client`,
 		clientSecret: entry.clientSecret ?? `${name}-secret`,
 		callbackURL: entry.callbackURL,
 	};
-	return { ...config, federations: { ...config.federations, [name]: federation } };
+	const core = (config as { readonly core?: Readonly<Record<string, unknown>> }).core;
+	return {
+		...config,
+		core: { ...core, federations: { ...federationsOf(config), [name]: federation } },
+	} as C & {
+		readonly core: { readonly federations: Readonly<Record<string, FederationEntryForTests>> };
+	};
 }

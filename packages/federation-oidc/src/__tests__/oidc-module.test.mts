@@ -178,20 +178,20 @@ describe("readOidcFederationConfigs", () => {
 		const { issuer: _i, ...noIssuer } = okta;
 		expect(() =>
 			readOidcFederationConfigs({ okta: { enabled: true, type: "oidc", ...noIssuer } }),
-		).toThrow(/federations\.okta\.issuer/);
+		).toThrow(/core\.federations\.okta\.issuer/);
 		const { callbackURL: _c, ...noCallback } = okta;
 		expect(() =>
 			readOidcFederationConfigs({ okta: { enabled: true, type: "oidc", ...noCallback } }),
-		).toThrow(/federations\.okta\.callbackURL/);
+		).toThrow(/core\.federations\.okta\.callbackURL/);
 		const { clientSecret: _s, ...noSecret } = okta;
 		expect(() =>
 			readOidcFederationConfigs({ okta: { enabled: true, type: "oidc", ...noSecret } }),
-		).toThrow(/federations\.okta[\s\S]*clientSecret[\s\S]*privateKey/);
+		).toThrow(/core\.federations\.okta[\s\S]*clientSecret[\s\S]*privateKey/);
 		expect(() =>
 			readOidcFederationConfigs({
 				okta: { enabled: true, type: "oidc", ...okta, privateKey: "-----BEGIN PRIVATE KEY-----" },
 			}),
-		).toThrow(/federations\.okta[\s\S]*clientSecret[\s\S]*privateKey/);
+		).toThrow(/core\.federations\.okta[\s\S]*clientSecret[\s\S]*privateKey/);
 	});
 
 	it("refuses fields of the wrong shape rather than dropping them", () => {
@@ -199,35 +199,35 @@ describe("readOidcFederationConfigs", () => {
 			okta: { enabled: true, type: "oidc", ...okta, ...extra },
 		});
 		expect(() => readOidcFederationConfigs(section({ scopes: "openid profile" }))).toThrow(
-			/federations\.okta\.scopes/,
+			/core\.federations\.okta\.scopes/,
 		);
 		expect(() => readOidcFederationConfigs(section({ scopes: ["openid", 3] }))).toThrow(
-			/federations\.okta\.scopes/,
+			/core\.federations\.okta\.scopes/,
 		);
 		expect(() => readOidcFederationConfigs(section({ endpoints: "https://x" }))).toThrow(
-			/federations\.okta\.endpoints/,
+			/core\.federations\.okta\.endpoints/,
 		);
 		expect(() => readOidcFederationConfigs(section({ endpoints: { tokenEndpoint: 1 } }))).toThrow(
-			/federations\.okta\.endpoints\.tokenEndpoint/,
+			/core\.federations\.okta\.endpoints\.tokenEndpoint/,
 		);
 		expect(() => readOidcFederationConfigs(section({ discovery: "yes" }))).toThrow(
-			/federations\.okta\.discovery/,
+			/core\.federations\.okta\.discovery/,
 		);
 		expect(() => readOidcFederationConfigs(section({ userInfo: 1 }))).toThrow(
-			/federations\.okta\.userInfo/,
+			/core\.federations\.okta\.userInfo/,
 		);
 		expect(() => readOidcFederationConfigs(section({ clockToleranceSeconds: "10" }))).toThrow(
-			/federations\.okta\.clockToleranceSeconds/,
+			/core\.federations\.okta\.clockToleranceSeconds/,
 		);
 		expect(() => readOidcFederationConfigs(section({ redirectAllowlist: "https://x" }))).toThrow(
-			/federations\.okta\.redirectAllowlist/,
+			/core\.federations\.okta\.redirectAllowlist/,
 		);
 		expect(() => readOidcFederationConfigs(section({ sessionDomain: 42 }))).toThrow(
-			/federations\.okta\.sessionDomain/,
+			/core\.federations\.okta\.sessionDomain/,
 		);
 		expect(() =>
 			readOidcFederationConfigs(section({ privateKey: { kid: "k" }, clientSecret: undefined })),
-		).toThrow(/federations\.okta\.privateKey/);
+		).toThrow(/core\.federations\.okta\.privateKey/);
 	});
 });
 

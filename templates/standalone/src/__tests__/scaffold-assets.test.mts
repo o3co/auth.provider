@@ -28,8 +28,10 @@ import { type AppConfig, AppConfigSchema, coreReference } from "@o3co/auth-provi
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
+import { readAdapters } from "../adapters.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
+import { type Adapters, repositoriesSectionSchema } from "../sections.mjs";
 
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -72,6 +74,23 @@ function resolveWith(env: Record<string, string>, configEnv = "production"): App
 	);
 }
 
+/** The template's own layers under `env`, over its own reference, unparsed. */
+function ownResolved(
+	env: Record<string, string>,
+	configEnv = "production",
+): Record<string, unknown> {
+	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
+	return parseFile(envConfPath, { env })
+		.withFallback(parseFile(applicationConfPath, { env }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+		.toObject() as Record<string, unknown>;
+}
+
+/** The adapters phase one reads under `env`. */
+function adaptersWith(env: Record<string, string>, configEnv = "production"): Adapters {
+	return readAdapters(ownResolved(env, configEnv), env);
+}
+
 /**
  * A compose file's `environment:` block, plus the secrets no compose file
  * carries (they come from `.env` or a compose secret) — the environment the
@@ -88,9 +107,9 @@ function bootableEnv(rel: string): Record<string, string> {
 	for (const [key, value] of composeAppEnvironment(rel)) {
 		if (value !== null) env[key] = value;
 	}
-	if (env.OAUTH_JWT_PRIVATE_KEY_PATH === undefined) {
-		env.OAUTH_JWT_ALGORITHM = "HS256";
-		env.OAUTH_JWT_SECRET = "scaffold-assets-compose.at-least-32-bytes.ok";
+	if (env.KEY_STORE_LOCAL_PRIVATE_KEY_PATH === undefined) {
+		env.KEY_STORE_LOCAL_ALGORITHM = "HS256";
+		env.KEY_STORE_LOCAL_SECRET = "scaffold-assets-compose.at-least-32-bytes.ok";
 	}
 	return env;
 }
@@ -124,7 +143,12 @@ describe("the dev compose can reach every Redis it configures", () => {
 		// which inside the container is the container itself. `.env.example` is
 		// what the compose file loads, so a URL missing from it is a boot that
 		// dials nothing.
-		const conf = read("/config/application.conf") + read("/config/reference.conf");
+		// The captures of renamed variables (`renamed-variables { … }`) read an
+		// old name only to refuse it, and dial nothing.
+		const conf = (read("/config/application.conf") + read("/config/reference.conf")).replace(
+			/^renamed-variables \{[\s\S]*?^\}/m,
+			"",
+		);
 		const declared = [...conf.matchAll(/\$\{\?([A-Z0-9_]*REDIS_URL)\}/g)].map((m) => m[1]);
 		expect(declared.length).toBeGreaterThan(0);
 
@@ -245,10 +269,11 @@ describe("what .gitignore keeps out of git stays out of the image, and productio
 			"./config/clients.yaml",
 		);
 		// And the process reads it there, through the real config layers.
-		const config = resolveWith(bootableEnv("/docker-compose.production.yml"));
-		const client = config.repositories.client as { type: string; yaml?: { path?: string } };
-		expect(client.type).toBe("yaml");
-		expect(client.yaml?.path).toBe(`/run/secrets/${name}`);
+		const env = bootableEnv("/docker-compose.production.yml");
+		expect(adaptersWith(env).clientRepository).toBe("yaml");
+		expect(repositoriesSectionSchema.parse(ownResolved(env).repositories).client.yaml.path).toBe(
+			`/run/secrets/${name}`,
+		);
 	});
 });
 
@@ -298,26 +323,28 @@ describe("the compose files put a store and its lifetime-sibling on the same bac
 	// the same lifetime" — so nothing but this assertion stands behind it.
 	for (const file of ["/docker-compose.production.yml", "/docker-compose.yml"]) {
 		it(`${file} keeps the user-session stores with the express-session store`, () => {
-			const config = resolveWith(bootableEnv(file));
+			const env = bootableEnv(file);
 			// Resolved through the real config layers, not read off the file:
 			// what matters is the value the process ends up with, whether the
 			// compose stated it or `config/application.conf` did.
-			expect(config["session-store"]?.storage?.type).toBe("redis");
-			expect(config.userSessionStores?.adapter).toBe("redis");
+			expect(resolveWith(env)["session-store"]?.storage?.type).toBe("redis");
+			expect(adaptersWith(env).userSessionStores).toBe("redis");
 		});
 	}
 
 	it("the production compose leaves no store on memory while a sibling is on Redis", () => {
-		const config = resolveWith(bootableEnv("/docker-compose.production.yml"));
+		const env = bootableEnv("/docker-compose.production.yml");
 		// Every store whose records must outlive one process. The federation
 		// token store is deliberately absent: this template ships every
 		// federation disabled, so nothing writes to it, and turning it on needs
 		// an AES key the compose file must not invent.
-		expect(config["session-store"]?.storage?.type).toBe("redis");
-		expect(config.userSessionStores?.adapter).toBe("redis");
-		expect(config.oauth.code?.adapter).toBe("redis");
-		expect(config.accessTokenDenylist?.adapter).toBe("redis");
-		expect(config.rateLimiter?.adapter).toBe("redis");
+		expect(resolveWith(env)["session-store"]?.storage?.type).toBe("redis");
+		expect(adaptersWith(env)).toMatchObject({
+			userSessionStores: "redis",
+			codeRepository: "redis",
+			accessTokenDenylist: "redis",
+			rateLimiter: "redis",
+		});
 	});
 });
 

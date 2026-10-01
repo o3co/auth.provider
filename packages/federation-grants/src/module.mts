@@ -37,9 +37,11 @@ import {
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
 	defineModule,
+	describeAbsenceDeclaration,
 	durationFromEnv,
 	type FederationGrantConnection,
 	type FederationGrantRefresher,
+	isAbsenceDeclared,
 	type ProviderDeps,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantAcquisitionLimits,
@@ -300,13 +302,11 @@ const requireDelegatedCapability = (
  */
 const requireAuditDecision = (deps: FederationGrantsModuleDeps): void => {
 	if (deps.auditSink !== undefined) return;
-	const declared = deps.config?.audit?.sink?.type;
-	if (declared === AUDIT_SINK_ABSENCE_POLICY.absentValue) return;
+	if (isAbsenceDeclared(deps.config, AUDIT_SINK_ABSENCE_POLICY)) return;
 	throw new Error(
 		"federationGrantsModule: federation-grants.enabled = true with no auditSink component. " +
-			`Wire one, or set ${AUDIT_SINK_ABSENCE_POLICY.configKey.join(".")} = ` +
-			`"${AUDIT_SINK_ABSENCE_POLICY.absentValue}" to declare the capability absent on purpose. ` +
-			AUDIT_SINK_ABSENCE_POLICY.hint,
+			`Wire one, or ${describeAbsenceDeclaration(AUDIT_SINK_ABSENCE_POLICY)} to declare the ` +
+			`capability absent on purpose. ${AUDIT_SINK_ABSENCE_POLICY.hint}`,
 	);
 };
 

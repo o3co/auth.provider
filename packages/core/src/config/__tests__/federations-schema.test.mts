@@ -14,27 +14,24 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema, fullSectionsSchema } from "#/config/application.schema.mjs";
+import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 
-/**
- * Access the federations schema directly for sub-schema-level tests.
- * Mirrors the pattern used by schema-open-type.test.mts.
- */
-const federationsSchema = fullSectionsSchema.shape.federations;
+/** The schema of `core.federations`, for tests of an entry's shape. */
+const federationsSchema = CoreConfigSchema.shape.core.unwrap().shape.federations.unwrap();
 
 /**
  * Per ADR 2026-04-30: schema is a pure type contract; defaults live in
  * hocon. AppConfigSchema.parse rejects bare `{}` inputs, so the fixture
  * supplies a minimal schema-valid baseline (intentionally diverges from
  * reference.conf — see makeValidAppConfig docstring). Per-test
- * overrides target only the field-under-test (e.g. add `federations`
+ * overrides target only the field-under-test (e.g. add `core.federations`
  * for federation-specific assertions).
  */
 const minimalConfig = makeValidAppConfig();
 
-describe("federations schema — open to z.record with passthrough", () => {
-	it("accepts shorthand: federations.google { enabled: true, clientId, clientSecret, callbackURL }", () => {
+describe("core.federations schema — open to z.record with passthrough", () => {
+	it("accepts shorthand: core.federations.google { enabled: true, clientId, clientSecret, callbackURL }", () => {
 		const parsed = federationsSchema.parse({
 			google: {
 				enabled: true,
@@ -50,7 +47,7 @@ describe("federations schema — open to z.record with passthrough", () => {
 		expect(google.callbackURL).toBe("https://example.com/callback");
 	});
 
-	it("accepts explicit multi-tenant: federations['google-work'] { type: 'google', google: { clientId, ... } }", () => {
+	it("accepts explicit multi-tenant: core.federations['google-work'] { type: 'google', google: { clientId, ... } }", () => {
 		const parsed = federationsSchema.parse({
 			"google-work": {
 				enabled: false,
@@ -68,7 +65,7 @@ describe("federations schema — open to z.record with passthrough", () => {
 		expect(nested.clientId).toBe("work-client-id");
 	});
 
-	it("accepts arbitrary custom type: federations['corporate-sso'] { type: 'saml', saml: { entityId: '...' } }", () => {
+	it("accepts arbitrary custom type: core.federations['corporate-sso'] { type: 'saml', saml: { entityId: '...' } }", () => {
 		const parsed = federationsSchema.parse({
 			"corporate-sso": {
 				enabled: false,
@@ -100,11 +97,11 @@ describe("federations schema — open to z.record with passthrough", () => {
 		}
 	});
 
-	it("preserves an empty federations record passed by the caller (no schema-side default)", () => {
-		// hocon supplies the default federations record at runtime; the schema
-		// itself does not inject `{}` when the section is omitted.
+	it("leaves core.federations absent when the configuration has none (no schema-side default)", () => {
+		// Core's reference.conf ships the empty map; the schema itself does
+		// not inject `{}` when the key is omitted.
 		const parsed = AppConfigSchema.parse(minimalConfig);
-		expect(parsed.federations).toEqual({});
+		expect(parsed.core?.federations).toBeUndefined();
 	});
 
 	it("does not enforce clientId/clientSecret/callbackURL when enabled=true", () => {
@@ -121,7 +118,7 @@ describe("federations schema — open to z.record with passthrough", () => {
 	});
 
 	it("coerces enabled='true' string to boolean true (env var path)", () => {
-		// FEDERATIONS_GOOGLE_ENABLED=true arrives as the string "true" from ts.hocon env-var
+		// CORE_FEDERATIONS_GOOGLE_ENABLED=true arrives as the string "true" from ts.hocon env-var
 		// substitution when the z.record wrapper prevents hocon-level coerce traversal.
 		const parsed = federationsSchema.parse({
 			google: { enabled: "true" },
@@ -177,7 +174,7 @@ describe("federations schema — open to z.record with passthrough", () => {
 		expect(() =>
 			AppConfigSchema.parse({
 				...minimalConfig,
-				federations: { google: { enabled: "yes" } },
+				core: { ...minimalConfig.core, federations: { google: { enabled: "yes" } } },
 			}),
 		).toThrow();
 	});

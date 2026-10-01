@@ -52,7 +52,7 @@ export const ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY = {
 	absentValue: "unsupported",
 	hint:
 		"RFC 7009 revocation of an access token would answer 200 and leave the token valid " +
-		'until it expires. Wire a shared denylist (`accessTokenDenylist.adapter = "redis"` in ' +
+		'until it expires. Wire a shared denylist (`adapters.accessTokenDenylist = "redis"` in ' +
 		"the standalone template; the bundled memoryAccessTokenDenylistModule is single-replica " +
 		'only), or declare `"unsupported"` to have the endpoint reject access-token revocation ' +
 		"with unsupported_token_type. Refresh-token revocation runs off the family store and is " +

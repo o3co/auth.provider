@@ -33,6 +33,7 @@
  * written.
  */
 
+import { federationsOf } from "../federations/configured.mjs";
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import type { RequirementSession } from "../session-admission/requirement.mjs";
@@ -330,7 +331,7 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
 
 /**
  * Whether federation `name`'s upstream IdP's `amr` counts: only when
- * `federations.<name>.trustUpstreamAmr` is `true` beside `enabled: true`,
+ * `core.federations.<name>.trustUpstreamAmr` is `true` beside `enabled: true`,
  * in either section shape. Then the IdP's values sit in the session's `amr`
  * beside `fed`, where tokens carry them and `acr` is matched against them;
  * otherwise they are kept apart, for the record only.
@@ -346,10 +347,9 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
  * read this one function, so they cannot disagree.
  */
 export function federationTrustsUpstreamAmr(config: unknown, name: string): boolean {
-	const federations = (config as { federations?: unknown } | null | undefined)?.federations;
-	if (typeof federations !== "object" || federations === null) return false;
+	const federations = federationsOf(config);
 	if (!Object.hasOwn(federations, name)) return false;
-	const section = (federations as Record<string, unknown>)[name];
+	const section = federations[name];
 	if (typeof section !== "object" || section === null) return false;
 	// The nested shape's sub-section (keyed by `type`, or by the name for a
 	// shorthand: session's `extractFederationSection`) holds the adapter's own
@@ -361,14 +361,14 @@ export function federationTrustsUpstreamAmr(config: unknown, name: string): bool
 	const sub = Object.hasOwn(section, type) ? (section as Record<string, unknown>)[type] : undefined;
 	if (typeof sub === "object" && sub !== null && Object.hasOwn(sub, "trustUpstreamAmr")) {
 		throw new RangeError(
-			`federations.${name}.${type}.trustUpstreamAmr belongs beside enabled, as federations.${name}.trustUpstreamAmr`,
+			`core.federations.${name}.${type}.trustUpstreamAmr belongs beside enabled, as core.federations.${name}.trustUpstreamAmr`,
 		);
 	}
 	const trust = Object.hasOwn(section, "trustUpstreamAmr")
 		? (section as { trustUpstreamAmr?: unknown }).trustUpstreamAmr
 		: undefined;
 	if (trust !== undefined && typeof trust !== "boolean") {
-		throw new RangeError(`federations.${name}.trustUpstreamAmr must be true or false`);
+		throw new RangeError(`core.federations.${name}.trustUpstreamAmr must be true or false`);
 	}
 	const enabled =
 		Object.hasOwn(section, "enabled") && (section as { enabled?: unknown }).enabled === true;

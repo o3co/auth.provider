@@ -53,6 +53,7 @@ import {
 	revokeAllForSubject,
 } from "@o3co/auth-provider-core";
 import {
+	coreConfigForTests,
 	createTestSessionCookiePolicy,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
@@ -144,15 +145,17 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 	const events: { type: string; details?: Record<string, unknown> }[] = [];
 	const config = {
 		...makeValidCoreConfig(),
-		federations: {
-			upstream: {
-				enabled: true,
-				issuer: connection.upstreamIssuer,
-				clientId: connection.upstreamClientId,
-			},
-		},
 		rateLimit: { failMode: "closed" },
-		audit: { sink: { type: "none" } },
+		...coreConfigForTests({
+			declaredAbsent: ["auditSink"],
+			federations: {
+				upstream: {
+					enabled: true,
+					issuer: connection.upstreamIssuer,
+					clientId: connection.upstreamClientId,
+				},
+			},
+		}),
 		"federation-grants": {
 			enabled: true,
 			allowKeepOnSubjectRevocation: allowKeep,

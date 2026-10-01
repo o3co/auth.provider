@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージがプロバイダーと並べて contribute するリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -14,7 +14,7 @@
 
 **持つもの:**
 
-- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログインのレート制限ガードの配線とその予算（`session.rateLimit.login`。session モジュールがこれを `login` の予算として寄与する）。リダイレクト許可リスト（`session.redirectAllowlist`、`federations.<name>.redirectAllowlist`）。
+- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログインのレート制限ガードの配線とその予算（`session.rateLimit.login`。session モジュールがこれを `login` の予算として寄与する）。リダイレクト許可リスト（`session.redirectAllowlist`、`core.federations.<name>.redirectAllowlist`）。
 - モジュールが、契約が core にあるスロットを通して他のパッケージに提供するもの: `csrfGuard`、`loginEntry`、`loginCompletion`、そして `sessionCookiePolicy` と `csrfTokenSigner` — [後述](#モジュールが他のパッケージに提供するもの)。
 - フェデレーションの駆動方法: `state`・PKCE・`nonce`、`form_post` トランザクションとその cookie、クレームの優先順位、ログインが記録する `amr`、コールバックがストアに書き込む内容。
 - `federationRedirectPolicies` という contribution 種別と、それが core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
@@ -146,7 +146,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 マニフェスト（[`src/module.mts`](src/module.mts)）:
 
 - `requires`: `config`、`userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`、`csrfTokenSigner`（CSRF トークンを署名・検査するもの。セッションストアのモジュールが提供する）、`sessionCookiePolicy`（セッション cookie の名前・属性・寿命。これもセッションストアのモジュールが提供する）、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは per-federation モジュールの `federations.<name>` と `federationRedirectPolicies.<name>` の contribution から boot planner が組み立てる。さらに `sessionRequirementResolver` — パスワードログインは何かを書く前に core の [セッションアドミッション](../core/src/session-admission/README.md) を通して登録済みの requirement に問い合わせ、アカウントリンクのルートはそれを通してセッションを読むので、`sessionModule` を入れる構成は `core.sessionRequirements.expected` を宣言する。手で組み立てるルーター（`routes/Session.mts`、`routes/Federation.mts`）は resolver を必須のオプション `requirements` として受け取り、無ければ例外を投げる。テストは core の `resolverForTests` で作る。そして `deploymentMode` — core が `core.deployment.mode` から埋める。ログインのスロットルのプロセス内フォールバックは `multi` で拒否されるので、モードは未設定として読まれるのではなく必須になっている。手で組み立てるセッションルーターは、署名器も必須のオプション `csrfTokenSigner` として受け取って無ければ例外を投げ、モードを必須のオプション `deploymentMode` として受け取って、三つの値のどれでもない値（無い場合も含む）は構築時に TypeError になる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
-- `optional`: `logger`、`rateLimiter`、`auditSink`、`subjectSessionIndex`、`subjectRevocation`（リンクのルートのアドミッションが読む境界）。`auditSink` を配線しないなら `audit.sink.type = "none"`、`subjectSessionIndex` と `subjectRevocation` を配線しないなら `oauth.revocation.subject = "unsupported"` で宣言しなければ起動は拒否される。
+- `optional`: `logger`、`rateLimiter`、`auditSink`、`subjectSessionIndex`、`subjectRevocation`（リンクのルートのアドミッションが読む境界）。`auditSink` を配線しないなら `core.declaredAbsent = ["auditSink"]`、`subjectSessionIndex` と `subjectRevocation` を配線しないなら `oauth.revocation.subject = "unsupported"` で宣言しなければ起動は拒否される。
 
 ### パスワードログイン
 
@@ -213,7 +213,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 - **foreign な** `Origin` はトークンがあっても拒否する。クロスサイトリクエストであることの積極的な証拠だから。
 - ログインに成功すると **新しい** CSRF cookie が返るので、続くログアウトに追加の往復は要らない。
 
-トークンは乱数 nonce と有効期限（`session.csrf.ttlSeconds`）に対する署名付きでステートレスな HMAC で、鍵は `session-store.secret` の HKDF 展開 — 親ドメインの cookie を書けるサブドメインでも偽造できない。ルートはこれを `csrfTokenSigner` スロット（セッションストアのモジュールが埋める）を通して署名・検査し、`session-store.secret` を読まない。トークンが正しく署名されているとみなすのは署名器の `verify` が `true` を返したときだけで、有効期限が `session.csrf.ttlSeconds` と 60 秒の時計のずれより先にあるトークンは拒否する。ルートが発行するトークンはそれより先に期限切れにならない。クロスオリジンのログイン UI は自身のオリジンを `session.csrf.trustedOrigins` に載せる。`cors.allowedOrigins` は CSRF の信頼を与えない。載せたオリジンはフェデレーショングラントの同意とデバイス検証にも回答できるので、クライアントのオリジンは決して載せない（federation-grants ADR の D7）。
+トークンは乱数 nonce と有効期限（`session.csrf.ttlSeconds`）に対する署名付きでステートレスな HMAC で、鍵は `session-store.secret` の HKDF 展開 — 親ドメインの cookie を書けるサブドメインでも偽造できない。ルートはこれを `csrfTokenSigner` スロット（セッションストアのモジュールが埋める）を通して署名・検査し、`session-store.secret` を読まない。トークンが正しく署名されているとみなすのは署名器の `verify` が `true` を返したときだけで、有効期限が `session.csrf.ttlSeconds` と 60 秒の時計のずれより先にあるトークンは拒否する。ルートが発行するトークンはそれより先に期限切れにならない。クロスオリジンのログイン UI は自身のオリジンを `session.csrf.trustedOrigins` に載せる。`http.cors.allowedOrigins` は CSRF の信頼を与えない。載せたオリジンはフェデレーショングラントの同意とデバイス検証にも回答できるので、クライアントのオリジンは決して載せない（federation-grants ADR の D7）。
 
 他のパッケージはこのポリシーを import せず、`sessionModule` が提供する `csrfGuard` スロットを通して実行する — デバイス検証はその `middleware` をマウントし、federation-grants の同意の回答はその `check` に問う。`checkRequestOrigin`、`createCsrfProtection`、`createCsrfProtectionFromConfig`、`createCsrfGuard`、`createCsrfIssueHandler`、`createSessionCsrfGuard` は、独自のログインページをマウントしたり独自のルートを保護したりする組み立てのために export されている（[`src/csrf.mts`](src/csrf.mts)）。`createCsrfProtection` と `createCsrfProtectionFromConfig` は署名器（`{ signer }`）— `csrfTokenSigner` スロットのもの、または `createSessionCsrfTokenSigner(sessionSecret)`（[`src/csrf-token-signer.mts`](src/csrf-token-signer.mts)）— を受け取る（`createSessionCsrfTokenSigner` は secret を core のエントロピーの下限に照らす）。署名器なしでは作られず、core の契約を破る署名器でも作られない: 作る前に二つのペイロードに署名させ、その署名と、変えた署名、別のペイロードの署名を検査する。`sign` と `verify` は署名器から一度だけ読むので、作った後に署名器のオブジェクトを変えても、発行するトークンにも受け入れるトークンにも影響しない。
 
@@ -227,7 +227,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | フェデレーションのコールバック | `["fed"]` — `fed` は「フェデレーション経由」を表すデプロイ定義のマーカーで、core の `FEDERATED_AMR`。このパッケージも re-export する。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。`trustUpstreamAmr = true` のフェデレーションでは、その横に上流 IdP の `amr` | primary は `fed`、フェデレーションの名前、そして — フェデレーションが IdP を信頼しない限り — IdP の `amr` を `upstreamAmr` として |
 | アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない | 変わらない |
 
-**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのセクションの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationTrustsUpstreamAmr` で読む — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは合成を拒否し（`RangeError`）、環境変数が渡す綴りはスキーマが変換する。各フェデレーションのスイッチはインストールされた名前ごとに保持され、ログインはそのコールバックが来た名前のスイッチを取る。`authentication.federation` が名指すのもその名前である。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
+**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`core.federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのセクションの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationTrustsUpstreamAmr` で読む — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは合成を拒否し（`RangeError`）、環境変数が渡す綴りはスキーマが変換する。各フェデレーションのスイッチはインストールされた名前ごとに保持され、ログインはそのコールバックが来た名前のスイッチを取る。`authentication.federation` が名指すのもその名前である。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
 
 **信頼の取り消し。** `trustUpstreamAmr` を `true` から `false` にしても、既にそのもとで記録されたセッションには届かない: その `amr` は IdP の値を持ち続ける — 書かれたときには保証されていた — ので、そこから発行されたトークンはそれを運び続け、そこから発行されたリフレッシュトークンはファミリーが終わるまで（ログインから `oauth.refreshToken.expiresIn`、既定 1 日）それを引き継ぐ。すぐに取り消すには、そのフェデレーション経由でサインインした subject について core の `revokeAllForSubject` を呼ぶ: そのセッション、そこから発行されたリフレッシュファミリーとコード、そしてこのプロバイダー自身が検証するすべてのアクセストークン（イントロスペクション、`/oauth/userinfo`、フェデレーショントークンのルート、トークン交換、リフレッシュグラント）を終わらせ、利用者は新しい設定のもとで再びログインする。リソースサーバーがオフラインで検証するアクセストークンは `exp` まで生きる。`revokeAllForSubject` には `subjectRevocation` と `subjectSessionIndex` の配線が要り、無ければ自身を `incomplete` と報告する。手順は [運用ランブック](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust) にある。
 
@@ -259,7 +259,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 - リンク要求は既に認証済み — それが生きたセッション上の `link=1` の保証 — なので、リンクを認可するのは一致するアドレスではなくセッションである。それでも Store は拒否してよい: アカウントあたりプロバイダーごとに一つの ID、再認証からの最大経過時間、新しい ID に検証済みアドレスを要求する、など。
 - `sub` は issuer ごとに不透明で安定している。`<provider>:<sub>` をそのまま保存し、`email` から ID を導出しない。
 
-`@o3co/auth-provider-foundation` の `HttpUserRepository` は `linkFederatedIdentityUrl`（`CLIENT_USER_LINK_FEDERATED_IDENTITY_URL`）が設定されていればこの継ぎ目を実装する: ワイヤ契約は [その README](../foundation/README.ja.md) を参照。core のインメモリリポジトリはメモリ上でリンクするだけ — 開発用であって永続化ではない。
+`@o3co/auth-provider-foundation` の `HttpUserRepository` は `linkFederatedIdentityUrl`（`REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL`）が設定されていればこの継ぎ目を実装する: ワイヤ契約は [その README](../foundation/README.ja.md) を参照。core のインメモリリポジトリはメモリ上でリンクするだけ — 開発用であって永続化ではない。
 
 #### 開始がステップアップを返すとき
 
@@ -394,15 +394,15 @@ cookie を厳密に一つのホストに固定するのは `__Host-` であり�
 
 ### フェデレーションの設定
 
-`federations.<name>` がフェデレーションに名前を付け、`extractFederationSection`（[`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts)）がそれを読むモジュールのためにセクションを正規化する。受け付ける形は三つ:
+`core.federations.<name>` がフェデレーションに名前を付け、`extractFederationSection`（[`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts)）がそれを読むモジュールのためにセクションを正規化する。受け付ける形は三つ:
 
 ```hocon
-federations {
+core.federations {
   # 省略形: キーが type を表す（ここでは "google"）。
   google {
     enabled = true
-    clientId = ${FEDERATIONS_GOOGLE_CLIENT_ID}
-    clientSecret = ${FEDERATIONS_GOOGLE_CLIENT_SECRET}
+    clientId = ${CORE_FEDERATIONS_GOOGLE_CLIENT_ID}
+    clientSecret = ${CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
     clientUrl = "https://app.example.com/"
   }
@@ -432,16 +432,16 @@ federations {
 起動時の規則:
 
 - 有効なセクションはすべて `callbackURL` を持たなければならず、無ければ `sessionModule` が起動に失敗する。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
-- `trustUpstreamAmr` はどの形でもセクションの最上位、`enabled` の横に置く。無ければ `false` で、（スキーマの変換のあと）真偽値でないものは起動に失敗する。ネストした形のサブセクションの中（`federations.okta.oidc.trustUpstreamAmr`）に書いても起動に失敗し、`enabled` の横に置くよう告げる — さもなければ無視されてしまう。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
+- `trustUpstreamAmr` はどの形でもセクションの最上位、`enabled` の横に置く。無ければ `false` で、（スキーマの変換のあと）真偽値でないものは起動に失敗する。ネストした形のサブセクションの中（`core.federations.okta.oidc.trustUpstreamAmr`）に書いても起動に失敗し、`enabled` の横に置くよう告げる — さもなければ無視されてしまう。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
 - すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。
 - `sessionModule` は設定と contribution を突き合わせない。設定で有効だがどのモジュールも contribute していないフェデレーションは起動し、そのルートは `404` を返す。有効なセクションなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。どちらかで起動を失敗させたい組み立ては自分で検査を加える。
 
 ### リダイレクト許可リスト
 
-`GET /session/oauth/federation/:name?redirect_to=…` と `POST /session/login` の `redirect_to` は、その後ブラウザが行く先を示す。どちらも示せる値はすべて列挙されていなければならない: フェデレーションは `federations.<name>.redirectAllowlist`（そのリダイレクトポリシーが読む）、ログインは `session.redirectAllowlist`。
+`GET /session/oauth/federation/:name?redirect_to=…` と `POST /session/login` の `redirect_to` は、その後ブラウザが行く先を示す。どちらも示せる値はすべて列挙されていなければならない: フェデレーションは `core.federations.<name>.redirectAllowlist`（そのリダイレクトポリシーが読む）、ログインは `session.redirectAllowlist`。
 
 ```hocon
-federations {
+core.federations {
   google {
     enabled = true
     # …資格情報…

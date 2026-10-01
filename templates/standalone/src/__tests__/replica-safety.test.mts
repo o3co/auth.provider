@@ -39,7 +39,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	type AppConfig,
 	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
@@ -55,9 +54,14 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths } from "../configPath.mjs";
+import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
-import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
+import {
+	adaptersOf,
+	capturedRenames,
+	libraryLayers,
+	sectionsCoreDoesNotDeclare,
+} from "./library-references.fixture.mjs";
 
 // The redis session-store builder, which the baseline selects, dynamically
 // imports these; mock them so no socket opens.
@@ -134,43 +138,43 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
  * below flips one variable off this.
  */
 const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
-	OAUTH_JWT_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: "replica-safety-test-secret.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_SECRET: "replica-safety-test-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "replica-safety-session-secret.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "redis",
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
-	CLIENT_USER_TYPE: "yaml",
+	ADAPTERS_USER_REPOSITORY: "yaml",
 	CORE_DEPLOYMENT_MODE: "multi",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
-	USER_SESSION_STORES_ADAPTER: "redis",
-	RATE_LIMITER_ADAPTER: "redis",
-	OAUTH_CODE_ADAPTER: "redis",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
-	REPLAY_SEEN_SET_ADAPTER: "redis",
-	FEDERATION_TOKEN_STORE_TYPE: "redis",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
+	ADAPTERS_USER_SESSION_STORES: "redis",
+	ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_CODE_REPOSITORY: "redis",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
+	ADAPTERS_REPLAY_SEEN_SET: "redis",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: ENCRYPTION_KEY,
 	// The consent step for clients that are not first-party, on the
 	// shared store — the one switch value `multi` accepts besides `none`.
-	CONSENT_STORE_ADAPTER: "redis",
+	ADAPTERS_CONSENT_STORE: "redis",
 };
 
-function resolveConfig(env: Record<string, string>): AppConfig {
+function resolveConfig(env: Record<string, string>): Switches {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
+	const layers = parseFile(envConfPath, { env })
+		.withFallback(parseFile(applicationConfPath, { env }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+		.withFallback(libraryLayers(env));
 	return {
-		...validate(
-			parseFile(envConfPath, { env })
-				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-				.withFallback(libraryLayers(env)),
-			AppConfigSchema,
-		),
+		...sectionsCoreDoesNotDeclare(layers),
+		adapters: adaptersOf(layers, env),
+		...validate(layers, AppConfigSchema),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(env),
-	} as AppConfig;
+	} as Switches;
 }
 
 /** Drops a variable, so the HOCON default takes over. */
@@ -199,20 +203,20 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},
 });
 
-const modulesFor = (config: AppConfig, environment?: string) =>
+const modulesFor = (config: Switches, environment?: string) =>
 	buildModules(config, {
 		keyStoreModule: testKeyStoreModule,
 		repositoriesModule: testRepositoriesModule,
 		...(environment === undefined ? {} : { environment }),
 	});
 
-const boot = (config: AppConfig, environment?: string) =>
+const boot = (config: Switches, environment?: string) =>
 	createApp({
 		modules: modulesFor(config, environment),
 		bootstrapComponents: { config, pathResolver: (s) => s },
@@ -234,19 +238,19 @@ describe('the standalone\'s memory modules are refused under core.deployment.mod
 
 	const cases: ReadonlyArray<readonly [variable: string, module: string]> = [
 		// The template's own modules.
-		["USER_SESSION_STORES_ADAPTER", "standalone-in-memory-session-stores"],
-		["OAUTH_CODE_ADAPTER", "standalone-in-memory-code-repository"],
-		["FEDERATION_TOKEN_STORE_TYPE", "standalone-in-memory-federation-token-store"],
+		["ADAPTERS_USER_SESSION_STORES", "standalone-in-memory-session-stores"],
+		["ADAPTERS_CODE_REPOSITORY", "standalone-in-memory-code-repository"],
+		["ADAPTERS_FEDERATION_TOKEN_STORE", "standalone-in-memory-federation-token-store"],
 		// express-session's own store. Not a module of this template but
 		// built here from its config, which is what lets the manifest declare.
 		["SESSION_STORE_STORAGE_TYPE", "session-store"],
 		// The consent store, wired only when the switch says so.
-		["CONSENT_STORE_ADAPTER", "core-consent-store-memory"],
+		["ADAPTERS_CONSENT_STORE", "core-consent-store-memory"],
 		// Core's, selected by the same kind of switch.
-		["RATE_LIMITER_ADAPTER", "core-rate-limiter-memory"],
-		["ACCESS_TOKEN_DENYLIST_ADAPTER", "core-access-token-denylist-memory"],
+		["ADAPTERS_RATE_LIMITER", "core-rate-limiter-memory"],
+		["ADAPTERS_ACCESS_TOKEN_DENYLIST", "core-access-token-denylist-memory"],
 		// The jti single-use record behind private_key_jwt client auth.
-		["REPLAY_SEEN_SET_ADAPTER", "core-replay-seen-set-memory"],
+		["ADAPTERS_REPLAY_SEEN_SET", "core-replay-seen-set-memory"],
 	];
 
 	for (const [variable, module] of cases) {
@@ -263,14 +267,14 @@ describe('the standalone\'s memory modules are refused under core.deployment.mod
 	it("names every memory module together when every switch is memory", async () => {
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
-			USER_SESSION_STORES_ADAPTER: "memory",
-			OAUTH_CODE_ADAPTER: "memory",
-			FEDERATION_TOKEN_STORE_TYPE: "memory",
+			ADAPTERS_USER_SESSION_STORES: "memory",
+			ADAPTERS_CODE_REPOSITORY: "memory",
+			ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
 			SESSION_STORE_STORAGE_TYPE: "memory",
-			RATE_LIMITER_ADAPTER: "memory",
-			ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-			REPLAY_SEEN_SET_ADAPTER: "memory",
-			CONSENT_STORE_ADAPTER: "memory",
+			ADAPTERS_RATE_LIMITER: "memory",
+			ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+			ADAPTERS_REPLAY_SEEN_SET: "memory",
+			ADAPTERS_CONSENT_STORE: "memory",
 		});
 		await expect(boot(config)).rejects.toMatchObject({
 			reason: "replica-unsafe-adapter",
@@ -285,9 +289,9 @@ describe('the standalone\'s memory modules are refused under core.deployment.mod
 		// the module and it has to say what breaks — the guard quotes it.
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
-			USER_SESSION_STORES_ADAPTER: "memory",
-			OAUTH_CODE_ADAPTER: "memory",
-			FEDERATION_TOKEN_STORE_TYPE: "memory",
+			ADAPTERS_USER_SESSION_STORES: "memory",
+			ADAPTERS_CODE_REPOSITORY: "memory",
+			ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
 		});
 		const standaloneMemoryModules = modulesFor(config).filter((m) =>
 			m.name.startsWith("standalone-in-memory-"),
@@ -313,7 +317,7 @@ describe('the standalone\'s memory modules are refused under core.deployment.mod
 	});
 });
 
-describe('federationTokenStore.type = "redis" in the standalone', () => {
+describe('adapters.federationTokenStore = "redis" in the standalone', () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 
 	afterEach(async () => {
@@ -321,13 +325,11 @@ describe('federationTokenStore.type = "redis" in the standalone', () => {
 		handleRef = undefined;
 	});
 
-	it("reaches the resolved config from FEDERATION_TOKEN_STORE_TYPE", () => {
-		// `AppConfigSchema` strips top-level keys it does not declare, so the
-		// switch must be declared for an env var to select anything.
-		expect(resolveConfig(ALL_REDIS_ENV).federationTokenStore?.type).toBe("redis");
+	it("reaches phase one's adapters from ADAPTERS_FEDERATION_TOKEN_STORE", () => {
+		expect(resolveConfig(ALL_REDIS_ENV).adapters.federationTokenStore).toBe("redis");
 		expect(
-			resolveConfig(without(ALL_REDIS_ENV, "FEDERATION_TOKEN_STORE_TYPE")).federationTokenStore
-				?.type,
+			resolveConfig(without(ALL_REDIS_ENV, "ADAPTERS_FEDERATION_TOKEN_STORE")).adapters
+				.federationTokenStore,
 		).toBe("memory");
 	});
 
@@ -353,10 +355,10 @@ describe('federationTokenStore.type = "redis" in the standalone', () => {
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
 			CORE_DEPLOYMENT_MODE: "single",
-			USER_SESSION_STORES_ADAPTER: "memory",
-			OAUTH_CODE_ADAPTER: "memory",
-			RATE_LIMITER_ADAPTER: "memory",
-			ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
+			ADAPTERS_USER_SESSION_STORES: "memory",
+			ADAPTERS_CODE_REPOSITORY: "memory",
+			ADAPTERS_RATE_LIMITER: "memory",
+			ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
 		});
 		const names = modulesFor(config).map((m) => m.name);
 		expect(names).toContain("redis-federation-token-store");
@@ -384,7 +386,7 @@ describe('federationTokenStore.type = "redis" in the standalone', () => {
 
 	it("keeps the memory branch: the default, in single mode, resolves the memory adapter", async () => {
 		const config = resolveConfig({
-			...without(ALL_REDIS_ENV, "FEDERATION_TOKEN_STORE_TYPE"),
+			...without(ALL_REDIS_ENV, "ADAPTERS_FEDERATION_TOKEN_STORE"),
 			CORE_DEPLOYMENT_MODE: "single",
 		});
 		const names = modulesFor(config).map((m) => m.name);
@@ -426,12 +428,12 @@ describe('consentStore.adapter = "redis" in the standalone', () => {
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
 			CORE_DEPLOYMENT_MODE: "single",
-			USER_SESSION_STORES_ADAPTER: "memory",
-			OAUTH_CODE_ADAPTER: "memory",
-			RATE_LIMITER_ADAPTER: "memory",
-			ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-			REPLAY_SEEN_SET_ADAPTER: "memory",
-			FEDERATION_TOKEN_STORE_TYPE: "memory",
+			ADAPTERS_USER_SESSION_STORES: "memory",
+			ADAPTERS_CODE_REPOSITORY: "memory",
+			ADAPTERS_RATE_LIMITER: "memory",
+			ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+			ADAPTERS_REPLAY_SEEN_SET: "memory",
+			ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
 		});
 		const names = buildModules(config, {
 			keyStoreModule: testKeyStoreModule,

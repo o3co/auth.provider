@@ -19,26 +19,23 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * `consentStore.adapter` selects which module provides both consent slots in
- * a composition like the standalone; `"redis"` is the one
- * `core.deployment.mode = "multi"` accepts. `redisConsentStore` is presence-only,
- * like every `redis*` section: without it `AppConfigSchema`'s strip mode
- * drops the operator's namespace before the module's own `configSchema` runs,
- * and the default silently takes its place.
+ * Which module provides the consent slots is a composition root's choice, not
+ * core's: `consentStore`, where the selection was, is presence-only, kept as
+ * written so a root that parses with `AppConfigSchema` before boot still hands
+ * it to the refusal of the path it moved from. `redisConsentStore` is
+ * presence-only too, like every `redis*` section.
  */
 const base = makeValidAppConfig();
 
-describe("consentStore.adapter", () => {
-	it.each(["none", "memory", "redis"] as const)("accepts %s", (adapter) => {
-		expect(AppConfigSchema.parse({ ...base, consentStore: { adapter } }).consentStore).toEqual({
-			adapter,
-		});
+describe("consentStore, where the selection was", () => {
+	it("is kept as written, whatever it holds: core reads nothing of it", () => {
+		expect(
+			AppConfigSchema.parse({ ...base, consentStore: { adapter: "postgres" } }).consentStore,
+		).toEqual({ adapter: "postgres" });
 	});
 
-	it("refuses an adapter it does not know, by name", () => {
-		expect(() => AppConfigSchema.parse({ ...base, consentStore: { adapter: "postgres" } })).toThrow(
-			/consentStore/,
-		);
+	it("is absent when omitted", () => {
+		expect(AppConfigSchema.parse(base).consentStore).toBeUndefined();
 	});
 });
 

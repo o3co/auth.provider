@@ -113,7 +113,7 @@ describe("core's reference.conf holds only what core's schema declares", () => {
 
 	it("resolves to a non-trivial tree, so the diff below is over something", () => {
 		const paths = collectPaths(resolved);
-		expect(paths.length).toBeGreaterThan(50);
+		expect(paths.length).toBeGreaterThan(30);
 		expect(paths).toContain("oauth.jwt.legacyTypAccept");
 		expect(paths).toContain("core-rate-limiter-memory.maxBuckets");
 	});
@@ -260,90 +260,7 @@ describe("core's reference.conf binds core's own section and its modules', and n
 
 describe("core's reference.conf declares the operator keys a composition layering on it alone needs", () => {
 	// The drift diff above proves the schema keeps every path the file has; it
-	// cannot notice a path the file should have and does not. Declared only in
-	// the standalone template, `linkFederatedIdentityUrl` would have its
-	// variable substituted nowhere else, and `?link=1` would answer
-	// `link_unsupported`.
-
-	it("substitutes CLIENT_USER_LINK_FEDERATED_IDENTITY_URL and keeps it through boot's parse", () => {
-		const raw = parseFile(REFERENCE_CONF_PATH, {
-			env: {
-				...REQUIRED_ENV,
-				CLIENT_USER_LINK_FEDERATED_IDENTITY_URL: "https://store.example/link",
-			},
-		});
-		const parsed = parsedByBase(raw.toObject()) as {
-			repositories?: { user?: { http?: { linkFederatedIdentityUrl?: unknown } } };
-		};
-		expect(parsed.repositories?.user?.http?.linkFederatedIdentityUrl).toBe(
-			"https://store.example/link",
-		);
-	});
-
-	it("leaves it absent when the variable is unset, so the link seam stays off", () => {
-		const parsed = parsedByBase(
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
-		) as {
-			repositories?: { user?: { http?: Record<string, unknown> } };
-		};
-		expect(parsed.repositories?.user?.http).not.toHaveProperty("linkFederatedIdentityUrl");
-	});
-
-	it("substitutes CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL and keeps it through boot's parse", () => {
-		const raw = parseFile(REFERENCE_CONF_PATH, {
-			env: {
-				...REQUIRED_ENV,
-				CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL: "https://store.example/identity",
-			},
-		});
-		const parsed = parsedByBase(raw.toObject()) as {
-			repositories?: { user?: { http?: { findSubjectByFederatedIdentityUrl?: unknown } } };
-		};
-		expect(parsed.repositories?.user?.http?.findSubjectByFederatedIdentityUrl).toBe(
-			"https://store.example/identity",
-		);
-	});
-
-	it("leaves the lookup URL absent when unset, and ships an empty coverage declaration", () => {
-		// Absent, not blank: the repository defines the two lookup methods only
-		// when the URL is there, and that absence is the boot refusal an
-		// operator reads. The coverage list is HOCON's to fill; an empty default
-		// is what a deployment that never declares any gets — and it must reach
-		// the factory as a list, not vanish.
-		const parsed = parsedByBase(
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
-		) as {
-			repositories?: { user?: { http?: Record<string, unknown> } };
-		};
-		expect(parsed.repositories?.user?.http).not.toHaveProperty("findSubjectByFederatedIdentityUrl");
-		expect(parsed.repositories?.user?.http?.federatedIdentityLookupCoverage).toEqual([]);
-	});
-
-	it("substitutes CLIENT_USER_BEARER_TOKEN and keeps it through boot's parse", () => {
-		// The credential the http user adapter presents to the Store. Declared
-		// here for the reason the link URL is: a composition layering on this
-		// file alone would otherwise export the variable and send nothing.
-		const token = "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a";
-		const parsed = parsedByBase(
-			parseFile(REFERENCE_CONF_PATH, {
-				env: { ...REQUIRED_ENV, CLIENT_USER_BEARER_TOKEN: token },
-			}).toObject(),
-		) as {
-			repositories?: { user?: { http?: { bearerToken?: unknown } } };
-		};
-		expect(parsed.repositories?.user?.http?.bearerToken).toBe(token);
-	});
-
-	it("leaves the Store credential absent when the variable is unset, so no Authorization is sent", () => {
-		// Absent, not blank: a blank token is refused by the adapter, so an
-		// unset variable must not reach it as "".
-		const parsed = parsedByBase(
-			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject(),
-		) as {
-			repositories?: { user?: { http?: Record<string, unknown> } };
-		};
-		expect(parsed.repositories?.user?.http).not.toHaveProperty("bearerToken");
-	});
+	// cannot notice a path the file should have and does not.
 
 	it("declares oauth.authorize.acrValues, empty, so an unset table resolves to no acr values", () => {
 		const parsed = parsedByBase(

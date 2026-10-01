@@ -75,15 +75,10 @@ const CONFIG_REQUIRERS: readonly string[] = [
 	"packages/oauth-token-exchange -> oauth-token-exchange",
 	"packages/session -> session",
 	"packages/webauthn -> webauthn",
-	// The Redis stores read their own sections, and the deployment mode.
-	"packages/redis -> redis-code-repository",
-	// The standalone template's own modules, which read the template's
-	// settings and the adapter selection.
-	"templates/standalone -> audit-sink",
+	// The standalone template's federation config bridges, which read
+	// `federations`, and its deprecated `stores` bundle.
 	"templates/standalone -> google-federation-config",
 	"templates/standalone -> oidc-federation-config",
-	"templates/standalone -> repositories",
-	"templates/standalone -> standalone-in-memory-code-repository",
 	"templates/standalone -> stores",
 ];
 

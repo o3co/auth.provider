@@ -56,17 +56,18 @@ describe("withInsecureSessionCookie", () => {
 });
 
 describe("withFederation", () => {
-	it("answers a copy with federations.<name> an enabled entry: its callback URL and client credentials", () => {
+	it("answers a copy with core.federations.<name> an enabled entry: its callback URL and client credentials", () => {
 		const config = withFederation(makeValidAppConfig(), "stub", {
 			callbackURL: "https://auth.test/session/oauth/federation/stub/callback",
 		});
-		expect(config.federations.stub).toEqual({
+		expect(config.core.federations.stub).toEqual({
 			enabled: true,
 			clientId: "stub-client",
 			clientSecret: "stub-secret",
 			callbackURL: "https://auth.test/session/oauth/federation/stub/callback",
 		});
-		expect(AppConfigSchema.parse(config).federations.stub).toMatchObject({ enabled: true });
+		expect(AppConfigSchema.parse(config).core?.federations?.stub).toMatchObject({ enabled: true });
+		expect(config).not.toHaveProperty("federations");
 	});
 
 	it("keeps the federations already there, and leaves the configuration it was given as it was", () => {
@@ -77,12 +78,13 @@ describe("withFederation", () => {
 			clientId: "client-2",
 			clientSecret: "secret-2",
 		});
-		expect(Object.keys(two.federations)).toEqual(["first", "second"]);
-		expect(two.federations.second).toMatchObject({
+		expect(Object.keys(two.core.federations)).toEqual(["first", "second"]);
+		expect(two.core.federations.second).toMatchObject({
 			clientId: "client-2",
 			clientSecret: "secret-2",
 		});
-		expect(base.federations).toEqual({});
-		expect(Object.keys(one.federations)).toEqual(["first"]);
+		expect(base.core).not.toHaveProperty("federations");
+		expect(Object.keys(one.core.federations)).toEqual(["first"]);
+		expect(one.core.declaredAbsent).toEqual(base.core.declaredAbsent);
 	});
 });

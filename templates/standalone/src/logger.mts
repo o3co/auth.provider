@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { AppConfig, AuditSink, Logger } from "@o3co/auth-provider-core";
+import type { AuditSink, Logger } from "@o3co/auth-provider-core";
 import { pino, stdSerializers } from "pino";
+import type { LoggingSettings } from "./sections.mjs";
 
-/** What the logger is built from: the `logging` module's section. */
-export type LoggingSettings = NonNullable<AppConfig["logging"]>;
+export type { LoggingSettings } from "./sections.mjs";
 
 /**
  * The composition root's logger, and the value wired into the `logger` slot

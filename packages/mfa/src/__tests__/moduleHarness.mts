@@ -172,7 +172,7 @@ export function configFor(
 		oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: ISSUER } },
 		"session-store": { ...base["session-store"], name: "auth.session", secure: false },
 		session: { ...base.session, redirectAllowlist: ["https://app.example/after"] },
-		...coreConfigForTests({ expected }),
+		...coreConfigForTests({ expected, declaredAbsent: ["auditSink"] }),
 		...mfaConfigForTests({ key: MFA_KEY, mode, ...(mfa as Partial<MfaConfigForTestsOptions>) }),
 		...mfaTotpFactorConfigForTests(totp as MfaTotpFactorConfigForTestsOptions),
 		...mfaRecoveryCodeFactorConfigForTests(),

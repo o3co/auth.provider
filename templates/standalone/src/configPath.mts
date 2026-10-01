@@ -30,6 +30,7 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import {
 	type AppConfig,
 	coreReference,
@@ -42,8 +43,10 @@ import {
 	redisFederationGrantStoreModule,
 } from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
-import type { LoggingSettings } from "./logger.mjs";
-import { LOGGING_SECTION, loggingModule } from "./modules.mjs";
+import { ADAPTERS_SECTION, readAdapters } from "./adapters.mjs";
+import { loggingModule, templateReference } from "./modules.mjs";
+import { refuseRenamedVariables, SHIPPED_FEDERATION_RENAMES } from "./rootRenames.mjs";
+import { type Adapters, type LoggingSettings, loggingSectionSchema } from "./sections.mjs";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
@@ -150,19 +153,9 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  */
 export const SWITCHES: readonly string[] = [
 	"core.sessionRequirements",
-	"federations",
+	"core.federations",
 	"federation-grants.enabled",
-	"federationGrantStore.adapter",
-	"federationGrantIntentStore.adapter",
-	"federationTokenStore.type",
-	"rateLimiter.adapter",
-	"userSessionStores.adapter",
-	"accessTokenDenylist.adapter",
-	"replaySeenSet.adapter",
-	"consentStore.adapter",
 	"session-store.storage",
-	"repositories.code",
-	"oauth.code.adapter",
 	"oauth-session.enabled",
 	"oauth-authorization.grants",
 	"oauth.accessToken",
@@ -173,7 +166,8 @@ export const SWITCHES: readonly string[] = [
  * `mfa.mode`, the MFA module's key, which core's schema does not declare, read
  * raw from the template's own layers and held to its values by `readMfaMode`.
  * Read only until the template installs the MFA module (the MFA ADR's build
- * order, step 20), which removes this reading.
+ * order, step 20), which removes this reading. (`adapters`, the composition
+ * root's own section, is read with the template's own schema: `readAdapters`.)
  */
 export const OWN_READS: readonly string[] = ["mfa.mode"];
 
@@ -227,18 +221,33 @@ export interface SwitchesOptions {
 }
 
 /**
+ * What phase one answers: the switches core's reader parsed, and the
+ * composition root's own `adapters`, parsed with the template's schema.
+ */
+export type Switches = AppConfig & { readonly adapters: Adapters };
+
+/**
  * Phase one: the switches (`SWITCHES`, and `reads`) from the composition's
  * own layers over core's `reference.conf` alone, read with core's
  * `readTransitionalConfig`: each parsed with the schema core declares at its
- * path, everything else as written. Use it for those choices only. A switch
- * whose default only a package ships reads as unset here; set it in the
- * template's own files.
+ * path, everything else as written; and `adapters`, the composition root's
+ * own section, from its own layers over the template's `config/reference.conf`
+ * (`readAdapters`), which refuses a selection at the path it moved from and a
+ * variable renamed with one. A variable the template bound for a federation it
+ * ships, renamed after the entry's path under `core.federations`
+ * (`SHIPPED_FEDERATION_RENAMES`), is refused here too. Use it for those
+ * choices only. A switch whose
+ * default only a package ships reads as unset here; set it in the template's
+ * own files.
  */
-export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): AppConfig {
-	return readTransitionalConfig(resolveLayers(own, [coreReference()]), [
+export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): Switches {
+	const adapters = readAdapters(resolveLayers(own, [templateReference()]), own.env);
+	refuseRenamedVariables(own.env, SHIPPED_FEDERATION_RENAMES);
+	const switches = readTransitionalConfig(resolveLayers(own, [coreReference()]), [
 		...SWITCHES,
 		...(options.reads ?? []),
 	]);
+	return { ...switches, adapters };
 }
 
 /**
@@ -248,7 +257,7 @@ export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): App
  */
 export function readLogging(own: OwnLayers): LoggingSettings {
 	const resolved = resolveLayers(own, moduleReferences([loggingModule]));
-	const result = LOGGING_SECTION.safeParse(resolved.logging);
+	const result = loggingSectionSchema.safeParse(resolved.logging);
 	if (!result.success) {
 		const issues = result.error.issues;
 		throw new RangeError(
@@ -373,6 +382,50 @@ function refuseIntentPrefixLeftAtDefault(
 }
 
 /**
+ * The sections the template's own `config/reference.conf` sets that no module
+ * in `modules` owns and that nothing has changed: as that file sets them with
+ * no environment. Boot is not handed them, so a module of the template's the
+ * composition does not load names nothing at boot; a section an operator's
+ * layer or the environment changed is handed on, and boot names it once as a
+ * section nothing owns.
+ */
+function unownedTemplateDefaults(
+	resolved: Readonly<Record<string, unknown>>,
+	modules: readonly Module[],
+): readonly string[] {
+	const defaults = resolveLayers({ config: empty(), env: {} }, [templateReference()]);
+	return Object.keys(defaults).filter(
+		(name) =>
+			name !== RENAMED_VARIABLES &&
+			name !== ADAPTERS_SECTION &&
+			!ownsSection(modules, name) &&
+			isDeepStrictEqual(resolved[name], defaults[name]),
+	);
+}
+
+/**
+ * Refuses, with a `RangeError` naming it, a module whose section is at or
+ * under `adapters`, the composition root's own section, which phase one
+ * consumes and boot is never handed: the module would read nothing its
+ * operator wrote.
+ */
+function refuseModuleAtAdapters(modules: readonly Module[]): void {
+	for (const module of modules) {
+		const section = module.section;
+		if (section === undefined) continue;
+		const path = section.at ?? module.name;
+		if (path.split(".")[0] === ADAPTERS_SECTION) {
+			throw new RangeError(
+				`Module "${module.name}" has its section at ${path}, under ${ADAPTERS_SECTION}: the composition root's own section, which boot is not handed. Give the module a section of another name.`,
+			);
+		}
+	}
+}
+
+/** The section a resolution captures renamed variables in: never left out. */
+const RENAMED_VARIABLES = "renamed-variables";
+
+/**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
  * `reference.conf` of every package `modules` come from, core's last,
@@ -382,9 +435,13 @@ function refuseIntentPrefixLeftAtDefault(
  * nothing but the mode, which the template read for itself (`readMfaMode`),
  * is left out when no loaded module owns it; anything more reaches boot,
  * which names an unowned section once. The MFA ADR's build-order step 20
- * removes this with the template's reading.
+ * removes this with the template's reading. So is `adapters`, the
+ * composition root's own section, which phase one consumed, and a section the
+ * template's own `reference.conf` sets for a module the composition does not
+ * load, left as that file sets it (`unownedTemplateDefaults`).
  *
- * Refuses, with a `RangeError`, the Redis intent store left on its default
+ * Refuses, with a `RangeError`, a module whose section is under `adapters`
+ * (`refuseModuleAtAdapters`), and the Redis intent store left on its default
  * key prefix where the grant store's was moved
  * (`refuseIntentPrefixLeftAtDefault`).
  *
@@ -396,8 +453,11 @@ export function resolveForBoot(
 	modules: readonly Module[],
 	sessionRequirements: SessionRequirements,
 ): AppConfig {
-	const layered = resolveLayers(own, moduleReferences(modules));
-	refuseIntentPrefixLeftAtDefault(layered, modules);
+	refuseModuleAtAdapters(modules);
+	const all = resolveLayers(own, moduleReferences(modules));
+	refuseIntentPrefixLeftAtDefault(all, modules);
+	const unowned = new Set([ADAPTERS_SECTION, ...unownedTemplateDefaults(all, modules)]);
+	const layered = Object.fromEntries(Object.entries(all).filter(([name]) => !unowned.has(name)));
 	const { mfa: _consumed, ...withoutMfa } = layered;
 	const resolved = consumedMfa(layered.mfa, modules) ? withoutMfa : layered;
 	return (sessionRequirements === undefined

@@ -41,6 +41,7 @@ import { createAsymmetricKeyStore, createSymmetricKeyStore } from "../../keys/Ke
 import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { createTestHttpSettings } from "../../testing/slots/httpSettings.mjs";
 import { createTestOAuthTokenSettings } from "../../testing/slots/oauthTokenSettings.mjs";
 import { BootError } from "../types.mjs";
 
@@ -242,15 +243,13 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 	it("serves the document on the issuer of the oauthTokenSettings the composition holds, and lets CORS read it there", async () => {
 		// The configuration names the issuer without a path; the slot the oauth
 		// module provides names it under one, and the slot is what is read.
-		const config = {
-			...withIssuer("https://auth.example.com"),
-			cors: { allowedOrigins: ["https://app.example"] },
-		};
+		const config = withIssuer("https://auth.example.com");
 		const handle = await createTestApp({
 			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
 			bootstrapComponents: {
 				config,
 				pathResolver: (s) => s,
+				httpSettings: createTestHttpSettings({ allowedOrigins: ["https://app.example"] }),
 				oauthTokenSettings: createTestOAuthTokenSettings({
 					issuer: "https://auth.example.com/tenant-a",
 				}),

@@ -43,6 +43,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	coreConfigForTests,
 	createTestApp,
 	createTestLoginEntry,
 	makeValidAppConfig,
@@ -318,7 +319,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
 				authorize: { acrValues },
 			},
-			federations,
+			...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
 		} as ReturnType<typeof makeValidAppConfig>;
 	};
 	/** A federation, contributed as a federation package's module contributes one. */
@@ -390,7 +391,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 		// The default: an upstream `mfa` is kept apart from the session's `amr`
 		// and meets no `acr`, so the entry is one nothing installed can meet —
 		// for an installed, enabled federation that says nothing of its trust.
-		// (Boot parses the `federations` section core's schema declares
+		// (Boot parses the `core.federations` map core's schema declares
 		// whenever it is present, so an entry states `enabled`.)
 		const { body, logger, lines } = await boot([googleFederationModule, ...federationStores], {
 			google: { enabled: true },
@@ -427,7 +428,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 		// outside boot, is pinned beside it in core.
 		await expect(
 			boot([googleFederationModule], { google: { enabled: false, trustUpstreamAmr: "yes" } }),
-		).rejects.toThrow(/federations\.google\.trustUpstreamAmr: /);
+		).rejects.toThrow(/core\.federations\.google\.trustUpstreamAmr: /);
 	});
 });
 

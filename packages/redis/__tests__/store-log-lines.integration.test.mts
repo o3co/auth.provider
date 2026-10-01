@@ -186,7 +186,7 @@ describe("redisCodeRepositoryModule: the repository it builds logs on the compos
 			"codeRepository",
 			{
 				codeRepositoryClient: makeIoredisClients(raw).codeRepositoryClient,
-				config: { redisCodeRepository: { keyPrefix } },
+				config: { "redis-code-repository": { keyPrefix } },
 				logger,
 			},
 		);

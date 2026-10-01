@@ -42,11 +42,13 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
+import { coreConfigForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { capturedRenames } from "./library-references.fixture.mjs";
+import type { Switches } from "../configPath.mjs";
+import { capturedRenames, inProcessAdapters } from "./library-references.fixture.mjs";
 
 const keyPair = generateKeyPairSync("ed25519", {
 	publicKeyEncoding: { type: "spki", format: "pem" },
@@ -60,9 +62,15 @@ const USERNAME = "alice";
 const PASSWORD = "correct-horse-battery-staple";
 
 /** The `http` module's section, as the hand-built configuration below carries it. */
-const HTTP = { port: 0, trustProxy: false, readinessTimeoutMs: 1000 };
+const HTTP = {
+	port: 0,
+	trustProxy: false,
+	readinessTimeoutMs: 1000,
+	cors: { allowedOrigins: [] as string[] },
+};
 
-const config: AppConfig = {
+/** The template modules' sections sit beside core's, so the configuration is wider than `AppConfig`. */
+const config: AppConfig & Record<string, unknown> = {
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
@@ -70,22 +78,22 @@ const config: AppConfig = {
 	},
 	http: HTTP,
 	logging: { level: "silent" },
+	"key-store": {
+		provider: "local",
+		local: {
+			algorithm: "EdDSA",
+			kid: "v0",
+			privateKey: keyPair.privateKey,
+			publicKey: keyPair.publicKey,
+			previousKeys: [],
+		},
+	},
 	// The session requirements this composition expects, as the shipped
 	// `application.conf` does (ADR 2026-09-28-session-admission): none.
-	core: { sessionRequirements: { expected: [] } },
+	...coreConfigForTests({ federations: { google: { enabled: false } } }),
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",
-			signingKey: {
-				provider: "local",
-				local: {
-					algorithm: "EdDSA",
-					kid: "v0",
-					privateKey: keyPair.privateKey,
-					publicKey: keyPair.publicKey,
-					previousKeys: [],
-				},
-			},
 		},
 		accessToken: { expiresIn: 3600 },
 		refreshToken: {
@@ -94,7 +102,6 @@ const config: AppConfig = {
 			legacyRtPolicy: "reject" as const,
 		},
 		oidcMode: "oidc-required",
-		code: { adapter: "memory" as const },
 	},
 	// The grant this whole test is about: it mints straight from an
 	// authenticated browser session, which is the BFF topology.
@@ -113,14 +120,11 @@ const config: AppConfig = {
 		rateLimit: { login: { windowMs: 60000, limit: 100 } },
 	},
 	rateLimit: { failMode: "open" },
-	federations: { google: { enabled: false } },
-	repositories: {
-		client: { type: "yaml", path: "./config/clients.yaml" },
-		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
-		code: { type: "memory", defaultExpiresIn: 600 },
-	},
-	cors: { allowedOrigins: [] },
+	"standalone-in-memory-code-repository": { defaultExpiresIn: 600 },
 } as unknown as AppConfig;
+
+/** What phase one hands `buildModules`: the configuration, and every store in process. */
+const switches = { ...config, adapters: inProcessAdapters() } as unknown as Switches;
 
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",
@@ -160,7 +164,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},
@@ -176,7 +180,7 @@ describe("POST /session/logout invalidates the session grant's access token", ()
 
 	async function buildApp() {
 		const handle = await createApp({
-			modules: buildModules(config, {
+			modules: buildModules(switches, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],

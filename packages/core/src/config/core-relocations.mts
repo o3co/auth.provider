@@ -28,11 +28,14 @@ export type CoreRelocations = Pick<ModuleSection, "relocatedFrom" | "renamedVari
 
 /**
  * Core's shipped declaration, frozen with every map and entry it holds: the
- * replica count, the expected session requirements and the token-binding
- * settings moved into `core`, with the variables bound to them renamed. A
- * variable binds `core.deployment.mode` and the two token-binding keys alone:
- * the rest of `deployment` and `tokenBinding`, and the expected session
- * requirements, have none.
+ * replica count, the expected session requirements, the token-binding
+ * settings and the federations' map moved into `core`, with the variables
+ * bound to them renamed. A variable binds `core.deployment.mode`, the two
+ * token-binding keys and each key of a federation (named after its path,
+ * `CORE_FEDERATIONS_<NAME>_<KEY>`): the rest of `deployment` and
+ * `tokenBinding`, and the expected session requirements, have none. Core's
+ * reference binds no federation's key, so it declares none of their
+ * variables renamed; a composition that bound one declares that itself.
  */
 export const CORE_RELOCATIONS: CoreRelocations = Object.freeze({
 	relocatedFrom: Object.freeze({
@@ -43,6 +46,7 @@ export const CORE_RELOCATIONS: CoreRelocations = Object.freeze({
 		"oauth.tokenBinding.dispatch-policy": "tokenBinding.dispatchPolicy",
 		"oauth.tokenBinding.bindConfidentialClientRefreshTokens":
 			"tokenBinding.bindConfidentialClientRefreshTokens",
+		federations: "federations",
 	}),
 	renamedVariables: Object.freeze({
 		DEPLOYMENT_MODE: "deployment.mode",

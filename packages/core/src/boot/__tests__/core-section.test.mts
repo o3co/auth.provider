@@ -28,6 +28,7 @@
 import { fileURLToPath } from "node:url";
 import { parseFile, parseString } from "@o3co/ts.hocon";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createApp } from "#/boot/create-app.mjs";
 import { type AppHandle, BootError, type BootstrapMap } from "#/boot/types.mjs";
 import { AppConfigSchema } from "#/config/application.schema.mjs";
@@ -193,6 +194,134 @@ describe("core's own section, strict", () => {
 		expect(err.message).toContain(`"${key}"`);
 		expect(err.message).not.toContain(value);
 		expect(JSON.stringify(err.details)).not.toContain(value);
+	});
+});
+
+describe("core.declaredAbsent, the slots a composition runs without on purpose", () => {
+	it("reads a list of slot names, which no variable sets", async () => {
+		const handle = await boot({}, 'core.declaredAbsent = ["auditSink"]\n');
+		const config = handle.components.config as { core?: { declaredAbsent?: unknown } };
+		expect(config.core?.declaredAbsent).toEqual(["auditSink"]);
+		await handle.dispose();
+	});
+
+	it("ships none: core's reference.conf declares nothing absent", () => {
+		const reference = parseFile(fileURLToPath(coreReference()), {
+			env: { OAUTH_JWT_ISSUER: "https://auth.test" },
+		}).toObject() as { core?: { declaredAbsent?: unknown } };
+		expect(reference.core?.declaredAbsent).toBeUndefined();
+	});
+
+	it.each([
+		['core.declaredAbsent = "auditSink"', "a name that is not in a list"],
+		['core.declaredAbsent = [""]', "an empty name"],
+	])("refuses %s (%s), naming core.declaredAbsent", async (hocon) => {
+		const err = await refusal(boot({}, `${hocon}\n`));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("core.declaredAbsent");
+	});
+});
+
+describe("the federations, under core.federations", () => {
+	it("reads each federation written there, its switches as the strings an environment variable carries", async () => {
+		const handle = await boot(
+			{},
+			'core.federations.upstream { enabled = "false", type = "oidc", trustUpstreamAmr = "true" }\n',
+		);
+		const config = handle.components.config as {
+			core?: { federations?: Record<string, Record<string, unknown>> };
+		};
+		expect(config.core?.federations?.upstream).toEqual({
+			enabled: false,
+			type: "oidc",
+			trustUpstreamAmr: true,
+		});
+		await handle.dispose();
+	});
+
+	it("ships an empty map there, and nothing at the top level", () => {
+		const reference = parseFile(fileURLToPath(coreReference()), {
+			env: { OAUTH_JWT_ISSUER: "https://auth.test" },
+		}).toObject() as { core?: { federations?: unknown }; federations?: unknown };
+		expect(reference.core?.federations).toEqual({});
+		expect(reference).not.toHaveProperty("federations");
+	});
+
+	it("refuses an enabled federation without the stores it needs, naming it under core.federations", async () => {
+		const err = await refusal(boot({}, "core.federations.upstream.enabled = true\n"));
+
+		expect(err.message).toContain("core.federations.upstream");
+	});
+
+	it("refuses federations at the top level, naming each key's path under core.federations and its variable", async () => {
+		const err = await refusal(
+			boot(
+				{},
+				'federations.google.enabled = true\nfederations.google.clientId = "old-value-5e2d"\n',
+			),
+		);
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "core",
+					from: "federations.google.enabled",
+					to: "core.federations.google.enabled",
+					environmentVariable: "CORE_FEDERATIONS_GOOGLE_ENABLED",
+				},
+				{
+					module: "core",
+					from: "federations.google.clientId",
+					to: "core.federations.google.clientId",
+					environmentVariable: "CORE_FEDERATIONS_GOOGLE_CLIENT_ID",
+				},
+			],
+		});
+		expect(err.message).not.toContain("old-value-5e2d");
+	});
+});
+
+describe("cors, which core no longer reads", () => {
+	it("refuses a configuration that still writes it, saying core reads its CORS origins from the httpSettings slot alone", async () => {
+		const err = await refusal(boot({}, 'cors.allowedOrigins = ["https://app.example"]\n'));
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toMatch(/cors/);
+		expect(err.message).toContain("httpSettings");
+		// Core's words, not a composition's: no module's path is named.
+		expect(err.message).not.toContain("http.cors");
+		expect(err.message).not.toContain("https://app.example");
+	});
+
+	it("leaves the refusal to a loaded module that relocates cors, in its words", async () => {
+		const relocating = defineModule({
+			name: "fixture-http",
+			section: {
+				schema: z.object({ cors: z.object({ allowedOrigins: z.array(z.string()) }) }).optional(),
+				relocatedFrom: { cors: "cors" },
+			},
+		});
+		const err = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootstrap(
+					resolved({}, 'cors.allowedOrigins = ["https://app.example"]\n'),
+				),
+			}),
+		);
+
+		expect(err.reason).toBe("config-path-relocated");
+		expect(err.details).toMatchObject({
+			relocated: [
+				{
+					module: "fixture-http",
+					from: "cors.allowedOrigins",
+					to: "fixture-http.cors.allowedOrigins",
+				},
+			],
+		});
 	});
 });
 

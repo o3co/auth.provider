@@ -16,31 +16,33 @@
 
 /**
  * The builder and the reader a test sets and reads the user repository's
- * HTTP settings with (`repositories.user.http`), core's section.
+ * HTTP settings with (`repositories.user.http`), the section a composition
+ * root's repositories module reads them from.
  */
 
 interface WithUserRepository {
-	readonly repositories: { readonly user: Readonly<Record<string, unknown>> };
+	readonly repositories?: { readonly user?: Readonly<Record<string, unknown>> };
 }
 
 /**
  * A copy of `config` whose user repository's `http` block is `http`, every
  * other key of `config` kept; `config` itself is left as it was.
  */
-export function withUserRepositoryHttp<C extends WithUserRepository>(
+export function withUserRepositoryHttp<C extends object>(
 	config: C,
 	http: Readonly<Record<string, unknown>>,
-): C {
+): C & WithUserRepository {
+	const repositories = (config as WithUserRepository).repositories;
 	return {
 		...config,
 		repositories: {
-			...config.repositories,
-			user: { ...config.repositories.user, http: { ...http } },
+			...repositories,
+			user: { ...repositories?.user, http: { ...http } },
 		},
 	};
 }
 
 /** What `config` holds as the user repository's `http` block, as it holds it. */
-export function userRepositoryHttpOf(config: WithUserRepository): unknown {
-	return config.repositories.user.http;
+export function userRepositoryHttpOf(config: object): unknown {
+	return (config as WithUserRepository).repositories?.user?.http;
 }

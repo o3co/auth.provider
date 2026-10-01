@@ -58,6 +58,27 @@ function goneKeyMessage(path: string, whatBecameOfIt: string, remedy: string): s
 	return `${path} ${whatBecameOfIt}; see CHANGELOG. ${remedy}`;
 }
 
+/**
+ * A top-level section core no longer reads, as a schema: absent, it is
+ * nothing; present, whatever it holds, it is refused, naming the section and
+ * what to do instead, and quoting nothing of its value. For a section whose
+ * reader moved into a module core cannot name: a loaded module that relocates
+ * the section refuses it first, before parse, in its own words.
+ */
+export function unreadSection(name: string, remedy: string) {
+	const message = goneKeyMessage(
+		name,
+		"is no longer read by core",
+		`${remedy} Remove this section from your config.`,
+	);
+	return z
+		.unknown()
+		.superRefine((_value, ctx) => {
+			ctx.addIssue({ code: "custom", message });
+		})
+		.optional();
+}
+
 /** One removed key: what to tell the operator still setting it. */
 export interface RemovedKey {
 	/** The key as it appeared under the section (`legacyTokenCompat`). */

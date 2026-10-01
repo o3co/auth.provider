@@ -62,9 +62,7 @@ const config = handle.components.config; // boot がパースしたもの
 
 | フィールド | 説明 |
 | --- | --- |
-| `http` | ホストプロセスの HTTP 設定 — `port`、`trustProxy`（Express の `trust proxy`: `false` / IP・CIDR レンジ・名前付きレンジ `loopback` / `linklocal` / `uniquelocal` のアドレスリスト / ホップ数 / `true`）、`readinessTimeoutMs`。`httpSettings` を provide するモジュール（standalone テンプレートの `http` モジュール）が所有し、デフォルトもそこにある。core はどれも読まず、デフォルトも持たない。core のスキーマはこのセクションを宣言しているので、設定が持つたびにエントリは boot 時に検証される。`true` はプロセスに到達できる誰からの forwarded アドレスも信じるため、プロキシを明示することを推奨 |
-| `logging.level` | composition の logger が出力するレベル。composition root の logging モジュール（standalone テンプレートの `logging`）が所有し、デフォルトもそこにある。core はこれを読まず、スキーマが語彙を宣言している |
-| `oauth.jwt` | JWT 設定 — `issuer` と `signingKey`（`provider` とそのサブセクション）: `keyStore` を provide するモジュール（standalone テンプレートの `key-store`）のセクションで、デフォルトもそこにある。core は `signingKey` を読まない |
+| `oauth.jwt` | JWT 設定 — `issuer` と `legacyTypAccept`。`signingKey` は存在だけを宣言する: 署名鍵の移動元のパスで、`keyStore` を provide するモジュール（standalone テンプレートの `key-store`）のセクションに移った。移動の拒否のために書かれたまま残す |
 | `oauth.accessToken.defaultExpiresIn` | リクエストが有効期間を指定しないときに全グラントが発行するアクセストークンの有効期間（秒）。指定できるのは token exchange（`expires_in` パラメータ）だけで、他のグラントはそのパラメータを無視する。有効期間は `resolveAccessTokenLifetime(config)` で読む。スキーマが拒否する値にはキーを名指しした `RangeError` を投げ（規則は `isLifetimeSeconds` で、数値として渡される有効期間のために export されている）、同梱のグラントはすべて構築時に読むので、それが拒否する手組みの config はリクエストではなく構築（と起動）で失敗する |
 | `oauth.accessToken.maxExpiresIn` | token exchange の `expires_in` で得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、明示的に設定しない限り延長されない。デフォルトがこれを超えると両キーを名指しして起動失敗 |
 | `oauth.accessToken.expiresIn` | `defaultExpiresIn` の**非推奨（deprecated）**エイリアス。`defaultExpiresIn` 未設定の間だけ読まれる（`reference.conf` は出荷時の `3600` をこのキーに置いている）。パース後の config はこの名前にも解決済みのデフォルトを持つ |
@@ -72,15 +70,15 @@ const config = handle.components.config; // boot がパースしたもの
 | `oauth.grants` | 存在のみ: グラントのスイッチの移動元のパスで、移動の拒否のために書かれたまま残す。スイッチはそれぞれモジュールのもの: session グラントは `oauth-session.enabled`、ほかは `oauth-authorization.grants.<grant>.enabled`（`oauth` パッケージが文書化する）。他のグラントパッケージのスイッチはここに無い: token exchange と WebAuthn はモジュールが組み込まれればグラントを登録し、device grant は `device-grant.enabled` が true のときだけグラントを登録する — 渡された config から `deviceGrantModule({ config })` が決める |
 | `session`、`session-store` | 存在のみ: session モジュールのセクションとセッションストアのセクションで、それぞれのモジュールが parse する（`session` パッケージが文書化する）。`session` の下はセッションストアのキーの移動元のパスで、移動の拒否のために書かれたまま残す。core はどちらも読まず、composition root はモジュールを選ぶ前に `session-store.storage` を読む |
 | `rateLimit` | 存在のみ: `login` はログインの予算の移動元のパス（`session.rateLimit.login`、session モジュールのもの）で、移動の拒否のために書かれたまま残す。Redis リミッターの障害時ポリシーと OAuth エンドポイントの制限値は、リミッターモジュール自身のセクションのもの（`core-rate-limiter-memory.*` / `redis-rate-limiter.*`）。Redis リミッターの旧パス `rateLimit.failMode` は、移動の拒否と boot の `rate_limit_fail_mode_not_applied` 警告のために書かれたまま残す |
-| `federations` | フェデレーションプロバイダー。名前をキーとする `{ enabled, type?, … }`。core が読むのは `enabled`（boot 時のフェデレーションストア配線チェック）だけで、`type` とエントリの残りはそれを読むアダプターパッケージのもの — アダプターパッケージは [ルート README](../../README.md) に一覧がある |
-| `repositories` | client、user、code の Repository 設定 — それぞれ `type` とそのサブセクション |
+| `federations` | 存在だけを宣言する: フェデレーションのマップの移動元のパス（`core.federations`）。各キーの新しいパスと変数を名指しする移動の拒否のために、書かれたまま残す |
+| `repositories`、`audit`、`cors`、`oauth.code`、`refreshTokenFamilyStore`、アダプターの選択（`rateLimiter`、`userSessionStores`、`accessTokenDenylist`、`replaySeenSet`、`consentStore`、`federationTokenStore`、`federationGrantStore`、`federationGrantIntentStore`、`mfaFactorStore`、`mfaTransactionStore`） | 存在だけを宣言する: モジュールや composition root が所有するセクション — リポジトリ、監査 sink、CORS のリスト（`http.cors`）、コードリポジトリ、共有 Redis 接続（`redis-clients`）のもの — と、アダプターの選択の移動元のパス（standalone テンプレート自身の `adapters`）。書かれたまま残し、core はどれも読まない |
 | `endpoints` | 存在のみ: ログインページと同意ページの移動元のパス（`session.loginPage.url` は session モジュールのもの、`oauth.consentPage.url` は oauth モジュールのもの）で、移動の拒否のために書かれたまま残す |
 | `core` | core 自身のセクションで、厳格: どの階層でも宣言されていないキーはブートを拒否し（`config-validation-failed`）、キーを示し、値は決して示さない |
 | `core.deployment.mode` | オペレーターが述べるレプリカ数: `single`、`multi`、または未設定（`CORE_DEPLOYMENT_MODE`）。既定値は無い: 未設定はそれ自体が一つの状態である。boot はこれから `deploymentMode` スロットを埋め、`multi` のもとではレプリカごとに分岐する状態を宣言するすべてのモジュールを拒否する。`deployment.mode` はこのパスを示して拒否される。`DEPLOYMENT_MODE` は `CORE_DEPLOYMENT_MODE` へ改名されたと宣言されており、単独で、または別の値で設定されているとブートを拒否する |
 | `core.sessionRequirements.expected` | この構成が期待するセッション要件 — 「ログイン済み」の意味を変える拡張で、MFA はその一つ — で、ブート時にインストールされたモジュールが登録したものと比較される（[セッション許可](#セッション許可) を参照）。書かれていれば、セッション許可に問い合わせるモジュールの有無にかかわらず両方向で比較する: インストールされたどのモジュールも登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件を書き漏らしても拒否する（`session-requirements-undeclared`）。セッション許可に問い合わせるモジュールがインストールされているときは必須（`oauthModule` はその一つ）で、書かれていなければ拒否する（`session-requirements-undeclared`）。`[]` は「なし」。既定値は無く、構成は自らの姿勢を述べる。`sessionRequirements.expected` はこのパスを示して拒否される |
 | `core.tokenBinding` | すべての機構が共有するトークンバインディングの設定: 機構のあいだを調停する `dispatchPolicy`（`CORE_TOKEN_BINDING_DISPATCH_POLICY`。[トークンバインディング機構](#トークンバインディング機構) を参照）と `bindConfidentialClientRefreshTokens`（`CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS`）で、`resolveTokenBindingSettings` が読む。`oauth.tokenBinding` はこれらのパスを示して拒否される |
-| `mfaFactorStore.adapter`、`mfaTransactionStore.adapter` | 登録済みの要素を保持するストア（`memory`、`redis`、`store`）と、MFA のトランザクションとロック状態を保持するストア（`memory`、`redis`）。どちらも既定は `memory`。MFA を組み込み、ストアを名前で選ぶ composition root が読むが、まだそうするものはない: standalone テンプレートは MFA モジュールを組み込まず、`"off"` 以外のモードではブートを拒否する（`mfa` を宣言するが、そこで登録するものは無い） |
-| `cors.allowedOrigins` | token / userinfo / revocation / discovery・JWKS のレスポンスを読める browser origin — [CORS](#cors) を参照。空（既定）なら CORS は無効。`httpSettings` を provide するモジュールがないとき core が読む。standalone テンプレートの `http` モジュールはこのリストをそのスロットで渡す。CSRF の信頼は与えない（`session.csrf.trustedOrigins` を使う） |
+| `core.federations` | フェデレーション。各フェデレーションに到達する名前をキーとする `{ enabled, type?, trustUpstreamAmr?, … }` で、名前がすべての type にわたって一意になるよう 1 つのマップにしている。`federationsOf(config)` で読む: core が読むのは `enabled`（boot 時のフェデレーションストア配線チェック）と `trustUpstreamAmr`（`federationTrustsUpstreamAmr`）で、`type` とエントリの残りはそれを読むアダプターパッケージのもの — アダプターパッケージは[ルート README](../../README.ja.md) に列挙している。エントリのキーはそのパスから名付けた変数 `CORE_FEDERATIONS_<NAME>_<KEY>` に束縛される。トップレベルの `federations` はこれを名指しして拒否される。core の `reference.conf` は空のマップを出荷する |
+| `core.declaredAbsent` | この構成が意図して埋めないスロットを、そのキーで並べる（`["auditSink"]`）: そのようなスロットのモジュールの absence policy は、ここに挙げた名前で満たされる（`isAbsenceDeclared`、`describeAbsenceDeclaration`）。デフォルトも変数もない |
 
 ### グラントシステム
 
@@ -122,7 +120,7 @@ RFC 6749 付録 A.7 と A.8 は `error` と `error_description` を `1*NQSCHAR`�
 
 ### キーストア
 
-`KeyStore` インターフェースは、対称鍵（HS256）と非対称鍵（RS256、ES256、EdDSA）の署名鍵を、鍵のローテーションを含めて抽象化します。ローテーションは形が鍵種別で異なり、非対称アルゴリズムは `previousKeys`（kid + 公開鍵 + 有効期限）、HS256 は `previousSecrets`（kid + secret + 有効期限）を使います。`getVerificationKey(kid)` は kid で鍵を解決し — キーストアは一致する鍵を直接返し、複数の鍵で試し検証することはありません — 持っていない kid には `UnknownKidError`、`expiresAt` を過ぎた kid には `ExpiredKidError` を throw するので、呼び出し側は捏造された kid と退役した kid を区別できます。それ以外の throw（タイムアウトしたリモートの鍵サービスなど）はキーストアが答えられなかったということで、トークンについての判定ではありません。`verifyJwt` はそれを `kid_unknown` ではなく `verification_key_unavailable` として報告し、すべてのルートが `503 temporarily_unavailable` で答えます（[トークン検証](#トークン検証)を参照）。したがって独自のキーストアは、持っていない kid には他のエラーではなく `UnknownKidError` で答えなければなりません。`kid` は信頼できない入力です — 署名を検査する前に読むトークン自身のヘッダーで、`verifyJwt` が渡すのは整った鍵 ID（`isWellFormedKid`: 制御文字を含まない 1〜`MAX_KID_LENGTH`（256）文字の文字列）だけですが、それ以外のどんな文字でも含み得ます。リモートで鍵を引くアダプター（KMS、HSM、JWKS エンドポイント）は、それがリモートに届く前に自分の鍵の命名規則で検査し、通らないものには `UnknownKidError` で答えます。同じ規則は kid を選ぶ側でも守られます: `oauth.jwt.signingKey` と 3 つの組み込みキーストアは、整った鍵 ID でない現在の kid や以前の kid を構築時に拒否します（[`src/keys/kid.mts`](src/keys/kid.mts)）。そうでなければ、サーバーは自分の検証器が `kid_unknown` として拒否するトークンに署名してしまいます。契約は [`src/keys/KeyStore.mts`](src/keys/KeyStore.mts) の `getVerificationKey` に書かれています。`sign(options)` は compact JWT を返します。protected header の `alg` / `kid` は KeyStore が自動注入するため、呼び出し側は上書きできません。この契約により、remote-sign アダプター（KMS/HSM）は private key を露出せずに `sign()` を実装できます。`getSigningKidFallback()` は、`kid` header を欠く legacy/malformed トークンの検証用に現在の署名 kid を返す軽量なアクセサーです。rotation-safe な lookup には使わないでください。
+`KeyStore` インターフェースは、対称鍵（HS256）と非対称鍵（RS256、ES256、EdDSA）の署名鍵を、鍵のローテーションを含めて抽象化します。ローテーションは形が鍵種別で異なり、非対称アルゴリズムは `previousKeys`（kid + 公開鍵 + 有効期限）、HS256 は `previousSecrets`（kid + secret + 有効期限）を使います。`getVerificationKey(kid)` は kid で鍵を解決し — キーストアは一致する鍵を直接返し、複数の鍵で試し検証することはありません — 持っていない kid には `UnknownKidError`、`expiresAt` を過ぎた kid には `ExpiredKidError` を throw するので、呼び出し側は捏造された kid と退役した kid を区別できます。それ以外の throw（タイムアウトしたリモートの鍵サービスなど）はキーストアが答えられなかったということで、トークンについての判定ではありません。`verifyJwt` はそれを `kid_unknown` ではなく `verification_key_unavailable` として報告し、すべてのルートが `503 temporarily_unavailable` で答えます（[トークン検証](#トークン検証)を参照）。したがって独自のキーストアは、持っていない kid には他のエラーではなく `UnknownKidError` で答えなければなりません。`kid` は信頼できない入力です — 署名を検査する前に読むトークン自身のヘッダーで、`verifyJwt` が渡すのは整った鍵 ID（`isWellFormedKid`: 制御文字を含まない 1〜`MAX_KID_LENGTH`（256）文字の文字列）だけですが、それ以外のどんな文字でも含み得ます。リモートで鍵を引くアダプター（KMS、HSM、JWKS エンドポイント）は、それがリモートに届く前に自分の鍵の命名規則で検査し、通らないものには `UnknownKidError` で答えます。同じ規則は kid を選ぶ側でも守られます: `key-store` と 3 つの組み込みキーストアは、整った鍵 ID でない現在の kid や以前の kid を構築時に拒否します（[`src/keys/kid.mts`](src/keys/kid.mts)）。そうでなければ、サーバーは自分の検証器が `kid_unknown` として拒否するトークンに署名してしまいます。契約は [`src/keys/KeyStore.mts`](src/keys/KeyStore.mts) の `getVerificationKey` に書かれています。`sign(options)` は compact JWT を返します。protected header の `alg` / `kid` は KeyStore が自動注入するため、呼び出し側は上書きできません。この契約により、remote-sign アダプター（KMS/HSM）は private key を露出せずに `sign()` を実装できます。`getSigningKidFallback()` は、`kid` header を欠く legacy/malformed トークンの検証用に現在の署名 kid を返す軽量なアクセサーです。rotation-safe な lookup には使わないでください。
 
 定義 — `KeyStore`、`SignJwtOptions`、`JWTPayload`、`ManagedKey`、`KeyLike`、2 つのエラー、`AsymmetricKeyStoreOptions`、`SymmetricPreviousSecret`、`createAsymmetricKeyStore`、`createSymmetricKeyStore` — は [`src/keys/KeyStore.mts`](src/keys/KeyStore.mts) にあります。
 
@@ -183,7 +181,7 @@ floor が置かれているのは **builder と schema**（= config 境界）で
 3. `application.conf` で新しい `kid` + `secret` を設定し、古い組を `previousSecrets` に移す:
 
    ```hocon
-   oauth.jwt.signingKey.local {
+   key-store.local {
      algorithm = "HS256"
      kid = "v1"           # 新しい kid
      secret = "<new-secret>"
@@ -292,7 +290,7 @@ core が自分でマウントするもの（この順）: レスポンスを読�
 
 ## CORS
 
-`corsMw`（`src/middleware/cors.mts`）がレスポンスを読ませるオリジンは、composition が `httpSettings` スロットを持つときはその `cors.allowedOrigins`（standalone テンプレートの `http` モジュールが提供します）、持たないときは設定の `cors.allowedOrigins` です。2 つを混ぜることはありません。`assembleApp` はこのミドルウェアを**最初に** — 他のすべてのミドルウェアとルート contribution より前に — マウントします。空のリスト（既定）なら何もマウントしません: CORS ヘッダーも `Vary` も付きません。契約に反するオリジンを持つスロット（`checkSerializedOrigin` が拒否するエントリー、または文字列のリストでないもの）は、メンバーとインデックスを示す `RangeError` で boot を拒否します。
+`corsMw`（`src/middleware/cors.mts`）がレスポンスを読ませるオリジンは、`httpSettings` スロットの `cors.allowedOrigins` です — standalone テンプレートの `http` モジュールが `http.cors.allowedOrigins` から提供します。`httpSettings` を持たない構成は CORS をマウントしません。`assembleApp` はこのミドルウェアを**最初に** — 他のすべてのミドルウェアとルート contribution より前に — マウントします。空のリスト（既定）なら何もマウントしません: CORS ヘッダーも `Vary` も付きません。契約に反するオリジンを持つスロット（`checkSerializedOrigin` が拒否するエントリー、または文字列のリストでないもの）は、メンバーとインデックスを示す `RangeError` で boot を拒否します。
 
 ### 対象ルート
 
@@ -323,7 +321,7 @@ core が自分でマウントするもの（この順）: レスポンスを読�
 
 エントリーは boot 時に `checkSerializedOrigin`（`src/net/origin.mts`）で検証され、インデックスを示して拒否されます。一致判定は文字列の完全一致なので、末尾のスラッシュ、明示的な `:443`、大文字のホスト、パス、ワイルドカードは、誰も通さずそのことをどこにも言わない許可リストになるからです。loopback ホストを除き `https` が必須で、判定は共有の `isLoopbackHostname` に拠ります。`corsMw` は同じ検査をもう一度適用し、落としたものを警告するので、スキーマを通っていない手組みの `AppConfig` でも、スキーマなら拒否したエントリーは入りません。
 
-リストの書き方は 2 通りあります。環境変数が運べる唯一の形であるカンマ区切りの文字列（`CORS_ALLOWED_ORIGINS`）はカンマで分割され、各エントリーは前後の空白を除かれ、空のエントリーは捨てられるので、空の変数はリストなしになります。配列は文字列のエントリーを前後の空白を除いて保ち、空のエントリーは上の検査で拒否され、文字列でないエントリーは捨てられます。`null` はリストなしです。それ以外の形 — 数値、オブジェクト、真偽値。設定ファイルでしか書けない形です — はパース時に `cors.allowedOrigins` を示して拒否されます — `createApp` を通るなら手組みの設定も同じです。boot はこのセクションがあればいつでもパースするからです（#728）。それでもミドルウェアをマウントする箇所に届いた形は警告され（`cors_allowed_origins_unreadable`、受け取った形を `received` に持つ）、ミドルウェアはマウントされません。両方を読むのは同じファイルの `normalizeAllowedOrigins` で、export されています。WebAuthn パッケージは `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` をこれで読むので、環境変数から設定するオリジンのリストはどれも同じ書き方になります。
+リストの書き方は 2 通りあります。環境変数が運べる唯一の形であるカンマ区切りの文字列（`HTTP_CORS_ALLOWED_ORIGINS`）はカンマで分割され、各エントリーは前後の空白を除かれ、空のエントリーは捨てられるので、空の変数はリストなしになります。配列は文字列のエントリーを前後の空白を除いて保ち、空のエントリーは上の検査で拒否され、文字列でないエントリーは捨てられます。`null` はリストなしです。それ以外の形 — 数値、オブジェクト、真偽値。設定ファイルでしか書けない形です — は、スロットを提供するモジュールが拒否します（standalone テンプレートの `http` モジュールは `http.cors.allowedOrigins` を示します）。core は `cors` セクションを読みません: まだそれを書く設定は、読み込まれたモジュールが先に自分の言葉で移動を拒否しない限り、それを示して boot を拒否します。両方を読むのは同じファイルの `normalizeAllowedOrigins` で、export されています。WebAuthn パッケージは `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` をこれで読むので、環境変数から設定するオリジンのリストはどれも同じ書き方になります。
 
 ## 使い方
 
@@ -335,27 +333,29 @@ import {
   createRepositoryFactories,
   createKeyStoreFactory,
   defineModule,
-  readTransitionalConfig,
   registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 
-// boot より前にこの構成が読むもの。rawConfig は createApp 自身がパースする（#728）。
-const config = readTransitionalConfig(rawConfig, ["http.port", "oauth.jwt.signingKey", "repositories"]);
-
-// 署名鍵とポートはこの構成自身の設定: core は `oauth.jwt.signingKey` にも `http` にも
-// デフォルトを持たないので、rawConfig がそれを持つ（standalone テンプレートは自分の
-// `config/reference.conf` に置いている）。
-const { signingKey } = config.oauth.jwt;
-const port = config.http?.port;
-if (signingKey === undefined || port === undefined) {
-  throw new Error("oauth.jwt.signingKey and http.port are required");
+// 署名鍵、リポジトリ、ポートはこの構成自身のセクション: core はどれも宣言せず
+// デフォルトも持たないので、rawConfig が書かれたまま持つ（standalone テンプレートは
+// 自分の `config/reference.conf` に置き、それぞれ自分のモジュールのスキーマでパースする）。
+// 自分のスキーマでパースすること。rawConfig は createApp 自身がパースする（#728）。
+type Selected = { type?: string; provider?: string } & Record<string, unknown>;
+const own = rawConfig as {
+  "key-store"?: Selected;
+  repositories?: { client: Selected; user: Selected; code: Selected };
+  http?: { port?: number };
+};
+const signingKey = own["key-store"];
+const repositories = own.repositories;
+const port = own.http?.port;
+if (signingKey === undefined || repositories === undefined || port === undefined) {
+  throw new Error("key-store, repositories and http.port are required");
 }
 
-// repositories.*（'type' セレクター）と oauth.jwt.signingKey（'provider' セレクター）は同じ入れ子の
+// repositories.*（'type' セレクター）と key-store（'provider' セレクター）は同じ入れ子の
 // アダプターサブセクション形式に従う。flatten() はどちらも { type, ...サブセクションフィールド } に正規化してから factory に渡す:
-const flatten = (
-  section: ({ type: string } | { provider: string }) & Record<string, unknown>,
-) => {
+const flatten = (section: Selected) => {
   const selector =
     (section as { type?: string; provider?: string }).type
     ?? (section as { provider?: string }).provider;
@@ -376,9 +376,9 @@ const keyStore = await keyStoreFactory.create(flatten(signingKey));
 
 const { clientFactory, userFactory, codeFactory } = createRepositoryFactories();
 
-const clientRepository = await clientFactory.create(flatten(config.repositories.client));
-const userRepository = await userFactory.create(flatten(config.repositories.user));
-const codeRepository = await codeFactory.create(flatten(config.repositories.code));
+const clientRepository = await clientFactory.create(flatten(repositories.client));
+const userRepository = await userFactory.create(flatten(repositories.user));
+const codeRepository = await codeFactory.create(flatten(repositories.code));
 
 const localComponentsModule = defineModule({
   name: "local-components",
@@ -469,7 +469,7 @@ const userRepo = new InMemoryUserRepository(users);
 - `MfaFactorStore` — 対象ユーザーの登録済み要素を保持する場所 — と `MfaFactorRecord` — [`src/mfa/factorStore.mts`](src/mfa/factorStore.mts)。レコードの `data` はストアに届く前に封印され、ストアはそれを 1 バイトも変えずに保持する。`update` は `version` に対する compare-and-set で、`Number.MAX_SAFE_INTEGER` での更新は次のバージョンが安全な整数にならないため、何も書かずに `RangeError` になる（`checkMfaVersionAdvances`、[`src/mfa/version.mts`](src/mfa/version.mts)）。応答できないストアは「要素なし」と答えず例外を投げる。インプロセスのアダプター `createMemoryMfaFactorStore()` とそのモジュール `memoryMfaFactorStoreModule` は開発用と単一レプリカ用: 再起動で空になり、モジュールはそのことを一度だけ警告し（`mfa_factor_store_in_memory`）、`core.deployment.mode = "multi"` はこのモジュールを拒否する。`createMfaFactorStoreFactory()` / `registerBuiltinMfaFactorStores()` で名前から組み立てられる。すべてのアダプターは `@o3co/auth-provider-test-kit` のスイート `mfaFactorStoreContract` を実行し、テストキット自身のテストがそれをプロセス内のアダプターに対して走らせる。
 - Store の MFA エンドポイントのワイヤ形式 — [`src/mfa/storeWire.mts`](src/mfa/storeWire.mts): list・create・update・delete・`markMfaEnrolled` の JSON ボディ（`MfaStoreFactor`、`MfaStoreFactorChanges`、`MfaStoreUpdateRequest` など）と、その変換（`toMfaStoreFactor`、`readMfaStoreFactor`、`fromMfaStoreFactor`、`readMfaStoreListAnswer`、`toMfaStoreFactorChanges`、`readMfaStoreFactorChanges`、`toMfaStoreUpdateRequest`）。Store のアダプターと、Store 自身の実装やその偽物が読む。時刻はエポックミリ秒で `…Ms` と名付け、値の無い省略可能なフィールドは省き、`null` を持つレコードは `readMfaStoreFactor` が読まない。ページが表示するフィールド — `id`・`kind`・`label` — がレコードの形から外れたものも読まない: `isMfaFactorId`（base64url の 22 文字）、`isMfaFactorKind`（ヒントのトークン）、`isMfaFactorLabel`（1〜`MFA_FACTOR_LABEL_MAX_LENGTH`、64 文字で、行を分けたり並びを変えたりする文字を含まない）。これらは [`src/mfa/factorStore.mts`](src/mfa/factorStore.mts) にある。一覧は丸ごと読まれる: 読めないレコード、別の主体を名指すレコード、同じ ID の二つのレコードのどれか一つで読めなくなる。書き手が作るものは読み手がそのまま読み戻し、読み手が拒むものは書き手が `RangeError` で拒む。更新はレコードを `subject` と `id` で名指し、期待するバージョンと、変更として `data`・`label`・`lastUsedAtMs` だけを運び、他のフィールドを持つ変更は読まれない。各応答の意味は [`@o3co/auth-provider-foundation`](../foundation/README.md#the-stores-mfa-endpoints) が定める。
 - `MfaTransactionStore` — MFA のトランザクションと対象ユーザーのロック状態を保持する場所 — と `MfaTransaction`、`MfaTransactionPatch`、`MfaLockoutPolicy` — [`src/mfa/transactionStore.mts`](src/mfa/transactionStore.mts)。トランザクションは第二要素の 1 回のセレモニーの使い捨ての記録で、それを始めたものに `binding` で結び付けられる — `MfaTransactionBinding` は `kind` で区別される共用体で、現在は `{ kind: "session", id }`（`MfaSessionBinding`）だけ（#742）— ストアはそれを丸ごと保持する。どの利用も結び付けを種類も含めて丸ごと比較し（`isMfaTransactionBoundTo`）、それを通してトランザクションを読む（`getBoundMfaTransaction`。別のものに結び付いたトランザクションは未知の id として答える）。`reserveAttempt`、`takeChallenge`、`consume` はアトミックなので、同時に飛んでいる試行はそれぞれ消費され、チャレンジは一度だけ答えられ、トランザクションを消費する検証は 1 つだけである。`create` は型が認めない値のフィールド — 知らない種類の結び付けや、空の id の結び付けもそこに含まれる — と、新しい記録のカウンターで始まらないトランザクションを拒否し、トランザクションが持つフィールドだけを保持する（`newMfaTransactionRecord`）。`update` はパッチのキーだけを書き — 値は設定し、`null` は空にできるフィールドを消し、`undefined` は無いものとして扱い、それ以外は `RangeError`（`mfaTransactionPatchWrites`）— 要件を取り消す遷移を拒否する: 必須のメール証明を満たす以外の変更、満たされた証明の取り消し、`enrollment` の引き下げ（`checkMfaTransactionTransitions`）。さらに `Number.MAX_SAFE_INTEGER` での更新は、次のバージョンが安全な整数にならないため、何かを読み書きする前に `RangeError` で拒否する（`checkMfaVersionAdvances`。要素ストアも呼ぶ）。すべてのアダプターがこの 4 つを呼ぶ。どの操作も、ストア自身の時計で `expiresAtMs` 以降のトランザクションを存在しないものとして答える — `reserveAttempt` と `takeChallenge` も同じで、何も消費せず何も取り出さない — 共有バックエンドの時計が何と言おうと。対象ユーザーの状態は推測可能な証明に対するロックで、呼び出し側それぞれが渡す時刻で判断するので、呼び出し側の時計は揃っていなければならない: 連続した失敗（`threshold` 回の失敗から始まり `maxSeconds` まで倍になる短いバックオフで、最後のロックが終わってから — ロックの前なら直前の失敗から — `memorySeconds` で忘れられる。`hardLimit` に達すると免除要素での成功まで保留。成功は自分の予約までの連続を終わらせる）、そしてどの成功も払い戻さず、どの試行も迂回しない任意の連続 7 日間（`MFA_WEEKLY_WINDOW_MS`）の失敗の週次予算。拒否された予約は、試行が通された後の最初の拒否かどうかを答える（`first`）ので、ホールドの始まりをそれを繰り返す拒否と区別できる。免除要素での成功（`noteExemptSuccess`）は、その時刻までの連続を終わらせ、何も答えない。ストアは失敗を、数えなくなってから `MFA_CLOCK_SKEW_ALLOWANCE_MS`（1 日）後に、自分の時計より後にはならない時刻で判断して初めて忘れるので、それより少しだけ時計が進んでいる呼び出し側がほかの呼び出し側がまだ数える失敗を消すことはなく、大きく進んでいる呼び出し側も、どの対象ユーザーについても何も消さない。`clearSubjectState`（オペレーターのリセットとパスワード変更）は連続と週を消す。パスワード変更で週次予算が消えるのは意図したものである。ロックとは別に、ストアはオペレーターのリセットが求めたメール証明の要件を、対象ユーザーの次の最初の結び付けが消費するまで保持する（`requireEmailProofAtNextBinding`、`emailProofRequiredAtNextBinding`、`consumeEmailProofRequirement`）。`clearSubjectState` はそれを消さない。さらに、対象ユーザーの 1 つのセッションで示されたアカウントのメール証明（D24）も保持する（`recordSessionEmailProof(subject, sid, provedAtMs, untilMs)`。そのセッションの以前の証明を置き換える）。その `untilMs` が問われた時刻とストアの時計の両方より後である間、証明が示された時刻を、問われた時刻より後にならない値で答える（`sessionEmailProofAt(subject, sid, nowMs)`）。別のセッションや、別の対象ユーザーの同じ `sid` には決して答えない。`checkSessionEmailProof`（ストアの時計で判断する: `untilMs` がそれより後で、`provedAtMs` がそれより `MFA_CLOCK_SKEW_ALLOWANCE_MS` を超えて先ではない）、`checkSessionEmailProofQuestion`（エポック以降の時刻）、`sessionEmailProofAnswer` は、すべてのアダプターが記録し、問われ、答えるときの規則で、`readSessionEmailProof(answer, nowMs)` はその答えの唯一の読み方である — `null` か `nowMs` までの時刻以外はすべて障害。証明が失われても安全側に倒れる: ユーザーはもう一度証明する。`checkMfaLockoutPolicy()` はストアが適用できないポリシーを `RangeError` で拒否する。`hardLimit` を超える `threshold` や、NIST の 100（`MFA_LOCKOUT_MAX_HARD_LIMIT`）を超える `hardLimit` もそこに含まれる。インプロセスのアダプター `createMemoryMfaTransactionStore()` と `memoryMfaTransactionStoreModule` は開発用と単一レプリカ用で、`core.deployment.mode = "multi"` では拒否される。このアダプターが保持するのはトランザクションとセッションの証明を合わせて `core-mfa-transaction-store-memory.maxEntries` 件まで（`DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES`、10 万件）で、上限に達すると生きているものを追い出さず、新しいものをストア障害 `MfaTransactionStoreFullError` として拒否する。`createMfaTransactionStoreFactory()` / `registerBuiltinMfaTransactionStores()` で名前から組み立てられる。すべてのアダプターは [`src/mfa/__tests__/transactionStore.contract.mts`](src/mfa/__tests__/transactionStore.contract.mts) を実行する。
-- セッションの唯一の読み方（`sessionAuthentication`、`vouchedAmr`、`SessionAuthentication`）は、`UserSession.authentication` ができる前に書かれたセッションを読むときに分割し、`requirementSession(session)` はセッション要件がそのセッションについて問われる入力を、`requirementSessionFromAmr` は生きたセッションを持たないトークンについて問われる入力を組み立てる。同じファイルに、各ログイン経路が記録するもの（`passwordSessionAuthentication`、`federatedSessionAuthentication`）、フェデレーションの上流 IdP の `amr` を数えるか（`federationTrustsUpstreamAmr`、`federations.<name>.trustUpstreamAmr`）、検証された第 2 要素がセッションをどうするか（`sessionAfterSecondFactor`、`checkSecondFactorEvent`）、ストアが `authentication` として記録してよいもの（`recordableSessionAuthentication`）がある — [`src/user-sessions/authentication.mts`](src/user-sessions/authentication.mts)。セッションがログインの `User` について最初の結び付けのために記録するもの（`UserSession.enrollmentFacts`、`SessionEnrollmentFacts`: 登録の証跡と、そのアドレスが何か — 無い、プロバイダーが読めるアドレス、読めないもの（`MailAddressFact`: `none`、`address`、`unreadable`）。アドレスそのものは決して記録しない）は core のプライマリビルダーが導き、ストアがそれとして記録してよいものは `recordableEnrollmentFacts`、読み戻しは `readEnrollmentFacts` である — [`src/user-sessions/enrollmentFacts.mts`](src/user-sessions/enrollmentFacts.mts)。このキーは省略可能で、独自のストアはそれを往復させる。このプロバイダーが記録する `amr` の値（`PASSWORD_AMR`、`FEDERATED_AMR`、`OTP_AMR`、`HARDWARE_KEY_AMR`、`SOFTWARE_KEY_AMR`、`MFA_AMR`、`EMAIL_OTP_AMR`、`RECOVERY_CODE_AMR`）と、検証された要素がセッションの `amr` に加えるもの（`composeAmr`） — [`src/grants/authenticationClaims.mts`](src/grants/authenticationClaims.mts)。
+- セッションの唯一の読み方（`sessionAuthentication`、`vouchedAmr`、`SessionAuthentication`）は、`UserSession.authentication` ができる前に書かれたセッションを読むときに分割し、`requirementSession(session)` はセッション要件がそのセッションについて問われる入力を、`requirementSessionFromAmr` は生きたセッションを持たないトークンについて問われる入力を組み立てる。同じファイルに、各ログイン経路が記録するもの（`passwordSessionAuthentication`、`federatedSessionAuthentication`）、フェデレーションの上流 IdP の `amr` を数えるか（`federationTrustsUpstreamAmr`、`core.federations.<name>.trustUpstreamAmr`）、検証された第 2 要素がセッションをどうするか（`sessionAfterSecondFactor`、`checkSecondFactorEvent`）、ストアが `authentication` として記録してよいもの（`recordableSessionAuthentication`）がある — [`src/user-sessions/authentication.mts`](src/user-sessions/authentication.mts)。セッションがログインの `User` について最初の結び付けのために記録するもの（`UserSession.enrollmentFacts`、`SessionEnrollmentFacts`: 登録の証跡と、そのアドレスが何か — 無い、プロバイダーが読めるアドレス、読めないもの（`MailAddressFact`: `none`、`address`、`unreadable`）。アドレスそのものは決して記録しない）は core のプライマリビルダーが導き、ストアがそれとして記録してよいものは `recordableEnrollmentFacts`、読み戻しは `readEnrollmentFacts` である — [`src/user-sessions/enrollmentFacts.mts`](src/user-sessions/enrollmentFacts.mts)。このキーは省略可能で、独自のストアはそれを往復させる。このプロバイダーが記録する `amr` の値（`PASSWORD_AMR`、`FEDERATED_AMR`、`OTP_AMR`、`HARDWARE_KEY_AMR`、`SOFTWARE_KEY_AMR`、`MFA_AMR`、`EMAIL_OTP_AMR`、`RECOVERY_CODE_AMR`）と、検証された要素がセッションの `amr` に加えるもの（`composeAmr`） — [`src/grants/authenticationClaims.mts`](src/grants/authenticationClaims.mts)。
 - core は要素を同梱しない: MFA パッケージが TOTP 要素（`mfaTotpFactorModule`）を寄与し、`@o3co/auth-provider-webauthn` がパスキーのグラント（`contributes.grants`）の傍らで WebAuthn 要素（`webauthnMfaFactorModule`、`mfaFactors.webauthn`）を寄与する。
 
 #### セッション許可
@@ -539,7 +539,7 @@ const userRepo = new InMemoryUserRepository(users);
 - `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用（`authorization_code` では再評価しない）
 - その他のグラント（refresh / client_credentials / token-exchange）はトークンエンドポイントで評価
 
-5 つとも任意です。audit sink は absence policy（`AUDIT_SINK_ABSENCE_POLICY`）を持ちます: スロットを埋めるものがなければ、設定で不在を宣言する（`audit.sink.type = "none"`）必要があり、宣言がなければ boot は拒否されます。他の 4 つは、ないときは単に無効です。
+5 つとも任意です。audit sink は absence policy（`AUDIT_SINK_ABSENCE_POLICY`）を持ちます: スロットを埋めるものがなければ、設定で不在を宣言する（`core.declaredAbsent = ["auditSink"]`）必要があり、宣言がなければ boot は拒否されます。他の 4 つは、ないときは単に無効です。
 
 ### トークンバインディング機構
 
@@ -581,7 +581,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 - `SupportsSessionEnd` — `SessionFamilyIndex` の任意の capability（`endSession`、`addFamilyIdUnlessEnded`）。同じセッションに対するログアウトの end とグラントの add について、end の一覧がその family を含むか、add が `"ended"` と答えるかのどちらかになる。同梱の 2 つのインデックスはどちらも実装している（Redis のものは印を書けるクライアントの上で）。`supportsSessionEnd(index)` ガードで検出する。ストアが読み書きを線形化可能に保ち、読み取りをプライマリで処理すること（各操作は、それが始まる前に完了したすべての書き込みを見る）を信頼している。Redis の非同期レプリケーションはフェイルオーバーをまたいでこれを保証しない。昇格したレプリカは、旧プライマリが応答済みの書き込みを持たないことがある。レプリカが答える読み取りも同様である。この保証は、関係するすべての時計でセッションの寿命内にある操作について成り立つ。印はその寿命にクロックスキューの許容幅（`DEFAULT_CLOCK_SKEW_MS`）を足した間だけ残る。
 - `federationTokenStore`: `(sid, federationName)` をキーとする上流 IdP のトークンで、ログアウトで削除される。Redis アダプターは `refresh_token` を AES-256-GCM で暗号化し、`allow-plaintext` は opt-in で警告を出力する。ストアは `FederationTokens` のすべてのフィールドを round-trip させなければならない — `expiresAt: null` を含め、記録がないフィールドは `null` ではなく `undefined` で返す。フィールドごとのポート契約は [src/README.md](src/README.md#federation-tokens) に、必須キーのためにストア実装者が変えることは [docs/upgrading-required-record-keys.md](../../docs/upgrading-required-record-keys.md) にある。
 
-`@o3co/auth-provider-oauth` が両方を消費します: ログアウトと連鎖失効、id_token と `/userinfo`、`POST /oauth/federation/:name/token`。いずれかの `federations.<name>.enabled` が true のとき、`userSessionStore`、`sessionRPRegistry`、`sessionFamilyIndex`、`sessionFederationIndex`、`federationTokenStore`、`refreshTokenFamilyRevocation` のどれかが欠けた構成を boot は拒否します（`federation-stores-incomplete`）。
+`@o3co/auth-provider-oauth` が両方を消費します: ログアウトと連鎖失効、id_token と `/userinfo`、`POST /oauth/federation/:name/token`。いずれかの `core.federations.<name>.enabled` が true のとき、`userSessionStore`、`sessionRPRegistry`、`sessionFamilyIndex`、`sessionFederationIndex`、`federationTokenStore`、`refreshTokenFamilyRevocation` のどれかが欠けた構成を boot は拒否します（`federation-stores-incomplete`）。
 
 - `SupportsLock` — `FederationTokenStore` の任意の capability で、`(sid, federationName)` 単位の advisory lock を提供し、並行リフレッシュが上流に殺到するのを防ぐ。同梱の両ストアが実装しており、`supportsLock(store)` ガードで検出する。その背後のロック実装 — core の `createInProcessLock`（`src/federation-tokens/lock/memory.mts`）と `@o3co/auth-provider-redis` の `createRedisLock` — は内部実装で export されない。ロックが必要な独自ストアは代わりに `SupportsLock` を公開する。
 - `Client.allowedAzpForFederationToken` — `Client` レコードの opt-in フラグ。ないときは `false`。`POST /oauth/federation/:name/token` を利用するクライアントは `true` に設定しなければならない。

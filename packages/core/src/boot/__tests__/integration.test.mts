@@ -173,9 +173,12 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 
 		// Bootstrap components are accessible. config is the parsed
 		// (CoreConfigSchema-validated) result, not the raw bootstrap reference
-		// (see validateAndComposeConfig). `port: 3000` comes from the
-		// makeValidCoreConfig fixture: the schema carries no default.
-		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
+		// (see validateAndComposeConfig). The refresh-token lifetime comes from
+		// the makeValidCoreConfig fixture: the schema carries no default.
+		expect(
+			(handle.components.config as { oauth: { refreshToken: { expiresIn: number } } }).oauth
+				.refreshToken.expiresIn,
+		).toBe(86400);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 
 		// Router is a real Express Router instance with a callable .use method.

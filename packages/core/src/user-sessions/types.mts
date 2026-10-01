@@ -412,7 +412,7 @@ export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
 	hint:
 		"Without these a credential change cannot invalidate what was already issued: a " +
 		"password reset leaves every existing session and access token working until it " +
-		'expires. Wire both (`userSessionStores.adapter = "redis"` in the standalone ' +
+		'expires. Wire both (`adapters.userSessionStores = "redis"` in the standalone ' +
 		"template, or core's memorySessionStoresModule for a single-process deployment), " +
 		'or declare `"unsupported"` to state that this deployment has no subject-level ' +
 		"revocation. Refresh-token family revocation runs off the family store and is " +

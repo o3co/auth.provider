@@ -28,7 +28,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	type AppConfig,
 	AppConfigSchema,
 	createApp,
 	createKeyStoreFactory,
@@ -45,10 +44,15 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths } from "../configPath.mjs";
+import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { installGracefulShutdown } from "../shutdown.mjs";
-import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
+import {
+	adaptersOf,
+	capturedRenames,
+	libraryLayers,
+	sectionsCoreDoesNotDeclare,
+} from "./library-references.fixture.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
 // and the shared clients module's readiness probe gets its PONG.
@@ -107,24 +111,24 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 /** A single-replica deployment with every shared store on memory, grants off. */
 const BASE_ENV: Readonly<Record<string, string>> = {
-	OAUTH_JWT_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: "federation-grants-composition.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_SECRET: "federation-grants-composition.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "federation-grants-composition-session.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "memory",
-	CLIENT_USER_TYPE: "yaml",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
-	USER_SESSION_STORES_ADAPTER: "memory",
-	RATE_LIMITER_ADAPTER: "memory",
-	OAUTH_CODE_ADAPTER: "memory",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-	REPLAY_SEEN_SET_ADAPTER: "memory",
-	FEDERATION_TOKEN_STORE_TYPE: "memory",
-	CONSENT_STORE_ADAPTER: "none",
-	FEDERATION_GRANT_STORE_ADAPTER: "memory",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+	ADAPTERS_USER_REPOSITORY: "yaml",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
+	ADAPTERS_USER_SESSION_STORES: "memory",
+	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_CODE_REPOSITORY: "memory",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+	ADAPTERS_REPLAY_SEEN_SET: "memory",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
+	ADAPTERS_CONSENT_STORE: "none",
+	ADAPTERS_FEDERATION_GRANT_STORE: "memory",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 };
 
 /** The umbrella E2E's shape: every shared store on Redis, more than one replica. */
@@ -133,16 +137,16 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	CORE_DEPLOYMENT_MODE: "multi",
 	SESSION_STORE_STORAGE_TYPE: "redis",
 	SESSION_STORE_STORAGE_REDIS_URL: "redis://redis.test:6379",
-	USER_SESSION_STORES_ADAPTER: "redis",
-	RATE_LIMITER_ADAPTER: "redis",
-	OAUTH_CODE_ADAPTER: "redis",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
-	REPLAY_SEEN_SET_ADAPTER: "redis",
-	FEDERATION_TOKEN_STORE_TYPE: "redis",
+	ADAPTERS_USER_SESSION_STORES: "redis",
+	ADAPTERS_RATE_LIMITER: "redis",
+	ADAPTERS_CODE_REPOSITORY: "redis",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "redis",
+	ADAPTERS_REPLAY_SEEN_SET: "redis",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: ENCRYPTION_KEY,
-	CONSENT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANT_STORE_ADAPTER: "redis",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
+	ADAPTERS_CONSENT_STORE: "redis",
+	ADAPTERS_FEDERATION_GRANT_STORE: "redis",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "redis",
 };
 
 /** What enabling the feature adds: the switch, and the page boot requires. */
@@ -151,15 +155,17 @@ const GRANTS_ON: Readonly<Record<string, string>> = {
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 };
 
-function resolveConfig(env: Record<string, string>): AppConfig {
+function resolveConfig(env: Record<string, string>): Switches {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const config = validate(
-		parseFile(envConfPath, { env })
-			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-			.withFallback(libraryLayers(env)),
-		AppConfigSchema,
-	);
+	const layers = parseFile(envConfPath, { env })
+		.withFallback(parseFile(applicationConfPath, { env }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
+		.withFallback(libraryLayers(env));
+	const config = {
+		...sectionsCoreDoesNotDeclare(layers),
+		...validate(layers, AppConfigSchema),
+		adapters: adaptersOf(layers, env),
+	};
 	// The key ring has no environment form (a list of { id, key } is HOCON's);
 	// the Redis grant store refuses to construct without one under "required".
 	return {
@@ -171,7 +177,7 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 			...(config["redis-federation-grant-store"] as object | undefined),
 			encryptionKeys: [{ id: "k-test", key: ENCRYPTION_KEY }],
 		},
-	} as AppConfig;
+	} as Switches;
 }
 
 const testRepositoriesModule = defineModule({
@@ -191,13 +197,13 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},
 });
 
-const modulesFor = (config: AppConfig, memoryOnly = false, environment?: string) =>
+const modulesFor = (config: Switches, memoryOnly = false, environment?: string) =>
 	buildModules(config, {
 		keyStoreModule: testKeyStoreModule,
 		repositoriesModule: testRepositoriesModule,
@@ -205,13 +211,13 @@ const modulesFor = (config: AppConfig, memoryOnly = false, environment?: string)
 		...(environment === undefined ? {} : { environment }),
 	});
 
-const boot = (config: AppConfig, memoryOnly = false, environment?: string) =>
+const boot = (config: Switches, memoryOnly = false, environment?: string) =>
 	createApp({
 		modules: modulesFor(config, memoryOnly, environment),
 		bootstrapComponents: { config, pathResolver: (s) => s },
 	});
 
-const names = (config: AppConfig, memoryOnly = false) =>
+const names = (config: Switches, memoryOnly = false) =>
 	modulesFor(config, memoryOnly).map((m) => m.name);
 
 /**
@@ -291,7 +297,7 @@ describe("the standalone composes federation grants from its config", () => {
 	it("installs nothing of the feature while it is off, whatever the switches say", async () => {
 		// Off is the default, and off must cost nothing: no store, no socket, no
 		// boot requirement a deployment that never asked for grants would meet.
-		const config = resolveConfig({ ...BASE_ENV, FEDERATION_GRANT_STORE_ADAPTER: "redis" });
+		const config = resolveConfig({ ...BASE_ENV, ADAPTERS_FEDERATION_GRANT_STORE: "redis" });
 		const installed = names(config, true);
 		for (const name of GRANT_MODULES) expect(installed).not.toContain(name);
 		expect(installed).not.toContain("redis-clients");
@@ -392,7 +398,7 @@ describe("the standalone composes federation grants from its config", () => {
 				upstreamHardTimeoutMs: 60_000,
 				refreshLockTtlMs: 65_000,
 			},
-		} as AppConfig;
+		} as Switches;
 		handleRef = await boot(raised, true);
 		expect(handleRef.cleanupAllowanceMs).toBe(60_000 + 3_000 + 5_000 + 12_000);
 
@@ -443,15 +449,15 @@ describe("the standalone composes federation grants from its config", () => {
 		const config = resolveConfig({
 			...BASE_ENV,
 			...GRANTS_ON,
-			FEDERATION_GRANT_STORE_ADAPTER: "redis",
-			FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
+			ADAPTERS_FEDERATION_GRANT_STORE: "redis",
+			ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "redis",
 		});
 		expect(names(config, true)).toContain("redis-clients");
 	});
 
 	it.each([
-		["FEDERATION_GRANT_STORE_ADAPTER", "core-federation-grant-store-memory"],
-		["FEDERATION_GRANT_INTENT_STORE_ADAPTER", "core-federation-grant-intent-store-memory"],
+		["ADAPTERS_FEDERATION_GRANT_STORE", "core-federation-grant-store-memory"],
+		["ADAPTERS_FEDERATION_GRANT_INTENT_STORE", "core-federation-grant-intent-store-memory"],
 	])("%s=memory is refused under multi, naming %s", async (variable, module) => {
 		const config = resolveConfig({ ...ALL_REDIS_ENV, ...GRANTS_ON, [variable]: "memory" });
 		await expect(boot(config)).rejects.toMatchObject({
@@ -540,8 +546,8 @@ describe("the standalone composes federation grants from its config", () => {
 		const config = resolveConfig({
 			...BASE_ENV,
 			...GRANTS_ON,
-			FEDERATION_GRANT_STORE_ADAPTER: "redis",
-			FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+			ADAPTERS_FEDERATION_GRANT_STORE: "redis",
+			ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 		});
 		let error: unknown;
 		try {
@@ -560,8 +566,8 @@ describe("the standalone composes federation grants from its config", () => {
 		const config = resolveConfig({
 			...BASE_ENV,
 			...GRANTS_ON,
-			USER_SESSION_STORES_ADAPTER: "redis",
-			FEDERATION_GRANT_STORE_ADAPTER: "redis",
+			ADAPTERS_USER_SESSION_STORES: "redis",
+			ADAPTERS_FEDERATION_GRANT_STORE: "redis",
 			REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE: "allow-plaintext",
 		});
 		let error: unknown;
@@ -588,9 +594,9 @@ describe("the standalone composes federation grants from its config", () => {
 		const config = resolveConfig({
 			...BASE_ENV,
 			...GRANTS_ON,
-			USER_SESSION_STORES_ADAPTER: "redis",
-			FEDERATION_GRANT_STORE_ADAPTER: "redis",
-			FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+			ADAPTERS_USER_SESSION_STORES: "redis",
+			ADAPTERS_FEDERATION_GRANT_STORE: "redis",
+			ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 		});
 		handleRef = await boot(config);
 		expect(handleRef.components.federationGrantStore?.kind).toBe("redis");
@@ -612,7 +618,7 @@ describe("the browser consent route parses its own body, with sessionModule list
 	});
 
 	/** The standalone's modules, with `sessionModule` moved ahead of the grant modules. */
-	const sessionFirst = (config: AppConfig) => {
+	const sessionFirst = (config: Switches) => {
 		const modules = modulesFor(config, true);
 		const session = modules.find((m) => m.name === "session");
 		if (session === undefined) throw new Error("sessionModule is not in the standalone's list");
@@ -686,7 +692,7 @@ describe("the grants consent answer is held to the session module's CSRF guard",
 		const trusting = {
 			...config,
 			session: { ...session, csrf: { ...session.csrf, trustedOrigins: [SIBLING] } },
-		} as AppConfig;
+		} as Switches;
 		handleRef = await boot(trusting, true);
 		return express().set("trust proxy", "loopback").use(handleRef.router);
 	};

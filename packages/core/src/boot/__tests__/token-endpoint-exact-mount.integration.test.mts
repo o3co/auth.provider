@@ -34,6 +34,7 @@ import { createApp } from "../../index.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { createTestHttpSettings } from "../../testing/slots/httpSettings.mjs";
 import type { BootstrapMap } from "../types.mjs";
 
 const BOOT: BootstrapMap = {
@@ -74,7 +75,11 @@ const shapeOf = (req: { path: string; url: string; baseUrl: string }): SeenShape
  * is mounted at `mountedAt`, as a host app may mount it; `config` is merged
  * over the valid core config.
  */
-const bootApp = async (mountedAt = "/", config: Record<string, unknown> = {}) => {
+const bootApp = async (
+	mountedAt = "/",
+	config: Record<string, unknown> = {},
+	components: Record<string, unknown> = {},
+) => {
 	const proofsJudged: string[] = [];
 	const grantMiddlewareSaw: string[] = [];
 	const mechanismShapes: SeenShape[] = [];
@@ -141,7 +146,11 @@ const bootApp = async (mountedAt = "/", config: Record<string, unknown> = {}) =>
 				},
 			}),
 		],
-		bootstrapComponents: { ...BOOT, config: { ...makeValidCoreConfig(), ...config } as never },
+		bootstrapComponents: {
+			...BOOT,
+			...components,
+			config: { ...makeValidCoreConfig(), ...config } as never,
+		},
 	});
 	const app = express();
 	app.use(mountedAt, handle.router);
@@ -202,9 +211,11 @@ describe("the token endpoint's middleware matches /oauth/token exactly", () => {
 	it("answers a CORS preflight for /oauth/token before any of the token endpoint's middleware", async () => {
 		// `corsMw` is mounted first; an OPTIONS is not the token endpoint's
 		// POST either way.
-		const { app, mechanismShapes, grantMiddlewareSaw } = await bootApp("/", {
-			cors: { allowedOrigins: ["https://spa.example"] },
-		});
+		const { app, mechanismShapes, grantMiddlewareSaw } = await bootApp(
+			"/",
+			{},
+			{ httpSettings: createTestHttpSettings({ allowedOrigins: ["https://spa.example"] }) },
+		);
 
 		const res = await request(app)
 			.options("/oauth/token")

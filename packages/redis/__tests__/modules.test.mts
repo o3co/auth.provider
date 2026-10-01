@@ -7,6 +7,7 @@ import {
 	createRedisMfaFactorStore,
 	createRedisMfaTransactionStore,
 	redisChallengeStoreModule,
+	redisCodeRepositoryModule,
 	redisConsentStoreModule,
 	redisDeviceCodeStoreModule,
 	redisMfaFactorStoreModule,
@@ -64,6 +65,29 @@ describe("redisDeviceCodeStoreModule", () => {
 		expect(redisDeviceCodeStoreModule.section?.at).toBeUndefined();
 		expect(redisDeviceCodeStoreModule.section?.schema.parse(undefined)).toEqual({
 			keyPrefix: "devauth:",
+		});
+	});
+});
+
+describe("redisCodeRepositoryModule", () => {
+	it("requires 'codeRepositoryClient', and no configuration", () => {
+		expect(redisCodeRepositoryModule.requires).toEqual(["codeRepositoryClient"]);
+		expect(redisCodeRepositoryModule.configSchema).toBeUndefined();
+	});
+
+	it("reads its own section, 'redis-code-repository', strict, which moved from redisCodeRepository", () => {
+		expect(redisCodeRepositoryModule.section?.at).toBeUndefined();
+		const schema = redisCodeRepositoryModule.section?.schema;
+		expect(schema?.parse({ keyPrefix: "t:code:", defaultExpiresIn: "300" })).toEqual({
+			keyPrefix: "t:code:",
+			defaultExpiresIn: 300,
+		});
+		expect(schema?.safeParse({ defaultExpiresIn: "0" }).success).toBe(false);
+		expect(schema?.safeParse({ keyPrefx: "t:" }).success).toBe(false);
+		expect(redisCodeRepositoryModule.section?.relocatedFrom).toEqual({
+			redisCodeRepository: "",
+			"repositories.code.redis": null,
+			"repositories.code.memory": null,
 		});
 	});
 });

@@ -39,9 +39,9 @@ import { isLoopbackHostname } from "./loopback.mjs";
 /**
  * Reads a configured origin allowlist from either legitimate shape: an array
  * (a config file, a hand-built `AppConfig`) or a comma-separated string (the
- * only way an environment variable carries a list). Used for
- * `cors.allowedOrigins`, and by the WebAuthn package for the environment
- * spelling of `webauthn.origin` / `webauthn.topOrigin`.
+ * only way an environment variable carries a list). Used for a composition's
+ * CORS list, and by the WebAuthn package for the environment spelling of
+ * `webauthn.origin` / `webauthn.topOrigin`.
  *
  * The string is split, trimmed, and empty pieces dropped (an exported-but-empty
  * variable is no list). The array keeps every string entry trimmed, empty ones
@@ -52,9 +52,8 @@ import { isLoopbackHostname } from "./loopback.mjs";
  * {@link checkSerializedOrigin} (by the schema and the CORS middleware, or by
  * `webauthnConfigSchema`), so this cannot widen an allowlist. A comma inside a
  * host (`https://a,b.example`) cannot be written in the string form: the piece
- * after it has no scheme and is refused. It lives here, not in the schema,
- * because `assembleApp` also reads the key off configs that may not have been
- * through the schema.
+ * after it has no scheme and is refused. It lives here, not in a schema, so
+ * every reader of an origin list reads it the same way.
  */
 export function normalizeAllowedOrigins(raw: unknown): readonly string[] {
 	if (Array.isArray(raw)) {

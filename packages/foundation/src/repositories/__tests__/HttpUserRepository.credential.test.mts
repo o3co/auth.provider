@@ -222,7 +222,7 @@ describe("a token the constructor would not stand behind is refused at construct
 			const message = refusal(weak, weak);
 			expect(message).toMatch(/repositories\.user\.http\.bearerToken/);
 			expect(message).toMatch(/at least 32 bytes/);
-			expect(message).toMatch(/CLIENT_USER_BEARER_TOKEN/);
+			expect(message).toMatch(/REPOSITORIES_USER_HTTP_BEARER_TOKEN/);
 		}
 	});
 
@@ -398,7 +398,7 @@ describe("a Store that refuses this deployment's credential", () => {
 				expect((error as Error).message).toContain(`${origin}${path}`);
 				expect((error as Error).message).toContain(`HTTP ${status} with a Bearer challenge`);
 				expect((error as Error).message).toMatch(/refused this deployment's credential/);
-				expect((error as Error).message).toMatch(/CLIENT_USER_BEARER_TOKEN/);
+				expect((error as Error).message).toMatch(/REPOSITORIES_USER_HTTP_BEARER_TOKEN/);
 				expect(surfaced(error)).not.toContain(TOKEN);
 				expect(surfaced(error)).not.toContain("who are you");
 			}
