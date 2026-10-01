@@ -20,34 +20,32 @@
  * `no-store`, body parsing, CSRF and flood guards, each route admitting the
  * session through `routes.mts` first.
  *
- * - `GET /factors`, admitted as `mfa.view`: every record of the subject,
- *   oldest first, with its state as `factorState.mts` reads it for the
- *   session's login address, and a recovery set's codes left; never a
- *   record's data. A record whose data or digest needs a key the ring no
- *   longer holds is said at error with that key's id.
+ * - `GET /factors`, admitted as `mfa.view`: every record of the subject, oldest
+ *   first, with its state as `factorState.mts` reads it for the session's login
+ *   address, and a recovery set's codes left; never a record's data. A record
+ *   whose data or digest needs a key the ring no longer holds is said at error
+ *   with that key's id.
  * - `POST /factors/rename {factor_id, label}`, admitted as `mfa.manage`: the
- *   label written by compare-and-set at the version read, the data and last
- *   use as read; a lost race is `409`, nothing retried.
- * - `POST /factors/remove {factor_id}`, admitted as `mfa.manage`, run whole
- *   by `factorSet.mts` (the read, this file's refusal, the removal, the
- *   witness), held to the subject's generation read before the session is
- *   admitted, one write of the subject's at a time: another in the way past
+ *   label written by compare-and-set at the version read, the data and last use
+ *   as read; a lost race is `409`, nothing retried.
+ * - `POST /factors/remove {factor_id}`, admitted as `mfa.manage`, run whole by
+ *   `factorSet.mts` (the read, this file's refusal, the removal, the witness),
+ *   held to the start the admission carries — the subject's generation read
+ *   before it — one write of the subject's at a time: another in the way past
  *   its wait is `409 mfa_factors_busy` with `Retry-After`; a recovery or a
- *   reset since it began, `409 mfa_factors_changed`, nothing removed; one
- *   that ran past its hold said at error whatever it came to, a removal it
- *   made audited and answered `409 mfa_factors_changed`. Under `required`, removing an installed counting factor is
- *   refused `409` when no other usable counting record stands — one
- *   unreadable or `address_changed` does not. Audited `mfa.factor.removed`;
- *   a re-read that failed, and a witness clear that failed, are said at warn,
- *   the removal standing.
+ *   reset since it began, `409 mfa_factors_changed`, nothing removed; one that
+ *   ran past its hold said at error whatever it came to, a removal it made
+ *   audited and answered `409 mfa_factors_changed`. Under `required`, removing
+ *   an installed counting factor is refused `409` when no other usable counting
+ *   record stands — one unreadable or `address_changed` does not. Audited
+ *   `mfa.factor.removed`; a re-read that failed, and a witness clear that
+ *   failed, are said at warn, the removal standing.
  * - A factor named that is not the subject's is `400`; a store that cannot
  *   answer, or answers outside its port's contract, is `503`, logged once.
  */
 
 import {
 	type AuditSink,
-	type CookieCarrier,
-	cookieClaim,
 	emitAuditEvent,
 	errorEnvelope,
 	isMfaFactorLabel,
@@ -61,7 +59,7 @@ import {
 import express, { type Request, type Response, type Router } from "express";
 import type { MfaAdmissionAction } from "./admissionActions.mjs";
 import { type MfaCeremonySession, OUTSIDE_CONTRACT } from "./ceremony.mjs";
-import type { MfaFactorSet } from "./factorSet.mjs";
+import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
 import { type MfaRecordReading, readFactorRecordAt } from "./factorState.mjs";
 import { recoveryCodesLeft } from "./recovery/factor.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
@@ -87,6 +85,11 @@ const FACTOR_CONFLICT = errorEnvelope(
 	"The factor changed while it was renamed: try again",
 );
 
+/** A session admitted as `mfa.manage`: with where its factor-set write begins, taken before the admission. */
+export type MfaManagingSession = MfaCeremonySession & {
+	readonly factorSetStart: MfaFactorSetStart;
+};
+
 export interface MfaManagementOptions {
 	readonly factors: MfaFactorResolver;
 	readonly factorStore: MfaFactorStore;
@@ -96,11 +99,11 @@ export interface MfaManagementOptions {
 	/** `mfa.mode`: under `required` the last usable counting factor stays. */
 	readonly mode: MfaRequirementMode;
 	/** The signed-in session the request's cookie carries, admitted for `action`; `undefined` once the refusal is answered. */
-	readonly admit: (
+	readonly admit: <Action extends MfaAdmissionAction>(
 		req: Request,
 		res: Response,
-		action: MfaAdmissionAction,
-	) => Promise<MfaCeremonySession | undefined>;
+		action: Action,
+	) => Promise<(Action extends "mfa.manage" ? MfaManagingSession : MfaCeremonySession) | undefined>;
 	readonly logger: Logger;
 	readonly auditSink: AuditSink | undefined;
 }
@@ -231,9 +234,6 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 			res.status(200).json({ factor: { id: record.id, kind: record.kind, label } });
 		})
 		.post("/factors/remove", async (req: Request, res: Response) => {
-			// The removal is held to the subject's generation as it was before the session was admitted.
-			const claimed = cookieClaim(req as unknown as CookieCarrier).subject;
-			const started = claimed === undefined ? undefined : await factorSet.begin(claimed);
 			const session = await admit(req, res, "mfa.manage");
 			if (session === undefined) return;
 			/** Under `required`, an installed counting factor stays unless another usable one does. */
@@ -248,7 +248,7 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 					? LAST_FACTOR
 					: undefined;
 			const removal = await factorSet.remove(
-				started,
+				session.factorSetStart,
 				session.subject,
 				(req.body as { factor_id?: unknown } | undefined)?.factor_id,
 				lastFactor,

@@ -965,9 +965,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
 			}
 
-			// A reconciliation's mark is held to the subject's generation as it was before the proof is checked.
-			const started =
-				factor.counting && witness.writable ? await factorSet.begin(tx.subject) : undefined;
+			// A reconciliation's mark, where one could follow, is held to the subject's generation as it was before the proof is checked.
+			const markDue =
+				tx.purpose === "step_up"
+					? reconcilesSession(factor, call.session?.witness)
+					: reconciles(factor, tx.continuation?.primary.user);
+			const started = markDue ? await factorSet.begin(tx.subject, "mark") : undefined;
 
 			const reserved = await reserve(tx);
 			if ("outcome" in reserved) {

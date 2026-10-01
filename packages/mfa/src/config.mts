@@ -231,8 +231,8 @@ const enrollmentSchema = z.object(
 	{ error: sectionError },
 );
 
-/** `mfa.storeTimeoutMs`'s range: from 100 ms; the most a lease allows is `factorSet.mts`'s to refuse. */
-const MFA_STORE_TIMEOUT_MS = { min: 100, max: 2_147_483_647 } as const;
+/** `mfa.storeTimeoutMs`'s range: from 1000 ms; the most a lease allows is `factorSet.mts`'s to refuse. */
+const MFA_STORE_TIMEOUT_MS = { min: 1_000, max: 2_147_483_647 } as const;
 
 /**
  * The MFA module's section, `mfa`: its mode, the page's shape, the key ring,

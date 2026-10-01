@@ -16,41 +16,42 @@
 
 /**
  * A subject's factor set as the enrollment witness follows it: the records
- * read, oldest first, and the two writes after which the witness is brought
- * in step with them. The one place the subject's lease and generation are
- * used: callers hold an opaque start and read an answer, never the lease.
+ * read, oldest first, and the two writes after which the witness is brought in
+ * step with them. The one place the subject's lease and generation are used:
+ * callers hold an opaque start and read an answer, never the lease.
  *
- * - A write's start (`begin`) reads the subject's generation before the
- *   request that writes is admitted, or before a verification's proof is
- *   checked; ceremonies that write later carry theirs from their begin.
+ * - A write's start (`begin`) reads the subject's generation before the request
+ *   that writes is admitted, or before a verification's proof is checked;
+ *   ceremonies that write later carry theirs from their begin.
  * - The write acquires the subject's lease at that generation — waiting a
  *   bounded while for another holder, then `busy` with the holder's whole
  *   seconds left; `changed` when the generation moved since the start, a
  *   recovery or a reset in between — runs whole under it, and releases it.
- * - The lease stands six of `mfa.storeTimeoutMs`, one more than the most
- *   Store calls a write makes; a timeout whose six pass core's longest lease
- *   is refused (`checkFactorSetStoreTimeout`). From the acquire, a local
- *   monotonic deadline: a read under the lease is given up when it would
- *   leave less than one Store timeout, and so is a write that would start
- *   with less — before the first write, `busy` with nothing written; after
- *   it, an overrun.
- * - A transaction-store call (generation, acquire, release) not answered
- *   within one Store timeout is an outage; a write to the factor store or the
+ * - The lease stands six of `mfa.storeTimeoutMs`, one more than the most Store
+ *   calls a write makes; a timeout whose six pass core's longest lease is
+ *   refused (`checkFactorSetStoreTimeout`). From the acquire, a local monotonic
+ *   deadline: a read under the lease is given up when it would leave less than
+ *   one Store timeout, and so is a write that would start with less — before
+ *   the first write, `busy` with nothing written; after it, an overrun.
+ * - A transaction-store call (generation, acquire, release) not answered within
+ *   one Store timeout is an outage; a write to the factor store or the
  *   directory is never abandoned once started.
  * - A release the store answers `false`, or cannot take, is an overrun: the
  *   lease ended, or another holder moved the generation, while the write ran.
  *   Every answer of a write that overran says so.
  * - `markEnrolled`, a verification's reconciliation: the records read first;
- *   none that may count, or none readable, writes nothing (`in_step`, or
- *   `unwritten`); else the witness marked, the records read again, and the
- *   witness cleared when a write outside the lease left none — a clear that
- *   fails, or a read again that fails, is `unwritten`. One that cannot hold the lease, or overran it, is
- *   `unwritten`; a directory that cannot write the witness takes no lease.
- * - `remove`: the records read, the caller's refusal asked, the record
- *   removed — a store that fails after its write is read again, and a record
- *   gone is a removal — then the records read again (or, unreadable, those
- *   read before less the removed one) and, when none may count
- *   (`mayCount`), the witness cleared.
+ *   none that may count writes nothing and the witness is in step (`in_step`),
+ *   none readable writes nothing (`unwritten`); else the witness marked, the
+ *   records read again, and the witness cleared when a write outside the lease
+ *   left none — in step again (`in_step`); a clear that fails, or a read again
+ *   that fails, is `unwritten`. One that cannot hold the lease, or overran it,
+ *   is `unwritten`; a directory that cannot write the witness takes no lease,
+ *   and its start reads no generation.
+ * - `remove`: the records read, the caller's refusal asked, the record removed
+ *   — a store that fails after its write is read again, and a record gone is a
+ *   removal — then the records read again (or, unreadable, those read before
+ *   less the removed one) and, when none may count (`mayCount`), the witness
+ *   cleared.
  *
  * The lease is logical: it cannot fence a write the factor store or the
  * directory applies after the deadline check. Never throws for a store's
@@ -105,6 +106,9 @@ export interface MfaFactorSetStart {
 	readonly __mfaFactorSetStart: never;
 }
 
+/** What a start is taken for: a change to the factor set, or a verification's witness mark. */
+export type MfaFactorSetWrite = "change" | "mark";
+
 /** What a start holds. */
 type Started =
 	| { readonly subject: string; readonly generation: number }
@@ -142,8 +146,12 @@ export type MfaFactorRemoval<Refusal> = (
 };
 
 export interface MfaFactorSet {
-	/** Where a write of `subject`'s begins: read before the request is admitted, or before a proof is checked. Never throws. */
-	begin(subject: string): Promise<MfaFactorSetStart>;
+	/**
+	 * Where a write of `subject`'s begins — `change`, one that changes the
+	 * factor set; `mark`, a verification's witness mark: read before the
+	 * request is admitted, or before a proof is checked. Never throws.
+	 */
+	begin(subject: string, write: MfaFactorSetWrite): Promise<MfaFactorSetStart>;
 	/** The subject's records, oldest first; throws for a store that cannot answer, or answers anything but a list of records. */
 	list(subject: string): Promise<MfaFactorRecord[]>;
 	/**
@@ -154,7 +162,7 @@ export interface MfaFactorSet {
 	markEnrolled(start: MfaFactorSetStart | undefined, subject: string): Promise<MfaWitnessMark>;
 	/** Under the subject's lease, the record `factorId` names removed, unless `refuse` answers a refusal over it and the records read. */
 	remove<Refusal>(
-		start: MfaFactorSetStart | undefined,
+		start: MfaFactorSetStart,
 		subject: string,
 		factorId: unknown,
 		refuse: (record: MfaFactorRecord, records: readonly MfaFactorRecord[]) => Refusal | undefined,
@@ -233,8 +241,16 @@ export function createMfaFactorSet(options: {
 		cause,
 	});
 
-	const begin = async (subject: string): Promise<MfaFactorSetStart> => {
+	const begin = async (subject: string, write: MfaFactorSetWrite): Promise<MfaFactorSetStart> => {
 		const start = Object.freeze({}) as MfaFactorSetStart;
+		// A mark a directory cannot write takes no lease: it needs no generation.
+		if (write === "mark" && !witness.writable) {
+			starts.set(start, {
+				subject,
+				cause: new Error("no lease is taken for a mark nobody can write"),
+			});
+			return start;
+		}
 		let started: Started;
 		try {
 			const generation = readMfaSubjectCount(
@@ -259,7 +275,10 @@ export function createMfaFactorSet(options: {
 		subject: string,
 		write: (time: LeaseTime) => Promise<T>,
 	): Promise<
-		{ readonly outcome: "held"; readonly done: T; readonly overran: boolean } | MfaFactorSetRefusal
+		| { readonly outcome: "held"; readonly done: T; readonly overran: boolean }
+		/** Out of time after a write was started: what was written stands. */
+		| { readonly outcome: "ran_out" }
+		| MfaFactorSetRefusal
 	> => {
 		const started = start === undefined ? undefined : starts.get(start);
 		// A start for another subject, or none, began nowhere this write can tell.
@@ -289,7 +308,12 @@ export function createMfaFactorSet(options: {
 			} else {
 				const pause = LEASE_WAITS_MS[tries];
 				if (pause === undefined) {
-					return { outcome: "busy", retryAfterSeconds: Math.ceil(answer.retryAfterMs / 1000) };
+					return {
+						outcome: "busy",
+						retryAfterSeconds: Math.ceil(
+							Math.min(answer.retryAfterMs, MFA_SUBJECT_LEASE_MAX_MS) / 1000,
+						),
+					};
 				}
 				await new Promise((resolve) => setTimeout(resolve, pause));
 			}
@@ -333,9 +357,7 @@ export function createMfaFactorSet(options: {
 			await release();
 			if (!(cause instanceof OutOfTime)) throw cause;
 			// Out of time before any write: nothing was written. After one: an overrun.
-			return wrote
-				? { outcome: "held", done: undefined as T, overran: true }
-				: { outcome: "busy", retryAfterSeconds: 1 };
+			return wrote ? { outcome: "ran_out" } : { outcome: "busy", retryAfterSeconds: 1 };
 		}
 		return { outcome: "held", done, overran: !(await release()) };
 	};
@@ -391,13 +413,15 @@ export function createMfaFactorSet(options: {
 					return unwritten("found the subject's generation moved since the proof was checked");
 				case "unavailable":
 					return { outcome: "unwritten", cause: held.cause };
+				case "ran_out":
+					return unwritten("ran out of the subject's lease after it wrote");
 				default:
 					return held.overran ? unwritten("outran the subject's lease") : held.done;
 			}
 		},
 
 		async remove<Refusal>(
-			start: MfaFactorSetStart | undefined,
+			start: MfaFactorSetStart,
 			subject: string,
 			factorId: unknown,
 			refuse: (record: MfaFactorRecord, records: readonly MfaFactorRecord[]) => Refusal | undefined,
@@ -430,8 +454,15 @@ export function createMfaFactorSet(options: {
 						let after: MfaFactorRecord[];
 						try {
 							after = await time.read(() => list(subject));
-						} catch {
-							return { outcome: "unavailable", store: "mfa_factor", step: "remove", cause };
+						} catch (unread) {
+							// Whether it stands cannot be told; out of time, it is also an overrun.
+							return {
+								outcome: "unavailable",
+								store: "mfa_factor",
+								step: "remove",
+								cause,
+								...(unread instanceof OutOfTime ? { overran: true as const } : {}),
+							};
 						}
 						if (after.some((one) => one.id === record.id)) {
 							return { outcome: "unavailable", store: "mfa_factor", step: "remove", cause };
@@ -460,13 +491,13 @@ export function createMfaFactorSet(options: {
 					};
 				},
 			);
-			if (held.outcome !== "held") return held;
-			if (held.done === undefined) {
+			if (held.outcome === "ran_out") {
 				// Out of time after the removal was written: it stands, the witness not cleared.
 				return removedRecord === undefined
 					? { outcome: "busy", retryAfterSeconds: 1 }
 					: { outcome: "removed", record: removedRecord, overran: true };
 			}
+			if (held.outcome !== "held") return held;
 			return held.overran ? { ...held.done, overran: true } : held.done;
 		},
 	};

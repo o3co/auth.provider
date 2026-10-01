@@ -49,7 +49,9 @@
  *   `401` where the session store cannot record a step-up.
  * - The account page's management of the subject's factors, under
  *   `/factors`, is `management.mts`'s, mounted here behind the same guards
- *   and admitted through `sessionFor`.
+ *   and admitted through `sessionFor`, which takes a session admitted as
+ *   `mfa.manage` with where its factor-set write begins (`factorSet.mts`),
+ *   read before the admission.
  * - A session is escalated (`escalateSession`) behind its admission, by the
  *   renewal nonce of the claim admission compared: the express id renewed,
  *   then the second factor recorded on its `UserSession` once, never
@@ -431,6 +433,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		res: Response,
 		action: MfaAdmissionAction | IssuedRemediationAction,
 	): Promise<SignedInSession | undefined> => {
+		// A session admitted to change the factor set is held to the subject's generation read before its admission.
+		const claim = cookieClaim(req as unknown as CookieCarrier);
+		const factorSetStart =
+			action === MFA_MANAGE && claim.authenticated && claim.subject !== undefined
+				? await management.factorSet.begin(claim.subject, "change")
+				: undefined;
 		const { admitted, expectedRenewalNonce } = await admitCookie(req, action);
 		if (admitted.outcome === "step_up") {
 			answerStepUp(res, admitted);
@@ -453,7 +461,14 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			witness = view.enrollmentFacts?.witness;
 		}
 		return {
-			session: { sid: session.sid, subject: session.sub, user, authTimeMs, witness },
+			session: {
+				sid: session.sid,
+				subject: session.sub,
+				user,
+				authTimeMs,
+				witness,
+				...(factorSetStart === undefined ? {} : { factorSetStart }),
+			},
 			expectedRenewalNonce,
 		};
 	};
@@ -820,7 +835,8 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		.use(
 			createMfaManagementRouter({
 				...management,
-				admit: async (req, res, action) => (await sessionFor(req, res, action))?.session,
+				admit: (async (req: Request, res: Response, action: MfaAdmissionAction) =>
+					(await sessionFor(req, res, action))?.session) as MfaManagementOptions["admit"],
 				logger,
 				auditSink,
 			}),

@@ -136,6 +136,8 @@ export interface MfaCeremonySession {
 	readonly user: Readonly<Record<string, unknown>>;
 	readonly authTimeMs: number | undefined;
 	readonly witness: "enrolled" | "not_enrolled" | "malformed" | undefined;
+	/** Where a write to the subject's factor set begins, taken before the session was admitted for one (`factorSet.mts`); none for an action that writes none. */
+	readonly factorSetStart?: MfaFactorSetStart;
 }
 
 /** One call's request: the transaction named, the binding the browser presents, and what a factor may read of the request. */

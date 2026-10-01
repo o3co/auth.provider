@@ -43,7 +43,7 @@ import type { MfaCeremonySession } from "./ceremony.mjs";
 /** What writing the witness — marking or clearing it — came to. */
 export type MfaWitnessMark =
 	| { readonly outcome: "marked" }
-	/** Nothing written: the witness already says what the records do. */
+	/** The witness says what the records do: no mark was due, or a mark was undone by a clear once the records held none that may count. */
 	| { readonly outcome: "in_step" }
 	/** The directory has no `markMfaEnrolled`: said once at boot. */
 	| { readonly outcome: "unwritable" }
