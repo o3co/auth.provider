@@ -171,7 +171,12 @@ export const decideOnAdmission = async (
 	maxAge: number | undefined,
 	requested: readonly string[],
 	askStore: ReauthAskStore | undefined,
-): Promise<{ readonly session: UserSession | null; readonly acr: string | undefined } | null> => {
+): Promise<{
+	readonly session: UserSession | null;
+	readonly acr: string | undefined;
+	/** The session is fresh because of the login the presented ask asked for. */
+	readonly freshByAsk: boolean;
+} | null> => {
 	switch (admission.outcome) {
 		case "unavailable":
 			redirectError(ctx, "temporarily_unavailable", describeAdmissionOutage(admission.store));
@@ -214,7 +219,11 @@ export const decideOnAdmission = async (
 				await stepUpTrip(ctx, admission, prompt, askStore, ask);
 				return null;
 			}
-			return { session: admission.session, acr: admission.acr };
+			return {
+				session: admission.session,
+				acr: admission.acr,
+				freshByAsk: reauth === "fresh_by_ask",
+			};
 		}
 	}
 };

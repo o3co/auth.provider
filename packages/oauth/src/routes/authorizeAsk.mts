@@ -141,41 +141,94 @@ const askRequestOf = (ctx: AuthorizeContext): string => {
 };
 
 /**
- * The presented ask, consumed so a replayed URL asks again rather than
- * minting twice: `null` when absent, unknown, bound to another request or
- * expired; `undefined` after an outage has been answered. Read only when a
- * decision needs it.
+ * An ask store that cannot answer: not a decision either way, the same rule
+ * the session read applies.
+ */
+const answerAskOutage = (ctx: AuthorizeContext, err: unknown): void => {
+	ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
+	redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+};
+
+/** The ask id this request presents, if any. */
+const presentedId = (ctx: AuthorizeContext): string | undefined => {
+	const presented = ctx.params[REAUTH_ASK_PARAM];
+	return typeof presented === "string" && presented.length > 0 ? presented : undefined;
+};
+
+/**
+ * The presented ask, read without spending it, so a later pass of this
+ * request (after consent, or another trip) finds it too: `null` when absent,
+ * unknown, bound to another request or expired; `undefined` after an outage
+ * has been answered. Read only when a decision needs it.
  */
 export const presentedAsk = async (
 	ctx: AuthorizeContext,
 	askStore: ReauthAskStore | undefined,
 ): Promise<ReauthAskRecord | null | undefined> => {
-	const presented = ctx.params[REAUTH_ASK_PARAM];
-	if (typeof presented !== "string" || presented.length === 0 || askStore === undefined) {
-		return null;
-	}
+	const presented = presentedId(ctx);
+	if (presented === undefined || askStore === undefined) return null;
 	try {
-		return await askStore.consume(presented, askRequestOf(ctx));
+		return await askStore.read(presented, askRequestOf(ctx));
 	} catch (err) {
-		// The same rule the session read applies: an outage is not a decision
-		// either way.
-		ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
-		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+		answerAskOutage(ctx, err);
 		return undefined;
 	}
 };
 
-/** Writes an ask, or answers the outage and returns `null`. */
+/**
+ * Spends the presented ask: the record, `null` when there was none to spend,
+ * or `undefined` after an outage has been answered.
+ */
+const spendPresented = async (
+	ctx: AuthorizeContext,
+	askStore: ReauthAskStore,
+): Promise<ReauthAskRecord | null | undefined> => {
+	const presented = presentedId(ctx);
+	if (presented === undefined) return null;
+	try {
+		return await askStore.consume(presented, askRequestOf(ctx));
+	} catch (err) {
+		answerAskOutage(ctx, err);
+		return undefined;
+	}
+};
+
+/**
+ * The pass that mints spends the presented ask, so a replayed URL asks again
+ * rather than minting twice. An ask gone by now — spent by another pass of
+ * the same request — refuses with `login_required` when the session's
+ * freshness rested on it, and is ignored otherwise. `false` once answered.
+ */
+export const spendAskAtMint = async (
+	ctx: AuthorizeContext,
+	askStore: ReauthAskStore | undefined,
+	freshByAsk: boolean,
+): Promise<boolean> => {
+	if (askStore === undefined) return true;
+	const spent = await spendPresented(ctx, askStore);
+	if (spent === undefined) return false;
+	if (spent === null && freshByAsk) {
+		redirectError(ctx, "login_required", "the re-authentication ask was already used");
+		return false;
+	}
+	return true;
+};
+
+/**
+ * Writes the ask that follows `ask`, spending `ask` first so one record
+ * stands for the request; or answers the outage and returns `null`.
+ */
 const recordAsk = async (
 	ctx: AuthorizeContext,
 	askStore: ReauthAskStore,
+	ask: ReauthAskRecord | null,
 	record: ReauthAskRecord,
 ): Promise<string | null> => {
+	if (ask !== null && (await spendPresented(ctx, askStore)) === undefined) return null;
 	try {
 		return await askStore.ask(record);
 	} catch (err) {
-		ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
-		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+		answerAskOutage(ctx, err);
 		return null;
 	}
 };
@@ -187,7 +240,11 @@ const returnWithAsk = (askRequest: string, askId: string): string => {
 	return back.toString();
 };
 
-type ReauthOutcome = "proceed" | "login" | "answered";
+/**
+ * `fresh_by_ask`: the session is fresh because of the login the presented
+ * ask asked for, which the pass that mints then holds it to.
+ */
+type ReauthOutcome = "proceed" | "fresh_by_ask" | "login" | "answered";
 
 /**
  * Whether the session's authentication is fresh enough. `prompt=login`, or a
@@ -232,7 +289,7 @@ export const evaluateReauthentication = (
 	if (ask !== null && ask.loginAskedAt !== undefined) {
 		// Strictly after the ask, to the millisecond: an authentication made
 		// before it — even earlier in the same second — is not the one it asked for.
-		if (session.authTime.getTime() > ask.loginAskedAt) return "proceed";
+		if (session.authTime.getTime() > ask.loginAskedAt) return "fresh_by_ask";
 		redirectError(
 			ctx,
 			"login_required",
@@ -273,7 +330,7 @@ export const sendToLogin = async (
 ): Promise<void> => {
 	const now = Date.now();
 	const askRequest = askRequestOf(ctx);
-	const askId = await recordAsk(ctx, askStore, {
+	const askId = await recordAsk(ctx, askStore, ask, {
 		request: askRequest,
 		// Kept across the trips of one request, which caps a chain of them.
 		createdAt: ask?.createdAt ?? now,
@@ -387,7 +444,7 @@ export const stepUpTrip = async (
 	}
 	const now = Date.now();
 	const askRequest = askRequestOf(ctx);
-	const askId = await recordAsk(ctx, askStore, {
+	const askId = await recordAsk(ctx, askStore, ask, {
 		request: askRequest,
 		// Kept across the trips of one request, as the login trip keeps it.
 		createdAt: ask?.createdAt ?? now,

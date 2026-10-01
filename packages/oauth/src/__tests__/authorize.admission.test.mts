@@ -673,7 +673,8 @@ describe("/authorize on admission — the step-up trip", () => {
 			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
 		);
 		expect(params.get("error")).toBe("login_required");
-		expect(harness.records.size).toBe(0);
+		// Left for a replay to be refused by again; only the pass that mints spends it.
+		expect(harness.records.size).toBe(1);
 	});
 
 	it("a session that comes back still unmet is unmet_authentication_requirements when the requirement says so", async () => {

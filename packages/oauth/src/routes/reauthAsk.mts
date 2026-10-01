@@ -95,9 +95,15 @@ export interface ReauthAskStore {
 	/** Mint an id, record the ask under it, and return the id. */
 	ask(record: ReauthAskRecord): Promise<string>;
 	/**
-	 * The ask `id` names, if it is for `request` — removed in the same step, so
-	 * a replay finds nothing. `null` when there is no such ask, when it was
-	 * minted for another request, or when it has expired.
+	 * The ask `id` names, if it is for `request`, left in place for a later
+	 * pass of the same request. `null` when there is no such ask, when it has
+	 * expired, or when it was minted for another request — which spends it,
+	 * so it cannot be tried against a third.
+	 */
+	read(id: string, request: string): Promise<ReauthAskRecord | null>;
+	/**
+	 * The ask `id` names, if it is for `request` — removed whatever it was, so
+	 * a replay finds nothing. `null` as {@link ReauthAskStore.read} answers it.
 	 */
 	consume(id: string, request: string): Promise<ReauthAskRecord | null>;
 }
@@ -159,6 +165,18 @@ const readRecord = (value: unknown): ReauthAskRecord | null => {
  */
 export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskStore => {
 	const key = (id: string): string => `${REAUTH_ASK_KEY_PREFIX}${id}`;
+	const fetch = (id: string): Promise<ReauthAskRecord | null> =>
+		new Promise<unknown>((resolve, reject) => {
+			store.get(key(id), (err: unknown, record?: unknown) =>
+				err ? reject(err as Error) : resolve(record),
+			);
+		}).then(readRecord);
+	const destroy = (id: string): Promise<void> =>
+		new Promise<void>((resolve, reject) => {
+			store.destroy(key(id), (err?: unknown) => (err ? reject(err as Error) : resolve()));
+		});
+	const current = (record: ReauthAskRecord): boolean =>
+		lastWrittenAt(record) + REAUTH_ASK_TTL_MS > Date.now();
 
 	return {
 		async ask(record) {
@@ -195,22 +213,25 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 			return id;
 		},
 
-		async consume(id, request) {
-			const value = await new Promise<unknown>((resolve, reject) => {
-				store.get(key(id), (err: unknown, record?: unknown) =>
-					err ? reject(err as Error) : resolve(record),
-				);
-			});
-			const record = readRecord(value);
+		async read(id, request) {
+			const record = await fetch(id);
 			if (record === null) return null;
-			// Destroy whatever was found, matching or not: an ask presented once
-			// is spent, so a mismatch cannot be retried against another request.
-			await new Promise<void>((resolve, reject) => {
-				store.destroy(key(id), (err?: unknown) => (err ? reject(err as Error) : resolve()));
-			});
+			if (record.request !== request) {
+				// Presented with another request: spent, so it cannot be tried
+				// against a third until one happens to match.
+				await destroy(id);
+				return null;
+			}
+			return current(record) ? record : null;
+		},
+
+		async consume(id, request) {
+			const record = await fetch(id);
+			if (record === null) return null;
+			// Destroy whatever was found, matching or not.
+			await destroy(id);
 			if (record.request !== request) return null;
-			if (lastWrittenAt(record) + REAUTH_ASK_TTL_MS <= Date.now()) return null;
-			return record;
+			return current(record) ? record : null;
 		},
 	};
 };

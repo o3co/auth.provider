@@ -35,7 +35,7 @@ import {
 import type { Request, RequestHandler, Response } from "express";
 import type { OAUTH_ROUTER_ADMISSION_ACTIONS } from "../admissionActions.mjs";
 import { auditFailure, redirectError } from "./authorizeAnswers.mjs";
-import { parseAcrValues, parseMaxAge, resolvePrompt } from "./authorizeAsk.mjs";
+import { parseAcrValues, parseMaxAge, resolvePrompt, spendAskAtMint } from "./authorizeAsk.mjs";
 import {
 	checkAuthorizationCodeGrantAllowed,
 	checkFirstPartyOrConsentable,
@@ -313,13 +313,14 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			action: AUTHORIZE_ACTION,
 			...(requested.length > 0 ? { asks: { acrValues: requested } } : {}),
 		});
+		const askStore = reauthAskStoreFor(req);
 		const decided = await decideOnAdmission(
 			ctx,
 			admission,
 			prompt,
 			maxAge.value,
 			requested,
-			reauthAskStoreFor(req),
+			askStore,
 		);
 		if (decided === null) return;
 		if (!checkResponseTypeIsCode(ctx)) return;
@@ -365,6 +366,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		);
 		if (!audience) return;
 
+		if (!(await spendAskAtMint(ctx, askStore, decided.freshByAsk))) return;
 		const minted = await mintCode(ctx, {
 			// `checkPkce` proved both are present and admissible for this client.
 			codeChallenge: toStr(code_challenge),
