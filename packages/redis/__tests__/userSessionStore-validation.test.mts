@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { newRenewalNonce } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import type { UserSessionStoreClient } from "../src/clients.mjs";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
@@ -191,6 +192,12 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 			"enrollmentFacts.mailAddress a boolean",
 			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled", mailAddress: true } },
 		],
+		// `renewalNonce` is absent (none recorded) or a nonce. Anything else is
+		// not read as absent: that would unbind an escalated session.
+		["renewalNonce null", { ...validEnvelope, renewalNonce: null }],
+		["renewalNonce empty", { ...validEnvelope, renewalNonce: "" }],
+		["renewalNonce short", { ...validEnvelope, renewalNonce: "abc" }],
+		["renewalNonce a number", { ...validEnvelope, renewalNonce: 7 }],
 	])("returns null and logs shape_invalid warn for %s", async (_label, corrupt) => {
 		const logger = {
 			trace: vi.fn(),
@@ -373,6 +380,29 @@ describe("RedisUserSessionStore — what the store needs from its client, and wh
 				keyPrefix,
 			}),
 		).toThrow(/replaceIfUnchanged/);
+	});
+
+	it("reads renewalNonce from the envelope, and an envelope without one as a session bound to none", async () => {
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		const renewalNonce = newRenewalNonce();
+		client.seed(`${keyPrefix}sid-1`, JSON.stringify({ ...validEnvelope, renewalNonce }));
+		expect((await store.get("sid-1"))?.renewalNonce).toBe(renewalNonce);
+		client.seed(`${keyPrefix}sid-2`, JSON.stringify({ ...validEnvelope, sid: "sid-2" }));
+		expect(await store.get("sid-2")).not.toHaveProperty("renewalNonce");
+	});
+
+	it("writes the event's renewalNonce into the envelope in the escalation's compare-and-set, and leaves it when the event carries none", async () => {
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		client.seed(`${keyPrefix}sid-1`, JSON.stringify({ ...validEnvelope, amr: ["pwd"] }));
+		const renewalNonce = newRenewalNonce();
+		await store.recordSecondFactor("sid-1", { amr: ["otp", "mfa"], at: new Date(), renewalNonce });
+		const written = JSON.parse(client.read(`${keyPrefix}sid-1`) as string);
+		expect(written.renewalNonce).toBe(renewalNonce);
+		expect(written.amr).toEqual(["pwd", "otp", "mfa"]);
+		await store.recordSecondFactor("sid-1", { amr: ["hwk", "mfa"], at: new Date() });
+		expect(JSON.parse(client.read(`${keyPrefix}sid-1`) as string).renewalNonce).toBe(renewalNonce);
 	});
 
 	it("keeps what a newer release added to the envelope — beside the session and inside authentication — when it records a second factor", async () => {

@@ -19,6 +19,7 @@ import {
 	type CreateUserSessionInput,
 	checkSecondFactorEvent,
 	consoleLogger,
+	isRenewalNonce,
 	type Logger,
 	loggableError,
 	readEnrollmentFacts,
@@ -85,6 +86,12 @@ interface Envelope {
 	 * release wrote (which also reads one that has it, ignoring the key).
 	 */
 	enrollmentFacts?: SessionEnrollmentFacts;
+	/**
+	 * The renewal nonce the last escalation carried (the MFA ADR's D27). Left
+	 * out until one is recorded, and absent in an envelope an older release
+	 * wrote (which also reads one that has it, ignoring the key).
+	 */
+	renewalNonce?: string;
 }
 
 /**
@@ -152,7 +159,9 @@ const isValidEnvelope = (v: unknown): v is Envelope => {
 		(e.amr === undefined || isStringList(e.amr)) &&
 		isValidEnvelopeAuthentication(e.authentication) &&
 		// Absent, or the two facts: anything else is corrupt, never read as none.
-		(e.enrollmentFacts === undefined || readEnrollmentFacts(e.enrollmentFacts) !== undefined)
+		(e.enrollmentFacts === undefined || readEnrollmentFacts(e.enrollmentFacts) !== undefined) &&
+		// Absent, or a nonce: anything else is corrupt, never read as unbound.
+		(e.renewalNonce === undefined || isRenewalNonce(e.renewalNonce))
 	);
 };
 
@@ -203,6 +212,7 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 	...(e.enrollmentFacts === undefined
 		? {}
 		: { enrollmentFacts: readEnrollmentFacts(e.enrollmentFacts) }),
+	...(e.renewalNonce === undefined ? {} : { renewalNonce: e.renewalNonce }),
 });
 
 /**
@@ -230,8 +240,9 @@ const RECORD_SECOND_FACTOR_ATTEMPTS = 5;
  *   `sessionAfterSecondFactor` (which first splits a session recorded without
  *   `authentication`), and writes it with the client's `replaceIfUnchanged`
  *   (`KEEPTTL`, only while the stored bytes are the ones read), re-reading on
- *   a loss at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times. Only `amr` and
- *   the `authentication` fields this release knows are rewritten; everything
+ *   a loss at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times. Only `amr`, the
+ *   `authentication` fields this release knows, and `renewalNonce` when the
+ *   event carries one are rewritten; everything
  *   else, keys a newer release added included, is written back as read, so a
  *   step-up on a replica not yet upgraded loses nothing a newer one recorded.
  * - `delete`: `DEL`.
@@ -359,6 +370,8 @@ export function createRedisUserSessionStore(
 						...stored.authentication,
 						...toEnvelopeAuthentication(next.authentication),
 					},
+					// In the same write as the escalation; an event without one keeps it.
+					...(event.renewalNonce === undefined ? {} : { renewalNonce: event.renewalNonce }),
 				};
 				if (await opts.client.replaceIfUnchanged(k(sid), raw, JSON.stringify(written))) {
 					return fromEnvelope(written);

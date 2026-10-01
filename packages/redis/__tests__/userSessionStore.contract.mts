@@ -17,6 +17,7 @@
 import {
 	type CreateUserSessionInput,
 	DEFAULT_CLOCK_SKEW_MS,
+	newRenewalNonce,
 	type SupportsSecondFactorUpdate,
 	supportsSecondFactorUpdate,
 	type UserSessionStore,
@@ -530,6 +531,55 @@ export function runSecondFactorUpdateContract(
 			expect(await store.get("sf-1")).toStrictEqual(expected);
 		});
 
+		it("records the event's renewalNonce in the same write as the escalation, and answers it", async () => {
+			const store = await capable();
+			await store.create(INPUT({ sid: "sf-nonce", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
+			expect(await store.get("sf-nonce")).not.toHaveProperty("renewalNonce");
+			const renewalNonce = newRenewalNonce();
+			const recorded = await store.recordSecondFactor("sf-nonce", {
+				amr: ["otp", "mfa"],
+				at: at(1_000),
+				renewalNonce,
+			});
+			expect(recorded?.renewalNonce).toBe(renewalNonce);
+			expect(recorded?.amr).toEqual(["pwd", "otp", "mfa"]);
+			expect(await store.get("sf-nonce")).toStrictEqual(recorded);
+		});
+
+		it("replaces an earlier renewalNonce, and keeps it when the event carries none", async () => {
+			const store = await capable();
+			await store.create(
+				INPUT({ sid: "sf-renewed", amr: ["pwd"], authentication: PASSWORD_LOGIN }),
+			);
+			const first = newRenewalNonce();
+			await store.recordSecondFactor("sf-renewed", {
+				amr: ["otp", "mfa"],
+				at: at(2_000),
+				renewalNonce: first,
+			});
+			const second = newRenewalNonce();
+			await store.recordSecondFactor("sf-renewed", {
+				amr: ["hwk", "mfa"],
+				at: at(1_000),
+				renewalNonce: second,
+			});
+			expect((await store.get("sf-renewed"))?.renewalNonce).toBe(second);
+			await store.recordSecondFactor("sf-renewed", { amr: ["otp"], at: at(500) });
+			expect((await store.get("sf-renewed"))?.renewalNonce).toBe(second);
+		});
+
+		it("writes no renewalNonce to a session that is gone", async () => {
+			const store = await capable();
+			expect(
+				await store.recordSecondFactor("sf-gone-nonce", {
+					amr: ["otp", "mfa"],
+					at: at(1_000),
+					renewalNonce: newRenewalNonce(),
+				}),
+			).toBeNull();
+			expect(await store.get("sf-gone-nonce")).toBeNull();
+		});
+
 		it("keeps the session's enrollmentFacts as they were recorded", async () => {
 			const store = await capable();
 			const enrollmentFacts = { witness: "enrolled", mailAddress: "unreadable" } as const;
@@ -661,6 +711,13 @@ export function runSecondFactorUpdateContract(
 			// values: alone, it names no factor that was verified.
 			["mfa alone", { amr: ["mfa"], at: new Date() }],
 			["mfa repeated alone", { amr: ["mfa", "mfa"], at: new Date() }],
+			// The nonce binds the session to one cookie session: a value that is
+			// not one binds it to none any cookie could hold.
+			[
+				"a renewalNonce that is not one",
+				{ amr: ["otp", "mfa"], at: new Date(), renewalNonce: "short" },
+			],
+			["an empty renewalNonce", { amr: ["otp", "mfa"], at: new Date(), renewalNonce: "" }],
 		])("refuses an event with %s — a RangeError, and nothing recorded", async (_label, event) => {
 			// A second factor adds its own values; it never changes the primary
 			// the baseline is decided on, and a time that is no instant is not
