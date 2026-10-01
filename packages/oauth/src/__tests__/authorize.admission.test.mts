@@ -33,6 +33,8 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createInMemorySubjectRevocation,
+	createMemoryConsentStore,
+	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
 	type PublicClient,
 	type RequirementInput,
@@ -78,7 +80,7 @@ const makeConfig = (oauthOverrides: Record<string, unknown> = {}): AppConfig =>
 			...oauthOverrides,
 		},
 		rateLimit: { failMode: "open" as const },
-		endpoints: { login: { url: "/login" } },
+		endpoints: { login: { url: "/login" }, consent: { url: "/consent" } },
 	}) as unknown as AppConfig;
 
 const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
@@ -164,6 +166,14 @@ const makeApp = async (opts: {
 	anyPageOrigin?: boolean;
 	/** Compose without an express-session store (no ask can be recorded). */
 	sessionStore?: false;
+	/** The client is not first-party: the consent step, over the memory consent stores, asks for it. */
+	consent?: boolean;
+	/**
+	 * Called on each read of an ask record (`n` from 1): `"spend"` removes the
+	 * record once it is handed back, as another pass consuming it right after
+	 * would; `"fail"` answers an outage.
+	 */
+	onAskGet?: (n: number) => "spend" | "fail" | undefined;
 }) => {
 	const client = {
 		clientId: CLIENT_ID,
@@ -171,8 +181,10 @@ const makeApp = async (opts: {
 		allowedRedirectUris: [REDIRECT_URI],
 		allowedScopes: ["read"],
 		defaultScopes: ["read"],
-		firstParty: true,
+		firstParty: opts.consent !== true,
 	} as unknown as PublicClient;
+	const consentStore = createMemoryConsentStore();
+	const pendingConsentStore = createMemoryPendingConsentStore();
 	const clientRepository: ClientRepository = {
 		findById: async (id) => (opts.clientNotFound ? null : id === CLIENT_ID ? client : null),
 		authenticate: async () => null,
@@ -204,6 +216,7 @@ const makeApp = async (opts: {
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
+		...(opts.consent === true ? { consentStore, pendingConsentStore } : {}),
 	});
 
 	const app = express();
@@ -232,9 +245,18 @@ const makeApp = async (opts: {
 	};
 	const records = new Map<string, unknown>();
 	const storeDown = new Error("session store unavailable");
+	let askGets = 0;
 	const sessionStore = {
-		get: (sid: string, cb: (err: unknown, rec?: unknown) => void) =>
-			opts.sessionStoreFail === "get" ? cb(storeDown) : cb(null, records.get(sid)),
+		get: (sid: string, cb: (err: unknown, rec?: unknown) => void) => {
+			if (opts.sessionStoreFail === "get") return cb(storeDown);
+			const found = records.get(sid);
+			if (sid.startsWith("reauth:") && opts.onAskGet !== undefined) {
+				const step = opts.onAskGet(++askGets);
+				if (step === "fail") return cb(storeDown);
+				if (step === "spend") records.delete(sid);
+			}
+			cb(null, found);
+		},
 		set: (sid: string, rec: unknown, cb?: (err?: unknown) => void) => {
 			if (opts.sessionStoreFail === "set") return cb?.(storeDown);
 			records.set(sid, rec);
@@ -246,8 +268,13 @@ const makeApp = async (opts: {
 		},
 	};
 	app.use((req, res, next) => {
-		const holder = req as unknown as { session?: unknown; sessionStore?: unknown };
+		const holder = req as unknown as {
+			session?: unknown;
+			sessionStore?: unknown;
+			sessionID?: string;
+		};
 		holder.session = cookieSession(holder);
+		holder.sessionID = "cookie-session-1";
 		if (opts.sessionStore !== false) holder.sessionStore = sessionStore;
 		// What express-session would save when the response ends: the
 		// request's session as the route left it.
@@ -262,6 +289,8 @@ const makeApp = async (opts: {
 		createCode,
 		logger,
 		records,
+		consentStore,
+		pendingConsentStore,
 		get session() {
 			return state.session;
 		},
@@ -849,6 +878,163 @@ describe("/authorize on admission — the step-up trip", () => {
 		});
 		const params = redirectParams(await authorize(harness.app, baseQuery));
 		expect(params.get("error")).toBe("temporarily_unavailable");
+	});
+});
+
+describe("/authorize on admission — the ask is read until the code is minted", () => {
+	/** A requirement that steps `/authorize` up until the test flips it to met. */
+	const steppingUp = (whenStillUnmet: "reauthenticate" | "unmet" = "reauthenticate") => {
+		const state = { met: false };
+		const requirement = fixture("fixture", () =>
+			state.met ? { outcome: "met" } : { outcome: "step_up", whenStillUnmet },
+		);
+		return { requirement, state };
+	};
+
+	/** The page `/authorize` sent the browser to, parsed against the issuer. */
+	const sentTo = (res: request.Response): URL => {
+		expect(res.status).toBe(302);
+		return new URL(res.headers.location as string, ISSUER);
+	};
+
+	/** The request a page hands back, as a query. */
+	const queryOf = (url: URL): Record<string, string> => Object.fromEntries(url.searchParams.entries());
+
+	/** The request a step-up page returns to. */
+	const returnOf = (page: URL): URL => new URL(page.searchParams.get("redirect_to") as string);
+
+	/** A login made after everything before it, to the millisecond. */
+	const loggedInNow = async (clock: { authTime: Date }) => {
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		clock.authTime = new Date();
+	};
+
+	it("consent after a login trip and a step-up trip resumes with the ask still readable, and mints without a second login", async () => {
+		const { requirement, state } = steppingUp();
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+			consent: true,
+		});
+		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		await loggedInNow(clock);
+		const toStepUp = sentTo(await authorize(harness.app, queryOf(toLogin)));
+		expect(toStepUp.pathname).toBe("/step-up");
+		state.met = true;
+		const back = returnOf(toStepUp);
+		const toConsent = sentTo(await authorize(harness.app, queryOf(back)));
+		expect(toConsent.pathname).toBe("/consent");
+		expect(harness.createCode).not.toHaveBeenCalled();
+
+		// The consent page records the answer and returns to the parked request.
+		const parked = await harness.pendingConsentStore.consume(
+			toConsent.searchParams.get("challenge") as string,
+		);
+		expect(parked).not.toBeNull();
+		await harness.consentStore.grant({
+			sub: SUBJECT,
+			clientId: CLIENT_ID,
+			scopes: [...(parked?.scopes ?? [])],
+			grantedAt: Date.now(),
+			expiresAt: undefined,
+		});
+		const resumed = new URL(parked?.authorizeUrl as string);
+		expect(resumed.searchParams.get("reauth_ask")).toBe(back.searchParams.get("reauth_ask"));
+		const done = sentTo(await authorize(harness.app, queryOf(resumed)));
+		expect(done.origin + done.pathname).toBe(REDIRECT_URI);
+		expect(done.searchParams.get("code")).toBe("code-x");
+		expect(harness.regenerated).toBe(0);
+	});
+
+	it("spends the ask on the pass that mints: replaying the returned URL asks for the login again", async () => {
+		const { requirement, state } = steppingUp();
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+		});
+		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		await loggedInNow(clock);
+		const back = returnOf(sentTo(await authorize(harness.app, queryOf(toLogin))));
+		state.met = true;
+		expect(codeOf(await authorize(harness.app, queryOf(back)))).toBe("code-x");
+		expect(harness.records.size).toBe(0);
+
+		const again = loginRedirectTo(await authorize(harness.app, queryOf(back)));
+		expect(again.searchParams.get("reauth_ask")).not.toBe(back.searchParams.get("reauth_ask"));
+		expect(harness.createCode).toHaveBeenCalledTimes(1);
+	});
+
+	it("each trip's write spends the ask it was presented: one record stands for the request", async () => {
+		const { requirement } = steppingUp();
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+		});
+		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "60" }));
+		await loggedInNow(clock);
+		const back = returnOf(sentTo(await authorize(harness.app, queryOf(toLogin))));
+		expect([...harness.records.keys()]).toEqual([`reauth:${back.searchParams.get("reauth_ask")}`]);
+	});
+
+	it("an ask another pass spent between this pass's read and its mint is login_required when the login it asked for was what made the session fresh", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			// The first read hands the ask back and another pass spends it straight after.
+			onAskGet: (n) => (n === 1 ? "spend" : undefined),
+		});
+		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		await loggedInNow(clock);
+		const params = redirectParams(await authorize(harness.app, queryOf(toLogin)));
+		expect(params.get("error")).toBe("login_required");
+		expect(params.get("error_description")).toBe("the re-authentication ask was already used");
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
+	it("an ask already spent when freshness did not rest on it is no reason to refuse: the code is minted", async () => {
+		const { requirement, state } = steppingUp();
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [requirement],
+		});
+		const back = returnOf(sentTo(await authorize(harness.app, baseQuery)));
+		harness.records.clear();
+		state.met = true;
+		expect(codeOf(await authorize(harness.app, queryOf(back)))).toBe("code-x");
+	});
+
+	it("an ask store that cannot spend the ask at the mint is temporarily_unavailable, with no code", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			onAskGet: (n) => (n === 2 ? "fail" : undefined),
+		});
+		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+		await loggedInNow(clock);
+		const params = redirectParams(await authorize(harness.app, queryOf(toLogin)));
+		expect(params.get("error")).toBe("temporarily_unavailable");
+		expect(harness.createCode).not.toHaveBeenCalled();
+		expect(harness.logger.error).toHaveBeenCalledWith(
+			{ err: expect.objectContaining({ name: "Error" }) },
+			"authorize_reauth_ask_store_unavailable",
+		);
+	});
+
+	it("a refused return replayed is refused again, not sent on another trip", async () => {
+		const { requirement } = steppingUp("unmet");
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [requirement],
+		});
+		const back = returnOf(sentTo(await authorize(harness.app, baseQuery)));
+		for (let pass = 0; pass < 2; pass++) {
+			const params = redirectParams(await authorize(harness.app, queryOf(back)));
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+		}
+		expect(harness.createCode).not.toHaveBeenCalled();
 	});
 });
 

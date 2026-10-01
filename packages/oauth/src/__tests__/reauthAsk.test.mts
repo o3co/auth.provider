@@ -97,6 +97,51 @@ describe("createReauthAskStore — minting and spending an ask", () => {
 		expect(await store.consume(id, REQUEST)).toBeNull();
 	});
 
+	it("read hands the record back and leaves it, so a later pass of the same request finds it again", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const askedAt = Date.now();
+		const id = await store.ask(loginAsk(askedAt));
+
+		expect(await store.read(id, REQUEST)).toEqual(loginAsk(askedAt));
+		expect(backing.records.size).toBe(1);
+		expect(await store.read(id, REQUEST)).toEqual(loginAsk(askedAt));
+	});
+
+	it("consume after read spends the record: neither finds it again", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const askedAt = Date.now();
+		const id = await store.ask(loginAsk(askedAt));
+
+		expect(await store.read(id, REQUEST)).toEqual(loginAsk(askedAt));
+		expect(await store.consume(id, REQUEST)).toEqual(loginAsk(askedAt));
+		expect(backing.records.size).toBe(0);
+		expect(await store.read(id, REQUEST)).toBeNull();
+		expect(await store.consume(id, REQUEST)).toBeNull();
+	});
+
+	it("read refuses an ask minted for another request, and spends it", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const id = await store.ask(loginAsk(Date.now()));
+
+		expect(await store.read(id, `${REQUEST}&state=another`)).toBeNull();
+		expect(backing.records.size).toBe(0);
+		expect(await store.read(id, REQUEST)).toBeNull();
+	});
+
+	it("read refuses one whose last write has aged past its window, and anything that is not the record it wrote", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const old = Date.now() - REAUTH_ASK_TTL_MS - 1000;
+		const id = await store.ask(loginAsk(old));
+		expect(await store.read(id, REQUEST)).toBeNull();
+
+		backing.records.set(`${REAUTH_ASK_KEY_PREFIX}planted`, { reauth: { request: REQUEST } });
+		expect(await store.read("planted", REQUEST)).toBeNull();
+	});
+
 	it("records a step-up trip per requirement beside the login, and hands both back", async () => {
 		// ADR 2026-09-25-multi-factor-authentication, D17 as amended: one ask
 		// accumulates what was asked — the login, and each requirement's trip
@@ -238,6 +283,10 @@ describe("createReauthAskStore — minting and spending an ask", () => {
 
 		await expect(
 			createReauthAskStore(failing({ get: (_sid, cb) => cb(boom) })).consume("id", REQUEST),
+		).rejects.toThrow(/unavailable/);
+
+		await expect(
+			createReauthAskStore(failing({ get: (_sid, cb) => cb(boom) })).read("id", REQUEST),
 		).rejects.toThrow(/unavailable/);
 
 		const backing = memoryStore();
