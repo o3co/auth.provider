@@ -42,6 +42,7 @@ import {
 	federationGrantHeldToken,
 	federationGrantKeptAccessToken,
 	type StoredAccessToken,
+	type WrittenAccessToken,
 } from "./held-token.mjs";
 import { federationGrantEffectiveExpiry } from "./lifetime.mjs";
 import type { FederationGrantStore } from "./store.mjs";
@@ -488,7 +489,7 @@ type Evaluation =
 			 * eligible under the current maximum, alive, and dated believably. A
 			 * refresh that brings nothing usable keeps it.
 			 */
-			readonly keep?: StoredAccessToken;
+			readonly keep?: WrittenAccessToken;
 			/** The access token that is stored, whether or not it could be disclosed. */
 			readonly stored?: string;
 	  };
@@ -762,8 +763,11 @@ async function evaluate(
 		};
 	}
 	const credentials = opened.credentials.value;
-	const token = credentials.accessToken;
-	let keep: StoredAccessToken | undefined;
+	// Read once, here: what is judged is what a refresh keeps, and nothing of a
+	// store's answer is read again once the upstream has been asked.
+	const stored = credentials.accessToken;
+	const token = stored === undefined ? undefined : federationGrantKeptAccessToken(stored);
+	let keep: WrittenAccessToken | undefined;
 	if (token !== undefined) {
 		// The same predicate guards every disclosure, cached or fresh, against
 		// the CURRENT maximum.
@@ -1291,7 +1295,7 @@ async function refreshUnderLock(
 	// is judged again, against the maximum and the clock, at every disclosure.
 	let credentials: FederationGrantCredentialsInput = {
 		refreshToken: response.refreshToken,
-		accessToken: held.keep === undefined ? undefined : federationGrantKeptAccessToken(held.keep),
+		accessToken: held.keep,
 	};
 	let ineligible: FederationGrantIneligibilityMarker | null = null;
 	const marker = (

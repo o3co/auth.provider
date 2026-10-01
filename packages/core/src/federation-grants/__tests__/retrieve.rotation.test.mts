@@ -308,6 +308,43 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-0", expiresIn: 1200 });
 		});
 
+		it("reads the stored token once, before the upstream is asked: a field that cannot be read again costs no rotation", async () => {
+			// A store of a deployment's own may answer accessors. One that reads
+			// once and then throws must not cost the grant the refresh token the
+			// upstream just rotated.
+			await h.seed();
+			const real = h.store.open.bind(h.store);
+			vi.spyOn(h.store, "open").mockImplementation(async (id, at) => {
+				const opened = await real(id, at);
+				if (opened === null || opened.credentials.state !== "ok") return opened;
+				const { refreshToken, accessToken } = opened.credentials.value;
+				if (accessToken === undefined) return opened;
+				let reads = 0;
+				const once = Object.defineProperty({ ...accessToken }, "effectiveExpiresAt", {
+					enumerable: true,
+					get: () => {
+						reads += 1;
+						if (reads > 1) throw new Error("read twice");
+						return accessToken.effectiveExpiresAt;
+					},
+				});
+				return {
+					...opened,
+					credentials: { state: "ok", value: { refreshToken, accessToken: once } },
+				};
+			});
+			setNow(at(40 * MIN));
+			h.refresh.mockResolvedValue(refreshed("rotated", now()));
+
+			expect(await retrieve({ minTtlSeconds: 3600 })).toMatchObject({
+				ok: true,
+				accessToken: "at-rotated",
+				refreshed: true,
+			});
+			vi.mocked(h.store.open).mockRestore();
+			expect((await stored())?.refreshToken).toBe(`${SECRET}-rotated`);
+		});
+
 		it("does not cost it that token when the new one is merely ineligible, either", async () => {
 			await h.seed();
 			setNow(at(40 * MIN));
