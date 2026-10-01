@@ -16,9 +16,10 @@
 
 /**
  * What a deployment must have configured before it may create grants,
- * resolved once, at boot (the federation-grants ADR, D6–D8). Every refusal
- * here is one a user would otherwise meet at the end of a consent: a page
- * that cannot be shown, or a callback that was never going to accept them.
+ * resolved once, at boot. Every refusal here is one a user would otherwise
+ * meet at the end of a consent: a page that cannot be shown, or a callback
+ * that was never going to accept them. The design record is
+ * `packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md`.
  */
 
 import type {
@@ -75,7 +76,7 @@ const issuerOrigin = (issuer: unknown): string => {
  * what it must show with the session cookie, and this provider never answers
  * a credentialed cross-origin read (`middleware/cors.mts`), so a page on
  * another origin could not show the user the client, the expiry, or that the
- * access outlives logout (the federation-grants ADR, D8).
+ * access outlives logout.
  */
 const consentUrl = (section: AcquisitionSection | undefined, origin: string): string => {
 	const written = section?.consent?.url;
@@ -247,7 +248,7 @@ const IDENTITY_LOOKUP_REMEDY =
 
 /**
  * Acquisition asks whether the upstream identity is already another local
- * user's (the federation-grants ADR, D7 check 5), which needs a lookup the
+ * user's, which needs a lookup the
  * Store port has only optionally. `"required"` — the default — refuses to
  * boot without it; `"unsupported"` is the decision to skip that one check,
  * recorded in the audit of every acquisition rather than taken silently.

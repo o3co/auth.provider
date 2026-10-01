@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		include: ["src/**/__tests__/**/*.test.mts"],
-		// #357: the workspace-wide deadline floor, repeated as literals rather
+		// The workspace-wide deadline floor, repeated as literals rather
 		// than imported from vitest.shared.mts — this template is copied
 		// verbatim into scaffolded projects, where that file does not exist.
 		// Rationale lives there: under a loaded parallel run, transform+import
@@ -11,7 +11,7 @@ export default defineConfig({
 		// 20s.
 		testTimeout: 20_000,
 		hookTimeout: 20_000,
-		// #512: run the @o3co/auth-provider-* packages through vitest instead of
+		// Run the @o3co/auth-provider-* packages through vitest instead of
 		// letting Node load them natively. In a scaffolded project they are
 		// installed from npm under node_modules, which vitest externalizes by
 		// default — and an externalized package's own `import "ioredis"` /
@@ -20,11 +20,12 @@ export default defineConfig({
 		// monorepo the same packages are symlinks to source and are inlined
 		// anyway; this makes the two layouts behave the same.
 		server: { deps: { inline: [/@o3co\/auth-provider-/] } },
-		// #556: the server `request(app)` starts listens on 127.0.0.1, the
-		// address supertest dials. Unpatched, macOS can give it a port another
-		// process holds on 127.0.0.1, and the request hangs on that process until
-		// the test timeout. Rationale and mechanics in the file itself. The
-		// Dockerfile `test` stage copies it; scaffold-assets.test.mts checks that.
+		// The supertest loopback guard: the server `request(app)` starts
+		// listens on 127.0.0.1, the address supertest dials. Unpatched, macOS
+		// can give it a port another process holds on 127.0.0.1, and the
+		// request hangs on that process until the test timeout. Rationale and
+		// mechanics in the file itself. The Dockerfile `test` stage copies it;
+		// scaffold-assets.test.mts checks that.
 		setupFiles: ["./vitest.supertest-loopback.mts"],
 	},
 });
