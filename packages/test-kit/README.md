@@ -10,8 +10,8 @@ it; production code never does.
 
 **Role.** The executable specification of a port or capability whose
 implementations live outside core: a suite that an adapter in this repository
-and a deployment's own implementation run alike, and the fakes a suite needs.
-It depends on core alone — `@o3co/auth-provider-core`, as a peer — and no
+and a deployment's own implementation run alike, the fakes a suite needs, and
+a refused connection for tests. It depends on core alone — `@o3co/auth-provider-core`, as a peer — and no
 package depends on it at run time: a package's tests list it among their
 devDependencies.
 

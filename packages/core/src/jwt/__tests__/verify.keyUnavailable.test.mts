@@ -397,6 +397,7 @@ describe("verifyJwt — a keystore's throw it cannot inspect", () => {
 			const err = await verifyJwt(await mint(), keyStore, options).catch((e: unknown) => e);
 			expect(err).toBeInstanceOf(JwtVerificationError);
 			expect(err).toMatchObject({ reason: "verification_key_unavailable" });
+			expect((err as Error).cause).toBe(thrown);
 		},
 	);
 });

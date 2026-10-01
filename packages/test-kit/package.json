@@ -1,6 +1,6 @@
 {
 	"name": "@o3co/auth-provider-test-kit",
-	"description": "Contract suites and a fake Store for implementations of auth.provider's ports",
+	"description": "Contract suites and a fake Store for implementations of auth.provider's ports, and a refused connection for tests",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"engines": {
