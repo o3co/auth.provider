@@ -15,19 +15,12 @@ export default defineConfig({
 				"src/boot/**/*.test.mts",
 				"src/refresh-token-family/**/*.test.mts",
 				"src/user-sessions/__tests__/**/*.test.mts",
-				// D-1 FOLLOW-UP: explicit single-file include (not the
-				// `repositories/__tests__/**` glob) because
-				// `InMemoryClientRepository.test.mts` has 16 pre-existing TS
-				// errors unrelated to D-1. Widen to the glob once that file
-				// is cleaned up — track in the next core/repositories
-				// hygiene PR.
+				// Its fixtures build `CreateCodeInput`, which names every key.
 				"src/repositories/__tests__/InMemoryCodeRepository.test.mts",
-				// #343: this file's fixtures use `satisfies Required<...>` to make
-				// a new optional field on `Client` / `User` a COMPILE error rather
-				// than a silently uncovered one. That only fires under typecheck
-				// mode, and `tsconfig.json` excludes `__tests__` — so without this
-				// line the annotation is decorative, which is the same
-				// looks-enforced-but-is-not shape #343 is about.
+				// This file's fixtures use `satisfies Required<...>` to make a new
+				// optional field on `Client` / `User` a compile error rather than a
+				// silently uncovered one; listed so that error is reported against
+				// its own tests.
 				"src/repositories/__tests__/entrySchemaConformance.test.mts",
 				// CC-5 readonly compile-time contract tests. The @ts-expect-error
 				// directives in these files only fire under typecheck mode.
@@ -39,7 +32,8 @@ export default defineConfig({
 				"src/__tests__/contributes-map-substitution.test.mts",
 				// Wave 1 §2.3.1 — WebAuthnCredential + WebAuthnCredentialStore type contract.
 				"src/webauthn-credentials/__tests__/types.test.mts",
-				// v0.13.0 audit: never typechecked before; paired with tsconfig.test.json.
+				// The challenge store's type contract, and `wiring.test.mts`'s
+				// `satisfies … as BootstrapMap`.
 				"src/challenges/__tests__/types.test.mts",
 				"src/challenges/__tests__/wiring.test.mts",
 				// #593: the `@ts-expect-error` directives here are the regression
@@ -47,79 +41,63 @@ export default defineConfig({
 				// with only some of the authorization fields must not compile.
 				"src/federation-grants/__tests__/types.test.mts",
 				// The session-admission ADR (A2): the contract's shapes are asserted
-				// with expectTypeOf, and the fixtures claim the port's types. Paired
-				// with tsconfig.test.json, as #343 requires.
+				// with expectTypeOf, and the fixtures claim the port's types.
 				"src/session-admission/**/*.test.mts",
-				// #626: which intent fields a store must not drop. Paired with
-				// tsconfig.test.json, which already covers the directory.
+				// Which intent fields a store must not drop.
 				"src/federation-grants/__tests__/intent-fields.types.test.mts",
-				// #626: which grant fields a store must not drop. Paired with
-				// tsconfig.test.json, which already covers the directory.
+				// Which grant fields a store must not drop.
 				"src/federation-grants/__tests__/record-fields.types.test.mts",
-				// Which AssertionIssuerEntry fields a registry must not drop. Paired
-				// with the same entry in tsconfig.test.json — both lists, or nothing.
+				// Which AssertionIssuerEntry fields a registry must not drop.
 				"src/assertions/__tests__/entry-fields.types.test.mts",
-				// The registry's own tests and the verifier's — their fixtures build
-				// entries, and went uncompiled while claiming a type they did not
-				// satisfy. Paired with tsconfig.test.json.
+				// The registry's own tests and the verifier's: their fixtures build
+				// entries that claim the entry type.
 				"src/assertions/__tests__/issuerRegistry.test.mts",
 				"src/assertions/__tests__/registryAssertionVerifier.test.mts",
 				// #645 follow-up: which `FederationTokens` fields a store must not
 				// drop. A conditional-type assertion proves nothing outside the checker.
 				"src/federation-tokens/__tests__/record-fields.types.test.mts",
-				// Their fixtures build `FederationTokens` records, and went
-				// uncompiled while missing keys the type requires. Paired with
-				// tsconfig.test.json.
+				// Their fixtures build `FederationTokens` records, which name every
+				// key the type requires.
 				"src/federation-tokens/__tests__/memory.test.mts",
 				"src/federation-tokens/__tests__/removeBySid-rename.test.mts",
-				// #626 P1: relocated from `packages/session`, where both were in its
-				// typecheck list. The `expectTypeOf` and `@ts-expect-error` here
-				// are the regression test for the adapter port, and they only fire
-				// under typecheck mode — moving the files without moving the
-				// entries would have left them transpiled and unchecked.
+				// The `expectTypeOf` and `@ts-expect-error` here are the regression
+				// test for the adapter port, and they fire only under typecheck mode.
 				"src/federations/__tests__/federation-provider-slim.test.mts",
 				"src/federations/__tests__/delegated-authorization-types.test.mts",
-				// #626 P2: `GrantDependencies` is pinned to ComponentMap slot types.
-				// Paired with tsconfig.test.json, as #343 requires.
+				// `GrantDependencies` is pinned to ComponentMap slot types.
 				"src/grants/__tests__/dependencies.types.test.mts",
-				// #626: which consent-record fields a store must not drop, and the
-				// fixtures that build those records — uncompiled, they went on
-				// omitting a field the type now requires. Paired with
-				// tsconfig.test.json.
+				// Which consent-record fields a store must not drop, and the
+				// fixtures that build those records.
 				"src/consents/__tests__/**/*.test.mts",
-				// #626: which Code fields a repository must not drop, and a factory
-				// test that builds one — uncompiled, it went on omitting the keys.
-				// Paired with tsconfig.test.json.
+				// Which Code fields a repository must not drop, and a factory test
+				// that builds one.
 				"src/repositories/__tests__/code-fields.types.test.mts",
 				"src/repositories/__tests__/createRepositoryFactories.test.mts",
-				// #626: which DeviceAuthorization fields a store must not drop, and
-				// the fixtures that build them. Paired with tsconfig.test.json.
+				// Which DeviceAuthorization fields a store must not drop, and the
+				// fixtures that build them.
 				"src/device-authorization/__tests__/**/*.test.mts",
 				// One type per audit `details` key: `error` a string, `cause` an
-				// audited error. Paired with tsconfig.test.json.
+				// audited error.
 				"src/audit/__tests__/audit-details.types.test.mts",
 				// The MFA ports: the slot and contract assertions here are
 				// `expectTypeOf`, and the fixtures build records whose every field is
-				// a required key. Paired with tsconfig.test.json.
+				// a required key.
 				"src/mfa/__tests__/**/*.test.mts",
 				"src/mail/__tests__/**/*.test.mts",
-				// The MFA enrollment witness on `User` and `UserRepository`. Paired
-				// with tsconfig.test.json.
+				// The MFA enrollment witness on `User` and `UserRepository`.
 				"src/repositories/__tests__/mfaEnrollmentWitness.test.mts",
-				// The slots through which modules share what one of them owns
-				// (#728): the slot types are asserted with expectTypeOf, and the
-				// fixtures claim the contracts' types. Paired with
-				// tsconfig.test.json.
+				// The slots through which modules share what one of them owns: the
+				// slot types are asserted with expectTypeOf, and the fixtures claim
+				// the contracts' types.
 				"src/token-settings/__tests__/**/*.test.mts",
 				"src/browser-session/__tests__/**/*.test.mts",
 				"src/deployment/__tests__/**/*.test.mts",
 				// The RateLimiter port's `failMode` and its contract suite (#728).
 				"src/ratelimit/__tests__/rateLimiter.contract.test.mts",
-				// The outage policy's brand and options (#728). Paired with
-				// tsconfig.test.json.
+				// The outage policy's brand and options.
 				"src/ratelimit/__tests__/policy.types.test.mts",
 				// The rate-limit guard: its fixtures claim the `Logger` and
-				// `RateLimiter` types. Paired with tsconfig.test.json.
+				// `RateLimiter` types.
 				"src/ratelimit/__tests__/guard.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
@@ -136,6 +114,12 @@ export default defineConfig({
 				"src/user-sessions/__tests__/memory.sessionRPRegistry.test.mts",
 				"src/user-sessions/__tests__/memory.userSessionStore.test.mts",
 			],
+			// tsconfig.test.json, not the build config: the build config leaves
+			// `__tests__` out. Its program takes every file under `src`. In any
+			// run that includes one of the files `include` above names (a full
+			// run, and CI, always does), an error in any file of the program
+			// fails the run; `include` decides only which files' errors are
+			// reported against their own tests.
 			tsconfig: "./tsconfig.test.json",
 		},
 		coverage: {
