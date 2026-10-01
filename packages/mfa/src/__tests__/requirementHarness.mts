@@ -36,6 +36,11 @@ export const WITHOUT_MAIL = {
 	sessionEmailProofAt: async () => null,
 } as const;
 
+/** A transaction store that holds no subject's first-binding mark. */
+export const NO_FIRST_BINDING_MARK = {
+	firstBindingAt: async () => null,
+} as const;
+
 /** What a login records of an account that is not enrolled and has no address: a session's enrollment facts. */
 export const NOT_ENROLLED_FACTS = Object.freeze({
 	witness: "not_enrolled",

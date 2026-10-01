@@ -135,6 +135,7 @@ function build(
 			transactionStore.emailProofRequiredAtNextBinding(subject),
 		sessionEmailProofAt: (subject, sid, nowMs) =>
 			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
+		firstBindingAt: (subject, nowMs) => transactionStore.firstBindingAt(subject, nowMs),
 	});
 	return { requirement, transactionStore };
 }

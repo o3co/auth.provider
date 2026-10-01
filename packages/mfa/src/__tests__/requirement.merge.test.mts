@@ -55,6 +55,7 @@ import {
 	factorRecord,
 	factorStoreHolding,
 	resolverOver,
+	NO_FIRST_BINDING_MARK,
 	WITHOUT_MAIL,
 } from "./requirementHarness.mjs";
 
@@ -100,6 +101,7 @@ const realRequirement = (
 		recentMfaMaxAgeSeconds: 300,
 		logger: consoleLogger,
 		...WITHOUT_MAIL,
+		...NO_FIRST_BINDING_MARK,
 	});
 
 const storeOf = (session: UserSession): UserSessionStore => ({

@@ -46,6 +46,7 @@ import {
 	factorStoreHolding,
 	NOT_ENROLLED_FACTS,
 	resolverOver,
+	NO_FIRST_BINDING_MARK,
 	WITHOUT_MAIL,
 } from "./requirementHarness.mjs";
 
@@ -167,6 +168,7 @@ describe("the mfa requirement over every bundled action, by the grade its packag
 					recentMfaMaxAgeSeconds: 300,
 					logger: silent(),
 					...WITHOUT_MAIL,
+					...NO_FIRST_BINDING_MARK,
 				});
 				const answered: Record<string, string> = {};
 				for (const name of Object.keys(BUNDLED_ACTIONS)) {
