@@ -67,7 +67,7 @@ const RULES = {
 	identity:
 		"identity, when present, answers the enrolled data a non-empty string, the same at a second reading, through another JSON round trip, and for the next data a verification answers",
 	identityUnreadable:
-		"identity, when present, answers a non-empty string or undefined over data it cannot read, and never throws",
+		"identity, when present, answers a non-empty string or undefined over data it cannot read, never one string for two of them unless it is the enrolled data's own, and never throws",
 } as const;
 
 const USER = { id: "u-contract", username: "contract", email: "contract@example.com" };
@@ -903,5 +903,21 @@ describe("mfaFactorContract", () => {
 		).toEqual([RULES.identityUnreadable]);
 		expect(await failing(over(() => 7 as never))).toEqual([RULES.identityUnreadable]);
 		expect(await failing(over(() => ""))).toEqual([RULES.identityUnreadable]);
+	});
+
+	it("fails an identity that answers one string for two data it cannot read", async () => {
+		// Read through a member without checking it: a removed digest, or one that
+		// is a number or a string, answers "undefined:undefined" alike.
+		const careless = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			identity: (data) => {
+				const digest = data.addressDigest as
+					| { readonly keyId?: unknown; readonly digest?: unknown }
+					| null
+					| undefined;
+				return `${String(digest?.keyId)}:${String(digest?.digest)}`;
+			},
+		});
+		expect(await failing(inputFor({ mail: true }, careless))).toEqual([RULES.identityUnreadable]);
 	});
 });
