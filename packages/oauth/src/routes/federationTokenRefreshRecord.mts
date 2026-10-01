@@ -34,7 +34,6 @@ import {
 	refuseUndisclosableTokenType,
 } from "./federationTokenDisclosure.mjs";
 import {
-	classifyAnsweredScope,
 	isUsableToken,
 	narrowedScope,
 	type RefreshReading,
@@ -53,8 +52,7 @@ export const recordRefresh = async (
 ): Promise<Response> => {
 	const { opts, req, res, name, federation, logger, storeUnavailable } = ctx;
 	const { sid, sub } = caller;
-	const { answer, unreadable, derivedExpiry, lifetimeIsBroken, tokenTypeIsBroken, nextTokenType } =
-		reading;
+	const { answer, derivedExpiry, lifetimeIsBroken, tokenTypeIsBroken, nextTokenType } = reading;
 
 	/**
 	 * Keeps a rotated refresh token even when this refresh brought
@@ -104,10 +102,8 @@ export const recordRefresh = async (
 		}
 	};
 
-	// The adapter answered something this route cannot read as a token. No
-	// (or an empty) access token is a failed refresh, never a 200 without
-	// `access_token` (RFC 6749 §5.1).
-	if (!isUsableToken(answer.accessToken) || lifetimeIsBroken || tokenTypeIsBroken) {
+	// The adapter answered something this route cannot read as a token.
+	if (!reading.accessTokenIsUsable || lifetimeIsBroken || tokenTypeIsBroken) {
 		await keepRotatedRefreshToken();
 		emitAuditEvent(opts.auditSink, {
 			timestamp: new Date(),
@@ -119,7 +115,7 @@ export const recordRefresh = async (
 				federation,
 				reason: lifetimeIsBroken
 					? "invalid_expiry"
-					: !isUsableToken(answer.accessToken)
+					: !reading.accessTokenIsUsable
 						? "no_access_token"
 						: "invalid_token_type",
 			},
@@ -144,7 +140,7 @@ export const recordRefresh = async (
 	// request. `null` omits `expires_in` (optional in RFC 6749 §5.1).
 	const nextExpiresAt = derivedExpiry;
 	const updatedTokens = {
-		accessToken: answer.accessToken,
+		accessToken: reading.answer.accessToken,
 		// `??` would let `""` through, and an empty string overwriting a
 		// usable stored token strands the connection at the next request.
 		refreshToken: isUsableToken(answer.refreshToken)
@@ -160,11 +156,7 @@ export const recordRefresh = async (
 		// The three readings and the bound they are judged against are
 		// `narrowedScope`'s, next to its own reasoning. Nothing about the
 		// rule is restated here, so the two cannot drift apart.
-		scope: narrowedScope(
-			classifyAnsweredScope(answer, unreadable),
-			currentTokens.scope,
-			currentTokens.grantedScope,
-		),
+		scope: narrowedScope(reading.answeredScope, currentTokens.scope, currentTokens.grantedScope),
 		// The ceiling itself never moves: a refresh is bounded by the grant,
 		// not by the token it replaces (RFC 6749 §6). Parsed on the way back
 		// out as well — it came from a store, and a store is another thing

@@ -94,7 +94,7 @@ type AnsweredScope =
  * is unusable, not omitted: omitted means the full grant, so collapsing the
  * two would let an adapter widen the scope by failing to be read.
  */
-export const classifyAnsweredScope = (
+const classifyAnsweredScope = (
 	answer: Partial<RefreshedTokens>,
 	unreadable: ReadonlySet<string>,
 ): AnsweredScope => {
@@ -133,17 +133,29 @@ export const narrowedScope = (
 	return asked.every((entry) => within.has(entry)) ? asked.join(" ") : keep;
 };
 
-/** A refresh answer as `readRefreshAnswer` read it, and how it judged it. */
-export interface RefreshReading {
-	/** Each field as read once; one whose getter threw is `undefined` and named in `unreadable`. */
-	readonly answer: Partial<RefreshedTokens>;
-	readonly unreadable: ReadonlySet<string>;
+/**
+ * A refresh answer as `readRefreshAnswer` read it, and how it judged it. Every
+ * verdict on the answer is here, so the code that acts on it judges nothing.
+ */
+export type RefreshReading = {
 	readonly derivedExpiry: Date | null;
 	readonly lifetimeIsBroken: boolean;
 	readonly tokenTypeIsBroken: boolean;
 	/** The type the record carries next. */
 	readonly nextTokenType: string | undefined;
-}
+	/** How the answer named the scope, for `narrowedScope`. */
+	readonly answeredScope: AnsweredScope;
+} & (
+	| {
+			readonly accessTokenIsUsable: true;
+			/** Each field as read once; one whose getter threw is `undefined`. */
+			readonly answer: Partial<RefreshedTokens> & { readonly accessToken: string };
+	  }
+	| {
+			readonly accessTokenIsUsable: false;
+			readonly answer: Partial<RefreshedTokens>;
+	  }
+);
 
 /**
  * Reads `refreshed` once. `currentTokens` is the freshest snapshot of the
@@ -222,12 +234,17 @@ export const readRefreshAnswer = (
 	// Bearer. The disclosure check refuses it instead.
 	const nextTokenType = answeredType ?? currentTokens.tokenType;
 
-	return {
-		answer,
-		unreadable,
+	const judged = {
 		derivedExpiry,
 		lifetimeIsBroken,
 		tokenTypeIsBroken,
 		nextTokenType,
+		answeredScope: classifyAnsweredScope(answer, unreadable),
 	};
+	const { accessToken } = answer;
+	// No (or an empty) access token is a failed refresh, never a 200 without
+	// `access_token` (RFC 6749 §5.1).
+	return isUsableToken(accessToken)
+		? { ...judged, accessTokenIsUsable: true, answer: { ...answer, accessToken } }
+		: { ...judged, accessTokenIsUsable: false, answer };
 };
