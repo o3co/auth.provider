@@ -12,7 +12,7 @@ Last updated: 2026-10-02
 
 OAuth 2.0 / OpenID Connect provider. It signs users in — with a password your user service checks, through an upstream identity provider, or with a passkey — and issues JWT access tokens, refresh tokens and ID tokens that downstream services verify offline against its published keys. Session login and the authorization code flow produce the same token format, answer at the same introspection endpoint, and are verified the same way downstream.
 
-**Stability.** The packages are on the 0.x line, where a minor release may carry breaking changes. Each one is marked `!` in its commit and PR title and listed in the [CHANGELOG](CHANGELOG.md) under the release it ships in; see the [release policy](docs/release-policy.md).
+**Stability.** The packages are on the 0.x line, where a minor release may carry breaking changes. The [CHANGELOG](CHANGELOG.md) lists each one under the release it ships in, and is the list to read before upgrading: commit and PR titles mark a breaking change with `!` by convention, but a title is not the record. See the [release policy](docs/release-policy.md).
 
 ## Responsibility
 
