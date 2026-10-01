@@ -218,7 +218,7 @@ For consumer-driven account flows (signup forms, magic-link, etc.) establishing 
 
 ## Registering from a browser session
 
-The registration routes read `req.webauthnSubject`; they do not read a session. `webauthnSessionSubjectModule` sets it from the browser's cookie session, through core's [session admission](../core/src/session-admission/README.md) — the one reading of a live session every consumer shares ([the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md), D8):
+The registration routes read `req.webauthnSubject`; they do not read a session. `webauthnSessionSubjectModule` sets it from the browser's cookie session, through core's [session admission](../core/src/session-admission/README.md) — the one reading of a live session every consumer shares ([the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)):
 
 ```ts
 import { sessionStoreModule } from "@o3co/auth-provider-session";
@@ -260,7 +260,7 @@ A `subjectFor` that throws, answers a subject whose fields throw when read, or a
 
 ## WebAuthn as a second factor
 
-`webauthnMfaFactorModule` ([`src/mfaFactor/module.mts`](src/mfaFactor/module.mts)) contributes the `webauthn` factor ([`src/mfaFactor/factor.mts`](src/mfaFactor/factor.mts)) under core's `mfaFactors` kind, where the MFA package's `mfa` requirement reads it (the MFA ADR's D4, F7). It reads its own section, and takes the `webauthnConfig` slot — the relying party the grant uses — when it is wired: with the factor off, the module boots without it; with the factor on and no relying party, the boot is refused (`contribute-factory-failed`, naming `webauthnConfig` and `webauthn.rpId`, `rpName`, `origin`). Installed while the relying party has `allowCredentialsForKnownUser` on, with the factor on or off, the boot is refused too (`contribute-factory-failed`, naming `webauthn.allowCredentialsForKnownUser` and `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`): see [SECURITY — an assertion's user handle](#security--an-assertions-user-handle). It is stateless.
+`webauthnMfaFactorModule` ([`src/mfaFactor/module.mts`](src/mfaFactor/module.mts)) contributes the `webauthn` factor ([`src/mfaFactor/factor.mts`](src/mfaFactor/factor.mts)) under core's `mfaFactors` kind, where the MFA package's `mfa` requirement reads it. It reads its own section, and takes the `webauthnConfig` slot — the relying party the grant uses — when it is wired: with the factor off, the module boots without it; with the factor on and no relying party, the boot is refused (`contribute-factory-failed`, naming `webauthnConfig` and `webauthn.rpId`, `rpName`, `origin`). Installed while the relying party has `allowCredentialsForKnownUser` on, with the factor on or off, the boot is refused too (`contribute-factory-failed`, naming `webauthn.allowCredentialsForKnownUser` and `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`): see [SECURITY — an assertion's user handle](#security--an-assertions-user-handle). It is stateless.
 
 ```ts
 import { webauthnMfaFactorModule } from "@o3co/auth-provider-webauthn";
@@ -292,7 +292,7 @@ The defaults are in [`config/reference.conf`](config/reference.conf); a composit
 
 **The sign count** (WebAuthn §6.1.1) is judged only once the signature verified: an assertion whose signature does not verify is refused as invalid whatever its counter. A signed counter that did not increase over the stored one is refused and audited as `mfa.verify.failure` with `reason: "sign_count_regression"` and `factorId`, the record id of the factor whose credential asserted — a possibly cloned authenticator. A counter of `0` against a stored `0` is an authenticator that keeps no counter: it passes and stays `0`, and gives no clone signal.
 
-**`amr`** (the MFA ADR's D14): `hwk` for a credential that is not backup-eligible (BE = 0), bound to one device; `swk` for one that is (BE = 1), a multi-device credential, whether or not it is backed up yet; `mfa` beside either. With attestation `none` — what this factor asks for — BE and BS are what the authenticator reports about itself: `hwk` means *reported* device-bound, not proof of hardware. Attested hardware would be `phrh` with attestation, which this factor does not offer.
+**`amr`**: `hwk` for a credential that is not backup-eligible (BE = 0), bound to one device; `swk` for one that is (BE = 1), a multi-device credential, whether or not it is backed up yet; `mfa` beside either. With attestation `none` — what this factor asks for — BE and BS are what the authenticator reports about itself: `hwk` means *reported* device-bound, not proof of hardware. Attested hardware would be `phrh` with attestation, which this factor does not offer.
 
 **Guessing.** A signature cannot be guessed: the factor is not held to the subject lock that bounds TOTP codes, and counts as MFA.
 

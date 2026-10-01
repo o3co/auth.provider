@@ -17,7 +17,7 @@
 /**
  * The `webauthn` second factor, as core's `MfaFactor` contract states it,
  * with verification mocked at `#/internal/verification.mjs`, as the grant's
- * tests mock it. See the MFA ADR's D4, D14, D21 and F7.
+ * tests mock it.
  *
  * Registration asks for a credential under the subject's WebAuthn user
  * handle, excluding the credentials the subject holds, with a resident key
