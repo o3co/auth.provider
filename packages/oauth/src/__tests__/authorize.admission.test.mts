@@ -109,6 +109,8 @@ const storeAnswering = (
 		create: vi.fn(async () => {}),
 		get: vi.fn(impl),
 		delete: vi.fn(async () => {}),
+		// A store that can record a second factor, so a step-up stays a step-up.
+		recordSecondFactor: vi.fn(async () => null),
 	}) as unknown as UserSessionStore & { get: ReturnType<typeof vi.fn> };
 
 const storeWith = (session: UserSession | null) =>
