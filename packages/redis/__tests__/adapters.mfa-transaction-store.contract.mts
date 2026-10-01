@@ -1786,6 +1786,12 @@ export function runMfaTransactionStoreContract(
 				["an end that is not whole", "user-1", now, later + 0.5],
 				["an end past the Date range", "user-1", now, 1e17],
 				[
+					"an end further after its time than MFA_CLOCK_SKEW_ALLOWANCE_MS",
+					"user-1",
+					now,
+					now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1,
+				],
+				[
 					"a time further ahead of the store's clock than the clock skew allowed",
 					"user-1",
 					now + DEFAULT_CLOCK_SKEW_MS + MINUTE,

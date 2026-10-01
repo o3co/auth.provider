@@ -30,6 +30,7 @@
 
 import {
 	createMemoryMfaTransactionStore,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
 	type MfaTransaction,
@@ -37,6 +38,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { MfaTransactionStoreClient } from "#/clients.mjs";
 import {
 	MFA_FIRST_BINDING_NOTE,
 	MFA_FIRST_BINDING_READ,
@@ -64,6 +66,15 @@ const first = (): Redis => connections[0] as Redis;
 /** How the adapter spells a value inside a key — looked at from outside, as the probes must. */
 const keyPart = (value: string): string =>
 	Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+
+/**
+ * Mark values carrying a field a note never writes: nested deeper than the
+ * scripts' JSON reader decodes, and holding a lone surrogate.
+ */
+const odd = (atMs: number): string[] => {
+	const head = `{"atMs":${atMs},"untilMs":${atMs + 10 * 60_000},"x":`;
+	return [`${head}${"[".repeat(1_200)}${"]".repeat(1_200)}}`, `${head}"\\ud800"}`];
+};
 
 /** A keyspace of its own for each case. */
 const freshPrefix = (): string => {
@@ -1062,8 +1073,11 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 			JSON.stringify({ atMs: "x", untilMs: 1 }),
 			JSON.stringify({ atMs: -5, untilMs: 1 }),
 			JSON.stringify({ atMs: now, untilMs: 0 }),
-			// Noted further ahead of the server's clock than any note may be.
-			JSON.stringify({ atMs: now + 10 * MINUTE, untilMs: now + 20 * MINUTE }),
+			// Standing longer than any note may make it stand.
+			JSON.stringify({ atMs: now, untilMs: now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1 }),
+			// A field a note never writes, the script's JSON reader and this
+			// side's disagreeing on it or not.
+			...odd(now),
 		]) {
 			await first().set(key, value, "PX", MINUTE);
 			const read = store.firstBindingAt("user-1", now);
@@ -1081,12 +1095,67 @@ describe("createRedisMfaTransactionStore — a subject's first-binding mark", ()
 		for (const value of [
 			"not json",
 			JSON.stringify({ atMs: now + MINUTE }),
-			JSON.stringify({ atMs: now + 10 * MINUTE, untilMs: now + 20 * MINUTE }),
+			JSON.stringify({ atMs: now - MINUTE, untilMs: now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1 }),
+			...odd(now - MINUTE),
 		]) {
 			await first().set(key, value, "PX", MINUTE);
 			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
-			expect(await store.firstBindingAt("user-1", now), value).toBe(now);
+			expect(await store.firstBindingAt("user-1", now), value.slice(0, 60)).toBe(now);
 		}
+	});
+
+	it("refuses to read a key of another type, an outage, and a note overwrites it", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Math.floor(await serverClock(first)());
+		for (const [type, write] of [
+			["hash", () => first().hset(key, "atMs", String(now))],
+			["list", () => first().rpush(key, String(now))],
+			["set", () => first().sadd(key, String(now))],
+			["zset", () => first().zadd(key, now, "atMs")],
+		] as const) {
+			await first().del(key);
+			await write();
+			const read = store.firstBindingAt("user-1", now);
+			await expect(read, type).rejects.toThrow();
+			await expect(read, type).rejects.not.toThrow(RangeError);
+			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			expect(await first().type(key), type).toBe("string");
+			expect(await store.firstBindingAt("user-1", now), type).toBe(now);
+		}
+	});
+
+	it("keeps a sound mark noted ahead of the server's clock, as one whose clock stepped back sees it: a note merges with it and never moves it back", async () => {
+		// The script sees a mark noted before its server's clock stepped back
+		// as one ahead of it. Implausible on the clock, it is still a mark.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Math.floor(await serverClock(first)());
+		const held = { atMs: now + 6 * MINUTE, untilMs: now + 20 * MINUTE };
+		await first().set(key, JSON.stringify(held), "PXAT", held.untilMs);
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual(held);
+		expect(await deadlineOf(key)).toBe(held.untilMs);
+		// The store answers it; the caller's reading judges it on its own clock.
+		expect(await store.firstBindingAt("user-1", now)).toBe(held.atMs);
+	});
+
+	it("answers a sound mark read on a server whose clock stepped back, rather than an outage", async () => {
+		const prefix = freshPrefix();
+		const client = makeIoredisMfaTransactionStoreClient(first());
+		const stepped: MfaTransactionStoreClient = {
+			...client,
+			firstBindingMark: async (key) => {
+				const read = await client.firstBindingMark(key);
+				return { ...read, serverNowMs: read.serverNowMs - 10 * MINUTE };
+			},
+		};
+		const store = createRedisMfaTransactionStore({ client: stepped, keyPrefix: prefix });
+		const now = Math.floor(await serverClock(first)());
+		await storeAt(prefix).noteFirstBinding("user-1", now, now + 20 * MINUTE);
+		expect(await store.firstBindingAt("user-1", now)).toBe(now);
 	});
 
 	it("notes and reads through EVAL once the server has forgotten the scripts", async () => {

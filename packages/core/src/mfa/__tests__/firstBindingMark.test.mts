@@ -28,6 +28,7 @@ import {
 	checkFirstBindingQuestion,
 	firstBindingAnswer,
 	laterFirstBindingMark,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 } from "#/mfa/transactionStore.mjs";
 
 const STORE_NOW = 1_800_000_000_000;
@@ -75,6 +76,10 @@ describe("checkFirstBindingNote — a mark a store can keep, on its clock", () =
 		expect(() =>
 			checkFirstBindingNote("user-1", STORE_NOW - 2 * MINUTE, STORE_NOW - MINUTE),
 		).not.toThrow();
+		// A day is the longest a mark may stand.
+		expect(() =>
+			checkFirstBindingNote("user-1", STORE_NOW, STORE_NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS),
+		).not.toThrow();
 		for (const [atMs, untilMs] of [
 			[-5, 1],
 			[STORE_NOW, 0],
@@ -82,6 +87,7 @@ describe("checkFirstBindingNote — a mark a store can keep, on its clock", () =
 			[STORE_NOW - 0.5, STORE_NOW + MINUTE],
 			[1e17, 1e17 + 1],
 			["x", 1],
+			[STORE_NOW, STORE_NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1],
 		] as const) {
 			expect(() => checkFirstBindingNote("user-1", atMs, untilMs), `${atMs} ${untilMs}`).toThrow(
 				RangeError,
