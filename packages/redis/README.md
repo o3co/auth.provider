@@ -681,8 +681,8 @@ has passed on the caller's clock expires, and is dropped.
 *Rolling upgrade.* A record approved before an upgrade, or by a replica that
 has not been upgraded yet, holds no `approvedAtMs`, `amr` or `authTimeMs`, and
 reads each as absent. So does a stored `amr` that is not a non-empty JSON
-list of non-empty strings, or an instant that is not a number. Nothing needs
-migrating.
+list of non-empty strings, or an `authTimeMs` that is not the whole epoch
+milliseconds of an instant at or after the epoch. Nothing needs migrating.
 
 ## Consent records and parked requests
 
