@@ -139,6 +139,8 @@ async function setup(
 		readonly mailWired?: boolean;
 		readonly withoutDirectory?: boolean;
 		readonly monotonicNow?: () => number;
+		/** The reset's clock; the system's by default. */
+		readonly now?: () => number;
 		readonly transactionStore?: MfaTransactionStore;
 		readonly factorStore?: MfaFactorStore;
 	} = {},
@@ -163,6 +165,7 @@ async function setup(
 			...(options.monotonicNow === undefined ? {} : { monotonicNow: options.monotonicNow }),
 		}),
 		auditSink: audit,
+		...(options.now === undefined ? {} : { now: options.now }),
 	});
 	return { reset, factorStore, transactionStore, users, service, audit };
 }
@@ -651,6 +654,64 @@ describe("resetMfaForSubject", () => {
 
 		expect(report.complete).toBe(true);
 		expect(transactionStore.acquireSubjectLease).toHaveBeenCalledTimes(2);
+	});
+
+	it("sets D25's flag again as its last write under the lease: a consume landing during the reset does not leave it cleared", async () => {
+		const { reset, factorStore, transactionStore } = await setup();
+		const removeAll = factorStore.removeAllForSubject.bind(factorStore);
+		vi.spyOn(factorStore, "removeAllForSubject").mockImplementation(async (subject) => {
+			await removeAll(subject);
+			// A binding's consume that timed out before the reset, landing now.
+			await transactionStore.consumeEmailProofRequirement(subject);
+		});
+		const flag = vi.spyOn(transactionStore, "requireEmailProofAtNextBinding");
+
+		const report = await reset.resetMfaForSubject(ALICE.id, { requireEmailProof: true });
+
+		expect(report.complete).toBe(true);
+		expect(flag).toHaveBeenCalledTimes(2);
+		expect(await transactionStore.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
+	});
+
+	it("takes the time it authorizes and applies at after the revocation: one slower than the authorization's lifetime still completes", async () => {
+		let clock = T0;
+		const transactionStore = createMemoryMfaTransactionStore({ now: () => clock });
+		const service = revocationService();
+		service.revokeAllForSubject.mockImplementationOnce(async () => {
+			clock += 2 * 3_600_000;
+			return revocationReport();
+		});
+		const { reset } = await setup({ service, transactionStore, now: () => clock });
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report).toMatchObject({ complete: true, generation: 1 });
+	});
+
+	it("reads each revocation report's completeness once: a getter that throws on a second read does not reject the reset", async () => {
+		const once = () => {
+			let reads = 0;
+			return {
+				...revocationReport(),
+				get complete(): boolean {
+					reads += 1;
+					if (reads > 1) throw new Error("read twice");
+					return true;
+				},
+			};
+		};
+		const service = revocationService();
+		service.revokeAllForSubject.mockImplementation(async () => once());
+		const { reset, audit } = await setup({ service });
+
+		const report = await reset.resetMfaForSubject(ALICE.id);
+
+		expect(report.complete).toBe(true);
+		expect(audit.of("mfa.reset")[0]?.details).toMatchObject({
+			sessions: true,
+			sessionsAgain: true,
+			complete: true,
+		});
 	});
 
 	it("stops, the witness left, when the records cannot be removed", async () => {
