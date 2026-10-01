@@ -17,10 +17,12 @@
 import { createSecretKey } from "node:crypto";
 import {
 	createSymmetricKeyStore,
+	type GrantResult,
 	type KeyStore,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
 import { SignJWT } from "jose";
+import { expect } from "vitest";
 
 export const SECRET = "test-secret-at-least-32-chars!!";
 export const keyStore: KeyStore = createSymmetricKeyStore(SECRET);
@@ -57,3 +59,9 @@ export function makeFamilyRevocation(
 		...overrides,
 	};
 }
+
+/** The tokens a grant issued; a result that issued none fails the test, naming it. */
+export const tokensOf = (result: GrantResult) =>
+	"tokens" in result
+		? result.tokens
+		: expect.fail(`expected tokens, got ${JSON.stringify(result)}`);
