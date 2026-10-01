@@ -50,7 +50,9 @@ export interface WebAuthnSessionSubjectOptions {
 	 * The WebAuthn subject for an admitted session — synchronous, called with
 	 * the live `UserSession` admission read. `userId` is the user handle an
 	 * authenticator stores and may sync: opaque, 1–64 bytes, never an e-mail
-	 * or a username (WebAuthn §5.4.3; the README's "`userId` opacity").
+	 * or a username (WebAuthn §5.4.3; the README's "`userId` opacity"), and
+	 * not guessable where the RP ID is shared with another system (the
+	 * README's "Known limitations").
 	 */
 	readonly subjectFor: (session: UserSession) => WebAuthnSubject;
 }
