@@ -1318,6 +1318,7 @@ stream — its level is fixed at `info`.
 | `federation_token_refresh_unsupported` (error) | `oauth/src/routes/federationTokenRefresh.mts` | a federation whose provider cannot refresh is answering every expired token `503 refresh_not_supported`: configure the provider |
 | `logout_federation_token_read_failed` (warn) | `oauth/src/routes/logout.mts` | RP-initiated logout could not read the first federation's token record (`store: "federation_token"`, `step: "get"`, the error's projection) before redirecting to that IdP's end-session endpoint. The logout proceeds; what is lost is the `id_token_hint` on the upstream call, so the IdP may ask the user to confirm the logout or to pick the account, or may not end the upstream session at all. The same outage as the other federation-token-store lines |
 | `logout_registered_redirect_uri_refused` (warn) | `oauth/src/routes/logout.mts` | a logout's `post_logout_redirect_uri` matched an entry of the client's `postLogoutRedirectUris` that fails core's `checkRedirectUri` — not a URL, or an executable scheme such as `javascript:`, or any other shape `ClientEntrySchema` refuses at boot. Only a custom `ClientRepository`, which bypasses that schema, can hold one. The logout completed without the redirect. With `site` (`logout` / `federation_logout`), the sanitised `clientId` and the rejection's `reason`; fix the registration |
+| `authorize_registered_redirect_uri_refused` (warn) | `oauth/src/routes/authorizeClient.mts` | an `/oauth/authorize` request's `redirect_uri` (GET or POST) matched an entry of the client's `allowedRedirectUris` that fails core's `checkRedirectUri` — any shape `ClientEntrySchema` refuses at boot, the query-name rule included. Only a custom `ClientRepository`, which bypasses that schema, can hold one. The client was answered `400 invalid_request` (`redirect_uri not allowed`) and the browser was not redirected. With `site: "authorize"`, the sanitised `clientId` and the rejection's `reason`; fix the registration |
 | `federation_logout_end_session_failed`, `logout_federation_end_session_failed` (warn) | `oauth/src/routes/logout.mts` | the upstream IdP's end-session call failed after this server's own state was cleared: the user is logged out here but may still be signed in at the IdP (an orphan IdP session). With the error's projection and the sanitised `federation`. The federation logout route also emits audit `federation.logout.idp_unreachable`. Not every line involved an IdP: an Apple federation with no `endSessionEndpoint` refuses locally whenever it is handed no `post_logout_redirect_uri` — including one the request named but the client has not registered, which the routes drop — and that refusal is logged, and audited, the same way. Read those with the error's projection (a plain `Error`, no status) before paging anyone about the IdP |
 | `logout_backchannel_rejected` (warn) by `status`; `logout_backchannel_failed` (warn) by `step`; `logout_frontchannel_iframe_skipped` (warn) | `oauth/src/logout/broadcastBackchannel.mts`, `oauth/src/logout/renderFrontchannel.mts` | an RP was not told about a logout, by `clientId` (sanitised, capped at 200 characters). `rejected`: its back-channel endpoint answered a non-2xx `status` (the RP's own status text is not logged). `failed`: the POST failed (`step: "post"`) or the logout token could not be built or signed (`"logout_token"`), with the error's projection. `iframe_skipped`: its front-channel URI could not be turned into an iframe URL. Logout proceeds either way; that RP's session may outlive it |
 | `logout_store_unavailable` (error) by `store`; `logout_cascade_operation_failed`, `logout_cascade_cleanup_failed` (warn) | `oauth/src/routes/logout.mts`, `oauth/src/logout/sessionEnd.mts`, `oauth/src/logout/cascadeLogout.mts` | RP-initiated logout is answering `503` because a session store could not be read or marked (`left` says what that left: `unchanged`, `half_ended`, `unknown`) or the cascade stopped (`store: "logout_cascade"`, `cascadeStep`); the warn lines name each operation that failed. A listing that failed after the ended mark (`left: "half_ended"`), a mark whose outcome is `unknown`, or a cascade that stopped after step 1 may leave the session half-ended: it still exists, but the family index has marked it ended, so its code exchanges are refused (`session_invalidated`) until a retry of the logout completes or the mark lapses at the session's `expiresAt` plus five minutes (fail-closed) |
@@ -2252,7 +2253,8 @@ before you flip — and a relying party holding the secret can also mint.
 7. **Registered redirect URIs: query names.** Check every
    `allowedRedirectUris`, `postLogoutRedirectUris` and
    `federationGrantRedirectUris` entry, and every Client ID Metadata Document
-   you depend on. Two cases:
+   you depend on, and every entry a custom `ClientRepository` returns. Three
+   cases:
 
    - **Newly refused registrations.** A query name outside `[A-Za-z0-9_-]`
      (`?filter[x]=1`, `?a.b=1`), a parameter with no name, a `;` anywhere in
@@ -2276,6 +2278,17 @@ before you flip — and a relying party holding the secret can also mint.
      `redirect_uri_reserved_parameter`; both are `400 invalid_request`, so
      only an alert or client keyed on the `error_description` text sees the
      difference.
+   - **A custom `ClientRepository`'s entries.** Such a repository bypasses
+     the boot check, so its entries are held to `checkRedirectUri` where they
+     are used. An `allowedRedirectUris` entry that `checkRedirectUri`
+     refuses — any shape, the query rules included — used to be redirected
+     to; now
+     `/oauth/authorize` answers it `400 invalid_request` (`redirect_uri not
+     allowed`) with no redirect, after the login step, and warns
+     `authorize_registered_redirect_uri_refused` ([§4](#4-alerts)). A consent
+     request parked with such a URI before the upgrade gets the same `400` on
+     deny. A `postLogoutRedirectUris` entry it refuses was already dropped at
+     logout (`logout_registered_redirect_uri_refused`).
 
    Rename or remove such parameters, and carry the client's context in
    `state` or in the path. The rule covers names as written and the common

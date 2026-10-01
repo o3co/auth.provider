@@ -25,8 +25,9 @@
 
 /**
  * `redirectUri` with `params` appended, then `state` when the request carried
- * one, then `iss` = `responseIssuer`. The registered query is kept as it is:
- * nothing in it is rewritten or replaced.
+ * one, then `iss` = `responseIssuer`. The registered query's parameters are
+ * kept, names and values: nothing in it is removed or replaced, though
+ * serializing the query may re-encode a value's bytes (`%20` as `+`).
  */
 export function authorizationResponseUrl(
 	redirectUri: string,
