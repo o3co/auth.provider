@@ -952,6 +952,38 @@ describe("/authorize on admission — the ask is read until the code is minted",
 		expect(harness.regenerated).toBe(0);
 	});
 
+	it("prompt=login consent: the login trip, consent, then a code with no second login", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			consent: true,
+		});
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, prompt: "login consent" }),
+		);
+		// The return is the request as sent.
+		expect(toLogin.searchParams.get("prompt")).toBe("login consent");
+		await loggedInNow(clock);
+		const toConsent = sentTo(await authorize(harness.app, queryOf(toLogin)));
+		expect(toConsent.pathname).toBe("/consent");
+
+		const parked = await harness.pendingConsentStore.consume(
+			toConsent.searchParams.get("challenge") as string,
+		);
+		await harness.consentStore.grant({
+			sub: SUBJECT,
+			clientId: CLIENT_ID,
+			scopes: [...(parked?.scopes ?? [])],
+			grantedAt: Date.now(),
+			expiresAt: undefined,
+		});
+		const resumed = new URL(parked?.authorizeUrl as string);
+		expect(resumed.searchParams.get("prompt")).toBe("login");
+		const done = sentTo(await authorize(harness.app, queryOf(resumed)));
+		expect(done.origin + done.pathname).toBe(REDIRECT_URI);
+		expect(done.searchParams.get("code")).toBe("code-x");
+	});
+
 	it("spends the ask on the pass that mints: replaying the returned URL asks for the login again", async () => {
 		const { requirement, state } = steppingUp();
 		const clock = { authTime: minutesAgo(5) };
