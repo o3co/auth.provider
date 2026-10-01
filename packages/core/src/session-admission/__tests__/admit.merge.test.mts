@@ -590,6 +590,21 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 		).toMatchObject({ outcome: "admitted", acr: MFA });
 	});
 
+	it("probes the store admission read the session from, not the deps a second time", async () => {
+		let reads = 0;
+		const once = deps(session, [met(["otp", "mfa"])]);
+		const swapping = Object.defineProperty({ ...once }, "userSessionStore", {
+			get: () => (reads++ === 0 ? recordingStoreOf(session) : storeOf(session)),
+		});
+		const admission = await admitSession(swapping, {
+			claim: claim(),
+			action: "test.use",
+			asks: { acrValues: [MFA] },
+		});
+		expect(admission).toMatchObject({ outcome: "step_up", requirement: "mfa" });
+		expect(reads).toBe(1);
+	});
+
 	it("keeps unmet (acr) when the authority registered no page: it could not have finished the entry either way", async () => {
 		const pageless: SessionRequirement = { ...met(["otp", "mfa"]), stepUpPage: undefined };
 		expect(await ask([pageless], [MFA], { store: storeOf })).toEqual({
