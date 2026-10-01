@@ -44,8 +44,7 @@ export interface RedisSubjectRevocationOptions {
  * behind, must not move the line back and resurrect every token the first one
  * killed. Last-writer-wins does that, and a client-side read-compare-write
  * does it one round-trip later. So the comparison runs on the server in one
- * command (the client's `advanceRevocationBoundaries`, or
- * `setRevocationBoundaries` over a client without it), and the same guard
+ * command (the client's `advanceRevocationBoundaries`), and the same guard
  * covers the entry's expiry: shortening an in-force watermark would retire the
  * line while tokens it must refuse are still presentable. An expired key is an absent key, so a
  * reset after the previous watermark lapsed starts from its own value, as in
@@ -64,8 +63,7 @@ export interface RedisSubjectRevocationOptions {
  * A boundary later than the server's `TIME` plus `DEFAULT_CLOCK_SKEW_MS` is
  * clamped to that in the same script (`advanceRevocationBoundaries`), and the
  * clamp is said at warn after the write; a failing logger never fails the
- * revocation. Over a client without that method the boundary is recorded
- * unclamped, and construction says so at warn.
+ * revocation. A client without that method is refused at construction.
  */
 export function createRedisSubjectRevocation(
 	deps: RedisSubjectRevocationOptions,
@@ -73,20 +71,19 @@ export function createRedisSubjectRevocation(
 	const prefix = deps.keyPrefix ?? "ss:rev:";
 	const key = (subject: string): string => `${prefix}${subject}`;
 
-	// A driver without `setRevocationBoundaries` cannot express a
-	// sessions-only stamp, and one that quietly ignored the mode would answer
-	// every such stamp by revoking the subject's grants, the one operation the
-	// caller asked not to perform. So it fails here, at construction, rather
-	// than at the first password change.
+	// A driver without the clamped write records a boundary as far ahead as a
+	// replica's clock runs, refusing the subject's sign-ins until then; one
+	// without the mode would answer a sessions-only stamp by revoking grants.
+	// So it fails here, at construction, rather than at the first revocation.
 	if (
-		typeof (deps.client as { setRevocationBoundaries?: unknown }).setRevocationBoundaries !==
-		"function"
+		typeof (deps.client as { advanceRevocationBoundaries?: unknown })
+			.advanceRevocationBoundaries !== "function"
 	) {
 		throw new Error(
-			"createRedisSubjectRevocation: this driver has no `setRevocationBoundaries`. " +
-				"Without it a driver can advance only one revocation boundary, so a sessions-only " +
-				"stamp made through it would revoke the subject's federation grants. Upgrade the " +
-				"driver rather than the adapter.",
+			"createRedisSubjectRevocation: this driver has no `advanceRevocationBoundaries`. " +
+				"Without it a revocation boundary cannot be clamped to the server's clock, so a " +
+				"replica whose clock runs ahead would refuse the subject's sign-ins until its own " +
+				"clock's reading. Implement it in the driver (`makeIoredisClients` provides it).",
 		);
 	}
 
@@ -98,11 +95,6 @@ export function createRedisSubjectRevocation(
 			// Only the signal is lost.
 		}
 	};
-	const advance =
-		typeof deps.client.advanceRevocationBoundaries === "function"
-			? deps.client.advanceRevocationBoundaries.bind(deps.client)
-			: undefined;
-	if (advance === undefined) warn({ store: "redis" }, "subject_revocation_clamp_unsupported");
 
 	/** What a `Date` can hold: ±100 000 000 days from the epoch (ECMA-262). */
 	const MAX_DATE_MS = 8_640_000_000_000_000;
@@ -120,17 +112,7 @@ export function createRedisSubjectRevocation(
 	): Promise<void> => {
 		const expiresAtMs = checkSubjectRevocationInstant(expiresAt, "expiresAt");
 		const beforeMs = checkSubjectRevocationInstant(before, "before");
-		if (advance === undefined) {
-			await deps.client.setRevocationBoundaries(
-				key(subject),
-				mode,
-				beforeMs,
-				expiresAtMs,
-				SUBJECT_REVOCATION_MIN_RETENTION_MS,
-			);
-			return;
-		}
-		const { serverNowMs } = await advance(key(subject), mode, {
+		const { serverNowMs } = await deps.client.advanceRevocationBoundaries(key(subject), mode, {
 			beforeMs,
 			expiresAtMs,
 			grantRetentionMs: SUBJECT_REVOCATION_MIN_RETENTION_MS,

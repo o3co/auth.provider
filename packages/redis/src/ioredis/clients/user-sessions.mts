@@ -199,15 +199,6 @@ export function makeIoredisSubjectSessionIndexClient(io: Redis): SubjectSessionI
 export function makeIoredisSubjectRevocationClient(io: Redis): SubjectRevocationClient {
 	const subjectRevocationClient: SubjectRevocationClient = {
 		get: (k) => io.get(k),
-		setRevocationBoundaries: async (key, mode, beforeMs, expiresAtMs, grantRetentionMs) => {
-			const [value] = (await runScript(
-				io,
-				SET_REVOCATION_BOUNDARIES,
-				[key],
-				[mode, String(beforeMs), String(expiresAtMs), String(grantRetentionMs)],
-			)) as [string, string];
-			return value;
-		},
 		advanceRevocationBoundaries: async (key, mode, write) => {
 			const [value, serverNow] = (await runScript(
 				io,

@@ -292,6 +292,25 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		},
 	);
 
+	it("refuses a write with no skew, writing nothing", async () => {
+		// Without the skew the script could not clamp `before`.
+		const key = "t593e:skew:absent";
+		await raw.set(key, "1000", "PX", 600_000);
+		const now = await serverClock(() => raw)();
+		await expect(
+			raw.eval(
+				SET_REVOCATION_BOUNDARIES.source,
+				1,
+				key,
+				"all",
+				String(now + 10 * DEFAULT_CLOCK_SKEW_MS),
+				String(now + 600_000),
+				String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
+			),
+		).rejects.toThrow(/non-numeric argument/);
+		expect(await raw.get(key)).toBe("1000");
+	});
+
 	const unreadableInstants = [
 		"NaN",
 		"nan",
@@ -364,17 +383,19 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 		}
 	});
 
-	it("refuses a driver that cannot express a sessions-only stamp", async () => {
-		// A driver with only the single-boundary primitive would answer every
-		// sessions-only stamp by revoking the subject's grants.
-		const construct = () =>
-			createRedisSubjectRevocation({
-				client: { get: async () => null } as never,
-				keyPrefix: "t593e:9:",
-			});
-		expect(construct).toThrow(/setRevocationBoundaries/);
-		// The refusal states the rule it enforces, with no issue number or design label.
-		expect(construct).toThrow(/can advance only one revocation boundary/);
-		expect(construct).not.toThrow(/#\d|\bD\d+\b/);
+	it("refuses a driver that cannot clamp a boundary to the server's clock", async () => {
+		// A driver with only the unclamped write records a boundary a replica's
+		// clock runs ahead to, refusing the subject's sign-ins until then.
+		for (const client of [
+			{ get: async () => null },
+			{ get: async () => null, setRevocationBoundaries: async () => "1000" },
+		]) {
+			const construct = () =>
+				createRedisSubjectRevocation({ client: client as never, keyPrefix: "t593e:9:" });
+			expect(construct).toThrow(/advanceRevocationBoundaries/);
+			// The refusal states the rule it enforces, with no issue number or design label.
+			expect(construct).toThrow(/clamp/);
+			expect(construct).not.toThrow(/#\d|\bD\d+\b/);
+		}
 	});
 });

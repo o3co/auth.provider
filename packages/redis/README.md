@@ -198,13 +198,11 @@ Each one implements a port core declares; the slot name is in parentheses.
   with `store`, `subject`, `requestedBefore`, `recordedBefore`) on the
   module's logger, or the builder's `logger` option, else the factory
   context's logger, and `consoleLogger` without one; a failing logger never fails
-  the revocation. It clamps through the client's optional
-  `advanceRevocationBoundaries`, which `makeIoredisClients` provides. Over a
-  custom `SubjectRevocationClient` without it, the store records the boundary
-  unclamped through `setRevocationBoundaries`, and says so once at
-  construction (`subject_revocation_clamp_unsupported`, warn). A replica of an
-  older release writes the same stored value, unclamped, until it is
-  replaced.
+  the revocation. It clamps through the client's
+  `advanceRevocationBoundaries`, which `makeIoredisClients` provides; the store
+  refuses, at construction, a custom `SubjectRevocationClient` without it. A
+  replica of an older release writes the same stored value, unclamped, until
+  it is replaced.
 - `FederationTokenStore` (`federationTokenStore`) — the upstream IdP tokens
   held for a session. See [Federation-token keys and logout](#federation-token-keys-and-logout).
 - `FederationGrantStore` (`federationGrantStore`) and

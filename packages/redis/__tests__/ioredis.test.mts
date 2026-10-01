@@ -722,25 +722,11 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 			wire: [1, "idx"],
 		},
 		{
-			name: "subjectRevocationClient.setRevocationBoundaries",
-			reply: ["stored", "5000"],
-			answer: "stored",
-			run: (io: Redis) =>
-				makeIoredisClients(io).subjectRevocationClient.setRevocationBoundaries(
-					"rev",
-					"sessions",
-					1_000,
-					2_000,
-					3_000,
-				),
-			wire: [1, "rev", "sessions", "1000", "2000", "3000"],
-		},
-		{
 			name: "subjectRevocationClient.advanceRevocationBoundaries",
 			reply: ["stored", "5000"],
 			answer: { value: "stored", serverNowMs: 5_000 },
 			run: (io: Redis) =>
-				makeIoredisClients(io).subjectRevocationClient.advanceRevocationBoundaries?.("rev", "all", {
+				makeIoredisClients(io).subjectRevocationClient.advanceRevocationBoundaries("rev", "all", {
 					beforeMs: 1_000,
 					expiresAtMs: 2_000,
 					grantRetentionMs: 3_000,
@@ -799,6 +785,13 @@ describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRI
 // another replica's build, a SCRIPT FLUSH, a failover — loads that text. The
 // text is the script's source: what its comments say is part of what ships.
 // ---------------------------------------------------------------------------
+
+describe("makeIoredisClients subjectRevocationClient — one write, the clamped one", () => {
+	it("offers only the read and the clamped write", () => {
+		const client = makeIoredisClients(makeFakeIoredis()).subjectRevocationClient;
+		expect(Object.keys(client).sort()).toEqual(["advanceRevocationBoundaries", "get"]);
+	});
+});
 
 describe("makeIoredisFederationGrantStoreClient — a cold cache loads this build's script text", () => {
 	const writes = [
