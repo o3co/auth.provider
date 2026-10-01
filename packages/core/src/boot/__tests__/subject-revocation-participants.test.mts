@@ -106,6 +106,122 @@ describe("subjectRevocationParticipants — registration", () => {
 	});
 });
 
+describe("subjectRevocationParticipants — what registers", () => {
+	it("calls the checked run with Reflect.apply: an own call set on it afterwards is not used", async () => {
+		const runs: string[] = [];
+		const checked = async ({ subject }: { readonly subject: string }) => {
+			runs.push(`checked:${subject}`);
+		};
+		const resolver = await resolverOf([contributing("test:call", { feature: () => ({ run: checked }) })]);
+		Object.defineProperty(checked, "call", {
+			value: () => {
+				runs.push("own call");
+				return Promise.resolve();
+			},
+		});
+
+		await resolver?.get("feature")?.run({ subject: "u-1" });
+		expect(runs).toEqual(["checked:u-1"]);
+	});
+
+	it("calls run with this as the object the factory answered", async () => {
+		const seen: unknown[] = [];
+		class Participant {
+			readonly tag = "instance";
+			async run(this: Participant, _input: { readonly subject: string }): Promise<void> {
+				seen.push(this);
+			}
+		}
+		const answered = new Participant();
+		const resolver = await resolverOf([contributing("test:class", { feature: () => answered })]);
+
+		await resolver?.get("feature")?.run({ subject: "u-1" });
+		expect(seen).toEqual([answered]);
+		expect(seen[0]).toBe(answered);
+	});
+
+	it("reads a getter run once, at registration", async () => {
+		const runs: string[] = [];
+		let reads = 0;
+		const answered = {
+			get run() {
+				reads += 1;
+				const tag = `read-${reads}`;
+				return async ({ subject }: { readonly subject: string }) =>
+					void runs.push(`${tag}:${subject}`);
+			},
+		};
+		const resolver = await resolverOf([contributing("test:getter", { feature: () => answered })]);
+
+		await resolver?.get("feature")?.run({ subject: "u-1" });
+		await resolver?.get("feature")?.run({ subject: "u-2" });
+		expect(reads).toBe(1);
+		expect(runs).toEqual(["read-1:u-1", "read-1:u-2"]);
+	});
+});
+
+describe("subjectRevocationParticipants — the resolver cannot be changed", () => {
+	it("is frozen", async () => {
+		const resolver = await resolverOf([
+			contributing("test:owner", { feature: () => participant([], "owner") }),
+		]);
+		expect(Object.isFrozen(resolver)).toBe(true);
+	});
+
+	it("refuses a contribution factory that assigns entries, and the owner's participant still runs", async () => {
+		const runs: string[] = [];
+		const caught: unknown[] = [];
+		const tampering = defineModule({
+			name: "test:tamper",
+			requires: ["subjectRevocationParticipantResolver"],
+			contributes: {
+				subjectRevocationParticipants: {
+					tamper: (deps: { subjectRevocationParticipantResolver: object }) => {
+						try {
+							(deps.subjectRevocationParticipantResolver as { entries: unknown }).entries = () =>
+								[][Symbol.iterator]();
+						} catch (error) {
+							caught.push(error);
+						}
+						return participant(runs, "tamper");
+					},
+				},
+			},
+		} as never);
+		const resolver = await resolverOf([
+			contributing("test:owner", { feature: () => participant(runs, "owner") }),
+			tampering,
+		]);
+
+		expect(caught).toHaveLength(1);
+		expect(caught[0]).toBeInstanceOf(TypeError);
+		for (const [, registered] of resolver?.entries() ?? []) {
+			await registered.run({ subject: "u-1" });
+		}
+		expect(runs).toEqual(["owner:u-1", "tamper:u-1"]);
+	});
+
+	it("refuses boot when a provides factory assigns entries (provides-factory-failed)", async () => {
+		const tampering = defineModule({
+			name: "test:tamper",
+			requires: ["subjectRevocationParticipantResolver"],
+			provides: {
+				tamperSlot: (deps: { subjectRevocationParticipantResolver: object }) => {
+					(deps.subjectRevocationParticipantResolver as { entries: unknown }).entries = () =>
+						[][Symbol.iterator]();
+					return 1;
+				},
+			},
+			lifecycle: { tamperSlot: { eager: true } },
+		} as never);
+		const err = await refusal(
+			boot([contributing("test:owner", { feature: () => participant([], "owner") }), tampering]),
+		);
+		expect(err.reason).toBe("provides-factory-failed");
+		expect(err.cause).toBeInstanceOf(TypeError);
+	});
+});
+
 describe("subjectRevocationParticipants — refusals", () => {
 	it("refuses a name two modules contribute (duplicate-contribute)", async () => {
 		const err = await refusal(

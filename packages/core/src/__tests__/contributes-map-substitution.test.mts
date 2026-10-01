@@ -32,12 +32,14 @@ import type {
 	MfaFactor,
 	MfaFactorFactory,
 	RateLimitBudgetFactory,
+	SubjectRevocationParticipantFactory,
 } from "../modules/manifest/contributes-map.mjs";
 import { defineFederationType } from "../modules/manifest/define-federation-type.mjs";
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import type { GrantPolicyHook } from "../policy/types.mjs";
 import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../token-exchange/validator.mjs";
+import type { SubjectRevocationParticipant } from "../user-sessions/subjectRevocationParticipants.mjs";
 
 // Every contribution kind carries its concrete type from registration to
 // use. The first describe block covers the kinds whose implementations live
@@ -153,6 +155,43 @@ describe("rate-limit budgets and declared federation contributions", () => {
 				rateLimitBudgets: {
 					// @ts-expect-error — no `windowSeconds`
 					"acme-login": () => ({ limit: 5 }),
+				},
+			},
+		});
+		expect(true).toBe(true);
+	});
+
+	it("a subjectRevocationParticipants factory answers the participant contract in user-sessions, never null", () => {
+		expectTypeOf<ReturnType<SubjectRevocationParticipantFactory<unknown>>>().toEqualTypeOf<
+			Contributed<SubjectRevocationParticipant>
+		>();
+		defineModule({
+			name: "acme-participant",
+			requires: ["config"],
+			contributes: {
+				subjectRevocationParticipants: {
+					"acme.lock": (deps) => {
+						expectTypeOf(deps.config).not.toBeUnknown();
+						return { run: async ({ subject }) => void subject };
+					},
+				},
+			},
+		});
+		defineModule({
+			name: "acme-participant-off",
+			contributes: {
+				subjectRevocationParticipants: {
+					// @ts-expect-error — a participant is switched off by not installing it
+					"acme.lock": () => null,
+				},
+			},
+		});
+		defineModule({
+			name: "acme-participant-sync",
+			contributes: {
+				subjectRevocationParticipants: {
+					// @ts-expect-error — run answers a promise
+					"acme.lock": () => ({ run: (_input: { readonly subject: string }) => 1 }),
 				},
 			},
 		});

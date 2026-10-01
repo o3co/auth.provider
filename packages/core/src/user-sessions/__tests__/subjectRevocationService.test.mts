@@ -598,31 +598,140 @@ describe("createSubjectRevocationService — participants", () => {
 		return { get: (name) => byName.get(name), entries: () => byName.entries() };
 	};
 
-	it("runs them once on the revoke path, after the revocation completed", async () => {
-		const runs: string[] = [];
-		const service = createSubjectRevocationService(
-			deps({ subjectRevocationParticipantResolver: participants(runs) }),
-		);
+	/**
+	 * Deps whose watermark, cascade and grant listing record into `order`,
+	 * beside a participant that records there too.
+	 */
+	const ordered = async (order: string[], over: Record<string, unknown> = {}) => {
+		const revocation = createInMemorySubjectRevocation();
+		const revokeBefore = revocation.revokeBefore.bind(revocation);
+		const revokeSessionsBefore = revocation.revokeSessionsBefore.bind(revocation);
+		vi.spyOn(revocation, "revokeBefore").mockImplementation(async (...args) => {
+			order.push("watermark");
+			return revokeBefore(...args);
+		});
+		vi.spyOn(revocation, "revokeSessionsBefore").mockImplementation(async (...args) => {
+			order.push("sessions-watermark");
+			return revokeSessionsBefore(...args);
+		});
+		const index = createInMemorySubjectSessionIndex();
+		await index.addSid("u-1", "sid-1", new Date(now().getTime() + 60 * MIN));
+		const h = harness();
+		const listBySubject = h.store.listBySubject.bind(h.store);
+		vi.spyOn(h.store, "listBySubject").mockImplementation(async (...args) => {
+			order.push("grants");
+			return listBySubject(...args);
+		});
+		const byName = new Map<string, SubjectRevocationParticipant>([
+			["feature", { run: async ({ subject }) => void order.push(`participant:${subject}`) }],
+		]);
+		return deps({
+			subjectRevocation: revocation,
+			subjectSessionIndex: index,
+			cascadeSession: async (sid: string) => {
+				order.push(`cascade:${sid}`);
+				return { ok: true };
+			},
+			federationGrantStore: h.store,
+			subjectRevocationParticipantResolver: {
+				get: (name: string) => byName.get(name),
+				entries: () => byName.entries(),
+			},
+			...over,
+		});
+	};
+
+	it("runs them once on the revoke path, after the watermark, the sessions and the grants", async () => {
+		const order: string[] = [];
+		const service = createSubjectRevocationService(await ordered(order));
 
 		const result = await service.revokeAllForSubject({ subject: "u-1" });
 
-		expect(runs).toEqual(["u-1"]);
+		expect(order).toEqual(["watermark", "cascade:sid-1", "grants", "participant:u-1"]);
 		expect(result.participantsHeldBack).toEqual([]);
 		expect(result.complete).toBe(true);
 	});
 
-	it("runs them on the keep path, after the revocation completed", async () => {
-		const runs: string[] = [];
-		const service = createSubjectRevocationService(
-			deps({ allowKeep: true, subjectRevocationParticipantResolver: participants(runs) }),
-		);
+	it("runs them once on the keep path, after the sessions boundary, the sessions and the grants", async () => {
+		const order: string[] = [];
+		const service = createSubjectRevocationService(await ordered(order, { allowKeep: true }));
 
 		const result = await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
 
 		expect(result.federationGrants.applied).toBe("keep");
-		expect(runs).toEqual(["u-1"]);
+		expect(order).toEqual(["sessions-watermark", "cascade:sid-1", "grants", "participant:u-1"]);
 		expect(result.participantsHeldBack).toEqual([]);
 		expect(result.complete).toBe(true);
+	});
+
+	it("holds them back on the keep path when a kept grant's renewal could not be ended", async () => {
+		const runs: string[] = [];
+		const h = harness();
+		await h.seed();
+		vi.spyOn(h.store, "retireIntent").mockRejectedValue(new Error("store is down"));
+		const service = createSubjectRevocationService(
+			deps({
+				allowKeep: true,
+				federationGrantStore: h.store,
+				subjectRevocationParticipantResolver: participants(runs),
+				logger: { error: () => {}, warn: () => {} },
+			}),
+		);
+
+		const result = await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
+
+		expect(result.grantsRetireFailed).toEqual(["g-1"]);
+		expect(runs).toEqual([]);
+		expect(result.participantsHeldBack).toEqual(["feature"]);
+		expect(result.complete).toBe(false);
+	});
+
+	it("holds them back on the keep path when the grants could not be listed", async () => {
+		const runs: string[] = [];
+		const h = harness();
+		vi.spyOn(h.store, "listBySubject").mockRejectedValue(new Error("store is down"));
+		const service = createSubjectRevocationService(
+			deps({
+				allowKeep: true,
+				federationGrantStore: h.store,
+				subjectRevocationParticipantResolver: participants(runs),
+				logger: { error: () => {}, warn: () => {} },
+			}),
+		);
+
+		const result = await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
+
+		expect(result.failures).toContainEqual(
+			expect.objectContaining({ operation: "listBySubject" }),
+		);
+		expect(runs).toEqual([]);
+		expect(result.participantsHeldBack).toEqual(["feature"]);
+		expect(result.complete).toBe(false);
+	});
+
+	it("reports, on the keep path, participants that cannot be listed as a failure of the slot", async () => {
+		const service = createSubjectRevocationService(
+			deps({
+				allowKeep: true,
+				subjectRevocationParticipantResolver: {
+					get: () => undefined,
+					entries: () => {
+						throw new Error("not readable yet");
+					},
+				},
+				logger: { error: () => {}, warn: () => {} },
+			}),
+		);
+
+		const result = await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
+
+		expect(result.failures).toEqual([
+			expect.objectContaining({
+				capability: "subjectRevocationParticipantResolver",
+				operation: "entries",
+			}),
+		]);
+		expect(result.complete).toBe(false);
 	});
 
 	it("holds them back on the keep path when the sessions boundary could not be written", async () => {

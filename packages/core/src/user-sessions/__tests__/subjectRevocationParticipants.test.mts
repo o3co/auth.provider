@@ -15,6 +15,8 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { runInNewContext } from "node:vm";
+import type { FederationGrantStore } from "#/federation-grants/store.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import { createInMemorySubjectSessionIndex } from "#/user-sessions/memory/subjectSessionIndex.mjs";
@@ -60,12 +62,39 @@ const withSessions = async (...sids: string[]) => {
 	return index;
 };
 
-const silentLogger = (): { readonly logger: Logger; readonly lines: string[] } => {
+interface LoggedLine {
+	readonly level: string;
+	readonly message: string | undefined;
+	readonly fields: Record<string, unknown>;
+}
+
+/**
+ * A logger that keeps each line, its structured fields included; one that
+ * throws on the messages in `throwsOn` once it has kept them.
+ */
+const silentLogger = (
+	throwsOn: readonly string[] = [],
+): {
+	readonly logger: Logger;
+	readonly lines: string[];
+	readonly logged: LoggedLine[];
+} => {
 	const lines: string[] = [];
+	const logged: LoggedLine[] = [];
 	const at =
 		(level: string) =>
 		(first: unknown, second?: unknown): void => {
-			lines.push(`${level}:${typeof first === "string" ? first : String(second)}`);
+			const message = typeof first === "string" ? first : (second as string | undefined);
+			lines.push(`${level}:${String(message)}`);
+			logged.push({
+				level,
+				message,
+				fields:
+					typeof first === "object" && first !== null ? (first as Record<string, unknown>) : {},
+			});
+			if (message !== undefined && throwsOn.includes(message)) {
+				throw new Error("the logger is down");
+			}
 		};
 	const logger = {
 		trace: () => {},
@@ -76,8 +105,14 @@ const silentLogger = (): { readonly logger: Logger; readonly lines: string[] } =
 		fatal: () => {},
 		child: () => logger,
 	} as unknown as Logger;
-	return { logger, lines };
+	return { logger, lines, logged };
 };
+
+/** A participant that rejects with `thrown`. */
+const rejecting = (name: string, thrown: unknown): readonly [string, SubjectRevocationParticipant] => [
+	name,
+	{ run: () => Promise.reject(thrown) },
+];
 
 describe("isSubjectRevocationParticipant", () => {
 	it("admits an object whose run is a function", () => {
@@ -116,6 +151,12 @@ describe("revokeAllForSubject — participants", () => {
 				order.push(`cascade:${sid}`);
 				return { ok: true };
 			},
+			federationGrantStore: {
+				listBySubject: async () => {
+					order.push("grants");
+					return [];
+				},
+			} as unknown as FederationGrantStore,
 			subjectRevocationParticipantResolver: resolverOf([
 				recording("second-feature", order),
 				recording("first-feature", order),
@@ -125,6 +166,7 @@ describe("revokeAllForSubject — participants", () => {
 		expect(order).toEqual([
 			"watermark",
 			"cascade:s1",
+			"grants",
 			`second-feature:${SUBJECT}`,
 			`first-feature:${SUBJECT}`,
 		]);
@@ -314,6 +356,114 @@ describe("revokeAllForSubject — participants", () => {
 		expect(JSON.stringify(result.participantFailures)).not.toContain("alice");
 	});
 
+	it("records a thrown Proxy whose traps throw, and a revoked Proxy, by name, and runs the next", async () => {
+		const calls: string[] = [];
+		const trapping = new Proxy(new Error("inner"), {
+			get() {
+				throw new Error("trap");
+			},
+			getPrototypeOf() {
+				throw new Error("trap");
+			},
+			getOwnPropertyDescriptor() {
+				throw new Error("trap");
+			},
+			has() {
+				throw new Error("trap");
+			},
+		});
+		const revocable = Proxy.revocable(new Error("inner"), {});
+		revocable.revoke();
+		const result = await revokeAllForSubject({
+			subject: SUBJECT,
+			watermarkTtlMs: TTL,
+			subjectSessionIndex: await withSessions(),
+			subjectRevocation: createInMemorySubjectRevocation(),
+			cascadeSession: async () => ({ ok: true }),
+			subjectRevocationParticipantResolver: resolverOf([
+				rejecting("trapping", trapping),
+				recording("between", calls),
+				rejecting("revoked", revocable.proxy),
+				recording("after", calls),
+			]),
+			logger: silentLogger().logger,
+		});
+
+		expect(calls).toEqual([`between:${SUBJECT}`, `after:${SUBJECT}`]);
+		expect(result.participantFailures).toEqual([
+			{ name: "trapping", error: { name: "NonError" } },
+			{ name: "revoked", error: { name: "NonError" } },
+		]);
+		expect(result.failures).toEqual([]);
+		expect(result.complete).toBe(false);
+	});
+
+	it("reads an Error from another realm as an Error", async () => {
+		const foreign = runInNewContext(
+			'Object.assign(new TypeError("elsewhere"), { reason: "unreachable" })',
+		) as unknown;
+		expect(foreign instanceof Error).toBe(false);
+		const outcome = await runSubjectRevocationParticipants({
+			subject: SUBJECT,
+			participants: resolverOf([rejecting("foreign", foreign)]),
+			revocationComplete: true,
+			logger: silentLogger().logger,
+		});
+		expect(outcome.participantFailures).toEqual([
+			{ name: "foreign", error: { name: "TypeError", reason: "unreachable" } },
+		]);
+	});
+
+	it("drops an error name that is, or holds, the subject", async () => {
+		const outcome = await runSubjectRevocationParticipants({
+			subject: "alice42",
+			participants: resolverOf([
+				rejecting("named", Object.assign(new Error("x"), { name: "alice42" })),
+				rejecting("holding", Object.assign(new Error("x"), { name: "Lockalice42" })),
+				rejecting("other", Object.assign(new Error("x"), { name: "LockError" })),
+			]),
+			revocationComplete: true,
+			logger: silentLogger().logger,
+		});
+		expect(outcome.participantFailures).toEqual([
+			{ name: "named", error: { name: "Error" } },
+			{ name: "holding", error: { name: "Error" } },
+			{ name: "other", error: { name: "LockError" } },
+		]);
+	});
+
+	it("drops a reason that is, or holds, the subject", async () => {
+		const outcome = await runSubjectRevocationParticipants({
+			subject: "alice",
+			participants: resolverOf([
+				rejecting("equal", Object.assign(new Error("x"), { reason: "alice" })),
+				rejecting("holding", Object.assign(new Error("x"), { reason: "lock-alice" })),
+				rejecting("other", Object.assign(new Error("x"), { reason: "unreachable" })),
+			]),
+			revocationComplete: true,
+			logger: silentLogger().logger,
+		});
+		expect(outcome.participantFailures).toEqual([
+			{ name: "equal", error: { name: "Error" } },
+			{ name: "holding", error: { name: "Error" } },
+			{ name: "other", error: { name: "Error", reason: "unreachable" } },
+		]);
+	});
+
+	it("keeps only an own reason, never one an error inherits", async () => {
+		class CodedError extends Error {}
+		Object.defineProperty(CodedError.prototype, "reason", { value: "unreachable" });
+		const outcome = await runSubjectRevocationParticipants({
+			subject: SUBJECT,
+			participants: resolverOf([rejecting("inherited", new CodedError("x"))]),
+			revocationComplete: true,
+			logger: silentLogger().logger,
+		});
+		expect(outcome.participantFailures).toEqual([
+			{ name: "inherited", error: { name: "Error" } },
+		]);
+	});
+
 	it("reports a resolver that cannot be read as a failure of the slot, and still answers", async () => {
 		const throwing: SubjectRevocationParticipantResolver = {
 			get: () => undefined,
@@ -357,33 +507,135 @@ describe("revokeAllForSubject — participants", () => {
 });
 
 describe("runSubjectRevocationParticipants", () => {
-	it("logs a failure with the participant's name and a held-back pass with every name", async () => {
+	it("logs a failure with the subject, the participant's name and the error's projection", async () => {
 		const failing = silentLogger();
 		await runSubjectRevocationParticipants({
 			subject: SUBJECT,
-			participants: resolverOf([
-				[
-					"x",
-					{
-						run: async () => {
-							throw new Error("down");
-						},
-					},
-				],
-			]),
+			participants: resolverOf([rejecting("x", new RangeError("down"))]),
 			revocationComplete: true,
 			logger: failing.logger,
 		});
-		expect(failing.lines).toEqual(["error:revoke_all_participant_failed"]);
+		expect(failing.logged).toEqual([
+			{
+				level: "error",
+				message: "revoke_all_participant_failed",
+				fields: {
+					subject: SUBJECT,
+					participant: "x",
+					err: expect.objectContaining({ name: "RangeError", detail: "down" }),
+				},
+			},
+		]);
+	});
 
+	it("logs a held-back pass once, with the subject and every name", async () => {
 		const held = silentLogger();
 		await runSubjectRevocationParticipants({
 			subject: SUBJECT,
-			participants: resolverOf([recording("x", [])]),
+			participants: resolverOf([recording("x", []), recording("y", [])]),
 			revocationComplete: false,
 			logger: held.logger,
 		});
-		expect(held.lines).toEqual(["warn:revoke_all_participants_held_back"]);
+		expect(held.logged).toEqual([
+			{
+				level: "warn",
+				message: "revoke_all_participants_held_back",
+				fields: { subject: SUBJECT, participants: ["x", "y"] },
+			},
+		]);
+	});
+
+	it("logs a listing that threw with the subject and the error's projection", async () => {
+		const unlisted = silentLogger();
+		const outcome = await runSubjectRevocationParticipants({
+			subject: SUBJECT,
+			participants: {
+				get: () => undefined,
+				entries: () => {
+					throw new TypeError("not readable yet");
+				},
+			},
+			revocationComplete: true,
+			logger: unlisted.logger,
+		});
+		expect(outcome.participantFailures).toEqual([]);
+		expect(outcome.listingError?.error).toBeInstanceOf(TypeError);
+		expect(unlisted.logged).toEqual([
+			{
+				level: "error",
+				message: "revoke_all_list_participants_failed",
+				fields: {
+					subject: SUBJECT,
+					err: expect.objectContaining({ name: "TypeError", detail: "not readable yet" }),
+				},
+			},
+		]);
+	});
+
+	it("goes on past a logger that throws on a failure's line", async () => {
+		const calls: string[] = [];
+		const { logger } = silentLogger(["revoke_all_participant_failed"]);
+		const outcome = await runSubjectRevocationParticipants({
+			subject: SUBJECT,
+			participants: resolverOf([
+				rejecting("first", new Error("down")),
+				recording("between", calls),
+				rejecting("second", new Error("down")),
+			]),
+			revocationComplete: true,
+			logger,
+		});
+		expect(calls).toEqual([`between:${SUBJECT}`]);
+		expect(outcome.participantFailures.map((failure) => failure.name)).toEqual([
+			"first",
+			"second",
+		]);
+		expect(outcome.listingError).toBeUndefined();
+	});
+
+	it("answers the held-back names when the logger throws on the held-back line", async () => {
+		const { logger } = silentLogger(["revoke_all_participants_held_back"]);
+		const outcome = await runSubjectRevocationParticipants({
+			subject: SUBJECT,
+			participants: resolverOf([recording("x", [])]),
+			revocationComplete: false,
+			logger,
+		});
+		expect(outcome).toEqual({ participantsHeldBack: ["x"], participantFailures: [] });
+	});
+
+	it("answers a listing error when the logger throws on its line too", async () => {
+		const { logger } = silentLogger(["revoke_all_list_participants_failed"]);
+		const outcome = await runSubjectRevocationParticipants({
+			subject: SUBJECT,
+			participants: {
+				get: () => undefined,
+				entries: () => {
+					throw new Error("not readable yet");
+				},
+			},
+			revocationComplete: true,
+			logger,
+		});
+		expect(outcome.listingError).toBeDefined();
+	});
+
+	it("reads an entry that is not a pair as a listing error, and runs none", async () => {
+		const calls: string[] = [];
+		const outcome = await runSubjectRevocationParticipants({
+			subject: SUBJECT,
+			participants: {
+				get: () => undefined,
+				entries: () =>
+					[recording("a", calls), 42][Symbol.iterator]() as unknown as IterableIterator<
+						readonly [string, SubjectRevocationParticipant]
+					>,
+			},
+			revocationComplete: true,
+			logger: silentLogger().logger,
+		});
+		expect(calls).toEqual([]);
+		expect(outcome.listingError).toBeDefined();
 	});
 
 	it("lists the participants once, before the first runs", async () => {
