@@ -16,16 +16,22 @@
 
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
- * read, the subject, the renewal nonce and the revocation boundary. The session store and the
- * boundary are read here and nowhere else in admission; an outage is
- * answered through admission's `unavailable`, which logs it.
+ * read, the subject, the renewal nonce and the revocation boundary, then the
+ * store's step-up capability over the live record. The session store and the
+ * boundary are read here and nowhere else in admission; an outage, or a
+ * store that throws when its capability is read, is answered through
+ * admission's `unavailable`, which logs it.
  */
 
 import { emitAuditEvent } from "../audit/factory.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
-import type { UserSession, UserSessionStore } from "../user-sessions/types.mjs";
+import {
+	supportsSecondFactorUpdate,
+	type UserSession,
+	type UserSessionStore,
+} from "../user-sessions/types.mjs";
 import { nonEmptyString } from "./input-values.mjs";
 import type { CheckedRequest } from "./request-check.mjs";
 import type { Admission, AdmissionInfrastructureStore } from "./requirement.mjs";
@@ -36,9 +42,13 @@ const isValidDate = (value: unknown): value is Date =>
 /**
  * What steps 1 to 4 end in: the answer, when one of them gave it; else the
  * live record, or `null` when there is no store or a token carrier has no
- * `sid`.
+ * `sid`, with whether the store it was read from has the step-up capability
+ * (`supportsSecondFactorUpdate`, read once, over a live record alone;
+ * `false` without one).
  */
-export type LiveSession = { readonly answer: Admission } | { readonly session: UserSession | null };
+export type LiveSession =
+	| { readonly answer: Admission }
+	| { readonly session: UserSession | null; readonly storeRecords: boolean };
 
 /**
  * Whether a record bound to `bound` — its renewal nonce, read once by the
@@ -149,5 +159,16 @@ export async function readLiveSession(
 		}
 	}
 
-	return { session };
+	// The store's step-up capability, read once over the live record: a
+	// store that throws on the read is unavailable, as on any other.
+	let storeRecords = false;
+	if (session !== null) {
+		try {
+			storeRecords = supportsSecondFactorUpdate(userSessionStore);
+		} catch (err) {
+			return { answer: unavailable("user_session" satisfies AdmissionInfrastructureStore, err) };
+		}
+	}
+
+	return { session, storeRecords };
 }

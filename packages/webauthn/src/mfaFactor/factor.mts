@@ -15,8 +15,9 @@
  */
 
 /**
- * The `webauthn` second factor, as core's `MfaFactor` contract states it (the
- * MFA ADR's D4, D14, F7). See README, "WebAuthn as a second factor".
+ * The `webauthn` second factor, as core's `MfaFactor` contract states it,
+ * contributed under core's `mfaFactors` kind. See README, "WebAuthn as a
+ * second factor".
  *
  * - Registration asks for a credential under the subject's WebAuthn user
  *   handle — 32 random bytes made at its first WebAuthn enrollment and kept
@@ -44,10 +45,13 @@
  *   than the one registered is `invalid` (BE is fixed at creation, WebAuthn
  *   §6.1.3).
  * - `hwk` for a credential that is not backup-eligible (BE = 0), `swk` for
- *   one that is, whatever its backup state (the MFA ADR's D14). With
+ *   one that is, whatever its backup state: BE, fixed at creation, says
+ *   whether the key may leave the device; BS only says whether it has. With
  *   attestation `none` both flags are what the authenticator reports of
  *   itself: `hwk` means reported device-bound, not proven hardware. The
  *   backup state is kept for the record; no decision reads it.
+ * - A record's identity is its credential id, read as the record's data is.
+ *   Data the factor cannot read has none: the identity never throws.
  * - A ceremony's challenge lives until the relying party's
  *   `challengeTtlMs`; the transaction bounds it too.
  * - Data or a pending state that is not a WebAuthn record is thrown (the
@@ -324,6 +328,15 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 		counting: true,
 		guessable: false,
 		describe: () => ({}),
+		// The credential id, which an assertion leaves as it is. Never throws: data the factor
+		// cannot read names none.
+		identity: (data) => {
+			try {
+				return readData(data).credentialId;
+			} catch {
+				return undefined;
+			}
+		},
 
 		async challenge(ctx) {
 			readData(ctx.factor.data);

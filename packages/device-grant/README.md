@@ -1,6 +1,6 @@
 # @o3co/auth-provider-device-grant
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
@@ -192,7 +192,7 @@ Errors: `400 invalid_request` (`malformed_body` for JSON the parser cannot read;
 - the provider's own origin, or one listed in `session.csrf.trustedOrigins`, is accepted — a verification page served from another origin is declared there, on the same list the login form uses;
 - a request with no origin signal at all (a non-browser client) must present the signed double-submit token from `GET /session/csrf`: the `<session-store.name>.csrf` cookie echoed in the `x-csrf-token` header.
 
-**Enabling the grant requires a `csrfGuard` component**, so boot fails without one, naming it. The slot is optional in the manifest, so a deployment that leaves the grant off needs none. One CSRF policy for the product, read through its contract in core, not a second origin check that can drift from it — and not a guard rebuilt from the session's configuration: this package reads no `session.*` or `session-store.*` key.
+**Enabling the grant requires a `csrfGuard` component**, so boot fails without one, naming it, and fails naming `csrfGuard.middleware` for a guard whose `middleware`, which the route mounts, cannot be read or is not a request handler (a function of at most three parameters; Express skips one of four or more as an error handler). The slot is optional in the manifest, so a deployment that leaves the grant off needs none. One CSRF policy for the product, read through its contract in core, not a second origin check that can drift from it — and not a guard rebuilt from the session's configuration: this package reads no `session.*` or `session-store.*` key.
 
 **The checks run in this order:** the declared body size (`413`), the JSON parser (`413` for a chunked body over the bound, `415 unsupported_encoding` for one it cannot decode, `400 malformed_body` for one it cannot read), the CSRF guard (`403 access_denied`), then, in the handler, the media type (`415`), the action (`400`), session admission (`401 login_required`, `403 step_up_required`, or `503` when it cannot answer), the email gate on `approve` (`403`), the budget (`429`, or the limiter outage's `503`) and the code. So RFC 8628 §5.4's cross-site form is refused by the guard with `403` before its media type is looked at. `415` is what a request the guard lets through gets for a body that is not JSON — a same-origin form, or a POST with no body at all — and it comes before `401`: a non-JSON request with no session is `415`. The action comes before the session too, since it names what admission is asked about: an unknown action is `400` whether or not the cookie is signed in, and whether or not the session store can answer.
 
