@@ -29,10 +29,12 @@ import {
 	type FederationGrantConnectTransaction,
 	type FederationGrantIntent,
 	type FederationGrantStore,
+	federationGrantAccessToken,
 	federationGrantAuditMetadata,
 	isFederationUpstreamOutage,
 	judgeUpstreamAccessToken,
 	parseScopeTokens,
+	readUpstreamTokenLifetime,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
 import { accountHolds } from "./browserAccountBinding.mjs";
@@ -273,13 +275,14 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 				scopeText === undefined
 					? [...transaction.consent.scopes]
 					: [...parseScopeTokens(scopeText)];
+			// A lifetime both fields state, with life left when the answer is read;
+			// anything else is no finite lifetime, and refused.
+			const reading = readUpstreamTokenLifetime(
+				{ expiresIn: tokens.expiresIn, expiresAt: tokens.expiresAt },
+				{ calledAt, now: receivedAt, floorMs: 0 },
+			);
 			const lifetime =
-				typeof tokens.expiresIn === "number" &&
-				Number.isFinite(tokens.expiresIn) &&
-				tokens.expiresAt instanceof Date &&
-				!Number.isNaN(tokens.expiresAt.getTime())
-					? tokens.expiresIn
-					: null;
+				reading.verdict === "finite" && reading.stated === "both" ? reading : undefined;
 			if (typeof tokens.accessToken !== "string" || tokens.accessToken.length === 0) {
 				await fail("upstream_token_ineligible");
 				return;
@@ -287,13 +290,13 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 			// The scope is judged in step 7 and given here as consented, so this
 			// can only refuse for the lifetime or the token type.
 			const judgement = judgeUpstreamAccessToken({
-				issuedLifetime: lifetime,
+				issuedLifetime: lifetime?.issuedLifetime ?? null,
 				scopes: granted,
 				consentedScopes: granted,
 				maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
 				tokenType: typeof tokens.tokenType === "string" ? tokens.tokenType : "",
 			});
-			if (!judgement.eligible || lifetime === null) {
+			if (!judgement.eligible || lifetime === undefined) {
 				await fail("upstream_token_ineligible");
 				return;
 			}
@@ -339,12 +342,6 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 			}
 
 			// 8. The guarded activation.
-			const expiresAtMs = (tokens.expiresAt as Date).getTime();
-			// When the token was obtained, on the adapter's clock, held inside the
-			// window of the exchange — the retrieval's rule (retrieve.mts), so a
-			// wild `expiresAt` can neither date a token in the future nor
-			// lengthen its life.
-			const obtainedAt = Math.min(Math.max(expiresAtMs - lifetime * 1000, calledAt), receivedAt);
 			let written: Awaited<ReturnType<FederationGrantStore["activate"]>>;
 			try {
 				written = await options.grantStore.activate({
@@ -366,13 +363,10 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 					},
 					credentials: {
 						refreshToken,
-						accessToken: {
-							value: tokens.accessToken,
-							tokenType: tokens.tokenType as string,
-							obtainedAt: new Date(obtainedAt),
-							issuedLifetime: lifetime,
-							scopes: granted,
-						},
+						accessToken: federationGrantAccessToken(
+							{ value: tokens.accessToken, tokenType: tokens.tokenType as string, scopes: granted },
+							lifetime,
+						),
 					},
 					now: now(),
 				});

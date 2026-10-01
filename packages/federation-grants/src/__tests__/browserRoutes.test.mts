@@ -1347,6 +1347,91 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 		}
 	});
 
+	it("refuses an answer whose expiresAt leaves no life, whatever its expiresIn says, and activates nothing", async () => {
+		for (const expiresAt of [
+			() => new Date(0),
+			(now: number) => new Date(now - 1),
+			(now: number) => new Date(now),
+		]) {
+			const w = world();
+			const a = await approved(w);
+			w.state.exchange = {
+				...w.state.exchange,
+				tokens: {
+					...w.state.exchange.tokens,
+					expiresIn: 3600,
+					expiresAt: expiresAt(w.state.now.getTime()),
+				},
+			};
+			const back = returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+			expect(back.get("error")).toBe("upstream_token_ineligible");
+			expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("pending");
+		}
+	});
+
+	it("refuses a lifetime only one field states, or one the fields contradict, as retrieval does", async () => {
+		const cases: Record<string, unknown>[] = [
+			{ expiresIn: null },
+			{ expiresIn: undefined },
+			{ expiresAt: null },
+			{ expiresIn: 1e306 },
+			{ expiresIn: "3600" },
+		];
+		for (const over of cases) {
+			const w = world();
+			const a = await approved(w);
+			const tokens: Record<string, unknown> = {
+				...w.state.exchange.tokens,
+				expiresAt: new Date(w.state.now.getTime() + 600_000),
+				...over,
+			};
+			for (const key of Object.keys(tokens)) if (tokens[key] === undefined) delete tokens[key];
+			w.state.exchange = { ...w.state.exchange, tokens };
+			const back = returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+			expect(back.get("error"), JSON.stringify(over)).toBe("upstream_token_ineligible");
+			expect((await w.grants.find(a.grantId, w.state.now))?.status, JSON.stringify(over)).toBe(
+				"pending",
+			);
+		}
+	});
+
+	it("stores the token dated from the exchange's start, ending at the earlier instant the answer names", async () => {
+		for (const [expiresAtAfterCall, endsAfterCall] of [
+			[600_000, 600_000],
+			[7_200_000, 3_600_000],
+		] as const) {
+			const w = world();
+			const a = await approved(w);
+			const calledAt = w.state.now.getTime();
+			// The upstream takes five seconds to answer: the clock moves while
+			// the exchange reads the answer it returns.
+			const tokens: Record<string, unknown> = { ...w.state.exchange.tokens, expiresIn: 3600 };
+			Object.defineProperty(tokens, "expiresAt", {
+				enumerable: true,
+				get: () => {
+					w.state.now = new Date(calledAt + 5_000);
+					return new Date(calledAt + expiresAtAfterCall);
+				},
+			});
+			w.state.exchange = { ...w.state.exchange, tokens };
+			const back = returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+			expect(back.has("error")).toBe(false);
+			expect(w.state.now.getTime()).toBe(calledAt + 5_000);
+			const opened = await w.grants.open(a.grantId, w.state.now);
+			expect(opened?.credentials).toMatchObject({
+				state: "ok",
+				value: {
+					accessToken: {
+						value: "upstream-access",
+						obtainedAt: new Date(calledAt),
+						issuedLifetime: 3600,
+						effectiveExpiresAt: new Date(calledAt + endsAfterCall),
+					},
+				},
+			});
+		}
+	});
+
 	it("keeps what the upstream narrowed to, and reads an omitted scope as the one requested", async () => {
 		const w = world();
 		const a = await approved(w, "b-1");
