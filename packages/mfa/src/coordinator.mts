@@ -15,16 +15,24 @@
  */
 
 /**
- * The coordinator: a login's second-factor ceremony over the MFA stores, the
- * key ring and the installed factors — reading the transaction, issuing a
+ * The coordinator: a login's second-factor ceremony, and an enrollment or an
+ * account-email proof in a signed-in session, over the MFA stores, the key
+ * ring and the installed factors — reading the transaction, issuing a
  * factor's challenge, verifying a proof — answered as outcomes the routes map
  * to HTTP. See README, "The routes", and ADR
- * 2026-09-25-multi-factor-authentication, F1 and D8.
+ * 2026-09-25-multi-factor-authentication, F1, F2, F4 and D8.
  *
  * - Every operation starts with the bound read (`getBoundMfaTransaction`), and
  *   after it calls only operations that carry the version it read, and
  *   `reserveAttempt` once it held. A transaction bound to anything else,
- *   spent, expired, or not a login's reads as unknown, and spends nothing.
+ *   spent, expired, neither a login's nor an `enroll` one of the session the
+ *   call was admitted in — its `sid` and subject — reads as unknown, and
+ *   spends nothing. An `enroll` transaction verifies the account-email proof
+ *   alone.
+ * - The step-up of a subject with no record that may count opens, or uses,
+ *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
+ *   on one is recorded for its session alone, standing
+ *   `mfa.manage.maxAgeSeconds`.
  * - A verification reserves its attempt before the proof is checked, consumes
  *   the transaction before the factor moves on, and on a lost compare-and-set
  *   reads the factor again and checks the proof again: a code used twice at
@@ -48,6 +56,7 @@
  */
 
 import {
+	DEFAULT_CLOCK_SKEW_MS,
 	getBoundMfaTransaction,
 	isConsumedMfaTransaction,
 	isMfaFactorUpdateWritten,
@@ -65,6 +74,7 @@ import {
 	type MfaTransactionStore,
 	type MfaVerification,
 	readMfaAttemptReservation,
+	readSessionEmailProof,
 } from "@o3co/auth-provider-core";
 import {
 	type MfaCeremonyCall,
@@ -76,6 +86,7 @@ import {
 	type MfaEnrollmentCompleteOutcome,
 	type MfaFactorUnreadable,
 	type MfaRefusalReason,
+	type MfaStepUpOutcome,
 	type MfaStoreOutage,
 	type MfaVerifyOutcome,
 	OUTSIDE_CONTRACT,
@@ -89,6 +100,8 @@ import { keptState, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
+import { createMfaStepUp } from "./stepUp.mjs";
+import { openEnrollTransaction } from "./transactions.mjs";
 import { type MfaEnrollmentWitness, reconciles } from "./witness.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */
@@ -126,14 +139,21 @@ export interface MfaCoordinator {
 	verify(
 		call: MfaCeremonyCall & { readonly factorId: unknown; readonly proof: unknown },
 	): Promise<MfaVerifyOutcome>;
-	/** A login's first binding begun: the enrollment of the factor of `kind` started (`enrollment.mts`). */
+	/** An enrollment begun — a login's first binding, or one in the session `call.session` names — the factor of `kind` started (`enrollment.mts`). */
 	beginEnrollment(
 		call: MfaCeremonyCall & { readonly kind: unknown },
 	): Promise<MfaEnrollmentBeginOutcome>;
-	/** A login's first binding completed: the proof taken, the factor bound (`enrollment.mts`). */
+	/** An enrollment completed: the proof taken, the factor bound (`enrollment.mts`). */
 	completeEnrollment(
 		call: MfaCeremonyCall & { readonly proof: unknown; readonly label: unknown },
 	): Promise<MfaEnrollmentCompleteOutcome>;
+	/**
+	 * The step-up of `call.session`'s subject when it holds no record that may
+	 * count: the `enroll` transaction the account-email proof is owed on — the
+	 * one `call` names, when it is that session's first binding's and its
+	 * proof is not met, else a new one.
+	 */
+	stepUp(call: MfaCeremonyCall): Promise<MfaStepUpOutcome>;
 }
 
 export interface MfaCoordinatorOptions {
@@ -149,6 +169,12 @@ export interface MfaCoordinatorOptions {
 	readonly mailSender?: MailSender;
 	/** The enrollment witness a verified counting factor reconciles. */
 	readonly witness: MfaEnrollmentWitness;
+	/** `mfa.transactionTtlSeconds`: how long an `enroll` transaction lives. */
+	readonly transactionTtlSeconds: number;
+	/** `mfa.maxFactorsPerSubject`. */
+	readonly maxFactorsPerSubject: number;
+	/** `mfa.manage.maxAgeSeconds`: how long the account-email proof given in a session stands. */
+	readonly sessionProofSeconds: number;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -175,10 +201,17 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		mode,
 		mailSender,
 		witness,
+		transactionTtlSeconds,
+		maxFactorsPerSubject,
+		sessionProofSeconds,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
-	/** The login transaction `call` names, bound to its binding; `null` when there is none to use. */
+	/**
+	 * The transaction `call` names, bound to its binding: a login's, or an
+	 * `enroll` one recording the `sid` and subject of the session the call was
+	 * admitted in; `null` when there is none to use.
+	 */
 	const bound = async (call: MfaCeremonyCall): Promise<MfaTransaction | null | MfaStoreOutage> => {
 		const id = call.transactionId;
 		if (id === undefined || !TRANSACTION_ID.test(id)) return null;
@@ -188,8 +221,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		} catch (cause) {
 			return outage("mfa_transaction", "get", cause);
 		}
-		// This build completes a login's transaction alone.
-		return tx !== null && tx.purpose === "login" ? tx : null;
+		if (tx === null) return null;
+		if (tx.purpose === "login") return tx;
+		const session = call.session;
+		return tx.purpose === "enroll" &&
+			session !== undefined &&
+			tx.sid === session.sid &&
+			tx.subject === session.subject
+			? tx
+			: null;
 	};
 
 	/** Every record of `subject`, oldest first; an outage is never "none". */
@@ -397,7 +437,53 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		mailSender,
 		witness,
 		now,
+		maxFactorsPerSubject,
 		bound,
+		openEnrollment: async (call, session, shape) => {
+			try {
+				return await openEnrollTransaction(transactions, {
+					sessionId: call.binding.id,
+					sid: session.sid,
+					subject: session.subject,
+					enrollment: shape.enrollment,
+					emailProof: shape.emailProof,
+					nowMs: now(),
+					ttlSeconds: transactionTtlSeconds,
+				});
+			} catch (cause) {
+				return outage("mfa_transaction", "create", cause);
+			}
+		},
+		provedInSession: async (subject, sid) => {
+			const nowMs = now();
+			let answer: unknown;
+			try {
+				answer = await transactions.sessionEmailProofAt(subject, sid, nowMs);
+			} catch (cause) {
+				return outage("mfa_transaction", "sessionEmailProofAt", cause);
+			}
+			const proved = readSessionEmailProof(answer, nowMs);
+			if (proved === undefined) {
+				return outage("mfa_transaction", "sessionEmailProofAt", OUTSIDE_CONTRACT);
+			}
+			// One given longer ago than its window and the clock skew is none, whatever the store answered.
+			return (
+				proved !== null && proved >= nowMs - sessionProofSeconds * 1000 - DEFAULT_CLOCK_SKEW_MS
+			);
+		},
+		recordSessionProof: async (subject, sid, provedAtMs) => {
+			try {
+				await transactions.recordSessionEmailProof(
+					subject,
+					sid,
+					provedAtMs,
+					provedAtMs + sessionProofSeconds * 1000,
+				);
+				return undefined;
+			} catch (cause) {
+				return outage("mfa_transaction", "recordSessionEmailProof", cause);
+			}
+		},
 		recordsOf,
 		reserve,
 		consume,
@@ -434,6 +520,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	};
 	const enrollment = createMfaEnrollment(kit);
 	const proof = createAccountEmailProof(kit);
+	const stepUp = createMfaStepUp(kit);
 
 	return {
 		async describe(call) {
@@ -441,7 +528,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const tx = await bound(call);
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
-			const records = await recordsOf(tx.subject);
+			// An enroll transaction verifies the account-email proof alone: it lists no factor.
+			const records = tx.purpose === "enroll" ? [] : await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const listed = records.flatMap((record) => {
 				const factor = factors.get(record.kind);
@@ -485,7 +573,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const tx = await bound(call);
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
-			if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) return proof.challenge(tx);
+			if (tx.purpose === "enroll") {
+				return call.factorId === ACCOUNT_EMAIL_FACTOR_ID
+					? proof.challenge(tx, call.session?.user)
+					: UNKNOWN_FACTOR;
+			}
+			if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) {
+				return proof.challenge(tx, tx.continuation?.primary.user);
+			}
 			const records = await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const found = named(records, call.factorId);
@@ -615,6 +710,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
 			if (call.factorId === ACCOUNT_EMAIL_FACTOR_ID) return proof.verify(call, tx);
+			if (tx.purpose === "enroll") return UNKNOWN_FACTOR;
 			let records = await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
 			const found = named(records, call.factorId);
@@ -819,5 +915,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 		beginEnrollment: (call) => enrollment.begin(call),
 		completeEnrollment: (call) => enrollment.complete(call),
+
+		stepUp: (call) => stepUp.open(call),
 	};
 }

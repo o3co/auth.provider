@@ -24,11 +24,13 @@
  * factor finishes the login through it) and `deploymentMode` (the development
  * sample key and the routes' per-process limiter are refused under `multi`,
  * so a mode read as absent must not lift that); reads `rateLimiter`,
- * `auditSink` (absence declared), `logger`, `mailSender` — where the
- * account-email proof and a factor's codes go — and `userRepository`, for
- * the enrollment witness's write alone (`markMfaEnrolled`). Nothing it keeps
- * forks per replica; without a shared `rateLimiter` its routes' limiter does,
- * refused under `multi`, warned about when the mode is unset.
+ * `auditSink` and `subjectRevocation` (each absence declared; the routes'
+ * admission of a signed-in session reads the boundary), `logger`,
+ * `mailSender` — where the account-email proof and a factor's codes go — and
+ * `userRepository`, for the enrollment witness's write alone
+ * (`markMfaEnrolled`). Nothing it keeps forks per replica; without a shared
+ * `rateLimiter` its routes' limiter does, refused under `multi`, warned about
+ * when the mode is unset.
  *
  * Reads its own section, `mfa` — the mode, its settings and the step-up
  * page, `mfa.page.url` — and the deployment mode from the `deploymentMode`
@@ -56,9 +58,13 @@
  * `/session/mfa` POST limits under, for every limiter to read; none when the
  * section gives none.
  *
+ * Contributes `mfa.manage`, graded `credential_change`, as the admission
+ * action its routes admit a signed-in session's enrollment for.
+ *
  * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
  * session middleware. Their factory runs after every factor has registered,
- * so it checks the installed factors (`checkInstalledFactors`) first.
+ * so it checks the installed factors (`checkInstalledFactors`) first, and
+ * the resolver holds `mfa.manage` (core's `checkResolver`).
  */
 
 import {
@@ -66,12 +72,14 @@ import {
 	type AuditSink,
 	BootError,
 	checkDeploymentMode,
+	checkResolver,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
 	type DeploymentMode,
 	defineModule,
 	isHintToken,
+	issuedRemediationActions,
 	type Logger,
 	type MfaFactorResolver,
 	type Module,
@@ -80,9 +88,11 @@ import {
 	requireUsableConfiguredRateLimitSpec,
 	type SessionRequirement,
 	type StepUpPage,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	supportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
+import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
@@ -320,7 +330,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "csrfGuard"
 		| "loginCompletion"
 		| "deploymentMode",
-		"rateLimiter" | "auditSink" | "logger" | "mailSender" | "userRepository",
+		"rateLimiter" | "auditSink" | "subjectRevocation" | "logger" | "mailSender" | "userRepository",
 		typeof mfaSectionSchema
 	>({
 		name: "mfa",
@@ -345,9 +355,20 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"loginCompletion",
 			"deploymentMode",
 		],
-		optional: ["rateLimiter", "auditSink", "logger", "mailSender", "userRepository"],
-		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
+		optional: [
+			"rateLimiter",
+			"auditSink",
+			"subjectRevocation",
+			"logger",
+			"mailSender",
+			"userRepository",
+		],
+		absencePolicies: {
+			auditSink: AUDIT_SINK_ABSENCE_POLICY,
+			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+		},
 		contributes: {
+			admissionActions: MFA_ADMISSION_ACTIONS,
 			rateLimitBudgets: {
 				[MFA_RATE_LIMIT_PREFIX]: (deps) => routesBudget(deps.section),
 			},
@@ -417,6 +438,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						firstBinding: { requireEmailProof, mailWired },
 						emailProofRequiredAtNextBinding: (subject) =>
 							deps.mfaTransactionStore.emailProofRequiredAtNextBinding(subject),
+						sessionEmailProofAt: (subject, sid, nowMs) =>
+							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,
@@ -431,8 +454,19 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			},
 			routes: [
 				(deps) => {
-					const { mode, settings, sealing, witness, logger } = mfaBootState(deps.mfaFactorResolver);
+					const { mode, settings, sealing, requirement, witness, logger } = mfaBootState(
+						deps.mfaFactorResolver,
+					);
 					checkInstalledFactors(deps.mfaFactorResolver, mode);
+					const requirements = checkResolver(
+						deps.sessionRequirementResolver,
+						"mfaModule",
+						Object.keys(MFA_ADMISSION_ACTIONS),
+					);
+					const stepUp = issuedRemediationActions(requirement)?.step_up;
+					if (stepUp === undefined) {
+						throw new Error("core issued the mfa requirement no mfa.step_up remediation");
+					}
 					return {
 						id: MFA_ROUTES_ID,
 						mountPath: MFA_ROUTES_MOUNT_PATH,
@@ -447,15 +481,19 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								mode,
 								mailSender: deps.mailSender,
 								witness,
+								transactionTtlSeconds: settings.transactionTtlSeconds,
+								maxFactorsPerSubject: settings.maxFactorsPerSubject,
+								sessionProofSeconds: settings.manage.maxAgeSeconds,
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,
-								subjectRevocation: undefined,
-								requirements: deps.sessionRequirementResolver,
+								subjectRevocation: deps.subjectRevocation,
+								requirements,
 								acrTable: {},
 								logger,
 								auditSink: deps.auditSink,
 							},
+							stepUp,
 							loginCompletion: deps.loginCompletion,
 							csrfGuard: deps.csrfGuard,
 							floodGuard: mfaFloodGuard({

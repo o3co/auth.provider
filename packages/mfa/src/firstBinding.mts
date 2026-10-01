@@ -31,11 +31,27 @@
  *   nobody can send the proof to.
  * - A proof asked for that nobody can give is `unprovable`, with why: the
  *   binding is refused, never let through without it.
+ *
+ * Whether a binding is a first one is read over the subject's records with
+ * admission's presumption (`mayCount`): a record counts unless an installed
+ * factor of its kind declares it does not.
  */
 
-import type { MailAddressFact } from "@o3co/auth-provider-core";
+import type { MailAddressFact, MfaFactorRecord, MfaFactorResolver } from "@o3co/auth-provider-core";
 
 export type { MailAddressFact };
+
+/**
+ * Whether `record` may hold a counting factor: unless an installed factor of
+ * its kind declares it does not, so a kind no longer installed counts. Right
+ * for admitting, and for telling a first binding — it fails closed, a
+ * password never standing in for a factor it cannot see; wrong for a
+ * last-factor check or clearing the witness.
+ */
+export const mayCount = (
+	factors: MfaFactorResolver,
+	record: Pick<MfaFactorRecord, "kind">,
+): boolean => factors.get(record.kind)?.counting !== false;
 
 /** `mfa.enrollment.requireEmailProof`. */
 export const REQUIRE_EMAIL_PROOF = ["when-mail", "always", "never"] as const;

@@ -57,7 +57,9 @@ const RULES = {
 	unreadable:
 		"challenge, over data whose address digest is gone or is no digest, still asks for its login code, with a null address digest, and never throws: the coordinator refuses the factor",
 	noAddress:
-		"no answer carries the account's address, whatever its case or escaping: the pending enrollment's state and response, the enrolled data and label, a challenge's state and response, and a verification's next data",
+		"nothing kept, and no challenge's answer, carries the account's address — an enrollment's answer only as the account's username, verbatim — whatever its case or escaping: the pending enrollment's state and answer, the enrolled data and label, a challenge's state and answer, and a verification's next data",
+	quietErrors:
+		"an error the factor throws — over an account without a username, or a pending state or data it cannot read — quotes neither the account's address nor its username",
 	verifyMalformed: "verify answers malformed for a proof it cannot read, and never throws for one",
 	verify:
 		"verify takes a valid proof, names a factor the subject holds, and answers next data that survives a JSON round trip",
@@ -433,7 +435,7 @@ describe("mfaFactorContract", () => {
 		]);
 	});
 
-	it("fails an address kept or answered anywhere, in another case or under JSON escaping", async () => {
+	it("fails an address kept anywhere, in another case or under JSON escaping", async () => {
 		const QUOTED = { ...USER, email: '"probe"@example.com' };
 		const answering = (
 			change: (factor: MfaFactor) => Partial<MfaFactor>,
@@ -506,6 +508,135 @@ describe("mfaFactorContract", () => {
 				),
 			),
 		).toEqual([RULES.noAddress]);
+	});
+
+	it("fails an address kept percent-encoded in the pending enrollment, as a URI would carry it", async () => {
+		const QUOTED = { ...USER, email: '"probe"@example.com' };
+		for (const user of [USER, QUOTED]) {
+			const encoding = inputFor({ mail: true }, (factor) => ({
+				...factor,
+				beginEnrollment: async (ctx) => {
+					const start = await factor.beginEnrollment(ctx);
+					return {
+						...start,
+						state: {
+							...start.state,
+							uri: `otpauth://totp/Issuer:${encodeURIComponent(String(ctx.user.email))}`,
+						},
+					};
+				},
+			}));
+			expect(await failing({ ...encoding, user }), user.email).toEqual([RULES.noAddress]);
+		}
+	});
+
+	it("fails a factor whose error quotes the account's address or its username, percent-encoded or not — the suite's own canary account", async () => {
+		const unreadable = (value: unknown) =>
+			typeof value === "object" && value !== null && Object.keys(value).length === 0;
+		const quoting: [string, (factor: MfaFactor) => Partial<MfaFactor>][] = [
+			[
+				"beginEnrollment",
+				(factor) => ({
+					beginEnrollment: async (ctx) => {
+						if (ctx.user.username === undefined) {
+							throw new Error(`no username for ${encodeURIComponent(String(ctx.user.email))}`);
+						}
+						return factor.beginEnrollment(ctx);
+					},
+				}),
+			],
+			[
+				"completeEnrollment",
+				(factor) => ({
+					completeEnrollment: async (ctx) => {
+						if (unreadable(ctx.state)) {
+							throw new Error(`no enrollment of ${String(ctx.user.username)}`);
+						}
+						return factor.completeEnrollment(ctx);
+					},
+				}),
+			],
+		];
+		for (const [where, change] of quoting) {
+			const input = inputFor({}, (factor) => ({ ...factor, ...change(factor) }));
+			expect(await failing(input), where).toEqual([RULES.quietErrors]);
+		}
+	});
+
+	it("passes a factor whose error says an ordinary word an account's username could be", async () => {
+		const plain = inputFor({}, (factor) => ({
+			...factor,
+			completeEnrollment: async (ctx) => {
+				if (Object.keys(ctx.state).length === 0)
+					throw new Error("a error in a state it cannot read");
+				return factor.completeEnrollment(ctx);
+			},
+		}));
+		for (const username of ["error", "a", "state"]) {
+			expect(await failing({ ...plain, user: { ...USER, username } }), username).toEqual([]);
+		}
+	});
+
+	it("fails a challenge's answer carrying the account's address, as it is or percent-encoded: a login's challenge goes to whoever holds the password", async () => {
+		for (const shown of [USER.email, encodeURIComponent(USER.email)]) {
+			const naming = inputFor({ challenge: true }, (factor) => ({
+				...factor,
+				challenge: async (ctx) => {
+					const sent = await (factor.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+					return { ...sent, response: { ...(sent.response as Record<string, unknown>), shown } };
+				},
+			}));
+			expect(await failing(naming), shown).toEqual([RULES.noAddress]);
+		}
+	});
+
+	it("fails an enrollment's answer carrying the account's address beside a username that is not it, percent-encoded or not", async () => {
+		const naming = inputFor({}, (factor) => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				return {
+					...start,
+					response: {
+						...(start.response as Record<string, unknown>),
+						uri: `otpauth://totp/Issuer:${encodeURIComponent(String(ctx.user.email))}`,
+					},
+				};
+			},
+		}));
+		expect(await failing(naming)).toEqual([RULES.noAddress]);
+	});
+
+	it("passes an enrollment's answer naming the account by its username verbatim, percent-encoded or not, where the username is the address: the answer goes to the account's own browser", async () => {
+		const naming = inputFor({}, (factor) => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				return {
+					...start,
+					response: {
+						...(start.response as Record<string, unknown>),
+						uri: `otpauth://totp/Issuer:${encodeURIComponent(String(ctx.user.username))}`,
+						account: ctx.user.username,
+					},
+				};
+			},
+		}));
+		expect(await failing({ ...naming, user: { ...USER, username: USER.email } })).toEqual([]);
+	});
+
+	it("passes text a percent sign cannot decode, searching it as it is", async () => {
+		const stray = inputFor({}, (factor) => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				return {
+					...start,
+					response: { ...(start.response as Record<string, unknown>), note: "100% of %E0%A4%A" },
+				};
+			},
+		}));
+		expect(await failing(stray)).toEqual([]);
 	});
 
 	it("fails a login code mailed with no address digest, one that is no digest, or the digest of another address", async () => {

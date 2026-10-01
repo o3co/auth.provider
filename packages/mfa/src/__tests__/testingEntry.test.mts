@@ -74,6 +74,12 @@ describe("the section builders", () => {
 		expect(
 			mfaConfigForTests({ key: KEY, maxAttemptsPerTransaction: 3 }).mfa.maxAttemptsPerTransaction,
 		).toBe(3);
+		expect(fragment.mfa.maxFactorsPerSubject).toBe(10);
+		expect(
+			readMfaSettings(mfaConfigForTests({ key: KEY, maxFactorsPerSubject: 2 }).mfa, {
+				deploymentMode: "unset",
+			}).maxFactorsPerSubject,
+		).toBe(2);
 		expect(mfaConfigForTests({ key: KEY }).mfa.mode).toBe("off");
 	});
 

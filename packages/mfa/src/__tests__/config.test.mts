@@ -79,13 +79,14 @@ const LOCKOUT = {
 	hardLimit: 100,
 } as const;
 
-/** The transaction's keys, recent MFA's window and the first binding's proof, as `reference.conf` defaults them. */
+/** The transaction's keys, recent MFA's window, the first binding's proof and a subject's factor limit, as `reference.conf` defaults them. */
 const TRANSACTION = {
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,
 	lockout: { ...LOCKOUT },
 	manage: { maxAgeSeconds: 300 },
 	enrollment: { requireEmailProof: "when-mail" },
+	maxFactorsPerSubject: 10,
 } as const;
 
 /** A configuration as the composition root hands it, with `mfa` as given. */
@@ -169,13 +170,14 @@ describe("the MFA settings this package reads", () => {
 		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
 	});
 
-	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, recent MFA's window and the first binding's proof — no factor's", () => {
+	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, recent MFA's window, the first binding's proof and a subject's factor limit — no factor's", () => {
 		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
 			"encryptionKeys",
 			"enrollment",
 			"lockout",
 			"manage",
 			"maxAttemptsPerTransaction",
+			"maxFactorsPerSubject",
 			"mode",
 			"page",
 			"transactionTtlSeconds",
@@ -711,6 +713,17 @@ describe("the transaction's life and attempts, and the lock", () => {
 		expect(refusal(() => readSettings(valid({ enrollment: undefined })))).toContain(
 			"mfa.enrollment",
 		);
+	});
+
+	it("holds mfa.maxFactorsPerSubject to 2-100 records, a whole number — a first binding writes a factor and its recovery codes — naming the key otherwise", () => {
+		for (const value of [2, 10, 100]) {
+			expect(readSettings(valid({ maxFactorsPerSubject: value })).maxFactorsPerSubject).toBe(value);
+		}
+		for (const value of [1, 101, 0, 10.5, "10", null, undefined]) {
+			const message = refusal(() => readSettings(valid({ maxFactorsPerSubject: value })));
+			expect(message, String(value)).toContain("mfa.maxFactorsPerSubject");
+			expect(message, String(value)).toContain("2 to 100");
+		}
 	});
 
 	it("holds mfa.manage.maxAgeSeconds, recent MFA's window, to 60-3600 seconds, a whole number", () => {
