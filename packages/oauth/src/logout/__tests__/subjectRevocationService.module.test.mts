@@ -263,20 +263,26 @@ describe("subjectRevocationServiceModule", () => {
 			expect(result.sessionsRevoked).toEqual(["sid-1"]);
 		});
 
-		it("leaves a session whose store cannot answer live, with no cascade step run", async () => {
+		it("still revokes the families of a session whose store cannot answer, and leaves the sid for a retry", async () => {
 			const index = createInMemorySubjectSessionIndex();
 			await index.addSid("u-1", "sid-1", new Date(Date.now() + HOUR));
 			const stores = endingStores();
-			stores.userSessionStore.get.mockRejectedValue(new Error("session store is down"));
-			const service = build({ ...stores, subjectSessionIndex: index });
+			const outage = new Error("session store is down");
+			stores.userSessionStore.get.mockRejectedValue(outage);
+			const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
+			const service = build({ ...stores, subjectSessionIndex: index, logger });
 
 			const result = await service.revokeAllForSubject({ subject: "u-1" });
 
-			expect(result.sessionsFailed).toEqual(["sid-1"]);
 			expect(stores.sessionFamilyIndex.endSession).not.toHaveBeenCalled();
-			expect(stores.refreshTokenFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
-			expect(stores.userSessionStore.delete).not.toHaveBeenCalled();
+			expect(stores.sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-1");
+			expect(stores.refreshTokenFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+			expect(result.sessionsFailed).toEqual(["sid-1"]);
 			expect(await index.listSids("u-1")).toEqual(["sid-1"]);
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({ subject: "u-1", sid: "sid-1" }),
+				"revoke_all_cascade_failed",
+			);
 		});
 	});
 
