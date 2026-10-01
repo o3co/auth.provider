@@ -167,6 +167,10 @@ export interface AuditSink {
 	 * Fire-and-forget recording. Implementations MAY buffer or batch internally.
 	 * Errors thrown here are swallowed by auth.provider core (audit failure
 	 * does NOT block auth flow).
+	 *
+	 * Once a module contributes `auditHooks`, `record` may run concurrently
+	 * with the other sinks' for the same event; it must not mutate the event,
+	 * which they share; and its failure is isolated from theirs.
 	 */
 	record(event: AuditEvent): Promise<void>;
 }

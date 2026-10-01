@@ -47,6 +47,11 @@ export {
 	sessionRequirementContract,
 } from "../session-admission/testing/requirement.contract.mjs";
 export { resolverForTests } from "../session-admission/testing/resolver.mjs";
+export {
+	auditHooksModule,
+	createRecordingAuditSink,
+	type RecordingAuditSink,
+} from "./auditSinks.mjs";
 export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
 // The check a package runs over its own config/reference.conf.
 export { unreadableModuleLeaves } from "./environmentLeaves.mjs";
