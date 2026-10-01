@@ -428,6 +428,25 @@ describe("createAuditFanOut", () => {
 		});
 	});
 
+	it("warns audit_sink_reentered for an event a hook records that cannot be copied, when the slot has no sink of its own", async () => {
+		const { logger, warn } = spyLogger();
+		const uncopyable = {
+			timestamp: new Date(0),
+			type: "hook.recorded",
+			get details(): never {
+				throw new Error("unreadable");
+			},
+		} as unknown as AuditEvent;
+		let fanOut: AuditSink | undefined;
+		const loop = reentering(() => fanOut as AuditSink, (sink) => emitAuditEvent(sink, uncopyable));
+		fanOut = createAuditFanOut({ hooks: () => [loop.hook], logger: () => logger });
+
+		await fanOut.record(event());
+		await settled();
+
+		expect(warn.mock.calls).toEqual([[{ type: undefined }, "audit_sink_reentered"]]);
+	});
+
 	it("hands the hooks an event the slot's own sink records while it runs", async () => {
 		const hook = createRecordingAuditSink();
 		let fanOut: AuditSink | undefined;
