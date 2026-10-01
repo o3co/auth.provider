@@ -109,7 +109,7 @@ export function createFederationGrantBrowserRouter(
 	if (typeof subjectRevocation !== "object" || subjectRevocation === null) {
 		throw new TypeError(
 			"createFederationGrantBrowserRouter: subjectRevocation is required — the sessions " +
-				"boundary a session must have authenticated after (D13) is read through it",
+				"boundary a session must have authenticated after is read through it",
 		);
 	}
 	// Likewise the issuer every URL here is built on: one that is not an absolute

@@ -32,7 +32,6 @@ import {
 	admitSession,
 	consoleLogger,
 	cookieClaim,
-	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	type MfaFactor,
 	type SessionRequirement,
@@ -51,7 +50,13 @@ import {
 import { describe, expect, it } from "vitest";
 import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
-import { FACTORS, resolverOver } from "./requirementHarness.mjs";
+import {
+	FACTORS,
+	factorRecord,
+	factorStoreHolding,
+	resolverOver,
+	WITHOUT_MAIL,
+} from "./requirementHarness.mjs";
 
 /**
  * The factors a composition enables, each declaring its `amrValues`, standing
@@ -83,7 +88,9 @@ const realRequirement = (
 	createMfaRequirement({
 		mode,
 		factors: resolverOver(FACTOR_SETS[factors]()),
-		factorStore: createMemoryMfaFactorStore(),
+		// The rows' subject holds a counting factor: a session without one is sent to log in
+		// before any step-up, so the rows' step-ups are a second factor's.
+		factorStore: factorStoreHolding(factorRecord("user-1")),
 		transactions: createLoginTransactions({
 			store: createMemoryMfaTransactionStore(),
 			ttlSeconds: 600,
@@ -92,6 +99,7 @@ const realRequirement = (
 		stepUpRecordable: true,
 		recentMfaMaxAgeSeconds: 300,
 		logger: consoleLogger,
+		...WITHOUT_MAIL,
 	});
 
 const storeOf = (session: UserSession): UserSessionStore => ({

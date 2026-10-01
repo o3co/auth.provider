@@ -239,7 +239,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					// GrantHandlerResolver is what the synthetic key resolves to
 					// and what createOAuthRouter's `registry` param accepts —
 					// the type-level read-only projection that exposes
-					// `.get(grantType)`, which routes.mts only consumes.
+					// `.get(grantType)`, which the router only consumes.
 					const registry = deps.grantHandlerResolver;
 					const { router } = await createOAuthRouter(express, {
 						registry,

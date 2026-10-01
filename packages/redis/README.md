@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -106,6 +106,13 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   `private_key_jwt` and WebAuthn. A Redis at `maxmemory` refuses every
   consumer alike — keep the seen-set's instance sized for the flood, or on
   one of its own.
+- **For the family index's "ended" mark, reads and writes that are
+  linearizable, and reads served by the primary** (core's
+  `SupportsSessionEnd`): that a logout and a grant on one session never both
+  miss each other holds only while every operation sees each write completed
+  before it. Redis's asynchronous replication does not hold that across a
+  failover, where a promoted replica may lack a write the old primary
+  acknowledged, and a read answered by a replica does not either.
 - **For the MFA stores, a server that keeps what it is written** (the MFA
   ADR's D12). An enrolled second factor lost to an eviction or a restart
   reads as "never enrolled", and whoever holds the password can then bind
@@ -157,7 +164,29 @@ Each one implements a port core declares; the slot name is in parentheses.
   or inside them survives a step-up on a replica not yet upgraded. A custom
   `UserSessionStoreClient` implements `replaceIfUnchanged`
   (`makeIoredisClients` does); `createRedisUserSessionStore` refuses a client
-  without it when the store is built, naming the method.
+  without it when the store is built, naming the method. The envelope carries
+  `enrollmentFacts` (`{witness, mailAddress}`, what the login's `User` said for
+  a first binding) as a key of its own, left out when the session recorded
+  none: an envelope without it reads as a session with none, a malformed one
+  is refused as corrupt, and a release before this one ignores the key. A
+  step-up keeps it as it was. The `SessionFamilyIndex` has the session-end
+  capability (core's `SupportsSessionEnd`) when it is given an
+  `endedKeyPrefix` and a `SessionFamilyIndexClient` with `writeEndedMark` and
+  `hasEndedMark`, which `makeIoredisClients` provides, and which the module
+  and the builder (beside its default `keyPrefix`) give it: the mark is a
+  string at `<endedKeyPrefix><sid>` (`ss:fi-ended:` by default) expiring at
+  the session's `expiresAt` plus the clock-skew allowance (core's
+  `DEFAULT_CLOCK_SKEW_MS`), beside the family set, and `removeBySid` leaves
+  it. `endSession` writes the mark, even past `expiresAt`, and then lists;
+  `addFamilyIdUnlessEnded` adds, then reads the mark, then its clock, and
+  answers `"ended"` once `expiresAt` has passed. Each reply is in before the
+  next command is sent, with no script, so the two keys need not share a
+  Cluster slot. A client owes the capability writes that resolve only on the
+  server's reply and reads served by the primary. An index over a client
+  without the two methods, or without an `endedKeyPrefix`, works as before
+  without the capability; `createRedisSessionFamilyIndex` refuses an
+  `endedKeyPrefix` that overlaps `keyPrefix` (either starting with the
+  other).
 - `FederationTokenStore` (`federationTokenStore`) — the upstream IdP tokens
   held for a session. See [Federation-token keys and logout](#federation-token-keys-and-logout).
 - `FederationGrantStore` (`federationGrantStore`) and
@@ -439,7 +468,7 @@ give the same answers:
 | `FederationTokenStore` | a `ttl` that is not a positive number of seconds ending within the Date range (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
 | The federation-token lock (`acquireLock`) and the federation-grant refresh lock | a TTL that is not a positive lifetime, or a wait that is not a non-negative one, ending within the Date range | `PX` = the TTL, rounded up |
 | `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` or `authentication.mfaAt` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range); `recordSecondFactor` keeps it (`KEEPTTL`) |
-| `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt` |
+| `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `addFamilyIdUnlessEnded`, `endSession`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt`; the family index's "ended" mark `PXAT` = that plus `DEFAULT_CLOCK_SKEW_MS` |
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
@@ -665,6 +694,7 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 | `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, and whether a hold's first refusal was answered (`held`) |
 | `mfat:week:{<subject>}` | sorted set | the weekly window: one member per failure, scored by its time |
 | `mfat:proof:{<subject>}` | string | the email proof an operator reset requires at the next first binding |
+| `mfat:session-proof:{<subject>}:<sid>` | string | the account-email proof given in one session, JSON `{provedAtMs, untilMs}`, expiring at `untilMs` |
 
 Subjects and ids are base64url of their JSON, as the federation grant store
 spells its ids, so no brace moves a hash tag and no two values share a key.
@@ -728,6 +758,14 @@ a transaction hash's `sends` and `lastSentAtMs`, where present, are not read:
 neither loosens a limit the store keeps. The email-proof requirement is a key of
 its own with no TTL: `clearSubjectState` leaves it, and consuming it is one
 `DEL`.
+
+**A session's account-email proof.** One string per session of a subject,
+written with one `SET … PX`, whose lifetime is `untilMs` less the store's own
+clock (`now`), so a later proof for the session replaces the earlier one and
+its end. A read answers it absent at or past `untilMs` on that clock or at the
+time asked about, and absent when it does not read back as a proof: losing
+one fails closed, and the user proves again. The factor store's durability
+check does not cover it.
 
 **Durability at boot (D12).** Before providing its store each module asks the
 server, through its client's `durability()`, each part on its own: the policy

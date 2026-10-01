@@ -21,6 +21,7 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { MfaEnrollmentWitness } from "#/repositories/UserRepository.mjs";
 import type { AdmissionAction } from "#/session-admission/actions.mjs";
 import type {
 	AdmissionRequest,
@@ -45,7 +46,7 @@ import {
 } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { RecordedAuthentication } from "#/user-sessions/authentication.mjs";
-import type { UserSessionClaims } from "#/user-sessions/types.mjs";
+import type { SessionEnrollmentFacts, UserSessionClaims } from "#/user-sessions/types.mjs";
 
 const ISSUER = "https://auth.test";
 
@@ -868,6 +869,11 @@ describe("the shapes the contract names", () => {
 			readonly sub: string;
 			readonly authTime: Date;
 			readonly expiresAt: Date;
+			readonly enrollmentFacts?: SessionEnrollmentFacts;
+		}>();
+		expectTypeOf<SessionEnrollmentFacts>().toEqualTypeOf<{
+			readonly witness: MfaEnrollmentWitness;
+			readonly mailAddress: "none" | "address" | "unreadable";
 		}>();
 		expectTypeOf<RequirementInput["authentication"]>().toEqualTypeOf<RequirementSession | null>();
 		expectTypeOf<RequirementInput["carrier"]>().toEqualTypeOf<
@@ -891,12 +897,13 @@ describe("the shapes the contract names", () => {
 		expect(true).toBe(true);
 	});
 
-	it("PrimaryAuthentication carries what a login path records, never a method and amr of its own", () => {
+	it("PrimaryAuthentication carries what a login path records and the enrollment facts core derives, never a method and amr of its own", () => {
 		expectTypeOf<PrimaryAuthentication>().toEqualTypeOf<{
 			readonly subject: string;
 			readonly user: Readonly<Record<string, unknown>>;
 			readonly claims: UserSessionClaims;
 			readonly recorded: RecordedAuthentication;
+			readonly enrollmentFacts: SessionEnrollmentFacts;
 			readonly authTime: Date;
 			readonly redirectTo: string | undefined;
 			readonly request: { readonly ip?: string; readonly userAgent?: string };

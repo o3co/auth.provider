@@ -1,6 +1,6 @@
 # composition — every workspace package, booted together
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 The contracts that exist only when all of this repository's modules are
 composed: the standalone template's composition with every package it does not
@@ -55,6 +55,13 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   unsigned one refused without the audit, and `hwk` or `swk` by the backup
   eligibility registered
   ([`webauthn-mfa-factor.test.mts`](src/__tests__/webauthn-mfa-factor.test.mts)).
+- **The passwordless grant and the user handle.** A second factor's
+  credential, registered by its id and public key as another account's
+  passkey through `POST /oauth/webauthn/registration/verify` (a `none`
+  attestation from the software passkey), is refused at the grant when its
+  owner's authenticator answers with her user handle; an account's own
+  passkey, answering the handle its registration options named, signs it in
+  ([`webauthn-grant-user-handle.test.mts`](src/__tests__/webauthn-grant-user-handle.test.mts)).
 - **The budget in force for each prefix a package owns, on both bundled
   limiters.** `login`, `device_verification`,
   `webauthn-authentication-options` and `mfa` — each the budget its owning
@@ -99,13 +106,12 @@ package is added to `packages/` without being added here.
 
 ## Known gaps
 
-- **No WebAuthn registration.** Assertions run through the composed app —
-  a passkey sign-in through the grant, and the second factor's — signed by a
-  software passkey ([`software-passkey.mts`](src/__tests__/software-passkey.mts)),
-  over a credential seeded in its store. A registration needs an attestation,
-  which the helper does not produce: the WebAuthn package's own ceremony tests
-  mock the verification. A `none`-attestation credential from the helper
-  would let one registration run through the composed app.
+- **No second-factor WebAuthn enrollment.** The software passkey
+  ([`software-passkey.mts`](src/__tests__/software-passkey.mts)) asserts, and
+  registers by a `none` attestation, through the composed app — the grant's
+  registration and sign-in, and the second factor's assertion — but the MFA
+  package does not drive the WebAuthn factor's enrollment yet, so the second
+  factor's tests seed its credential in the factor store.
 - **No mTLS outage.** In `self-signed` mode the mechanism reads no store; the
   `full-pki` revocation outage needs a CRL distribution point or an OCSP
   responder, which the mTLS package tests against its own fakes.

@@ -29,6 +29,19 @@ import {
 	type MfaFactorStore,
 } from "@o3co/auth-provider-core";
 
+/** The first-binding gate's inputs of a composition with no mail sender and no operator reset: no proof is asked, and none was given. */
+export const WITHOUT_MAIL = {
+	firstBinding: { requireEmailProof: "when-mail", mailWired: false },
+	emailProofRequiredAtNextBinding: async () => false,
+	sessionEmailProofAt: async () => null,
+} as const;
+
+/** What a login records of an account that is not enrolled and has no address: a session's enrollment facts. */
+export const NOT_ENROLLED_FACTS = Object.freeze({
+	witness: "not_enrolled",
+	mailAddress: "none",
+} as const);
+
 /** A factor that declares `amrValues`, adds `mfa` or not, counts or not; it verifies nothing. */
 export function stubFactor(
 	kind: string,

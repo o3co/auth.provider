@@ -45,6 +45,7 @@ export const BUNDLED_ACTIONS: Readonly<Record<string, BundledAction>> = {
 	"session.link": { grade: "credential_change", carrier: "cookie" },
 	"session.link_callback": { grade: "use", carrier: "link" },
 	"webauthn.register": { grade: "credential_change", carrier: "cookie" },
+	"mfa.manage": { grade: "credential_change", carrier: "cookie" },
 };
 
 /**
@@ -115,6 +116,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link": "rmmmrrr",
 		"session.link_callback": "mmmmmmm",
 		"webauthn.register": "rmmmrrr",
+		"mfa.manage": "rmmmrrr",
 	},
 	"optional · no factor": {
 		"oauth.authorize": "mmmmmmm",
@@ -131,6 +133,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link": "rmmmrrr",
 		"session.link_callback": "mmmmmmm",
 		"webauthn.register": "rmmmrrr",
+		"mfa.manage": "rmmmrrr",
 	},
 	"optional · totp, not recordable": {
 		"oauth.authorize": "mmmmmmm",
@@ -147,22 +150,24 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link": "rmmmrrr",
 		"session.link_callback": "mmmmmmm",
 		"webauthn.register": "rmmmrrr",
+		"mfa.manage": "rmmmrrr",
 	},
 	"required · totp, recordable": {
-		"oauth.authorize": "rsmmrrs",
-		"oauth.consent": "rsmmrrs",
-		"oauth.session_grant": "rsmmrrs",
-		"oauth.code_exchange": "rsmmrrs",
+		"oauth.authorize": "rrmmrrr",
+		"oauth.consent": "rrmmrrr",
+		"oauth.session_grant": "rrmmrrr",
+		"oauth.code_exchange": "rrmmrrr",
 		"oauth.refresh": "urrmmmrm",
 		"device.lookup": "rmmmmmm",
-		"device.approve": "rsmmrrs",
+		"device.approve": "rrmmrrr",
 		"device.deny": "rmmmmmm",
-		"federation_grants.connect": "rsmmrrs",
-		"federation_grants.consent": "rsmmrrs",
-		"federation_grants.callback": "rsmmrrs",
-		"session.link": "rsmmrrs",
-		"session.link_callback": "rsmmrrs",
-		"webauthn.register": "rsmmrrs",
+		"federation_grants.connect": "rrmmrrr",
+		"federation_grants.consent": "rrmmrrr",
+		"federation_grants.callback": "rrmmrrr",
+		"session.link": "rrmmrrr",
+		"session.link_callback": "rrmmrrr",
+		"webauthn.register": "rrmmrrr",
+		"mfa.manage": "rrmmrrr",
 	},
 	"required · no factor": {
 		"oauth.authorize": "rummrru",
@@ -179,6 +184,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link": "rummrru",
 		"session.link_callback": "rummrru",
 		"webauthn.register": "rummrru",
+		"mfa.manage": "rummrru",
 	},
 	"required · totp, not recordable": {
 		"oauth.authorize": "rrmmrrr",
@@ -195,6 +201,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link": "rrmmrrr",
 		"session.link_callback": "rrmmrrr",
 		"webauthn.register": "rrmmrrr",
+		"mfa.manage": "rrmmrrr",
 	},
 	"optional · totp, recordable, holding totp": {
 		"oauth.authorize": "mmmmmmm",
@@ -211,6 +218,7 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link": "rsmsrrs",
 		"session.link_callback": "mmmmmmm",
 		"webauthn.register": "rsmsrrs",
+		"mfa.manage": "rsmsrrs",
 	},
 	"required · totp, recordable, holding totp": {
 		"oauth.authorize": "rsmmrrs",
@@ -227,5 +235,6 @@ export const VERDICTS: Readonly<Record<string, Readonly<Record<string, string>>>
 		"session.link": "rsmsrrs",
 		"session.link_callback": "rsmmrrs",
 		"webauthn.register": "rsmsrrs",
+		"mfa.manage": "rsmsrrs",
 	},
 };

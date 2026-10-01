@@ -58,3 +58,8 @@ export {
 	type FakeStoreUser,
 	startFakeStore,
 } from "./mfa/fakeStore.mjs";
+export {
+	type WebAuthnCredentialStoreContractInput,
+	type WebAuthnCredentialStoreHarness,
+	webAuthnCredentialStoreContract,
+} from "./webauthn/credentialStore.contract.mjs";

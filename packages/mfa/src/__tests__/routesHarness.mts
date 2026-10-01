@@ -36,8 +36,10 @@ import type {
 	PrimaryContinuation,
 	RequirementInterruption,
 	SessionRequirement,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { defineModule } from "@o3co/auth-provider-core";
+import type { RecordingMailSender } from "@o3co/auth-provider-core/testing";
 import type express from "express";
 import type request from "supertest";
 import { expect, vi } from "vitest";
@@ -49,6 +51,7 @@ import {
 	seedTotpFactor,
 	totpCodeForTests,
 } from "#/testing/index.mjs";
+import { decodeBase32 } from "#/totp/base32.mjs";
 import { totpStep } from "#/totp/rfc6238.mjs";
 import {
 	ALICE,
@@ -208,6 +211,130 @@ export async function beginLogin(
 	const boundTo = sessionIdSet(res);
 	if (boundTo === undefined) throw new Error("the login's 403 set no session");
 	return { agent, transaction: res.body.transaction as string, boundTo };
+}
+
+/** `POST /session/login` answered `403 mfa_enrollment_required`, as the page receives it: a first binding begun. */
+export async function beginFirstBinding(
+	app: express.Express,
+	user: { readonly username: string; readonly password: string } = ALICE,
+): Promise<BegunLogin & { readonly hints: Record<string, unknown> }> {
+	const { agent, res } = await login(app, { username: user.username, password: user.password });
+	expect(res.status, JSON.stringify(res.body)).toBe(403);
+	expect(res.body.error).toBe("mfa_enrollment_required");
+	const boundTo = sessionIdSet(res);
+	if (boundTo === undefined) throw new Error("the login's 403 set no session");
+	return {
+		agent,
+		transaction: res.body.transaction as string,
+		boundTo,
+		hints: res.body.hints as Record<string, unknown>,
+	};
+}
+
+/** `POST /session/mfa/enrollment` for `kind` on `transaction`. */
+export const beginEnrollment = (
+	agent: Agent,
+	transaction: string,
+	kind: unknown,
+): Promise<request.Response> =>
+	mfaPost(agent, "/enrollment", { transaction_id: transaction, kind });
+
+/** `POST /session/mfa/enrollment/complete` with `proof` on `transaction`, and a `label` when given. */
+export const completeEnrollment = (
+	agent: Agent,
+	transaction: string,
+	proof: unknown,
+	label?: unknown,
+): Promise<request.Response> =>
+	mfaPost(agent, "/enrollment/complete", {
+		transaction_id: transaction,
+		proof,
+		...(label === undefined ? {} : { label }),
+	});
+
+/** A browser signed in: the agent holding the authenticated session, and the sid of the `UserSession` its login wrote. */
+export interface SignedIn {
+	readonly agent: Agent;
+	readonly sid: string;
+}
+
+/** Runs `signIn` with `store`'s `create` watched, and answers the agent with the sid of the session it wrote. */
+async function watchingCreate(
+	store: UserSessionStore,
+	signIn: () => Promise<Agent>,
+): Promise<SignedIn> {
+	const create = vi.spyOn(store, "create");
+	try {
+		const agent = await signIn();
+		const sid = (create.mock.calls.at(-1)?.[0] as { sid?: unknown } | undefined)?.sid;
+		if (typeof sid !== "string") throw new Error("the login wrote no session");
+		return { agent, sid };
+	} finally {
+		create.mockRestore();
+	}
+}
+
+/** `POST /session/login` as `user` (alice by default), established with no second factor asked. */
+export const signIn = (
+	app: express.Express,
+	store: UserSessionStore,
+	user: { readonly username: string; readonly password: string } = ALICE,
+): Promise<SignedIn> =>
+	watchingCreate(store, async () => {
+		const { agent, res } = await login(app, { username: user.username, password: user.password });
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		return agent;
+	});
+
+/** A login of alice interrupted for her TOTP factor `seeded`, and established by its code: a session with a second factor verified now. */
+export const signInWithTotp = (
+	app: express.Express,
+	store: UserSessionStore,
+	seeded: SeededTotp,
+): Promise<SignedIn> =>
+	watchingCreate(store, async () => {
+		const { agent, transaction } = await beginLogin(app);
+		const res = await verify(agent, transaction, seeded.record.id, totpCode(seeded.secret));
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		return agent;
+	});
+
+/** `POST /session/mfa/enrollment` for `kind` with no transaction: a factor added from the account page. */
+export const enrollFromAccount = (agent: Agent, kind: unknown): Promise<request.Response> =>
+	mfaPost(agent, "/enrollment", { kind });
+
+/** `POST /session/mfa/step-up`, naming `transaction` when given. */
+export const stepUp = (agent: Agent, transaction?: string): Promise<request.Response> =>
+	mfaPost(agent, "/step-up", transaction === undefined ? {} : { transaction_id: transaction });
+
+/** The account-email proof given on `transaction`: challenged, then the code `sender` was handed last verified. */
+export async function giveEmailProof(
+	agent: Agent,
+	transaction: string,
+	sender: RecordingMailSender,
+): Promise<request.Response> {
+	const challenged = await mfaPost(agent, "/challenge", {
+		transaction_id: transaction,
+		factor_id: "account-email",
+	});
+	expect(challenged.status, JSON.stringify(challenged.body)).toBe(200);
+	const code = sender.sent.at(-1)?.code;
+	if (code === undefined) throw new Error("nothing was sent");
+	return verify(agent, transaction, "account-email", code);
+}
+
+/** The step-up a first binding is answered with: `403 step_up_required`, naming the requirement and its page. */
+export const STEP_UP_REQUIRED = {
+	error: "step_up_required",
+	requirement: "mfa",
+	page: "https://auth.example/mfa",
+} as const;
+
+/** The code a TOTP enrollment's `secret` (base32, SHA1, 6 digits, 30 s) takes now. */
+export function totpProofOf(secret: unknown): string {
+	const key = typeof secret === "string" ? decodeBase32(secret) : undefined;
+	if (key === undefined) throw new Error("the enrollment answered no secret");
+	return totpCode(key);
 }
 
 /** An audit sink that keeps what it is handed. */

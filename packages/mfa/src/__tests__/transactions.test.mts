@@ -119,19 +119,25 @@ describe("the login's transaction", () => {
 		});
 	});
 
-	it("offers no email proof before step 9 can require one: the type admits only false, and anything else is refused before a transaction is stored", async () => {
+	it("opens a first binding whose account-email proof comes first as a proof required, and answers so", async () => {
+		const { store, transactions } = opened();
+		const answer = await transactions.open("sess-1", CONTINUATION, {
+			error: "mfa_enrollment_required",
+			enrollable: ["totp"],
+			emailProof: true,
+		});
+		expect(answer.body.hints).toEqual({ enrollable: ["totp"], email_proof: true });
+		expect(await store.get(answer.body.transaction as string)).toMatchObject({
+			enrollment: "required",
+			emailProof: "required",
+		});
+	});
+
+	it("refuses a proof that is neither true nor false before a transaction is stored: the answer never advertises what the transaction does not record", async () => {
 		const store = createMemoryMfaTransactionStore();
 		const create = vi.fn(store.create);
 		const { transactions } = opened(600, { ...store, create });
-		const typed = () =>
-			transactions.open("sess-1", CONTINUATION, {
-				error: "mfa_enrollment_required",
-				enrollable: ["totp"],
-				// @ts-expect-error — the account-email proof is step 9's: until then the answer cannot advertise one the transaction does not require
-				emailProof: true,
-			});
-		await expect(typed()).rejects.toThrow(RangeError);
-		for (const emailProof of [true, "false", 0, undefined, null]) {
+		for (const emailProof of ["false", 0, undefined, null]) {
 			await expect(
 				transactions.open("sess-1", CONTINUATION, {
 					error: "mfa_enrollment_required",

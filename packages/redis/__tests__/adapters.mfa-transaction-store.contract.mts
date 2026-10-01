@@ -16,6 +16,7 @@
 
 import {
 	getBoundMfaTransaction,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
@@ -35,11 +36,13 @@ import { describe, expect, it } from "vitest";
  * one winner among verifications in flight. And the subject state, which
  * bounds guessable proofs across transactions: the consecutive run with its
  * short backoff and hard limit, and the weekly budget no success refunds.
+ * Beside them, what a first binding asks of the store: the email proof an
+ * operator reset requires, and the account-email proof given in one session.
  *
  * The subject state is judged on the time its caller passes, so D21's
- * schedule is driven here by an injected clock; a transaction expires on the
- * store's own clock, read through {@link ExpiryClock} as the session-store
- * suite does.
+ * schedule is driven here by an injected clock; a transaction and a
+ * session's proof expire on the store's own clock, read through
+ * {@link ExpiryClock} as the session-store suite does.
  */
 export type MfaTransactionStoreContractFactory = () => Promise<MfaTransactionStore>;
 
@@ -1360,6 +1363,150 @@ export function runMfaTransactionStoreContract(
 			const store = await factory();
 			expect(await store.consumeEmailProofRequirement("user-1")).toBe(false);
 			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
+		});
+	});
+
+	describe("MfaTransactionStore contract: a session's account-email proof", () => {
+		// The proof a subject with no counting factor gives in a session before
+		// a first binding there (the MFA ADR's D24): it stands for that session
+		// of that subject alone, until its end, and a later one replaces it.
+
+		/** A whole millisecond at or after both clocks: the host's, which a write is checked against, and the store's. */
+		const nowOnBoth = async (): Promise<number> =>
+			Math.floor(Math.max(Date.now(), await expiry.now()));
+
+		it("records a proof, and answers when it was given while it stands", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBeNull();
+			await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now + 10 * MINUTE - 1)).toBe(now);
+		});
+
+		it("answers no proof at a time at or past its end, though the store still holds it", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now + 10 * MINUTE)).toBeNull();
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now + 11 * MINUTE)).toBeNull();
+			// Still held for a caller whose time is inside it.
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+		});
+
+		it("forgets a proof once the store's clock passes its end, whatever time a caller asks about", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			const until = now + 300;
+			await store.recordSessionEmailProof("user-1", "sid-1", now, until);
+			await expiry.passed(until);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBeNull();
+		});
+
+		it("records a proof given a little ahead of the store's clock, and answers it no later than the time asked about", async () => {
+			// A caller's clock may run ahead of the store's by up to the skew
+			// allowance; the proof is kept, and never read as still to come.
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.recordSessionEmailProof("user-1", "sid-1", now + MINUTE, now + 10 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+		});
+
+		it("answers when a proof was given no later than the time asked about", async () => {
+			// A caller whose clock runs behind the one that recorded it is never
+			// told of a proof still to come.
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now - 1_000)).toBe(now - 1_000);
+		});
+
+		it("answers another session of the subject, and that session under another subject, no proof", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-2", now)).toBeNull();
+			expect(await store.sessionEmailProofAt("user-2", "sid-1", now)).toBeNull();
+			// A subject and a sid whose texts join to the same text are still two.
+			await store.recordSessionEmailProof("user-1:a", "b", now, now + 10 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "a:b", now)).toBeNull();
+			expect(await store.sessionEmailProofAt("user-1:a", "b", now)).toBe(now);
+		});
+
+		it("replaces an earlier proof for the session with a later one: its time, and its end", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.recordSessionEmailProof("user-1", "sid-1", now - 2 * MINUTE, now + 10 * MINUTE);
+			await store.recordSessionEmailProof("user-1", "sid-1", now - MINUTE, now + 5 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now - MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now + 6 * MINUTE)).toBeNull();
+			// Another session's proof stands beside it, untouched.
+			await store.recordSessionEmailProof("user-1", "sid-2", now, now + 10 * MINUTE);
+			await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+			expect(await store.sessionEmailProofAt("user-1", "sid-2", now)).toBe(now);
+		});
+
+		it("refuses, with a RangeError, a proof it cannot keep, and records nothing", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			const later = now + 10 * MINUTE;
+			for (const [label, subject, sid, provedAtMs, untilMs] of [
+				["an empty subject", "", "sid-1", now, later],
+				["a subject that is not a string", 7, "sid-1", now, later],
+				["an empty sid", "user-1", "", now, later],
+				["a sid that is not a string", "user-1", undefined, now, later],
+				["a proof time that is not a number", "user-1", "sid-1", Number.NaN, later],
+				["a proof time before the epoch", "user-1", "sid-1", -1, later],
+				["a proof time that is not whole", "user-1", "sid-1", now + 0.5, later],
+				["a proof time as text", "user-1", "sid-1", String(now), later],
+				["an end at the proof's time", "user-1", "sid-1", now, now],
+				["an end before the proof's time", "user-1", "sid-1", now, now - 1],
+				[
+					"an end already past on the store's clock",
+					"user-1",
+					"sid-1",
+					now - 2 * MINUTE,
+					now - MINUTE,
+				],
+				["an end that is not a number", "user-1", "sid-1", now, Number.NaN],
+				["an end that is not whole", "user-1", "sid-1", now, later + 0.5],
+				["an end past the Date range", "user-1", "sid-1", now, 1e17],
+				[
+					"a proof time further ahead of the store's clock than the skew allowance",
+					"user-1",
+					"sid-1",
+					now + MFA_CLOCK_SKEW_ALLOWANCE_MS + MINUTE,
+					now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 10 * MINUTE,
+				],
+			] as const) {
+				await expect(
+					store.recordSessionEmailProof(
+						subject as never,
+						sid as never,
+						provedAtMs as never,
+						untilMs as never,
+					),
+					label,
+				).rejects.toThrow(RangeError);
+			}
+			expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBeNull();
+		});
+
+		it("refuses, with a RangeError, a question it cannot answer: no subject, no sid, or a time that is no instant", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			for (const [label, subject, sid, nowMs] of [
+				["an empty subject", "", "sid-1", now],
+				["an empty sid", "user-1", "", now],
+				["a time that is not a number", "user-1", "sid-1", Number.NaN],
+				["a time before the epoch", "user-1", "sid-1", -1],
+				["a time as text", "user-1", "sid-1", String(now)],
+			] as const) {
+				await expect(
+					store.sessionEmailProofAt(subject, sid, nowMs as never),
+					label,
+				).rejects.toThrow(RangeError);
+			}
 		});
 	});
 }

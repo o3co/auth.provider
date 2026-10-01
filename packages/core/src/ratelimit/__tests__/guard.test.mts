@@ -27,7 +27,7 @@
 
 import express from "express";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 import type { AuditEvent, AuditSink } from "#/audit/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import {
@@ -63,11 +63,22 @@ const scriptedLimiter = (
 	};
 };
 
-const makeLogger = (): Logger & { error: ReturnType<typeof vi.fn> } => ({
+const unexpectedLoggerCall = (member: string): never => {
+	throw new Error(`guard.test: logger.${member} is not expected`);
+};
+
+/**
+ * `error` accepts both of `Logger.error`'s overloads, and records each call.
+ * The guard writes only `error`: `trace`, `fatal` and `child` throw if called.
+ */
+const makeLogger = (): Logger & { error: Mock<(...args: unknown[]) => void> } => ({
+	trace: vi.fn(() => unexpectedLoggerCall("trace")),
 	debug: vi.fn(),
 	info: vi.fn(),
 	warn: vi.fn(),
-	error: vi.fn(),
+	error: vi.fn<(...args: unknown[]) => void>(),
+	fatal: vi.fn(() => unexpectedLoggerCall("fatal")),
+	child: vi.fn((): Logger => unexpectedLoggerCall("child")),
 });
 
 const spyAuditSink = (): { sink: AuditSink; events: AuditEvent[] } => {

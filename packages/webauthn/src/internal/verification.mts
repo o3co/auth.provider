@@ -22,10 +22,26 @@
  * bumped. They reshape registration material for the endpoint layer, and answer the backup
  * eligibility (BE) and backup state (BS) of a verified credential to the caller that asks.
  *
+ * A registration's top origin is held to the rule the library holds an assertion's to, which it
+ * does not apply to a registration: a top origin the client data reports must be one of the
+ * expected top origins, and belong to a cross-origin ceremony. None reported passes, as it does
+ * for an assertion (Safari reports none). The client data is read as the library decodes it
+ * (`./clientData.mts`), so the text judged is the text it verified.
+ * - `topOriginAccepted` mirrors `verifyAuthenticationResponse`'s `crossOrigin` branch: recheck it
+ *   at every `@simplewebauthn/server` bump.
+ * - Once `verifyRegistrationResponse` takes an expected top origin, pass it through and delete
+ *   `topOriginAccepted`.
+ *
  * The sign count is judged here, only once the signature verified: the library, which compares
  * the count before it checks the signature, is handed a stored count of 0 and so never judges
  * it. A count that did not increase over the stored one is a regression, but for 0 against a
  * stored 0 — an authenticator that keeps no counter (WebAuthn §6.1.1).
+ *
+ * An assertion's user handle, which the library does not compare, is held here to the one the
+ * caller expects (WebAuthn §7.2 step 6), once the signature verified and before the count: one
+ * carried must be the expected bytes' unpadded base64url, and no other spelling of them — padded,
+ * the standard alphabet, the handle read as text — is accepted. None carried (`null` is none)
+ * passes: a non-discoverable credential may return none.
  *
  * Attestation chain failures ("x5c could not be chained to any specified trust anchor") match no
  * prefix and read as "unknown"; there is no dedicated reason for them.
@@ -34,6 +50,7 @@
 import type { AuthenticatorTransport, WebAuthnCredential } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
+import { readClientData } from "./clientData.mjs";
 import { WEBAUTHN_ALGORITHM_IDS } from "./options.mjs";
 
 // ---------------------------------------------------------------------------
@@ -52,6 +69,11 @@ export interface AttestationVerificationInput {
 	 * by grant policy.
 	 */
 	readonly userVerification?: "required" | "preferred" | "discouraged";
+	/**
+	 * Origins this RP may be framed by, as {@link AssertionVerificationInput.expectedTopOrigins}.
+	 * Absent, a reported top origin is refused.
+	 */
+	readonly expectedTopOrigins?: readonly string[];
 }
 
 export type AttestationVerificationResult =
@@ -74,6 +96,7 @@ export type AttestationVerificationResult =
 			readonly ok: false;
 			readonly reason:
 				| "origin_mismatch"
+				| "top_origin_mismatch"
 				| "challenge_mismatch"
 				| "attestation_invalid"
 				| "rp_id_mismatch"
@@ -130,6 +153,9 @@ export async function verifyWebAuthnAttestationWithBackupState(
 		if (!verification.verified || !verification.registrationInfo) {
 			return { ok: false, reason: "attestation_invalid" };
 		}
+		if (!topOriginAccepted(input.response.response.clientDataJSON, input.expectedTopOrigins)) {
+			return { ok: false, reason: "top_origin_mismatch" };
+		}
 
 		const info = verification.registrationInfo;
 		return {
@@ -152,6 +178,22 @@ export async function verifyWebAuthnAttestationWithBackupState(
 	} catch (err) {
 		return mapRegistrationError(err);
 	}
+}
+
+/**
+ * Whether the top origin `clientDataJSON` reports, decoded as the library decodes it, is one a
+ * ceremony may come from: none reported, or one of `expected` for a cross-origin ceremony. Client
+ * data that is not a JSON object fails.
+ */
+function topOriginAccepted(
+	clientDataJSON: string,
+	expected: readonly string[] | undefined,
+): boolean {
+	const clientData = readClientData(clientDataJSON);
+	if (clientData === undefined) return false;
+	const { crossOrigin, topOrigin } = clientData;
+	if (topOrigin === undefined) return true;
+	return crossOrigin === true && typeof topOrigin === "string" && !!expected?.includes(topOrigin);
 }
 
 /** The library's own message prefixes for a refused registration, each with its reason. */
@@ -219,6 +261,12 @@ export interface AssertionVerificationInput {
 	 * default).
 	 */
 	readonly expectedTopOrigins?: readonly string[];
+	/**
+	 * The user handle of the account the credential belongs to. Given, a response carrying
+	 * another is refused as `user_handle_mismatch`; absent, the response's user handle is not
+	 * read.
+	 */
+	readonly expectedUserHandle?: Uint8Array;
 }
 
 export type AssertionVerificationResult =
@@ -231,6 +279,7 @@ export type AssertionVerificationResult =
 				| "challenge_mismatch"
 				| "rp_id_mismatch"
 				| "signature_invalid"
+				| "user_handle_mismatch"
 				| "sign_count_regression"
 				| "unknown";
 	  };
@@ -298,6 +347,9 @@ export async function verifyWebAuthnAssertionWithBackupState(
 		if (!verification.verified) {
 			return { ok: false, reason: "signature_invalid" };
 		}
+		if (!userHandleAccepted(input.response.response.userHandle, input.expectedUserHandle)) {
+			return { ok: false, reason: "user_handle_mismatch" };
+		}
 
 		const { newCounter, credentialBackedUp, credentialDeviceType } =
 			verification.authenticationInfo;
@@ -321,6 +373,15 @@ export async function verifyWebAuthnAssertionWithBackupState(
 	} catch (err) {
 		return mapAuthenticationError(err);
 	}
+}
+
+/**
+ * Whether the user handle a response carries may stand for the account whose handle is
+ * `expected`: none expected, none carried, or `expected`'s unpadded base64url.
+ */
+function userHandleAccepted(presented: unknown, expected: Uint8Array | undefined): boolean {
+	if (expected === undefined || presented === undefined || presented === null) return true;
+	return presented === Buffer.from(expected).toString("base64url");
 }
 
 function mapAuthenticationError(err: unknown): Extract<AssertionVerificationResult, { ok: false }> {

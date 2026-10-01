@@ -387,17 +387,21 @@ export {
 } from "./grants/confirmationMatch.mjs";
 export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
 // Grant-policy evaluation and its bounds: the one answer every minting
-// path gives a policy that throws, denies, or exceeds its ceiling.
+// path gives a policy that throws, denies, returns a decision that is
+// neither allow nor deny, or exceeds its ceiling.
 export {
 	boundPolicyAudience,
 	type EvaluateGrantPolicyOptions,
 	evaluateGrantPolicy,
 	type GrantPolicyAllow,
+	type GrantPolicyDeny,
 	type GrantPolicyOutcome,
+	type GrantPolicyReading,
 	logGrantPolicyUnavailable,
 	type PolicyAudienceOutcome,
 	type PolicyScopeCeiling,
 	policyOutOfBounds,
+	readGrantPolicyDecision,
 } from "./grants/grantPolicy.mjs";
 // id_token generation (OIDC Core §2)
 export {
@@ -640,6 +644,8 @@ export {
 export {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	checkSessionEmailProof,
+	checkSessionEmailProofQuestion,
 	getBoundMfaTransaction,
 	isConsumedMfaTransaction,
 	isMfaTransactionBoundTo,
@@ -660,6 +666,9 @@ export {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 	readMfaAttemptReservation,
+	readSessionEmailProof,
+	type SessionEmailProof,
+	sessionEmailProofAnswer,
 } from "./mfa/transactionStore.mjs";
 export { checkMfaVersionAdvances } from "./mfa/version.mjs";
 // Middleware — CORS for the browser-facing OAuth surface
@@ -974,6 +983,7 @@ export {
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	cookieClaim,
+	cookieSessionUser,
 	establishWithoutAsking,
 	type FederatedLogin,
 	isEstablishment,
@@ -1059,6 +1069,11 @@ export {
 	sessionAuthentication,
 	vouchedAmr,
 } from "./user-sessions/authentication.mjs";
+// What a session's enrollment facts may hold, read one way by every store.
+export {
+	readEnrollmentFacts,
+	recordableEnrollmentFacts,
+} from "./user-sessions/enrollmentFacts.mjs";
 export {
 	createSessionFamilyIndexFactory,
 	createSessionFederationIndexFactory,
@@ -1098,9 +1113,11 @@ export {
 // @o3co/auth-provider-redis.
 export type {
 	CreateUserSessionInput,
+	MailAddressFact,
 	RegisteredRP,
 	SecondFactorEvent,
 	SessionAuthentication,
+	SessionEnrollmentFacts,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
 	SessionFederationIndex,
@@ -1112,6 +1129,7 @@ export type {
 	SubjectSessionIndex,
 	SubjectSessionIndexFactory,
 	SupportsSecondFactorUpdate,
+	SupportsSessionEnd,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -1120,6 +1138,7 @@ export type {
 export {
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	supportsSecondFactorUpdate,
+	supportsSessionEnd,
 } from "./user-sessions/types.mjs";
 
 // ---------------------------------------------------------------------------

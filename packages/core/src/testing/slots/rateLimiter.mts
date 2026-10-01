@@ -23,7 +23,8 @@
  * if declared, of the guard's two; a well-formed decision; with
  * `withOutage`, an outage thrown, never answered as a decision, so the
  * guard's policy and report apply; with `withBudget`, a key allowed its
- * limit and refused past it, each key counted apart. The budget case hands
+ * limit and refused past it, each key counted apart, a key under a prefix
+ * named after an `Object.prototype` member included. The budget case hands
  * one spec for every key: how a limiter resolves a spec is its own.
  *
  * `createTestRateLimiter` records every key checked, allows every check or
@@ -53,6 +54,9 @@ export interface RateLimiterContractInput {
 
 const FAIL_MODES: ReadonlySet<unknown> = new Set<RateLimitFailMode>(["open", "closed"]);
 const CONTEXT: RateLimitContext = { ip: "192.0.2.1" };
+
+/** Prefixes the budget case spends under: an ordinary one, and names a plain object inherits. */
+const BUDGET_PREFIXES = ["contract", "constructor", "__proto__", "toString", "valueOf"] as const;
 
 const wholeFrom = (value: unknown, least: number): boolean =>
 	typeof value === "number" && Number.isInteger(value) && value >= least;
@@ -141,18 +145,20 @@ export function rateLimiterContract(input: RateLimiterContractInput): readonly C
 	}
 	if (withBudget !== undefined) {
 		cases.push({
-			name: "a key is allowed its limit and refused past it, and another key is counted apart",
+			name: "a key is allowed its limit and refused past it, under a prefix named after an Object.prototype member too, and another key is counted apart",
 			run: async () => {
 				const limiter = withBudget({ limit: 2, windowSeconds: 60 });
-				const spent = "contract:ip:192.0.2.1";
-				const answers: RateLimitDecision[] = [];
-				for (let i = 0; i < 3; i++) answers.push(await limiter.check(spent, CONTEXT));
-				for (const answer of answers) checkDecision(answer);
-				assert.deepEqual(
-					answers.map((a) => a.allowed),
-					[true, true, false],
-					"a limit of 2 must allow a key twice and refuse it the third time",
-				);
+				for (const prefix of BUDGET_PREFIXES) {
+					const spent = `${prefix}:ip:192.0.2.1`;
+					const answers: RateLimitDecision[] = [];
+					for (let i = 0; i < 3; i++) answers.push(await limiter.check(spent, CONTEXT));
+					for (const answer of answers) checkDecision(answer);
+					assert.deepEqual(
+						answers.map((a) => a.allowed),
+						[true, true, false],
+						`a limit of 2 must allow ${spent} twice and refuse it the third time`,
+					);
+				}
 				const other = await limiter.check("contract:ip:192.0.2.2", { ip: "192.0.2.2" });
 				assert.equal(other.allowed, true, "another key was refused for the first key's checks");
 			},

@@ -205,7 +205,7 @@ describe("redisRefreshTokenFamilyStoreBuilder — client guard", () => {
 		const store = redisRefreshTokenFamilyStoreBuilder(
 			{ client } as never,
 			{ lifecycle: undefined } as never,
-		);
+		) as { kind: string };
 		expect(store).toBeDefined();
 		expect(store.kind).toBe("redis");
 	});

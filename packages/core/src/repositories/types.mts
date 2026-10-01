@@ -214,6 +214,12 @@ export interface Client {
  * `mfaEnrolled` is not a claim: it is the MFA enrollment witness, read by the
  * MFA package and never stamped on a token. The index signature carries
  * custom claims, which a consumer may map through a custom claim filter.
+ *
+ * A `User` is plain data: its own enumerable data properties, holding
+ * primitives, arrays and objects whose prototype is `Object.prototype` or
+ * `null` — what JSON parses to. A login refuses anything else with a
+ * `RangeError` (a `500`): a copy would lose a field an accessor, a prototype
+ * or a non-enumerable property holds, and read the witness as not enrolled.
  */
 export interface User {
 	readonly id: string;

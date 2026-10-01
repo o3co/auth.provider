@@ -20,10 +20,11 @@
  * `establishWithoutAsking`) into a `UserSession` record and an authenticated
  * express session, rolling back what it wrote when a store fails. It writes
  * from `establishment.primary` alone, never from what a caller passes beside
- * it: what a session vouches for is what admission established. Both login
- * routes use it, and it is exported so a requirement's completion (e.g. MFA)
- * finishes a login the same way; callers supply their extra writes (steps)
- * and their log vocabulary (reporter).
+ * it: what a session vouches for, and what it records of the login's `User`
+ * for a first binding (`enrollmentFacts`), is what admission established.
+ * Both login routes use it, and it is exported so a requirement's completion
+ * (e.g. MFA) finishes a login the same way; callers supply their extra writes
+ * (steps) and their log vocabulary (reporter).
  *
  * Sequence:
  * 1. `UserSessionStore.create` (a failure has nothing to undo);
@@ -169,7 +170,15 @@ export async function establishSession<S extends string = never, T extends strin
 		);
 	}
 	const { req, userSessionStore, subjectSessionIndex, sessionTtlMs } = deps;
-	const { subject: sub, user, claims, authTime, recorded, redirectTo } = establishment.primary;
+	const {
+		subject: sub,
+		user,
+		claims,
+		authTime,
+		recorded,
+		enrollmentFacts,
+		redirectTo,
+	} = establishment.primary;
 
 	// The record is minted before it is written, so the reporter and every
 	// line it emits can name the sid from the first write on.
@@ -238,6 +247,7 @@ export async function establishSession<S extends string = never, T extends strin
 				expiresAt: record.expiresAt,
 				claims,
 				...recorded,
+				enrollmentFacts,
 			});
 		} catch (err) {
 			// Fail-closed: the store's outage, answered as one — never a

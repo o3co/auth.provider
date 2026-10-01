@@ -15,20 +15,23 @@
  */
 
 /**
- * The MFA transaction a login opens, and the answer the login is interrupted
- * with. See README, "The login's interruption", and ADR
+ * The MFA transactions a ceremony runs on: the one a login opens, with the
+ * answer the login is interrupted with, and the `enroll` one a signed-in
+ * session opens. See README, "The login's interruption", and ADR
  * 2026-09-25-multi-factor-authentication, as ADR 2026-09-28-session-admission
  * amends it.
  *
- * Opened after the regeneration and bound to the regenerated session, so the
- * browser holding the new cookie is the one that may continue. The id is not a
- * bearer: every later use compares the whole binding, kind included
- * (`isMfaTransactionBoundTo`). The record carries core's continuation, never a
- * `user` or `primary` field of its own, and the primary's subject and
- * `redirectTo`, which the store holds it to. `expiresAtMs` is derived from
- * `mfa.transactionTtlSeconds` and nothing else; the store has no ceiling of
- * its own. A store that cannot create it rejects the open, answered as an
- * outage.
+ * A login's is opened after the regeneration and bound to the regenerated
+ * session, so the browser holding the new cookie is the one that may
+ * continue. The id is not a bearer: every later use compares the whole
+ * binding, kind included (`isMfaTransactionBoundTo`). The record carries
+ * core's continuation, never a `user` or `primary` field of its own, and the
+ * primary's subject and `redirectTo`, which the store holds it to. An
+ * `enroll` one is bound to the browser session and records the session's
+ * `sid` and subject, which every use compares with the session admitted.
+ * `expiresAtMs` is derived from `mfa.transactionTtlSeconds` and nothing else;
+ * the store has no ceiling of its own. A store that cannot create one rejects,
+ * answered as an outage.
  */
 
 import { randomBytes } from "node:crypto";
@@ -56,12 +59,12 @@ export type LoginInterruption =
 			/** The kinds this user may enroll, in registration order: `hints.enrollable`. */
 			readonly enrollable: readonly string[];
 			/**
-			 * Whether the account-email proof comes before the binding:
-			 * `hints.email_proof`. `false` alone: the transaction records
-			 * `emailProof: "not_required"`, and the answer must not advertise a
-			 * proof the server does not enforce.
+			 * Whether the account-email proof comes before the binding
+			 * (`firstBinding.mts`): `hints.email_proof`, and the transaction's
+			 * `emailProof` — `required` or `not_required` — so the answer
+			 * advertises exactly the proof the transaction enforces.
 			 */
-			readonly emailProof: false;
+			readonly emailProof: boolean;
 	  };
 
 /** Opens a login's transaction and answers the interruption. */
@@ -106,12 +109,13 @@ export function createLoginTransactions({
 	}
 	return {
 		async open(sessionId, continuation, interruption) {
-			// The type admits `false` alone; held at run time too, before anything
-			// is stored, so no caller can advertise a proof nothing requires.
-			if (interruption.error === "mfa_enrollment_required" && interruption.emailProof !== false) {
-				throw new RangeError(
-					"a first binding's email_proof must be false until the account-email proof can be required (build-order step 9)",
-				);
+			// Held at run time too, before anything is stored: the answer and the
+			// transaction say the same.
+			if (
+				interruption.error === "mfa_enrollment_required" &&
+				typeof interruption.emailProof !== "boolean"
+			) {
+				throw new RangeError("a first binding's email_proof must be true or false");
 			}
 			const id = newTransactionId();
 			const createdAtMs = now();
@@ -125,8 +129,7 @@ export function createLoginTransactions({
 				continuation,
 				redirectTo: continuation.primary.redirectTo,
 				enrollment: firstBinding ? "required" : "none",
-				// Never required: no mail is wired for the account-email proof.
-				emailProof: "not_required",
+				emailProof: firstBinding && interruption.emailProof ? "required" : "not_required",
 				acrValues: undefined,
 				challenge: undefined,
 				pendingEnrollment: undefined,
@@ -154,4 +157,51 @@ export function createLoginTransactions({
 			};
 		},
 	};
+}
+
+/** What an `enroll` transaction is opened for. */
+export interface EnrollTransactionShape {
+	/** The express session id of the browser that opened it. */
+	readonly sessionId: string;
+	/** The `UserSession` it was opened in, and its subject. */
+	readonly sid: string;
+	readonly subject: string;
+	/** `required`: the subject's first counting factor; `allowed`: one beside a factor that may count. */
+	readonly enrollment: "required" | "allowed";
+	/** Whether the account-email proof is owed on it. */
+	readonly emailProof: "required" | "not_required";
+	readonly nowMs: number;
+	/** `mfa.transactionTtlSeconds`. */
+	readonly ttlSeconds: number;
+}
+
+/**
+ * Creates a new `enroll` transaction for `shape` in `store` — a fresh id, no
+ * continuation, bound to the session `sessionId` names — and answers it.
+ * Rejects when the store cannot keep it.
+ */
+export async function openEnrollTransaction(
+	store: MfaTransactionStore,
+	shape: EnrollTransactionShape,
+): Promise<MfaTransaction> {
+	const transaction: MfaTransaction = {
+		id: newTransactionId(),
+		purpose: "enroll",
+		binding: { kind: "session", id: shape.sessionId },
+		subject: shape.subject,
+		sid: shape.sid,
+		continuation: undefined,
+		redirectTo: undefined,
+		enrollment: shape.enrollment,
+		emailProof: shape.emailProof,
+		acrValues: undefined,
+		challenge: undefined,
+		pendingEnrollment: undefined,
+		attempts: 0,
+		createdAtMs: shape.nowMs,
+		expiresAtMs: shape.nowMs + shape.ttlSeconds * 1000,
+		version: 0,
+	};
+	await store.create(transaction);
+	return transaction;
 }

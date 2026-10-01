@@ -91,4 +91,9 @@ describe("the barrel's session-admission surface", () => {
 			expect(Object.hasOwn(core, internal), internal).toBe(false);
 		}
 	});
+
+	it("exports cookieSessionUser beside cookieClaim, and not the facts' derivation, which only core's primary builders run", () => {
+		expect(typeof core.cookieSessionUser).toBe("function");
+		expect(Object.hasOwn(core, "enrollmentFactsOf")).toBe(false);
+	});
 });

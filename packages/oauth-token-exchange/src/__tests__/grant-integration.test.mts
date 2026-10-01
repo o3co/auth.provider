@@ -20,9 +20,11 @@ import {
 	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
+	evaluateGrantPolicy,
 	type GrantContext,
 	type GrantHandler,
 	type GrantPolicyDecision,
+	type GrantPolicyHook,
 	type GrantPolicyRequest,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
@@ -717,7 +719,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				"a subject_token carrying a compound cnf",
 				() => subject({ cnf: { jkt: JKT, "x5t#S256": X5T } }),
 				dpop(JKT),
-				"subject_token has compound cnf binding which is not supported (Stage 1)",
+				"subject_token has compound cnf binding which is not supported",
 			],
 			[
 				"a subject_token with no lifetime left",
@@ -759,7 +761,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				"an actor_token carrying a compound cnf",
 				async () => withActor(await actor({ cnf: { jkt: JKT, "x5t#S256": X5T } })),
 				dpop(JKT),
-				"actor_token has compound cnf binding which is not supported (Stage 1)",
+				"actor_token has compound cnf binding which is not supported",
 			],
 			[
 				"a subject_token whose may_act does not name the actor_token's subject",
@@ -1134,26 +1136,28 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 	});
 
-	// A policy deny carries the policy's own `error`. RFC 6749 §5.2 makes
-	// `error` 1*NQSCHAR (printable ASCII without `"` and `\`), so a code
-	// outside that set — or none — is answered `invalid_request`, §2.2.2's
-	// code for a request refused by policy, and the policy's code is logged,
-	// sanitised, for the operator who wrote it.
+	// A policy deny is `400` with the policy's own `error`, as on every grant
+	// (RFC 6749 §5.2). §5.2 makes `error` 1*NQSCHAR (printable ASCII without
+	// `"` and `\`), so a code outside that set — or none — is answered
+	// `invalid_request`, §2.2.2's code for a request refused by policy, and the
+	// policy's code is logged, sanitised, for the operator who wrote it.
 	describe("a policy deny", () => {
-		const denying = (error: string, errorDescription: unknown = "denied by the test policy") =>
+		const denyingPolicy = (
+			error: string,
+			errorDescription: unknown = "denied by the test policy",
+		): GrantPolicyHook => ({
+			kind: "test",
+			evaluate: async () =>
+				({
+					outcome: "deny",
+					error,
+					errorDescription,
+				}) as unknown as GrantPolicyDecision,
+		});
+		const denying = (error: string, errorDescription?: unknown) =>
 			defineModule({
 				name: "test:denying-grant-policy",
-				provides: {
-					grantPolicy: () => ({
-						kind: "test",
-						evaluate: async () =>
-							({
-								outcome: "deny",
-								error,
-								errorDescription,
-							}) as unknown as GrantPolicyDecision,
-					}),
-				},
+				provides: { grantPolicy: () => denyingPolicy(error, errorDescription) },
 			});
 		const warnings = () => {
 			const logger = {
@@ -1206,32 +1210,124 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 
 		// A JavaScript policy can return anything as its description; one that
-		// is not a non-empty string is not sent — the grant's own default is.
+		// is not a non-empty string is not sent, and nothing is sent in its place.
 		it.each([
-			["a number", 42],
-			["the empty string", ""],
-		])(
-			"answers the default description for a deny description that is %s",
-			async (_label, description) => {
-				const { grant } = await boot([denying("access_denied", description)]);
+			["a number", { outcome: "deny", error: "access_denied", errorDescription: 42 }],
+			["the empty string", { outcome: "deny", error: "access_denied", errorDescription: "" }],
+			["absent", { outcome: "deny", error: "access_denied" }],
+		])("answers a deny whose description is %s with no description", async (_label, decision) => {
+			const { grant } = await boot([
+				defineModule({
+					name: "test:denying-grant-policy",
+					provides: {
+						grantPolicy: (): GrantPolicyHook => ({
+							kind: "test",
+							evaluate: async () => decision as unknown as GrantPolicyDecision,
+						}),
+					},
+				}),
+			]);
+			const { result } = await exchange(grant, await body());
+			expect(result).toStrictEqual({ status: 400, error: "access_denied" });
+		});
+
+		// The other grants answer a deny through core's `evaluateGrantPolicy`.
+		it.each(["access_denied", "invalid_request", "invalid_scope"])(
+			"answers a deny carrying %s as core's policy evaluation does: 400, the policy's code and description",
+			async (code) => {
+				const { grant } = await boot([denying(code)]);
 				const { result } = await exchange(grant, await body());
 				expect(result).toEqual({
-					status: 403,
-					error: "access_denied",
-					errorDescription: "denied by policy",
+					status: 400,
+					error: code,
+					errorDescription: "denied by the test policy",
 				});
+				const otherGrants = await evaluateGrantPolicy(
+					denyingPolicy(code),
+					{ grantType: TOKEN_EXCHANGE_GRANT_TYPE },
+					{ issuer: ISSUER },
+					[],
+					{ logger: undefined },
+				);
+				expect(otherGrants).toEqual({ ok: false, result });
 			},
 		);
+	});
 
-		it("keeps a well-formed deny code, access_denied as 403", async () => {
-			const { grant } = await boot([denying("access_denied")]);
-			const { result } = await exchange(grant, await body());
-			expect(result).toEqual({
-				status: 403,
-				error: "access_denied",
-				errorDescription: "denied by the test policy",
-			});
+	// Core reads every grant's policy decision; this grant's answer to one
+	// that is neither allow nor deny is the other grants'.
+	describe("a policy decision that is neither allow nor deny", () => {
+		it.each([
+			["another outcome", { outcome: "denied", error: "access_denied" }],
+			["another case", { outcome: "Deny" }],
+			["no outcome", {}],
+			["null", null],
+		])(
+			"answers a decision with %s as core's policy evaluation does: 500 server_error",
+			async (_label, decision) => {
+				const policy: GrantPolicyHook = {
+					kind: "test",
+					evaluate: async () => decision as unknown as GrantPolicyDecision,
+				};
+				const { grant } = await boot([
+					defineModule({
+						name: "test:invalid-grant-policy",
+						provides: { grantPolicy: () => policy },
+					}),
+				]);
+				const { result } = await exchange(grant, {
+					subject_token: await signSelfIssuedAccessToken({}),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				});
+				expect(result).toEqual({
+					status: 500,
+					error: "server_error",
+					errorDescription: "policy_decision_invalid",
+				});
+				const otherGrants = await evaluateGrantPolicy(
+					policy,
+					{ grantType: TOKEN_EXCHANGE_GRANT_TYPE },
+					{ issuer: ISSUER },
+					[],
+					{ logger: undefined },
+				);
+				expect(otherGrants).toEqual({ ok: false, result });
+			},
+		);
+	});
+
+	// A policy that throws is an outage, answered as core answers it for the
+	// other grants.
+	it("answers a policy that throws as core's policy evaluation does: 503 policy evaluation unavailable", async () => {
+		const policy: GrantPolicyHook = {
+			kind: "test",
+			evaluate: async () => {
+				throw new Error("decision service down");
+			},
+		};
+		const { grant } = await boot([
+			defineModule({
+				name: "test:throwing-grant-policy",
+				provides: { grantPolicy: () => policy },
+			}),
+		]);
+		const { result } = await exchange(grant, {
+			subject_token: await signSelfIssuedAccessToken({}),
+			subject_token_type: ACCESS_TOKEN_TYPE,
 		});
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "policy evaluation unavailable",
+		});
+		const otherGrants = await evaluateGrantPolicy(
+			policy,
+			{ grantType: TOKEN_EXCHANGE_GRANT_TYPE },
+			{ issuer: ISSUER },
+			[],
+			{ logger: undefined },
+		);
+		expect(otherGrants).toEqual({ ok: false, result });
 	});
 
 	// Core's ExchangeTokenValidator contract: `null` means the token is not

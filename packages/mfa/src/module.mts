@@ -24,9 +24,13 @@
  * factor finishes the login through it) and `deploymentMode` (the development
  * sample key and the routes' per-process limiter are refused under `multi`,
  * so a mode read as absent must not lift that); reads `rateLimiter`,
- * `auditSink` (absence declared) and `logger`. Nothing it keeps forks per
- * replica; without a shared `rateLimiter` its routes' limiter does, refused
- * under `multi`, warned about when the mode is unset.
+ * `auditSink` and `subjectRevocation` (each absence declared; the routes'
+ * admission of a signed-in session reads the boundary), `logger`,
+ * `mailSender` — where the account-email proof and a factor's codes go — and
+ * `userRepository`, for the enrollment witness's write alone
+ * (`markMfaEnrolled`). Nothing it keeps forks per replica; without a shared
+ * `rateLimiter` its routes' limiter does, refused under `multi`, warned about
+ * when the mode is unset.
  *
  * Reads its own section, `mfa` — the mode, its settings and the step-up
  * page, `mfa.page.url` — and the deployment mode from the `deploymentMode`
@@ -36,21 +40,31 @@
  *
  * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
  * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
- * the key), or when `mfa.page.url` is unset. It builds the key ring's sealing
- * once per boot (so `mfa_factor_sealed_with_retired_key` is logged once per key
- * id) and keeps it, with the requirement core issues `mfa.step_up` to, for the
- * same boot's routes (`mfaBootState`). It warns once when the development sample
- * key is in use, and once when the user-session store cannot record a step-up
- * (`mfa_step_up_unsupported`); the requirement then sends the session to log in
- * instead.
+ * the key), when `mfa.page.url` is unset, or when
+ * `mfa.enrollment.requireEmailProof` is `always` and no `mailSender` is wired —
+ * nobody could give the proof, so nobody could bind (the MFA ADR's D20). It
+ * builds the key ring's sealing once per boot (so
+ * `mfa_factor_sealed_with_retired_key` is logged once per key id) and keeps it,
+ * with the requirement core issues `mfa.step_up` to and the enrollment
+ * witness, for the same boot's routes (`mfaBootState`). It warns once each:
+ * when the development sample key is in use; when the user-session store
+ * cannot record a step-up (`mfa_step_up_unsupported`), the requirement then
+ * sending the session to log in instead; when `when-mail` meets no
+ * `mailSender`, so a first binding asks no proof
+ * (`mfa_first_binding_without_email_proof`); and when the directory cannot
+ * write the witness (`mfa_enrollment_witness_unwritable`).
  *
  * Contributes `mfa.rateLimit.routes` as the budget of the `mfa` prefix every
  * `/session/mfa` POST limits under, for every limiter to read; none when the
  * section gives none.
  *
+ * Contributes `mfa.manage`, graded `credential_change`, as the admission
+ * action its routes admit a signed-in session's enrollment for.
+ *
  * Contributes the MFA routes (`routes.mts`) at `/session/mfa`, after the
  * session middleware. Their factory runs after every factor has registered,
- * so it checks the installed factors (`checkInstalledFactors`) first.
+ * so it checks the installed factors (`checkInstalledFactors`) first, and
+ * the resolver holds `mfa.manage` (core's `checkResolver`).
  */
 
 import {
@@ -58,12 +72,14 @@ import {
 	type AuditSink,
 	BootError,
 	checkDeploymentMode,
+	checkResolver,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
 	type DeploymentMode,
 	defineModule,
 	isHintToken,
+	issuedRemediationActions,
 	type Logger,
 	type MfaFactorResolver,
 	type Module,
@@ -72,9 +88,11 @@ import {
 	requireUsableConfiguredRateLimitSpec,
 	type SessionRequirement,
 	type StepUpPage,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	supportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
+import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
@@ -84,6 +102,7 @@ import { createMfaRouter } from "./routes.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
 import { mfaTotpFactorModule } from "./totp/module.mjs";
 import { createLoginTransactions } from "./transactions.mjs";
+import { createMfaEnrollmentWitness, type MfaEnrollmentWitness } from "./witness.mjs";
 
 /** The id of the MFA routes' contribution: what another route orders itself against. */
 export const MFA_ROUTES_ID = "mfa-routes";
@@ -127,6 +146,8 @@ export interface MfaBootState {
 	readonly sealing: MfaSealing;
 	/** The object the requirement's factory returned: the one core issued `mfa.step_up` to. */
 	readonly requirement: SessionRequirement;
+	/** The enrollment witness over the composition's directory. */
+	readonly witness: MfaEnrollmentWitness;
 	readonly logger: Logger;
 }
 
@@ -309,7 +330,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "csrfGuard"
 		| "loginCompletion"
 		| "deploymentMode",
-		"rateLimiter" | "auditSink" | "logger",
+		"rateLimiter" | "auditSink" | "subjectRevocation" | "logger" | "mailSender" | "userRepository",
 		typeof mfaSectionSchema
 	>({
 		name: "mfa",
@@ -334,9 +355,20 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			"loginCompletion",
 			"deploymentMode",
 		],
-		optional: ["rateLimiter", "auditSink", "logger"],
-		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
+		optional: [
+			"rateLimiter",
+			"auditSink",
+			"subjectRevocation",
+			"logger",
+			"mailSender",
+			"userRepository",
+		],
+		absencePolicies: {
+			auditSink: AUDIT_SINK_ABSENCE_POLICY,
+			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+		},
 		contributes: {
+			admissionActions: MFA_ADMISSION_ACTIONS,
 			rateLimitBudgets: {
 				[MFA_RATE_LIMIT_PREFIX]: (deps) => routesBudget(deps.section),
 			},
@@ -369,6 +401,27 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							"mfa_step_up_unsupported",
 						);
 					}
+					// D20: under "always" nobody could give the proof without a sender, so
+					// nobody could bind; under "when-mail" a first binding goes without it.
+					const { requireEmailProof } = settings.enrollment;
+					const mailWired = deps.mailSender !== undefined;
+					if (requireEmailProof === "always" && !mailWired) {
+						throw new RangeError(
+							'mfa.enrollment.requireEmailProof is "always" and no mail sender is wired: nobody could give the account-email proof, so nobody could bind a factor — wire a mail sender, or set mfa.enrollment.requireEmailProof (MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF) to "when-mail" or "never"',
+						);
+					}
+					if (requireEmailProof === "when-mail" && !mailWired) {
+						logger.warn(
+							{ setting: "mfa.enrollment.requireEmailProof", value: requireEmailProof },
+							"mfa_first_binding_without_email_proof",
+						);
+					}
+					// A directory that cannot write the witness leaves D12's defence to
+					// what the Store answers on authenticate: said once.
+					const witness = createMfaEnrollmentWitness(deps.userRepository);
+					if (!witness.writable) {
+						logger.warn({ slot: "userRepository" }, "mfa_enrollment_witness_unwritable");
+					}
 					const requirement = createMfaRequirement({
 						mode,
 						factors: deps.mfaFactorResolver,
@@ -381,12 +434,19 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						stepUpRecordable,
 						recentMfaMaxAgeSeconds: settings.manage.maxAgeSeconds,
 						logger,
+						auditSink: deps.auditSink,
+						firstBinding: { requireEmailProof, mailWired },
+						emailProofRequiredAtNextBinding: (subject) =>
+							deps.mfaTransactionStore.emailProofRequiredAtNextBinding(subject),
+						sessionEmailProofAt: (subject, sid, nowMs) =>
+							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 					});
 					bootStates.set(deps.mfaFactorResolver, {
 						mode,
 						settings,
 						sealing: createMfaSealing({ ring: settings.encryptionKeys, logger }),
 						requirement,
+						witness,
 						logger,
 					});
 					return requirement;
@@ -394,8 +454,19 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			},
 			routes: [
 				(deps) => {
-					const { mode, settings, sealing, logger } = mfaBootState(deps.mfaFactorResolver);
+					const { mode, settings, sealing, requirement, witness, logger } = mfaBootState(
+						deps.mfaFactorResolver,
+					);
 					checkInstalledFactors(deps.mfaFactorResolver, mode);
+					const requirements = checkResolver(
+						deps.sessionRequirementResolver,
+						"mfaModule",
+						Object.keys(MFA_ADMISSION_ACTIONS),
+					);
+					const stepUp = issuedRemediationActions(requirement)?.step_up;
+					if (stepUp === undefined) {
+						throw new Error("core issued the mfa requirement no mfa.step_up remediation");
+					}
 					return {
 						id: MFA_ROUTES_ID,
 						mountPath: MFA_ROUTES_MOUNT_PATH,
@@ -408,15 +479,21 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								sealing,
 								maxAttemptsPerTransaction: settings.maxAttemptsPerTransaction,
 								mode,
+								mailSender: deps.mailSender,
+								witness,
+								transactionTtlSeconds: settings.transactionTtlSeconds,
+								maxFactorsPerSubject: settings.maxFactorsPerSubject,
+								sessionProofSeconds: settings.manage.maxAgeSeconds,
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,
-								subjectRevocation: undefined,
-								requirements: deps.sessionRequirementResolver,
+								subjectRevocation: deps.subjectRevocation,
+								requirements,
 								acrTable: {},
 								logger,
 								auditSink: deps.auditSink,
 							},
+							stepUp,
 							loginCompletion: deps.loginCompletion,
 							csrfGuard: deps.csrfGuard,
 							floodGuard: mfaFloodGuard({

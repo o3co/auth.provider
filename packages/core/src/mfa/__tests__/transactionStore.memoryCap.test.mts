@@ -113,7 +113,7 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		expect(refusal).not.toBeInstanceOf(RangeError);
 		expect(refusal).toMatchObject({ name: "MfaTransactionStoreFullError", reason: "full" });
 		expect((refusal as Error).message).toBe(
-			"memory MfaTransactionStore is at its cap of 2 resident transactions (expired ones not yet swept included); refusing a new one rather than evicting one",
+			"memory MfaTransactionStore is at its cap of 2 resident entries — transactions and session email proofs, expired ones not yet swept included; refusing a new one rather than evicting one",
 		);
 
 		expect(store.transactions).toBe(2);
@@ -172,6 +172,46 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 		// no second scan, so the store is still full.
 		expect(await refusalOf(store.create(TX("third")))).toBeInstanceOf(MfaTransactionStoreFullError);
 		expect(store.transactions).toBe(1);
+	});
+
+	it("counts a session's email proofs against its cap beside its transactions: at the cap a new proof is refused as a store fault, recording nothing", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 2 });
+		await store.create(TX("tx-1"));
+		await store.recordSessionEmailProof("user-1", "sid-1", T0, T0 + 300_000);
+		expect(store.sessionEmailProofs).toBe(1);
+		const refusal = await refusalOf(
+			store.recordSessionEmailProof("user-1", "sid-2", T0, T0 + 300_000),
+		);
+		expect(refusal).toBeInstanceOf(MfaTransactionStoreFullError);
+		expect(await store.sessionEmailProofAt("user-1", "sid-2", T0)).toBeNull();
+		// Nor is a transaction let past the cap the proofs share.
+		expect(await refusalOf(store.create(TX("tx-2")))).toBeInstanceOf(MfaTransactionStoreFullError);
+		expect(store.transactions).toBe(1);
+		expect(store.sessionEmailProofs).toBe(1);
+	});
+
+	it("replaces a session's proof at its cap: a replacement is no new entry", async () => {
+		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 1 });
+		await store.recordSessionEmailProof("user-1", "sid-1", T0, T0 + 300_000);
+		await store.recordSessionEmailProof("user-1", "sid-1", T0 + 1_000, T0 + 300_000);
+		expect(await store.sessionEmailProofAt("user-1", "sid-1", T0 + 1_000)).toBe(T0 + 1_000);
+		expect(store.sessionEmailProofs).toBe(1);
+	});
+
+	it("reclaims expired proofs before it refuses", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			maxEntries: 2,
+			minSweepIntervalMs: 0,
+		});
+		await store.recordSessionEmailProof("user-1", "sid-short", T0, T0 + 1_000);
+		await store.create(TX("long"));
+		now = T0 + 2_000;
+		await store.recordSessionEmailProof("user-1", "sid-next", T0 + 2_000, T0 + 300_000);
+		expect(store.sessionEmailProofs).toBe(1);
+		expect(store.transactions).toBe(1);
+		expect(await store.sessionEmailProofAt("user-1", "sid-next", now)).toBe(T0 + 2_000);
 	});
 
 	it("refuses a cap above what a Map can hold, 2^24 entries", () => {

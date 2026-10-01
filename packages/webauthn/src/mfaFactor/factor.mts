@@ -24,17 +24,21 @@
  *   address, excluding the subject's WebAuthn
  *   credentials, with a resident key discouraged, no attestation,
  *   `WEBAUTHN_ALGORITHM_IDS` and the section's user verification. Completion
- *   verifies the attestation and keeps the credential's backup eligibility
- *   (BE); a credential id the subject holds is `duplicate`.
+ *   verifies the attestation, its top origin held to `webauthn.topOrigin` as
+ *   an assertion's is, and keeps the credential's backup eligibility (BE); a
+ *   credential id the subject holds is `duplicate`.
  * - A credential is only ever looked up among its own subject's factors, so
  *   one id held by two subjects is not refused. Any path that resolves an
  *   MFA credential by its id alone must refuse such a duplicate first.
  * - An assertion's challenge lists every WebAuthn factor of the subject.
  *   Verification finds the credential by its id among them and verifies the
- *   assertion against the challenge the coordinator took; its next data is
+ *   assertion against the challenge the coordinator took, and a user handle
+ *   the response carries against the subject's (WebAuthn §7.2 step 6), once
+ *   the signature verified: another is `invalid`. Its next data is
  *   the new sign count and the backup state (BS) the assertion reports. A
  *   counter that did not increase over the stored one — judged only once
- *   the signature verified — is `sign_count_regression`; 0 against a stored
+ *   the signature verified — is `sign_count_regression`, naming the record
+ *   id of the factor whose credential asserted; 0 against a stored
  *   0 is an authenticator that keeps no counter (WebAuthn §6.1.1), which
  *   passes and stays 0. An assertion reporting another backup eligibility
  *   than the one registered is `invalid` (BE is fixed at creation, WebAuthn
@@ -336,11 +340,6 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 			const found = readable(ctx.factors).find(({ data }) => data.credentialId === assertion.id);
 			if (found === undefined) return { ok: false, reason: "invalid" };
 			const { data } = found;
-			// WebAuthn §7.2 step 6: a user handle the response carries must be the credential's.
-			const presented = assertion.response.userHandle;
-			if (presented !== undefined && presented !== data.userHandle) {
-				return { ok: false, reason: "invalid" };
-			}
 			const verified = await verifyWebAuthnAssertionWithBackupState({
 				credential: {
 					credentialId: data.credentialId,
@@ -356,12 +355,14 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 					? {}
 					: { expectedTopOrigins: relyingParty.topOrigin }),
 				userVerification,
+				// WebAuthn §7.2 step 6: a user handle the response carries must be the subject's.
+				expectedUserHandle: bytesOf(data.userHandle),
 			});
 			if (!verified.ok) {
-				return {
-					ok: false,
-					reason: verified.reason === "sign_count_regression" ? "sign_count_regression" : "invalid",
-				};
+				// Any other refusal, `user_handle_mismatch` included, is the contract's `invalid`.
+				return verified.reason === "sign_count_regression"
+					? { ok: false, reason: "sign_count_regression", factorId: found.factor.id }
+					: { ok: false, reason: "invalid" };
 			}
 			// BE is fixed at creation (WebAuthn §6.1.3): another one is not this credential's word.
 			if (verified.backupEligible !== data.backupEligible) return { ok: false, reason: "invalid" };
@@ -405,6 +406,9 @@ export function createWebAuthnMfaFactor(settings: WebAuthnMfaFactorSettings): Mf
 				expectedChallenge: state.challenge,
 				expectedRpId: relyingParty.rpId,
 				expectedOrigins: relyingParty.origin,
+				...(relyingParty.topOrigin === undefined
+					? {}
+					: { expectedTopOrigins: relyingParty.topOrigin }),
 				userVerification,
 			});
 			if (!verified.ok) return { ok: false, reason: "invalid" };

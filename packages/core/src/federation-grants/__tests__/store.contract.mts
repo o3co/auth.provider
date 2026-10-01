@@ -40,6 +40,13 @@ export interface FederationGrantStoreContractFactory<
 	 * grant. For a Redis adapter this is whether the credential key exists.
 	 */
 	credentialResident(store: S, grantId: string): Promise<boolean>;
+	/**
+	 * Set when the store's calls travel on more than one connection, so that a
+	 * release sent after a lock attempt can reach the server before it. The
+	 * lock cases then accept a lock taken by an attempt the release overtook,
+	 * provided `waitedMs` places it before the deadline. Unset, they do not.
+	 */
+	readonly lockCallsMayOvertake?: true;
 }
 
 const MIN = 60_000;
@@ -2845,10 +2852,19 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				// already given up on.
 				const first = await store.acquireRefreshLock("g-1", HELD);
 				if (!first.acquired) throw new Error("fixture: the first acquire failed");
-				const waiting = store.acquireRefreshLock("g-1", { ttlMs: 120_000, waitForMs: 5 });
+				const waitForMs = 5;
+				const waiting = store.acquireRefreshLock("g-1", { ttlMs: 120_000, waitForMs });
 				await sleep(15);
 				await first.release();
-				expect(await waiting).toEqual({ acquired: false, reason: "timeout" });
+				const outcome = await waiting;
+				if (factory.lockCallsMayOvertake === true && outcome.acquired) {
+					// The release overtook the waiter's first attempt on its way to the
+					// server: a lock taken before the deadline, as `waitedMs` shows.
+					expect(outcome.waitedMs).toBeLessThan(waitForMs);
+					await outcome.release();
+				} else {
+					expect(outcome).toEqual({ acquired: false, reason: "timeout" });
+				}
 
 				const next = await store.acquireRefreshLock("g-1", HELD);
 				expect(next.acquired).toBe(true);

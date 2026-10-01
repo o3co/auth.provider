@@ -33,7 +33,7 @@
  *   window 0-2, SHA1, SHA256 or SHA512; the issuer defaults to the host of
  *   the deployment's issuer.
  * - `mfa.transactionTtlSeconds` is held to 60-1800 seconds and
- *   `mfa.maxAttemptsPerTransaction` to 1-10 (the ADR states neither bound),
+ *   `mfa.maxAttemptsPerTransaction` to 2-10 (the ADR states neither bound),
  *   and the subject lock, `mfa.lockout`, to core's `checkMfaLockoutPolicy`
  *   under that key: obligations the MFA module refuses a boot for.
  * - The settings say whether the development sample key was accepted, so the
@@ -79,12 +79,14 @@ const LOCKOUT = {
 	hardLimit: 100,
 } as const;
 
-/** The transaction's keys and recent MFA's window, as `reference.conf` defaults them. */
+/** The transaction's keys, recent MFA's window, the first binding's proof and a subject's factor limit, as `reference.conf` defaults them. */
 const TRANSACTION = {
 	transactionTtlSeconds: 600,
 	maxAttemptsPerTransaction: 5,
 	lockout: { ...LOCKOUT },
 	manage: { maxAgeSeconds: 300 },
+	enrollment: { requireEmailProof: "when-mail" },
+	maxFactorsPerSubject: 10,
 } as const;
 
 /** A configuration as the composition root hands it, with `mfa` as given. */
@@ -168,12 +170,14 @@ describe("the MFA settings this package reads", () => {
 		expect(refusal(() => readTotp(undefined))).toMatch(/^mfa-totp-factor /);
 	});
 
-	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock and recent MFA's window — no factor's", () => {
+	it("exports the schema of the mfa section it reads: its mode, the page, the ring, the transaction's keys, the lock, recent MFA's window, the first binding's proof and a subject's factor limit — no factor's", () => {
 		expect(Object.keys(mfaConfigSchema.shape).sort()).toEqual([
 			"encryptionKeys",
+			"enrollment",
 			"lockout",
 			"manage",
 			"maxAttemptsPerTransaction",
+			"maxFactorsPerSubject",
 			"mode",
 			"page",
 			"transactionTtlSeconds",
@@ -654,16 +658,27 @@ describe("the transaction's life and attempts, and the lock", () => {
 		}
 	});
 
-	it("holds mfa.maxAttemptsPerTransaction to 1-10, a whole number (the owner's bound; the ADR states none)", () => {
-		for (const value of [1, 5, 10]) {
+	it("holds mfa.maxAttemptsPerTransaction to 2-10, a whole number: an email-proof first binding spends one on the proof and one on the binding", () => {
+		for (const value of [2, 5, 10]) {
 			expect(
 				readSettings(valid({ maxAttemptsPerTransaction: value })).maxAttemptsPerTransaction,
 			).toBe(value);
 		}
-		for (const value of [0, 11, 100, -1, 1.5, "5", null, undefined, Number.MAX_SAFE_INTEGER + 1]) {
+		for (const value of [
+			0,
+			1,
+			11,
+			100,
+			-1,
+			1.5,
+			"5",
+			null,
+			undefined,
+			Number.MAX_SAFE_INTEGER + 1,
+		]) {
 			const message = refusal(() => readSettings(valid({ maxAttemptsPerTransaction: value })));
 			expect(message, String(value)).toContain("mfa.maxAttemptsPerTransaction");
-			expect(message, String(value)).toContain("1 to 10");
+			expect(message, String(value)).toContain("2 to 10");
 		}
 	});
 
@@ -682,6 +697,32 @@ describe("the transaction's life and attempts, and the lock", () => {
 				refusal(() => readSettings(valid({ lockout }))),
 				JSON.stringify(lockout),
 			).toContain(field);
+		}
+	});
+
+	it("holds mfa.enrollment.requireEmailProof to when-mail, always or never, naming the key otherwise", () => {
+		for (const requireEmailProof of ["when-mail", "always", "never"]) {
+			expect(readSettings(valid({ enrollment: { requireEmailProof } })).enrollment).toEqual({
+				requireEmailProof,
+			});
+		}
+		for (const requireEmailProof of ["sometimes", "", true, undefined]) {
+			const message = refusal(() => readSettings(valid({ enrollment: { requireEmailProof } })));
+			expect(message, String(requireEmailProof)).toContain("mfa.enrollment.requireEmailProof");
+		}
+		expect(refusal(() => readSettings(valid({ enrollment: undefined })))).toContain(
+			"mfa.enrollment",
+		);
+	});
+
+	it("holds mfa.maxFactorsPerSubject to 2-100 records, a whole number — a first binding writes a factor and its recovery codes — naming the key otherwise", () => {
+		for (const value of [2, 10, 100]) {
+			expect(readSettings(valid({ maxFactorsPerSubject: value })).maxFactorsPerSubject).toBe(value);
+		}
+		for (const value of [1, 101, 0, 10.5, "10", null, undefined]) {
+			const message = refusal(() => readSettings(valid({ maxFactorsPerSubject: value })));
+			expect(message, String(value)).toContain("mfa.maxFactorsPerSubject");
+			expect(message, String(value)).toContain("2 to 100");
 		}
 	});
 

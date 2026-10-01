@@ -30,6 +30,8 @@
  *   3. the sign count, judged here after the signature verified — the library
  *      is handed a stored count of 0 — with the corner case stored=0 && new=0
  *      allowed
+ *   4. the user handle a response carries, held to the one the caller
+ *      expects, once the signature verified
  *
  * The real cryptographic path is covered by the library's own suite and by the
  * integration tests that run a real ceremony.
@@ -62,14 +64,20 @@ const mockVerifyAuthentication = vi.mocked(verifyAuthenticationResponse);
 // Shared test stubs
 // ---------------------------------------------------------------------------
 
-/** Minimal RegistrationResponseJSON stub — the wrapped function receives this but
- *  passes it straight to SimpleWebAuthn. Its shape doesn't matter for unit tests
- *  since SimpleWebAuthn is mocked. */
+/** Minimal RegistrationResponseJSON stub — the wrapped function passes it to SimpleWebAuthn,
+ *  mocked here, and reads its client data's top origin; that is a same-origin browser's. */
 const STUB_REGISTRATION_RESPONSE: RegistrationResponseJSON = {
 	id: "dGVzdC1jcmVkZW50aWFsLWlk",
 	rawId: "dGVzdC1jcmVkZW50aWFsLWlk",
 	response: {
-		clientDataJSON: "stub",
+		clientDataJSON: Buffer.from(
+			JSON.stringify({
+				type: "webauthn.create",
+				challenge: "some-challenge",
+				origin: "https://example.com",
+				crossOrigin: false,
+			}),
+		).toString("base64url"),
 		attestationObject: "stub",
 	},
 	clientExtensionResults: {},
@@ -495,6 +503,136 @@ describe("verifyWebAuthnAssertion", () => {
 		});
 
 		expect(result).toEqual({ ok: false, reason: "signature_invalid" });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The response's user handle (WebAuthn §7.2 step 6)
+// ---------------------------------------------------------------------------
+
+describe("the user handle an assertion carries", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	/** The owner's user handle: bytes whose base64url is not a multiple of four characters. */
+	const OWNER = new TextEncoder().encode("user-alice");
+	const OWNER_JSON = Buffer.from(OWNER).toString("base64url");
+	/** Another account's user handle, as the JSON form writes it. */
+	const OTHER_JSON = Buffer.from("user-mallory").toString("base64url");
+
+	/** An owner's user handle whose base64url uses both characters the base64 alphabet writes otherwise. */
+	const URL_SAFE_OWNER = new Uint8Array(Buffer.from("u-_owner", "base64url"));
+
+	/** A verified assertion as the library answers one, its counter `newCounter` (increased unless given). */
+	const verified = (newCounter = 6) =>
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: {
+				newCounter,
+				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
+				userVerified: true,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				authenticatorExtensionResults: undefined,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		});
+
+	/**
+	 * An input whose response carries `userHandle` as given (a `null` included), expecting the
+	 * owner's handle unless told otherwise; `null` expects none.
+	 */
+	const input = (
+		userHandle: unknown,
+		expectedUserHandle: Uint8Array | null = OWNER,
+	): Parameters<typeof verifyWebAuthnAssertion>[0] => ({
+		credential: makeStoredCredential(5),
+		response: {
+			...STUB_AUTHENTICATION_RESPONSE,
+			response: {
+				...STUB_AUTHENTICATION_RESPONSE.response,
+				...(userHandle === undefined ? {} : { userHandle: userHandle as string }),
+			},
+		},
+		expectedChallenge: "some-challenge",
+		expectedRpId: "example.com",
+		expectedOrigins: ["https://example.com"],
+		...(expectedUserHandle === null ? {} : { expectedUserHandle }),
+	});
+
+	it.each([
+		["another account's", OTHER_JSON],
+		["an empty one", ""],
+		["the owner's, padded", `${OWNER_JSON}==`],
+		[
+			"the owner's as raw text, as a client before @simplewebauthn/browser v10 answers it",
+			"user-alice",
+		],
+	])("refuses %s as user_handle_mismatch", async (_what, userHandle) => {
+		verified();
+		expect(await verifyWebAuthnAssertion(input(userHandle))).toEqual({
+			ok: false,
+			reason: "user_handle_mismatch",
+		});
+	});
+
+	it.each([
+		["the owner's", OWNER_JSON],
+		["none", undefined],
+		["null, which is none", null],
+	])("accepts %s", async (_what, userHandle) => {
+		verified();
+		expect(await verifyWebAuthnAssertion(input(userHandle))).toEqual({
+			ok: true,
+			newSignCount: 6,
+		});
+	});
+
+	it("refuses another's with the backup flags asked for too", async () => {
+		verified();
+		expect(await verifyWebAuthnAssertionWithBackupState(input(OTHER_JSON))).toEqual({
+			ok: false,
+			reason: "user_handle_mismatch",
+		});
+	});
+
+	it("refuses the owner's written in the standard base64 alphabet, and accepts it in the URL-safe one", async () => {
+		const standard = Buffer.from(URL_SAFE_OWNER).toString("base64");
+		expect(standard).toBe("u+/owner");
+		verified();
+		expect(await verifyWebAuthnAssertion(input(standard, URL_SAFE_OWNER))).toEqual({
+			ok: false,
+			reason: "user_handle_mismatch",
+		});
+		verified();
+		expect(await verifyWebAuthnAssertion(input("u-_owner", URL_SAFE_OWNER))).toEqual({
+			ok: true,
+			newSignCount: 6,
+		});
+	});
+
+	it("judges it before the count: another's with a counter that did not increase is user_handle_mismatch", async () => {
+		verified(5);
+		expect(await verifyWebAuthnAssertion(input(OTHER_JSON))).toEqual({
+			ok: false,
+			reason: "user_handle_mismatch",
+		});
+	});
+
+	it("does not read it when the caller expects none", async () => {
+		verified();
+		expect(await verifyWebAuthnAssertion(input(OTHER_JSON, null))).toEqual({
+			ok: true,
+			newSignCount: 6,
+		});
+	});
+
+	it("judges it only once the signature verified: an unsigned assertion carrying another's is signature_invalid", async () => {
+		mockVerifyAuthentication.mockResolvedValueOnce({ verified: false } as never);
+		expect(await verifyWebAuthnAssertion(input(OTHER_JSON))).toEqual({
+			ok: false,
+			reason: "signature_invalid",
+		});
 	});
 });
 

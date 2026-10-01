@@ -33,6 +33,8 @@ import {
 	type ActionGrade,
 	ADMISSION_GRADES,
 	type AdmissionAction,
+	type AuditEvent,
+	type AuditSink,
 	admitPrimary,
 	admitSession,
 	cookieClaim,
@@ -63,6 +65,7 @@ import {
 	FACTORS,
 	factorRecord,
 	factorStoreHolding,
+	NOT_ENROLLED_FACTS,
 	resolverOver,
 	stubFactor,
 	unreachableFactorStore,
@@ -102,6 +105,11 @@ function build(
 		/** `mfa.manage.maxAgeSeconds`; the package's default, by default. */
 		readonly recentMfaMaxAgeSeconds?: number;
 		readonly logger?: Logger;
+		readonly auditSink?: AuditSink;
+		/** `mfa.enrollment.requireEmailProof`; the package's default, by default. */
+		readonly requireEmailProof?: "when-mail" | "always" | "never";
+		/** Whether a mail sender is wired; none, by default. */
+		readonly mailWired?: boolean;
 	} = {},
 ): Built {
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
@@ -118,6 +126,15 @@ function build(
 		stepUpRecordable: options.stepUpRecordable ?? true,
 		recentMfaMaxAgeSeconds: options.recentMfaMaxAgeSeconds ?? 300,
 		logger: options.logger ?? silentLogger(),
+		auditSink: options.auditSink,
+		firstBinding: {
+			requireEmailProof: options.requireEmailProof ?? "when-mail",
+			mailWired: options.mailWired ?? false,
+		},
+		emailProofRequiredAtNextBinding: (subject) =>
+			transactionStore.emailProofRequiredAtNextBinding(subject),
+		sessionEmailProofAt: (subject, sid, nowMs) =>
+			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
 	});
 	return { requirement, transactionStore };
 }
@@ -221,7 +238,10 @@ describe("what the requirement declares", () => {
 		expect(await requirement.admit(about(password()))).toEqual(UNMET);
 
 		const later: MfaFactor[] = [FACTORS.totp()];
-		const reaching = build("required", { factors: later }).requirement;
+		const reaching = build("required", {
+			factors: later,
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		}).requirement;
 		expect([...reaching.reach].sort()).toEqual(["mfa", "otp"]);
 		later.pop();
 		expect([...reaching.reach].sort()).toEqual(["mfa", "otp"]);
@@ -230,7 +250,10 @@ describe("what the requirement declares", () => {
 
 	it("reads its reach at its first verdict when nothing read it before", async () => {
 		const factors: MfaFactor[] = [FACTORS.totp()];
-		const { requirement } = build("required", { factors });
+		const { requirement } = build("required", {
+			factors,
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		});
 		expect(await requirement.admit(about(password()))).toEqual(STEP_UP);
 		factors.pop();
 		expect([...requirement.reach].sort()).toEqual(["mfa", "otp"]);
@@ -288,7 +311,7 @@ const USE: AdmissionAction = { name: "test.use", grade: "use" };
 const NOTHING: AdmissionAction = { name: "test.peek", grade: "grants_nothing" };
 const CHANGE: AdmissionAction = { name: "test.change", grade: "credential_change" };
 
-/** What admission hands a requirement about a record read by `carrier`. */
+/** What admission hands a requirement about a record read by `carrier`: the view with what the login recorded of an account that is not enrolled. */
 const about = (
 	session: UserSession | null,
 	action: AdmissionAction = USE,
@@ -302,6 +325,7 @@ const about = (
 					sub: session.sub,
 					authTime: session.authTime,
 					expiresAt: session.expiresAt,
+					enrollmentFacts: NOT_ENROLLED_FACTS,
 				},
 	authentication: requirementSession(session),
 	carrier,
@@ -367,9 +391,31 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 		},
 		// required · use: the baseline.
 		{
-			row: "required · use · pwd, no mfaAt, a factor to step up with → step_up, refused for the baseline when it comes back unmet",
+			row: "required · use · pwd, no mfaAt, a counting factor held to step up with → step_up, refused for the baseline when it comes back unmet",
 			mode: "required",
 			input: about(password()),
+			records: HOLDING_TOTP,
+			expected: STEP_UP,
+		},
+		{
+			row: "required · use · pwd, no mfaAt, no counting factor held → reauthenticate: a new login binds the first one",
+			mode: "required",
+			input: about(password()),
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "required · use · pwd, no mfaAt, recovery codes alone held → reauthenticate: they do not count",
+			mode: "required",
+			input: about(password()),
+			factors: [FACTORS.totp(), FACTORS.recovery()],
+			records: [factorRecord("u-alice", "recovery_code")],
+			expected: REAUTHENTICATE,
+		},
+		{
+			row: "required · use · pwd, no mfaAt, a record of a kind no longer installed → step_up: it may count",
+			mode: "required",
+			input: about(password()),
+			records: [factorRecord("u-alice", "retired-kind")],
 			expected: STEP_UP,
 		},
 		{
@@ -401,13 +447,21 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 			row: "required · use · a code's read and a link's are judged as the cookie's",
 			mode: "required",
 			input: about(password(), USE, "code"),
+			records: HOLDING_TOTP,
 			expected: STEP_UP,
 		},
 		{
-			row: "required · use · the link callback's read, a pwd session without mfaAt → step_up",
+			row: "required · use · the link callback's read, a pwd session without mfaAt whose subject holds a counting factor → step_up",
 			mode: "required",
 			input: about(password(), USE, "link"),
+			records: HOLDING_TOTP,
 			expected: STEP_UP,
+		},
+		{
+			row: "required · use · the link callback's read, a pwd session without mfaAt whose subject holds none → reauthenticate",
+			mode: "required",
+			input: about(password(), USE, "link"),
+			expected: REAUTHENTICATE,
 		},
 		// required · grants_nothing: met on any live session, whatever the action is named.
 		{
@@ -460,9 +514,10 @@ describe("admit — its table of verdicts under mfa.mode", () => {
 			expected: MET,
 		},
 		{
-			row: "required · use · an action named device.lookup graded use → step_up: a name admits nothing",
+			row: "required · use · an action named device.lookup graded use, a counting factor held → step_up: a name admits nothing",
 			mode: "required",
 			input: about(password(), { name: "device.lookup", grade: "use" }),
+			records: HOLDING_TOTP,
 			expected: STEP_UP,
 		},
 		{
@@ -685,18 +740,18 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 		},
 		// A subject with no counting factor: a recent primary instead.
 		{
-			row: "no factor record, a password primary inside the window → met; under required, the baseline's step_up",
+			row: "no factor record, a password primary inside the window → met; under required, a new login: nothing to step up with",
 			input: about(password(), CHANGE),
 			records: [],
 			expected: MET,
-			required: STEP_UP,
+			required: REAUTHENTICATE,
 		},
 		{
-			row: "no factor record, a password primary before the window → reauthenticate; under required, the baseline's step_up",
+			row: "no factor record, a password primary before the window → reauthenticate; under required, a new login: nothing to step up with",
 			input: about(aged(password(), 24 * 60), CHANGE),
 			records: [],
 			expected: REAUTHENTICATE,
-			required: STEP_UP,
+			required: REAUTHENTICATE,
 		},
 		{
 			row: "no factor record, a federated primary inside the window → met",
@@ -711,26 +766,26 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			expected: REAUTHENTICATE,
 		},
 		{
-			row: "no factor record, a stale primary with a second factor verified inside the window → met",
+			row: "no factor record, a stale primary with a second factor verified inside the window → reauthenticate: a first binding needs a recent primary",
 			input: about(aged(password(["pwd", "recovery", "mfa"], minutesAgo(1)), 24 * 60), CHANGE),
 			records: [],
-			expected: MET,
+			expected: REAUTHENTICATE,
 		},
 		{
-			row: "recovery codes alone do not count: a primary inside the window → met; under required, the baseline's step_up",
+			row: "recovery codes alone do not count: a primary inside the window → met; under required, a new login: nothing to step up with",
 			input: about(password(), CHANGE),
 			records: [factorRecord("u-alice", "recovery_code")],
 			factors: [FACTORS.totp(), FACTORS.recovery()],
 			expected: MET,
-			required: STEP_UP,
+			required: REAUTHENTICATE,
 		},
 		{
-			row: "recovery codes alone do not count: a primary before the window → reauthenticate; under required, the baseline's step_up",
+			row: "recovery codes alone do not count: a primary before the window → reauthenticate; under required, a new login: nothing to step up with",
 			input: about(aged(password(), 24 * 60), CHANGE),
 			records: [factorRecord("u-alice", "recovery_code")],
 			factors: [FACTORS.totp(), FACTORS.recovery()],
 			expected: REAUTHENTICATE,
-			required: STEP_UP,
+			required: REAUTHENTICATE,
 		},
 		{
 			row: "recovery codes alone do not count: a federated primary inside the window → met",
@@ -740,11 +795,11 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			expected: MET,
 		},
 		{
-			row: "another subject's factor does not count: a primary inside the window → met; under required, the baseline's step_up",
+			row: "another subject's factor does not count: a primary inside the window → met; under required, a new login: nothing to step up with",
 			input: about(password(), CHANGE),
 			records: [factorRecord("u-bob")],
 			expected: MET,
-			required: STEP_UP,
+			required: REAUTHENTICATE,
 		},
 		{
 			row: "no factor record, a stale primary, and a session store that cannot record a step-up → reauthenticate: never stepped up",
@@ -804,24 +859,30 @@ describe("admit — under required, credential_change is never looser than use",
 	const RECOVERY_ONLY = [factorRecord("u-alice", "recovery_code")];
 	const WITH_RECOVERY = [FACTORS.totp(), FACTORS.recovery()];
 
-	it("steps up a password session without a second factor, signed in inside the window, whose subject holds no counting factor — as use does", async () => {
+	it("sends a password session without a second factor, signed in inside the window, whose subject holds no counting factor to log in again — as use does: the login binds its first factor", async () => {
 		const { requirement } = build("required");
-		expect(await requirement.admit(about(password(), CHANGE))).toEqual(STEP_UP);
-		expect(await requirement.admit(about(password(), USE))).toEqual(STEP_UP);
+		expect(await requirement.admit(about(password(), CHANGE))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(about(password(), USE))).toEqual(REAUTHENTICATE);
 	});
 
-	it("steps up a password session written before authentication, signed in inside the window, whose subject holds no factor", async () => {
+	it("sends a password session written before authentication, whose subject holds no factor, to log in again", async () => {
 		const { requirement } = build("required");
-		expect(await requirement.admit(about(preUpgradePassword(), CHANGE))).toEqual(STEP_UP);
-		expect(await requirement.admit(about(preUpgradePassword(), USE))).toEqual(STEP_UP);
+		expect(await requirement.admit(about(preUpgradePassword(), CHANGE))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(about(preUpgradePassword(), USE))).toEqual(REAUTHENTICATE);
 	});
 
-	it("steps up a password session without a second factor whose subject holds recovery codes alone", async () => {
+	it("sends a password session without a second factor whose subject holds recovery codes alone to log in again", async () => {
 		const { requirement } = build("required", {
 			factors: WITH_RECOVERY,
 			factorStore: factorStoreHolding(...RECOVERY_ONLY),
 		});
+		expect(await requirement.admit(about(password(), CHANGE))).toEqual(REAUTHENTICATE);
+	});
+
+	it("steps up a password session without a second factor whose subject holds a counting factor, as use does", async () => {
+		const { requirement } = build("required", { factorStore: factorStoreHolding(...HOLDING_TOTP) });
 		expect(await requirement.admit(about(password(), CHANGE))).toEqual(STEP_UP);
+		expect(await requirement.admit(about(password(), USE))).toEqual(STEP_UP);
 	});
 
 	it("answers the baseline's other answers too: unmet with no factor enabled, a new login where a step-up cannot be recorded", async () => {
@@ -913,10 +974,14 @@ describe("admit — credential_change reads the subject's factor records", () =>
 		}
 	});
 
-	it("reads them for credential_change alone: use and grants_nothing are answered over a store that is down", async () => {
+	it("reads them for credential_change, and for use only where the baseline would step a password session up: otherwise use and grants_nothing are answered over a store that is down", async () => {
 		const { requirement } = build("required", { factorStore: unreachableFactorStore() });
-		expect(await requirement.admit(about(password(), USE))).toEqual(STEP_UP);
+		expect(
+			await requirement.admit(about(password(["pwd", "otp", "mfa"], minutesAgo(1)), USE)),
+		).toEqual(MET);
+		expect(await requirement.admit(about(federated(), USE))).toEqual(MET);
 		expect(await requirement.admit(about(password(), NOTHING))).toEqual(MET);
+		await expect(requirement.admit(about(password(), USE))).rejects.toThrow();
 		const optional = build("optional", { factorStore: unreachableFactorStore() }).requirement;
 		expect(await optional.admit(about(password(), USE))).toEqual(MET);
 	});
@@ -928,10 +993,24 @@ describe("admit — credential_change reads the subject's factor records", () =>
 		expect(await requirement.admit(about(knownNot("magiclink"), CHANGE))).toEqual(REAUTHENTICATE);
 	});
 
-	it("reads none under required for a session the baseline does not meet: its answer comes first", async () => {
+	it("reads none under required where the baseline answers without them: no factor enabled, or a step-up the store cannot record", async () => {
+		const down = unreachableFactorStore();
+		expect(
+			await build("required", { factorStore: down, factors: [] }).requirement.admit(
+				about(password(), CHANGE),
+			),
+		).toEqual(UNMET);
+		expect(
+			await build("required", { factorStore: down, stepUpRecordable: false }).requirement.admit(
+				about(preUpgradePassword(), CHANGE),
+			),
+		).toEqual(REAUTHENTICATE);
+	});
+
+	it("throws under required where the baseline would step a password session up and the records cannot be read: whether a counting factor is held decides it", async () => {
 		const { requirement } = build("required", { factorStore: unreachableFactorStore() });
-		expect(await requirement.admit(about(password(), CHANGE))).toEqual(STEP_UP);
-		expect(await requirement.admit(about(preUpgradePassword(), CHANGE))).toEqual(STEP_UP);
+		await expect(requirement.admit(about(password(), CHANGE))).rejects.toThrow();
+		await expect(requirement.admit(about(preUpgradePassword(), USE))).rejects.toThrow();
 	});
 
 	it("reads the live record's subject's, the code's first read included, which names no subject of its own", async () => {
@@ -1154,6 +1233,116 @@ describe("admitPrimary — after a password login", () => {
 		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("u-alice");
 	});
 
+	/** What a first binding under `options` opens for alice, whose account carries `user`. */
+	const firstBinding = async (
+		options: Parameters<typeof build>[1],
+		user: Record<string, unknown> = { email: "alice@example.com" },
+		before?: (store: MfaTransactionStore) => Promise<void>,
+	) => {
+		const built = build("required", options);
+		await before?.(built.transactionStore);
+		const admission = await admitPrimary(depsFor(built.requirement), primaryOf("u-alice", user));
+		if (admission.outcome !== "interrupt") throw new Error("not interrupted");
+		const answer = await admission.open("sess-1");
+		const transaction = await built.transactionStore.get(answer.body.transaction as string);
+		return { hint: answer.body.hints?.email_proof, emailProof: transaction?.emailProof };
+	};
+
+	it("asks for the account-email proof first where a mail sender is wired and the account has an address: the hint says so, and the transaction requires it", async () => {
+		expect(await firstBinding({ mailWired: true })).toEqual({ hint: true, emailProof: "required" });
+		expect(await firstBinding({ mailWired: true, requireEmailProof: "always" })).toEqual({
+			hint: true,
+			emailProof: "required",
+		});
+	});
+
+	it("asks for none without a sender, for an account with no address, or under never", async () => {
+		const none = { hint: false, emailProof: "not_required" };
+		expect(await firstBinding({ mailWired: false })).toEqual(none);
+		expect(await firstBinding({ mailWired: false }, { email: "not an address" })).toEqual(none);
+		for (const email of [undefined, "", null]) {
+			expect(await firstBinding({ mailWired: true }, { email }), String(email)).toEqual(none);
+		}
+		expect(await firstBinding({ mailWired: true, requireEmailProof: "never" })).toEqual(none);
+	});
+
+	it("reads the address as the login's enrollment facts say it: one it cannot read asks for a proof nobody can give under when-mail — refused, never skipped — and changes nothing under never", async () => {
+		const asked = { hint: true, emailProof: "required" };
+		for (const email of ["not an address", "Alice <alice@example.com>", "a%b@example.com", 42]) {
+			expect(await firstBinding({ mailWired: true }, { email }), String(email)).toEqual(asked);
+		}
+		const logger = silentLogger();
+		expect(
+			await firstBinding(
+				{ mailWired: true, requireEmailProof: "never", logger },
+				{ email: "Alice <alice@example.com>" },
+			),
+		).toEqual({ hint: false, emailProof: "not_required" });
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("asks for it under always even where nobody can give it — no sender, no address — never skipped", async () => {
+		const asked = { hint: true, emailProof: "required" };
+		expect(await firstBinding({ mailWired: false, requireEmailProof: "always" })).toEqual(asked);
+		expect(
+			await firstBinding({ mailWired: true, requireEmailProof: "always" }, { email: undefined }),
+		).toEqual(asked);
+	});
+
+	it("says at warn when the proof it asks for cannot be given — no sender, no address, or one it cannot read — naming the subject and why, never the address", async () => {
+		const logger = silentLogger();
+		await firstBinding({ mailWired: false, requireEmailProof: "always", logger });
+		await firstBinding(
+			{ mailWired: true, requireEmailProof: "always", logger },
+			{ email: undefined },
+		);
+		await firstBinding({ mailWired: true, logger }, { email: "Alice <alice@example.com>" });
+		expect(logger.warn.mock.calls).toEqual([
+			[{ sub: "u-alice", reason: "no_sender" }, "mfa_email_proof_unprovable"],
+			[{ sub: "u-alice", reason: "no_address" }, "mfa_email_proof_unprovable"],
+			[{ sub: "u-alice", reason: "unreadable_address" }, "mfa_email_proof_unprovable"],
+		]);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("alice@example.com");
+		const quiet = silentLogger();
+		await firstBinding({ mailWired: true, logger: quiet });
+		await firstBinding({ mailWired: false, logger: quiet });
+		expect(quiet.warn).not.toHaveBeenCalled();
+	});
+
+	it("asks for it while the operator reset's flag stands, whatever the setting (D25)", async () => {
+		const flagged = (store: MfaTransactionStore) => store.requireEmailProofAtNextBinding("u-alice");
+		const asked = { hint: true, emailProof: "required" };
+		for (const requireEmailProof of ["when-mail", "always", "never"] as const) {
+			expect(
+				await firstBinding({ mailWired: true, requireEmailProof }, undefined, flagged),
+				requireEmailProof,
+			).toEqual(asked);
+		}
+		expect(
+			await firstBinding({ mailWired: false, requireEmailProof: "never" }, undefined, flagged),
+		).toEqual(asked);
+	});
+
+	it("throws when the flag cannot be read, or reads other than a boolean — admission answers unavailable — and opens nothing", async () => {
+		for (const failing of [
+			async () => {
+				throw new Error("transaction store unreachable");
+			},
+			async () => "yes" as never,
+		]) {
+			const transactionStore = createMemoryMfaTransactionStore();
+			const create = vi.spyOn(transactionStore, "create");
+			const { requirement } = build("required", {
+				transactionStore: { ...transactionStore, emailProofRequiredAtNextBinding: failing },
+			});
+			expect(await admitPrimary(depsFor(requirement), primaryOf("u-alice"))).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+			expect(create).not.toHaveBeenCalled();
+		}
+	});
+
 	it("says nothing when a first binding offers a kind", async () => {
 		const logger = silentLogger();
 		const { requirement } = build("required", { logger });
@@ -1163,15 +1352,97 @@ describe("admitPrimary — after a password login", () => {
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("reads no enrollment witness before step 9: a user the Store says enrolled, with no record, is still asked for a first binding (owner decision 2)", async () => {
-		const { requirement } = build("required");
+	it("answers a subject the Store says enrolled, holding no record, as an outage under either mode: the event recorded, the cause naming the inconsistency, nothing opened", async () => {
+		for (const mode of ["optional", "required"] as const) {
+			const events: AuditEvent[] = [];
+			const transactionStore = createMemoryMfaTransactionStore();
+			const create = vi.spyOn(transactionStore, "create");
+			const { requirement } = build(mode, {
+				transactionStore,
+				auditSink: { kind: "recording", record: async (event) => void events.push(event) },
+			});
+			const primary = primaryOf("u-alice", { mfaEnrolled: true });
+
+			const thrown = await requirement.admitPrimary?.(primary).catch((err: unknown) => err);
+			expect(thrown, mode).toMatchObject({
+				name: "MfaEnrollmentStateInconsistentError",
+				reason: "mfa_enrollment_state_inconsistent",
+			});
+			expect(await admitPrimary(depsFor(requirement), primary), mode).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+			expect(create, mode).not.toHaveBeenCalled();
+			expect(events, mode).toEqual([
+				expect.objectContaining({
+					type: "mfa.enrollment_state_inconsistent",
+					subject: "u-alice",
+					details: { purpose: "login", witness: "enrolled" },
+				}),
+				expect.objectContaining({ type: "mfa.enrollment_state_inconsistent" }),
+			]);
+		}
+	});
+
+	it("answers a witness the Store answered malformed — null, a number, a string, an object — as the same outage, never a first binding", async () => {
+		for (const mfaEnrolled of [null, 1, "true", {}]) {
+			const events: AuditEvent[] = [];
+			const { requirement } = build("required", {
+				auditSink: { kind: "recording", record: async (event) => void events.push(event) },
+			});
+			await expect(
+				requirement.admitPrimary?.(primaryOf("u-alice", { mfaEnrolled })),
+				JSON.stringify(mfaEnrolled),
+			).rejects.toMatchObject({ reason: "mfa_enrollment_state_inconsistent" });
+			expect(
+				events.map((event) => event.details),
+				JSON.stringify(mfaEnrolled),
+			).toEqual([{ purpose: "login", witness: "malformed" }]);
+		}
+	});
+
+	it("compares the witness with the records that count: recovery codes alone beside it are the same outage; a counting record, or one of a kind no longer installed, is asked for", async () => {
+		const enrolled = primaryOf("u-alice", { mfaEnrolled: true });
+		const alone = build("required", {
+			factors: [FACTORS.totp(), FACTORS.recovery()],
+			factorStore: factorStoreHolding(factorRecord("u-alice", "recovery_code")),
+		});
+		await expect(alone.requirement.admitPrimary?.(enrolled)).rejects.toMatchObject({
+			reason: "mfa_enrollment_state_inconsistent",
+		});
+		for (const kind of ["totp", "retired-kind"]) {
+			const { requirement } = build("required", {
+				factors: [FACTORS.totp(), FACTORS.recovery()],
+				factorStore: factorStoreHolding(factorRecord("u-alice", kind)),
+			});
+			const admission = await admitPrimary(depsFor(requirement), enrolled);
+			expect(admission.outcome, kind).toBe("interrupt");
+			if (admission.outcome !== "interrupt") return;
+			expect((await admission.open("sess-1")).body.error, kind).toBe("mfa_required");
+		}
+	});
+
+	it("reads no witness while a counting record stands: a malformed one beside it is asked for the factor", async () => {
+		const { requirement } = build("required", {
+			factorStore: factorStoreHolding(factorRecord("u-alice", "totp")),
+		});
 		const admission = await admitPrimary(
 			depsFor(requirement),
-			primaryOf("u-alice", { mfaEnrolled: true }),
+			primaryOf("u-alice", { mfaEnrolled: "yes" }),
 		);
 		expect(admission.outcome).toBe("interrupt");
 		if (admission.outcome !== "interrupt") return;
-		expect((await admission.open("sess-1")).body.error).toBe("mfa_enrollment_required");
+		expect((await admission.open("sess-1")).body.error).toBe("mfa_required");
+	});
+
+	it("opens a first binding for a subject the Store says is not enrolled — false, or no witness at all", async () => {
+		for (const user of [{ mfaEnrolled: false }, {}]) {
+			const { requirement } = build("required");
+			const admission = await admitPrimary(depsFor(requirement), primaryOf("u-alice", user));
+			expect(admission.outcome, JSON.stringify(user)).toBe("interrupt");
+			if (admission.outcome !== "interrupt") return;
+			expect((await admission.open("sess-1")).body.error).toBe("mfa_enrollment_required");
+		}
 	});
 
 	it("throws when the factors cannot be listed — admission answers unavailable, and nothing is opened", async () => {

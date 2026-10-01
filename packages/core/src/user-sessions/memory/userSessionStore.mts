@@ -20,9 +20,11 @@ import {
 	recordableSessionAuthentication,
 	sessionAfterSecondFactor,
 } from "../authentication.mjs";
+import { recordableEnrollmentFacts } from "../enrollmentFacts.mjs";
 import type {
 	CreateUserSessionInput,
 	SessionAuthentication,
+	SessionEnrollmentFacts,
 	SupportsSecondFactorUpdate,
 	UserSession,
 	UserSessionClaims,
@@ -40,6 +42,8 @@ interface Stored {
 	amr: readonly string[] | undefined;
 	/** The MFA ADR's D9; a required key, as on the session. Kept as a copy that shares nothing. */
 	authentication: SessionAuthentication | undefined;
+	/** What `recordableEnrollmentFacts` answered at `create`; `undefined` for none. */
+	enrollmentFacts: SessionEnrollmentFacts | undefined;
 }
 
 /**
@@ -66,6 +70,8 @@ const toSession = (s: Stored): UserSession => ({
 	claims: cloneClaims(s.claims) as UserSessionClaims,
 	amr: s.amr ? [...s.amr] : undefined,
 	authentication: s.authentication ? copySessionAuthentication(s.authentication) : undefined,
+	// Optional on the session: left out when none was recorded.
+	...(s.enrollmentFacts === undefined ? {} : { enrollmentFacts: { ...s.enrollmentFacts } }),
 });
 
 /**
@@ -115,6 +121,8 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 				input.authentication,
 				Date.now(),
 			);
+			// Likewise the enrollment facts: a copy of what the type admits.
+			const enrollmentFacts = recordableEnrollmentFacts(input.sid, input.enrollmentFacts);
 			if (input.expiresAt.getTime() <= Date.now()) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}
@@ -132,6 +140,7 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 				amr: input.amr ? [...input.amr] : undefined,
 				// Already a copy, its `mfaAt` no later than this store's clock.
 				authentication,
+				enrollmentFacts,
 			});
 		},
 		async get(sid: string): Promise<UserSession | null> {

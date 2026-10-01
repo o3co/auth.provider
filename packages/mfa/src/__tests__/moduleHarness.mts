@@ -36,11 +36,14 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	InMemoryUserRepository,
+	type MailSender,
 	type MfaFactorStore,
 	type MfaTransactionStore,
 	type Module,
 	type RateLimiter,
 	type SessionFederationIndex,
+	type SubjectRevocation,
+	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -190,15 +193,48 @@ const generousRateLimiter = (): RateLimiter =>
  * user-session store, and the directory; `rateLimiter` is the composition's
  * limiter, none when `null`.
  */
-const sessionSupport = (rateLimiter: RateLimiter | null): Module[] => [
+/** The directory the login verifies: alice and bob, each with an address. */
+export const directoryEntries = () =>
+	new Map<string, Record<string, unknown> & { password: string }>([
+		[ALICE.username, { password: ALICE.password, id: ALICE.id, email: ALICE.email }],
+		[BOB.username, { password: BOB.password, id: BOB.id, email: BOB.email }],
+	]);
+
+/** A directory that writes the enrollment witness: each mark recorded, and answered back by the next `authenticate`. */
+export class WitnessingUserRepository extends InMemoryUserRepository {
+	/** Every mark written, oldest first. */
+	readonly marks: { readonly subject: string; readonly enrolled: boolean }[] = [];
+	private failure: unknown;
+
+	constructor(private readonly entries = directoryEntries()) {
+		super(entries);
+	}
+
+	/** From now on, every mark rejects with `error` and writes nothing. */
+	failWith(error: unknown): void {
+		this.failure = error;
+	}
+
+	/** Write marks again. */
+	recover(): void {
+		this.failure = undefined;
+	}
+
+	async markMfaEnrolled(subject: string, enrolled: boolean): Promise<void> {
+		if (this.failure !== undefined) throw this.failure;
+		this.marks.push({ subject, enrolled });
+		for (const entry of this.entries.values()) {
+			if (entry.id === subject) entry.mfaEnrolled = enrolled;
+		}
+	}
+}
+
+const sessionSupport = (
+	rateLimiter: RateLimiter | null,
+	userRepository: UserRepository | undefined,
+): Module[] => [
 	providing("test:user-repository", {
-		userRepository: () =>
-			new InMemoryUserRepository(
-				new Map([
-					[ALICE.username, { password: ALICE.password, id: ALICE.id, email: ALICE.email }],
-					[BOB.username, { password: BOB.password, id: BOB.id, email: BOB.email }],
-				]),
-			),
+		userRepository: () => userRepository ?? new WitnessingUserRepository(),
 	}),
 	providing("test:federation-token-store", {
 		federationTokenStore: () =>
@@ -247,6 +283,12 @@ export interface BootOptions {
 	readonly rateLimiter?: RateLimiter | null;
 	/** Where the composition's audit events go; the configuration declares none by default. */
 	readonly auditSink?: AuditSink;
+	/** The composition's mail sender; none by default. */
+	readonly mailSender?: MailSender;
+	/** The directory the login verifies; alice and bob in a {@link WitnessingUserRepository} by default. */
+	readonly userRepository?: UserRepository;
+	/** The subjects' revocation boundary; none by default, its absence declared by the configuration. */
+	readonly subjectRevocation?: SubjectRevocation;
 	/** Modules beside the composition's: another factor, say. */
 	readonly extraModules?: readonly Module[];
 	/** Leave the session package's login out: the MFA modules and their stores alone. */
@@ -291,7 +333,17 @@ export function modulesFor(options: BootOptions = {}): {
 						sessionStoreModuleFor(config as never),
 						sessionModule,
 						...(options.withoutLoginCompletion === true ? [] : [loginCompletionModule]),
-						...sessionSupport(rateLimiter),
+						...sessionSupport(rateLimiter, options.userRepository),
+					]),
+			...(options.mailSender === undefined
+				? []
+				: [providing("test:mail-sender", { mailSender: () => options.mailSender })]),
+			...(options.subjectRevocation === undefined
+				? []
+				: [
+						providing("test:subject-revocation", {
+							subjectRevocation: () => options.subjectRevocation,
+						}),
 					]),
 			...(userSessionStore === null
 				? []

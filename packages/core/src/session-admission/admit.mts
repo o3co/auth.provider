@@ -20,7 +20,8 @@
  * before a session is written. See ADR 2026-09-28-session-admission.
  *
  * `admitSession` judges a session for an action; the claim builders are the
- * one reading of each carrier. `admitPrimary` and `resumePrimary` ask the
+ * one reading of each carrier, and `cookieSessionUser` the one reading of the
+ * cookie session's user. `admitPrimary` and `resumePrimary` ask the
  * requirements that interrupt a login and answer the `Establishment`
  * `establishSession` requires; `establishWithoutAsking` builds a federated
  * login's.
@@ -55,6 +56,7 @@ import {
 	requirementSession,
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
+import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
 import type {
 	SubjectRevocation,
 	UserSession,
@@ -69,6 +71,7 @@ import {
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
 	continuationOf,
+	frozenUserCopy,
 	primaryFromDto,
 } from "./primary.mjs";
 import {
@@ -214,6 +217,30 @@ export function cookieClaim(req: CookieCarrier): SessionClaim {
 		subject: nonEmptyString(user?.id),
 		carrier: "cookie",
 	} as SessionClaim);
+}
+
+/**
+ * The `User` the cookie session holds — its login's — copied as plain data,
+ * frozen at every depth and sharing nothing with it (`frozenUserCopy`), when
+ * the session is authenticated (`isAuthenticated === true`, as `cookieClaim`
+ * reads it) and the copy's `id` is `subject`; else `undefined`, a user that
+ * is not plain data included. For a route that admitted `subject` over the
+ * cookie's claim. A request that is not an object, or a `subject` that is
+ * not a non-empty string, is a `RangeError`.
+ */
+export function cookieSessionUser(
+	req: CookieCarrier,
+	subject: string,
+): Readonly<Record<string, unknown>> | undefined {
+	if (!isObject(req)) throw new RangeError("cookieSessionUser: the request must be an object");
+	if (nonEmptyString(subject) === undefined) {
+		throw new RangeError("cookieSessionUser: the subject must be a non-empty string");
+	}
+	const session = isObject(req.session) ? req.session : undefined;
+	if (session?.isAuthenticated !== true) return undefined;
+	// Judged on the copy it answers: the session's user is read once.
+	const user = frozenUserCopy(session.user);
+	return user?.id === subject ? user : undefined;
 }
 
 /** What a code claim is built from: the code record, which carries a `sid` when a session minted it. */
@@ -433,14 +460,21 @@ function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRe
 const isValidDate = (value: unknown): value is Date =>
 	value instanceof Date && !Number.isNaN(value.getTime());
 
-/** The view a requirement is handed: a copy of four fields, never the record. */
-const viewOf = (session: UserSession): SessionView =>
-	Object.freeze({
+/**
+ * The view a requirement is handed: a copy of four fields, and of the
+ * record's `enrollmentFacts` when it holds ones the type admits — never the
+ * record.
+ */
+const viewOf = (session: UserSession): SessionView => {
+	const enrollmentFacts = readEnrollmentFacts(session.enrollmentFacts);
+	return Object.freeze({
 		sid: session.sid,
 		sub: session.sub,
 		authTime: new Date(session.authTime.getTime()),
 		expiresAt: new Date(session.expiresAt.getTime()),
+		...(enrollmentFacts === undefined ? {} : { enrollmentFacts: Object.freeze(enrollmentFacts) }),
 	});
+};
 
 const VERDICTS: ReadonlySet<string> = new Set(["met", "reauthenticate", "step_up", "unmet"]);
 

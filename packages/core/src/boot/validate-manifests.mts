@@ -789,6 +789,8 @@ const containerShape = (container: unknown): string =>
  *   skip a function or `null`);
  * - a prefix is not empty and holds no `:`, since a limiter key carries it
  *   before its first `:`, whatever the budget's factory answers;
+ * - a prefix names no `Object.prototype` member (`constructor`, `__proto__`),
+ *   which a limiter looking budgets up on a plain object finds in its place;
  * - a declaration, as normalisation read it (`federationTypeSnapshots`), is
  *   an object with a Zod `entrySchema` and a `factory` function, so one
  *   written in JavaScript is refused as itself, not as a `TypeError` at
@@ -855,6 +857,15 @@ function checkContributionShapes(
 						prefix,
 						channel,
 						`a prefix is what a limiter key carries before its first ":", so it is not empty and holds no ":"`,
+					);
+				}
+				if (Object.hasOwn(Object.prototype, prefix)) {
+					refuse(
+						m,
+						"rateLimitBudgets",
+						prefix,
+						channel,
+						"a prefix does not name an Object.prototype member, which a limiter looking budgets up on a plain object would find in its place",
 					);
 				}
 			}

@@ -2,7 +2,7 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { afterAll, beforeAll } from "vitest";
 import type { RefreshTokenFamilyClient } from "#/clients.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";

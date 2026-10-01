@@ -764,9 +764,10 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])(
 );
 
 describe("a request body the OAuth endpoints do not parse", () => {
-	// KNOWN DEFECT (packages/oauth, `createOAuthRouter` in routes.mts): the
-	// token and introspection handlers read `req.body` without checking that a
-	// parser ran. A body that is neither a form nor JSON — or none at all —
+	// KNOWN DEFECT (packages/oauth, `routes/token.mts`,
+	// `routes/introspectCaller.mts` and `routes.mts`): the token and
+	// introspection handlers read `req.body` without checking that a parser
+	// ran. A body that is neither a form nor JSON — or none at all —
 	// leaves it undefined, the handler throws, and the terminal handler answers
 	// `500 server_error` and logs `unhandled_request_error` for the client's
 	// own mistake. `/oauth/revoke` checks, and answers 400.
@@ -951,7 +952,7 @@ const OUTAGES: readonly OutageCase[] = [
 		event: "authorize_consent_store_unavailable",
 		defects: {
 			"store-field":
-				"packages/oauth `routes/authorize.mts`: `authorize_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
+				"packages/oauth `routes/authorizeConsent.mts`: `authorize_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
 		},
 	},
 	{
@@ -967,7 +968,7 @@ const OUTAGES: readonly OutageCase[] = [
 		event: "authorize_pending_consent_store_unavailable",
 		defects: {
 			"store-field":
-				"packages/oauth `routes/authorize.mts`: `authorize_pending_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
+				"packages/oauth `routes/authorizeConsent.mts`: `authorize_pending_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
 		},
 	},
 	{

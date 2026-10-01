@@ -67,7 +67,15 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 	});
 
 	it("returns null and logs json_parse warn on malformed JSON (object-first call shape)", async () => {
-		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix, logger });
 		client.seed(`${keyPrefix}sid-bad`, "{not-valid-json}}");
@@ -156,8 +164,43 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 			"authentication.mfaAtMs a string",
 			{ ...validEnvelope, authentication: { primary: "pwd", mfaAtMs: "1" } },
 		],
+		// `enrollmentFacts` is absent (none recorded, or written before the
+		// key) or what the type admits. Anything else is not read as absent:
+		// a session whose facts cannot be read is refused, never taken for one
+		// that recorded none.
+		["enrollmentFacts null", { ...validEnvelope, enrollmentFacts: null }],
+		["enrollmentFacts a string", { ...validEnvelope, enrollmentFacts: "enrolled" }],
+		["enrollmentFacts an array", { ...validEnvelope, enrollmentFacts: [] }],
+		[
+			"enrollmentFacts.witness unknown",
+			{ ...validEnvelope, enrollmentFacts: { witness: "yes", mailAddress: "address" } },
+		],
+		[
+			"enrollmentFacts without witness",
+			{ ...validEnvelope, enrollmentFacts: { mailAddress: "address" } },
+		],
+		[
+			"enrollmentFacts without mailAddress",
+			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled" } },
+		],
+		[
+			"enrollmentFacts.mailAddress an address",
+			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled", mailAddress: "a@b.example" } },
+		],
+		[
+			"enrollmentFacts.mailAddress a boolean",
+			{ ...validEnvelope, enrollmentFacts: { witness: "enrolled", mailAddress: true } },
+		],
 	])("returns null and logs shape_invalid warn for %s", async (_label, corrupt) => {
-		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix, logger });
 		client.seed(`${keyPrefix}sid-corrupt`, JSON.stringify(corrupt));
@@ -205,6 +248,26 @@ describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 		});
 	});
 
+	it("reads enrollmentFacts from the envelope, and an envelope without them as a session that has none", async () => {
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		client.seed(
+			`${keyPrefix}sid-1`,
+			JSON.stringify({
+				...validEnvelope,
+				enrollmentFacts: { witness: "malformed", mailAddress: "unreadable" },
+			}),
+		);
+		expect((await store.get("sid-1"))?.enrollmentFacts).toStrictEqual({
+			witness: "malformed",
+			mailAddress: "unreadable",
+		});
+		client.seed(`${keyPrefix}sid-2`, JSON.stringify({ ...validEnvelope, sid: "sid-2" }));
+		expect(await store.get("sid-2")).not.toHaveProperty("enrollmentFacts");
+		client.seed(`${keyPrefix}${PRE_UPGRADE_FEDERATED_SID}`, PRE_UPGRADE_FEDERATED_ENVELOPE);
+		expect(await store.get(PRE_UPGRADE_FEDERATED_SID)).not.toHaveProperty("enrollmentFacts");
+	});
+
 	it("returns null and writes through consoleLogger when no logger is injected", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
@@ -232,7 +295,15 @@ describe("RedisUserSessionStore.recordSecondFactor — what it reads and how oft
 	};
 
 	it("reads a corrupt envelope as gone, as get does: null, one warn, nothing written", async () => {
-		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix, logger });
 		client.seed(`${keyPrefix}sid-1`, JSON.stringify({ ...validEnvelope, authentication: null }));

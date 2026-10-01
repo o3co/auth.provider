@@ -129,11 +129,18 @@ username arrives as `email`); **`authenticateByToken`** posts `{ token }` to
 to a user — `<provider>:<sub>` from the federation callback, the verified
 assertion's subject handle from `oauth`'s jwt-bearer grant. For both:
 
-- a `2xx` whose body is a JSON `User` (`{ id: string, username: string, … }`) is
-  the user;
+- a `2xx` whose body is a JSON `User` (`{ id: string, username: string, … }`,
+  both non-empty) is the user;
 - `401` or `403` is `null` — no such user, or wrong credentials;
 - a `2xx` with a body that is not a `User` throws — an upstream failure, not a
-  "user not found";
+  "user not found". An empty `id` or `username` is not a `User`: an empty `id`
+  names nobody, and OpenID Connect Core §2 requires the `sub` it becomes to be
+  a locally unique identifier. For a user without a username, the Store sends
+  a stable label as `username`, such as the e-mail address. The session routes
+  and the jwt-bearer grant answer the throw `503 temporarily_unavailable`, as
+  they answer any Store failure (the table under
+  [What the Store must enforce itself](#what-the-store-must-enforce-itself)
+  names each line they log);
 - any other status throws.
 
 The body of a non-`2xx` answer is discarded unread, for these and for linking.
@@ -186,7 +193,10 @@ among them. A request that outlives the deadline is a `TimeoutError` instead
 **`linkFederatedIdentity`** posts `{ userId, provider, sub, token, claims }` to
 `linkFederatedIdentityUrl`: a `2xx` `User` is `{ ok: true, user }`; `401` / `403`
 is `{ ok: false, reason: "refused" }`; `409` is
-`{ ok: false, reason: "conflict" }`; anything else throws. Because the body of a
+`{ ok: false, reason: "conflict" }`; anything else throws. A `2xx` whose body
+is not a `User` throws too, although the Store has already made the link: the
+caller answers `503` and audits no link, so the Store reconciles that link on
+its side. Because the body of a
 refusal is not read, a refusal carries no description from the Store. The
 method is absent when `linkFederatedIdentityUrl` is not configured, which is
 how the federation

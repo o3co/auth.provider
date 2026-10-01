@@ -103,4 +103,7 @@ runFederationGrantStoreContract("redis", {
 		const id = Buffer.from(JSON.stringify(grantId), "utf8").toString("base64url");
 		return (await connection.exists(`${prefix}{${id}}:cred`)) === 1;
 	},
+	// Two connections: Redis orders nothing between them, so a release can
+	// reach the server ahead of a lock attempt sent before it.
+	lockCallsMayOvertake: true,
 });

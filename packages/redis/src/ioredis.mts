@@ -23,6 +23,7 @@ import type {
 	RateLimiterClient,
 	RefreshTokenFamilyClient,
 	ReplaySeenSetClient,
+	SessionFamilyIndexClient,
 	SessionRPRegistryClient,
 	SessionSidSortedSetClient,
 	SubjectRevocationClient,
@@ -48,6 +49,7 @@ import {
 	makeIoredisReplaySeenSetClient,
 } from "./ioredis/clients/single-key-stores.mjs";
 import {
+	makeIoredisSessionFamilyIndexClient,
 	makeIoredisSessionRPRegistryClient,
 	makeIoredisSessionSidSortedSetClient,
 	makeIoredisSubjectRevocationClient,
@@ -98,7 +100,7 @@ export function makeIoredisClients(
 	refreshTokenFamilyClient: RefreshTokenFamilyClient;
 	userSessionStoreClient: UserSessionStoreClient;
 	sessionRPRegistryClient: SessionRPRegistryClient;
-	sessionFamilyIndexClient: SessionSidSortedSetClient;
+	sessionFamilyIndexClient: SessionFamilyIndexClient;
 	sessionFederationIndexClient: SessionSidSortedSetClient;
 	subjectSessionIndexClient: SubjectSessionIndexClient;
 	subjectRevocationClient: SubjectRevocationClient;
@@ -120,6 +122,7 @@ export function makeIoredisClients(
 	const userSessionStoreClient = makeIoredisUserSessionStoreClient(io);
 	const sessionRPRegistryClient = makeIoredisSessionRPRegistryClient(io);
 	const sortedSetClient = makeIoredisSessionSidSortedSetClient(io);
+	const sessionFamilyIndexClient = makeIoredisSessionFamilyIndexClient(io);
 	const subjectSessionIndexClient = makeIoredisSubjectSessionIndexClient(io);
 	const subjectRevocationClient = makeIoredisSubjectRevocationClient(io);
 	const federationTokenStoreClient = makeIoredisFederationTokenStoreClient(io);
@@ -136,7 +139,7 @@ export function makeIoredisClients(
 		refreshTokenFamilyClient,
 		userSessionStoreClient,
 		sessionRPRegistryClient,
-		sessionFamilyIndexClient: sortedSetClient,
+		sessionFamilyIndexClient,
 		sessionFederationIndexClient: sortedSetClient,
 		subjectSessionIndexClient,
 		subjectRevocationClient,

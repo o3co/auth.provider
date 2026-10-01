@@ -20,7 +20,7 @@
  * after its module, its keys camelCase, its defaults in the package's
  * `reference.conf` alone, each key read from the variable its path names,
  * and an unknown key refused by its name. The module declares the section
- * and contributes nothing: this build has no recovery codes.
+ * and contributes the recovery-code factor from it.
  */
 
 import { fileURLToPath } from "node:url";
@@ -107,7 +107,7 @@ describe("mfaRecoveryCodeFactorModule, which declares the section", () => {
 		expect(unreadableModuleLeaves([module])).toEqual([]);
 	});
 
-	it("boots with its defaults, and adds no factor to the resolver", async () => {
+	it("boots with its defaults, and adds the recovery-code factor to the resolver", async () => {
 		const handle = await createApp({
 			modules: [mfaRecoveryCodeFactorModule],
 			bootstrapComponents: {
@@ -117,7 +117,7 @@ describe("mfaRecoveryCodeFactorModule, which declares the section", () => {
 		});
 		disposable = handle;
 		const resolver = handle.components.mfaFactorResolver as MfaFactorResolver;
-		expect([...resolver.entries()]).toEqual([]);
+		expect([...resolver.entries()].map(([kind]) => kind)).toEqual(["recovery_code"]);
 	});
 
 	it("refuses the boot for a key its section does not know, naming the section and the key", async () => {
@@ -140,8 +140,11 @@ describe("mfaRecoveryCodeFactorModule, which declares the section", () => {
 		);
 	});
 
-	it("contributes nothing", () => {
-		expect(mfaRecoveryCodeFactorModule.contributes).toBeUndefined();
+	it("contributes the recovery-code factor alone, and provides nothing", () => {
+		expect(Object.keys(mfaRecoveryCodeFactorModule.contributes ?? {})).toEqual(["mfaFactors"]);
+		expect(Object.keys(mfaRecoveryCodeFactorModule.contributes?.mfaFactors ?? {})).toEqual([
+			"recovery_code",
+		]);
 		expect(mfaRecoveryCodeFactorModule.provides).toBeUndefined();
 	});
 });

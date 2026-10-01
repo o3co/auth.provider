@@ -208,9 +208,8 @@ export interface FederationGrantLodgingRefused extends FederationGrantLodgingAbs
 	/** On `storage`: what failed — a `FederationGrantLodgingFailure`, not enumerable (`carry.mts`). */
 	readonly failure?: FederationGrantLodgingFailure;
 	/**
-	 * On `connection_not_configured`: the connection it is about — the one the
-	 * request named, or the renewed grant's, which a renewal need not name.
-	 * Not enumerable (`carry.mts`).
+	 * On `connection_not_configured`: the connection the request named. Not
+	 * enumerable (`carry.mts`).
 	 */
 	readonly connection?: string;
 }
@@ -585,9 +584,10 @@ async function secondWrite(
 
 /**
  * Lodges a renewal of an existing grant: ownership, then the revocation
- * backstop before anything else is asked of it, then what a renewal can and
- * cannot mend, then the client's current permission and its request, and only
- * then the two writes.
+ * backstop before anything else is asked of it, then the grant's lifecycle and
+ * the configuration in retrieval's order (`admission`), then a key missing from
+ * the ring, the asserted connection and the request, and only then the two
+ * writes.
  */
 export async function lodgeFederationGrantReauthorization(
 	deps: FederationGrantLodgingDeps,
@@ -629,16 +629,17 @@ export async function lodgeFederationGrantReauthorization(
 
 type Inspection = NonNullable<Awaited<ReturnType<FederationGrantStore["inspect"]>>>;
 
-/** The grant's effective status, as a reauthorization judges it. */
+/** The grant's effective status against `connection`, the grant's as configured now. */
 function statusOf(
 	deps: FederationGrantLodgingDeps,
 	inspection: Inspection,
+	connection: FederationGrantAcquisitionConnection | undefined,
 	boundary: Date | null,
 	at: Date,
 ) {
 	return effectiveFederationGrantStatus(inspection.grant, {
 		now: at,
-		connection: deps.connections.get(inspection.grant.connection),
+		connection,
 		maxExpiresInMs: deps.maxExpiresInMs,
 		grantsBoundary: boundary,
 		revocationSkewMs: deps.revocationSkewMs,
@@ -652,22 +653,35 @@ export type FederationGrantRenewableStatus =
 	| "reauthorization_required"
 	| "upstream_token_ineligible";
 
-/** What the lifecycle says of a renewal: the status it is admitted from, or the answer it gets instead. */
+/**
+ * What the lifecycle and the configuration say of a renewal: the status it is
+ * admitted from, with the connection it renews on, or the answer it gets instead.
+ */
 type Admission =
-	| { readonly admitted: FederationGrantRenewableStatus }
+	| {
+			readonly admitted: FederationGrantRenewableStatus;
+			readonly connection: FederationGrantAcquisitionConnection;
+	  }
 	| { readonly refused: ReauthorizationRefusal };
 
 /**
- * What a reauthorization cannot mend, as the answer it gets, or the status it is
- * admitted from: `active`, `reauthorization_required`, or a grant starved of
- * scope (an IdP that accumulates consent answers a narrower grant's refresh
- * with wider scopes, and a wider consent is the remedy). Other ineligibilities
- * are refused, judged as they read now: a maximum no token can satisfy
- * outranks an old scope marker. The 201 reports the admitted status unchanged.
+ * A renewal judged in retrieval's order (the federation-grants ADR's D10): a
+ * grant that is over first; then the configuration — a connection the
+ * operator removed, or one the client may no longer use, one refusal either
+ * way; then what a reauthorization cannot mend. It is admitted from `active`,
+ * `reauthorization_required`, or a grant starved of scope (an IdP that
+ * accumulates consent answers a narrower grant's refresh with wider scopes,
+ * and a wider consent is the remedy). Other ineligibilities are refused,
+ * judged as they read now: a maximum no token can satisfy outranks an old
+ * scope marker. The 201 reports the admitted status unchanged.
+ *
+ * `status` is the one judged against `connection`: what is admitted is the
+ * connection the status describes.
  */
 function admission(
 	status: ReturnType<typeof effectiveFederationGrantStatus>,
-	connection: string,
+	connection: FederationGrantAcquisitionConnection | undefined,
+	client: FederationGrantLodgingClient,
 ): Admission {
 	switch (status.status) {
 		case "revoked":
@@ -683,20 +697,22 @@ function admission(
 			return { refused: { ok: false, reason: "authorization_pending" } };
 		case "expired":
 			return { refused: { ok: false, reason: "grant_expired", expiredBy: status.reason } };
-		case "connection_not_configured":
-			// The grant's: a renewal need not name the connection it renews.
-			return {
-				refused: carrying<ReauthorizationRefusal>(
-					{ ok: false, reason: "connection_not_configured" },
-					"connection",
-					connection,
-				),
-			};
+	}
+	// A client is never sent to its operator about a grant that is over, and
+	// one that may not use the connection cannot act on anything judged after it.
+	if (
+		status.status === "connection_not_configured" ||
+		connection === undefined ||
+		!permits(client, connection.name)
+	) {
+		return { refused: { ok: false, reason: "connection_not_permitted" } };
+	}
+	switch (status.status) {
 		case "connection_identity_changed":
 			return { refused: { ok: false, reason: "connection_identity_changed" } };
 		case "upstream_token_ineligible":
 			return status.reason === "scope_exceeded"
-				? { admitted: "upstream_token_ineligible" }
+				? { admitted: "upstream_token_ineligible", connection }
 				: {
 						refused: {
 							ok: false,
@@ -706,7 +722,7 @@ function admission(
 					};
 		case "active":
 		case "reauthorization_required":
-			return { admitted: status.status };
+			return { admitted: status.status, connection };
 	}
 }
 
@@ -719,7 +735,8 @@ async function judgeAndLodge(
 	randomId: () => string,
 ): Promise<FederationGrantReauthorizationResult> {
 	const { grant } = inspection;
-	const status = statusOf(deps, inspection, boundary, now());
+	const configured = deps.connections.get(grant.connection);
+	const status = statusOf(deps, inspection, configured, boundary, now());
 
 	if (status.status === "revoked" && status.reason === "backstop" && grant.status !== "revoked") {
 		// Written down, not only reported: a revocation that lived only in the
@@ -740,7 +757,7 @@ async function judgeAndLodge(
 				}
 			: { ok: false, reason: "grant_revoked", revokedBy: "backstop", revokedNow: false };
 	}
-	const judged = admission(status, grant.connection);
+	const judged = admission(status, configured, request.client);
 	if ("refused" in judged) return judged.refused;
 	if (
 		status.status === "reauthorization_required" &&
@@ -751,14 +768,10 @@ async function judgeAndLodge(
 		// to consent again.
 		return { ok: false, reason: "key_unavailable" };
 	}
-	// Defined here: a connection that is not configured was refused above.
-	const connection = deps.connections.get(grant.connection) as FederationGrantAcquisitionConnection;
+	const { connection } = judged;
 
 	if (request.connection !== undefined && request.connection !== grant.connection) {
 		return { ok: false, reason: "connection_mismatch" };
-	}
-	if (!permits(request.client, connection.name)) {
-		return { ok: false, reason: "connection_not_permitted" };
 	}
 	const checked = checkRequest(deps, request, connection);
 	if (!checked.ok) return checked;
@@ -837,7 +850,12 @@ async function judgeAndLodge(
 	// Still renewable: the write lost to something that left it so, and the
 	// honest answer is that this attempt did not take — with the write's own
 	// error as what failed.
-	const again = admission(statusOf(deps, fresh, boundary, now()), fresh.grant.connection);
+	const configuredNow = deps.connections.get(fresh.grant.connection);
+	const again = admission(
+		statusOf(deps, fresh, configuredNow, boundary, now()),
+		configuredNow,
+		request.client,
+	);
 	return "refused" in again
 		? absorbing(again.refused, [...writeThrew, ...after])
 		: absorbing(storage({ store: "federation_grant", step: "name_intent", ...named.why }), after);

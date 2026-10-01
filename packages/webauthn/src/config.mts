@@ -163,10 +163,10 @@ export const webauthnConfigSchema = z.object({
 	origin: z.preprocess(readOriginList, z.array(originEntry).min(1)),
 	/**
 	 * Origins this RP may be framed by: the parent pages' origins (not this RP's) that a browser
-	 * reports as `topOrigin` for a cross-origin (iframe) ceremony. Optional; absent, an
-	 * authentication response reporting a cross-origin `topOrigin` is refused, the right answer
-	 * for a deployment never meant to be embedded. Enforced only where the browser reports one
-	 * (Safari does not).
+	 * reports as `topOrigin` for a cross-origin (iframe) ceremony. Optional; absent, a
+	 * registration or authentication response reporting a cross-origin `topOrigin` is refused, the
+	 * right answer for a deployment never meant to be embedded. Enforced only where the browser
+	 * reports one (Safari does not).
 	 *
 	 * Same rules as `origin`'s web entries; the Android app form is refused, since nothing frames
 	 * it. From the environment, `WEBAUTHN_TOP_ORIGIN` is a comma-separated list, and an empty
@@ -194,6 +194,10 @@ export const webauthnConfigSchema = z.object({
 	 * for authenticators that cannot do discoverable credentials (non-resident keys, typically
 	 * older security keys): it knowingly reopens that enumeration oracle, so pair it with a strict
 	 * `rateLimit.authenticationOptions` and, where possible, an authenticated identifier-first step.
+	 * With it on, a credential that returns no user handle (a non-resident security key, such as a
+	 * WebAuthn second factor's) can be registered by another account through the grant and then
+	 * sign its owner in as that account: keep it off where WebAuthn second factors are enrolled.
+	 * `webauthnMfaFactorModule` refuses the boot while it is on.
 	 *
 	 * `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`: "true" / "1" on, "false" / "0" / empty off (case
 	 * and surrounding spaces ignored); any other value fails the parse.

@@ -449,6 +449,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+policyOutOfBounds\b/,
 	},
 	{
+		concept: "fail-closed grant-policy evaluation — the one reading of a decision",
+		home: "packages/core/src/grants/grantPolicy.mts",
+		definition: /(?:function|const)\s+readGrantPolicyDecision\b/,
+	},
+	{
 		concept: "key-ring sealing envelope — sealing (#593)",
 		home: "packages/core/src/sealing/envelope.mts",
 		definition: /(?:function|const)\s+sealWithKeyRing\b/,
@@ -504,6 +509,34 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isMfaFactorUpdateWritten\b/,
 	},
 	{
+		concept:
+			"an MFA store's answer, read as promised — a session's account-email proof (the MFA ADR's D24)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+readSessionEmailProof\b/,
+	},
+	{
+		concept:
+			"a session's enrollment facts — derived from the login's User by core's primary builders (the MFA ADR's D12, D24)",
+		home: "packages/core/src/session-admission/primary.mts",
+		definition: /(?:function|const)\s+enrollmentFactsOf\b/,
+	},
+	{
+		concept: "a session's enrollment facts — what a store may record (the MFA ADR's D12, D24)",
+		home: "packages/core/src/user-sessions/enrollmentFacts.mts",
+		definition: /(?:function|const)\s+recordableEnrollmentFacts\b/,
+	},
+	{
+		concept:
+			"a session's enrollment facts — what a stored value is read back as (the MFA ADR's D12, D24)",
+		home: "packages/core/src/user-sessions/enrollmentFacts.mts",
+		definition: /(?:function|const)\s+readEnrollmentFacts\b/,
+	},
+	{
+		concept: "the cookie session's user, for a route that admitted its subject (the MFA ADR's D24)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+cookieSessionUser\b/,
+	},
+	{
 		concept: "core.deployment.mode as core reads it — the deploymentMode slot's value",
 		home: DEPLOYMENT_MODE_HOME,
 		definition: /(?:function|const)\s+deploymentModeOf\b/,
@@ -539,38 +572,49 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/mfa/src/requirement.mts",
 		definition: /(?:function|const)\s+isRecentMfa\b/,
 	},
-	// Declared before their homes define them: each names the build step of
-	// the MFA ADR that builds it.
 	{
 		concept:
 			"MFA mail — the one place a code the provider issued is handed to the mail sender (the MFA ADR's D5, F5)",
 		home: "packages/mfa/src/mail.mts",
 		definition: /(?:function|const)\s+sendMfaMail\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 	{
 		concept: "the masked address a code went to, as a page may show it (the MFA ADR's D23)",
 		home: "packages/mfa/src/mail.mts",
 		definition: /(?:function|const)\s+maskMailAddress\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 	{
 		concept: "the long code — made (the MFA ADR's D22)",
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+generateLongCode\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 	{
 		concept: "the long code — read as a user types or pastes it (the MFA ADR's D6, D22)",
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+readLongCode\b/,
-		declared: "the MFA ADR's build-order step 9",
 	},
 	{
 		concept: "the long code — shown in groups (the MFA ADR's D22)",
 		home: "packages/mfa/src/codes.mts",
 		definition: /(?:function|const)\s+formatLongCode\b/,
-		declared: "the MFA ADR's build-order step 9",
+	},
+	{
+		concept:
+			"a recovery-code set — issued beside a first counting factor, kept as keyed digests (the MFA ADR's D22, D25)",
+		home: "packages/mfa/src/recovery/factor.mts",
+		definition: /(?:function|const)\s+generateRecoveryCodes\b/,
+	},
+	{
+		concept:
+			"the first-binding gate — whether the account-email proof comes before a subject's first way into the account (the MFA ADR's D24, D25)",
+		home: "packages/mfa/src/firstBinding.mts",
+		definition: /(?:function|const)\s+firstBindingGate\b/,
+	},
+	{
+		concept:
+			"whether a factor record may count — admission's presumption, which tells a first binding (the MFA ADR's D12, F3)",
+		home: "packages/mfa/src/firstBinding.mts",
+		definition: /(?:function|const)\s+mayCount\b/,
 	},
 ];
 
@@ -617,7 +661,8 @@ function walk(dir: string, out: string[]): void {
  * Shipped sources allowed to call `grantPolicy.evaluate(` other than the home,
  * each with why. A grant that consults the policy anywhere else re-implements
  * the home's fail-closed rules inline, which the definition-only guard above
- * cannot see.
+ * cannot see. Each still reads the decision with the home's
+ * `readGrantPolicyDecision`, once per call.
  */
 const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reason: string }>> = {
 	"packages/oauth/src/routes/authorize.mts": {
@@ -628,18 +673,39 @@ const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reaso
 	"packages/oauth-token-exchange/src/grant.mts": {
 		calls: 1,
 		reason:
-			"its ceilings include the subject token's (scope: subject ∩ allowedScopes; audience: subject aud ∩ allowedAudiences ∪ {clientId}) and `access_denied` is 403; a policy scope or audience past them is `policyOutOfBounds` like the rest, the request's own audience past them RFC 8693 §2.2.2's `invalid_target`",
+			"its ceilings include the subject token's (scope: subject ∩ allowedScopes; audience: subject aud ∩ allowedAudiences ∪ {clientId}); a policy scope or audience past them is `policyOutOfBounds` like the rest, the request's own audience past them RFC 8693 §2.2.2's `invalid_target`",
 	},
 };
 
+/** `source` with its comments removed, so a mention in one is not code. */
+const withoutComments = (source: string): string =>
+	source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
 /** `grantPolicy.evaluate(` calls in `source`, comments removed so a mention is not a call. */
 const policyEvaluateCalls = (source: string): number =>
-	(
-		source
-			.replace(/\/\*[\s\S]*?\*\//g, "")
-			.replace(/(^|[^:])\/\/.*$/gm, "$1")
-			.match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []
-	).length;
+	(withoutComments(source).match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []).length;
+
+/**
+ * What `source` does with a grant policy's decision outside the home, comments
+ * removed: its `readGrantPolicyDecision(` calls, and its `outcome`s. A file
+ * exempt from calling the home's evaluation counts every `outcome` its code
+ * names: it holds a raw decision, and any read of that field is a second
+ * reading. Any other file counts its comparisons of an `outcome` with the
+ * string `allow` or `deny`.
+ */
+const policyDecisionReads = (
+	source: string,
+	exempt: boolean,
+): { reading: number; outcome: number } => {
+	const code = withoutComments(source);
+	const outcome = exempt
+		? /\boutcome\b/g
+		: /\.outcome\s*[!=]==?\s*["'`](?:allow|deny)["'`]|["'`](?:allow|deny)["'`]\s*[!=]==?\s*[\w$.?]*\.outcome\b/g;
+	return {
+		reading: (code.match(/\breadGrantPolicyDecision\s*\(/g) ?? []).length,
+		outcome: (code.match(outcome) ?? []).length,
+	};
+};
 
 /** Session admission's home: the acr selection is its own step, over the input `requirementSession` builds. */
 const REQUIREMENT_RULE_HOME = "packages/core/src/session-admission/admit.mts";
@@ -651,7 +717,7 @@ const REQUIREMENT_RULE_HOME = "packages/core/src/session-admission/admit.mts";
  * no call site passes one.
  */
 const requirementRuleCalls = (source: string): string[] => {
-	const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+	const code = withoutComments(source);
 	const calls: string[] = [];
 	// Its definition (`function selectAcr(`) is not a call.
 	for (const match of code.matchAll(/(?<!function\s)\bselectAcr\s*\(/g)) {
@@ -2007,6 +2073,31 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(found, "call evaluateGrantPolicy from core/src/grants/grantPolicy.mts").toEqual(
 			expected,
 		);
+	});
+
+	it("reads a grant policy's decision through the home: an exempt file calls it once per evaluation and names no outcome, and no other file compares one", () => {
+		const home = join(repoRoot, "packages/core/src/grants/grantPolicy.mts");
+		const found = Object.fromEntries(
+			listShippedSources()
+				.filter((file) => file !== home)
+				.map((file) => [relative(repoRoot, file).split(sep).join("/"), file] as const)
+				.map(([rel, file]) => {
+					const exempt = Object.hasOwn(POLICY_EVALUATE_EXEMPTIONS, rel);
+					return [rel, exempt, policyDecisionReads(readFileSync(file, "utf8"), exempt)] as const;
+				})
+				.filter(([, exempt, reads]) => exempt || reads.reading > 0 || reads.outcome > 0)
+				.map(([rel, , reads]) => [rel, reads] as const),
+		);
+		const expected = Object.fromEntries(
+			Object.entries(POLICY_EVALUATE_EXEMPTIONS).map(([rel, { calls }]) => [
+				rel,
+				{ reading: calls, outcome: 0 },
+			]),
+		);
+		expect(
+			found,
+			"read the decision with readGrantPolicyDecision (core/src/grants/grantPolicy.mts)",
+		).toEqual(expected);
 	});
 
 	it("flags a read of the deployment section by every shape: member, element, destructuring, alias, helper, reflection", () => {

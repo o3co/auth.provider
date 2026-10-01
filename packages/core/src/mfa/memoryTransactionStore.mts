@@ -28,13 +28,18 @@
  * requirement the operator reset records is not lock state: only its
  * consumption at the next first binding removes it.
  *
- * At most `maxEntries` transactions are held. At the cap the store reclaims
- * expired entries (no more often than the sweep floor) and, if still full,
- * refuses with {@link MfaTransactionStoreFullError}, never evicting a live
- * transaction (that would end the ceremony of a user typing a code). Subject
- * state is uncapped: only a login the Store accepted creates a subject (an
- * open sign-up lets anyone mint them). The cap is global, so the coordinator
- * bounds the transactions one session holds.
+ * A session's account-email proof expires on this store's clock too, and is
+ * swept with the transactions.
+ *
+ * At most `maxEntries` entries are held: transactions and session email
+ * proofs together. At the cap the store reclaims expired entries (no more
+ * often than the sweep floor) and, if still full, refuses a new one with
+ * {@link MfaTransactionStoreFullError}, never evicting a live one (that would
+ * end the ceremony of a user typing a code, or send them to prove again).
+ * Replacing a session's proof is no new entry. Subject state is uncapped:
+ * only a login the Store accepted creates a subject (an open sign-up lets
+ * anyone mint them). The cap is global, so the coordinator bounds the
+ * transactions one session holds.
  */
 
 import { randomBytes } from "node:crypto";
@@ -44,6 +49,8 @@ import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/
 import {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	checkSessionEmailProof,
+	checkSessionEmailProofQuestion,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
@@ -55,6 +62,8 @@ import {
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
+	type SessionEmailProof,
+	sessionEmailProofAnswer,
 } from "./transactionStore.mjs";
 import { checkMfaVersionAdvances } from "./version.mjs";
 
@@ -65,10 +74,11 @@ export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL = 1_000;
 export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS = 10_000;
 
 /**
- * The default cap. A transaction carries the login's `User` snapshot, so the
- * cap is lower than the challenge and `jti` stores'. Over the ten-minute default
- * lifetime it allows about 170 new transactions a second on one replica, more
- * password logins than one process verifies.
+ * The default cap, on transactions and session email proofs together. A
+ * transaction carries the login's `User` snapshot, so the cap is lower than
+ * the challenge and `jti` stores'. Over the ten-minute default lifetime it
+ * allows about 170 new transactions a second on one replica, more password
+ * logins than one process verifies.
  */
 export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES = 100_000;
 
@@ -76,7 +86,8 @@ export interface MemoryMfaTransactionStoreOptions extends AmortizedSweepOptions 
 	/** The clock a transaction expires by, in epoch milliseconds. Default `Date.now`. */
 	readonly now?: () => number;
 	/**
-	 * The most transactions held, expired-but-unswept included; default
+	 * The most entries held — transactions and session email proofs,
+	 * expired-but-unswept included; default
 	 * {@link DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES}. Anything but a
 	 * positive whole number up to 2^24 (a `Map`'s limit) is a `RangeError`,
 	 * never read as no cap.
@@ -95,7 +106,7 @@ export class MfaTransactionStoreFullError extends Error {
 
 	constructor(maxEntries: number) {
 		super(
-			`memory MfaTransactionStore is at its cap of ${maxEntries} resident transactions (expired ones not yet swept included); refusing a new one rather than evicting one`,
+			`memory MfaTransactionStore is at its cap of ${maxEntries} resident entries — transactions and session email proofs, expired ones not yet swept included; refusing a new one rather than evicting one`,
 		);
 		this.name = "MfaTransactionStoreFullError";
 	}
@@ -107,7 +118,9 @@ export interface MemoryMfaTransactionStore extends MfaTransactionStore {
 	readonly transactions: number;
 	/** Subjects with lock state resident. */
 	readonly subjects: number;
-	/** The most transactions it holds (`maxEntries`); at it, a new transaction is refused. */
+	/** Session email proofs resident, expired-but-unswept included. */
+	readonly sessionEmailProofs: number;
+	/** The most entries it holds (`maxEntries`), transactions and proofs together; at it, a new one is refused. */
 	readonly maxEntries: number;
 }
 
@@ -128,6 +141,9 @@ interface SubjectState {
 	/** Whether a refusal was answered since an attempt was last let through: an episode is under way. */
 	refusing: boolean;
 }
+
+/** Where a session's proof is kept: the subject and the `sid` as one unambiguous key. */
+const proofKeyOf = (subject: string, sid: string): string => JSON.stringify([subject, sid]);
 
 /** The transaction as plain data, every field named, its nested values copied. */
 const copyOf = (tx: MfaTransaction): MfaTransaction => structuredClone(tx);
@@ -206,6 +222,8 @@ export function createMemoryMfaTransactionStore(
 	);
 	const transactions = new Map<string, MfaTransaction>();
 	const subjects = new Map<string, SubjectState>();
+	/** Each session's account-email proof, by `proofKeyOf`. */
+	const proofs = new Map<string, SessionEmailProof>();
 	/** Subjects whose next first binding requires the email proof: no expiry, never swept. */
 	const emailProofRequired = new Set<string>();
 	/** The order of the next reservation. */
@@ -238,13 +256,16 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	/**
-	 * Expired transactions by this store's clock; subject state by the latest
-	 * time a caller passed, and not at all before one has — but never later
-	 * than this store's clock (see `prune`).
+	 * Expired transactions and proofs by this store's clock; subject state by
+	 * the latest time a caller passed, and not at all before one has — but
+	 * never later than this store's clock (see `prune`).
 	 */
 	function sweep(storeNowMs: number): void {
 		for (const [id, tx] of transactions) {
 			if (tx.expiresAtMs <= storeNowMs) transactions.delete(id);
+		}
+		for (const [key, proof] of proofs) {
+			if (proof.untilMs <= storeNowMs) proofs.delete(key);
 		}
 		if (latestCallerMs === undefined) return;
 		for (const [subject, state] of subjects) {
@@ -285,6 +306,15 @@ export function createMemoryMfaTransactionStore(
 		if (isEmpty(state)) subjects.delete(subject);
 	}
 
+	/** At the cap: reclaims expired entries, then refuses if still full. */
+	function makeRoom(nowMs: number): void {
+		if (transactions.size + proofs.size < maxEntries) return;
+		if (schedule.due()) sweep(nowMs);
+		if (transactions.size + proofs.size >= maxEntries) {
+			throw new MfaTransactionStoreFullError(maxEntries);
+		}
+	}
+
 	return {
 		kind: "memory",
 
@@ -294,6 +324,10 @@ export function createMemoryMfaTransactionStore(
 
 		get subjects() {
 			return subjects.size;
+		},
+
+		get sessionEmailProofs() {
+			return proofs.size;
 		},
 
 		maxEntries,
@@ -309,11 +343,7 @@ export function createMemoryMfaTransactionStore(
 			if (live(record.id, nowMs) !== undefined) {
 				throw new Error("an MFA transaction with this id already exists");
 			}
-			// At the cap: reclaim expired entries, then refuse if still full.
-			if (transactions.size >= maxEntries) {
-				if (schedule.due()) sweep(nowMs);
-				if (transactions.size >= maxEntries) throw new MfaTransactionStoreFullError(maxEntries);
-			}
+			makeRoom(nowMs);
 			transactions.set(record.id, record);
 			if (schedule.wrote()) sweep(nowMs);
 		},
@@ -477,6 +507,31 @@ export function createMemoryMfaTransactionStore(
 
 		async consumeEmailProofRequirement(subject: string): Promise<boolean> {
 			return emailProofRequired.delete(subject);
+		},
+
+		async recordSessionEmailProof(
+			subject: string,
+			sid: string,
+			provedAtMs: number,
+			untilMs: number,
+		): Promise<void> {
+			const nowMs = clock();
+			checkSessionEmailProof(subject, sid, provedAtMs, untilMs, nowMs);
+			const key = proofKeyOf(subject, sid);
+			if (!proofs.has(key)) makeRoom(nowMs);
+			proofs.set(key, { provedAtMs, untilMs });
+			if (schedule.wrote()) sweep(nowMs);
+		},
+
+		async sessionEmailProofAt(subject: string, sid: string, nowMs: number): Promise<number | null> {
+			checkSessionEmailProofQuestion(subject, sid, nowMs);
+			const key = proofKeyOf(subject, sid);
+			const proof = proofs.get(key);
+			if (proof === undefined) return null;
+			const storeNowMs = clock();
+			// Gone on this store's clock: reclaimed now rather than at a sweep.
+			if (proof.untilMs <= storeNowMs) proofs.delete(key);
+			return sessionEmailProofAnswer(proof, nowMs, storeNowMs);
 		},
 	};
 }

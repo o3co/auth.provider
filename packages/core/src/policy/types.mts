@@ -35,6 +35,12 @@ export interface GrantPolicyContext {
 	readonly issuer: string;
 }
 
+/**
+ * What a policy returns. `outcome` must be exactly `"allow"` or `"deny"`:
+ * any other value, or a value that is not such a record, is an invalid
+ * decision, answered `500 server_error` and never allowed
+ * (`readGrantPolicyDecision`).
+ */
 export type GrantPolicyDecision =
 	| {
 			readonly outcome: "allow";
@@ -53,8 +59,8 @@ export type GrantPolicyDecision =
 			readonly error: string;
 			/**
 			 * Sent as `error_description`, held to the same characters. One
-			 * that is empty or not a string is not sent; the endpoint's own
-			 * default is.
+			 * that is empty or not a string is not sent: `/oauth/token` sends
+			 * no description, and `/oauth/authorize` its own default.
 			 */
 			readonly errorDescription?: string;
 	  };

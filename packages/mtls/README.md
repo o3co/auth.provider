@@ -1,6 +1,6 @@
 # @o3co/auth-provider-mtls
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tokens for [`auth.provider`](../../README.md): a token issued to a client that presented a certificate is bound to that certificate, and is refused from anyone presenting another.
 
@@ -96,7 +96,7 @@ core.tokenBinding.dispatchPolicy = "intent-explicit"   # or "strict-mutual-exclu
 
 When both `@o3co/auth-provider-dpop` and `@o3co/auth-provider-mtls` are installed, core composes a **single** `tokenBindingMw` from both modules' contributions. The configured `core.tokenBinding.dispatchPolicy` arbitrates cross-mechanism:
 
-- `"intent-explicit"` (default): explicit-intent mechanisms (DPoP) win over ambient mechanisms (mTLS) on a single request. ≥2 explicit-intent mechanisms succeeding → 400 `invalid_request`.
+- `"intent-explicit"` (default): explicit-intent mechanisms (DPoP) win over ambient mechanisms (mTLS) on a single request. ≥2 explicit-intent mechanisms succeeding, or ≥2 ambient mechanisms succeeding with no explicit one → 400 `invalid_request`.
 - `"strict-mutual-exclusion"`: any 2+ mechanisms succeeding → 400 `invalid_request`.
 
 Set it once at the application layer:
