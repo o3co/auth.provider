@@ -738,6 +738,32 @@ describe("POST /oauth/logout", () => {
 			}
 		});
 
+		it("warns through the route's console fallback for an RP it skips when no logger is wired", async () => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			try {
+				const rpData = [storedRP("rp-skipped", "com.example.app:/x")];
+				const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+				const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+				const app = buildApp({ sessionStore, sessionRPRegistry });
+				const token = await mintIdToken();
+
+				const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
+
+				expect(res.status).toBe(200);
+				const refused = warn.mock.calls.filter(
+					([, name]) => name === "logout_frontchannel_uri_refused",
+				);
+				expect(refused).toHaveLength(1);
+				expect(refused[0]?.[0]).toMatchObject({
+					site: "logout",
+					clientId: "rp-skipped",
+					reason: "not-http",
+				});
+			} finally {
+				warn.mockRestore();
+			}
+		});
+
 		it("answers as without front-channel logout when no RP's front-channel URI is http(s)", async () => {
 			const logger = createMockLogger();
 			const rpData = NON_HTTP_URIS.map((uri, i) => storedRP(`rp-skipped-${i}`, uri));
