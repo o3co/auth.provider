@@ -293,6 +293,95 @@ describe("createMemoryFederationGrantStore", () => {
 		}
 	});
 
+	describe("the access token's effective end", () => {
+		const token = (over: Record<string, unknown> = {}) => ({
+			value: "at-1",
+			tokenType: "Bearer",
+			obtainedAt: at(3 * MIN),
+			issuedLifetime: 3600,
+			scopes: SCOPES,
+			...over,
+		});
+		const replace = async (accessToken: ReturnType<typeof token>) => {
+			const store = createMemoryFederationGrantStore();
+			await lodge(store, "g-1");
+			const active = await activate(store, "g-1");
+			if (!active.ok) throw new Error("fixture: not activated");
+			const written = await store.replaceCredentials({
+				grantId: "g-1",
+				expectedVersion: active.grant.version,
+				credentials: { refreshToken: "rt-2", accessToken } as never,
+				ineligible: null,
+				now: at(3 * MIN),
+			});
+			const opened = await store.open("g-1", at(3 * MIN));
+			const held = opened?.credentials.state === "ok" ? opened.credentials.value : undefined;
+			return { written, held: held?.accessToken };
+		};
+
+		it("round-trips it as a Date of its own", async () => {
+			const end = at(33 * MIN);
+			const { written, held } = await replace(token({ effectiveExpiresAt: end }));
+			expect(written.ok).toBe(true);
+			expect(held?.effectiveExpiresAt).toEqual(at(33 * MIN));
+			expect(held?.effectiveExpiresAt).not.toBe(end);
+		});
+
+		it("leaves it absent when the token has none", async () => {
+			const { held } = await replace(token());
+			expect(held).toBeDefined();
+			expect(held).not.toHaveProperty("effectiveExpiresAt");
+		});
+
+		it("refuses one that is not a date", async () => {
+			const { written } = await replace(token({ effectiveExpiresAt: new Date(Number.NaN) }));
+			expect(written.ok).toBe(false);
+		});
+
+		/** An Invalid Date whose own `getTime` says otherwise. */
+		const disguised = (): Date =>
+			Object.assign(new Date(Number.NaN), { getTime: () => at(33 * MIN).getTime() });
+
+		it.each<[string, unknown]>([
+			["an Invalid Date whose own getTime answers an instant", disguised()],
+			["a string", at(33 * MIN).toISOString()],
+			["a number", at(33 * MIN).getTime()],
+			["null", null],
+			["a Date look-alike", { getTime: () => at(33 * MIN).getTime() }],
+		])("refuses %s as its end, or its obtainedAt, and does not throw", async (_, value) => {
+			expect((await replace(token({ effectiveExpiresAt: value }))).written.ok).toBe(false);
+			expect((await replace(token({ obtainedAt: value }))).written.ok).toBe(false);
+		});
+
+		it("stores the end it judged: each field is read once", async () => {
+			let reads = 0;
+			const shifting = token();
+			Object.defineProperty(shifting, "effectiveExpiresAt", {
+				enumerable: true,
+				get: () => (reads++ < 2 ? at(4 * MIN) : undefined),
+			});
+			const { written, held } = await replace(shifting);
+			expect(written.ok).toBe(true);
+			expect(held?.effectiveExpiresAt).toEqual(at(4 * MIN));
+		});
+	});
+
+	it("refuses a failure stamp whose own getTime is not an instant, as it always has", async () => {
+		const store = createMemoryFederationGrantStore();
+		await lodge(store, "g-1");
+		const active = await activate(store, "g-1");
+		if (!active.ok) throw new Error("fixture: not activated");
+		const at3 = Object.assign(new Date(at(3 * MIN)), { getTime: () => Number.NaN });
+		const written = await store.noteRefreshFailure({
+			grantId: "g-1",
+			expectedVersion: active.grant.version,
+			failure: { at: at3, kind: "unavailable" },
+			rowMs: MIN,
+			now: at(3 * MIN),
+		});
+		expect(written.ok).toBe(false);
+	});
+
 	it("hands every failed write its own result: one caller's object is not another's", async () => {
 		const store = createMemoryFederationGrantStore();
 		const first = await store.revoke("g-unknown", "client", T0);

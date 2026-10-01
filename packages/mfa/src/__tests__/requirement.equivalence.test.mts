@@ -47,6 +47,7 @@ import {
 	NO_FIRST_BINDING_MARK,
 	NOT_ENROLLED_FACTS,
 	resolverOver,
+	SEALING,
 	WITHOUT_MAIL,
 } from "./requirementHarness.mjs";
 
@@ -169,6 +170,7 @@ describe("the mfa requirement over every bundled action, by the grade its packag
 					logger: silent(),
 					...WITHOUT_MAIL,
 					...NO_FIRST_BINDING_MARK,
+					sealing: SEALING,
 				});
 				const answered: Record<string, string> = {};
 				for (const name of Object.keys(BUNDLED_ACTIONS)) {

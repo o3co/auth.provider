@@ -442,9 +442,9 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			});
 		});
 
-		it("dates a token inside the call even when the adapter's expiry is in the past", async () => {
+		it("never writes a token whose adapter expiry is already past: neither field can lengthen the other", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			let resolve!: (value: DelegatedTokens) => void;
 			h.refresh.mockReturnValueOnce(
 				new Promise((res) => {
@@ -453,11 +453,64 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			);
 			const answer = retrieve();
 			await vi.advanceTimersByTimeAsync(2_000);
-			resolve(refreshed("1", DUE, { expiresAt: new Date(0) }));
-			expect((await answer).ok).toBe(true);
-			// `expiresIn` is what the upstream issued; the wild anchor is held to when
-			// the call began, which is the earlier, and so the shorter, reading.
-			expect((await stored())?.accessToken?.obtainedAt).toEqual(DUE);
+			resolve(refreshed("1", GONE, { expiresAt: new Date(0) }));
+			// The earlier of the two instants stands, and it is already past: the
+			// token has no life left to disclose, so it reads as having no finite
+			// lifetime, and the rotated refresh token is kept all the same.
+			expect(await answer).toStrictEqual({
+				ok: false,
+				code: "upstream_token_ineligible",
+				reason: "no_finite_lifetime",
+				retryAfterSeconds: 300,
+			});
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-1`,
+				accessToken: undefined,
+			});
+		});
+
+		it("reads an expiry that throws when its type is asked as malformed, and keeps the rotated refresh token", async () => {
+			await h.seed();
+			setNow(GONE);
+			const throwing = new Proxy(new Date(GONE.getTime() + HOUR), {
+				getPrototypeOf() {
+					throw new Error("a trap that throws");
+				},
+			});
+			h.refresh.mockResolvedValue(refreshed("1", GONE, { expiresAt: throwing }));
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "upstream_token_ineligible",
+				reason: "malformed_token_response",
+				retryAfterSeconds: 300,
+			});
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-1`,
+				accessToken: undefined,
+			});
+			await Promise.all(h.background);
+			expect(await lockIsFree(h)).toBe(true);
+		});
+
+		it("reads an expiry that is a Date holding no instant as no finite lifetime, and keeps the rotated refresh token", async () => {
+			await h.seed();
+			setNow(GONE);
+			// Passes `instanceof Date`, and throws when `getTime` is called on it.
+			h.refresh.mockResolvedValue(
+				refreshed("1", GONE, { expiresAt: Object.create(Date.prototype) as Date }),
+			);
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "upstream_token_ineligible",
+				reason: "no_finite_lifetime",
+				retryAfterSeconds: 300,
+			});
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-1`,
+				accessToken: undefined,
+			});
+			await Promise.all(h.background);
+			expect(await lockIsFree(h)).toBe(true);
 		});
 	});
 
@@ -519,11 +572,13 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			resolve(
 				refreshed("1", asked, { expiresIn: 2, expiresAt: new Date(asked.getTime() + 2_000) }),
 			);
-			// Nothing overtook this call: what failed it is the upstream's token.
-			expect(await answer).toStrictEqual({
-				ok: false,
-				code: "temporarily_unavailable",
-				reason: "upstream",
+			// Dated from when the call began, the fresh token has no life left when
+			// its answer is read: it is never written, and the token the grant had
+			// serves while it lasts, as after any refresh that brought nothing usable.
+			expect(await answer).toMatchObject({ ok: true, accessToken: "at-0", refreshed: false });
+			expect((await stored())?.accessToken?.value).toBe("at-0");
+			expect(await h.store.find("g-1", now())).toMatchObject({
+				ineligible: { reason: "no_finite_lifetime" },
 			});
 		});
 
@@ -542,6 +597,36 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			}
 			expect(h.refresh).toHaveBeenCalledTimes(1);
 		});
+
+		// An adapter whose `expiresAt` ends the token before its `expiresIn`
+		// would: half its life is counted from when the call began, not from a
+		// start dated back to fit the issued lifetime.
+		const early = (tag: string): DelegatedTokens =>
+			refreshed(tag, now(), {
+				expiresIn: 3600,
+				expiresAt: new Date(now().getTime() + 30 * MIN),
+				scope: "openid",
+			});
+		it.each<[string, Partial<typeof request>]>([
+			["a min_ttl above what is left", { minTtlSeconds: 3600 }],
+			["a scope the token lacks", { scope: ["calendar.read"] }],
+		])(
+			"is not made to rotate on every request by %s when the adapter's expiry is earlier than its lifetime",
+			async (_, ask) => {
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockImplementation(async () => early(`n${h.refresh.mock.calls.length}`));
+				for (let i = 0; i < 4; i++) {
+					await retrieve(ask);
+					setNow(new Date(now().getTime() + 5_000));
+				}
+				expect(h.refresh).toHaveBeenCalledTimes(1);
+				// Half of the thirty minutes it lives is when it may be refreshed again.
+				setNow(new Date(DUE.getTime() + 15 * MIN));
+				await retrieve(ask);
+				expect(h.refresh).toHaveBeenCalledTimes(2);
+			},
+		);
 	});
 
 	describe("what is left running", () => {

@@ -88,6 +88,7 @@ const TRANSACTION = {
 	manage: { maxAgeSeconds: 300 },
 	enrollment: { requireEmailProof: "when-mail" },
 	maxFactorsPerSubject: 10,
+	storeTimeoutMs: 5_000,
 } as const;
 
 /** A configuration as the composition root hands it, with `mfa` as given. */
@@ -181,6 +182,7 @@ describe("the MFA settings this package reads", () => {
 			"maxFactorsPerSubject",
 			"mode",
 			"page",
+			"storeTimeoutMs",
 			"transactionTtlSeconds",
 		]);
 		expect(mfaConfigSchema.safeParse(valid().mfa).success).toBe(true);
@@ -741,6 +743,19 @@ describe("the transaction's life and attempts, and the lock", () => {
 			expect(message, String(value)).toContain("mfa.maxFactorsPerSubject");
 			expect(message, String(value)).toContain("2 to 100");
 		}
+	});
+
+	it("holds mfa.storeTimeoutMs to a whole number of milliseconds from 1000, and refuses one whose lease — six of it, one more than the most Store calls a factor-set write makes — passes the longest subject lease, naming the key", () => {
+		for (const value of [1_000, 5_000, 100_000]) {
+			expect(readSettings(valid({ storeTimeoutMs: value })).storeTimeoutMs).toBe(value);
+		}
+		for (const value of [999, 100, 0, 10.5, "5e3", null, undefined]) {
+			const message = refusal(() => readSettings(valid({ storeTimeoutMs: value })));
+			expect(message, String(value)).toContain("mfa.storeTimeoutMs");
+		}
+		const tooLong = refusal(() => readSettings(valid({ storeTimeoutMs: 100_001 })));
+		expect(tooLong).toContain("mfa.storeTimeoutMs");
+		expect(tooLong).toContain("600000");
 	});
 
 	it("holds mfa.manage.maxAgeSeconds, recent MFA's window, to 60-3600 seconds, a whole number", () => {

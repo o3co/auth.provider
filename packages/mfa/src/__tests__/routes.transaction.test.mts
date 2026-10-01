@@ -32,6 +32,7 @@ import {
 	freezeClock,
 	newFactorId,
 	readTransaction,
+	recoverySet,
 	seedFactor,
 	seedTotp,
 	T0,
@@ -98,6 +99,20 @@ describe("GET /session/mfa/transaction", () => {
 		const res = await readTransaction(agent, transaction);
 
 		expect(res.body.factors).toEqual([{ id: record.id, kind: "totp" }]);
+	});
+
+	it("leaves out a recovery set with no code left, and lists one with a code left", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const { record } = await seedTotp(factorStore);
+		await seedFactor(factorStore, "recovery_code", recoverySet(0).data);
+		const left = await seedFactor(factorStore, "recovery_code", recoverySet(1).data);
+		const { app } = await boot({ config: configFor("required"), factorStore });
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await readTransaction(agent, transaction);
+
+		const listed = (res.body.factors as { id: string }[]).map(({ id }) => id).sort();
+		expect(listed).toEqual([record.id, left.id].sort());
 	});
 
 	it("lists a factor's hint when its data opens, and a factor whose data does not open without one — never leaving it out", async () => {

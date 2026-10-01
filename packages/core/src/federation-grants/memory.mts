@@ -98,6 +98,16 @@ function instant(date: Date, name: string): number {
 
 const isDate = (date: Date): boolean => !Number.isNaN(date.getTime());
 
+/** A copy of a real `Date` holding an instant, read by its own value and never through a method it may override; `undefined` for anything else. */
+const instantCopy = (value: unknown): Date | undefined => {
+	try {
+		const ms = Date.prototype.getTime.call(value);
+		return Number.isNaN(ms) ? undefined : new Date(ms);
+	} catch {
+		return undefined;
+	}
+};
+
 function copyAuthorization(from: FederationGrantAuthorization): FederationGrantAuthorization {
 	// Field by field, and not a spread: what is stored is the authorization and
 	// nothing a caller's object happens to carry beside it.
@@ -133,22 +143,51 @@ function copyCredentials(from: FederationGrantCredentials): FederationGrantCrede
 						tokenType: token.tokenType,
 						obtainedAt: new Date(token.obtainedAt),
 						issuedLifetime: token.issuedLifetime,
+						...(token.effectiveExpiresAt === undefined
+							? {}
+							: { effectiveExpiresAt: new Date(token.effectiveExpiresAt) }),
 						scopes: [...token.scopes],
 					},
 	};
 }
 
 /**
- * Whether the credentials are ones a store can keep: the access token's date
- * is a date, and its issued lifetime a finite number. A lifetime of NaN or
- * infinity is refused at the write, where every adapter refuses it alike,
- * rather than kept here and read back as unreadable by an adapter that seals
- * what it stores.
+ * The copy of the credentials a store keeps, or `undefined` when they are not
+ * ones it can: the access token's dates are dates, and its issued lifetime a
+ * finite number. Each field is read once, and what was judged is what is
+ * stored. A lifetime of NaN or infinity is refused at the write, where every
+ * adapter refuses it alike, rather than kept here and read back as unreadable
+ * by an adapter that seals what it stores.
  */
-const storableCredentials = (credentials: FederationGrantCredentials): boolean =>
-	credentials.accessToken === undefined ||
-	(isDate(credentials.accessToken.obtainedAt) &&
-		Number.isFinite(credentials.accessToken.issuedLifetime));
+const storableCredentials = (
+	credentials: FederationGrantCredentials,
+): FederationGrantCredentials | undefined => {
+	const refreshToken = credentials.refreshToken;
+	const token = credentials.accessToken;
+	if (token === undefined) return { refreshToken, accessToken: undefined };
+	const obtainedAt = instantCopy(token.obtainedAt);
+	const issuedLifetime = token.issuedLifetime;
+	const effective = token.effectiveExpiresAt;
+	const effectiveExpiresAt = effective === undefined ? undefined : instantCopy(effective);
+	if (
+		obtainedAt === undefined ||
+		!Number.isFinite(issuedLifetime) ||
+		(effective !== undefined && effectiveExpiresAt === undefined)
+	) {
+		return undefined;
+	}
+	return {
+		refreshToken,
+		accessToken: {
+			value: token.value,
+			tokenType: token.tokenType,
+			obtainedAt,
+			issuedLifetime,
+			...(effectiveExpiresAt === undefined ? {} : { effectiveExpiresAt }),
+			scopes: [...token.scopes],
+		},
+	};
+};
 
 /**
  * In-process Map-backed {@link FederationGrantStore}.
@@ -418,7 +457,8 @@ export function createMemoryFederationGrantStore(
 			// that a date that is not one is refused as well.
 			if (!(authorization.consent.at.getTime() <= nowMs)) return failed();
 			if (!(authorization.authorizedAt.getTime() <= nowMs)) return failed();
-			if (!storableCredentials(input.credentials)) return failed();
+			const credentials = storableCredentials(input.credentials);
+			if (credentials === undefined) return failed();
 			// A renewal never re-points a grant: same upstream account, same
 			// identity revision. `mayActivate` has refused a revoked grant,
 			// so one that has an authorization here is `active` or needs the user.
@@ -450,7 +490,7 @@ export function createMemoryFederationGrantStore(
 				refreshFailure: undefined,
 			};
 			entry.intent = null;
-			entry.credentials = copyCredentials(input.credentials);
+			entry.credentials = credentials;
 			return written(entry, next);
 		},
 
@@ -466,7 +506,8 @@ export function createMemoryFederationGrantStore(
 			// behind, as a key TTL that has fired is not: that same caller
 			// would read the new one as `absent` a call later.
 			if (entry.credentials === null) return failed();
-			if (!storableCredentials(input.credentials)) return failed();
+			const credentials = storableCredentials(input.credentials);
+			if (credentials === undefined) return failed();
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return failed();
 			// A maximum that is not a finite number is not one the marker was judged
 			// against, nor one every adapter can keep.
@@ -480,7 +521,7 @@ export function createMemoryFederationGrantStore(
 				ineligible: input.ineligible === null ? undefined : copyMarker(input.ineligible),
 				refreshFailure: undefined,
 			};
-			entry.credentials = copyCredentials(input.credentials);
+			entry.credentials = credentials;
 			return written(entry, next);
 		},
 
