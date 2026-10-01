@@ -579,8 +579,9 @@ What holds:
 - **What renewal orphans.** Records bound to the old express session id are
   lost: a consent `/authorize` parked, a federation-grant browser binding,
   and the session's other open MFA transactions. A flow in another tab starts
-  again; a tab that still holds the old cookie is refused once the session is
-  escalated, and signs in again.
+  again. A tab that still holds the old cookie is refused once the session is
+  escalated, and signs in again; its `POST /session/logout` ends only its own
+  cookie session, never the renewed one ([below](#what-post-sessionlogout-invalidates)).
 
 ### What `POST /session/logout` invalidates
 
@@ -615,6 +616,15 @@ import `@o3co/auth-provider-oauth` — they are siblings over core.
 The `session` grant issues no refresh token, so a deployment whose tokens all
 come from that grant has no family to revoke and `/session/logout` is
 sufficient on its own.
+
+**A copy the record was renewed away from.** Before it invalidates anything,
+the logout asks core's `cookieRenewedAway`: when the record the cookie names
+carries a renewal nonce this cookie session does not hold — an old cookie, or
+a copy of it, from before a step-up renewed the session — the record is the
+renewed session's, so only this cookie session is destroyed and the answer is
+the same `200`. The renewed session stays live. When the record cannot be
+read, that is logged as `logout_user_session_read_failed` and the logout
+invalidates as above.
 
 **Failure modes.** Every records step in the table above is best-effort and
 logged, never propagated: an outage of those stores must not turn a logout
