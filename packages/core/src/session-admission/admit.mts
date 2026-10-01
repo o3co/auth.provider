@@ -34,9 +34,15 @@ import {
 	passwordSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,
+	sessionAuthentication,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
-import type { UserSession, UserSessionClaims, UserSessionStore } from "../user-sessions/types.mjs";
+import {
+	supportsSecondFactorUpdate,
+	type UserSession,
+	type UserSessionClaims,
+	type UserSessionStore,
+} from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
@@ -304,7 +310,10 @@ const copyView = (view: SessionView): SessionView =>
  *    token's own `amr`, record or not.
  * 6. `acr_values`: `selectAcr` over the vouched `amr`, with reach the union
  *    of every requirement's when the session is live.
- * 7. `merge` of 5 and 6.
+ * 7. `merge` of 5 and 6. A step-up the second-factor authority would make
+ *    onto a session that cannot record it — a store without
+ *    `recordSecondFactor`, or a record whose primary cannot be told — is a
+ *    new login instead (`reauthenticate`, `acr`).
  */
 export async function admitSession(
 	deps: AdmissionDeps,
@@ -412,6 +421,10 @@ export async function admitSession(
 		// What step 5 handed the requirements, from a reading no requirement was handed.
 		held: authentication?.amr ?? [],
 		table: checked.acrTable,
+		recordable:
+			session !== null &&
+			supportsSecondFactorUpdate(deps.userSessionStore) &&
+			sessionAuthentication(session) !== undefined,
 	});
 }
 
