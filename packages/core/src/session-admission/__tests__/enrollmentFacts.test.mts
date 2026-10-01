@@ -412,6 +412,24 @@ describe("the enrollment facts of a login's continuation — read by its holder 
 		expect(enrollmentFactsOfContinuation(tampered as never)).toEqual(await resumedFacts(tampered));
 	});
 
+	it("never reads an enrollmentFacts field the continuation or its primary carries", async () => {
+		const continuation = await continuationFor({ mfaEnrolled: true });
+		const primary = { ...continuation.primary };
+		const carried = { ...continuation, primary };
+		for (const target of [primary, carried]) {
+			Object.defineProperty(target, "enrollmentFacts", {
+				enumerable: true,
+				get: () => {
+					throw new Error("a carried enrollmentFacts was read");
+				},
+			});
+		}
+		expect(enrollmentFactsOfContinuation(carried as never)).toEqual({
+			witness: "enrolled",
+			mailAddress: "none",
+		});
+	});
+
 	it("answers the two facts alone, frozen, and no address", async () => {
 		const facts = enrollmentFactsOfContinuation(
 			await continuationFor({ mfaEnrolled: true, email: "alice@example.com", name: "Alice" }),
