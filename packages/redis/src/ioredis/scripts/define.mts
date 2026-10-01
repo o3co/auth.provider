@@ -16,20 +16,24 @@
 
 /**
  * A Lua script as the server caches it: its source, its SHA-1 (what `EVALSHA` names it by) and
- * whether the server is expected to hold it. Each is defined once, at module scope, so every
- * client in a process shares its cache flag.
+ * whether the server is expected to hold it. Each is defined once, at module scope: the script
+ * is constant, so every client in a process shares the server's cache state.
  */
 
 import { createHash } from "node:crypto";
 
 /**
- * A script, its digest, and whether the server is expected to hold it, for
- * {@link runScript}'s EVALSHA-first path. Module-scoped, as `scriptCached` explains.
+ * A script, its digest, and whether the server is expected to hold it, for `runScript`'s
+ * EVALSHA-first path.
  */
 export interface CachedScript {
 	readonly source: string;
-	/** See {@link LUA_COMPARE_AND_DELETE_SHA} for why the digest is precomputed. */
+	/**
+	 * SHA-1 of `source`: Redis keys its script cache by it, so the digest is what `SCRIPT LOAD`
+	 * would return, without that round trip.
+	 */
 	readonly sha: string;
+	/** `true` lets the next run use `EVALSHA`; a `NOSCRIPT` clears it and `EVAL` sets it again. */
 	cached: boolean;
 }
 

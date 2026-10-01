@@ -70,9 +70,9 @@ export function createRedisSubjectRevocation(
 	) {
 		throw new Error(
 			"createRedisSubjectRevocation: this driver has no `setRevocationBoundaries`. " +
-				"It predates the two revocation boundaries of #593 (D13) and can only advance " +
-				"one, so a sessions-only stamp made through it would revoke the subject's " +
-				"federation grants. Upgrade the driver rather than the adapter.",
+				"Without it a driver can advance only one revocation boundary, so a sessions-only " +
+				"stamp made through it would revoke the subject's federation grants. Upgrade the " +
+				"driver rather than the adapter.",
 		);
 	}
 

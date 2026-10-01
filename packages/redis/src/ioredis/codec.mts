@@ -40,7 +40,10 @@ export const hashFields = (flat: unknown): Record<string, string> => {
 export const deviceCodeRecordOf = (flat: unknown): DeviceCodeRecordFields =>
 	hashFields(flat) as unknown as DeviceCodeRecordFields;
 
-/** A number as a Redis argument: never in exponent form, whatever its magnitude. */
+/**
+ * A number as a Redis argument, rounded to an integer. Plain digits for a magnitude below 1e21;
+ * at or above it `toFixed` gives exponent form, and a non-finite value is spelled out.
+ */
 export const fgNumber = (value: number): string =>
 	Number.isFinite(value) ? value.toFixed(0) : String(value);
 

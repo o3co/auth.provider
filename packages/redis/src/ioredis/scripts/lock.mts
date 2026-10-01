@@ -19,7 +19,7 @@
  * delete that frees only the value the caller was given.
  */
 
-import { createHash } from "node:crypto";
+import { defineScript } from "./define.mjs";
 
 /**
  * Lua compare-and-delete script — atomic alternative to GET+DEL.
@@ -34,10 +34,5 @@ else
 end
 `.trim();
 
-/**
- * SHA-1 of `LUA_COMPARE_AND_DELETE`. Redis keys its script cache by the SHA-1 of the source, so
- * the digest matches what `SCRIPT LOAD` would return, without that round trip.
- */
-export const LUA_COMPARE_AND_DELETE_SHA = createHash("sha1")
-	.update(LUA_COMPARE_AND_DELETE)
-	.digest("hex");
+/** The federation token store's lock release. */
+export const COMPARE_AND_DELETE = defineScript(LUA_COMPARE_AND_DELETE);

@@ -44,7 +44,7 @@ describe("lock release is atomic compare-and-delete (no spurious DEL)", () => {
 		};
 
 		const lock = createRedisLock({
-			// biome-ignore lint/suspicious/noExplicitAny: fake client structurally satisfies the post-D-9 RedisLockClient shape; the cast keeps the test compatible across the interface widening.
+			// biome-ignore lint/suspicious/noExplicitAny: the fake carries only the RedisLockClient methods the lock calls.
 			client: fakeClient as any,
 			keyPrefix: "ftlock:",
 		});

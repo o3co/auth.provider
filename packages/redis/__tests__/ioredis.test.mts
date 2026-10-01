@@ -12,12 +12,14 @@
 // A hand-rolled fake of the ioredis `Redis` shape, not a container: the
 // subject is the adapter's branching, not the Lua atomicity the server gives.
 
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { DeviceCodeStoreError } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { FederationGrantStoreClient } from "../src/clients.mjs";
 import { createRedisDeviceCodeStore } from "../src/device-code-store.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
+import { makeIoredisClients, makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
 
 /** The fake's members a test replaces or reads back as mocks. */
 interface FakeIoredis {
@@ -57,7 +59,7 @@ function makeFakeIoredis(overrides: Partial<FakeIoredis> = {}): Redis & FakeIore
 }
 
 describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () => {
-	// Each test warms the module-level `scriptCached` cache from cold within
+	// Each test warms the module-level residency flag from cold within
 	// its own body so the suite is order-independent (running any single test
 	// via `vitest -t "..."` works in isolation). The first `compareAndDelete`
 	// call after module load — or after a prior NOSCRIPT path — runs EVAL;
@@ -67,7 +69,7 @@ describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () =>
 	it("first call falls through to EVAL (cold path semantics) and returns true on match", async () => {
 		const io = makeFakeIoredis({
 			// EVALSHA may or may not be called first depending on whether
-			// `scriptCached` is true from a prior test. Both code paths
+			// the residency flag is true from a prior test. Both code paths
 			// must succeed. In a cold-path call the response is 1 (matched
 			// → key deleted).
 			evalsha: vi.fn().mockResolvedValue(1),
@@ -78,12 +80,12 @@ describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () =>
 		const result = await federationTokenStoreClient.compareAndDelete("k", "v");
 		expect(result).toBe(true);
 		// One of EVAL or EVALSHA was called; total = 1. We don't assert on
-		// which because that depends on the prior `scriptCached` state.
+		// which because that depends on the prior residency flag.
 		expect(io.eval.mock.calls.length + io.evalsha.mock.calls.length).toBe(1);
 	});
 
 	it("after a warmup call the next call uses EVALSHA only (warm path)", async () => {
-		// Self-contained: don't depend on whether `scriptCached` is true at
+		// Self-contained: don't depend on whether the residency flag is true at
 		// test start. Both EVALSHA and EVAL succeed for the warmup so the
 		// path taken doesn't matter; the assertion is only on the SECOND
 		// call's behavior (EVALSHA increments by 1, EVAL does not).
@@ -93,7 +95,7 @@ describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () =>
 		});
 		const { federationTokenStoreClient } = makeIoredisClients(io);
 
-		// Warmup: regardless of cold/warm initial state, scriptCached ends true.
+		// Warmup: regardless of cold/warm initial state, the residency flag ends true.
 		await federationTokenStoreClient.compareAndDelete("k", "v");
 		const evalshaBefore = io.evalsha.mock.calls.length;
 		const evalBefore = io.eval.mock.calls.length;
@@ -113,7 +115,7 @@ describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () =>
 		});
 		const { federationTokenStoreClient } = makeIoredisClients(io);
 
-		// Warmup so `scriptCached === true` regardless of prior test state.
+		// Warmup so the residency flag is true regardless of prior test state.
 		await federationTokenStoreClient.compareAndDelete("k", "v");
 		const evalAfterWarmup = io.eval.mock.calls.length;
 
@@ -144,7 +146,7 @@ describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () =>
 		});
 		const { federationTokenStoreClient } = makeIoredisClients(io);
 
-		// Warmup ensures `scriptCached === true` regardless of prior test state.
+		// Warmup ensures the residency flag is true regardless of prior test state.
 		await federationTokenStoreClient.compareAndDelete("k", "v");
 		const evalAfterWarmup = io.eval.mock.calls.length;
 
@@ -689,4 +691,142 @@ describe("makeIoredisClients consent clients — keys declared and the caller's 
 			"",
 		]);
 	});
+});
+
+// ---------------------------------------------------------------------------
+// The subject sweep and the revocation record's write take the same
+// EVALSHA-first path: a cold cache is recovered by EVAL of the text EVALSHA
+// named, and anything that is not NOSCRIPT is the caller's error.
+// ---------------------------------------------------------------------------
+
+const sha1 = (text: string): string => createHash("sha1").update(text).digest("hex");
+const noScript = (): Error => new Error("NOSCRIPT No matching script. Please use EVAL.");
+
+describe("makeIoredisClients session-store scripts — EVALSHA-first with NOSCRIPT fallback", () => {
+	const scripts = [
+		{
+			name: "subjectSessionIndexClient.pruneExpiredAndList",
+			reply: ["sid-1"],
+			run: (io: Redis) =>
+				makeIoredisClients(io).subjectSessionIndexClient.pruneExpiredAndList("idx"),
+			wire: [1, "idx"],
+		},
+		{
+			name: "subjectRevocationClient.setRevocationBoundaries",
+			reply: "stored",
+			run: (io: Redis) =>
+				makeIoredisClients(io).subjectRevocationClient.setRevocationBoundaries(
+					"rev",
+					"sessions",
+					1_000,
+					2_000,
+					3_000,
+				),
+			wire: [1, "rev", "sessions", "1000", "2000", "3000"],
+		},
+	] as const;
+
+	it.each(scripts)(
+		"$name: NOSCRIPT on EVALSHA loads the named text by EVAL and re-warms the cache",
+		async ({ reply, run, wire }) => {
+			const io = makeFakeIoredis({
+				evalsha: vi.fn().mockResolvedValue(reply),
+				eval: vi.fn().mockResolvedValue(reply),
+			});
+			// Warmup: whatever the script's residency flag was, it ends true.
+			await run(io);
+			io.eval.mockClear();
+			io.evalsha.mockReset().mockRejectedValueOnce(noScript()).mockResolvedValue(reply);
+
+			expect(await run(io)).toEqual(reply);
+			expect(io.evalsha).toHaveBeenCalledTimes(1);
+			expect(io.eval).toHaveBeenCalledTimes(1);
+			const [sha, ...shaWire] = io.evalsha.mock.calls[0] as [string, ...unknown[]];
+			const [text, ...evalWire] = io.eval.mock.calls[0] as [string, ...unknown[]];
+			expect(sha1(text)).toBe(sha);
+			expect(shaWire).toEqual(wire);
+			expect(evalWire).toEqual(wire);
+
+			expect(await run(io)).toEqual(reply);
+			expect(io.evalsha).toHaveBeenCalledTimes(2);
+			expect(io.eval).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it.each(scripts)(
+		"$name: a non-NOSCRIPT error from EVALSHA propagates, with no EVAL",
+		async ({ reply, run }) => {
+			const io = makeFakeIoredis({
+				evalsha: vi.fn().mockResolvedValue(reply),
+				eval: vi.fn().mockResolvedValue(reply),
+			});
+			await run(io);
+			io.eval.mockClear();
+			io.evalsha.mockReset().mockRejectedValue(new Error("ECONNRESET: connection lost"));
+
+			await expect(run(io)).rejects.toThrow(/ECONNRESET/);
+			expect(io.eval).not.toHaveBeenCalled();
+		},
+	);
+});
+
+// ---------------------------------------------------------------------------
+// A replica names a script by the SHA-1 of its own text, and a cold cache —
+// another replica's build, a SCRIPT FLUSH, a failover — loads that text. The
+// text is the script's source: what its comments say is part of what ships.
+// ---------------------------------------------------------------------------
+
+describe("makeIoredisFederationGrantStoreClient — a cold cache loads this build's script text", () => {
+	const writes = [
+		{
+			name: "replaceCredentials",
+			run: (client: FederationGrantStoreClient) =>
+				client.replaceCredentials("g", "c", {
+					nowMs: 1_000,
+					expectedVersion: 1,
+					credential: "sealed",
+					ineligible: null,
+				}),
+		},
+		{
+			name: "revoke",
+			run: (client: FederationGrantStoreClient) =>
+				client.revoke("g", "c", { atMs: 1_000, by: "user" }),
+		},
+		{
+			name: "noteRefreshFailure",
+			run: (client: FederationGrantStoreClient) =>
+				client.noteRefreshFailure("g", {
+					nowMs: 1_000,
+					expectedVersion: 1,
+					atMs: 1_000,
+					kind: "transient",
+					rowMs: 60_000,
+					retryAfterSeconds: undefined,
+					upstreamCode: undefined,
+				}),
+		},
+	] as const;
+
+	it.each(writes)(
+		"$name: EVAL after NOSCRIPT sends the text EVALSHA named, which carries no history",
+		async ({ run }) => {
+			const io = makeFakeIoredis({
+				evalsha: vi.fn().mockResolvedValue([0]),
+				eval: vi.fn().mockResolvedValue([0]),
+			});
+			const client = makeIoredisFederationGrantStoreClient(io);
+			await run(client);
+			io.eval.mockClear();
+			io.evalsha.mockReset().mockRejectedValueOnce(noScript()).mockResolvedValue([0]);
+
+			expect(await run(client)).toBeNull();
+			expect(io.evalsha).toHaveBeenCalledTimes(1);
+			expect(io.eval).toHaveBeenCalledTimes(1);
+			const [sha] = io.evalsha.mock.calls[0] as [string];
+			const [text] = io.eval.mock.calls[0] as [string];
+			expect(sha1(text)).toBe(sha);
+			expect(text).not.toMatch(/#\d|\bD\d+\b|Copilot|Codex|reviewer/);
+		},
+	);
 });

@@ -291,13 +291,11 @@ local version = fg_num(g['version'])
 if version == nil or version ~= expected then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
--- The credential it replaces must still be there (#631): its key's deadline
--- is the expiry on the server's clock, and once that has fired the refresh is
--- refused HERE, in the step that writes. The adapter's own read of the
--- credential is a round trip earlier, and the deadline can fire between the
--- two; written all the same, the new credential would take the same past
--- deadline and be gone at once, after a reply that said it was written
--- (Copilot).
+-- The credential it replaces must still be there, checked in the step that
+-- writes: its key's deadline is the expiry on the server's clock, and the
+-- adapter's own read is a round trip earlier. A credential written after that
+-- deadline fired would take the same past deadline and be gone at once, after
+-- a reply that said it was written.
 if redis.call('EXISTS', KEYS[2]) == 0 then return {0} end
 redis.call('HDEL', KEYS[1],
   'ineligible', 'failureAt', 'failureKind', 'failureCount',
@@ -344,20 +342,20 @@ return {1, redis.call('HGETALL', KEYS[1])}
  * has no expiry and is retained from the revocation.
  */
 const LUA_FG_REVOKE = `${LUA_FG_PRELUDE}
--- The horizon as the read side computes it (#627): from the expiry in the
+-- The horizon as the read side computes it: from the expiry in the
 -- authenticated authorization text, and never from the expiresAtMs copy
--- beside it, which anyone able to write the keyspace can move. Moved into the
--- past, the copy made a live grant read as a tombstone HERE, and refused the
--- one write meant to end it, while the credential stayed at rest until the
--- key's own TTL. A pending grant has no text and runs from its intent; a text
--- that does not parse gives no horizon, which is the retention case below.
+-- beside it, which anyone able to write the keyspace can move. A copy moved
+-- into the past would make a live grant read as a tombstone here and refuse
+-- the one write meant to end it. A pending grant has no text and runs from its
+-- intent; a text that does not parse gives no horizon, which is the retention
+-- case below.
 --
 -- Every number is read as the TypeScript reader reads it — a string of digits
 -- within the safe-integer range, and the retention not negative — and not
--- with tonumber, which takes "-1.5" and "1e21": a value the reader refuses
--- makes a record it answers nothing for, and a horizon computed from such a
--- value here would refuse to end exactly that record (Codex). No horizon
--- instead, and the revocation proceeds.
+-- with tonumber, which takes "-1.5" and "1e21": the reader answers nothing for
+-- a record holding such a value, and a horizon computed from it here would
+-- refuse to end exactly that record. Such a value gives no horizon, and the
+-- revocation proceeds.
 local function fg_int(v)
   if type(v) ~= 'string' or string.match(v, '^%-?%d+$') == nil then return nil end
   local n = tonumber(v)
@@ -387,9 +385,8 @@ if g['status'] == 'revoked' then return {0} end
 -- the one that must always win. A horizon that CAN be computed is still
 -- honoured: a tombstone is not revoked again. One that cannot — a record
 -- whose retention someone deleted, or whose text does not read — is not a
--- reason to leave a credential at rest with no way to end it, which is
--- exactly the state an operator reaches for this in (the reviewer, then
--- Copilot).
+-- reason to leave a credential at rest with no way to end it: that is exactly
+-- the state an operator reaches for this in.
 local horizon = fg_revoke_horizon(g)
 if horizon ~= nil and not (at < horizon) then return {0} end
 local version = fg_num(g['version'])
@@ -444,8 +441,8 @@ local previous = fg_num(g['failureAt'])
 local count = 1
 if previous ~= nil then
   if failedAt < previous then return {0} end
-  -- Never over the user (#616, D12): a refusal that says the user has to come
-  -- back is read as reauthorization_required, and no later stamp replaces it.
+  -- Never over the user: a refusal that says the user has to come back is
+  -- read as reauthorization_required, and no later stamp replaces it.
   if g['failureKind'] == 'rejected' then
     local code = g['failureUpstreamCode']
     if code == 'interaction_required' or code == 'login_required'
