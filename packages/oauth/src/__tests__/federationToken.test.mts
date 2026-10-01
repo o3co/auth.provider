@@ -26,6 +26,7 @@ import {
 	memoryFederationTokenStoreModule,
 	type RefreshTokenFamilyRevocation,
 	type SessionFederationIndex,
+	type SupportsLock,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -4595,6 +4596,62 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 		expect(res.body.access_token).toBe("refreshed-by-the-holder");
 		expect(provider.refreshToken).not.toHaveBeenCalled();
 		expect(release).toHaveBeenCalled();
+	});
+});
+
+describe("POST /oauth/federation/:name/token — a record removed while the refresh waits for the lock is never refreshed", () => {
+	// A logout or an unlink that removes the record while a refresh waits for
+	// the lock asked for its refresh token to be dropped: the refresh answers
+	// as if the link were gone, and writes no record back.
+	it("is answered unlinked, with no upstream call and no record written back", async () => {
+		const store = memoryFederationTokenStoreModule.provides?.federationTokenStore?.({} as never) as
+			| (FederationTokenStore & SupportsLock)
+			| undefined;
+		if (store === undefined) throw new Error("core's memory module provides no store");
+		await store.attach("sid-1", "google", {
+			...baseFedTokens,
+			expiresAt: new Date(Date.now() - 1000),
+		});
+		const release = vi.fn();
+		const lockingStore: FederationTokenStore & SupportsLock = {
+			...store,
+			attach: vi.fn(store.attach),
+			update: vi.fn(store.update),
+			// The logout lands while this request waits for the lock.
+			acquireLock: async (opts) => {
+				await store.delete("sid-1", "google");
+				const result = await store.acquireLock(opts);
+				if (!result.acquired) return result;
+				return {
+					acquired: true,
+					release: async () => {
+						release();
+						await result.release();
+					},
+				};
+			},
+		};
+		const index = makeSessionFederationIndex();
+		const refreshToken = vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: 3600 });
+		const provider = { ...federationBase("google"), refreshToken } as unknown as FederationProvider;
+		const app = buildApp({
+			fedTokenStore: lockingStore,
+			sessionFederationIndex: index,
+			getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+		});
+
+		const res = await postFedToken(app, "google", await mintAccessToken());
+
+		// The answer the first read gives a missing record.
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("federation_not_linked");
+		expect(res.body.error_description).toBe("federation 'google' tokens not found");
+		expect(index.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+		expect(refreshToken).not.toHaveBeenCalled();
+		expect(lockingStore.update).not.toHaveBeenCalled();
+		expect(lockingStore.attach).not.toHaveBeenCalled();
+		expect(await store.get("sid-1", "google")).toBeNull();
+		expect(release).toHaveBeenCalledTimes(1);
 	});
 });
 
