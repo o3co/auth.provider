@@ -24,15 +24,21 @@
 // with no property names, a date as a decimal millisecond string rather than
 // a number, and nothing sorted, normalized or re-serialized on the way out.
 
+import { createHash } from "node:crypto";
 import type {
 	FederationGrantAuthorization,
 	FederationGrantCredentials,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import {
+	CREDENTIAL_EXTENSION_MAX_TEXT,
 	canonicalAuthorization,
 	credentialAad,
+	credentialDigest,
+	credentialExtensionAad,
+	decodeCredentialExtension,
 	decodeCredentials,
+	encodeCredentialExtension,
 	encodeCredentials,
 	parseCanonicalAuthorization,
 } from "#/internal/federation-grant-codec.mjs";
@@ -292,5 +298,142 @@ describe("the credential payload", () => {
 		for (const [name, text] of Object.entries(cases)) {
 			expect(decodeCredentials(text), name).toBeUndefined();
 		}
+	});
+});
+
+describe("the credential's extension", () => {
+	const binding = { ...record, authorization: canonicalAuthorization(authorization()) };
+	const ENVELOPE = "v2.ay1h.aXYtaXYtaXYtaXY.Y2lwaGVy.dGFnLXRhZy10YWctdGFn";
+
+	it("names the exact credential envelope it was written with, as the base64url SHA-256 of its bytes", () => {
+		expect(credentialDigest(ENVELOPE)).toBe(
+			createHash("sha256").update(ENVELOPE, "utf8").digest("base64url"),
+		);
+		expect(credentialDigest(ENVELOPE)).not.toBe(credentialDigest(`${ENVELOPE}x`));
+	});
+
+	it("is authenticated under its own label, the credential's whole binding and that envelope's digest", () => {
+		expect(JSON.parse(credentialExtensionAad(binding, ENVELOPE).toString("utf8"))).toStrictEqual([
+			"o3co.auth-provider.federation-grant-ext",
+			1,
+			binding.credentialKey,
+			binding.id,
+			binding.subject,
+			binding.clientId,
+			binding.connection,
+			binding.authorization,
+			credentialDigest(ENVELOPE),
+		]);
+	});
+
+	it("never shares authenticated data with the credential, and changes with every field it binds", () => {
+		const base = credentialExtensionAad(binding, ENVELOPE).toString("utf8");
+		expect(base).not.toBe(credentialAad(binding).toString("utf8"));
+		for (const over of [
+			{ credentialKey: "fg:{g-2}:cred" },
+			{ id: "g-2" },
+			{ subject: "u-2" },
+			{ clientId: "other" },
+			{ connection: "other" },
+			{ authorization: canonicalAuthorization(authorization({ authorizationRevision: "a-2" })) },
+		]) {
+			expect(credentialExtensionAad({ ...binding, ...over }, ENVELOPE).toString("utf8")).not.toBe(
+				base,
+			);
+		}
+		expect(credentialExtensionAad(binding, `${ENVELOPE}x`).toString("utf8")).not.toBe(base);
+	});
+
+	it("is written only when it has a key to carry: the end as a decimal millisecond string, and the binding when given", () => {
+		expect(encodeCredentialExtension({})).toBeUndefined();
+		expect(encodeCredentialExtension({ effectiveExpiresAt: undefined })).toBeUndefined();
+		expect(encodeCredentialExtension({ effectiveExpiresAt: at(1_800_000) })).toBe(
+			JSON.stringify({ effectiveExpiresAt: String(T0 + 1_800_000) }),
+		);
+		expect(encodeCredentialExtension({ effectiveExpiresAt: at(1_800_000) }, "digest")).toBe(
+			JSON.stringify({ bind: "digest", effectiveExpiresAt: String(T0 + 1_800_000) }),
+		);
+		expect(encodeCredentialExtension({}, "digest")).toBeUndefined();
+	});
+
+	it("is never written longer than it is read: the longest it is today fits, and longer is refused", () => {
+		const longest = encodeCredentialExtension(
+			{ effectiveExpiresAt: new Date(-8_640_000_000_000_000) },
+			credentialDigest(ENVELOPE),
+		);
+		expect(longest?.length).toBe(95);
+		expect(longest?.length).toBeLessThanOrEqual(CREDENTIAL_EXTENSION_MAX_TEXT);
+		expect(() =>
+			encodeCredentialExtension(
+				{ effectiveExpiresAt: at(0) },
+				"x".repeat(CREDENTIAL_EXTENSION_MAX_TEXT),
+			),
+		).toThrow(RangeError);
+	});
+
+	it("comes back as what went in", () => {
+		const text = encodeCredentialExtension({ effectiveExpiresAt: at(1_800_000) }, "digest");
+		expect(decodeCredentialExtension(text as string)).toStrictEqual({
+			bind: "digest",
+			effectiveExpiresAt: at(1_800_000),
+		});
+	});
+
+	it("reads only the keys it knows, into a fresh object, and ignores every other", () => {
+		const read = decodeCredentialExtension(
+			JSON.stringify({
+				future: { anything: 1 },
+				effectiveExpiresAt: String(T0),
+				constructor: "x",
+				toString: "x",
+			}),
+		);
+		expect(read).toStrictEqual({ effectiveExpiresAt: new Date(T0) });
+		expect(Object.getPrototypeOf(read)).toBe(Object.prototype);
+		const proto = decodeCredentialExtension(
+			`{"__proto__":{"effectiveExpiresAt":"${T0}","bind":"x"}}`,
+		);
+		expect(proto).toStrictEqual({});
+		expect(proto?.effectiveExpiresAt).toBeUndefined();
+		expect(({} as { effectiveExpiresAt?: unknown }).effectiveExpiresAt).toBeUndefined();
+	});
+
+	it.each([
+		["not JSON", "{"],
+		["JSON null", "null"],
+		["an array", `["${T0}"]`],
+		["a string", `"${T0}"`],
+		["a number", String(T0)],
+		["text past the bound", JSON.stringify({ pad: "x".repeat(CREDENTIAL_EXTENSION_MAX_TEXT) })],
+	])("reads as no extension at all when it is %s", (_, text) => {
+		expect(decodeCredentialExtension(text)).toBeUndefined();
+	});
+
+	it.each([
+		["a JSON number", T0],
+		["a fraction", `${T0}.5`],
+		["an exponent", "1e12"],
+		["blank", ""],
+		["past the Date range", "8640000000000001"],
+		["before the Date range", "-8640000000000001"],
+		["past the safe integers", "9007199254740993"],
+		["an object", { at: String(T0) }],
+	])("reads an end that is %s as no end", (_, value) => {
+		expect(decodeCredentialExtension(JSON.stringify({ effectiveExpiresAt: value }))).toStrictEqual(
+			{},
+		);
+	});
+
+	it("keeps an end at either edge of the Date range, and one at or before any start: judging it is core's", () => {
+		for (const ms of [8_640_000_000_000_000, -8_640_000_000_000_000, 0]) {
+			expect(
+				decodeCredentialExtension(JSON.stringify({ effectiveExpiresAt: String(ms) }))
+					?.effectiveExpiresAt,
+			).toStrictEqual(new Date(ms));
+		}
+	});
+
+	it("reads a binding that is not a string as no binding", () => {
+		expect(decodeCredentialExtension(JSON.stringify({ bind: 7 }))).toStrictEqual({});
 	});
 });
