@@ -347,7 +347,7 @@ const read = (target: object, key: string): unknown => guardedRead(target, key)?
  * fallback asks the value for its prototype and its tag, which a Proxy may
  * answer by throwing — any throw reads as "not an Error".
  */
-const isError = (value: unknown): value is object => {
+export const isError = (value: unknown): value is object => {
 	try {
 		const brand = (Error as { isError?: (candidate: unknown) => boolean }).isError;
 		if (typeof brand === "function") return brand(value);
