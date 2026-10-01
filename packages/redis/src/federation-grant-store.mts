@@ -133,21 +133,52 @@ const instant = (value: Date, name: string): number => {
 const isDate = (value: unknown): value is Date =>
 	value instanceof Date && !Number.isNaN(value.getTime());
 
+/** A copy of a real `Date` holding an instant, read by its own value and never through a method it may override. */
+const instantCopy = (value: unknown): Date | undefined => {
+	try {
+		const ms = Date.prototype.getTime.call(value);
+		return Number.isNaN(ms) ? undefined : new Date(ms);
+	} catch {
+		return undefined;
+	}
+};
+
 /**
- * Whether the credentials are ones this store can keep: the access token's
- * dates are dates, and its issued lifetime a finite number. Sealed, a lifetime
- * of NaN or infinity reads back as an unreadable credential, and every refresh
- * after it is refused; refused at the write instead, as every adapter refuses
- * it.
+ * The copy of the credentials this store writes, or `undefined` when they are
+ * not ones it can keep: the access token's dates are dates, and its issued
+ * lifetime a finite number. Each field is read once, before the write awaits
+ * anything, and what was judged is what is sealed. Sealed, a lifetime of NaN or
+ * infinity reads back as an unreadable credential, and every refresh after it
+ * is refused; refused at the write instead, as every adapter refuses it.
  */
-const storableCredentials = (credentials: FederationGrantCredentials): boolean => {
+const storableCredentials = (
+	credentials: FederationGrantCredentials,
+): FederationGrantCredentials | undefined => {
+	const refreshToken = credentials.refreshToken;
 	const token = credentials.accessToken;
-	return (
-		token === undefined ||
-		(isDate(token.obtainedAt) &&
-			Number.isFinite(token.issuedLifetime) &&
-			(token.effectiveExpiresAt === undefined || isDate(token.effectiveExpiresAt)))
-	);
+	if (token === undefined) return { refreshToken, accessToken: undefined };
+	const obtainedAt = instantCopy(token.obtainedAt);
+	const issuedLifetime = token.issuedLifetime;
+	const effective = token.effectiveExpiresAt;
+	const effectiveExpiresAt = effective === undefined ? undefined : instantCopy(effective);
+	if (
+		obtainedAt === undefined ||
+		!Number.isFinite(issuedLifetime) ||
+		(effective !== undefined && effectiveExpiresAt === undefined)
+	) {
+		return undefined;
+	}
+	return {
+		refreshToken,
+		accessToken: {
+			value: token.value,
+			tokenType: token.tokenType,
+			obtainedAt,
+			issuedLifetime,
+			...(effectiveExpiresAt === undefined ? {} : { effectiveExpiresAt }),
+			scopes: [...token.scopes],
+		},
+	};
 };
 
 /**
@@ -794,7 +825,8 @@ export function createRedisFederationGrantStore(
 			if (!(authorization.consent.at.getTime() <= nowMs)) return { ok: false };
 			if (!(authorization.authorizedAt.getTime() <= nowMs)) return { ok: false };
 			if (!isDate(authorization.expiresAt)) return { ok: false };
-			if (!storableCredentials(input.credentials)) return { ok: false };
+			const credentials = storableCredentials(input.credentials);
+			if (credentials === undefined) return { ok: false };
 
 			// Preparation, not authority: the subject names the index, and the
 			// record is what the credential is sealed against. The script checks
@@ -811,7 +843,7 @@ export function createRedisFederationGrantStore(
 			// text the credential was sealed under.
 			if (!current.guardsAgree) return { ok: false };
 			const text = canonicalAuthorization(authorization);
-			const { credential, extension } = seal(input.credentials, {
+			const { credential, extension } = seal(credentials, {
 				id: current.base.id,
 				subject: current.base.subject,
 				clientId: current.base.clientId,
@@ -846,7 +878,8 @@ export function createRedisFederationGrantStore(
 			// client writes a number out as an integer and the script compares
 			// numbers, so a fractional version would round into a match.
 			if (!Number.isSafeInteger(input.expectedVersion)) return { ok: false };
-			if (!storableCredentials(input.credentials)) return { ok: false };
+			const credentials = storableCredentials(input.credentials);
+			if (credentials === undefined) return { ok: false };
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return { ok: false };
 			// Read back, a marker judged against a maximum that is not finite is no
 			// marker at all: refused here, as every adapter refuses it.
@@ -866,7 +899,7 @@ export function createRedisFederationGrantStore(
 			if (openCredential(current, snapshot.credential, nowMs, input.grantId).state !== "ok") {
 				return { ok: false };
 			}
-			const { credential, extension } = seal(input.credentials, {
+			const { credential, extension } = seal(credentials, {
 				id: current.base.id,
 				subject: current.base.subject,
 				clientId: current.base.clientId,

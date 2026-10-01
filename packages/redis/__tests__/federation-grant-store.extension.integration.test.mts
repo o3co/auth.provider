@@ -299,6 +299,69 @@ describe("the token's end, kept beside the credential", () => {
 		expect(await redis.hget(key("g-2", "grant"), "status")).toBe("pending");
 	});
 
+	it("refuses an end whose own value is no instant, whatever its methods say", async () => {
+		const held = sealed();
+		await activated(held, credentials(END()));
+		const disguised = new Date(Number.NaN);
+		disguised.getTime = () => END().getTime();
+		const written = await held.replaceCredentials({
+			grantId: "g-1",
+			expectedVersion: 2,
+			credentials: credentials(disguised, "2"),
+			ineligible: null,
+			now: at(3 * MIN),
+		});
+		expect(written.ok).toBe(false);
+		expect((await token(held))?.value).toBe("at-1");
+	});
+
+	it("stores the credentials as they were when the write was asked for, read once", async () => {
+		const held = sealed();
+		await activated(held, credentials(END()));
+		// An end read once as the token's, and as nothing after: what was
+		// judged is what is kept.
+		let reads = 0;
+		const given = credentials(undefined, "2");
+		Object.defineProperty(given.accessToken as object, "effectiveExpiresAt", {
+			enumerable: true,
+			get: () => {
+				reads += 1;
+				return reads === 1 ? at(20 * MIN) : undefined;
+			},
+		});
+		const replaced = await held.replaceCredentials({
+			grantId: "g-1",
+			expectedVersion: 2,
+			credentials: given,
+			ineligible: null,
+			now: at(3 * MIN),
+		});
+		expect(replaced.ok).toBe(true);
+		expect((await token(held))?.effectiveExpiresAt).toStrictEqual(at(20 * MIN));
+
+		// Dates changed by the caller while the write is under way change nothing.
+		const end = at(30 * MIN);
+		const obtained = at(2 * MIN);
+		const next = credentials(end, "3");
+		const changing = {
+			...next,
+			accessToken: { ...(next.accessToken as object), obtainedAt: obtained },
+		} as FederationGrantCredentials;
+		const writing = held.replaceCredentials({
+			grantId: "g-1",
+			expectedVersion: 3,
+			credentials: changing,
+			ineligible: null,
+			now: at(3 * MIN),
+		});
+		end.setTime(Number.NaN);
+		obtained.setTime(Number.NaN);
+		expect((await writing).ok).toBe(true);
+		const after = await token(held);
+		expect(after?.obtainedAt).toStrictEqual(at(2 * MIN));
+		expect(after?.effectiveExpiresAt).toStrictEqual(at(30 * MIN));
+	});
+
 	it("is taken away with the credential when the user is asked again and when the grant is revoked", async () => {
 		const held = sealed();
 		await activated(held, credentials(END()));
@@ -490,6 +553,13 @@ describe("in plaintext mode", () => {
 		await activated(held, credentials(END()), "g-3");
 		await rewrittenByAnOldRelease((await redis.get(key("g-2", "cred"))) as string, "g-3");
 		expect(await token(held, "g-3")).not.toHaveProperty("effectiveExpiresAt");
+	});
+
+	it("keeps reading the end beside a byte-identical rewrite of the credential: the same token, so the same end", async () => {
+		const held = plaintext();
+		await activated(held, credentials(END()));
+		await rewrittenByAnOldRelease((await redis.get(key("g-1", "cred"))) as string);
+		expect((await token(held))?.effectiveExpiresAt).toStrictEqual(END());
 	});
 
 	it("reads a sealed spelling, an unbound one or a malformed one as absent", async () => {
