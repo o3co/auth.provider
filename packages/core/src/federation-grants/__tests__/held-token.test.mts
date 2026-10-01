@@ -74,6 +74,18 @@ describe("federationGrantHeldToken", () => {
 		expect(Number.isNaN(held.expiresAt.getTime())).toBe(true);
 	});
 
+	it.each([Number.POSITIVE_INFINITY, Number.NaN, "3600"])(
+		"reads an issued lifetime of %s as no end, even beside an effective one",
+		(issuedLifetime) => {
+			const held = federationGrantHeldToken({
+				...stored,
+				issuedLifetime: issuedLifetime as number,
+				effectiveExpiresAt: at(1_800_000),
+			});
+			expect(Number.isNaN(held.expiresAt.getTime())).toBe(true);
+		},
+	);
+
 	it("reads an obtainedAt that is no instant as a token held since no instant, and never throws", () => {
 		for (const obtainedAt of [at(0).toISOString(), null, LOOK_ALIKE]) {
 			const held = federationGrantHeldToken({

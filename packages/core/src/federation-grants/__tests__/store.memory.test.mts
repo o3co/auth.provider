@@ -352,6 +352,34 @@ describe("createMemoryFederationGrantStore", () => {
 			expect((await replace(token({ effectiveExpiresAt: value }))).written.ok).toBe(false);
 			expect((await replace(token({ obtainedAt: value }))).written.ok).toBe(false);
 		});
+
+		it("stores the end it judged: each field is read once", async () => {
+			let reads = 0;
+			const shifting = token();
+			Object.defineProperty(shifting, "effectiveExpiresAt", {
+				enumerable: true,
+				get: () => (reads++ < 2 ? at(4 * MIN) : undefined),
+			});
+			const { written, held } = await replace(shifting);
+			expect(written.ok).toBe(true);
+			expect(held?.effectiveExpiresAt).toEqual(at(4 * MIN));
+		});
+	});
+
+	it("refuses a failure stamp whose own getTime is not an instant, as it always has", async () => {
+		const store = createMemoryFederationGrantStore();
+		await lodge(store, "g-1");
+		const active = await activate(store, "g-1");
+		if (!active.ok) throw new Error("fixture: not activated");
+		const at3 = Object.assign(new Date(at(3 * MIN)), { getTime: () => Number.NaN });
+		const written = await store.noteRefreshFailure({
+			grantId: "g-1",
+			expectedVersion: active.grant.version,
+			failure: { at: at3, kind: "unavailable" },
+			rowMs: MIN,
+			now: at(3 * MIN),
+		});
+		expect(written.ok).toBe(false);
 	});
 
 	it("hands every failed write its own result: one caller's object is not another's", async () => {
