@@ -13,7 +13,7 @@ import {
 	redisMfaFactorStoreModule,
 	redisMfaTransactionStoreModule,
 	redisReplaySeenSetModule,
-} from "../src/index.mjs";
+} from "#/index.mjs";
 
 describe("redisChallengeStoreModule", () => {
 	it("has the canonical module name 'redis-challenge-store'", () => {

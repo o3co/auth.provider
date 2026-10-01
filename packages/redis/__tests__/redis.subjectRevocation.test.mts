@@ -29,8 +29,8 @@ import {
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SET_REVOCATION_BOUNDARIES } from "#/ioredis/scripts/user-sessions.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisSubjectRevocation } from "#/subjectRevocation.mjs";
 import {
 	runSessionsOnlyRevocationClockContract,
 	runSubjectRevocationClockContract,

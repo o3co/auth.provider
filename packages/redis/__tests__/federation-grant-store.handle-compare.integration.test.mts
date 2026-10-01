@@ -25,8 +25,8 @@
 import { constantTimeStringEqual } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRedisFederationGrantStore } from "../src/federation-grant-store.mjs";
-import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+import { createRedisFederationGrantStore } from "#/federation-grant-store.mjs";
+import { makeIoredisFederationGrantStoreClient } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 vi.mock("@o3co/auth-provider-core", async (importOriginal) => {

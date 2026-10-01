@@ -5,8 +5,8 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll } from "vitest";
-import { createRedisChallengeStore } from "../src/challenges.mjs";
-import type { ChallengeStoreClient } from "../src/clients.mjs";
+import { createRedisChallengeStore } from "#/challenges.mjs";
+import type { ChallengeStoreClient } from "#/clients.mjs";
 import { runChallengeStoreContract } from "./adapters.challenge-store.contract.mjs";
 import { keysExpire, testRedis } from "./support/redis.mjs";
 

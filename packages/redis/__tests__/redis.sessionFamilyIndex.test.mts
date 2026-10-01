@@ -22,9 +22,9 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { SessionFamilyIndexClient } from "../src/clients.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisSessionFamilyIndex } from "../src/sessionFamilyIndex.mjs";
+import type { SessionFamilyIndexClient } from "#/clients.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisSessionFamilyIndex } from "#/sessionFamilyIndex.mjs";
 import {
 	runSessionEndContract,
 	runSessionFamilyIndexContract,

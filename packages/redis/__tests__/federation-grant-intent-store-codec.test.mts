@@ -27,7 +27,7 @@ import {
 	encodeFederationGrantIntent,
 	federationGrantBindingText,
 	federationGrantIntentPairText,
-} from "../src/internal/federation-grant-intent-codec.mjs";
+} from "#/internal/federation-grant-intent-codec.mjs";
 
 const intent = (authorizationParams: Record<string, string>): FederationGrantIntent => ({
 	handle: "h-1",

@@ -16,9 +16,9 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { SessionRPRegistryClient } from "../src/clients.mjs";
-import { createRedisSidHash } from "../src/internal/redisSidHash.mjs";
-import { makeIoredisClients } from "../src/ioredis.mjs";
+import type { SessionRPRegistryClient } from "#/clients.mjs";
+import { createRedisSidHash } from "#/internal/redisSidHash.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
 import { aheadOfServer, serverPasses, testRedis } from "./support/redis.mjs";
 
 let raw: Redis;

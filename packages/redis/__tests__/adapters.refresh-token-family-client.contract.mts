@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import type { RefreshTokenFamilyClient } from "../src/clients.mjs";
+import type { RefreshTokenFamilyClient } from "#/clients.mjs";
 
 /**
  * Builds a RefreshTokenFamilyClient on a live Redis for the `duplicate()`

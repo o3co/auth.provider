@@ -15,8 +15,8 @@ import {
 	createRedisAccessTokenDenylist,
 	redisAccessTokenDenylistBuilder,
 	redisAccessTokenDenylistModule,
-} from "../src/access-token-denylist.mjs";
-import type { AccessTokenDenylistClient } from "../src/clients.mjs";
+} from "#/access-token-denylist.mjs";
+import type { AccessTokenDenylistClient } from "#/clients.mjs";
 import { relativeDeadline, serverPasses, testRedis } from "./support/redis.mjs";
 
 let client: Redis;

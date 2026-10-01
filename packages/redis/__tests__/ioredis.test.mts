@@ -17,9 +17,9 @@ import { EventEmitter } from "node:events";
 import { DeviceCodeStoreError } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FederationGrantStoreClient } from "../src/clients.mjs";
-import { createRedisDeviceCodeStore } from "../src/device-code-store.mjs";
-import { makeIoredisClients, makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+import type { FederationGrantStoreClient } from "#/clients.mjs";
+import { createRedisDeviceCodeStore } from "#/device-code-store.mjs";
+import { makeIoredisClients, makeIoredisFederationGrantStoreClient } from "#/ioredis.mjs";
 
 /** The fake's members a test replaces or reads back as mocks. */
 interface FakeIoredis {

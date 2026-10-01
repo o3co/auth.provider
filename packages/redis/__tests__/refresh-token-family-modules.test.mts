@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
-import { redisRefreshTokenFamilyStoreModule } from "../src/index.mjs";
+import { redisRefreshTokenFamilyStoreModule } from "#/index.mjs";
 
 describe("redisRefreshTokenFamilyStoreModule", () => {
 	it("has the canonical module name 'redis-refresh-token-family-store'", () => {
