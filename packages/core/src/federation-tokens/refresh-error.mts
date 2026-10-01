@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import { isError, isFederationUpstreamOutage } from "./upstreamOutage.mjs";
+import { isError } from "../logging/loggableError.mjs";
+import { isFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 /**
  * What an upstream federation refresh failed with.

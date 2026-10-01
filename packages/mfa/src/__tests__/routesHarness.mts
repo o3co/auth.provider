@@ -18,8 +18,8 @@
  * What the MFA routes' suites drive the composed application with, beside
  * `moduleHarness.mts`: a frozen clock on a TOTP step, a TOTP factor sealed
  * under the suite's key and seeded in the factor store, the codes it takes,
- * the browser's calls to `/session/mfa/*` on its cookie jar, and a recording
- * audit sink. Not a test file.
+ * the browser's calls to `/session/mfa/*` on its cookie jar, a recording
+ * audit sink, and a tap on the cookie sessions' store. Not a test file.
  */
 
 import { randomBytes } from "node:crypto";
@@ -40,7 +40,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { defineModule } from "@o3co/auth-provider-core";
 import type { RecordingMailSender } from "@o3co/auth-provider-core/testing";
-import type express from "express";
+import express from "express";
 import type request from "supertest";
 import { expect, vi } from "vitest";
 import { readMfaSettings } from "#/config.mjs";
@@ -435,3 +435,49 @@ export const setsCsrfToken = (
 	([] as string[])
 		.concat(res.headers["set-cookie"] ?? [])
 		.some((line) => line.startsWith(`${guard.cookieName}=`));
+
+/** express-session's store, as far as these tests make it fail. */
+export interface CookieSessionStore {
+	destroy(sid: string, done: (err?: unknown) => void): void;
+	set(sid: string, session: unknown, done: (err?: unknown) => void): void;
+}
+
+/**
+ * A module mounted behind the session middleware that hands the tests the
+ * cookie sessions' store, tells whether a cookie session is signed in, and
+ * holds a request on a cookie session until released, then saves it back as
+ * it was loaded.
+ */
+export function cookieSessionTap() {
+	const tapped: { store?: CookieSessionStore } = {};
+	let release: () => void = () => {};
+	let reached: () => void = () => {};
+	const held = { reached: new Promise<void>((resolve) => (reached = resolve)) };
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	const router = express.Router();
+	router.get("/", (req, res) => {
+		tapped.store = (req as unknown as { sessionStore: CookieSessionStore }).sessionStore;
+		const session = (req as unknown as { session?: { isAuthenticated?: unknown } }).session;
+		res.json({ authenticated: session?.isAuthenticated === true });
+	});
+	router.get("/hold", async (req, res) => {
+		reached();
+		await gate;
+		const session = (req as unknown as { session: { save(done: () => void): void } }).session;
+		session.save(() => res.status(204).end());
+	});
+	const module = defineModule({
+		name: "test:cookie-session-tap",
+		contributes: {
+			routes: [
+				() => ({
+					id: "test-cookie-session-tap",
+					mountPath: "/test-tap",
+					after: ["session-middleware"],
+					handler: router,
+				}),
+			],
+		},
+	});
+	return { module, tapped, held, release: () => release() };
+}
