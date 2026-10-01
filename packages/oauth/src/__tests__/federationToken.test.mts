@@ -1059,6 +1059,81 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 	});
 
+	describe("the refresh lock is released only once the write or the clean-up has settled", () => {
+		// While the lock is held, no second request can re-read the expired
+		// record and spend the refresh token this one just rotated. Each store
+		// call is recorded when it settles, a macrotask after it was called, so
+		// a release that runs as soon as the call starts lands before it.
+		const settleLater = (order: string[], step: string) =>
+			vi.fn(async () => {
+				await new Promise((resolve) => setImmediate(resolve));
+				order.push(step);
+			});
+
+		const lockedRefresh = (
+			order: string[],
+			refreshToken: (refreshToken: string) => Promise<unknown>,
+		) => {
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const lockingStore = {
+				...makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expiredTokens),
+					update: settleLater(order, "update"),
+					delete: settleLater(order, "delete"),
+				}),
+				acquireLock: vi.fn().mockResolvedValue({
+					acquired: true,
+					release: vi.fn(async () => {
+						order.push("release");
+					}),
+				}),
+			};
+			const sessionFederationIndex = makeSessionFederationIndex({
+				removeFederation: settleLater(order, "removeFederation"),
+			});
+			const provider = {
+				...federationBase("google"),
+				refreshToken,
+			} as unknown as FederationProvider;
+			return buildApp({
+				fedTokenStore: lockingStore,
+				sessionFederationIndex,
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+			});
+		};
+
+		it("releases after the refreshed record's write", async () => {
+			const order: string[] = [];
+			const app = lockedRefresh(
+				order,
+				vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: 3600 }),
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(order).toEqual(["update", "release"]);
+		});
+
+		it("releases after the invalid_grant clean-up", async () => {
+			const order: string[] = [];
+			const app = lockedRefresh(
+				order,
+				vi.fn().mockRejectedValue(
+					Object.assign(new Error("server responded with an error in the response body"), {
+						error: "invalid_grant",
+						status: 400,
+					}),
+				),
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(410);
+			expect(order).toEqual(["delete", "removeFederation", "release"]);
+		});
+	});
+
 	// ---------------------------------------------------------------------------
 	// Refresh-token preservation
 	// ---------------------------------------------------------------------------
@@ -2182,6 +2257,99 @@ describe("POST /oauth/federation/:name/token", () => {
 					details: expect.objectContaining({ federation: "google", refreshed: true }),
 				}),
 			);
+		});
+	});
+
+	describe("expires_in is the lifetime left once the success has been audited", () => {
+		// The audit sink is called synchronously; one that takes 2 minutes must
+		// not leave `expires_in` 2 minutes longer than the token has left.
+		const SINK_DELAY_MS = 120_000;
+		const LIFETIME_S = 3600;
+
+		const slowSink = (): AuditSink => ({
+			kind: "mock",
+			record: vi.fn(async (event) => {
+				if (event.type === "federation.token.success") {
+					vi.setSystemTime(Date.now() + SINK_DELAY_MS);
+				}
+			}),
+		});
+
+		const withFrozenDate = async (run: () => Promise<void>) => {
+			vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+			try {
+				await run();
+			} finally {
+				vi.useRealTimers();
+			}
+		};
+
+		const expected = LIFETIME_S - SINK_DELAY_MS / 1000;
+
+		it("on the stored token", async () => {
+			await withFrozenDate(async () => {
+				const stored = { ...baseFedTokens, expiresAt: new Date(Date.now() + LIFETIME_S * 1000) };
+				const app = buildApp({
+					fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(stored) }),
+					auditSink: slowSink(),
+				});
+
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(200);
+				expect(res.body.expires_in).toBe(expected);
+			});
+		});
+
+		it("on the record a concurrent refresh wrote, read after the lock", async () => {
+			await withFrozenDate(async () => {
+				const lockingStore = {
+					...makeFedTokenStore({
+						get: vi
+							.fn()
+							.mockResolvedValueOnce({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) })
+							.mockResolvedValueOnce({
+								...baseFedTokens,
+								expiresAt: new Date(Date.now() + LIFETIME_S * 1000),
+							}),
+					}),
+					acquireLock: vi.fn().mockResolvedValue({ acquired: true, release: vi.fn() }),
+				};
+				const provider = {
+					...federationBase("google"),
+					refreshToken: vi.fn(),
+				} as unknown as FederationProvider;
+				const app = buildApp({
+					fedTokenStore: lockingStore,
+					getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+					auditSink: slowSink(),
+				});
+
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(200);
+				expect(res.body.expires_in).toBe(expected);
+			});
+		});
+
+		it("on the refreshed token", async () => {
+			await withFrozenDate(async () => {
+				const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+				const provider = {
+					...federationBase("google"),
+					refreshToken: vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: LIFETIME_S }),
+				} as unknown as FederationProvider;
+				const app = buildApp({
+					fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
+					getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+					auditSink: slowSink(),
+				});
+
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(200);
+				expect(res.body.expires_in).toBe(expected);
+			});
 		});
 	});
 
