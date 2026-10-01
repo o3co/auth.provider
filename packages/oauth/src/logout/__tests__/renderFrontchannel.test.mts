@@ -510,6 +510,8 @@ describe("renderFrontchannelLogoutHtml", () => {
 			["two state parameters", "https://rp.example/out?state=x&state=y"],
 			["a state carrying a question mark", "https://rp.example/out?state=x?code=y"],
 			["a state with no value", "https://rp.example/out?state"],
+			["a state pair outside the query (in the host)", "http://localhost&state=x"],
+			["a state pair outside the query (after the port)", "https://rp.example:443&state=x"],
 		])("sets aside only a state the logout route writes: refuses %s", (_label, uri) => {
 			const logger = createMockLogger();
 			const { hasScript } = scriptFor(uri, logger);
@@ -519,6 +521,14 @@ describe("renderFrontchannelLogoutHtml", () => {
 					([, name]) => name === "logout_frontchannel_redirect_refused",
 				),
 			).toHaveLength(1);
+		});
+
+		it("keeps the state the logout route writes on a registered path that ends in an ampersand", () => {
+			const logger = createMockLogger();
+			const url = new URL("https://rp.example/out&");
+			url.searchParams.set("state", "s-1");
+			expect(scriptFor(url.toString(), logger).hasScript).toBe(true);
+			expect(logger.warn).not.toHaveBeenCalled();
 		});
 
 		it("keeps the state the logout route writes, percent-encoded and with a plus for a space", () => {
