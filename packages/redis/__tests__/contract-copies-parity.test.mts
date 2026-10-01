@@ -106,6 +106,14 @@ const COPIES: ReadonlyArray<{
 		],
 	},
 	{
+		core: "user-sessions/__tests__/subjectRevocation.clock.contract.mts",
+		copy: "subjectRevocation.clock.contract.mts",
+		runners: [
+			["runSubjectRevocationClockContract", "redis.subjectRevocation.test.mts"],
+			["runSessionsOnlyRevocationClockContract", "redis.subjectRevocation.test.mts"],
+		],
+	},
+	{
 		core: "user-sessions/__tests__/subjectSessionIndex.contract.mts",
 		copy: "subjectSessionIndex.contract.mts",
 		runners: [["runSubjectSessionIndexContract", "redis.subjectSessionIndex.test.mts"]],

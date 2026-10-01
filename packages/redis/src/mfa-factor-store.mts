@@ -99,7 +99,13 @@ const instantOf = (value: Date, name: string): number => {
 const optionalInstantOf = (value: Date | undefined, name: string): number | null =>
 	value === undefined ? null : instantOf(value, name);
 
-const BINDINGS: ReadonlySet<unknown> = new Set(["password", "email_proof", "mfa"]);
+const BINDING_NAMES = {
+	password: true,
+	email_proof: true,
+	federated: true,
+	mfa: true,
+} as const satisfies Record<NonNullable<MfaFactorRecord["binding"]>, true>;
+const BINDINGS: ReadonlySet<unknown> = new Set(Object.keys(BINDING_NAMES));
 
 /**
  * Refuses, with a `RangeError`, a mutable part {@link recordOf} would refuse
@@ -123,7 +129,7 @@ function checkRecord(record: MfaFactorRecord): void {
 	if (typeof record.subject !== "string") throw RANGE("subject must be a string");
 	if (typeof record.kind !== "string") throw RANGE("kind must be a string");
 	if (record.binding !== undefined && !BINDINGS.has(record.binding)) {
-		throw RANGE('binding must be "password", "email_proof", "mfa" or absent');
+		throw RANGE('binding must be "password", "email_proof", "federated", "mfa" or absent');
 	}
 	if (!isWholeVersion(record.version)) {
 		throw RANGE("version must be a safe non-negative integer");

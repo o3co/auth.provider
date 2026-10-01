@@ -405,6 +405,7 @@ export {
 	type PolicyAudienceOutcome,
 	type PolicyScopeCeiling,
 	policyOutOfBounds,
+	policyUnavailable,
 	readGrantPolicyDecision,
 } from "./grants/grantPolicy.mjs";
 // id_token generation (OIDC Core §2)
@@ -1126,6 +1127,11 @@ export {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./user-sessions/revokeAllForSubject.mjs";
+// How a SubjectRevocation store reads its arguments, and bounds a boundary by its clock.
+export {
+	checkSubjectRevocationInstant,
+	clampSubjectRevocationBoundary,
+} from "./user-sessions/subjectRevocationBoundary.mjs";
 export {
 	createSubjectRevocationService,
 	type FederationGrantDisposition,

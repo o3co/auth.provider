@@ -287,4 +287,24 @@ export interface SubjectRevocationClient {
 		expiresAtMs: number,
 		grantRetentionMs: number,
 	): Promise<string>;
+	/**
+	 * `setRevocationBoundaries`, with `beforeMs` first clamped to the server's
+	 * clock plus `skewMs`, that clock read in the same atomic step as the write.
+	 * A `beforeMs` behind it is written as given. Resolves with the stored value
+	 * and the server's clock in epoch milliseconds, as read in that step.
+	 *
+	 * Optional: a client without it still constructs; the adapter then
+	 * records through `setRevocationBoundaries`, unclamped, and says so at warn
+	 * once.
+	 */
+	advanceRevocationBoundaries?(
+		key: string,
+		mode: "all" | "sessions",
+		write: {
+			readonly beforeMs: number;
+			readonly expiresAtMs: number;
+			readonly grantRetentionMs: number;
+			readonly skewMs: number;
+		},
+	): Promise<{ readonly value: string; readonly serverNowMs: number }>;
 }

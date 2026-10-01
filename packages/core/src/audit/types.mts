@@ -78,8 +78,8 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// wires it, so no released composition emits them; the inventory's drift
 	// test names the step that emits each. A deployment notifies the account
 	// holder from six of them, each carrying, beside those, in its details:
-	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`
-	// or `mfa`) and `by: "user"`; `mfa.factor.removed` its `binding` and `by`
+	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`,
+	// `federated` or `mfa`) and `by: "user"`; `mfa.factor.removed` its `binding` and `by`
 	// (`user` or `operator`); `mfa.recovery_codes.generated` its `binding`,
 	// `by: "user"`, `regenerated` (true when a set stood, or may have)
 	// and, when an older set may still stand beside the new one,
