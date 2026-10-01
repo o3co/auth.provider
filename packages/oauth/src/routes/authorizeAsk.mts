@@ -218,10 +218,11 @@ const spendPresented = async (
 };
 
 /**
- * The pass that mints spends the presented ask, so a replayed URL asks again
- * rather than minting twice. An ask gone by now — spent by another pass of
- * the same request — refuses with `login_required` when the session's
- * freshness rested on it, and is ignored otherwise. `false` once answered.
+ * The pass that mints spends the presented ask, so the ask cannot carry its
+ * login into a second code; a replayed URL is then decided as a request with
+ * no ask. An ask gone by now — spent by another pass of the same request —
+ * refuses with `login_required` when the session's freshness rested on it,
+ * and is ignored otherwise. `false` once answered.
  */
 export const spendAskAtMint = async (
 	ctx: AuthorizeContext,
