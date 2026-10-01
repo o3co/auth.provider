@@ -346,6 +346,18 @@ describe("InMemoryCodeRepository", () => {
 			expect(await repo.consumeByCode(created.code)).toStrictEqual(expected);
 		});
 
+		it("keeps the amr it was given: neither the caller's array nor a returned one reaches the stored code", async () => {
+			repo = new InMemoryCodeRepository();
+			const amr = ["pwd"];
+			const created = await repo.createCode({ ...minimalParams, amr });
+			amr.push("otp", "mfa");
+			// What it answers is frozen, from `createCode` and from each read.
+			expect(() => (created.amr as string[]).push("otp")).toThrow(TypeError);
+			const found = await repo.findByCode(created.code);
+			expect(() => (found?.amr as string[]).push("otp")).toThrow(TypeError);
+			expect((await repo.consumeByCode(created.code))?.amr).toEqual(["pwd"]);
+		});
+
 		it("names every field it has no value for as undefined, rather than leaving it out", async () => {
 			repo = new InMemoryCodeRepository();
 			const created = await repo.createCode(minimalParams);

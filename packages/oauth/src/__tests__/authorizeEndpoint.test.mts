@@ -1861,6 +1861,16 @@ describe("/authorize — step-up and re-authentication", () => {
 			expect(params.get("error")).toBe("unmet_authentication_requirements");
 		});
 
+		it("records no amr on the code where no session store is wired", async () => {
+			const createCode = mintingCode();
+			const { app } = await makeApp({ session, createCode });
+			const res = await authorize(app, baseQuery);
+			expect(redirectParams(res).get("code")).toBe("code-x");
+			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ amr: undefined }));
+			// Named, as every field of the record is: a required key holding `undefined`.
+			expect(createCode.mock.calls[0]?.[0]).toHaveProperty("amr", undefined);
+		});
+
 		it("refuses an acr this deployment has not configured rather than accepting it silently", async () => {
 			const { app } = await makeApp({
 				session,

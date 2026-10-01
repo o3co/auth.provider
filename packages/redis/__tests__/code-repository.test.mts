@@ -326,16 +326,26 @@ describe("RedisCodeRepository", () => {
 			expect((await repo.consumeByCode(without.code))?.acr).toBeUndefined();
 		});
 
-		it("persists and returns amr, and reads a stored amr that is not a list as none", async () => {
+		it("persists and returns amr", async () => {
 			const withAmr = await repo.createCode({
 				...minimalParams,
 				amr: ["pwd", "otp", "mfa"],
 			});
 			expect((await repo.consumeByCode(withAmr.code))?.amr).toEqual(["pwd", "otp", "mfa"]);
+			const single = await repo.createCode({ ...minimalParams, amr: ["pwd"] });
+			expect((await repo.consumeByCode(single.code))?.amr).toEqual(["pwd"]);
+		});
 
+		it.each([
+			["a string", "pwd"],
+			["an object", { 0: "pwd" }],
+			["a number element", [1]],
+			["a null element", [null]],
+			["an empty element", ["pwd", ""]],
+		])("reads a stored amr that is %s as none", async (_label, stored) => {
 			const corrupt = await repo.createCode({ ...minimalParams, amr: ["pwd"] });
 			const key = `${KEY_PREFIX}${corrupt.code}`;
-			store.set(key, JSON.stringify({ ...JSON.parse(store.get(key) as string), amr: "pwd" }));
+			store.set(key, JSON.stringify({ ...JSON.parse(store.get(key) as string), amr: stored }));
 			const read = await repo.consumeByCode(corrupt.code);
 			expect(read).not.toBeNull();
 			expect(read).toHaveProperty("amr", undefined);
