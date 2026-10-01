@@ -601,7 +601,7 @@ OIDC id_token JWT（OIDC Core §2）に署名して返す。クレーム構成:
 - `sid` — バックチャネルログアウト用セッション識別子
 - `azp` — authorized party、指定された場合のみ付与
 - `nonce` — 認可リクエストから転送され、指定された場合にそのまま反映
-- `amr`、`acr` — 呼び出し側が渡したとおり（`authorization_code` グラントは、セッションが保証する `amr` — `vouchedAmr` — とコードの `acr` を渡す）。空の `amr` は `[]` として出力せず省略する
+- `amr`、`acr` — 呼び出し側が渡したとおり（`authorization_code` グラントは、コードの `amr` — `/authorize` の時点でセッションが保証したもの、`vouchedAmr` — とその `acr` を渡す）。空の `amr` は `[]` として出力せず省略する
 - `filterClaimsByScope` によるスコープフィルター済みユーザークレーム
 
 ヘッダーは `typ: "JWT"` を使用する — 標準綴りで、RFC 9068 の `at+jwt` と意図的に排他にしてあり、id_token が access-token 面を通ることはない。`id+jwt` を持つ id_token は通常の `typ` 不一致として拒否される。
