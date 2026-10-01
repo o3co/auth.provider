@@ -105,14 +105,23 @@ const realRequirement = (
 		...NO_FIRST_BINDING_MARK,
 	});
 
-const storeOf = (session: UserSession): UserSessionStore & SupportsSecondFactorUpdate => ({
+/**
+ * Whether a row's store can record a second factor: every row's can, as
+ * the coordinator's `stepUpRecordable: true` above says, unless the row
+ * says its store cannot.
+ */
+const recordsSecondFactor = (row: MergeRow): boolean =>
+	!("storeRecords" in row && row.storeRecords === false);
+
+const storeOf = (
+	session: UserSession,
+	records: boolean,
+): UserSessionStore & Partial<SupportsSecondFactorUpdate> => ({
 	kind: "test",
 	create: async () => {},
 	get: async (sid) => (sid === session.sid ? session : null),
 	delete: async () => {},
-	// A store that can record a second factor, as the coordinator's
-	// `stepUpRecordable: true` above says the composition's store can.
-	recordSecondFactor: async () => null,
+	...(records ? { recordSecondFactor: async () => null } : {}),
 });
 
 const claim = () =>
@@ -120,7 +129,8 @@ const claim = () =>
 
 /** What a composition registers under the row's mode: the real requirement, or — under off, which the module refuses — none. */
 const deps = (row: MergeRow): AdmissionDeps => ({
-	userSessionStore: row.session === null ? undefined : storeOf(row.session),
+	userSessionStore:
+		row.session === null ? undefined : storeOf(row.session, recordsSecondFactor(row)),
 	subjectRevocation: undefined,
 	requirements: resolverForTests(
 		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors)],
