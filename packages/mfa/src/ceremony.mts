@@ -182,8 +182,10 @@ export type MfaVerifyOutcome =
 			readonly retryAfterMs: number | null;
 			/** Whether this refusal begins an episode. */
 			readonly first: boolean;
-			/** The kinds that still work during the hold. */
-			readonly usableKinds: readonly string[];
+			/** The exempt kinds the subject holds: what a hold does not refuse. */
+			readonly exemptKinds: readonly string[];
+			/** The transaction's attempts left: the refusal spent one. */
+			readonly attemptsRemaining: number;
 			/** What authorized the refused attempt's factor. */
 			readonly binding: MfaFactorRecord["binding"];
 	  } & MfaCeremonySubject)

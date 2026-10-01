@@ -22,6 +22,7 @@
  * that cannot reserve or settle does to the answer.
  */
 
+import { randomBytes } from "node:crypto";
 import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
@@ -34,6 +35,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
+import { createMfaSealing } from "#/sealing.mjs";
 import { BOB, boot, configFor, disposeAll, events } from "./moduleHarness.mjs";
 import {
 	beginLogin,
@@ -110,7 +112,7 @@ async function held(
 }
 
 describe("a held subject's guessable proof", () => {
-	it("is 429 mfa_locked, with the hold, Retry-After in whole seconds rounded up, and the kinds that still work", async () => {
+	it("is 429 mfa_locked, with the hold, Retry-After in whole seconds rounded up, the exempt kinds the subject holds in code-unit order, and the attempts left", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await seedFactor(factorStore, "recovery_code", recoverySet().data);
 		await seedFactor(factorStore, "key", {});
@@ -133,14 +135,14 @@ describe("a held subject's guessable proof", () => {
 		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.body).toEqual({
 			error: "mfa_locked",
-			error_description: expect.any(String),
+			error_description: "Too many failed attempts: try again later, or use another second factor",
 			hold: "backoff",
-			usable_kinds: expect.arrayContaining(["recovery_code", "key"]),
+			usable_kinds: ["key", "recovery_code"],
+			attempts_remaining: 2,
 		});
-		expect(res.body.usable_kinds).toHaveLength(2);
 	});
 
-	it("carries no Retry-After for the hard hold, which only an exempt proof, a password change or an operator lifts", async () => {
+	it("carries no Retry-After for the hard hold, which no time lifts, and offers no later try", async () => {
 		const { app, totp } = await held({ threshold: 2, hardLimit: 2 });
 		const { agent, transaction } = await beginLogin(app);
 		for (let n = 0; n < 2; n++) {
@@ -151,36 +153,79 @@ describe("a held subject's guessable proof", () => {
 
 		expect(res.status).toBe(429);
 		expect(res.headers["retry-after"]).toBeUndefined();
-		expect(res.body).toMatchObject({ error: "mfa_locked", hold: "hard", usable_kinds: [] });
+		expect(res.body).toEqual({
+			error: "mfa_locked",
+			error_description: "Too many failed attempts: use another second factor",
+			hold: "hard",
+			usable_kinds: [],
+			attempts_remaining: 2,
+		});
 	});
 
-	it("lists no recovery set with no code left, no kind whose data does not open, and no guessable kind", async () => {
+	/** The 429 a subject holding alice's TOTP factor and `seed`'s records is answered once held. */
+	async function heldWith(seed: (factorStore: MfaFactorStore) => Promise<unknown>) {
 		const factorStore = createMemoryMfaFactorStore();
-		await seedFactor(factorStore, "recovery_code", { codes: [] });
-		// Sealed to another subject's record: it does not open as alice's.
-		const id = newFactorId();
-		await factorStore.create({
-			id,
-			subject: "u-alice",
-			kind: "key",
-			label: undefined,
-			binding: "password",
-			createdAt: new Date(T0 - 86_400_000),
-			lastUsedAt: undefined,
-			version: 0,
-			data: suiteSealing().sealFactorData({ subject: BOB.id, id, kind: "key" }, {}),
-		});
+		await seed(factorStore);
 		const { app, totp } = await held(
 			{ threshold: 1 },
 			{ factorStore, extraModules: [contributing(keyFactor)] },
 		);
 		const { agent, transaction } = await beginLogin(app);
 		await verify(agent, transaction, totp.record.id, wrongCode(totp.secret));
-
 		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
-
 		expect(res.status).toBe(429);
-		expect(res.body.usable_kinds).toEqual([]);
+		return res;
+	}
+
+	it("lists a recovery set with no code left, because the subject holds it", async () => {
+		const res = await heldWith((factorStore) =>
+			seedFactor(factorStore, "recovery_code", { codes: [] }),
+		);
+
+		expect(res.body.usable_kinds).toEqual(["recovery_code"]);
+	});
+
+	it("lists a recovery set whose key left the ring, because the subject holds it", async () => {
+		const gone = createMfaSealing({ ring: [{ id: "k-gone", key: randomBytes(32) }] });
+		const set = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			gone.digestsFor("recovery_code"),
+		);
+		const res = await heldWith((factorStore) =>
+			seedFactor(factorStore, "recovery_code", set?.data ?? {}),
+		);
+
+		expect(res.body.usable_kinds).toEqual(["recovery_code"]);
+	});
+
+	it("lists an exempt kind whose data does not open, because the subject holds it", async () => {
+		const res = await heldWith(async (factorStore) => {
+			// Sealed to another subject's record: it does not open as alice's.
+			const id = newFactorId();
+			await factorStore.create({
+				id,
+				subject: "u-alice",
+				kind: "key",
+				label: undefined,
+				binding: "password",
+				createdAt: new Date(T0 - 86_400_000),
+				lastUsedAt: undefined,
+				version: 0,
+				data: suiteSealing().sealFactorData({ subject: BOB.id, id, kind: "key" }, {}),
+			});
+		});
+
+		expect(res.body.usable_kinds).toEqual(["key"]);
+	});
+
+	it("lists no guessable kind, and each exempt kind once however many records hold it", async () => {
+		const res = await heldWith(async (factorStore) => {
+			await seedFactor(factorStore, "key", {});
+			await seedFactor(factorStore, "key", {});
+			await seedTotp(factorStore);
+		});
+
+		expect(res.body.usable_kinds).toEqual(["key"]);
 	});
 
 	it("writes no session, spends one of the transaction's attempts, and leaves the factor as it was", async () => {
@@ -237,12 +282,88 @@ describe("the audit of a refusal", () => {
 	});
 });
 
+describe("what reserves no subject attempt", () => {
+	/** Boots `required` over a transaction store whose `reserveSubjectAttempt` is watched. */
+	async function watched(
+		options: { readonly factorStore?: MfaFactorStore; readonly maxAttempts?: number } = {},
+	) {
+		const store = createMemoryMfaTransactionStore();
+		const reserveSubjectAttempt = vi.fn(store.reserveSubjectAttempt);
+		const factorStore = options.factorStore ?? createMemoryMfaFactorStore();
+		const booted = await boot({
+			config: configFor("required", { maxAttemptsPerTransaction: options.maxAttempts ?? 5 }),
+			factorStore,
+			transactionStore: { ...store, reserveSubjectAttempt },
+		});
+		return { ...booted, reserveSubjectAttempt };
+	}
+
+	it("an exhausted transaction: 401 exhausted, the subject's attempts untouched", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const totp = await seedTotp(factorStore);
+		const { app, reserveSubjectAttempt } = await watched({ factorStore, maxAttempts: 2 });
+		const { agent, transaction } = await beginLogin(app);
+		for (let n = 0; n < 2; n++) {
+			await verify(agent, transaction, totp.record.id, wrongCode(totp.secret));
+		}
+		reserveSubjectAttempt.mockClear();
+
+		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
+
+		expect(res.status).toBe(401);
+		expect(res.body.attempts_remaining).toBe(0);
+		expect(reserveSubjectAttempt).not.toHaveBeenCalled();
+	});
+
+	it("a factor store that cannot list the subject's factors: 503, the subject's attempts untouched", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const totp = await seedTotp(memory);
+		let down = false;
+		const factorStore: MfaFactorStore = {
+			...memory,
+			list: async (subject) => {
+				if (down) throw new Error("factor store unreachable");
+				return memory.list(subject);
+			},
+		};
+		const { app, reserveSubjectAttempt } = await watched({ factorStore });
+		const { agent, transaction } = await beginLogin(app);
+		down = true;
+
+		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
+
+		expect(res.status).toBe(503);
+		expect(reserveSubjectAttempt).not.toHaveBeenCalled();
+	});
+
+	it("a factor whose data does not open: 503, the subject's attempts untouched", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const totp = await seedTotp(factorStore, "u-alice", { sealedFor: BOB.id });
+		const { app, reserveSubjectAttempt } = await watched({ factorStore });
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
+
+		expect(res.status).toBe(503);
+		expect(reserveSubjectAttempt).not.toHaveBeenCalled();
+	});
+});
+
 describe("the subject lock's store", () => {
 	it("answers 503 when it cannot reserve, logged once, and never checks the proof", async () => {
 		const store = createMemoryMfaTransactionStore();
-		const { app, totp, logger, audit } = await held(
+		const checked = vi.fn(async ({ factor }: { factor: { id: string } }) => ({
+			ok: true as const,
+			factorId: factor.id,
+		}));
+		const probe: MfaFactor = { ...keyFactor, kind: "probe", guessable: true, verify: checked };
+		const factorStore = createMemoryMfaFactorStore();
+		const record = await seedFactor(factorStore, "probe", {});
+		const { app, logger, audit } = await held(
 			{},
 			{
+				factorStore,
+				extraModules: [contributing(probe)],
 				transactionStore: {
 					...store,
 					reserveSubjectAttempt: async () => {
@@ -253,9 +374,11 @@ describe("the subject lock's store", () => {
 		);
 		const { agent, transaction } = await beginLogin(app);
 
-		const res = await verify(agent, transaction, totp.record.id, totpCode(totp.secret));
+		const res = await verify(agent, transaction, record.id, "123456");
 
 		expect(res.status).toBe(503);
+		expect(checked).not.toHaveBeenCalled();
+		expect((await factorStore.list("u-alice")).find((r) => r.id === record.id)?.version).toBe(0);
 		expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
 		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
 			route: "verify",

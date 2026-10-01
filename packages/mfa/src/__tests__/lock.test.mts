@@ -62,7 +62,15 @@ const EXEMPT = { kind: "recovery_code", guessable: false } as const;
 const policyOf = (lockout: Partial<MfaLockoutPolicy> = {}): MfaLockoutPolicy =>
 	mfaConfigForTests({ key: MFA_KEY, lockout }).mfa.lockout;
 
-/** The lock over core's memory store, its clock and the store's one injected clock. */
+/** The lock as a verification at the suite's clock uses it: each attempt at the time it is made. */
+interface TimedLock {
+	enter(
+		subject: string,
+		factor: Pick<MfaFactor, "kind" | "guessable">,
+	): ReturnType<MfaSubjectLock["enter"]>;
+}
+
+/** The lock over core's memory store, the store and every verification on one injected clock. */
 function lockOver(
 	lockout: Partial<MfaLockoutPolicy> = {},
 	wrap: (store: MfaTransactionStore) => MfaTransactionStore = (store) => store,
@@ -70,12 +78,8 @@ function lockOver(
 	let clock = 1_900_000_000_000;
 	const store = wrap(createMemoryMfaTransactionStore({ now: () => clock }));
 	const unsettled = vi.fn();
-	const lock = createMfaSubjectLock({
-		store,
-		policy: policyOf(lockout),
-		now: () => clock,
-		unsettled,
-	});
+	const untimed = createMfaSubjectLock({ store, policy: policyOf(lockout), unsettled });
+	const lock: TimedLock = { enter: (subject, factor) => untimed.enter(subject, factor, clock) };
 	return {
 		store,
 		lock,
@@ -88,7 +92,7 @@ function lockOver(
 
 /** One guessable attempt let through and settled `outcome`. */
 async function settled(
-	lock: MfaSubjectLock,
+	lock: TimedLock,
 	outcome: "failure" | "success" | "void",
 	factor: { readonly kind: string; readonly guessable: boolean } = GUESSABLE,
 ): Promise<void> {
@@ -201,6 +205,25 @@ describe("an exempt proof", () => {
 
 		await settled(lock, "failure");
 		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({ hold: "weekly" });
+	});
+
+	it("dates its success by its verification's time: an attempt reserved after that stays in the run", async () => {
+		const { lock, advance } = lockOver({ threshold: 3, hardLimit: 3 });
+		await settled(lock, "failure");
+		await settled(lock, "failure");
+		advance(1000);
+		const exempt = await lock.enter(SUBJECT, EXEMPT);
+		if (exempt.outcome !== "entered") throw new Error("not entered");
+		advance(1000);
+		await settled(lock, "failure");
+		advance(1000);
+
+		await exempt.settle("success");
+
+		// The run holds the failure reserved after the exempt proof's time, and two more make it three.
+		await settled(lock, "failure");
+		await settled(lock, "failure");
+		expect(await lock.enter(SUBJECT, GUESSABLE)).toMatchObject({ hold: "hard" });
 	});
 
 	it("records an exempt success only for a success: a refusal or a void leaves the run as it was", async () => {
@@ -363,7 +386,7 @@ describe("a verification's attempt, through the routes", () => {
 		expect(res.body).toMatchObject({ error: "mfa_locked", hold: "backoff" });
 	});
 
-	it("settles a right code whose factor write was lost, or failed, as void: it never counts", async () => {
+	it("settles a right code whose factor write was lost, or failed, as void: neither a failure nor a success, the run going on", async () => {
 		const memory = createMemoryMfaFactorStore();
 		const { record, secret } = await seedTotp(memory);
 		let write: "lost" | "down" | "as stored" = "lost";
@@ -380,16 +403,23 @@ describe("a verification's attempt, through the routes", () => {
 			config: configFor("required", { lockout: { threshold: 2 } }),
 			factorStore,
 		});
+		const wrong = async () => {
+			const { agent, transaction } = await beginLogin(app);
+			expect((await verify(agent, transaction, record.id, wrongCode(secret))).status).toBe(401);
+		};
+		await wrong();
+		// Counted as failures, the second of these would be held; as successes, they would end the run.
 		for (const how of ["lost", "down", "lost", "down"] as const) {
 			write = how;
 			const { agent, transaction } = await beginLogin(app);
 			expect((await verify(agent, transaction, record.id, totpCode(secret))).status).toBe(503);
 		}
-
 		write = "as stored";
+		await wrong();
+
 		const { agent, transaction } = await beginLogin(app);
 		const res = await verify(agent, transaction, record.id, totpCode(secret));
-		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.status, JSON.stringify(res.body)).toBe(429);
 	});
 
 	it("keeps a factor that throws a failure: a proof crafted to make it throw buys no free guess", async () => {

@@ -21,7 +21,8 @@
  * - A guessable proof reserves one of its subject's attempts before it is
  *   checked, and settles it once. Only a factor that says it is not
  *   guessable is exempt: it reserves nothing, passes during every hold, and
- *   records an exempt success when it settles a success.
+ *   records an exempt success when it settles a success. Each is judged at
+ *   the time its verification passes, so one verification has one time.
  * - A refusal names its hold, when an attempt may come back (none for the
  *   hard hold), and whether it begins an episode.
  * - A reservation the store cannot answer, or answers outside the port, is
@@ -41,8 +42,6 @@ import type {
 	MfaTransactionStore,
 } from "@o3co/auth-provider-core";
 import { type MfaStoreOutage, OUTSIDE_CONTRACT, outage } from "./ceremony.mjs";
-import { recoveryCodesLeft } from "./recovery/factor.mjs";
-import type { MfaSealing } from "./sealing.mjs";
 
 /** An attempt let through: settle it once, `failure`, `success` or `void`. */
 export interface MfaSubjectLockEntry {
@@ -70,10 +69,15 @@ export interface MfaSubjectLockUnsettled {
 }
 
 export interface MfaSubjectLock {
-	/** An attempt of `subject` with a proof of `factor`'s: let through, refused by a hold, or the store's outage. */
+	/**
+	 * An attempt of `subject` with a proof of `factor`'s at `nowMs`, the
+	 * verification's time: let through, refused by a hold, or the store's
+	 * outage. An exempt success it settles is dated `nowMs`.
+	 */
 	enter(
 		subject: string,
 		factor: Pick<MfaFactor, "kind" | "guessable">,
+		nowMs: number,
 	): Promise<MfaSubjectLockEntry | MfaSubjectLocked | MfaStoreOutage>;
 }
 
@@ -84,8 +88,6 @@ export interface MfaSubjectLockOptions {
 	>;
 	/** `mfa.lockout`. */
 	readonly policy: MfaLockoutPolicy;
-	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
-	readonly now?: () => number;
 	readonly unsettled: (failure: MfaSubjectLockUnsettled) => void;
 }
 
@@ -123,7 +125,6 @@ function readReservation(
 /** The subject lock over `options` (see this file's header). */
 export function createMfaSubjectLock(options: MfaSubjectLockOptions): MfaSubjectLock {
 	const { store, policy, unsettled } = options;
-	const now = options.now ?? (() => Date.now());
 
 	/** `settle`, run once; what it throws is reported, never thrown. */
 	const once = (
@@ -148,16 +149,16 @@ export function createMfaSubjectLock(options: MfaSubjectLockOptions): MfaSubject
 	};
 
 	return {
-		async enter(subject, factor) {
+		async enter(subject, factor, nowMs) {
 			if (factor.guessable === false) {
 				return once(subject, factor.kind, "noteExemptSuccess", async (outcome) => {
 					// Called after the consume, as the port requires: a success is settled only then.
-					if (outcome === "success") await store.noteExemptSuccess(subject, now());
+					if (outcome === "success") await store.noteExemptSuccess(subject, nowMs);
 				});
 			}
 			let answer: unknown;
 			try {
-				answer = await store.reserveSubjectAttempt(subject, now(), policy);
+				answer = await store.reserveSubjectAttempt(subject, nowMs, policy);
 			} catch (cause) {
 				return outage("mfa_transaction", "reserveSubjectAttempt", cause);
 			}
@@ -175,27 +176,19 @@ export function createMfaSubjectLock(options: MfaSubjectLockOptions): MfaSubject
 }
 
 /**
- * The kinds that still work while `subject`'s guessable proofs are held:
- * installed, not guessable, held by the subject in a record whose data
- * opens — a recovery set only while it has a code left — oldest first.
+ * The exempt kinds `subject` holds — installed, not guessable, with at
+ * least one record — each once, in code-unit order. An inventory, not a
+ * verdict: whether one works shows at its verification.
  */
-export function usableKindsDuringHold(options: {
-	readonly subject: string;
+export function exemptKindsHeld(options: {
 	readonly records: readonly MfaFactorRecord[];
 	readonly factors: MfaFactorResolver;
-	readonly sealing: MfaSealing;
 }): string[] {
-	const { subject, records, factors, sealing } = options;
-	const usable = records.filter((record) => {
-		const factor = factors.get(record.kind);
-		if (factor === undefined || factor.guessable !== false) return false;
-		const opened = sealing.openFactorData(
-			{ subject, id: record.id, kind: record.kind },
-			record.data,
-		);
-		if (opened.state !== "ok") return false;
-		const left = recoveryCodesLeft(factor, opened.value);
-		return left === undefined || left > 0;
-	});
-	return [...new Set(usable.map((record) => record.kind))];
+	const { records, factors } = options;
+	const kinds = new Set(
+		records
+			.filter((record) => factors.get(record.kind)?.guessable === false)
+			.map((record) => record.kind),
+	);
+	return [...kinds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }

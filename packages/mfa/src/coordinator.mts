@@ -103,7 +103,7 @@ import {
 	type UnknownTransaction,
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
-import { type MfaSubjectLock, usableKindsDuringHold } from "./lock.mjs";
+import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
 import { keptState, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import { recoveryCodesLeft } from "./recovery/factor.mjs";
@@ -764,14 +764,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			}
 			const { attemptsRemaining } = reserved;
 
-			const entered = await lock.enter(tx.subject, factor);
+			const entered = await lock.enter(tx.subject, factor, nowMs);
 			if (entered.outcome === "unavailable") return entered;
 			if (entered.outcome === "locked") {
 				const { outcome: _, ...hold } = entered;
 				return {
 					outcome: "locked",
 					...hold,
-					usableKinds: usableKindsDuringHold({ subject: tx.subject, records, factors, sealing }),
+					exemptKinds: exemptKindsHeld({ records, factors }),
+					attemptsRemaining,
 					binding: record.binding,
 					...about,
 				};
