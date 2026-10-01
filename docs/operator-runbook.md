@@ -1265,6 +1265,31 @@ A key dropped too early reads as `503 key_unavailable` on every grant it
 sealed — recoverable by putting it back, which is why the store never deletes
 on that answer.
 
+The credential's extension (`ext` in the grant hash, which holds the token's
+`effectiveExpiresAt`) is sealed under the same ring at the same write, and
+needs no step of its own. One that names a key not in the ring reads as
+absent, never as `key_unavailable`.
+
+### Upgrading the Redis federation-grant store to a release that keeps a token's end (#1037)
+
+A refresh stores when the upstream said the token ends (`effectiveExpiresAt`),
+and the Redis store keeps it in the grant hash's `ext` field, beside a
+credential that every earlier release still reads. No migration, and a
+rolling upgrade or a rollback is safe. Until the last replica runs the new
+release:
+
+- **A replica on an earlier release serves a token to the released end**
+  (`obtainedAt + issuedLifetime`), as that release always did. A token whose
+  upstream said it ends sooner can be handed out after that, and the upstream
+  answers it with `401`: availability, not wider access.
+- **A credential written by an earlier replica orphans the `ext` beside it**
+  (under `allow-plaintext`, unless it is byte for byte the credential already
+  there), and the new release reads it as absent: that token, too, ends at the
+  released end, until the next refresh on a new replica writes `ext` again.
+- **A `FederationGrantStoreClient` of your own** that ignores the new
+  `extension` input never writes `ext`. Its grants stay on the released end
+  indefinitely, which is the behaviour before this release.
+
 ---
 
 ## 4. Alerts

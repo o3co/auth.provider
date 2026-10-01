@@ -135,6 +135,8 @@ export function makeIoredisFederationGrantStoreClient(
 						input.upstreamIssuer,
 						input.upstreamSubject,
 						input.credential,
+						input.extension === undefined ? "0" : "1",
+						input.extension ?? "",
 					],
 				),
 			);
@@ -152,6 +154,8 @@ export function makeIoredisFederationGrantStoreClient(
 						input.credential,
 						input.ineligible === null ? "0" : "1",
 						input.ineligible ?? "",
+						input.extension === undefined ? "0" : "1",
+						input.extension ?? "",
 					],
 				),
 			);
