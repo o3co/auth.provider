@@ -305,7 +305,9 @@ export function credentialExtensionAad(
 /**
  * The extension's text: a JSON object of the keys there are, `bind` first
  * when given, each instant a decimal millisecond string. `undefined` when it
- * has no key to carry, which is written as no extension.
+ * has no key to carry, which is written as no extension. A text longer than
+ * {@link CREDENTIAL_EXTENSION_MAX_TEXT} is a RangeError: every read would
+ * take it as absent.
  */
 export function encodeCredentialExtension(
 	extension: FederationGrantCredentialExtension,
@@ -313,10 +315,14 @@ export function encodeCredentialExtension(
 ): string | undefined {
 	const end = extension.effectiveExpiresAt;
 	if (end === undefined) return undefined;
-	return JSON.stringify({
+	const text = JSON.stringify({
 		...(bind === undefined ? {} : { bind }),
 		effectiveExpiresAt: ms(end),
 	});
+	if (text.length > CREDENTIAL_EXTENSION_MAX_TEXT) {
+		throw new RangeError("federation grant credential extension is longer than a reader reads");
+	}
+	return text;
 }
 
 const instantFrom = (value: unknown): Date | undefined => {

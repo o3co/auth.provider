@@ -356,6 +356,21 @@ describe("the credential's extension", () => {
 		expect(encodeCredentialExtension({}, "digest")).toBeUndefined();
 	});
 
+	it("is never written longer than it is read: the longest it is today fits, and longer is refused", () => {
+		const longest = encodeCredentialExtension(
+			{ effectiveExpiresAt: new Date(-8_640_000_000_000_000) },
+			credentialDigest(ENVELOPE),
+		);
+		expect(longest?.length).toBe(95);
+		expect(longest?.length).toBeLessThanOrEqual(CREDENTIAL_EXTENSION_MAX_TEXT);
+		expect(() =>
+			encodeCredentialExtension(
+				{ effectiveExpiresAt: at(0) },
+				"x".repeat(CREDENTIAL_EXTENSION_MAX_TEXT),
+			),
+		).toThrow(RangeError);
+	});
+
 	it("comes back as what went in", () => {
 		const text = encodeCredentialExtension({ effectiveExpiresAt: at(1_800_000) }, "digest");
 		expect(decodeCredentialExtension(text as string)).toStrictEqual({
