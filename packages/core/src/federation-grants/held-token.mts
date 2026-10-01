@@ -69,21 +69,15 @@ export function federationGrantHeldToken(token: StoredAccessToken): HeldUpstream
 
 /**
  * A stored access token written back as it is: it states the end it is read
- * to have. Each field is read once, by name, so an accessor a store's answer
- * carries is kept; its dates are copies, so nothing the store holds is shared.
+ * to have. Its fields are read by name, never spread, so a token a store
+ * answers as a class instance whose fields are getters keeps them; its dates
+ * are copies, so nothing the store holds is shared.
  */
 export function federationGrantKeptAccessToken(token: StoredAccessToken): WrittenAccessToken {
-	const { value, tokenType, obtainedAt, issuedLifetime, effectiveExpiresAt, scopes } = token;
-	const held = federationGrantHeldToken({
-		value,
-		tokenType,
-		obtainedAt,
-		issuedLifetime,
-		effectiveExpiresAt,
-		scopes,
+	const held = federationGrantHeldToken(token);
+	return federationGrantAccessToken(token, {
+		obtainedAt: held.obtainedAt,
+		expiresAt: held.expiresAt,
+		issuedLifetime: token.issuedLifetime,
 	});
-	return federationGrantAccessToken(
-		{ value, tokenType, scopes },
-		{ obtainedAt: held.obtainedAt, expiresAt: held.expiresAt, issuedLifetime },
-	);
 }
