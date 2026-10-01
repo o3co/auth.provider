@@ -20,7 +20,7 @@
  * the contract fails the case that names it.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { type MfaFactor, type MfaFactorData, normaliseMailAddress } from "@o3co/auth-provider-core";
 import {
 	createTestMfaDigests,
@@ -69,7 +69,7 @@ const RULES = {
 	identityUnreadable:
 		"identity, when present, answers a non-empty string or undefined over data it cannot read, never one string for two of them unless it is the enrolled data's own, and never throws",
 	identityDistinct:
-		"identity, when present and given a second authenticator's enrollment proof, answers the enrolled data of the two authenticators two different non-empty strings: no identity is a duplicate of none, never a distinct authenticator",
+		"identity, when present and given a second authenticator's enrollment proof, answers the enrolled data of the two authenticators two different non-empty strings, each the same once both are enrolled through the factor that enrolled it or a fresh one, in either order: an absent identity is a duplicate of none, never a distinct authenticator",
 } as const;
 
 const USER = { id: "u-contract", username: "contract", email: "contract@example.com" };
@@ -998,54 +998,25 @@ describe("mfaFactorContract", () => {
 		expect(await failing(withSecond(inputFor({}, latestOnly)))).toEqual([RULES.identityDistinct]);
 	});
 
-	it("fails an identity that a later enrollment changes, or that remembers the record objects it was handed", async () => {
-		const latestApart = (factor: MfaFactor): MfaFactor => {
-			let latest: string | undefined;
+	it("fails an identity keyed per factor instance: a fresh factor reads each record another string", async () => {
+		// As an identity under an HMAC key each build makes: stable in one instance, another in the next.
+		const instanceKeyed = (factor: MfaFactor): MfaFactor => {
+			const key = randomBytes(32);
 			return {
 				...factor,
-				completeEnrollment: async (ctx) => {
-					const done = await factor.completeEnrollment(ctx);
-					if (done.ok) latest = identityOf(done.data);
-					return done;
-				},
 				identity: (data) => {
 					const own = identityOf(data);
-					return own === undefined ? undefined : own === latest ? "latest" : "older";
+					return own === undefined
+						? undefined
+						: createHmac("sha256", key).update(own).digest("base64url");
 				},
 			};
 		};
-		const rememberingHeld = (factor: MfaFactor): MfaFactor => {
-			const seen = new WeakSet<object>();
-			return {
-				...factor,
-				beginEnrollment: async (ctx) => {
-					for (const held of ctx.factors) seen.add(held.data);
-					return factor.beginEnrollment(ctx);
-				},
-				identity: (data) =>
-					identityOf(data) === undefined ? undefined : seen.has(data) ? "held" : "account",
-			};
-		};
-		expect(await failing(withSecond(inputFor({}, latestApart)))).toEqual([RULES.identityDistinct]);
-		expect(await failing(withSecond(inputFor({}, rememberingHeld)))).toEqual([
+		expect(await failing(withSecond(inputFor({}, instanceKeyed)))).toEqual([
 			RULES.identityDistinct,
 		]);
-	});
-
-	it("fails an identity that depends on which record a factor read first", async () => {
-		const firstRead = (factor: MfaFactor): MfaFactor => {
-			let first: string | undefined;
-			return {
-				...factor,
-				identity: (data) => {
-					const own = identityOf(data);
-					if (own === undefined) return undefined;
-					first ??= own;
-					return own === first ? "first" : "other";
-				},
-			};
-		};
-		expect(await failing(withSecond(inputFor({}, firstRead)))).toEqual([RULES.identityDistinct]);
+		// One instance alone cannot tell.
+		expect(await failing(inputFor({}, instanceKeyed))).toEqual([]);
 	});
 
 	it("fails a second authenticator's proof that completes no enrollment", async () => {

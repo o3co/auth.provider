@@ -1064,7 +1064,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "identity, when present and given a second authenticator's enrollment proof, answers the enrolled data of the two authenticators two different non-empty strings: no identity is a duplicate of none, never a distinct authenticator",
+			name: "identity, when present and given a second authenticator's enrollment proof, answers the enrolled data of the two authenticators two different non-empty strings, each the same once both are enrolled through the factor that enrolled it or a fresh one, in either order: an absent identity is a duplicate of none, never a distinct authenticator",
 			run: async () => {
 				const factor = input.build();
 				const { secondEnrollmentProof } = input;
@@ -1077,7 +1077,7 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 				for (const identity of [first, second]) {
 					assert.ok(
 						typeof identity === "string" && identity.length > 0,
-						`identity answers ${JSON.stringify(identity)} for an authenticator's enrolled data: no identity is a duplicate of none, so it cannot count as a distinct authenticator`,
+						`identity answers ${JSON.stringify(identity)} for an authenticator's enrolled data: an absent identity is a duplicate of none, so it cannot count as a distinct authenticator`,
 					);
 				}
 				assert.notEqual(
