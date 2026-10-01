@@ -574,6 +574,36 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			}
 			expect(h.refresh).toHaveBeenCalledTimes(1);
 		});
+
+		// An adapter whose `expiresAt` ends the token before its `expiresIn`
+		// would: half its life is counted from when the call began, not from a
+		// start dated back to fit the issued lifetime.
+		const early = (tag: string): DelegatedTokens =>
+			refreshed(tag, now(), {
+				expiresIn: 3600,
+				expiresAt: new Date(now().getTime() + 30 * MIN),
+				scope: "openid",
+			});
+		it.each<[string, Partial<typeof request>]>([
+			["a min_ttl above what is left", { minTtlSeconds: 3600 }],
+			["a scope the token lacks", { scope: ["calendar.read"] }],
+		])(
+			"is not made to rotate on every request by %s when the adapter's expiry is earlier than its lifetime",
+			async (_, ask) => {
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockImplementation(async () => early(`n${h.refresh.mock.calls.length}`));
+				for (let i = 0; i < 4; i++) {
+					await retrieve(ask);
+					setNow(new Date(now().getTime() + 5_000));
+				}
+				expect(h.refresh).toHaveBeenCalledTimes(1);
+				// Half of the thirty minutes it lives is when it may be refreshed again.
+				setNow(new Date(DUE.getTime() + 15 * MIN));
+				await retrieve(ask);
+				expect(h.refresh).toHaveBeenCalledTimes(2);
+			},
+		);
 	});
 
 	describe("what is left running", () => {
