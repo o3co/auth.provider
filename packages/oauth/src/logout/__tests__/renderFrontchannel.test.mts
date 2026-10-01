@@ -502,6 +502,42 @@ describe("renderFrontchannelLogoutHtml", () => {
 			expect(logger.warn).not.toHaveBeenCalled();
 		});
 
+		it.each([
+			["a state carrying a semicolon", "https://rp.example/out?state=x;code=y"],
+			["a state carrying a newline", "https://rp.example/out?state=x\n"],
+			["an empty pair before the state", "https://rp.example/out?&state=x"],
+			["an empty pair after the state", "https://rp.example/out?state=x&"],
+			["two state parameters", "https://rp.example/out?state=x&state=y"],
+			["a state carrying a question mark", "https://rp.example/out?state=x?code=y"],
+			["a state with no value", "https://rp.example/out?state"],
+		])("sets aside only a state the logout route writes: refuses %s", (_label, uri) => {
+			const logger = createMockLogger();
+			const { hasScript } = scriptFor(uri, logger);
+			expect(hasScript).toBe(false);
+			expect(
+				logger.warn.mock.calls.filter(
+					([, name]) => name === "logout_frontchannel_redirect_refused",
+				),
+			).toHaveLength(1);
+		});
+
+		it("keeps the state the logout route writes, percent-encoded and with a plus for a space", () => {
+			const logger = createMockLogger();
+			const url = new URL("https://rp.example/out?tenant=a");
+			url.searchParams.set("state", "a b;c?d&e/f");
+			const { hasScript } = scriptFor(url.toString(), logger);
+			expect(hasScript).toBe(true);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("refuses a value without throwing when the logger throws", () => {
+			const logger = createMockLogger();
+			logger.warn.mockImplementation(() => {
+				throw new Error("logger unavailable");
+			});
+			expect(scriptFor("ftp://rp.example/out", logger).hasScript).toBe(false);
+		});
+
 		it("writes no script and no warn when the value is absent", () => {
 			const logger = createMockLogger();
 			expect(scriptFor(undefined, logger).hasScript).toBe(false);
