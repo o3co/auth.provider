@@ -376,7 +376,11 @@ describe("secondFactorRecordable: whether a second factor can be recorded on the
 			const seen: Array<RequirementInput["session"]> = [];
 			const { store, reads } = recording(session);
 			const admission = await admitSession(
-				deps(store, [watching(seen, { outcome: "met" }, { name: "first" }), authority(seen)], table),
+				deps(
+					store,
+					[watching(seen, { outcome: "met" }, { name: "first" }), authority(seen)],
+					table,
+				),
 				{ claim: cookie(), action: "test.use", asks: { acrValues: [MFA] } },
 			);
 			// The merge's row: what the authority alone can finish, recorded or

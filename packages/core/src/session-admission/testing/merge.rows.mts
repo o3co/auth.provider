@@ -566,13 +566,25 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 ];
 
 /**
+ * Each row's session, by identity, to whether its row's store records a
+ * second factor: what the view `mergeAdmission` answers is built over. A
+ * session no row holds is read over a store that records, the rows' default.
+ * `mergeAdmission` is handed the row's session, not the row, so it finds the
+ * row this way until its callers hand it the row.
+ */
+const ROW_STORE_RECORDS = new WeakMap<UserSession, boolean>();
+
+/**
  * The ADR's mapping of a row's decision onto the admission, for `authority`,
  * the registered second-factor authority (`undefined` when none is
  * registered): `requirement: "acr"` stays `"acr"` (a `reauthenticate`'s too), `"baseline"` becomes the
  * authority's name, and a `step_up`'s requirement becomes `whenStillUnmet`
  * (`"acr"` → `"unmet"`, `"baseline"` → `"reauthenticate"`) with its
- * registered page. Throws for an `authority` that is not a registered
- * requirement declaring it, and for a row that names it when none is given.
+ * registered page. The view is admission's, over the store the row runs
+ * over (`mergeSessionStore`), its `secondFactorRecordable` included; pass
+ * `row.session` as the rows hold it. Throws for an `authority` that is not a
+ * registered requirement declaring it, and for a row that names it when none
+ * is given.
  */
 export function mergeAdmission(
 	expected: MergeDecision,
@@ -589,6 +601,8 @@ export function mergeAdmission(
 			);
 		}
 	}
+	const viewOver = (read: UserSession) =>
+		viewOf(read, storeHolding(read, ROW_STORE_RECORDS.get(read) ?? true));
 	const named = (): RegisteredRequirement => {
 		if (authority === undefined) {
 			throw new Error(
@@ -602,7 +616,7 @@ export function mergeAdmission(
 			return {
 				outcome: "admitted",
 				session,
-				view: session === null ? null : viewOf(session),
+				view: session === null ? null : viewOver(session),
 				acr: expected.acr,
 			};
 		case "reauthenticate":
@@ -621,7 +635,7 @@ export function mergeAdmission(
 				outcome: "step_up",
 				requirement: name,
 				session,
-				view: viewOf(session),
+				view: viewOver(session),
 				page: stepUpPage,
 				acrValues: expected.acrValues,
 				whenStillUnmet: expected.requirement === "acr" ? "unmet" : "reauthenticate",
@@ -643,15 +657,22 @@ export function mergeAdmission(
  * `undefined` for a row with no session, a composition without a store.
  */
 export function mergeSessionStore(row: MergeRow): UserSessionStore | undefined {
-	const { session } = row;
-	if (session === null) return undefined;
+	return row.session === null ? undefined : storeHolding(row.session, row.storeRecords !== false);
+}
+
+/** A store holding `session`, with the step-up capability when `records` — its `recordSecondFactor` records nothing (`null`). */
+const storeHolding = (session: UserSession, records: boolean): UserSessionStore => {
 	const store: UserSessionStore = {
 		kind: "merge-rows",
 		create: async () => {},
 		get: async (sid) => (sid === session.sid ? session : null),
 		delete: async () => {},
 	};
-	return row.storeRecords === false
-		? store
-		: Object.assign(store, { recordSecondFactor: async () => null });
+	return records ? Object.assign(store, { recordSecondFactor: async () => null }) : store;
+};
+
+for (const { rows } of MERGE_ROW_GROUPS) {
+	for (const row of rows) {
+		if (row.session !== null) ROW_STORE_RECORDS.set(row.session, row.storeRecords !== false);
+	}
 }

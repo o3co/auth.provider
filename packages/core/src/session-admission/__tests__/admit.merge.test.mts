@@ -233,7 +233,7 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 		expect(mergeAdmission({ outcome: "met", acr: MFA }, session, undefined)).toEqual({
 			outcome: "admitted",
 			session,
-			view: viewOf(session),
+			view: viewOf(session, recordingStoreOf(session)),
 			acr: MFA,
 		});
 		expect(mergeAdmission({ outcome: "unmet", requirement: "acr" }, session, undefined)).toEqual({
@@ -318,7 +318,7 @@ describe("the merge — the rows the MFA table does not reach", () => {
 			outcome: "step_up",
 			requirement: "keys",
 			session,
-			view: viewOf(session),
+			view: viewOf(session, recordingStoreOf(session)),
 			page: { url: "/keys", params: { via: "keys" }, href: `${ISSUER}/keys?via=keys` },
 			acrValues: [PHR],
 			whenStillUnmet: "unmet",
@@ -419,7 +419,7 @@ describe("the merge — the rows the MFA table does not reach", () => {
 			outcome: "step_up",
 			requirement: "first",
 			session,
-			view: viewOf(session),
+			view: viewOf(session, recordingStoreOf(session)),
 			page: { url: "/first", params: { via: "first" }, href: `${ISSUER}/first?via=first` },
 			acrValues: [],
 			whenStillUnmet: "unmet",
@@ -551,7 +551,7 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 				outcome: "step_up",
 				requirement: "keys",
 				session,
-				view: viewOf(session),
+				view: viewOf(session, storeOf(session)),
 				page: { url: "/keys", params: { via: "keys" }, href: `${ISSUER}/keys?via=keys` },
 				acrValues: [PHR],
 				whenStillUnmet: "unmet",
@@ -573,7 +573,7 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 			outcome: "step_up",
 			requirement: AUTHORITY,
 			session,
-			view: viewOf(session),
+			view: viewOf(session, storeOf(session)),
 			page: { url: "/verifier", params: {}, href: `${ISSUER}/verifier` },
 			acrValues: [],
 			whenStillUnmet: "reauthenticate",
@@ -586,23 +586,34 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 		});
 	});
 
-	it("reads the store's capability only when the merge would step up through the authority: a store whose probe throws still admits a session asked no acr", async () => {
-		const throwing = (record: UserSession): UserSessionStore =>
+	it("reads the store's capability once, as admission reads the record into its view, and never without a record", async () => {
+		let reads = 0;
+		const counting = (record: UserSession): UserSessionStore =>
 			Object.defineProperty(storeOf(record), "recordSecondFactor", {
 				get: () => {
-					throw new Error("the probe was read");
+					reads++;
+					return async () => null;
 				},
 			});
-		expect(await ask([met(["otp", "mfa"])], [], { store: throwing })).toEqual({
-			outcome: "admitted",
-			session,
-			view: viewOf(session),
-			acr: undefined,
-		});
-		const held = passwordSession(["pwd", "otp", "mfa"], minutesAgo(1));
-		expect(
-			await ask([met(["otp", "mfa"])], [MFA], { store: throwing, record: held }),
-		).toMatchObject({ outcome: "admitted", acr: MFA });
+		// Asked no acr, and asked one the merge steps up through the authority for.
+		for (const acrValues of [[], [MFA]]) {
+			reads = 0;
+			const admission = await ask([met(["otp", "mfa"])], acrValues, { store: counting });
+			expect(admission, JSON.stringify(acrValues)).toMatchObject({
+				view: { secondFactorRecordable: true },
+			});
+			expect(reads, JSON.stringify(acrValues)).toBe(1);
+		}
+		reads = 0;
+		const gone = await admitSession(
+			{
+				...deps(session, [met(["otp", "mfa"])]),
+				userSessionStore: counting({ ...session, sid: "other" }),
+			},
+			{ claim: claim(), action: "test.use", asks: { acrValues: [MFA] } },
+		);
+		expect(gone).toEqual({ outcome: "not_live", reason: "gone" });
+		expect(reads).toBe(0);
 	});
 
 	it("probes the store admission read the session from, not the deps a second time", async () => {

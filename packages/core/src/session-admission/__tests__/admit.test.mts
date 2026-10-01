@@ -696,7 +696,7 @@ describe("step 2 — the live read", () => {
 		expect(admission).toEqual({
 			outcome: "admitted",
 			session: record,
-			view: viewOf(record),
+			view: viewOf(record, holding(record)),
 			acr: undefined,
 		});
 	});
@@ -915,7 +915,7 @@ describe("step 4 — the revocation boundary", () => {
 });
 
 describe("step 5 — the requirements", () => {
-	it("hands each requirement a view of the session — sid, sub, authTime, expiresAt — never the record, with the vouched authentication, the action, the asks and now", async () => {
+	it("hands each requirement a view of the session — sid, sub, authTime, expiresAt, whether a second factor can be recorded — never the record, with the vouched authentication, the action, the asks and now", async () => {
 		const asked = { acrValues: ["urn:x"] };
 		const seen: RequirementInput[] = [];
 		const record = session({ amr: ["hwk", "fed"], authentication: undefined });
@@ -943,9 +943,17 @@ describe("step 5 — the requirements", () => {
 			sub: "user-1",
 			authTime: record.authTime,
 			expiresAt: record.expiresAt,
+			// `holding` has no `recordSecondFactor`.
+			secondFactorRecordable: false,
 		});
 		expect(input.session).not.toBe(record);
-		expect(Object.keys(input.session ?? {})).toEqual(["sid", "sub", "authTime", "expiresAt"]);
+		expect(Object.keys(input.session ?? {})).toEqual([
+			"sid",
+			"sub",
+			"authTime",
+			"expiresAt",
+			"secondFactorRecordable",
+		]);
 		// The vouched amr, split as the MFA ADR's D9 reads a pre-upgrade record:
 		// `hwk` is an untrusted IdP's word.
 		expect(input.authentication).toEqual({
@@ -1205,7 +1213,7 @@ describe("step 5 — the requirements", () => {
 			outcome: "step_up",
 			requirement: "r",
 			session: record,
-			view: viewOf(record),
+			view: viewOf(record, holding(record)),
 			// As registered: resolved once, on the issuer, to the URL a
 			// consumer answers.
 			page: { url: "/r", params: { v: "1" }, href: `${ISSUER}/r?v=1` },
@@ -1700,7 +1708,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 		expect(await ask(plain, ["pwd", "otp", "mfa"])).toEqual({
 			outcome: "admitted",
 			session: plain,
-			view: viewOf(plain),
+			view: viewOf(plain, holding(plain)),
 			acr: "urn:o3co:acr:mfa",
 		});
 	});
@@ -1780,7 +1788,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 			).toEqual({
 				outcome: "admitted",
 				session: session(),
-				view: viewOf(session()),
+				view: viewOf(session(), holding(session())),
 				acr: undefined,
 			});
 		}

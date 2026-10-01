@@ -291,6 +291,18 @@ export interface SessionView {
 	readonly expiresAt: Date;
 	/** A frozen copy of the record's `enrollmentFacts` when it holds ones the type admits; absent otherwise. Never the `User`. */
 	readonly enrollmentFacts?: SessionEnrollmentFacts;
+	/**
+	 * Whether a second factor verified in this session can be recorded on it:
+	 * the session store has the step-up capability
+	 * (`supportsSecondFactorUpdate`) and `canRecordSecondFactor` is true of
+	 * the record. Admission decides it once per admission, when it reads the
+	 * record into this view, and sets it on every view it builds; a
+	 * requirement chooses `step_up` or `reauthenticate` on it, and a route
+	 * refuses to open a step-up it is `false` for, without either reading the
+	 * store or the record's shape. Optional only so a view built by hand
+	 * still type-checks: absent reads as `false`.
+	 */
+	readonly secondFactorRecordable?: boolean;
 }
 
 /**
