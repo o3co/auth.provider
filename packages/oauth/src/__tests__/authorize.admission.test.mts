@@ -105,6 +105,7 @@ const record = (over: Partial<UserSession> = {}): UserSession => ({
 
 const storeAnswering = (
 	impl: (sid: string) => Promise<UserSession | null>,
+	{ recordsSecondFactor = true }: { readonly recordsSecondFactor?: boolean } = {},
 ): UserSessionStore & { get: ReturnType<typeof vi.fn> } =>
 	({
 		kind: "memory",
@@ -112,7 +113,7 @@ const storeAnswering = (
 		get: vi.fn(impl),
 		delete: vi.fn(async () => {}),
 		// A store that can record a second factor: the second-factor authority's step-up is answered as a trip, not a new login.
-		recordSecondFactor: vi.fn(async () => null),
+		...(recordsSecondFactor ? { recordSecondFactor: vi.fn(async () => null) } : {}),
 	}) as unknown as UserSessionStore & { get: ReturnType<typeof vi.fn> };
 
 const storeWith = (session: UserSession | null) =>
@@ -320,7 +321,7 @@ const loginRedirectTo = (res: request.Response): URL => {
 /** The error redirect this endpoint answers once `redirect_uri` is trusted. */
 const redirectParams = (res: request.Response): URLSearchParams => {
 	expect(res.status).toBe(302);
-	const location = new URL(res.headers.location as string);
+	const location = new URL(res.headers.location as string, ISSUER);
 	expect(location.origin + location.pathname).toBe(REDIRECT_URI);
 	return location.searchParams;
 };
@@ -1114,6 +1115,150 @@ describe("/authorize on admission — prompt=login from a browser that is not si
 	});
 });
 
+describe("/authorize on admission — a reauthenticate verdict is answered with one login trip", () => {
+	/** A login made after everything before it, to the millisecond, on the session the cookie names. */
+	const loggedInNow = async (
+		harness: { login(next: Record<string, unknown>): void },
+		clock: { authTime: Date },
+	) => {
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		clock.authTime = new Date();
+		harness.login({ isAuthenticated: true, user: { id: SUBJECT }, sid: SID });
+	};
+
+	/** The second-factor authority, met by every session: what can stop it is the store. */
+	const authority: SessionRequirement = {
+		name: "mfa",
+		secondFactorAuthority: true,
+		reach: new Set(["otp", "mfa"]),
+		stepUpPage: { url: "/mfa", params: {} },
+		remediations: ["mfa.step_up"],
+		hintKeys: [],
+		admit: async () => ({ outcome: "met" }),
+	};
+	const acrTable = { authorize: { acrValues: { "urn:example:mfa": ["mfa"] } } };
+
+	it("a session still reauthenticate after the login it was sent to is refused with login_required, not sent again", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [fixture("fixture", () => ({ outcome: "reauthenticate" }))],
+		});
+		const back = loginRedirectTo(await authorize(harness.app, baseQuery));
+		await loggedInNow(harness, clock);
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+		expect(params.get("error_description")).toMatch(/fixture/);
+		expect(harness.regenerated).toBe(1);
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
+	it("acr onto a store that cannot record a second factor: a login trip, then unmet_authentication_requirements when the login carried none", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime }), {
+				recordsSecondFactor: false,
+			}),
+			requirements: [authority],
+			oauth: acrTable,
+		});
+		const query = { ...baseQuery, acr_values: "urn:example:mfa" };
+		const back = loginRedirectTo(await authorize(harness.app, query));
+		await loggedInNow(harness, clock);
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("unmet_authentication_requirements");
+		expect(params.get("error_description")).toMatch(/urn:example:mfa/);
+	});
+
+	it("acr onto a store that cannot record a second factor, under prompt=none: login_required, no ask, the session kept", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record(), { recordsSecondFactor: false }),
+			requirements: [authority],
+			oauth: acrTable,
+		});
+		const params = redirectParams(
+			await authorize(harness.app, { ...baseQuery, prompt: "none", acr_values: "urn:example:mfa" }),
+		);
+		expect(params.get("error")).toBe("login_required");
+		expect(harness.records.size).toBe(0);
+		expect(harness.regenerated).toBe(0);
+	});
+
+	it("a login asked for after a step-up trip carries that trip, so the requirement is not sent on it twice for the same login", async () => {
+		const state = { verdict: "step_up" as "step_up" | "reauthenticate" };
+		const requirement = fixture("fixture", () =>
+			state.verdict === "step_up"
+				? { outcome: "step_up", whenStillUnmet: "reauthenticate" }
+				: { outcome: "reauthenticate" },
+		);
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [requirement],
+		});
+		const page = new URL((await authorize(harness.app, baseQuery)).headers.location as string);
+		const back = new URL(page.searchParams.get("redirect_to") as string);
+		state.verdict = "reauthenticate";
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		const ask = (
+			harness.records.get(`reauth:${toLogin.searchParams.get("reauth_ask")}`) as {
+				reauth: Record<string, unknown>;
+			}
+		).reauth;
+		expect(ask.loginAskedAt).toEqual(expect.any(Number));
+		expect(ask.stepUpAskedAt).toEqual({ fixture: expect.any(Number) });
+		expect(harness.records.size).toBe(1);
+	});
+
+	it("is refused as a composition error where no session store can record the ask", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [fixture("fixture", () => ({ outcome: "reauthenticate" }))],
+			sessionStore: false,
+		});
+		const params = redirectParams(await authorize(harness.app, baseQuery));
+		expect(params.get("error")).toBe("invalid_request");
+		expect(harness.regenerated).toBe(0);
+	});
+
+	it("max_age running out during a step-up trip: a login trip carrying the trip, then one more step-up for the new login, then a code", async () => {
+		const state = { met: false };
+		const requirement = fixture("fixture", () =>
+			state.met ? { outcome: "met" } : { outcome: "step_up", whenStillUnmet: "reauthenticate" },
+		);
+		// The session's age stands in for the clock: 50 s at the first pass, 70 s on the way back.
+		const clock = { authTime: new Date(Date.now() - 50_000) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+		});
+		const query = { ...baseQuery, max_age: "60" };
+		const firstPage = new URL((await authorize(harness.app, query)).headers.location as string);
+		expect(firstPage.pathname).toBe("/step-up");
+		const back = new URL(firstPage.searchParams.get("redirect_to") as string);
+		clock.authTime = new Date(Date.now() - 70_000);
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		await loggedInNow(harness, clock);
+		const secondPage = new URL(
+			(await authorize(harness.app, Object.fromEntries(toLogin.searchParams.entries()))).headers
+				.location as string,
+		);
+		expect(secondPage.pathname).toBe("/step-up");
+		state.met = true;
+		const last = new URL(secondPage.searchParams.get("redirect_to") as string);
+		expect(codeOf(await authorize(harness.app, Object.fromEntries(last.searchParams.entries())))).toBe(
+			"code-x",
+		);
+	});
+});
+
 describe("/authorize on admission — a POST's parameters survive every trip", () => {
 	// OIDC Core §3.1.2.1: a POST carries the authorization request in its form
 	// body. Every page the browser is sent to must return it to the same
@@ -1290,13 +1435,15 @@ describe("/authorize on admission — what the new order changes, pinned", () =>
 		expect(harness.records.size).toBe(0);
 	});
 
-	it("records no ask for a reauthenticate verdict: the login it sends to is a new session's", async () => {
+	it("records a login ask for a reauthenticate verdict, so the session that comes back from the login is judged once", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record()),
 			requirements: [fixture("fixture", () => ({ outcome: "reauthenticate" }))],
 		});
-		loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
-		expect(harness.records.size).toBe(0);
+		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
+		const askId = back.searchParams.get("reauth_ask") as string;
+		expect([...harness.records.keys()]).toEqual([`reauth:${askId}`]);
+		expect(harness.regenerated).toBe(1);
 	});
 
 	it("abandons the cookie session after a regeneration fails, so express-session writes nothing on the way out", async () => {
