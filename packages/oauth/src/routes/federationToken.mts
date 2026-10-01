@@ -120,7 +120,7 @@ const checkCallerStanding = async (
 		return false;
 	}
 
-	// Read the federation index once, for the membership check and cleanup.
+	// The federation index, read for step 8's membership check.
 	let federations: ReadonlyArray<string>;
 	try {
 		federations = await opts.sessionFederationIndex.listFederations(sid);
