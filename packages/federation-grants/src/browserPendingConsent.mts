@@ -18,7 +18,9 @@
  * The consent question parked for this browser: the one reader behind `GET` and
  * `POST /consent`, so the page learns nothing on `GET` that the answer would then
  * refuse, and `GET /consent`'s data. A challenge with nothing behind it for this
- * browser, whatever the reason, gets the one indistinguishable answer.
+ * browser, whatever the reason, gets the one indistinguishable answer. Every
+ * `503` it answers is audited as `federation.grant.authorization_failed` with the
+ * outcome `unavailable`, naming the flow only once its intent has been read.
  */
 
 import {
@@ -74,6 +76,8 @@ export const pendingFor = async (
 			},
 			error,
 		);
+		// Nothing read names a flow yet: the audit carries this request alone.
+		failed(req, res, "unavailable");
 		jsonError(res, 503, "temporarily_unavailable", "storage");
 		return null;
 	}

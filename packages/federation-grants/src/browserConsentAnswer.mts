@@ -88,7 +88,7 @@ export function createConsentAnswerHandler(flow: BrowserFlow): RequestHandler {
 				grantId: intent.grantId,
 				correlationId: requestIdOf(res),
 			};
-			/** A `503` this answer gives: one line at error. */
+			/** A `503` this answer gives: one line at error, audited as `unavailable`. */
 			const consentUnavailable = (
 				description: "storage" | "upstream_unavailable",
 				at: { readonly store?: string; readonly step: string; readonly refusal?: string },
@@ -99,6 +99,7 @@ export function createConsentAnswerHandler(flow: BrowserFlow): RequestHandler {
 					{ ...context, reason: description, ...at },
 					...cause,
 				);
+				failed(req, res, "unavailable", intent);
 				jsonError(res, 503, "temporarily_unavailable", description);
 			};
 			/**

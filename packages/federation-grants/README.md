@@ -692,6 +692,12 @@ A refused answer is logged as one warn line,
 | The limiter backend is down, and the limiter's `failMode` is `"closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
 | The upstream URL could not be built, or the federation lost the capability (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
 
+A `503` from this package's stores, from the judgement, or from the upstream URL
+is audited as a refusal is: `federation.grant.authorization_failed` with the
+outcome `unavailable`, beside its one log line. One whose question or intent
+could not be read has no flow to name: it carries no grant, client, subject or
+connection, and the request's own correlation id.
+
 A challenge is not a bearer token: it is answerable only from the browser it
 was issued to, by the same durable session and subject, and every answer
 re-admits that session.
@@ -711,7 +717,11 @@ It checks, in this order:
 
 1. **The transaction** — the `state` is one this provider issued, for THIS
    connection, and it is spent before any code is exchanged. Otherwise a plain
-   `400` and no redirect: there is nowhere trustworthy to send the browser.
+   `400` and no redirect: there is nowhere trustworthy to send the browser. A
+   transaction the store could not spend is a plain `503`, audited as
+   `federation.grant.authorization_failed` with the outcome
+   `temporarily_unavailable`, naming no flow and carrying the request's own
+   correlation id.
 2. **The intent** is still the grant's current one, within the flow's deadline,
    and the connection is still what it was lodged against; for a renewal, the
    grant it would renew is checked against the subject's grants boundary and
