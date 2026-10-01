@@ -35,7 +35,7 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-import { expectBestEffortWarn, serialisedCalls } from "./_helpers/projectedLog.mjs";
+import { expectBestEffortWarn, expectUriNotLogged } from "./_helpers/projectedLog.mjs";
 
 // codeData must carry client_id and redirect_uri (required fields), and
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
@@ -2040,9 +2040,10 @@ describe("createAuthorizationGrant", () => {
 
 			describe("a frontchannelLogoutUri must be http(s)", () => {
 				/** One code exchange against `record`; the RP registration it made and the logger. */
-				const exchangeWith = async (record: object) => {
+				const exchangeWith = async (record: object, warn?: () => void) => {
 					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
 					const logger = createMockLogger();
+					if (warn !== undefined) logger.warn.mockImplementation(warn);
 					const clientRepository: ClientRepository = {
 						...mockClientRepository,
 						findById: vi.fn().mockResolvedValue(record),
@@ -2098,14 +2099,14 @@ describe("createAuthorizationGrant", () => {
 				};
 
 				it.each([
-					["a non-http(s) scheme (javascript:)", "javascript:void(0)", "not-http"],
+					["a non-http(s) scheme (lower case)", "javascript:void(0)", "not-http"],
 					["a non-http(s) scheme (upper case)", "JAVASCRIPT:void(0)", "not-http"],
 					// The URL parser strips the tab, so this parses as the scheme above.
-					["a non-http(s) scheme (with a tab)", "java\tscript:void(0)", "not-http"],
-					["a non-http(s) scheme (data:)", "data:text/plain,signed-out", "not-http"],
-					["a non-http(s) scheme (blob:)", "blob:https://rp.example/x", "not-http"],
-					["a non-http(s) scheme (reverse-domain)", "com.example.app:/x", "not-http"],
-					["a non-http(s) scheme (ftp:)", "ftp://rp.example/front", "not-http"],
+					["a non-http(s) scheme (a tab inside the scheme)", "java\tscript:void(0)", "not-http"],
+					["a non-http(s) scheme (a data URL)", "data:text/plain,signed-out", "not-http"],
+					["a non-http(s) scheme (a blob URL)", "blob:https://rp.example/x", "not-http"],
+					["a non-http(s) scheme (a custom scheme)", "com.example.app:/x", "not-http"],
+					["a non-http(s) scheme (an ftp URL)", "ftp://rp.example/front", "not-http"],
 					["a value that is not a URL", "not-a-url", "unparsable"],
 					["a value that is not a string", 42, "not-a-string"],
 				])(
@@ -2127,9 +2128,38 @@ describe("createAuthorizationGrant", () => {
 							{ site: "authorization_code", clientId: "client1", reason },
 							null,
 						);
-						expect(serialisedCalls(logger)).not.toContain(JSON.stringify(String(uri)).slice(1, -1));
+						expectUriNotLogged(logger, String(uri));
 					},
 				);
+
+				it("names the authenticated client in the warn, not the record's clientId", async () => {
+					const { rpData, logger } = await exchangeWith({
+						...baseRecord,
+						clientId: "record-client",
+						frontchannelLogoutUri: "ftp://rp.example/front",
+					});
+
+					expect(rpData.clientId).toBe("client1");
+					expectBestEffortWarn(
+						logger,
+						"logout_frontchannel_uri_refused",
+						{ site: "authorization_code", clientId: "client1", reason: "not-http" },
+						null,
+					);
+				});
+
+				it("refuses a non-http(s) scheme without failing the exchange when the logger throws", async () => {
+					const { result, rpData, logger } = await exchangeWith(
+						{ ...baseRecord, frontchannelLogoutUri: "ftp://rp.example/front" },
+						() => {
+							throw new Error("logger unavailable");
+						},
+					);
+
+					expect(result.status).toBe(200);
+					expect(rpData.frontchannelLogoutUri).toBeUndefined();
+					expect(logger.warn).toHaveBeenCalledTimes(1);
+				});
 
 				it("refuses a frontchannelLogoutUri whose read throws, without failing the exchange", async () => {
 					const record = {

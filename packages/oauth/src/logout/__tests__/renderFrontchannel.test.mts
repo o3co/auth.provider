@@ -1,6 +1,9 @@
 import { assert, describe, expect, it } from "vitest";
 import { createMockLogger, type MockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
-import { expectBestEffortWarn, serialisedCalls } from "../../__tests__/_helpers/projectedLog.mjs";
+import {
+	expectBestEffortWarn,
+	expectUriNotLogged,
+} from "../../__tests__/_helpers/projectedLog.mjs";
 import { type FrontchannelRP, renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
 
 describe("renderFrontchannelLogoutHtml", () => {
@@ -237,17 +240,17 @@ describe("renderFrontchannelLogoutHtml", () => {
 			[...html.matchAll(/<iframe src="([^"]*)"/g)].map((m) => m[1] ?? "");
 
 		it.each([
-			["javascript:void(0)"],
-			["JAVASCRIPT:void(0)"],
-			// The URL parser strips the tab, so this parses as the scheme above.
-			["java\tscript:void(0)"],
-			["data:text/plain,signed-out"],
-			["blob:https://rp.example/x"],
-			["com.example.app:/x"],
-			["ftp://rp.example/fc"],
+			["lower case", "javascript:void(0)"],
+			["upper case", "JAVASCRIPT:void(0)"],
+			// The URL parser strips the tab, so this parses as the lower-case value.
+			["a tab inside the scheme", "java\tscript:void(0)"],
+			["a data URL", "data:text/plain,signed-out"],
+			["a blob URL", "blob:https://rp.example/x"],
+			["a custom scheme", "com.example.app:/x"],
+			["an ftp URL", "ftp://rp.example/fc"],
 		])(
-			"refuses a non-http(s) scheme (%j) stored for an RP: never rendered, the other RPs are, one warn names the reason, never the URI",
-			(uri) => {
+			"refuses a non-http(s) scheme (%s) stored for an RP: never rendered, the other RPs are, one warn names the reason, never the URI",
+			(_label, uri) => {
 				const logger = createMockLogger();
 				const html = render([{ clientId: "rp", frontchannelLogoutUri: uri }], logger);
 
@@ -261,9 +264,39 @@ describe("renderFrontchannelLogoutHtml", () => {
 					{ site: "logout", clientId: "rp", reason: "not-http" },
 					null,
 				);
-				expect(serialisedCalls(logger)).not.toContain(JSON.stringify(uri).slice(1, -1));
+				expectUriNotLogged(logger, uri);
 			},
 		);
+
+		it("reads a refused RP's clientId once", () => {
+			const logger = createMockLogger();
+			let reads = 0;
+			render(
+				[
+					{
+						get clientId(): string {
+							reads += 1;
+							return "rp";
+						},
+						frontchannelLogoutUri: "ftp://rp.example/fc",
+					},
+				],
+				logger,
+			);
+			expect(reads).toBe(1);
+		});
+
+		it("refuses a non-http(s) scheme without throwing when the logger throws", () => {
+			const logger = createMockLogger();
+			logger.warn.mockImplementation(() => {
+				throw new Error("logger unavailable");
+			});
+			const html = render(
+				[{ clientId: "rp", frontchannelLogoutUri: "ftp://rp.example/fc" }],
+				logger,
+			);
+			expect(iframeSrcs(html)).toHaveLength(1);
+		});
 
 		it("refuses a value that is not a string, and one whose read throws", () => {
 			const logger = createMockLogger();
@@ -345,26 +378,135 @@ describe("renderFrontchannelLogoutHtml", () => {
 				issuer: "https://auth.example",
 				sid: "sid-1",
 			});
-			const match = html.match(/<iframe src="([^"]*)" style=/);
-			assert(match !== null, "expected one iframe with a quoted src");
+			// The whole tag: a src that ended early would not be followed by ` style=`.
+			const match = html.match(
+				/<iframe src="([^"]*)" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"><\/iframe>/,
+			);
+			assert(match !== null, "expected one well-formed iframe");
+			return match[1] ?? "";
+		};
+
+		const ISS_SID = "iss=https%3A%2F%2Fauth.example&amp;sid=sid-1";
+		it.each([
+			["a double quote", 'https://rp.example/a"b', `https://rp.example/a%22b?${ISS_SID}`],
+			["a single quote", "https://rp.example/a'b", `https://rp.example/a&#39;b?${ISS_SID}`],
+			["a less-than sign", "https://rp.example/a<b", `https://rp.example/a%3Cb?${ISS_SID}`],
+			[
+				"an ampersand",
+				"https://rp.example/fc?a=1&b=2",
+				`https://rp.example/fc?a=1&amp;b=2&amp;${ISS_SID}`,
+			],
+		])("renders an https URI carrying %s escaped in the src", (_label, uri, expected) => {
+			expect(srcOf(uri)).toBe(expected);
+		});
+	});
+
+	describe("redirectDelayMs is a non-negative whole number of milliseconds", () => {
+		const delayIn = (redirectDelayMs: number): string => {
+			const html = renderFrontchannelLogoutHtml({
+				rps: [],
+				issuer: "iss",
+				sid: "sid",
+				postLogoutRedirectUri: "https://rp.example/logged-out",
+				redirectDelayMs,
+			});
+			const match = html.match(/\}, ([^)]*)\);<\/script>/);
+			assert(match !== null, "expected the redirect script");
 			return match[1] ?? "";
 		};
 
 		it.each([
-			["a double quote", 'https://rp.example/a"b', "https://rp.example/a%22b?"],
-			["a single quote", "https://rp.example/a'b", "https://rp.example/a&#39;b?"],
-			["a less-than sign", "https://rp.example/a<b", "https://rp.example/a%3Cb?"],
-			[
-				"an ampersand",
-				"https://rp.example/fc?a=1&b=2",
-				"https://rp.example/fc?a=1&amp;b=2&amp;iss=",
-			],
-		])("renders an https URI carrying %s escaped in the src", (_label, uri, expected) => {
-			const src = srcOf(uri);
-			expect(src.startsWith(expected)).toBe(true);
-			// Nothing in the attribute value can end it or open a tag.
-			expect(src).not.toMatch(/["'<>]/);
-			expect(src.replace(/&(amp|#39|quot|lt|gt);/g, "")).not.toContain("&");
+			["NaN", Number.NaN, "2000"],
+			["Infinity", Number.POSITIVE_INFINITY, "2000"],
+			["a negative number", -5, "2000"],
+			["a fraction", 1500.7, "1500"],
+			["a value that is not a number", "soon" as unknown as number, "2000"],
+			["zero", 0, "0"],
+		])("writes %s into the script as a whole number", (_label, value, expected) => {
+			expect(delayIn(value)).toBe(expected);
+		});
+	});
+
+	describe("postLogoutRedirectUri is held to the redirect-URI rules", () => {
+		const scriptFor = (
+			postLogoutRedirectUri: unknown,
+			logger: MockLogger,
+		): { html: string; hasScript: boolean } => {
+			const html = renderFrontchannelLogoutHtml({
+				rps: [{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" }],
+				issuer: "https://auth.example",
+				sid: "sid-1",
+				postLogoutRedirectUri: postLogoutRedirectUri as string,
+				logger,
+			});
+			return { html, hasScript: html.includes("<script>") };
+		};
+
+		it.each([
+			["a non-http(s) scheme", "data:text/plain,signed-out", "executable-scheme"],
+			["a scheme that is not reverse-domain", "ftp://rp.example/out", "scheme-not-reverse-domain"],
+			["plain http off a loopback host", "http://rp.example/out", "http-non-loopback"],
+			["a value that is not a URL", "not-a-url", "unparsable"],
+		])(
+			"refuses %s: the page keeps its iframes, has no redirect script, and one warn names the reason, never the URI",
+			(_label, uri, reason) => {
+				const logger = createMockLogger();
+				const { html, hasScript } = scriptFor(uri, logger);
+
+				expect(hasScript).toBe(false);
+				expect(html).toContain("<iframe");
+				expect(html).not.toContain(uri);
+				expect(logger.warn).toHaveBeenCalledTimes(1);
+				expectBestEffortWarn(logger, "logout_frontchannel_redirect_refused", { reason }, null);
+				expectUriNotLogged(logger, uri);
+			},
+		);
+
+		it("refuses a value that is not a string, and a read that throws, without throwing", () => {
+			const logger = createMockLogger();
+			expect(scriptFor(42, logger).hasScript).toBe(false);
+			const throwing = {
+				rps: [],
+				issuer: "iss",
+				sid: "sid",
+				logger,
+				get postLogoutRedirectUri(): string {
+					throw new Error("field unavailable");
+				},
+			};
+			expect(renderFrontchannelLogoutHtml(throwing)).not.toContain("<script>");
+			expectBestEffortWarn(
+				logger,
+				"logout_frontchannel_redirect_refused",
+				{ reason: "not-a-string" },
+				null,
+			);
+			expectBestEffortWarn(
+				logger,
+				"logout_frontchannel_redirect_refused",
+				{ reason: "unreadable" },
+				null,
+			);
+		});
+
+		it.each([
+			["an https URI", "https://rp.example/logged-out"],
+			["an https URI carrying the RP's state", "https://rp.example/logged-out?state=s-1"],
+			["a reverse-domain custom scheme", "com.example.app:/signed-out?state=s-1"],
+			["plain http on a loopback host", "http://127.0.0.1:8080/out"],
+		])("keeps the redirect script for %s, without a warn", (_label, uri) => {
+			const logger = createMockLogger();
+			const { html, hasScript } = scriptFor(uri, logger);
+			expect(hasScript).toBe(true);
+			expect(html).toContain(JSON.stringify(uri));
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("writes no script and no warn when the value is absent", () => {
+			const logger = createMockLogger();
+			expect(scriptFor(undefined, logger).hasScript).toBe(false);
+			expect(scriptFor("", logger).hasScript).toBe(false);
+			expect(logger.warn).not.toHaveBeenCalled();
 		});
 	});
 

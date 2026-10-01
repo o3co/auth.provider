@@ -764,7 +764,7 @@ describe("POST /oauth/logout", () => {
 			}
 		});
 
-		it("answers as without front-channel logout when no RP's front-channel URI is http(s)", async () => {
+		it("answers the JSON fallback when no RP's front-channel URI is http(s) and nothing else redirects", async () => {
 			const logger = createMockLogger();
 			const rpData = NON_HTTP_URIS.map((uri, i) => storedRP(`rp-skipped-${i}`, uri));
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
@@ -780,6 +780,39 @@ describe("POST /oauth/logout", () => {
 			expect(
 				logger.warn.mock.calls.filter(([, name]) => name === "logout_frontchannel_uri_refused"),
 			).toHaveLength(NON_HTTP_URIS.length);
+		});
+
+		it("redirects to the registered post_logout_redirect_uri when no RP's front-channel URI is http(s)", async () => {
+			const rpData = NON_HTTP_URIS.map((uri, i) => storedRP(`rp-skipped-${i}`, uri));
+			const clientRepo = makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					allowedRedirectUris: [],
+					allowedScopes: [],
+					postLogoutRedirectUris: ["https://app.example.com/logged-out"],
+				}),
+			});
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({
+				sessionStore,
+				sessionRPRegistry,
+				clientRepo,
+				logger: createMockLogger(),
+			});
+
+			const res = await postLogout(
+				app,
+				{
+					id_token_hint: await mintIdToken(),
+					post_logout_redirect_uri: "https://app.example.com/logged-out",
+					state: "s-1",
+				},
+				{ Accept: "text/html" },
+			);
+
+			expect(res.status).toBe(303);
+			expect(res.headers.location).toBe("https://app.example.com/logged-out?state=s-1");
 		});
 
 		it.each([
