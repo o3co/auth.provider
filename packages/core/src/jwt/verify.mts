@@ -26,7 +26,7 @@ import { auditErrorText } from "../errors/envelope.mjs";
 import { ExpiredKidError, type KeyStore, UnknownKidError } from "../keys/KeyStore.mjs";
 import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import type { Logger } from "../logging/Logger.mjs";
-import { lineSafeText, thrownText } from "../logging/loggableError.mjs";
+import { guardedRead, lineSafeText, thrownText } from "../logging/loggableError.mjs";
 import type { SubjectRevocation } from "../user-sessions/types.mjs";
 
 /**
@@ -321,11 +321,23 @@ export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
  * when a composition holds two copies of this package, a keystore built
  * against one and the verifier from the other — an object carrying that
  * `name`. The finding errors set `name` to their own class name, and nothing
- * else in this package uses those names.
+ * else in this package uses those names. Never throws: a value whose
+ * prototype chain or `name` cannot be read is neither finding.
  */
-const isFinding = (cause: unknown, cls: abstract new (...args: never[]) => Error, name: string) =>
-	cause instanceof cls ||
-	(typeof cause === "object" && cause !== null && (cause as { name?: unknown }).name === name);
+const isFinding = (
+	cause: unknown,
+	cls: abstract new (...args: never[]) => Error,
+	name: string,
+): boolean => {
+	try {
+		return (
+			cause instanceof cls ||
+			(typeof cause === "object" && cause !== null && guardedRead(cause, "name")?.value === name)
+		);
+	} catch {
+		return false;
+	}
+};
 
 /**
  * How long past a token's `exp` a record that revokes it must still be kept:
