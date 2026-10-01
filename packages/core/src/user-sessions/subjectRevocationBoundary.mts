@@ -42,11 +42,13 @@ export function checkSubjectRevocationInstant(value: unknown, name: string): num
 }
 
 /**
- * The boundary a store records for `before` on `storeNowMs`, its clock read
- * in the same step as the write: `before` when it is no later than
- * `storeNowMs + DEFAULT_CLOCK_SKEW_MS`, else exactly that, with `clamped`
+ * The rule every store bounds a boundary by: `before` when it is no later
+ * than `storeNowMs + DEFAULT_CLOCK_SKEW_MS`, else exactly that, with `clamped`
  * saying which. A `RangeError` for a `before` that is no date, or a clock
- * that is not a finite instant: the bound is never skipped.
+ * that is not a finite instant: the bound is never skipped. A store whose
+ * clock is read in-process calls it in the step that writes; a store whose
+ * clock is a server's clamps in its own atomic step there, and may call it
+ * with the `now` that server answers to tell whether it clamped.
  */
 export function clampSubjectRevocationBoundary(
 	before: unknown,

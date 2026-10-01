@@ -29,7 +29,7 @@ import {
 	supportsSessionsOnlyRevocation,
 } from "../types.mjs";
 
-/** The clock the store judges a boundary by. A Redis runner reads the server's `TIME`. */
+/** The clock the store judges a boundary by. A store whose clock is a server passes a clock that reads it. */
 export interface StoreClock {
 	/** Epoch milliseconds on the store's clock. */
 	now(): Promise<number>;
@@ -121,6 +121,24 @@ export function runSubjectRevocationClockContract(
 			await store.revokeBefore("k-u4", behind, await lifetime(clock));
 			expect((await store.revokedBefore("k-u4"))?.getTime()).toBe(within.getTime());
 		});
+
+		it.each([
+			["an Invalid Date", new Date(Number.NaN)],
+			["an object that only answers getTime", { getTime: () => Number.NEGATIVE_INFINITY }],
+		])(
+			"refuses %s as before or expiresAt with a RangeError, leaving the boundary in force",
+			async (_label, bad) => {
+				const store = await factory();
+				const held = new Date((await clock.now()) - MARGIN_MS);
+				await store.revokeBefore("k-u8", held, await lifetime(clock));
+				const notADate = bad as unknown as Date;
+				await expect(store.revokeBefore("k-u8", notADate, await lifetime(clock))).rejects.toThrow(
+					RangeError,
+				);
+				await expect(store.revokeBefore("k-u8", new Date(), notADate)).rejects.toThrow(RangeError);
+				expect((await store.revokedBefore("k-u8"))?.getTime()).toBe(held.getTime());
+			},
+		);
 	});
 }
 

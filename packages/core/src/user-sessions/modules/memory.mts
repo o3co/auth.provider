@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { consoleLogger } from "../../logging/consoleLogger.mjs";
 import type { Logger } from "../../logging/Logger.mjs";
 import { defineModule } from "../../modules/manifest/define-module.mjs";
 import { createInMemorySessionFamilyIndex } from "../memory/sessionFamilyIndex.mjs";
@@ -50,6 +51,6 @@ export const memorySessionStoresModule = defineModule({
 		// subject-level revocation by installing the module it already installs.
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
 		subjectRevocation: (deps: { readonly logger?: Logger }) =>
-			createInMemorySubjectRevocation(deps.logger !== undefined ? { logger: deps.logger } : {}),
+			createInMemorySubjectRevocation({ logger: deps.logger ?? consoleLogger }),
 	} as never,
 });

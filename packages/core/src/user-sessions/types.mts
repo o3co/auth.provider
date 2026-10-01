@@ -476,11 +476,13 @@ export interface SubjectRevocation {
 	 * {@link SupportsSessionsOnlyRevocation}.
 	 *
 	 * A `before` later than the store's clock plus `DEFAULT_CLOCK_SKEW_MS` is
-	 * recorded as that clock plus the skew (`clampSubjectRevocationBoundary`,
-	 * read in the same atomic step as the write), never refused: a boundary
-	 * further ahead than the clock skew between hosts is no replica's clock
-	 * reading, and a refusal would leave every token already issued alive. One
-	 * behind the store's clock is recorded as given. A `RangeError`, nothing
+	 * recorded as that clock plus the skew, by the rule
+	 * `clampSubjectRevocationBoundary` states, with the clock read in the same
+	 * atomic step as the write. It is never refused: a refusal would leave every
+	 * token already issued alive. Such a boundary comes from a replica whose
+	 * clock runs outside the tolerance; what that replica minted past the clamp
+	 * is not covered, and the store's warn line is the signal. One behind the
+	 * store's clock is recorded as given. A `RangeError`, nothing
 	 * written, for a `before` or `expiresAt` that is not a `Date` with a finite
 	 * time (`checkSubjectRevocationInstant`).
 	 */

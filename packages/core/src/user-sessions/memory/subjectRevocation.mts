@@ -112,6 +112,7 @@ export function createInMemorySubjectRevocation(
 		grants: "advance" | "keep",
 	): void => {
 		const expiresAtMs = checkSubjectRevocationInstant(expiresAt, "expiresAt");
+		const requestedMs = checkSubjectRevocationInstant(before, "before");
 		const { boundary, clamped } = clampSubjectRevocationBoundary(before, clock());
 		const beforeMs = boundary.getTime();
 		write(subject, beforeMs, grants === "advance" ? beforeMs : null, expiresAtMs);
@@ -121,7 +122,7 @@ export function createInMemorySubjectRevocation(
 				{
 					store: "memory",
 					subject,
-					requestedBefore: before.toISOString(),
+					requestedBefore: new Date(requestedMs).toISOString(),
 					recordedBefore: boundary.toISOString(),
 				},
 				"subject_revocation_boundary_clamped",
