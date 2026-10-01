@@ -20,7 +20,8 @@
  * D23, as #810 amended them): the login's address is compared with the
  * digest the factor recorded before anything is written, the code is kept
  * with the digest of the address it went to and handed back to the
- * verification, and what the sender answered decides the answer.
+ * verification, the page is answered where the code went (masked) and how
+ * long it lives, and what the sender answered decides the answer.
  */
 
 import {
@@ -110,14 +111,14 @@ const challenge = (agent: Parameters<typeof mfaPost>[0], transaction: string, fa
 	mfaPost(agent, "/challenge", { transaction_id: transaction, factor_id: factorId });
 
 describe("a factor's login code", () => {
-	it("goes to the login's address when it matches the digest the factor recorded: kept with that address's digest, handed back to the verification, and the login completes", async () => {
+	it("goes to the login's address when it matches the digest the factor recorded: kept with that address's digest, handed back to the verification, the page answered the masked address and the code's life beside the factor's answer, and the login completes", async () => {
 		const { app, record, sender, verified, transactionStore, audit } = await withMailedFactor();
 		const { agent, transaction } = await beginLogin(app);
 
 		const res = await challenge(agent, transaction, record.id);
 
 		expect(res.status).toBe(200);
-		expect(res.body).toEqual({ sent: true });
+		expect(res.body).toEqual({ sent: true, sent_to: "a***@example.com", expires_in: 600 });
 		expect(sender.sent).toEqual([
 			{
 				purpose: "login_code",
@@ -136,6 +137,33 @@ describe("a factor's login code", () => {
 		expect(done.status).toBe(200);
 		expect(verified).toHaveLength(1);
 		expect(verified[0]?.addressDigest).toEqual(recordedDigest(ALICE.email));
+	});
+
+	it("answers where the code went and how long it lives as the coordinator kept them, whatever the factor's own answer says", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const record = await seedFactor(factorStore, KIND, {
+			addressDigest: recordedDigest(ALICE.email),
+		});
+		const double = createTestMfaFactor({ kind: KIND, mail: true });
+		const claiming: MfaFactor = {
+			...double,
+			challenge: async (ctx) => {
+				const issued = await (double.challenge as NonNullable<MfaFactor["challenge"]>)(ctx);
+				return { ...issued, response: { sent_to: "elsewhere@example.net", expires_in: 86_400 } };
+			},
+		};
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			mailSender: createRecordingMailSender(),
+			extraModules: [contributing(claiming)],
+		});
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await challenge(agent, transaction, record.id);
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ sent_to: "a***@example.com", expires_in: 600 });
 	});
 
 	it("is refused when the login's address does not match: 403, mfa.email_address_mismatch recorded with the subject and the kind alone, nothing sent, nothing kept", async () => {

@@ -605,6 +605,22 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+formatLongCode\b/,
 	},
 	{
+		concept: "the six-digit code — made (the MFA ADR's F5, D22)",
+		home: "packages/mfa/src/codes.mts",
+		definition: /(?:function|const)\s+generateSixDigitCode\b/,
+	},
+	{
+		concept: "the six-digit code — read as a user types it (the MFA ADR's F5, D22)",
+		home: "packages/mfa/src/codes.mts",
+		definition: /(?:function|const)\s+readSixDigitCode\b/,
+	},
+	{
+		concept:
+			"the email factor — six-digit login codes and a long enrollment code, kept as keyed digests bound to their transaction, recording only the address digest it is handed (the MFA ADR's F5, D11, D22)",
+		home: "packages/mfa/src/email/factor.mts",
+		definition: /(?:function|const)\s+createEmailFactor\b/,
+	},
+	{
 		concept:
 			"a recovery-code set — issued beside a first counting factor, kept as keyed digests (the MFA ADR's D22, D25)",
 		home: "packages/mfa/src/recovery/factor.mts",
