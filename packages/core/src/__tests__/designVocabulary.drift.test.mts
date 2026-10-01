@@ -886,13 +886,13 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	{
 		file: "packages/core/src/user-sessions/authentication.mts",
 		read: "session.authentication",
-		count: 3,
+		count: 1,
 		why: READER_WHY,
 	},
 	{
 		file: "packages/core/src/user-sessions/authentication.mts",
 		read: "session.amr",
-		count: 2,
+		count: 1,
 		why: READER_WHY,
 	},
 	{
