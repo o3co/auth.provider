@@ -728,7 +728,7 @@ export function createMemoryMfaTransactionStore(
 
 		async acquireSubjectLease(subject, request): Promise<MfaSubjectLeaseAnswer> {
 			const { ttlMs, generation } = checkSubjectLeaseRequest(subject, request);
-			if (generation !== undefined && generation !== (generations.get(subject) ?? 0)) {
+			if (generation !== (generations.get(subject) ?? 0)) {
 				return { outcome: "stale" };
 			}
 			const nowMs = clock();

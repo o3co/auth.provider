@@ -268,11 +268,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				io,
 				MFA_SUBJECT_LEASE_ACQUIRE,
 				[keys.lease, keys.recovery],
-				[
-					input.token,
-					String(input.ttlMs),
-					input.generation === undefined ? "" : String(input.generation),
-				],
+				[input.token, String(input.ttlMs), String(input.generation)],
 			);
 			const [outcome, pttl] = Array.isArray(reply) ? reply : [];
 			if (outcome === "acquired" || outcome === "stale") return { outcome };

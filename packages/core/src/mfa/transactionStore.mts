@@ -829,8 +829,8 @@ export const DEFAULT_MFA_SUBJECT_LEASE_MS = 60_000;
 export interface MfaSubjectLeaseRequest {
 	/** How long it stands on the store's clock, from {@link MFA_SUBJECT_LEASE_MIN_MS} to {@link MFA_SUBJECT_LEASE_MAX_MS}. */
 	readonly ttlMs: number;
-	/** The subject's generation the writer captured before it began; absent, none is compared. */
-	readonly generation?: number;
+	/** The subject's generation the writer captured before it began. */
+	readonly generation: number;
 }
 
 /** What `acquireSubjectLease` answers. */
@@ -855,13 +855,13 @@ const isSubject = (value: unknown): value is string =>
  * The request {@link MfaTransactionStore.acquireSubjectLease} acts on, its
  * fields read once, or a `RangeError`: `subject` a non-empty string, `ttlMs`
  * a whole number from {@link MFA_SUBJECT_LEASE_MIN_MS} to
- * {@link MFA_SUBJECT_LEASE_MAX_MS}, `generation` absent or a safe whole
- * number from 0. Every adapter calls it first.
+ * {@link MFA_SUBJECT_LEASE_MAX_MS}, `generation` a safe whole number from 0.
+ * Every adapter calls it first.
  */
 export function checkSubjectLeaseRequest(
 	subject: unknown,
 	request: unknown,
-): { readonly ttlMs: number; readonly generation: number | undefined } {
+): MfaSubjectLeaseRequest {
 	const refuse = (what: string): never => {
 		throw new RangeError(`MfaTransactionStore.acquireSubjectLease: ${what}`);
 	};
@@ -878,10 +878,10 @@ export function checkSubjectLeaseRequest(
 			`ttlMs must be a whole number from MFA_SUBJECT_LEASE_MIN_MS (${MFA_SUBJECT_LEASE_MIN_MS}) to MFA_SUBJECT_LEASE_MAX_MS (${MFA_SUBJECT_LEASE_MAX_MS})`,
 		);
 	}
-	if (generation !== undefined && !isCount(generation)) {
-		refuse("generation must be absent or a safe whole number from 0");
+	if (!isCount(generation)) {
+		refuse("generation, the one the writer captured, must be a safe whole number from 0");
 	}
-	return { ttlMs: ttlMs as number, generation: generation as number | undefined };
+	return { ttlMs: ttlMs as number, generation: generation as number };
 }
 
 /**
@@ -1433,8 +1433,8 @@ export interface MfaTransactionStore {
 	 */
 	subjectGeneration(subject: string): Promise<number>;
 	/**
-	 * In one step: `stale` when `request.generation` is given and is not the
-	 * subject's generation; else `busy` while another holder's lease stands;
+	 * In one step: `stale` when `request.generation` is not the subject's
+	 * generation; else `busy` while another holder's lease stands;
 	 * else a lease standing `ttlMs` on the store's clock, under a fresh token.
 	 * The generation moves only under the lease
 	 * (`applySubjectRecovery`), so it stays the one acquired under until the
@@ -1446,8 +1446,8 @@ export interface MfaTransactionStore {
 		request: MfaSubjectLeaseRequest,
 	): Promise<MfaSubjectLeaseAnswer>;
 	/**
-	 * Ends the lease `token` holds: `true` when it still held it, so the
-	 * generation did not move while it stood; `false` when the lease had
+	 * Ends the lease `token` holds: `true` when it still held it, so no other
+	 * holder moved the generation while it stood; `false` when the lease had
 	 * ended, or another holds it, which it leaves. A `RangeError` for what
 	 * {@link checkSubjectLeaseRelease} refuses.
 	 */

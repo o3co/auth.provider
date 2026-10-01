@@ -147,8 +147,8 @@ export interface AcquireMfaSubjectLeaseInput {
 	/** The token the lease is written with when it is free. */
 	readonly token: string;
 	readonly ttlMs: number;
-	/** The generation the writer captured; absent, none is compared. */
-	readonly generation: number | undefined;
+	/** The generation the writer captured. */
+	readonly generation: number;
 }
 
 export interface AuthorizeMfaSubjectRecoveryInput {
@@ -348,7 +348,7 @@ export interface MfaTransactionStoreClient {
 	/** The recovery hash's `g` field (`HGET`); `null` when there is none. */
 	subjectGeneration(keys: MfaSubjectKeys): Promise<string | null>;
 	/**
-	 * Atomically: `stale` when `input.generation` is given and is not the recovery hash's `g`
+	 * Atomically: `stale` when `input.generation` is not the recovery hash's `g`
 	 * (absent is `0`); else `busy`, with the lease's time left, while one stands; else the lease
 	 * written with `input.token` for `input.ttlMs` (`SET NX PX`).
 	 */
