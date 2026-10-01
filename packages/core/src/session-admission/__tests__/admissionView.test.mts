@@ -274,7 +274,7 @@ const unrecordable = (amr: unknown): UserSession => record({ amr: amr as never }
 const UNRECORDABLE_AMRS: readonly unknown[] = [["pwd", ""], ["pwd", 1], "pwd"];
 
 describe("secondFactorRecordable: whether a second factor can be recorded on the session", () => {
-	it("is typed boolean on SessionView, optional only so a view built by hand still type-checks", () => {
+	it("is typed `boolean | undefined` on SessionView", () => {
 		expectTypeOf<SessionView["secondFactorRecordable"]>().toEqualTypeOf<boolean | undefined>();
 		expect(true).toBe(true);
 	});
@@ -392,6 +392,47 @@ describe("secondFactorRecordable: whether a second factor can be recorded on the
 			);
 			expect(seen).toHaveLength(2);
 			expect(reads(), outcome).toBe(1);
+		}
+	});
+
+	it("is unavailable (user_session) when the store's capability probe throws over a live record, and the probe is not read without one", async () => {
+		let reads = 0;
+		const throwing = (session: UserSession): UserSessionStore =>
+			Object.defineProperty(holding(session), "recordSecondFactor", {
+				get: () => {
+					reads++;
+					throw new Error("the probe was read");
+				},
+			});
+		const seen: Array<RequirementInput["session"]> = [];
+		for (const claim of [cookie(), tokenClaim({ sub: "user-1", sid: "sid-1", amr: ["pwd"] })]) {
+			reads = 0;
+			const admission = await admitSession(deps(throwing(record()), [watching(seen)]), {
+				claim,
+				action: "test.use",
+			});
+			expect(admission, claim.carrier).toEqual({ outcome: "unavailable", store: "user_session" });
+			expect(reads, claim.carrier).toBe(1);
+		}
+		// Never a verdict: no requirement was asked.
+		expect(seen).toEqual([]);
+		// No live record: gone, another subject's, or no sid on a token.
+		for (const [store, claim, expected] of [
+			[throwing(record({ sid: "other" })), cookie(), { outcome: "not_live", reason: "gone" }],
+			[
+				throwing(record({ sub: "user-2" })),
+				cookie(),
+				{ outcome: "not_live", reason: "subject_mismatch" },
+			],
+			[throwing(record()), tokenClaim({ sub: "user-1", amr: ["pwd"] }), { outcome: "admitted" }],
+		] as const) {
+			reads = 0;
+			const admission = await admitSession(deps(store, [watching(seen)]), {
+				claim,
+				action: "test.use",
+			});
+			expect(admission, JSON.stringify(expected)).toMatchObject(expected);
+			expect(reads, JSON.stringify(expected)).toBe(0);
 		}
 	});
 });
