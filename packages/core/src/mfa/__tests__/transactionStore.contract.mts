@@ -871,6 +871,23 @@ export function runMfaTransactionStoreContract(
 			expect(await live(store, ids)).toStrictEqual(ids.slice(3));
 		});
 
+		it("ends the one that expires first, even within one millisecond of another, whatever the order created", async () => {
+			const store = await factory();
+			const base = Math.floor(Math.max(Date.now(), await expiry.now())) + 10 * MINUTE;
+			await store.create(TX({ id: "later", expiresAtMs: base + 0.75 }));
+			await store.create(TX({ id: "sooner", expiresAtMs: base + 0.25 }));
+			const rest = Array.from({ length: N - 2 }, (_, i) => `rest-${i}`);
+			for (const [i, id] of rest.entries()) {
+				await store.create(TX({ id, expiresAtMs: base + (i + 1) * 1_000 }));
+			}
+			await store.create(TX({ id: "next", expiresAtMs: base + N * 1_000 }));
+			expect(await live(store, ["sooner", "later", ...rest, "next"])).toStrictEqual([
+				"later",
+				...rest,
+				"next",
+			]);
+		});
+
 		it("leaves every other binding's transactions alone", async () => {
 			const store = await factory();
 			const mine = await opened(store, "mine", N);
