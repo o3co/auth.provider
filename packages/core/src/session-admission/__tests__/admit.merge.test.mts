@@ -51,7 +51,11 @@ import {
 	mergeSessionStore,
 } from "#/session-admission/testing/merge.rows.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
-import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
+import {
+	supportsSecondFactorUpdate,
+	type UserSession,
+	type UserSessionStore,
+} from "#/user-sessions/types.mjs";
 import { TEST_ACTIONS } from "./actions.fixture.mjs";
 
 const { MFA, PHR, KBA } = MERGE_ACR;
@@ -593,5 +597,32 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 			requirement: "acr",
 			session,
 		});
+	});
+});
+
+describe("mergeSessionStore", () => {
+	const row = MERGE_ROW_GROUPS.flatMap((group) => group.rows).find(
+		(candidate): candidate is MergeRow & { session: UserSession } => candidate.session !== null,
+	);
+	if (row === undefined) throw new Error("the merge rows hold no row with a session");
+
+	it("answers no store for a row without a session", () => {
+		expect(mergeSessionStore({ ...row, session: null })).toBeUndefined();
+	});
+
+	it("answers the row's session for its own sid alone, and writes nothing", async () => {
+		const store = mergeSessionStore(row) as UserSessionStore;
+		expect(await store.get(row.session.sid)).toBe(row.session);
+		expect(await store.get(`${row.session.sid}-other`)).toBeNull();
+		await expect(store.create(row.session)).resolves.toBeUndefined();
+		await expect(store.delete(row.session.sid)).resolves.toBeUndefined();
+		expect(await store.get(row.session.sid)).toBe(row.session);
+	});
+
+	it("can record a second factor unless the row says its store cannot", () => {
+		expect(supportsSecondFactorUpdate(mergeSessionStore(row))).toBe(true);
+		expect(supportsSecondFactorUpdate(mergeSessionStore({ ...row, storeRecords: false }))).toBe(
+			false,
+		);
 	});
 });
