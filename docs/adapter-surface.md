@@ -333,7 +333,7 @@ out-of-tree adapter can import and run:
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |
 | `WebAuthnCredentialStore` | `packages/test-kit/src/webauthn/credentialStore.contract.mts` (`webAuthnCredentialStoreContract`), published on `@o3co/auth-provider-test-kit` |
 | `UserSessionStore` | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` (`runUserSessionStoreContract`) |
-| `SupportsMfaEnrollmentWitness` (the `UserRepository` capability `markMfaEnrolled`, answered back as `User.mfaEnrolled`; run only for a repository that claims it) | `packages/test-kit/src/mfa/enrollmentWitness.contract.mts` (`mfaEnrollmentWitnessContract`), published on `@o3co/auth-provider-test-kit` |
+| `SupportsMfaEnrollmentWitness` (the `UserRepository` capability `markMfaEnrolled`, answered back as `User.mfaEnrolled` on `authenticate` and on `authenticateByToken`; run only for a repository that claims it) | `packages/test-kit/src/mfa/enrollmentWitness.contract.mts` (`mfaEnrollmentWitnessContract`), published on `@o3co/auth-provider-test-kit` |
 | `SupportsSecondFactorUpdate` (the `UserSessionStore` step-up capability; run only for a store that claims it) | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` (`runSecondFactorUpdateContract`) |
 | `SessionRPRegistry` | `packages/core/src/user-sessions/__tests__/sessionRPRegistry.contract.mts` |
 | `SessionFamilyIndex` | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` |

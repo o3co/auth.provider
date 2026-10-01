@@ -17,12 +17,16 @@
 /**
  * The contract suite of the MFA enrollment witness: a `UserRepository` that
  * writes it (`markMfaEnrolled`, detected by `supportsMfaEnrollmentWitness`)
- * and answers it back on `authenticate` as `User.mfaEnrolled`, read through
- * core's `readMfaEnrollmentWitness`.
+ * and answers it back as `User.mfaEnrolled` on `authenticate` and on
+ * `authenticateByToken` alike, read through core's `readMfaEnrollmentWitness`.
+ * A federated session records the witness from the second read, so a
+ * repository that answers it on the first alone fails.
  *
  * Holds a repository to: the capability detected; a user nobody marked read
- * as not enrolled; a mark resolving to nothing and the next login answering
- * it, `true` and `false` alike; a repeated mark a success that changes
+ * as not enrolled, through either read; a mark resolving to nothing and the
+ * next login answering it, `true` and `false` alike; after each mark,
+ * `authenticateByToken` answering every user's witness as `authenticate`
+ * does; a repeated mark a success that changes
  * nothing; the last of successive marks holding; a mark reaching its own
  * subject alone; concurrent marks of one value all succeeding; a mark of
  * either value for a subject the backend does not hold refused with a throw,
@@ -39,11 +43,14 @@ import {
 } from "@o3co/auth-provider-core";
 import type { ContractCase } from "@o3co/auth-provider-core/testing";
 
-/** A user the backend holds: its subject (`User.id`) and the credentials that authenticate it. */
+/** A user the backend holds: its subject (`User.id`) and what each read resolves to it. */
 export interface MfaEnrollmentWitnessUser {
 	readonly subject: string;
+	/** With `password`, what `authenticate` resolves to this user. */
 	readonly username: string;
 	readonly password: string;
+	/** A handle `authenticateByToken` resolves to this user. */
+	readonly token: string;
 }
 
 /** What one case runs over: a fresh backend and the repository under test over it. */
@@ -89,6 +96,24 @@ async function witnessOf(harness: MfaEnrollmentWitnessHarness, user: MfaEnrollme
 	return readMfaEnrollmentWitness(answered);
 }
 
+/** What `authenticateByToken` answers of `user`'s witness, read as the provider reads it. */
+async function witnessByTokenOf(
+	harness: MfaEnrollmentWitnessHarness,
+	user: MfaEnrollmentWitnessUser,
+) {
+	const answered = await harness.repository.authenticateByToken(user.token);
+	assert.ok(
+		answered !== null,
+		`authenticateByToken refused the token of ${user.username}, a user the backend holds`,
+	);
+	assert.equal(
+		answered.id,
+		user.subject,
+		`authenticateByToken answered another user for the token of ${user.username}`,
+	);
+	return readMfaEnrollmentWitness(answered);
+}
+
 /** A case that builds its harness, runs `body` over it and closes it. */
 function contractCase(
 	input: MfaEnrollmentWitnessContractInput,
@@ -127,6 +152,15 @@ export function mfaEnrollmentWitnessContract(
 		}),
 		contractCase(
 			input,
+			"a user nobody marked reads as not enrolled through authenticateByToken",
+			async (harness) => {
+				for (const user of harness.users) {
+					assert.equal(await witnessByTokenOf(harness, user), "not_enrolled", user.username);
+				}
+			},
+		),
+		contractCase(
+			input,
 			"marking a user enrolled resolves to nothing, and the next authenticate answers the user enrolled",
 			async (harness) => {
 				const [user] = harness.users;
@@ -157,6 +191,30 @@ export function mfaEnrollmentWitnessContract(
 				await mark(user.subject, false);
 				await mark(user.subject, false);
 				assert.equal(await witnessOf(harness, user), "not_enrolled");
+			},
+		),
+		contractCase(
+			input,
+			"after each mark, authenticateByToken answers the same witness as authenticate",
+			async (harness) => {
+				const [first, second] = harness.users;
+				const mark = markOf(harness);
+				const marks: readonly (readonly [MfaEnrollmentWitnessUser, boolean])[] = [
+					[first, true],
+					[second, true],
+					[first, false],
+					[second, false],
+				];
+				for (const [user, enrolled] of marks) {
+					await mark(user.subject, enrolled);
+					for (const read of harness.users) {
+						assert.equal(
+							await witnessByTokenOf(harness, read),
+							await witnessOf(harness, read),
+							`after marking ${user.username} ${enrolled}, the two reads of ${read.username} differ`,
+						);
+					}
+				}
 			},
 		),
 		contractCase(input, "the last of successive marks holds", async (harness) => {

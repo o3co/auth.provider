@@ -26,8 +26,8 @@ devDependencies.
   [`src/webauthn/credentialStore.contract.mts`](src/webauthn/credentialStore.contract.mts);
 - `mfaEnrollmentWitnessContract`, the contract suite of the MFA enrollment
   witness — a `UserRepository` that writes it with `markMfaEnrolled` and
-  answers it back on `authenticate` as `User.mfaEnrolled` (the MFA ADR's
-  D12) — in [`src/mfa/enrollmentWitness.contract.mts`](src/mfa/enrollmentWitness.contract.mts);
+  answers it back as `User.mfaEnrolled` on `authenticate` and on
+  `authenticateByToken` (the MFA ADR's D12) — in [`src/mfa/enrollmentWitness.contract.mts`](src/mfa/enrollmentWitness.contract.mts);
 - `startFakeStore`, a fake Store that answers the Store's MFA endpoints and
   its two login endpoints over HTTP, in [`src/mfa/fakeStore.mts`](src/mfa/fakeStore.mts);
 - `mfaFactorContract`, the conformance suite of a second factor — a value of
@@ -80,13 +80,17 @@ describe("my repository keeps the MFA enrollment witness", () => {
 
 `build` answers a fresh harness for each case
 (`MfaEnrollmentWitnessHarness`): the repository under test; two users the
-backend holds, neither marked, each as its subject, username and password; a
+backend holds, neither marked, each as its subject, username and password,
+and `token`, a handle `authenticateByToken` resolves to it (required); a
 subject the backend does not hold; `outage`, which makes every later mark
 fail, when `withOutage` is `true`; and `close`, called when the case ends.
 
 It holds the repository to: `supportsMfaEnrollmentWitness` answering `true`;
-a user nobody marked read as not enrolled; a mark resolving to nothing, and
-the next `authenticate` answering it, `true` and `false` alike; a mark of the
+a user nobody marked read as not enrolled, through `authenticate` and through
+`authenticateByToken`; a mark resolving to nothing, and the next
+`authenticate` answering it, `true` and `false` alike; after each mark,
+`authenticateByToken` answering every user's witness as `authenticate` does;
+a mark of the
 value already held succeeding and keeping it; the last of successive marks
 holding; a mark reaching its own subject alone; concurrent marks of one value
 all succeeding; a mark of either value for a subject the backend does not
@@ -95,6 +99,14 @@ were; and, with `withOutage`, a mark during an outage throwing. The
 witness is read as the provider reads it, through core's
 `readMfaEnrollmentWitness`, so a backend answering anything but a boolean
 fails.
+
+**What a Store must do.** Answer `mfaEnrolled` on `authenticateByToken` as
+on `authenticate`. A federated login records the witness from the `User`
+that `authenticateByToken` answers; a Store that answers it on
+`authenticate` alone leaves every federated session reading "not enrolled",
+so a lost factor store lets whoever holds the federated identity make a
+first binding. The harness's `token` is required for this reason: no
+harness passes the suite without proving both reads.
 
 ## The factor store's contract suite
 
@@ -268,7 +280,8 @@ the bodies of core's `mfa/storeWire.mts`:
   `authenticateUrl` and `authenticateByTokenUrl`;
 - `authenticateUrl` answers `{ email, password }` of a user in `users` with
   its `User` — `id`, `username`, its `claims`, and `mfaEnrolled` once marked —
-  and anything else `401`; `authenticateByTokenUrl` answers `401`;
+  and anything else `401`; `authenticateByTokenUrl` answers `{ token }` of a
+  user whose `tokens` hold it with the same `User`, and anything else `401`;
 - every record it holds is answered back as held, one the provider cannot
   read included; an update writes its changes and nothing else at the
   expected version plus one; each request is answered from state it reads
@@ -316,12 +329,12 @@ Exported from [`src/index.mts`](src/index.mts):
 
 | Test file | Pins |
 | --- | --- |
-| [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
+| [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject, or whose `authenticateByToken` answers no witness, answers it as text, resolves no token or answers another user, among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
 | [`factorStore.contract.test.mts`](src/mfa/__tests__/factorStore.contract.test.mts) | the factor store's suite over core's in-process store; each broken store — one that drops an undefined field, rewrites data, overwrites a duplicate, lets every writer win, changes a field an update does not carry, reaches another subject's record, removes every subject's records, writes the same id under another subject or the subject's other factors on a successful update, or answers an update at `Number.MAX_SAFE_INTEGER` with `null` rather than a `RangeError` — refused by the case that names what it breaks; every record id in the provider's shape; a harness built and closed per case |
 | [`credentialStore.contract.test.mts`](src/webauthn/__tests__/credentialStore.contract.test.mts) | the WebAuthn credential store's suite over core's in-process store; each broken store — one that lets a registration take a credential id another user holds, overwrites a held credential's record and then throws `duplicate-credential`, refuses a held id with another error, lists a credential under the user it refused, lets a user register a held id again over its record, checks for a held id and inserts in two steps, finds a credential with a sign count of 0, lists every credential whoever's, updates a sign count whatever the count it expects, or leaves a removed credential — refused by the case that names what it breaks; a harness built and closed per case |
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
-| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
+| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 
 ## See also
 

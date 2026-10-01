@@ -19,7 +19,7 @@
  * the Store's MFA endpoints as the wire contract says (core's
  * `mfa/storeWire.mts`; `@o3co/auth-provider-foundation`'s README, "The
  * Store's MFA endpoints"), and the two login endpoints the enrollment witness
- * is read back through.
+ * is read back through, each answering it alike.
  *
  * Guarantees: every record held is answered back as held, one the provider
  * cannot read included; an update is a compare-and-set that writes the
@@ -48,6 +48,8 @@ export interface FakeStoreUser {
 	readonly id: string;
 	readonly username: string;
 	readonly password: string;
+	/** The handles `authenticateByToken` resolves to this user. */
+	readonly tokens?: readonly string[];
 	/** The other fields of the `User` it answers. */
 	readonly claims?: Readonly<Record<string, unknown>>;
 }
@@ -211,8 +213,11 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 				const found = users.find((u) => u.username === body.email && u.password === body.password);
 				return found === undefined ? empty(401) : json(200, user(found));
 			}
-			case "authenticateByToken":
-				return empty(401);
+			case "authenticateByToken": {
+				const { token } = body;
+				const found = users.find((u) => typeof token === "string" && u.tokens?.includes(token));
+				return found === undefined ? empty(401) : json(200, user(found));
+			}
 			case "list": {
 				if (typeof body.subject !== "string") return empty(400);
 				return json(200, { factors: holds(body.subject) });
