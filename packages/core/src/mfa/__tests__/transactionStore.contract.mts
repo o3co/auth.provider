@@ -2061,6 +2061,88 @@ export function runMfaTransactionStoreContract(
 					).toMatchObject({ outcome: "applied", hard: false });
 				});
 			});
+
+			describe("the reset", () => {
+				// The operator reset clears the subject's lock state whole, with no
+				// boundary or rebind asked for, and ends every other authorization.
+				const RESET = { operation: "reset", sid: undefined } as const;
+				const resetAuthorization = () => authorization({ ...RESET, recoveryId: "reset-1" });
+
+				it("ends every hold, the hard hold included, with no boundary or rebind, and moves the generation", async () => {
+					const store = await factory();
+					const last = await toTheHardLimit(store);
+					await store.authorizeSubjectRecovery("user-1", resetAuthorization());
+					expect(await recover(store, last + MINUTE, RESET)).toEqual({
+						outcome: "applied",
+						recoveryId: "reset-1",
+						generation: 1,
+						cleared: { week: true, run: true, hard: true },
+						hard: false,
+					});
+					expect(await store.subjectGeneration("user-1")).toBe(1);
+					// Neither the hard hold nor a week of six holds: the state starts empty.
+					expect(
+						(await check(store, last + 2 * MINUTE, { ...SMALL_HARD, weeklyBudget: 6 })).ok,
+					).toBe(true);
+				});
+
+				it("ends every other authorization of the subject, keeps its own applied, and leaves another subject's", async () => {
+					const store = await factory();
+					await store.authorizeSubjectRecovery("user-1", authorization());
+					await store.authorizeSubjectRecovery(
+						"user-1",
+						authorization({ sid: "sid-2", recoveryId: "recovery-2" }),
+					);
+					await store.authorizeSubjectRecovery("user-2", authorization());
+					await store.authorizeSubjectRecovery("user-1", resetAuthorization());
+					const now = start();
+					expect(await recover(store, now, RESET)).toMatchObject({
+						outcome: "applied",
+						generation: 1,
+					});
+					expect(await recover(store, now)).toMatchObject({ reason: "unauthorized" });
+					expect(await recover(store, now, { sid: "sid-2" })).toMatchObject({
+						reason: "unauthorized",
+					});
+					expect(await recover(store, now, RESET)).toEqual({
+						outcome: "already_applied",
+						recoveryId: "reset-1",
+						generation: 1,
+						hard: false,
+					});
+					expect(await recover(store, now, {}, "user-2")).toMatchObject({ outcome: "applied" });
+				});
+
+				it("leaves what is not lock state: the email-proof requirement, the first-binding mark, a session's proof and a transaction", async () => {
+					const store = await factory();
+					const now = Math.floor(Math.max(Date.now(), await expiry.now()));
+					await store.requireEmailProofAtNextBinding("user-1");
+					await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+					await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+					await store.create(TX());
+					await store.authorizeSubjectRecovery("user-1", resetAuthorization());
+					expect(await recover(store, start(), RESET)).toMatchObject({ outcome: "applied" });
+					expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
+					expect(await store.firstBindingAt("user-1", now)).toBe(now);
+					expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+					expect(await store.get("tx-1")).not.toBeNull();
+				});
+
+				it("moves the generation on at each reset applied", async () => {
+					const store = await factory();
+					for (const generation of [1, 2, 3]) {
+						await store.authorizeSubjectRecovery(
+							"user-1",
+							authorization({ ...RESET, recoveryId: `reset-${generation}` }),
+						);
+						expect(await recover(store, start(), RESET)).toMatchObject({
+							outcome: "applied",
+							generation,
+						});
+					}
+					expect(await store.subjectGeneration("user-1")).toBe(3);
+				});
+			});
 		});
 	});
 
