@@ -19,6 +19,8 @@
  * the express session first, then session admission on the cookie's claim as
  * the step's action, then the flow's own conditions. Asked at
  * every step; fails closed, so a store that cannot answer is an outage, never a yes.
+ * A step-up admission asks for is a refusal at every step; at connect it also
+ * carries the requirement's trip.
  * The connection pin is defined here once, for the judgement and the callback alike.
  */
 
@@ -41,6 +43,13 @@ import type { FederationGrantBrowserRouterOptions, Unanswered } from "./browserF
 import { sessionIdOf } from "./browserRequest.mjs";
 import type { FederationGrantLog } from "./log.mjs";
 
+/** Where a requirement that asked this session to step up sends the browser. */
+export interface StepUpTrip {
+	readonly requirement: string;
+	/** The requirement's page as admission answers it (`page.href`): no return parameter yet. */
+	readonly page: string;
+}
+
 export type Judgement =
 	| { readonly ok: true; readonly binding: FederationGrantBrowserBinding }
 	| {
@@ -53,6 +62,11 @@ export type Judgement =
 				| "stale"
 				| "connection_not_permitted"
 				| "connection_changed";
+			/**
+			 * At connect only, beside `reauthentication_required`: the step-up trip
+			 * admission asked for, which connect may take once instead of refusing.
+			 */
+			readonly stepUp?: StepUpTrip;
 	  }
 	| {
 			readonly ok: false;
@@ -76,25 +90,40 @@ export const CONSENT: FederationGrantsAdmissionAction = "federation_grants.conse
 export const CALLBACK: FederationGrantsAdmissionAction = "federation_grants.callback";
 
 /**
- * The session's part of a judgement: the live record; `null` for any session a new
- * login is the remedy for (gone, expired, another subject's, covered by the
- * sessions boundary, or refused by a requirement, `step_up` included); or an
- * outage admission has already logged, with the store it named.
+ * The session's part of a judgement: the live record; a refusal for any session
+ * a new login is the remedy for (gone, expired, another subject's, covered by
+ * the sessions boundary, or refused by a requirement), carrying the trip when a
+ * requirement asked for a step-up; or an outage admission has already logged,
+ * with the store it named.
  */
+type SessionPart =
+	| { readonly outcome: "admitted"; readonly session: UserSession }
+	| { readonly outcome: "refused"; readonly stepUp?: StepUpTrip }
+	| { readonly outcome: "unavailable"; readonly store: string };
+
 async function admittedSession(
 	deps: AdmissionDeps,
 	claim: SessionClaim,
 	action: FederationGrantsAdmissionAction,
-): Promise<UserSession | null | { readonly unavailable: string }> {
+): Promise<SessionPart> {
 	const admission = await admitSession(deps, { claim, action });
-	if (admission.outcome === "unavailable") return { unavailable: admission.store };
-	return admission.outcome === "admitted" ? admission.session : null;
+	switch (admission.outcome) {
+		case "admitted":
+			// No record to bind to is no session to go on with.
+			return admission.session === null
+				? { outcome: "refused" }
+				: { outcome: "admitted", session: admission.session };
+		case "unavailable":
+			return { outcome: "unavailable", store: admission.store };
+		case "step_up":
+			return {
+				outcome: "refused",
+				stepUp: { requirement: admission.requirement, page: admission.page.href },
+			};
+		default:
+			return { outcome: "refused" };
+	}
 }
-
-/** Whether the session's part was an outage, rather than a record or a refusal. */
-const isAdmissionOutage = (
-	part: UserSession | null | { readonly unavailable: string },
-): part is { readonly unavailable: string } => part !== null && "unavailable" in part;
 
 /**
  * Whether THIS browser may go on with THIS intent now: the cookie names the
@@ -123,11 +152,21 @@ export async function judge(
 	// A session that authenticated at or before the sessions boundary may not mint a
 	// consent dated after it; `authTime` never changes, so signing in again is the
 	// remedy, and the distinct error lets the page say so.
-	const session = await admittedSession(admission, claim, action);
-	if (isAdmissionOutage(session)) {
-		return { ok: false, status: 503, reason: "unavailable", admissionStore: session.unavailable };
+	const part = await admittedSession(admission, claim, action);
+	if (part.outcome === "unavailable") {
+		return { ok: false, status: 503, reason: "unavailable", admissionStore: part.store };
 	}
-	if (session === null) return { ok: false, status: 403, reason: "reauthentication_required" };
+	if (part.outcome === "refused") {
+		// Only connect sends a browser on a step-up trip: consent and the callback
+		// come after connect has gated, and answer it as a dead session.
+		return {
+			ok: false,
+			status: 403,
+			reason: "reauthentication_required",
+			...(action === CONNECT && part.stepUp !== undefined ? { stepUp: part.stepUp } : {}),
+		};
+	}
+	const { session } = part;
 
 	// Which question is being asked, so that a failure names what could not answer.
 	let asking: Omit<Unanswered, "error"> = { store: "federation_grant", step: "is_current_intent" };
@@ -219,7 +258,7 @@ export async function sessionHolds(
 	if (sessionIdOf(req) !== binding.sessionId || claim.sid !== binding.sid) {
 		return "reauthentication_required";
 	}
-	const session = await admittedSession(admission, claim, CALLBACK);
-	if (isAdmissionOutage(session)) return "unavailable";
-	return session === null ? "reauthentication_required" : "ok";
+	const part = await admittedSession(admission, claim, CALLBACK);
+	if (part.outcome === "unavailable") return "unavailable";
+	return part.outcome === "refused" ? "reauthentication_required" : "ok";
 }

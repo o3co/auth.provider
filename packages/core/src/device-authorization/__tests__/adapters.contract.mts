@@ -24,6 +24,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
 import type { DeviceCodeStore } from "../types.mjs";
 
 export interface DeviceCodeStoreContractFactory {
@@ -35,6 +36,8 @@ export interface DeviceCodeStoreContractFactory {
 
 const NOW = 1_800_000_000_000;
 const MINUTE = 60_000;
+/** When the approving session authenticated: before the approval, as it always is. */
+const AUTH_TIME_MS = NOW - 5 * MINUTE;
 
 const seed = {
 	deviceCode: "dc-aaaaaaaaaaaaaaaaaaaa",
@@ -61,6 +64,32 @@ const UNSTORABLE_EXPIRIES = [
 	1e21,
 	-1e21,
 ];
+
+/**
+ * `amr` values no store may record: not a non-empty list of non-empty strings.
+ * A hole in a list reads as `undefined`, which is not a string.
+ */
+const UNSTORABLE_AMRS = [
+	[],
+	[""],
+	["pwd", ""],
+	[1],
+	["pwd", undefined],
+	// biome-ignore lint/suspicious/noSparseArray: a hole is one of the malformed lists
+	["pwd", , "mfa"],
+	"pwd",
+	null,
+	{ 0: "pwd", length: 1 },
+] as unknown as ReadonlyArray<readonly string[]>;
+
+/** Authentication instants no store may record: not a valid `Date`, or before the epoch. */
+const UNSTORABLE_AUTH_TIMES = [
+	new Date(Number.NaN),
+	new Date(-1),
+	AUTH_TIME_MS,
+	String(AUTH_TIME_MS),
+	null,
+] as unknown as ReadonlyArray<Date>;
 
 export const runDeviceCodeStoreContract = (
 	name: string,
@@ -185,15 +214,21 @@ export const runDeviceCodeStoreContract = (
 					subject: undefined,
 					grantedScope: undefined,
 					approvedAtMs: undefined,
+					amr: undefined,
+					authTimeMs: undefined,
 				};
 				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toStrictEqual(pending);
 
+				// The authentication instant is earlier than the approval, so the two
+				// instants swapped show too.
 				const approved = {
 					...pending,
 					status: "approved",
 					subject: "user-1",
 					grantedScope: ["profile"],
 					approvedAtMs: NOW,
+					amr: ["pwd", "otp", "mfa"],
+					authTimeMs: AUTH_TIME_MS,
 				};
 				expect(
 					await store.approve({
@@ -201,6 +236,8 @@ export const runDeviceCodeStoreContract = (
 						subject: "user-1",
 						grantedScope: ["profile"],
 						nowMs: NOW,
+						amr: ["pwd", "otp", "mfa"],
+						authTime: new Date(AUTH_TIME_MS),
 					}),
 				).toStrictEqual({ status: "ok", authorization: approved });
 				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000)).toStrictEqual({
@@ -226,6 +263,8 @@ export const runDeviceCodeStoreContract = (
 					subject: undefined,
 					grantedScope: undefined,
 					approvedAtMs: undefined,
+					amr: undefined,
+					authTimeMs: undefined,
 				};
 				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toStrictEqual(pending);
 				expect(await store.deny(seed.userCode, NOW)).toStrictEqual({
@@ -252,6 +291,8 @@ export const runDeviceCodeStoreContract = (
 					subject: "user-1",
 					grantedScope: [],
 					approvedAtMs: NOW,
+					amr: undefined,
+					authTimeMs: undefined,
 				};
 				expect(
 					await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW }),
@@ -278,6 +319,174 @@ export const runDeviceCodeStoreContract = (
 				expect(decided.status === "ok" && decided.authorization.approvedAtMs).toBe(approvedAt);
 				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
 				expect(polled.status === "approved" && polled.authorization.approvedAtMs).toBe(approvedAt);
+			});
+		});
+
+		it("records the approving session's amr and authentication time, and hands them to the poll", async () => {
+			// What the device's token says about how its user authenticated. The
+			// grant stamps them at the poll, so the store carries them from the
+			// approval to the poll unchanged.
+			await withStore(async (store) => {
+				await store.create(seed);
+				const decided = await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: NOW,
+					amr: ["pwd", "hwk", "mfa"],
+					authTime: new Date(AUTH_TIME_MS),
+				});
+				expect(decided).toMatchObject({
+					status: "ok",
+					authorization: { amr: ["pwd", "hwk", "mfa"], authTimeMs: AUTH_TIME_MS },
+				});
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				expect(polled).toMatchObject({
+					status: "approved",
+					authorization: { amr: ["pwd", "hwk", "mfa"], authTimeMs: AUTH_TIME_MS },
+				});
+			});
+		});
+
+		it("keeps an approval handed neither as one that records neither: absent stays absent", async () => {
+			// Absent reads as "cannot tell" downstream, which fails closed; a store
+			// that filled in an amr or an instant of its own would vouch for an
+			// authentication nobody reported.
+			await withStore(async (store) => {
+				await store.create(seed);
+				const decided = await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: NOW,
+				});
+				expect(decided.status === "ok" && decided.authorization).toMatchObject({
+					amr: undefined,
+					authTimeMs: undefined,
+				});
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				expect(polled.status).toBe("approved");
+				if (polled.status === "approved") {
+					expect(polled.authorization).toHaveProperty("amr", undefined);
+					expect(polled.authorization).toHaveProperty("authTimeMs", undefined);
+				}
+			});
+		});
+
+		it("keeps an approval's amr as it was handed, whatever the caller does to its array afterwards", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				const amr = ["pwd", "otp"];
+				await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW, amr });
+				amr.push("mfa");
+				amr[0] = "fed";
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				expect(polled.status === "approved" && polled.authorization.amr).toEqual(["pwd", "otp"]);
+			});
+		});
+
+		it("refuses an amr that is not a non-empty list of non-empty strings, and records nothing", async () => {
+			// A caller fault. Stored, it would reach a token as an amr no reader
+			// accepts, or as one that says less than the session vouched for.
+			await withStore(async (store) => {
+				await store.create(seed);
+				for (const bad of UNSTORABLE_AMRS) {
+					await expect(
+						store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW, amr: bad }),
+						String(bad),
+					).rejects.toThrow(RangeError);
+					expect(await store.findPendingByUserCode(seed.userCode, NOW)).toMatchObject({
+						status: "pending",
+					});
+				}
+				expect(
+					(await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW })).status,
+				).toBe("ok");
+			});
+		});
+
+		it("refuses an authentication time that is not a valid Date at or after the epoch, and records nothing", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				for (const bad of UNSTORABLE_AUTH_TIMES) {
+					await expect(
+						store.approve({
+							userCode: seed.userCode,
+							subject: "user-1",
+							nowMs: NOW,
+							authTime: bad,
+						}),
+						String(bad),
+					).rejects.toThrow(RangeError);
+					expect(await store.findPendingByUserCode(seed.userCode, NOW)).toMatchObject({
+						status: "pending",
+					});
+				}
+				const decided = await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: NOW,
+					authTime: new Date(0),
+				});
+				expect(decided.status === "ok" && decided.authorization.authTimeMs).toBe(0);
+			});
+		});
+
+		it("refuses an authentication time further ahead of the approval's clock than the skew tolerated between hosts, and records nothing", async () => {
+			// One further ahead is no clock's reading; kept, it would read as a
+			// fresh authentication for longer than it is.
+			await withStore(async (store) => {
+				await store.create(seed);
+				await expect(
+					store.approve({
+						userCode: seed.userCode,
+						subject: "user-1",
+						nowMs: NOW,
+						authTime: new Date(NOW + DEFAULT_CLOCK_SKEW_MS + 1),
+					}),
+				).rejects.toThrow(RangeError);
+				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toMatchObject({
+					status: "pending",
+				});
+			});
+		});
+
+		it("records an authentication time a little ahead of the approval's clock as that clock's instant", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				const decided = await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: NOW,
+					authTime: new Date(NOW + DEFAULT_CLOCK_SKEW_MS),
+				});
+				expect(decided.status === "ok" && decided.authorization.authTimeMs).toBe(NOW);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				expect(polled.status === "approved" && polled.authorization.authTimeMs).toBe(NOW);
+			});
+		});
+
+		it("records an authentication time held to a fractional clock as a whole millisecond", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: NOW + 0.5,
+					authTime: new Date(NOW + 1_000),
+				});
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				expect(polled.status === "approved" && polled.authorization.authTimeMs).toBe(NOW);
+			});
+		});
+
+		it("records neither on a denial", async () => {
+			await withStore(async (store) => {
+				await store.create(seed);
+				const decided = await store.deny(seed.userCode, NOW);
+				expect(decided.status === "ok" && decided.authorization).toMatchObject({
+					status: "denied",
+					amr: undefined,
+					authTimeMs: undefined,
+				});
 			});
 		});
 

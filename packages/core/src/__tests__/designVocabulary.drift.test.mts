@@ -871,6 +871,8 @@ const REDIS_STORE_WHY =
 	"the Redis store copying the record to and from its envelope, and the step-up write";
 const CODE_AMR_STORE_WHY =
 	"a code repository copying the code record's amr in and out: what /authorize filled with vouchedAmr, never a session record";
+const DEVICE_CODE_AMR_STORE_WHY =
+	"a device-code store copying an approval's amr in and out: what device verification filled with vouchedAmr, never a session record";
 
 /**
  * Every read of a field named `amr` or `authentication` in the scanned
@@ -1155,6 +1157,44 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: CODE_AMR_STORE_WHY,
 	},
+	// A device approval's amr: what the approving session vouched for at
+	// device verification (`vouchedAmr`), carried on the record to the poll.
+	{
+		file: "packages/core/src/device-authorization/approval.mts",
+		read: "approval.amr",
+		count: 1,
+		why: "what a device-code store records of an approval's amr, read once and checked: what device verification filled with vouchedAmr, never a session record",
+	},
+	{
+		file: "packages/core/src/device-authorization/memory.mts",
+		read: "{amr}=recordableDeviceApproval(input,input.nowMs)",
+		count: 1,
+		why: DEVICE_CODE_AMR_STORE_WHY,
+	},
+	{
+		file: "packages/core/src/device-authorization/memory.mts",
+		read: "entry.amr",
+		count: 2,
+		why: DEVICE_CODE_AMR_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/device-code-store.mts",
+		read: "{amr}=recordableDeviceApproval(input,input.nowMs)",
+		count: 1,
+		why: DEVICE_CODE_AMR_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/device-code-store.mts",
+		read: "fields.amr",
+		count: 1,
+		why: DEVICE_CODE_AMR_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/ioredis/clients/device-code.mts",
+		read: "approval?.amr",
+		count: 1,
+		why: "the device-code store's client encoding an approval's amr as the approval script's argument: what device verification filled with vouchedAmr, never a session record",
+	},
 	{
 		file: "packages/oauth/src/grants/authorization.mts",
 		read: "codeData.amr",
@@ -1252,7 +1292,8 @@ const SESSION_RECORD_FIELDS: ReadonlySet<string> = new Set(["amr", "authenticati
  * claim), matched by the name they are called by: the token minters
  * `generateToken` and `generateIdToken`, the key store's `sign`, which takes
  * the claims both build (see {@link CLAIMS_ONLY_TAKERS}), the amr composer, a
- * store's `create`, the step-up and the acr selection. A spread into an object
+ * store's `create`, a device-code store's `approve` and what decides its
+ * record, the step-up and the acr selection. A spread into an object
  * handed to one of them copies a record's own `amr` without naming it.
  * `create` is also other factories' name: their spreads are pinned like reads.
  */
@@ -1262,6 +1303,8 @@ const AMR_TAKERS: ReadonlySet<string> = new Set([
 	"generateIdToken",
 	"composeAmr",
 	"create",
+	"approve",
+	"recordableDeviceApproval",
 	"recordSecondFactor",
 	"sessionAfterSecondFactor",
 	"checkSecondFactorEvent",
@@ -2020,6 +2063,24 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		]) {
 			expect(sessionRecordReads(notASpread), notASpread).toHaveLength(0);
 		}
+	});
+
+	it("counts a device-code store's approve among what takes an amr: a spread into it copies the session's own", () => {
+		expect(
+			sessionRecordReads("await store.approve({ ...session, userCode, nowMs });"),
+		).toHaveLength(1);
+		expect(
+			sessionRecordReads(
+				"await store.approve({ userCode, subject, nowMs, ...(amr ? { amr } : {}) });",
+			),
+		).toHaveLength(0);
+	});
+
+	it("counts what decides a device approval's record among what takes an amr", () => {
+		expect(sessionRecordReads("recordableDeviceApproval({ ...session }, nowMs);")).toHaveLength(1);
+		expect(
+			sessionRecordReads("recordableDeviceApproval({ ...(amr ? { amr } : {}) }, nowMs);"),
+		).toHaveLength(0);
 	});
 
 	it("counts the key store's signer among what takes an amr: a token's claims reach it whole", () => {

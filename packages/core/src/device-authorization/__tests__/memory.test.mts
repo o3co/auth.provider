@@ -259,6 +259,23 @@ describe("memory DeviceCodeStore — eviction and decision edge cases", () => {
 		expect(await store.findPendingByUserCode("edge-uc-2", base)).not.toBeNull();
 	});
 
+	it("answers an approval's amr frozen: no reader can change what the poll hands on", async () => {
+		// The decision's record and the poll's share the stored copy, so a
+		// reader writing through one would change what the device's token says.
+		const base = Date.now();
+		const store = createMemoryDeviceCodeStore();
+		await store.create(record(4, base + 100_000));
+		const decided = await store.approve({
+			userCode: "edge-uc-4",
+			subject: "u",
+			nowMs: base,
+			amr: ["pwd", "otp"],
+		});
+		expect(decided.status === "ok" && Object.isFrozen(decided.authorization.amr)).toBe(true);
+		const polled = await store.poll("edge-dc-4", base);
+		expect(polled.status === "approved" && polled.authorization.amr).toEqual(["pwd", "otp"]);
+	});
+
 	it("answers already_decided when a decided record is denied", async () => {
 		const base = Date.now();
 		const store = createMemoryDeviceCodeStore();

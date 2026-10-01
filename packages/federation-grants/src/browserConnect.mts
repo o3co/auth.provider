@@ -19,17 +19,30 @@
  * signed in sent to login, the judgement as `federation_grants.connect`, and the
  * consent question parked for this browser's binding before the browser is sent
  * to the consent page. Connect never approves or creates an upstream transaction.
+ * A session a requirement asks to step up is sent once to the requirement's
+ * page, returning here with the one-trip marker; a marked return still asked
+ * to step up is refused as a dead session is, never sent again.
  * An unknown handle, every refusal after the handle is read, and every `503` this
  * handler answers are audited as `federation.grant.authorization_failed`, with only
  * what is established by then.
  */
 
-import type { FederationGrantIntent, FederationGrantIntentStore } from "@o3co/auth-provider-core";
+import {
+	type FederationGrantIntent,
+	type FederationGrantIntentStore,
+	LOGIN_RETURN_PARAMETER,
+} from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
 import { plain } from "./browserAnswers.mjs";
 import type { BrowserFlow } from "./browserFlow.mjs";
-import { CONNECT, type Judgement, judge, judgementUnavailable } from "./browserJudgement.mjs";
-import { claimOf, isPrefetch, single } from "./browserRequest.mjs";
+import {
+	CONNECT,
+	type Judgement,
+	judge,
+	judgementUnavailable,
+	type StepUpTrip,
+} from "./browserJudgement.mjs";
+import { claimOf, isPrefetch, isSteppedUpReturn, single } from "./browserRequest.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
 import { requestIdOf } from "./requestId.mjs";
 
@@ -93,6 +106,26 @@ export function createConnectHandler({
 				now,
 			);
 			if (!judged.ok) {
+				if (
+					judged.reason !== "unavailable" &&
+					judged.stepUp !== undefined &&
+					!isSteppedUpReturn(req)
+				) {
+					const location = stepUpLocation(judged.stepUp, options.issuer, intent.handle);
+					if (location === undefined) {
+						// Registration holds a page to the issuer's origin; a resolver built
+						// without the issuer does not. A composition fault, never followed.
+						log.misconfigured("federation_grant_step_up_page_off_origin", {
+							grantId: intent.grantId,
+							correlationId: requestIdOf(res),
+							requirement: judged.stepUp.requirement,
+						});
+						plain(res, 500, "Something went wrong.");
+						return;
+					}
+					res.redirect(303, location);
+					return;
+				}
 				if (judged.reason === "unavailable" && judged.unanswered !== undefined) {
 					judgementUnavailable(
 						log,
@@ -143,6 +176,21 @@ export function createConnectHandler({
 			plain(res, 500, "Something went wrong.");
 		}
 	};
+}
+
+/**
+ * The step-up page with `redirect_to` naming this connect, marked: built from
+ * the issuer and the intent's handle alone, never from the request. `undefined`
+ * for a page off the issuer's origin.
+ */
+function stepUpLocation(trip: StepUpTrip, issuer: string, handle: string): string | undefined {
+	const target = new URL(trip.page);
+	if (target.origin !== new URL(issuer).origin) return undefined;
+	target.searchParams.set(
+		LOGIN_RETURN_PARAMETER,
+		federationGrantConnectUri(issuer, handle, { steppedUp: true }),
+	);
+	return target.href;
 }
 
 /** The consent page's URL with the challenge on it. */

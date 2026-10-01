@@ -46,6 +46,8 @@
  */
 
 import { describe, expectTypeOf, it } from "vitest";
+import type { federationGrantAccessToken } from "#/federation-grants/held-token.mjs";
+import type { FederationGrantStore } from "#/federation-grants/store.mjs";
 import type {
 	FederationGrantAuthorization,
 	FederationGrantBase,
@@ -100,10 +102,37 @@ describe("what a grant store answers with", () => {
 	it("names the access token, and every field of one", () => {
 		expectTypeOf<OptionalKeys<FederationGrantCredentials>>().toEqualTypeOf<never>();
 		expectTypeOf<IsRequiredKey<FederationGrantCredentials, "accessToken">>().toEqualTypeOf<true>();
-		// The one optional key, for now: every refresh writes it, and leaving it
-		// out fails open, serving a token past its adapter's stated end. It
-		// becomes a required key once every store and writer carries it.
+		// The one optional key: a record from before it existed, or rewritten by
+		// a release that does not keep it, has none, and reads as ending at
+		// `obtainedAt` + `issuedLifetime`.
 		expectTypeOf<OptionalKeys<AccessToken>>().toEqualTypeOf<"effectiveExpiresAt">();
+	});
+});
+
+type Written<T extends { readonly credentials: { readonly accessToken: unknown } }> = Exclude<
+	T["credentials"]["accessToken"],
+	undefined
+>;
+
+describe("what a writer hands a grant store", () => {
+	// Leaving `effectiveExpiresAt` out fails open, serving a token past its
+	// adapter's stated end; every write states it.
+	it("states when the access token ends, on an activation", () => {
+		type Token = Written<Parameters<FederationGrantStore["activate"]>[0]>;
+		expectTypeOf<OptionalKeys<Token>>().toEqualTypeOf<never>();
+		expectTypeOf<Token["effectiveExpiresAt"]>().toEqualTypeOf<Date>();
+	});
+
+	it("states when the access token ends, on a refresh", () => {
+		type Token = Written<Parameters<FederationGrantStore["replaceCredentials"]>[0]>;
+		expectTypeOf<OptionalKeys<Token>>().toEqualTypeOf<never>();
+		expectTypeOf<Token["effectiveExpiresAt"]>().toEqualTypeOf<Date>();
+	});
+
+	it("is what the access-token builder returns", () => {
+		type Token = ReturnType<typeof federationGrantAccessToken>;
+		expectTypeOf<OptionalKeys<Token>>().toEqualTypeOf<never>();
+		expectTypeOf<Token["effectiveExpiresAt"]>().toEqualTypeOf<Date>();
 	});
 });
 

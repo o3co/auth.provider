@@ -235,6 +235,7 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 					tokenType: "Bearer",
 					obtainedAt: at,
 					issuedLifetime: 3600,
+					effectiveExpiresAt: new Date(at.getTime() + 3_600_000),
 					scopes: [...connection.scopes],
 				},
 			},

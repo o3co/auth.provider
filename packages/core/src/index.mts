@@ -685,6 +685,7 @@ export {
 	MFA_LOCKOUT_MAX_BACKOFF_SECONDS,
 	MFA_LOCKOUT_MAX_HARD_LIMIT,
 	MFA_LOCKOUT_MIN_HARD_LIMIT,
+	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
@@ -1526,6 +1527,7 @@ export {
 	type FederationGrantConnection,
 	type FederationGrantConsent,
 	type FederationGrantCredentials,
+	type FederationGrantCredentialsInput,
 	type FederationGrantDenial,
 	type FederationGrantExpiredReason,
 	type FederationGrantIneligibilityMarker,
@@ -1587,6 +1589,10 @@ export {
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628)
 // ===========================================================================
 
+export {
+	type RecordableDeviceApproval,
+	recordableDeviceApproval,
+} from "./device-authorization/approval.mjs";
 export {
 	DeviceCodeStoreError,
 	type DeviceCodeStoreErrorReason,

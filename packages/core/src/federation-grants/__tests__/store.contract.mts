@@ -20,7 +20,7 @@ import type { FederationGrantStore, FederationGrantWrite } from "#/federation-gr
 import {
 	type AuthorizedFederationGrant,
 	type FederationGrantAuthorization,
-	type FederationGrantCredentials,
+	type FederationGrantCredentialsInput,
 	type FederationGrantIneligibilityMarker,
 	type FederationGrantRefreshFailureInput,
 	hasFederationGrantAuthorization,
@@ -105,13 +105,14 @@ const authorization = (
 	...over,
 });
 
-const credentials = (tag: string): FederationGrantCredentials => ({
+const credentials = (tag: string): FederationGrantCredentialsInput => ({
 	refreshToken: `rt-${tag}`,
 	accessToken: {
 		value: `at-${tag}`,
 		tokenType: "Bearer",
 		obtainedAt: at(2 * MIN),
 		issuedLifetime: 3600,
+		effectiveExpiresAt: at(62 * MIN),
 		scopes: [...SCOPES],
 	},
 });
