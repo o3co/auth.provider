@@ -45,6 +45,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
@@ -321,6 +322,83 @@ describe("the authorization_code grant on admission — the first read", () => {
 		const { handler } = makeGrant({});
 		const { result } = await handler.handle(ctx({ user: { id: "cookie-user" } }));
 		expect(result.status).toBe(200);
+	});
+});
+
+describe("the authorization_code grant — the auth_time it stamps, read against the minting clock", () => {
+	/** A wall clock that steps back two seconds at every read, as one an operator or NTP moves back would. */
+	const steppingBack = () => {
+		let t = Date.now();
+		return vi.spyOn(Date, "now").mockImplementation(() => {
+			t -= 2_000;
+			return t;
+		});
+	};
+
+	it("a clock that steps back between the reading of authTime and the signing still gives auth_time <= iat on every token", async () => {
+		const authTime = new Date();
+		const clock = steppingBack();
+		try {
+			const { handler } = makeGrant({ userSessionStore: storeAnswering(record({ authTime })) });
+			const { result } = await handler.handle(ctx());
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+			const tokens = [
+				result.tokens.access_token,
+				result.tokens.refresh_token,
+				result.tokens.id_token,
+			];
+			for (const claims of tokens.map((token) => decodeJwt(token as string))) {
+				expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+			}
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	const minted = async (authTime: Date) => {
+		const { handler } = makeGrant({ userSessionStore: storeAnswering(record({ authTime })) });
+		const { result } = await handler.handle(ctx());
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		return [result.tokens.access_token, result.tokens.refresh_token, result.tokens.id_token].map(
+			(token) => decodeJwt(token as string),
+		);
+	};
+
+	it("stamps the session's authTime, in seconds, on the access, refresh and id tokens alike", async () => {
+		const authTime = minutesAgo(5);
+		for (const claims of await minted(authTime)) {
+			expect(claims.auth_time).toBe(Math.floor(authTime.getTime() / 1000));
+		}
+	});
+
+	it("an authTime ahead of the clock within the skew is stamped as the minting clock: never later than iat", async () => {
+		const before = Math.floor(Date.now() / 1000);
+		for (const claims of await minted(new Date(Date.now() + 60_000))) {
+			expect(claims.auth_time as number).toBeGreaterThanOrEqual(before);
+			expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+		}
+	});
+
+	it("an authTime further ahead than the skew allows is 400 invalid_grant session_invalid, nothing signed, warned with how far ahead", async () => {
+		const logger = createMockLogger();
+		const { handler, signed } = makeGrant({
+			logger,
+			userSessionStore: storeAnswering(record({ authTime: new Date(Date.now() + 10 * 60_000) })),
+		});
+		expect(await refused(handler)).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(signed).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ sid: SID, clientId: CLIENT_ID, aheadMs: expect.any(Number) },
+			"auth_time_ahead_of_clock",
+		);
+		const [fields] = logger.warn.mock.calls.find(
+			([, line]) => line === "auth_time_ahead_of_clock",
+		) as [{ aheadMs: number }];
+		expect(fields.aheadMs).toBeGreaterThan(5 * 60_000);
 	});
 });
 

@@ -381,7 +381,9 @@ What the suites hold an adapter to:
   named, as `undefined`, not left out. An extra key, or a class instance in
   place of a plain object, also fails. `CodeRepository`, `FederationTokenStore`
   and `AssertionIssuerRegistry` return such records but ship no suite yet; the
-  bundled adapters' own tests hold them to the same rule.
+  bundled adapters' own tests hold them to the same rule. The exception is
+  `FederationTokens.obtainedAt`, the one optional key, which is left out when
+  unset.
 - **Only the inputs the port's types allow.** How an adapter treats a value
   outside them, such as a `null` or `""` from an untyped caller, is up to the
   adapter, and its own tests cover it. For example, the bundled device-code

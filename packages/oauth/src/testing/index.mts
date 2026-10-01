@@ -29,7 +29,26 @@ export interface OAuthConfigForTestsOptions {
 	readonly accessTokenExpiresIn?: number;
 	/** `oauth.refreshToken.expiresIn`, in seconds; 86400 unless given. */
 	readonly refreshTokenExpiresIn?: number;
+	/**
+	 * `oauth.authorize.acrValues`: each acr this deployment vouches for, with
+	 * the `amr` values that satisfy it (one list, or alternatives); left
+	 * unstated, which reads as no acr values, unless given.
+	 */
+	readonly acrValues?: Readonly<Record<string, readonly string[] | readonly (readonly string[])[]>>;
 }
+
+/** A fresh, mutable copy of an acr table, as the schema reads one. */
+const copyAcrValues = (
+	table: NonNullable<OAuthConfigForTestsOptions["acrValues"]>,
+): Record<string, string[] | string[][]> =>
+	Object.fromEntries(
+		Object.entries(table).map(([acr, requirement]) => [
+			acr,
+			requirement.every((entry) => typeof entry === "string")
+				? [...(requirement as readonly string[])]
+				: (requirement as readonly (readonly string[])[]).map((alternative) => [...alternative]),
+		]),
+	);
 
 /**
  * The `oauth` section, as a configuration fragment to lay over a
@@ -60,6 +79,9 @@ export function oauthConfigForTests(options: OAuthConfigForTestsOptions = {}) {
 					? {}
 					: { expiresIn: options.refreshTokenExpiresIn }),
 			},
+			...(options.acrValues === undefined
+				? {}
+				: { authorize: { acrValues: copyAcrValues(options.acrValues) } }),
 			consentPage: { url: "/consent" },
 			clientIdMetadataDocuments: { enabled: false },
 		},
