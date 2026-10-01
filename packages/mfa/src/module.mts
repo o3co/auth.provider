@@ -508,6 +508,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								...(deps.subjectRevocation === undefined
 									? {}
 									: { subjectRevocation: deps.subjectRevocation }),
+								stepUpRecordable: supportsSecondFactorUpdate(deps.userSessionStore),
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,

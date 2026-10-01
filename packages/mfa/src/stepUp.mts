@@ -16,14 +16,21 @@
 
 /**
  * A signed-in session's step-up (the MFA ADR's F2), over the coordinator's
- * kit. For a subject holding no record that may count (`mayCount`), its
- * first-binding branch: the `enroll` transaction the account-email proof is
- * owed on — the one the call names, when it is that session's own
- * first-binding transaction and its proof is not met, raised to owe it; a
- * new one otherwise, a met proof included, since the session's proof it
- * recorded may be lost. A subject holding one is answered
- * `counting_factor_held`: the branch that steps up a second factor goes
- * here beside this one.
+ * kit.
+ *
+ * - For a subject holding no record that may count (`mayCount`), its
+ *   first-binding branch: the `enroll` transaction the account-email proof
+ *   is owed on — the one the call names, when it is that session's own
+ *   first-binding transaction and its proof is not met, raised to owe it; a
+ *   new one otherwise, a met proof included, since the session's proof it
+ *   recorded may be lost.
+ * - For a subject holding one, the `step_up` transaction its second factor
+ *   is verified on — the one the call names, when it is that session's own;
+ *   a new one otherwise, recording the `acr_values` hinted, which choose
+ *   nothing here. Every factor the subject can use is offered, one that does
+ *   not count included; none of an installed kind whose data opens is
+ *   `no_qualifying_factor`. A session store that cannot record the step-up
+ *   opens none, whatever the session already holds.
  */
 
 import type { MfaTransaction } from "@o3co/auth-provider-core";
@@ -37,15 +44,18 @@ import { mayCount } from "./firstBinding.mjs";
 
 /** The step-up over the coordinator's `kit` (see this file's header). */
 export function createMfaStepUp(kit: MfaCeremonyKit): {
-	open(call: MfaCeremonyCall): Promise<MfaStepUpOutcome>;
+	open(
+		call: MfaCeremonyCall & { readonly acrValues: readonly string[] | undefined },
+	): Promise<MfaStepUpOutcome>;
 } {
-	/** `tx` as the page names it next. */
+	/** `tx` as the page names it next, and whether the proof is owed on it. */
 	const opened = (tx: MfaTransaction): MfaStepUpOutcome => ({
 		outcome: "opened",
 		transaction: {
 			id: tx.id,
 			expiresIn: Math.max(1, Math.ceil((tx.expiresAtMs - kit.now()) / 1000)),
 		},
+		emailProof: tx.emailProof === "required",
 	});
 
 	return {
@@ -55,7 +65,24 @@ export function createMfaStepUp(kit: MfaCeremonyKit): {
 			const records = await kit.recordsOf(session.subject);
 			if ("outcome" in records) return records;
 			if (records.some((record) => mayCount(kit.factors, record))) {
-				return { outcome: "counting_factor_held" };
+				if (!kit.stepUpRecordable) return { outcome: "step_up_unrecordable" };
+				const usable = records.some(
+					(record) =>
+						kit.factors.get(record.kind) !== undefined &&
+						kit.sealing.openFactorData(
+							{ subject: session.subject, id: record.id, kind: record.kind },
+							record.data,
+						).state === "ok",
+				);
+				if (!usable) return { outcome: "no_qualifying_factor" };
+				if (call.transactionId !== undefined) {
+					const tx = await kit.boundInSession(call);
+					if (tx === null) return UNKNOWN_TRANSACTION;
+					if ("outcome" in tx) return tx;
+					return tx.purpose === "step_up" ? opened(tx) : UNKNOWN_TRANSACTION;
+				}
+				const created = await kit.openStepUp(call, session, call.acrValues);
+				return "outcome" in created ? created : opened(created);
 			}
 			if (call.transactionId !== undefined) {
 				const tx = await kit.boundInSession(call);

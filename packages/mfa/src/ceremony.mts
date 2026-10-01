@@ -18,7 +18,7 @@
  * The contract the MFA ceremonies share: a call, what each ceremony answers,
  * and the kit the coordinator hands the ceremonies beside a verification —
  * an enrollment (`enrollment.mts`), the account-email proof (`proof.mts`),
- * a session's step-up (`stepUp.mts`) and a login reopened for a binding
+ * a session's step-up opened (`stepUp.mts`) and a login reopened for a binding
  * (`reopen.mts`). A leaf: the coordinator and the
  * ceremonies import it, and it imports none of them, so no two of them
  * depend on each other's contracts.
@@ -375,15 +375,24 @@ export type MfaEnrollmentCompleteOutcome =
 	  } & MfaCeremonySubject);
 
 /**
- * What the step-up of a subject with no counting factor answers: the
- * `enroll` transaction the account-email proof is owed on, or why none.
+ * What a session's step-up answers: for a subject with no record that may
+ * count, the `enroll` transaction the account-email proof is owed on; for
+ * one holding a record that may count, the `step_up` transaction its factor
+ * is verified on; or why none.
  */
 export type MfaStepUpOutcome =
 	| UnknownTransaction
 	| MfaStoreOutage
-	/** The subject holds a record that may count: its step-up is a second factor's. */
-	| { readonly outcome: "counting_factor_held" }
-	| { readonly outcome: "opened"; readonly transaction: MfaOpenedTransaction };
+	/** The session store cannot record a second factor: the session logs in again instead. */
+	| { readonly outcome: "step_up_unrecordable" }
+	/** The subject holds no record of an installed kind whose data opens: nothing could step it up. */
+	| { readonly outcome: "no_qualifying_factor" }
+	| {
+			readonly outcome: "opened";
+			readonly transaction: MfaOpenedTransaction;
+			/** Whether the account-email proof is owed on it: a first binding's, never a step-up's. */
+			readonly emailProof: boolean;
+	  };
 
 /**
  * What the ceremonies beside a verification share of the coordinator: its
@@ -403,14 +412,14 @@ export interface MfaCeremonyKit {
 	readonly requireEmailProof: RequireEmailProof;
 	/**
 	 * The transaction `call` names, bound to its binding: a login's, or an
-	 * `enroll` one whose `sid` and subject are `call.session`'s; `null` when
-	 * there is none to use; `revoked` for a login's past its subject's
-	 * sessions boundary.
+	 * `enroll` or `step_up` one whose `sid` and subject are `call.session`'s;
+	 * `null` when there is none to use; `revoked` for a login's past its
+	 * subject's sessions boundary.
 	 */
 	readonly bound: (
 		call: MfaCeremonyCall,
 	) => Promise<MfaTransaction | null | Revoked | MfaStoreOutage>;
-	/** As `bound`, for an `enroll` transaction of `call.session` alone: a login's is none, and its boundary is never read. */
+	/** As `bound`, for an `enroll` or `step_up` transaction of `call.session` alone: a login's is none, and its boundary is never read. */
 	readonly boundInSession: (
 		call: MfaCeremonyCall,
 	) => Promise<MfaTransaction | null | MfaStoreOutage>;
@@ -444,6 +453,14 @@ export interface MfaCeremonyKit {
 			readonly emailProof: "required" | "not_required";
 		},
 	) => Promise<MfaTransaction | MfaStoreOutage>;
+	/** A new `step_up` transaction for `session`, bound to the browser `call` presents, recording `acrValues`; the outage otherwise. */
+	readonly openStepUp: (
+		call: MfaCeremonyCall,
+		session: MfaCeremonySession,
+		acrValues: readonly string[] | undefined,
+	) => Promise<MfaTransaction | MfaStoreOutage>;
+	/** Whether the session store can record a second factor verified in a session: a step-up is opened only then. */
+	readonly stepUpRecordable: boolean;
 	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */
 	readonly provedInSession: (subject: string, sid: string) => Promise<boolean | MfaStoreOutage>;
 	/**

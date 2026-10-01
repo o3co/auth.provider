@@ -25,21 +25,23 @@
  * - Every operation starts with the bound read (`getBoundMfaTransaction`), and
  *   after it calls only operations that carry the version it read, and
  *   `reserveAttempt` once it held. A transaction bound to anything else,
- *   spent, expired, neither a login's nor an `enroll` one of the session the
- *   call was admitted in — its `sid` and subject — reads as unknown, and
- *   spends nothing. An `enroll` transaction verifies the account-email proof
- *   alone.
+ *   spent, expired, neither a login's nor an `enroll` or `step_up` one of
+ *   the session the call was admitted in — its `sid` and subject — reads as
+ *   unknown, and spends nothing. An `enroll` transaction verifies the
+ *   account-email proof alone.
  * - A login's transaction is held to its subject's sessions boundary
  *   (`revokedBefore`) at every bound read: a continuation authenticated at or
  *   before it, the revocation skew allowed, is `revoked` and spends nothing;
  *   a boundary that cannot be read is an outage; none wired, none is read.
- *   The step-up reads only its session's `enroll` transactions, so it never
- *   reads a login's boundary. The boundary is read once per call: a
+ *   The step-up reads only its session's `enroll` and `step_up`
+ *   transactions, so it never reads a login's boundary. The boundary is read once per call: a
  *   revocation landing during that call can still let it bind.
  * - The step-up of a subject with no record that may count opens, or uses,
  *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
  *   on one is recorded for its session alone, standing
- *   `mfa.manage.maxAgeSeconds`.
+ *   `mfa.manage.maxAgeSeconds`. The step-up of a subject holding one opens,
+ *   or uses, a `step_up` transaction, opened only when the session store can
+ *   record it.
  * - A verification reserves its attempt before the proof is checked, consumes
  *   the transaction before the factor moves on, and on a lost compare-and-set
  *   reads the factor again and checks the proof again: a code used twice at
@@ -142,7 +144,11 @@ import { createLoginReopen } from "./reopen.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import { createMfaStepUp } from "./stepUp.mjs";
-import { openEnrollTransaction, openLoginBinding } from "./transactions.mjs";
+import {
+	openEnrollTransaction,
+	openLoginBinding,
+	openStepUpTransaction,
+} from "./transactions.mjs";
 import { type MfaEnrollmentWitness, reconciles } from "./witness.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */
@@ -189,12 +195,15 @@ export interface MfaCoordinator {
 		call: MfaCeremonyCall & { readonly proof: unknown; readonly label: unknown },
 	): Promise<MfaEnrollmentCompleteOutcome>;
 	/**
-	 * The step-up of `call.session`'s subject when it holds no record that may
-	 * count: the `enroll` transaction the account-email proof is owed on — the
-	 * one `call` names, when it is that session's first binding's and its
-	 * proof is not met, else a new one.
+	 * The step-up of `call.session`'s subject (`stepUp.mts`): with no record
+	 * that may count, the `enroll` transaction the account-email proof is
+	 * owed on; holding one, the `step_up` transaction its factor is verified
+	 * on, recording `acrValues` — each the one `call` names when it is that
+	 * session's own and still usable, else a new one.
 	 */
-	stepUp(call: MfaCeremonyCall): Promise<MfaStepUpOutcome>;
+	stepUp(
+		call: MfaCeremonyCall & { readonly acrValues: readonly string[] | undefined },
+	): Promise<MfaStepUpOutcome>;
 }
 
 export interface MfaCoordinatorOptions {
@@ -224,6 +233,8 @@ export interface MfaCoordinatorOptions {
 	readonly firstBindingMarkMs: number;
 	/** The subjects' sessions boundary a login's transaction is held to; none wired, none is read. */
 	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
+	/** Whether the session store can record a second factor verified in a session (`supportsSecondFactorUpdate`). */
+	readonly stepUpRecordable: boolean;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -257,6 +268,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		sessionProofSeconds,
 		firstBindingMarkMs,
 		subjectRevocation,
+		stepUpRecordable,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
@@ -291,9 +303,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 
 	/**
 	 * The transaction `call` names, bound to its binding: a login's, held to
-	 * its subject's sessions boundary, or an `enroll` one recording the `sid`
-	 * and subject of the session the call was admitted in; `null` when there
-	 * is none to use.
+	 * its subject's sessions boundary, or an `enroll` or `step_up` one
+	 * recording the `sid` and subject of the session the call was admitted
+	 * in; `null` when there is none to use.
 	 */
 	const bound = async (
 		call: MfaCeremonyCall,
@@ -308,10 +320,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return inSession(tx, call);
 	};
 
-	/** An `enroll` transaction of the session `call` was admitted in — its `sid` and subject — else none. */
+	/** An `enroll` or `step_up` transaction of the session `call` was admitted in — its `sid` and subject — else none. */
 	const inSession = (tx: MfaTransaction, call: MfaCeremonyCall): MfaTransaction | null => {
 		const session = call.session;
-		return tx.purpose === "enroll" &&
+		return (tx.purpose === "enroll" || tx.purpose === "step_up") &&
 			session !== undefined &&
 			tx.sid === session.sid &&
 			tx.subject === session.subject
@@ -572,6 +584,21 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "create", cause);
 			}
 		},
+		openStepUp: async (call, session, acrValues) => {
+			try {
+				return await openStepUpTransaction(transactions, {
+					sessionId: call.binding.id,
+					sid: session.sid,
+					subject: session.subject,
+					acrValues,
+					nowMs: now(),
+					ttlSeconds: transactionTtlSeconds,
+				});
+			} catch (cause) {
+				return outage("mfa_transaction", "create", cause);
+			}
+		},
+		stepUpRecordable,
 		openLoginBinding: async (binding, continuation, shape) => {
 			try {
 				return await openLoginBinding(transactions, {

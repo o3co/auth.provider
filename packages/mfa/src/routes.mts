@@ -84,6 +84,7 @@ import {
 	loggableError,
 	type MfaSubjectHold,
 	type PrimaryAdmission,
+	readSpaceDelimitedParameter,
 	resumePrimary,
 } from "@o3co/auth-provider-core";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
@@ -143,7 +144,10 @@ const FACTOR_LIMIT = errorEnvelope(
 	"mfa_factor_limit",
 	"The subject holds as many second factors as it may",
 );
-const NOT_FOUND = errorEnvelope("not_found", "Not found");
+const NO_QUALIFYING_FACTOR = errorEnvelope(
+	"mfa_no_qualifying_factor",
+	"No second factor of this account can be used for a step-up",
+);
 const ENROLLMENT_CONFLICT = errorEnvelope(
 	"mfa_enrollment_conflict",
 	"The account's second factors changed while enrolling: start again",
@@ -222,6 +226,26 @@ const postedTransaction = (req: Request): { readonly id: string | undefined } | 
 	const header = headerOf(req, TRANSACTION_HEADER);
 	if (body !== undefined && header !== undefined && body !== header) return "disagree";
 	return { id: body ?? header };
+};
+
+/** The most `acr_values` a step-up records, and the longest one. */
+const ACR_VALUES_LIMIT = { count: 16, length: 256 } as const;
+
+/**
+ * The `acr_values` a step-up's body hints: a string read strictly
+ * (`readSpaceDelimitedParameter`), within {@link ACR_VALUES_LIMIT};
+ * `undefined` for anything else, which records none.
+ */
+const postedAcrValues = (req: Request): readonly string[] | undefined => {
+	const posted: unknown = (req.body as { acr_values?: unknown } | undefined)?.acr_values;
+	if (typeof posted !== "string") return undefined;
+	const values = readSpaceDelimitedParameter(posted);
+	return values !== null &&
+		values.length > 0 &&
+		values.length <= ACR_VALUES_LIMIT.count &&
+		values.every((value) => value.length <= ACR_VALUES_LIMIT.length)
+		? values
+		: undefined;
 };
 
 /** The transaction id a POST names; two that disagree name none, which no transaction matches. */
@@ -1115,7 +1139,11 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				answerNoSession(res, judged);
 				return;
 			}
-			const outcome = await coordinator.stepUp({ ...callOf(req, posted.id), session });
+			const outcome = await coordinator.stepUp({
+				...callOf(req, posted.id),
+				session,
+				acrValues: postedAcrValues(req),
+			});
 			switch (outcome.outcome) {
 				case "unknown_transaction":
 					res.status(400).json(UNKNOWN_TRANSACTION);
@@ -1123,14 +1151,17 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				case "unavailable":
 					answerOutage("step-up", res, outcome);
 					return;
-				case "counting_factor_held":
-					res.status(404).json(NOT_FOUND);
+				case "step_up_unrecordable":
+					res.status(401).json(LOGIN_REQUIRED);
+					return;
+				case "no_qualifying_factor":
+					res.status(403).json(NO_QUALIFYING_FACTOR);
 					return;
 				case "opened":
 					res.status(200).json({
 						transaction: outcome.transaction.id,
 						expires_in: outcome.transaction.expiresIn,
-						email_proof: true,
+						email_proof: outcome.emailProof,
 					});
 					return;
 			}

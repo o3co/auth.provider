@@ -16,8 +16,8 @@
 
 /**
  * The MFA transactions a ceremony runs on: the one a login opens, with the
- * answer the login is interrupted with, and the `enroll` one a signed-in
- * session opens. See README, "The login's interruption", and ADR
+ * answer the login is interrupted with, and the `enroll` and `step_up` ones a
+ * signed-in session opens. See README, "The login's interruption", and ADR
  * 2026-09-25-multi-factor-authentication, as ADR 2026-09-28-session-admission
  * amends it.
  *
@@ -27,8 +27,10 @@
  * binding, kind included (`isMfaTransactionBoundTo`). The record carries
  * core's continuation, never a `user` or `primary` field of its own, and the
  * primary's subject and `redirectTo`, which the store holds it to. An
- * `enroll` one is bound to the browser session and records the session's
- * `sid` and subject, which every use compares with the session admitted.
+ * `enroll` or `step_up` one is bound to the browser session and records the
+ * session's `sid` and subject, which every use compares with the session
+ * admitted; a `step_up` one owes no proof, binds nothing, and records the
+ * `acr_values` the page hinted.
  * `expiresAtMs` is derived from `mfa.transactionTtlSeconds` and nothing else;
  * the store has no ceiling of its own. A store that cannot create one rejects,
  * answered as an outage.
@@ -258,18 +260,29 @@ export interface EnrollTransactionShape {
 	readonly ttlSeconds: number;
 }
 
-/**
- * Creates a new `enroll` transaction for `shape` in `store` — a fresh id, no
- * continuation, bound to the session `sessionId` names — and answers it.
- * Rejects when the store cannot keep it.
- */
-export async function openEnrollTransaction(
+/** What a signed-in session's step-up transaction is opened for. */
+export interface StepUpTransactionShape {
+	/** The express session id of the browser that opened it. */
+	readonly sessionId: string;
+	/** The `UserSession` it steps up, and its subject. */
+	readonly sid: string;
+	readonly subject: string;
+	/** The `acr_values` the page hinted, read; `undefined` for none. */
+	readonly acrValues: readonly string[] | undefined;
+	readonly nowMs: number;
+	/** `mfa.transactionTtlSeconds`. */
+	readonly ttlSeconds: number;
+}
+
+/** A new transaction of a signed-in session, bound to the browser session `sessionId` names, with no continuation, stored and answered. */
+async function openSessionTransaction(
 	store: MfaTransactionStore,
-	shape: EnrollTransactionShape,
+	shape: Pick<EnrollTransactionShape, "sessionId" | "sid" | "subject" | "nowMs" | "ttlSeconds"> &
+		Pick<MfaTransaction, "purpose" | "enrollment" | "emailProof" | "acrValues">,
 ): Promise<MfaTransaction> {
 	const transaction: MfaTransaction = {
 		id: newTransactionId(),
-		purpose: "enroll",
+		purpose: shape.purpose,
 		binding: { kind: "session", id: shape.sessionId },
 		subject: shape.subject,
 		sid: shape.sid,
@@ -277,7 +290,7 @@ export async function openEnrollTransaction(
 		redirectTo: undefined,
 		enrollment: shape.enrollment,
 		emailProof: shape.emailProof,
-		acrValues: undefined,
+		acrValues: shape.acrValues,
 		challenge: undefined,
 		pendingEnrollment: undefined,
 		attempts: 0,
@@ -287,4 +300,34 @@ export async function openEnrollTransaction(
 	};
 	await store.create(transaction);
 	return transaction;
+}
+
+/**
+ * Creates a new `enroll` transaction for `shape` in `store` — a fresh id, no
+ * continuation, bound to the session `sessionId` names — and answers it.
+ * Rejects when the store cannot keep it.
+ */
+export function openEnrollTransaction(
+	store: MfaTransactionStore,
+	shape: EnrollTransactionShape,
+): Promise<MfaTransaction> {
+	return openSessionTransaction(store, { ...shape, purpose: "enroll", acrValues: undefined });
+}
+
+/**
+ * Creates a new `step_up` transaction for `shape` in `store` — a fresh id, no
+ * continuation, bound to the session `sessionId` names, verifying a factor
+ * the subject holds and owing no proof — and answers it. Rejects when the
+ * store cannot keep it.
+ */
+export function openStepUpTransaction(
+	store: MfaTransactionStore,
+	shape: StepUpTransactionShape,
+): Promise<MfaTransaction> {
+	return openSessionTransaction(store, {
+		...shape,
+		purpose: "step_up",
+		enrollment: "none",
+		emailProof: "not_required",
+	});
 }
