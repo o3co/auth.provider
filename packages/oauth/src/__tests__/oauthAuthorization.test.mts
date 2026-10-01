@@ -1517,7 +1517,7 @@ describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () =
 			state: "state-omit",
 			scope: "openid profile",
 			code_challenge: VALID_S256_CHALLENGE,
-			// no code_challenge_method → routes.mts treats absence as "plain"
+			// no code_challenge_method → the /authorize stages (routes/authorize*.mts) treat absence as "plain"
 		});
 		expect(res.status).toBe(302);
 		const location = new URL(res.headers.location);

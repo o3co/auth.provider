@@ -107,7 +107,7 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 		name: "allowUnmarkedClients",
 		removedIn: "v0.10.0 (#330)",
 		note:
-			"The one-time migration flag for the /authorize first-party invariant (#316/#317) is " +
+			"The one-time migration flag for the /authorize first-party invariant is " +
 			"gone: a client whose registration does not carry `firstParty: true` is now always " +
 			"refused, whatever this key is set to. Mark every client you operate with " +
 			"`firstParty: true` (only ones you would trust to receive a user's identity without " +

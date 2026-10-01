@@ -31,7 +31,7 @@ export type RecordAnswer = (
 	answer: Parameters<FederationGrantIntentStore["answerConsent"]>[0]["answer"],
 ) => Promise<Awaited<ReturnType<FederationGrantIntentStore["answerConsent"]>> | null>;
 
-/** Gives the answer's `503` and writes its one line. */
+/** Gives the answer's `503`, writes its one line and audits it. */
 export type ConsentUnavailable = (
 	description: "storage" | "upstream_unavailable",
 	at: { readonly store?: string; readonly step: string; readonly refusal?: string },

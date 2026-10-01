@@ -42,27 +42,31 @@ describe("requireFederationGrantSubjectRevocation", () => {
 	});
 
 	it("refuses a deployment with no boundary at all", () => {
-		expect(() =>
-			requireFederationGrantSubjectRevocation({ module: "m", subjectRevocation: undefined }),
-		).toThrow(/requires a subjectRevocation component/);
+		const wire = () =>
+			requireFederationGrantSubjectRevocation({ module: "m", subjectRevocation: undefined });
+		expect(wire).toThrow(/requires a subjectRevocation component/);
+		// Each refusal states the rule it enforces, with no design label.
+		expect(wire).not.toThrow(/\bD\d+\b/);
 	});
 
 	it("refuses an adapter that only carries the older single boundary", () => {
 		// Absence declared through the policy is not an escape here: sessions
 		// end when their cookie does, and a grant ends when nothing does.
-		expect(() =>
-			requireFederationGrantSubjectRevocation({ module: "m", subjectRevocation: olderAdapter() }),
-		).toThrow(/grantsRevokedBefore/);
+		const wire = () =>
+			requireFederationGrantSubjectRevocation({ module: "m", subjectRevocation: olderAdapter() });
+		expect(wire).toThrow(/grantsRevokedBefore/);
+		expect(wire).not.toThrow(/\bD\d+\b/);
 	});
 
 	it("refuses grants that outlive the process beside a boundary that does not", () => {
-		expect(() =>
+		const wire = () =>
 			requireFederationGrantSubjectRevocation({
 				module: "m",
 				subjectRevocation: createInMemorySubjectRevocation(),
 				federationGrantStore: durableStore,
-			}),
-		).toThrow(/outlive the process/);
+			});
+		expect(wire).toThrow(/outlive the process/);
+		expect(wire).not.toThrow(/\bD\d+\b/);
 	});
 
 	it("accepts the bundled memory pair, which fails over together or not at all", () => {

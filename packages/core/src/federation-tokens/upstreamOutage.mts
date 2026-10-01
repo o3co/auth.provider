@@ -38,6 +38,8 @@
  * Never throws: every read is guarded.
  */
 
+import { isError } from "../logging/loggableError.mjs";
+
 /** The names a request that was given up on is raised under: `AbortSignal.timeout` raises `TimeoutError`. */
 const ABANDONED: ReadonlySet<string> = new Set(["AbortError", "TimeoutError"]);
 
@@ -141,27 +143,6 @@ const field = (value: object, key: string): unknown => {
 
 const serverError = (status: unknown): boolean =>
 	typeof status === "number" && Number.isInteger(status) && status >= 500 && status <= 599;
-
-/**
- * An Error — this realm's or another's (`Error.isError` where the runtime has
- * it) — and not a plain object shaped like one: what a library raised, never
- * what a peer's parsed body says. Asking never throws. The refresh-error
- * classifier follows a cause by the same test (`refresh-error.mts`).
- */
-export const isError = (value: unknown): value is object => {
-	try {
-		const brand = (Error as { isError?: (candidate: unknown) => boolean }).isError;
-		if (typeof brand === "function") return brand(value);
-		return (
-			value instanceof Error ||
-			(typeof value === "object" &&
-				value !== null &&
-				Object.prototype.toString.call(value) === "[object Error]")
-		);
-	} catch {
-		return false;
-	}
-};
 
 /**
  * A fetch `Response` — what oauth4webapi raises a status it would not read

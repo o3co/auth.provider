@@ -24,6 +24,11 @@ import { describe, expect, it, vi } from "vitest";
 import { memoryDeviceCodeStoreModule } from "#/device-authorization/module.mjs";
 
 describe("memoryDeviceCodeStoreModule", () => {
+	it("declares what forks per replica, with no issue number", () => {
+		expect(memoryDeviceCodeStoreModule.replicaSafety?.reason).toMatch(/fork per replica/);
+		expect(memoryDeviceCodeStoreModule.replicaSafety?.reason).not.toMatch(/#\d/);
+	});
+
 	it("declares the lifecycle registrar as an optional dependency", () => {
 		expect(memoryDeviceCodeStoreModule.optional).toContain("lifecycleRegistrar");
 	});

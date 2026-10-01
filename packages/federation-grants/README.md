@@ -317,12 +317,14 @@ of scope (below) — because a renewal changes nothing a client can see until
 the user finishes it.
 
 Ownership first, with the same `404 grant_not_found` for an unknown id,
-another client's grant and another subject's. Then the subject's grants
-boundary: a grant a subject-wide revocation covers is revoked here, durably,
-before anything else is asked of it, and answers `410 grant_revoked/backstop`.
-Then the rest in `/token`'s order, each with the status `/token` gives it. A
-grant that is over comes first: `410 grant_revoked/<by>`,
-`410 grant_expired/<reason>`, `400 authorization_pending`. Then the
+another client's grant and another subject's. Then what the record itself
+says, as `/token` answers it: a stored revocation is `410 grant_revoked/<by>`
+and a pending grant `400 authorization_pending`, whether or not the subject's
+grants boundary can be read. Then that boundary: one that cannot be read is
+`503 temporarily_unavailable/storage`, and a grant a subject-wide revocation
+covers is revoked here, durably, before anything else is asked of it, and
+answers `410 grant_revoked/backstop`. Then the rest in `/token`'s order, each
+with the status `/token` gives it: `410 grant_expired/<reason>` first. Then the
 configuration: a connection the deployment no longer configures and one the
 client may no longer use are one answer, `403 access_denied/connection_not_permitted`
 — a client is never sent to its operator about a grant that is over, and one
@@ -692,6 +694,12 @@ A refused answer is logged as one warn line,
 | The limiter backend is down, and the limiter's `failMode` is `"closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
 | The upstream URL could not be built, or the federation lost the capability (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
 
+A `503` from this package's stores, from the judgement, from the client registry
+describing the client, or from the upstream URL is audited as a refusal is: `federation.grant.authorization_failed` with the
+outcome `unavailable`, beside its one log line. One whose question or intent
+could not be read has no flow to name: it carries no grant, client, subject or
+connection, and the request's own correlation id.
+
 A challenge is not a bearer token: it is answerable only from the browser it
 was issued to, by the same durable session and subject, and every answer
 re-admits that session.
@@ -711,7 +719,11 @@ It checks, in this order:
 
 1. **The transaction** — the `state` is one this provider issued, for THIS
    connection, and it is spent before any code is exchanged. Otherwise a plain
-   `400` and no redirect: there is nowhere trustworthy to send the browser.
+   `400` and no redirect: there is nowhere trustworthy to send the browser. A
+   transaction the store could not spend is a plain `503`, audited as
+   `federation.grant.authorization_failed` with the outcome
+   `temporarily_unavailable`, naming no flow and carrying the request's own
+   correlation id.
 2. **The intent** is still the grant's current one, within the flow's deadline,
    and the connection is still what it was lodged against; for a renewal, the
    grant it would renew is checked against the subject's grants boundary and
