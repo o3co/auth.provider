@@ -41,9 +41,10 @@
  * reset. The lease is logical: a write that outlives it is told so at its
  * release, never stopped.
  *
- * Transactions are bounded by their expiry alone, not per subject and not
- * per session: nothing caps the transactions one session holds, and how many
- * are open is bounded only by the rate limits of the routes that open them.
+ * Transactions are bounded by their expiry, and per binding: a binding holds
+ * at most {@link MFA_MAX_TRANSACTIONS_PER_BINDING} live transactions, and
+ * opening one more ends its oldest. This manages the state the store owns;
+ * it is no abuse defence, and nothing caps transactions per subject.
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
@@ -367,6 +368,15 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 		version: tx.version,
 	};
 }
+
+/**
+ * The most live transactions one binding holds — a browser session's tabs,
+ * each in a ceremony of its own. `create` past it ends the binding's oldest
+ * rather than refusing the new one: the transaction a user opened last is the
+ * one they are looking at. A core constant, not configuration: it bounds the
+ * state the store owns, which no deployment needs to raise.
+ */
+export const MFA_MAX_TRANSACTIONS_PER_BINDING = 5;
 
 /**
  * Whether `tx` is bound to `binding`, the whole binding compared, kind
@@ -1277,6 +1287,22 @@ export interface MfaTransactionStore {
 	 * is not a future instant, or a record {@link newMfaTransactionRecord}
 	 * refuses. No lifetime ceiling here: the coordinator derives `expiresAtMs`
 	 * only from `mfa.transactionTtlSeconds`, which boot range-checks.
+	 *
+	 * The binding then holds at most {@link MFA_MAX_TRANSACTIONS_PER_BINDING}
+	 * live transactions: when it already holds that many, `create` ends the
+	 * one of them that expires first — its oldest, since every transaction
+	 * lives the same `mfa.transactionTtlSeconds` — as a consume would, and
+	 * never the one it creates; between two that expire at one instant, which
+	 * goes is the store's choice. A consumed transaction, one its attempts
+	 * ended and an expired one do not count, and no other binding's is ever
+	 * ended. Replacing one this way is no new entry against a store's own
+	 * cap. A store whose create and its binding's count are not one atomic
+	 * step (the Redis adapter's, whose transactions sit on slots of their own)
+	 * may hold more while creates are in flight, and settles at the cap once
+	 * they have answered; only a step that failed leaves an excess, until it
+	 * expires. Such a store may also reject a create after it has written the
+	 * transaction (an outage at a later step): the transaction stands, unknown
+	 * to the caller, until it expires.
 	 */
 	create(tx: MfaTransaction): Promise<void>;
 	/** The transaction, or `null` once it expired. */

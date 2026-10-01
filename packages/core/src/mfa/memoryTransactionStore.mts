@@ -34,18 +34,26 @@
  * too, and are swept with the transactions. A subject's generation and
  * recovery-set floor are never swept.
  *
+ * A binding holds at most {@link MFA_MAX_TRANSACTIONS_PER_BINDING} live
+ * transactions: a create past it ends the binding's oldest, as the port says.
+ * An index of each binding's transactions is kept exactly, in the same
+ * synchronous step as every write that adds or removes a transaction —
+ * create, consume, an attempt past `max`, expiry found by a read or a sweep —
+ * and a binding with none left is dropped from it.
+ *
  * At most `maxEntries` entries are held: transactions, session email proofs,
  * first-binding marks, subject leases and recovery authorizations together. At the cap the store reclaims expired
  * entries (no more often than the sweep floor) and, if still full, refuses a
  * new one with {@link MfaTransactionStoreFullError}, never evicting a live one
- * (that would end the ceremony of a user typing a code, send them to prove
- * again, or trust a session a mark distrusts). Replacing a session's proof,
- * or noting a subject's mark again, is no new entry. Subject state is uncapped,
+ * to make room (that would end the ceremony of a user typing a code, send
+ * them to prove again, or trust a session a mark distrusts). Replacing a
+ * session's proof, noting a subject's mark again, or a create that ends its
+ * binding's oldest, is no new entry. Subject state is uncapped,
  * and so are a subject's generation and recovery-set floor, which the cap
  * does not count: only a login the Store accepted creates a subject (an open
  * sign-up lets anyone mint them). At the cap a new lease is refused too, so a
- * recovery or a reset waits until room frees. The cap is global: nothing caps the transactions one
- * session holds, so a client within the routes' rate limits can fill it.
+ * recovery or a reset waits until room frees. Beyond the per-binding bound the cap is
+ * global: many bindings together can fill it.
  */
 
 import { randomBytes } from "node:crypto";
@@ -70,6 +78,7 @@ import {
 	firstBindingAnswer,
 	laterFirstBindingMark,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaRecoverySetFloorAnswer,
@@ -81,6 +90,7 @@ import {
 	type MfaSubjectRecoveryOperation,
 	type MfaSubjectRecoveryRefusal,
 	type MfaTransaction,
+	type MfaTransactionBinding,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
@@ -141,6 +151,8 @@ export class MfaTransactionStoreFullError extends Error {
 export interface MemoryMfaTransactionStore extends MfaTransactionStore {
 	/** Transactions resident, expired-but-unswept included. */
 	readonly transactions: number;
+	/** Bindings holding a resident transaction. */
+	readonly bindings: number;
 	/** Subjects with lock state resident. */
 	readonly subjects: number;
 	/** Session email proofs resident, expired-but-unswept included. */
@@ -193,6 +205,10 @@ interface RecoverySlot {
 /** Where an authorization is kept for its subject: the operation and the `sid` as one unambiguous key. */
 const slotKeyOf = (operation: MfaSubjectRecoveryOperation, sid: string | undefined): string =>
 	JSON.stringify([operation, sid ?? null]);
+
+/** Where a binding's transactions are indexed: the whole binding, kind included, as one unambiguous key. */
+const bindingKeyOf = (binding: MfaTransactionBinding): string =>
+	JSON.stringify([binding.kind, binding.id]);
 
 /** Where a session's proof is kept: the subject and the `sid` as one unambiguous key. */
 const proofKeyOf = (subject: string, sid: string): string => JSON.stringify([subject, sid]);
@@ -277,6 +293,8 @@ export function createMemoryMfaTransactionStore(
 		"createMemoryMfaTransactionStore",
 	);
 	const transactions = new Map<string, MfaTransaction>();
+	/** Each binding's resident transactions, by `bindingKeyOf`, in the order they were created. */
+	const byBinding = new Map<string, Set<string>>();
 	const subjects = new Map<string, SubjectState>();
 	/** Each session's account-email proof, by `proofKeyOf`. */
 	const proofs = new Map<string, SessionEmailProof>();
@@ -313,14 +331,57 @@ export function createMemoryMfaTransactionStore(
 		"createMemoryMfaTransactionStore",
 	);
 
+	/** Removes a transaction and its place in its binding's index, in one step. */
+	function drop(id: string): void {
+		const tx = transactions.get(id);
+		if (tx === undefined) return;
+		transactions.delete(id);
+		const key = bindingKeyOf(tx.binding);
+		const ids = byBinding.get(key);
+		if (ids === undefined) return;
+		ids.delete(id);
+		if (ids.size === 0) byBinding.delete(key);
+	}
+
+	/** Holds a new transaction, and its place in its binding's index, in one step. */
+	function hold(tx: MfaTransaction): void {
+		transactions.set(tx.id, tx);
+		const key = bindingKeyOf(tx.binding);
+		const ids = byBinding.get(key);
+		if (ids === undefined) byBinding.set(key, new Set([tx.id]));
+		else ids.add(tx.id);
+	}
+
 	function live(id: string, nowMs: number): MfaTransaction | undefined {
 		const tx = transactions.get(id);
 		if (tx === undefined) return undefined;
 		if (tx.expiresAtMs <= nowMs) {
-			transactions.delete(id);
+			drop(id);
 			return undefined;
 		}
 		return tx;
+	}
+
+	/**
+	 * Ends the binding's transactions that expire first until it holds fewer
+	 * than {@link MFA_MAX_TRANSACTIONS_PER_BINDING} live ones, dropping the
+	 * expired on the way; answers whether it ended a live one.
+	 */
+	function makeRoomInBinding(binding: MfaTransactionBinding, nowMs: number): boolean {
+		const ids = byBinding.get(bindingKeyOf(binding));
+		if (ids === undefined) return false;
+		const held = [...ids]
+			.map((id) => live(id, nowMs))
+			.filter((tx): tx is MfaTransaction => tx !== undefined);
+		let ended = false;
+		while (held.length >= MFA_MAX_TRANSACTIONS_PER_BINDING) {
+			// The first that expires soonest, in the order created among equals.
+			const soonest = held.reduce((a, b) => (b.expiresAtMs < a.expiresAtMs ? b : a));
+			drop(soonest.id);
+			held.splice(held.indexOf(soonest), 1);
+			ended = true;
+		}
+		return ended;
 	}
 
 	/**
@@ -330,7 +391,7 @@ export function createMemoryMfaTransactionStore(
 	 */
 	function sweep(storeNowMs: number): void {
 		for (const [id, tx] of transactions) {
-			if (tx.expiresAtMs <= storeNowMs) transactions.delete(id);
+			if (tx.expiresAtMs <= storeNowMs) drop(id);
 		}
 		for (const [key, proof] of proofs) {
 			if (proof.untilMs <= storeNowMs) proofs.delete(key);
@@ -467,6 +528,10 @@ export function createMemoryMfaTransactionStore(
 			return transactions.size;
 		},
 
+		get bindings() {
+			return byBinding.size;
+		},
+
 		get subjects() {
 			return subjects.size;
 		},
@@ -496,8 +561,9 @@ export function createMemoryMfaTransactionStore(
 			if (live(record.id, nowMs) !== undefined) {
 				throw new Error("an MFA transaction with this id already exists");
 			}
-			makeRoom(nowMs);
-			transactions.set(record.id, record);
+			// Ending the binding's oldest frees the entry the new one takes.
+			if (!makeRoomInBinding(record.binding, nowMs)) makeRoom(nowMs);
+			hold(record);
 			if (schedule.wrote()) sweep(nowMs);
 		},
 
@@ -537,7 +603,7 @@ export function createMemoryMfaTransactionStore(
 			const attempts = tx.attempts + 1;
 			// Fails closed: a count that is not a number is past every max.
 			if (!(attempts <= max)) {
-				transactions.delete(id);
+				drop(id);
 				return { ok: false, attempts: tx.attempts };
 			}
 			transactions.set(id, { ...tx, attempts });
@@ -559,7 +625,7 @@ export function createMemoryMfaTransactionStore(
 		async consume(id: string, expectedVersion: number): Promise<MfaTransaction | null> {
 			const tx = live(id, clock());
 			if (tx === undefined || tx.version !== expectedVersion) return null;
-			transactions.delete(id);
+			drop(id);
 			return copyOf(tx);
 		},
 
