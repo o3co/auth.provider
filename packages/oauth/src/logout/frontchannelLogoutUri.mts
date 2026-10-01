@@ -56,9 +56,9 @@ const UNREADABLE = Symbol("unreadable");
  * `undefined`. Absent (`undefined`, `null`, `""`) is silent. Anything else
  * must be a string whose parsed protocol is `http:` or `https:`, on any host,
  * the rule the bundled client schema applies at registration. A refused
- * value is one warn with the reason, never the value. Every read is guarded
- * and this never throws: front-channel logout is best-effort, so a refusal
- * drops only this URI.
+ * value is one warn with the reason, never the value. Every read and the
+ * warn are guarded, so this never throws: front-channel logout is
+ * best-effort, so a refusal drops only this URI.
  *
  * Interim: a custom `ClientRepository` or session RP registry bypasses the
  * registration schema, so the value is checked where it is used. Exit
@@ -73,10 +73,14 @@ export function usableFrontchannelLogoutUri(
 	if (source === null || source === undefined) return undefined;
 	const refuse = (reason: FrontchannelLogoutUriRefusal): undefined => {
 		const clientId = guardedRead(() => source.clientId, undefined);
-		logger?.warn(
-			{ site, clientId: auditErrorText(clientId), reason },
-			"logout_frontchannel_uri_refused",
-		);
+		try {
+			logger?.warn(
+				{ site, clientId: auditErrorText(clientId), reason },
+				"logout_frontchannel_uri_refused",
+			);
+		} catch {
+			// A logger that throws costs the line, never the caller's flow.
+		}
 		return undefined;
 	};
 	// The error is not logged: its message could carry the value.

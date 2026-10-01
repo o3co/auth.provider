@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-import type { Logger } from "@o3co/auth-provider-core";
-import { auditErrorText, loggableError } from "@o3co/auth-provider-core";
+import type { Logger, RedirectUriRejection } from "@o3co/auth-provider-core";
+import { auditErrorText, checkRedirectUri, loggableError } from "@o3co/auth-provider-core";
 import { usableFrontchannelLogoutUri } from "./frontchannelLogoutUri.mjs";
 
 export interface FrontchannelRP {
@@ -31,8 +31,12 @@ export interface RenderFrontchannelLogoutHtmlOptions {
 	/**
 	 * Where the page sends the browser once the iframes have had their time:
 	 * the validated `post_logout_redirect_uri` with the RP's `state` already
-	 * on it, exactly as the route's own redirect would carry it. Taken as
-	 * given; the caller composes it.
+	 * on it, exactly as the route's own redirect would carry it. Checked here
+	 * with core's `checkRedirectUri`, the rule the route accepts it by, with
+	 * the `state` parameter set aside since the caller appends it: a value
+	 * the check refuses, one that is not a string, or a read that throws
+	 * leaves the page without its redirect, logged once at warn as
+	 * `logout_frontchannel_redirect_refused` with the reason, never the URI.
 	 */
 	readonly postLogoutRedirectUri?: string;
 	/** Defaults to 2000ms. */
@@ -81,26 +85,65 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
 	return url.toString();
 }
 
+/** Why the page's redirect was dropped. */
+type PostLogoutRedirectRefusal = RedirectUriRejection["reason"] | "not-a-string" | "unreadable";
+
+/**
+ * `raw` without its `state` query parameters, the one parameter the caller
+ * appends to the registered URI. Everything else is kept as written, so the
+ * check sees the rest of the value byte for byte.
+ */
+function withoutState(raw: string): string {
+	const query = raw.indexOf("?");
+	if (query === -1) return raw;
+	const hash = raw.indexOf("#", query);
+	const end = hash === -1 ? raw.length : hash;
+	const kept = raw
+		.slice(query + 1, end)
+		.split("&")
+		.filter((pair) => pair.split("=", 1)[0] !== "state");
+	return raw.slice(0, query) + (kept.length > 0 ? `?${kept.join("&")}` : "") + raw.slice(end);
+}
+
+/**
+ * `opts.postLogoutRedirectUri` when core's `checkRedirectUri` accepts it with
+ * its `state` set aside; otherwise `undefined`. Absent is silent; a refusal is
+ * one warn with the reason, never the value. Never throws.
+ */
+function checkedPostLogoutRedirectUri(
+	opts: RenderFrontchannelLogoutHtmlOptions,
+	logger: Pick<Logger, "warn">,
+): string | undefined {
+	const refuse = (reason: PostLogoutRedirectRefusal): undefined => {
+		logger.warn({ reason }, "logout_frontchannel_redirect_refused");
+		return undefined;
+	};
+	let value: unknown;
+	try {
+		value = opts.postLogoutRedirectUri;
+	} catch {
+		// The error is not logged: its message could carry the value.
+		return refuse("unreadable");
+	}
+	if (value === undefined || value === null || value === "") return undefined;
+	if (typeof value !== "string") return refuse("not-a-string");
+	const rejection = checkRedirectUri(withoutState(value));
+	return rejection === null ? value : refuse(rejection.reason);
+}
+
 /**
  * Renders an OIDC Front-Channel Logout 1.0 page: one hidden `<iframe>` per RP
  * with an http(s) `frontchannelLogoutUri` (any other is skipped with a warn),
- * its URL carrying `iss` and, unless
- * `frontchannelLogoutSessionRequired` is `false`, `sid`. With
- * `postLogoutRedirectUri`, a `<script>` redirects after `redirectDelayMs` so
- * the iframes can load. Pure; callers MUST send it as
+ * its URL carrying `iss` and, unless `frontchannelLogoutSessionRequired` is
+ * `false`, `sid`. With a `postLogoutRedirectUri` core's `checkRedirectUri`
+ * accepts (any other is dropped with a warn), a `<script>` redirects after
+ * `redirectDelayMs` so the iframes can load. Pure; callers MUST send it as
  * `Content-Type: text/html; charset=utf-8`.
  */
 export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
 	const logger = opts.logger ?? console;
 	const iframes = opts.rps
 		.flatMap((rp) => {
-			// Read once and guarded: it is only logged, when the iframe is skipped.
-			let clientId: unknown;
-			try {
-				clientId = rp.clientId;
-			} catch {
-				clientId = undefined;
-			}
 			// http(s) only, whoever calls this: a registry entry made before the
 			// code exchange checked it, or by a custom registry, is checked here.
 			const uri = usableFrontchannelLogoutUri(rp, "logout", logger);
@@ -116,6 +159,13 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 					`<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`,
 				];
 			} catch (err) {
+				// Read here only, and guarded: it is only logged.
+				let clientId: unknown;
+				try {
+					clientId = rp.clientId;
+				} catch {
+					clientId = undefined;
+				}
 				logger.warn(
 					{ clientId: auditErrorText(clientId), err: loggableError(err) },
 					"logout_frontchannel_iframe_skipped",
@@ -125,10 +175,18 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 		})
 		.join("\n    ");
 
-	const delay = opts.redirectDelayMs ?? DEFAULT_REDIRECT_DELAY_MS;
-	const redirect = opts.postLogoutRedirectUri
-		? `<script>setTimeout(() => { window.location.href = ${safeJsStringLiteral(opts.postLogoutRedirectUri)}; }, ${delay});</script>`
-		: "";
+	// Written into the script as a number literal, so only a non-negative
+	// whole number reaches it.
+	const requestedDelay = opts.redirectDelayMs;
+	const delay =
+		Number.isFinite(requestedDelay) && (requestedDelay as number) >= 0
+			? Math.trunc(requestedDelay as number)
+			: DEFAULT_REDIRECT_DELAY_MS;
+	const redirectTarget = checkedPostLogoutRedirectUri(opts, logger);
+	const redirect =
+		redirectTarget !== undefined
+			? `<script>setTimeout(() => { window.location.href = ${safeJsStringLiteral(redirectTarget)}; }, ${delay});</script>`
+			: "";
 
 	return `<!DOCTYPE html>
 <html lang="en">

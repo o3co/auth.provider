@@ -763,7 +763,15 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 								// leaves this RP without a front-channel entry, and the
 								// exchange goes on.
 								frontchannelLogoutUri: usableFrontchannelLogoutUri(
-									clientRecord,
+									{
+										// The RP is registered under the authenticated id,
+										// so the warn names that one.
+										clientId: authenticatedClientId,
+										// Read by the helper, inside its guard.
+										get frontchannelLogoutUri(): unknown {
+											return clientRecord?.frontchannelLogoutUri;
+										},
+									},
 									"authorization_code",
 									logger,
 								),
