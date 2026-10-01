@@ -29,6 +29,13 @@
  *   call was admitted in — its `sid` and subject — reads as unknown, and
  *   spends nothing. An `enroll` transaction verifies the account-email proof
  *   alone.
+ * - A login's transaction is held to its subject's sessions boundary
+ *   (`revokedBefore`) at every bound read: a continuation authenticated at or
+ *   before it, the revocation skew allowed, is `revoked` and spends nothing;
+ *   a boundary that cannot be read is an outage; none wired, none is read.
+ *   The step-up reads only its session's `enroll` transactions, so it never
+ *   reads a login's boundary. The boundary is read once per call: a
+ *   revocation landing during that call can still let it bind.
  * - The step-up of a subject with no record that may count opens, or uses,
  *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
  *   on one is recorded for its session alone, standing
@@ -58,7 +65,11 @@
  *   reopened for a binding. A login transaction opened for a binding
  *   verifies no factor.
  * - A verified counting factor marks the enrollment witness of a login whose
- *   `User` does not carry it (D12); a mark that fails never fails the login.
+ *   `User` does not carry it (D12), after noting the subject's first-binding
+ *   mark (`firstBindingMark.mts`): a note that fails leaves the witness
+ *   unmarked, so no session's recorded witness goes stale unmarked; a
+ *   directory that cannot write the witness gets no note. Neither failure
+ *   fails the login (`reconcileWitness`).
  * - A factor is handed its records opened and digests under the ring; it
  *   never sees a key, a store, a transaction or the mail sender. A code it
  *   asks to be mailed goes through `sendMfaMail` (`mail.mts`), to the
@@ -72,7 +83,9 @@
  */
 
 import {
+	coveredByRevocationBoundary,
 	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	getBoundMfaTransaction,
 	isConsumedMfaTransaction,
 	isMfaFactorUpdateWritten,
@@ -91,6 +104,7 @@ import {
 	type MfaVerification,
 	readMfaAttemptReservation,
 	readSessionEmailProof,
+	type SubjectRevocation,
 } from "@o3co/auth-provider-core";
 import {
 	type MfaCeremonyCall,
@@ -101,18 +115,25 @@ import {
 	type MfaEnrollmentBeginOutcome,
 	type MfaEnrollmentCompleteOutcome,
 	type MfaFactorUnreadable,
+	type MfaFirstBindingDistrusted,
 	type MfaRefusalReason,
 	type MfaStepUpOutcome,
 	type MfaStoreOutage,
 	type MfaVerifyOutcome,
 	OUTSIDE_CONTRACT,
 	outage,
+	type Revoked,
 	UNKNOWN_FACTOR,
 	UNKNOWN_TRANSACTION,
 	type UnknownTransaction,
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
 import type { RequireEmailProof } from "./firstBinding.mjs";
+import {
+	distrustedByFirstBinding,
+	firstBindingRetryAfterMs,
+	readFirstBindingMark,
+} from "./firstBindingMark.mjs";
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
@@ -199,6 +220,10 @@ export interface MfaCoordinatorOptions {
 	readonly requireEmailProof: RequireEmailProof;
 	/** `mfa.manage.maxAgeSeconds`: how long the account-email proof given in a session stands. */
 	readonly sessionProofSeconds: number;
+	/** How long a subject's first-binding mark stands, in milliseconds (`firstBindingMarkLifetimeMs`). */
+	readonly firstBindingMarkMs: number;
+	/** The subjects' sessions boundary a login's transaction is held to; none wired, none is read. */
+	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -230,15 +255,74 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		maxFactorsPerSubject,
 		requireEmailProof,
 		sessionProofSeconds,
+		firstBindingMarkMs,
+		subjectRevocation,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
 	/**
-	 * The transaction `call` names, bound to its binding: a login's, or an
-	 * `enroll` one recording the `sid` and subject of the session the call was
-	 * admitted in; `null` when there is none to use.
+	 * Whether `tx`, a login's, was authenticated at or before its subject's
+	 * sessions boundary, the revocation skew allowed — a login without a
+	 * continuation is, under any boundary; a boundary that cannot be read, or
+	 * a time that cannot be compared, is the boundary's outage.
 	 */
-	const bound = async (call: MfaCeremonyCall): Promise<MfaTransaction | null | MfaStoreOutage> => {
+	const pastSessionsBoundary = async (tx: MfaTransaction): Promise<boolean | MfaStoreOutage> => {
+		if (subjectRevocation === undefined) return false;
+		try {
+			const boundary: unknown = await subjectRevocation.revokedBefore(tx.subject);
+			if (boundary === null) return false;
+			if (!(boundary instanceof Date)) {
+				throw new TypeError("the sessions boundary is neither a date nor null");
+			}
+			// A login transaction without a continuation cannot show it began after the boundary.
+			const authTimeMs = tx.continuation?.primary.authTimeMs;
+			return (
+				authTimeMs === undefined ||
+				coveredByRevocationBoundary(
+					new Date(authTimeMs),
+					boundary,
+					DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+				)
+			);
+		} catch (cause) {
+			return outage("revocation_boundary", "revokedBefore", cause);
+		}
+	};
+
+	/**
+	 * The transaction `call` names, bound to its binding: a login's, held to
+	 * its subject's sessions boundary, or an `enroll` one recording the `sid`
+	 * and subject of the session the call was admitted in; `null` when there
+	 * is none to use.
+	 */
+	const bound = async (
+		call: MfaCeremonyCall,
+	): Promise<MfaTransaction | null | Revoked | MfaStoreOutage> => {
+		const tx = await boundRead(call);
+		if (tx === null || "outcome" in tx) return tx;
+		if (tx.purpose === "login") {
+			const past = await pastSessionsBoundary(tx);
+			if (past === false) return tx;
+			return past === true ? { outcome: "revoked", subject: tx.subject } : past;
+		}
+		return inSession(tx, call);
+	};
+
+	/** An `enroll` transaction of the session `call` was admitted in — its `sid` and subject — else none. */
+	const inSession = (tx: MfaTransaction, call: MfaCeremonyCall): MfaTransaction | null => {
+		const session = call.session;
+		return tx.purpose === "enroll" &&
+			session !== undefined &&
+			tx.sid === session.sid &&
+			tx.subject === session.subject
+			? tx
+			: null;
+	};
+
+	/** The transaction `call` names, bound to its binding, whatever its purpose; `null` for none. */
+	const boundRead = async (
+		call: MfaCeremonyCall,
+	): Promise<MfaTransaction | null | MfaStoreOutage> => {
 		const id = call.transactionId;
 		if (id === undefined || !TRANSACTION_ID.test(id)) return null;
 		let tx: MfaTransaction | null;
@@ -247,15 +331,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		} catch (cause) {
 			return outage("mfa_transaction", "get", cause);
 		}
-		if (tx === null) return null;
-		if (tx.purpose === "login") return tx;
-		const session = call.session;
-		return tx.purpose === "enroll" &&
-			session !== undefined &&
-			tx.sid === session.sid &&
-			tx.subject === session.subject
-			? tx
-			: null;
+		return tx;
 	};
 
 	/** Every record of `subject`, oldest first; an outage is never "none". */
@@ -456,6 +532,21 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return { written: written as MfaTransaction };
 	};
 
+	/**
+	 * `subject`'s first-binding mark noted, standing its lifetime; the outage
+	 * otherwise. Dated by the clock read just before the note, not the
+	 * request's start: a request that stalled must not date the mark early.
+	 */
+	const noteFirstBinding = async (subject: string): Promise<MfaStoreOutage | undefined> => {
+		const atMs = now();
+		try {
+			await transactions.noteFirstBinding(subject, atMs, atMs + firstBindingMarkMs);
+			return undefined;
+		} catch (cause) {
+			return outage("mfa_transaction", "noteFirstBinding", cause);
+		}
+	};
+
 	const kit: MfaCeremonyKit = {
 		factors,
 		factorStore,
@@ -523,6 +614,36 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			} catch (cause) {
 				return outage("mfa_transaction", "recordSessionEmailProof", cause);
 			}
+		},
+		boundInSession: async (call) => {
+			const tx = await boundRead(call);
+			return tx === null || "outcome" in tx ? tx : inSession(tx, call);
+		},
+		firstBindingDistrust: async (subject, authTimeMs) => {
+			const nowMs = now();
+			let mark: number | null;
+			try {
+				mark = readFirstBindingMark(await transactions.firstBindingAt(subject, nowMs), nowMs);
+			} catch (cause) {
+				return outage("mfa_transaction", "firstBindingAt", cause);
+			}
+			return mark !== null && distrustedByFirstBinding(authTimeMs, mark)
+				? ({
+						outcome: "first_binding_distrusted",
+						subject,
+						retryAfterMs: firstBindingRetryAfterMs(mark, nowMs),
+					} satisfies MfaFirstBindingDistrusted)
+				: undefined;
+		},
+		noteFirstBinding,
+		reconcileWitness: async (subject) => {
+			// A directory that cannot write the witness leaves no session stale: no mark is due.
+			if (!witness.writable)
+				return { witness: await witness.mark(subject), firstBindingUnnoted: undefined };
+			const unnoted = await noteFirstBinding(subject);
+			return unnoted === undefined
+				? { witness: await witness.mark(subject), firstBindingUnnoted: undefined }
+				: { witness: undefined, firstBindingUnnoted: unnoted };
 		},
 		recordsOf,
 		reserve,
@@ -989,7 +1110,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				// D12: a counting factor verified for a login's `User` that does not
 				// say it enrolled marks it, so a mark that failed heals here.
 				const user = consumed.continuation?.primary.user;
-				const marked = reconciles(factor, user) ? await witness.mark(tx.subject) : undefined;
+				const reconciled = reconciles(factor, user)
+					? await kit.reconcileWitness(tx.subject)
+					: undefined;
 
 				return {
 					outcome: "verified",
@@ -998,7 +1121,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
 						mfaAt: new Date(nowMs),
 					},
-					witness: marked,
+					witness: reconciled?.witness,
+					firstBindingUnnoted: reconciled?.firstBindingUnnoted,
 					recoveryCodesRemaining: recoveryCodesLeft(factor, checked.next),
 					...about,
 				};

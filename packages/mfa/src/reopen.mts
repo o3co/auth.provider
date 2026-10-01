@@ -35,7 +35,10 @@
  * first binding's witness; the counting factors the user may enroll — none,
  * or one that cannot say, is an outage; D25's flag and the gate — a proof
  * nobody can give is refused; and `mfa.maxFactorsPerSubject` — for a first
- * binding, its factor and its codes, less a set they replace.
+ * binding, its factor and its codes, less a set they replace. A first
+ * binding whose continuation the subject's first-binding mark distrusts
+ * (`firstBindingMark.mts`) is refused too; a mark that cannot be read is an
+ * outage.
  */
 
 import {
@@ -93,6 +96,13 @@ export function createLoginReopen(kit: MfaCeremonyKit): {
 			const enrollment = reopenedEnrollment(kit.factors, records);
 			if (enrollment === "required" && facts.witness !== "not_enrolled") {
 				return { outcome: "enrollment_state_inconsistent", witness: facts.witness };
+			}
+			if (enrollment === "required") {
+				const distrusted = await kit.firstBindingDistrust(
+					tx.subject,
+					tx.continuation.primary.authTimeMs,
+				);
+				if (distrusted !== undefined) return distrusted;
 			}
 			let enrollable: string[];
 			try {

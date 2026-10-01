@@ -43,7 +43,11 @@
  * the view's recorded facts are read — none recorded sends the session to
  * log in, and a witness `enrolled` or malformed is recorded and thrown —
  * then a recent primary (`authTime`; a second factor does not stand in for
- * it), then the one gate, whose proof is the one given in that session and
+ * it), then the subject's first-binding mark (`firstBindingMark.mts`): a
+ * session it distrusts, whose recorded witness may predate the subject's
+ * enrollment, is sent to log in — said at info — and a mark that cannot be
+ * read throws;
+ * then the one gate, whose proof is the one given in that session and
  * still standing (`MfaTransactionStore.sessionEmailProofAt`, read no older
  * than `mfa.manage.maxAgeSeconds` and the clock skew). A proof nobody can
  * give steps the session up and never admits it.
@@ -97,6 +101,7 @@ import {
 	mayCount,
 	type RequireEmailProof,
 } from "./firstBinding.mjs";
+import { distrustedByFirstBinding, readFirstBindingMark } from "./firstBindingMark.mjs";
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
 import { MfaEnrollmentStateInconsistentError } from "./witness.mjs";
 
@@ -149,6 +154,11 @@ export interface MfaRequirementOptions {
 		sid: string,
 		nowMs: number,
 	) => Promise<number | null>;
+	/**
+	 * When `subject`'s first-binding mark was noted, while it stands
+	 * (`MfaTransactionStore.firstBindingAt`); rejects on an outage.
+	 */
+	readonly firstBindingAt: (subject: string, nowMs: number) => Promise<number | null>;
 }
 
 /** What recent MFA is read from: a live session's primary time and its last second factor. */
@@ -263,6 +273,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		firstBinding,
 		emailProofRequiredAtNextBinding,
 		sessionEmailProofAt,
+		firstBindingAt,
 	} = options;
 
 	/**
@@ -410,8 +421,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	/**
 	 * A first binding in `session`, whose subject holds no record that may
 	 * count: what the session recorded of its login's `User` — none is a new
-	 * login — then a recent primary, then the gate, a proof asked for
-	 * admitted only while one given in this session stands.
+	 * login — then a recent primary, then the subject's first-binding mark —
+	 * a session it distrusts is a new login — then the gate, a proof asked
+	 * for admitted only while one given in this session stands.
 	 */
 	const firstBindingIn = async (
 		session: SessionView,
@@ -430,6 +442,11 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			nowMs,
 		);
 		if (!recentPrimary) return REAUTHENTICATE;
+		const mark = readFirstBindingMark(await firstBindingAt(session.sub, nowMs), nowMs);
+		if (distrustedByFirstBinding(session.authTime.getTime(), mark)) {
+			logger.info({ sub: session.sub, action: action.name }, "mfa_first_binding_distrusted");
+			return REAUTHENTICATE;
+		}
 		const gate = await gateFor(session.sub, facts.mailAddress);
 		if (gate.outcome === "bind") return MET;
 		if (gate.outcome === "unprovable") return STEP_UP;

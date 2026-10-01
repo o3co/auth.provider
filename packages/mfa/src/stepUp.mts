@@ -58,7 +58,7 @@ export function createMfaStepUp(kit: MfaCeremonyKit): {
 				return { outcome: "counting_factor_held" };
 			}
 			if (call.transactionId !== undefined) {
-				const tx = await kit.bound(call);
+				const tx = await kit.boundInSession(call);
 				if (tx === null) return UNKNOWN_TRANSACTION;
 				if ("outcome" in tx) return tx;
 				if (tx.purpose !== "enroll" || tx.enrollment !== "required") return UNKNOWN_TRANSACTION;
