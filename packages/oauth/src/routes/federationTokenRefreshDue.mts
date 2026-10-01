@@ -17,13 +17,17 @@
 /**
  * Whether a stored token is refreshed before it is handed on: one with no
  * finite expiry never is; one that ends within the refresh buffer is, unless
- * it is known to be obtained less than half its lifetime ago. That rule only
- * ever delays a refresh: an `obtainedAt` that is absent, or that core's
- * `judgeHeldUpstreamToken` does not believe, leaves the buffer rule alone.
+ * it is known to be obtained less than half its lifetime ago and has at least
+ * the refresh floor left. That rule only ever delays a refresh: an
+ * `obtainedAt` that is absent, or that core's `judgeHeldUpstreamToken` does
+ * not believe, leaves the buffer rule alone. It reads the record's instants
+ * on this replica's clock, so it assumes replicas' clocks agree to within the
+ * floor.
  */
 
 import { type FederationTokens, judgeHeldUpstreamToken } from "@o3co/auth-provider-core";
 import type { FederationTokenContext } from "./federationTokenContext.mjs";
+import { REFRESH_FLOOR_MS } from "./federationTokenRefreshAnswer.mjs";
 
 export const refreshIsDue = (
 	ctx: Pick<FederationTokenContext, "refreshBufferMs">,
@@ -34,8 +38,10 @@ export const refreshIsDue = (
 	// tokens). An expiry that names no instant compares false: it is due.
 	if (expiresAt === null) return false;
 	const now = Date.now();
-	if (expiresAt.getTime() - now > ctx.refreshBufferMs) return false;
-	if (obtainedAt === undefined) return true;
+	const remainingMs = expiresAt.getTime() - now;
+	if (remainingMs > ctx.refreshBufferMs) return false;
+	// Never handed on with less left than a refresh answer is accepted with.
+	if (obtainedAt === undefined || remainingMs < REFRESH_FLOOR_MS) return true;
 	// Never refreshed before it is half spent, so a lifetime shorter than the
 	// buffer is not refreshed on every request. A token not believed reads as
 	// half spent: the buffer rule stands.

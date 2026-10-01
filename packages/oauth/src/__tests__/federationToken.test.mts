@@ -4429,6 +4429,28 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 		});
 	});
 
+	it("refreshes a token with less than a second left, even before it is half spent", async () => {
+		await withFrozenDate(async () => {
+			const store = await seeded({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) });
+			let issued = 0;
+			const { app, provider } = appWith(store, async () => {
+				issued += 1;
+				return {
+					accessToken: `one-second-at-${issued}`,
+					expiresIn: 1,
+					refreshToken: `rt-${issued}`,
+				};
+			});
+
+			await postFedToken(app, "google", await mintAccessToken());
+			vi.setSystemTime(Date.now() + 100);
+			const second = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(second.body.access_token).toBe("one-second-at-2");
+			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
+		});
+	});
+
 	it("refreshes it once half of it is spent", async () => {
 		await withFrozenDate(async () => {
 			const store = await seeded({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) });

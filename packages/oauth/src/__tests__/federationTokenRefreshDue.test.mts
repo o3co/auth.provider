@@ -92,6 +92,12 @@ describe("refreshIsDue", () => {
 			);
 		});
 
+		it("refreshes a token with less than a second left, half spent or not", () => {
+			// Never handed on with no whole second left: the floor a refresh answer is held to.
+			expect(due({ obtainedAt: new Date(NOW - 100), expiresAt: new Date(NOW + 999) })).toBe(true);
+			expect(due({ obtainedAt: new Date(NOW - 100), expiresAt: new Date(NOW + 1000) })).toBe(false);
+		});
+
 		it("believes an obtainedAt a little ahead of now, as another replica's clock may be", () => {
 			expect(due(held(NOW + 5000))).toBe(false);
 		});
