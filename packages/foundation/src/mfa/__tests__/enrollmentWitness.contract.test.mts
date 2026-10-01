@@ -16,20 +16,13 @@
 
 /**
  * The enrollment witness's contract suite (`@o3co/auth-provider-test-kit`)
- * over the test kit's fake Store. The witness is read back through
- * `HttpUserRepository.authenticate` and `authenticateByToken`, each user
- * resolvable by a token the fake holds for it. `HttpUserRepository` has no
- * `markMfaEnrolled`, so the witness is written by this file's stand-in, which
- * posts the mark as the wire contract says and reads an answer other than
- * `204` through `mfaStoreStatusError`; a check here fails once the repository
- * writes the witness itself, so the suite then runs over that.
+ * over `HttpUserRepository` and the test kit's fake Store: the witness
+ * written through `markMfaEnrolled` and read back through `authenticate` and
+ * `authenticateByToken`, each user resolvable by a token the fake holds for
+ * it. The repository writes the witness only with `markMfaEnrolledUrl`.
  */
 
-import {
-	type MfaStoreMarkEnrolledRequest,
-	supportsMfaEnrollmentWitness,
-	type UserRepository,
-} from "@o3co/auth-provider-core";
+import { supportsMfaEnrollmentWitness } from "@o3co/auth-provider-core";
 import {
 	type MfaEnrollmentWitnessHarness,
 	mfaEnrollmentWitnessContract,
@@ -37,7 +30,8 @@ import {
 } from "@o3co/auth-provider-test-kit";
 import { describe, expect, it } from "vitest";
 import { HttpUserRepository } from "#/index.mjs";
-import { mfaStoreStatusError } from "#/mfa/storeFailure.mjs";
+
+const TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 const USERS = [
 	{
@@ -51,6 +45,7 @@ const USERS = [
 
 async function build(): Promise<MfaEnrollmentWitnessHarness> {
 	const fake = await startFakeStore({
+		bearerToken: TOKEN,
 		users: USERS.map((user) => ({
 			id: user.subject,
 			username: user.username,
@@ -58,30 +53,14 @@ async function build(): Promise<MfaEnrollmentWitnessHarness> {
 			tokens: [user.token],
 		})),
 	});
-	const reader = new HttpUserRepository({
-		authenticateUrl: fake.urls.authenticateUrl,
-		authenticateByTokenUrl: fake.urls.authenticateByTokenUrl,
-		timeout: 5000,
-	});
-	const repository: UserRepository = {
-		authenticate: (username, password) => reader.authenticate(username, password),
-		authenticateByToken: (token) => reader.authenticateByToken(token),
-		markMfaEnrolled: async (subject, enrolled) => {
-			const body: MfaStoreMarkEnrolledRequest = { subject, enrolled };
-			const response = await fetch(fake.urls.markMfaEnrolledUrl, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(body),
-				redirect: "manual",
-			});
-			if (response.status !== 204) {
-				throw mfaStoreStatusError("markMfaEnrolled", fake.urls.markMfaEnrolledUrl, response);
-			}
-			await response.body?.cancel();
-		},
-	};
 	return {
-		repository,
+		repository: new HttpUserRepository({
+			authenticateUrl: fake.urls.authenticateUrl,
+			authenticateByTokenUrl: fake.urls.authenticateByTokenUrl,
+			markMfaEnrolledUrl: fake.urls.markMfaEnrolledUrl,
+			bearerToken: TOKEN,
+			timeout: 5000,
+		}),
 		users: USERS,
 		unknownSubject: "nobody",
 		outage: () => fake.answer("markMfaEnrolled", () => ({ status: 503 })),
@@ -90,17 +69,25 @@ async function build(): Promise<MfaEnrollmentWitnessHarness> {
 }
 
 describe("the witness's write side", () => {
-	it("is this file's stand-in: HttpUserRepository has no markMfaEnrolled", () => {
-		const repository = new HttpUserRepository({
+	it("is HttpUserRepository's own with markMfaEnrolledUrl, and absent without it", () => {
+		const options = {
 			authenticateUrl: "https://store.example/authenticate",
 			authenticateByTokenUrl: "https://store.example/authenticate-by-token",
 			timeout: 5000,
-		});
-		expect(supportsMfaEnrollmentWitness(repository)).toBe(false);
+		};
+		expect(
+			supportsMfaEnrollmentWitness(
+				new HttpUserRepository({
+					...options,
+					markMfaEnrolledUrl: "https://store.example/mfa/enrolled",
+				}),
+			),
+		).toBe(true);
+		expect(supportsMfaEnrollmentWitness(new HttpUserRepository(options))).toBe(false);
 	});
 });
 
-describe("the enrollment witness over the fake Store, read back through HttpUserRepository", () => {
+describe("the enrollment witness through HttpUserRepository over the fake Store", () => {
 	for (const contractCase of mfaEnrollmentWitnessContract({ build, withOutage: true })) {
 		it(contractCase.name, contractCase.run);
 	}

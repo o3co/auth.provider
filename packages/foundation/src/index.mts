@@ -50,6 +50,11 @@ export const registerBuiltinAdapters = (factories: {
 						findSubjectByFederatedIdentityUrl: config.findSubjectByFederatedIdentityUrl as string,
 					}
 				: {}),
+			// Optional, forwarded whenever SET for the same reason: a witness URL
+			// that vanished leaves the MFA enrollment witness unwritten.
+			...(config.markMfaEnrolledUrl !== undefined
+				? { markMfaEnrolledUrl: config.markMfaEnrolledUrl as string }
+				: {}),
 			...(config.federatedIdentityLookupCoverage !== undefined
 				? {
 						federatedIdentityLookupCoverage:

@@ -429,6 +429,7 @@ core.federations {
 | `REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL` | — | トークン認証用のユーザー認証 URL。**https 必須**（下記参照） |
 | `REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL` | — | 任意。Store がフェデレーション identity を紐づける URL（#482）。フェデレーション開始ルートで `?link=1` を有効にする。**https 必須** |
 | `REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | — | 任意。上流 identity の持ち主を Store が答える URL（#613、フェデレーショングラントの check 5）。設定した場合は、Store が cover する範囲を `repositories.user.http.federatedIdentityLookupCoverage`（HOCON）に宣言する。**https 必須** |
+| `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` | — | 任意。Store が MFA の登録の証人を保持する URL（MFA ADR の D12）。設定すれば、失われた要素ストアが最初の紐付けを開けない。そのとき Store は二つの認証 URL の両方で `mfaEnrolled` を返す。未設定なら、MFA が有効な起動で警告が出る（`mfa_enrollment_witness_unwritable`）。**https 必須** |
 | `REPOSITORIES_USER_HTTP_BEARER_TOKEN` | — | 任意。このサーバーが Store に提示する資格情報: Store へのすべてのリクエストが `Authorization: Bearer <token>` を持つ。32 バイト以上の素のトークン（`Bearer ` の接頭辞なし）— `openssl rand -hex 32`。未設定なら `Authorization` ヘッダーは送らない（下記参照） |
 | `REPOSITORIES_USER_HTTP_TIMEOUT` | `5000` | HTTP リクエストタイムアウト（ミリ秒）。`2147483647` 以下の正の整数 |
 | `REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES` | `1048576` | 上流レスポンスボディの受け入れ上限（バイト） |

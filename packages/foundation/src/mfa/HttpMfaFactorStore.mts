@@ -43,7 +43,7 @@ import {
 	toMfaStoreFactor,
 	toMfaStoreUpdateRequest,
 } from "@o3co/auth-provider-core";
-import { assertSecureEndpoint, endpointForMessage } from "../endpointUrl.mjs";
+import { assertSecureEndpoint } from "../endpointUrl.mjs";
 import {
 	bearerAuthorization,
 	checkStoreResponseCap,
@@ -56,6 +56,7 @@ import {
 import {
 	type MfaStoreOperation,
 	mfaStoreMalformedAnswer,
+	mfaStoreRequestMessages,
 	mfaStoreStatusError,
 	mfaStoreUnreadableRecord,
 	mfaStoreVersionSkipped,
@@ -202,18 +203,11 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		readsBody: (status: number) => boolean,
 	): Promise<StoreAnswer> {
 		const url = this.#urls[operation];
-		const endpoint = `the Store's MFA ${operation} endpoint at ${endpointForMessage(url)}`;
 		return postToStore(
 			url,
 			body,
 			this.#settings,
-			{
-				owner: OWNER,
-				unreachable: `${OWNER}: ${endpoint} could not be reached`,
-				closed: `${OWNER}: the connection to ${endpoint} closed before a complete response arrived`,
-				malformed: `${OWNER}: ${endpoint} answered with a malformed HTTP response`,
-				unreadable: `${OWNER}: the answer of ${endpoint} could not be read`,
-			},
+			mfaStoreRequestMessages(OWNER, operation, url),
 			readsBody,
 		);
 	}

@@ -368,14 +368,27 @@ return 1
 /**
  * `MfaTransactionStoreClient.noteExemptSuccess`.
  *
- * `ARGV`: now. Ends the run up to now; the week stands.
+ * `ARGV`: now, hardLimit. Ends the run up to now while the attempts up to now
+ * are fewer than hardLimit; at or past it they, and the hard hold, stand. An
+ * attempt after now stays, and the week stands. A hardLimit that is missing or
+ * not a number is refused before anything is read.
  */
 const LUA_MFA_SUBJECT_EXEMPT = `${LUA_MFA_SUBJECT_PRELUDE}
+local hard = tonumber(ARGV[2])
+if hard == nil or hard ~= hard or hard == math.huge or hard == -math.huge then
+  error({err = 'MFA subject state: the hardLimit argument is missing or not a number'})
+end
 local now = num(ARGV[1])
 local run, pending, week = load()
 prune(run, pending, week, math.min(now, server_ms()) - SKEW)
+local up_to = 0
 for _, a in ipairs(run) do
-  if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
+  if a.at <= now then up_to = up_to + 1 end
+end
+if up_to < hard then
+  for _, a in ipairs(run) do
+    if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
+  end
 end
 keep()
 return 1

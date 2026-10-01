@@ -55,7 +55,7 @@ describe("the MfaTransactionStore port", () => {
 		expect(true).toBe(true);
 	});
 
-	it("reserves a subject's attempt with no browser, and notes an exempt success as the subject and the time alone", () => {
+	it("reserves a subject's attempt with no browser, and notes an exempt success with the subject, the time and the lockout policy", () => {
 		expectTypeOf<MfaTransactionStore["reserveSubjectAttempt"]>().toEqualTypeOf<
 			(
 				subject: string,
@@ -64,7 +64,7 @@ describe("the MfaTransactionStore port", () => {
 			) => Promise<MfaSubjectAttemptReservation>
 		>();
 		expectTypeOf<MfaTransactionStore["noteExemptSuccess"]>().toEqualTypeOf<
-			(subject: string, nowMs: number) => Promise<void>
+			(subject: string, nowMs: number, policy: MfaLockoutPolicy) => Promise<void>
 		>();
 		expect(true).toBe(true);
 	});

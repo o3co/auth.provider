@@ -45,6 +45,7 @@ import {
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
 	moduleReferences,
+	supportsMfaEnrollmentWitness,
 } from "@o3co/auth-provider-core";
 import { httpSettingsContract, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { HttpUserRepository } from "@o3co/auth-provider-foundation";
@@ -1189,6 +1190,11 @@ describe("repositories", () => {
 			"bearerToken",
 			"0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a",
 		],
+		[
+			"REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL",
+			"markMfaEnrolledUrl",
+			"https://store.example/mfa/enrolled",
+		],
 	])(
 		"binds %s at repositories.user.http.%s, and leaves the key absent while it is unset",
 		(variable, key, value) => {
@@ -1198,6 +1204,62 @@ describe("repositories", () => {
 			expect(referenced()).not.toHaveProperty(key);
 		},
 	);
+
+	it("builds a user repository that writes the MFA enrollment witness with REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL, and one that does not without it", async () => {
+		const clients = yamlFile("clients.yaml", "");
+		const env = {
+			ADAPTERS_USER_REPOSITORY: "http",
+			REPOSITORIES_CLIENT_YAML_PATH: clients,
+			REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: "https://store.example/authenticate",
+			REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL: "https://store.example/by-token",
+		};
+		for (const [url, writes] of [
+			["https://store.example/mfa/enrolled", true],
+			[undefined, false],
+		] as const) {
+			const handle = await bootTemplate({
+				repositories: true,
+				env: { ...env, REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL: url },
+			});
+			try {
+				const users = handle.components.userRepository;
+				expect(users).toBeInstanceOf(HttpUserRepository);
+				expect(supportsMfaEnrollmentWitness(users as HttpUserRepository), String(url)).toBe(writes);
+			} finally {
+				await handle.dispose();
+			}
+		}
+	});
+
+	it("refuses the boot for a witness URL that is not https or loopback http, naming markMfaEnrolledUrl and quoting no value", async () => {
+		const clients = yamlFile("clients.yaml", "");
+		for (const url of [
+			"http://store.internal/mfa/enrolled?key=QUERY-SECRET",
+			"https://user:QUERY-SECRET@store.example/mfa/enrolled",
+		]) {
+			const refused = await bootTemplate({
+				repositories: true,
+				env: {
+					ADAPTERS_USER_REPOSITORY: "http",
+					REPOSITORIES_CLIENT_YAML_PATH: clients,
+					REPOSITORIES_USER_HTTP_AUTHENTICATE_URL: "https://store.example/authenticate",
+					REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL: "https://store.example/by-token",
+					REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL: url,
+				},
+			}).then(
+				async (handle) => {
+					await handle.dispose();
+					return undefined;
+				},
+				(error: unknown) => error,
+			);
+			expect(refused, url).toBeInstanceOf(BootError);
+			expect((refused as BootError).reason, url).toBe("provides-factory-failed");
+			const text = `${(refused as BootError).message} ${String(((refused as BootError).cause as Error | undefined)?.message)}`;
+			expect(text, url).toContain('"markMfaEnrolledUrl"');
+			expect(text, url).not.toContain("QUERY-SECRET");
+		}
+	});
 
 	it("ships an empty identity-lookup coverage declaration, which reaches the factory as a list", () => {
 		expect(referenced().federatedIdentityLookupCoverage).toEqual([]);

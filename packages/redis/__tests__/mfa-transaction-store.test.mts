@@ -35,6 +35,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { MFA_SUBJECT_EXEMPT } from "#/ioredis/scripts/mfa.mjs";
 import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
 import { createRedisMfaTransactionStore } from "#/mfa-transaction-store.mjs";
 import { runMfaTransactionStoreContract } from "./adapters.mfa-transaction-store.contract.mjs";
@@ -90,7 +91,7 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 			pick().reserveSubjectAttempt(subject, nowMs, policy),
 		settleSubjectAttempt: (subject, reservation, outcome) =>
 			pick().settleSubjectAttempt(subject, reservation, outcome),
-		noteExemptSuccess: (subject, nowMs) => pick().noteExemptSuccess(subject, nowMs),
+		noteExemptSuccess: (subject, nowMs, policy) => pick().noteExemptSuccess(subject, nowMs, policy),
 		clearSubjectState: (subject) => pick().clearSubjectState(subject),
 		requireEmailProofAtNextBinding: (subject) => pick().requireEmailProofAtNextBinding(subject),
 		emailProofRequiredAtNextBinding: (subject) => pick().emailProofRequiredAtNextBinding(subject),
@@ -431,7 +432,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		const week = `${prefix}week:{${keyPart("user-1")}}`;
 
 		// An exempt success on a subject with nothing counted keeps nothing.
-		await store.noteExemptSuccess("user-1", t);
+		await store.noteExemptSuccess("user-1", t, POLICY);
 		expect(await first().exists(lock, week)).toBe(0);
 
 		const failed = await store.reserveSubjectAttempt("user-1", t + MINUTE, POLICY);
@@ -498,7 +499,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 			await weekly.settleSubjectAttempt("user-1", r.reservation, "failure");
 			at += MINUTE;
 		}
-		await weekly.noteExemptSuccess("user-1", at);
+		await weekly.noteExemptSuccess("user-1", at, weekOnly);
 		expect(await weekly.reserveSubjectAttempt("user-1", at, weekOnly)).toMatchObject({
 			ok: false,
 			first: true,
@@ -539,6 +540,48 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		// the hash without a TTL.
 		expect(await first().exists(week)).toBe(0);
 		expect(await deadlineOf(lock)).toBe(-1);
+	});
+
+	it("keeps the hard hold, and no TTL, through an exempt success, the script loaded again after the cache was flushed", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const small: MfaLockoutPolicy = { ...POLICY, threshold: 5, hardLimit: 5 };
+		const t = start();
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		for (let i = 0; i < 5; i++) {
+			const r = await store.reserveSubjectAttempt("user-1", t + i, small);
+			if (!r.ok) throw new Error("expected a reservation");
+			await store.settleSubjectAttempt("user-1", r.reservation, "failure");
+		}
+		await store.noteExemptSuccess("user-1", t + 5, small);
+		await first().script("FLUSH");
+		await store.noteExemptSuccess("user-1", t + 6, small);
+		expect(await first().script("EXISTS", MFA_SUBJECT_EXEMPT.sha)).toEqual([1]);
+		expect(await store.reserveSubjectAttempt("user-1", t + 7, small)).toMatchObject({
+			ok: false,
+			hold: "hard",
+			retryAfterMs: null,
+		});
+		expect(await deadlineOf(lock)).toBe(-1);
+	});
+
+	it("refuses an exempt success whose hardLimit argument is missing or not a number, naming the argument, and writes nothing", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const t = start();
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		const week = `${prefix}week:{${keyPart("user-1")}}`;
+		const r = await store.reserveSubjectAttempt("user-1", t, POLICY);
+		if (!r.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", r.reservation, "failure");
+		const before = await first().hgetall(lock);
+		for (const args of [[String(t + 1)], [String(t + 1), "abc"], [String(t + 1), "inf"]]) {
+			await expect(
+				first().eval(MFA_SUBJECT_EXEMPT.source, 2, lock, week, ...args),
+				JSON.stringify(args),
+			).rejects.toThrow("MFA subject state: the hardLimit argument is missing or not a number");
+			expect(await first().hgetall(lock), JSON.stringify(args)).toEqual(before);
+		}
 	});
 
 	it("drops the keys once nothing in them counts", async () => {
@@ -590,7 +633,9 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 			await expect(store.reserveSubjectAttempt("user-1", t, POLICY), key).rejects.toThrow(
 				/subject state/,
 			);
-			await expect(store.noteExemptSuccess("user-1", t), key).rejects.toThrow(/subject state/);
+			await expect(store.noteExemptSuccess("user-1", t, POLICY), key).rejects.toThrow(
+				/subject state/,
+			);
 		}
 	});
 
@@ -619,7 +664,7 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 			retryAfterMs: t + WEEK - at,
 			first: true,
 		});
-		await store.noteExemptSuccess("user-1", at);
+		await store.noteExemptSuccess("user-1", at, weekOnly);
 		expect(await store.reserveSubjectAttempt("user-1", at + 1, weekOnly)).toMatchObject({
 			ok: false,
 			hold: "weekly",
@@ -710,8 +755,8 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 					await memory.settleSubjectAttempt("user-1", mine, outcome);
 					await redis.settleSubjectAttempt("user-1", theirs, outcome);
 				} else if (roll < 0.97) {
-					await memory.noteExemptSuccess("user-1", at);
-					await redis.noteExemptSuccess("user-1", at);
+					await memory.noteExemptSuccess("user-1", at, SMALL);
+					await redis.noteExemptSuccess("user-1", at, SMALL);
 				} else {
 					await memory.clearSubjectState("user-1");
 					await redis.clearSubjectState("user-1");
@@ -745,6 +790,45 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		expect(answers[0]).toEqual({ ok: false, hold: "weekly", retryAfterMs: WEEK - 1, first: true });
 	});
 
+	it("keeps a run at the hard limit through an exempt success, a reservation in flight counted, and ends it once below, as core's store does", async () => {
+		// The random walk seldom reaches the hard limit; this walks its edge.
+		const four: MfaLockoutPolicy = {
+			...POLICY,
+			threshold: 4,
+			baseSeconds: 60,
+			maxSeconds: 60,
+			weeklyBudget: 1000,
+			hardLimit: 4,
+		};
+		const t = Math.floor(Date.now() / 1000) * 1000;
+		const answers: Array<Array<string | null>> = [];
+		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
+			const seen: Array<string | null> = [];
+			const reserve = async (at: number): Promise<string | null> => {
+				const r = await store.reserveSubjectAttempt("user-1", at, four);
+				seen.push(r.ok ? "ok" : r.hold);
+				return r.ok ? r.reservation : null;
+			};
+			for (let i = 0; i < 3; i++) {
+				const r = await reserve(t + i);
+				if (r !== null) await store.settleSubjectAttempt("user-1", r, "failure");
+			}
+			const inFlight = await reserve(t + 3);
+			await store.noteExemptSuccess("user-1", t + 4, four);
+			await reserve(t + 5);
+			if (inFlight !== null) await store.settleSubjectAttempt("user-1", inFlight, "void");
+			await store.noteExemptSuccess("user-1", t + 6, four);
+			for (let i = 0; i < 3; i++) {
+				const r = await reserve(t + 7 + i);
+				if (r !== null) await store.settleSubjectAttempt("user-1", r, "failure");
+			}
+			await reserve(t + 10);
+			answers.push(seen);
+		}
+		expect(answers[1]).toEqual(answers[0]);
+		expect(answers[0]).toEqual(["ok", "ok", "ok", "ok", "hard", "ok", "ok", "ok", "ok"]);
+	});
+
 	it("ends an attempt reserved at the very instant of an exempt success, as core's store does", async () => {
 		// "Up to its time" includes the instant itself: threshold - 1 failures
 		// before it and one at it are all ended, so four more failures after it
@@ -757,7 +841,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 				if (!reserved.ok) throw new Error("expected a reservation");
 				await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
 			}
-			await store.noteExemptSuccess("user-1", t + 30);
+			await store.noteExemptSuccess("user-1", t + 30, POLICY);
 			for (let i = 0; i < 4; i++) {
 				const next = await store.reserveSubjectAttempt("user-1", t + 40 + i, POLICY);
 				if (!next.ok) throw new Error("expected a reservation");
