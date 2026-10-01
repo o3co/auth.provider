@@ -20,9 +20,9 @@
  * `step_up` it answers lists only the entries the stepping requirement's own
  * trip can finish. In the met + step_up row, a step-up through the
  * second-factor authority is never offered for `acr_values` onto a session
- * whose store has no `recordSecondFactor` or on which
- * `canRecordSecondFactor` is false: the answer is a new login
- * (`reauthenticate`, `acr`) instead.
+ * whose view says no second factor can be recorded on it
+ * (`SessionView.secondFactorRecordable`, decided by admission as it builds
+ * the view): the answer is a new login (`reauthenticate`, `acr`) instead.
  */
 
 import type { AcrSelection } from "./acr.mjs";
@@ -38,12 +38,6 @@ export interface MergeContext {
 	/** The vouched `amr`. */
 	readonly held: readonly string[];
 	readonly table: AdmissionDeps["acrTable"];
-	/**
-	 * Whether a second factor can be recorded on the live session: the store
-	 * has the step-up capability and `canRecordSecondFactor` is true. Called
-	 * only where the met + step_up row would choose the authority.
-	 */
-	readonly recordable: () => boolean;
 }
 
 /** The merge table of ADR 2026-09-28-session-admission: `R` the requirements' verdict, `A` the acr selection (`undefined` when nothing was asked). */
@@ -110,9 +104,9 @@ const finishes = (
  * reach covers everything one alternative of a reachable entry lacks, with
  * the entries that requirement alone can finish as the hint — `undefined`
  * when no single requirement covers any, since no one trip can finish it.
- * The second-factor authority is passed over when the session cannot record
- * its trip; when it alone could have finished one, the answer is
- * `reauthenticate` (`acr`).
+ * The second-factor authority is passed over when the view says the session
+ * cannot record its trip (`secondFactorRecordable`); when it alone could have
+ * finished one, the answer is `reauthenticate` (`acr`).
  */
 function stepUpThroughOne(
 	reachable: readonly string[],
@@ -126,7 +120,7 @@ function stepUpThroughOne(
 		// A requirement whose reach covers an entry registered a page: boot
 		// holds a non-empty reach to one. Without one nothing could finish it.
 		if (finishable.length > 0 && requirement.stepUpPage !== undefined) {
-			if (requirement.secondFactorAuthority && !context.recordable()) {
+			if (requirement.secondFactorAuthority && live.view.secondFactorRecordable !== true) {
 				unrecordable = true;
 				continue;
 			}
