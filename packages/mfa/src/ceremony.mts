@@ -30,6 +30,7 @@ import type {
 	MfaFactorRecord,
 	MfaFactorResolver,
 	MfaFactorStore,
+	MfaSubjectHold,
 	MfaTransaction,
 	MfaTransactionBinding,
 	MfaTransactionPatch,
@@ -173,6 +174,21 @@ export type MfaVerifyOutcome =
 	  } & MfaCeremonySubject)
 	/** The proof was right, and another verification consumed the transaction first. */
 	| { readonly outcome: "spent" }
+	/** A guessable proof the subject's hold refused, unchecked (the MFA ADR's D21). */
+	| ({
+			readonly outcome: "locked";
+			readonly hold: MfaSubjectHold;
+			/** Milliseconds until an attempt may be reserved; `null` for the hard hold. */
+			readonly retryAfterMs: number | null;
+			/** Whether this refusal begins an episode. */
+			readonly first: boolean;
+			/** The exempt kinds the subject holds: what a hold does not refuse. */
+			readonly exemptKinds: readonly string[];
+			/** The transaction's attempts left: the refusal spent one. */
+			readonly attemptsRemaining: number;
+			/** What authorized the refused attempt's factor. */
+			readonly binding: MfaFactorRecord["binding"];
+	  } & MfaCeremonySubject)
 	/** The account-email proof was given: the first binding may proceed. */
 	| ({ readonly outcome: "proved" } & MfaCeremonySubject)
 	/** The proof was right, but it does not count and the subject holds no counting factor it can use (F3). */
@@ -185,6 +201,8 @@ export type MfaVerifyOutcome =
 			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
 			/** The witness marked for a login's `User` that lacked it; `undefined` when none was due. */
 			readonly witness: MfaWitnessMark | undefined;
+			/** The codes the set holds once a recovery code was spent; `undefined` for any other factor. */
+			readonly recoveryCodesRemaining: number | undefined;
 	  } & MfaCeremonySubject);
 
 /** Why an enrollment is refused before anything is spent. */

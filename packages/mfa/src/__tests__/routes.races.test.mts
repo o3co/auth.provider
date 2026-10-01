@@ -55,7 +55,11 @@ describe("N verifications at once", () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const { record, secret } = await seedTotp(factorStore);
 		const { app, transactionStore } = await boot({
-			config: configFor("required", { maxAttemptsPerTransaction: 10 }),
+			// The subject lock is set past this suite's codes: the transaction's limit is what it counts.
+			config: configFor("required", {
+				maxAttemptsPerTransaction: 10,
+				lockout: { threshold: 100, weeklyBudget: 100 },
+			}),
 			factorStore,
 		});
 		const { agent, transaction } = await beginLogin(app);

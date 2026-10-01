@@ -612,6 +612,18 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept:
+			"recovery-code verification — a code read as typed, compared with every digest of its set, and spent by the set answered without it (the MFA ADR's D22, D25)",
+		home: "packages/mfa/src/recovery/factor.mts",
+		definition: /(?:function|const)\s+spendRecoveryCode\b/,
+	},
+	{
+		concept:
+			"the subject lock in the verify path — a guessable proof reserves and settles one of its subject's attempts, an exempt proof passes during a hold and records an exempt success (the MFA ADR's D21, F1 step 5)",
+		home: "packages/mfa/src/lock.mts",
+		definition: /(?:function|const)\s+createMfaSubjectLock\b/,
+	},
+	{
+		concept:
 			"the first-binding gate — whether the account-email proof comes before a subject's first way into the account (the MFA ADR's D24, D25)",
 		home: "packages/mfa/src/firstBinding.mts",
 		definition: /(?:function|const)\s+firstBindingGate\b/,

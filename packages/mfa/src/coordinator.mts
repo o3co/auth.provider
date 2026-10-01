@@ -37,6 +37,13 @@
  *   the transaction before the factor moves on, and on a lost compare-and-set
  *   reads the factor again and checks the proof again: a code used twice at
  *   once succeeds once, and a lost race never spends a factor's state.
+ * - Between the two, the subject lock (`lock.mts`): a guessable proof
+ *   reserves one of its subject's attempts after the transaction's, and a
+ *   hold refuses it unchecked. The attempt is settled once the verification
+ *   ends: `success` once the factor was written, `void` for a right proof
+ *   that completed nothing, and a failure otherwise — a refusal, an outage
+ *   or a factor that throws before a verdict. An exempt proof records its
+ *   success once the factor was written.
  * - A store that cannot answer, a factor whose data does not open, and a
  *   factor that throws are outages: never a wrong code, never "no factor".
  * - `factor_id: "account-email"` names the account-email proof (`proof.mts`)
@@ -96,8 +103,10 @@ import {
 	type UnknownTransaction,
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
+import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
 import { keptState, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
+import { recoveryCodesLeft } from "./recovery/factor.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import { createMfaStepUp } from "./stepUp.mjs";
@@ -163,6 +172,8 @@ export interface MfaCoordinatorOptions {
 	readonly sealing: MfaSealing;
 	/** `mfa.maxAttemptsPerTransaction`. */
 	readonly maxAttemptsPerTransaction: number;
+	/** The subject lock a verification's proof is held to. */
+	readonly lock: MfaSubjectLock;
 	/** `mfa.mode`: under `required` a factor that does not count completes no login for a subject with no counting factor it can use. */
 	readonly mode: MfaRequirementMode;
 	/** Where a factor's codes are mailed; none wired, a factor that asks for one is an outage. */
@@ -198,6 +209,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		transactions,
 		sealing,
 		maxAttemptsPerTransaction,
+		lock,
 		mode,
 		mailSender,
 		witness,
@@ -752,165 +764,188 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			}
 			const { attemptsRemaining } = reserved;
 
-			const pending = await challengeState(tx, factor, record, nowMs);
-			if ("outcome" in pending) return pending;
-
-			/**
-			 * The proof checked against the factor as `opened` holds it, and what
-			 * the verification adds: non-empty, and only what the factor declares.
-			 */
-			const check = async (): Promise<
-				| {
-						readonly verified: MfaEnrolledFactor;
-						readonly next: MfaEnrolledFactor["data"];
-						/** What the verification adds: the factor's values, as it declares them. */
-						readonly added: readonly string[];
-				  }
-				| ({ readonly reason: MfaRefusalReason } & RefusalConcerns)
-				| MfaFactorUnreadable
-			> => {
-				if ("outcome" in opened) return opened;
-				const { named: self, all } = opened;
-				let result: MfaVerification;
-				try {
-					result = await factor.verify({
-						subject: tx.subject,
-						transactionId: tx.id,
-						nowMs,
-						request: call.request,
-						digests: sealing.digestsFor(record.kind),
-						factor: self,
-						factors: all,
-						state: pending.state,
-						...(pending.addressDigest === undefined
-							? {}
-							: { addressDigest: pending.addressDigest }),
-						proof: call.proof,
-					});
-				} catch (cause) {
-					return unreadable(cause);
-				}
-				if (!result.ok) {
-					if (result.factorId === undefined) return { reason: result.reason };
-					const concerned = all.find((candidate) => candidate.id === result.factorId);
-					return concerned === undefined
-						? { reason: result.reason, factorIdDropped: true }
-						: { reason: result.reason, factorId: concerned.id };
-				}
-				const verified = all.find((candidate) => candidate.id === result.factorId);
-				if (verified === undefined) {
-					return unreadable(
-						new TypeError("the factor verified a factor id the subject does not hold"),
-					);
-				}
-				const next = result.next ?? verified.data;
-				let amr: unknown;
-				try {
-					amr = factor.amrFor(next);
-				} catch (cause) {
-					return unreadable(cause);
-				}
-				if (!declaresEach(factor, amr)) {
-					return unreadable(
-						new TypeError("the factor's amrFor answered values it does not declare"),
-					);
-				}
-				return { verified, next, added: amr };
-			};
-
-			let checked = await check();
-			if ("outcome" in checked) return checked;
-			if ("reason" in checked) {
-				const { reason, ...concerns } = checked;
-				return refused(reason, attemptsRemaining, concerns);
+			const entered = await lock.enter(tx.subject, factor, nowMs);
+			if (entered.outcome === "unavailable") return entered;
+			if (entered.outcome === "locked") {
+				const { outcome: _, ...hold } = entered;
+				return {
+					outcome: "locked",
+					...hold,
+					exemptKinds: exemptKindsHeld({ records, factors }),
+					attemptsRemaining,
+					binding: record.binding,
+					...about,
+				};
 			}
+			// How the subject's attempt settles: a failure until the proof verifies.
+			let settled: "failure" | "void" | "success" = "failure";
+			try {
+				const pending = await challengeState(tx, factor, record, nowMs);
+				if ("outcome" in pending) return pending;
 
-			// F3: under `required`, a factor that does not count completes no login
-			// for a subject left with no counting factor it can use.
-			if (mode === "required" && !factor.counting && !holdsUsableCounting(tx.subject, records)) {
-				return { outcome: "enrollment_required", ...about };
-			}
-
-			// Consumed before the factor moves on: a lost race spends the
-			// transaction, never the factor's state.
-			const consumed = await consume(tx);
-			if ("outcome" in consumed) return consumed;
-
-			for (let round = 1; ; round++) {
-				const { verified, next } = checked;
-				const target = records.find((candidate) => candidate.id === verified.id);
-				if (target === undefined) return refused("invalid", 0);
-				let data: string;
-				try {
-					// Re-sealed under the ring's first key at every use.
-					data = sealing.sealFactorData(
-						{ subject: tx.subject, id: target.id, kind: target.kind },
-						next,
-					);
-				} catch (cause) {
-					return unreadable(cause);
-				}
-				let written: unknown;
-				try {
-					written = await factorStore.update(tx.subject, target.id, target.version, {
-						data,
-						label: target.label,
-						lastUsedAt: new Date(nowMs),
-					});
-				} catch (cause) {
-					return outage("mfa_factor", "update", cause);
-				}
-				if (written !== null) {
-					if (
-						!isMfaFactorUpdateWritten(written, {
+				/**
+				 * The proof checked against the factor as `opened` holds it, and what
+				 * the verification adds: non-empty, and only what the factor declares.
+				 */
+				const check = async (): Promise<
+					| {
+							readonly verified: MfaEnrolledFactor;
+							readonly next: MfaEnrolledFactor["data"];
+							/** What the verification adds: the factor's values, as it declares them. */
+							readonly added: readonly string[];
+					  }
+					| ({ readonly reason: MfaRefusalReason } & RefusalConcerns)
+					| MfaFactorUnreadable
+				> => {
+					if ("outcome" in opened) return opened;
+					const { named: self, all } = opened;
+					let result: MfaVerification;
+					try {
+						result = await factor.verify({
 							subject: tx.subject,
-							id: target.id,
-							expectedVersion: target.version,
-							next: { data },
-						})
-					) {
-						return outage("mfa_factor", "update", OUTSIDE_CONTRACT);
+							transactionId: tx.id,
+							nowMs,
+							request: call.request,
+							digests: sealing.digestsFor(record.kind),
+							factor: self,
+							factors: all,
+							state: pending.state,
+							...(pending.addressDigest === undefined
+								? {}
+								: { addressDigest: pending.addressDigest }),
+							proof: call.proof,
+						});
+					} catch (cause) {
+						return unreadable(cause);
 					}
-					break;
-				}
-				if (round === ADVANCE_ROUNDS) {
-					return outage(
-						"mfa_factor",
-						"update",
-						new Error(`the factor's compare-and-set was lost ${ADVANCE_ROUNDS} times`),
-					);
-				}
-				// Lost: read the factor again and check the proof again against it.
-				records = await recordsOf(tx.subject);
-				if ("outcome" in records) return records;
-				const again = records.find((candidate) => candidate.id === record.id);
-				if (again === undefined) return refused("invalid", 0);
-				record = again;
-				opened = openKind(tx.subject, record, records);
-				if ("outcome" in opened) return opened;
-				checked = await check();
+					if (!result.ok) {
+						if (result.factorId === undefined) return { reason: result.reason };
+						const concerned = all.find((candidate) => candidate.id === result.factorId);
+						return concerned === undefined
+							? { reason: result.reason, factorIdDropped: true }
+							: { reason: result.reason, factorId: concerned.id };
+					}
+					const verified = all.find((candidate) => candidate.id === result.factorId);
+					if (verified === undefined) {
+						return unreadable(
+							new TypeError("the factor verified a factor id the subject does not hold"),
+						);
+					}
+					const next = result.next ?? verified.data;
+					let amr: unknown;
+					try {
+						amr = factor.amrFor(next);
+					} catch (cause) {
+						return unreadable(cause);
+					}
+					if (!declaresEach(factor, amr)) {
+						return unreadable(
+							new TypeError("the factor's amrFor answered values it does not declare"),
+						);
+					}
+					return { verified, next, added: amr };
+				};
+
+				let checked = await check();
 				if ("outcome" in checked) return checked;
 				if ("reason" in checked) {
 					const { reason, ...concerns } = checked;
-					return refused(reason, 0, concerns);
+					return refused(reason, attemptsRemaining, concerns);
 				}
+				// Right: from here a proof that completes nothing never counts.
+				settled = "void";
+
+				// F3: under `required`, a factor that does not count completes no login
+				// for a subject left with no counting factor it can use.
+				if (mode === "required" && !factor.counting && !holdsUsableCounting(tx.subject, records)) {
+					return { outcome: "enrollment_required", ...about };
+				}
+
+				// Consumed before the factor moves on: a lost race spends the
+				// transaction, never the factor's state.
+				const consumed = await consume(tx);
+				if ("outcome" in consumed) return consumed;
+
+				for (let round = 1; ; round++) {
+					const { verified, next } = checked;
+					const target = records.find((candidate) => candidate.id === verified.id);
+					if (target === undefined) return refused("invalid", 0);
+					let data: string;
+					try {
+						// Re-sealed under the ring's first key at every use.
+						data = sealing.sealFactorData(
+							{ subject: tx.subject, id: target.id, kind: target.kind },
+							next,
+						);
+					} catch (cause) {
+						return unreadable(cause);
+					}
+					let written: unknown;
+					try {
+						written = await factorStore.update(tx.subject, target.id, target.version, {
+							data,
+							label: target.label,
+							lastUsedAt: new Date(nowMs),
+						});
+					} catch (cause) {
+						return outage("mfa_factor", "update", cause);
+					}
+					if (written !== null) {
+						if (
+							!isMfaFactorUpdateWritten(written, {
+								subject: tx.subject,
+								id: target.id,
+								expectedVersion: target.version,
+								next: { data },
+							})
+						) {
+							return outage("mfa_factor", "update", OUTSIDE_CONTRACT);
+						}
+						settled = "success";
+						break;
+					}
+					if (round === ADVANCE_ROUNDS) {
+						return outage(
+							"mfa_factor",
+							"update",
+							new Error(`the factor's compare-and-set was lost ${ADVANCE_ROUNDS} times`),
+						);
+					}
+					// Lost: read the factor again and check the proof again against it.
+					records = await recordsOf(tx.subject);
+					if ("outcome" in records) return records;
+					const again = records.find((candidate) => candidate.id === record.id);
+					if (again === undefined) return refused("invalid", 0);
+					record = again;
+					opened = openKind(tx.subject, record, records);
+					if ("outcome" in opened) return opened;
+					checked = await check();
+					if ("outcome" in checked) return checked;
+					if ("reason" in checked) {
+						const { reason, ...concerns } = checked;
+						return refused(reason, 0, concerns);
+					}
+				}
+
+				// D12: a counting factor verified for a login's `User` that does not
+				// say it enrolled marks it, so a mark that failed heals here.
+				const user = consumed.continuation?.primary.user;
+				const marked = reconciles(factor, user) ? await witness.mark(tx.subject) : undefined;
+
+				return {
+					outcome: "verified",
+					continuation: consumed.continuation,
+					adds: {
+						amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
+						mfaAt: new Date(nowMs),
+					},
+					witness: marked,
+					recoveryCodesRemaining: recoveryCodesLeft(factor, checked.next),
+					...about,
+				};
+			} finally {
+				await entered.settle(settled);
 			}
-
-			// D12: a counting factor verified for a login's `User` that does not
-			// say it enrolled marks it, so a mark that failed heals here.
-			const user = consumed.continuation?.primary.user;
-			const marked = reconciles(factor, user) ? await witness.mark(tx.subject) : undefined;
-
-			return {
-				outcome: "verified",
-				continuation: consumed.continuation,
-				adds: {
-					amr: [...new Set([...checked.added, ...(factor.addsMfa ? [MFA_AMR] : [])])],
-					mfaAt: new Date(nowMs),
-				},
-				witness: marked,
-				...about,
-			};
 		},
 
 		beginEnrollment: (call) => enrollment.begin(call),
