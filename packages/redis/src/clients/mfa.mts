@@ -118,6 +118,15 @@ export interface MfaTransactionUpdateInput {
 }
 
 /**
+ * What a reservation past `max` removed with the transaction: the `index` and `incarnation`
+ * fields it held, as text, for the store to take it out of its binding's index.
+ */
+export interface MfaRemovedTransaction {
+	readonly index: string;
+	readonly incarnation: string;
+}
+
+/**
  * A subject's keys. Each carries the subject's hash tag: every operation on
  * them is one command or one script on one Cluster slot.
  */
@@ -259,8 +268,15 @@ export interface MfaFirstBindingRead {
  * Semantic operations: every one the port calls atomic is a read, a decision
  * and a write, which Redis makes one step only as a script (see
  * `makeIoredisClients`). The operations here read a transaction's `version`,
- * `incarnation`, `attempts`, `challenge` and `expiresAtMs` fields by name,
- * and never decode its `record`.
+ * `incarnation`, `index`, `attempts`, `challenge` and `expiresAtMs` fields by
+ * name, and never decode its `record`.
+ *
+ * A binding's index is a sorted set of its own, one member per transaction
+ * scored by the transaction's deadline. It shares no hash tag with the
+ * transactions, so it and they change in separate steps: the store adds a
+ * member after the transaction is written, ends what the index removed
+ * through `evictTransaction`, and removes a member after the transaction is
+ * gone.
  *
  * The subject state's decisions — backoff, weekly budget and hard limit —
  * are the port's rules, judged on the caller's `nowMs`;
@@ -299,13 +315,19 @@ export interface MfaTransactionStoreClient {
 	 * as decimal text, or holding none that is a finite number — is
 	 * `{ ok: false, attempts: 0 }`, spending nothing: the store's clock is the
 	 * transaction's, whatever the server's says, and the key is left to its
-	 * deadline on the server's.
+	 * deadline on the server's. A reservation that deleted the transaction
+	 * answers, as `removed`, the `index` and `incarnation` it held, when it
+	 * held both.
 	 */
 	reserveAttempt(
 		key: string,
 		max: number,
 		nowMs: number,
-	): Promise<{ readonly ok: boolean; readonly attempts: number }>;
+	): Promise<{
+		readonly ok: boolean;
+		readonly attempts: number;
+		readonly removed?: MfaRemovedTransaction;
+	}>;
 	/**
 	 * Atomically: the `challenge` field, removed, while the version is
 	 * `expectedVersion` and the transaction is not gone at `nowMs` (as
@@ -314,6 +336,25 @@ export interface MfaTransactionStoreClient {
 	takeChallenge(key: string, expectedVersion: string, nowMs: number): Promise<string | null>;
 	/** Atomically: every field, and the hash deleted, while the version is `expectedVersion`; `null` otherwise. */
 	consume(key: string, expectedVersion: string): Promise<Readonly<Record<string, string>> | null>;
+	/**
+	 * Atomically, on the binding's index at `key`: while it holds `max` members or more, remove
+	 * those with the soonest deadlines until one fewer remain; then add `member` scored by
+	 * `deadlineMs` — never among those removed — and set the key to expire at the latest deadline
+	 * it holds (`PEXPIREAT`). Resolves the members removed.
+	 */
+	indexTransaction(
+		key: string,
+		member: string,
+		deadlineMs: number,
+		max: number,
+	): Promise<readonly string[]>;
+	/** Remove `member` from the binding's index at `key` (`ZREM`). Idempotent. */
+	unindexTransaction(key: string, member: string): Promise<void>;
+	/**
+	 * Atomically: delete the transaction at `key` only while its `incarnation` field is
+	 * `incarnation`. Resolves whether it deleted.
+	 */
+	evictTransaction(key: string, incarnation: string): Promise<boolean>;
 	/** The port's `reserveSubjectAttempt`, one script over both keys. */
 	reserveSubjectAttempt(
 		keys: MfaSubjectKeys,

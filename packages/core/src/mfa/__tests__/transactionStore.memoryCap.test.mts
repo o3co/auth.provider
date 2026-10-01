@@ -421,7 +421,8 @@ describe("createMemoryMfaTransactionStore — the live transactions one binding 
 	it("ends at most the one binding's oldest, and holds N per binding across many bindings", async () => {
 		const store = createMemoryMfaTransactionStore({ now: () => T0 });
 		for (let s = 0; s < 3; s++) {
-			for (let i = 0; i <= N; i++) await store.create(BOUND(`s${s}-${i}`, `s${s}`, T0 + 600_000 + i));
+			for (let i = 0; i <= N; i++)
+				await store.create(BOUND(`s${s}-${i}`, `s${s}`, T0 + 600_000 + i));
 		}
 		expect(store.transactions).toBe(3 * N);
 		expect(store.bindings).toBe(3);

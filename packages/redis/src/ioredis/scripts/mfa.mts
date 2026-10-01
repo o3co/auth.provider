@@ -105,22 +105,23 @@ end
  *
  * `KEYS[1]` = the transaction; `ARGV[1]` = max, `ARGV[2]` = the store's
  * clock. Returns `{ok, attempts}`: `{1, n}` for the nth attempt within max;
- * `{0, n}` — and the transaction gone — for the one past it, n being what it
- * had; `{0, 0}` for no transaction, for one gone at the store's clock (left
- * as it is), or for a count that is not a number (fails closed: deleted).
+ * `{0, n, index, incarnation}` — and the transaction gone — for the one past
+ * it, n being what it had and the two its `index` and `incarnation` fields
+ * (nil when absent), for its binding's index; `{0, 0}` for no transaction or
+ * for one gone at the store's clock (left as it is); `{0, 0, index,
+ * incarnation}` for a count that is not a number (fails closed: deleted).
  */
 const LUA_MFA_TX_RESERVE_ATTEMPT = `${LUA_MFA_TX_PRELUDE}
 if redis.call('EXISTS', KEYS[1]) == 0 then return {0, 0} end
 if mfa_tx_gone(KEYS[1], tonumber(ARGV[2])) then return {0, 0} end
 local attempts = tonumber(redis.call('HGET', KEYS[1], 'attempts'))
-if attempts == nil then
+local function removed(n)
+  local held = redis.call('HMGET', KEYS[1], 'index', 'incarnation')
   redis.call('DEL', KEYS[1])
-  return {0, 0}
+  return {0, n, held[1], held[2]}
 end
-if not (attempts + 1 <= tonumber(ARGV[1])) then
-  redis.call('DEL', KEYS[1])
-  return {0, attempts}
-end
+if attempts == nil then return removed(0) end
+if not (attempts + 1 <= tonumber(ARGV[1])) then return removed(attempts) end
 return {1, redis.call('HINCRBY', KEYS[1], 'attempts', 1)}
 `.trim();
 
@@ -147,6 +148,45 @@ if redis.call('HGET', KEYS[1], 'version') ~= ARGV[1] then return false end
 local fields = redis.call('HGETALL', KEYS[1])
 redis.call('DEL', KEYS[1])
 return fields
+`.trim();
+
+// A binding's index: a sorted set under a hash tag of its own, one member per transaction —
+// `<incarnation>:<id key part>` — scored by the transaction's deadline. The transactions sit on
+// slots of their own, so no script reaches both: the index script decides which go, and the
+// client ends each through `MFA_TX_EVICT`, which deletes a transaction only while it still holds
+// the incarnation its member names.
+
+/**
+ * `MfaTransactionStoreClient.indexTransaction`. `KEYS[1]` = the binding's index; `ARGV[1]` = the
+ * new member, `ARGV[2]` = its deadline (epoch ms, whole), `ARGV[3]` = the most members held.
+ * While the index holds that many or more, removes the lowest-scored (the soonest deadlines;
+ * between equal scores, the lower member) until one fewer remain, then adds the new member — so
+ * it is never among those removed — and sets the key to expire at the highest score it holds.
+ * Returns the members removed.
+ */
+const LUA_MFA_BINDING_INDEX = `
+local max = tonumber(ARGV[3])
+local held = redis.call('ZCARD', KEYS[1])
+local ended = {}
+if held >= max then
+  ended = redis.call('ZRANGE', KEYS[1], 0, held - max)
+  redis.call('ZREM', KEYS[1], unpack(ended))
+end
+redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+local latest = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
+redis.call('PEXPIREAT', KEYS[1], string.format('%.0f', tonumber(latest[2])))
+return ended
+`.trim();
+
+/**
+ * `MfaTransactionStoreClient.evictTransaction`. `KEYS[1]` = the transaction; `ARGV[1]` = the
+ * incarnation its index member names. Deletes it only while its `incarnation` field holds that
+ * one: a transaction created again under the id, for this binding or another, is left alone.
+ * Returns 1 when it deleted.
+ */
+const LUA_MFA_TX_EVICT = `
+if redis.call('HGET', KEYS[1], 'incarnation') ~= ARGV[1] then return 0 end
+return redis.call('DEL', KEYS[1])
 `.trim();
 
 // Subject lockout state: `KEYS[1]` the lock hash, `KEYS[2]` the week's sorted set (see
@@ -776,6 +816,8 @@ export const MFA_TX_UPDATE = defineScript(LUA_MFA_TX_UPDATE);
 export const MFA_TX_RESERVE_ATTEMPT = defineScript(LUA_MFA_TX_RESERVE_ATTEMPT);
 export const MFA_TX_TAKE_CHALLENGE = defineScript(LUA_MFA_TX_TAKE_CHALLENGE);
 export const MFA_TX_CONSUME = defineScript(LUA_MFA_TX_CONSUME);
+export const MFA_TX_EVICT = defineScript(LUA_MFA_TX_EVICT);
+export const MFA_BINDING_INDEX = defineScript(LUA_MFA_BINDING_INDEX);
 export const MFA_SUBJECT_RESERVE = defineScript(LUA_MFA_SUBJECT_RESERVE);
 export const MFA_SUBJECT_SETTLE = defineScript(LUA_MFA_SUBJECT_SETTLE);
 export const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);

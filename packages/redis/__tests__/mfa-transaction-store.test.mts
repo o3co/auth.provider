@@ -31,8 +31,8 @@
 import { createHash } from "node:crypto";
 import {
 	createMemoryMfaTransactionStore,
-	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
 	type MfaSubjectRecoveryAnswer,
@@ -241,7 +241,9 @@ const deadlineOf = async (key: string): Promise<number> =>
 
 /** A binding's index, as the adapter names it: the SHA-256 of the whole binding, never its id. */
 const bindingKey = (prefix: string, binding: { readonly kind: string; readonly id: string }) =>
-	`${prefix}binding:{${createHash("sha256").update(JSON.stringify([binding.kind, binding.id])).digest("base64url")}}`;
+	`${prefix}binding:{${createHash("sha256")
+		.update(JSON.stringify([binding.kind, binding.id]))
+		.digest("base64url")}}`;
 
 describe("createRedisMfaTransactionStore — the transaction", () => {
 	it('declares kind "redis"', () => {
@@ -512,7 +514,7 @@ describe("createRedisMfaTransactionStore — the live transactions one binding h
 		const deadlines = await opened(store, "tab", 2, A);
 		const index = bindingKey(prefix, A);
 		expect(await first().type(index)).toBe("zset");
-		const members = await first().zrange(index, 0, -1, "WITHSCORES");
+		const members = await first().zrange(index, "0", "-1", "WITHSCORES");
 		expect(members).toHaveLength(4);
 		expect([Number(members[1]), Number(members[3])]).toEqual(deadlines);
 		expect(await deadlineOf(index)).toBe(deadlines[1]);

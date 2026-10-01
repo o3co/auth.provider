@@ -24,6 +24,7 @@
  *
  * ```text
  * <keyPrefix>tx:{<id>}                          HASH   one transaction, expiring at its expiresAtMs
+ * <keyPrefix>binding:{<digest>}                ZSET   a binding's transactions, scored by deadline, expiring at the latest
  * <keyPrefix>lock:{<subject>}                   HASH   the lockout run, reservations in flight, the hard hold
  * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
  * <keyPrefix>recovery:{<subject>}               HASH   the generation, the recovery-set floor, the recovery authorizations
@@ -33,7 +34,9 @@
  * <keyPrefix>first-binding:{<subject>}          STRING a subject's first-binding mark, expiring at its end
  * ```
  *
- * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`).
+ * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`);
+ * `<digest>` is base64url of the SHA-256 of the binding, kind and id, so the
+ * express session id is copied into no key.
  * A subject's lock, week, recovery hash and lease share its hash tag, so each
  * operation on them is one script on one Cluster slot. The recovery hash
  * carries no TTL once it holds a generation or a floor (losing either would
@@ -43,6 +46,22 @@
  * (`makeIoredisClients`): insert-only create, compare-and-set update,
  * `reserveAttempt`, `takeChallenge`, `consume`, and each lockout step, which
  * reads, decides and writes the subject state at once.
+ *
+ * A binding holds at most `MFA_MAX_TRANSACTIONS_PER_BINDING` live
+ * transactions, kept in its index: one member per transaction,
+ * `<incarnation>:<id key part>`, scored by its deadline. `create` writes the
+ * transaction, then one script adds its member and takes out those with the
+ * soonest deadlines past the cap, never the new one; each taken out is
+ * deleted by a script that compares its `incarnation`, so a member left
+ * behind never deletes a transaction created again under its id, for any
+ * binding. `consume`, and a reservation past `max`, take the member out.
+ * The index key expires at the latest deadline it holds, and an empty one is
+ * gone, so it never outlives its transactions. An expired transaction's
+ * member stays until it is taken out first: its deadline is the soonest. The
+ * transactions sit on slots of their own, so these are separate steps, not
+ * one atomic one: while creates race, or after a step that failed, a binding
+ * may hold more than the cap until the excess expires; a member that failed
+ * to leave may count for its transaction until its deadline.
  *
  * A transaction is written and read back through core's
  * `newMfaTransactionRecord`, so it has the in-process store's shape and rules.
@@ -83,7 +102,7 @@
  * either.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
@@ -105,9 +124,11 @@ import {
 	firstBindingAnswer,
 	isStorableExpiry,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	type MfaSubjectRecoveryOperation,
 	type MfaTransaction,
+	type MfaTransactionBinding,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
@@ -116,7 +137,11 @@ import {
 	type SessionEmailProof,
 	sessionEmailProofAnswer,
 } from "@o3co/auth-provider-core";
-import type { MfaSubjectKeys, MfaTransactionStoreClient } from "./clients.mjs";
+import type {
+	MfaRemovedTransaction,
+	MfaSubjectKeys,
+	MfaTransactionStoreClient,
+} from "./clients.mjs";
 import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
 import { checkMfaKeyPrefix, mfaKeyPart } from "./internal/mfa-keys.mjs";
 import { keyPrefixSection, redisReference } from "./internal/section.mjs";
@@ -147,11 +172,16 @@ const PATCH_FIELD_TEXT: Readonly<Record<keyof MfaTransactionPatch, (value: unkno
 	pendingEnrollment: (value) => JSON.stringify(value),
 };
 
-/** The fields of a new transaction's hash. */
-function fieldsOf(record: MfaTransaction, incarnation: string): Record<string, string> {
+/** The fields of a new transaction's hash; `index` is its binding's digest. */
+function fieldsOf(
+	record: MfaTransaction,
+	incarnation: string,
+	index: string,
+): Record<string, string> {
 	const fields: Record<string, string> = {
 		id: record.id,
 		incarnation,
+		index,
 		version: String(record.version),
 		attempts: "0",
 		enrollment: record.enrollment,
@@ -234,6 +264,15 @@ function transactionOf(
 		return null;
 	}
 }
+
+/** A binding's digest: base64url of the SHA-256 of its kind and id, so no key copies the id. */
+const bindingDigest = (binding: MfaTransactionBinding): string =>
+	createHash("sha256")
+		.update(JSON.stringify([binding.kind, binding.id]))
+		.digest("base64url");
+
+/** Text this store wrote as a key part, a digest or an incarnation: base64url, nothing else. */
+const isKeyText = (text: string): boolean => /^[A-Za-z0-9_-]+$/.test(text);
 
 const isWholeVersion = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -371,6 +410,31 @@ export function createRedisMfaTransactionStore(
 		"MfaTransactionStore (redis)",
 	);
 	const txKey = (id: string): string => `${keyPrefix}tx:{${mfaKeyPart(id)}}`;
+	const indexKey = (digest: string): string => `${keyPrefix}binding:{${digest}}`;
+	/** A transaction's member in its binding's index. */
+	const memberOf = (incarnation: string, id: string): string => `${incarnation}:${mfaKeyPart(id)}`;
+	/**
+	 * Takes a transaction already gone out of its binding's index. Best
+	 * effort: the operation that removed it has answered, and a member left
+	 * behind leaves first at the next create past the cap, its eviction
+	 * deleting nothing (the incarnation is gone).
+	 */
+	const unindex = async (removed: Partial<MfaRemovedTransaction>, id: string): Promise<void> => {
+		const { index, incarnation } = removed;
+		if (index === undefined || incarnation === undefined) return;
+		if (!isKeyText(index) || !isKeyText(incarnation)) return;
+		await client
+			.unindexTransaction(indexKey(index), memberOf(incarnation, id))
+			.catch(() => undefined);
+	};
+	/** Ends a transaction its binding's index took out, while it holds the incarnation the member names. */
+	const evict = async (member: string): Promise<void> => {
+		const at = member.indexOf(":");
+		const incarnation = member.slice(0, at);
+		const part = member.slice(at + 1);
+		if (at < 0 || !isKeyText(incarnation) || !isKeyText(part)) return;
+		await client.evictTransaction(`${keyPrefix}tx:{${part}}`, incarnation);
+	};
 	const subjectKeys = (subject: string): MfaSubjectKeys => {
 		const tag = `{${mfaKeyPart(subject)}}`;
 		return {
@@ -397,12 +461,21 @@ export function createRedisMfaTransactionStore(
 				);
 			}
 			const incarnation = randomBytes(16).toString("base64url");
+			const digest = bindingDigest(record.binding);
+			const deadlineMs = Math.ceil(record.expiresAtMs);
 			const written = await client.create(
 				txKey(record.id),
-				fieldsOf(record, incarnation),
-				Math.ceil(record.expiresAtMs),
+				fieldsOf(record, incarnation, digest),
+				deadlineMs,
 			);
 			if (!written) throw new Error("an MFA transaction with this id already exists");
+			const ended = await client.indexTransaction(
+				indexKey(digest),
+				memberOf(incarnation, record.id),
+				deadlineMs,
+				MFA_MAX_TRANSACTIONS_PER_BINDING,
+			);
+			await Promise.all(ended.map(evict));
 		},
 
 		async get(id) {
@@ -440,7 +513,9 @@ export function createRedisMfaTransactionStore(
 					"MfaTransactionStore.reserveAttempt: max must be a positive whole number",
 				);
 			}
-			return client.reserveAttempt(txKey(id), max, clock());
+			const { ok, attempts, removed } = await client.reserveAttempt(txKey(id), max, clock());
+			if (removed !== undefined) await unindex(removed, id);
+			return { ok, attempts };
 		},
 
 		async takeChallenge(id, expectedVersion) {
@@ -451,7 +526,9 @@ export function createRedisMfaTransactionStore(
 		async consume(id, expectedVersion) {
 			if (!isWholeVersion(expectedVersion)) return null;
 			const fields = await client.consume(txKey(id), String(expectedVersion));
-			return fields === null ? null : transactionOf(fields, id, clock());
+			if (fields === null) return null;
+			await unindex(fields, id);
+			return transactionOf(fields, id, clock());
 		},
 
 		async reserveSubjectAttempt(subject, nowMs, policy) {

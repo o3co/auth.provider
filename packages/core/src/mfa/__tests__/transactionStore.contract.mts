@@ -827,7 +827,10 @@ export function runMfaTransactionStoreContract(
 	describe("MfaTransactionStore contract: the live transactions one binding holds", () => {
 		const N = MFA_MAX_TRANSACTIONS_PER_BINDING;
 		const MINE: MfaTransactionBinding = { kind: "session", id: SESSION_ID };
-		const OTHER: MfaTransactionBinding = { kind: "session", id: "Rk2_aW-9pLmX3vQt7ZbN0cY-5sJh_F8b" };
+		const OTHER: MfaTransactionBinding = {
+			kind: "session",
+			id: "Rk2_aW-9pLmX3vQt7ZbN0cY-5sJh_F8b",
+		};
 
 		/**
 		 * `count` transactions `<prefix>-<i>` bound to `binding`, created one

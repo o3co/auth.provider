@@ -66,6 +66,7 @@ export type {
 	MfaFactorRecordUpdateInput,
 	MfaFactorStoreClient,
 	MfaFirstBindingRead,
+	MfaRemovedTransaction,
 	MfaSubjectKeys,
 	MfaTransactionStoreClient,
 	MfaTransactionUpdateInput,
