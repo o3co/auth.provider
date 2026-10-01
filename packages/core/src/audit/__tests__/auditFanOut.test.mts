@@ -153,6 +153,7 @@ describe("createAuditFanOut", () => {
 			kind: "broken-then",
 			record: () => {
 				const answer = Promise.resolve();
+				// biome-ignore lint/suspicious/noThenProperty: the sink under test answers a promise whose then throws
 				Object.defineProperty(answer, "then", {
 					value: () => {
 						throw new Error("broken then");
@@ -169,6 +170,71 @@ describe("createAuditFanOut", () => {
 		await expect(fanOut.record(event())).resolves.toBeUndefined();
 
 		expect(after.events).toHaveLength(1);
+	});
+
+	it("observes a rejected promise a sink answers even when its then throws", async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			const broken: AuditSink = {
+				kind: "rejected-broken-then",
+				record: () => {
+					const answer = Promise.reject(new Error("down"));
+					// biome-ignore lint/suspicious/noThenProperty: the sink under test answers a promise whose then throws
+					Object.defineProperty(answer, "then", {
+						value: () => {
+							throw new Error("broken then");
+						},
+					});
+					return answer;
+				},
+			};
+			const fanOut = createAuditFanOut({ hooks: () => [broken], logger: () => spyLogger().logger });
+
+			await fanOut.record(event());
+			await settled();
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+
+		expect(unhandled).toEqual([]);
+	});
+
+	it("reads an event's type once, and logs it only as a string", async () => {
+		const { logger, error } = spyLogger();
+		let reads = 0;
+		const switching = {
+			timestamp: new Date(0),
+			get type(): string {
+				reads++;
+				return (reads === 1 ? "test.switching" : { subject: "event-content" }) as string;
+			},
+		};
+		const fanOut = createAuditFanOut({ hooks: () => [rejecting()], logger: () => logger });
+
+		await fanOut.record(Object.setPrototypeOf(switching, { kind: "class-like" }) as AuditEvent);
+
+		expect(error.mock.calls).toEqual([[{ sink: 1, type: "test.switching" }, "audit_sink_failed"]]);
+	});
+
+	it("resolves when reading the event's type throws", async () => {
+		const throwing = Object.setPrototypeOf(
+			{
+				timestamp: new Date(0),
+				get type(): string {
+					throw new Error("type unreadable");
+				},
+			},
+			{ kind: "class-like" },
+		) as AuditEvent;
+		const fanOut = createAuditFanOut({
+			sink: createRecordingAuditSink(),
+			hooks: () => [],
+			logger: () => spyLogger().logger,
+		});
+
+		await expect(fanOut.record(throwing)).resolves.toBeUndefined();
 	});
 
 	it("logs no type that is not a string", async () => {
