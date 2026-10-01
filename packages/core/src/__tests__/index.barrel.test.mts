@@ -145,6 +145,11 @@ describe("core barrel — the federation adapter toolkit", () => {
 		expect(typeof core.callbackUrlForExchange).toBe("function");
 		expect(typeof core.resolveClientSecret).toBe("function");
 	});
+
+	it("re-exports the one reading of an upstream token's lifetime, and the age of one held", () => {
+		expect(typeof core.readUpstreamTokenLifetime).toBe("function");
+		expect(typeof core.judgeHeldUpstreamToken).toBe("function");
+	});
 });
 
 describe("core barrel — the sealing leaf", () => {
