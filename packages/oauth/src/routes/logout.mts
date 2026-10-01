@@ -884,9 +884,16 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// Only when text/html explicitly outranks json (e.g. browser requests) do we serve HTML.
 		const negotiated = accepts(req).type(["application/json", "text/html"]);
 		const acceptsHtml = negotiated === "text/html";
-		const hasFrontchannel = rps.some(
-			(rp) => typeof rp.frontchannelLogoutUri === "string" && rp.frontchannelLogoutUri.length > 0,
-		);
+		// Whether any RP names a front-channel URI; the renderer judges each one
+		// and logs one it refuses. A read that throws counts as named, so the
+		// renderer logs it instead of the logout failing here.
+		const hasFrontchannel = rps.some((rp) => {
+			try {
+				return typeof rp.frontchannelLogoutUri === "string" && rp.frontchannelLogoutUri.length > 0;
+			} catch {
+				return true;
+			}
+		});
 		if (acceptsHtml && hasFrontchannel) {
 			const html = renderFrontchannelLogoutHtml({
 				rps,

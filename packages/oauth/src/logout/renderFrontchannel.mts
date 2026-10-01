@@ -93,11 +93,18 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 	const logger = opts.logger ?? console;
 	const iframes = opts.rps
 		.flatMap((rp) => {
+			// Read once and guarded: it is only ever logged.
+			let clientId: unknown;
+			try {
+				clientId = rp.clientId;
+			} catch {
+				clientId = undefined;
+			}
 			// Held to the redirect-URI rules: a registry entry made before the
 			// code exchange checked it, or by a custom registry, is checked here.
 			const uri = usableFrontchannelLogoutUri(
 				() => rp.frontchannelLogoutUri,
-				{ site: "logout", clientId: rp.clientId },
+				{ site: "logout", clientId },
 				logger,
 			);
 			if (uri === undefined) return [];
@@ -113,7 +120,7 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 				];
 			} catch (err) {
 				logger.warn(
-					{ clientId: auditErrorText(rp.clientId), err: loggableError(err) },
+					{ clientId: auditErrorText(clientId), err: loggableError(err) },
 					"logout_frontchannel_iframe_skipped",
 				);
 				return [];
