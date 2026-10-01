@@ -30,11 +30,12 @@
  *   use as read; a lost race is `409`, nothing retried.
  * - `POST /factors/remove {factor_id}`, admitted as `mfa.manage`, run whole
  *   by `factorSet.mts` (the read, this file's refusal, the removal, the
- *   witness), one write of the subject's at a time: another in the way past
+ *   witness), held to the subject's generation read before the session is
+ *   admitted, one write of the subject's at a time: another in the way past
  *   its wait is `409 mfa_factors_busy` with `Retry-After`; a recovery or a
  *   reset since it began, `409 mfa_factors_changed`, nothing removed; one
- *   that ran past its hold, said at error, its removal audited and answered
- *   `409 mfa_factors_changed`. Under `required`, removing an installed counting factor is
+ *   that ran past its hold said at error whatever it came to, a removal it
+ *   made audited and answered `409 mfa_factors_changed`. Under `required`, removing an installed counting factor is
  *   refused `409` when no other usable counting record stands — one
  *   unreadable or `address_changed` does not. Audited `mfa.factor.removed`;
  *   a re-read that failed, and a witness clear that failed, are said at warn,
@@ -45,6 +46,8 @@
 
 import {
 	type AuditSink,
+	type CookieCarrier,
+	cookieClaim,
 	emitAuditEvent,
 	errorEnvelope,
 	isMfaFactorLabel,
@@ -228,6 +231,9 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 			res.status(200).json({ factor: { id: record.id, kind: record.kind, label } });
 		})
 		.post("/factors/remove", async (req: Request, res: Response) => {
+			// The removal is held to the subject's generation as it was before the session was admitted.
+			const claimed = cookieClaim(req as unknown as CookieCarrier).subject;
+			const started = claimed === undefined ? undefined : await factorSet.begin(claimed);
 			const session = await admit(req, res, "mfa.manage");
 			if (session === undefined) return;
 			/** Under `required`, an installed counting factor stays unless another usable one does. */
@@ -242,10 +248,15 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 					? LAST_FACTOR
 					: undefined;
 			const removal = await factorSet.remove(
+				started,
 				session.subject,
 				(req.body as { factor_id?: unknown } | undefined)?.factor_id,
 				lastFactor,
 			);
+			if (removal.overran === true) {
+				// What the write did stands; a recovery or a reset may have run beside it.
+				logger.error({ route: "factors", sub: session.subject }, "mfa_subject_lease_overrun");
+			}
 			switch (removal.outcome) {
 				case "unknown_factor":
 					res.status(400).json(UNKNOWN_FACTOR);
@@ -257,7 +268,7 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 					unavailable(res, removal.step, removal.cause, removal.store);
 					return;
 				case "busy":
-					res.set("Retry-After", "1");
+					res.set("Retry-After", String(Math.max(1, removal.retryAfterSeconds)));
 					res.status(409).json(FACTORS_BUSY);
 					return;
 				case "changed":
@@ -293,8 +304,6 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 				);
 			}
 			if (removal.overran === true) {
-				// The removal stands; a recovery or a reset may have run beside it.
-				logger.error({ route: "factors", sub: session.subject }, "mfa_subject_lease_overrun");
 				res.status(409).json(FACTORS_CHANGED);
 				return;
 			}

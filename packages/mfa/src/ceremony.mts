@@ -39,6 +39,7 @@ import type {
 	MfaVerification,
 	PrimaryContinuation,
 } from "@o3co/auth-provider-core";
+import type { MfaFactorSetStart } from "./factorSet.mjs";
 import type { RequireEmailProof, UnprovableReason } from "./firstBinding.mjs";
 import type { MfaMailRefusal } from "./mail.mjs";
 import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
@@ -457,10 +458,14 @@ export interface MfaCeremonyKit {
 	/**
 	 * D12's reconciliation for `subject`, just verified with a counting factor
 	 * its `User` does not say it enrolled: the first-binding mark noted, then
-	 * the witness marked — only once the mark was noted, and never by a
-	 * directory that cannot write it. Never throws.
+	 * the witness marked — only once the mark was noted, never by a directory
+	 * that cannot write it, and held to `started`, read before the proof was
+	 * checked. Never throws.
 	 */
-	readonly reconcileWitness: (subject: string) => Promise<{
+	readonly reconcileWitness: (
+		subject: string,
+		started: MfaFactorSetStart | undefined,
+	) => Promise<{
 		readonly witness: MfaWitnessMark | undefined;
 		readonly firstBindingUnnoted: MfaStoreOutage | undefined;
 	}>;

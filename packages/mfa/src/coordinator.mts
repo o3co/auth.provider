@@ -663,13 +663,19 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				: undefined;
 		},
 		noteFirstBinding,
-		reconcileWitness: async (subject) => {
+		reconcileWitness: async (subject, started) => {
 			// A directory that cannot write the witness leaves no session stale: no mark is due.
 			if (!witness.writable)
-				return { witness: await factorSet.markEnrolled(subject), firstBindingUnnoted: undefined };
+				return {
+					witness: await factorSet.markEnrolled(started, subject),
+					firstBindingUnnoted: undefined,
+				};
 			const unnoted = await noteFirstBinding(subject);
 			return unnoted === undefined
-				? { witness: await factorSet.markEnrolled(subject), firstBindingUnnoted: undefined }
+				? {
+						witness: await factorSet.markEnrolled(started, subject),
+						firstBindingUnnoted: undefined,
+					}
 				: { witness: undefined, firstBindingUnnoted: unnoted };
 		},
 		recordsOf,
@@ -958,6 +964,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
 			}
 
+			// A reconciliation's mark is held to the subject's generation as it was before the proof is checked.
+			const started =
+				factor.counting && witness.writable ? await factorSet.begin(tx.subject) : undefined;
+
 			const reserved = await reserve(tx);
 			if ("outcome" in reserved) {
 				return reserved.outcome === "exhausted" ? refused("exhausted", 0) : reserved;
@@ -1142,7 +1152,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						? reconcilesSession(factor, call.session?.witness)
 						: reconciles(factor, consumed.continuation?.primary.user)
 				)
-					? await kit.reconcileWitness(tx.subject)
+					? await kit.reconcileWitness(tx.subject, started)
 					: undefined;
 				const verified = {
 					adds: {

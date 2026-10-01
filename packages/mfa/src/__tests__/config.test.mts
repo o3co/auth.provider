@@ -749,7 +749,7 @@ describe("the transaction's life and attempts, and the lock", () => {
 		for (const value of [100, 5_000, 100_000]) {
 			expect(readSettings(valid({ storeTimeoutMs: value })).storeTimeoutMs).toBe(value);
 		}
-		for (const value of [99, 0, 10.5, "5000", null, undefined]) {
+		for (const value of [99, 0, 10.5, "5e3", null, undefined]) {
 			const message = refusal(() => readSettings(valid({ storeTimeoutMs: value })));
 			expect(message, String(value)).toContain("mfa.storeTimeoutMs");
 		}

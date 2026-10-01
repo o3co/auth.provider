@@ -44,6 +44,7 @@ import {
 	type SealingKeyRing,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
+import { checkFactorSetStoreTimeout } from "./factorSet.mjs";
 import { REQUIRE_EMAIL_PROOF, type RequireEmailProof } from "./firstBinding.mjs";
 import type { TotpFactorSettings } from "./totp/factor.mjs";
 import { TOTP_ALGORITHMS } from "./totp/rfc6238.mjs";
@@ -230,6 +231,9 @@ const enrollmentSchema = z.object(
 	{ error: sectionError },
 );
 
+/** `mfa.storeTimeoutMs`'s range: from 100 ms; the most a lease allows is `factorSet.mts`'s to refuse. */
+const MFA_STORE_TIMEOUT_MS = { min: 100, max: 2_147_483_647 } as const;
+
 /**
  * The MFA module's section, `mfa`: its mode, the page's shape, the key ring,
  * a transaction's life and attempts, the subject lock, recent MFA's window,
@@ -272,6 +276,11 @@ export const mfaConfigSchema = z.object(
 			MFA_MAX_FACTORS_PER_SUBJECT.min,
 			MFA_MAX_FACTORS_PER_SUBJECT.max,
 			" records",
+		),
+		storeTimeoutMs: environmentWholeNumber(
+			MFA_STORE_TIMEOUT_MS.min,
+			MFA_STORE_TIMEOUT_MS.max,
+			" milliseconds",
 		),
 	},
 	{ error: sectionError },
@@ -328,6 +337,8 @@ export interface MfaSettings {
 	readonly enrollment: { readonly requireEmailProof: RequireEmailProof };
 	/** The records a subject may hold before an enrollment from its session is refused (F4): recovery codes are one. */
 	readonly maxFactorsPerSubject: number;
+	/** How long one Store call may take, in milliseconds: what a factor-set write's lease and deadline are made of (`factorSet.mts`). */
+	readonly storeTimeoutMs: number;
 }
 
 /** What the settings read beside the `mfa` section. */
@@ -541,5 +552,6 @@ export function readMfaSettings(section: unknown, options: MfaSettingsOptions): 
 		manage: { maxAgeSeconds: settings.manage.maxAgeSeconds },
 		enrollment: { requireEmailProof: settings.enrollment.requireEmailProof },
 		maxFactorsPerSubject: settings.maxFactorsPerSubject,
+		storeTimeoutMs: checkFactorSetStoreTimeout(settings.storeTimeoutMs),
 	};
 }
