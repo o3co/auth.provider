@@ -30,7 +30,7 @@ import {
 	passwordSessionAuthentication,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import { createLoginTransactions } from "#/transactions.mjs";
+import { createLoginTransactions, openLoginBinding } from "#/transactions.mjs";
 
 const NOW = 1_900_000_000_000;
 
@@ -199,5 +199,83 @@ describe("the login's transaction", () => {
 		await expect(
 			transactions.open("sess-1", CONTINUATION, { error: "mfa_required" }),
 		).rejects.toThrow("transaction store unreachable");
+	});
+});
+
+describe("a login's transaction reopened for a binding", () => {
+	const shape = {
+		binding: { kind: "session" as const, id: "sess-1" },
+		continuation: CONTINUATION,
+		enrollable: ["totp"],
+		nowMs: NOW,
+		ttlSeconds: 600,
+	};
+
+	it("opens one allowed beside a record that may count: the same binding and continuation, a fresh TTL, no proof owed", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const answer = await openLoginBinding(store, {
+			...shape,
+			enrollment: "allowed",
+			emailProof: false,
+		});
+		expect(answer).toEqual({
+			status: 403,
+			body: {
+				error: "mfa_enrollment_required",
+				transaction: expect.any(String),
+				expires_in: 600,
+				hints: { enrollable: ["totp"], email_proof: false },
+			},
+		});
+		const id = answer.body.transaction as string;
+		expect(await store.get(id)).toEqual({
+			id,
+			purpose: "login",
+			binding: { kind: "session", id: "sess-1" },
+			subject: "u-alice",
+			sid: undefined,
+			continuation: CONTINUATION,
+			redirectTo: "https://app.example/after",
+			enrollment: "allowed",
+			emailProof: "not_required",
+			acrValues: undefined,
+			challenge: undefined,
+			pendingEnrollment: undefined,
+			attempts: 0,
+			createdAtMs: NOW,
+			expiresAtMs: NOW + 600_000,
+			version: 0,
+		});
+	});
+
+	it("opens a first binding as required, owing the proof when the gate asked it", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const answer = await openLoginBinding(store, {
+			...shape,
+			enrollment: "required",
+			emailProof: true,
+		});
+		expect(answer.body.hints).toEqual({ enrollable: ["totp"], email_proof: true });
+		expect(await store.get(answer.body.transaction as string)).toMatchObject({
+			enrollment: "required",
+			emailProof: "required",
+		});
+	});
+
+	it("refuses a proof owed beside a record that may count, storing nothing", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const create = vi.spyOn(store, "create");
+		await expect(
+			openLoginBinding(store, { ...shape, enrollment: "allowed", emailProof: true }),
+		).rejects.toThrow(RangeError);
+		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("rejects when the store cannot keep it", async () => {
+		const store = createMemoryMfaTransactionStore();
+		vi.spyOn(store, "create").mockRejectedValue(new Error("down"));
+		await expect(
+			openLoginBinding(store, { ...shape, enrollment: "required", emailProof: false }),
+		).rejects.toThrow("down");
 	});
 });

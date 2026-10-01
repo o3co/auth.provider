@@ -36,8 +36,9 @@
  *
  * A stored value that does not read back as the record written under that
  * subject and field is refused with an error quoting nothing it read: an
- * outage, never "no factor". Only zero records open a first binding, so a
- * record read as absent would downgrade the account.
+ * outage, never "no factor". Only a subject with no record that may count
+ * opens a first binding, so a record read as absent would downgrade the
+ * account.
  * See the MFA ADR (2026-09-25-multi-factor-authentication), D7 and D12.
  */
 

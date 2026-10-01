@@ -90,6 +90,8 @@ import {
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
 import {
+	countingKinds,
+	enrollableKinds,
 	type FirstBindingGate,
 	firstBindingGate,
 	mayCount,
@@ -508,12 +510,9 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	 * bound: said at warn, each time, with the kinds alone — never the subject.
 	 */
 	const enrollableFor = (user: PrimaryAuthentication["user"]): string[] => {
-		const counting = [...factors.entries()].filter(([, factor]) => factor.counting);
-		const enrollable = counting
-			.filter(([, factor]) => factor.enrollable?.(user) ?? true)
-			.map(([kind]) => kind);
+		const enrollable = enrollableKinds(factors, user);
 		if (enrollable.length === 0) {
-			logger.warn({ kinds: counting.map(([kind]) => kind) }, "mfa_enrollment_nothing_enrollable");
+			logger.warn({ kinds: countingKinds(factors) }, "mfa_enrollment_nothing_enrollable");
 		}
 		return enrollable;
 	};

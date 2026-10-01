@@ -19,9 +19,9 @@
  * slot (ADR 2026-09-25-multi-factor-authentication).
  *
  * A record's `data` is sealed by the coordinator and opaque to every store:
- * kept byte for byte, never decoded, logged or derived from. Only zero records
- * open a first binding, so losing this store is guarded separately by the
- * enrollment witness on `UserRepository`.
+ * kept byte for byte, never decoded, logged or derived from. Only a subject
+ * with no record that may count opens a first binding, so losing this store
+ * is guarded separately by the enrollment witness on `UserRepository`.
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";

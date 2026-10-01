@@ -212,8 +212,8 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 	});
 
 	it("refuses to list a subject whose hash holds a record it cannot read: never fewer factors than there are", async () => {
-		// Only zero records open a first binding (ADR
-		// 2026-09-25-multi-factor-authentication, F3), so a record read as
+		// Only a subject with no record that may count opens a first binding
+		// (ADR 2026-09-25-multi-factor-authentication, F3), so a record read as
 		// absent would downgrade the account. The adapter throws — an outage,
 		// 503 — and quotes nothing it read.
 		const prefix = freshPrefix();

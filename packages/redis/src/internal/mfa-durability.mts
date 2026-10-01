@@ -15,8 +15,8 @@
  */
 
 /**
- * The boot check both MFA store modules run. "Only zero records open a first
- * binding" is only as strong as the store: an eviction, or a restart without
+ * The boot check both MFA store modules run. "Only a subject with no record
+ * that may count opens a first binding" is only as strong as the store: an eviction, or a restart without
  * persistence, empties a subject's list, and whoever holds the password can
  * then bind their own authenticator. The email-proof requirement an operator
  * reset records is lost the same way. So, before the store is provided:
