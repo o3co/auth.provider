@@ -83,7 +83,7 @@ const consentUrl = (section: AcquisitionSection | undefined, origin: string): st
 		return refuse(
 			"federation-grants.consent.url must name the deployment's consent page. The provider ships " +
 				"no UI, a grant is never created without the user's consent, and there is no default: " +
-				"enabling federation grants is a statement that such a page exists (D8)",
+				"enabling federation grants is a statement that such a page exists",
 		);
 	}
 	if (written.startsWith("/") && !written.startsWith("//")) {

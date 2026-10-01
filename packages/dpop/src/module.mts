@@ -195,7 +195,7 @@ export const dpopModule = defineModule<
 						"dpopModule: oauth.jwt.issuer is required when DPoP is enabled. Its origin " +
 							"is what every DPoP proof's `htu` is checked against; without it the AS would " +
 							"have to rebuild that origin from the request's own forwarded headers, which a " +
-							"caller can choose (o3co/auth.provider#292).",
+							"caller can choose.",
 					);
 				}
 

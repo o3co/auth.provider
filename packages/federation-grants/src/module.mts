@@ -403,7 +403,7 @@ const boundaryFor =
 		throw new Error(
 			"federationGrantsModule: the subjectRevocation adapter answered something that is " +
 				"neither a date nor null for the subject's grants boundary. Fails closed: an " +
-				"answer that cannot be compared is not the same as no revocation (D13).",
+				"answer that cannot be compared is not the same as no revocation.",
 		);
 	};
 

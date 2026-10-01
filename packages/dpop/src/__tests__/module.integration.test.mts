@@ -566,6 +566,8 @@ describe("dpopModule — integration via createApp", () => {
 		delete oauth.jwt;
 
 		expect(() => buildMechanism(boot.config)).toThrow(/oauth\.jwt\.issuer/);
+		// The refusal states the rule it enforces, with no issue reference.
+		expect(() => buildMechanism(boot.config)).not.toThrow(/#\d/);
 	});
 
 	it("refuses to build a mechanism when the issuer is a bare host rather than a URL", () => {
