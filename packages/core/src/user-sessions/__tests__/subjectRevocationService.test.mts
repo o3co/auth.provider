@@ -701,9 +701,7 @@ describe("createSubjectRevocationService — participants", () => {
 
 		const result = await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
 
-		expect(result.failures).toContainEqual(
-			expect.objectContaining({ operation: "listBySubject" }),
-		);
+		expect(result.failures).toContainEqual(expect.objectContaining({ operation: "listBySubject" }));
 		expect(runs).toEqual([]);
 		expect(result.participantsHeldBack).toEqual(["feature"]);
 		expect(result.complete).toBe(false);

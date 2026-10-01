@@ -267,18 +267,20 @@ function makeRateLimitBudgetResolver(
 }
 
 /**
- * Instantiate a stable read-side `SubjectRevocationParticipantResolver` over
+ * Instantiate a frozen read-side `SubjectRevocationParticipantResolver` over
  * the `subjectRevocationParticipants` collector, in registration order. Reads
- * through at call time, like the other resolvers.
+ * through at call time, like the other resolvers. Frozen because every module
+ * reaching the slot holds the same object: one that replaced `entries` would
+ * have every later revocation run nothing and report it complete.
  * @internal
  */
 function makeSubjectRevocationParticipantResolver(
 	collector: NameKeyedCollector<SubjectRevocationParticipant>,
 ): SubjectRevocationParticipantResolver {
-	return {
+	return Object.freeze({
 		get: (name: string) => collector.get(name),
 		entries: () => collector.entries(),
-	};
+	});
 }
 
 /**
@@ -446,7 +448,7 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  *   validated;
  * - a `subjectRevocationParticipants` value that is not a participant
  *   (`isSubjectRevocationParticipant`), `null` included. What registers is a
- *   frozen participant over the `run` that was checked, called on the value.
+ *   frozen participant over the `run` that was checked, applied to the value.
  *
  * `null` (switched off by configuration) passes for `mfaFactors` and
  * `rateLimitBudgets` and keeps the name claimed.
@@ -542,8 +544,10 @@ function checkNameKeyedValue(
 			);
 		}
 		const run = read.run;
+		// `Reflect.apply`, not `run.call`: an own `call` set on the function
+		// afterwards would otherwise be what runs.
 		return Object.freeze({
-			run: (input: { readonly subject: string }) => run.call(value, input),
+			run: (input: { readonly subject: string }) => Reflect.apply(run, value, [input]),
 		});
 	}
 	if (kind === "sessionRequirements") {

@@ -112,7 +112,9 @@ describe("subjectRevocationParticipants — what registers", () => {
 		const checked = async ({ subject }: { readonly subject: string }) => {
 			runs.push(`checked:${subject}`);
 		};
-		const resolver = await resolverOf([contributing("test:call", { feature: () => ({ run: checked }) })]);
+		const resolver = await resolverOf([
+			contributing("test:call", { feature: () => ({ run: checked }) }),
+		]);
 		Object.defineProperty(checked, "call", {
 			value: () => {
 				runs.push("own call");

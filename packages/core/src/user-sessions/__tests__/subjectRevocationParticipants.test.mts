@@ -14,8 +14,8 @@
  * `revokeAllForSubject` and the service call them through.
  */
 
-import { describe, expect, it } from "vitest";
 import { runInNewContext } from "node:vm";
+import { describe, expect, it } from "vitest";
 import type { FederationGrantStore } from "#/federation-grants/store.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
@@ -109,10 +109,10 @@ const silentLogger = (
 };
 
 /** A participant that rejects with `thrown`. */
-const rejecting = (name: string, thrown: unknown): readonly [string, SubjectRevocationParticipant] => [
-	name,
-	{ run: () => Promise.reject(thrown) },
-];
+const rejecting = (
+	name: string,
+	thrown: unknown,
+): readonly [string, SubjectRevocationParticipant] => [name, { run: () => Promise.reject(thrown) }];
 
 describe("isSubjectRevocationParticipant", () => {
 	it("admits an object whose run is a function", () => {
@@ -459,9 +459,7 @@ describe("revokeAllForSubject — participants", () => {
 			revocationComplete: true,
 			logger: silentLogger().logger,
 		});
-		expect(outcome.participantFailures).toEqual([
-			{ name: "inherited", error: { name: "Error" } },
-		]);
+		expect(outcome.participantFailures).toEqual([{ name: "inherited", error: { name: "Error" } }]);
 	});
 
 	it("reports a resolver that cannot be read as a failure of the slot, and still answers", async () => {
@@ -586,10 +584,7 @@ describe("runSubjectRevocationParticipants", () => {
 			logger,
 		});
 		expect(calls).toEqual([`between:${SUBJECT}`]);
-		expect(outcome.participantFailures.map((failure) => failure.name)).toEqual([
-			"first",
-			"second",
-		]);
+		expect(outcome.participantFailures.map((failure) => failure.name)).toEqual(["first", "second"]);
 		expect(outcome.listingError).toBeUndefined();
 	});
 

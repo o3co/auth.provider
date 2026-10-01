@@ -29,7 +29,6 @@ import {
 	runSubjectRevocationParticipants,
 	type SubjectRevocationParticipantFailure,
 	type SubjectRevocationParticipantResolver,
-	type SubjectRevocationParticipantsOutcome,
 } from "./subjectRevocationParticipants.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
@@ -169,9 +168,10 @@ export interface RevokeAllForSubjectResult {
 
 /**
  * The participants' pass for a revocation whose own stages ended
- * `revocationComplete`, and the report's `complete`: none run unless it is,
- * and a resolver that cannot be listed is reported as a failure of its slot
- * rather than thrown. Both subject-revocation entries call it last.
+ * `revocationComplete`, mapped into the report: a listing error becomes a
+ * failure of the slot (`subjectRevocationParticipantResolver`, `entries`),
+ * and `complete` is the report's. Both subject-revocation entries call it
+ * last; it never throws.
  * @internal
  */
 export async function participantsAfterRevocation(opts: {
@@ -179,12 +179,12 @@ export async function participantsAfterRevocation(opts: {
 	readonly participants: SubjectRevocationParticipantResolver | undefined;
 	readonly revocationComplete: boolean;
 	readonly logger?: Logger;
-}): Promise<
-	SubjectRevocationParticipantsOutcome & {
-		readonly failure?: RevokeAllForSubjectFailure;
-		readonly complete: boolean;
-	}
-> {
+}): Promise<{
+	readonly participantsHeldBack: readonly string[];
+	readonly participantFailures: readonly SubjectRevocationParticipantFailure[];
+	readonly failure?: RevokeAllForSubjectFailure;
+	readonly complete: boolean;
+}> {
 	if (opts.participants === undefined) {
 		return {
 			participantsHeldBack: [],
@@ -192,27 +192,25 @@ export async function participantsAfterRevocation(opts: {
 			complete: opts.revocationComplete,
 		};
 	}
-	try {
-		const outcome = await runSubjectRevocationParticipants({
-			...opts,
-			participants: opts.participants,
-		});
+	const { participantsHeldBack, participantFailures, listingError } =
+		await runSubjectRevocationParticipants({ ...opts, participants: opts.participants });
+	if (listingError !== undefined) {
 		return {
-			...outcome,
-			complete: opts.revocationComplete && outcome.participantFailures.length === 0,
-		};
-	} catch (error) {
-		opts.logger?.error(
-			{ err: loggableError(error), subject: opts.subject },
-			"revoke_all_list_participants_failed",
-		);
-		return {
-			participantsHeldBack: [],
-			participantFailures: [],
-			failure: { capability: "subjectRevocationParticipantResolver", operation: "entries", error },
+			participantsHeldBack,
+			participantFailures,
+			failure: {
+				capability: "subjectRevocationParticipantResolver",
+				operation: "entries",
+				error: listingError.error,
+			},
 			complete: false,
 		};
 	}
+	return {
+		participantsHeldBack,
+		participantFailures,
+		complete: opts.revocationComplete && participantFailures.length === 0,
+	};
 }
 
 /**
