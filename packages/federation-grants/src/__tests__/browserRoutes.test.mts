@@ -194,6 +194,8 @@ function world(options: WorldOptions = {}) {
 			upstream: { issuer: string; subject: string };
 			tokens: Record<string, unknown>;
 		},
+		/** Whether the exchange adds an `expiresAt` from a numeric `expiresIn` when the answer names none. */
+		exchangeFillsExpiresAt: true,
 		exchangeThrows: undefined as Error | undefined,
 		exchanged: [] as Record<string, unknown>[],
 		/**
@@ -318,7 +320,11 @@ function world(options: WorldOptions = {}) {
 								state.exchanged.push(params as unknown as Record<string, unknown>);
 								if (state.exchangeThrows !== undefined) throw state.exchangeThrows;
 								const tokens = { ...state.exchange.tokens };
-								if (typeof tokens.expiresIn === "number" && !("expiresAt" in tokens)) {
+								if (
+									state.exchangeFillsExpiresAt &&
+									typeof tokens.expiresIn === "number" &&
+									!("expiresAt" in tokens)
+								) {
 									tokens.expiresAt = new Date(state.now.getTime() + tokens.expiresIn * 1000);
 								}
 								return { upstream: { ...state.exchange.upstream }, tokens } as never;
@@ -1393,6 +1399,19 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 				"pending",
 			);
 		}
+	});
+
+	it("refuses an answer that states expiresIn alone, as retrieval does", async () => {
+		const w = world();
+		const a = await approved(w);
+		w.state.exchangeFillsExpiresAt = false;
+		w.state.exchange = {
+			...w.state.exchange,
+			tokens: { ...w.state.exchange.tokens, expiresIn: 3600 },
+		};
+		const back = returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+		expect(back.get("error")).toBe("upstream_token_ineligible");
+		expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("pending");
 	});
 
 	it("stores the token dated from the exchange's start, ending at the earlier instant the answer names", async () => {
