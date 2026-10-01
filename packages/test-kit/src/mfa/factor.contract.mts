@@ -306,6 +306,42 @@ function carriesNoAddress(value: unknown, user: Readonly<Record<string, unknown>
 	);
 }
 
+/**
+ * Refuses `value` when a string it holds, percent-decoded, carries the
+ * account's address anywhere but in the account's username, verbatim: where
+ * the username is the address, it may be named by it, and only so.
+ */
+function carriesNoAddressButUsername(
+	value: unknown,
+	user: Readonly<Record<string, unknown>>,
+	what: string,
+) {
+	const { username, email } = user;
+	const address = typeof email === "string" ? [email, normaliseMailAddress(email)] : [];
+	// Only a username that holds the address is struck out: one that is part of it strikes nothing.
+	const named =
+		typeof username === "string" &&
+		address.some(
+			(spelling) =>
+				spelling !== undefined &&
+				spelling !== "" &&
+				username.toLowerCase().includes(spelling.toLowerCase()),
+		)
+			? username
+			: undefined;
+	const rest = decodedStrings(value).map((text) => {
+		const read = percentDecoded(text);
+		return named === undefined ? read : read.split(named).join(" ");
+	});
+	carriesNoAddress(rest, user, what);
+}
+
+/** The account the error probes run over: a username and an address no factor's text holds by chance. */
+const CANARY = {
+	username: "mfa-contract-canary-q7x",
+	email: "mfa-contract-canary-q7x@canary.example",
+} as const;
+
 /** What an error says: its name, message and own string properties, as a log line or its reader could show them. */
 function errorText(error: unknown): string {
 	try {
@@ -748,12 +784,17 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "nothing kept carries the account's address, whatever its case or escaping: the pending enrollment's state, the enrolled data and label, a challenge's state, and a verification's next data",
+			name: "nothing kept, and no challenge's answer, carries the account's address — an enrollment's answer only as the account's username, verbatim — whatever its case or escaping: the pending enrollment's state and answer, the enrolled data and label, a challenge's state and answer, and a verification's next data",
 			run: async () => {
 				const factor = input.build();
 				const begun = await begin(factor);
-				// A response goes to the account's owner alone, and may name the account as the Store does.
 				carriesNoAddress(begun.start.state, input.user, "the pending enrollment's state");
+				// An enrollment's answer goes to the account's own browser: it may name the account by its username.
+				carriesNoAddressButUsername(
+					begun.start.response,
+					input.user,
+					"the pending enrollment's answer",
+				);
 				const done = await complete(
 					factor,
 					begun,
@@ -774,6 +815,8 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 				};
 				const { context: later, sent } = await challenge(factor, enrolled);
 				carriesNoAddress(sent?.state, input.user, "the challenge's state");
+				// A login's challenge answers whoever holds the password.
+				carriesNoAddress(sent?.response, input.user, "the challenge's answer");
 				const verdict = await factor.verify({
 					...later,
 					factor: enrolled,
@@ -790,64 +833,71 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 				const factor = input.build();
 				const enrolled = await enroll(factor);
 				const begun = await begin(factor);
-				const { username: _username, ...nameless } = input.user;
 				const unreadable = { ...enrolled, data: {} };
-				const attempts: [string, () => Promise<unknown>][] = [
-					[
-						"beginEnrollment over an account without a username",
-						() => factor.beginEnrollment({ ...begun.context, user: nameless, factors: [] }),
-					],
-					[
-						"completeEnrollment over a pending state it cannot read",
-						() =>
-							factor.completeEnrollment({
-								...begun.context,
-								user: input.user,
-								factors: [],
-								state: {},
-								proof: "000000",
-							}),
-					],
-					[
-						"challenge over data it cannot read",
-						async () =>
-							factor.challenge?.({
-								...contextAt(
-									factor,
-									subjectOf(input.user),
-									VERIFIED_AT_MS,
-									"contract-verification",
-								),
-								factor: unreadable,
-								factors: [unreadable],
-							}),
-					],
-					[
-						"verify over data it cannot read",
-						() =>
-							factor.verify({
-								...contextAt(
-									factor,
-									subjectOf(input.user),
-									VERIFIED_AT_MS,
-									"contract-verification",
-								),
-								factor: unreadable,
-								factors: [unreadable],
-								state: undefined,
-								proof: "000000",
-							}),
-					],
-				];
-				for (const [what, attempt] of attempts) {
-					let thrown: unknown;
-					try {
-						await attempt();
-						continue;
-					} catch (error) {
-						thrown = error;
+				// The suite's canary accounts, so a username that is an ordinary word is never
+				// mistaken: one named apart from its address, one named by it.
+				for (const account of [
+					{ ...input.user, ...CANARY },
+					{ ...input.user, username: CANARY.email, email: CANARY.email },
+				]) {
+					const { username: _username, ...nameless } = account;
+					const attempts: [string, () => Promise<unknown>][] = [
+						[
+							"beginEnrollment over an account without a username",
+							() => factor.beginEnrollment({ ...begun.context, user: nameless, factors: [] }),
+						],
+						[
+							"completeEnrollment over a pending state it cannot read",
+							() =>
+								factor.completeEnrollment({
+									...begun.context,
+									user: account,
+									factors: [],
+									state: {},
+									proof: "000000",
+								}),
+						],
+						[
+							"challenge over data it cannot read",
+							async () =>
+								factor.challenge?.({
+									...contextAt(
+										factor,
+										subjectOf(input.user),
+										VERIFIED_AT_MS,
+										"contract-verification",
+									),
+									factor: unreadable,
+									factors: [unreadable],
+								}),
+						],
+						[
+							"verify over data it cannot read",
+							() =>
+								factor.verify({
+									...contextAt(
+										factor,
+										subjectOf(input.user),
+										VERIFIED_AT_MS,
+										"contract-verification",
+									),
+									factor: unreadable,
+									factors: [unreadable],
+									state: undefined,
+									proof: "000000",
+								}),
+						],
+					];
+					for (const [what, attempt] of attempts) {
+						let thrown: unknown;
+						try {
+							await attempt();
+							continue;
+						} catch (error) {
+							thrown = error;
+						}
+						carriesNoAccount(errorText(thrown), account, `the error ${what} threw`);
 					}
-					carriesNoAccount(errorText(thrown), input.user, `the error ${what} threw`);
 				}
 			},
 		},
