@@ -37,7 +37,6 @@
  */
 
 import { emitAuditEvent } from "../audit/factory.mjs";
-import type { AuditSink } from "../audit/types.mjs";
 import { isWellFormedErrorCode } from "../errors/envelope.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import {
@@ -57,13 +56,8 @@ import {
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
-import type {
-	SubjectRevocation,
-	UserSession,
-	UserSessionClaims,
-	UserSessionStore,
-} from "../user-sessions/types.mjs";
-import { type AcrSelection, type AcrTable, selectAcr, stepUpReach } from "./acr.mjs";
+import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
+import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import type { AdmissionAction } from "./actions.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
 import {
@@ -75,9 +69,9 @@ import {
 	frozenUserCopy,
 	primaryFromDto,
 } from "./primary.mjs";
+import { checkRequest, claim } from "./request-check.mjs";
 import {
 	type Admission,
-	type AdmissionAsks,
 	type AdmissionDeps,
 	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
@@ -110,21 +104,8 @@ export {
 } from "./requirement-resolver.mjs";
 
 // ---------------------------------------------------------------------------
-// The brands
-// ---------------------------------------------------------------------------
-
-/** The claims the builders below made. */
-const knownClaims = new WeakSet<object>();
-
-// ---------------------------------------------------------------------------
 // The claim builders
 // ---------------------------------------------------------------------------
-
-const claim = (fields: Omit<SessionClaim, never>): SessionClaim => {
-	const built = Object.freeze({ ...fields });
-	knownClaims.add(built);
-	return built;
-};
 
 /** What a cookie claim is built from: the express session, when the request has one. */
 export interface CookieCarrier {
@@ -287,108 +268,6 @@ const sessionlessStepUps = new Set<string>();
 // ---------------------------------------------------------------------------
 // admitSession
 // ---------------------------------------------------------------------------
-
-const isStringList = (value: unknown): value is readonly string[] =>
-	Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0);
-
-/**
- * What `checkRequest` answers: every untrusted input (claim, action, `asks`,
- * each dependency off `deps`) read once and copied, so a getter answering
- * one thing to the check and another to the steps changes nothing, and a
- * requirement cannot reach the caller's objects.
- */
-interface CheckedRequest {
-	readonly claim: SessionClaim;
-	readonly action: AdmissionAction;
-	readonly asks: AdmissionAsks | undefined;
-	readonly requirements: SessionRequirementResolver;
-	readonly userSessionStore: UserSessionStore | undefined;
-	readonly subjectRevocation: SubjectRevocation | undefined;
-	readonly acrTable: AcrTable;
-	readonly logger: Logger | undefined;
-	readonly auditSink: AuditSink | undefined;
-	readonly now: Date;
-}
-
-/**
- * The action a request names: a registered action by its name — the object
- * registration made, so the grade is never the caller's to restate — or a
- * remediation core issued to a requirement, by its identity. Both are core's
- * vocabulary, so a log line names either.
- */
-function checkedAction(asked: unknown, requirements: SessionRequirementResolver): AdmissionAction {
-	if (typeof asked === "string") {
-		const registered = requirements.action(asked);
-		if (registered === undefined) {
-			throw new RangeError(
-				`admitSession: ${JSON.stringify(asked)} is not a registered admission action: the module that admits it registers it under contributes.admissionActions`,
-			);
-		}
-		return registered;
-	}
-	// The issued object keeps its identity: that is what step 5 checks.
-	if (isIssuedAction(asked)) return asked;
-	throw new RangeError(
-		"admitSession: the action is a registered action's name, or a remediation core issued to a requirement (issuedRemediationActions)",
-	);
-}
-
-/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once. */
-function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
-	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
-	const requirements = checkResolver(deps.requirements);
-	const acrTable = deps.acrTable;
-	if (!isObject(acrTable)) throw new RangeError("admitSession: acrTable must be an object");
-	const userSessionStore = deps.userSessionStore;
-	const subjectRevocation = deps.subjectRevocation;
-	const logger = deps.logger;
-	const auditSink = deps.auditSink;
-	const clock = deps.now;
-	const now = clock === undefined ? new Date() : clock();
-	if (!isObject(request)) throw new RangeError("admitSession: the request must be an object");
-	const presented = request.claim;
-	if (!isObject(presented) || !knownClaims.has(presented)) {
-		throw new RangeError(
-			"admitSession: the claim must be one a claim builder made — cookieClaim, codeClaimFirstRead, codeClaimRevalidation, linkClaim or tokenClaim",
-		);
-	}
-	// A branded claim is frozen and core's own; the copy is still taken, so
-	// nothing downstream reads the caller's object twice.
-	const claim = Object.freeze({
-		authenticated: presented.authenticated === true,
-		sid: nonEmptyString(presented.sid),
-		subject: nonEmptyString(presented.subject),
-		carrier: presented.carrier,
-		...(Array.isArray(presented.tokenAmr)
-			? { tokenAmr: Object.freeze([...(presented.tokenAmr as readonly string[])]) }
-			: {}),
-	}) as SessionClaim;
-	const action = checkedAction(request.action, requirements);
-	const asksRead = request.asks;
-	let asks: AdmissionAsks | undefined;
-	if (asksRead !== undefined) {
-		if (!isObject(asksRead)) throw new RangeError("admitSession: asks must be an object");
-		const acrValues = asksRead.acrValues;
-		if (acrValues !== undefined && !isStringList(acrValues)) {
-			throw new RangeError("admitSession: asks.acrValues must be a list of non-empty strings");
-		}
-		asks = Object.freeze({
-			...(acrValues === undefined ? {} : { acrValues: Object.freeze([...acrValues]) }),
-		});
-	}
-	return {
-		claim,
-		action,
-		asks,
-		requirements,
-		userSessionStore,
-		subjectRevocation,
-		acrTable,
-		logger,
-		auditSink,
-		now,
-	};
-}
 
 const isValidDate = (value: unknown): value is Date =>
 	value instanceof Date && !Number.isNaN(value.getTime());
