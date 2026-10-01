@@ -45,6 +45,7 @@ import {
 	directoryEntries,
 	disposeAll,
 	events,
+	LOCKOUT,
 	refusal,
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
@@ -237,6 +238,28 @@ describe("a first binding where mail is wired and the account has an address", (
 			"invalid",
 			"exhausted",
 		]);
+	});
+
+	it("is given during a hard hold, and records no exempt success: the hold stands", async () => {
+		const store = createMemoryMfaTransactionStore();
+		const policy = { ...LOCKOUT, threshold: 1, hardLimit: 1 };
+		const held = await store.reserveSubjectAttempt(ALICE.id, Date.now(), policy);
+		if (!held.ok) throw new Error("not reserved");
+		await store.settleSubjectAttempt(ALICE.id, held.reservation, "failure");
+		const noteExemptSuccess = vi.fn(store.noteExemptSuccess);
+		const { app, sender } = await withMail({ transactionStore: { ...store, noteExemptSuccess } });
+		const { agent, transaction } = await beginFirstBinding(app);
+		await challengeProof(agent, transaction);
+
+		const res = await verify(agent, transaction, ACCOUNT_EMAIL, lastCode(sender));
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body).toEqual({ email_proof: "verified" });
+		expect(noteExemptSuccess).not.toHaveBeenCalled();
+		expect(await store.reserveSubjectAttempt(ALICE.id, Date.now(), policy)).toMatchObject({
+			ok: false,
+			hold: "hard",
+		});
 	});
 
 	it("keeps the code across attempts, and a resend replaces it", async () => {

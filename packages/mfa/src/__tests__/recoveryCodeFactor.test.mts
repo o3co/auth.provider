@@ -19,8 +19,9 @@
  * `mfaFactors.recovery_code` by its module while its section is on. It does
  * not count, adds `recovery` and `mfa`, is never enrolled on its own, and
  * issues a set of `count` long codes beside a first counting factor, kept as
- * keyed digests under the ring. Its verification is not built: a verification
- * is an outage (`503`), never a code accepted or refused.
+ * keyed digests under the ring. A verification compares the code with every
+ * digest of the set and answers the set without the one it matched; a
+ * digest whose key left the ring is an outage (`503`), never a code refused.
  */
 
 import { randomBytes } from "node:crypto";
@@ -29,6 +30,7 @@ import {
 	createMemoryMfaFactorStore,
 	type MfaFactor,
 	type MfaFactorResolver,
+	type MfaFactorStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
@@ -38,6 +40,7 @@ import {
 	createRecoveryCodeFactor,
 	generateRecoveryCodes,
 	RECOVERY_CODE_FACTOR_KIND,
+	recoveryCodesLeft,
 } from "#/recovery/factor.mjs";
 import { issueRecoveryCodes } from "#/recovery/issue.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
@@ -87,27 +90,123 @@ describe("the recovery-code factor", () => {
 			RangeError,
 		);
 	});
+});
 
-	it("verifies nothing yet: a verification throws, which the coordinator answers as an outage", async () => {
-		await expect(
-			factor.verify({
-				subject: "u-alice",
-				transactionId: "t",
-				nowMs: 0,
-				request: {},
-				digests: suiteSealing().digestsFor(RECOVERY_CODE_FACTOR_KIND),
-				factor: {
-					id: "f",
-					label: undefined,
-					createdAt: new Date(0),
-					lastUsedAt: undefined,
-					data: {},
-				},
-				factors: [],
-				state: undefined,
-				proof: "0123-4567-89AB-CDEF",
-			}),
-		).rejects.toThrow();
+describe("the recovery-code factor's verification", () => {
+	const factor = createRecoveryCodeFactor({ count: 10 });
+	const sealing = createMfaSealing({ ring: [{ id: "k1", key: randomBytes(32) }] });
+	const digests = sealing.digestsFor(RECOVERY_CODE_FACTOR_KIND);
+	const CODE = "0123456789ABCDEF";
+	const OTHER = "ZZZZYYYYXXXXWWWW";
+	const setOf = (...codes: string[]) => ({ codes: codes.map((code) => digests.digest([code])) });
+	const verifying = (
+		proof: unknown,
+		data: Record<string, unknown> = setOf(CODE, OTHER),
+		using = digests,
+	) =>
+		factor.verify({
+			subject: "u-alice",
+			transactionId: "t",
+			nowMs: 0,
+			request: {},
+			digests: using,
+			factor: {
+				id: "f-set",
+				label: undefined,
+				createdAt: new Date(0),
+				lastUsedAt: undefined,
+				data,
+			},
+			factors: [],
+			state: undefined,
+			proof,
+		});
+
+	it.each([
+		["as shown", "0123-4567-89AB-CDEF"],
+		["in lower case", "0123-4567-89ab-cdef"],
+		["without hyphens", "0123456789ABCDEF"],
+		["with O, I and L for the digits they stand for", "O123-4567-89AB-CDEF".replace("1", "I")],
+		["with L for one", "0L23-4567-89AB-CDEF"],
+		["with whitespace around it", "  0123-4567-89AB-CDEF\n"],
+	])("accepts a right code %s, answering the set without it", async (_, proof) => {
+		expect(await verifying(proof)).toEqual({
+			ok: true,
+			factorId: "f-set",
+			next: { codes: [digests.digest([OTHER])] },
+		});
+	});
+
+	it("refuses a wrong code as invalid, and anything that is no code as malformed", async () => {
+		expect(await verifying("ZZZZ-ZZZZ-ZZZZ-ZZZZ")).toEqual({ ok: false, reason: "invalid" });
+		for (const proof of [
+			"123456",
+			"",
+			42,
+			null,
+			undefined,
+			{ code: CODE },
+			"0123-4567-89AB-CDEU",
+		]) {
+			expect(await verifying(proof), JSON.stringify(proof)).toEqual({
+				ok: false,
+				reason: "malformed",
+			});
+		}
+	});
+
+	it("refuses a code already spent: the set it answered no longer holds it", async () => {
+		const first = await verifying(CODE);
+		const next = first.ok ? (first.next as Record<string, unknown>) : {};
+
+		expect(await verifying(CODE, next)).toEqual({ ok: false, reason: "invalid" });
+	});
+
+	it("answers an empty set for the last code, and refuses every code after", async () => {
+		const last = await verifying(CODE, setOf(CODE));
+		expect(last).toEqual({ ok: true, factorId: "f-set", next: { codes: [] } });
+
+		expect(await verifying(CODE, { codes: [] })).toEqual({ ok: false, reason: "invalid" });
+	});
+
+	it("throws, never refusing the code, when a digest names a key the ring no longer holds", async () => {
+		const gone = createMfaSealing({ ring: [{ id: "k-gone", key: randomBytes(32) }] }).digestsFor(
+			RECOVERY_CODE_FACTOR_KIND,
+		);
+		const data = { codes: [gone.digest([CODE]), gone.digest([OTHER])] };
+
+		await expect(verifying(CODE, data)).rejects.toThrow();
+		await expect(verifying("ZZZZ-ZZZZ-ZZZZ-ZZZZ", data)).rejects.toThrow();
+	});
+
+	it("throws on data that is not a set of keyed digests", async () => {
+		for (const data of [{}, { codes: "x" }, { codes: [{ keyId: "k1" }] }]) {
+			await expect(verifying(CODE, data), JSON.stringify(data)).rejects.toThrow();
+		}
+	});
+});
+
+describe("recoveryCodesLeft", () => {
+	const factor = createRecoveryCodeFactor({ count: 10 });
+	const digests = createMfaSealing({ ring: [{ id: "k1", key: randomBytes(32) }] }).digestsFor(
+		RECOVERY_CODE_FACTOR_KIND,
+	);
+
+	it("counts the codes a set holds", () => {
+		const set = generateRecoveryCodes(factor, digests);
+		expect(set && recoveryCodesLeft(factor, set.data)).toBe(10);
+		expect(recoveryCodesLeft(factor, { codes: [] })).toBe(0);
+	});
+
+	it("counts none in data that is not a set", () => {
+		expect(recoveryCodesLeft(factor, {})).toBe(0);
+		expect(recoveryCodesLeft(factor, { codes: "x" })).toBe(0);
+	});
+
+	it("says nothing for a factor this package's recovery-code module did not make", () => {
+		const settings = { algorithm: "SHA1", digits: 6, period: 30, window: 1, issuer: "x" } as const;
+		expect(recoveryCodesLeft(createTotpFactor(settings), { codes: [] })).toBeUndefined();
+		expect(recoveryCodesLeft({ ...factor }, { codes: [] })).toBeUndefined();
 	});
 });
 
@@ -257,10 +356,64 @@ describe("a recovery code at a login", () => {
 		thawClock();
 	});
 
-	it("is answered 503 once — mfa_factor_unreadable, the verification — and no session: verification is not built", async () => {
+	it("succeeds once when the same code is given in two logins at once: the loser spends its transaction, never a code", async () => {
+		const memory = createMemoryMfaFactorStore();
+		await seedTotp(memory);
+		const set = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			suiteSealing().digestsFor(RECOVERY_CODE_FACTOR_KIND),
+		);
+		if (set === undefined) throw new Error("no set");
+		const record = await seedFactor(memory, RECOVERY_CODE_FACTOR_KIND, set.data);
+		// Each write waits for the other: both verified the code before either spent it.
+		let arrived = 0;
+		let bothArrived: () => void = () => undefined;
+		const both = new Promise<void>((resolve) => {
+			bothArrived = resolve;
+		});
+		const factorStore: MfaFactorStore = {
+			...memory,
+			update: async (...args) => {
+				arrived += 1;
+				if (arrived === 2) bothArrived();
+				if (arrived <= 2) await both;
+				return memory.update(...args);
+			},
+		};
+		const { app, userSessionStore, transactionStore } = await boot({
+			config: configFor("required"),
+			factorStore,
+		});
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const logins = [await beginLogin(app), await beginLogin(app)];
+
+		const answers = await Promise.all(
+			logins.map(({ agent, transaction }) => verify(agent, transaction, record.id, set.codes[0])),
+		);
+
+		expect(answers.map((res) => res.status).sort()).toEqual([200, 401]);
+		expect(answers.find((res) => res.status === 401)?.body).toMatchObject({
+			error: "mfa_invalid",
+			attempts_remaining: 0,
+		});
+		expect(create).toHaveBeenCalledTimes(1);
+		for (const { transaction } of logins)
+			expect(await transactionStore.get(transaction)).toBeNull();
+		const stored = (await factorStore.list("u-alice")).find((entry) => entry.id === record.id);
+		const opened = stored && suiteSealing().openFactorData(stored, stored.data);
+		expect(opened?.state === "ok" && (opened.value.codes as unknown[]).length).toBe(2);
+	});
+
+	it("is answered 503 once — mfa_factor_unreadable, the verification — and no session, when the set's key left the ring", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await seedTotp(factorStore);
-		const record = await seedFactor(factorStore, RECOVERY_CODE_FACTOR_KIND, { codes: [] });
+		const gone = createMfaSealing({ ring: [{ id: "k-gone", key: randomBytes(32) }] });
+		const set = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			gone.digestsFor(RECOVERY_CODE_FACTOR_KIND),
+		);
+		if (set === undefined) throw new Error("no set");
+		const record = await seedFactor(factorStore, RECOVERY_CODE_FACTOR_KIND, set.data);
 		const { app, logger, userSessionStore } = await boot({
 			config: configFor("required"),
 			factorStore,
@@ -268,7 +421,7 @@ describe("a recovery code at a login", () => {
 		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
 		const { agent, transaction } = await beginLogin(app);
 
-		const res = await verify(agent, transaction, record.id, "0123-4567-89AB-CDEF");
+		const res = await verify(agent, transaction, record.id, set.codes[0]);
 
 		expect(res.status).toBe(503);
 		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
