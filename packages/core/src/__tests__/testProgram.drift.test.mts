@@ -15,16 +15,18 @@
  */
 
 /**
- * Every test file vitest collects in a package is compiled by that package's
- * test program. vitest's typecheck runs tsc on `tsconfig.test.json`, so a test
- * outside that program runs without its types ever being checked: a
- * `@ts-expect-error` or `satisfies` in it proves nothing.
+ * Every test file vitest collects in a package is compiled by the program
+ * that package's vitest typecheck runs tsc on, and that typecheck is on and
+ * fails the run on a source error. A test outside that program runs without
+ * its types ever being checked: a `@ts-expect-error` or `satisfies` in it
+ * proves nothing.
  *
- * Each workspace under `packages/` declares a `tsconfig.test.json`. The files
- * vitest collects are asked of vitest itself, from the package's own config;
- * the program's files are asked of TypeScript, from the package's own
- * `tsconfig.test.json`. A collected file outside the program fails, naming
- * the package and the file. There is no list of exceptions.
+ * For each workspace under `packages/`, everything is asked of vitest itself,
+ * from the package's own config: whether typecheck is enabled, whether it
+ * ignores source errors, the files it collects, and the tsconfig it names,
+ * whose files TypeScript lists. A collected file outside that program fails,
+ * naming the package and the file. There is no list of exceptions. The
+ * fixtures under `fixtures/testProgram` hold the guard to each refusal.
  */
 
 import { existsSync, readdirSync } from "node:fs";
@@ -44,7 +46,7 @@ const packages = readdirSync(packagesDir, { withFileTypes: true })
 	.map((entry) => entry.name)
 	.sort();
 
-/** The files `tsconfig.test.json` hands tsc, as absolute paths. */
+/** The files a tsconfig hands tsc, as absolute paths. */
 function programFiles(configPath: string): Set<string> {
 	const parsed = ts.getParsedCommandLineOfConfigFile(
 		configPath,
@@ -65,34 +67,65 @@ function programFiles(configPath: string): Set<string> {
 	return new Set(parsed.fileNames.map((file) => resolve(file)));
 }
 
-/** The test files vitest collects under the package's own config, typecheck included. */
-async function collectedFiles(root: string): Promise<string[]> {
+/**
+ * What keeps the package's collected test files from being type-checked;
+ * empty when nothing does. Everything is read from the package's own vitest
+ * config: whether its typecheck runs, whether source errors fail it, and the
+ * tsconfig it hands tsc.
+ */
+async function testProgramFindings(root: string): Promise<string[]> {
 	const vitest = await createVitest("test", { root, watch: false });
 	try {
+		const typecheck = vitest.config.typecheck;
+		const findings: string[] = [];
+		if (typecheck.enabled !== true) findings.push("typecheck is off");
+		if (typecheck.ignoreSourceErrors === true) findings.push("typecheck ignores source errors");
 		const specifications = await vitest.globTestSpecifications();
-		return [...new Set(specifications.map((specification) => resolve(specification.moduleId)))];
+		if (specifications.length === 0) return [...findings, "collects no test file"];
+		// tsc runs only in a run that includes a typecheck-collected file.
+		if (!specifications.some((specification) => specification.pool === "typescript")) {
+			findings.push("typecheck collects no file, so tsc never runs");
+		}
+		// Unnamed, tsc reads the root's tsconfig.json, as vitest's typecheck does.
+		const program = programFiles(resolve(root, typecheck.tsconfig ?? "tsconfig.json"));
+		const collected = [...new Set(specifications.map((s) => resolve(s.moduleId)))];
+		for (const file of collected.filter((file) => !program.has(file)).sort()) {
+			findings.push(`${file.slice(root.length + 1)} is collected but never compiled`);
+		}
+		return findings;
 	} finally {
 		await vitest.close();
 	}
 }
 
-describe("every test file vitest collects is in its package's tsconfig.test.json", () => {
+const fixtures = join(fileURLToPath(import.meta.url), "../fixtures/testProgram");
+
+describe("the guard itself", () => {
+	it("catches a package whose typecheck is off", async () => {
+		expect(await testProgramFindings(join(fixtures, "typecheck-off"))).toContain(
+			"typecheck is off",
+		);
+	});
+
+	it("catches a package whose typecheck ignores source errors", async () => {
+		expect(await testProgramFindings(join(fixtures, "source-errors-ignored"))).toContain(
+			"typecheck ignores source errors",
+		);
+	});
+
+	it("reads the program the package's typecheck names, not a file name it assumes", async () => {
+		expect(await testProgramFindings(join(fixtures, "points-at-build-config"))).toEqual([
+			"src/__tests__/a.probe.mts is collected but never compiled",
+		]);
+	});
+});
+
+describe("every test file vitest collects is in the program its package's typecheck compiles", () => {
 	it("finds the packages to check", () => {
 		expect(packages).toContain("core");
 	});
 
 	it.each(packages)("%s", async (name) => {
-		const root = join(packagesDir, name);
-		const configPath = join(root, "tsconfig.test.json");
-		expect(existsSync(configPath), `packages/${name} has no tsconfig.test.json`).toBe(true);
-
-		const program = programFiles(configPath);
-		const collected = await collectedFiles(root);
-		expect(collected.length, `vitest collects no test file in packages/${name}`).toBeGreaterThan(0);
-		const outside = collected
-			.filter((file) => !program.has(file))
-			.map((file) => file.slice(root.length + 1))
-			.sort();
-		expect(outside, `packages/${name}: collected by vitest, never compiled`).toEqual([]);
+		expect(await testProgramFindings(join(packagesDir, name)), `packages/${name}`).toEqual([]);
 	});
 });
