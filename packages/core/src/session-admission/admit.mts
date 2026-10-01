@@ -29,12 +29,12 @@ import {
 } from "../grants/authenticationClaims.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import {
+	canRecordSecondFactor,
 	copySessionAuthentication,
 	federatedSessionAuthentication,
 	passwordSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,
-	sessionAuthentication,
 } from "../user-sessions/authentication.mjs";
 import { readEnrollmentFacts } from "../user-sessions/enrollmentFacts.mjs";
 import {
@@ -312,8 +312,8 @@ const copyView = (view: SessionView): SessionView =>
  *    of every requirement's when the session is live.
  * 7. `merge` of 5 and 6. In the met + step_up row, a step-up through the
  *    second-factor authority is never offered for `acr_values` onto a store
- *    without `recordSecondFactor` or a record whose primary cannot be told:
- *    the answer is a new login (`reauthenticate`, `acr`).
+ *    without `recordSecondFactor` or a record `canRecordSecondFactor`
+ *    refuses: the answer is a new login (`reauthenticate`, `acr`).
  */
 export async function admitSession(
 	deps: AdmissionDeps,
@@ -427,7 +427,7 @@ export async function admitSession(
 			(recordable ??=
 				session !== null &&
 				supportsSecondFactorUpdate(checked.userSessionStore) &&
-				sessionAuthentication(session) !== undefined),
+				canRecordSecondFactor(session)),
 	});
 }
 

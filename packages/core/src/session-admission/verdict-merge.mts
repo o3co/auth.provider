@@ -20,8 +20,9 @@
  * `step_up` it answers lists only the entries the stepping requirement's own
  * trip can finish. In the met + step_up row, a step-up through the
  * second-factor authority is never offered for `acr_values` onto a session
- * whose store has no `recordSecondFactor` or whose primary cannot be told:
- * the answer is a new login (`reauthenticate`, `acr`) instead.
+ * whose store has no `recordSecondFactor` or on which
+ * `canRecordSecondFactor` is false: the answer is a new login
+ * (`reauthenticate`, `acr`) instead.
  */
 
 import type { AcrSelection } from "./acr.mjs";
@@ -39,7 +40,7 @@ export interface MergeContext {
 	readonly table: AdmissionDeps["acrTable"];
 	/**
 	 * Whether a second factor can be recorded on the live session: the store
-	 * has the step-up capability and the record's primary can be told. Called
+	 * has the step-up capability and `canRecordSecondFactor` is true. Called
 	 * only where the met + step_up row would choose the authority.
 	 */
 	readonly recordable: () => boolean;
