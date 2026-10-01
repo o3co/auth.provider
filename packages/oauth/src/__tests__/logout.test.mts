@@ -344,7 +344,7 @@ describe("POST /oauth/logout", () => {
 			expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
 		});
 
-		it("marks the session ended in a family index with the session-end capability, with the session's own expiresAt — before the RP listing, and again in the cascade", async () => {
+		it("marks the session ended once, in a family index with the session-end capability, with the session's own expiresAt, and the cascade revokes the families that mark read", async () => {
 			const sessionFamilyIndex = {
 				...makeSessionFamilyIndex(),
 				endSession: vi.fn(async (_sid: string, _expiresAt: Date) => ["fam-1"]),
@@ -356,10 +356,7 @@ describe("POST /oauth/logout", () => {
 			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
 
 			expect(res.status).toBe(200);
-			expect(sessionFamilyIndex.endSession.mock.calls).toEqual([
-				["sid-1", baseSession.expiresAt],
-				["sid-1", baseSession.expiresAt],
-			]);
+			expect(sessionFamilyIndex.endSession.mock.calls).toEqual([["sid-1", baseSession.expiresAt]]);
 			expect(sessionFamilyIndex.listFamilyIds).not.toHaveBeenCalled();
 			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 		});
@@ -401,6 +398,7 @@ describe("POST /oauth/logout", () => {
 			expectOutageLine(logger, "logout_store_unavailable", {
 				store: "session_family_index",
 				step: "endSession",
+				session: "unknown",
 			});
 		});
 

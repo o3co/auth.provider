@@ -544,6 +544,50 @@ describe("the logout route and a code exchange: the relying parties it lists", (
 		});
 	}
 
+	it("a relying-party listing that fails after the session is marked: 503, the session half-ended — kept, its families unrevoked, its code exchanges refused — until a retry", async () => {
+		const w = await world();
+		expect((await w.exchange()).status).toBe(200);
+		const family = w.familyId();
+		const registry = w.logoutStores.sessionRPRegistry;
+		const listRPs = vi.spyOn(registry, "listRPs").mockRejectedValueOnce(new Error("registry down"));
+
+		const listed: string[][] = [];
+		expect((await logoutRoute(w, listed)).status).toBe(503);
+		expect(listRPs).toHaveBeenCalledTimes(1);
+		expect(await w.userSessionStore.get(SID)).not.toBeNull();
+		expect(await w.revocation.isFamilyRevoked(family)).toBe(false);
+		expect((await registry.listRPs(SID)).map((rp) => rp.clientId)).toEqual([CLIENT_ID]);
+		expectSessionInvalidated(await w.exchange());
+
+		// The retry completes the logout.
+		expect((await logoutRoute(w, listed)).status).toBe(200);
+		expect(await w.userSessionStore.get(SID)).toBeNull();
+		expect(await w.revocation.isFamilyRevoked(family)).toBe(true);
+	});
+
+	it("an exchange whose family cannot join after its relying party registered: 503 with no token, and the registration stays", async () => {
+		const w = await world();
+		const failing = {
+			...w.grantStores,
+			sessionFamilyIndex: {
+				...w.grantStores.sessionFamilyIndex,
+				addFamilyIdUnlessEnded: async () => {
+					throw new Error("index down");
+				},
+			} as SessionFamilyIndex,
+		};
+		const result = await w.exchange(failing);
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session linking unavailable",
+		});
+		expect(result).not.toHaveProperty("tokens");
+		expect((await w.grantStores.sessionRPRegistry.listRPs(SID)).map((rp) => rp.clientId)).toEqual([
+			CLIENT_ID,
+		]);
+	});
+
 	it("an exchange that runs while the logout is held after its RP listing is refused as ended", async () => {
 		const w = await world();
 		const held = checkpoint();
