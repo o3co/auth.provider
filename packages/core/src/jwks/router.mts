@@ -173,8 +173,8 @@ export const createRouter = (
 				error: "jwks_not_published",
 				error_description:
 					"This authorization server signs with HS256, a symmetric algorithm with no " +
-					"public key to publish. Configure an asymmetric algorithm (EdDSA, ES256 or " +
-					"RS256) via oauth.jwt.signingKey.local.algorithm to publish a verifiable JWKS.",
+					"public key to publish. Configure the key store with an asymmetric algorithm " +
+					"(EdDSA, ES256 or RS256) to publish a verifiable JWKS.",
 			});
 		}
 		let managedKeys: ManagedKey[];

@@ -74,7 +74,7 @@ export interface OidcProviderConfig {
 	readonly clientSecret?: FederationClientSecret;
 	/** `private_key_jwt`. A PEM PKCS#8 key, or `{ pem, kid?, alg? }`. */
 	readonly privateKey?: string | OidcPrivateKey;
-	/** Where the IdP sends the browser back; the session routes read it from `federations.<name>`. */
+	/** Where the IdP sends the browser back; the session routes read it from `core.federations.<name>`. */
 	readonly callbackURL: string;
 	/** Default `openid profile email`; `openid` is mandatory. */
 	readonly scopes?: readonly string[];

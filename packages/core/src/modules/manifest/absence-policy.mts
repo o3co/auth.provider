@@ -29,19 +29,23 @@
  * as the declaration), so stage 1 stays deterministic and side-effect-free and
  * the boot error can name the exact line to write. A policy that needs to
  * compute absence means the declaration vocabulary is wrong, not that this
- * type needs a callback.
+ * type needs a callback. {@link isAbsenceDeclared} is the one reading of a
+ * declaration, and {@link describeAbsenceDeclaration} the one way of saying how
+ * to write it.
  */
 export interface AbsencePolicy {
 	/**
 	 * Path into the parsed application config, one segment per element
-	 * (`["audit", "sink", "type"]` reads `config.audit.sink.type`), where an
-	 * operator declares the capability absent on purpose.
+	 * (`["oauth", "revocation", "subject"]` reads
+	 * `config.oauth.revocation.subject`), where an operator declares the
+	 * capability absent on purpose.
 	 */
 	readonly configKey: readonly string[];
 	/**
 	 * The one value at {@link configKey} that counts as the declaration,
-	 * compared with `===`. A declaration that needs coercion should point at a
-	 * schema-validated key instead.
+	 * compared with `===`; where the key holds a list (core's
+	 * `core.declaredAbsent`), a member of it. A declaration that needs
+	 * coercion should point at a schema-validated key instead.
 	 */
 	readonly absentValue: string;
 	/**
@@ -50,4 +54,43 @@ export interface AbsencePolicy {
 	 * what the deployment loses.
 	 */
 	readonly hint: string;
+}
+
+/** Core's own list of the slots a composition runs without on purpose. */
+const DECLARED_ABSENT = ["core", "declaredAbsent"] as const;
+
+/** Whether `configKey` is core's list of declared absences. */
+const isDeclaredAbsentList = (configKey: readonly string[]): boolean =>
+	configKey.length === DECLARED_ABSENT.length &&
+	configKey.every((segment, index) => segment === DECLARED_ABSENT[index]);
+
+/**
+ * Whether `config` declares `policy`'s capability absent: the value at its
+ * `configKey`, read as own properties (a key an object inherits is not one
+ * anyone wrote), is its `absentValue` — or, at core's own list,
+ * `core.declaredAbsent`, a list holding it.
+ */
+export function isAbsenceDeclared(config: unknown, policy: AbsencePolicy): boolean {
+	let value: unknown = config;
+	for (const segment of policy.configKey) {
+		if (value === null || typeof value !== "object" || !Object.hasOwn(value, segment)) {
+			return false;
+		}
+		value = (value as Record<string, unknown>)[segment];
+	}
+	return isDeclaredAbsentList(policy.configKey) && Array.isArray(value)
+		? value.includes(policy.absentValue)
+		: value === policy.absentValue;
+}
+
+/**
+ * How an operator declares `policy`'s capability absent, as a clause:
+ * `list "auditSink" in core.declaredAbsent` for core's list,
+ * `set oauth.revocation.subject = "unsupported"` for any other key.
+ */
+export function describeAbsenceDeclaration(policy: AbsencePolicy): string {
+	const key = policy.configKey.join(".");
+	return isDeclaredAbsentList(policy.configKey)
+		? `list "${policy.absentValue}" in ${key}`
+		: `set ${key} = "${policy.absentValue}"`;
 }

@@ -61,6 +61,7 @@ import {
 	createMemoryWebAuthnCredentialStore,
 	defaultChallengeCeremonyModule,
 	defineModule,
+	federationsOf,
 	type GrantPolicyHook,
 	type InterruptionAnswer,
 	loggableError,
@@ -83,7 +84,6 @@ import {
 	createRecordingMailSender,
 	type FakeIdp,
 	type RecordingMailSender,
-	userRepositoryHttpOf,
 } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
@@ -114,8 +114,17 @@ import {
 	type Composition,
 	compose,
 	ISSUER,
+	ownFiles,
 	resettable,
+	SINGLE_ENV,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
+import {
+	readOwnLayers,
+	resolveLayers,
+	type Switches,
+} from "@o3co/auth-provider-standalone/src/configPath.mts";
+import { templateReference } from "@o3co/auth-provider-standalone/src/modules.mts";
+import { repositoriesSectionSchema } from "@o3co/auth-provider-standalone/src/sections.mts";
 import type { FakeStoreUrls } from "@o3co/auth-provider-test-kit";
 import {
 	webauthnConfigSchema,
@@ -243,15 +252,17 @@ export function browser() {
 export type Stores = "memory" | "redis";
 
 /** The settings with no default, laid over the resolved config for `features`. */
-function withFeatures(config: AppConfig, features: Features): AppConfig {
+function withFeatures<C extends AppConfig>(config: C, features: Features): C {
 	const c = config as unknown as {
 		mfa?: Record<string, unknown>;
 		"device-grant"?: Record<string, unknown>;
 		dpop?: Record<string, unknown>;
 		mtls?: Record<string, unknown>;
-		federations: Record<string, Record<string, unknown>>;
 		webauthn?: Record<string, unknown>;
-		core?: { sessionRequirements?: { expected?: readonly string[] } };
+		core?: {
+			sessionRequirements?: { expected?: readonly string[] };
+			federations?: Record<string, Record<string, unknown>>;
+		};
 	};
 	return {
 		...config,
@@ -262,6 +273,25 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 		// each name is kept once.
 		core: {
 			...c.core,
+			federations: {
+				...c.core?.federations,
+				apple: {
+					enabled: features.apple,
+					type: "apple",
+					clientId: "com.example.composition",
+					clientSecret: "apple-static-client-secret",
+					callbackURL: `${ISSUER}/session/oauth/federation/apple/callback`,
+					clientUrl: APPLE_LANDING,
+				},
+				github: {
+					enabled: features.github,
+					type: "github",
+					clientId: "github-client",
+					clientSecret: "github-secret",
+					callbackURL: `${ISSUER}/session/oauth/federation/github/callback`,
+					clientUrl: GITHUB_LANDING,
+				},
+			},
 			sessionRequirements: {
 				expected: [
 					...new Set([
@@ -300,26 +330,7 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 			rpName: "Composition",
 			origin: [ISSUER],
 		},
-		federations: {
-			...c.federations,
-			apple: {
-				enabled: features.apple,
-				type: "apple",
-				clientId: "com.example.composition",
-				clientSecret: "apple-static-client-secret",
-				callbackURL: `${ISSUER}/session/oauth/federation/apple/callback`,
-				clientUrl: APPLE_LANDING,
-			},
-			github: {
-				enabled: features.github,
-				type: "github",
-				clientId: "github-client",
-				clientSecret: "github-secret",
-				callbackURL: `${ISSUER}/session/oauth/federation/github/callback`,
-				clientUrl: GITHUB_LANDING,
-			},
-		},
-	} as unknown as AppConfig;
+	} as unknown as C;
 }
 
 // ---------------------------------------------------------------------------
@@ -647,9 +658,9 @@ async function createFakes(): Promise<Fakes> {
 const APPLE_SUB = "000123.apple-composition.0456";
 const GITHUB_ID = 12345;
 
-/** A federation section's fields, as the bridges read them (they check nothing else). */
+/** A federation's fields in `core.federations`, as the bridges read them (they check nothing else). */
 const section = (config: AppConfig, name: string): Record<string, string> =>
-	(config.federations as Record<string, Record<string, string>>)[name] ?? {};
+	(federationsOf(config)[name] as Record<string, string> | undefined) ?? {};
 
 function federationBridges(config: AppConfig, features: Features, f: Fakes): Module[] {
 	const bridge = (name: "apple" | "github", fetch: typeof globalThis.fetch) => {
@@ -681,16 +692,29 @@ interface AddedStores {
 	readonly mfa: Stores;
 	/** The Store's MFA factor endpoints, when the Store keeps the factors. */
 	readonly mfaFactorStoreAt: FakeStoreUrls | undefined;
+	/** The user repository's HTTP settings, which the Store-backed factor store is handed as its transport. */
+	readonly storeTransport: unknown;
+}
+
+/**
+ * The user repository's HTTP settings as the template's `repositories` module
+ * reads them under `env`, from the template's own layers over its reference:
+ * what a composition root hands the Store-backed factor store.
+ */
+function storeTransportUnder(env: Readonly<Record<string, string>>): unknown {
+	const own = readOwnLayers(ownFiles(), { env });
+	return repositoriesSectionSchema.parse(resolveLayers(own, [templateReference()]).repositories)
+		.user.http;
 }
 
 /** The two MFA stores' modules: the factor store the Store's when `stores` says so. */
-function mfaStoreModules(config: AppConfig, stores: AddedStores): Module[] {
+function mfaStoreModules(stores: AddedStores): Module[] {
 	const transactions =
 		stores.mfa === "redis" ? redisMfaTransactionStoreModule : memoryMfaTransactionStoreModule;
 	if (stores.mfaFactorStoreAt !== undefined) {
 		// As a composition root hands the user repository its settings.
 		return [
-			foundationMfaFactorStoreModule({ storeTransport: userRepositoryHttpOf(config) }),
+			foundationMfaFactorStoreModule({ storeTransport: stores.storeTransport }),
 			transactions,
 		];
 	}
@@ -736,7 +760,7 @@ function addedModules(
 			? [
 					...mfaModules({ environment: "production" }),
 					loginCompletionModule,
-					...mfaStoreModules(config, stores),
+					...mfaStoreModules(stores),
 				]
 			: []),
 		// The WebAuthn second factor, over the relying party the WebAuthn
@@ -831,7 +855,7 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	 */
 	readonly credentialStore?: Module;
 	/** Adjust the resolved config after the features are laid over it. */
-	readonly adjust?: (config: AppConfig) => AppConfig;
+	readonly adjust?: (config: Switches) => Switches;
 	/** The subjects whose login both fixture requirements interrupt; none by default. */
 	readonly interruptLogins?: readonly string[];
 	/** Where the fixture requirements record each ceremony they open; a list of the boot's own by default. */
@@ -859,6 +883,10 @@ export async function fullSetOptions(
 		challenge: options.challengeStore ?? stores,
 		mfa: options.mfaStores ?? stores,
 		mfaFactorStoreAt: options.mfaFactorStoreAt,
+		storeTransport:
+			options.mfaFactorStoreAt === undefined
+				? undefined
+				: storeTransportUnder(options.env ?? SINGLE_ENV),
 		credential:
 			options.credentialStore ??
 			(stores === "redis" ? deploymentCredentialStoreModule : memoryWebAuthnCredentialStoreModule),

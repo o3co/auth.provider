@@ -70,7 +70,6 @@ const baseQuery: Record<string, string> = {
 
 const makeConfig = (oauthOverrides: Record<string, unknown> = {}): AppConfig =>
 	({
-		federations: {},
 		oauth: {
 			jwt: { issuer: ISSUER },
 			accessToken: { expiresIn: 300 },

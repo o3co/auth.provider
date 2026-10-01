@@ -400,7 +400,7 @@ describe("describeRedirectRejection", () => {
 	/*
 	 * The same rule guards two entry points configured in two places, so the
 	 * two allowlist reasons have to name the caller's own key.
-	 * A login-flow operator sent to `federations.<name>.redirectAllowlist`
+	 * A login-flow operator sent to `core.federations.<name>.redirectAllowlist`
 	 * edits a section that has no effect on the request they are debugging.
 	 */
 	it("names the caller's allowlist config key in the two allowlist reasons", () => {

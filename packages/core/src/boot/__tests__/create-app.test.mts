@@ -258,9 +258,13 @@ describe("createApp — 1. happy path: minimal manifest boots", () => {
 		// components map is accessible and contains the bootstrap keys
 		expect(handle.components).toBeDefined();
 		// config is the parsed (CoreConfigSchema-validated) result, not the raw
-		// bootstrap reference (see validateAndComposeConfig). `port: 3000` comes
-		// from the makeValidCoreConfig fixture: the schema carries no default.
-		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
+		// bootstrap reference (see validateAndComposeConfig). The refresh-token
+		// lifetime comes from the makeValidCoreConfig fixture: the schema carries
+		// no default.
+		expect(
+			(handle.components.config as { oauth: { refreshToken: { expiresIn: number } } }).oauth
+				.refreshToken.expiresIn,
+		).toBe(86400);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 		// The slot provided by the module is materialised (eager activation)
 		expect(handle.components.slotCA).toBe(42);
@@ -280,9 +284,13 @@ describe("createApp — 1. happy path: minimal manifest boots", () => {
 		expect(Object.isFrozen(handle.components)).toBe(true);
 		// Bootstrap components are present in the frozen component map.
 		// config is the parsed (CoreConfigSchema-validated) result, not the raw
-		// bootstrap reference (see validateAndComposeConfig). `port: 3000` comes
-		// from the makeValidCoreConfig fixture: the schema carries no default.
-		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
+		// bootstrap reference (see validateAndComposeConfig). The refresh-token
+		// lifetime comes from the makeValidCoreConfig fixture: the schema carries
+		// no default.
+		expect(
+			(handle.components.config as { oauth: { refreshToken: { expiresIn: number } } }).oauth
+				.refreshToken.expiresIn,
+		).toBe(86400);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 	});
 });

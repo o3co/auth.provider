@@ -1,6 +1,6 @@
 # auth.provider
 
-最終更新: 2026-09-30
+最終更新: 2026-10-01
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -82,7 +82,7 @@ pnpm install
 スキャフォールドはデフォルトのままでは起動しない。`pnpm run debug` は `.env`
 ファイルを読まず、シェルの環境変数から次のものを必要とする: issuer
 （`OAUTH_JWT_ISSUER`）、署名鍵のペア、セッションシークレット、ユーザーサービスの
-2 つの URL（`CLIENT_USER_AUTHENTICATE_URL`、`CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL`）、
+2 つの URL（`REPOSITORIES_USER_HTTP_AUTHENTICATE_URL`、`REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL`）、
 そして `localhost:6379` の Redis。コマンドは[テンプレートの README](templates/standalone/README.ja.md#使い方)
 に、スキャフォルダーが何を生成するか、`--template` でコピーするテンプレートをどう選ぶか
 （デフォルトは `standalone`。テンプレートの分け方は
@@ -153,7 +153,7 @@ standalone テンプレートのような構成での主なエンドポイント
 | --- | --- | --- |
 | `POST /oauth/token` | oauth | トークンエンドポイント: 組み込まれた全グラントを `grant_type` でディスパッチ |
 | `GET`, `POST /oauth/authorize` | oauth | 認可コードフロー (PKCE) |
-| `GET`, `POST /oauth/consent` | oauth | デプロイメントの同意ページが何について尋ね、答えをどこに送るか。同意ストアが配線されているときだけマウントされる（テンプレートは `CONSENT_STORE_ADAPTER=none` で出荷） |
+| `GET`, `POST /oauth/consent` | oauth | デプロイメントの同意ページが何について尋ね、答えをどこに送るか。同意ストアが配線されているときだけマウントされる（テンプレートは `ADAPTERS_CONSENT_STORE=none` で出荷） |
 | `POST /oauth/introspect` | oauth | トークンイントロスペクション (RFC 7662) |
 | `POST /oauth/revoke` | oauth | トークン失効 (RFC 7009) |
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect の userinfo |
@@ -174,28 +174,28 @@ HOCON 設定ファイル + 環境変数オーバーライド。設定スキー�
 
 ```hocon
 http { port = 3000 }
+key-store {
+  provider = "local"           # "local" is the only built-in; extend via KeyStoreFactory
+  local {
+    # Default. Asymmetric, so /.well-known/jwks.json publishes a real
+    # verification key and no relying party ever holds a key that can
+    # also MINT tokens. Required — there is no key-material default:
+    #   openssl genpkey -algorithm ed25519 -out jwt-private.pem
+    #   openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+    algorithm = "EdDSA"        # EdDSA | ES256 | RS256 | HS256
+    privateKeyPath = ${?KEY_STORE_LOCAL_PRIVATE_KEY_PATH}
+    publicKeyPath  = ${?KEY_STORE_LOCAL_PUBLIC_KEY_PATH}
+    # HS256 instead: set algorithm = "HS256" and supply a secret of at
+    # least 32 bytes (`openssl rand -hex 32`). No JWKS is published.
+    # secret = ${?KEY_STORE_LOCAL_SECRET}
+  }
+}
 oauth {
   jwt {
     # Required. Canonical issuer stamped as `iss` on every minted token:
     # absolute https URL (http only for a loopback host), no query or fragment.
     # Boot fails when unset — it is never derived from the Host header.
     issuer = ${?OAUTH_JWT_ISSUER}
-    signingKey {
-      provider = "local"           # "local" is the only built-in; extend via KeyStoreFactory
-      local {
-        # Default. Asymmetric, so /.well-known/jwks.json publishes a real
-        # verification key and no relying party ever holds a key that can
-        # also MINT tokens. Required — there is no key-material default:
-        #   openssl genpkey -algorithm ed25519 -out jwt-private.pem
-        #   openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
-        algorithm = "EdDSA"        # EdDSA | ES256 | RS256 | HS256
-        privateKeyPath = ${?OAUTH_JWT_PRIVATE_KEY_PATH}
-        publicKeyPath  = ${?OAUTH_JWT_PUBLIC_KEY_PATH}
-        # HS256 instead: set algorithm = "HS256" and supply a secret of at
-        # least 32 bytes (`openssl rand -hex 32`). No JWKS is published.
-        # secret = ${?OAUTH_JWT_SECRET}
-      }
-    }
   }
   # Seconds, positive, <= 1 year. `defaultExpiresIn` is what every grant
   # mints; `maxExpiresIn` (unset = the default) is the most a token-exchange
@@ -225,7 +225,7 @@ session-store { secret = ${SESSION_STORE_SECRET} }
 
 # One section per federation. `type` names the adapter package and defaults
 # to the section's name; each adapter's README lists its settings.
-federations {
+core.federations {
   google {
     enabled = false
     # clientId, clientSecret, callbackURL — required when enabled = true

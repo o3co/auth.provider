@@ -226,20 +226,19 @@ start() {
 		# shellcheck disable=SC1090
 		. "$profile_file"
 		set +a
-		export "FEDERATIONS_${FED}_ENABLED=true"
-		export "FEDERATIONS_${FED}_CALLBACK_URL=http://localhost:$PORT/session/oauth/federation/$fed/callback"
+		export "CORE_FEDERATIONS_${FED}_ENABLED=true"
+		export "CORE_FEDERATIONS_${FED}_CALLBACK_URL=http://localhost:$PORT/session/oauth/federation/$fed/callback"
 		export CONFIG_ENV="$OVERLAY_ENV" HTTP_PORT="$PROVIDER_PORT"
 		export OAUTH_JWT_ISSUER="http://localhost:$PROVIDER_PORT"
-		export OAUTH_JWT_PRIVATE_KEY_PATH="$STATE/keys/jwt-private.pem"
-		export OAUTH_JWT_PUBLIC_KEY_PATH="$STATE/keys/jwt-public.pem"
+		export KEY_STORE_LOCAL_PRIVATE_KEY_PATH="$STATE/keys/jwt-private.pem"
+		export KEY_STORE_LOCAL_PUBLIC_KEY_PATH="$STATE/keys/jwt-public.pem"
 		SESSION_STORE_SECRET="$(cat "$STATE/session-secret")"
 		export SESSION_STORE_SECRET
 		export SESSION_STORE_SECURE=false SESSION_STORE_NAME=auth.session
-		export CLIENT_USER_AUTHENTICATE_URL="http://localhost:$PORT/__store/authenticate"
-		export CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL="http://localhost:$PORT/__store/authenticate-by-token"
-		export CLIENT_CODE_ENDPOINT_URI="$REDIS_URL"
+		export REPOSITORIES_USER_HTTP_AUTHENTICATE_URL="http://localhost:$PORT/__store/authenticate"
+		export REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL="http://localhost:$PORT/__store/authenticate-by-token"
 		export SESSION_STORE_STORAGE_REDIS_URL="$REDIS_URL"
-		export REFRESH_TOKEN_FAMILY_STORE_REDIS_URL="$REDIS_URL"
+		export REDIS_CLIENTS_URL="$REDIS_URL"
 		export NODE_OPTIONS='--conditions=development'
 		exec pnpm exec tsx src/app.mts
 	) >"$STATE/provider.log" 2>&1 &

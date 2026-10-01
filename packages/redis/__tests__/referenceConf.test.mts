@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import {
 	redisAccessTokenDenylistModule,
 	redisChallengeStoreModule,
+	redisCodeRepositoryModule,
 	redisConsentStoreModule,
 	redisDeviceCodeStoreModule,
 	redisFederationGrantIntentStoreModule,
@@ -40,6 +41,7 @@ const REFERENCE = new URL("../config/reference.conf", import.meta.url);
 const MODULES: readonly Module[] = [
 	redisAccessTokenDenylistModule,
 	redisChallengeStoreModule,
+	redisCodeRepositoryModule,
 	redisConsentStoreModule,
 	redisDeviceCodeStoreModule,
 	redisFederationGrantIntentStoreModule,
@@ -87,10 +89,18 @@ describe("the package's config/reference.conf", () => {
 		expect(redisFederationGrantStoreModule.section?.renamedVariables).toEqual({
 			FEDERATION_GRANTS_ENCRYPTION_MODE: "federationGrants.encryptionMode",
 		});
+		expect(redisCodeRepositoryModule.section?.renamedVariables).toEqual({
+			CLIENT_CODE_KEY_PREFIX: "redisCodeRepository.keyPrefix",
+			CLIENT_CODE_DEFAULT_EXPIRES_IN: "redisCodeRepository.defaultExpiresIn",
+			CLIENT_CODE_ENDPOINT_URI: "repositories.code.redis.endpointUri",
+			CLIENT_CODE_PASSWORD: "repositories.code.redis.password",
+		});
 	});
 
 	it.each([
 		["REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX", "redis-access-token-denylist.keyPrefix"],
+		["REDIS_CODE_REPOSITORY_KEY_PREFIX", "redis-code-repository.keyPrefix"],
+		["REDIS_CODE_REPOSITORY_DEFAULT_EXPIRES_IN", "redis-code-repository.defaultExpiresIn"],
 		["REDIS_CONSENT_STORE_KEY_PREFIX", "redis-consent-store.keyPrefix"],
 		["REDIS_MFA_FACTOR_STORE_KEY_PREFIX", "redis-mfa-factor-store.keyPrefix"],
 		["REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX", "redis-mfa-transaction-store.keyPrefix"],
@@ -117,6 +127,8 @@ describe("the package's config/reference.conf", () => {
 	it.each([
 		["redis-access-token-denylist.keyPrefix", "atdeny:"],
 		["redis-challenge-store.keyPrefix", "chal:"],
+		["redis-code-repository.keyPrefix", "oauth:code:"],
+		["redis-code-repository.defaultExpiresIn", 600],
 		["redis-consent-store.keyPrefix", "consent:"],
 		["redis-device-code-store.keyPrefix", "devauth:"],
 		["redis-mfa-factor-store.keyPrefix", "mfaf:"],

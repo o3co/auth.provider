@@ -43,7 +43,7 @@ import {
 } from "@o3co/auth-provider-core";
 
 export interface FederationGrantAuditBridgeOptions {
-	/** Absent on a deployment that declared `audit.sink.type = "none"`. */
+	/** Absent on a deployment that lists `auditSink` in `core.declaredAbsent`. */
 	readonly sink?: AuditSink;
 	readonly ip?: string;
 	readonly userAgent?: string;

@@ -16,11 +16,10 @@
 
 /**
  * The `federationTypes` contribution kind: a federation package
- * declares, keyed by the `type` an entry of the `federations` configuration
- * names, the schema of such an entry and the factory that builds a provider
- * from one entry and its name. Registered by type, so two packages claiming
- * one type refuse boot; not dispatched yet — no entry is parsed and no
- * factory runs until the federations section moves under core.
+ * declares, keyed by the `type` an entry of `core.federations` names, the
+ * schema of such an entry and the factory that builds a provider from one
+ * entry and its name. Registered by type, so two packages claiming one type
+ * refuse boot; not dispatched yet — no entry is parsed and no factory runs.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -28,7 +27,7 @@ import { z } from "zod";
 import type { FederationProvider } from "../../federations/types.mjs";
 import type { Module } from "../../modules/manifest/index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { coreConfigForTests, makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { applyContributions } from "../apply-contributions.mjs";
 import { createApp, mergeWithBuiltins } from "../create-app.mjs";
 import { materializeComponents } from "../materialize-components.mjs";
@@ -123,7 +122,9 @@ describe("federationTypes — declared by type", () => {
 		const handle = await createApp({
 			modules: [acme],
 			bootstrapComponents: bootWith({
-				federations: { corp: { enabled: false, type: "acme", issuer: 42 } },
+				...coreConfigForTests({
+					federations: { corp: { enabled: false, type: "acme", issuer: 42 } },
+				}),
 			}),
 		});
 

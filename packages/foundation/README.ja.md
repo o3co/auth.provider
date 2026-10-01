@@ -6,7 +6,7 @@ auth.provider のための「the Store」 — デプロイ自身のユーザー�
 
 ## 責務と役割
 
-**役割。** core のポート二つのアダプター: [`UserRepository`](../core/src/repositories/UserRepository.mts)（[`core/src/repositories`](../core/src/repositories/README.md) を参照）と、Store がデプロイの MFA 要素を保持する場合の [`MfaFactorStore`](../core/src/mfa/factorStore.mts)。パッケージ名に反して基盤層ではない: 実行時にこれを import する他のパッケージは無い（`federation-grants` がテストで使うだけ）。これを選ぶのは組み立て側 — standalone テンプレートでは `repositories.user.type = "http"`。
+**役割。** core のポート二つのアダプター: [`UserRepository`](../core/src/repositories/UserRepository.mts)（[`core/src/repositories`](../core/src/repositories/README.md) を参照）と、Store がデプロイの MFA 要素を保持する場合の [`MfaFactorStore`](../core/src/mfa/factorStore.mts)。パッケージ名に反して基盤層ではない: 実行時にこれを import する他のパッケージは無い（`federation-grants` がテストで使うだけ）。これを選ぶのは組み立て側 — standalone テンプレートでは `adapters.userRepository = "http"`。
 
 **持つもの:**
 
@@ -54,18 +54,18 @@ const userRepo = await userFactory.create({
 
 ### 設定
 
-`repositories.user`（`type = "http"`、`CLIENT_USER_TYPE`）の `http` ブロックの下。デフォルト値は [`reference.conf`](../core/config/reference.conf) にある:
+standalone テンプレートの `repositories` セクションの `repositories.user.http` の下で、`adapters.userRepository = "http"`（`ADAPTERS_USER_REPOSITORY`）のとき読まれる。デフォルト値は[テンプレートの `reference.conf`](../../templates/standalone/config/reference.conf) にある:
 
 | キー | 環境変数 | |
 | --- | --- | --- |
-| `authenticateUrl` | `CLIENT_USER_AUTHENTICATE_URL` | 必須。パスワードログイン。 |
-| `authenticateByTokenUrl` | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | 必須。不透明なハンドルを解決する: フェデレーションログイン、jwt-bearer グラント。 |
-| `linkFederatedIdentityUrl` | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | 任意。アカウントリンクを有効にする。 |
-| `findSubjectByFederatedIdentityUrl` | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | 任意。ID の照会。 |
+| `authenticateUrl` | `REPOSITORIES_USER_HTTP_AUTHENTICATE_URL` | 必須。パスワードログイン。 |
+| `authenticateByTokenUrl` | `REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL` | 必須。不透明なハンドルを解決する: フェデレーションログイン、jwt-bearer グラント。 |
+| `linkFederatedIdentityUrl` | `REPOSITORIES_USER_HTTP_LINK_FEDERATED_IDENTITY_URL` | 任意。アカウントリンクを有効にする。 |
+| `findSubjectByFederatedIdentityUrl` | `REPOSITORIES_USER_HTTP_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | 任意。ID の照会。 |
 | `federatedIdentityLookupCoverage` | —（リストなので HOCON のみ） | 照会がカバーする範囲。デフォルト `[]`。 |
-| `bearerToken` | `CLIENT_USER_BEARER_TOKEN` | 任意。すべてのリクエストで `Authorization: Bearer <token>` として送る。32 バイト以上の鍵素材。未設定なら `Authorization` ヘッダーは送らない。[Store を誰が呼べるか](#store-が自分で守るべきこと) を参照。 |
-| `timeout` | `CLIENT_USER_TIMEOUT` | ミリ秒。デフォルト 5000。 |
-| `maxResponseBytes` | `CLIENT_USER_MAX_RESPONSE_BYTES` | デフォルト 1048576。 |
+| `bearerToken` | `REPOSITORIES_USER_HTTP_BEARER_TOKEN` | 任意。すべてのリクエストで `Authorization: Bearer <token>` として送る。32 バイト以上の鍵素材。未設定なら `Authorization` ヘッダーは送らない。[Store を誰が呼べるか](#store-が自分で守るべきこと) を参照。 |
+| `timeout` | `REPOSITORIES_USER_HTTP_TIMEOUT` | ミリ秒。デフォルト 5000。 |
+| `maxResponseBytes` | `REPOSITORIES_USER_HTTP_MAX_RESPONSE_BYTES` | デフォルト 1048576。 |
 
 ## ワイヤ契約
 
@@ -190,7 +190,7 @@ const modules = [
 
 ## Store が自分で守るべきこと
 
-- **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。MFA のエンドポイントも同じである: 開いた `deleteUrl` や `markMfaEnrolledUrl` に届く者は誰でも主体の要素を消し、証人を外せ、その主体の次のパスワードログインは、パスワードを持つ誰にでも最初の紐付けを開く。`bearerToken`（`CLIENT_USER_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は auth.provider に提供するすべてのエンドポイント — ユーザーリポジトリの四つも MFA のエンドポイントも — で、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。一つのトークンがそれらの URL すべてに送られるので、それらは一つの信頼境界でなければならない: どれか一つのエンドポイントを運用する者は、他のエンドポイントも受け付ける資格情報を持つことになる。拒否は `401` と `WWW-Authenticate: Bearer error="invalid_token"`（RFC 6750 §3）で返す — 有効だが足りないトークンなら `403` と `error="insufficient_scope"` で。このチャレンジがあれば、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — はすべての呼び出しで障害になり、各呼び出し元はそれを下の表のとおり報告する。チャレンジが無ければ `401` や `403` はワイヤ上の意味 — 「ユーザーが居ない」またはリンクの拒否 — を保ち、不一致はすべてのログインの失敗としてしか現れない。同じ理由で、ユーザーのパスワード誤り、未知の ID、ポリシーが拒否するリンクに `Bearer` チャレンジを付けてはならない: その応答は Store が auth.provider を拒否したと読まれ、そのユーザーのログインやリンクの失敗が障害になる。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
+- **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。MFA のエンドポイントも同じである: 開いた `deleteUrl` や `markMfaEnrolledUrl` に届く者は誰でも主体の要素を消し、証人を外せ、その主体の次のパスワードログインは、パスワードを持つ誰にでも最初の紐付けを開く。`bearerToken`（`REPOSITORIES_USER_HTTP_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は auth.provider に提供するすべてのエンドポイント — ユーザーリポジトリの四つも MFA のエンドポイントも — で、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。一つのトークンがそれらの URL すべてに送られるので、それらは一つの信頼境界でなければならない: どれか一つのエンドポイントを運用する者は、他のエンドポイントも受け付ける資格情報を持つことになる。拒否は `401` と `WWW-Authenticate: Bearer error="invalid_token"`（RFC 6750 §3）で返す — 有効だが足りないトークンなら `403` と `error="insufficient_scope"` で。このチャレンジがあれば、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — はすべての呼び出しで障害になり、各呼び出し元はそれを下の表のとおり報告する。チャレンジが無ければ `401` や `403` はワイヤ上の意味 — 「ユーザーが居ない」またはリンクの拒否 — を保ち、不一致はすべてのログインの失敗としてしか現れない。同じ理由で、ユーザーのパスワード誤り、未知の ID、ポリシーが拒否するリンクに `Bearer` チャレンジを付けてはならない: その応答は Store が auth.provider を拒否したと読まれ、そのユーザーのログインやリンクの失敗が障害になる。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
 - **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: すべてのリクエスト行に載り、Store 自身のアクセスログにも途中のプロキシにも届く。このアダプターが投げるエラー（セッションルートがログに出す）はエンドポイントをオリジンとパスだけで示し、クエリやフラグメントは決して示さないので、少なくともこのデプロイのログにはクエリは届かない。呼び出し元の資格情報は `bearerToken` に置く。このアダプターが投げるものはどれもそれを含まない。
 - **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届き、それ以外のどこからの応答もユーザー、リンク、照会の答えとして受け取られない。どのエンドポイントからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — 正規のホストへリダイレクトするホストの別名、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
 - **MFA の要素を欠けなく新しく保つ。** MFA の要素を保持する Store は、その完全性と鮮度に責任を持つ: 要素を巻き戻さず、一覧から隠さず、削除を認めたものを返さず、同じバージョンへの二つの更新を両方とも成功させない。バージョンは決して戻らず、認めた書き込みは復元やフェイルオーバーを挟んでも失われず、一覧は最新の書き込みを返す。それが破られてもプロバイダーには分からない: 古いレコードの封印されたデータは当時のとおりに開く — 封印が結び付けるのは主体・要素 ID・種類で、バージョンではない — ので、使用済みの TOTP のステップが窓の中で再び受け付けられ、使用済みのリカバリーコードが再び使え、削除した要素が戻る。主体のレコードを落とした Store は、`mfa.mode = "optional"` ではパスワードだけのログインを通し、`required` ではパスワードを持つ誰にでも最初の紐付けを開く。それを止めるのは要素ストアの外に保つ登録の証人である（MFA ADR の D12）。MFA ADR の O6 は、要素を Redis に、証人を Store に置くことを勧める。両方を一つの Store に置くとこの守りは失われる: 一方を落としたり巻き戻したりするものは、もう一方にも同じことができるからである。フェイルオーバーと復元の手順は運用ランブックの「Keeping MFA factors in the Store」にある。
@@ -204,7 +204,7 @@ const modules = [
 | jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)） | `503 temporarily_unavailable` | `jwt_bearer_user_repository_unavailable`（error、`err` 付き） |
 | federation-grants の接続コールバック — ID の照会（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)） | `error=temporarily_unavailable` 付きのリダイレクト | `federation_grant_callback_unavailable`（error、`store: "user_directory"`、`err` 付き） |
 
-`err` がログに出る場合、`StoreCredentialRefusedError` のメッセージは Store のエンドポイント（オリジンとパス）、ステータス、`CLIENT_USER_BEARER_TOKEN` を示し、トークンは決して示さない。`StoreTransportError` のメッセージは同じくエンドポイント、何が失敗したか、せいぜい通信のコードを示す。このアダプターが投げるどのメッセージも URL のクエリ文字列やフラグメントを引用しない。
+`err` がログに出る場合、`StoreCredentialRefusedError` のメッセージは Store のエンドポイント（オリジンとパス）、ステータス、`REPOSITORIES_USER_HTTP_BEARER_TOKEN` を示し、トークンは決して示さない。`StoreTransportError` のメッセージは同じくエンドポイント、何が失敗したか、せいぜい通信のコードを示す。このアダプターが投げるどのメッセージも URL のクエリ文字列やフラグメントを引用しない。
 
 ## コンストラクタでの検証
 
@@ -220,7 +220,7 @@ const modules = [
 
 **`maxResponseBytes` は正の整数でなければならず**、デフォルトは `DEFAULT_MAX_RESPONSE_BYTES`（1 MiB）。上限は `Content-Length` に対しても、ストリーム読み取り中にも適用されるので、ヘッダーを省く — あるいは偽る — Store も、メモリを使い果たす前に打ち切られる。
 
-**`bearerToken` は、設定するなら 32 バイト以上の鍵素材を持つ素の RFC 6750 トークンでなければならない。** 未設定（キーが無い）なら `Authorization` ヘッダーは送らない。設定した場合は、文字列であること、空でないこと（空の環境変数による上書きは「トークン無し」ではなく起動失敗）、英字・数字・`-._~+/` と末尾の `=` パディングだけから成ること — 空白も改行も、アダプターが付ける `Bearer ` の接頭辞も含まない — 、そして core の共有シークレットの下限（`MIN_SECRET_ENTROPY_BYTES`。`SESSION_STORE_SECRET` と `OAUTH_JWT_SECRET` が満たすのと同じもの）を満たすことが求められ、どれかを欠けば拒否される。hex や base64 の値はデコード後の長さで測るので、`openssl rand -hex 16` は見た目の長さに関わらず 16 バイトである。このトークンを持つ者は auth.provider として Store と話せる。形をここで検査するのは、`fetch` が拒否するヘッダー値は、`fetch` が投げるエラーの中にそのまま引用されるからである。どの拒否も値を引用せず、リクエストのどのエラーも値を含まず — 通信の失敗は通信自身のエラーを付けずに投げられる（ワイヤ契約を参照） — 、値は ECMAScript の private フィールドに保持されるので、リポジトリの `inspect()` や `JSON.stringify` にも現れない。これらの検査はリポジトリが組み立てられるときに行われ、デプロイがそうするのは `repositories.user.type = "http"`（standalone テンプレートのデフォルト）のときである。core の `reference.conf` のデフォルトである `yaml` では、`http` ブロック — とその中のトークン — はまったく読まれない。
+**`bearerToken` は、設定するなら 32 バイト以上の鍵素材を持つ素の RFC 6750 トークンでなければならない。** 未設定（キーが無い）なら `Authorization` ヘッダーは送らない。設定した場合は、文字列であること、空でないこと（空の環境変数による上書きは「トークン無し」ではなく起動失敗）、英字・数字・`-._~+/` と末尾の `=` パディングだけから成ること — 空白も改行も、アダプターが付ける `Bearer ` の接頭辞も含まない — 、そして core の共有シークレットの下限（`MIN_SECRET_ENTROPY_BYTES`。`SESSION_STORE_SECRET` と `KEY_STORE_LOCAL_SECRET` が満たすのと同じもの）を満たすことが求められ、どれかを欠けば拒否される。hex や base64 の値はデコード後の長さで測るので、`openssl rand -hex 16` は見た目の長さに関わらず 16 バイトである。このトークンを持つ者は auth.provider として Store と話せる。形をここで検査するのは、`fetch` が拒否するヘッダー値は、`fetch` が投げるエラーの中にそのまま引用されるからである。どの拒否も値を引用せず、リクエストのどのエラーも値を含まず — 通信の失敗は通信自身のエラーを付けずに投げられる（ワイヤ契約を参照） — 、値は ECMAScript の private フィールドに保持されるので、リポジトリの `inspect()` や `JSON.stringify` にも現れない。これらの検査はリポジトリが組み立てられるときに行われ、デプロイがそうするのは `adapters.userRepository = "http"`（standalone テンプレートのデフォルト）のときである。core の `reference.conf` のデフォルトである `yaml` では、`http` ブロック — とその中のトークン — はまったく読まれない。
 
 ## パブリック API
 

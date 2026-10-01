@@ -33,10 +33,13 @@ const reading = (name: string, configSchema: z.ZodObject) => defineModule({ name
 
 describe("unreadableModuleLeaves — what core's base hands a module's leaf", () => {
 	it("covers a module's number where the base reads the string as a number", () => {
-		// `http.port` is a coerced number in core's base.
+		// `oauth.nonce.maxLength` is a coerced number in core's base.
 		expect(
 			unreadableModuleLeaves([
-				reading("port-reader", z.object({ http: z.object({ port: z.number() }) })),
+				reading(
+					"nonce-reader",
+					z.object({ oauth: z.object({ nonce: z.object({ maxLength: z.number() }) }) }),
+				),
 			]),
 		).toEqual([]);
 	});
@@ -53,13 +56,13 @@ describe("unreadableModuleLeaves — what core's base hands a module's leaf", ()
 	});
 
 	it("does not cover a module's number where the base reads the string and leaves it a string", () => {
-		// `logging.level` is an enum of strings: the base reads `"3"` and
+		// `oauth.oidcMode` is an enum of strings: the base reads `"3"` and
 		// refuses it, or hands a string on — never the number the module takes.
 		expect(
 			unreadableModuleLeaves([
-				reading("level-reader", z.object({ logging: z.object({ level: z.number() }) })),
+				reading("mode-reader", z.object({ oauth: z.object({ oidcMode: z.number() }) })),
 			]),
-		).toEqual(["level-reader: logging.level"]);
+		).toEqual(["mode-reader: oauth.oidcMode"]);
 	});
 
 	it("reports a module's preprocess that hands a string on to a boolean untouched", () => {

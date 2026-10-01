@@ -20,13 +20,18 @@ import {
 	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
+	federationsOf,
 	type Logger,
 	type Module,
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, renamedVariableCaptures } from "@o3co/auth-provider-core/testing";
+import {
+	coreConfigForTests,
+	makeValidAppConfig,
+	renamedVariableCaptures,
+} from "@o3co/auth-provider-core/testing";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
@@ -51,28 +56,31 @@ function buildConfig(): AppConfig {
 		...base,
 		// supertest speaks plain http; a Secure cookie would never come back.
 		"session-store": { ...base["session-store"], name: "auth.sid", secure: false },
-		federations: {
-			"idp-a": {
-				enabled: true,
-				type: "oidc",
-				issuer: ISSUER_A,
-				clientId: "client-a",
-				clientSecret: "secret-a",
-				callbackURL: CALLBACK_A,
-				clientUrl: "https://app-a.test/",
-			},
-			"idp-b": {
-				enabled: true,
-				type: "oidc",
-				clientUrl: "https://app-b.test/",
-				oidc: {
-					issuer: ISSUER_B,
-					clientId: "client-b",
-					clientSecret: "secret-b",
-					callbackURL: CALLBACK_B,
+		...coreConfigForTests({
+			declaredAbsent: ["auditSink"],
+			federations: {
+				"idp-a": {
+					enabled: true,
+					type: "oidc",
+					issuer: ISSUER_A,
+					clientId: "client-a",
+					clientSecret: "secret-a",
+					callbackURL: CALLBACK_A,
+					clientUrl: "https://app-a.test/",
+				},
+				"idp-b": {
+					enabled: true,
+					type: "oidc",
+					clientUrl: "https://app-b.test/",
+					oidc: {
+						issuer: ISSUER_B,
+						clientId: "client-b",
+						clientSecret: "secret-b",
+						callbackURL: CALLBACK_B,
+					},
 				},
 			},
-		},
+		}),
 	} as unknown as AppConfig;
 }
 
@@ -93,7 +101,7 @@ async function boot(
 		requires: ["config"] as const,
 		provides: {
 			oidcFederationConfigs: ({ config: c }) => {
-				const read = readOidcFederationConfigs((c as AppConfig).federations);
+				const read = readOidcFederationConfigs(federationsOf(c));
 				return {
 					"idp-a": { ...read["idp-a"], fetch: idpA.fetch },
 					"idp-b": { ...read["idp-b"], fetch: idpB.fetch },

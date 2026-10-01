@@ -38,6 +38,7 @@ import {
 	MULTI_ENV,
 	resolveConfig,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
+import { repositoriesModuleFor } from "@o3co/auth-provider-standalone/src/modules.mts";
 import { parseFile } from "@o3co/ts.hocon";
 import { afterAll, describe, expect, it } from "vitest";
 import { composeFullSet, type FullSet, fullSetOptions } from "./full-set.fixture.mts";
@@ -82,7 +83,8 @@ let fullSet: FullSet | undefined;
 /**
  * The modules of the full set as it boots, on memory stores, and as it would
  * compose on Redis — every Redis store and the shipped refresh-token family
- * store — each once.
+ * store — each once, with the template's own `repositories` module, which the
+ * full set's test repositories stand in for.
  */
 async function declaringModules(booted: FullSet): Promise<readonly Module[]> {
 	const options = await fullSetOptions({ stores: "redis" });
@@ -93,7 +95,13 @@ async function declaringModules(booted: FullSet): Promise<readonly Module[]> {
 		shippedRefreshTokenFamilyStore: true,
 	});
 	const byName = new Map<string, Module>();
-	for (const module of [...booted.modules, ...onRedis]) byName.set(module.name, module);
+	for (const module of [
+		...booted.modules,
+		...onRedis,
+		repositoriesModuleFor({ client: "yaml", user: "http" }),
+	]) {
+		if (module.name !== "test:repositories") byName.set(module.name, module);
+	}
 	return [...byName.values()];
 }
 

@@ -173,16 +173,15 @@ export type AuditSinkFactory = AdapterFactory<AuditSink>;
  *
  * `auditSink` is optional to wire but not to decide: `emitAuditEvent` is a
  * no-op on an empty slot, so a composition that never fills it discards every
- * security event with no symptom. Wire a sink, or write
- * `audit.sink.type = "none"` to own the decision in config. (The standalone
- * template always wires one; it has no "none" builder.)
+ * security event with no symptom. Wire a sink, or list `auditSink` in core's
+ * `core.declaredAbsent` to own the decision in config.
  *
  * One shared constant, so the boot error's advice cannot depend on which
  * module tripped it; the declared-absence guard refuses policies that disagree.
  */
 export const AUDIT_SINK_ABSENCE_POLICY = {
-	configKey: ["audit", "sink", "type"],
-	absentValue: "none",
+	configKey: ["core", "declaredAbsent"],
+	absentValue: "auditSink",
 	hint:
 		"Without a sink every security event the routes emit (token issuance failures, " +
 		"authorize decisions, rate-limit outages) is discarded.",
@@ -193,8 +192,8 @@ export const AUDIT_SINK_ABSENCE_POLICY = {
 //
 // Declared here so oauthModule can list "auditSink" in its `optional` array
 // and the DI graph types deps.auditSink as AuditSink | undefined. Optional to
-// wire, not to decide: an unfilled slot must be declared with
-// audit.sink.type = "none" or boot refuses (AUDIT_SINK_ABSENCE_POLICY).
+// wire, not to decide: an unfilled slot must be listed in
+// core.declaredAbsent or boot refuses (AUDIT_SINK_ABSENCE_POLICY).
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

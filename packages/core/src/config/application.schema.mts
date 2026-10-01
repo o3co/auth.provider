@@ -24,18 +24,8 @@
 import { z } from "zod";
 
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
-import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
-import {
-	checkSerializedOrigin,
-	describeSerializedOriginRejection,
-	normalizeAllowedOrigins,
-} from "../net/origin.mjs";
-import {
-	checkTrustedProxyEntry,
-	describeTrustedProxyEntryRejection,
-} from "../net/trusted-proxy.mjs";
 import { MAX_DURATION_SECONDS } from "./durations.mjs";
-import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
+import { type RemovedKey, unreadSection, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
 
 /**
@@ -75,67 +65,6 @@ const rateLimitSpecSchema = z.object({
 	// Date range is one the limiter adapters refuse when they are built.
 	windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 });
-
-// A configured kid is held to the rule `verifyJwt` holds a kid header to
-// (`keys/kid.mts`): one it would refuse makes every token signed under it fail
-// as the client's fault. The keystores check again when they are built, for a
-// composition that builds one without this schema.
-const kidSchema = z.string().refine(isWellFormedKid, {
-	message: `must be a key id: a string of 1 to ${MAX_KID_LENGTH} characters with no control character`,
-});
-
-const hs256PreviousSecretSchema = z.object({
-	kid: kidSchema,
-	secret: z.string(),
-	expiresAt: z.string(),
-});
-
-// HS256 rotation keeps shared secrets under `previousSecrets`, not the
-// asymmetric `previousKeys`. `.strict()` so `previousKeys` under HS256 fails at
-// boot instead of surviving parse and breaking rotation at the first refresh.
-const signingKeyLocalHs256Schema = z
-	.object({
-		algorithm: z.literal("HS256"),
-		kid: kidSchema,
-		secret: z.string().optional(),
-		previousSecrets: z.array(hs256PreviousSecretSchema).optional(),
-	})
-	.strict();
-
-const signingKeyLocalAsymmetricSchema = z
-	.object({
-		algorithm: z.enum(["RS256", "ES256", "EdDSA"]),
-		kid: kidSchema,
-		privateKey: z.string().optional(),
-		privateKeyPath: z.string().optional(),
-		publicKey: z.string().optional(),
-		publicKeyPath: z.string().optional(),
-		// Optional so the shared HOCON default can omit `previousKeys = []`; the
-		// factory treats absent, null and [] alike.
-		previousKeys: z
-			.array(
-				z.object({
-					kid: kidSchema,
-					publicKey: z.string().optional(),
-					publicKeyPath: z.string().optional(),
-					expiresAt: z.string(),
-				}),
-			)
-			.optional(),
-	})
-	.passthrough();
-
-const signingKeyLocalSchema = z.discriminatedUnion("algorithm", [
-	signingKeyLocalHs256Schema,
-	signingKeyLocalAsymmetricSchema,
-]);
-
-const signingKeySchema = z
-	.object({
-		provider: z.string(),
-		local: signingKeyLocalSchema.optional(),
-	})
-	.passthrough();
 
 const LEGACY_JWT_FIELDS = [
 	"algorithm",
@@ -218,9 +147,10 @@ const jwtSchemaBase = z.object({
 			});
 		}
 	}),
-	// The section of the module that provides `keyStore`; core reads none of it
-	// and ships no default.
-	signingKey: signingKeySchema.optional(),
+	// Presence-only: the path the key-store module's section moved from, kept
+	// so a root that parses with `AppConfigSchema` before boot still hands it
+	// to the relocation refusal. Nothing reads it.
+	signingKey: z.unknown().optional(),
 	// When true, the JWT verifier accepts tokens with no `typ` header and warns.
 	// No schema default: `reference.conf` ships `false` (a typ-less token is a
 	// misconfiguration or downgrade signal); `OAUTH_JWT_LEGACY_TYP_ACCEPT=true`
@@ -236,9 +166,7 @@ const jwtSchemaBase = z.object({
 
 /**
  * Detects legacy flat `oauth.jwt.*` fields on the raw input: Zod strips unknown
- * keys before `superRefine` runs, so only `z.preprocess` can see them. This
- * pipe's `out.shape.signingKey` is read as the signing-key section's schema:
- * keep that path, or change its readers with it.
+ * keys before `superRefine` runs, so only `z.preprocess` can see them.
  */
 const jwtSchema = z.preprocess((raw, ctx) => {
 	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
@@ -249,7 +177,7 @@ const jwtSchema = z.preprocess((raw, ctx) => {
 				code: z.ZodIssueCode.custom,
 				message:
 					`oauth.jwt has legacy flat fields (${legacyPresent.join(", ")}). ` +
-					`Migrate to nested shape: oauth.jwt.signingKey.local.<field>. ` +
+					`Migrate to the key store's section: key-store.local.<field>. ` +
 					`See packages/core/README.md for migration guide.`,
 				path: [legacyPresent[0]],
 			});
@@ -535,124 +463,36 @@ const authorizeSchema = withRemovedKeys(
 );
 
 /**
- * Ceiling for `http.trustProxy` as a hop count: a typo guard, not a policy. A
- * large number meant as "trust everything" would silently grant the blanket
- * trust `true` states openly. Exported so the `httpSettings` contract suite
- * holds the slot to the same ceiling.
+ * Ceiling for a `trust proxy` hop count: a typo guard, not a policy. A large
+ * number meant as "trust everything" would silently grant the blanket trust
+ * `true` states openly. Exported so the `httpSettings` contract suite, and the
+ * module that parses a composition's HTTP settings, hold the value to it.
  */
 export const MAX_TRUST_PROXY_HOPS = 255;
 
 /**
- * A decimal, optionally signed or fractional: the env-var shapes meant as a hop
- * count. `-1` and `1.5` match on purpose, so they fail as bad hop counts rather
- * than read as one-entry address lists; `10.0.0.7` and `loopback` do not match.
+ * One federation in `core.federations`: whether it is on, the package that
+ * handles it (`type`), and whether its upstream IdP's `amr` counts. Every
+ * other key is the handling package's, kept as written.
  */
-const NUMERIC_STRING = /^-?[0-9]+(\.[0-9]+)?$/;
-
-/**
- * Normalises the config source's value into one of Express's `trust proxy`
- * shapes. HOCON substitutes `${?HTTP_TRUST_PROXY}` as a string, and a union
- * gives the hocon bridge nothing to coerce towards, so the mapping lives here.
- * Separate from `coerceBooleanFromEnv` on purpose: `1` and `0` are hop counts
- * here, not booleans; `true` / `false` / `""` agree.
- */
-const normalizeTrustProxy = (raw: unknown): unknown => {
-	if (Array.isArray(raw)) {
-		return raw.map((entry) => (typeof entry === "string" ? entry.trim() : entry));
-	}
-	if (typeof raw !== "string") return raw;
-
-	const value = raw.trim();
-	// An exported-but-empty variable is the .env / compose / ConfigMap shape
-	// that arrives as "". Fail closed rather than guessing at a policy.
-	if (value === "") return false;
-
-	const lower = value.toLowerCase();
-	if (lower === "true") return true;
-	if (lower === "false") return false;
-	if (NUMERIC_STRING.test(value)) return Number(value);
-
-	// A trailing comma is the ordinary list typo; dropping the empty tail is
-	// friendlier than reporting an "empty entry" the operator never wrote.
-	return value
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter((entry) => entry !== "");
-};
-
-/**
- * `http.trustProxy`, handed straight to Express's `trust proxy`:
- *
- * - `false`: trust nothing; `req.ip` is the socket peer. The default.
- * - `true`: trust every hop. Correct only when nothing but the proxy can reach
- *   this process; otherwise anyone can choose `req.ip` and forge a rate-limit
- *   identity.
- * - a hop count: trust that many hops back from the socket peer.
- * - an address list: IP literals, CIDR ranges or named ranges (`loopback`,
- *   `linklocal`, `uniquelocal`); the only shape that says which hop is trusted.
- *
- * Entries are validated with `../net/trusted-proxy`, the vocabulary
- * `@o3co/auth-provider-mtls` uses, so a typo fails at boot naming its index
- * instead of silently never matching.
- */
-const trustProxySchema = z
-	.preprocess(
-		normalizeTrustProxy,
-		z.union([
-			z.boolean(),
-			z.number().int().min(0).max(MAX_TRUST_PROXY_HOPS),
-			z
-				.array(z.string())
-				.min(
-					1,
-					"must list at least one address, CIDR range, or named range — use `false` to trust no forwarding hop",
-				),
-		]),
-	)
-	.superRefine((value, ctx) => {
-		if (!Array.isArray(value)) return;
-		value.forEach((entry, index) => {
-			const rejection = checkTrustedProxyEntry(entry);
-			if (rejection !== null) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message: `http.trustProxy[${index}] ${describeTrustedProxyEntryRejection(rejection)}`,
-					path: [index],
-				});
-			}
-		});
-	});
+const federationEntrySchema = z
+	.object({
+		enabled: coerceBooleanFromEnv,
+		type: z.string().optional(),
+		// Whether this federation's upstream IdP's `amr` counts (MFA ADR): it is
+		// recorded in the session's `amr` beside `fed`, stamped on tokens and
+		// matched for `acr`. Absent is `false`: the values are kept apart
+		// (`authentication.upstreamAmr`). Beside `enabled` in both shapes, never
+		// inside a type's own section.
+		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
+	})
+	.passthrough();
 
 /**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
- * The modules owning `logging`, `http` and `oauth.jwt.signingKey` parse their
- * sections with the declarations here until they have schemas of their own.
  */
 export const CoreConfigSchema = z.object({
-	// The section of the module that provides `httpSettings`; core reads none
-	// of it and ships no default.
-	http: z
-		.object({
-			port: z.coerce.number(),
-			// Boolean, hop count or address list. See `trustProxySchema`.
-			trustProxy: trustProxySchema,
-			// Per-probe deadline for the readiness endpoint; keep it well under the
-			// orchestrator's probe timeout, or a partitioned dependency reads as a
-			// slow replica instead of an unready one. Bounded both ways because
-			// `setTimeout` turns 0 (an empty env var through `z.coerce.number()`)
-			// and anything above 2^31-1 into 1ms: every probe would time out and
-			// the replica would answer 503 with nothing wrong.
-			readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
-		})
-		.optional(),
-	// The composition root's logging module's section; core reads none of it
-	// and ships no default. `silent` is a threshold, not a level.
-	logging: z
-		.object({
-			level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),
-		})
-		.optional(),
 	oauth: z.object({
 		jwt: jwtSchema,
 		// The access-token lifetime: `defaultExpiresIn`, `maxExpiresIn`, and the
@@ -686,17 +526,9 @@ export const CoreConfigSchema = z.object({
 		// and the tombstone for the removed `allowUnmarkedClients` (see
 		// `REMOVED_AUTHORIZE_FIELDS`).
 		authorize: authorizeSchema,
-		// Adapter for the OAuth authorization-code repository. Multi-replica
-		// deployments MUST use `"redis"`: memory loses codes on restart and across
-		// replicas. Optional because HOCON binds it to `${?OAUTH_CODE_ADAPTER}`
-		// with no literal, leaving `oauth.code = {}` when unset, and
-		// `buildModules` falls back to the deprecated `repositories.code.type`
-		// only when `adapter` is undefined.
-		code: z
-			.object({
-				adapter: z.enum(["memory", "redis"]).optional(),
-			})
-			.optional(),
+		// Presence-only: the path the code repository's selection moved from (the
+		// composition root's `adapters.codeRepository`). Nothing reads it.
+		code: z.unknown().optional(),
 		// Presence-only: the paths the device-grant, oauth-token-exchange, mTLS
 		// and DPoP modules' sections moved from, kept so a root that parses with
 		// `AppConfigSchema` before boot still hands them to the relocation
@@ -793,6 +625,18 @@ export const CoreConfigSchema = z.object({
 			// through `resolveTokenBindingSettings` alone, and carried by no
 			// slot. See
 			// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`.
+			// The slots this composition runs without on purpose, each a slot a
+			// module's absence policy names by its key here (`auditSink`): the
+			// declared-absence guard reads the list, and no variable sets it.
+			declaredAbsent: z
+				.array(z.string().min(1, { error: "core.declaredAbsent names each slot" }), {
+					error: "core.declaredAbsent is a list of slot names",
+				})
+				.optional(),
+			// The federations this deployment runs, keyed by the name each is
+			// reached at (`/session/oauth/federation/<name>`): one map, so a name
+			// is unique across every type. Read through `federationsOf`.
+			federations: z.record(z.string(), federationEntrySchema).optional(),
 			tokenBinding: z
 				.object({
 					// How `tokenBindingMw` arbitrates when several mechanisms succeed
@@ -866,19 +710,6 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	return schema;
 }
 
-const federationEntrySchema = z
-	.object({
-		enabled: coerceBooleanFromEnv,
-		type: z.string().optional(),
-		// Whether this federation's upstream IdP's `amr` counts (MFA ADR): it is
-		// recorded in the session's `amr` beside `fed`, stamped on tokens and
-		// matched for `acr`. Absent is `false`: the values are kept apart
-		// (`authentication.upstreamAmr`). Beside `enabled` in both shapes, never
-		// inside a type's own section.
-		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
-	})
-	.passthrough();
-
 /**
  * The sections core mirrors for other packages' modules. This object strips
  * undeclared keys, so a section parsed through `AppConfigSchema` survives only
@@ -886,9 +717,7 @@ const federationEntrySchema = z
  * transitional base (`TransitionalConfigSchema`); each mirror stays for the
  * coercions and checks it applies, validated whenever the configuration carries
  * it, until its package owns the section. Mirrors are presence and shape only:
- * bounds and defaults stay with the owning package. The modules owning `cors`
- * and `refreshTokenFamilyStore.redis` parse their sections with the
- * declarations here until they have schemas of their own.
+ * bounds and defaults stay with the owning package.
  */
 export const fullSectionsSchema = z.object({
 	// Presence-only: the paths core's own settings moved from, kept so a root
@@ -929,73 +758,25 @@ export const fullSectionsSchema = z.object({
 		})
 		.passthrough()
 		.optional(),
-	federations: z.record(z.string(), federationEntrySchema),
-	repositories: z.object({
-		client: z
-			.object({
-				type: z.string(),
-			})
-			.passthrough(),
-		user: z
-			.object({
-				type: z.string(),
-			})
-			.passthrough(),
-		code: z
-			.object({
-				type: z.string(),
-			})
-			.passthrough(),
-	}),
+	// Presence-only: the path the federations' map moved from
+	// (`core.federations`), kept so a root that parses with `AppConfigSchema`
+	// before boot still hands it to the relocation refusal. Nothing reads it.
+	federations: z.unknown().optional(),
+	// Presence-only: the section the repositories' settings sit in (the
+	// standalone template's `repositories` module's), and where the code
+	// repositories' moved from. Nothing in core reads it.
+	repositories: z.unknown().optional(),
 	// Presence-only: the paths the login and consent pages moved from
 	// (`session.loginPage.url`, `oauth.consentPage.url`). Nothing reads them.
 	endpoints: z.unknown().optional(),
-	cors: z.object({
-		/**
-		 * The browser origins allowed to read the token, userinfo, revocation and
-		 * discovery/JWKS responses. Empty (the default) means CORS is off and no
-		 * middleware is mounted.
-		 *
-		 * Matching is exact string equality against `Origin`, so entries are
-		 * validated at boot with `../net/origin`: `https://app.example.com/` (a
-		 * trailing slash) would otherwise admit nobody, silently. Accepts a list
-		 * or one comma-separated string (`${?CORS_ALLOWED_ORIGINS}`; the hocon
-		 * bridge cannot coerce to an array), and `null` reads as no list. Any
-		 * other shape is refused by path rather than silently turning CORS off.
-		 * This list confers no CSRF trust: see `session.csrf.trustedOrigins`.
-		 */
-		allowedOrigins: z
-			.preprocess(
-				// Normalisation is shared with `assembleApp`'s mount site
-				// (`net/origin.mts`), so the two cannot disagree. A shape neither
-				// reads is refused here; the mount site only warns
-				// (`cors_allowed_origins_unreadable`).
-				(raw, ctx) => {
-					if (raw === undefined) return raw;
-					if (raw !== null && typeof raw !== "string" && !Array.isArray(raw)) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: `cors.allowedOrigins must be a list of origins, or one comma-separated string of them (CORS_ALLOWED_ORIGINS); got ${typeof raw === "object" ? "an object" : `a ${typeof raw}`}`,
-						});
-						return raw;
-					}
-					return normalizeAllowedOrigins(raw);
-				},
-				z.array(z.string()),
-			)
-			.superRefine((value, ctx) => {
-				value.forEach((entry, index) => {
-					const rejection = checkSerializedOrigin(entry);
-					if (rejection !== null) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: `cors.allowedOrigins[${index}] ${describeSerializedOriginRejection(rejection)}`,
-							path: [index],
-						});
-					}
-				});
-			}),
-	}),
+	// Refused whenever present: core reads a composition's CORS origins from
+	// the `httpSettings` slot alone. A loaded module that relocates `cors` (the
+	// standalone template's `http`) refuses it first, before parse, naming its
+	// own path.
+	cors: unreadSection(
+		"cors",
+		"The CORS origins are handed to core in the httpSettings slot (cors.allowedOrigins), by the module that provides the slot; without the slot, no CORS is mounted.",
+	),
 	// The WebAuthn deployer section, which a composition root's bootstrap
 	// module parses with `webauthnConfigSchema`; lost here, the bootstrap fails
 	// on a missing `rpId` instead of reading the operator's. Presence-only:
@@ -1025,150 +806,29 @@ export const fullSectionsSchema = z.object({
 				.optional(),
 		})
 		.optional(),
-	// Where security-relevant audit events go. `type` selects a builder in the
-	// composition root's `AuditSinkFactory`, so it is an open string and
-	// sub-keys pass through: an out-of-tree sink needs no schema change here
-	// (`registerBuiltinAuditSinks` ships `console`). Core reads one value:
-	// `type = "none"`, which the declared-absence guard
-	// (AUDIT_SINK_ABSENCE_POLICY) takes as running sink-less on purpose; the
-	// standalone registers no "none" builder, so there it still fails boot. The
-	// safe default (a sink, never "none") is the composition root's job, and
-	// the literal lives in `reference.conf`.
-	audit: z
-		.object({
-			sink: z
-				.object({
-					type: z.string(),
-				})
-				.passthrough(),
-		})
-		.optional(),
-	// Connection config for the standalone refresh-token-family client; defaults
-	// in HOCON. The store's own settings (`keyPrefix`, `casRetryLimit`) are in
-	// its section, `redis-refresh-token-family-store`.
-	refreshTokenFamilyStore: z
-		.object({
-			redis: z
-				.object({
-					url: z.string(),
-					password: z.string().optional(),
-				})
-				.optional(),
-		})
-		.optional(),
-	// Adapter for the rate limiter, which serves both the OAuth endpoints and
-	// `/session/login`, so `"redis"` is what makes either safe across replicas.
-	// Default `"memory"` in HOCON. `session.rateLimit.login` configures the
-	// login window and limit, which the session module contributes as the
-	// `login` budget.
-	rateLimiter: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Adapter for the four user-session stores (`userSessionStore`,
-	// `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`).
-	// Multi-replica deployments MUST use `"redis"`: memory loses session state
-	// on restart and across replicas. Top-level, not under `session-store`,
-	// which is the express-session cookie and its store.
-	userSessionStores: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Adapter for the federation token store (upstream IdP tokens held for a
-	// session); default `"memory"` in HOCON. Memory forks per replica and its
-	// module declares `replicaSafety`, so `core.deployment.mode = "multi"` refuses it
-	// by name. `"redis"` mounts `redisFederationTokenStoreModule`, configured
-	// under `redis-federation-token-store`.
-	federationTokenStore: z
-		.object({
-			type: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// The two adapter switches for federation grants. The grant store and the
-	// intent store are installed independently: grants in Redis with
-	// acquisition in memory is a supported single-replica shape (a restart
-	// loses only flows in progress). Both memory modules declare
-	// `replicaSafety` and are refused by name under `core.deployment.mode = "multi"`;
-	// a Redis grant store beside a memory subject revocation is refused by the
-	// routes module. Defaults in `reference.conf`.
-	federationGrantStore: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	federationGrantIntentStore: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Which store keeps enrolled MFA factors, and which keeps MFA transactions
-	// and the lock state (MFA ADR); read by a composition root that picks its
-	// MFA stores by name. The factor store may be kept in the Store; a
-	// transaction is verification state and has no Store variant. Defaults in
-	// `reference.conf`.
-	mfaFactorStore: z
-		.object({
-			adapter: z.enum(["memory", "redis", "store"]).optional(),
-		})
-		.optional(),
-	mfaTransactionStore: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-			// Presence-only: the path `core-mfa-transaction-store-memory` moved from.
-			memory: z.unknown().optional(),
-		})
-		.optional(),
-	// Adapter for the RFC 7009 access-token denylist; default `"memory"` in
-	// HOCON. Memory forks per replica (a revocation on one leaves the token
-	// working on the others), so `core-access-token-denylist-memory` is in the
-	// replica-safety guard's refused set under `core.deployment.mode = "multi"`.
-	accessTokenDenylist: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Backend for the replay seen-set: the single-use `jti` record behind
-	// `private_key_jwt` client authentication (and the WebAuthn challenge
-	// ceremony when installed). `core-replay-seen-set-memory` is in the
-	// replica-safety guard's refused set: a captured assertion would replay
-	// once per replica.
-	replaySeenSet: z
-		.object({
-			adapter: z.enum(["memory", "redis"]).optional(),
-			// Presence-only: the path `core-replay-seen-set-memory` moved from.
-			memory: z.unknown().optional(),
-		})
-		.optional(),
-	// Presence-only: the path `core-challenge-store-memory` moved from.
-	challengeStore: z
-		.object({
-			memory: z.unknown().optional(),
-		})
-		.optional(),
-	// Where consent to a non-first-party client is recorded. `"none"` (the HOCON
-	// default) wires nothing, so such clients are refused; `"memory"` forks per
-	// replica and is refused under `core.deployment.mode = "multi"`; `"redis"` shares
-	// consent records and parked requests across replicas.
-	consentStore: z
-		.object({
-			adapter: z.enum(["none", "memory", "redis"]).optional(),
-		})
-		.optional(),
-	// Module-internal config for `redisCodeRepositoryModule`
-	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`).
-	// Presence-only; defaults in `reference.conf`.
-	redisCodeRepository: z
-		.object({
-			keyPrefix: z.string().optional(),
-			// The Redis PX TTL, in seconds, for authorization codes. A positive
-			// integer so a bad env override fails boot instead of erroring on
-			// every Redis call; the module schema and the `RedisCodeRepository`
-			// constructor check it again.
-			defaultExpiresIn: z.coerce.number().int().positive().optional(),
-		})
-		.optional(),
+	// Presence-only: the path the audit sink's selection (the composition
+	// root's `adapters.auditSink`), its options (the `audit-sink` module's) and
+	// its declared absence (`core.declaredAbsent`) moved from.
+	audit: z.unknown().optional(),
+	// Presence-only: the path the shared Redis connection's settings moved from
+	// (`redis-clients`, the standalone template's module's). Nothing reads it.
+	refreshTokenFamilyStore: z.unknown().optional(),
+	// Presence-only: the paths the adapter selections moved from (the
+	// composition root's `adapters`), and the stores' sections moved from with
+	// them, kept so a root that parses with `AppConfigSchema` before boot
+	// still hands them to the relocation refusal. Nothing reads them.
+	rateLimiter: z.unknown().optional(),
+	userSessionStores: z.unknown().optional(),
+	federationTokenStore: z.unknown().optional(),
+	federationGrantStore: z.unknown().optional(),
+	federationGrantIntentStore: z.unknown().optional(),
+	mfaFactorStore: z.unknown().optional(),
+	mfaTransactionStore: z.unknown().optional(),
+	accessTokenDenylist: z.unknown().optional(),
+	replaySeenSet: z.unknown().optional(),
+	challengeStore: z.unknown().optional(),
+	consentStore: z.unknown().optional(),
+	redisCodeRepository: z.unknown().optional(),
 	// Presence-only: the paths the stores' sections moved from, kept so a root
 	// that parses with `AppConfigSchema` before boot still hands them to the
 	// relocation refusal. Nothing reads them.
@@ -1193,6 +853,7 @@ export const fullSectionsSchema = z.object({
 	"core-federation-grant-store-memory": z.unknown().optional(),
 	"redis-access-token-denylist": z.unknown().optional(),
 	"redis-challenge-store": z.unknown().optional(),
+	"redis-code-repository": z.unknown().optional(),
 	"redis-consent-store": z.unknown().optional(),
 	"redis-device-code-store": z.unknown().optional(),
 	"redis-mfa-factor-store": z.unknown().optional(),

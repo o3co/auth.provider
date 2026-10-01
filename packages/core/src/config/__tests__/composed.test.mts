@@ -46,8 +46,9 @@ function deepFreeze<T>(value: T): T {
 describe("TransitionalConfigSchema — core's sections, and every mirrored one optional", () => {
 	it("requires none of the sections core mirrors for another package", () => {
 		expect(TransitionalConfigSchema.safeParse(resolved()).success).toBe(true);
-		// The schema a composition root pre-parsed with requires six of them.
-		expect(AppConfigSchema.safeParse(resolved()).success).toBe(false);
+		// Nor does the schema a composition root pre-parsed with: every section
+		// it mirrors is optional.
+		expect(AppConfigSchema.safeParse(resolved()).success).toBe(true);
 	});
 
 	it("declares every section AppConfigSchema declares, with the same schema", () => {
@@ -61,13 +62,12 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 	it("reads an environment variable's string as the value its section's schema makes of it", () => {
 		const config = readTransitionalConfig(
 			resolved({
-				http: { port: "8080", trustProxy: "false", readinessTimeoutMs: "1500" },
+				oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } },
 				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
 			}),
-			["http", "webauthn"],
+			["oauth.nonce", "webauthn"],
 		);
-		expect(config.http?.port).toBe(8080);
-		expect(config.http?.readinessTimeoutMs).toBe(1500);
+		expect(config.oauth.nonce?.maxLength).toBe(128);
 		expect(config.webauthn?.rateLimit?.authenticationOptions).toEqual({
 			limit: 120,
 			windowSeconds: 60,
@@ -77,20 +77,23 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 	it("parses only the paths it reads: every other key stays as written, and is not checked", () => {
 		const config = readTransitionalConfig(
 			resolved({
-				http: { port: "8080", trustProxy: false, readinessTimeoutMs: "1500" },
+				webauthn: { rateLimit: { authenticationOptions: { limit: "120", windowSeconds: "60" } } },
 				core: { deployment: { mode: "several" } },
 			}),
-			["http.port"],
-		) as unknown as { http: Record<string, unknown>; core: unknown };
-		expect(config.http?.port).toBe(8080);
-		expect(config.http?.readinessTimeoutMs).toBe("1500");
+			["webauthn.rateLimit.authenticationOptions.limit"],
+		) as unknown as {
+			webauthn: { rateLimit: { authenticationOptions: Record<string, unknown> } };
+			core: unknown;
+		};
+		expect(config.webauthn.rateLimit.authenticationOptions.limit).toBe(120);
+		expect(config.webauthn.rateLimit.authenticationOptions.windowSeconds).toBe("60");
 		expect(config.core).toEqual({ deployment: { mode: "several" } });
 	});
 
 	it("leaves out the captures of renamed variables: they reach no switch and no module factory", () => {
 		const config = readTransitionalConfig(
 			resolved({ "renamed-variables": { LEGACY_RETRIES: "5", FIXTURE_RENAMING_RETRIES: null } }),
-			["http.port"],
+			["oauth.nonce"],
 		);
 		expect(config).not.toHaveProperty("renamed-variables");
 	});
@@ -111,43 +114,43 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		try {
 			readTransitionalConfig(
 				resolved({
-					http: { port: "not-a-port", trustProxy: false, readinessTimeoutMs: 1000 },
+					oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "not-a-number" } },
 					core: { deployment: { mode: "several" } },
 				}),
-				["http.port", "core.deployment.mode"],
+				["oauth.nonce.maxLength", "core.deployment.mode"],
 			);
 		} catch (err) {
 			thrown = err;
 		}
 		expect(thrown).toBeInstanceOf(RangeError);
-		expect((thrown as Error).message).toMatch(/http\.port: /);
+		expect((thrown as Error).message).toMatch(/oauth\.nonce\.maxLength: /);
 		expect((thrown as Error).message).toMatch(/core\.deployment\.mode: /);
 		expect((thrown as Error).cause).toBeInstanceOf(z.ZodError);
 	});
 
 	it("refuses a configuration a read of which throws, as a RangeError, rather than letting the error escape", () => {
-		const http = {
-			trustProxy: false,
-			readinessTimeoutMs: 1000,
-			get port(): number {
-				throw new Error("the port getter broke");
+		const nonce = {
+			get maxLength(): number {
+				throw new Error("the length getter broke");
 			},
 		};
 		let thrown: unknown;
 		try {
-			readTransitionalConfig(resolved({ http }), ["http.port"]);
+			readTransitionalConfig(resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce } }), [
+				"oauth.nonce.maxLength",
+			]);
 		} catch (err) {
 			thrown = err;
 		}
 		expect(thrown).toBeInstanceOf(RangeError);
 		expect((thrown as Error).message).toMatch(/threw instead of answering/);
 		// The error it threw is carried, not flattened into the message.
-		expect(((thrown as Error).cause as Error).message).toBe("the port getter broke");
-		expect((thrown as Error).message).not.toMatch(/the port getter broke/);
+		expect(((thrown as Error).cause as Error).message).toBe("the length getter broke");
+		expect((thrown as Error).message).not.toMatch(/the length getter broke/);
 	});
 
 	it("refuses a configuration that is not an object, naming the configuration itself", () => {
-		expect(() => readTransitionalConfig("http.port = 3000", ["http.port"])).toThrow(
+		expect(() => readTransitionalConfig("oauth.nonce.maxLength = 3000", ["oauth.nonce"])).toThrow(
 			/^Config validation failed — 1 issue\(s\) found: \(the configuration\): /,
 		);
 	});
@@ -183,10 +186,10 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 
 	it("covers a path under another it reads", () => {
 		const config = readTransitionalConfig(
-			resolved({ http: { port: "8080", trustProxy: false, readinessTimeoutMs: "1500" } }),
-			["http", "http.port"],
+			resolved({ oauth: { ...makeValidCoreConfig().oauth, nonce: { maxLength: "128" } } }),
+			["oauth.nonce", "oauth.nonce.maxLength"],
 		);
-		expect(config.http).toEqual({ port: 8080, trustProxy: false, readinessTimeoutMs: 1500 });
+		expect(config.oauth.nonce).toEqual({ maxLength: 128 });
 	});
 
 	it("keeps what no schema declares, at the top and under a section it reads", () => {
@@ -206,7 +209,7 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 			resolved({ widget: { size: "3" }, core: { deployment: { mode: "single" } } }),
 		);
 		const before = JSON.stringify(given);
-		expect(() => readTransitionalConfig(given, ["http", "core.deployment"])).not.toThrow();
+		expect(() => readTransitionalConfig(given, ["oauth.nonce", "core.deployment"])).not.toThrow();
 		expect(JSON.stringify(given)).toBe(before);
 	});
 });

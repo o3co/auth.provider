@@ -44,7 +44,7 @@ const CONNECTION = {
 };
 
 const resolve = (connections: Record<string, unknown>, federations: unknown = FEDERATIONS) =>
-	resolveFederationGrantConnections({ connections }, { federations });
+	resolveFederationGrantConnections({ connections }, { core: { federations } });
 
 describe("resolveFederationGrantConnections", () => {
 	it("joins the entry with the issuer and client id the federation is configured with", () => {
@@ -85,7 +85,9 @@ describe("resolveFederationGrantConnections", () => {
 		// Removing the last one must stay an operable change: a deployment with
 		// no connections issues no new grants and still answers about the ones
 		// it has.
-		expect(resolveFederationGrantConnections(undefined, { federations: FEDERATIONS }).size).toBe(0);
+		expect(
+			resolveFederationGrantConnections(undefined, { core: { federations: FEDERATIONS } }).size,
+		).toBe(0);
 		expect(resolve({}).size).toBe(0);
 	});
 

@@ -1261,7 +1261,7 @@ export interface FederatedLogin {
 	readonly user: Readonly<Record<string, unknown>>;
 	/** The merged claims envelope the callback composed: what the session record's `claims` will hold. */
 	readonly claims: UserSessionClaims;
-	/** The federation's name (`federations.<name>`). */
+	/** The federation's name (`core.federations.<name>`). */
 	readonly federation: string;
 	/** The upstream IdP's `amr`, as it surfaced it. */
 	readonly upstreamAmr: readonly string[];

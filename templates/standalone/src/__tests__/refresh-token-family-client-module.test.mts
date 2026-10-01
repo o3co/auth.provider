@@ -60,7 +60,7 @@ const importModule = async () =>
 		standaloneRedisClientsModule: import("@o3co/auth-provider-core").Module;
 	};
 
-/** The module's own section, `refreshTokenFamilyStore.redis`, as boot hands it over. */
+/** The module's own section, `redis-clients`, as boot hands it over. */
 const baseSection = { url: "redis://example.com:6379", password: "test-pw" };
 
 describe("standaloneRedisClientsModule", () => {
@@ -131,7 +131,7 @@ describe("standaloneRedisClientsModule", () => {
 		expect(quitSpies[0]).not.toHaveBeenCalled();
 	});
 
-	it("fails fast on an empty refreshTokenFamilyStore.redis.url (no silent localhost fallback)", async () => {
+	it("fails fast on an empty redis-clients.url (no silent localhost fallback)", async () => {
 		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
 			standaloneRedisClientsModule as unknown as {
@@ -144,7 +144,7 @@ describe("standaloneRedisClientsModule", () => {
 		// leave each replica with refresh-token families the others cannot
 		// see. A section with no URL at all is refused by boot's parse of it.
 		await expect(provides.refreshTokenFamilyClient({ section: { url: "" } })).rejects.toThrow(
-			/refreshTokenFamilyStore\.redis\.url/,
+			/redis-clients\.url/,
 		);
 		// And no ioredis instance was constructed because we threw before
 		// `new Redis(...)`.

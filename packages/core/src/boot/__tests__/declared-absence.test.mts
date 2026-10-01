@@ -20,13 +20,19 @@
  * config does not carry the policy's declared-absent value. Absence of such a
  * capability has to be declared; it is never a silent no-op.
  *
- * `auditSink` is the test subject: the three bundled modules that read it
- * declare `AUDIT_SINK_ABSENCE_POLICY`, so a composition without a sink must
- * say `audit.sink.type = "none"` out loud.
+ * `auditSink` is the test subject: the bundled modules that read it declare
+ * `AUDIT_SINK_ABSENCE_POLICY`, so a composition without a sink must list
+ * `auditSink` in `core.declaredAbsent` out loud.
  */
 import { describe, expect, it } from "vitest";
-import { AUDIT_SINK_ABSENCE_POLICY, createApp, defineModule } from "../../index.mjs";
-import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import {
+	AUDIT_SINK_ABSENCE_POLICY,
+	createApp,
+	defineModule,
+	describeAbsenceDeclaration,
+	isAbsenceDeclared,
+} from "../../index.mjs";
+import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
 /** A module that reads `auditSink` and refuses to be silently sink-less. */
@@ -63,18 +69,20 @@ const auditProviderModule = defineModule({
 	} as never,
 });
 
+/** `core` declaring `names` absent. */
+const declaring = (...names: string[]) => coreConfigForTests({ declaredAbsent: names });
+
 /**
- * `makeValidAppConfig` deliberately carries `audit.sink.type = "none"`
- * so ordinary module tests boot without a sink; the fixture for THIS suite
+ * `makeValidAppConfig` deliberately declares the audit sink absent so
+ * ordinary module tests boot without a sink; the fixture for THIS suite
  * strips that declaration, because the undeclared state is the subject.
  */
 function boot(configOverrides: Record<string, unknown> = {}) {
-	const { audit, ...withoutDeclaration } = makeValidAppConfig() as Record<string, unknown> & {
+	const { audit: _audit, ...config } = makeValidAppConfig() as Record<string, unknown> & {
 		audit?: unknown;
 	};
-	void audit;
 	return {
-		config: { ...withoutDeclaration, ...configOverrides },
+		config: { ...config, ...coreConfigForTests(), ...configOverrides },
 		pathResolver: (p: string) => p,
 	} as never;
 }
@@ -89,8 +97,8 @@ describe("checkDeclaredAbsence", () => {
 				reason: "component-absence-undeclared",
 				componentKey: "auditSink",
 				consumedBy: ["test:audit-consumer"],
-				configKey: "audit.sink.type",
-				absentValue: "none",
+				configKey: "core.declaredAbsent",
+				absentValue: "auditSink",
 			},
 		});
 	});
@@ -102,18 +110,35 @@ describe("checkDeclaredAbsence", () => {
 		}).catch((e: unknown) => e as BootError);
 		expect(err).toBeInstanceOf(BootError);
 		const message = (err as BootError).message;
-		expect(message).toContain("auditSink");
-		expect(message).toContain('audit.sink.type = "none"');
+		expect(message).toContain('list "auditSink" in core.declaredAbsent');
 		expect(message).toContain(AUDIT_SINK_ABSENCE_POLICY.hint);
 	});
 
-	it("boots when the config declares the capability absent", async () => {
+	it("boots when core.declaredAbsent lists the slot", async () => {
+		await expect(
+			createApp({
+				modules: [auditConsumerModule],
+				bootstrapComponents: boot(declaring("auditSink")),
+			}),
+		).resolves.toBeDefined();
+	});
+
+	it("declares nothing through a list naming other slots", async () => {
+		await expect(
+			createApp({
+				modules: [auditConsumerModule],
+				bootstrapComponents: boot(declaring("mailSender")),
+			}),
+		).rejects.toMatchObject({ reason: "component-absence-undeclared" });
+	});
+
+	it('declares nothing through audit.sink.type = "none", where the declaration was', async () => {
 		await expect(
 			createApp({
 				modules: [auditConsumerModule],
 				bootstrapComponents: boot({ audit: { sink: { type: "none" } } }),
 			}),
-		).resolves.toBeDefined();
+		).rejects.toMatchObject({ reason: "component-absence-undeclared" });
 	});
 
 	it("boots when a module provides the slot, with no declaration needed", async () => {
@@ -155,7 +180,7 @@ describe("checkDeclaredAbsence", () => {
 		// would make the boot error's advice depend on module order.
 		const err = await createApp({
 			modules: [auditConsumerModule, conflictingConsumerModule],
-			bootstrapComponents: boot({ audit: { sink: { type: "none" } } }),
+			bootstrapComponents: boot(declaring("auditSink")),
 		}).catch((e: unknown) => e as BootError);
 		expect(err).toBeInstanceOf(BootError);
 		expect((err as BootError).reason).toBe("component-absence-undeclared");
@@ -186,7 +211,7 @@ describe("checkDeclaredAbsence — manifest authoring bugs", () => {
 		});
 		const err = await createApp({
 			modules: [policyWithoutRead],
-			bootstrapComponents: boot({ audit: { sink: { type: "none" } } }),
+			bootstrapComponents: boot(declaring("auditSink")),
 		}).catch((e: unknown) => e as BootError);
 		expect(err).toBeInstanceOf(BootError);
 		expect((err as BootError).reason).toBe("component-absence-undeclared");
@@ -205,9 +230,64 @@ describe("checkDeclaredAbsence — manifest authoring bugs", () => {
 		});
 		const err = await createApp({
 			modules: [auditConsumerModule, hintVariantModule],
-			bootstrapComponents: boot({ audit: { sink: { type: "none" } } }),
+			bootstrapComponents: boot(declaring("auditSink")),
 		}).catch((e: unknown) => e as BootError);
 		expect(err).toBeInstanceOf(BootError);
 		expect((err as BootError).message).toContain("disagree");
+	});
+});
+
+describe("isAbsenceDeclared and describeAbsenceDeclaration — one reading of a declaration", () => {
+	it("reads a list key as declaring the absent value when the list holds it", () => {
+		expect(isAbsenceDeclared(declaring("auditSink"), AUDIT_SINK_ABSENCE_POLICY)).toBe(true);
+		expect(isAbsenceDeclared(declaring("mailSender"), AUDIT_SINK_ABSENCE_POLICY)).toBe(false);
+		expect(isAbsenceDeclared({}, AUDIT_SINK_ABSENCE_POLICY)).toBe(false);
+	});
+
+	it("reads a scalar key as declaring it when it holds the absent value", () => {
+		const policy = {
+			configKey: ["oauth", "revocation", "subject"],
+			absentValue: "unsupported",
+			hint: "h",
+		};
+		expect(isAbsenceDeclared({ oauth: { revocation: { subject: "unsupported" } } }, policy)).toBe(
+			true,
+		);
+		expect(isAbsenceDeclared({ oauth: { revocation: { subject: "watermark" } } }, policy)).toBe(
+			false,
+		);
+	});
+
+	it("reads a list at a key other than core's list as no declaration", () => {
+		const policy = {
+			configKey: ["oauth", "revocation", "subject"],
+			absentValue: "unsupported",
+			hint: "h",
+		};
+		expect(isAbsenceDeclared({ oauth: { revocation: { subject: ["unsupported"] } } }, policy)).toBe(
+			false,
+		);
+	});
+
+	it("reads own keys only", () => {
+		expect(
+			isAbsenceDeclared(
+				Object.create({ core: { declaredAbsent: ["auditSink"] } }),
+				AUDIT_SINK_ABSENCE_POLICY,
+			),
+		).toBe(false);
+	});
+
+	it("says how to declare the absence, for a list key and for a scalar one", () => {
+		expect(describeAbsenceDeclaration(AUDIT_SINK_ABSENCE_POLICY)).toBe(
+			'list "auditSink" in core.declaredAbsent',
+		);
+		expect(
+			describeAbsenceDeclaration({
+				configKey: ["oauth", "revocation", "subject"],
+				absentValue: "unsupported",
+				hint: "h",
+			}),
+		).toBe('set oauth.revocation.subject = "unsupported"');
 	});
 });

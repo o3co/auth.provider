@@ -147,8 +147,8 @@ export interface CorsMiddlewareOptions {
  * Build the CORS middleware, or `null` when the allowlist is empty (or
  * entirely invalid): CORS is off and nothing is mounted, not even `Vary`.
  *
- * `allowedOrigins` is re-checked because a hand-built `AppConfig` never passed
- * the config schema. A dropped entry is warned about by name: a silently
+ * `allowedOrigins` is re-checked because a hand-built `httpSettings` never
+ * passed a schema. A dropped entry is warned about by name: a silently
  * narrowed allowlist is as hard to diagnose as a silently absent one.
  */
 export function corsMw(options: CorsMiddlewareOptions): RequestHandler | null {

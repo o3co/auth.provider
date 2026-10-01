@@ -17,7 +17,7 @@
 /**
  * Integration tests for the federation-stores-incomplete boot validator.
  *
- * When `config.federations.<name>.enabled === true` for any federation, all
+ * When `core.federations.<name>.enabled === true` for any federation, all
  * six session/federation/refresh-family slots MUST be wired in the planned
  * component set: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
  * sessionFederationIndex, federationTokenStore and
@@ -29,7 +29,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
-import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { coreConfigForTests, makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
 /** A bootstrap map with google federation enabled but no stores wired. */
@@ -37,9 +37,10 @@ function makeBootWithFederationEnabled() {
 	return {
 		config: {
 			...makeValidAppConfig(),
-			federations: {
-				google: { enabled: true },
-			},
+			...coreConfigForTests({
+				declaredAbsent: ["auditSink"],
+				federations: { google: { enabled: true } },
+			}),
 		},
 		pathResolver: (p: string) => p,
 	} as never;
@@ -48,7 +49,7 @@ function makeBootWithFederationEnabled() {
 /** A bootstrap map with no federations enabled (empty federations map). */
 function makeBootWithNoFederations() {
 	return {
-		config: makeValidAppConfig(), // federations: {}
+		config: makeValidAppConfig(),
 		pathResolver: (p: string) => p,
 	} as never;
 }

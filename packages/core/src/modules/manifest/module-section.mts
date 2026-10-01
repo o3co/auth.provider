@@ -79,7 +79,7 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	readonly reference?: URL;
 	/**
 	 * Where the section sits today, as a dot-separated path of non-empty keys
-	 * (`"oauth.jwt.signingKey"`), for a section not yet moved under the module's name.
+	 * (`"parent.child"`), for a section not yet moved under the module's name.
 	 * Unset, it is the top-level key named exactly as the module (not split on
 	 * dots). Keys are read as own properties only; an invalid path refuses boot
 	 * (`module-section-path-invalid`). Transitional.
@@ -111,7 +111,7 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * `configSchema` declares no section path, so its old paths are not caught.
 	 *
 	 * A switch that decides whether a module loads (an adapter selection,
-	 * `federations.<name>.enabled`) is relocated by a module that is always
+	 * `core.federations.<name>.enabled`) is relocated by a module that is always
 	 * loaded, since the module it selects may never be. Defaults and variable
 	 * bindings move with the path, and none stays at the old one; the schema
 	 * rules are in `docs/release-policy.md` ("Key moved to another path").

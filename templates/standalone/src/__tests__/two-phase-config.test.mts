@@ -24,7 +24,9 @@
  *    `expectedSessionRequirements` reads beside `mfa.mode` — the one path it
  *    reads raw (`OWN_READS`, `readMfaMode`), until the MFA ADR's build-order
  *    step 20 (the log level is the `logging` module's section, which
- *    `readLogging` reads with that module's schema: `own-modules.test.mts`);
+ *    `readLogging` reads with that module's schema: `own-modules.test.mts`) —
+ *    and the composition root's own `adapters`, over the template's own
+ *    reference, with the template's schema (`adapters.test.mts`);
  * 2. `resolveForBoot` — its own files over the `reference.conf` of every
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
@@ -39,13 +41,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-	type AppConfig,
-	AppConfigSchema,
-	coreReference,
-	createApp,
-	type Module,
-} from "@o3co/auth-provider-core";
+import { AppConfigSchema, coreReference, createApp, type Module } from "@o3co/auth-provider-core";
 import {
 	redisFederationGrantIntentStoreModule,
 	redisFederationGrantStoreModule,
@@ -53,6 +49,7 @@ import {
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
+import { ADAPTERS_SECTION } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
@@ -64,13 +61,14 @@ import {
 	resolveForBoot,
 	resolveLayers,
 	SWITCHES,
+	type Switches,
 } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 const REQUIRED_ENV = {
-	OAUTH_JWT_SECRET: "two-phase-config-secret.at-least-32-bytes.ok",
+	KEY_STORE_LOCAL_SECRET: "two-phase-config-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "two-phase-config-session.at-least-32-bytes.ok",
 };
@@ -83,10 +81,10 @@ const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 		CORE_DEPLOYMENT_MODE: "multi",
 		SESSION_STORE_STORAGE_TYPE: "redis",
 		SESSION_STORE_STORAGE_REDIS_URL: "redis://redis:6379",
-		REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
-		USER_SESSION_STORES_ADAPTER: "redis",
-		RATE_LIMITER_ADAPTER: "redis",
-		OAUTH_CODE_ADAPTER: "redis",
+		REDIS_CLIENTS_URL: "redis://redis:6379",
+		ADAPTERS_USER_SESSION_STORES: "redis",
+		ADAPTERS_RATE_LIMITER: "redis",
+		ADAPTERS_CODE_REPOSITORY: "redis",
 		HTTP_PORT: "8080",
 		HTTP_TRUST_PROXY: "loopback",
 		SESSION_STORE_SECURE: "false",
@@ -131,7 +129,7 @@ function operatorLayer(text: string): string {
 }
 
 /** `config`, recording every dotted path read off it. */
-function recording(config: unknown): { readonly config: AppConfig; readonly reads: Set<string> } {
+function recording(config: unknown): { readonly config: Switches; readonly reads: Set<string> } {
 	const reads = new Set<string>();
 	const wrap = (target: object, path: string): object =>
 		new Proxy(target, {
@@ -143,7 +141,7 @@ function recording(config: unknown): { readonly config: AppConfig; readonly read
 				return typeof value === "object" && value !== null ? wrap(value, at) : value;
 			},
 		});
-	return { config: wrap(config as object, "") as AppConfig, reads };
+	return { config: wrap(config as object, "") as Switches, reads };
 }
 
 describe("phase one reads each switch as the template's AppConfigSchema pre-parse read it", () => {
@@ -197,7 +195,7 @@ describe("phase one reads its switches and nothing else", () => {
 		expectedSessionRequirements(config);
 		buildModules(config, { environment: "production" });
 		const covered = (path: string) =>
-			[...SWITCHES, ...OWN_READS].some(
+			[...SWITCHES, ...OWN_READS, ADAPTERS_SECTION].some(
 				(switchPath) =>
 					path === switchPath ||
 					path.startsWith(`${switchPath}.`) ||
@@ -208,9 +206,9 @@ describe("phase one reads its switches and nothing else", () => {
 	});
 
 	it("still refuses a switch it reads that the schema refuses, naming it", () => {
-		const bad = operatorLayer('rateLimiter.adapter = "carrier-pigeon"\n');
+		const bad = operatorLayer('adapters.rateLimiter = "carrier-pigeon"\n');
 		expect(() => readSwitches(readOwnLayers([bad, ...ownFiles("production")], { env }))).toThrow(
-			/rateLimiter\.adapter/,
+			/adapters\.rateLimiter/,
 		);
 	});
 });
@@ -230,7 +228,7 @@ describe("phase two: what createApp is handed", () => {
 		const reference = join(dir, "reference.conf");
 		writeFileSync(
 			reference,
-			'widget { size = 3 }\naudit.sink.type = "widget-sink"\noauth.oidcMode = "widget-mode"\n',
+			'widget { size = 3 }\noauth.revocation.accessToken = "widget-revocation"\noauth.oidcMode = "widget-mode"\n',
 		);
 		return {
 			name: "widget",
@@ -248,7 +246,7 @@ describe("phase two: what createApp is handed", () => {
 		// The package's own section, from its reference.
 		expect(resolved.widget).toEqual({ size: 3 });
 		// The template's application.conf wins over a package's reference…
-		expect(resolved.audit?.sink).toEqual({ type: "logger" });
+		expect(resolved.oauth?.revocation).toEqual({ accessToken: "denylist" });
 		// …and a package's reference over core's.
 		expect(resolved.oauth?.oidcMode).toBe("widget-mode");
 	});
@@ -364,29 +362,32 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 
 	it("sees a file's first contents in both phases, though it is replaced between them", () => {
 		// Mounted configuration is commonly replaced atomically: read twice,
-		// boot could parse the Redis limiter while phase one chose the memory
-		// one, and nothing would refuse the disagreement.
-		const operator = operatorLayer('rateLimiter.adapter = "redis"\n');
+		// boot could parse the Redis session store while phase one chose the
+		// memory one, and nothing would refuse the disagreement.
+		const operator = operatorLayer('session-store.storage.type = "redis"\n');
 		const own = readOwnLayers([operator, ...ownFiles("production")], { env });
-		writeFileSync(operator, 'rateLimiter.adapter = "memory"\n');
+		writeFileSync(operator, 'session-store.storage.type = "memory"\n');
 		const switches = readSwitches(own);
-		const resolved = resolveForBoot(own, [], expectedSessionRequirements(switches)) as unknown as {
-			rateLimiter: { adapter: unknown };
-		};
-		expect(switches.rateLimiter?.adapter).toBe("redis");
-		expect(resolved.rateLimiter.adapter).toBe("redis");
+		const resolved = resolveForBoot(own, [], expectedSessionRequirements(switches));
+		expect(valueAt(switches, "session-store.storage.type")).toBe("redis");
+		expect(valueAt(resolved, "session-store.storage.type")).toBe("redis");
 	});
 
 	it("substitutes one snapshot of the environment in both phases", () => {
-		const changing: Record<string, string> = { ...env, RATE_LIMITER_ADAPTER: "redis" };
+		const changing: Record<string, string> = { ...env, SESSION_STORE_STORAGE_TYPE: "redis" };
 		const own = readOwnLayers(ownFiles("production"), { env: changing });
-		changing.RATE_LIMITER_ADAPTER = "memory";
+		changing.SESSION_STORE_STORAGE_TYPE = "memory";
 		const switches = readSwitches(own);
-		const resolved = resolveForBoot(own, [], expectedSessionRequirements(switches)) as unknown as {
-			rateLimiter: { adapter: unknown };
-		};
-		expect(switches.rateLimiter?.adapter).toBe("redis");
-		expect(resolved.rateLimiter.adapter).toBe("redis");
+		const resolved = resolveForBoot(own, [], expectedSessionRequirements(switches));
+		expect(valueAt(switches, "session-store.storage.type")).toBe("redis");
+		expect(valueAt(resolved, "session-store.storage.type")).toBe("redis");
+	});
+
+	it("reads the adapters from the same snapshot of the environment", () => {
+		const changing: Record<string, string> = { ...env, ADAPTERS_RATE_LIMITER: "redis" };
+		const own = readOwnLayers(ownFiles("production"), { env: changing });
+		changing.ADAPTERS_RATE_LIMITER = "memory";
+		expect(readSwitches(own).adapters.rateLimiter).toBe("redis");
 	});
 
 	it("reads every switch as boot's parse has it, for the shipped environments", async () => {

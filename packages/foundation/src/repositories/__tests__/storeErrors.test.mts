@@ -155,7 +155,7 @@ describe("the named errors", () => {
 		expect(
 			named.message.startsWith("HttpMfaFactorStore: the Store at https://store.test/mfa/list "),
 		).toBe(true);
-		expect(named.message).toContain("CLIENT_USER_BEARER_TOKEN");
+		expect(named.message).toContain("REPOSITORIES_USER_HTTP_BEARER_TOKEN");
 		expect(named.message).not.toContain("QUERY");
 		expect(named.storeStatus).toBe(403);
 	});

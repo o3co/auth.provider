@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
-import type { AppConfig } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { coreConfigForTests, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
+import type { Switches } from "../configPath.mjs";
 import { oidcFederationConfigModule } from "../modules.mjs";
+import { inProcessAdapters } from "./library-references.fixture.mjs";
 
 /**
- * The scaffold turns every enabled `federations.<name>` of type
+ * The scaffold turns every enabled `core.federations.<name>` of type
  * `oidc` into one instance of the generic OIDC federation module, fed by a
  * single config bridge. A deployment adds an IdP with configuration only.
  */
@@ -40,15 +41,13 @@ const okta = {
 	callbackURL: "https://auth.test/session/oauth/federation/okta/callback",
 };
 
-/** Core's valid fixture, with the federations under test and every adapter on memory. */
-const configWith = (federations: Record<string, unknown>): AppConfig => {
-	const base = makeValidAppConfig();
-	return {
-		...base,
-		federations,
-		oauth: { ...base.oauth, code: { adapter: "memory" } },
-	} as unknown as AppConfig;
-};
+/** Core's valid fixture, with the federations under test and every store in process. */
+const configWith = (federations: Record<string, unknown>): Switches =>
+	({
+		...makeValidAppConfig(),
+		...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
+		adapters: inProcessAdapters(),
+	}) as unknown as Switches;
 
 describe("oidcFederationConfigModule", () => {
 	it("has the scaffold's module name and reads config", () => {
@@ -59,26 +58,28 @@ describe("oidcFederationConfigModule", () => {
 	it("reads every enabled oidc section into the slot, keyed by federation name", () => {
 		const out = bridge({
 			config: {
-				federations: {
-					okta: { enabled: true, type: "oidc", ...okta },
-					keycloak: {
-						enabled: true,
-						type: "oidc",
-						clientUrl: "https://app.test/",
-						oidc: {
-							issuer: "https://kc.test/realms/dev",
-							clientId: "kc-client",
-							clientSecret: "kc-secret",
-							callbackURL: "https://auth.test/session/oauth/federation/keycloak/callback",
+				core: {
+					federations: {
+						okta: { enabled: true, type: "oidc", ...okta },
+						keycloak: {
+							enabled: true,
+							type: "oidc",
+							clientUrl: "https://app.test/",
+							oidc: {
+								issuer: "https://kc.test/realms/dev",
+								clientId: "kc-client",
+								clientSecret: "kc-secret",
+								callbackURL: "https://auth.test/session/oauth/federation/keycloak/callback",
+							},
 						},
+						google: {
+							enabled: true,
+							clientId: "g",
+							clientSecret: "s",
+							callbackURL: "https://auth.test/g",
+						},
+						paused: { enabled: false, type: "oidc", ...okta },
 					},
-					google: {
-						enabled: true,
-						clientId: "g",
-						clientSecret: "s",
-						callbackURL: "https://auth.test/g",
-					},
-					paused: { enabled: false, type: "oidc", ...okta },
 				},
 			},
 		});
@@ -93,12 +94,16 @@ describe("oidcFederationConfigModule", () => {
 	it("refuses a malformed section at boot, naming the field", () => {
 		const { issuer: _dropped, ...noIssuer } = okta;
 		expect(() =>
-			bridge({ config: { federations: { okta: { enabled: true, type: "oidc", ...noIssuer } } } }),
-		).toThrow(/federations\.okta\.issuer/);
+			bridge({
+				config: { core: { federations: { okta: { enabled: true, type: "oidc", ...noIssuer } } } },
+			}),
+		).toThrow(/core\.federations\.okta\.issuer/);
 	});
 
 	it("is an empty slot when no section is of type oidc", () => {
-		expect(bridge({ config: { federations: { google: { enabled: false } } } })).toEqual({});
+		expect(bridge({ config: { core: { federations: { google: { enabled: false } } } } })).toEqual(
+			{},
+		);
 	});
 });
 

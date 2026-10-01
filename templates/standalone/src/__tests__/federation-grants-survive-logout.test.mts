@@ -42,6 +42,7 @@ import {
 	type FederationTokenStore,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
+	federationsOf,
 	InMemoryClientRepository,
 	InMemoryUserRepository,
 	type MemoryFederationGrantStore,
@@ -55,9 +56,14 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths } from "../configPath.mjs";
+import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
-import { capturedRenames, libraryLayers } from "./library-references.fixture.mjs";
+import {
+	adaptersOf,
+	capturedRenames,
+	libraryLayers,
+	sectionsCoreDoesNotDeclare,
+} from "./library-references.fixture.mjs";
 
 const DAY = 86_400_000;
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -83,24 +89,24 @@ const REFRESH_TOKEN = "SENTINEL-refresh-token";
 const ACCESS_TOKEN = "upstream-access-token";
 
 const ENV: Readonly<Record<string, string>> = {
-	OAUTH_JWT_ALGORITHM: "HS256",
-	OAUTH_JWT_SECRET: JWT_SECRET,
+	KEY_STORE_LOCAL_ALGORITHM: "HS256",
+	KEY_STORE_LOCAL_SECRET: JWT_SECRET,
 	OAUTH_JWT_ISSUER: ISSUER,
 	SESSION_STORE_SECRET: "federation-grants-survive-logout-session.at-least-32-bytes.ok",
 	SESSION_STORE_SECURE: "false",
 	SESSION_STORE_NAME: "auth.session",
 	SESSION_STORE_STORAGE_TYPE: "memory",
-	CLIENT_USER_TYPE: "yaml",
-	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
-	USER_SESSION_STORES_ADAPTER: "memory",
-	RATE_LIMITER_ADAPTER: "memory",
-	OAUTH_CODE_ADAPTER: "memory",
-	ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
-	REPLAY_SEEN_SET_ADAPTER: "memory",
-	FEDERATION_TOKEN_STORE_TYPE: "memory",
-	CONSENT_STORE_ADAPTER: "none",
-	FEDERATION_GRANT_STORE_ADAPTER: "memory",
-	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+	ADAPTERS_USER_REPOSITORY: "yaml",
+	REDIS_CLIENTS_URL: "redis://redis.test:6379",
+	ADAPTERS_USER_SESSION_STORES: "memory",
+	ADAPTERS_RATE_LIMITER: "memory",
+	ADAPTERS_CODE_REPOSITORY: "memory",
+	ADAPTERS_ACCESS_TOKEN_DENYLIST: "memory",
+	ADAPTERS_REPLAY_SEEN_SET: "memory",
+	ADAPTERS_FEDERATION_TOKEN_STORE: "memory",
+	ADAPTERS_CONSENT_STORE: "none",
+	ADAPTERS_FEDERATION_GRANT_STORE: "memory",
+	ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "memory",
 	FEDERATION_GRANTS_ENABLED: "true",
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	// The connect flow is not driven here, and the bundled repository has no
@@ -114,37 +120,40 @@ const ENV: Readonly<Record<string, string>> = {
  * that have no environment form written over it: the
  * upstream federation the connection names, and the connection.
  */
-function resolveConfig(): AppConfig {
+function resolveConfig(): Switches {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const config = validate(
-		parseFile(envConfPath, { env: ENV })
-			.withFallback(parseFile(applicationConfPath, { env: ENV }))
-			.withFallback(parseFile(fileURLToPath(templateReference()), { env: ENV }))
-			.withFallback(libraryLayers(ENV)),
-		AppConfigSchema,
-	);
+	const layers = parseFile(envConfPath, { env: ENV })
+		.withFallback(parseFile(applicationConfPath, { env: ENV }))
+		.withFallback(parseFile(fileURLToPath(templateReference()), { env: ENV }))
+		.withFallback(libraryLayers(ENV));
+	const config = validate(layers, AppConfigSchema);
 	return {
+		...sectionsCoreDoesNotDeclare(layers),
+		adapters: adaptersOf(layers, ENV),
 		...config,
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.
 		"renamed-variables": capturedRenames(ENV),
-		federations: {
-			...config.federations,
-			upstream: {
-				enabled: true,
-				type: "oidc",
-				issuer: UPSTREAM,
-				clientId: UPSTREAM_CLIENT_ID,
-				clientSecret: "provider-secret",
-				callbackURL: `${ISSUER}/session/oauth/federation/upstream/callback`,
-				scopes: [...SCOPES],
-				discovery: false,
-				endpoints: {
-					authorizationEndpoint: `${UPSTREAM}/authorize`,
-					tokenEndpoint: `${UPSTREAM}/token`,
-					jwksUri: `${UPSTREAM}/jwks`,
+		core: {
+			...config.core,
+			federations: {
+				...federationsOf(config),
+				upstream: {
+					enabled: true,
+					type: "oidc",
+					issuer: UPSTREAM,
+					clientId: UPSTREAM_CLIENT_ID,
+					clientSecret: "provider-secret",
+					callbackURL: `${ISSUER}/session/oauth/federation/upstream/callback`,
+					scopes: [...SCOPES],
+					discovery: false,
+					endpoints: {
+						authorizationEndpoint: `${UPSTREAM}/authorize`,
+						tokenEndpoint: `${UPSTREAM}/token`,
+						jwksUri: `${UPSTREAM}/jwks`,
+					},
+					redirectAllowlist: [],
 				},
-				redirectAllowlist: [],
 			},
 		},
 		"redis-federation-grant-store": {
@@ -163,7 +172,7 @@ function resolveConfig(): AppConfig {
 				},
 			},
 		},
-	} as AppConfig;
+	} as Switches;
 }
 
 const testRepositoriesModule = defineModule({
@@ -205,7 +214,7 @@ const testKeyStoreModule = defineModule({
 			registerBuiltinKeyStores(factory);
 			return factory.create({
 				type: "local",
-				...((c as AppConfig).oauth.jwt.signingKey?.local ?? {}),
+				...((c as { "key-store"?: { local?: object } })["key-store"]?.local ?? {}),
 			});
 		},
 	},

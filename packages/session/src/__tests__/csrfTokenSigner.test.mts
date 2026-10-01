@@ -38,6 +38,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	coreConfigForTests,
 	createTestApp,
 	createTestCsrfTokenSigner,
 	createTestSessionCookiePolicy,
@@ -487,15 +488,17 @@ describe("the session module reads no session-store.secret", () => {
 		const config = {
 			...base,
 			"session-store": store,
-			federations: {
-				...(base.federations as object),
-				stub: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "federation-client-secret",
-					callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
+			...coreConfigForTests({
+				declaredAbsent: ["auditSink"],
+				federations: {
+					stub: {
+						enabled: true,
+						clientId: "id",
+						clientSecret: "federation-client-secret",
+						callbackURL: "https://app.example.com/session/oauth/federation/stub/callback",
+					},
 				},
-			},
+			}),
 		} as unknown as AppConfig;
 		const stub: FederationProvider = {
 			name: "stub",

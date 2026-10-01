@@ -41,6 +41,7 @@ import {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 	resolveTokenBindingSettings,
+	supportsSessionEnd,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -67,6 +68,7 @@ export type AuthorizationGrantDeps = Pick<
 	| "userSessionStore"
 	| "subjectRevocation"
 	| "refreshTokenFamilyRotation"
+	| "refreshTokenFamilyRevocation"
 	| "sessionFamilyIndex"
 	| "sessionRPRegistry"
 > &
@@ -139,6 +141,32 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	};
 
 	/**
+	 * Revoke the family a refused exchange registered, whose tokens were never
+	 * served. Never throws: a failure is one error line, and the refusal
+	 * stands. With a rotation and no revocation wired, the record stays
+	 * active; `oauthAuthorizationModule` warns of that at boot.
+	 */
+	const revokeRefusedFamily = async (
+		familyId: string,
+		at: { readonly sid: string; readonly clientId: string },
+	): Promise<void> => {
+		if (!deps.refreshTokenFamilyRotation || !deps.refreshTokenFamilyRevocation) return;
+		try {
+			await deps.refreshTokenFamilyRevocation.revokeFamily(familyId);
+		} catch (err) {
+			logger?.error(
+				{
+					sid: at.sid,
+					clientId: auditErrorText(at.clientId),
+					familyId,
+					err: loggableError(err),
+				},
+				"authorization_grant_refused_family_revocation_failed",
+			);
+		}
+	};
+
+	/**
 	 * The first read's answer when it does not admit: a code with no `sid`
 	 * while a store is wired is refused naming the login wiring; a record
 	 * gone, past its expiry or without a subject, and a session established
@@ -168,12 +196,29 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	};
 
 	/**
+	 * The answer for a session that ended while the tokens were being issued:
+	 * `session_invalidated`, logged at warn (subject change or otherwise) with
+	 * the `sid` and the client for SIEM correlation with `cascadeLogout`'s
+	 * audit events, and never a code identifier (`CodeData` has no stable jti,
+	 * and the raw `code` is secret).
+	 */
+	const sessionInvalidated = (
+		at: { readonly sid: string; readonly clientId: string },
+		subjectChanged = false,
+	): GrantError => {
+		logger?.warn(
+			at,
+			subjectChanged
+				? "authorization_grant_rejected_session_subject_changed_during_token_issuance"
+				: "authorization_grant_rejected_session_invalidated_during_token_issuance",
+		);
+		return { status: 400, error: "invalid_grant", errorDescription: "session_invalidated" };
+	};
+
+	/**
 	 * The second read's answer when it does not admit: a session that went
 	 * away, expired, was revoked or changed its subject since the first read
-	 * is `session_invalidated`, logged at warn (subject change or otherwise)
-	 * with the `sid` and the client for SIEM correlation with `cascadeLogout`'s
-	 * audit events, and never a code identifier (`CodeData` has no stable jti,
-	 * and the raw `code` is secret). A requirement's verdict or an outage is
+	 * is {@link sessionInvalidated}. A requirement's verdict or an outage is
 	 * answered as on the first read.
 	 */
 	const revalidationRefusal = (
@@ -185,13 +230,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			case "revoked":
 			case "unauthenticated":
 			case "admitted":
-				logger?.warn(
+				return sessionInvalidated(
 					at,
-					admission.outcome === "not_live" && admission.reason === "subject_mismatch"
-						? "authorization_grant_rejected_session_subject_changed_during_token_issuance"
-						: "authorization_grant_rejected_session_invalidated_during_token_issuance",
+					admission.outcome === "not_live" && admission.reason === "subject_mismatch",
 				);
-				return { status: 400, error: "invalid_grant", errorDescription: "session_invalidated" };
 			default:
 				return requirementOrOutageRefusal(admission);
 		}
@@ -644,12 +686,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				try {
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
 
-					// The second read, right before mutating the family index: a
-					// `cascadeLogout` since the first read (spanning both signings, the
-					// family registration and `findById`) would orphan the new tokens
-					// from logout. This narrows the window; it does not close the gap
-					// between this check and `addFamilyId`, which needs an atomic
-					// check-and-add.
+					// The second read, right before the family is added: a session
+					// ended since the first read (spanning both signings, the family
+					// registration and `findById`) is refused here. A logout between
+					// this read and the add is caught by the add itself (below).
 					//
 					// The claim carries the first read's `sub`: the tokens were signed
 					// from it and the id_token is minted from this read, so a different
@@ -679,7 +719,26 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// two are too. `?.` would silently no-op on a misconfigured root.
 					linking = "session_family_index";
 					// biome-ignore lint/style/noNonNullAssertion: intentional — see invariant comment above
-					await deps.sessionFamilyIndex!.addFamilyId(sid, familyId, userSession.expiresAt);
+					const familyIndex = deps.sessionFamilyIndex!;
+					// With the session-end capability, either the logout's listing
+					// includes this family or the add answers "ended"; no token is
+					// served for a family a logout could miss. Without it, the add is
+					// unguarded; `oauthAuthorizationModule` warns of that at boot.
+					if (supportsSessionEnd(familyIndex)) {
+						const added = await familyIndex.addFamilyIdUnlessEnded(
+							sid,
+							familyId,
+							userSession.expiresAt,
+						);
+						if (added === "ended") {
+							const at = { sid, clientId: authenticatedClientId };
+							const refusal = sessionInvalidated(at);
+							await revokeRefusedFamily(familyId, at);
+							return { result: refusal };
+						}
+					} else {
+						await familyIndex.addFamilyId(sid, familyId, userSession.expiresAt);
+					}
 					linking = "session_rp_registry";
 					// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
 					await deps.sessionRPRegistry!.registerRP(

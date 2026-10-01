@@ -1043,12 +1043,6 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: "a cookie-session store factory's create, handed its storage settings: no session record",
 	},
-	{
-		file: "templates/standalone/src/modules.mts",
-		read: "...slice",
-		count: 1,
-		why: "an adapter factory's create, handed its configuration slice: no session record",
-	},
 	// The declarations a pinned spread, or a local handed whole to what takes
 	// an amr, is followed to.
 	{
@@ -1092,18 +1086,6 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		read: "storageSlice=section.storageas{type:string}&Record<string,unknown>",
 		count: 1,
 		why: "the cookie-session storage settings, the base of a pinned spread into a store factory's create",
-	},
-	{
-		file: "templates/standalone/src/modules.mts",
-		read: "slice=flattenAdapterConfig((configasAppConfig).repositories.clientas{type:string}&Record<string,unknown>)",
-		count: 1,
-		why: "the client repository's adapter settings, handed whole to its factory's create",
-	},
-	{
-		file: "templates/standalone/src/modules.mts",
-		read: "slice=flattenAdapterConfig((configasAppConfig).repositories.codeas{type:string}&Record<string,unknown>)",
-		count: 1,
-		why: "the code repository's adapter settings, the base of a pinned spread into its factory's create",
 	},
 	{
 		file: "packages/redis/src/mfa-factor-store.mts",

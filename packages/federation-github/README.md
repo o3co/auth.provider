@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-github
 
-Last updated: 2026-09-26
+Last updated: 2026-10-01
 
 GitHub federation provider for `auth.provider`: sign-in with a GitHub account
 through a GitHub OAuth App, with upstream logout and claim mapping.
@@ -43,7 +43,7 @@ Add `githubFederationModule` to the manifest list passed to `createApp`. A small
 config-bootstrap module supplies the typed `githubFederationConfig` slot:
 
 ```ts
-import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
 import {
   extractFederationSection,
   sessionModule,
@@ -59,8 +59,8 @@ const githubConfigBridgeModule = defineModule({
   requires: ["config"] as const,
   provides: {
     githubFederationConfig: (deps): GithubProviderConfig => {
-      const slice = extractFederationSection(deps.config.federations, "github");
-      if (slice?.type !== "github") throw new Error("federations.github must be enabled, with type github");
+      const slice = extractFederationSection(federationsOf(deps.config), "github");
+      if (slice?.type !== "github") throw new Error("core.federations.github must be enabled, with type github");
       return {
         clientId: slice.clientId as string,
         clientSecret: slice.clientSecret as string,
@@ -89,7 +89,7 @@ const handle = await createApp({
 ```
 
 Single-tenant: `provider.name` is fixed at `"github"`, so the federation is
-`federations.github`, the identity handed to the Store is `github:<id>`, and a
+`core.federations.github`, the identity handed to the Store is `github:<id>`, and a
 deployment has one GitHub client. The config fields are
 [`GithubProviderConfig`](src/github.mts). The four redirect fields
 (`redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl`) follow the

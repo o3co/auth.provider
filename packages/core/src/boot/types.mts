@@ -1106,7 +1106,7 @@ export interface GrantPolicyWithoutIssuerDetails {
 }
 
 /**
- * When `config.federations.<name>.enabled` is true, all six federation slots
+ * When `core.federations.<name>.enabled` is true, all six federation slots
  * must be wired: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
  * sessionFederationIndex, federationTokenStore and
  * refreshTokenFamilyRevocation (matching the route-level gating in
