@@ -561,7 +561,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 フロー: `id_token_hint` を検証 → `post_logout_redirect_uri` をクライアントのリストと照合 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
 
-- 使える `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（[クライアントレコードのログアウトメタデータ](#クライアントレコードのログアウトメタデータ)を参照。q 値付きネゴシエーションで `Accept: text/html` が勝った場合）。`post_logout_redirect_uri` が一致したときは、続いてブラウザーを `state` 付きでそこへ送るスクリプトを含む（下の `303` と同じ）
+- `http`/`https` の `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（[クライアントレコードのログアウトメタデータ](#クライアントレコードのログアウトメタデータ)を参照。q 値付きネゴシエーションで `Accept: text/html` が勝った場合）。`post_logout_redirect_uri` が一致したときは、続いてブラウザーを `state` 付きでそこへ送るスクリプトを含む（下の `303` と同じ）
 - 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
@@ -609,7 +609,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 
 - `postLogoutRedirectUris` — `post_logout_redirect_uri` のアローリスト。**`allowedRedirectUris` と同じ文法**で検証される（#498）: `https:`、ループバックホストの `http:`、または RFC 8252 §7.1 の逆ドメイン形式のカスタムスキーム（`com.example.app:/signout`）で、フラグメント・userinfo・実行可能スキームは決して許さない。クエリにも同じ規則がかかる: 名前は `[A-Za-z0-9_-]` だけ、どのパラメーターにも名前があり、`;` を含まず、認可レスポンスの名前（`code`、`state`、`iss`、`error`、`error_description`。大文字小文字と `_`・`-` を無視する）を使わない — ログアウトは自分で `state` を付け加える。カスタムスキームを登録できることが、ネイティブアプリをログアウト後に JSON ボディに着地させずにアプリ自身へ戻せる条件になる。
 - `backchannelLogoutUri` — `logout_token` の POST を受け取る。**`http`/`https` のみ** — このサーバー自身が POST するので、カスタムスキームには届けられない。
-- `frontchannelLogoutUri` — iframe の src。**`http`/`https` のみ** — ブラウザーはこの値をドキュメントのコンテキストで解決し、そこではカスタムスキームはよくて無効、悪ければ RP が頼んでもいないハンドラーの起動になる。カスタムの `ClientRepository` は `ClientEntrySchema` を通らないため、この値は使われる場所でも core の `checkRedirectUri` で確かめる。ログアウト用に RP を登録するコード交換と、フロントチャネルのページの 2 か所である。このチェックが拒む値、文字列でない値、読み取りが失敗する値は使わず（RP はその URI なしで登録され、iframe も出ない）、`logout_frontchannel_uri_refused` として warn で 1 回、`site`・`clientId`・`reason` とともに記録する（URI は記録しない）。トークン交換もログアウトもこれでは失敗しない。フロントチャネルログアウトはベストエフォートである。
+- `frontchannelLogoutUri` — iframe の src。**`http`/`https` のみ** — ブラウザーはこの値をドキュメントのコンテキストで解決し、そこではカスタムスキームはよくて無効、悪ければ RP が頼んでもいないハンドラーの起動になる。カスタムの `ClientRepository` は `ClientEntrySchema` を通らないため、同じ規則（パースしたプロトコルが `http:` か `https:`。ホストは問わない）を、値が使われる場所でも適用する。ログアウト用に RP を登録するコード交換、ログアウトのルート、フロントチャネルのページの 3 か所である。規則に合わない値、文字列でない値、読み取りが失敗する値は使わない。RP はその URI なしで登録されて iframe も出ず、残る RP がなければ、ログアウトはフロントチャネルログアウトがないときと同じ応答を返す。それぞれ `logout_frontchannel_uri_refused` として warn で 1 回、`site`・`clientId`・`reason` とともに記録する（URI は記録しない）。トークン交換もログアウトもこれでは失敗しない。フロントチャネルログアウトはベストエフォートである。
 - `backchannelLogoutSessionRequired` / `frontchannelLogoutSessionRequired` — 既定 `true`。`false` にすると `logout_token` / iframe URL から `sid` を除く。
 
 ## フェデレーショントークンエンドポイント
