@@ -158,7 +158,10 @@ export function runMfaTransactionStoreContract(
 	/** The operator reset of `subject`, authorized and applied under its lease: its lock state ends whole. */
 	async function resetSubject(store: MfaTransactionStore, subject: string): Promise<void> {
 		resets += 1;
-		const lease = await store.acquireSubjectLease(subject, { ttlMs: 60_000 });
+		const lease = await store.acquireSubjectLease(subject, {
+			ttlMs: 60_000,
+			generation: await store.subjectGeneration(subject),
+		});
 		if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
 		await store.authorizeSubjectRecovery(subject, {
 			operation: "reset",
@@ -1638,7 +1641,10 @@ export function runMfaTransactionStoreContract(
 			const SKEW = DEFAULT_CLOCK_SKEW_MS;
 
 			async function leased(store: MfaTransactionStore, subject = "user-1"): Promise<string> {
-				const answer = await store.acquireSubjectLease(subject, { ttlMs: 60_000 });
+				const answer = await store.acquireSubjectLease(subject, {
+					ttlMs: 60_000,
+					generation: await store.subjectGeneration(subject),
+				});
 				if (answer.outcome !== "acquired") throw new Error(`expected a lease: ${answer.outcome}`);
 				return answer.token;
 			}
@@ -1729,7 +1735,7 @@ export function runMfaTransactionStoreContract(
 			it("refuses an apply under a lease that lapsed on the store's clock", async () => {
 				const store = await factory();
 				await store.authorizeSubjectRecovery("user-1", authorization());
-				const answer = await store.acquireSubjectLease("user-1", { ttlMs: 1_000 });
+				const answer = await store.acquireSubjectLease("user-1", { ttlMs: 1_000, generation: 0 });
 				if (answer.outcome !== "acquired") throw new Error("expected a lease");
 				await expiry.passed((await expiry.now()) + 1_000);
 				expect(await recover(store, start(), { leaseToken: answer.token })).toMatchObject({
@@ -2553,12 +2559,9 @@ export function runMfaTransactionStoreContract(
 		const token = async (
 			store: MfaTransactionStore,
 			subject = "user-1",
-			generation?: number,
+			generation = 0,
 		): Promise<string> => {
-			const answer = await store.acquireSubjectLease(subject, {
-				ttlMs: TTL,
-				...(generation === undefined ? {} : { generation }),
-			});
+			const answer = await store.acquireSubjectLease(subject, { ttlMs: TTL, generation });
 			if (answer.outcome !== "acquired") throw new Error(`expected a lease: ${answer.outcome}`);
 			return answer.token;
 		};
@@ -2573,13 +2576,15 @@ export function runMfaTransactionStoreContract(
 			const held = await token(store);
 			expect(held).toEqual(expect.any(String));
 			expect(held.length).toBeGreaterThan(0);
-			const busy = await store.acquireSubjectLease("user-1", { ttlMs: TTL });
+			const busy = await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 });
 			expect(busy.outcome).toBe("busy");
 			if (busy.outcome !== "busy") return;
 			expect(busy.retryAfterMs).toBeGreaterThan(0);
 			expect(busy.retryAfterMs).toBeLessThanOrEqual(TTL);
 			expect(await store.releaseSubjectLease("user-1", `${held}x`)).toBe(false);
-			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe("busy");
+			expect(
+				(await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 })).outcome,
+			).toBe("busy");
 			expect(await store.releaseSubjectLease("user-1", held)).toBe(true);
 			expect(await store.releaseSubjectLease("user-1", held)).toBe(false);
 			const next = await token(store);
@@ -2589,7 +2594,9 @@ export function runMfaTransactionStoreContract(
 		it("gives the lease to exactly one of N acquires in flight", async () => {
 			const store = await factory();
 			const answers = await Promise.all(
-				Array.from({ length: 10 }, () => store.acquireSubjectLease("user-1", { ttlMs: TTL })),
+				Array.from({ length: 10 }, () =>
+					store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 }),
+				),
 			);
 			expect(answers.filter((a) => a.outcome === "acquired")).toHaveLength(1);
 			expect(answers.filter((a) => a.outcome === "busy")).toHaveLength(9);
@@ -2597,7 +2604,7 @@ export function runMfaTransactionStoreContract(
 
 		it("lets a lease lapse at its end on the store's clock: another acquires it, and the first holder's release answers false", async () => {
 			const store = await factory();
-			const answer = await store.acquireSubjectLease("user-1", { ttlMs: 1_000 });
+			const answer = await store.acquireSubjectLease("user-1", { ttlMs: 1_000, generation: 0 });
 			if (answer.outcome !== "acquired") throw new Error("expected a lease");
 			const after = await expiry.now();
 			await expiry.passed(after + 1_000);
@@ -2613,7 +2620,9 @@ export function runMfaTransactionStoreContract(
 			expect(await store.releaseSubjectLease("user-2", one)).toBe(false);
 			expect(await store.releaseSubjectLease("user-1", two)).toBe(false);
 			expect(await store.releaseSubjectLease("user-1", one)).toBe(true);
-			expect((await store.acquireSubjectLease("user-2", { ttlMs: TTL })).outcome).toBe("busy");
+			expect(
+				(await store.acquireSubjectLease("user-2", { ttlMs: TTL, generation: 0 })).outcome,
+			).toBe("busy");
 		});
 
 		it("acquires under the generation the caller captured, and answers stale under any other, holding nothing", async () => {
@@ -2632,15 +2641,19 @@ export function runMfaTransactionStoreContract(
 				outcome: "stale",
 			});
 			expect(await store.releaseSubjectLease("user-1", other)).toBe(true);
-			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe("acquired");
+			expect(
+				(await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 })).outcome,
+			).toBe("acquired");
 		});
 
 		it("refuses, with a RangeError, a lease it cannot give or a question it cannot answer, and holds nothing", async () => {
 			const store = await factory();
 			for (const [label, subject, request] of [
-				["an empty subject", "", { ttlMs: TTL }],
-				["a subject that is not a string", 7, { ttlMs: TTL }],
+				["an empty subject", "", { ttlMs: TTL, generation: 0 }],
+				["a subject that is not a string", 7, { ttlMs: TTL, generation: 0 }],
 				["no request", "user-1", undefined],
+				// A writer that names no generation would pass every recovery and reset.
+				["a request with no generation", "user-1", { ttlMs: TTL }],
 				["a lease shorter than MFA_SUBJECT_LEASE_MIN_MS", "user-1", { ttlMs: 999 }],
 				["a lease longer than MFA_SUBJECT_LEASE_MAX_MS", "user-1", { ttlMs: 600_001 }],
 				["a lease that is not whole", "user-1", { ttlMs: 1_000.5 }],
@@ -2667,7 +2680,9 @@ export function runMfaTransactionStoreContract(
 				).rejects.toThrow(RangeError);
 			}
 			await expect(store.subjectGeneration("" as never)).rejects.toThrow(RangeError);
-			expect((await store.acquireSubjectLease("user-1", { ttlMs: TTL })).outcome).toBe("acquired");
+			expect(
+				(await store.acquireSubjectLease("user-1", { ttlMs: TTL, generation: 0 })).outcome,
+			).toBe("acquired");
 		});
 	});
 

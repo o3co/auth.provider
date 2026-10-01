@@ -197,7 +197,10 @@ async function applied(
 	resets += 1;
 	const operation = application.operation ?? "reset";
 	const sid = operation === "reset" ? undefined : "sid-1";
-	const lease = await store.acquireSubjectLease(subject, { ttlMs: 60_000 });
+	const lease = await store.acquireSubjectLease(subject, {
+		ttlMs: 60_000,
+		generation: await store.subjectGeneration(subject),
+	});
 	if (lease.outcome !== "acquired") throw new Error(`expected a lease: ${lease.outcome}`);
 	try {
 		await store.authorizeSubjectRecovery(subject, {
@@ -1530,9 +1533,9 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		await first().set(keysOf(prefix).lease, "someone");
-		await expect(store.acquireSubjectLease("user-1", { ttlMs: 60_000 })).rejects.toThrow(
-			/lease script/,
-		);
+		await expect(
+			store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 }),
+		).rejects.toThrow(/lease script/);
 	});
 
 	it("ends at a reset a lock state the scripts cannot read", async () => {

@@ -259,15 +259,19 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 	it("counts subject leases against its cap beside its other entries: at the cap a new lease is refused as a store fault, holding nothing", async () => {
 		const store = createMemoryMfaTransactionStore({ now: () => T0, maxEntries: 2 });
 		await store.create(TX("tx-1"));
-		const held = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
+		const held = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
 		expect(held.outcome).toBe("acquired");
 		expect(store.subjectLeases).toBe(1);
-		const refusal = await refusalOf(store.acquireSubjectLease("user-2", { ttlMs: 60_000 }));
+		const refusal = await refusalOf(
+			store.acquireSubjectLease("user-2", { ttlMs: 60_000, generation: 0 }),
+		);
 		expect(refusal).toBeInstanceOf(MfaTransactionStoreFullError);
 		expect(store.subjectLeases).toBe(1);
 		expect(await refusalOf(store.create(TX("tx-2")))).toBeInstanceOf(MfaTransactionStoreFullError);
 		// Asked again while it stands, the held lease is busy, not refused.
-		expect((await store.acquireSubjectLease("user-1", { ttlMs: 60_000 })).outcome).toBe("busy");
+		expect(
+			(await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 })).outcome,
+		).toBe("busy");
 	});
 
 	it("reclaims a lapsed lease before it refuses, and takes a subject's next lease in its place", async () => {
@@ -277,16 +281,16 @@ describe("createMemoryMfaTransactionStore — a cap on the transactions it holds
 			maxEntries: 2,
 			minSweepIntervalMs: 0,
 		});
-		await store.acquireSubjectLease("user-short", { ttlMs: 1_000 });
+		await store.acquireSubjectLease("user-short", { ttlMs: 1_000, generation: 0 });
 		await store.create(TX("long"));
 		now = T0 + 2_000;
-		expect((await store.acquireSubjectLease("user-short", { ttlMs: 1_000 })).outcome).toBe(
-			"acquired",
-		);
+		expect(
+			(await store.acquireSubjectLease("user-short", { ttlMs: 1_000, generation: 0 })).outcome,
+		).toBe("acquired");
 		now = T0 + 4_000;
-		expect((await store.acquireSubjectLease("user-next", { ttlMs: 60_000 })).outcome).toBe(
-			"acquired",
-		);
+		expect(
+			(await store.acquireSubjectLease("user-next", { ttlMs: 60_000, generation: 0 })).outcome,
+		).toBe("acquired");
 		expect(store.subjectLeases).toBe(1);
 		expect(store.transactions).toBe(1);
 	});

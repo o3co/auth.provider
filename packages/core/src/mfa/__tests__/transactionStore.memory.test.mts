@@ -190,7 +190,7 @@ describe("the in-process MfaTransactionStore", () => {
 		const failed = await store.reserveSubjectAttempt("user-1", T0, POLICY);
 		if (failed.ok) await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
 		expect(store.subjects).toBe(1);
-		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000 });
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
 		if (lease.outcome !== "acquired") throw new Error("expected a lease");
 		await store.authorizeSubjectRecovery("user-1", {
 			operation: "reset",
