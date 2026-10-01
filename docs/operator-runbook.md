@@ -806,8 +806,11 @@ wires it.
   `mfa.email_address_mismatch` when it refuses the factor for it. A user with
   no other factor needs a recovery code or an operator reset. The stale
   record stays — listed, refused at each challenge, and counted toward
-  `mfa.maxFactorsPerSubject` — until it is removed: factor management and the
-  reset are step 12's. Changing the
+  `mfa.maxFactorsPerSubject` — until it is removed: the account page's list
+  says `address_changed` and the user removes it
+  (`POST /session/mfa/factors/remove`), or an operator resets the subject
+  (step 12). A session begun before the address changed lists, and mails a
+  step-up's code, against the old address until the user signs in again. Changing the
   address is the Store's: ask for recent authentication, and tell the old
   address. **The Store must hold one mailbox per account**: the provider
   reads the address as one addr-spec alone, and an account whose address is
@@ -849,7 +852,8 @@ wires it.
   recovery code of a user whose counting factor is gone binds the first
   factor, by `password`, at the login the code reopens. The owner keeps
   their remaining codes and still signs in with them; the factor stands
-  until the owner removes it (step 12) or an operator does. The trail is
+  until the owner removes it (`POST /session/mfa/factors/remove`) or an
+  operator does. The trail is
   `mfa.recovery_code.used`, then `mfa.factor.enrolled {purpose: "login",
   binding: "password"}`, then `mfa.recovery_codes.generated {regenerated:
   true, binding: "password", kept: "password_binding"}`; a Store that keeps
@@ -1215,6 +1219,7 @@ stream — its level is fixed at `info`.
 | `session_admission_subject_mismatch` (warn — `action`) + audit `session.admission.subject_mismatch` (`sid`, `carrier`, `claimedSubject`, `recordSubject`) | `core/src/session-admission/live-session.mts` | a claim named a subject that is not the live record's — a cookie, a link transaction, a token or a code's second read against a session the record says belongs to someone else. Answered `not_live`; the identifiers are in the audit event alone. Sustained, with `carrier: "cookie"`, a login of the deployment's own writes the cookie session's `user.id` and `sid` from different sources: the cookie and the store disagree about who is signed in |
 | `session_admission_no_subject` (warn — `action`) | `core/src/session-admission/live-session.mts` | a cookie session says it is authenticated and names no user: not a session this provider wrote. Answered `not_live`, nothing read, nothing audited |
 | `mfa_enrollment_witness_unwritten` (warn — `sub`, the error's projection) | `mfa/src/routes.mts` | the Store could not write the enrollment witness after a counting factor was bound or verified: the login completed, and the next verification of a counting factor where the login's `User` does not say it enrolled — at a login, or a step-up — marks it again. Sustained, the Store's endpoint at `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` is failing, and a lost factor store would read those accounts as never enrolled |
+| `mfa_enrollment_witness_uncleared` (warn — `sub`, the error's projection) | `mfa/src/management.mts` | a removal from the account page left the subject no factor record that may count, and the Store could not clear the enrollment witness (`markMfaEnrolled(subject, false)`): the removal stands, and the witness still says enrolled beside no counting record, so the subject's next password login is `503` with `mfa.enrollment_state_inconsistent`. Clear the flag in the Store for that subject; sustained, the endpoint at `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` is failing |
 | `mfa_first_binding_unnoted` (warn — `sub`, `store`, `step: "noteFirstBinding"`, the error's projection) | `mfa/src/routes.mts` | a verification of a counting factor, for a login whose `User` does not say it enrolled, could not note the subject's first-binding mark in the MFA transaction store, so it left the enrollment witness unmarked: a witness marked without the mark would leave the sessions signed in before it trusted. The login completed, and the next such verification notes the mark and marks the witness. Sustained, the transaction store is failing or full (a memory store at its cap: `MfaTransactionStoreFullError` in the error's projection) |
 | `mfa_login_revoked` (info — `sub`, `route`) | `mfa/src/routes.mts` | a call on a login's MFA transaction whose sign-in is at or before the subject's sessions boundary (a revocation or a password change since the login began): answered `401 login_required`, nothing spent. Expected after a password change; a burst for one subject is someone holding an old login open |
 | `mfa_first_binding_distrusted` (info — `sub`, and `route`, or `action` from a session's admission) | `mfa/src/routes.mts`, `mfa/src/requirement.mts` | a first binding refused by the subject's first-binding mark: its sign-in is no later than a mark noted within `DEFAULT_CLOCK_SKEW_MS` before it (the re-login wait, under "The first binding"). The user signs in again after the `Retry-After`; repeated for one subject, its factors vanish right after binding — look for `mfa_store_unavailable` around the mark |
@@ -1389,7 +1394,8 @@ emits `mfa.enrollment_state_inconsistent` (`witness`; `purpose` `login`, or
 `session` with the admitted `action`), and so do the routes for a recovery
 code that would reopen a login for a first binding (`purpose: "login"`).
 `mfa.verified` for a recovery code that reopens a login for a binding
-carries `reopened: true`. The rest are declared ahead
+carries `reopened: true`. `mfa.factor.removed` (`kind`, `binding`,
+`by: "user"`) is a removal from the account page. The rest are declared ahead
 of the build steps that emit them. `sign_count_regression` is
 the WebAuthn factor's clone event, and names the factor's record id as
 `factorId` — see

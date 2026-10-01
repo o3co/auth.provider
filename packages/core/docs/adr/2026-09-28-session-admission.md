@@ -263,6 +263,8 @@ Core exports the bundled actions as a closed union, `ADMISSION_ACTIONS`, each wi
 
 **Amended 2026-09-30 (#733): actions are a contributed vocabulary.** Each consumer registers the actions it admits (`admissionActions`), each with one of core's grades, and passes the name; core keeps the closed list of grades — adding `grants_nothing`, which the device grant declares for `device.lookup` and `device.deny` and the MFA requirement meets on any live session a record carries — a token is judged on its own `amr` whatever the grade — in place of D6's refinement by name — and names no consumer's action: `ADMISSION_ACTIONS` leaves core, and a name nothing registers is refused — where a consumer is built, or at the call. An action's grade is its registrant's: an override is refused, and boot says each action's grade and module.
 
+**Amended 2026-10-01 (the MFA ADR's build-order step 12): the MFA package's list of a subject's factors is `mfa.view`, graded `use`;** `mfa.manage` admits an enrollment, a rename, a removal and a regeneration from the account page.
+
 ### D5 — Establishment: `admitPrimary`, the interruption, and the capability to establish
 
 `POST /session/login` reaches a point where the user is verified and nothing has been written. There it calls `admitPrimary(deps, primary)`:
