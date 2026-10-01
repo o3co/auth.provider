@@ -572,7 +572,8 @@ describe("the composition's family index", () => {
 		const { handle, expiresAt, exchange, lines, revocationLines } = await boot();
 		try {
 			const index = handle.components.sessionFamilyIndex;
-			if (!supportsSessionEnd(index)) throw new Error("the memory index has the capability");
+			if (!supportsSessionEnd(index))
+				throw new Error("the memory index lacks the session-end capability");
 			await index.endSession(SID, expiresAt);
 
 			expectSessionInvalidated(await exchange());
@@ -616,7 +617,8 @@ describe("the composition's family index", () => {
 				[{ slot: "refreshTokenFamilyRevocation", grant: "authorization_code" }, NO_REVOCATION_LINE],
 			]);
 			const index = handle.components.sessionFamilyIndex;
-			if (!supportsSessionEnd(index)) throw new Error("the memory index has the capability");
+			if (!supportsSessionEnd(index))
+				throw new Error("the memory index lacks the session-end capability");
 			await index.endSession(SID, expiresAt);
 
 			expectSessionInvalidated(await exchange());
