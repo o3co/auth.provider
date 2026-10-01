@@ -34,7 +34,8 @@
  *
  * Whether a binding is a first one is read over the subject's records with
  * admission's presumption (`mayCount`): a record counts unless an installed
- * factor of its kind declares it does not.
+ * factor of its kind declares it does not. The same reading names the
+ * binding a login reopens after a non-counting proof (`reopenedEnrollment`).
  */
 
 import type { MailAddressFact, MfaFactorRecord, MfaFactorResolver } from "@o3co/auth-provider-core";
@@ -52,6 +53,35 @@ export const mayCount = (
 	factors: MfaFactorResolver,
 	record: Pick<MfaFactorRecord, "kind">,
 ): boolean => factors.get(record.kind)?.counting !== false;
+
+/**
+ * The enrollment a login reopens for once a non-counting proof left its
+ * subject no counting factor it can use: `allowed`, a binding beside a
+ * record that may count (one whose data does not open, a kind no longer
+ * installed); else `required`, a first binding.
+ */
+export const reopenedEnrollment = (
+	factors: MfaFactorResolver,
+	records: readonly Pick<MfaFactorRecord, "kind">[],
+): "allowed" | "required" =>
+	records.some((record) => mayCount(factors, record)) ? "allowed" : "required";
+
+/**
+ * The counting factors `user` may enroll, in registration order: what a
+ * reopened binding offers. A factor whose `enrollable` throws offers nothing.
+ */
+export const enrollableKinds = (
+	factors: MfaFactorResolver,
+	user: Readonly<Record<string, unknown>>,
+): string[] =>
+	[...factors.entries()].flatMap(([kind, factor]) => {
+		if (!factor.counting) return [];
+		try {
+			return (factor.enrollable?.(user) ?? true) ? [kind] : [];
+		} catch {
+			return [];
+		}
+	});
 
 /** `mfa.enrollment.requireEmailProof`. */
 export const REQUIRE_EMAIL_PROOF = ["when-mail", "always", "never"] as const;

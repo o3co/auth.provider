@@ -50,6 +50,10 @@
  *   on a transaction that owes it; a first binding is `enrollment.mts`'s.
  *   Both are handed the coordinator's reads and writes as the kit; what the
  *   three share is `ceremony.mts`'s contract.
+ * - Under `required`, a verified factor that does not count, for a subject
+ *   with no counting factor it can use, completes no login: once the
+ *   transaction is consumed and the proof spent, the login is reopened for a
+ *   binding (`reopen.mts`), settled before anything is spent.
  * - A verified counting factor marks the enrollment witness of a login whose
  *   `User` does not carry it (D12); a mark that fails never fails the login.
  * - A factor is handed its records opened and digests under the ring; it
@@ -103,14 +107,16 @@ import {
 	type UnknownTransaction,
 } from "./ceremony.mjs";
 import { createMfaEnrollment } from "./enrollment.mjs";
+import type { RequireEmailProof } from "./firstBinding.mjs";
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
 import { keptState, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import { recoveryCodesLeft } from "./recovery/factor.mjs";
+import { createLoginReopen } from "./reopen.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import { createMfaStepUp } from "./stepUp.mjs";
-import { openEnrollTransaction } from "./transactions.mjs";
+import { openEnrollTransaction, openLoginBinding } from "./transactions.mjs";
 import { type MfaEnrollmentWitness, reconciles } from "./witness.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */
@@ -184,6 +190,8 @@ export interface MfaCoordinatorOptions {
 	readonly transactionTtlSeconds: number;
 	/** `mfa.maxFactorsPerSubject`. */
 	readonly maxFactorsPerSubject: number;
+	/** `mfa.enrollment.requireEmailProof`: the gate of a login reopened for a first binding. */
+	readonly requireEmailProof: RequireEmailProof;
 	/** `mfa.manage.maxAgeSeconds`: how long the account-email proof given in a session stands. */
 	readonly sessionProofSeconds: number;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
@@ -215,6 +223,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		witness,
 		transactionTtlSeconds,
 		maxFactorsPerSubject,
+		requireEmailProof,
 		sessionProofSeconds,
 	} = options;
 	const now = options.now ?? (() => Date.now());
@@ -450,6 +459,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		witness,
 		now,
 		maxFactorsPerSubject,
+		requireEmailProof,
 		bound,
 		openEnrollment: async (call, session, shape) => {
 			try {
@@ -459,6 +469,22 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					subject: session.subject,
 					enrollment: shape.enrollment,
 					emailProof: shape.emailProof,
+					nowMs: now(),
+					ttlSeconds: transactionTtlSeconds,
+				});
+			} catch (cause) {
+				return outage("mfa_transaction", "create", cause);
+			}
+		},
+		openLoginBinding: async (sessionId, continuation, shape) => {
+			try {
+				if (continuation === undefined) {
+					throw new TypeError("the login's transaction carries no continuation");
+				}
+				return await openLoginBinding(transactions, {
+					sessionId,
+					continuation,
+					...shape,
 					nowMs: now(),
 					ttlSeconds: transactionTtlSeconds,
 				});
@@ -533,6 +559,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	const enrollment = createMfaEnrollment(kit);
 	const proof = createAccountEmailProof(kit);
 	const stepUp = createMfaStepUp(kit);
+	const reopen = createLoginReopen(kit);
 
 	return {
 		async describe(call) {
@@ -856,9 +883,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				settled = "void";
 
 				// F3: under `required`, a factor that does not count completes no login
-				// for a subject left with no counting factor it can use.
-				if (mode === "required" && !factor.counting && !holdsUsableCounting(tx.subject, records)) {
-					return { outcome: "enrollment_required", ...about };
+				// for a subject left with no counting factor it can use; what the login
+				// reopens for is settled before anything is spent.
+				const reopening =
+					mode === "required" && !factor.counting && !holdsUsableCounting(tx.subject, records)
+						? await reopen.plan(tx, records)
+						: undefined;
+				if (reopening !== undefined && "outcome" in reopening) {
+					return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
 				}
 
 				// Consumed before the factor moves on: a lost race spends the
@@ -925,6 +957,20 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						const { reason, ...concerns } = checked;
 						return refused(reason, 0, concerns);
 					}
+				}
+
+				if (reopening !== undefined) {
+					const recoveryCodesRemaining = recoveryCodesLeft(factor, checked.next);
+					const answer = await reopen.open(consumed, reopening);
+					return "outcome" in answer
+						? { outcome: "binding_not_reopened", outage: answer, recoveryCodesRemaining, ...about }
+						: {
+								outcome: "binding_reopened",
+								answer,
+								unprovable: reopening.unprovable,
+								recoveryCodesRemaining,
+								...about,
+							};
 				}
 
 				// D12: a counting factor verified for a login's `User` that does not

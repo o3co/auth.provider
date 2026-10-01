@@ -55,6 +55,13 @@
  *   begins an episode.
  * - A recovery code spent answers, and records as `mfa.recovery_code.used`,
  *   how many codes the set has left.
+ * - A verified proof that completes no login under `required` — it does not
+ *   count, and the subject has no counting factor it can use — answers the
+ *   login's own `403 mfa_enrollment_required`, naming the transaction
+ *   reopened for a binding; a proof that gate asks nobody can give is said at
+ *   warn, as at a login. A new transaction that cannot be opened is `503`, the
+ *   proof spent; a login's `User` that says the subject enrolled is `503`,
+ *   recorded as `mfa.enrollment_state_inconsistent`, nothing spent.
  */
 
 import {
@@ -104,10 +111,6 @@ const SESSION_STORE_UNAVAILABLE = errorEnvelope(
 	"Session store unavailable",
 );
 const LOGIN_REQUIRED = errorEnvelope("login_required", "Log in again");
-const ENROLLMENT_REQUIRED = errorEnvelope(
-	"mfa_enrollment_required",
-	"A second factor that counts must be enrolled",
-);
 const FACTOR_REFUSED = errorEnvelope(
 	"mfa_factor_refused",
 	"This second factor cannot be used: use another",
@@ -610,6 +613,36 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				factorId: body?.factor_id,
 				proof: body?.proof,
 			});
+			/** A verified proof's events: `mfa.verified`, and `mfa.recovery_code.used` for a recovery code spent. */
+			const verifiedEvents = (
+				verified: Extract<
+					MfaVerifyOutcome,
+					{ outcome: "verified" | "binding_reopened" | "binding_not_reopened" }
+				>,
+			): void => {
+				emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "mfa.verified",
+					subject: verified.subject,
+					ip: call.request.ip,
+					userAgent: call.request.userAgent,
+					details: { kind: verified.kind, purpose: verified.purpose },
+				});
+				if (verified.recoveryCodesRemaining !== undefined) {
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.recovery_code.used",
+						subject: verified.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: {
+							kind: verified.kind,
+							purpose: verified.purpose,
+							remaining: verified.recoveryCodesRemaining,
+						},
+					});
+				}
+			};
 			switch (outcome.outcome) {
 				case "unknown_transaction":
 				case "spent":
@@ -618,8 +651,34 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				case "unknown_factor":
 					res.status(400).json(UNKNOWN_FACTOR);
 					return;
-				case "enrollment_required":
-					res.status(403).json(ENROLLMENT_REQUIRED);
+				case "enrollment_state_inconsistent":
+					emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "mfa.enrollment_state_inconsistent",
+						subject: outcome.subject,
+						ip: call.request.ip,
+						userAgent: call.request.userAgent,
+						details: { purpose: outcome.purpose, witness: outcome.witness },
+					});
+					logger.error(
+						{ route: "verify", sub: outcome.subject, witness: outcome.witness },
+						"mfa_enrollment_state_inconsistent",
+					);
+					res.status(503).json(MFA_UNAVAILABLE);
+					return;
+				case "binding_reopened":
+					verifiedEvents(outcome);
+					if (outcome.unprovable !== undefined) {
+						logger.warn(
+							{ sub: outcome.subject, reason: outcome.unprovable },
+							"mfa_email_proof_unprovable",
+						);
+					}
+					res.status(outcome.answer.status).json(outcome.answer.body);
+					return;
+				case "binding_not_reopened":
+					verifiedEvents(outcome);
+					answerOutage("verify", res, outcome.outage);
 					return;
 				case "unavailable":
 				case "unreadable":
@@ -688,29 +747,8 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(200).json({ email_proof: "verified" });
 					return;
 				case "verified":
-					emitAuditEvent(auditSink, {
-						timestamp: new Date(),
-						type: "mfa.verified",
-						subject: outcome.subject,
-						ip: call.request.ip,
-						userAgent: call.request.userAgent,
-						details: { kind: outcome.kind, purpose: outcome.purpose },
-					});
+					verifiedEvents(outcome);
 					witnessUnwritten(outcome.subject, outcome.witness);
-					if (outcome.recoveryCodesRemaining !== undefined) {
-						emitAuditEvent(auditSink, {
-							timestamp: new Date(),
-							type: "mfa.recovery_code.used",
-							subject: outcome.subject,
-							ip: call.request.ip,
-							userAgent: call.request.userAgent,
-							details: {
-								kind: outcome.kind,
-								purpose: outcome.purpose,
-								remaining: outcome.recoveryCodesRemaining,
-							},
-						});
-					}
 					await completeLogin(
 						"verify",
 						req,
@@ -919,9 +957,16 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 								purpose: outcome.purpose,
 								binding: outcome.binding,
 								by: "user",
-								regenerated: false,
+								regenerated: codes.regenerated === true,
 							},
 						});
+						if (codes.unreplaced !== undefined) {
+							// The set it was to replace may still stand beside the new one.
+							logger.error(
+								{ sub: outcome.subject, err: loggableError(codes.unreplaced) },
+								"mfa_recovery_codes_unreplaced",
+							);
+						}
 					} else if (codes?.issued === false) {
 						logger.error(
 							{ sub: outcome.subject, err: loggableError(codes.cause) },

@@ -32,6 +32,11 @@
  * `expiresAtMs` is derived from `mfa.transactionTtlSeconds` and nothing else;
  * the store has no ceiling of its own. A store that cannot create one rejects,
  * answered as an outage.
+ *
+ * A login reopened for a binding after a non-counting proof is a new login
+ * transaction over the same continuation, bound to the same browser session,
+ * answered with the login's own `403`: `allowed` asks no proof, `required`
+ * the proof the gate asked.
  */
 
 import { randomBytes } from "node:crypto";
@@ -117,46 +122,109 @@ export function createLoginTransactions({
 			) {
 				throw new RangeError("a first binding's email_proof must be true or false");
 			}
-			const id = newTransactionId();
-			const createdAtMs = now();
 			const firstBinding = interruption.error === "mfa_enrollment_required";
-			const transaction: MfaTransaction = {
-				id,
-				purpose: "login",
-				binding: { kind: "session", id: sessionId },
-				subject: continuation.primary.subject,
-				sid: undefined,
+			const transaction = loginTransaction({
+				sessionId,
 				continuation,
-				redirectTo: continuation.primary.redirectTo,
 				enrollment: firstBinding ? "required" : "none",
-				emailProof: firstBinding && interruption.emailProof ? "required" : "not_required",
-				acrValues: undefined,
-				challenge: undefined,
-				pendingEnrollment: undefined,
-				attempts: 0,
-				createdAtMs,
-				expiresAtMs: createdAtMs + ttlSeconds * 1000,
-				version: 0,
-			};
+				emailProof: firstBinding && interruption.emailProof,
+				nowMs: now(),
+				ttlSeconds,
+			});
 			await store.create(transaction);
-			return {
-				status: 403,
-				body: {
-					error: interruption.error,
-					transaction: id,
-					expires_in: ttlSeconds,
-					...(interruption.error === "mfa_enrollment_required"
-						? {
-								hints: {
-									enrollable: [...interruption.enrollable],
-									email_proof: interruption.emailProof,
-								},
-							}
-						: {}),
-				},
-			};
+			return interruptionAnswer(transaction.id, ttlSeconds, interruption);
 		},
 	};
+}
+
+/** A new login transaction over `continuation`, bound to the session `sessionId` names. */
+const loginTransaction = (shape: {
+	readonly sessionId: string;
+	readonly continuation: PrimaryContinuation;
+	readonly enrollment: MfaTransaction["enrollment"];
+	readonly emailProof: boolean;
+	readonly nowMs: number;
+	readonly ttlSeconds: number;
+}): MfaTransaction => ({
+	id: newTransactionId(),
+	purpose: "login",
+	binding: { kind: "session", id: shape.sessionId },
+	subject: shape.continuation.primary.subject,
+	sid: undefined,
+	continuation: shape.continuation,
+	redirectTo: shape.continuation.primary.redirectTo,
+	enrollment: shape.enrollment,
+	emailProof: shape.emailProof ? "required" : "not_required",
+	acrValues: undefined,
+	challenge: undefined,
+	pendingEnrollment: undefined,
+	attempts: 0,
+	createdAtMs: shape.nowMs,
+	expiresAtMs: shape.nowMs + shape.ttlSeconds * 1000,
+	version: 0,
+});
+
+/** The login's closed `403` naming transaction `id`, living `ttlSeconds`. */
+const interruptionAnswer = (
+	id: string,
+	ttlSeconds: number,
+	interruption: LoginInterruption,
+): InterruptionAnswer => ({
+	status: 403,
+	body: {
+		error: interruption.error,
+		transaction: id,
+		expires_in: ttlSeconds,
+		...(interruption.error === "mfa_enrollment_required"
+			? {
+					hints: {
+						enrollable: [...interruption.enrollable],
+						email_proof: interruption.emailProof,
+					},
+				}
+			: {}),
+	},
+});
+
+/** What a login is reopened for after a non-counting proof. */
+export interface LoginBindingShape {
+	/** The express session id the login's transaction was bound to. */
+	readonly sessionId: string;
+	readonly continuation: PrimaryContinuation;
+	/** `allowed`: a binding beside a record that may count; `required`: a first binding. */
+	readonly enrollment: "allowed" | "required";
+	/** The counting factors the user may enroll: `hints.enrollable`. */
+	readonly enrollable: readonly string[];
+	/** Whether the account-email proof comes first: the gate's, for a first binding alone. */
+	readonly emailProof: boolean;
+	readonly nowMs: number;
+	/** `mfa.transactionTtlSeconds`. */
+	readonly ttlSeconds: number;
+}
+
+/**
+ * Creates the login transaction `shape` reopens in `store` and answers the
+ * login's `403 mfa_enrollment_required` naming it. A proof owed beside a
+ * record that may count is a `RangeError`, before anything is stored; a
+ * store that cannot keep it rejects.
+ */
+export async function openLoginBinding(
+	store: MfaTransactionStore,
+	shape: LoginBindingShape,
+): Promise<InterruptionAnswer> {
+	if (
+		typeof shape.emailProof !== "boolean" ||
+		(shape.enrollment === "allowed" && shape.emailProof)
+	) {
+		throw new RangeError("a binding beside a factor that may count owes no account-email proof");
+	}
+	const transaction = loginTransaction(shape);
+	await store.create(transaction);
+	return interruptionAnswer(transaction.id, shape.ttlSeconds, {
+		error: "mfa_enrollment_required",
+		enrollable: shape.enrollable,
+		emailProof: shape.emailProof,
+	});
 }
 
 /** What an `enroll` transaction is opened for. */
