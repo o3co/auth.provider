@@ -44,7 +44,13 @@ import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import {
+	ISSUER,
+	keyStore,
+	makeFamilyRevocation,
+	signSelfIssuedAccessToken,
+	tokensOf,
+} from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 /** A consumer-contributed token type, used to drive claims the built-in
@@ -65,6 +71,7 @@ const mockConfig = {
 
 const publicClient = (overrides: Partial<PublicClient> = {}): PublicClient => ({
 	clientId: "client-a",
+	tokenEndpointAuthMethod: "client_secret_basic",
 	allowedRedirectUris: [],
 	allowedScopes: ["read", "write"],
 	allowedAudiences: [],
@@ -157,9 +164,9 @@ describe("token exchange — client allowedScopes ceiling", () => {
 		const token = await signSelfIssuedAccessToken({ scope: "read admin", family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBe("read");
-		expect(decodeJwt(result.tokens.access_token).scope).toBe("read");
+		const tokens = tokensOf(result);
+		expect(tokens.scope).toBe("read");
+		expect(decodeJwt(tokens.access_token).scope).toBe("read");
 	});
 
 	it("grants no scope at all when the registration declares an empty allowedScopes", async () => {
@@ -169,8 +176,8 @@ describe("token exchange — client allowedScopes ceiling", () => {
 		const token = await signSelfIssuedAccessToken({ scope: "read", family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBeUndefined();
+		const tokens = tokensOf(result);
+		expect(tokens.scope).toBeUndefined();
 	});
 
 	it("refuses every explicit scope when the registration declares an empty allowedScopes", async () => {
@@ -212,8 +219,8 @@ describe("token exchange — client allowedScopes ceiling", () => {
 		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token, { scope: "read write" })));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBe("read write");
+		const tokens = tokensOf(result);
+		expect(tokens.scope).toBe("read write");
 	});
 });
 
@@ -244,9 +251,9 @@ describe("token exchange — may_act on the impersonation path", () => {
 		});
 		const { result } = await g.handle(ctx(exchangeBody(token)));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
+		const tokens = tokensOf(result);
 		// Impersonation: no actor token, so no `act` chain is recorded.
-		expect(decodeJwt(result.tokens.access_token).act).toBeUndefined();
+		expect(decodeJwt(tokens.access_token).act).toBeUndefined();
 	});
 
 	it("fails closed when the may_act entry also pins an iss the client cannot present", async () => {
@@ -346,11 +353,11 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" }, { expiresIn: "60s" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.expires_in).toBeLessThanOrEqual(60);
-		expect(result.tokens.expires_in).toBeGreaterThan(0);
+		const tokens = tokensOf(result);
+		expect(tokens.expires_in).toBeLessThanOrEqual(60);
+		expect(tokens.expires_in).toBeGreaterThan(0);
 		const subjectExp = decodeJwt(token).exp as number;
-		expect(decodeJwt(result.tokens.access_token).exp as number).toBeLessThanOrEqual(subjectExp);
+		expect(decodeJwt(tokens.access_token).exp as number).toBeLessThanOrEqual(subjectExp);
 	});
 
 	it("keeps the configured lifetime when the subject token outlives it", async () => {
@@ -358,8 +365,8 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" }, { expiresIn: "1h" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.expires_in).toBe(300);
+		const tokens = tokensOf(result);
+		expect(tokens.expires_in).toBe(300);
 	});
 
 	it("refuses a subject token that has already expired rather than minting a dead token", async () => {
@@ -430,10 +437,10 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 			);
 
 			expect(result.status).toBe(200);
-			if (result.status !== 200) return;
-			const claims = decodeJwt(result.tokens.access_token);
+			const tokens = tokensOf(result);
+			const claims = decodeJwt(tokens.access_token);
 			expect(claims.exp as number).toBeLessThanOrEqual(subjectExp);
-			expect((claims.exp as number) - (claims.iat as number)).toBe(result.tokens.expires_in);
+			expect((claims.exp as number) - (claims.iat as number)).toBe(tokens.expires_in);
 		});
 	});
 
@@ -450,8 +457,8 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 			}),
 		);
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.expires_in).toBe(300);
+		const tokens = tokensOf(result);
+		expect(tokens.expires_in).toBe(300);
 	});
 });
 
@@ -480,7 +487,7 @@ describe("token exchange — a request may ask for its lifetime with expires_in"
 
 	/** The response's `expires_in`, asserting it is the lifetime actually minted. */
 	function mintedLifetime(result: Awaited<ReturnType<typeof exchange>>["result"]): number {
-		if (result.status !== 200) throw new Error(`expected 200, got ${JSON.stringify(result)}`);
+		if (!("tokens" in result)) throw new Error(`expected 200, got ${JSON.stringify(result)}`);
 		const claims = decodeJwt(result.tokens.access_token);
 		expect((claims.exp as number) - (claims.iat as number)).toBe(result.tokens.expires_in);
 		return result.tokens.expires_in as number;
@@ -511,8 +518,8 @@ describe("token exchange — a request may ask for its lifetime with expires_in"
 		const lifetime = mintedLifetime(result);
 		expect(lifetime).toBeLessThanOrEqual(60);
 		expect(lifetime).toBeGreaterThan(0);
-		if (result.status !== 200) return;
-		expect(decodeJwt(result.tokens.access_token).exp as number).toBeLessThanOrEqual(
+		const tokens = tokensOf(result);
+		expect(decodeJwt(tokens.access_token).exp as number).toBeLessThanOrEqual(
 			decodeJwt(token).exp as number,
 		);
 	});
@@ -590,9 +597,9 @@ describe("token exchange — token_type matches the issued confirmation", () => 
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", cnf: { jkt: JKT } });
 		const { result } = await g.handle(ctx(exchangeBody(token), { tokenBinding: dpopBinding }));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(decodeJwt(result.tokens.access_token).cnf).toEqual({ jkt: JKT });
-		expect(result.tokens.token_type).toBe("DPoP");
+		const tokens = tokensOf(result);
+		expect(decodeJwt(tokens.access_token).cnf).toEqual({ jkt: JKT });
+		expect(tokens.token_type).toBe("DPoP");
 	});
 
 	it("advertises DPoP on the unbound-subject opt-in upgrade row too", async () => {
@@ -600,8 +607,8 @@ describe("token exchange — token_type matches the issued confirmation", () => 
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token), { tokenBinding: dpopBinding }));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.token_type).toBe("DPoP");
+		const tokens = tokensOf(result);
+		expect(tokens.token_type).toBe("DPoP");
 	});
 
 	it("keeps Bearer for an mTLS-bound issued token (RFC 8705 §3)", async () => {
@@ -612,9 +619,9 @@ describe("token exchange — token_type matches the issued confirmation", () => 
 		});
 		const { result } = await g.handle(ctx(exchangeBody(token), { tokenBinding: mtlsBinding }));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(decodeJwt(result.tokens.access_token).cnf).toEqual({ "x5t#S256": X5T });
-		expect(result.tokens.token_type).toBe("Bearer");
+		const tokens = tokensOf(result);
+		expect(decodeJwt(tokens.access_token).cnf).toEqual({ "x5t#S256": X5T });
+		expect(tokens.token_type).toBe("Bearer");
 	});
 
 	it("keeps Bearer when the issued token is unbound", async () => {
@@ -622,7 +629,7 @@ describe("token exchange — token_type matches the issued confirmation", () => 
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.token_type).toBe("Bearer");
+		const tokens = tokensOf(result);
+		expect(tokens.token_type).toBe("Bearer");
 	});
 });

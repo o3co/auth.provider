@@ -9,6 +9,13 @@ export default defineConfig({
 		...WORKSPACE_TEST_SETUP,
 		include: ["src/**/__tests__/**/*.test.mts"],
 		passWithNoTests: true,
+		// A `@ts-expect-error` or `satisfies` in a test fires only under
+		// typecheck; tsconfig.test.json is the program it compiles.
+		typecheck: {
+			enabled: true,
+			include: ["src/**/__tests__/**/*.test.mts"],
+			tsconfig: "./tsconfig.test.json",
+		},
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "json", "json-summary"],

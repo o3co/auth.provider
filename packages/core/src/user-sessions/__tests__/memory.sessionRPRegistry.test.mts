@@ -13,7 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { describe } from "vitest";
 import { createInMemorySessionRPRegistry } from "../memory/sessionRPRegistry.mjs";
 import { runSessionRPRegistryContract } from "./sessionRPRegistry.contract.mjs";
 
-runSessionRPRegistryContract(async () => createInMemorySessionRPRegistry());
+describe("the memory session RP registry", () => {
+	runSessionRPRegistryContract(async () => createInMemorySessionRPRegistry());
+});

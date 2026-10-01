@@ -28,9 +28,11 @@
  * ECDSA P-256 unless a test asks otherwise: RSA key generation is slow.
  */
 
-import { X509Certificate } from "node:crypto";
+import { type webcrypto, X509Certificate } from "node:crypto";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
+
+type CryptoKeyPair = webcrypto.CryptoKeyPair;
 
 /** OIDs used by the shapes these tests mint. */
 const OID = {
@@ -809,7 +811,7 @@ export const mintOcspResponse = async (options: MintOcspResponseOptions): Promis
 		? new asn1js.OctetString({
 				valueHex: await crypto.digest(
 					{ name: "SHA-1" },
-					signer.cert.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView,
+					new Uint8Array(signer.cert.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView),
 				),
 			})
 		: signer.cert.subject;

@@ -52,6 +52,12 @@ import {
 	ocspAia,
 } from "./pkiFactory.mjs";
 
+/** What `new Response` takes as its body. */
+type ResponseBody = ConstructorParameters<typeof Response>[0];
+
+/** What `fetch` takes as its first argument. */
+type FetchInput = Parameters<typeof fetch>[0];
+
 const NOW = new Date("2027-01-01T00:00:00Z");
 const INT_CRL_URL = "http://crl.test/int.crl";
 const ROOT_CRL_URL = "http://crl.test/root.crl";
@@ -75,16 +81,16 @@ type Answer = Uint8Array | ((init: RequestInit | undefined) => Promise<Response>
 
 /** A platform `fetch` answering from a table; anything else is a 404. */
 const tableFetch = (table: Record<string, Answer>) =>
-	(async (input: URL | RequestInfo, init?: RequestInit) => {
+	(async (input: FetchInput, init?: RequestInit) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 		const entry = table[url];
 		if (entry === undefined) return new Response(null, { status: 404 });
 		if (typeof entry === "function") return entry(init);
-		return new Response(entry as unknown as BodyInit, { status: 200 });
+		return new Response(entry as unknown as ResponseBody, { status: 200 });
 	}) as unknown as typeof globalThis.fetch;
 
 const ocspResponse = (bytes: Uint8Array): Response =>
-	new Response(bytes as unknown as BodyInit, {
+	new Response(bytes as unknown as ResponseBody, {
 		status: 200,
 		headers: { "content-type": "application/ocsp-response" },
 	});
@@ -434,8 +440,8 @@ describe("createMtlsMechanism — the refusal line carries the projection", () =
 		// intermediate's, for the leaf, carries a signature value WebCrypto
 		// cannot read — a verdict on the list (`bad_signature`), not an
 		// outage, so the mechanism logs its refusal.
-		let rootCrl = new Uint8Array();
-		let intCrl = new Uint8Array();
+		let rootCrl: Uint8Array = new Uint8Array();
+		let intCrl: Uint8Array = new Uint8Array();
 		const origin = await serve((req, res) => {
 			res.writeHead(200, { "content-type": "application/pkix-crl" });
 			res.end(Buffer.from(req.url === "/int.crl" ? intCrl : rootCrl));

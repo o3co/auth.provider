@@ -39,11 +39,12 @@ import {
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import { clientEntries, GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const ISSUER = "https://auth.example";
@@ -61,11 +62,12 @@ const fullConfig = {
 } as unknown as AppConfig;
 
 const codeRepoStub: CodeRepository = {
-	createCode: async () => ({
-		code: "code-x",
-		client_id: TEST_CLIENT_ID,
-		redirect_uri: "",
-	}),
+	createCode: async () =>
+		codeRecord({
+			code: "code-x",
+			client_id: TEST_CLIENT_ID,
+			redirect_uri: "",
+		}),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
@@ -142,7 +144,7 @@ function makeInMemoryRepo(
 	allowedGrantTypes: readonly string[] = ["client_credentials"],
 ): ClientRepository {
 	return new InMemoryClientRepository(
-		new Map([
+		clientEntries([
 			[
 				TEST_CLIENT_ID,
 				{

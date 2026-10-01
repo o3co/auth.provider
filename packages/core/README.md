@@ -249,6 +249,12 @@ Each mechanism is one axis of the extension surface: a `routes`, `grants` or `fe
 
 A module that reads configuration declares its own section in the manifest ([#728](https://github.com/o3co/auth.provider/issues/728)): `section.schema` is the Zod schema of the one section it owns, and boot parses that section before any factory runs and hands it to every factory as `deps.section`, typed as the schema's output. A value the schema refuses refuses boot (`config-validation-failed`), naming the path the operator wrote. The section is read at the module's name, or at `section.at` while it still sits at an older path; `section.relocatedFrom` names the paths the section moved from: a configuration that still sets a key there refuses boot (`config-path-relocated`), naming the key's new path and the environment variable that binds it, or that the key was removed — a bridge for the 0.x line, removed at the first major release (the relocated-paths drift test fails the cut that forgets). `section.renamedVariables` names the environment variables whose names changed, each old name mapped to the old path it was bound to (the new name is the one the new path is bound to; a removed key's has none), and the package's `reference.conf` captures each name in the reserved `renamed-variables` section: while the resolution captured an old name set, boot refuses unless it captured the new name set to the same value (`environment-variable-renamed`), as it does for a removed key's variable set or a name not captured. `section.reference` names the package's `config/reference.conf`: boot does not read it, and `moduleReferences(modules)` ([`src/config/references.mts`](src/config/references.mts)) answers the references of the modules a composition loads, each once, with core's own (`coreReference()`) at the bottom, for the composition root to layer beneath its own files; a package checks its reference in its own tests with `packageReferenceProblems` from `@o3co/auth-provider-core/testing`. Boot writes each module's parsed section back into the configuration at its path, so a factory reading `config` sees what the section's schema made of it; a section inside another module's is written back inside it, and two modules may not declare their sections at the same path (`module-section-path-invalid`). `configSchema`, which boot parses over the whole configuration after core's schema, is to be deprecated once each section moves under its module's name.
 
+A section's leaf that an environment variable can set reads the string HOCON substitutes for `${?VAR}`. Core exports the readers for those strings, all defined in [`src/config/application.schema.mts`](src/config/application.schema.mts), so every package reads a variable the same way:
+
+- `wholeNumberFromEnv(bounds)` reads a whole number. It accepts a number as written, or a string of decimal digits (a whole number), whitespace around the digits allowed. Anything else reaches `bounds` unchanged and is refused there, with the message `bounds` gives. That includes an empty or blank string, a string with a sign, a fraction, an exponent (`"8e3"`) or hexadecimal (`"0x50"`), and `null`, `true` or a list. `z.coerce.number()` would read `""`, `null` and `[]` as `0` and `"1e3"` as `1000`. `bounds` is a `z.number()` schema that decides every other rule: an integer check for a number written as one, the minimum, the maximum and the message. The standalone template reads `http.port` with it, so an exported-but-empty `HTTP_PORT` fails boot instead of listening on a port the OS picks.
+- `durationFromEnv(bounds)` is the same reader, under the name its duration leaves use.
+- `coerceBooleanFromEnv` reads a boolean: `"true"` / `"1"` and `"false"` / `"0"` / `""`, trimmed and case-insensitive. Anything else fails boot.
+
 A key several modules read has one owner, and the others receive it through a slot whose contract is core's ([#728](https://github.com/o3co/auth.provider/issues/728)): the owner parses its own section and provides the value, and in code a package imports only core. Core declares these slots; the session package's modules provide `loginCompletion`, `loginEntry`, `csrfGuard`, `sessionCookiePolicy` and `csrfTokenSigner`, the oauth module provides `oauthTokenSettings`, core fills `deploymentMode` itself, and the others are declared ahead of their providers:
 
 - `oauthTokenSettings`, what other modules read of the oauth module's token settings — [`src/token-settings/types.mts`](src/token-settings/types.mts).
@@ -455,6 +461,19 @@ const users = loadYamlMap("./users.yaml", UserEntrySchema);
 
 const clientRepo = new InMemoryClientRepository(clients);
 const userRepo = new InMemoryUserRepository(users);
+```
+
+In a test, `clientEntries` from `@o3co/auth-provider-core/testing` builds the same map from entries written in code ([`src/testing/fixtures/clientEntries.mts`](src/testing/fixtures/clientEntries.mts)). Each entry is written as a registration file gives it, with the schema's defaults left out, and `InMemoryClientRepository` parses each one:
+
+```typescript
+import { InMemoryClientRepository } from "@o3co/auth-provider-core";
+import { clientEntries } from "@o3co/auth-provider-core/testing";
+
+const clientRepo = new InMemoryClientRepository(
+  clientEntries([
+    ["rp", { tokenEndpointAuthMethod: "client_secret_basic", clientSecret: "s", allowedRedirectUris: [], allowedScopes: ["read"] }],
+  ]),
+);
 ```
 
 ### Extension points

@@ -24,6 +24,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createGuardedFetch } from "#/fullPki/fetchGuard.mjs";
 
+/** What `new Response` takes as its body. */
+type ResponseBody = ConstructorParameters<typeof Response>[0];
+
 const options = {
 	allowedHosts: ["crl.example.test", "other.test:8443"],
 	timeoutMs: 50,
@@ -31,7 +34,7 @@ const options = {
 };
 
 const okResponse = (bytes: Uint8Array) =>
-	new Response(bytes as unknown as BodyInit, { status: 200 });
+	new Response(bytes as unknown as ResponseBody, { status: 200 });
 
 describe("guarded fetch — destination", () => {
 	it("fetches an allowlisted host", async () => {
@@ -202,7 +205,7 @@ describe("guarded fetch — response limits", () => {
 		const oversized = new Uint8Array(4096);
 		const fetchImpl = vi.fn(
 			async () =>
-				new Response(oversized as unknown as BodyInit, {
+				new Response(oversized as unknown as ResponseBody, {
 					status: 200,
 					headers: { "content-length": "10" },
 				}),
@@ -221,7 +224,7 @@ describe("guarded fetch — response limits", () => {
 	it("refuses on a declared Content-Length over the cap", async () => {
 		const fetchImpl = vi.fn(
 			async () =>
-				new Response(new Uint8Array([1]) as unknown as BodyInit, {
+				new Response(new Uint8Array([1]) as unknown as ResponseBody, {
 					status: 200,
 					headers: { "content-length": "999999" },
 				}),
@@ -328,7 +331,7 @@ describe("guarded fetch — POST, for OCSP", () => {
 		expectContentType: "application/ocsp-response",
 	};
 	const typed = (bytes: Uint8Array, contentType: string) =>
-		new Response(bytes as unknown as BodyInit, {
+		new Response(bytes as unknown as ResponseBody, {
 			status: 200,
 			headers: { "content-type": contentType },
 		});
