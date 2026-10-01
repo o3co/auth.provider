@@ -28,11 +28,13 @@ import {
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	defineModule,
 	EMAIL_OTP_AMR,
 	InMemoryUserRepository,
 	MFA_AMR,
 	type MfaFactorStore,
 	type Module,
+	newRenewalNonce,
 	OTP_AMR,
 	PASSWORD_AMR,
 	RECOVERY_CODE_AMR,
@@ -41,6 +43,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createRecordingMailSender } from "@o3co/auth-provider-core/testing";
+import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
@@ -112,7 +115,8 @@ interface Setup {
 async function composed(setup: Setup = {}) {
 	const factorStore = createMemoryMfaFactorStore();
 	const transactionStore = createMemoryMfaTransactionStore();
-	const userSessionStore = setup.userSessionStore ?? createInMemoryUserSessionStore();
+	const userSessionStore = (setup.userSessionStore ??
+		createInMemoryUserSessionStore()) as ReturnType<typeof createInMemoryUserSessionStore>;
 	const users = setup.users ?? new WitnessingUserRepository(directoryEntries());
 	const sender = createRecordingMailSender();
 	const audit = recordingAuditSink();
@@ -606,5 +610,311 @@ describe("what a step-up logs", () => {
 		for (const secret of [code, ALICE.email, transaction, nonce]) {
 			expect(text).not.toContain(secret);
 		}
+	});
+});
+
+/** express-session's store, as far as these tests make it fail. */
+interface CookieSessionStore {
+	destroy(sid: string, done: (err?: unknown) => void): void;
+	set(sid: string, session: unknown, done: (err?: unknown) => void): void;
+}
+
+/**
+ * A module mounted behind the session middleware that hands the tests the
+ * cookie sessions' store, tells whether a cookie session is signed in, and
+ * holds a request on a cookie session until released, then saves it back as
+ * it was loaded.
+ */
+function cookieSessionTap() {
+	const tapped: { store?: CookieSessionStore } = {};
+	let release: () => void = () => {};
+	let reached: () => void = () => {};
+	const held = { reached: new Promise<void>((resolve) => (reached = resolve)) };
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	const router = express.Router();
+	router.get("/", (req, res) => {
+		tapped.store = (req as unknown as { sessionStore: CookieSessionStore }).sessionStore;
+		const session = (req as unknown as { session?: { isAuthenticated?: unknown } }).session;
+		res.json({ authenticated: session?.isAuthenticated === true });
+	});
+	router.get("/hold", async (req, res) => {
+		reached();
+		await gate;
+		const session = (req as unknown as { session: { save(done: () => void): void } }).session;
+		session.save(() => res.status(204).end());
+	});
+	const module = defineModule({
+		name: "test:cookie-session-tap",
+		contributes: {
+			routes: [
+				() => ({
+					id: "test-cookie-session-tap",
+					mountPath: "/test-tap",
+					after: ["session-middleware"],
+					handler: router,
+				}),
+			],
+		},
+	});
+	return { module, tapped, held, release: () => release() };
+}
+
+/** Whether the cookie session `cookie` names is signed in as express-session holds it, whatever admission makes of it. */
+const signedInAs = async (app: Parameters<typeof login>[0], cookie: string): Promise<boolean> =>
+	(await request(app).get("/test-tap").set("Cookie", cookie)).body.authenticated === true;
+
+describe("the step-up's finish", () => {
+	/** A TOTP step-up opened in a password session, with the cookie-session tap mounted. */
+	async function opened(setup: Setup = {}) {
+		const tap = cookieSessionTap();
+		const booted = await composed({ ...setup, extraModules: [tap.module] });
+		const session = await signedIn(booted.app, booted.userSessionStore);
+		const totp = await seedTotp(booted.factorStore);
+		const transaction = await openedStepUp(session.agent);
+		await signedInAs(booted.app, session.cookie);
+		const store = tap.tapped.store;
+		if (store === undefined) throw new Error("the tap saw no store");
+		const recordUnwatched = booted.userSessionStore.recordSecondFactor.bind(
+			booted.userSessionStore,
+		);
+		const record = vi.spyOn(booted.userSessionStore, "recordSecondFactor");
+		return {
+			...booted,
+			...session,
+			tap,
+			cookieStore: store,
+			totp,
+			transaction,
+			record,
+			recordUnwatched,
+			verified: () =>
+				verify(session.agent, transaction, totp.record.id, totpCode(totp.secret)),
+		};
+	}
+
+	const SESSION_STORE_UNAVAILABLE = {
+		error: "temporarily_unavailable",
+		error_description: "Session store unavailable",
+	};
+	const SERVER_ERROR = {
+		error: "server_error",
+		error_description: "The step-up could not be recorded",
+	};
+
+	it("answers 503 and records nothing when the cookie session cannot be regenerated: the old one stands, not stepped up", async () => {
+		const { app, sid, cookie, cookieStore, userSessionStore, record, logger, verified } =
+			await opened();
+		vi.spyOn(cookieStore, "destroy").mockImplementationOnce((_sid, done) =>
+			done(new Error("cookie store down")),
+		);
+
+		const res = await verified();
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expect(record).not.toHaveBeenCalled();
+		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR]);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "verify", sid, store: "cookie_session", step: "regenerate" }),
+			"mfa_store_unavailable",
+		);
+		expect(await admitted(app, cookie)).toBe(true);
+		expect((await postAs(app, cookie, "/enrollment", { kind: "totp" })).status).toBe(403);
+	});
+
+	it("answers 503 and records nothing when the renewed cookie session cannot be saved: the browser is signed out", async () => {
+		const { app, sid, cookie, agent, cookieStore, userSessionStore, record, logger, verified } =
+			await opened();
+		vi.spyOn(cookieStore, "set").mockImplementationOnce((_sid, _session, done) =>
+			done(new Error("cookie store down")),
+		);
+
+		const res = await verified();
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expect(record).not.toHaveBeenCalled();
+		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR]);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "verify", sid, store: "cookie_session", step: "save" }),
+			"mfa_store_unavailable",
+		);
+		expect(await admitted(app, cookie)).toBe(false);
+		expect((await stepUp(agent)).status).toBe(401);
+	});
+
+	it("answers 503 to a session store that cannot record, calling it once: the renewed cookie stands, not stepped up", async () => {
+		const { app, sid, userSessionStore, record, logger, verified } = await opened();
+		record.mockRejectedValueOnce(new Error("session store down"));
+
+		const res = await verified();
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expect(record).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				route: "verify",
+				sid,
+				store: "user_session",
+				step: "recordSecondFactor",
+			}),
+			"mfa_store_unavailable",
+		);
+		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR]);
+		const renewed = sessionCookie(res);
+		expect(await admitted(app, renewed)).toBe(true);
+		expect((await postAs(app, renewed, "/enrollment", { kind: "totp" })).status).toBe(403);
+	});
+
+	it("answers 503 to a session store that answers something that is no session", async () => {
+		const { record, verified } = await opened();
+		record.mockResolvedValueOnce(true as unknown as UserSession);
+
+		const res = await verified();
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expect(record).toHaveBeenCalledTimes(1);
+	});
+
+	it("answers 500 when the store refuses the event as one it cannot record, said as mfa_step_up_unrecordable", async () => {
+		const { record, logger, verified } = await opened();
+		record.mockRejectedValueOnce(new RangeError("recordSecondFactor: at is ahead of the clock"));
+
+		const res = await verified();
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual(SERVER_ERROR);
+		expect(record).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "verify", sub: ALICE.id }),
+			"mfa_step_up_unrecordable",
+		);
+	});
+
+	it("answers 500 when the store answers the session without the renewal nonce, said as mfa_step_up_unbound", async () => {
+		const { record, recordUnwatched, logger, verified } = await opened();
+		record.mockImplementationOnce(async (sid, event) => {
+			const { renewalNonce: _dropped, ...rest } = event;
+			return recordUnwatched(sid, rest);
+		});
+
+		const res = await verified();
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual(SERVER_ERROR);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ route: "verify", sub: ALICE.id }),
+			"mfa_step_up_unbound",
+		);
+	});
+
+	describe("a step-up the session store does not record", () => {
+		it("answers 401 when the session is gone by then, the renewed cookie not admitted", async () => {
+			const { app, sid, userSessionStore, record, recordUnwatched, verified } = await opened();
+			record.mockImplementationOnce(async (...args) => {
+				await userSessionStore.delete(sid);
+				return recordUnwatched(...args);
+			});
+
+			const res = await verified();
+
+			expect(res.status, JSON.stringify(res.body)).toBe(401);
+			expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
+			expect(record).toHaveBeenCalledTimes(1);
+			expect(await admitted(app, sessionCookie(res))).toBe(false);
+		});
+
+		it("answers 401 when another completion from the same cookie session was recorded first, the renewed cookie not admitted", async () => {
+			const { app, sid, record, recordUnwatched, verified } = await opened();
+			record.mockImplementationOnce(async (...args) => {
+				await recordUnwatched(sid, {
+					amr: [OTP_AMR],
+					at: new Date(T0),
+					renewalNonce: newRenewalNonce(),
+				});
+				return recordUnwatched(...args);
+			});
+
+			const res = await verified();
+
+			expect(res.status, JSON.stringify(res.body)).toBe(401);
+			expect(record).toHaveBeenCalledTimes(1);
+			expect(await admitted(app, sessionCookie(res))).toBe(false);
+		});
+
+		it("answers 401 when the record predates how a session was established, leaving it as it was, the renewed cookie never admitted for mfa.manage", async () => {
+			const { app, sid, userSessionStore, record, verified } = await opened();
+			const before = await stored(userSessionStore, sid);
+			await userSessionStore.delete(sid);
+			await userSessionStore.create({
+				sid,
+				sub: before.sub,
+				authTime: before.authTime,
+				expiresAt: before.expiresAt,
+				claims: before.claims,
+				amr: undefined,
+				authentication: undefined,
+			});
+
+			const res = await verified();
+
+			expect(res.status, JSON.stringify(res.body)).toBe(401);
+			expect(record).toHaveBeenCalledTimes(1);
+			expect((await stored(userSessionStore, sid)).authentication).toBeUndefined();
+			const renewed = sessionCookie(res);
+			expect((await postAs(app, renewed, "/enrollment", { kind: "totp" })).status).toBe(401);
+		});
+	});
+
+	it("records one of two step-ups finished at once from one cookie session: the other is 401, and its renewed cookie is not admitted", async () => {
+		const { app, sid, cookie, factorStore, userSessionStore, agent, transaction, totp } =
+			await opened();
+		const other = await seedTotp(factorStore);
+		const second = await openedStepUp(agent);
+		const update = factorStore.update.bind(factorStore);
+		let release: () => void = () => {};
+		let reached: () => void = () => {};
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		const paused = new Promise<void>((resolve) => (reached = resolve));
+		vi.spyOn(factorStore, "update").mockImplementationOnce(async (...args) => {
+			reached();
+			await gate;
+			return update(...args);
+		});
+
+		const first = postAs(app, cookie, "/verify", {
+			transaction_id: transaction,
+			factor_id: totp.record.id,
+			proof: totpCode(totp.secret),
+		});
+		await paused;
+		const won = await postAs(app, cookie, "/verify", {
+			transaction_id: second,
+			factor_id: other.record.id,
+			proof: totpCode(other.secret),
+		});
+		release();
+		const lost = await first;
+
+		expect(won.status, JSON.stringify(won.body)).toBe(200);
+		expect(lost.status, JSON.stringify(lost.body)).toBe(401);
+		expect(await admitted(app, sessionCookie(won))).toBe(true);
+		expect(await admitted(app, sessionCookie(lost))).toBe(false);
+		expect((await stored(userSessionStore, sid)).amr).toEqual([PASSWORD_AMR, OTP_AMR, MFA_AMR]);
+	});
+
+	it("refuses the old cookie session even when a request held on it saves it back after the step-up", async () => {
+		const { app, cookie, tap, verified } = await opened();
+		const held = request(app).get("/test-tap/hold").set("Cookie", cookie).then((res) => res);
+		await tap.held.reached;
+
+		expect((await verified()).status).toBe(200);
+		tap.release();
+		expect((await held).status).toBe(204);
+
+		expect(await signedInAs(app, cookie)).toBe(true);
+		expect(await admitted(app, cookie)).toBe(false);
 	});
 });
