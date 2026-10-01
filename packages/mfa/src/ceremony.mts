@@ -346,7 +346,11 @@ export type MfaEnrollmentCompleteOutcome = (
 	| MfaEnrollmentRefusal
 	| MfaFactorUnreadable
 	| { readonly outcome: "no_pending_enrollment" }
-	/** Another write held the subject's factor set past the wait: nothing was written, nor the transaction spent. */
+	/**
+	 * Another write held the subject's factor set past the wait: nothing was
+	 * written and the transaction stands; the attempt the completion reserved
+	 * before its proof was checked counts, as any completion's does.
+	 */
 	| { readonly outcome: "factors_busy"; readonly retryAfterSeconds: number }
 	| { readonly outcome: "invalid_label" }
 	| { readonly outcome: "spent" }

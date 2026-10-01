@@ -694,7 +694,7 @@ describe("a factor-set write begun before a reset or a recovery", () => {
 		expect(heldDuringCreate).toBe("busy");
 	});
 
-	it("is answered 409 mfa_factors_busy with Retry-After while another write holds the lease, nothing written nor spent, and binds once it ends", async () => {
+	it("is answered 409 mfa_factors_busy with Retry-After while another write holds the lease, nothing written and the transaction standing, and binds once it ends", async () => {
 		const setup = await enrollmentBegun();
 		const lease = await setup.transactionStore.acquireSubjectLease(ALICE.id, {
 			ttlMs: 60_000,

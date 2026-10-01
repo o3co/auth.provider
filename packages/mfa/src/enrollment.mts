@@ -51,7 +51,9 @@
  *   since the begin refuses the binding, nothing spent but the attempt, as a
  *   binding the records no longer allow; another write holding the lease past
  *   the wait, or too little of it left before the first write, is
- *   `factors_busy`, nothing written nor spent. Writes that ran out of the
+ *   `factors_busy`, nothing written and the transaction standing — the
+ *   attempt reserved before the proof was checked counts, as any
+ *   completion's does. Writes that ran out of the
  *   lease, or past it, answer what they wrote, and say so (`overran`).
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, under the lease, in this order: for a first binding notes the
