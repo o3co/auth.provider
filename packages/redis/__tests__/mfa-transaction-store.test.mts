@@ -584,6 +584,52 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		expect(await deadlineOf(lock)).toBe(-1);
 	});
 
+	it("keeps the hard hold in the lock hash's hard field, the time it was reached, and the keys with no TTL after the run has ended", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const two: MfaLockoutPolicy = { ...POLICY, threshold: 2, hardLimit: 2 };
+		const t = start();
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		const week = `${prefix}week:{${keyPart("user-1")}}`;
+		const failed = await store.reserveSubjectAttempt("user-1", t, two);
+		if (!failed.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
+		const second = await store.reserveSubjectAttempt("user-1", t + MINUTE, two);
+		if (!second.ok) throw new Error("expected a reservation");
+		expect(await first().hget(lock, "hard")).toBe(String(t + MINUTE));
+		await store.settleSubjectAttempt("user-1", second.reservation, "success");
+		expect(await deadlineOf(lock)).toBe(-1);
+		expect(await deadlineOf(week)).toBe(-1);
+		expect(await store.reserveSubjectAttempt("user-1", t + 2 * MINUTE, two)).toMatchObject({
+			ok: false,
+			hold: "hard",
+			retryAfterMs: null,
+		});
+	});
+
+	it("refuses every lock operation on a hard field it cannot read: an outage, never a pass, and nothing settled", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const t = start();
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY);
+		if (!reserved.ok) throw new Error("expected a reservation");
+		for (const garbage of ["garbage", "inf", ""]) {
+			await first().hset(lock, "hard", garbage);
+			await expect(store.reserveSubjectAttempt("user-1", t + 1, POLICY), garbage).rejects.toThrow(
+				/subject state/,
+			);
+			await expect(store.noteExemptSuccess("user-1", t + 1, POLICY), garbage).rejects.toThrow(
+				/subject state/,
+			);
+			await expect(
+				store.settleSubjectAttempt("user-1", reserved.reservation, "success"),
+				garbage,
+			).rejects.toThrow(/subject state/);
+			expect(await first().hget(lock, `p:${reserved.reservation}`), garbage).not.toBeNull();
+		}
+	});
+
 	it("refuses an exempt success whose hardLimit argument is missing or not a number, naming the argument, and writes nothing", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
@@ -809,7 +855,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		expect(answers[0]).toEqual({ ok: false, hold: "weekly", retryAfterMs: WEEK - 1, first: true });
 	});
 
-	it("keeps a run at the hard limit through an exempt success, a reservation in flight counted, and ends it once below, as core's store does", async () => {
+	it("holds hard from the reservation that brings the run to the limit, through an exempt success, a void of that reservation and another exempt success, as core's store does", async () => {
 		// The random walk seldom reaches the hard limit; this walks its edge.
 		const four: MfaLockoutPolicy = {
 			...POLICY,
@@ -845,7 +891,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 			answers.push(seen);
 		}
 		expect(answers[1]).toEqual(answers[0]);
-		expect(answers[0]).toEqual(["ok", "ok", "ok", "ok", "hard", "ok", "ok", "ok", "ok"]);
+		expect(answers[0]).toEqual(["ok", "ok", "ok", "ok", "hard", "hard", "hard", "hard", "hard"]);
 	});
 
 	it("ends an attempt reserved at the very instant of an exempt success, as core's store does", async () => {
