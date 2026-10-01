@@ -59,7 +59,7 @@ const NETWORK_CODES: ReadonlySet<string> = new Set([
 const UNREADABLE: unique symbol = Symbol("unreadable");
 
 /** `value[key]`, or {@link UNREADABLE}: the thrown value is whatever an adapter threw. */
-const field = (value: object, key: string): unknown => {
+const readOrUnreadable = (value: object, key: string): unknown => {
 	const read = guardedRead(value, key);
 	return read === null ? UNREADABLE : read.value;
 };
@@ -77,10 +77,10 @@ function extractNetworkCode(error: object): string | undefined | typeof UNREADAB
 	let cur: unknown = error;
 	for (let depth = 0; depth < 4 && cur !== null && typeof cur === "object"; depth++) {
 		if (depth > 0 && !isError(cur)) return undefined;
-		const code = field(cur, "code");
+		const code = readOrUnreadable(cur, "code");
 		if (code === UNREADABLE) return UNREADABLE;
 		if (typeof code === "string" && NETWORK_CODES.has(code)) return code;
-		cur = field(cur, "cause");
+		cur = readOrUnreadable(cur, "cause");
 		if (cur === UNREADABLE) return UNREADABLE;
 	}
 	return undefined;
@@ -195,8 +195,8 @@ export function classifyFederationRefreshError(
 ): FederationRefreshErrorClassification {
 	const extras: { upstreamCode?: string; retryAfterSeconds?: number } = {};
 	if (error !== null && typeof error === "object") {
-		const code = field(error, "error");
-		const status = field(error, "status");
+		const code = readOrUnreadable(error, "error");
+		const status = readOrUnreadable(error, "status");
 		const networkCode = extractNetworkCode(error);
 		// Nothing read off an error with an unreadable field is safe to act on.
 		if (code === UNREADABLE || status === UNREADABLE || networkCode === UNREADABLE) {
