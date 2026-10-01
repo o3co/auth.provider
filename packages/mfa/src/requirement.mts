@@ -41,9 +41,10 @@
  * non-counting counts — and a list that cannot answer throws.
  *
  * For a subject that holds none, the action is a first binding (D12, D24):
- * the view's recorded facts are read — none recorded, or a witness `enrolled`
- * or malformed, sends the session to log in, whose own read of the `User`
- * records a real loss —
+ * the view's recorded facts are read — none recorded sends the session to
+ * log in; a witness `enrolled` or malformed sends a password session to log
+ * in, whose own read of the `User` records a real loss, and is recorded and
+ * thrown for any other primary, a federated login having no such read —
  * then a recent primary (`authTime`; a second factor does not stand in for
  * it), then the subject's first-binding mark (`firstBindingMark.mts`): a
  * session it distrusts, whose recorded witness may predate the subject's
@@ -428,19 +429,26 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 
 	/**
 	 * A first binding in `session`, whose subject holds no record that may
-	 * count: what the session recorded of its login's `User` — none, or a
-	 * witness other than `not_enrolled`, is a new login — then a recent primary, then the subject's first-binding mark —
+	 * count: what the session recorded of its login's `User` — none is a new
+	 * login; a witness other than `not_enrolled` is a new login for a
+	 * password session, and recorded and thrown for any other — then a recent primary, then the subject's first-binding mark —
 	 * a session it distrusts is a new login — then the gate, a proof asked
 	 * for admitted only while one given in this session stands.
 	 */
 	const firstBindingIn = async (
 		session: SessionView,
+		primary: string,
 		action: AdmissionAction,
 		nowMs: number,
 	): Promise<RequirementVerdict> => {
 		const facts = session.enrollmentFacts;
-		// A witness recorded at login may predate a removal that cleared it: the login reads it fresh.
-		if (facts === undefined || facts.witness !== "not_enrolled") return REAUTHENTICATE;
+		if (facts === undefined) return REAUTHENTICATE;
+		if (facts.witness !== "not_enrolled") {
+			// A password login's admitPrimary reads the User afresh and records a real loss;
+			// a federated login never runs it, so any other session records it here.
+			if (primary === PASSWORD_AMR) return REAUTHENTICATE;
+			inconsistent(session.sub, facts.witness, { purpose: "session", action: action.name });
+		}
 		const recentPrimary = isRecentMfa(
 			{ authTime: session.authTime, mfaAt: undefined },
 			{ holdsCountingFactor: false },
@@ -473,7 +481,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			return REAUTHENTICATE;
 		}
 		if (!(await mayHoldCountingFactor(session.sub))) {
-			return firstBindingIn(session, action, nowMs);
+			return firstBindingIn(session, recorded.primary, action, nowMs);
 		}
 		const recentMfa = isRecentMfa(
 			{ authTime: session.authTime, mfaAt: recorded.mfaAt },
