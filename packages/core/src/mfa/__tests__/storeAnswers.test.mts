@@ -17,17 +17,19 @@
 /**
  * The MFA stores' answers, read as their ports promise them, beside the
  * bound read: a reservation, a subject attempt's reservation, a consumed
- * transaction, a factor's compare-and-set and a session's account-email
- * proof. An answer outside the promise is `undefined` or `false`, which a
+ * transaction, a factor's compare-and-set, a session's account-email proof
+ * and a subject's first-binding mark. An answer outside the promise is `undefined` or `false`, which a
  * caller answers as the store's outage — never as a verdict.
  */
 
 import { describe, expect, it } from "vitest";
 import * as core from "#/index.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import { isMfaFactorUpdateWritten, type MfaFactorRecord } from "#/mfa/factorStore.mjs";
 import {
 	isConsumedMfaTransaction,
 	type MfaTransaction,
+	readFirstBindingAt,
 	readMfaAttemptReservation,
 	readMfaSubjectAttemptReservation,
 	readSessionEmailProof,
@@ -255,6 +257,39 @@ describe("readSessionEmailProof", () => {
 	});
 });
 
+describe("readFirstBindingAt", () => {
+	const NOW = 1_800_000_000_000;
+
+	it("reads no mark as no mark, and a mark as when it was noted", () => {
+		expect(readFirstBindingAt(null, NOW)).toBeNull();
+		expect(readFirstBindingAt(NOW - 60_000, NOW)).toBe(NOW - 60_000);
+		expect(readFirstBindingAt(NOW, NOW)).toBe(NOW);
+		expect(readFirstBindingAt(0, NOW)).toBe(0);
+	});
+
+	it("reads a mark noted ahead of the time asked about, up to the clock skew allowed, as noted", () => {
+		// The mark bounds which sessions are trusted: read earlier, it would
+		// trust one it should not.
+		expect(readFirstBindingAt(NOW + 60_000, NOW)).toBe(NOW + 60_000);
+		expect(readFirstBindingAt(NOW + DEFAULT_CLOCK_SKEW_MS, NOW)).toBe(NOW + DEFAULT_CLOCK_SKEW_MS);
+	});
+
+	it.each<[string, unknown]>([
+		["a time further ahead than the clock skew allowed", NOW + DEFAULT_CLOCK_SKEW_MS + 1],
+		["a time before the epoch", -1],
+		["a time that is not whole", NOW - 0.5],
+		["a time that is not a number", Number.NaN],
+		["an infinite time", Number.POSITIVE_INFINITY],
+		["a time as text", String(NOW)],
+		["a date", new Date(NOW)],
+		["a record", { atMs: NOW }],
+		["a boolean", true],
+		["nothing", undefined],
+	])("reads %s as no answer", (_label, answer) => {
+		expect(readFirstBindingAt(answer, NOW)).toBeUndefined();
+	});
+});
+
 const CONTINUATION = {
 	interruptedBy: "mfa",
 	primary: {
@@ -401,11 +436,12 @@ describe("isMfaFactorUpdateWritten", () => {
 });
 
 describe("on the package's root", () => {
-	it("are the five readings", () => {
+	it("are the six readings", () => {
 		expect(core.readMfaAttemptReservation).toBe(readMfaAttemptReservation);
 		expect(core.readMfaSubjectAttemptReservation).toBe(readMfaSubjectAttemptReservation);
 		expect(core.isConsumedMfaTransaction).toBe(isConsumedMfaTransaction);
 		expect(core.isMfaFactorUpdateWritten).toBe(isMfaFactorUpdateWritten);
 		expect(core.readSessionEmailProof).toBe(readSessionEmailProof);
+		expect(core.readFirstBindingAt).toBe(readFirstBindingAt);
 	});
 });

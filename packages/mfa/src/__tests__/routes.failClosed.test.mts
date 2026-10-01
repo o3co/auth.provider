@@ -249,7 +249,7 @@ const notCounting = (): MfaFactor =>
 	createTestMfaFactor({ kind: "rc", counting: false, amrValues: ["recovery"] });
 
 describe("a factor that does not count, under required (F3)", () => {
-	it("does not complete the login of a subject with no counting factor it can use: 403 mfa_enrollment_required, the transaction kept and nothing written", async () => {
+	it("does not complete the login of a subject with no counting factor it can use: the proof spent, 403 mfa_enrollment_required naming a new transaction, and no session written", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const record = await seedFactor(factorStore, "rc", { secret: "look-up" });
 		const audit = recordingAuditSink();
@@ -266,10 +266,17 @@ describe("a factor that does not count, under required (F3)", () => {
 
 		expect(res.status).toBe(403);
 		expect(res.body.error).toBe("mfa_enrollment_required");
+		expect(res.body.transaction).not.toBe(transaction);
 		expect(create).not.toHaveBeenCalled();
-		expect(await transactionStore.get(transaction)).not.toBeNull();
-		expect((await storedData(factorStore, record)).record.version).toBe(0);
-		expect(audit.of("mfa.verified")).toEqual([]);
+		expect(await transactionStore.get(transaction)).toBeNull();
+		expect(await transactionStore.get(res.body.transaction as string)).toMatchObject({
+			purpose: "login",
+			enrollment: "required",
+		});
+		expect((await storedData(factorStore, record)).record.version).toBe(1);
+		expect(audit.of("mfa.verified").map((event) => event.details)).toEqual([
+			{ kind: "rc", purpose: "login", reopened: true },
+		]);
 	});
 
 	it("does not count a counting factor whose data does not open as one the subject can use", async () => {

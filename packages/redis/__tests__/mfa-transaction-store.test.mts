@@ -19,8 +19,10 @@
  * contract on a real Redis, and below it: the key layout (a hash per
  * transaction expiring at its `expiresAtMs` on the server's clock; a hash per
  * subject for the lockout state beside the weekly window, a sorted set of
- * failure times; the email-proof requirement in a key with no TTL), what
- * reclaims the subject state, and the answer to a value it cannot read.
+ * failure times; the email-proof requirement in a key with no TTL; a
+ * session's proof and a subject's first-binding mark in strings expiring at
+ * their ends), what reclaims the subject state, and the answer to a value it
+ * cannot read.
  *
  * The contract's store alternates between two connections, so its races are
  * across sockets rather than queued on one client.
@@ -28,6 +30,7 @@
 
 import {
 	createMemoryMfaTransactionStore,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
 	type MfaTransaction,
@@ -35,7 +38,12 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MFA_SUBJECT_EXEMPT } from "#/ioredis/scripts/mfa.mjs";
+import type { MfaTransactionStoreClient } from "#/clients.mjs";
+import {
+	MFA_FIRST_BINDING_NOTE,
+	MFA_FIRST_BINDING_READ,
+	MFA_SUBJECT_EXEMPT,
+} from "#/ioredis/scripts/mfa.mjs";
 import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
 import { createRedisMfaTransactionStore } from "#/mfa-transaction-store.mjs";
 import { runMfaTransactionStoreContract } from "./adapters.mfa-transaction-store.contract.mjs";
@@ -58,6 +66,15 @@ const first = (): Redis => connections[0] as Redis;
 /** How the adapter spells a value inside a key — looked at from outside, as the probes must. */
 const keyPart = (value: string): string =>
 	Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+
+/**
+ * Mark values carrying a field a note never writes: nested deeper than the
+ * scripts' JSON reader decodes, and holding a lone surrogate.
+ */
+const odd = (atMs: number): string[] => {
+	const head = `{"atMs":${atMs},"untilMs":${atMs + 10 * 60_000},"x":`;
+	return [`${head}${"[".repeat(1_200)}${"]".repeat(1_200)}}`, `${head}"\\ud800"}`];
+};
 
 /** A keyspace of its own for each case. */
 const freshPrefix = (): string => {
@@ -99,6 +116,8 @@ const alternating = (keyPrefix: string): MfaTransactionStore => {
 		recordSessionEmailProof: (subject, sid, provedAtMs, untilMs) =>
 			pick().recordSessionEmailProof(subject, sid, provedAtMs, untilMs),
 		sessionEmailProofAt: (subject, sid, nowMs) => pick().sessionEmailProofAt(subject, sid, nowMs),
+		noteFirstBinding: (subject, atMs, untilMs) => pick().noteFirstBinding(subject, atMs, untilMs),
+		firstBindingAt: (subject, nowMs) => pick().firstBindingAt(subject, nowMs),
 	};
 };
 
@@ -950,5 +969,258 @@ describe("createRedisMfaTransactionStore — a session's account-email proof", (
 		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
 		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
 		expect(await first().keys(`${prefix}*`)).toEqual([proofKey(prefix, "user-1", "sid-1")]);
+	});
+});
+
+describe("createRedisMfaTransactionStore — a subject's first-binding mark", () => {
+	const markKey = (prefix: string, subject: string): string =>
+		`${prefix}first-binding:{${keyPart(subject)}}`;
+
+	/** A store over the first connection whose own clock is `offsetMs` off the host's. */
+	const skewedStore = (prefix: string, offsetMs: number): MfaTransactionStore =>
+		createRedisMfaTransactionStore({
+			client: makeIoredisMfaTransactionStoreClient(first()),
+			keyPrefix: prefix,
+			now: () => Date.now() + offsetMs,
+		});
+
+	it("keeps it in a string of its own, <prefix>first-binding:{<subject>}, holding when it was noted and its end, expiring at its end on the server's clock", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = await serverClock(first)();
+		const until = Math.floor(now) + 10 * MINUTE;
+		await store.noteFirstBinding("user-1", Math.floor(now), until);
+		const key = markKey(prefix, "user-1");
+		expect(await first().keys(`${prefix}*`)).toEqual([key]);
+		expect(await first().type(key)).toBe("string");
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual({
+			atMs: Math.floor(now),
+			untilMs: until,
+		});
+		expect(await deadlineOf(key)).toBe(until);
+	});
+
+	it("judges a mark on the server's clock alone: a replica whose clock runs ahead neither reads it as ended nor replaces it with an earlier one", async () => {
+		const prefix = freshPrefix();
+		const onTime = storeAt(prefix);
+		const ahead = skewedStore(prefix, 11 * MINUTE);
+		const now = Math.floor(await serverClock(first)());
+		await onTime.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(await ahead.firstBindingAt("user-1", now + 11 * MINUTE)).toBe(now);
+		await ahead.noteFirstBinding("user-1", now - MINUTE, now + 20 * MINUTE);
+		expect(await onTime.firstBindingAt("user-1", now)).toBe(now);
+		expect(await deadlineOf(markKey(prefix, "user-1"))).toBe(now + 20 * MINUTE);
+	});
+
+	it("judges a note's bounds on the server's clock, whatever the replica's clock says", async () => {
+		const prefix = freshPrefix();
+		const behind = skewedStore(prefix, -20 * MINUTE);
+		const ahead = skewedStore(prefix, 20 * MINUTE);
+		const now = Math.floor(await serverClock(first)());
+		// On the server's clock these stand, though each replica's clock says otherwise.
+		await ahead.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(await behind.firstBindingAt("user-1", now)).toBe(now);
+		// And these do not, though each replica's clock admits them.
+		await expect(
+			behind.noteFirstBinding("user-2", now - 15 * MINUTE, now - MINUTE),
+		).rejects.toThrow(RangeError);
+		await expect(
+			ahead.noteFirstBinding("user-2", now + 15 * MINUTE, now + 30 * MINUTE),
+		).rejects.toThrow(RangeError);
+		expect(await first().exists(markKey(prefix, "user-2"))).toBe(0);
+	});
+
+	it("keeps the later time and the later end: the key's value and deadline move only forward", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Math.floor(await serverClock(first)());
+		const key = markKey(prefix, "user-1");
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		// Earlier and ending sooner: nothing moves.
+		await store.noteFirstBinding("user-1", now - MINUTE, now + 5 * MINUTE);
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual({
+			atMs: now,
+			untilMs: now + 10 * MINUTE,
+		});
+		expect(await deadlineOf(key)).toBe(now + 10 * MINUTE);
+		// Earlier and ending later: the end moves, the time stays.
+		await store.noteFirstBinding("user-1", now - MINUTE, now + 30 * MINUTE);
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual({
+			atMs: now,
+			untilMs: now + 30 * MINUTE,
+		});
+		expect(await deadlineOf(key)).toBe(now + 30 * MINUTE);
+	});
+
+	it("refuses to answer a mark it cannot read back: an outage, never no mark, quoting nothing it read, whatever its end looks like", async () => {
+		// No mark lets a session's recorded witness stand: a mark read as
+		// absent would trust the session it is there to distrust.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Math.floor(await serverClock(first)());
+		for (const value of [
+			"not json",
+			"null",
+			JSON.stringify({ atMs: now }),
+			JSON.stringify({ atMs: String(now), untilMs: now + MINUTE }),
+			JSON.stringify({ atMs: now - 0.5, untilMs: now + MINUTE }),
+			JSON.stringify({ atMs: -1, untilMs: now + MINUTE }),
+			JSON.stringify({ atMs: now, untilMs: now + MINUTE + 0.5 }),
+			JSON.stringify({ atMs: now + MINUTE, untilMs: now + MINUTE }),
+			// An end that looks past is no excuse for a shape that is wrong.
+			JSON.stringify({ untilMs: -1 }),
+			JSON.stringify({ atMs: "x", untilMs: 1 }),
+			JSON.stringify({ atMs: -5, untilMs: 1 }),
+			JSON.stringify({ atMs: now, untilMs: 0 }),
+			// Standing longer than any note may make it stand.
+			JSON.stringify({ atMs: now, untilMs: now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1 }),
+			// A field a note never writes, the script's JSON reader and this
+			// side's disagreeing on it or not.
+			...odd(now),
+		]) {
+			await first().set(key, value, "PX", MINUTE);
+			const read = store.firstBindingAt("user-1", now);
+			await expect(read, value).rejects.toThrow(/MfaTransactionStore/);
+			await expect(read, value).rejects.not.toThrow(RangeError);
+			await expect(read, value).rejects.not.toThrow(/not json|atMs|untilMs/);
+		}
+	});
+
+	it("replaces a mark it cannot read back with the next note", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Math.floor(await serverClock(first)());
+		for (const value of [
+			"not json",
+			JSON.stringify({ atMs: now + MINUTE }),
+			JSON.stringify({ atMs: now - MINUTE, untilMs: now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1 }),
+			...odd(now - MINUTE),
+		]) {
+			await first().set(key, value, "PX", MINUTE);
+			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now), value.slice(0, 60)).toBe(now);
+		}
+	});
+
+	it("replaces, never merges, a held value with a field a note never writes, however late its times", async () => {
+		// Merged, its later times would stay, and this side refuses them as an
+		// outage no note could then repair.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Math.floor(await serverClock(first)());
+		const held = { atMs: now + 6 * MINUTE, untilMs: now + 20 * MINUTE, x: 1 };
+		await first().set(key, JSON.stringify(held), "PXAT", held.untilMs);
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual({
+			atMs: now,
+			untilMs: now + 10 * MINUTE,
+		});
+		expect(await deadlineOf(key)).toBe(now + 10 * MINUTE);
+		expect(await store.firstBindingAt("user-1", now)).toBe(now);
+	});
+
+	it("refuses to read a key of another type, an outage, and a note overwrites it", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Math.floor(await serverClock(first)());
+		for (const [type, write] of [
+			["hash", () => first().hset(key, "atMs", String(now))],
+			["list", () => first().rpush(key, String(now))],
+			["set", () => first().sadd(key, String(now))],
+			["zset", () => first().zadd(key, now, "atMs")],
+		] as const) {
+			await first().del(key);
+			await write();
+			const read = store.firstBindingAt("user-1", now);
+			await expect(read, type).rejects.toThrow();
+			await expect(read, type).rejects.not.toThrow(RangeError);
+			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			expect(await first().type(key), type).toBe("string");
+			expect(await store.firstBindingAt("user-1", now), type).toBe(now);
+		}
+	});
+
+	it("keeps a sound mark noted ahead of the server's clock, as one whose clock stepped back sees it: a note merges with it and never moves it back", async () => {
+		// The script sees a mark noted before its server's clock stepped back
+		// as one ahead of it. Implausible on the clock, it is still a mark.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = markKey(prefix, "user-1");
+		const now = Math.floor(await serverClock(first)());
+		const held = { atMs: now + 6 * MINUTE, untilMs: now + 20 * MINUTE };
+		await first().set(key, JSON.stringify(held), "PXAT", held.untilMs);
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(JSON.parse((await first().get(key)) as string)).toStrictEqual(held);
+		expect(await deadlineOf(key)).toBe(held.untilMs);
+		// The store answers it; the caller's reading judges it on its own clock.
+		expect(await store.firstBindingAt("user-1", now)).toBe(held.atMs);
+	});
+
+	it("answers a sound mark read on a server whose clock stepped back, rather than an outage", async () => {
+		const prefix = freshPrefix();
+		const client = makeIoredisMfaTransactionStoreClient(first());
+		const stepped: MfaTransactionStoreClient = {
+			...client,
+			firstBindingMark: async (key) => {
+				const read = await client.firstBindingMark(key);
+				return { ...read, serverNowMs: read.serverNowMs - 10 * MINUTE };
+			},
+		};
+		const store = createRedisMfaTransactionStore({ client: stepped, keyPrefix: prefix });
+		const now = Math.floor(await serverClock(first)());
+		await storeAt(prefix).noteFirstBinding("user-1", now, now + 20 * MINUTE);
+		expect(await store.firstBindingAt("user-1", now)).toBe(now);
+	});
+
+	it("notes and reads through EVAL once the server has forgotten the scripts", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Math.floor(await serverClock(first)());
+		await store.noteFirstBinding("user-1", now - MINUTE, now + 10 * MINUTE);
+		await store.firstBindingAt("user-1", now);
+		await first().script("FLUSH");
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		expect(await store.firstBindingAt("user-1", now)).toBe(now);
+		expect(
+			await first().script("EXISTS", MFA_FIRST_BINDING_NOTE.sha, MFA_FIRST_BINDING_READ.sha),
+		).toEqual([1, 1]);
+	});
+
+	it("rejects a note and a read when the server cannot be reached: an outage, never no mark", async () => {
+		const unreachable = first().duplicate({ lazyConnect: true, enableOfflineQueue: false });
+		try {
+			const store = storeAt(freshPrefix(), unreachable);
+			const now = Date.now();
+			await expect(store.noteFirstBinding("user-1", now, now + 10 * MINUTE)).rejects.toThrow();
+			await expect(store.firstBindingAt("user-1", now)).rejects.toThrow();
+		} finally {
+			unreachable.disconnect();
+		}
+	});
+
+	it("keeps it apart from the transactions, the subject lock, the requirement and a session's proof", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const now = Math.floor(await serverClock(first)());
+		await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+		await store.recordSessionEmailProof("user-1", "sid-1", now, now + 10 * MINUTE);
+		await store.create(TX({ sid: "sid-1" }));
+		expect(await store.consume("tx-1", 1)).not.toBeNull();
+		await store.requireEmailProofAtNextBinding("user-1");
+		await store.reserveSubjectAttempt("user-1", now, POLICY);
+		await store.clearSubjectState("user-1");
+		expect(await store.consumeEmailProofRequirement("user-1")).toBe(true);
+		expect(await store.firstBindingAt("user-1", now)).toBe(now);
+		expect(await store.sessionEmailProofAt("user-1", "sid-1", now)).toBe(now);
+		expect((await first().keys(`${prefix}*`)).sort()).toEqual(
+			[
+				markKey(prefix, "user-1"),
+				`${prefix}session-proof:{${keyPart("user-1")}}:${keyPart("sid-1")}`,
+			].sort(),
+		);
 	});
 });

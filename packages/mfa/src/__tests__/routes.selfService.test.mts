@@ -33,6 +33,7 @@ import {
 	createMemoryMfaTransactionStore,
 	type MfaFactor,
 	type MfaFactorRecord,
+	type Module,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -42,6 +43,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
 import {
 	ALICE,
 	boot,
@@ -52,6 +54,7 @@ import {
 } from "./moduleHarness.mjs";
 import { stubFactor } from "./requirementHarness.mjs";
 import {
+	beginLogin,
 	completeEnrollment,
 	contributing,
 	csrfOf,
@@ -73,6 +76,7 @@ import {
 	T0,
 	thawClock,
 	totpProofOf,
+	verify,
 } from "./routesHarness.mjs";
 
 beforeEach(() => freezeClock());
@@ -120,6 +124,7 @@ interface Setup {
 	readonly address?: "address" | "none" | "unreadable";
 	readonly maxFactorsPerSubject?: number;
 	readonly subjectRevocation?: ReturnType<typeof createInMemorySubjectRevocation>;
+	readonly extraModules?: readonly Module[];
 }
 
 /** Boots `mode` (optional by default) with no mail sender unless one is given, and alice's address as `address` says. */
@@ -144,6 +149,7 @@ async function composed(setup: Setup = {}) {
 		...(setup.subjectRevocation === undefined
 			? {}
 			: { subjectRevocation: setup.subjectRevocation }),
+		...(setup.extraModules === undefined ? {} : { extraModules: setup.extraModules }),
 	});
 	return {
 		...booted,
@@ -533,17 +539,135 @@ describe("the enroll transaction", () => {
 		expect(create).not.toHaveBeenCalled();
 	});
 
-	it("refuses a first factor 409 to a subject whose only records do not count, opening nothing", async () => {
-		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+	it("binds a first factor by password for a subject whose only records do not count, and keeps its recovery codes beside the new ones", async () => {
+		const { app, factorStore, userSessionStore, audit } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
-		await seedFactor(factorStore, "recovery_code", { codes: [] });
+		const old = await seedFactor(factorStore, "recovery_code", { codes: [] });
+
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body.recovery_codes).toHaveLength(10);
+		const records = await factorStore.list(ALICE.id);
+		expect(records.map((record) => [record.kind, record.binding]).sort()).toEqual([
+			["recovery_code", "password"],
+			["recovery_code", "password"],
+			["totp", "password"],
+		]);
+		expect(records.some((record) => record.id === old.id)).toBe(true);
+		expect(audit.of("mfa.recovery_codes.generated")[0]?.details).toEqual({
+			kind: "recovery_code",
+			purpose: "enroll",
+			binding: "password",
+			by: "user",
+			regenerated: true,
+			unreplaced: true,
+			kept: "password_binding",
+		});
+	});
+
+	it("refuses a first factor 409 mfa_factor_limit, opening nothing, when the factor and its codes beside a record that does not count would pass mfa.maxFactorsPerSubject", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed({
+			maxFactorsPerSubject: 2,
+			extraModules: [contributing(stubFactor("rc", ["recovery"], { counting: false }))],
+		});
+		const { agent } = await signIn(app, userSessionStore);
+		await seedFactor(factorStore, "rc", { secret: "x" });
 		const create = vi.spyOn(transactionStore, "create");
 
 		const res = await enrollFromAccount(agent, "totp");
 
 		expect(res.status).toBe(409);
-		expect(res.body).toEqual(ENROLLMENT_CONFLICT);
+		expect(res.body).toEqual(FACTOR_LIMIT);
 		expect(create).not.toHaveBeenCalled();
+		expect((await factorStore.list(ALICE.id)).map((record) => record.kind)).toEqual(["rc"]);
+	});
+
+	it("counts the set a binding by password keeps: 409 mfa_factor_limit at the completion, nothing written", async () => {
+		const { app, factorStore, userSessionStore } = await composed({
+			mode: "optional",
+			requireEmailProof: "never",
+			maxFactorsPerSubject: 2,
+		});
+		const { agent } = await signIn(app, userSessionStore);
+		await seedFactor(factorStore, "recovery_code", { codes: [] });
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(done.status).toBe(409);
+		expect(done.body).toEqual(FACTOR_LIMIT);
+		expect((await factorStore.list(ALICE.id)).map((record) => record.kind)).toEqual([
+			"recovery_code",
+		]);
+	});
+
+	it("re-checks the limit once its factor is written: a set another binding wrote at once takes it past, and its own factor is removed, 409", async () => {
+		const { app, factorStore, userSessionStore } = await composed({
+			mode: "optional",
+			requireEmailProof: "never",
+			maxFactorsPerSubject: 3,
+		});
+		const { agent } = await signIn(app, userSessionStore);
+		await seedFactor(factorStore, "recovery_code", { codes: [] });
+		const begun = await enrollFromAccount(agent, "totp");
+		const other = await seedFactor(createMemoryMfaFactorStore(), "recovery_code", { codes: [] });
+		const list = factorStore.list.bind(factorStore);
+		let reads = 0;
+		vi.spyOn(factorStore, "list").mockImplementation(async (subject) =>
+			reads++ === 0 ? list(subject) : [...(await list(subject)), other],
+		);
+
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(done.status).toBe(409);
+		expect(done.body).toEqual(FACTOR_LIMIT);
+		expect((await list(ALICE.id)).map((record) => record.kind)).toEqual(["recovery_code"]);
+	});
+
+	it("keeps the owner's codes under optional with no proof asked: an old code still logs in after a first factor bound by password", async () => {
+		const { app, factorStore, userSessionStore } = await composed({
+			mode: "optional",
+			requireEmailProof: "never",
+		});
+		const { agent } = await signIn(app, userSessionStore);
+		const generated = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			suiteSealing().digestsFor("recovery_code"),
+		);
+		if (generated === undefined) throw new Error("no set");
+		const old = await seedFactor(factorStore, "recovery_code", generated.data);
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(
+			(
+				await completeEnrollment(
+					agent,
+					begun.body.transaction as string,
+					totpProofOf(begun.body.secret),
+				)
+			).status,
+		).toBe(200);
+
+		const { agent: next, transaction } = await beginLogin(app);
+		const res = await verify(next, transaction, old.id, generated.codes[0]);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body).toEqual({ message: "Logged in successfully", recovery_codes_remaining: 2 });
 	});
 
 	it("answers 400 when the body and the MFA-Transaction header name different transactions, opening none", async () => {

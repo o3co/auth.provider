@@ -522,6 +522,17 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept:
+			"a subject's first-binding mark — what a store's answer is read as (the MFA ADR's D12)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+readFirstBindingAt\b/,
+	},
+	{
+		concept: "a subject's first-binding mark — which of two a store keeps (the MFA ADR's D12)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+laterFirstBindingMark\b/,
+	},
+	{
+		concept:
 			"a session's enrollment facts — derived from the login's User by core's primary builders (the MFA ADR's D12, D24)",
 		home: "packages/core/src/session-admission/primary.mts",
 		definition: /(?:function|const)\s+enrollmentFactsOf\b/,

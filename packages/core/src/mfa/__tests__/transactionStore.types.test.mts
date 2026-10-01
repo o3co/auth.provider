@@ -78,4 +78,14 @@ describe("the MfaTransactionStore port", () => {
 		}>();
 		expect(true).toBe(true);
 	});
+
+	it("notes a subject's first binding with its time and end, and answers the time or null", () => {
+		expectTypeOf<MfaTransactionStore["noteFirstBinding"]>().toEqualTypeOf<
+			(subject: string, atMs: number, untilMs: number) => Promise<void>
+		>();
+		expectTypeOf<MfaTransactionStore["firstBindingAt"]>().toEqualTypeOf<
+			(subject: string, nowMs: number) => Promise<number | null>
+		>();
+		expect(true).toBe(true);
+	});
 });

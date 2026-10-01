@@ -15,8 +15,8 @@
  */
 
 /**
- * The boot check both MFA store modules run. "Only zero records open a first
- * binding" is only as strong as the store: an eviction, or a restart without
+ * The boot check both MFA store modules run. "Only a subject with no record
+ * that may count opens a first binding" is only as strong as the store: an eviction, or a restart without
  * persistence, empties a subject's list, and whoever holds the password can
  * then bind their own authenticator. The email-proof requirement an operator
  * reset records is lost the same way. So, before the store is provided:
@@ -25,8 +25,11 @@
  *   `allkeys-*`, which may evict any key, refuse the boot, whatever else could
  *   not be read. The four `volatile-*` pass: they never pick the factors or
  *   the requirement, which carry no TTL. The transaction store still warns on
- *   them, because its subject lock and weekly window carry a TTL once no run
- *   is counted and an evicted one lifts a lockout hold early. Any other policy
+ *   them, naming the key families an eviction fails open on: its subject
+ *   lock and weekly window carry a TTL once no run is counted, and an evicted
+ *   one lifts a lockout hold early; a subject's first-binding mark carries one
+ *   always, and an evicted one no longer refuses a stale session's first
+ *   binding. Any other policy
  *   (empty, unknown, a future server's) cannot be judged and is named in the
  *   warning below;
  * - RDB snapshots without AOF are one warning, no persistence at all another;
@@ -72,6 +75,8 @@ const NAMES: Readonly<
 			readonly unchecked: string;
 			/** The notice a `volatile-*` policy is given, where some of the store's keys carry a TTL. */
 			readonly lockEvictable: string | undefined;
+			/** The key families that notice names: each carries a TTL, and losing one fails open. */
+			readonly evictableFamilies: readonly string[] | undefined;
 			/** What an eviction would lose, for the refusal's message. */
 			readonly holds: string;
 			/** What the refusal tells an operator to set. */
@@ -85,6 +90,7 @@ const NAMES: Readonly<
 		volatile: "mfa_factor_store_volatile",
 		unchecked: "mfa_factor_store_durability_unchecked",
 		lockEvictable: undefined,
+		evictableFamilies: undefined,
 		holds:
 			"enrolled second factors, and an account whose factors are evicted reads as never enrolled",
 		remedy:
@@ -96,6 +102,7 @@ const NAMES: Readonly<
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
 		lockEvictable: "mfa_transaction_store_lock_evictable",
+		evictableFamilies: ["lock", "week", "first-binding"],
 		holds:
 			"the email proof an operator reset requires at the next first binding, which a password holder could then skip",
 		remedy: '"noeviction"',
@@ -143,7 +150,15 @@ export async function checkRedisMfaStoreDurability(
 		throw new RedisMfaStoreEvictableError(store, policy);
 	}
 	if (names.lockEvictable !== undefined && policy !== undefined && VOLATILE_POLICIES.has(policy)) {
-		logger.warn({ store, adapter: "redis", maxmemoryPolicy: policy }, names.lockEvictable);
+		logger.warn(
+			{
+				store,
+				adapter: "redis",
+				maxmemoryPolicy: policy,
+				evictableFamilies: names.evictableFamilies,
+			},
+			names.lockEvictable,
+		);
 	}
 	/** A policy read but not one the allow-list knows: it cannot be judged. */
 	const unjudged =

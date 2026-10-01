@@ -15,6 +15,7 @@
  */
 
 import {
+	DEFAULT_CLOCK_SKEW_MS,
 	getBoundMfaTransaction,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_WEEKLY_WINDOW_MS,
@@ -37,12 +38,13 @@ import { describe, expect, it } from "vitest";
  * bounds guessable proofs across transactions: the consecutive run with its
  * short backoff and hard limit, and the weekly budget no success refunds.
  * Beside them, what a first binding asks of the store: the email proof an
- * operator reset requires, and the account-email proof given in one session.
+ * operator reset requires, the account-email proof given in one session,
+ * and the subject's first-binding mark.
  *
  * The subject state is judged on the time its caller passes, so D21's
- * schedule is driven here by an injected clock; a transaction and a
- * session's proof expire on the store's own clock, read through
- * {@link ExpiryClock} as the session-store suite does.
+ * schedule is driven here by an injected clock; a transaction, a session's
+ * proof and a first-binding mark expire on the store's own clock, read
+ * through {@link ExpiryClock} as the session-store suite does.
  */
 export type MfaTransactionStoreContractFactory = () => Promise<MfaTransactionStore>;
 
@@ -1647,6 +1649,183 @@ export function runMfaTransactionStoreContract(
 					store.sessionEmailProofAt(subject, sid, nowMs as never),
 					label,
 				).rejects.toThrow(RangeError);
+			}
+		});
+	});
+
+	describe("MfaTransactionStore contract: a subject's first-binding mark", () => {
+		// When a first counting factor was last bound for a subject, or its
+		// witness marked (the MFA ADR's D12): a session or a login authenticated
+		// no later than it may hold a stale witness. A mark distrusts, so every
+		// doubt keeps it: it stands until its end on the store's clock alone,
+		// and of two marks the store keeps the later time and the later end.
+
+		/** A whole millisecond at or after both clocks: the host's, which a write is checked against, and the store's. */
+		const nowOnBoth = async (): Promise<number> =>
+			Math.floor(Math.max(Date.now(), await expiry.now()));
+
+		it("notes a mark, and answers when it was noted while it stands", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			expect(await store.firstBindingAt("user-1", now)).toBeNull();
+			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now);
+		});
+
+		it("answers a mark while it stands on the store's clock, whatever time a caller asks about", async () => {
+			// A caller whose clock runs ahead never ends a mark early.
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now + 10 * MINUTE)).toBe(now);
+			expect(await store.firstBindingAt("user-1", now + 11 * MINUTE)).toBe(now);
+		});
+
+		it("keeps the later time of the mark held and the one noted: an earlier note never moves it back", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.noteFirstBinding("user-1", now - 2 * MINUTE, now + 10 * MINUTE);
+			await store.noteFirstBinding("user-1", now - MINUTE, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - MINUTE);
+			await store.noteFirstBinding("user-1", now - 3 * MINUTE, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - MINUTE);
+		});
+
+		it("keeps the later end of the mark held and the one noted: a note that ends sooner never shortens it", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.noteFirstBinding("user-1", now - 2 * MINUTE, now + 2_000);
+			// Later, and ending sooner: its time is kept, the held end stands.
+			await store.noteFirstBinding("user-1", now - MINUTE, now + 1_000);
+			await expiry.passed(now + 1_000);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - MINUTE);
+			await expiry.passed(now + 2_000);
+			expect(await store.firstBindingAt("user-1", now)).toBeNull();
+		});
+
+		it("keeps the latest time and the latest end of N notes in flight", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			// The latest time is the last step's; the latest end is the first's.
+			const steps = [3, 9, 1, 7, 5, 0, 8, 2, 6, 4];
+			await Promise.all(
+				steps.map((i) =>
+					store.noteFirstBinding(
+						"user-1",
+						now - (10 - i) * 1_000,
+						i === 0 ? now + 10 * MINUTE : now + 2_000,
+					),
+				),
+			);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - 1_000);
+			await expiry.passed(now + 2_000);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now - 1_000);
+		});
+
+		it("forgets a mark once the store's clock passes its end, whatever time a caller asks about", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			const until = now + 300;
+			await store.noteFirstBinding("user-1", now, until);
+			await expiry.passed(until);
+			expect(await store.firstBindingAt("user-1", now)).toBeNull();
+		});
+
+		it("takes any note once the mark it held has ended on the store's clock, an earlier time included", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			const until = now + 300;
+			await store.noteFirstBinding("user-1", now, until);
+			await expiry.passed(until);
+			const later = await nowOnBoth();
+			await store.noteFirstBinding("user-1", now - MINUTE, later + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", later)).toBe(now - MINUTE);
+		});
+
+		it("answers a mark noted a little ahead of the store's clock as noted, never earlier", async () => {
+			// A caller's clock may run ahead of the store's by up to the skew
+			// allowance. The mark bounds which sessions are trusted, so an
+			// earlier answer would trust one it should not.
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.noteFirstBinding("user-1", now + MINUTE, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now + MINUTE);
+		});
+
+		it("keeps each subject's mark apart, and through clearSubjectState", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			await store.noteFirstBinding("user-1", now, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-2", now)).toBeNull();
+			await store.noteFirstBinding("user-2", now - MINUTE, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-1", now)).toBe(now);
+			expect(await store.firstBindingAt("user-2", now)).toBe(now - MINUTE);
+			// The mark is not lock state: clearing the lock trusts no stale session.
+			await store.clearSubjectState("user-1");
+			expect(await store.firstBindingAt("user-1", now)).toBe(now);
+			// Nor is a session's proof of a subject its mark.
+			await store.recordSessionEmailProof("user-3", "sid-1", now, now + 10 * MINUTE);
+			expect(await store.firstBindingAt("user-3", now)).toBeNull();
+		});
+
+		it("refuses, with a RangeError, a note it cannot keep, and records nothing", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			const later = now + 10 * MINUTE;
+			for (const [label, subject, atMs, untilMs] of [
+				["an empty subject", "", now, later],
+				["a subject that is not a string", 7, now, later],
+				["a time that is not a number", "user-1", Number.NaN, later],
+				["a time before the epoch", "user-1", -1, later],
+				["a time that is not whole", "user-1", now + 0.5, later],
+				["a time as text", "user-1", String(now), later],
+				["an end at the mark's time", "user-1", now, now],
+				["an end before the mark's time", "user-1", now, now - 1],
+				["an end already past on the store's clock", "user-1", now - 2 * MINUTE, now - MINUTE],
+				["an end that is not a number", "user-1", now, Number.NaN],
+				["an end that is not whole", "user-1", now, later + 0.5],
+				["an end past the Date range", "user-1", now, 1e17],
+				[
+					"an end further after its time than MFA_CLOCK_SKEW_ALLOWANCE_MS",
+					"user-1",
+					now,
+					now + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1,
+				],
+				[
+					"a time further ahead of the store's clock than the clock skew allowed",
+					"user-1",
+					now + DEFAULT_CLOCK_SKEW_MS + MINUTE,
+					now + DEFAULT_CLOCK_SKEW_MS + 10 * MINUTE,
+				],
+				[
+					"a time further behind the store's clock than the clock skew allowed",
+					"user-1",
+					now - DEFAULT_CLOCK_SKEW_MS - MINUTE,
+					later,
+				],
+			] as const) {
+				await expect(
+					store.noteFirstBinding(subject as never, atMs as never, untilMs as never),
+					label,
+				).rejects.toThrow(RangeError);
+			}
+			expect(await store.firstBindingAt("user-1", now)).toBeNull();
+		});
+
+		it("refuses, with a RangeError, a question it cannot answer: no subject, or a time that is no instant", async () => {
+			const store = await factory();
+			const now = await nowOnBoth();
+			for (const [label, subject, nowMs] of [
+				["an empty subject", "", now],
+				["a subject that is not a string", 7, now],
+				["a time that is not a number", "user-1", Number.NaN],
+				["a time before the epoch", "user-1", -1],
+				["a time past the Date range", "user-1", 1e17],
+				["a time as text", "user-1", String(now)],
+			] as const) {
+				await expect(store.firstBindingAt(subject as never, nowMs as never), label).rejects.toThrow(
+					RangeError,
+				);
 			}
 		});
 	});

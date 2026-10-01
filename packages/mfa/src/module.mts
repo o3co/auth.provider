@@ -495,6 +495,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								witness,
 								transactionTtlSeconds: settings.transactionTtlSeconds,
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
+								requireEmailProof: settings.enrollment.requireEmailProof,
 								sessionProofSeconds: settings.manage.maxAgeSeconds,
 							}),
 							admission: {

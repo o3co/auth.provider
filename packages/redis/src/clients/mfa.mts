@@ -16,8 +16,8 @@
 
 /**
  * The MFA stores' clients: the enrolled factors, one hash per subject; the transactions, a
- * subject's lock state and the email-proof requirement; and the durability report both are
- * checked by at boot.
+ * subject's lock state, the email-proof requirement, a session's proof and a subject's
+ * first-binding mark; and the durability report both are checked by at boot.
  */
 
 import type {
@@ -158,6 +158,28 @@ export interface NoteMfaExemptSuccessInput {
 	readonly policy: MfaLockoutPolicy;
 }
 
+/** A subject's first-binding mark to note; the server's clock judges it. */
+export interface NoteMfaFirstBindingInput {
+	readonly atMs: number;
+	readonly untilMs: number;
+	/** How far either side of the server's clock a mark's time may lie (`DEFAULT_CLOCK_SKEW_MS`). */
+	readonly skewMs: number;
+	/** The longest a held mark may stand past its time and still be one (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). */
+	readonly longestMs: number;
+}
+
+/** What a note answers: kept, or refused on the server's clock, which it names. */
+export type NoteMfaFirstBindingReply =
+	| { readonly noted: true }
+	| { readonly noted: false; readonly serverNowMs: number };
+
+/** A subject's first-binding mark as read, with the server's clock at the read. */
+export interface MfaFirstBindingRead {
+	/** The key's value; `null` when there is none. */
+	readonly value: string | null;
+	readonly serverNowMs: number;
+}
+
 /**
  * Backing client for the `MfaTransactionStore` adapter (ADR
  * 2026-09-25-multi-factor-authentication, D8, D21, D25).
@@ -245,6 +267,18 @@ export interface MfaTransactionStoreClient {
 	recordSessionEmailProof(key: string, value: string, ttlMs: number): Promise<void>;
 	/** The session's email proof at `key` (`GET`); `null` when there is none. */
 	sessionEmailProof(key: string): Promise<string | null>;
+	/**
+	 * Atomically, on the server's clock: refuse a mark whose `untilMs` is not after it or
+	 * whose `atMs` lies further from it than `input.skewMs`, writing nothing; otherwise write
+	 * the later `atMs` and the later `untilMs` of the mark held, while it stands, and this
+	 * one, expiring at that `untilMs` (`SET … PXAT`). A held mark is judged on its shape
+	 * alone, never on where its time sits on the server's clock; a held value that is not a
+	 * mark (`input.longestMs` bounding how long one stands), or a key of another type, is
+	 * replaced.
+	 */
+	noteFirstBinding(key: string, input: NoteMfaFirstBindingInput): Promise<NoteMfaFirstBindingReply>;
+	/** The subject's first-binding mark at `key`, and the server's clock, in one step. */
+	firstBindingMark(key: string): Promise<MfaFirstBindingRead>;
 	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }

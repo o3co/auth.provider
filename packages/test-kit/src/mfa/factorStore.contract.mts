@@ -16,8 +16,8 @@
 
 /**
  * The contract suite of `MfaFactorStore` (the MFA ADR's D7), for every
- * adapter. "Only zero records open a first binding" (the same ADR's F3) is
- * only as strong as the store: a record that comes back without a field, a
+ * adapter. "Only a subject with no record that may count opens a first
+ * binding" (the same ADR's F3) is only as strong as the store: a record that comes back without a field, a
  * version that two writers both win, or a removal that reaches another
  * subject each loses or forges a factor.
  *

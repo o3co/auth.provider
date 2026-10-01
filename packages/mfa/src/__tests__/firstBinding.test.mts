@@ -25,11 +25,15 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	enrollableKinds,
 	type FirstBindingGate,
 	firstBindingGate,
 	type MailAddressFact,
+	MfaEnrollableError,
 	type RequireEmailProof,
+	reopenedEnrollment,
 } from "#/firstBinding.mjs";
+import { FACTORS, factorRecord, resolverOver, stubFactor } from "./requirementHarness.mjs";
 
 type Row = readonly [RequireEmailProof, boolean, MailAddressFact, FirstBindingGate];
 
@@ -90,5 +94,57 @@ describe("firstBindingGate", () => {
 			expect(gate(false, "address"), requireEmailProof).toEqual(unprovable("no_sender"));
 			expect(gate(false, "unreadable"), requireEmailProof).toEqual(unprovable("no_sender"));
 		}
+	});
+});
+
+describe("reopenedEnrollment", () => {
+	const factors = resolverOver([FACTORS.totp(), FACTORS.recovery()]);
+
+	it("is allowed beside a record that may count: one of a counting kind, or of a kind no longer installed", () => {
+		expect(
+			reopenedEnrollment(factors, [factorRecord("u", "recovery_code", "a"), factorRecord("u")]),
+		).toBe("allowed");
+		expect(
+			reopenedEnrollment(factors, [
+				factorRecord("u", "recovery_code", "a"),
+				factorRecord("u", "retired", "b"),
+			]),
+		).toBe("allowed");
+	});
+
+	it("is required — a first binding — over records none of which may count, or none", () => {
+		expect(reopenedEnrollment(factors, [factorRecord("u", "recovery_code", "a")])).toBe("required");
+		expect(reopenedEnrollment(factors, [])).toBe("required");
+	});
+});
+
+describe("enrollableKinds", () => {
+	it("offers the counting factors the user may enroll, in registration order", () => {
+		const refusing = { ...stubFactor("email", ["email"]), enrollable: () => false };
+		const factors = resolverOver([
+			FACTORS.webauthn(),
+			FACTORS.recovery(),
+			refusing,
+			FACTORS.totp(),
+		]);
+		expect(enrollableKinds(factors, { id: "u" })).toEqual(["webauthn", "totp"]);
+	});
+
+	it("lets a factor's enrollable throw through, naming its kind: a factor that cannot answer is an outage", () => {
+		const broken = new Error("broken");
+		const throwing = {
+			...stubFactor("email", ["email"]),
+			enrollable: () => {
+				throw broken;
+			},
+		};
+		let thrown: unknown;
+		try {
+			enrollableKinds(resolverOver([FACTORS.totp(), throwing]), { id: "u" });
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toBeInstanceOf(MfaEnrollableError);
+		expect(thrown).toMatchObject({ kind: "email", cause: broken });
 	});
 });

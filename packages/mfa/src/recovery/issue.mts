@@ -20,6 +20,17 @@
  * sealed to it, as the binding it follows authorized it. Never throws: a set
  * that cannot be made or written is answered not issued, with why, so what
  * it follows stands.
+ *
+ * The new set replaces the subject's sets that stood before it: they are
+ * listed first, the new one is written, then those — and only those — are
+ * removed, so a set written after the listing (another binding's) is never
+ * removed. A listing or a removal that fails leaves an old set usable beside
+ * the new one, answered with why; it never undoes the new set.
+ *
+ * A binding by `password` — no account-email proof was asked — replaces
+ * nothing: whoever holds the password and one code could make it, so the
+ * sets that stood are kept and the owner's remaining codes stay usable
+ * (D25's amendment). Wherever the binding is made, this is the one rule.
  */
 
 import { randomBytes } from "node:crypto";
@@ -27,9 +38,24 @@ import type { MfaFactorRecord, MfaFactorResolver, MfaFactorStore } from "@o3co/a
 import type { MfaSealing } from "../sealing.mjs";
 import { generateRecoveryCodes, RECOVERY_CODE_FACTOR_KIND } from "./factor.mjs";
 
-/** What issuing came to: nothing while the factor is off, the codes to answer once, or not issued, with why. */
+/** Why a set that stood may still stand beside the new one: kept for a `password` binding, or a listing or removal that failed. */
+export type MfaUnreplacedRecoveryCodes =
+	| { readonly kept: "password_binding" }
+	| { readonly cause: unknown };
+
+/**
+ * What issuing came to: nothing while the factor is off, or not issued, with
+ * why; or the codes to answer once, whether the new set replaces one —
+ * `regenerated`: one stood, or could not be ruled out — and why one may
+ * still stand (`unreplaced`).
+ */
 export type MfaIssuedRecoveryCodes =
-	| { readonly issued: true; readonly codes: readonly string[] }
+	| {
+			readonly issued: true;
+			readonly codes: readonly string[];
+			readonly regenerated: boolean;
+			readonly unreplaced?: MfaUnreplacedRecoveryCodes;
+	  }
 	| { readonly issued: false; readonly cause: unknown }
 	| undefined;
 
@@ -43,6 +69,10 @@ export interface IssueRecoveryCodesOptions {
 	readonly nowMs: number;
 }
 
+/** Whether a set issued beside a binding by `binding` replaces the sets that stood: the one rule (see this file's header). */
+export const replacesStandingSets = (binding: NonNullable<MfaFactorRecord["binding"]>): boolean =>
+	binding !== "password";
+
 /** A new set for `options.subject` (see this file's header). */
 export async function issueRecoveryCodes(
 	options: IssueRecoveryCodesOptions,
@@ -53,6 +83,7 @@ export async function issueRecoveryCodes(
 	try {
 		const set = generateRecoveryCodes(factor, sealing.digestsFor(RECOVERY_CODE_FACTOR_KIND));
 		if (set === undefined) return undefined;
+		const standing = await setsOf(factorStore, subject);
 		const id = randomBytes(16).toString("base64url");
 		await factorStore.create({
 			id,
@@ -65,8 +96,56 @@ export async function issueRecoveryCodes(
 			version: 0,
 			data: sealing.sealFactorData({ subject, id, kind: RECOVERY_CODE_FACTOR_KIND }, set.data),
 		});
-		return { issued: true, codes: set.codes };
+		const issued = { issued: true as const, codes: set.codes };
+		if ("cause" in standing) return { ...issued, regenerated: true, unreplaced: standing };
+		if (standing.ids.length === 0) return { ...issued, regenerated: false };
+		if (!replacesStandingSets(options.binding)) {
+			return { ...issued, regenerated: true, unreplaced: { kept: "password_binding" } };
+		}
+		const failed = await removeEach(factorStore, subject, standing.ids);
+		return {
+			...issued,
+			regenerated: true,
+			...(failed === undefined ? {} : { unreplaced: failed }),
+		};
 	} catch (cause) {
 		return { issued: false, cause };
 	}
+}
+
+/** The ids of the subject's sets as listed now, or why they could not be. */
+async function setsOf(
+	factorStore: MfaFactorStore,
+	subject: string,
+): Promise<{ readonly ids: readonly string[] } | { readonly cause: unknown }> {
+	try {
+		const records: unknown = await factorStore.list(subject);
+		if (!Array.isArray(records)) {
+			throw new TypeError("MfaFactorStore.list answered something that is not a list");
+		}
+		return {
+			ids: (records as MfaFactorRecord[])
+				.filter((record) => record.kind === RECOVERY_CODE_FACTOR_KIND)
+				.map((record) => record.id),
+		};
+	} catch (cause) {
+		return { cause };
+	}
+}
+
+/** Each of `ids` removed: `undefined` once all are, else the first failure. */
+async function removeEach(
+	factorStore: MfaFactorStore,
+	subject: string,
+	ids: readonly string[],
+): Promise<{ readonly cause: unknown } | undefined> {
+	let failed: { readonly cause: unknown } | undefined;
+	for (const id of ids) {
+		try {
+			await factorStore.remove(subject, id);
+		} catch (cause) {
+			failed ??= { cause };
+		}
+	}
+	return failed;
 }

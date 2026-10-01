@@ -17,8 +17,8 @@
 /**
  * Redis {@link MfaTransactionStore}: the single-use record of each
  * second-factor ceremony, the subject lock that bounds guessable proofs, the
- * email proof an operator reset requires, and the account-email proof given
- * in a session (see
+ * email proof an operator reset requires, the account-email proof given in a
+ * session, and a subject's first-binding mark (see
  * packages/core/docs/adr/2026-09-25-multi-factor-authentication.md).
  *
  * ```text
@@ -27,6 +27,7 @@
  * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
  * <keyPrefix>proof:{<subject>}                  STRING the email-proof requirement, with no TTL
  * <keyPrefix>session-proof:{<subject>}:<sid>    STRING a session's account-email proof, expiring at its end
+ * <keyPrefix>first-binding:{<subject>}          STRING a subject's first-binding mark, expiring at its end
  * ```
  *
  * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`).
@@ -61,18 +62,36 @@
  * this side's clock (`untilMs` less `now`, rounded up), and answered absent
  * at or past `untilMs` on that clock too. One that does not read back is
  * absent: losing a proof fails closed — the user proves again.
+ *
+ * A subject's first-binding mark is JSON `{atMs, untilMs}` judged on one
+ * clock, the Redis server's (`TIME` in its scripts): its end, which mark a
+ * note keeps (the later time and the later end) and the key's deadline
+ * (`PXAT` its end). This side's clock decides none of them, so a replica
+ * whose clock runs ahead or behind neither ends a mark early nor replaces it
+ * with an earlier one, and a mark whose time sits ahead of the server's clock
+ * (a clock stepped back) is still merged and answered: the caller's reading
+ * judges that. A value that does not read back as a mark, whatever its end
+ * looks like, or a key of another type, is an outage, never absent: an
+ * absent mark trusts the session it is there to distrust. A note replaces
+ * either.
  */
 
 import { randomBytes } from "node:crypto";
 import {
+	checkFirstBindingNote,
+	checkFirstBindingQuestion,
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
 	checkMfaVersionAdvances,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
 	consoleLogger,
+	DEFAULT_CLOCK_SKEW_MS,
 	defineModule,
+	type FirstBindingMark,
+	firstBindingAnswer,
 	isStorableExpiry,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
@@ -97,7 +116,9 @@ export interface RedisMfaTransactionStoreOptions {
 	 * The clock a transaction expires by on this side, in epoch milliseconds:
 	 * `create` refuses an expiry at or before it, and a read answers a
 	 * transaction at or past its `expiresAtMs` on it as absent, whatever the
-	 * server's clock says. Default `Date.now`.
+	 * server's clock says. A session's proof is judged on it too; a subject's
+	 * first-binding mark is not (the server's clock decides it). Default
+	 * `Date.now`.
 	 */
 	readonly now?: () => number;
 }
@@ -236,6 +257,40 @@ function sessionProofOf(
 	}
 }
 
+/** The fields a note writes, and no other. */
+const MARK_FIELDS: ReadonlySet<string> = new Set(["atMs", "untilMs"]);
+
+/**
+ * The first-binding mark `text` holds, or `null` when there is none. Throws,
+ * naming nothing it read, when it holds no mark a note could have written:
+ * `atMs` and `untilMs` and no other field — a note writes none, and the
+ * script that keeps the mark need not decode one — in the shape
+ * `checkFirstBindingNote` holds a note to, judged before its end is. Where
+ * its time sits on the server's clock is the caller's reading to judge.
+ */
+function firstBindingMarkOf(text: string | null, subject: string): FirstBindingMark | null {
+	if (text === null) return null;
+	const unreadable = (): never => {
+		throw new Error("MfaTransactionStore: a first-binding mark it cannot read");
+	};
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		return unreadable();
+	}
+	if (!isObject(value) || !Object.keys(value).every((key) => MARK_FIELDS.has(key))) {
+		return unreadable();
+	}
+	const { atMs, untilMs } = value;
+	try {
+		checkFirstBindingNote(subject, atMs, untilMs);
+	} catch {
+		return unreadable();
+	}
+	return { atMs: atMs as number, untilMs: untilMs as number };
+}
+
 function checkInstant(nowMs: number, operation: string): void {
 	if (!isStorableExpiry(nowMs)) {
 		throw new RangeError(
@@ -261,6 +316,8 @@ export function createRedisMfaTransactionStore(
 	const proofKey = (subject: string): string => `${keyPrefix}proof:{${mfaKeyPart(subject)}}`;
 	const sessionProofKey = (subject: string, sid: string): string =>
 		`${keyPrefix}session-proof:{${mfaKeyPart(subject)}}:${mfaKeyPart(sid)}`;
+	const firstBindingKey = (subject: string): string =>
+		`${keyPrefix}first-binding:{${mfaKeyPart(subject)}}`;
 
 	return {
 		kind: "redis",
@@ -393,6 +450,29 @@ export function createRedisMfaTransactionStore(
 			const proof = sessionProofOf(text, subject, sid, storeNowMs);
 			return proof === null ? null : sessionEmailProofAnswer(proof, nowMs, storeNowMs);
 		},
+
+		async noteFirstBinding(subject, atMs, untilMs) {
+			// The shape here; the clock's bounds in the script, on the server's clock.
+			checkFirstBindingNote(subject, atMs, untilMs);
+			const reply = await client.noteFirstBinding(firstBindingKey(subject), {
+				atMs,
+				untilMs,
+				skewMs: DEFAULT_CLOCK_SKEW_MS,
+				longestMs: MFA_CLOCK_SKEW_ALLOWANCE_MS,
+			});
+			if (reply.noted) return;
+			checkFirstBindingNote(subject, atMs, untilMs, reply.serverNowMs);
+			throw new RangeError(
+				"MfaTransactionStore.noteFirstBinding: the mark does not stand on the store's clock",
+			);
+		},
+
+		async firstBindingAt(subject, nowMs) {
+			checkFirstBindingQuestion(subject, nowMs);
+			const { value, serverNowMs } = await client.firstBindingMark(firstBindingKey(subject));
+			const mark = firstBindingMarkOf(value, subject);
+			return mark === null ? null : firstBindingAnswer(mark, serverNowMs);
+		},
 	};
 }
 
@@ -412,8 +492,10 @@ export function createRedisMfaTransactionStore(
  * (`mfa_transaction_store_volatile`) and a server refusing `CONFIG`
  * (`mfa_transaction_store_durability_unchecked`) each warn on the `logger` slot
  * (or `consoleLogger`). So does a `volatile-*` policy
- * (`mfa_transaction_store_lock_evictable`): the lock state carries a TTL once no
- * run is counted, and evicting it lifts a lockout hold early.
+ * (`mfa_transaction_store_lock_evictable`, naming `evictableFamilies`): the
+ * lock state carries a TTL once no run is counted, and evicting it lifts a
+ * lockout hold early; a first-binding mark carries one always, and evicting
+ * it fails open — a stale session's first binding is no longer refused.
  */
 export const redisMfaTransactionStoreModule = defineModule({
 	name: "redis-mfa-transaction-store",

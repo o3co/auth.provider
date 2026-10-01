@@ -34,10 +34,13 @@
  *
  * Whether a binding is a first one is read over the subject's records with
  * admission's presumption (`mayCount`): a record counts unless an installed
- * factor of its kind declares it does not.
+ * factor of its kind declares it does not. The same reading names the
+ * binding a login reopens after a non-counting proof (`reopenedEnrollment`).
  */
 
 import type { MailAddressFact, MfaFactorRecord, MfaFactorResolver } from "@o3co/auth-provider-core";
+import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
+import { replacesStandingSets } from "./recovery/issue.mjs";
 
 export type { MailAddressFact };
 
@@ -52,6 +55,73 @@ export const mayCount = (
 	factors: MfaFactorResolver,
 	record: Pick<MfaFactorRecord, "kind">,
 ): boolean => factors.get(record.kind)?.counting !== false;
+
+/**
+ * The enrollment a login reopens for once a non-counting proof left its
+ * subject no counting factor it can use: `allowed`, a binding beside a
+ * record that may count (one whose data does not open, a kind no longer
+ * installed); else `required`, a first binding.
+ */
+export const reopenedEnrollment = (
+	factors: MfaFactorResolver,
+	records: readonly Pick<MfaFactorRecord, "kind">[],
+): "allowed" | "required" =>
+	records.some((record) => mayCount(factors, record)) ? "allowed" : "required";
+
+/**
+ * How many records the subject holds once a first binding by `binding`
+ * stands beside `records` (its own factor not among them): those records,
+ * less the recovery-code sets the binding's new set replaces, plus its
+ * factor and — the recovery-code factor installed — the new set. Held to
+ * `mfa.maxFactorsPerSubject`.
+ */
+export const recordsAfterFirstBinding = (
+	factors: MfaFactorResolver,
+	records: readonly Pick<MfaFactorRecord, "kind">[],
+	binding: NonNullable<MfaFactorRecord["binding"]>,
+): number => {
+	const replaced = replacesStandingSets(binding);
+	const staying = records.filter(
+		(record) => !(replaced && record.kind === RECOVERY_CODE_FACTOR_KIND),
+	).length;
+	return staying + 1 + (factors.get(RECOVERY_CODE_FACTOR_KIND) === undefined ? 0 : 1);
+};
+
+/** A factor's `enrollable` that threw: its `kind`, and the factor's error as `cause`, never quoted. */
+export class MfaEnrollableError extends Error {
+	constructor(
+		readonly kind: string,
+		cause: unknown,
+	) {
+		super(`the ${kind} factor could not say whether the user may enroll it`, { cause });
+		this.name = "MfaEnrollableError";
+	}
+}
+
+/** The kinds of the installed counting factors, in registration order. */
+export const countingKinds = (factors: MfaFactorResolver): string[] =>
+	[...factors.entries()].filter(([, factor]) => factor.counting).map(([kind]) => kind);
+
+/**
+ * The counting factors `user` may enroll, in registration order: what a
+ * first binding offers. A factor whose `enrollable` throws cannot answer —
+ * an outage, never "not offered" — so the throw goes through, as an
+ * {@link MfaEnrollableError} naming its kind.
+ */
+export const enrollableKinds = (
+	factors: MfaFactorResolver,
+	user: Readonly<Record<string, unknown>>,
+): string[] =>
+	[...factors.entries()].flatMap(([kind, factor]) => {
+		if (!factor.counting) return [];
+		let offered: boolean;
+		try {
+			offered = factor.enrollable?.(user) ?? true;
+		} catch (cause) {
+			throw new MfaEnrollableError(kind, cause);
+		}
+		return offered ? [kind] : [];
+	});
 
 /** `mfa.enrollment.requireEmailProof`. */
 export const REQUIRE_EMAIL_PROOF = ["when-mail", "always", "never"] as const;

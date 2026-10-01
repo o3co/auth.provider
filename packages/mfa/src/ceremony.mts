@@ -17,13 +17,15 @@
 /**
  * The contract the MFA ceremonies share: a call, what each ceremony answers,
  * and the kit the coordinator hands the ceremonies beside a verification —
- * an enrollment (`enrollment.mts`), the account-email proof (`proof.mts`)
- * and a session's step-up (`stepUp.mts`). A leaf: the coordinator and the
+ * an enrollment (`enrollment.mts`), the account-email proof (`proof.mts`),
+ * a session's step-up (`stepUp.mts`) and a login reopened for a binding
+ * (`reopen.mts`). A leaf: the coordinator and the
  * ceremonies import it, and it imports none of them, so no two of them
  * depend on each other's contracts.
  */
 
 import type {
+	InterruptionAnswer,
 	MailSender,
 	MfaFactor,
 	MfaFactorData,
@@ -37,6 +39,7 @@ import type {
 	MfaVerification,
 	PrimaryContinuation,
 } from "@o3co/auth-provider-core";
+import type { RequireEmailProof, UnprovableReason } from "./firstBinding.mjs";
 import type { MfaMailRefusal } from "./mail.mjs";
 import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
 import type { MfaSealing } from "./sealing.mjs";
@@ -191,8 +194,24 @@ export type MfaVerifyOutcome =
 	  } & MfaCeremonySubject)
 	/** The account-email proof was given: the first binding may proceed. */
 	| ({ readonly outcome: "proved" } & MfaCeremonySubject)
-	/** The proof was right, but it does not count and the subject holds no counting factor it can use (F3). */
-	| ({ readonly outcome: "enrollment_required" } & MfaCeremonySubject)
+	/**
+	 * The proof was right and spent, but it does not count and the subject
+	 * holds no counting factor it can use (F3): the login's own `403`, naming
+	 * the transaction reopened for a binding.
+	 */
+	| ({
+			readonly outcome: "binding_reopened";
+			readonly answer: InterruptionAnswer;
+			/** The codes the set holds once a recovery code was spent; `undefined` for any other factor. */
+			readonly recoveryCodesRemaining: number | undefined;
+	  } & MfaCeremonySubject)
+	/** As `binding_reopened`, but the new transaction could not be opened: the proof stays spent. */
+	| ({
+			readonly outcome: "binding_not_reopened";
+			readonly outage: MfaStoreOutage;
+			readonly recoveryCodesRemaining: number | undefined;
+	  } & MfaCeremonySubject)
+	| (MfaReopenRefusal & MfaCeremonySubject)
 	| ({
 			readonly outcome: "verified";
 			/** What the login persisted, as the store answered it at consumption. */
@@ -204,6 +223,26 @@ export type MfaVerifyOutcome =
 			/** The codes the set holds once a recovery code was spent; `undefined` for any other factor. */
 			readonly recoveryCodesRemaining: number | undefined;
 	  } & MfaCeremonySubject);
+
+/**
+ * Why a login is not reopened for a binding, answered before anything is
+ * spent: a first binding while the login's `User` says the subject enrolled,
+ * or says nothing readable (D12); no counting factor offered to the user, or
+ * one that cannot say (each an outage); or a binding nobody could complete —
+ * a proof the gate asks that nobody can give, or `mfa.maxFactorsPerSubject`
+ * reached beside a record that may count.
+ */
+export type MfaReopenRefusal =
+	| {
+			readonly outcome: "enrollment_state_inconsistent";
+			readonly witness: "enrolled" | "malformed";
+	  }
+	| { readonly outcome: "nothing_enrollable"; readonly countingKinds: readonly string[] }
+	| { readonly outcome: "enrollable_failed"; readonly factorKind: string; readonly cause: unknown }
+	| {
+			readonly outcome: "binding_refused";
+			readonly unprovable: UnprovableReason | undefined;
+	  };
 
 /** Why an enrollment is refused before anything is spent. */
 export type MfaEnrollmentRefusal =
@@ -328,6 +367,8 @@ export interface MfaCeremonyKit {
 	readonly now: () => number;
 	/** `mfa.maxFactorsPerSubject`: the records a subject may hold before an enrollment in a session is refused. */
 	readonly maxFactorsPerSubject: number;
+	/** `mfa.enrollment.requireEmailProof`, which the gate of a login reopened for a first binding reads. */
+	readonly requireEmailProof: RequireEmailProof;
 	/**
 	 * The transaction `call` names, bound to its binding: a login's, or an
 	 * `enroll` one whose `sid` and subject are `call.session`'s; `null` when
@@ -345,6 +386,20 @@ export interface MfaCeremonyKit {
 	) => Promise<MfaTransaction | MfaStoreOutage>;
 	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */
 	readonly provedInSession: (subject: string, sid: string) => Promise<boolean | MfaStoreOutage>;
+	/**
+	 * A new login transaction over `continuation`, bound to `binding`, opened
+	 * for the binding `shape` says: the login's `403` naming it; the outage
+	 * otherwise.
+	 */
+	readonly openLoginBinding: (
+		binding: MfaTransactionBinding,
+		continuation: PrimaryContinuation,
+		shape: {
+			readonly enrollment: "allowed" | "required";
+			readonly enrollable: readonly string[];
+			readonly emailProof: boolean;
+		},
+	) => Promise<InterruptionAnswer | MfaStoreOutage>;
 	/** The account-email proof given at `provedAtMs` in the session `sid` of `subject`, recorded to stand `mfa.manage.maxAgeSeconds`; the outage otherwise. */
 	readonly recordSessionProof: (
 		subject: string,

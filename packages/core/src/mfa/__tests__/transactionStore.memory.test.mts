@@ -154,6 +154,31 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(store.transactions).toBe(1);
 	});
 
+	it("expires a subject's first-binding mark on its own clock", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({ now: () => now });
+		await store.noteFirstBinding("user-1", T0, T0 + 300_000);
+		now = T0 + 299_999;
+		expect(await store.firstBindingAt("user-1", T0)).toBe(T0);
+		now = T0 + 300_000;
+		expect(await store.firstBindingAt("user-1", T0)).toBeNull();
+		expect(store.firstBindingMarks).toBe(0);
+	});
+
+	it("sweeps expired first-binding marks as it is written to, so an abandoned one does not stay", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			sweepInterval: 2,
+			minSweepIntervalMs: 0,
+		});
+		await store.noteFirstBinding("abandoned", T0, T0 + 1_000);
+		now = T0 + 2_000;
+		await store.create(TX({ id: "a" }));
+		expect(store.firstBindingMarks).toBe(0);
+		expect(store.transactions).toBe(1);
+	});
+
 	it("drops a subject's state once nothing in it can matter, and an exempt success adds none", async () => {
 		const store = createMemoryMfaTransactionStore();
 		const reserved = await store.reserveSubjectAttempt("user-1", T0, POLICY);
