@@ -637,6 +637,15 @@ The same 1 s allowance, and the same dependence on the replicas' clocks, apply
 where the boundary is compared with a federation grant's consent, an MFA
 continuation, or a device authorization.
 
+**`auth_time` is never later than the clock that mints it.** A session's
+`authTime` carries the clock of the replica that signed the user in. The
+`authorization_code` exchange and the `session` grant stamp it as the minting
+replica's clock when it is ahead by up to 5 minutes (`DEFAULT_CLOCK_SKEW_MS`),
+so `now − auth_time` never goes negative and a token cannot pass any
+`max_age`; a session dated further ahead is refused `400 invalid_grant`
+`session_invalid` before anything is signed, and the user signs in again. A
+refresh caps the `auth_time` it carries at its own issuance.
+
 ---
 
 ### Linking a second federation to an account (#482)

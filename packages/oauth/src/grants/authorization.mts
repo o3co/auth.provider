@@ -19,7 +19,7 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	auditErrorText,
-	authTimeClaim,
+	authTimeAt,
 	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
@@ -514,6 +514,19 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				subject = typeof rawUserId === "string" ? rawUserId : null;
 			}
 
+			// The primary authentication's time, which a step-up never moves, read
+			// once against the minting clock (core's `authTimeAt`): never later
+			// than it, and the same on the access, refresh and id tokens (RFC 9470
+			// §6.1). One this clock cannot read — further ahead than the skew
+			// allows — refuses the exchange before anything is signed.
+			const authTime =
+				userSession === null ? undefined : authTimeAt(userSession.authTime, Date.now());
+			if (userSession !== null && authTime === undefined) {
+				return {
+					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
+				};
+			}
+
 			// Initial rt+jwt opens a new refresh-token family for replay detection
 			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same
 			// family_id; revoking the family revokes every descendant.
@@ -594,9 +607,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// liveness, the subject, `auth_time` and the id_token's claims.
 			const amr = wellFormedAmr(codeData.amr);
 			const acr = wellFormedAcr(codeData.acr);
-			// The primary authentication's time, which a step-up never moves: the
-			// id_token's `auth_time`, on the access and refresh tokens too (RFC 9470 §6.1).
-			const authTime = userSession ? authTimeClaim(userSession.authTime) : undefined;
 
 			// Both tokens carry family_id and, when present, sid, so introspect and
 			// refresh need not re-read the session store. No sid without a
@@ -790,12 +800,19 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// userSessionStore) and a configured issuer (see `configuredIssuer`).
 			// A session implies a sid here; `&& sid` is defensive.
 			let idToken: Token | undefined;
-			if (grantedScopes?.includes("openid") && userSession && sid && configuredIssuer) {
+			if (
+				grantedScopes?.includes("openid") &&
+				userSession &&
+				sid &&
+				configuredIssuer &&
+				authTime !== undefined
+			) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
 					aud: authenticatedClientId,
 					azp: authenticatedClientId,
-					authTime: userSession.authTime,
+					// The instant read above, so the three tokens agree.
+					authTime: new Date(authTime * 1000),
 					...(nonce ? { nonce } : {}),
 					sid,
 					...(amr ? { amr } : {}),

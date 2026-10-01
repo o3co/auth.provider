@@ -241,11 +241,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			const carriedAmr = wellFormedAmr(claims.amr);
 			const carriedAcr = wellFormedAcr(claims.acr);
 			const carriedAuthTime = wellFormedAuthTime(claims.auth_time);
-			const authenticationClaims = {
-				...(carriedAmr ? { amr: carriedAmr } : {}),
-				...(carriedAcr ? { acr: carriedAcr } : {}),
-				...(carriedAuthTime !== undefined ? { auth_time: carriedAuthTime } : {}),
-			};
 			const tokenAzp =
 				typeof claims.azp === "string" && claims.azp.length > 0 ? claims.azp : tokenAud;
 			if (tokenAzp !== authenticatedClientId) {
@@ -741,6 +736,15 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// reads as a replay and revokes the family — the price of reserving
 			// before signing. Answer `503` and log the family so the orphan is
 			// traceable, rather than an unhandled 500.
+			// A carried `auth_time` is never later than this issuance: one a clock
+			// ahead stamped is capped at it, so `max_age` never reads a negative age.
+			const authenticationClaims = {
+				...(carriedAmr ? { amr: carriedAmr } : {}),
+				...(carriedAcr ? { acr: carriedAcr } : {}),
+				...(carriedAuthTime !== undefined
+					? { auth_time: Math.min(carriedAuthTime, issuedAt) }
+					: {}),
+			};
 			let newAccessToken: Awaited<ReturnType<typeof generateToken>>;
 			let newRefreshToken: Awaited<ReturnType<typeof generateToken>>;
 			try {
