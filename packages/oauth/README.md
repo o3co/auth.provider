@@ -701,7 +701,7 @@ Both bundled stores meet these and are pinned on them.
 | --- | --- | --- |
 | 401 | `invalid_token` | Bearer missing, invalid, wrong type (not `at+jwt`), or family revoked |
 | 403 | `forbidden` | Client not opted in via `allowedAzpForFederationToken` |
-| 404 | `federation_not_linked` | The named federation isn't linked to this session |
+| 404 | `federation_not_linked` | The named federation isn't linked to this session, or its token record is gone or holds no usable access token (the link is then removed; the latter is logged at warn as `federation_token_record_unusable`) |
 | 410 | `refresh_token_absent` | Stored tokens have no refresh token (upstream didn't return one at login, or the post-lock re-read found a record without one) |
 | 410 | `re_authentication_required` | The IdP rejected the refresh token: `invalid_grant` / `invalid_token` in the `error` of what its library raised, under a status that is neither a 429 nor a 5xx — the session's federation is cleared; the user must re-authenticate with the IdP. A 429 or a 5xx is never this, whatever its body names, and neither is an error whose message merely contains the code: those keep the stored tokens (`429`, `503` and `500` below) |
 | 429 | `rate_limited` | Upstream IdP rate limit exceeded (`status: 429`, whatever code its body names, or `error: "too_many_requests"`); the stored tokens are kept. `Retry-After` carries the upstream's own, when it named one in whole seconds (1 to 86400); none is invented otherwise |

@@ -20,14 +20,12 @@
  * and handed on as stored while they do not expire within the refresh buffer.
  */
 
-import { type FederationTokens, loggableError, sanitizeErrorText } from "@o3co/auth-provider-core";
+import type { FederationTokens } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
-import {
-	mayDiscloseTokenType,
-	refuseUndisclosableTokenType,
-} from "./federationTokenDisclosure.mjs";
+import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
+import { answerUnlinkedRecord } from "./federationTokenUnlinked.mjs";
 
 /**
  * Step 9: the record for this session and federation. Returns it, or `null`
@@ -37,7 +35,7 @@ export const readStoredTokens = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
 ): Promise<FederationTokens | null> => {
-	const { opts, res, name, federation, logger, storeUnavailable } = ctx;
+	const { opts, res, name, federation, storeUnavailable } = ctx;
 	const { sid } = caller;
 
 	// Step 9: Get federation tokens. Throw → 503. null → self-heal + 404.
@@ -53,25 +51,7 @@ export const readStoredTokens = async (
 		return null;
 	}
 	if (!tokens) {
-		// Self-heal: federation link is dangling — remove from federation index.
-		try {
-			await opts.sessionFederationIndex.removeFederation(sid, name);
-		} catch (error) {
-			logger.warn(
-				{
-					federation,
-					store: "session_federation_index",
-					step: "remove",
-					err: loggableError(error),
-				},
-				"federation_token_index_self_heal_failed",
-			);
-			// Best-effort: still return 404 regardless
-		}
-		res.status(404).json({
-			error: "federation_not_linked",
-			error_description: sanitizeErrorText(`federation '${name}' tokens not found`),
-		});
+		await answerUnlinkedRecord(ctx, caller);
 		return null;
 	}
 	return tokens;
@@ -81,14 +61,14 @@ export const readStoredTokens = async (
  * Step 10's answer: the stored token, once its type may be disclosed. The
  * handler has judged that it does not expire within the refresh buffer.
  */
-export const answerStoredToken = (
+export const answerStoredToken = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
 	tokens: FederationTokens,
-): Response => {
+): Promise<Response> => {
 	// The type is judged before the token is read and before the success
 	// is audited, so a refused disclosure is not counted as one.
-	if (!mayDiscloseTokenType(tokens.tokenType)) {
+	if (!isDisclosable(tokens)) {
 		return refuseUndisclosableTokenType(ctx, caller, tokens.tokenType);
 	}
 	return answerToken(ctx, caller, tokens, false);
