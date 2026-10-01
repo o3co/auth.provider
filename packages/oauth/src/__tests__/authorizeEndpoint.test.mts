@@ -1746,7 +1746,8 @@ describe("/authorize — step-up and re-authentication", () => {
 			const params = redirectParams(res);
 			expect(params.get("error")).toBe("login_required");
 			expect(params.get("state")).toBe("xyz");
-			expect(harness.records.size).toBe(0);
+			// Left for a replay to be refused by again; only the pass that mints spends it.
+			expect(harness.records.size).toBe(1);
 		});
 
 		it("the ask satisfies max_age=0 on the way back too", async () => {

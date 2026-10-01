@@ -25,12 +25,15 @@ import {
 	consentCovers,
 	loggableError,
 	type PublicClient,
-	readSpaceDelimitedParameter,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
 import { auditFailure, redirectError } from "./authorizeAnswers.mjs";
 import type { PromptDirective } from "./authorizeAsk.mjs";
-import { type AuthorizeContext, authorizeRequestUrl } from "./authorizeContext.mjs";
+import {
+	type AuthorizeContext,
+	authorizeRequestUrl,
+	withoutConsentPrompt,
+} from "./authorizeContext.mjs";
 import { newConsentChallenge, PENDING_CONSENT_TTL_MS } from "./consent.mjs";
 
 /** The end-user the session names, or `null` when it names nobody. */
@@ -41,25 +44,10 @@ const subjectOf = (req: Request): string | null => {
 
 /**
  * The authorize request to resume after consent: this request less
- * `prompt=consent`, which the round trip answers — carried back, it would
- * park the request again forever. Other prompt values stay.
+ * `prompt=consent` (`withoutConsentPrompt`), which the round trip answers.
  */
-const resumeUrl = (ctx: AuthorizeContext): string => {
-	const url = authorizeRequestUrl(ctx.issuerOrigin, ctx.req);
-	const prompt = url.searchParams.get("prompt");
-	// Read as `resolvePrompt` read it; a malformed one was refused there, so
-	// it never reaches a consent page to be carried back from.
-	const prompts = prompt === null ? null : readSpaceDelimitedParameter(prompt);
-	if (prompts !== null) {
-		const remaining = prompts.filter((v) => v !== "consent");
-		if (remaining.length === 0) {
-			url.searchParams.delete("prompt");
-		} else {
-			url.searchParams.set("prompt", remaining.join(" "));
-		}
-	}
-	return url.toString();
-};
+const resumeUrl = (ctx: AuthorizeContext): string =>
+	withoutConsentPrompt(authorizeRequestUrl(ctx.issuerOrigin, ctx.req)).toString();
 
 /**
  * Consent for a client that is not an explicit `firstParty: true`. Without
