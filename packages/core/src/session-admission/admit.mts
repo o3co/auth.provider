@@ -36,16 +36,13 @@
  * `acr`.
  */
 
-import { emitAuditEvent } from "../audit/factory.mjs";
 import { isWellFormedErrorCode } from "../errors/envelope.mjs";
-import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import {
 	composeAmr,
 	MFA_AMR,
 	PASSWORD_AMR,
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
-import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import {
@@ -60,6 +57,7 @@ import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs"
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import type { AdmissionAction } from "./actions.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
+import { readLiveSession } from "./live-session.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -73,7 +71,6 @@ import { checkRequest, claim } from "./request-check.mjs";
 import {
 	type Admission,
 	type AdmissionDeps,
-	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,
 	type Establishment,
@@ -269,9 +266,6 @@ const sessionlessStepUps = new Set<string>();
 // admitSession
 // ---------------------------------------------------------------------------
 
-const isValidDate = (value: unknown): value is Date =>
-	value instanceof Date && !Number.isNaN(value.getTime());
-
 /**
  * The view a requirement is handed: a copy of four fields, and of the
  * record's `enrollmentFacts` when it holds ones the type admits — never the
@@ -349,15 +343,7 @@ export async function admitSession(
 	request: AdmissionRequest,
 ): Promise<Admission> {
 	const checked = checkRequest(deps, request);
-	const {
-		claim: presented,
-		asks,
-		requirements: resolver,
-		userSessionStore,
-		subjectRevocation,
-		now,
-		logger,
-	} = checked;
+	const { claim: presented, asks, requirements: resolver, now, logger } = checked;
 	const label = checked.action.name;
 	const unavailable = (store: string, err: unknown): Admission => {
 		logger?.error(
@@ -367,75 +353,10 @@ export async function admitSession(
 		return { outcome: "unavailable", store };
 	};
 
-	// Step 1: the claim.
-	if (presented.authenticated !== true) return { outcome: "unauthenticated" };
-	if (presented.carrier === "cookie" && presented.subject === undefined) {
-		// A cookie that says authenticated without a user: not a session this
-		// provider wrote. Said at warn with the action alone; nothing to audit.
-		logger?.warn({ action: label }, "session_admission_no_subject");
-		return { outcome: "not_live", reason: "no_subject" };
-	}
-
-	// Step 2: the live read.
-	let session: UserSession | null = null;
-	if (userSessionStore !== undefined && presented.sid === undefined) {
-		if (presented.carrier !== "token") return { outcome: "not_live", reason: "no_sid" };
-	} else if (userSessionStore !== undefined && presented.sid !== undefined) {
-		let record: UserSession | null | undefined;
-		try {
-			record = await userSessionStore.get(presented.sid);
-		} catch (err) {
-			return unavailable("user_session" satisfies AdmissionInfrastructureStore, err);
-		}
-		// `== null`: the port answers `null`, and a store of the deployment's own
-		// that answers `undefined` for a missing session is still no session.
-		if (
-			record == null ||
-			nonEmptyString(record.sub) === undefined ||
-			!isValidDate(record.authTime) ||
-			!isValidDate(record.expiresAt) ||
-			!(record.expiresAt.getTime() > now.getTime())
-		) {
-			return { outcome: "not_live", reason: "gone" };
-		}
-		session = record;
-	}
-
-	// Step 3: the subject.
-	if (session !== null && presented.subject !== undefined && presented.subject !== session.sub) {
-		logger?.warn({ action: label }, "session_admission_subject_mismatch");
-		void emitAuditEvent(checked.auditSink, {
-			timestamp: now,
-			type: "session.admission.subject_mismatch",
-			subject: session.sub,
-			details: {
-				// The claim's sid, whichever carrier made the claim: the record was read by it.
-				sid: presented.sid,
-				carrier: presented.carrier,
-				claimedSubject: presented.subject,
-				recordSubject: session.sub,
-			},
-		});
-		return { outcome: "not_live", reason: "subject_mismatch" };
-	}
-
-	// Step 4: the revocation boundary, against a live record; a token's is
-	// verifyJwt's, so the two readings do not double up.
-	if (session !== null && subjectRevocation !== undefined && presented.carrier !== "token") {
-		try {
-			const boundary = await subjectRevocation.revokedBefore(session.sub);
-			if (boundary !== null && !isValidDate(boundary)) {
-				throw new TypeError("the sessions boundary is neither a date nor null");
-			}
-			if (
-				coveredByRevocationBoundary(session.authTime, boundary, DEFAULT_SUBJECT_REVOCATION_SKEW_MS)
-			) {
-				return { outcome: "revoked" };
-			}
-		} catch (err) {
-			return unavailable("revocation_boundary" satisfies AdmissionInfrastructureStore, err);
-		}
-	}
+	// Steps 1 to 4: the claim, the live read, the subject, the revocation boundary.
+	const live = await readLiveSession(checked, unavailable);
+	if ("answer" in live) return live.answer;
+	const { session } = live;
 
 	// Step 5: the requirements, by the action's effective grade: only the
 	// issued remediation keeps its grade and skips them.
