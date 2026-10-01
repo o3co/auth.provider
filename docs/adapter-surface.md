@@ -64,7 +64,10 @@ restore from an old backup — would otherwise read as "never enrolled", and eve
 affected account would accept a first binding from whoever holds its password.
 A repository without the capability (`supportsMfaEnrollmentWitness`), and a
 Store that answers no field, leave the witness absent; the factor store's
-durability is then the whole defence.
+durability is then the whole defence. Foundation's `HttpUserRepository` has
+the capability once `repositories.user.http.markMfaEnrolledUrl`
+(`REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL`) names the Store's witness
+endpoint, and none without it.
 
 `revokeAllForSubject`, the last of the three call sites above, is the pattern
 for anything that looks like it needs a new slot: the library is downstream of
@@ -333,7 +336,7 @@ out-of-tree adapter can import and run:
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |
 | `WebAuthnCredentialStore` | `packages/test-kit/src/webauthn/credentialStore.contract.mts` (`webAuthnCredentialStoreContract`), published on `@o3co/auth-provider-test-kit` |
 | `UserSessionStore` | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` (`runUserSessionStoreContract`) |
-| `SupportsMfaEnrollmentWitness` (the `UserRepository` capability `markMfaEnrolled`, answered back as `User.mfaEnrolled` on `authenticate` and on `authenticateByToken`; run only for a repository that claims it) | `packages/test-kit/src/mfa/enrollmentWitness.contract.mts` (`mfaEnrollmentWitnessContract`), published on `@o3co/auth-provider-test-kit` |
+| `SupportsMfaEnrollmentWitness` (the `UserRepository` capability `markMfaEnrolled`, answered back as `User.mfaEnrolled` on `authenticate` and on `authenticateByToken`; run only for a repository that claims it) | `packages/test-kit/src/mfa/enrollmentWitness.contract.mts` (`mfaEnrollmentWitnessContract`), published on `@o3co/auth-provider-test-kit`; foundation runs it over `HttpUserRepository` against the kit's fake Store |
 | `SupportsSecondFactorUpdate` (the `UserSessionStore` step-up capability; run only for a store that claims it) | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` (`runSecondFactorUpdateContract`) |
 | `SessionRPRegistry` | `packages/core/src/user-sessions/__tests__/sessionRPRegistry.contract.mts` |
 | `SessionFamilyIndex` | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` |
