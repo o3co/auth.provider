@@ -370,14 +370,24 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return record === undefined || factor === undefined ? undefined : { record, factor };
 	};
 
-	/** Whether `subject` holds a factor that counts, of an installed kind, whose data opens. */
-	const holdsUsableCounting = (subject: string, records: readonly MfaFactorRecord[]): boolean =>
-		records.some(
-			(candidate) =>
-				factors.get(candidate.kind)?.counting === true &&
+	/**
+	 * Whether `subject` holds a factor of an installed kind whose data opens
+	 * — one that counts, when `options.counting` asks it.
+	 */
+	const holdsUsable = (
+		subject: string,
+		records: readonly MfaFactorRecord[],
+		options: { readonly counting: boolean },
+	): boolean =>
+		records.some((candidate) => {
+			const factor = factors.get(candidate.kind);
+			return (
+				factor !== undefined &&
+				(!options.counting || factor.counting === true) &&
 				sealing.openFactorData({ subject, id: candidate.id, kind: candidate.kind }, candidate.data)
-					.state === "ok",
-		);
+					.state === "ok"
+			);
+		});
 
 	/**
 	 * The named record and every record of its kind, opened for `subject`: the
@@ -599,6 +609,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			}
 		},
 		stepUpRecordable,
+		holdsUsable,
 		openLoginBinding: async (binding, continuation, shape) => {
 			try {
 				return await openLoginBinding(transactions, {
@@ -954,7 +965,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				mode === "required" &&
 				tx.purpose === "login" &&
 				!factor.counting &&
-				!holdsUsableCounting(tx.subject, current)
+				!holdsUsable(tx.subject, current, { counting: true })
 					? reopen.plan(tx, current)
 					: undefined;
 			let reopening = await planOver(records);
@@ -1159,9 +1170,13 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					...about,
 				};
 				// A step-up's session is escalated by the caller; a login is resumed by it.
-				return tx.purpose === "step_up" && tx.sid !== undefined
-					? { outcome: "stepped_up", sid: tx.sid, ...verified }
-					: { outcome: "verified", continuation: consumed.continuation, ...verified };
+				if (tx.purpose === "step_up") {
+					// The bound read held its sid to the session's: one without is none to escalate.
+					return tx.sid === undefined
+						? UNKNOWN_TRANSACTION
+						: { outcome: "stepped_up", sid: tx.sid, ...verified };
+				}
+				return { outcome: "verified", continuation: consumed.continuation, ...verified };
 			} finally {
 				await entered.settle(settled);
 			}

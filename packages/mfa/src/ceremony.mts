@@ -479,6 +479,15 @@ export interface MfaCeremonyKit {
 		session: MfaCeremonySession,
 		acrValues: readonly string[] | undefined,
 	) => Promise<MfaTransaction | MfaStoreOutage>;
+	/**
+	 * Whether `subject` holds a factor of an installed kind whose data opens
+	 * among `records` — one that counts, when `options.counting` asks it.
+	 */
+	readonly holdsUsable: (
+		subject: string,
+		records: readonly MfaFactorRecord[],
+		options: { readonly counting: boolean },
+	) => boolean;
 	/** Whether the session store can record a second factor verified in a session: a step-up is opened only then. */
 	readonly stepUpRecordable: boolean;
 	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */

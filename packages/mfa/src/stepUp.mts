@@ -66,15 +66,9 @@ export function createMfaStepUp(kit: MfaCeremonyKit): {
 			if ("outcome" in records) return records;
 			if (records.some((record) => mayCount(kit.factors, record))) {
 				if (!kit.stepUpRecordable) return { outcome: "step_up_unrecordable" };
-				const usable = records.some(
-					(record) =>
-						kit.factors.get(record.kind) !== undefined &&
-						kit.sealing.openFactorData(
-							{ subject: session.subject, id: record.id, kind: record.kind },
-							record.data,
-						).state === "ok",
-				);
-				if (!usable) return { outcome: "no_qualifying_factor" };
+				if (!kit.holdsUsable(session.subject, records, { counting: false })) {
+					return { outcome: "no_qualifying_factor" };
+				}
 				if (call.transactionId !== undefined) {
 					const tx = await kit.boundInSession(call);
 					if (tx === null) return UNKNOWN_TRANSACTION;

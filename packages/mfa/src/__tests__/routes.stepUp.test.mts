@@ -47,6 +47,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/factor.mjs";
 import {
 	ALICE,
 	boot,
@@ -69,6 +70,7 @@ import {
 	signIn,
 	signInWithTotp,
 	stepUp,
+	suiteSealing,
 	T0,
 	thawClock,
 	totpProofOf,
@@ -556,11 +558,16 @@ describe("the step-up of a subject holding a counting factor", () => {
 		}
 	});
 
-	it("offers a usable factor that does not count beside one that cannot be used: recovery codes beside an unopenable TOTP", async () => {
+	it("offers a recovery set whose data opens beside a TOTP whose data does not", async () => {
 		const { app, factorStore, transactionStore, userSessionStore } = await composed();
 		const { agent } = await signIn(app, userSessionStore);
 		await seedTotp(factorStore, ALICE.id, { sealedFor: "u-someone-else" });
-		const recovery = await seedFactor(factorStore, "recovery_code", { codes: [] });
+		const set = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			suiteSealing().digestsFor("recovery_code"),
+		);
+		if (set === undefined) throw new Error("no set");
+		const recovery = await seedFactor(factorStore, "recovery_code", set.data);
 
 		const res = await stepUp(agent);
 

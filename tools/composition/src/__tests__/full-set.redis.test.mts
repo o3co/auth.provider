@@ -322,45 +322,58 @@ describe("two replicas on one Redis database share every flow's state", () => {
 		const b = await replica();
 		const sessions = (set: FullSet) =>
 			(set.handle.components as unknown as { userSessionStore: UserSessionStore }).userSessionStore;
-		// The database is this file's: earlier flows left alice factors, and her password login must not be interrupted.
+		// Alice's password login must not be interrupted: whatever factors she holds in this
+		// database are set aside for the test, and put back after it, whatever it came to.
 		const factors = (a.handle.components as unknown as { mfaFactorStore: MfaFactorStore })
 			.mfaFactorStore;
-		for (const record of await factors.list(ALICE.sub)) await factors.remove(ALICE.sub, record.id);
-		const create = vi.spyOn(sessions(a), "create");
-		const page = browser();
-		const signIn = await page.post(
-			a.app,
-			"/session/login",
-			{ username: ALICE.username, password: ALICE.password },
-			{ form: true },
-		);
-		expect(signIn.status, JSON.stringify(signIn.body)).toBe(200);
-		const sid = (create.mock.calls[0]?.[0] as { sid?: unknown } | undefined)?.sid as string;
-		create.mockRestore();
-		const { factorId, secret } = await seedTotp(a.handle.components, a.config, ALICE.sub);
-		const old = page.cookies();
-		expect((await page.post(a.app, "/session/mfa/enrollment", { kind: "totp" })).status).toBe(403);
+		const setAside = await factors.list(ALICE.sub);
+		for (const record of setAside) await factors.remove(ALICE.sub, record.id);
+		try {
+			const create = vi.spyOn(sessions(a), "create");
+			const page = browser();
+			const signIn = await page.post(
+				a.app,
+				"/session/login",
+				{ username: ALICE.username, password: ALICE.password },
+				{ form: true },
+			);
+			expect(signIn.status, JSON.stringify(signIn.body)).toBe(200);
+			const sid = (create.mock.calls[0]?.[0] as { sid?: unknown } | undefined)?.sid as string;
+			create.mockRestore();
+			const { factorId, secret } = await seedTotp(a.handle.components, a.config, ALICE.sub);
+			const old = page.cookies();
+			expect((await page.post(a.app, "/session/mfa/enrollment", { kind: "totp" })).status).toBe(
+				403,
+			);
 
-		expect((await postWith(b.app, old, "/session/mfa/step-up", {})).status).toBe(200);
-		const opened = await page.post(a.app, "/session/mfa/step-up", {});
-		expect(opened.status, JSON.stringify(opened.body)).toBe(200);
-		expect(opened.body.email_proof).toBe(false);
-		const verified = await page.post(b.app, "/session/mfa/verify", {
-			transaction_id: opened.body.transaction,
-			factor_id: factorId,
-			proof: totpCodeForTests(secret),
-		});
+			expect((await postWith(b.app, old, "/session/mfa/step-up", {})).status).toBe(200);
+			const opened = await page.post(a.app, "/session/mfa/step-up", {});
+			expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+			expect(opened.body.email_proof).toBe(false);
+			const verified = await page.post(b.app, "/session/mfa/verify", {
+				transaction_id: opened.body.transaction,
+				factor_id: factorId,
+				proof: totpCodeForTests(secret),
+			});
 
-		expect(verified.status, JSON.stringify(verified.body)).toBe(200);
-		expect(verified.body).toEqual({ step_up: "verified" });
-		const record = await sessions(a).get(sid);
-		expect(record?.amr).toEqual(["pwd", "otp", "mfa"]);
-		expect(record?.authentication?.mfaAt).toBeInstanceOf(Date);
-		expect(record?.renewalNonce).toEqual(expect.any(String));
-		for (const set of [a, b]) {
-			expect((await postWith(set.app, old, "/session/mfa/step-up", {})).status).toBe(401);
+			expect(verified.status, JSON.stringify(verified.body)).toBe(200);
+			expect(verified.body).toEqual({ step_up: "verified" });
+			const record = await sessions(a).get(sid);
+			expect(record?.amr).toEqual(["pwd", "otp", "mfa"]);
+			expect(record?.authentication?.mfaAt).toBeInstanceOf(Date);
+			expect(record?.renewalNonce).toEqual(expect.any(String));
+			for (const set of [a, b]) {
+				expect((await postWith(set.app, old, "/session/mfa/step-up", {})).status).toBe(401);
+			}
+			expect((await page.post(a.app, "/session/mfa/enrollment", { kind: "totp" })).status).toBe(
+				200,
+			);
+		} finally {
+			for (const record of await factors.list(ALICE.sub)) {
+				await factors.remove(ALICE.sub, record.id);
+			}
+			for (const record of setAside) await factors.create(record);
 		}
-		expect((await page.post(a.app, "/session/mfa/enrollment", { kind: "totp" })).status).toBe(200);
 	});
 
 	it("keeps the state in Redis: a WebAuthn challenge and a federation grant intent land in the database", async () => {

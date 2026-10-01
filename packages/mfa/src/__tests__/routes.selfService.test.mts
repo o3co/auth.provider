@@ -1067,6 +1067,7 @@ describe("a first binding's escalation of its session, when it does not land", (
 		expect(done.body).toEqual(BOUND);
 		expect(done.body.recovery_codes).toHaveLength(10);
 		expect(await userSessionStore.get(sid)).toEqual(before);
+		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({ route: "enrollment", store: "cookie_session", step: "save" }),
 			"mfa_store_unavailable",
@@ -1089,7 +1090,7 @@ describe("a first binding's escalation of its session, when it does not land", (
 		expect(done.body).toEqual(BOUND);
 		expect(record).toHaveBeenCalledTimes(1);
 		expect(await userSessionStore.get(sid)).toEqual(before);
-		expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
+		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({ store: "user_session", step: "recordSecondFactor" }),
 			"mfa_store_unavailable",

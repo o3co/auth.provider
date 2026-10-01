@@ -30,6 +30,7 @@ import {
 	createMemoryMfaTransactionStore,
 	defineModule,
 	EMAIL_OTP_AMR,
+	getBoundMfaTransaction,
 	HARDWARE_KEY_AMR,
 	InMemoryUserRepository,
 	type LoginCompletion,
@@ -157,6 +158,12 @@ const sessionCookie = (res: request.Response): string => {
 		.find((candidate) => candidate.startsWith("auth.session="));
 	if (line === undefined) throw new Error("the response set no session cookie");
 	return line.split(";")[0] as string;
+};
+
+/** The express session id the `auth.session` cookie `cookie` carries, unsigned. */
+const expressIdOf = (cookie: string): string => {
+	const value = decodeURIComponent(cookie.slice("auth.session=".length));
+	return value.slice(2, value.lastIndexOf("."));
 };
 
 /** A password sign-in with no second factor asked: the agent, the sid its login wrote, and its session cookie. */
@@ -317,17 +324,30 @@ describe("a TOTP step-up verified in a password session", () => {
 		expect((await enrollFromAccount(agent, "totp")).status).toBe(200);
 	});
 
-	it("is spent by its verification: verified again, its transaction is unknown", async () => {
-		const { app, factorStore, userSessionStore } = await composed();
-		const { agent } = await signedIn(app, userSessionStore);
+	it("is spent by its verification: gone from the store, unknown to its original binding, and verified again it is unknown", async () => {
+		const { app, factorStore, transactionStore, userSessionStore } = await composed();
+		const { agent, cookie } = await signedIn(app, userSessionStore);
 		const totp = await seedTotp(factorStore);
 		const transaction = await openedStepUp(agent);
+		const original = expressIdOf(cookie);
+		expect(
+			await getBoundMfaTransaction(transactionStore, transaction, {
+				kind: "session",
+				id: original,
+			}),
+		).not.toBeNull();
 		expect((await verify(agent, transaction, totp.record.id, totpCode(totp.secret))).status).toBe(
 			200,
 		);
 
+		expect(await transactionStore.get(transaction)).toBeNull();
+		expect(
+			await getBoundMfaTransaction(transactionStore, transaction, {
+				kind: "session",
+				id: original,
+			}),
+		).toBeNull();
 		const again = await verify(agent, transaction, totp.record.id, totpCode(totp.secret, 1));
-
 		expect(again.status).toBe(400);
 		expect(again.body).toEqual(UNKNOWN);
 	});
@@ -580,11 +600,16 @@ describe("the enrollment witness at a step-up", () => {
 				const { enrollmentFacts: _facts, ...without } = session;
 				return without as UserSession;
 			});
+			const mark = vi.spyOn(users as WitnessingUserRepository, "markMfaEnrolled");
 
 			const res = await verified();
 
 			expect(res.status, recorded).toBe(200);
 			expect(note, recorded).toHaveBeenCalledTimes(1);
+			expect(mark, recorded).toHaveBeenCalledTimes(1);
+			expect(note.mock.invocationCallOrder[0], recorded).toBeLessThan(
+				mark.mock.invocationCallOrder[0] as number,
+			);
 			expect((users as WitnessingUserRepository).marks, recorded).toEqual([
 				{ subject: ALICE.id, enrolled: true },
 			]);
@@ -634,7 +659,7 @@ describe("the enrollment witness at a step-up", () => {
 });
 
 describe("what a step-up logs", () => {
-	it("never logs the code, the address, the transaction id or the renewal nonce", async () => {
+	it("never logs the code, the address, the transaction id or the renewal nonce across a refused code and a step-up that lands", async () => {
 		const { app, factorStore, userSessionStore, logger } = await composed();
 		const { agent, sid } = await signedIn(app, userSessionStore);
 		const totp = await seedTotp(factorStore);

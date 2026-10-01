@@ -36,6 +36,7 @@ import {
 	supportsMfaEnrollmentWitness,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
+import type { MfaCeremonySession } from "./ceremony.mjs";
 
 /** What marking the witness came to. */
 export type MfaWitnessMark =
@@ -87,7 +88,7 @@ export const reconciles = (factor: MfaFactor, user: unknown): boolean =>
  */
 export const reconcilesSession = (
 	factor: MfaFactor,
-	witness: "enrolled" | "not_enrolled" | "malformed" | undefined,
+	witness: MfaCeremonySession["witness"],
 ): boolean => factor.counting === true && witness !== "enrolled";
 
 /**
