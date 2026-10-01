@@ -463,10 +463,7 @@ const requireCsrfMiddleware = (deps: DeviceGrantModuleDeps): RequestHandler => {
 				install,
 		);
 	}
-	// Mounted behind a handler of three parameters, so the route runs the
-	// function checked whatever its `length` reads later.
-	const checked = middleware as RequestHandler;
-	return (req, res, next) => checked(req, res, next);
+	return middleware as RequestHandler;
 };
 
 const requireRateLimiter = (

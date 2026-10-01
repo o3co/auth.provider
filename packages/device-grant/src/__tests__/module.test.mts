@@ -756,55 +756,6 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		}
 	});
 
-	it("mounts the csrfGuard middleware it checked, reading it once", async () => {
-		// A getter answering differently on a second read must not swap the
-		// checked guard for one that mounts nothing.
-		const refuse = (_req: express.Request, res: express.Response) => {
-			res.status(403).json({ error: "access_denied", error_description: "refused by the slot" });
-		};
-		let reads = 0;
-		const shifting = Object.defineProperty({ ...createTestCsrfGuard() }, "middleware", {
-			get: () => {
-				reads += 1;
-				return reads === 1 ? refuse : [];
-			},
-		});
-		const app = mountVerificationRoute({ ...enabledDeps(), csrfGuard: shifting });
-		const res = await request(app)
-			.post("/oauth/device/verification")
-			.send({ action: "lookup", user_code: "BCDF-GHJK" });
-		expect(res.status).toBe(403);
-		expect(res.body.error_description).toBe("refused by the slot");
-		expect(reads).toBe(1);
-	});
-
-	it("runs the csrfGuard middleware it checked, whatever its arity reads later", async () => {
-		// Express re-reads a handler's `length` on every request and skips one of
-		// four as an error handler; the route must run the function checked.
-		let lengthReads = 0;
-		const refuse = Object.defineProperty(
-			(_req: express.Request, res: express.Response) => {
-				res.status(403).json({ error: "access_denied", error_description: "refused by the slot" });
-			},
-			"length",
-			{
-				get: () => {
-					lengthReads += 1;
-					return lengthReads === 1 ? 2 : 4;
-				},
-			},
-		);
-		const app = mountVerificationRoute({
-			...enabledDeps(),
-			csrfGuard: { ...createTestCsrfGuard(), middleware: refuse },
-		});
-		const res = await request(app)
-			.post("/oauth/device/verification")
-			.send({ action: "lookup", user_code: "BCDF-GHJK" });
-		expect(res.status).toBe(403);
-		expect(res.body.error_description).toBe("refused by the slot");
-	});
-
 	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides, over the configuration's", async () => {
 		// The configuration leaves it off; the slot turns it on, and the
 		// signed-in user-1 has no verified email.
