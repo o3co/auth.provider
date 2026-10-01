@@ -149,8 +149,10 @@ function readData(data: unknown): WebAuthnFactorData {
 	}
 	if (typeof backupEligible !== "boolean") throw unreadable(what, "backupEligible");
 	if (typeof backedUp !== "boolean") throw unreadable(what, "backedUp");
-	const handleBytes = isBase64url(userHandle) ? Buffer.from(userHandle, "base64url").length : 0;
-	if (handleBytes < 1 || handleBytes > MAX_USER_HANDLE_BYTES) throw unreadable(what, "userHandle");
+	// Canonical only: the factor writes no other form, and the handle compared is these bytes.
+	const handle = isBase64url(userHandle) ? Buffer.from(userHandle, "base64url") : Buffer.alloc(0);
+	const canonical = handle.length > 0 && handle.toString("base64url") === userHandle;
+	if (!canonical || handle.length > MAX_USER_HANDLE_BYTES) throw unreadable(what, "userHandle");
 	return {
 		credentialId,
 		publicKey,

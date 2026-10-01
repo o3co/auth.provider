@@ -210,6 +210,15 @@ describe("the webauthn factor's contract values", () => {
 		}
 	});
 
+	it.each([
+		["one byte, written with its padding bits set", "AB", "AA"],
+		["the subject's, written with its padding bits set", `${HANDLE.slice(0, -1)}d`, HANDLE],
+	])("throws for a user handle that is not base64url canonical: %s", (_what, handle, canonical) => {
+		expect(Buffer.from(handle, "base64url")).toEqual(Buffer.from(canonical, "base64url"));
+
+		expect(() => factorWith().amrFor(dataOf({ userHandle: handle }))).toThrow(/userHandle/);
+	});
+
 	it.each(["credentialId", "publicKey", "userHandle"])(
 		"quotes nothing of a %s it cannot read",
 		(field) => {
