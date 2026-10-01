@@ -405,7 +405,7 @@ describe("GET /connect — a session a requirement steps up", () => {
 		expect((await w.audited()).map((event) => event.details?.outcome)).toEqual(["stale"]);
 	});
 
-	it("allows one more trip after a new login: a marked return on an expired session is sent to log in without the marker", async () => {
+	it("allows one more trip after a new login: a marked return on a cookie session that ended is sent to log in without the marker", async () => {
 		const w = world();
 		w.state.verdict = stepUpAtConnect(new Set());
 		const { handle } = await w.lodge();
@@ -431,7 +431,7 @@ describe("GET /connect — a session a requirement steps up", () => {
 		expect(w.state.parked).toEqual([]);
 	});
 
-	it("keeps the consent's and the callback's dead-session answer: connect has gated, and only connect takes a trip", async () => {
+	it("keeps the consent's dead-session answer to a step-up: connect has gated, and only connect takes a trip", async () => {
 		const w = world();
 		const { handle } = await w.lodge();
 		w.signIn("b-1");

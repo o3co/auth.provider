@@ -580,9 +580,13 @@ and plain text, never a JSON body.
    (`page.href`) with `redirect_to` naming this link, built on the issuer from
    the handle alone, plus the one-trip marker `stepped_up=1`. Nothing is
    parked or audited. The page returns the browser there once the step-up is
-   recorded. A marked return still asked to step up gets the `403` above,
-   audited as `reauthentication_required`, and is never sent again. The marker
-   only narrows: a forged one makes the user's own connect refuse once. A
+   recorded. The deployment's step-up page (for the MFA requirement,
+   `mfa.page.url` / `MFA_PAGE_URL`) therefore also receives a `redirect_to`
+   naming this connect link, and must navigate back to it unchanged, only
+   while it is on the provider's origin. A marked return still asked to step
+   up gets the `403` above, audited as `reauthentication_required`, and is
+   never sent again. The marker only narrows: a forged one makes the user's
+   own connect refuse once. A
    login drops it, since step 3 returns to the handle alone, so a new login
    gets one more trip, as `/oauth/authorize` allows. A page off the issuer's
    origin is never followed: `500`, plain, and
