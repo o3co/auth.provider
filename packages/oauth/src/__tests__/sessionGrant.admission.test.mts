@@ -262,6 +262,30 @@ describe("the session grant on admission — what the session and its record dec
 });
 
 describe("the session grant — the auth_time it stamps", () => {
+	/** A wall clock that steps back two seconds at every read, as one an operator or NTP moves back would. */
+	const steppingBack = () => {
+		let t = Date.now();
+		return vi.spyOn(Date, "now").mockImplementation(() => {
+			t -= 2_000;
+			return t;
+		});
+	};
+
+	it("a clock that steps back between the reading of authTime and the signing still gives auth_time <= iat", async () => {
+		const authTime = new Date();
+		const clock = steppingBack();
+		try {
+			const { result } = await grant({
+				userSessionStore: storeWith(record({ authTime })),
+			}).handle(ctx(LIVE_COOKIE));
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+			const claims = decodeJwt(result.tokens.access_token);
+			expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	it("stamps the admitted record's primary authentication time, not when a second factor was verified", async () => {
 		const authTime = new Date("2026-04-21T00:00:00.750Z");
 		const { result } = await grant({

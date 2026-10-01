@@ -326,6 +326,35 @@ describe("the authorization_code grant on admission — the first read", () => {
 });
 
 describe("the authorization_code grant — the auth_time it stamps, read against the minting clock", () => {
+	/** A wall clock that steps back two seconds at every read, as one an operator or NTP moves back would. */
+	const steppingBack = () => {
+		let t = Date.now();
+		return vi.spyOn(Date, "now").mockImplementation(() => {
+			t -= 2_000;
+			return t;
+		});
+	};
+
+	it("a clock that steps back between the reading of authTime and the signing still gives auth_time <= iat on every token", async () => {
+		const authTime = new Date();
+		const clock = steppingBack();
+		try {
+			const { handler } = makeGrant({ userSessionStore: storeAnswering(record({ authTime })) });
+			const { result } = await handler.handle(ctx());
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+			const tokens = [
+				result.tokens.access_token,
+				result.tokens.refresh_token,
+				result.tokens.id_token,
+			];
+			for (const claims of tokens.map((token) => decodeJwt(token as string))) {
+				expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+			}
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	const minted = async (authTime: Date) => {
 		const { handler } = makeGrant({ userSessionStore: storeAnswering(record({ authTime })) });
 		const { result } = await handler.handle(ctx());

@@ -2461,6 +2461,22 @@ describe("refresh carries how the user authenticated", () => {
 		expect(at.auth_time as number).toBeLessThanOrEqual(at.iat as number);
 	});
 
+	it("a clock that steps back between the refresh's issuance and the signing still gives auth_time <= iat on both tokens", async () => {
+		const presented = await presentedWith({ auth_time: Math.floor(Date.now() / 1000) });
+		let t = Date.now();
+		const clock = vi.spyOn(Date, "now").mockImplementation(() => {
+			t -= 2_000;
+			return t;
+		});
+		try {
+			const { at, rt } = await refresh(presented);
+			expect(at.auth_time as number).toBeLessThanOrEqual(at.iat as number);
+			expect(rt.auth_time as number).toBeLessThanOrEqual(rt.iat as number);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	it("caps a carried auth_time later than the presented token's own iat at that iat", async () => {
 		const presentedIat = Math.floor(Date.now() / 1000) - 3600;
 		const presented = await new SignJWT({
