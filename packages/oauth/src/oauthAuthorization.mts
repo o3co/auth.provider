@@ -172,10 +172,11 @@ const OPTIONAL = [
 	// omitting them silently drops both features at the grant boundary.
 	"refreshTokenFamilyRotation",
 	// The refresh grant must call `revokeFamily` on a rotation `replayed`
-	// outcome (RFC 6819 §5.2.2). Both family slots are
-	// optional to wire — a composition without the refresh_token grant
-	// needs neither — but not optional to decide: with the grant on, its
-	// factory below refuses to boot unless both are filled
+	// outcome (RFC 6819 §5.2.2), and the authorization_code grant calls it on
+	// the family of an exchange it refuses because a logout ended the session.
+	// Both family slots are optional to wire — a composition without the
+	// refresh_token grant needs neither — but not optional to decide: with
+	// that grant on, its factory below refuses to boot unless both are filled
 	// (`requireRefreshTokenFamilies`).
 	"refreshTokenFamilyRevocation",
 	// The subject watermark, consulted at RT redemption as the backstop

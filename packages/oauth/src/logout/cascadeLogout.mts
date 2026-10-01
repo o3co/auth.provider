@@ -27,10 +27,10 @@ import { loggableError, supportsSessionEnd } from "@o3co/auth-provider-core";
 export interface CascadeLogoutOptions {
 	readonly sid: string;
 	/**
-	 * The session's `expiresAt`. With it, an index with the session-end
-	 * capability marks the session ended at step 1, so a family added after
-	 * the listing is refused rather than left unrevoked. Without it (the
-	 * session record is gone), the families are only listed.
+	 * The session's `expiresAt`. Pass it whenever the caller holds the
+	 * session. With it, an index with the session-end capability marks the
+	 * session ended at step 1, so a family added after the listing is refused
+	 * rather than left unrevoked. Without it, the families are only listed.
 	 */
 	readonly expiresAt?: Date;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
@@ -62,7 +62,8 @@ export type CascadeLogoutResult =
  *   1. Read the fanout context: `sessionFamilyIndex.endSession` when the
  *      index has the session-end capability and `expiresAt` is given, which
  *      marks the session ended before it lists; `listFamilyIds` otherwise.
- *      Failure returns `failed` step 1; nothing else ran, so a retry is safe.
+ *      Failure returns `failed` step 1; nothing else ran but, possibly, the
+ *      mark, and a retry is safe: `endSession` is idempotent.
  *   2. Fanout, collect-and-tally: `revokeFamily` per family, then
  *      `federationTokenStore.removeBySid`. Any failure returns `failed` step 2
  *      with every error, before step 3: cleanup would erase the bookkeeping a
@@ -72,6 +73,10 @@ export type CascadeLogoutResult =
  *      hence no step 3 in the result.
  *   4. `userSessionStore.delete`, last, which must succeed; failure returns
  *      `failed` step 4.
+ *
+ * A cascade that fails after the mark is written leaves the session
+ * half-ended: it still exists, and its code exchanges are refused until a
+ * retry completes the logout or the mark lapses (fail-closed).
  *
  * The caller maps `failed` to 503, invokes `broadcastBackchannelLogout`
  * (best-effort, never throws) before this, and runs front-channel and IdP

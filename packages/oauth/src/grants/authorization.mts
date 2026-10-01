@@ -195,12 +195,29 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	};
 
 	/**
+	 * The answer for a session that ended while the tokens were being issued:
+	 * `session_invalidated`, logged at warn (subject change or otherwise) with
+	 * the `sid` and the client for SIEM correlation with `cascadeLogout`'s
+	 * audit events, and never a code identifier (`CodeData` has no stable jti,
+	 * and the raw `code` is secret).
+	 */
+	const sessionInvalidated = (
+		at: { readonly sid: string; readonly clientId: string },
+		subjectChanged = false,
+	): GrantError => {
+		logger?.warn(
+			at,
+			subjectChanged
+				? "authorization_grant_rejected_session_subject_changed_during_token_issuance"
+				: "authorization_grant_rejected_session_invalidated_during_token_issuance",
+		);
+		return { status: 400, error: "invalid_grant", errorDescription: "session_invalidated" };
+	};
+
+	/**
 	 * The second read's answer when it does not admit: a session that went
 	 * away, expired, was revoked or changed its subject since the first read
-	 * is `session_invalidated`, logged at warn (subject change or otherwise)
-	 * with the `sid` and the client for SIEM correlation with `cascadeLogout`'s
-	 * audit events, and never a code identifier (`CodeData` has no stable jti,
-	 * and the raw `code` is secret). A requirement's verdict or an outage is
+	 * is {@link sessionInvalidated}. A requirement's verdict or an outage is
 	 * answered as on the first read.
 	 */
 	const revalidationRefusal = (
@@ -212,13 +229,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			case "revoked":
 			case "unauthenticated":
 			case "admitted":
-				logger?.warn(
+				return sessionInvalidated(
 					at,
-					admission.outcome === "not_live" && admission.reason === "subject_mismatch"
-						? "authorization_grant_rejected_session_subject_changed_during_token_issuance"
-						: "authorization_grant_rejected_session_invalidated_during_token_issuance",
+					admission.outcome === "not_live" && admission.reason === "subject_mismatch",
 				);
-				return { status: 400, error: "invalid_grant", errorDescription: "session_invalidated" };
 			default:
 				return requirementOrOutageRefusal(admission);
 		}
@@ -716,18 +730,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 							userSession.expiresAt,
 						);
 						if (added === "ended") {
-							logger?.warn(
-								{ sid, clientId: authenticatedClientId },
-								"authorization_grant_rejected_session_invalidated_during_token_issuance",
-							);
-							await revokeRefusedFamily(familyId, { sid, clientId: authenticatedClientId });
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "session_invalidated",
-								},
-							};
+							const at = { sid, clientId: authenticatedClientId };
+							const refusal = sessionInvalidated(at);
+							await revokeRefusedFamily(familyId, at);
+							return { result: refusal };
 						}
 					} else {
 						await familyIndex.addFamilyId(sid, familyId, userSession.expiresAt);

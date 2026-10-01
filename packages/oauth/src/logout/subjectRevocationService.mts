@@ -208,30 +208,37 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				subjectSessionIndex: deps.subjectSessionIndex,
 				subjectRevocation,
 				cascadeSession: async (sid: string) => {
-					// The session's own `expiresAt`, for the cascade's ended mark.
-					// A read that fails throws, and the helper counts the session
-					// failed and logs it; a session already gone has none.
-					const session = await deps.userSessionStore.get(sid);
-					return {
-						// `cascadeLogout` answers with its own union, and its `step`
-						// is what makes a failure retryable. What this needs is the
-						// one bit the helper's loop branches on; the detail is
-						// already in the log the cascade wrote.
-						ok:
-							(
-								await cascadeLogout({
-									sid,
-									...(session === null ? {} : { expiresAt: session.expiresAt }),
-									refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
-									federationTokenStore: deps.federationTokenStore,
-									userSessionStore: deps.userSessionStore,
-									sessionRPRegistry: deps.sessionRPRegistry,
-									sessionFamilyIndex: deps.sessionFamilyIndex,
-									sessionFederationIndex: deps.sessionFederationIndex,
-									...(deps.logger === undefined ? {} : { logger: deps.logger }),
-								})
-							).outcome === "done",
-					};
+					// The session's own `expiresAt`, for the cascade's ended mark; a
+					// session already gone has none. A read that fails still runs the
+					// cascade without it, so the families are revoked now, and then
+					// throws: the helper counts the sid failed, keeps it for a retry,
+					// and logs the read's error.
+					let expiresAt: Date | undefined;
+					let readFailed = false;
+					let readError: unknown;
+					try {
+						expiresAt = (await deps.userSessionStore.get(sid))?.expiresAt;
+					} catch (err) {
+						readFailed = true;
+						readError = err;
+					}
+					// `cascadeLogout` answers with its own union, and its `step` is
+					// what makes a failure retryable. What this needs is the one bit
+					// the helper's loop branches on; the detail is already in the log
+					// the cascade wrote.
+					const cascade = await cascadeLogout({
+						sid,
+						...(expiresAt === undefined ? {} : { expiresAt }),
+						refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+						federationTokenStore: deps.federationTokenStore,
+						userSessionStore: deps.userSessionStore,
+						sessionRPRegistry: deps.sessionRPRegistry,
+						sessionFamilyIndex: deps.sessionFamilyIndex,
+						sessionFederationIndex: deps.sessionFederationIndex,
+						...(deps.logger === undefined ? {} : { logger: deps.logger }),
+					});
+					if (readFailed) throw readError;
+					return { ok: cascade.outcome === "done" };
 				},
 				// The boundary must outlive the longest-lived thing it covers,
 				// which this module can read and the service cannot: the token
