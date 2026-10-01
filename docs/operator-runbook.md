@@ -732,8 +732,9 @@ wires it.
   fifth consecutive failure a lock of 15 minutes, doubling to 24 hours. Ten
   failures in any seven days hold guessable proofs (TOTP, an emailed code)
   for the subject, whatever succeeds between them, from every browser.
-  `mfa.lockout.hardLimit` consecutive failures (100; at least 10 and above
-  `threshold`) hold them with no time to come back (`mfa.lockout`). An
+  The `mfa.lockout.hardLimit`-th attempt since the last success (100; at
+  least 10 and above `threshold`) holds them with no time to come back
+  (`mfa.lockout`), whatever its outcome. An
   exempt proof (a recovery code, WebAuthn) passes during every lock and
   ends a consecutive run before the hard hold; it lifts no hard hold and
   refunds no weekly failure. The hard hold is fixed the moment the run,
