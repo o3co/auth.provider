@@ -14,8 +14,14 @@
  * limitations under the License.
  */
 import bcrypt from "bcrypt";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type MockInstance, vi } from "vitest";
 import { InMemoryUserRepository } from "#/repositories/InMemoryUserRepository.mjs";
+
+/** A spy on `bcrypt.compare`'s promise overload; `vi.spyOn` alone types it by the callback one, which returns `void`. */
+const spyOnCompare = () =>
+	vi.spyOn(bcrypt, "compare") as unknown as MockInstance<
+		(data: string | Buffer, encrypted: string) => Promise<boolean>
+	>;
 
 describe("InMemoryUserRepository", () => {
 	describe("authenticate", () => {
@@ -50,7 +56,7 @@ describe("InMemoryUserRepository", () => {
 		});
 
 		it("runs a dummy bcrypt compare for unknown usernames", async () => {
-			const compareSpy = vi.spyOn(bcrypt, "compare").mockResolvedValue(false);
+			const compareSpy = spyOnCompare().mockResolvedValue(false);
 			// Use a hash deliberately distinct from the source's dummy hash so
 			// the regression assertion below can verify the unknown-user path
 			// uses a different bcrypt input than the real entry.
@@ -81,7 +87,7 @@ describe("InMemoryUserRepository", () => {
 		});
 
 		it("runs a bcrypt compare on the plain-text path to equalize timing", async () => {
-			const compareSpy = vi.spyOn(bcrypt, "compare").mockResolvedValue(false);
+			const compareSpy = spyOnCompare().mockResolvedValue(false);
 			const repo = new InMemoryUserRepository(
 				new Map([["alice", { password: "secret123", id: "u1" }]]),
 			);
@@ -179,10 +185,10 @@ describe("InMemoryUserRepository", () => {
 
 		it("declares that it covers no registration", () => {
 			const r = repo();
-			expect(r.supportsFederatedIdentityLookup(registration)).toBe(false);
-			expect(r.supportsFederatedIdentityLookup({ ...registration, provider: "google" })).toBe(
-				false,
-			);
+			expect(r.supportsFederatedIdentityLookup(registration, ["sub"])).toBe(false);
+			expect(
+				r.supportsFederatedIdentityLookup({ ...registration, provider: "google" }, ["sub"]),
+			).toBe(false);
 		});
 
 		it("cannot tell, for an identity linked to somebody and for one linked to nobody alike", async () => {

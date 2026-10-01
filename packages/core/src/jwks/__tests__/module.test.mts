@@ -197,7 +197,7 @@ describe("jwksModule — its own section, jwks {}", () => {
 
 describe("jwksModule — the CORS table lists the path its route serves", () => {
 	const ORIGIN = "https://spa.example";
-	const boot = (modules: Parameters<typeof createTestApp>[0]["modules"]) =>
+	const boot = (modules: NonNullable<Parameters<typeof createTestApp>[0]>["modules"]) =>
 		createTestApp({
 			modules,
 			bootstrapComponents: {

@@ -86,7 +86,9 @@ describe("memoryChallengeStoreModule", () => {
 				...makeValidAppConfig(),
 				challengeStore: { memory: { maxEntries: "5000" } },
 			});
-			expect(parsed.challengeStore?.memory).toEqual({ maxEntries: "5000" });
+			expect((parsed.challengeStore as { memory?: unknown } | undefined)?.memory).toEqual({
+				maxEntries: "5000",
+			});
 		});
 
 		it("refuses challengeStore.memory.maxEntries at boot, naming core-challenge-store-memory.maxEntries", async () => {

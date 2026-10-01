@@ -96,7 +96,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 		expect(route?.id).toBe("core:oidc-discovery");
 		expect(route?.mountPath).toBe("/");
 		// Both well-known forms, one handler, so the two cannot differ.
-		expect(route?.routes.map((r) => r.path)).toEqual([
+		expect(route?.routes?.map((r) => r.path)).toEqual([
 			"/.well-known/openid-configuration",
 			"/.well-known/oauth-authorization-server",
 		]);

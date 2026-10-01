@@ -83,7 +83,9 @@ describe("memoryReplaySeenSetModule", () => {
 				...makeValidAppConfig(),
 				replaySeenSet: { memory: { maxEntries: "5000" } },
 			});
-			expect(parsed.replaySeenSet?.memory).toEqual({ maxEntries: "5000" });
+			expect((parsed.replaySeenSet as { memory?: unknown } | undefined)?.memory).toEqual({
+				maxEntries: "5000",
+			});
 		});
 
 		it("refuses replaySeenSet.memory.maxEntries at boot, naming core-replay-seen-set-memory.maxEntries", async () => {

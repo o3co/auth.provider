@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { LifecycleRegistrar } from "#/adapters/AdapterFactory.mjs";
+import type { GrantHandler } from "#/modules/manifest/index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { createTestApp } from "../create-test-app.mjs";
 import { makeValidAppConfig } from "../fixtures/valid-config.mjs";
@@ -39,7 +40,11 @@ describe("createTestApp", () => {
 	});
 
 	it("exposes inspect.grants populated by a contributed grant", async () => {
-		const fakeGrant = { handle: async () => ({ tokenType: "bearer", accessToken: "x" }) };
+		const fakeGrant: GrantHandler = {
+			handle: async () => ({
+				result: { status: 200, tokens: { token_type: "bearer", access_token: "x" } },
+			}),
+		};
 		const grantModule = defineModule({
 			name: "test:grant",
 			contributes: { grants: { fake_grant: () => fakeGrant } },
