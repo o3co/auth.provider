@@ -314,6 +314,18 @@ export {
 	readIssuedScope,
 	readSpaceDelimitedParameter,
 } from "./federations/scope.mjs";
+// The one reading of an upstream token's lifetime, and the age of one held.
+export type {
+	HeldUpstreamToken,
+	HeldUpstreamTokenAge,
+	UpstreamLifetimeClock,
+	UpstreamLifetimeFields,
+	UpstreamTokenLifetime,
+} from "./federations/token-lifetime.mjs";
+export {
+	judgeHeldUpstreamToken,
+	readUpstreamTokenLifetime,
+} from "./federations/token-lifetime.mjs";
 export type {
 	FederationTokenResponse,
 	FederationTokenSnapshot,
