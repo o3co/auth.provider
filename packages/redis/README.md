@@ -562,6 +562,16 @@ per-field shape of earlier releases — is dropped on first read: `get` returns
 `null`, the key and its index member go, and the user re-federates. There is
 no dual-read path by design.
 
+The envelope also carries `obtainedAt`, when the access token's lifetime counts
+from, as `obtainedAtMs`, and only when the record has one. A record without it
+reads back with no `obtainedAt`. When the value is not a whole millisecond
+within the Date range, the record is deleted on read, like any unreadable
+record. Adding it left the wrapper at `v: 2`: the reader ignores envelope keys
+it does not know, so a rolling deploy or a rollback reads records either
+release wrote, and an older replica's write leaves the field out, which costs
+only the refresh damping it feeds. The convention: adding an envelope key keeps
+`v: 2`; changing a present key's type or meaning bumps the version.
+
 ## Federation grants
 
 Their own keyspace, because what they hold outlives every session: default
