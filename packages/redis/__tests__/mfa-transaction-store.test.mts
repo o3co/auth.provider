@@ -36,6 +36,7 @@ import {
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
+import { MFA_SUBJECT_EXEMPT } from "#/ioredis/scripts/mfa.mjs";
 import { createRedisMfaTransactionStore } from "#/mfa-transaction-store.mjs";
 import { runMfaTransactionStoreContract } from "./adapters.mfa-transaction-store.contract.mjs";
 import { serverClock, serverPasses, testRedis } from "./support/redis.mjs";
@@ -555,12 +556,32 @@ describe("createRedisMfaTransactionStore — the subject state", () => {
 		await store.noteExemptSuccess("user-1", t + 5, small);
 		await first().script("FLUSH");
 		await store.noteExemptSuccess("user-1", t + 6, small);
+		expect(await first().script("EXISTS", MFA_SUBJECT_EXEMPT.sha)).toEqual([1]);
 		expect(await store.reserveSubjectAttempt("user-1", t + 7, small)).toMatchObject({
 			ok: false,
 			hold: "hard",
 			retryAfterMs: null,
 		});
 		expect(await deadlineOf(lock)).toBe(-1);
+	});
+
+	it("refuses an exempt success whose hardLimit argument is missing or not a number, naming the argument, and writes nothing", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const t = start();
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		const week = `${prefix}week:{${keyPart("user-1")}}`;
+		const r = await store.reserveSubjectAttempt("user-1", t, POLICY);
+		if (!r.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", r.reservation, "failure");
+		const before = await first().hgetall(lock);
+		for (const args of [[String(t + 1)], [String(t + 1), "abc"], [String(t + 1), "inf"]]) {
+			await expect(
+				first().eval(MFA_SUBJECT_EXEMPT.source, 2, lock, week, ...args),
+				JSON.stringify(args),
+			).rejects.toThrow("MFA subject state: the hardLimit argument is missing or not a number");
+			expect(await first().hgetall(lock), JSON.stringify(args)).toEqual(before);
+		}
 	});
 
 	it("drops the keys once nothing in them counts", async () => {
