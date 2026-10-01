@@ -89,8 +89,10 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// on purpose; `mfa.locked.first`, the refusal that begins an episode (the
 	// store's `first`), its `hold` and the refused attempt's factor `binding`;
 	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` and
-	// `count` of the records it removed (none when they could not be read),
-	// `requireEmailProof`, `sessions` (every session ended), `complete` and,
+	// `count` of the records it removed (none when they could not be read, or
+	// the removal did not succeed),
+	// `requireEmailProof`, `sessions` and `sessionsAgain` (every session
+	// ended, before the removal and again after it), `complete` and,
 	// when the operator named one, `requestedBy`;
 	// `mfa.lock.recovered`, an authorized recovery applied to the subject's
 	// lock state, its `operation`, the `generation` it moved to and what it
