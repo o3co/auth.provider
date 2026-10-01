@@ -54,10 +54,11 @@ end, so here **the provider decides and the Store only persists**: after the
 first counting factor is written the provider marks the subject enrolled, and
 after the last is removed it clears the mark — in that order, so a crash leaves
 a factor without a witness, never a witness without a factor. The Store answers
-the mark back as `User.mfaEnrolled` on `authenticate`, read only through
-`readMfaEnrollmentWitness`: a value that is neither a boolean nor absent is
-malformed, answered `503`, and never read as "not enrolled". Why it is a Store write at
-all: the witness has to survive the factor store it vouches for. A factor store
+the mark back as `User.mfaEnrolled` on `authenticate` and on
+`authenticateByToken` alike — a federated session records it from the latter —
+read only through `readMfaEnrollmentWitness`: a value that is neither a
+boolean nor absent is malformed, answered `503`, and never read as "not
+enrolled". Why it is a Store write at all: the witness has to survive the factor store it vouches for. A factor store
 that loses its records — a Redis restarted without persistence, an eviction, a
 restore from an old backup — would otherwise read as "never enrolled", and every
 affected account would accept a first binding from whoever holds its password.
@@ -332,7 +333,7 @@ out-of-tree adapter can import and run:
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |
 | `WebAuthnCredentialStore` | `packages/test-kit/src/webauthn/credentialStore.contract.mts` (`webAuthnCredentialStoreContract`), published on `@o3co/auth-provider-test-kit` |
 | `UserSessionStore` | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` (`runUserSessionStoreContract`) |
-| `SupportsMfaEnrollmentWitness` (the `UserRepository` capability `markMfaEnrolled`, answered back as `User.mfaEnrolled`; run only for a repository that claims it) | `packages/test-kit/src/mfa/enrollmentWitness.contract.mts` (`mfaEnrollmentWitnessContract`), published on `@o3co/auth-provider-test-kit` |
+| `SupportsMfaEnrollmentWitness` (the `UserRepository` capability `markMfaEnrolled`, answered back as `User.mfaEnrolled` on `authenticate` and on `authenticateByToken`; run only for a repository that claims it) | `packages/test-kit/src/mfa/enrollmentWitness.contract.mts` (`mfaEnrollmentWitnessContract`), published on `@o3co/auth-provider-test-kit` |
 | `SupportsSecondFactorUpdate` (the `UserSessionStore` step-up capability; run only for a store that claims it) | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` (`runSecondFactorUpdateContract`) |
 | `SessionRPRegistry` | `packages/core/src/user-sessions/__tests__/sessionRPRegistry.contract.mts` |
 | `SessionFamilyIndex` | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` |

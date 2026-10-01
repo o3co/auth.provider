@@ -85,7 +85,12 @@ export type LinkFederatedIdentityResult =
 export interface UserRepository {
 	/** The user `username` and `password` authenticate, as plain data (see {@link User}), or `null`. */
 	authenticate(username: string, password: string): Promise<User | null>;
-	/** The user a federated identity token is linked to, as plain data (see {@link User}), or `null`. */
+	/**
+	 * The user a federated identity token is linked to, as plain data (see
+	 * {@link User}), or `null`. The Store answers the MFA enrollment witness
+	 * (`User.mfaEnrolled`) here as on {@link authenticate}: a federated
+	 * session records it from this answer.
+	 */
 	authenticateByToken(token: string): Promise<User | null>;
 	/**
 	 * Link a federated identity to an existing user. Optional: without it the
@@ -153,8 +158,9 @@ export interface UserRepository {
 	): Promise<FederatedIdentityLookupResult>;
 	/**
 	 * Persist whether `subject` has a second factor enrolled: the MFA enrollment
-	 * witness the Store answers on `authenticate` as `User.mfaEnrolled`.
-	 * Optional; detected by {@link supportsMfaEnrollmentWitness}.
+	 * witness the Store answers on `authenticate` and on `authenticateByToken`
+	 * as `User.mfaEnrolled`. Optional; detected by
+	 * {@link supportsMfaEnrollmentWitness}.
 	 *
 	 * The provider decides and the Store only persists: `true` after the first
 	 * counting factor has been written, `false` after the last one is removed or
@@ -204,13 +210,13 @@ declare module "@o3co/auth-provider-core" {
 export type MfaEnrollmentWitness = "enrolled" | "not_enrolled" | "malformed";
 
 /**
- * The one reading of `User.mfaEnrolled`, for the `User` a login's
- * `authenticate` answered and for the session's snapshot of it alike: `true`
- * is `enrolled`; `false` or absent is `not_enrolled`; any other value (`1`,
- * `"true"`, `null`) is `malformed`. A malformed witness is never read as
- * "not enrolled", which would open a first binding to whoever holds the
- * password: the MFA package answers it `503 temporarily_unavailable` and
- * binds nothing (the MFA ADR's D12).
+ * The one reading of `User.mfaEnrolled`, for the `User` a primary sign-in's
+ * `authenticate` or `authenticateByToken` answered and for the session's
+ * snapshot of it alike: `true` is `enrolled`; `false` or absent is
+ * `not_enrolled`; any other value (`1`, `"true"`, `null`) is `malformed`. A
+ * malformed witness is never read as "not enrolled", which would open a first
+ * binding to whoever holds the password: the MFA package answers it
+ * `503 temporarily_unavailable` and binds nothing (the MFA ADR's D12).
  */
 export function readMfaEnrollmentWitness(
 	user: Readonly<Record<string, unknown>>,

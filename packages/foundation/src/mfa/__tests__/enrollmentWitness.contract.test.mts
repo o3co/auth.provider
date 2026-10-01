@@ -17,7 +17,8 @@
 /**
  * The enrollment witness's contract suite (`@o3co/auth-provider-test-kit`)
  * over the test kit's fake Store. The witness is read back through
- * `HttpUserRepository.authenticate`. `HttpUserRepository` has no
+ * `HttpUserRepository.authenticate` and `authenticateByToken`, each user
+ * resolvable by a token the fake holds for it. `HttpUserRepository` has no
  * `markMfaEnrolled`, so the witness is written by this file's stand-in, which
  * posts the mark as the wire contract says and reads an answer other than
  * `204` through `mfaStoreStatusError`; a check here fails once the repository
@@ -39,8 +40,13 @@ import { HttpUserRepository } from "#/index.mjs";
 import { mfaStoreStatusError } from "#/mfa/storeFailure.mjs";
 
 const USERS = [
-	{ subject: "user-1", username: "alice@example.com", password: "alice-password" },
-	{ subject: "user-2", username: "bob@example.com", password: "bob-password" },
+	{
+		subject: "user-1",
+		username: "alice@example.com",
+		password: "alice-password",
+		token: "github:alice",
+	},
+	{ subject: "user-2", username: "bob@example.com", password: "bob-password", token: "github:bob" },
 ] as const;
 
 async function build(): Promise<MfaEnrollmentWitnessHarness> {
@@ -49,6 +55,7 @@ async function build(): Promise<MfaEnrollmentWitnessHarness> {
 			id: user.subject,
 			username: user.username,
 			password: user.password,
+			tokens: [user.token],
 		})),
 	});
 	const reader = new HttpUserRepository({
