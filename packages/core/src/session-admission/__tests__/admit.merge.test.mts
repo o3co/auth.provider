@@ -530,6 +530,21 @@ describe("the merge — a step-up through the second-factor authority onto a ses
 		});
 	});
 
+	it.each([
+		["a string", "pwd"],
+		["an array holding a non-string", ["pwd", 1]],
+		["an array holding an empty string", ["pwd", ""]],
+		["an array with a hole", Object.assign(new Array<string>(2), { 0: "pwd" })],
+	])(
+		"answers reauthenticate (acr) onto a record whose primary is told but whose amr is %s, which no step-up can be recorded on",
+		async (_label, stored) => {
+			const unreadable: UserSession = { ...session, amr: stored as unknown as readonly string[] };
+			expect(
+				await ask([met(["otp", "mfa"])], [MFA], { store: recordingStoreOf, record: unreadable }),
+			).toEqual({ outcome: "reauthenticate", requirement: "acr", session: unreadable });
+		},
+	);
+
 	it("skips the authority and steps up through the next requirement whose reach finishes the entry", async () => {
 		expect(await ask([met(["hwk"]), reaching("keys", ["swk"])], [PHR], { store: storeOf })).toEqual(
 			{
