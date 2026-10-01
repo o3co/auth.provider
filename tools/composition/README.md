@@ -55,6 +55,18 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   unsigned one refused without the audit, and `hwk` or `swk` by the backup
   eligibility registered
   ([`webauthn-mfa-factor.test.mts`](src/__tests__/webauthn-mfa-factor.test.mts)).
+- **The MFA enrollment witness across a Store.** With the users in the test
+  kit's fake Store, read and marked through foundation's
+  `HttpUserRepository` (the fixture's `userRepositoryAt`), and the factors in
+  the same Store or in memory: a first TOTP binding marks the subject
+  enrolled after its factor is written; a mark the Store refuses is one
+  warning, the login completes, and the next TOTP login writes it; a
+  password login whose `User` says enrolled beside no factor is `503`, and so
+  is every first binding — a factor, a passkey, a link — of a federated
+  session whose `authenticateByToken` says so or answers a witness that is
+  not a boolean; and the boot warns that the witness cannot be written
+  exactly when the repository has no witness URL
+  ([`mfa-enrollment-witness.test.mts`](src/__tests__/mfa-enrollment-witness.test.mts)).
 - **The passwordless grant and the user handle.** A second factor's
   credential, registered by its id and public key as another account's
   passkey through `POST /oauth/webauthn/registration/verify` (a `none`

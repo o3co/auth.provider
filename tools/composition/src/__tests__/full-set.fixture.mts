@@ -42,6 +42,11 @@
  * - With `mfaFactorStoreAt`, the Store keeps the MFA factors: foundation's
  *   `foundationMfaFactorStoreModule` over those endpoints, handed the user
  *   repository's HTTP settings as a composition root hands them.
+ * - With `userRepositoryAt`, the Store keeps the users: foundation's `"http"`
+ *   user adapter over those endpoints, built from the
+ *   `repositories.user.http` block the configuration carries, in place of the
+ *   template fixture's in-memory directory. Given the witness's endpoint, it
+ *   writes the MFA enrollment witness.
  * - WebAuthn registration reads `req.webauthnSubject`, which the package's
  *   `webauthnSessionSubjectModule` sets from the admitted browser session;
  *   the deployment's mapper here is the session's opaque subject.
@@ -59,6 +64,7 @@ import {
 	type AppConfig,
 	consoleLogger,
 	createMemoryWebAuthnCredentialStore,
+	createRepositoryFactories,
 	defaultChallengeCeremonyModule,
 	defineModule,
 	federationsOf,
@@ -78,18 +84,24 @@ import {
 	resumePrimary,
 	type SessionRequirement,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	type UserRepository,
 } from "@o3co/auth-provider-core";
 import {
 	createFakeIdp,
 	createRecordingMailSender,
 	type FakeIdp,
 	type RecordingMailSender,
+	userRepositoryHttpOf,
+	withUserRepositoryHttp,
 } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationModule } from "@o3co/auth-provider-federation-github";
-import { foundationMfaFactorStoreModule } from "@o3co/auth-provider-foundation";
+import {
+	foundationMfaFactorStoreModule,
+	registerBuiltinAdapters,
+} from "@o3co/auth-provider-foundation";
 import { foundationMfaFactorStoreConfig } from "@o3co/auth-provider-foundation/testing";
 import { mfaModules } from "@o3co/auth-provider-mfa";
 import { seedTotpFactor } from "@o3co/auth-provider-mfa/testing";
@@ -658,6 +670,9 @@ async function createFakes(): Promise<Fakes> {
 const APPLE_SUB = "000123.apple-composition.0456";
 const GITHUB_ID = 12345;
 
+/** The handle the GitHub federation's callback resolves through `authenticateByToken`. */
+export const GITHUB_HANDLE = `github:${GITHUB_ID}`;
+
 /** A federation's fields in `core.federations`, as the bridges read them (they check nothing else). */
 const section = (config: AppConfig, name: string): Record<string, string> =>
 	(federationsOf(config)[name] as Record<string, string> | undefined) ?? {};
@@ -701,10 +716,51 @@ interface AddedStores {
  * reads them under `env`, from the template's own layers over its reference:
  * what a composition root hands the Store-backed factor store.
  */
-function storeTransportUnder(env: Readonly<Record<string, string>>): unknown {
+function storeTransportUnder(env: Readonly<Record<string, string>>): Record<string, unknown> {
 	const own = readOwnLayers(ownFiles(), { env });
 	return repositoriesSectionSchema.parse(resolveLayers(own, [templateReference()]).repositories)
 		.user.http;
+}
+
+/**
+ * The Store endpoints a user repository is built over, named as the
+ * configuration names them: a fake Store's `urls` (its witness endpoint left
+ * out for a repository that writes no witness), and a link endpoint where a
+ * test needs the capability present.
+ */
+export interface UserRepositoryUrls {
+	readonly authenticateUrl: string;
+	readonly authenticateByTokenUrl: string;
+	readonly markMfaEnrolledUrl?: string;
+	readonly linkFederatedIdentityUrl?: string;
+}
+
+/**
+ * The user repository's HTTP settings under `env` with `urls` laid over
+ * them, set and read back through core's builder, so the block the
+ * configuration carries is the one the repository is built from.
+ */
+function userRepositoryHttpUnder(
+	env: Readonly<Record<string, string>>,
+	urls: UserRepositoryUrls,
+): Record<string, unknown> {
+	const { authenticateUrl, authenticateByTokenUrl, markMfaEnrolledUrl, linkFederatedIdentityUrl } =
+		urls;
+	const http = {
+		...storeTransportUnder(env),
+		authenticateUrl,
+		authenticateByTokenUrl,
+		...(markMfaEnrolledUrl === undefined ? {} : { markMfaEnrolledUrl }),
+		...(linkFederatedIdentityUrl === undefined ? {} : { linkFederatedIdentityUrl }),
+	};
+	return userRepositoryHttpOf(withUserRepositoryHttp({}, http)) as Record<string, unknown>;
+}
+
+/** Foundation's `"http"` user adapter over `http`, built through the adapter factory as the template's repositories module builds it. */
+function httpUserRepository(http: Readonly<Record<string, unknown>>): Promise<UserRepository> {
+	const { userFactory } = createRepositoryFactories();
+	registerBuiltinAdapters({ userFactory });
+	return userFactory.create({ ...http, type: "http" });
 }
 
 /** The two MFA stores' modules: the factor store the Store's when `stores` says so. */
@@ -826,7 +882,7 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 
 const EXTRA_USERS: Readonly<Record<string, Record<string, unknown>>> = {
 	carol: { id: "u-carol", password: "carol-password-long", token: `apple:${APPLE_SUB}` },
-	dave: { id: "u-dave", password: "dave-password-long", token: `github:${GITHUB_ID}` },
+	dave: { id: "u-dave", password: "dave-password-long", token: GITHUB_HANDLE },
 };
 
 // ---------------------------------------------------------------------------
@@ -848,6 +904,14 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	 * HTTP settings, and the transaction store stays as `mfaStores` says.
 	 */
 	readonly mfaFactorStoreAt?: FakeStoreUrls;
+	/**
+	 * The Store's user endpoints: given, the user repository is foundation's
+	 * `"http"` adapter over them, on the user repository's HTTP settings, which
+	 * the configuration carries (`repositories.user.http`) and the
+	 * Store-backed factor store, when there is one, is handed too. It replaces
+	 * the template fixture's directory, so `extraUsers` are not consulted.
+	 */
+	readonly userRepositoryAt?: UserRepositoryUrls;
 	/**
 	 * The WebAuthn credential store module. Default: core's memory module on
 	 * memory stores, the deployment's own on Redis (no package ships a shared
@@ -878,15 +942,19 @@ export async function fullSetOptions(
 	const features = { ...ALL_ON, ...options.features };
 	const stores = options.stores ?? "memory";
 	const f = await sharedFakes();
+	const env = options.env ?? SINGLE_ENV;
+	const userHttp =
+		options.userRepositoryAt === undefined
+			? undefined
+			: userRepositoryHttpUnder(env, options.userRepositoryAt);
+	const userRepository = userHttp === undefined ? undefined : await httpUserRepository(userHttp);
 	const added: AddedStores = {
 		deviceCode: options.deviceCodeStore ?? stores,
 		challenge: options.challengeStore ?? stores,
 		mfa: options.mfaStores ?? stores,
 		mfaFactorStoreAt: options.mfaFactorStoreAt,
 		storeTransport:
-			options.mfaFactorStoreAt === undefined
-				? undefined
-				: storeTransportUnder(options.env ?? SINGLE_ENV),
+			options.mfaFactorStoreAt === undefined ? undefined : (userHttp ?? storeTransportUnder(env)),
 		credential:
 			options.credentialStore ??
 			(stores === "redis" ? deploymentCredentialStoreModule : memoryWebAuthnCredentialStoreModule),
@@ -898,6 +966,7 @@ export async function fullSetOptions(
 		challengeStore: _challengeStore,
 		mfaStores: _mfaStores,
 		mfaFactorStoreAt: _mfaFactorStoreAt,
+		userRepositoryAt: _userRepositoryAt,
 		credentialStore: _credentialStore,
 		adjust: _adjust,
 		interruptLogins,
@@ -917,11 +986,16 @@ export async function fullSetOptions(
 				added.mfaFactorStoreAt === undefined
 					? featured
 					: { ...featured, ...foundationMfaFactorStoreConfig(added.mfaFactorStoreAt) };
-			return options.adjust ? options.adjust(stored) : stored;
+			const users = userHttp === undefined ? stored : withUserRepositoryHttp(stored, userHttp);
+			return options.adjust ? options.adjust(users) : users;
 		},
 		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened, outage),
 		// The caller's own overrides win, its own mail sender included.
-		extraOverrides: (config) => ({ mailSender: mail, ...options.extraOverrides?.(config) }),
+		extraOverrides: (config) => ({
+			mailSender: mail,
+			...(userRepository === undefined ? {} : { userRepository }),
+			...options.extraOverrides?.(config),
+		}),
 		extraClients: { ...EXTRA_CLIENTS, ...options.extraClients },
 		extraUsers: { ...EXTRA_USERS, ...options.extraUsers },
 	};

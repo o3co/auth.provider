@@ -926,8 +926,10 @@ describe("a password login the mfa requirement interrupts, through the template'
 
 describe("a password login over the Store-backed MFA factor store, through the template's boot", () => {
 	// The factor store is foundation's module over the test kit's fake Store,
-	// on the user repository's HTTP settings; the enrollment witness is not
-	// written through the Store, so no case here binds a first factor.
+	// on the user repository's HTTP settings; the users are the template
+	// fixture's directory, which writes no enrollment witness, so no case here
+	// binds a first factor (mfa-enrollment-witness.test.mts binds over the
+	// Store's users).
 	const MARKER = "STORE-WROTE-THIS";
 	const FACTOR = toMfaStoreFactor({
 		id: "u1PIlRkb_cy7UmjYUKaL_A",
