@@ -39,6 +39,7 @@ export {
 	type MergeRow,
 	type MergeRowGroup,
 	mergeAdmission,
+	mergeSessionStore,
 } from "../session-admission/testing/merge.rows.mjs";
 export {
 	type ContractCase,
