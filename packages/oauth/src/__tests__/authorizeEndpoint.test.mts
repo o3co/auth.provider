@@ -2565,6 +2565,14 @@ describe("/authorize — every authorization response names its issuer (RFC 9207
 		expect(res.body).not.toHaveProperty("iss");
 	});
 
+	it("keeps a registered redirect_uri's own iss beside the response's: the builder rewrites no registered query", async () => {
+		const registered = `${REDIRECT_URI}?iss=${encodeURIComponent("https://other.example")}`;
+		const { app } = await makeApp({ client: { allowedRedirectUris: [registered] } });
+		const params = redirectParams(await authorize(app, { ...baseQuery, redirect_uri: registered }));
+		expect(params.get("code")).toBe("code-x");
+		expect(issOf(params)).toEqual(["https://other.example", ISS]);
+	});
+
 	it("names the issuer as discovery advertises it when the configured one ends in a slash", async () => {
 		const configured = "https://issuer.example/tenant/";
 		const { app } = await makeApp({
