@@ -183,19 +183,23 @@ void everyDeclaredFieldRead;
 
 const DECLARED_USER_FIELDS: ReadonlySet<string> = new Set(USER_FIELDS);
 
-/** Whether `key` is an array index as `Object.keys` names one. */
+/** Whether `key` is an array index as an array's own property names spell one. */
 const isArrayIndex = (key: string): boolean =>
 	/^(0|[1-9][0-9]*)$/.test(key) && Number(key) < 2 ** 32 - 1;
 
+/** What `copies` holds for an object `copyByName` found not plain data. */
+const NOT_PLAIN: unique symbol = Symbol("not plain data");
+
 /**
  * `value` copied by name as plain data, frozen at every depth and sharing
- * nothing with it: a primitive as it is; an array, each index `Object.keys`
- * names read once, and its `length`; an object whose prototype is
+ * nothing with it: a primitive as it is; an array, each of its own indices
+ * read once, and its `length`; an object whose prototype is
  * `Object.prototype` or `null`, each own enumerable string key read once.
  * Every read is an ordinary one, so an accessor runs and a throw is let
  * through as it was thrown. Anything else (a class instance, a `Date`, a
  * `Map`, a function, a symbol) throws `NotPlainData`. `copies` keeps a
- * shared or cyclic reference one copy.
+ * shared or cyclic reference one copy, read once, and remembers an object
+ * found not plain data, so it is not read again.
  */
 function copyByName(value: unknown, copies: Map<object, unknown>): unknown {
 	if (value === null) return null;
@@ -213,22 +217,35 @@ function copyByName(value: unknown, copies: Map<object, unknown>): unknown {
 	}
 	const source = value as Record<string, unknown>;
 	const known = copies.get(source);
+	if (known === NOT_PLAIN) throw new NotPlainData();
 	if (known !== undefined) return known;
 	const isArray = Array.isArray(source);
 	if (!isArray) {
 		const prototype = Reflect.getPrototypeOf(source);
-		if (prototype !== Object.prototype && prototype !== null) throw new NotPlainData();
+		if (prototype !== Object.prototype && prototype !== null) {
+			copies.set(source, NOT_PLAIN);
+			throw new NotPlainData();
+		}
 	}
 	const copy: Record<string, unknown> = isArray ? ([] as unknown as Record<string, unknown>) : {};
 	copies.set(source, copy);
-	for (const key of Object.keys(source)) {
-		if (isArray && !isArrayIndex(key)) continue;
-		Object.defineProperty(copy, key, {
-			value: copyByName(source[key], copies),
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
+	const keys = isArray
+		? Object.getOwnPropertyNames(source).filter(isArrayIndex)
+		: Object.keys(source);
+	try {
+		for (const key of keys) {
+			Object.defineProperty(copy, key, {
+				value: copyByName(source[key], copies),
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
+		}
+	} catch (err) {
+		// A copy a cyclic reference already took stays frozen plain data.
+		Object.freeze(copy);
+		if (err instanceof NotPlainData) copies.set(source, NOT_PLAIN);
+		throw err;
 	}
 	if (isArray) (copy as unknown as unknown[]).length = (source as unknown as unknown[]).length;
 	return Object.freeze(copy);
@@ -255,6 +272,9 @@ function userSnapshot(
 ): Readonly<Record<string, unknown>> {
 	if (!isPlainObject(user)) return refuse("user must be an object");
 	const snapshot: Record<string, unknown> = {};
+	// One map for every field: an object two fields share is read once, and a
+	// field that refers back to the user is the snapshot.
+	const copies = new Map<object, unknown>([[user, snapshot]]);
 	const keep = (key: string, value: unknown): void => {
 		Object.defineProperty(snapshot, key, {
 			value,
@@ -267,7 +287,7 @@ function userSnapshot(
 		const value = user[field];
 		if (value === undefined) continue;
 		try {
-			keep(field, copyByName(value, new Map()));
+			keep(field, copyByName(value, copies));
 		} catch (err) {
 			if (!(err instanceof NotPlainData)) throw err;
 			refuse(`user.${field} must be plain data: a primitive, an array or a plain object`);
@@ -279,7 +299,7 @@ function userSnapshot(
 		const value = user[key];
 		if (value === undefined) continue;
 		try {
-			keep(key, copyByName(value, new Map()));
+			keep(key, copyByName(value, copies));
 		} catch (err) {
 			if (!(err instanceof NotPlainData)) throw err;
 		}

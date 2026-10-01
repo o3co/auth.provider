@@ -358,6 +358,38 @@ describe("a user is read by name — each field the login needs, once, into a pl
 		}
 	});
 
+	it("reads an array's elements by index, one it does not enumerate included", () => {
+		const groups = Object.defineProperty(["", "admin"], "0", {
+			value: "staff",
+			enumerable: false,
+		});
+		for (const build of bothLogins({ id: "user-1", groups })) {
+			expect(build().user.groups).toStrictEqual(["staff", "admin"]);
+		}
+	});
+
+	it("reads an object two fields share once, and the user once where a field refers back to it", () => {
+		const reads = new Map<string, number>();
+		const counting = <T extends object>(target: T): T =>
+			new Proxy(target, {
+				get(of, key, receiver) {
+					if (typeof key === "string") reads.set(key, (reads.get(key) ?? 0) + 1);
+					return Reflect.get(of, key, receiver);
+				},
+			});
+		const shared = counting({ team: "red" });
+		const target: Record<string, unknown> = { id: "user-1", profile: shared, team: { of: shared } };
+		const user = counting(target);
+		target.self = user;
+		const primary = passwordPrimary({ ...passwordFacts({}), user } as never);
+		expect(primary.user.self).toBe(primary.user);
+		expect(primary.user.profile).toBe((primary.user.team as Record<string, unknown>).of);
+		expect(primary.user.profile).toStrictEqual({ team: "red" });
+		expect(reads.get("id")).toBe(1);
+		expect(reads.get("team")).toBe(2); // the user's own `team`, and the shared object's
+		expect([...reads.values()].every((count) => count <= 2)).toBe(true);
+	});
+
 	it("copies the arrays and plain objects a field holds by name, getters on them included", () => {
 		const user = {
 			id: "user-1",
