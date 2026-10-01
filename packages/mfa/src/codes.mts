@@ -15,16 +15,22 @@
  */
 
 /**
- * The long code (the MFA ADR's D6, D22): every 80-bit code the package
- * issues — a recovery code, the account-email proof, an email factor's
- * enrollment code. Made from 10 bytes of the CSPRNG as 16 Crockford base32
- * characters, shown in four groups of four, and read as a user types or
- * pastes it: either case, hyphens anywhere, whitespace around it, and `O`,
- * `I`, `L` read as the digits they stand for. Reading is ASCII first, so no
- * letter beyond ASCII can upper-case into the alphabet.
+ * The codes the package issues (the MFA ADR's D6, D22, F5).
+ *
+ * - The long code: every 80-bit code — a recovery code, the account-email
+ *   proof, an email factor's enrollment code. Made from 10 bytes of the
+ *   CSPRNG as 16 Crockford base32 characters, shown in four groups of four,
+ *   and read as a user types or pastes it: either case, hyphens anywhere,
+ *   whitespace around it, and `O`, `I`, `L` read as the digits they stand
+ *   for. Reading is ASCII first, so no letter beyond ASCII can upper-case
+ *   into the alphabet.
+ * - The six-digit code: an email factor's login code, typed from a phone.
+ *   Drawn uniformly below a million from the CSPRNG and written as six ASCII
+ *   digits; read with the whitespace around it and nothing else, so a digit
+ *   beyond ASCII is no code.
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 
 /** Crockford's base32 alphabet: no `I`, `L`, `O` or `U`. */
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -83,4 +89,28 @@ export function readLongCode(input: unknown): string | undefined {
 		.toUpperCase()
 		.replace(/[OIL]/g, (letter) => SUBSTITUTES[letter] as string);
 	return CODE.test(code) ? code : undefined;
+}
+
+/** How many six-digit codes there are: each is drawn below it. */
+const SIX_DIGIT_CODES = 1_000_000;
+
+/** A six-digit code as made and as read. */
+const SIX_DIGITS = /^[0-9]{6}$/;
+
+/** A new six-digit code: one draw below a million from `random` (the CSPRNG), zero-padded. */
+export function generateSixDigitCode(
+	random: (max: number) => number = (max) => randomInt(max),
+): string {
+	const drawn = random(SIX_DIGIT_CODES);
+	if (!Number.isSafeInteger(drawn) || drawn < 0 || drawn >= SIX_DIGIT_CODES) {
+		throw new RangeError("a six-digit code is one whole number below a million");
+	}
+	return String(drawn).padStart(6, "0");
+}
+
+/** `input` read as a six-digit code; `undefined` when it is not one. */
+export function readSixDigitCode(input: unknown): string | undefined {
+	if (typeof input !== "string" || input.length > TYPED_MAX_LENGTH) return undefined;
+	const typed = input.trim();
+	return SIX_DIGITS.test(typed) ? typed : undefined;
 }

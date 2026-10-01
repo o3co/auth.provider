@@ -26,6 +26,7 @@
 - Amended 2026-10-01 (build-order step 10, owner decision): an exempt success no longer lifts the hard hold; a rebind or an operator reset does (D21's amendment of that date).
 - Amended 2026-10-01 (build-order step 10, owner decision): no revocation and no credential change clears the MFA lock; it is cleared only through the MFA module's authorized-recovery entry (D21's amendment of that date).
 - Amended 2026-10-01 (build-order step 11, owner decision): a first binding or a witness mark notes a subject's first-binding mark in `MfaTransactionStore`, and a first binding in a session, or at a login, authenticated no later than it is refused (D12's amendment of that date).
+- Amended 2026-10-01 (build-order step 16, owner decision): an email challenge is not refused while the subject is held; the hold is enforced at verification (F5's amendment of that date). The email factor's listing carries no hint (D23's amendment of that date).
 
 ## Context
 
@@ -301,6 +302,8 @@ Two lengths, by what a code protects (D21, D22):
 | 3 | `POST /session/mfa/verify {…, proof}` | As F1 step 5 with D21's limits for the code's kind; compare digests in constant time; check `expiresAt`; only the latest code counts. | As F1, or the recorded proof. |
 
 The factor's address is the one enrolled: the account's `email` from the Store at enrollment time, proven by a code, and kept (sealed) in the factor record — never an address typed at challenge time. *(amended 2026-09-30, #810: the factor keeps a keyed digest of that address, not the address; a code goes to the Store's current address only when it matches, and a mismatch refuses the factor until re-enrollment. Row 1 has no send limits. See the amendment above.)* A later change of the Store's address does not redirect codes; the user re-enrolls. The `account-email` proof uses the Store's current address. An account without an address is not offered the kind, and cannot give a proof.
+
+**Amended 2026-10-01 (build-order step 16, owner decision): row 1 does not refuse a challenge while the subject's guessable factors are held.** Whether to send, and how many, is the sender's concern, not the verifier's: a held subject's code is mailed up to the sender's limit (`429`, D23). The hold is enforced where the code is verified (`429 mfa_locked`, D21), and a held user's code is refused there, spending one of the transaction's attempts.
 
 ### F6 — TOTP: enroll (secret and QR) and verify
 
@@ -860,6 +863,8 @@ This voids: this record's credential-change row of D21; reading (f) of the step-
 ### D23 — Email: enumeration and delivery failure
 
 The email factor is reachable only after a correct password (F1) or from an authenticated session (F2, F4), so it cannot probe for accounts. The login's `403 mfa_required` reveals that the password was right — as every MFA-after-password design does; the `login` limiter, D21 and the notices bound what that is worth. Hints are masked (`k***@example.com`). Codes go only to an enrolled address or, for a proof, the Store's address for the account. A failed delivery is `503`, never "sent". Messages carry the code and nothing clickable.
+
+**Amended 2026-10-01 (build-order step 16, owner decision): the email factor holds no address, so its listing carries no hint.** The masked address is the `sent_to` of the challenge's answer, and of a mailed enrollment code's.
 
 ### D24 — The first binding: trust on first use, stated
 

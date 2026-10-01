@@ -20,13 +20,25 @@
  * the sender's, and no limit on sending. Named after its module, its keys
  * camelCase, its defaults in the package's `reference.conf` alone, each key
  * read from the variable its path names, and an unknown key refused by its
- * name. The module answers no factor while off, requires no sender, and
- * refuses the boot when switched on: this build has no email factor.
+ * name. The module answers no factor while off, with or without a mail
+ * sender; switched on it builds the factor from its section, and refuses the
+ * boot without a sender, naming the switch and the slot.
  */
 
 import { fileURLToPath } from "node:url";
-import { BootError, createApp, type MfaFactorResolver } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
+import {
+	BootError,
+	createApp,
+	defineModule,
+	EMAIL_OTP_AMR,
+	type MfaFactorResolver,
+	type Module,
+} from "@o3co/auth-provider-core";
+import {
+	createRecordingMailSender,
+	makeValidAppConfig,
+	unreadableModuleLeaves,
+} from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { afterEach, describe, expect, it } from "vitest";
 import { mfaEmailFactorConfigSchema } from "#/email/config.mjs";
@@ -105,13 +117,20 @@ describe("mfaEmailFactorModule, which declares the section", () => {
 		disposable = undefined;
 	});
 
-	/** Boots the module over core's valid configuration with `section`: the handle, or the refusal. */
+	/** A module providing core's recording mail sender. */
+	const sender: Module = defineModule({
+		name: "test:mail-sender",
+		provides: { mailSender: () => createRecordingMailSender() },
+	});
+
+	/** Boots the module over core's valid configuration with `section`, and a mail sender when `mailed`: the handle, or the refusal. */
 	const boot = async (
 		section: Record<string, unknown>,
+		mailed = false,
 	): Promise<{ readonly resolver?: MfaFactorResolver; readonly refused?: unknown }> => {
 		try {
 			const handle = await createApp({
-				modules: [mfaEmailFactorModule],
+				modules: [...(mailed ? [sender] : []), mfaEmailFactorModule],
 				bootstrapComponents: {
 					config: { ...makeValidAppConfig(), ...section },
 					pathResolver: (p: string) => p,
@@ -124,12 +143,12 @@ describe("mfaEmailFactorModule, which declares the section", () => {
 		}
 	};
 
-	it("is named after its section, reads it at its name, declares the package's reference.conf, and requires nothing: no mail sender either", () => {
+	it("is named after its section, reads it at its name, declares the package's reference.conf, requires nothing, and reads the mail sender optionally", () => {
 		expect(mfaEmailFactorModule.name).toBe("mfa-email-factor");
 		expect(mfaEmailFactorModule.section?.at).toBeUndefined();
 		expect(mfaEmailFactorModule.section?.reference?.href).toBe(REFERENCE.href);
 		expect(mfaEmailFactorModule.requires ?? []).toEqual([]);
-		expect(mfaEmailFactorModule.optional ?? []).toEqual([]);
+		expect(mfaEmailFactorModule.optional ?? []).toEqual(["mailSender"]);
 		expect(mfaEmailFactorModule.provides).toBeUndefined();
 		expect(mfaEmailFactorModule.replicaSafety).toBeUndefined();
 		expect(unreadableModuleLeaves([mfaEmailFactorModule])).toEqual([]);
@@ -143,11 +162,56 @@ describe("mfaEmailFactorModule, which declares the section", () => {
 		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 
-	it("refuses the boot when switched on, naming the key and its variable", async () => {
+	it("while off, with a mail sender installed, adds no factor either", async () => {
+		const { resolver, refused } = await boot(mfaEmailFactorConfigForTests(), true);
+		expect(refused).toBeUndefined();
+		expect(resolver?.get("email")).toBeUndefined();
+	});
+
+	it("switched on with a mail sender, adds the email factor built from its section", async () => {
+		for (const addsMfa of [false, true]) {
+			const { resolver, refused } = await boot(
+				mfaEmailFactorConfigForTests({ enabled: true, addsMfa }),
+				true,
+			);
+			expect(refused).toBeUndefined();
+			const factor = resolver?.get("email");
+			expect(factor?.kind).toBe("email");
+			expect(factor?.amrValues).toEqual([EMAIL_OTP_AMR]);
+			expect(factor?.addsMfa).toBe(addsMfa);
+			expect(factor?.counting).toBe(true);
+			expect(factor?.guessable).toBe(true);
+			await disposable?.dispose();
+			disposable = undefined;
+		}
+	});
+
+	it("gives a code the life its section sets", async () => {
+		const { resolver } = await boot(
+			mfaEmailFactorConfigForTests({ enabled: true, codeTtlSeconds: 120 }),
+			true,
+		);
+		const factor = resolver?.get("email");
+		const started = await factor?.beginEnrollment({
+			subject: "u-alice",
+			transactionId: "tx-1",
+			nowMs: 1_000_000,
+			request: {},
+			digests: { digest: () => ({ keyId: "k", digest: "d" }), matchesDigest: () => "mismatch" },
+			user: { id: "u-alice", username: "alice", email: "alice@example.com" },
+			factors: [],
+		});
+		expect(started?.mail?.expiresAtMs).toBe(1_000_000 + 120_000);
+	});
+
+	it("refuses the boot when switched on with no mail sender, naming the key, its variable and the slot", async () => {
 		const { refused } = await boot(mfaEmailFactorConfigForTests({ enabled: true }));
 		expect(refused).toBeInstanceOf(BootError);
-		expect(String((refused as BootError).message)).toContain("mfa-email-factor.enabled");
-		expect(String((refused as BootError).message)).toContain("MFA_EMAIL_FACTOR_ENABLED");
+		expect((refused as BootError).reason).toBe("contribute-factory-failed");
+		const message = String((refused as BootError).message);
+		expect(message).toContain("mfa-email-factor.enabled");
+		expect(message).toContain("MFA_EMAIL_FACTOR_ENABLED");
+		expect(message).toContain("mailSender");
 	});
 
 	it("refuses the boot for a key its section does not know, naming the section and the key", async () => {
