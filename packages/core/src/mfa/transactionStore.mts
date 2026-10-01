@@ -28,8 +28,9 @@
  * Subject state is judged on the time each caller passes, not the store's
  * clock, so callers' clocks must agree (NTP); see
  * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} for what a fast clock can erase. A
- * subject's run never expires (only a success, an exempt success or
- * `clearSubjectState` ends it), and an open sign-up lets anyone mint subjects.
+ * subject's run never expires (only a success, an exempt success below
+ * `hardLimit` or `clearSubjectState` ends it), and an open sign-up lets anyone
+ * mint subjects.
  * Transactions are bounded by expiry and the login rate, not per subject, so
  * the coordinator must bound the transactions one session holds.
  */
@@ -612,7 +613,11 @@ export interface MfaLockoutPolicy {
 	readonly memorySeconds: number;
 	/** Failures allowed in any rolling seven days (10). */
 	readonly weeklyBudget: number;
-	/** Consecutive failures that hold guessable proofs until an exempt success (100); at most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}. */
+	/**
+	 * Consecutive failures (100) that hold guessable proofs until the held factor
+	 * is rebound or the subject reset; an exempt success does not lift the hold
+	 * (NIST SP 800-63B-4 §3.2.2). At most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}.
+	 */
 	readonly hardLimit: number;
 }
 
@@ -630,7 +635,10 @@ export const MFA_CLOCK_SKEW_ALLOWANCE_MS = 86_400_000;
 /** The most consecutive failures a lockout policy may allow: NIST SP 800-63B-4's cap. */
 export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
 
-/** Which hold refused a guessable attempt. `hard` lifts only on an exempt success, a credential change or an operator reset. */
+/**
+ * Which hold refused a guessable attempt. No time and no exempt success lifts
+ * `hard`; clearing the subject's lock state does (`clearSubjectState`).
+ */
 export type MfaSubjectHold = "backoff" | "weekly" | "hard";
 
 /** What `reserveSubjectAttempt` answers. */
@@ -740,17 +748,18 @@ export interface MfaTransactionStore {
 		outcome: MfaSubjectAttemptOutcome,
 	): Promise<void>;
 	/**
-	 * An exempt success (a recovery code, WebAuthn, the 80-bit email proof): ends
-	 * the run up to `nowMs` (a later reservation stays), and with it a hard hold.
+	 * An exempt success (a recovery code, WebAuthn, the 80-bit email proof). While
+	 * the run is shorter than `policy.hardLimit` it ends the run up to `nowMs` (a
+	 * later reservation stays); at or past it the run, and the hard hold, stand.
 	 * The week stands, and lets no attempt through. Call it only after the
-	 * transaction holding the exempt proof was consumed.
+	 * transaction holding the exempt proof was consumed. A `RangeError` for what
+	 * {@link checkMfaLockoutPolicy} refuses.
 	 */
-	noteExemptSuccess(subject: string, nowMs: number): Promise<void>;
+	noteExemptSuccess(subject: string, nowMs: number, policy: MfaLockoutPolicy): Promise<void>;
 	/**
-	 * Forget `subject`'s lock state (the run and the week):
-	 * the operator reset and a credential change. Clearing the week on a
-	 * password change is deliberate: it is the remedy for an attacker who holds
-	 * the password, and it ends the hold that attacker caused.
+	 * Forget `subject`'s lock state (the run and the week). Its callers are the
+	 * MFA module's authorized recovery and the operator reset: no revocation
+	 * and no credential change clears the lock.
 	 */
 	clearSubjectState(subject: string): Promise<void>;
 
@@ -759,7 +768,7 @@ export interface MfaTransactionStore {
 	 * Record that `subject`'s next first binding requires the 80-bit email proof,
 	 * whatever `mfa.enrollment.requireEmailProof` says (the operator reset's
 	 * `requireEmailProof: true`). Idempotent. No expiry, and `clearSubjectState`
-	 * leaves it: neither the reset nor a password change may lift it.
+	 * leaves it: the reset that clears the lock may not lift it.
 	 */
 	requireEmailProofAtNextBinding(subject: string): Promise<void>;
 	/** Whether the requirement is recorded for `subject`. */

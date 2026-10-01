@@ -50,8 +50,9 @@
  * Lockout answers are judged on the time the caller passes; what the scripts
  * forget and Redis reclaims is judged no later than the server's clock less
  * `MFA_CLOCK_SKEW_ALLOWANCE_MS`. While a run is counted (until a success, an
- * exempt success or `clearSubjectState`) the subject's keys carry no TTL, and a
- * subject state a script cannot read is refused, never read as empty.
+ * exempt success below `hardLimit` or `clearSubjectState`) the subject's keys
+ * carry no TTL, and a subject state a script cannot read is refused, never
+ * read as empty.
  *
  * The requirement must last as enrolled factors do: it has no TTL, and the
  * module runs the factor store's durability check.
@@ -352,9 +353,10 @@ export function createRedisMfaTransactionStore(
 			await client.settleSubjectAttempt(subjectKeys(subject), reservation, outcome);
 		},
 
-		async noteExemptSuccess(subject, nowMs) {
+		async noteExemptSuccess(subject, nowMs, policy) {
+			checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "noteExemptSuccess");
-			await client.noteExemptSuccess(subjectKeys(subject), { nowMs });
+			await client.noteExemptSuccess(subjectKeys(subject), { nowMs, policy });
 		},
 
 		async clearSubjectState(subject) {

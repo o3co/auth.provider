@@ -368,14 +368,17 @@ return 1
 /**
  * `MfaTransactionStoreClient.noteExemptSuccess`.
  *
- * `ARGV`: now. Ends the run up to now; the week stands.
+ * `ARGV`: now, hardLimit. Ends the run up to now while it is shorter than
+ * hardLimit; at or past it the run, and the hard hold, stand. The week stands.
  */
 const LUA_MFA_SUBJECT_EXEMPT = `${LUA_MFA_SUBJECT_PRELUDE}
-local now = num(ARGV[1])
+local now, hard = num(ARGV[1]), num(ARGV[2])
 local run, pending, week = load()
 prune(run, pending, week, math.min(now, server_ms()) - SKEW)
-for _, a in ipairs(run) do
-  if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
+if #run < hard then
+  for _, a in ipairs(run) do
+    if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
+  end
 end
 keep()
 return 1

@@ -745,9 +745,10 @@ caller passes; [`mfa-transaction-store.test.mts`](__tests__/mfa-transaction-stor
 holds the two stores to the same answers over random walks of the
 operations. What a script forgets, and what Redis reclaims, is judged no
 later than the server's clock less a day. While a run is counted the keys
-carry no TTL — only a success, an exempt success or `clearSubjectState` ends
-one — and once none is they expire a day after the last failure stops
-counting. A refusal answers whether it is the first since an attempt was
+carry no TTL — only a success, an exempt success while the run is shorter
+than the `hardLimit` the script is handed, or `clearSubjectState` ends one;
+at or past it the run, and the hard hold, stand through an exempt success —
+and once none is they expire a day after the last failure stops counting. A refusal answers whether it is the first since an attempt was
 let through (`first`) from the lock hash's `held` field, which the first
 refusal of a hold writes and an attempt let through deletes, so a subject
 refused again and again costs no write after the first. A state a script

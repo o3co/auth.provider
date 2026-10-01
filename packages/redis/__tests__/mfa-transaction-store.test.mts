@@ -769,6 +769,45 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 		expect(answers[0]).toEqual({ ok: false, hold: "weekly", retryAfterMs: WEEK - 1, first: true });
 	});
 
+	it("keeps a run at the hard limit through an exempt success, a reservation in flight counted, and ends it once below, as core's store does", async () => {
+		// The random walk seldom reaches the hard limit; this walks its edge.
+		const four: MfaLockoutPolicy = {
+			...POLICY,
+			threshold: 4,
+			baseSeconds: 60,
+			maxSeconds: 60,
+			weeklyBudget: 1000,
+			hardLimit: 4,
+		};
+		const t = Math.floor(Date.now() / 1000) * 1000;
+		const answers: Array<Array<string | null>> = [];
+		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
+			const seen: Array<string | null> = [];
+			const reserve = async (at: number): Promise<string | null> => {
+				const r = await store.reserveSubjectAttempt("user-1", at, four);
+				seen.push(r.ok ? "ok" : r.hold);
+				return r.ok ? r.reservation : null;
+			};
+			for (let i = 0; i < 3; i++) {
+				const r = await reserve(t + i);
+				if (r !== null) await store.settleSubjectAttempt("user-1", r, "failure");
+			}
+			const inFlight = await reserve(t + 3);
+			await store.noteExemptSuccess("user-1", t + 4, four);
+			await reserve(t + 5);
+			if (inFlight !== null) await store.settleSubjectAttempt("user-1", inFlight, "void");
+			await store.noteExemptSuccess("user-1", t + 6, four);
+			for (let i = 0; i < 3; i++) {
+				const r = await reserve(t + 7 + i);
+				if (r !== null) await store.settleSubjectAttempt("user-1", r, "failure");
+			}
+			await reserve(t + 10);
+			answers.push(seen);
+		}
+		expect(answers[1]).toEqual(answers[0]);
+		expect(answers[0]).toEqual(["ok", "ok", "ok", "ok", "hard", "ok", "ok", "ok", "ok"]);
+	});
+
 	it("ends an attempt reserved at the very instant of an exempt success, as core's store does", async () => {
 		// "Up to its time" includes the instant itself: threshold - 1 failures
 		// before it and one at it are all ended, so four more failures after it
