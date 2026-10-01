@@ -767,6 +767,19 @@ describe("lodging a reauthorization", () => {
 		expectTypeOf<Admits<FederationGrantLodgingResult>>().toEqualTypeOf<true>();
 	});
 
+	it("admits a connection on no refusal of its result type: only connection_not_configured carries one", () => {
+		type Carrying<R> = R extends { readonly ok: false }
+			? "connection" extends keyof R
+				? R
+				: never
+			: never;
+		expectTypeOf<Carrying<FederationGrantReauthorizationResult>>().toBeNever();
+		// The control: a first intent's connection_not_configured carries it, and that refusal alone.
+		expectTypeOf<
+			Carrying<FederationGrantLodgingResult>["reason"]
+		>().toEqualTypeOf<"connection_not_configured">();
+	});
+
 	it("refuses a client that may no longer use the grant's connection", async () => {
 		await establish();
 		expect(

@@ -207,22 +207,29 @@ export interface FederationGrantLodgingAbsorbedCarrier {
  */
 type SharedLodgingRefusal = Exclude<FederationGrantLodgingRefusal, "connection_not_configured">;
 
-/** A refusal, narrowed to `R`; on `storage`, carrying what failed. */
-export interface FederationGrantLodgingRefused<
-	R extends FederationGrantLodgingRefusal = FederationGrantLodgingRefusal,
-> extends FederationGrantLodgingAbsorbedCarrier {
+/** A refusal a first intent and a renewal share; on `storage`, carrying what failed. */
+export interface FederationGrantLodgingRefused extends FederationGrantLodgingAbsorbedCarrier {
 	readonly ok: false;
-	readonly reason: R;
+	readonly reason: SharedLodgingRefusal;
 	/** On `storage`: what failed — a `FederationGrantLodgingFailure`, not enumerable (`carry.mts`). */
 	readonly failure?: FederationGrantLodgingFailure;
-	/**
-	 * On `connection_not_configured`: the connection the request named. Not
-	 * enumerable (`carry.mts`).
-	 */
-	readonly connection?: string;
 }
 
-export type FederationGrantLodgingResult = FederationGrantLodged | FederationGrantLodgingRefused;
+export type FederationGrantLodgingResult =
+	| FederationGrantLodged
+	| FederationGrantLodgingRefused
+	| ({
+			readonly ok: false;
+			readonly reason: "connection_not_configured";
+			/** The connection the request named. Not enumerable (`carry.mts`). */
+			readonly connection?: string;
+	  } & FederationGrantLodgingAbsorbedCarrier);
+
+/** A first intent's refusal of a connection the deployment does not have. */
+type ConnectionNotConfigured = Extract<
+	FederationGrantLodgingResult,
+	{ readonly reason: "connection_not_configured" }
+>;
 
 export type FederationGrantReauthorizationResult =
 	| (FederationGrantLodged & {
@@ -233,7 +240,7 @@ export type FederationGrantReauthorizationResult =
 			 */
 			readonly status: FederationGrantRenewableStatus;
 	  })
-	| FederationGrantLodgingRefused<SharedLodgingRefusal>
+	| FederationGrantLodgingRefused
 	| ((
 			| {
 					readonly ok: false;
@@ -296,12 +303,10 @@ type RequestCheck =
 			readonly scopes: readonly string[];
 			readonly lifetimeMs: number;
 	  }
-	| FederationGrantLodgingRefused<SharedLodgingRefusal>;
+	| FederationGrantLodgingRefused;
 
 /** `storage`, carrying what failed where nothing enumerates it (`carry.mts`). */
-const storage = (
-	failure: FederationGrantLodgingFailure,
-): FederationGrantLodgingRefused<"storage"> =>
+const storage = (failure: FederationGrantLodgingFailure): FederationGrantLodgingRefused =>
 	carryingFailure({ ok: false, reason: "storage" }, failure);
 
 /** Every answer a renewal refuses with. */
@@ -418,7 +423,7 @@ function intentRecord(input: {
 	};
 }
 
-type Admitted = { readonly ok: true } | FederationGrantLodgingRefused<"storage" | "intent_limit">;
+type Admitted = { readonly ok: true } | FederationGrantLodgingRefused;
 
 async function admit(
 	store: FederationGrantIntentStore,
@@ -480,7 +485,7 @@ export async function lodgeFederationGrantIntent(
 	}
 	const connection = deps.connections.get(request.connection);
 	if (connection === undefined) {
-		return carrying<FederationGrantLodgingRefused>(
+		return carrying<ConnectionNotConfigured>(
 			{ ok: false, reason: "connection_not_configured" },
 			"connection",
 			request.connection,

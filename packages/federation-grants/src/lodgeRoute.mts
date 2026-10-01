@@ -270,7 +270,7 @@ function createLodgeHandler(
 					unavailable(
 						result.reason,
 						"failure" in result ? result.failure : undefined,
-						"connection" in result ? result.connection : undefined,
+						result.reason === "connection_not_configured" ? result.connection : undefined,
 					);
 				}
 				stepsFailed(result.absorbed);
