@@ -28,6 +28,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Logger } from "@o3co/auth-provider-core";
+import { refusedOrigin } from "@o3co/auth-provider-test-kit";
 import * as asn1js from "asn1js";
 import type { Request } from "express";
 import * as pkijs from "pkijs";
@@ -392,21 +393,12 @@ const serve = async (handle: Parameters<typeof createServer>[1]): Promise<string
 	return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 };
 
-/** A loopback port nothing listens on. */
-const closedPort = async (): Promise<number> => {
-	const server = createServer();
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const { port } = server.address() as AddressInfo;
-	await new Promise<void>((resolve) => server.close(() => resolve()));
-	return port;
-};
-
 const guarded = () =>
 	createGuardedFetch({ allowedHosts: ["127.0.0.1"], timeoutMs: 2_000, maxBytes: 1_024 });
 
 describe("the guarded fetch, against the platform fetch", () => {
 	it("a refused connection is 'network_error' named by its code, the fetch error as the cause", async () => {
-		const outcome = await guarded()(`http://127.0.0.1:${await closedPort()}/int.crl`);
+		const outcome = await guarded()(`${await refusedOrigin()}/int.crl`);
 		expect(outcome).toEqual({
 			ok: false,
 			reason: "network_error",

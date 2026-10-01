@@ -24,7 +24,6 @@
  * is one retrieval accepts. The route-level suites test each rule.
  */
 
-import { createServer as createNetServer } from "node:net";
 import { inspect } from "node:util";
 import type {
 	BootstrapMap,
@@ -56,6 +55,7 @@ import {
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
 import { HttpUserRepository } from "@o3co/auth-provider-foundation";
+import { refusedOrigin } from "@o3co/auth-provider-test-kit";
 import type { Request, RequestHandler } from "express";
 import express from "express";
 import { HttpResponse, http } from "msw";
@@ -897,19 +897,13 @@ describe("the identity lookup over HTTP, composed", () => {
 			fatal: record("fatal"),
 			child: () => logger,
 		} as Logger;
-		// A loopback port nothing listens on — outside the mocked Store origin,
+		// A loopback origin nothing listens on — outside the mocked Store origin,
 		// so the connection is really refused.
-		const closed = await new Promise<number>((resolve) => {
-			const probe = createNetServer();
-			probe.listen(0, "127.0.0.1", () => {
-				const { port } = probe.address() as { port: number };
-				probe.close(() => resolve(port));
-			});
-		});
+		const refused = await refusedOrigin();
 		const unreachable = new HttpUserRepository({
 			authenticateUrl: `${STORE}/authenticate`,
 			authenticateByTokenUrl: `${STORE}/authenticate/token`,
-			findSubjectByFederatedIdentityUrl: `http://127.0.0.1:${closed}/identity/lookup`,
+			findSubjectByFederatedIdentityUrl: `${refused}/identity/lookup`,
 			federatedIdentityLookupCoverage: [
 				{
 					provider: "upstream",

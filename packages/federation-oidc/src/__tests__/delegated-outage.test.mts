@@ -24,26 +24,16 @@
  * answering 503 or 502, and one refusing the code.
  */
 
-import { createServer } from "node:net";
 import {
 	isFederationUpstreamOutage,
 	supportsDelegatedAuthorization,
 } from "@o3co/auth-provider-core";
+import { refusedOrigin } from "@o3co/auth-provider-test-kit";
 import { describe, expect, it } from "vitest";
 import { createOidcProvider } from "#/oidc.mjs";
 import { createFakeIdp } from "./helpers.mjs";
 
 const ISSUER = "https://idp-outage.test";
-
-/** A loopback port nothing listens on: a connection there is really refused. */
-const closedPort = () =>
-	new Promise<number>((resolve) => {
-		const probe = createServer();
-		probe.listen(0, "127.0.0.1", () => {
-			const { port } = probe.address() as { port: number };
-			probe.close(() => resolve(port));
-		});
-	});
 
 /**
  * What the delegated code exchange throws when the token endpoint answers with
@@ -90,8 +80,8 @@ const answer = (status: number, body: string | null, contentType?: string) => as
 
 describe("the delegated code exchange's failures, as the federation-grants callback reads them", () => {
 	it("reads a port nothing listens on as an outage: undici's TypeError over a coded cause", async () => {
-		const port = await closedPort();
-		const error = await exchangeFailure((init) => fetch(`http://127.0.0.1:${port}/token`, init));
+		const origin = await refusedOrigin();
+		const error = await exchangeFailure((init) => fetch(`${origin}/token`, init));
 		expect(error).toMatchObject({ name: "TypeError", cause: { code: "ECONNREFUSED" } });
 		expect(isFederationUpstreamOutage(error)).toBe(true);
 	});

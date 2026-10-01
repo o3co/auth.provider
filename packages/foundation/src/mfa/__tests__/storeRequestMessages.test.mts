@@ -22,8 +22,8 @@
  * client and operation and the endpoint by origin and path.
  */
 
-import { createServer, type Server } from "node:http";
 import { createServer as createNetServer, type Server as NetServer } from "node:net";
+import { refusedOrigin } from "@o3co/auth-provider-test-kit";
 import { afterEach, describe, expect, it } from "vitest";
 import { HttpMfaFactorStore, HttpUserRepository, StoreTransportError } from "#/index.mjs";
 import { mfaStoreRequestMessages } from "#/mfa/storeFailure.mjs";
@@ -35,15 +35,6 @@ afterEach(async () => {
 	);
 	netServers = [];
 });
-
-/** A loopback origin nothing listens on: bound, then closed. */
-async function closedOrigin(): Promise<string> {
-	const server: Server = createServer();
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const { port } = server.address() as { port: number };
-	await new Promise<void>((resolve) => server.close(() => resolve()));
-	return `http://127.0.0.1:${port}`;
-}
 
 /** A loopback server that answers every request's head with `answer`, raw, and closes. */
 async function answering(answer: string): Promise<string> {
@@ -63,7 +54,7 @@ async function answering(answer: string): Promise<string> {
 
 /** Each transport failure: how a Store makes it, and the message key it is said with. */
 const FAILURES = {
-	unreachable: { origin: closedOrigin, key: "unreachable" },
+	unreachable: { origin: refusedOrigin, key: "unreachable" },
 	connection_closed: { origin: () => answering(""), key: "closed" },
 	malformed_response: {
 		origin: () => answering(`HTTP/1.1 200 OK\r\nX-Big: ${"a".repeat(70_000)}\r\n\r\n`),
