@@ -701,7 +701,7 @@ export interface MfaTransactionStore {
 		outcome: MfaSubjectAttemptOutcome,
 	): Promise<void>;
 	/**
-	 * An exempt success (a recovery code, WebAuthn, the 80-bit email proof): ends
+	 * An exempt success (a recovery code, a WebAuthn assertion): ends
 	 * the run up to `nowMs` (a later reservation stays), and with it a hard hold.
 	 * The week stands, and lets no attempt through. Call it only after the
 	 * transaction holding the exempt proof was consumed.

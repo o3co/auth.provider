@@ -820,6 +820,8 @@ Core's reference and schema hold what core's consumers read with the MFA package
 
 **What it costs, stated.** Whoever holds the password can keep a user's guessable factors held indefinitely — ten failures a week. The user signs in with WebAuthn or a recovery code; that browser is then trusted and uses TOTP again. A TOTP-only user therefore spends one recovery code per browser per episode, not per login, and a password change ends the episode. The user's own typos count toward the week — ten is meant to be generous. The lock answer (`429 mfa_locked`, with `hold`, `Retry-After` where there is one, and `usable_kinds`) lets the page say which factors still work; under `mfa.notices = "mail"` the first hold is also mailed ("someone entered your password and failed the second factor"), and under `"none"` the page is all the user sees. The trade-off is decided in O5.
 
+**Amended 2026-10-01 (build-order step 10, owner decision):** the account-email proof is not an exempt success: it ends no run and lifts no hold. The exempt successes are a recovery code and a WebAuthn assertion.
+
 ### D22 — Codes: entropy, lifetime, single use, replay
 
 - **TOTP**: a secret of the algorithm's output length (F6); 6 digits; window ±1 step (configurable 0–2); **no automatic drift resynchronisation** (RFC 6238 §6); the provider's clock NTP-synced (runbook). Reuse within a step refused by `lastUsedStep` (F6).
