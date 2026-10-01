@@ -128,6 +128,29 @@ describe("retrieveFederationGrantToken — what is evaluated before any token", 
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1", refreshed: true });
 		});
 
+		it("is refreshed, not disclosed, when its issued lifetime ends beyond any instant a Date holds", async () => {
+			// A record written before the lifetime had to fit a Date, under a
+			// hand-built maximum that admitted it: its end is no instant at all,
+			// so its age cannot be believed.
+			h.world.connections.set(connection.name, { ...connection, maxAccessTokenLifetime: 1e15 });
+			await h.seed({
+				credentials: {
+					refreshToken: SECRET,
+					accessToken: {
+						value: "at-absurd",
+						tokenType: "Bearer",
+						obtainedAt: T0,
+						issuedLifetime: 1e13,
+						scopes: [...SCOPES],
+					},
+				},
+			});
+			h.refresh.mockResolvedValue(refreshed("1", now()));
+			setNow(at(MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1", refreshed: true });
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+		});
+
 		it("is judged against the CURRENT maximum: a cached token does not become disclosable by ageing", async () => {
 			await h.seed();
 			h.world.connections.set(connection.name, { ...connection, maxAccessTokenLifetime: 1800 });

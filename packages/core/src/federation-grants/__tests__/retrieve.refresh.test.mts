@@ -162,7 +162,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			});
 		});
 
-		it("dates the token on the ADAPTER's clock, not on when its answer got here: a later reading would lengthen its life", async () => {
+		it("dates the token from when the call began, not from the adapter's clock nor from when its answer got here: time the upstream took is not life left", async () => {
 			await h.seed();
 			setNow(DUE);
 			const call = pendingUpstream();
@@ -171,11 +171,30 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			const obtained = now();
 			await vi.advanceTimersByTimeAsync(2_000);
 			// The adapter read the clock a second into the call; the answer arrives
-			// three seconds in.
+			// three seconds in. The earlier of `expiresAt` and the call's start plus
+			// `expiresIn` stands.
 			call.resolve(refreshed("1", obtained));
 
-			expect(await answer).toMatchObject({ ok: true, expiresIn: 3598 });
-			expect((await stored())?.accessToken?.obtainedAt).toEqual(obtained);
+			expect(await answer).toMatchObject({ ok: true, expiresIn: 3597 });
+			expect((await stored())?.accessToken).toMatchObject({
+				obtainedAt: DUE,
+				issuedLifetime: 3600,
+			});
+		});
+
+		it("shortens a token whose adapter expiry is earlier than its issued lifetime says, and still judges the lifetime as issued", async () => {
+			await h.seed();
+			setNow(DUE);
+			h.refresh.mockResolvedValue(
+				refreshed("1", DUE, { expiresAt: new Date(DUE.getTime() + 30 * MIN) }),
+			);
+			// Neither field can lengthen the other: the token ends at the earlier
+			// instant, and is dated back by as much.
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1", expiresIn: 1800 });
+			expect((await stored())?.accessToken).toMatchObject({
+				obtainedAt: new Date(DUE.getTime() - 30 * MIN),
+				issuedLifetime: 3600,
+			});
 		});
 
 		it("keeps the stored refresh token when the upstream did not rotate it (RFC 6749 §6)", async () => {
@@ -305,6 +324,14 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			],
 			["no lifetime at all", { expiresIn: null, expiresAt: null }, "no_finite_lifetime"],
 			["a lifetime without the adapter's anchor", { expiresAt: null }, "no_finite_lifetime"],
+			["an anchor without a lifetime", { expiresIn: undefined }, "no_finite_lifetime"],
+			["an expiry already past", { expiresAt: new Date(0) }, "no_finite_lifetime"],
+			// Dated so far back that no Date holds the instant it was obtained.
+			[
+				"an issued lifetime whose start lies outside the Date range",
+				{ expiresIn: 1e13 },
+				"no_finite_lifetime",
+			],
 			["scopes beyond the consent", { scope: "openid files.readwrite" }, "scope_exceeded"],
 			// Named, but naming no scope-token, is not silence: it must not read as
 			// "the grant's scopes" and so be disclosed as if it were.

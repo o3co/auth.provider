@@ -20,6 +20,10 @@ import {
 } from "../federation-tokens/refresh-error.mjs";
 import { isFederationUpstreamOutage } from "../federation-tokens/upstreamOutage.mjs";
 import { parseScopeTokens } from "../federations/scope.mjs";
+import {
+	judgeHeldUpstreamToken,
+	readUpstreamTokenLifetime,
+} from "../federations/token-lifetime.mjs";
 import type { DelegatedTokens } from "../federations/types.mjs";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import { carryingFailure } from "./carry.mjs";
@@ -765,19 +769,17 @@ async function evaluate(
 			maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
 			tokenType: token.tokenType,
 		}).eligible;
-		const lifetimeMs = token.issuedLifetime * 1000;
-		const age = now.getTime() - token.obtainedAt.getTime();
-		// A token dated far ahead is not believed: read as it stands it would be
-		// unspent, and alive, for as long as its date is ahead. One dated a little
-		// ahead is — by as much as the refresh buffer absorbs, or as replicas'
-		// clocks may differ where the buffer is set to less. Believing it costs
-		// that it is refreshed so much later; not believing it costs a second
-		// rotation on the heels of the first, whenever the replica that refreshed
-		// is the one that is ahead. And no token has more life left than it was
-		// issued with, whatever its date says.
-		const believed = age >= -dateAllowanceMs(deps.limits);
-		const tokenEndsAt = Math.min(token.obtainedAt.getTime(), now.getTime()) + lifetimeMs;
-		const remainingMs = tokenEndsAt - now.getTime();
+		// A token dated further ahead than the refresh buffer absorbs, or than
+		// replicas' clocks may differ where the buffer is set to less, is not
+		// believed; none has more life left than it was issued with.
+		const { believed, remainingMs, halfSpent } = judgeHeldUpstreamToken(
+			{
+				obtainedAt: token.obtainedAt,
+				expiresAt: new Date(token.obtainedAt.getTime() + token.issuedLifetime * 1000),
+			},
+			{ now: now.getTime(), allowanceMs: dateAllowanceMs(deps.limits) },
+		);
+		const tokenEndsAt = now.getTime() + remainingMs;
 		if (eligible && believed && remainingMs > 0) {
 			keep = token;
 			// Against the scopes THIS token carries, not what the grant once got.
@@ -789,7 +791,6 @@ async function evaluate(
 			// below the buffer), a path the ineligibility marker does not cover.
 			// With it, at most two rotations per token lifetime while the
 			// upstream answers. A FAILING upstream is bounded by the stamp.
-			const halfSpent = age >= lifetimeMs / 2;
 			const ranDown = remainingMs <= deps.limits.refreshBufferMs;
 			const wantsMore = !carries || remainingMs <= minTtlSeconds * 1000;
 			// The call's own token, at the last look: what the upstream just gave is
@@ -962,8 +963,8 @@ interface ReadResponse {
 		readonly accessToken: string;
 		readonly tokenType: string;
 		readonly expiresIn: number | null;
-		/** NaN when the adapter named no expiry, or one that is not a date. */
-		readonly expiresAtMs: number;
+		/** As answered; read for its instant only by the lifetime reading. */
+		readonly expiresAt: Date | null;
 		readonly scopes: readonly string[];
 	};
 }
@@ -1018,7 +1019,7 @@ function readResponse(
 			accessToken,
 			tokenType,
 			expiresIn,
-			expiresAtMs: expiresAt === null ? Number.NaN : expiresAt.getTime(),
+			expiresAt,
 			scopes: named.length === 0 ? [...grant.scopes] : named,
 		},
 	};
@@ -1296,15 +1297,17 @@ async function refreshUnderLock(
 	if (response.token === undefined) {
 		ineligible = marker("malformed_token_response");
 	} else {
-		const { expiresIn, expiresAtMs, scopes } = response.token;
-		// Both, or the token has no finite lifetime: the raw `expires_in` is what
-		// is judged, and the adapter's expiry is what dates the token.
+		const { expiresIn, expiresAt, scopes } = response.token;
+		// A lifetime both fields state, with life left when the answer is read,
+		// or none that is finite: the raw `expires_in` is what is judged.
+		const reading = readUpstreamTokenLifetime(
+			{ expiresIn, expiresAt },
+			{ calledAt, now: receivedAt, floorMs: 0 },
+		);
 		const lifetime =
-			expiresIn !== null && Number.isFinite(expiresIn) && !Number.isNaN(expiresAtMs)
-				? expiresIn
-				: null;
+			reading.verdict === "finite" && reading.stated === "both" ? reading : undefined;
 		const judgement = judgeUpstreamAccessToken({
-			issuedLifetime: lifetime,
+			issuedLifetime: lifetime?.issuedLifetime ?? null,
 			scopes,
 			consentedScopes: grant.consent.scopes,
 			maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
@@ -1312,18 +1315,14 @@ async function refreshUnderLock(
 		});
 		if (!judgement.eligible) {
 			ineligible = marker(judgement.reason);
-		} else if (lifetime !== null) {
-			// When the token was obtained, on the adapter's reading of the clock —
-			// held inside the window of the call, so that a wild `expiresAt` can
-			// neither date it in the future nor lengthen its life.
-			const obtainedAt = Math.min(Math.max(expiresAtMs - lifetime * 1000, calledAt), receivedAt);
+		} else if (lifetime !== undefined) {
 			credentials = {
 				refreshToken: response.refreshToken,
 				accessToken: {
 					value: response.token.accessToken,
 					tokenType: response.token.tokenType,
-					obtainedAt: new Date(obtainedAt),
-					issuedLifetime: lifetime,
+					obtainedAt: lifetime.obtainedAt,
+					issuedLifetime: lifetime.issuedLifetime,
 					scopes: [...scopes],
 				},
 			};
