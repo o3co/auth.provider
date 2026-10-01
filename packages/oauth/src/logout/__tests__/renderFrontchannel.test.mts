@@ -90,6 +90,29 @@ describe("renderFrontchannelLogoutHtml", () => {
 		expect(html).toMatch(/%3Cscript%3Ealert%281%29%3C%2Fscript%3E/);
 	});
 
+	it("preserves fragment in frontchannelLogoutUri (fragment must come after query)", () => {
+		const html = renderFrontchannelLogoutHtml({
+			rps: [{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc#app-route" }],
+			issuer: "https://auth.example",
+			sid: "sid-1",
+		});
+		// Expected: ...fc?iss=...&sid=...#app-route
+		// Find the iframe src attribute content (HTML-escaped form in output)
+		const match = html.match(/<iframe src="([^"]+)"/);
+		assert(match !== null, "expected an iframe src in the rendered HTML");
+		const src = (match[1] ?? "").replace(/&amp;/g, "&"); // undo HTML escape
+		// Query params come before fragment:
+		const queryIdx = src.indexOf("?");
+		const fragIdx = src.indexOf("#");
+		expect(queryIdx).toBeGreaterThan(-1);
+		expect(fragIdx).toBeGreaterThan(queryIdx);
+		// Fragment is preserved:
+		expect(src).toContain("#app-route");
+		// Both params are in the query portion:
+		expect(src.substring(queryIdx, fragIdx)).toContain("iss=");
+		expect(src.substring(queryIdx, fragIdx)).toContain("sid=sid-1");
+	});
+
 	it("appends to existing query string with `&` separator", () => {
 		const html = renderFrontchannelLogoutHtml({
 			rps: [{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc?tenant=foo" }],
@@ -148,6 +171,32 @@ describe("renderFrontchannelLogoutHtml", () => {
 		expect(html).not.toContain("window.location.href");
 	});
 
+	it("skips RPs with invalid frontchannelLogoutUri instead of throwing", () => {
+		const logger = createMockLogger();
+		const html = renderFrontchannelLogoutHtml({
+			rps: [
+				{ clientId: "good", frontchannelLogoutUri: "https://good.example/fc" },
+				{ clientId: "bad", frontchannelLogoutUri: "not-a-url" },
+			],
+			issuer: "https://auth.example",
+			sid: "sid-1",
+			logger,
+		});
+		// good RP still produces an iframe
+		expect(html).toContain("good.example");
+		// bad RP is skipped
+		expect(html).not.toContain("not-a-url");
+		// exactly one iframe in the output
+		expect([...html.matchAll(/<iframe/g)].length).toBe(1);
+		// one structured warning for the bad RP, refused before an iframe URL is built
+		expectBestEffortWarn(
+			logger,
+			"logout_frontchannel_uri_refused",
+			{ site: "logout", clientId: "bad", reason: "unparsable" },
+			null,
+		);
+	});
+
 	it("skips an RP whose iframe URL cannot be built instead of throwing", () => {
 		const logger = createMockLogger();
 		const html = renderFrontchannelLogoutHtml({
@@ -165,13 +214,9 @@ describe("renderFrontchannelLogoutHtml", () => {
 			sid: "sid-1",
 			logger,
 		});
-		// good RP still produces an iframe
 		expect(html).toContain("good.example");
-		// bad RP is skipped
 		expect(html).not.toContain("bad.example");
-		// exactly one iframe in the output
 		expect([...html.matchAll(/<iframe/g)].length).toBe(1);
-		// one structured warning for the bad RP, with the error's projection
 		expectBestEffortWarn(
 			logger,
 			"logout_frontchannel_iframe_skipped",
@@ -180,7 +225,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 		);
 	});
 
-	describe("a frontchannelLogoutUri held to the redirect-URI rules", () => {
+	describe("a frontchannelLogoutUri must be http(s)", () => {
 		const render = (rps: ReadonlyArray<FrontchannelRP>, logger: MockLogger): string =>
 			renderFrontchannelLogoutHtml({
 				rps: [{ clientId: "good", frontchannelLogoutUri: "https://good.example/fc" }, ...rps],
@@ -188,34 +233,35 @@ describe("renderFrontchannelLogoutHtml", () => {
 				sid: "sid-1",
 				logger,
 			});
-		const iframeCount = (html: string): number => [...html.matchAll(/<iframe/g)].length;
+		const iframeSrcs = (html: string): string[] =>
+			[...html.matchAll(/<iframe src="([^"]*)"/g)].map((m) => m[1] ?? "");
 
 		it.each([
-			["a non-http(s) scheme", "ftp://rp.example/fc", "scheme-not-reverse-domain"],
-			["an executable scheme", "data:text/plain,signed-out", "executable-scheme"],
-			["plain http off a loopback host", "http://rp.example/fc", "http-non-loopback"],
-			["a fragment", "https://rp.example/fc#app-route", "fragment"],
-			["userinfo", "https://user@rp.example/fc", "userinfo"],
-			["a value that is not a URL", "not-a-url", "unparsable"],
+			["javascript:void(0)"],
+			["JAVASCRIPT:void(0)"],
+			// The URL parser strips the tab, so this parses as the scheme above.
+			["java\tscript:void(0)"],
+			["data:text/plain,signed-out"],
+			["blob:https://rp.example/x"],
+			["com.example.app:/x"],
+			["ftp://rp.example/fc"],
 		])(
-			"refuses %s: never rendered, the other RPs are, and one warn names the reason, never the URI",
-			(_label, uri, reason) => {
+			"refuses a non-http(s) scheme (%j) stored for an RP: never rendered, the other RPs are, one warn names the reason, never the URI",
+			(uri) => {
 				const logger = createMockLogger();
 				const html = render([{ clientId: "rp", frontchannelLogoutUri: uri }], logger);
 
-				expect(iframeCount(html)).toBe(1);
-				expect(html).toContain("good.example");
-				expect(html).not.toContain("rp.example");
-				expect(html).not.toContain(uri);
-				// Warned once: refused before an iframe URL is built.
+				expect(iframeSrcs(html)).toEqual([
+					"https://good.example/fc?iss=https%3A%2F%2Fauth.example&amp;sid=sid-1",
+				]);
 				expect(logger.warn).toHaveBeenCalledTimes(1);
 				expectBestEffortWarn(
 					logger,
 					"logout_frontchannel_uri_refused",
-					{ site: "logout", clientId: "rp", reason },
+					{ site: "logout", clientId: "rp", reason: "not-http" },
 					null,
 				);
-				expect(serialisedCalls(logger)).not.toContain(uri);
+				expect(serialisedCalls(logger)).not.toContain(JSON.stringify(uri).slice(1, -1));
 			},
 		);
 
@@ -234,7 +280,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 				logger,
 			);
 
-			expect(iframeCount(html)).toBe(1);
+			expect(iframeSrcs(html)).toHaveLength(1);
 			expect(logger.warn).toHaveBeenCalledTimes(2);
 			expectBestEffortWarn(
 				logger,
@@ -250,7 +296,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 			);
 		});
 
-		it("refuses a URI for an RP whose clientId read throws, logging it without one", () => {
+		it("refuses a non-http(s) scheme for an RP whose clientId read throws, logging it without one", () => {
 			const logger = createMockLogger();
 			const html = render(
 				[
@@ -264,20 +310,22 @@ describe("renderFrontchannelLogoutHtml", () => {
 				logger,
 			);
 
-			expect(iframeCount(html)).toBe(1);
+			expect(iframeSrcs(html)).toHaveLength(1);
 			expectBestEffortWarn(
 				logger,
 				"logout_frontchannel_uri_refused",
-				{ site: "logout", clientId: undefined, reason: "scheme-not-reverse-domain" },
+				{ site: "logout", clientId: undefined, reason: "not-http" },
 				null,
 			);
 		});
 
-		it("renders a loopback http URI and skips an absent one, without a warn", () => {
+		it("renders an http(s) URI on any host, with a fragment or a query, and skips an absent one, without a warn", () => {
 			const logger = createMockLogger();
 			const html = render(
 				[
-					{ clientId: "loopback", frontchannelLogoutUri: "http://127.0.0.1:8080/fc" },
+					{ clientId: "http", frontchannelLogoutUri: "http://rp.example/fc" },
+					{ clientId: "fragment", frontchannelLogoutUri: "https://rp.example/fc#app-route" },
+					{ clientId: "query", frontchannelLogoutUri: "https://rp.example/fc?state=a" },
 					{ clientId: "null", frontchannelLogoutUri: null as unknown as string },
 					{ clientId: "empty", frontchannelLogoutUri: "" },
 					{ clientId: "none" },
@@ -285,9 +333,38 @@ describe("renderFrontchannelLogoutHtml", () => {
 				logger,
 			);
 
-			expect(iframeCount(html)).toBe(2);
-			expect(html).toContain("http://127.0.0.1:8080/fc?iss=");
+			expect(iframeSrcs(html)).toHaveLength(4);
 			expect(logger.warn).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("the iframe src attribute is escaped", () => {
+		const srcOf = (uri: string): string => {
+			const html = renderFrontchannelLogoutHtml({
+				rps: [{ clientId: "rp", frontchannelLogoutUri: uri }],
+				issuer: "https://auth.example",
+				sid: "sid-1",
+			});
+			const match = html.match(/<iframe src="([^"]*)" style=/);
+			assert(match !== null, "expected one iframe with a quoted src");
+			return match[1] ?? "";
+		};
+
+		it.each([
+			["a double quote", 'https://rp.example/a"b', "https://rp.example/a%22b?"],
+			["a single quote", "https://rp.example/a'b", "https://rp.example/a&#39;b?"],
+			["a less-than sign", "https://rp.example/a<b", "https://rp.example/a%3Cb?"],
+			[
+				"an ampersand",
+				"https://rp.example/fc?a=1&b=2",
+				"https://rp.example/fc?a=1&amp;b=2&amp;iss=",
+			],
+		])("renders an https URI carrying %s escaped in the src", (_label, uri, expected) => {
+			const src = srcOf(uri);
+			expect(src.startsWith(expected)).toBe(true);
+			// Nothing in the attribute value can end it or open a tag.
+			expect(src).not.toMatch(/["'<>]/);
+			expect(src.replace(/&(amp|#39|quot|lt|gt);/g, "")).not.toContain("&");
 		});
 	});
 

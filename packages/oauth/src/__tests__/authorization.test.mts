@@ -2038,7 +2038,7 @@ describe("createAuthorizationGrant", () => {
 				},
 			);
 
-			describe("a frontchannelLogoutUri held to the redirect-URI rules", () => {
+			describe("a frontchannelLogoutUri must be http(s)", () => {
 				/** One code exchange against `record`; the RP registration it made and the logger. */
 				const exchangeWith = async (record: object) => {
 					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
@@ -2098,14 +2098,18 @@ describe("createAuthorizationGrant", () => {
 				};
 
 				it.each([
-					["a non-http(s) scheme", "ftp://rp.example/front", "scheme-not-reverse-domain"],
-					["an executable scheme", "data:text/plain,signed-out", "executable-scheme"],
-					["plain http off a loopback host", "http://rp.example/front", "http-non-loopback"],
-					["a fragment", "https://rp.example/front#section", "fragment"],
+					["a non-http(s) scheme (javascript:)", "javascript:void(0)", "not-http"],
+					["a non-http(s) scheme (upper case)", "JAVASCRIPT:void(0)", "not-http"],
+					// The URL parser strips the tab, so this parses as the scheme above.
+					["a non-http(s) scheme (with a tab)", "java\tscript:void(0)", "not-http"],
+					["a non-http(s) scheme (data:)", "data:text/plain,signed-out", "not-http"],
+					["a non-http(s) scheme (blob:)", "blob:https://rp.example/x", "not-http"],
+					["a non-http(s) scheme (reverse-domain)", "com.example.app:/x", "not-http"],
+					["a non-http(s) scheme (ftp:)", "ftp://rp.example/front", "not-http"],
 					["a value that is not a URL", "not-a-url", "unparsable"],
 					["a value that is not a string", 42, "not-a-string"],
 				])(
-					"refuses %s: the RP is registered without it, the exchange still succeeds, and one warn names the reason, never the URI",
+					"refuses %s from a custom repository: the RP is registered without it, the exchange still succeeds, and one warn names the reason, never the URI",
 					async (_label, uri, reason) => {
 						const { result, rpData, logger } = await exchangeWith({
 							...baseRecord,
@@ -2123,7 +2127,7 @@ describe("createAuthorizationGrant", () => {
 							{ site: "authorization_code", clientId: "client1", reason },
 							null,
 						);
-						expect(serialisedCalls(logger)).not.toContain(String(uri));
+						expect(serialisedCalls(logger)).not.toContain(JSON.stringify(String(uri)).slice(1, -1));
 					},
 				);
 
@@ -2148,8 +2152,13 @@ describe("createAuthorizationGrant", () => {
 					);
 				});
 
-				it("registers a frontchannelLogoutUri the rules accept, loopback http included, without a warn", async () => {
-					for (const uri of ["https://rp.example/front?tenant=a", "http://127.0.0.1:8080/front"]) {
+				it("registers an http(s) frontchannelLogoutUri on any host, with a query or a fragment, without a warn", async () => {
+					for (const uri of [
+						"https://rp.example/front?state=a",
+						"https://rp.example/front#section",
+						"http://rp.example/front",
+						"http://127.0.0.1:8080/front",
+					]) {
 						const { rpData, logger } = await exchangeWith({
 							...baseRecord,
 							frontchannelLogoutUri: uri,
