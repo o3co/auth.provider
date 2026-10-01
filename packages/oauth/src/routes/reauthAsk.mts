@@ -36,8 +36,15 @@
 
 import { randomBytes } from "node:crypto";
 
-/** How long a browser has to come back from the login page before the ask expires. */
+/** How long a browser has to come back from a page before the ask expires: each write opens its own window. */
 export const REAUTH_ASK_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * How long a chain of trips for one request may run, from its first ask
+ * (`createdAt`), however recent its last write: past it the ask is nothing,
+ * and the request is decided on its merits again.
+ */
+export const REAUTH_ASK_MAX_CHAIN_MS = 30 * 60 * 1000;
 
 /**
  * Key prefix separating ask records from sessions in the same store.
@@ -175,8 +182,13 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 		new Promise<void>((resolve, reject) => {
 			store.destroy(key(id), (err?: unknown) => (err ? reject(err as Error) : resolve()));
 		});
-	const current = (record: ReauthAskRecord): boolean =>
-		lastWrittenAt(record) + REAUTH_ASK_TTL_MS > Date.now();
+	const current = (record: ReauthAskRecord): boolean => {
+		const now = Date.now();
+		return (
+			lastWrittenAt(record) + REAUTH_ASK_TTL_MS > now &&
+			record.createdAt + REAUTH_ASK_MAX_CHAIN_MS > now
+		);
+	};
 
 	return {
 		async ask(record) {
@@ -184,15 +196,18 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 			// browser was sent to the login page by this server, so it is sized
 			// like the bearer value it is.
 			const id = randomBytes(32).toString("base64url");
-			const expires = new Date(Date.now() + REAUTH_ASK_TTL_MS);
+			const now = Date.now();
+			// This write's window, and never past the chain's cap.
+			const expiresAt = Math.min(now + REAUTH_ASK_TTL_MS, record.createdAt + REAUTH_ASK_MAX_CHAIN_MS);
+			const maxAge = Math.max(0, expiresAt - now);
 			await new Promise<void>((resolve, reject) => {
 				store.set(
 					key(id),
 					{
 						cookie: {
-							originalMaxAge: REAUTH_ASK_TTL_MS,
-							maxAge: REAUTH_ASK_TTL_MS,
-							expires,
+							originalMaxAge: maxAge,
+							maxAge,
+							expires: new Date(expiresAt),
 							httpOnly: true,
 							path: "/",
 						},
