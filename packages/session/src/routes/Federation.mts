@@ -29,14 +29,11 @@
 
 import { randomBytes } from "node:crypto";
 import {
-	type Admission,
 	type AppConfig,
 	type AuditSink,
 	admitSession,
-	auditErrorText,
 	checkResolver,
 	consoleLogger,
-	cookieClaim,
 	errorEnvelope,
 	establishWithoutAsking,
 	type FederationProvider,
@@ -57,7 +54,6 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { SESSION_ADMISSION_ACTIONS, type SessionAdmissionAction } from "../admissionActions.mjs";
-import { checkNavigationOrigin } from "../csrf.mjs";
 import { type EstablishSessionStep, establishSession } from "../establish-session.mjs";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
 import { consentedScope } from "../federations/consented-scope.mjs";
@@ -69,11 +65,7 @@ import {
 	type LinkIntent,
 	mintFederationTransactionId,
 } from "../federations/transaction.mjs";
-import {
-	abandonCookieSession,
-	admissionUnavailable,
-	SESSION_STORE_UNAVAILABLE,
-} from "../internal/cookieSession.mjs";
+import { abandonCookieSession, SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
@@ -82,6 +74,7 @@ import { readCallbackParams, resolveCallbackProvider } from "./FederationCallbac
 import { consumeCallbackState } from "./FederationCallbackState.mjs";
 import { type FederationRouterContext, recordedTokenType } from "./FederationContext.mjs";
 import { completeLink } from "./FederationLinkCallback.mjs";
+import { checkLinkStart, readCsrfTrustedOrigins } from "./FederationLinkStart.mjs";
 import {
 	type FederationStore,
 	type FederationStoreStep,
@@ -119,20 +112,6 @@ const DEFAULT_SESSION_TTL_MS = 86_400_000; // 24 h
 const NO_ACR_TABLE = Object.freeze({});
 
 /**
- * The link start's answer to a step-up: `403 step_up_required` with the
- * requirement and its registered page. The start is a browser navigation, so
- * the page it came from can send the user through the step-up and start
- * again; no return parameter is added, since that page knows where it
- * returns to.
- */
-const stepUpRequired = (admission: Extract<Admission, { outcome: "step_up" }>) => ({
-	error: "step_up_required",
-	error_description: "Linking a federated identity requires a step-up first",
-	requirement: admission.requirement,
-	page: admission.page.href,
-});
-
-/**
  * The upstream IdP's own `amr` (when the provider surfaces the id_token's as
  * a string array), else nothing. Whether it counts is the federation's
  * `trustUpstreamAmr`: core records it beside `fed` for a trusted federation
@@ -142,14 +121,6 @@ const upstreamAmrOf = (profile: Readonly<Record<string, unknown>>): readonly str
 	Array.isArray(profile.amr) && profile.amr.every((v) => typeof v === "string")
 		? (profile.amr as string[])
 		: [];
-
-/** Read `config.session.csrf.trustedOrigins` without assuming a full AppConfig. */
-const readCsrfTrustedOrigins = (config: unknown): readonly string[] => {
-	const csrf = (config as { session?: { csrf?: { trustedOrigins?: unknown } } } | null | undefined)
-		?.session?.csrf;
-	const list = csrf?.trustedOrigins;
-	return Array.isArray(list) ? list.filter((o): o is string => typeof o === "string") : [];
-};
 
 export const createRouter = (
 	express: {
@@ -555,68 +526,9 @@ export const createRouter = (
 			const wantsLink = req.query.link === "1" || req.query.link === "true";
 			let link: LinkIntent | undefined;
 			if (wantsLink) {
-				// A link changes an existing account, so the user must be the one
-				// asking: a top-level cross-site navigation carries the SameSite=Lax
-				// cookie, and a forced `?link=1` paired with a login CSRF at the IdP
-				// would link the attacker's identity to the victim's account. The
-				// evidence is the session CSRF policy's navigation rule
-				// (`checkNavigationOrigin`). An ordinary login start is not held to
-				// this: cross-domain RPs starting a login is normal.
-				if (checkNavigationOrigin(req, linkTrustedOrigins).outcome !== "accepted") {
-					logger.warn(
-						{
-							provider: provider.name,
-							// The caller's header, sanitised and capped like every
-							// caller-controlled string on a log line.
-							secFetchSite: auditErrorText(req.get("sec-fetch-site") ?? ""),
-						},
-						"federation_link_start_rejected",
-					);
-					return res.status(403).json({
-						error: "link_requires_trusted_origin",
-						error_description:
-							"Linking a federated identity must be started from this site or an origin on session.csrf.trustedOrigins",
-					});
-				}
-				// A Store that cannot link is the composition's fault, not the
-				// session's: said first, before the session is read — a static
-				// fault answers the same whatever the session store is doing.
-				if (typeof userRepository.linkFederatedIdentity !== "function") {
-					return res.status(400).json({
-						error: "link_unsupported",
-						error_description: "The user repository does not support linking federated identities",
-					});
-				}
-				// Admitted as `session.link`, graded `credential_change` (a linked
-				// identity is a new way into the account), so a recent-authentication
-				// rule is decided here, where a step-up has a page to return to.
-				const claim = cookieClaim(req);
-				const admission = await admitLink(
-					claim,
-					"session.link",
-					logger.child({ provider: provider.name }),
-				);
-				if (admission.outcome === "unavailable") {
-					return res.status(503).json(admissionUnavailable(admission.store));
-				}
-				if (admission.outcome === "step_up") {
-					return res.status(403).json(stepUpRequired(admission));
-				}
-				if (
-					admission.outcome !== "admitted" ||
-					admission.session === null ||
-					claim.sid === undefined
-				) {
-					return res.status(401).json({
-						error: "login_required",
-						error_description: "Linking a federated identity requires an authenticated session",
-					});
-				}
-				// Recorded in the transaction, not inferred later: the cookie's `sid`
-				// and the admitted subject. A form_post callback arrives without the
-				// session cookie, and a browser that switched accounts must not link
-				// to the new one.
-				link = { sid: claim.sid, subject: admission.session.sub };
+				const intent = await checkLinkStart(ctx, provider, req, res);
+				if (intent === null) return;
+				link = intent;
 			}
 
 			const responseMode = resolveFederationResponseMode(provider);
