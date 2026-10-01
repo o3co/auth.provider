@@ -605,7 +605,8 @@ expected to change.
 
 **Keep the replicas' clocks within 1 second of each other (NTP).** A
 credential change, or any other call to `revokeAllForSubject`, sets a boundary
-for the subject. A sign-in dated no later than the boundary plus an allowance is refused: a
+for the subject when a subject revocation store is installed and the write
+succeeds (a failed write is reported as `tokensRevoked: false`). A sign-in dated no later than the boundary plus an allowance is refused: a
 token by its `iat`, a session by its `authTime`. The comparison is inclusive,
 with an allowance of
 `DEFAULT_SUBJECT_REVOCATION_SKEW_MS` = 1 s (`packages/core/src/jwt/verify.mts`;
