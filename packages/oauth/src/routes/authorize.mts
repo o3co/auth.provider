@@ -29,6 +29,7 @@ import {
 	extractResourceParam,
 	isWellFormedErrorCode,
 	logGrantPolicyUnavailable,
+	policyUnavailable,
 	readGrantPolicyDecision,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
@@ -72,6 +73,9 @@ export { authorizeParams } from "./authorizeContext.mjs";
 
 /** The action /authorize admits, as `oauthModule` registers it. */
 const AUTHORIZE_ACTION = "oauth.authorize" satisfies keyof typeof OAUTH_ROUTER_ADMISSION_ACTIONS;
+
+/** What `authorize.rejected` carries for a policy decision past the client's ceiling. */
+const POLICY_OUT_OF_BOUNDS = { reason: "policy_out_of_bounds" } as const;
 
 // Policy is evaluated once, here, and its narrowed scope and audience persist
 // on the code; the code exchange must not re-evaluate, so a crafted `/token`
@@ -140,7 +144,8 @@ const applyGrantPolicy = async (
 				{ site: "authorize", grantType: "authorization_code", policy: grantPolicy.kind },
 				err,
 			);
-			redirectError(ctx, "temporarily_unavailable", "policy evaluation unavailable");
+			const { error, errorDescription } = policyUnavailable();
+			redirectError(ctx, error, errorDescription);
 			return null;
 		}
 		const reading = readGrantPolicyDecision(answer, ctx.opts.logger, {
@@ -168,6 +173,7 @@ const applyGrantPolicy = async (
 				);
 				error = "access_denied";
 			}
+			await auditFailure(ctx, { reason: "policy_denied", error });
 			// A description that is empty or not a string is not sent (RFC 6749
 			// A.8 makes the field 1*NQSCHAR); the default is.
 			redirectError(
@@ -183,6 +189,7 @@ const applyGrantPolicy = async (
 		if (decision.grantedScope !== undefined) {
 			if (!Array.isArray(decision.grantedScope)) {
 				// A non-array from a JS policy would throw in `.filter`.
+				await auditFailure(ctx, POLICY_OUT_OF_BOUNDS);
 				redirectError(ctx, "server_error", "policy returned a non-array grantedScope");
 				return null;
 			}
@@ -193,6 +200,7 @@ const applyGrantPolicy = async (
 				(s) => !allowedFilteredScopes.includes(s),
 			);
 			if (invalidFromPolicy.length > 0) {
+				await auditFailure(ctx, POLICY_OUT_OF_BOUNDS);
 				redirectError(
 					ctx,
 					"server_error",
@@ -209,6 +217,7 @@ const applyGrantPolicy = async (
 			// server the client was never registered for. `server_error`, as above.
 			const bounded = boundPolicyAudience(decision, audienceCeiling);
 			if (!bounded.ok) {
+				await auditFailure(ctx, POLICY_OUT_OF_BOUNDS);
 				redirectError(
 					ctx,
 					bounded.result.error,
