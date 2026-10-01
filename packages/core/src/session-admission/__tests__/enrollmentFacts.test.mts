@@ -19,8 +19,10 @@
  * (`SessionEnrollmentFacts`): derived by core's primary builders from the
  * `User` — the witness as `readMfaEnrollmentWitness` reads it, and whether
  * `user.email` is none, an address `normaliseMailAddress` reads, or one it
- * cannot — never taken from a caller's object, and never from a `User` that
- * is not plain data; and handed to a requirement as a copy in the view.
+ * cannot — never taken from a caller's object; read from a plain snapshot
+ * of the `User`'s fields, each read by name once, so a class instance or an
+ * ORM entity logs in and a malformed field is refused; and handed to a
+ * requirement as a copy in the view.
  */
 
 import { describe, expect, it } from "vitest";
@@ -170,13 +172,77 @@ class Row {
 	mfaEnrolled = true;
 }
 
-describe("a user that is not plain data — refused before anything is derived from it", () => {
-	// A copy keeps own enumerable data alone: a field held another way would
-	// be dropped from the copy, and the witness read from it as not enrolled.
-	const NOT_PLAIN: ReadonlyArray<readonly [string, () => unknown]> = [
+/** A class whose fields are getters over private state, on its prototype. */
+class GetterUser {
+	readonly #email: string;
+	constructor(email: string) {
+		this.#email = email;
+	}
+	get id(): string {
+		return "user-1";
+	}
+	get username(): string {
+		return "alice";
+	}
+	get email(): string {
+		return this.#email;
+	}
+	get mfaEnrolled(): boolean {
+		return true;
+	}
+}
+
+/**
+ * An entity as an ORM hands it out: its columns in an internal record,
+ * each surfaced by a getter on the prototype, beside internals of its own.
+ */
+function ormEntity(columns: Record<string, unknown>): Record<string, unknown> {
+	class Entity {
+		dataValues: Record<string, unknown>;
+		isNewRecord = false;
+		constructor(values: Record<string, unknown>) {
+			this.dataValues = values;
+		}
+	}
+	for (const column of Object.keys(columns)) {
+		Object.defineProperty(Entity.prototype, column, {
+			get(this: Entity) {
+				return this.dataValues[column];
+			},
+			enumerable: false,
+			configurable: true,
+		});
+	}
+	return new Entity({ ...columns }) as unknown as Record<string, unknown>;
+}
+
+/** Both builders over `user`: the password login's primary and the federated login's. */
+const bothLogins = (user: unknown) => [
+	() => passwordPrimary({ ...passwordFacts({}), user } as never),
+	() => establishWithoutAsking({ ...federatedLogin({}), user } as never).primary,
+];
+
+describe("a user is read by name — each field the login needs, once, into a plain snapshot", () => {
+	const SHAPES: ReadonlyArray<readonly [string, () => unknown]> = [
+		["a class instance whose fields are prototype getters", () => new GetterUser("alice@example.com")],
+		[
+			"an ORM entity, its columns prototype getters over an internal record",
+			() =>
+				ormEntity({
+					id: "user-1",
+					username: "alice",
+					email: "alice@example.com",
+					mfaEnrolled: true,
+				}),
+		],
 		[
 			"a witness it does not enumerate",
-			() => Object.defineProperty({ id: "user-1" }, "mfaEnrolled", { value: true }),
+			() =>
+				Object.defineProperty(
+					{ id: "user-1", username: "alice", email: "alice@example.com" },
+					"mfaEnrolled",
+					{ value: true },
+				),
 		],
 		[
 			"an inherited witness",
@@ -187,53 +253,150 @@ describe("a user that is not plain data — refused before anything is derived f
 							return true;
 						},
 					}),
-					{ id: "user-1" },
+					{ id: "user-1", username: "alice", email: "alice@example.com" },
 				),
 		],
 		[
 			"an own accessor",
 			() => ({
 				id: "user-1",
+				username: "alice",
+				email: "alice@example.com",
 				get mfaEnrolled() {
 					return true;
 				},
 			}),
 		],
-		["a class instance", () => new Row()],
-		["a symbol key", () => ({ id: "user-1", [Symbol("witness")]: true })],
-		["a nested Date", () => ({ id: "user-1", joined: new Date(0) })],
-		["a nested Map", () => ({ id: "user-1", roles: new Map([["admin", true]]) })],
-		["a nested typed array", () => ({ id: "user-1", key: new Uint8Array(2) })],
-		["a class instance in a list", () => ({ id: "user-1", rows: [new Row()] })],
-		[
-			"a nested field it does not enumerate",
-			() => ({
-				id: "user-1",
-				profile: Object.defineProperty({}, "email", { value: "a@example.com" }),
-			}),
-		],
-		["a function", () => ({ id: "user-1", greet: () => "hi" })],
 	];
 
-	it.each(NOT_PLAIN)(
-		"refuses a user with %s, on both logins, with a RangeError that quotes nothing of it",
+	it.each(SHAPES)(
+		"logs in %s on both logins, its facts derived from what its fields answer",
 		(_label, userOf) => {
-			for (const build of [
-				() => passwordPrimary({ ...passwordFacts({}), user: userOf() } as never),
-				() => establishWithoutAsking({ ...federatedLogin({}), user: userOf() } as never),
-			]) {
-				let refusal: unknown;
-				try {
-					build();
-				} catch (err) {
-					refusal = err;
-				}
-				expect(refusal).toBeInstanceOf(RangeError);
-				expect((refusal as Error).message).toMatch(/user must be plain data/);
-				expect((refusal as Error).message).not.toContain("user-1");
+			for (const build of bothLogins(userOf())) {
+				const primary = build();
+				expect(primary.enrollmentFacts).toEqual({ witness: "enrolled", mailAddress: "address" });
+				expect(primary.user).toMatchObject({
+					id: "user-1",
+					username: "alice",
+					email: "alice@example.com",
+					mfaEnrolled: true,
+				});
+				expect(Reflect.getPrototypeOf(primary.user)).toBe(Object.prototype);
+				expect(Object.isFrozen(primary.user)).toBe(true);
 			}
 		},
 	);
+
+	it("carries a class instance whose columns are own data, as an ORM row may", () => {
+		for (const build of bothLogins(new Row())) {
+			const primary = build();
+			expect(primary.enrollmentFacts).toEqual({ witness: "enrolled", mailAddress: "none" });
+			expect(primary.user).toEqual({ id: "user-1", mfaEnrolled: true });
+			expect(Reflect.getPrototypeOf(primary.user)).toBe(Object.prototype);
+		}
+	});
+
+	it("reads each field once, on each build, and nothing of the user after the build", () => {
+		const reads = new Map<string, number>();
+		const counted = new Proxy(
+			{
+				id: "user-1",
+				username: "alice",
+				email: "alice@example.com",
+				mfaEnrolled: true,
+				groups: ["staff"],
+				department: "sales",
+			},
+			{
+				get(target, key, receiver) {
+					if (typeof key === "string") reads.set(key, (reads.get(key) ?? 0) + 1);
+					return Reflect.get(target, key, receiver);
+				},
+			},
+		);
+		const primary = passwordPrimary({ ...passwordFacts({}), user: counted } as never);
+		expect(primary.enrollmentFacts).toEqual({ witness: "enrolled", mailAddress: "address" });
+		expect(primary.user).toEqual({
+			id: "user-1",
+			username: "alice",
+			email: "alice@example.com",
+			mfaEnrolled: true,
+			groups: ["staff"],
+			department: "sales",
+		});
+		expect([...reads.values()].every((count) => count === 1)).toBe(true);
+		expect([...reads.keys()]).toEqual(
+			expect.arrayContaining(["id", "username", "email", "mfaEnrolled", "groups", "department"]),
+		);
+	});
+
+	it("leaves out a field the login does not need that is not plain data — a Date, a Map, a function, an instance", () => {
+		const user = {
+			id: "user-1",
+			mfaEnrolled: true,
+			email: "alice@example.com",
+			joined: new Date(0),
+			roles: new Map([["admin", true]]),
+			greet: () => "hi",
+			rows: [new Row()],
+			key: new Uint8Array(2),
+			department: "sales",
+			[Symbol("internal")]: true,
+		};
+		for (const build of bothLogins(user)) {
+			const primary = build();
+			expect(primary.enrollmentFacts).toEqual({ witness: "enrolled", mailAddress: "address" });
+			expect(primary.user).toStrictEqual({
+				id: "user-1",
+				mfaEnrolled: true,
+				email: "alice@example.com",
+				department: "sales",
+			});
+		}
+	});
+
+	it("copies the arrays and plain objects a field holds by name, getters on them included", () => {
+		const user = {
+			id: "user-1",
+			groups: ["staff", "admin"],
+			profile: {
+				get nickname() {
+					return "ally";
+				},
+				address: { city: "Tokyo" },
+			},
+		};
+		for (const build of bothLogins(user)) {
+			const primary = build();
+			expect(primary.user).toStrictEqual({
+				id: "user-1",
+				groups: ["staff", "admin"],
+				profile: { nickname: "ally", address: { city: "Tokyo" } },
+			});
+			expect(Object.isFrozen(primary.user.groups)).toBe(true);
+			expect(Object.isFrozen(primary.user.profile)).toBe(true);
+			expect(Object.isFrozen((primary.user.profile as Record<string, unknown>).address)).toBe(true);
+			expect(primary.user.groups).not.toBe(user.groups);
+		}
+	});
+
+	it("lets a getter that throws through as it threw — never read as a witness or an address", () => {
+		const outage = new Error("the entity's connection is closed");
+		const user = Object.defineProperty({ id: "user-1" }, "mfaEnrolled", {
+			get() {
+				throw outage;
+			},
+		});
+		for (const build of bothLogins(user)) {
+			let thrown: unknown;
+			try {
+				build();
+			} catch (err) {
+				thrown = err;
+			}
+			expect(thrown).toBe(outage);
+		}
+	});
 
 	it("takes plain data at any depth, a null prototype included, as a copy frozen at every depth", () => {
 		const user = Object.assign(Object.create(null), {
@@ -256,6 +419,42 @@ describe("a user that is not plain data — refused before anything is derived f
 		expect(Object.isFrozen((primary.user.groups as unknown[])[1])).toBe(true);
 		expect(Object.isFrozen(primary.user.profile)).toBe(true);
 	});
+});
+
+describe("a malformed user — still refused before anything is derived from it", () => {
+	// A field the login needs that the snapshot cannot hold would be lost
+	// from it, and the witness read as not enrolled: refused, not dropped.
+	const MALFORMED: ReadonlyArray<readonly [string, () => unknown, RegExp]> = [
+		["no object", () => "user-1", /user must be an object/],
+		["no id", () => ({ username: "alice", mfaEnrolled: true }), /user\.id must be a non-empty string/],
+		["an id that is not a string", () => ({ id: 1 }), /user\.id must be a non-empty string/],
+		["a witness that is a Date", () => ({ id: "user-1", mfaEnrolled: new Date(0) }), /user\.mfaEnrolled must be plain data/],
+		["a witness that is a function", () => ({ id: "user-1", mfaEnrolled: () => true }), /user\.mfaEnrolled must be plain data/],
+		["an email that is a class instance", () => ({ id: "user-1", email: new Row() }), /user\.email must be plain data/],
+		["groups holding a Map", () => ({ id: "user-1", groups: [new Map()] }), /user\.groups must be plain data/],
+		[
+			"an ORM entity whose witness column holds a Date",
+			() => ormEntity({ id: "user-1", mfaEnrolled: new Date(0) }),
+			/user\.mfaEnrolled must be plain data/,
+		],
+	];
+
+	it.each(MALFORMED)(
+		"refuses a user with %s, on both logins, with a RangeError that quotes nothing of it",
+		(_label, userOf, message) => {
+			for (const build of bothLogins(userOf())) {
+				let refusal: unknown;
+				try {
+					build();
+				} catch (err) {
+					refusal = err;
+				}
+				expect(refusal).toBeInstanceOf(RangeError);
+				expect((refusal as Error).message).toMatch(message);
+				expect((refusal as Error).message).not.toContain("user-1");
+			}
+		},
+	);
 });
 
 describe("the enrollment facts across an interruption — the continuation carries none, and its rehydration derives them again", () => {
@@ -442,7 +641,7 @@ describe("the enrollment facts of a login's continuation — read by its holder 
 	it.each([
 		["no object", undefined],
 		["a continuation without its primary", { done: [], interruptedBy: "verifier" }],
-		["a user that is not plain data", "user"],
+		["a user whose witness is not plain data", "user"],
 	])("refuses %s with a RangeError, as resumePrimary does", async (_label, shape) => {
 		const continuation =
 			shape === "user"
@@ -450,7 +649,7 @@ describe("the enrollment facts of a login's continuation — read by its holder 
 						...(await continuationFor({})),
 						primary: {
 							...(await continuationFor({})).primary,
-							user: { id: "user-1", joined: new Date(0) },
+							user: { id: "user-1", mfaEnrolled: new Date(0) },
 						},
 					}
 				: shape;
