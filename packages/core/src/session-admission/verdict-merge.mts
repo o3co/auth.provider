@@ -18,9 +18,10 @@
  * Step 7 of `admitSession`: the requirements' verdict and the `acr`
  * selection merged by the session-admission ADR's table. The hint of a
  * `step_up` it answers lists only the entries the stepping requirement's own
- * trip can finish. A step-up through the second-factor authority onto a
- * session that cannot record a second factor is never answered: a new login
- * (`reauthenticate`, `acr`) can carry the factor instead.
+ * trip can finish. In the met + step_up row, a step-up through the
+ * second-factor authority is never offered for `acr_values` onto a session
+ * whose store has no `recordSecondFactor` or whose primary cannot be told:
+ * the answer is a new login (`reauthenticate`, `acr`) instead.
  */
 
 import type { AcrSelection } from "./acr.mjs";
@@ -38,9 +39,10 @@ export interface MergeContext {
 	readonly table: AdmissionDeps["acrTable"];
 	/**
 	 * Whether a second factor can be recorded on the live session: the store
-	 * has the step-up capability and the record's primary can be told.
+	 * has the step-up capability and the record's primary can be told. Called
+	 * only where the met + step_up row would choose the authority.
 	 */
-	readonly recordable: boolean;
+	readonly recordable: () => boolean;
 }
 
 /** The merge table of ADR 2026-09-28-session-admission: `R` the requirements' verdict, `A` the acr selection (`undefined` when nothing was asked). */
@@ -123,7 +125,7 @@ function stepUpThroughOne(
 		// A requirement whose reach covers an entry registered a page: boot
 		// holds a non-empty reach to one. Without one nothing could finish it.
 		if (finishable.length > 0 && requirement.stepUpPage !== undefined) {
-			if (requirement.secondFactorAuthority && !context.recordable) {
+			if (requirement.secondFactorAuthority && !context.recordable()) {
 				unrecordable = true;
 				continue;
 			}

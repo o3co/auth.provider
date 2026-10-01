@@ -310,10 +310,10 @@ const copyView = (view: SessionView): SessionView =>
  *    token's own `amr`, record or not.
  * 6. `acr_values`: `selectAcr` over the vouched `amr`, with reach the union
  *    of every requirement's when the session is live.
- * 7. `merge` of 5 and 6. A step-up the second-factor authority would make
- *    onto a session that cannot record it — a store without
- *    `recordSecondFactor`, or a record whose primary cannot be told — is a
- *    new login instead (`reauthenticate`, `acr`).
+ * 7. `merge` of 5 and 6. In the met + step_up row, a step-up through the
+ *    second-factor authority is never offered for `acr_values` onto a store
+ *    without `recordSecondFactor` or a record whose primary cannot be told:
+ *    the answer is a new login (`reauthenticate`, `acr`).
  */
 export async function admitSession(
 	deps: AdmissionDeps,
@@ -413,7 +413,9 @@ export async function admitSession(
 	const noneConfigured =
 		requested.length > 0 && requested.every((acr: string) => !Object.hasOwn(checked.acrTable, acr));
 
-	// Step 7: the merge.
+	// Step 7: the merge. Whether the session can record a second factor is
+	// read once, and only when the merge would step up through the authority.
+	let recordable: boolean | undefined;
 	return merge(verdict, selection, {
 		live,
 		noneConfigured,
@@ -421,10 +423,11 @@ export async function admitSession(
 		// What step 5 handed the requirements, from a reading no requirement was handed.
 		held: authentication?.amr ?? [],
 		table: checked.acrTable,
-		recordable:
-			session !== null &&
-			supportsSecondFactorUpdate(deps.userSessionStore) &&
-			sessionAuthentication(session) !== undefined,
+		recordable: () =>
+			(recordable ??=
+				session !== null &&
+				supportsSecondFactorUpdate(deps.userSessionStore) &&
+				sessionAuthentication(session) !== undefined),
 	});
 }
 
