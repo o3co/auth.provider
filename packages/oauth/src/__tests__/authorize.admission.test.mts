@@ -541,14 +541,14 @@ describe("/authorize on admission — the session read", () => {
 });
 
 describe("/authorize on admission — a requirement's verdicts", () => {
-	it("reauthenticate: the cookie is regenerated and the browser sent to log in; prompt=none is login_required", async () => {
+	it("reauthenticate: the browser is sent to log in with the session kept; prompt=none is login_required", async () => {
 		const requirement = fixture("fixture", () => ({ outcome: "reauthenticate" }));
 		const harness = await makeApp({
 			userSessionStore: storeWith(record()),
 			requirements: [requirement],
 		});
 		loginRedirectTo(await authorize(harness.app, baseQuery));
-		expect(harness.regenerated).toBe(1);
+		expect(harness.regenerated).toBe(0);
 		expect(requirement.inputs[0]?.action).toEqual({ name: "oauth.authorize", grade: "use" });
 
 		const silent = await makeApp({
@@ -1341,7 +1341,7 @@ describe("/authorize on admission — a reauthenticate verdict is answered with 
 		);
 		expect(params.get("error")).toBe("login_required");
 		expect(params.get("error_description")).toMatch(/fixture/);
-		expect(harness.regenerated).toBe(1);
+		expect(harness.regenerated).toBe(0);
 		expect(harness.createCode).not.toHaveBeenCalled();
 	});
 
@@ -1548,7 +1548,7 @@ describe("/authorize on admission — the session's authentication time is read 
 			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
 		);
 		expect(params.get("error")).toBe("login_required");
-		expect(harness.regenerated).toBe(1);
+		expect(harness.regenerated).toBe(0);
 	});
 
 	it("an instant ahead of the clock within the skew does not meet a login an ask asked for: login_required", async () => {
@@ -1773,7 +1773,7 @@ describe("/authorize on admission — what the new order changes, pinned", () =>
 		const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
 		const askId = back.searchParams.get("reauth_ask") as string;
 		expect([...harness.records.keys()]).toEqual([`reauth:${askId}`]);
-		expect(harness.regenerated).toBe(1);
+		expect(harness.regenerated).toBe(0);
 	});
 
 	it("abandons the cookie session after a regeneration fails, so express-session writes nothing on the way out", async () => {

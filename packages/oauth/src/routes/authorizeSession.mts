@@ -154,7 +154,9 @@ const signedOut = async (ctx: AuthorizeContext): Promise<boolean> => {
 };
 
 /**
- * A new login, for `not_live`, `revoked` and `unauthenticated`. Under
+ * A new login, for `not_live`, `revoked` and `unauthenticated`: a session
+ * that is gone or ended, so regenerating the cookie session signs out no
+ * one still signed in. Under
  * `prompt=none` the answer is `login_required` (OIDC Core §3.1.2.6).
  * Otherwise the cookie session is regenerated first (`signedOut`), and under
  * `prompt=login` the login ask is recorded, as the login check records it,
@@ -182,10 +184,11 @@ const newLogin = async (
 
 /**
  * A `reauthenticate` admission: one login trip, with the ask recorded (and a
- * step-up trip already asked carried), after the cookie session is
- * regenerated. A session that comes back from that login — authenticated
- * after the ask — and is still `reauthenticate` is refused rather than sent
- * round again: `unmet_authentication_requirements` for `acr` (a new login
+ * step-up trip already asked carried). The live session is kept, as the
+ * `prompt=login` trip keeps it: a request anyone can send must not sign the
+ * user out. A session that comes back from that trip still `reauthenticate`
+ * is refused rather than sent round again, whether it logged in since the
+ * ask or not: `unmet_authentication_requirements` for `acr` (a new login
  * could not carry what the request asked for), `login_required` for a
  * requirement. `prompt=none` is `login_required`; no session store to
  * record the ask in is a composition error.
@@ -218,26 +221,25 @@ const reauthenticate = async (
 	const ask = await presentedAsk(ctx, askStore);
 	if (ask === undefined) return;
 	const loginAskedAt = ask?.loginAskedAt;
-	// Strictly after the ask, to the millisecond, as freshness reads it. With
-	// no record to read an authentication from, or one whose time cannot be
-	// read, the trip already asked is the one this request gets.
-	const cameBack =
-		loginAskedAt !== undefined &&
-		(admission.session === null ||
-			loginSince(admission.session, loginAskedAt, Date.now()) !== false);
-	if (cameBack) {
+	if (loginAskedAt !== undefined) {
+		// The trip already asked is the one this request gets. Whether a login
+		// was made since only words the refusal.
+		const loggedIn =
+			admission.session !== null &&
+			loginSince(admission.session, loginAskedAt, Date.now()) === true;
 		if (admission.requirement === "acr") {
 			refuseUnmet(ctx, "acr", requested);
 		} else {
 			redirectError(
 				ctx,
 				"login_required",
-				`the session still does not meet the ${admission.requirement} requirement after the login it was sent to`,
+				loggedIn
+					? `the session still does not meet the ${admission.requirement} requirement after the login it was sent to`
+					: "re-authentication was requested but the session was not re-established",
 			);
 		}
 		return;
 	}
-	if (!(await signedOut(ctx))) return;
 	// An ask spent by another pass since it was read: no successor carries
 	// its instants, and with no ask this is the first trip.
 	if ((await sendToLogin(ctx, askStore, ask)) === "spent") {
