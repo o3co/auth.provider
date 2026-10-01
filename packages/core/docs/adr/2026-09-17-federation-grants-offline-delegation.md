@@ -2460,6 +2460,39 @@ the token it activates by the earlier clamp and writes no
 `effectiveExpiresAt`, until it reads the answer through the same function
 (#1020).
 
+**Amended 2026-10-02 (#1075): a writer must state the end; a reader must not
+count on it.** Once the connect callback wrote `effectiveExpiresAt` (#1073),
+it did not become a required key of the record, as planned above: a record
+activated before then, one rewritten by a 0.15 or 0.16 replica during a
+rolling deploy, and one whose sealed extension does not open (D16's amendment)
+still have none. The types split instead. What a writer hands the store,
+`FederationGrantCredentialsInput`, requires it as a `Date`; what the store
+answers, `FederationGrantCredentials`, keeps it optional, read as ending at
+`obtainedAt + issuedLifetime`. A refresh that keeps the stored token writes it
+back with the end it is read to have, which changes nothing a reader sees.
+
+**Amended 2026-10-02 (owner decision): in-process deployment code is trusted,
+though it may be buggy.** An adapter (`FederationProvider` and its
+capabilities), a store, an audit sink, a validator and a hook run in the
+provider's process, and the deployment supplies them. What this provider reads
+from them is defended against bugs, not against hostility.
+
+- **In scope.** A malformed value: the wrong type, out of range, an Invalid
+  Date. A read that throws. A legitimate object shape: an ORM entity or a
+  class instance whose fields are getters, so a reader takes each field by
+  name and never spreads the object.
+- **Out of scope.** An object that lies between reads: a getter that answers
+  differently on a second read, a `then` that changes, a value that mutates
+  under the reader.
+- **The snapshot stays.** Reading each field once into plain values remains
+  the form a reader takes, because it is the simplest correct one and it
+  handles a read that throws. It is not a defence against an object that
+  lies.
+
+Why: the owner's decision. Deployment code is the deployment's own: it holds
+whatever the process holds, so a guard against it protects nothing, and each
+such guard would add complexity to every reader.
+
 ### D18 — Audit, with a correlation ID
 
 New event types, each added to `BUILT_IN_AUDIT_EVENT_TYPES`:

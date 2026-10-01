@@ -18,6 +18,7 @@ import type {
 	FederationGrant,
 	FederationGrantAuthorization,
 	FederationGrantCredentials,
+	FederationGrantCredentialsInput,
 	FederationGrantIneligibilityMarker,
 	FederationGrantRefreshFailureInput,
 	FederationGrantRevokedBy,
@@ -169,7 +170,7 @@ export interface FederationGrantStore {
 		readonly grantId: string;
 		readonly intentHandle: string;
 		readonly authorization: FederationGrantAuthorization;
-		readonly credentials: FederationGrantCredentials;
+		readonly credentials: FederationGrantCredentialsInput;
 		readonly now: Date;
 	}): Promise<FederationGrantWrite>;
 
@@ -188,7 +189,7 @@ export interface FederationGrantStore {
 	replaceCredentials(input: {
 		readonly grantId: string;
 		readonly expectedVersion: number;
-		readonly credentials: FederationGrantCredentials;
+		readonly credentials: FederationGrantCredentialsInput;
 		readonly ineligible: FederationGrantIneligibilityMarker | null;
 		readonly now: Date;
 	}): Promise<FederationGrantWrite>;

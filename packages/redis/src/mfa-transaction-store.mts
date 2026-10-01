@@ -24,6 +24,7 @@
  *
  * ```text
  * <keyPrefix>tx:{<id>}                          HASH   one transaction, expiring at its expiresAtMs
+ * <keyPrefix>binding:{<digest>}                ZSET   a binding's transactions, scored by expiresAtMs, expiring at the latest
  * <keyPrefix>lock:{<subject>}                   HASH   the lockout run, reservations in flight, the hard hold
  * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
  * <keyPrefix>recovery:{<subject>}               HASH   the generation, the recovery-set floor, the recovery authorizations
@@ -33,7 +34,9 @@
  * <keyPrefix>first-binding:{<subject>}          STRING a subject's first-binding mark, expiring at its end
  * ```
  *
- * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`).
+ * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`);
+ * `<digest>` is base64url of the SHA-256 of the binding, kind and id, so the
+ * express session id is copied into no key.
  * A subject's lock, week, recovery hash and lease share its hash tag, so each
  * operation on them is one script on one Cluster slot. The recovery hash
  * carries no TTL once it holds a generation or a floor (losing either would
@@ -43,6 +46,45 @@
  * (`makeIoredisClients`): insert-only create, compare-and-set update,
  * `reserveAttempt`, `takeChallenge`, `consume`, and each lockout step, which
  * reads, decides and writes the subject state at once.
+ *
+ * A binding holds at most `MFA_MAX_TRANSACTIONS_PER_BINDING` live
+ * transactions, kept in its index: one member per transaction,
+ * `<incarnation>:<id key part>`, scored by its `expiresAtMs` exactly (so the
+ * one ended is the one core's in-process store ends, within one millisecond
+ * too; at one instant, which goes is either store's choice). This adapter
+ * holds the cap's policy — N, which goes, the order of the steps and what a
+ * failed step costs — and the client only its three one-script primitives.
+ * `create` writes the
+ * transaction, then one script adds its member and takes out those with the
+ * soonest expiries past the cap, never the new one; each taken out is
+ * deleted by a script that compares its `incarnation`, so a member left
+ * behind never deletes a transaction created again under its id, for any
+ * binding. `consume`, and a reservation past `max`, take the member out.
+ * The index key expires at the latest deadline it holds, set again whenever a
+ * member is added or removed, and an empty one is gone, so it never outlives
+ * the transactions it names. An expired transaction's
+ * member stays until it is taken out first: its deadline is the soonest. The
+ * transactions sit on slots of their own, so these are separate steps, not
+ * one atomic one. While creates are in flight a binding may hold more than
+ * the cap; once they have answered it holds at most the cap, and only a step
+ * that failed leaves an excess, until it expires: a create refused at its
+ * index step has already written its transaction, and an eviction that fails
+ * (warned, `mfa_transaction_evict_failed`; the create still answers) leaves
+ * the one it would have ended. A member that failed to leave (warned,
+ * `mfa_transaction_unindex_failed`), or one added after its transaction was
+ * already consumed (a consume landing between a create's write and its index
+ * step, which no caller can do before `create` hands it the id), keeps its
+ * transaction's score and counts toward the cap until the index takes it
+ * out: while live members expire sooner, a create past the cap ends one of
+ * them first, so a live transaction may go early; once its transaction's
+ * expiry has passed it sorts before every live member and goes first. A
+ * Redis server whose clock runs ahead of the callers' by more than a
+ * transaction's lifetime expires what it is written at once: on one server
+ * the transaction too, so the create leaves nothing; on Cluster, an index
+ * node ahead of the transactions' nodes drops the index while the
+ * transactions stand, and the binding goes unbounded while that lasts, each
+ * transaction still ending at its own expiry. Callers' clocks and the
+ * servers' must agree (NTP).
  *
  * A transaction is written and read back through core's
  * `newMfaTransactionRecord`, so it has the in-process store's shape and rules.
@@ -83,7 +125,7 @@
  * either.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
 	checkFirstBindingNote,
 	checkFirstBindingQuestion,
@@ -101,13 +143,17 @@ import {
 	consoleLogger,
 	DEFAULT_CLOCK_SKEW_MS,
 	defineModule,
+	type EventLogger,
 	type FirstBindingMark,
 	firstBindingAnswer,
 	isStorableExpiry,
+	loggableError,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	type MfaSubjectRecoveryOperation,
 	type MfaTransaction,
+	type MfaTransactionBinding,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
@@ -116,7 +162,11 @@ import {
 	type SessionEmailProof,
 	sessionEmailProofAnswer,
 } from "@o3co/auth-provider-core";
-import type { MfaSubjectKeys, MfaTransactionStoreClient } from "./clients.mjs";
+import type {
+	MfaRemovedTransaction,
+	MfaSubjectKeys,
+	MfaTransactionStoreClient,
+} from "./clients.mjs";
 import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
 import { checkMfaKeyPrefix, mfaKeyPart } from "./internal/mfa-keys.mjs";
 import { keyPrefixSection, redisReference } from "./internal/section.mjs";
@@ -137,6 +187,12 @@ export interface RedisMfaTransactionStoreOptions {
 	 * `Date.now`.
 	 */
 	readonly now?: () => number;
+	/**
+	 * Where a binding index step that failed after its operation answered is
+	 * warned (`mfa_transaction_evict_failed`, `mfa_transaction_unindex_failed`).
+	 * Default `consoleLogger`.
+	 */
+	readonly logger?: Pick<EventLogger, "warn">;
 }
 
 /** How each patch field is written into the hash. */
@@ -147,11 +203,16 @@ const PATCH_FIELD_TEXT: Readonly<Record<keyof MfaTransactionPatch, (value: unkno
 	pendingEnrollment: (value) => JSON.stringify(value),
 };
 
-/** The fields of a new transaction's hash. */
-function fieldsOf(record: MfaTransaction, incarnation: string): Record<string, string> {
+/** The fields of a new transaction's hash; `index` is its binding's digest. */
+function fieldsOf(
+	record: MfaTransaction,
+	incarnation: string,
+	index: string,
+): Record<string, string> {
 	const fields: Record<string, string> = {
 		id: record.id,
 		incarnation,
+		index,
 		version: String(record.version),
 		attempts: "0",
 		enrollment: record.enrollment,
@@ -234,6 +295,15 @@ function transactionOf(
 		return null;
 	}
 }
+
+/** A binding's digest: base64url of the SHA-256 of its kind and id, so no key copies the id. */
+const bindingDigest = (binding: MfaTransactionBinding): string =>
+	createHash("sha256")
+		.update(JSON.stringify([binding.kind, binding.id]))
+		.digest("base64url");
+
+/** Text this store wrote as a key part, a digest or an incarnation: base64url, nothing else. */
+const isKeyText = (text: string): boolean => /^[A-Za-z0-9_-]+$/.test(text);
 
 const isWholeVersion = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -370,7 +440,52 @@ export function createRedisMfaTransactionStore(
 		options.keyPrefix ?? DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX,
 		"MfaTransactionStore (redis)",
 	);
+	const logger = options.logger ?? consoleLogger;
 	const txKey = (id: string): string => `${keyPrefix}tx:{${mfaKeyPart(id)}}`;
+	const indexKey = (digest: string): string => `${keyPrefix}binding:{${digest}}`;
+	/** A transaction's member in its binding's index. */
+	const memberOf = (incarnation: string, id: string): string => `${incarnation}:${mfaKeyPart(id)}`;
+	/**
+	 * Takes a transaction already gone out of its binding's index. Best
+	 * effort: the operation that removed it has answered, and must keep its
+	 * answer. A member that fails to leave is warned, and counts toward the
+	 * cap until the index takes it out: while live members expire sooner, a
+	 * create past the cap ends one of them first; once its transaction's
+	 * expiry has passed, it goes first. Its own eviction deletes nothing (the
+	 * incarnation is gone).
+	 */
+	const unindex = async (
+		removed: Partial<MfaRemovedTransaction>,
+		id: string,
+		operation: "consume" | "reserveAttempt",
+	): Promise<void> => {
+		const { index, incarnation } = removed;
+		if (index === undefined || incarnation === undefined) return;
+		if (!isKeyText(index) || !isKeyText(incarnation)) return;
+		await client
+			.unindexTransaction(indexKey(index), memberOf(incarnation, id))
+			.catch((err: unknown) =>
+				logger.warn({ operation, err: loggableError(err) }, "mfa_transaction_unindex_failed"),
+			);
+	};
+	/**
+	 * Ends a transaction its binding's index took out, while it holds the
+	 * incarnation the member names. Best effort: the create that took it out
+	 * has written and indexed its own transaction, and a failed eviction must
+	 * not turn that working ceremony into an outage. It is warned, and the
+	 * transaction not ended stays, one past the cap, until it expires.
+	 */
+	const evict = async (member: string): Promise<void> => {
+		const at = member.indexOf(":");
+		const incarnation = member.slice(0, at);
+		const part = member.slice(at + 1);
+		if (at < 0 || !isKeyText(incarnation) || !isKeyText(part)) return;
+		await client
+			.evictTransaction(`${keyPrefix}tx:{${part}}`, incarnation)
+			.catch((err: unknown) =>
+				logger.warn({ err: loggableError(err) }, "mfa_transaction_evict_failed"),
+			);
+	};
 	const subjectKeys = (subject: string): MfaSubjectKeys => {
 		const tag = `{${mfaKeyPart(subject)}}`;
 		return {
@@ -399,10 +514,17 @@ export function createRedisMfaTransactionStore(
 			const incarnation = randomBytes(16).toString("base64url");
 			const written = await client.create(
 				txKey(record.id),
-				fieldsOf(record, incarnation),
+				fieldsOf(record, incarnation, bindingDigest(record.binding)),
 				Math.ceil(record.expiresAtMs),
 			);
 			if (!written) throw new Error("an MFA transaction with this id already exists");
+			const ended = await client.indexTransaction(
+				indexKey(bindingDigest(record.binding)),
+				memberOf(incarnation, record.id),
+				record.expiresAtMs,
+				MFA_MAX_TRANSACTIONS_PER_BINDING,
+			);
+			await Promise.all(ended.map(evict));
 		},
 
 		async get(id) {
@@ -440,7 +562,9 @@ export function createRedisMfaTransactionStore(
 					"MfaTransactionStore.reserveAttempt: max must be a positive whole number",
 				);
 			}
-			return client.reserveAttempt(txKey(id), max, clock());
+			const { ok, attempts, removed } = await client.reserveAttempt(txKey(id), max, clock());
+			if (removed !== undefined) await unindex(removed, id, "reserveAttempt");
+			return { ok, attempts };
 		},
 
 		async takeChallenge(id, expectedVersion) {
@@ -451,7 +575,9 @@ export function createRedisMfaTransactionStore(
 		async consume(id, expectedVersion) {
 			if (!isWholeVersion(expectedVersion)) return null;
 			const fields = await client.consume(txKey(id), String(expectedVersion));
-			return fields === null ? null : transactionOf(fields, id, clock());
+			if (fields === null) return null;
+			await unindex(fields, id, "consume");
+			return transactionOf(fields, id, clock());
 		},
 
 		async reserveSubjectAttempt(subject, nowMs, policy) {
@@ -648,6 +774,7 @@ export const redisMfaTransactionStoreModule = defineModule({
 			const store = createRedisMfaTransactionStore({
 				client: deps.mfaTransactionStoreClient,
 				keyPrefix: deps.section.keyPrefix,
+				logger: deps.logger ?? consoleLogger,
 			});
 			await checkRedisMfaStoreDurability(
 				"mfaTransactionStore",

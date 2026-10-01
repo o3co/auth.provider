@@ -35,7 +35,7 @@ import {
 	type AuthorizedFederationGrant,
 	FEDERATION_GRANT_LIFETIME_CEILING_MS,
 	type FederationGrantAuthorization,
-	type FederationGrantCredentials,
+	type FederationGrantCredentialsInput,
 	type FederationGrantIneligibilityMarker,
 	type FederationGrantRefreshFailureInput,
 	type FederationGrantStore,
@@ -123,13 +123,14 @@ const authorization = (
 	...over,
 });
 
-const credentials = (tag: string): FederationGrantCredentials => ({
+const credentials = (tag: string): FederationGrantCredentialsInput => ({
 	refreshToken: `rt-${tag}`,
 	accessToken: {
 		value: `at-${tag}`,
 		tokenType: "Bearer",
 		obtainedAt: at(2 * MIN),
 		issuedLifetime: 3600,
+		effectiveExpiresAt: at(62 * MIN),
 		scopes: [...SCOPES],
 	},
 });

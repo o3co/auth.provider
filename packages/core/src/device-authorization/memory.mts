@@ -37,6 +37,7 @@
  */
 
 import { isStorableExpiry } from "../adapters/expiry.mjs";
+import { recordableDeviceApproval } from "./approval.mjs";
 import { DeviceCodeStoreError } from "./errors.mjs";
 import type {
 	ApproveDeviceAuthorizationInput,
@@ -58,6 +59,8 @@ interface Entry {
 	subject: string | undefined;
 	grantedScope: readonly string[] | undefined;
 	approvedAtMs: number | undefined;
+	amr: readonly string[] | undefined;
+	authTimeMs: number | undefined;
 	lastPolledAtMs?: number;
 }
 
@@ -71,6 +74,8 @@ const toAuthorization = (entry: Entry): DeviceAuthorization => ({
 	subject: entry.subject,
 	grantedScope: entry.grantedScope,
 	approvedAtMs: entry.approvedAtMs,
+	amr: entry.amr,
+	authTimeMs: entry.authTimeMs,
 });
 
 /**
@@ -235,6 +240,8 @@ export const createMemoryDeviceCodeStore = (
 				subject: undefined,
 				grantedScope: undefined,
 				approvedAtMs: undefined,
+				amr: undefined,
+				authTimeMs: undefined,
 			};
 			byDeviceCode.set(entry.deviceCode, entry);
 			byUserCode.set(entry.userCode, entry);
@@ -248,6 +255,8 @@ export const createMemoryDeviceCodeStore = (
 		},
 
 		approve: async (input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome> => {
+			// Refused before the lookup, so a refused approval changes nothing.
+			const { amr, authTimeMs } = recordableDeviceApproval(input, input.nowMs);
 			const entry = livePendingByUserCode(input.userCode, input.nowMs);
 			if (entry === null) return { status: "not_found" };
 			if (entry === "expired") return { status: "expired" };
@@ -257,6 +266,8 @@ export const createMemoryDeviceCodeStore = (
 			entry.status = "approved";
 			entry.subject = input.subject;
 			entry.approvedAtMs = input.nowMs;
+			entry.amr = amr;
+			entry.authTimeMs = authTimeMs;
 			// Omitted means "grant what was asked for". When supplied it is
 			// intersected rather than trusted: a caller may narrow what the
 			// user approved, never widen it past the allowlist the device
