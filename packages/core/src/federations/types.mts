@@ -321,10 +321,9 @@ export interface DelegatedTokens {
 	 */
 	readonly expiresIn?: number | null;
 	/**
-	 * The adapter's own `now + expiresIn`. Paired with `expiresIn` it anchors
-	 * when the token was obtained on the ADAPTER's reading of the clock; pairing
-	 * `expiresIn` with a later reading taken downstream would extend the expiry.
-	 * `null` when the upstream named no lifetime.
+	 * The adapter's own `now + expiresIn`; `null` when the upstream named no
+	 * lifetime. Read with `expiresIn` by `readUpstreamTokenLifetime`: the
+	 * earlier of the two ends the token, so neither can lengthen it.
 	 */
 	readonly expiresAt?: Date | null;
 	/**

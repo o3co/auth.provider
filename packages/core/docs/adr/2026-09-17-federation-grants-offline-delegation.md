@@ -2358,6 +2358,63 @@ later: until this slice nothing could create a grant, so no deployment holds
 one that such an adapter serves. The generic OIDC adapter implements it; the
 others remain as the paragraph above leaves them.
 
+**Amended 2026-10-01 (#1005): a refreshed token is dated from when the call
+began, and the earlier of its two instants ends it.** The decision above
+dated a refreshed token on the adapter's clock (`expiresAt − expiresIn`),
+held between the call's start and the answer's arrival, so an
+`expiresAt − expiresIn` earlier than that window was clamped up to the
+call's start and the token lived its full `expiresIn`. Core now has one reading of an upstream token's lifetime,
+`readUpstreamTokenLifetime` (`federations/token-lifetime.mts`), and the
+retrieval reads every refresh answer through it. The stored token keeps
+three facts, each as read and none recomputed from the others once stored:
+`obtainedAt` is `calledAt`;
+`issuedLifetime` is the `expires_in` as issued, which D5 judges when the
+answer arrives and again at every disclosure; and a new optional field,
+`effectiveExpiresAt`, is when the token ends,
+`min(expiresAt, calledAt + expiresIn)`. A record without
+`effectiveExpiresAt` ends at `obtainedAt + issuedLifetime`, as every record
+did before, and no record ends later than that: the end is bounded by
+`obtainedAt + issuedLifetime`. `effectiveExpiresAt` is optional only until
+the Redis store (#1037) and the connect callback (#1020) write it; leaving
+it out serves a token past its adapter's stated end, so it then becomes a
+required key.
+
+Why: two readers of the same answer, the retrieval and the oauth federation
+token route, applied different rules to it. This is the route's rule, and it
+is the more conservative one. It never dates a token later than the call
+began, it never counts the time the upstream took as life left, and neither
+field can lengthen the other. What it changes:
+
+- An `expiresAt` earlier than `calledAt + expiresIn` shortens the token. The
+  token is still dated from the call, not back to fit its issued lifetime:
+  dated back, it would be half spent at once, and a client asking for more
+  than it has could force a rotation on every request. Its half-spent point
+  is half of the life from the call to its end. Half-spent is an
+  approximation of D10's rotation bound, not a guarantee of it (#1032).
+- Neither is the issued lifetime shortened to fit the end: stored shortened,
+  a token issued for longer than a maximum lowered later would still be
+  disclosed (D5).
+- An `expiresAt` that leaves no life when the answer is read, the past
+  included, makes the refresh `upstream_token_ineligible` /
+  `no_finite_lifetime`, with the rotated refresh token kept. The clamp used
+  to give such a token its full lifetime. A token the grant already had is
+  kept and served while it lasts, as after any refresh that brought nothing
+  usable (D5).
+- The `expires_in` cache hint and the half-spent point (D10) come up to one
+  call's duration earlier.
+
+D5's rule on top of the reading is unchanged: a lifetime counts only when
+both fields state it, and anything else has no finite lifetime. A held
+token's age (D10's believed date, the life it has left, and half-spent) is
+`judgeHeldUpstreamToken`, beside the reading. A stored credential without
+`effectiveExpiresAt` whose issued lifetime would end beyond any instant a
+`Date` holds is not believed, and so it is refreshed. The Redis adapter does not keep `effectiveExpiresAt`
+yet, so a record it holds ends at `obtainedAt + issuedLifetime`, which now
+counts from the call's start. The connect callback (D7 check 6) still dates
+the token it activates by the earlier clamp and writes no
+`effectiveExpiresAt`, until it reads the answer through the same function
+(#1020).
+
 ### D18 — Audit, with a correlation ID
 
 New event types, each added to `BUILT_IN_AUDIT_EVENT_TYPES`:
