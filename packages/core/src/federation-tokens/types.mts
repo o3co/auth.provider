@@ -13,10 +13,11 @@ import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 /**
  * One upstream connection's tokens, as a `FederationTokenStore` holds them.
  *
- * Every field is a required key, holding `undefined` when there is nothing to
- * record: a store that copies the record field by field and forgets one fails
- * to compile instead of silently dropping it (a marker field would be dropped
- * too). `record-fields.types.test.mts` lists what each field's loss changes.
+ * Every field but `obtainedAt` is a required key, holding `undefined` when
+ * there is nothing to record: a store that copies the record field by field
+ * and forgets one fails to compile instead of silently dropping it (a marker
+ * field would be dropped too). `record-fields.types.test.mts` lists what each
+ * field's loss changes.
  */
 export interface FederationTokens {
 	readonly accessToken: string;
@@ -84,6 +85,23 @@ export interface FederationTokens {
 	 * the same reason, and with the same gaps, as `tokenType`.
 	 */
 	readonly grantedScope: string | undefined;
+	/**
+	 * When the upstream token was obtained: the instant its lifetime counts
+	 * from, never after the refresh call that obtained it began. The lifetime
+	 * is `expiresAt − obtainedAt`.
+	 *
+	 * Absent when no refresh wrote it: link-time records, and records written
+	 * before the field or by a replica that does not know it.
+	 *
+	 * A store MUST round-trip it through `attach`, `update` and `get`, as a
+	 * `Date`, and leave it absent when the record has none. A store that drops
+	 * it fails CLOSED: a token of unknown age is refreshed sooner, never kept
+	 * longer.
+	 *
+	 * The one optional key: session's link-time writes, whose code is reserved
+	 * for the MFA work, leave it out, and its loss fails closed.
+	 */
+	readonly obtainedAt?: Date;
 }
 
 /**

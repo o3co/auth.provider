@@ -262,6 +262,30 @@ describe("the session grant on admission — what the session and its record dec
 });
 
 describe("the session grant — the auth_time it stamps", () => {
+	/** A wall clock that steps back two seconds at every read, as one an operator or NTP moves back would. */
+	const steppingBack = () => {
+		let t = Date.now();
+		return vi.spyOn(Date, "now").mockImplementation(() => {
+			t -= 2_000;
+			return t;
+		});
+	};
+
+	it("a clock that steps back between the reading of authTime and the signing still gives auth_time <= iat", async () => {
+		const authTime = new Date();
+		const clock = steppingBack();
+		try {
+			const { result } = await grant({
+				userSessionStore: storeWith(record({ authTime })),
+			}).handle(ctx(LIVE_COOKIE));
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+			const claims = decodeJwt(result.tokens.access_token);
+			expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	it("stamps the admitted record's primary authentication time, not when a second factor was verified", async () => {
 		const authTime = new Date("2026-04-21T00:00:00.750Z");
 		const { result } = await grant({
@@ -282,6 +306,40 @@ describe("the session grant — the auth_time it stamps", () => {
 		expect(decodeJwt(result.tokens.access_token).auth_time).toBe(
 			Math.floor(authTime.getTime() / 1000),
 		);
+	});
+
+	it("an authTime ahead of the clock within the skew is stamped as the minting clock: never later than iat", async () => {
+		const before = Math.floor(Date.now() / 1000);
+		const { result } = await grant({
+			userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 60_000) })),
+		}).handle(ctx(LIVE_COOKIE));
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		const claims = decodeJwt(result.tokens.access_token);
+		expect(claims.auth_time as number).toBeGreaterThanOrEqual(before);
+		expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+	});
+
+	it("an authTime further ahead than the skew allows is 400 invalid_grant session_invalid, nothing signed, warned with how far ahead", async () => {
+		const logger = createMockLogger();
+		const signed = vi.spyOn(keyStore, "sign");
+		try {
+			const { result } = await grant({
+				logger,
+				userSessionStore: storeWith(record({ authTime: new Date(Date.now() + 10 * 60_000) })),
+			}).handle(ctx(LIVE_COOKIE));
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "session_invalid",
+			});
+			expect(signed).not.toHaveBeenCalled();
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ sid: SID, clientId: AUTH_CLIENT.clientId, aheadMs: expect.any(Number) },
+				"auth_time_ahead_of_clock",
+			);
+		} finally {
+			signed.mockRestore();
+		}
 	});
 
 	it("stamps no auth_time without a userSessionStore, which records no authentication", async () => {

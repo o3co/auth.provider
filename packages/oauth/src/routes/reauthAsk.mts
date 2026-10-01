@@ -16,8 +16,9 @@
 
 /**
  * The re-authentication ask: the record `/authorize` writes when it sends a
- * browser to the login page for `max_age` or `prompt=login` (or to a step-up
- * page), and consumes when the browser comes back.
+ * browser to the login page (`max_age`, `prompt=login`, a new login asked
+ * for) or to a step-up page, reads on every pass of that request, and
+ * spends on the pass that mints the code.
  *
  * Not a request parameter: the caller could forge it and skip the round trip
  * OIDC Core §3.1.2.1 puts on the OP. Not a session field: the login it asks
@@ -26,9 +27,12 @@
  *
  * An opaque 32-byte CSPRNG id on the URL names a record in the session store
  * under its own prefix: a caller cannot invent one that exists, it survives
- * session regeneration, `consume` is one store operation so a replay finds
- * nothing, and it is honoured only on a return to the request it was minted
- * for. The store is taken off the request (the one the session middleware
+ * session regeneration and renewal, and it is honoured only on a return to
+ * the request it was minted for (presented with another, it is spent).
+ * `read` leaves it for the next pass; `consume` removes it, so a replay after
+ * the mint finds nothing. Each write lives `REAUTH_ASK_TTL_MS`, and a chain of
+ * writes for one request no longer than `REAUTH_ASK_MAX_CHAIN_MS` from its
+ * first. The store is taken off the request (the one the session middleware
  * mounted) rather than injected, so it cannot point elsewhere. A login page
  * that rebuilds the authorize URL instead of returning `redirect_to` verbatim
  * drops the id, and the user is asked again.
@@ -36,8 +40,15 @@
 
 import { randomBytes } from "node:crypto";
 
-/** How long a browser has to come back from the login page before the ask expires. */
+/** How long a browser has to come back from a page before the ask expires: each write opens its own window. */
 export const REAUTH_ASK_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * How long a chain of trips for one request may run, from its first ask
+ * (`createdAt`), however recent its last write: past it the ask is nothing,
+ * and the request is decided on its merits again.
+ */
+export const REAUTH_ASK_MAX_CHAIN_MS = 30 * 60 * 1000;
 
 /**
  * Key prefix separating ask records from sessions in the same store.
@@ -95,9 +106,15 @@ export interface ReauthAskStore {
 	/** Mint an id, record the ask under it, and return the id. */
 	ask(record: ReauthAskRecord): Promise<string>;
 	/**
-	 * The ask `id` names, if it is for `request` — removed in the same step, so
-	 * a replay finds nothing. `null` when there is no such ask, when it was
-	 * minted for another request, or when it has expired.
+	 * The ask `id` names, if it is for `request`, left in place for a later
+	 * pass of the same request. `null` when there is no such ask, when it has
+	 * expired, or when it was minted for another request — which spends it,
+	 * so it cannot be tried against a third.
+	 */
+	read(id: string, request: string): Promise<ReauthAskRecord | null>;
+	/**
+	 * The ask `id` names, if it is for `request` — removed whatever it was, so
+	 * a replay finds nothing. `null` as {@link ReauthAskStore.read} answers it.
 	 */
 	consume(id: string, request: string): Promise<ReauthAskRecord | null>;
 }
@@ -159,6 +176,23 @@ const readRecord = (value: unknown): ReauthAskRecord | null => {
  */
 export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskStore => {
 	const key = (id: string): string => `${REAUTH_ASK_KEY_PREFIX}${id}`;
+	const fetch = (id: string): Promise<ReauthAskRecord | null> =>
+		new Promise<unknown>((resolve, reject) => {
+			store.get(key(id), (err: unknown, record?: unknown) =>
+				err ? reject(err as Error) : resolve(record),
+			);
+		}).then(readRecord);
+	const destroy = (id: string): Promise<void> =>
+		new Promise<void>((resolve, reject) => {
+			store.destroy(key(id), (err?: unknown) => (err ? reject(err as Error) : resolve()));
+		});
+	const current = (record: ReauthAskRecord): boolean => {
+		const now = Date.now();
+		return (
+			lastWrittenAt(record) + REAUTH_ASK_TTL_MS > now &&
+			record.createdAt + REAUTH_ASK_MAX_CHAIN_MS > now
+		);
+	};
 
 	return {
 		async ask(record) {
@@ -166,15 +200,21 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 			// browser was sent to the login page by this server, so it is sized
 			// like the bearer value it is.
 			const id = randomBytes(32).toString("base64url");
-			const expires = new Date(Date.now() + REAUTH_ASK_TTL_MS);
+			const now = Date.now();
+			// This write's window, and never past the chain's cap.
+			const expiresAt = Math.min(
+				now + REAUTH_ASK_TTL_MS,
+				record.createdAt + REAUTH_ASK_MAX_CHAIN_MS,
+			);
+			const maxAge = Math.max(0, expiresAt - now);
 			await new Promise<void>((resolve, reject) => {
 				store.set(
 					key(id),
 					{
 						cookie: {
-							originalMaxAge: REAUTH_ASK_TTL_MS,
-							maxAge: REAUTH_ASK_TTL_MS,
-							expires,
+							originalMaxAge: maxAge,
+							maxAge,
+							expires: new Date(expiresAt),
 							httpOnly: true,
 							path: "/",
 						},
@@ -195,22 +235,25 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 			return id;
 		},
 
-		async consume(id, request) {
-			const value = await new Promise<unknown>((resolve, reject) => {
-				store.get(key(id), (err: unknown, record?: unknown) =>
-					err ? reject(err as Error) : resolve(record),
-				);
-			});
-			const record = readRecord(value);
+		async read(id, request) {
+			const record = await fetch(id);
 			if (record === null) return null;
-			// Destroy whatever was found, matching or not: an ask presented once
-			// is spent, so a mismatch cannot be retried against another request.
-			await new Promise<void>((resolve, reject) => {
-				store.destroy(key(id), (err?: unknown) => (err ? reject(err as Error) : resolve()));
-			});
+			if (record.request !== request) {
+				// Presented with another request: spent, so it cannot be tried
+				// against a third until one happens to match.
+				await destroy(id);
+				return null;
+			}
+			return current(record) ? record : null;
+		},
+
+		async consume(id, request) {
+			const record = await fetch(id);
+			if (record === null) return null;
+			// Destroy whatever was found, matching or not.
+			await destroy(id);
 			if (record.request !== request) return null;
-			if (lastWrittenAt(record) + REAUTH_ASK_TTL_MS <= Date.now()) return null;
-			return record;
+			return current(record) ? record : null;
 		},
 	};
 };

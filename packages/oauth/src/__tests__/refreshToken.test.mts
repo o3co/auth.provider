@@ -2453,6 +2453,50 @@ describe("refresh carries how the user authenticated", () => {
 		expect(rt.auth_time).toBe(1_776_729_600);
 	});
 
+	it("caps a carried auth_time later than its own issuance at that issuance, on both new tokens", async () => {
+		const ahead = Math.floor(Date.now() / 1000) + 3600;
+		const { at, rt } = await refresh(await presentedWith({ auth_time: ahead }));
+		expect(rt.auth_time).toBe(rt.iat);
+		expect(at.auth_time).toBe(rt.iat);
+		expect(at.auth_time as number).toBeLessThanOrEqual(at.iat as number);
+	});
+
+	it("a clock that steps back between the refresh's issuance and the signing still gives auth_time <= iat on both tokens", async () => {
+		const presented = await presentedWith({ auth_time: Math.floor(Date.now() / 1000) });
+		let t = Date.now();
+		const clock = vi.spyOn(Date, "now").mockImplementation(() => {
+			t -= 2_000;
+			return t;
+		});
+		try {
+			const { at, rt } = await refresh(presented);
+			expect(at.auth_time as number).toBeLessThanOrEqual(at.iat as number);
+			expect(rt.auth_time as number).toBeLessThanOrEqual(rt.iat as number);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it("caps a carried auth_time later than the presented token's own iat at that iat", async () => {
+		const presentedIat = Math.floor(Date.now() / 1000) - 3600;
+		const presented = await new SignJWT({
+			sub: "u1",
+			scope: "read write",
+			family_id: "fam-1",
+			auth_time: presentedIat + 600,
+		})
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer("localhost")
+			.setAudience(DEFAULT_CLIENT_ID)
+			.setIssuedAt(presentedIat)
+			.setExpirationTime("24h")
+			.setJti("old-jti")
+			.sign(new TextEncoder().encode(SECRET));
+		const { at, rt } = await refresh(presented);
+		expect(at.auth_time).toBe(presentedIat);
+		expect(rt.auth_time).toBe(presentedIat);
+	});
+
 	it("refreshes a refresh token that carries no auth_time, and takes none from its live session", async () => {
 		const session: UserSession = {
 			sid: "sid-1",

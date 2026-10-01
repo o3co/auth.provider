@@ -314,6 +314,18 @@ export {
 	readIssuedScope,
 	readSpaceDelimitedParameter,
 } from "./federations/scope.mjs";
+// The one reading of an upstream token's lifetime, and the age of one held.
+export type {
+	HeldUpstreamToken,
+	HeldUpstreamTokenAge,
+	UpstreamLifetimeClock,
+	UpstreamLifetimeFields,
+	UpstreamTokenLifetime,
+} from "./federations/token-lifetime.mjs";
+export {
+	judgeHeldUpstreamToken,
+	readUpstreamTokenLifetime,
+} from "./federations/token-lifetime.mjs";
 export type {
 	FederationTokenResponse,
 	FederationTokenSnapshot,
@@ -662,6 +674,7 @@ export {
 	isMfaTransactionBoundTo,
 	laterFirstBindingMark,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_LOCKOUT_MAX_BACKOFF_SECONDS,
 	MFA_LOCKOUT_MAX_HARD_LIMIT,
 	MFA_LOCKOUT_MIN_HARD_LIMIT,
 	MFA_TRANSACTION_PATCH_KEYS,
