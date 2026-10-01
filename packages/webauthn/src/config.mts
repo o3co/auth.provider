@@ -197,7 +197,9 @@ export const webauthnConfigSchema = z.object({
 	 * With it on, a credential that returns no user handle (a non-resident security key, such as a
 	 * WebAuthn second factor's) can be registered by another account through the grant and then
 	 * sign its owner in as that account: keep it off where WebAuthn second factors are enrolled.
-	 * `webauthnMfaFactorModule` refuses the boot while it is on.
+	 * `webauthnMfaFactorModule` refuses the boot while it is on. The same holds for a credential
+	 * any other system on the RP ID issues, which the boot cannot see: see "Known limitations" in
+	 * the package README.
 	 *
 	 * `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`: "true" / "1" on, "false" / "0" / empty off (case
 	 * and surrounding spaces ignored); any other value fails the parse.
