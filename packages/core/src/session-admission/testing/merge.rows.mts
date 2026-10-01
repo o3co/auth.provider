@@ -567,10 +567,11 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 
 /**
  * Each row's session, by identity, to whether its row's store records a
- * second factor: what the view `mergeAdmission` answers is built over. A
- * session no row holds is read over a store that records, the rows' default.
- * `mergeAdmission` is handed the row's session, not the row, so it finds the
- * row this way until its callers hand it the row.
+ * second factor: the store `mergeAdmission` builds its view over when it is
+ * handed none. A session no row holds is read over a store that records, the
+ * rows' default. A fallback only, kept while a caller hands `mergeAdmission`
+ * the row's session without the store it ran the row over; it goes once
+ * every caller hands the store, and the store becomes required.
  */
 const ROW_STORE_RECORDS = new WeakMap<UserSession, boolean>();
 
@@ -580,16 +581,19 @@ const ROW_STORE_RECORDS = new WeakMap<UserSession, boolean>();
  * registered): `requirement: "acr"` stays `"acr"` (a `reauthenticate`'s too), `"baseline"` becomes the
  * authority's name, and a `step_up`'s requirement becomes `whenStillUnmet`
  * (`"acr"` → `"unmet"`, `"baseline"` → `"reauthenticate"`) with its
- * registered page. The view is admission's, over the store the row runs
- * over (`mergeSessionStore`), its `secondFactorRecordable` included; pass
- * `row.session` as the rows hold it. Throws for an `authority` that is not a
- * registered requirement declaring it, and for a row that names it when none
- * is given.
+ * registered page. The view is admission's over `store`, the store the
+ * admission ran over (`mergeSessionStore(row)`, or the test's own), its
+ * `secondFactorRecordable` included. Without one, it is built over the store
+ * of the row that holds `session` — `row.session` as the rows hold it — so a
+ * row varied to another store needs its store handed in. Throws for an
+ * `authority` that is not a registered requirement declaring it, and for a
+ * row that names it when none is given.
  */
 export function mergeAdmission(
 	expected: MergeDecision,
 	session: UserSession | null,
 	authority: RegisteredRequirement | undefined,
+	store?: UserSessionStore,
 ): Admission {
 	if (authority !== undefined) {
 		if (!isRegisteredRequirement(authority)) {
@@ -602,7 +606,7 @@ export function mergeAdmission(
 		}
 	}
 	const viewOver = (read: UserSession) =>
-		viewOf(read, storeHolding(read, ROW_STORE_RECORDS.get(read) ?? true));
+		viewOf(read, store ?? storeHolding(read, ROW_STORE_RECORDS.get(read) ?? true));
 	const named = (): RegisteredRequirement => {
 		if (authority === undefined) {
 			throw new Error(

@@ -323,7 +323,7 @@ describe("secondFactorRecordable: whether a second factor can be recorded on the
 		}
 	});
 
-	it("is carried on a requirement's own step_up, which the requirement answered from the same view", async () => {
+	it("is carried on a requirement's own step_up, equal to the copy the stepping requirement was handed", async () => {
 		for (const [store, expected] of [
 			[recording(record()).store, true],
 			[recording(unrecordable(["pwd", ""])).store, false],

@@ -170,13 +170,14 @@ const decide = async (row: MergeRow): Promise<{ admission: Admission; expected: 
 	);
 	const registered = requirements.get(AUTHORITY);
 	if (registered === undefined) throw new Error("the stand-in did not register");
+	const store = mergeSessionStore(row);
 	return {
-		admission: await admitSession(depsOver(mergeSessionStore(row), requirements), {
+		admission: await admitSession(depsOver(store, requirements), {
 			claim: claim(),
 			action: "test.use",
 			asks: { acrValues: row.acrValues ?? [] },
 		}),
-		expected: mergeAdmission(row.expected, row.session, registered),
+		expected: mergeAdmission(row.expected, row.session, registered, store),
 	};
 };
 
@@ -277,6 +278,39 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 		expect(() => mergeAdmission(decision, null, registered as never)).toThrow(
 			/a step-up needs a session/,
 		);
+	});
+
+	it("builds the view over the store it is handed, so a row varied to a store that cannot record expects the field false", () => {
+		const row = MERGE_ROW_GROUPS.flatMap((group) => group.rows).find(
+			(candidate) =>
+				candidate.session !== null &&
+				candidate.storeRecords === undefined &&
+				candidate.expected.outcome === "met",
+		);
+		if (row?.session == null)
+			throw new Error("the merge rows hold no met row over a recording store");
+		const variant: MergeRow = { ...row, storeRecords: false };
+		expect(
+			mergeAdmission(variant.expected, variant.session, undefined, mergeSessionStore(variant)),
+		).toMatchObject({ outcome: "admitted", view: { secondFactorRecordable: false } });
+		expect(
+			mergeAdmission(row.expected, row.session, undefined, mergeSessionStore(row)),
+		).toMatchObject({ outcome: "admitted", view: { secondFactorRecordable: true } });
+	});
+
+	it("without a store, builds the view over the store of the row that holds the session", () => {
+		const row = MERGE_ROW_GROUPS.flatMap((group) => group.rows).find(
+			(candidate) =>
+				candidate.session !== null &&
+				candidate.storeRecords === false &&
+				candidate.expected.outcome === "met",
+		);
+		if (row === undefined)
+			throw new Error("the merge rows hold no met row over a store that cannot record");
+		expect(mergeAdmission(row.expected, row.session, undefined)).toMatchObject({
+			outcome: "admitted",
+			view: { secondFactorRecordable: false },
+		});
 	});
 
 	it("throws for an object that is not a registered requirement, however it is shaped", () => {
