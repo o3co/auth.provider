@@ -278,7 +278,7 @@ export function createMfaFactorSet(options: {
 		| { readonly outcome: "held"; readonly done: T; readonly overran: boolean }
 		/** Out of time after a write was started: what was written stands. */
 		| { readonly outcome: "ran_out" }
-		| MfaFactorSetRefusal
+		| (MfaFactorSetRefusal & { readonly overran?: true })
 	> => {
 		const started = start === undefined ? undefined : starts.get(start);
 		// A start for another subject, or none, began nowhere this write can tell.
@@ -354,10 +354,13 @@ export function createMfaFactorSet(options: {
 		try {
 			done = await write(time);
 		} catch (cause) {
-			await release();
+			const kept = await release();
 			if (!(cause instanceof OutOfTime)) throw cause;
-			// Out of time before any write: nothing was written. After one: an overrun.
-			return wrote ? { outcome: "ran_out" } : { outcome: "busy", retryAfterSeconds: 1 };
+			// Out of time before any write: nothing was written, and a release that lost the lease is still an overrun.
+			if (wrote) return { outcome: "ran_out" };
+			return kept
+				? { outcome: "busy", retryAfterSeconds: 1 }
+				: { outcome: "busy", retryAfterSeconds: 1, overran: true };
 		}
 		return { outcome: "held", done, overran: !(await release()) };
 	};
