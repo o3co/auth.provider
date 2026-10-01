@@ -160,7 +160,7 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(store.subjects).toBe(1);
 		if (reserved.ok) await store.settleSubjectAttempt("user-1", reserved.reservation, "void");
 		expect(store.subjects).toBe(0);
-		await store.noteExemptSuccess("user-1", T0);
+		await store.noteExemptSuccess("user-1", T0, POLICY);
 		expect(store.subjects).toBe(0);
 		const failed = await store.reserveSubjectAttempt("user-1", T0, POLICY);
 		if (failed.ok) await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
