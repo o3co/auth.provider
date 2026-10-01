@@ -24,11 +24,11 @@
 
 import { describe, expect, it } from "vitest";
 import { recordAuditEvent } from "../../audit/factory.mjs";
-import { AUDIT_SINK_ABSENCE_POLICY } from "../../audit/types.mjs";
 import type { AuditEvent, AuditSink } from "../../audit/types.mjs";
+import { AUDIT_SINK_ABSENCE_POLICY } from "../../audit/types.mjs";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
-import { auditHooksModule, createRecordingAuditSink } from "../../testing/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { auditHooksModule, createRecordingAuditSink } from "../../testing/index.mjs";
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -90,8 +90,8 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		await createApp({
 			modules: [
 				sinkProvider(named("slot")),
-				auditHooksModule("test:hooks-a", named("hook-a1"), named("hook-a2")),
-				auditHooksModule("test:hooks-b", named("hook-b")),
+				auditHooksModule("a", named("hook-a1"), named("hook-a2")),
+				auditHooksModule("b", named("hook-b")),
 				reader.module,
 			],
 			bootstrapComponents: bootWith(),
@@ -106,7 +106,7 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		const reader = auditReader();
 
 		await createApp({
-			modules: [auditHooksModule("test:hooks", hook), reader.module],
+			modules: [auditHooksModule("test", hook), reader.module],
 			bootstrapComponents: bootWith(),
 		});
 		await recordAuditEvent(reader.handed.sink as AuditSink, event);
@@ -140,7 +140,7 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		const reader = auditReader();
 
 		await createApp({
-			modules: [auditHooksModule("test:hooks", hook), reader.module],
+			modules: [auditHooksModule("test", hook), reader.module],
 			bootstrapComponents: bootWith(),
 			overrideComponents: { auditSink: override },
 		});
@@ -160,7 +160,7 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		const handle = await createApp({
 			modules: [
 				sinkProvider(sink),
-				auditHooksModule("test:hooks", createRecordingAuditSink()),
+				auditHooksModule("test", createRecordingAuditSink()),
 				auditReader().module,
 			],
 			bootstrapComponents: bootWith(),

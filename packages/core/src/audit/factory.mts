@@ -17,6 +17,8 @@
 import { isIP } from "node:net";
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { auditErrorText } from "../errors/envelope.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
+import type { Logger } from "../logging/Logger.mjs";
 import type { AuditEvent, AuditSink, AuditSinkFactory } from "./types.mjs";
 
 export function createAuditSinkFactory(): AuditSinkFactory {
@@ -77,19 +79,151 @@ function withBoundedRequestFields(event: AuditEvent): AuditEvent {
 }
 
 /**
+ * The one call of a sink's `record` in the workspace (the log-projection drift
+ * guard pins it): {@link recordAuditEvent} and {@link createAuditFanOut} reach
+ * every sink through it. It answers whatever the sink answers, and throws
+ * what the sink throws.
+ */
+function handTo(sink: AuditSink, event: AuditEvent): Promise<void> {
+	return sink.record(event);
+}
+
+/**
  * Hands `event` to `sink` with its request fields bounded (see
  * {@link withBoundedRequestFields}) and answers the sink's own promise. A sink
  * that throws synchronously or answers a non-promise still never throws into
  * the caller.
  *
- * The one way a built-in event reaches a sink (the log-projection drift guard
- * pins it). {@link emitAuditEvent} calls it and detaches. The federation-grants
- * routes' bridge returns its promise, because core bounds audit waits and a
- * shutdown drains them; oauth's subject-revocation auditor neither waits nor
- * leaves it unobserved, logging a rejection (`federation_grant_audit_failed`).
+ * The one way a built-in event reaches a sink. {@link emitAuditEvent} calls it
+ * and detaches. The federation-grants routes' bridge returns its promise,
+ * because core bounds audit waits and a shutdown drains them; oauth's
+ * subject-revocation auditor neither waits nor leaves it unobserved, logging
+ * a rejection (`federation_grant_audit_failed`).
  */
 export async function recordAuditEvent(sink: AuditSink, event: AuditEvent): Promise<void> {
-	await sink.record(withBoundedRequestFields(event));
+	await handTo(sink, withBoundedRequestFields(event));
+}
+
+/** What {@link createAuditFanOut} delivers to and reports through. */
+export interface AuditFanOutSources {
+	/** The `auditSink` slot's own sink, when one fills it: delivered to first. */
+	readonly sink?: AuditSink;
+	/** The `auditHooks` contributions, in registration order, read at each event. */
+	readonly hooks: () => Iterable<AuditSink>;
+	/** Where a failing sink is reported, read at each failure; `consoleLogger` when it answers none. */
+	readonly logger: () => Logger | undefined;
+}
+
+/**
+ * The sink core fills the `auditSink` slot with when a module contributes
+ * `auditHooks`: each event goes to the slot's own sink, then to every hook,
+ * each called at once, in that order, without waiting for the one before.
+ *
+ * - Every sink is handed one copy of the event, deeply frozen (plain objects,
+ *   arrays and dates; anything else is handed as it is), so no sink can change
+ *   what another reads; the emitter's own event is left as it was.
+ * - Each call is isolated: a rejection, a synchronous throw or an answer that
+ *   is not a promise is that sink's failure alone, logged at error as
+ *   `audit_sink_failed` with `sink`, the sink's position in that order (0 is
+ *   the slot's own sink when there is one), and the event's `type` — nothing
+ *   else of the event and nothing of the failure, which may quote it. An
+ *   event that cannot be copied is handed to no sink, each reported failed
+ *   without a `type`.
+ * - `record` resolves once every sink has settled and never rejects. Core
+ *   neither retries nor times a sink out.
+ *
+ * It carries the slot's sink's `kind`, or `audit-hooks` without one.
+ */
+export function createAuditFanOut(sources: AuditFanOutSources): AuditSink {
+	return {
+		kind: sources.sink?.kind ?? "audit-hooks",
+		async record(event: AuditEvent): Promise<void> {
+			const sinks = [...(sources.sink === undefined ? [] : [sources.sink]), ...sources.hooks()];
+			let shared: AuditEvent;
+			try {
+				shared = frozenCopy(event, new Map()) as AuditEvent;
+			} catch {
+				// An event that cannot be read is handed to no sink: each has failed it.
+				for (const position of sinks.keys()) reportFailure(sources.logger, position, undefined);
+				return;
+			}
+			await Promise.all(
+				sinks.map((target, position) =>
+					delivered(target, shared).then((ok) => {
+						if (!ok) reportFailure(sources.logger, position, shared.type);
+					}),
+				),
+			);
+		},
+	};
+}
+
+/** Whether `target` took `event`: its call isolated, a failure answered `false`. */
+function delivered(target: AuditSink, event: AuditEvent): Promise<boolean> {
+	let answer: unknown;
+	try {
+		answer = handTo(target, event);
+	} catch {
+		return Promise.resolve(false);
+	}
+	if (!isThenable(answer)) return Promise.resolve(false);
+	return Promise.resolve(answer).then(
+		() => true,
+		() => false,
+	);
+}
+
+const isThenable = (value: unknown): value is PromiseLike<unknown> => {
+	try {
+		return typeof (value as { then?: unknown } | null | undefined)?.then === "function";
+	} catch {
+		return false;
+	}
+};
+
+function reportFailure(
+	logger: () => Logger | undefined,
+	position: number,
+	type: string | undefined,
+): void {
+	try {
+		(logger() ?? consoleLogger).error({ sink: position, type }, "audit_sink_failed");
+	} catch {
+		// A logger that throws must not fail the fan-out.
+	}
+}
+
+/**
+ * A copy of `value` in which every plain object, array and `Date` is copied
+ * and frozen; any other value is kept as it is. A value reached twice is
+ * copied once, so a cycle ends.
+ */
+function frozenCopy(value: unknown, copies: Map<object, unknown>): unknown {
+	if (value === null || typeof value !== "object") return value;
+	const known = copies.get(value);
+	if (known !== undefined) return known;
+	if (value instanceof Date) {
+		const date = new Date(value.getTime());
+		copies.set(value, date);
+		return Object.freeze(date);
+	}
+	if (Array.isArray(value)) {
+		const array: unknown[] = [];
+		copies.set(value, array);
+		for (const item of value) array.push(frozenCopy(item, copies));
+		return Object.freeze(array);
+	}
+	const prototype = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) return value;
+	const copy: Record<string, unknown> = prototype === null ? Object.create(null) : {};
+	copies.set(value, copy);
+	for (const key of Object.keys(value)) {
+		Object.defineProperty(copy, key, {
+			value: frozenCopy((value as Record<string, unknown>)[key], copies),
+			enumerable: true,
+		});
+	}
+	return Object.freeze(copy);
 }
 
 /**

@@ -57,6 +57,7 @@ describe("stage-1 check registries", () => {
 			"requires-closure",
 			"contribution-kind-coverage",
 			"contribution-shapes",
+			"audit-hooks-read-no-audit-sink",
 			"per-kind-contribute-duplicates",
 			"route-collisions",
 			"federation-redirect-policy-pairing",

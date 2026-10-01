@@ -67,6 +67,7 @@ import {
 	lifetimeBeyondConfiguration,
 	lifetimeBeyondConfigurationMessage,
 } from "../token-settings/check.mjs";
+import { checkAuditHooksDoNotReadAuditSink, contributesAuditHooks } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
@@ -2844,8 +2845,9 @@ interface StageOneContext {
 	readonly parsedConfig: unknown;
 	/**
 	 * Provides ∪ bootstrapComponents ∪ overrideComponents, the three component
-	 * sources. Wiring guards must test all three, or a composition root wiring
-	 * through bootstrap or override is falsely rejected.
+	 * sources, and `auditSink` when a module contributes `auditHooks` (core
+	 * fills it then). Wiring guards must test all three, or a composition root
+	 * wiring through bootstrap or override is falsely rejected.
 	 */
 	readonly plannedKeys: ReadonlySet<string>;
 }
@@ -2981,6 +2983,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		id: "contribution-shapes",
 		spec: "issue #728 (a rate-limit prefix; a federation type's declaration)",
 		run: (ctx) => checkContributionShapes(ctx.rawModules, ctx.modules),
+	},
+	{
+		id: "audit-hooks-read-no-audit-sink",
+		spec: "issue #710 (C1: a module's audit hooks are not handed back the events it emits)",
+		run: (ctx) => checkAuditHooksDoNotReadAuditSink(ctx.modules),
 	},
 	{
 		id: "per-kind-contribute-duplicates",
@@ -3138,6 +3145,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 			...normalisedModules.flatMap((m) => m.providesKeys as string[]),
 			...Object.keys(bootstrapComponents),
 			...Object.keys(overrideComponents ?? {}),
+			...(contributesAuditHooks(normalisedModules) ? ["auditSink"] : []),
 		]),
 	};
 

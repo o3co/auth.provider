@@ -52,13 +52,13 @@ describe("createRecordingAuditSink", () => {
 });
 
 describe("auditHooksModule", () => {
-	it("contributes each sink as an auditHooks entry, in order, under its name", () => {
+	it("contributes each sink as an auditHooks entry, in order, named after the name it is given", () => {
 		const first = createRecordingAuditSink();
 		const second = createRecordingAuditSink();
 
-		const module = auditHooksModule("test:hooks", first, second);
+		const module = auditHooksModule("test", first, second);
 
-		expect(module.name).toBe("test:hooks");
+		expect(module.name).toBe("audit-hooks-test");
 		expect(module.contributes?.auditHooks?.map((factory) => factory({} as never))).toEqual([
 			first,
 			second,
