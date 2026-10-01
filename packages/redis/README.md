@@ -781,15 +781,23 @@ keeps and the key's deadline. The note script refuses a mark whose end is
 not after that clock, or whose time lies further from it than
 `DEFAULT_CLOCK_SKEW_MS`, and otherwise keeps the later time and the later end
 of the mark held and the one noted — as core's `laterFirstBindingMark` —
-written with `PXAT` at that end; a held value that is no mark, or whose time
-lies further ahead than the skew, gives way to the note. The read script
-answers the value and the server's clock in one step, and the read answers
-the mark absent only once that clock passes its end: this side's clock
-(`now`) decides nothing about a mark. A value that does not read back as a
-mark, whatever its end looks like, is an outage, never absent, since an
-absent mark trusts the session it is there to distrust. The module's
-durability check covers it as it covers the email-proof requirement; a
-`volatile-*` policy may evict it, which fails open.
+written with `PXAT` at that end. A held mark is judged on its shape alone
+(whole times, an end after its time by at most a day,
+`MFA_CLOCK_SKEW_ALLOWANCE_MS`), never on where its time sits on the server's
+clock, so a clock stepped back never lets a note move a mark back; a held
+value without that shape, or a key of another type, gives way to the note.
+The read script answers the value and the server's clock in one step, and the
+read answers the mark absent only once that clock passes its end: this side's
+clock (`now`) decides nothing about a mark. A value that does not read back as
+a mark — a field beyond `atMs` and `untilMs` included, which a note never
+writes — whatever its end looks like, or a key of another type, is an outage,
+never absent, since an absent mark trusts the session it is there to distrust.
+Where a sound mark's time sits on the caller's clock is the caller's reading
+to judge (`readFirstBindingAt`). The mark's guarantee rests on the login
+replicas' clocks agreeing within `DEFAULT_CLOCK_SKEW_MS`: they date the
+sessions it is compared with, and the note's time. The module's durability
+check covers it as it covers the email-proof requirement; a `volatile-*`
+policy may evict it, which fails open.
 
 **Durability at boot (D12).** Before providing its store each module asks the
 server, through its client's `durability()`, each part on its own: the policy
