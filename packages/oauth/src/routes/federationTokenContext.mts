@@ -67,6 +67,14 @@ export interface FederationTokenRouterOptions {
 	 * building the route throws a `RangeError`.
 	 */
 	refreshBufferMs?: number;
+	/**
+	 * The longest a refreshed upstream token is stored for, in milliseconds,
+	 * counted from when the refresh answer is read: a longer lifetime is
+	 * capped, never refused. Default: 86_400_000 (24 hours). A whole number
+	 * greater than `refreshBufferMs` and at most 365 days, or building the
+	 * route throws a `RangeError`.
+	 */
+	maxTokenLifetimeMs?: number;
 	/** Configured issuer, pinned by the central verifier. */
 	issuer?: string;
 	/**
@@ -108,6 +116,8 @@ export interface FederationTokenContext {
 	readonly storeUnavailable: ReturnType<typeof createStoreUnavailableLog>;
 	/** Tokens expiring within this many milliseconds are refreshed. */
 	readonly refreshBufferMs: number;
+	/** A refreshed token is stored for at most this many milliseconds. */
+	readonly maxTokenLifetimeMs: number;
 }
 
 /** The access token's claims the later stages act on, each present. */
