@@ -33,6 +33,7 @@
 
 import { auditErrorText } from "@o3co/auth-provider-core";
 import { endpointForMessage } from "../endpointUrl.mjs";
+import type { StoreRequestMessages } from "../storeTransport.mjs";
 
 /** The Store's MFA endpoints, by what the provider asks of each. */
 export type MfaStoreOperation = "list" | "create" | "update" | "delete" | "markMfaEnrolled";
@@ -73,6 +74,26 @@ export class MfaStoreError extends Error {
 
 const endpointOf = (operation: MfaStoreOperation, url: string): string =>
 	`the Store's MFA ${operation} endpoint at ${endpointForMessage(url)}`;
+
+/**
+ * What a transport failure of `operation` at `url` says, for the client
+ * `owner` that sends it: one wording for every client of these endpoints,
+ * naming the endpoint by origin and path.
+ */
+export function mfaStoreRequestMessages(
+	owner: string,
+	operation: MfaStoreOperation,
+	url: string,
+): StoreRequestMessages {
+	const endpoint = endpointOf(operation, url);
+	return {
+		owner,
+		unreachable: `${owner}: ${endpoint} could not be reached`,
+		closed: `${owner}: the connection to ${endpoint} closed before a complete response arrived`,
+		malformed: `${owner}: ${endpoint} answered with a malformed HTTP response`,
+		unreadable: `${owner}: the answer of ${endpoint} could not be read`,
+	};
+}
 
 /**
  * `response`'s status as an error, when the contract does not give it to

@@ -28,9 +28,8 @@
  */
 
 import type { MfaStoreMarkEnrolledRequest } from "@o3co/auth-provider-core";
-import { endpointForMessage } from "../endpointUrl.mjs";
 import { postToStore, type StoreRequestSettings } from "../storeTransport.mjs";
-import { mfaStoreStatusError } from "./storeFailure.mjs";
+import { mfaStoreRequestMessages, mfaStoreStatusError } from "./storeFailure.mjs";
 
 /** Posts `{ subject, enrolled }` to `url`; resolves on a `204` and throws on anything else. */
 export async function markMfaEnrolledAtStore(
@@ -47,18 +46,11 @@ export async function markMfaEnrolledAtStore(
 		throw new RangeError(`${owner}: markMfaEnrolled takes enrolled as a boolean`);
 	}
 	const body: MfaStoreMarkEnrolledRequest = { subject, enrolled };
-	const endpoint = `the Store's MFA markMfaEnrolled endpoint at ${endpointForMessage(url)}`;
 	const { response } = await postToStore(
 		url,
 		body,
 		settings,
-		{
-			owner,
-			unreachable: `${owner}: ${endpoint} could not be reached`,
-			closed: `${owner}: the connection to ${endpoint} closed before a complete response arrived`,
-			malformed: `${owner}: ${endpoint} answered with a malformed HTTP response`,
-			unreadable: `${owner}: the answer of ${endpoint} could not be read`,
-		},
+		mfaStoreRequestMessages(owner, "markMfaEnrolled", url),
 		() => false,
 	);
 	if (response.status === 204) return;
