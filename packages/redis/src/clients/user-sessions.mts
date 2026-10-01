@@ -293,9 +293,9 @@ export interface SubjectRevocationClient {
 	 * A `beforeMs` behind it is written as given. Resolves with the stored value
 	 * and the server's clock in epoch milliseconds, as read in that step.
 	 *
-	 * Optional so a client written before it still constructs; the adapter
-	 * records through `setRevocationBoundaries`, unclamped, over a client
-	 * without it, and says so at warn once.
+	 * Optional: a client without it still constructs; the adapter then
+	 * records through `setRevocationBoundaries`, unclamped, and says so at warn
+	 * once.
 	 */
 	advanceRevocationBoundaries?(
 		key: string,

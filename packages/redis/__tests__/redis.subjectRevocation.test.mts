@@ -28,6 +28,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SET_REVOCATION_BOUNDARIES } from "../src/ioredis/scripts/user-sessions.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
 import {
@@ -266,6 +267,30 @@ describe("SubjectRevocation — the two boundaries on one key", () => {
 			await expect(adapter.grantsRevokedBefore("u"), corrupt).rejects.toThrow();
 		}
 	});
+
+	it.each(["-Infinity", "-inf", "NaN", "nan", "Infinity", "inf", "-1", "0.5", "86400001"])(
+		"refuses a skew of %s, writing nothing",
+		async (skew) => {
+			// The script is driven directly: a skew it took would skip the clamp
+			// (NaN, inf) or write a record nothing can read (-inf).
+			const key = "t593e:skew:u";
+			await raw.set(key, "1000", "PX", 600_000);
+			const now = await serverClock(() => raw)();
+			await expect(
+				raw.eval(
+					SET_REVOCATION_BOUNDARIES.source,
+					1,
+					key,
+					"all",
+					String(now + 10 * DEFAULT_CLOCK_SKEW_MS),
+					String(now + 600_000),
+					String(SUBJECT_REVOCATION_MIN_RETENTION_MS),
+					skew,
+				),
+			).rejects.toThrow(/non-numeric argument/);
+			expect(await raw.get(key)).toBe("1000");
+		},
+	);
 
 	it("refuses to write over a record it cannot read", async () => {
 		// The script fails the whole call rather than starting a fresh record:

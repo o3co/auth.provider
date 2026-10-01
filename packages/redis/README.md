@@ -196,7 +196,8 @@ Each one implements a port core declares; the slot name is in parentheses.
   server's `TIME` plus `DEFAULT_CLOCK_SKEW_MS` to that, in the script that
   writes it, and then says so at warn (`subject_revocation_boundary_clamped`,
   with `store`, `subject`, `requestedBefore`, `recordedBefore`) on the
-  module's logger, `consoleLogger` without one; a failing logger never fails
+  module's logger, or the builder's `logger` option, else the factory
+  context's logger, and `consoleLogger` without one; a failing logger never fails
   the revocation. It clamps through the client's optional
   `advanceRevocationBoundaries`, which `makeIoredisClients` provides. Over a
   custom `SubjectRevocationClient` without it, the store records the boundary

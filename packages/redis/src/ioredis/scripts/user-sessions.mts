@@ -38,7 +38,8 @@ return 0
 /**
  * The subject revocation record's only write: both boundaries (sessions, grants) in one key,
  * one atomic step. `KEYS[1]` = the record; `ARGV` = mode (`all` | `sessions`), `before` and the
- * proposed expiry (epoch ms), the grant retention (ms), and optionally the clock skew (ms).
+ * proposed expiry (epoch ms), the grant retention (ms), and optionally the clock skew (whole ms,
+ * at most a day).
  * Returns the value written and the server's `TIME` in epoch ms; a stored value it cannot read is
  * refused with an error.
  *
@@ -71,8 +72,13 @@ end
 local before = tonumber(ARGV[2])
 local expiresAt = tonumber(ARGV[3])
 local retention = tonumber(ARGV[4])
+-- A skew is whole milliseconds, at most a day: tonumber also takes nan and
+-- inf, which would skip the clamp, and a negative one moves the bound back.
+local MAX_SKEW = 86400000
 local skew = ARGV[5] and tonumber(ARGV[5])
-if before == nil or expiresAt == nil or retention == nil or (ARGV[5] and skew == nil) then
+local skewInvalid = ARGV[5] ~= nil and not (skew ~= nil and skew == skew and skew >= 0
+  and skew <= MAX_SKEW and math.floor(skew) == skew)
+if before == nil or expiresAt == nil or retention == nil or skewInvalid then
   return redis.error_reply("subject revocation: non-numeric argument")
 end
 local t = redis.call("TIME")

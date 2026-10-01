@@ -44,9 +44,10 @@ export interface RedisSubjectRevocationOptions {
  * behind, must not move the line back and resurrect every token the first one
  * killed. Last-writer-wins does that, and a client-side read-compare-write
  * does it one round-trip later. So the comparison runs on the server in one
- * command (`setRevocationBoundaries`), and the same guard covers the entry's
- * expiry: shortening an in-force watermark would retire the line while tokens
- * it must refuse are still presentable. An expired key is an absent key, so a
+ * command (the client's `advanceRevocationBoundaries`, or
+ * `setRevocationBoundaries` over a client without it), and the same guard
+ * covers the entry's expiry: shortening an in-force watermark would retire the
+ * line while tokens it must refuse are still presentable. An expired key is an absent key, so a
  * reset after the previous watermark lapsed starts from its own value, as in
  * the in-process adapter.
  *
