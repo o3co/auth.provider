@@ -20,7 +20,6 @@
  * never a verdict.
  */
 
-import { readMfaSubjectRecoveryAnswer } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import type { MfaFactorStoreClient, MfaTransactionStoreClient } from "../../clients.mjs";
 import { fgNumber, hashFields } from "../codec.mjs";
@@ -88,40 +87,6 @@ const serverMs = (text: unknown): number | undefined =>
 /** The apply script's rebind argument: the time, `none` when no guessable record remains, empty for a reset. */
 const rebindArgument = (since: number | null | undefined): string =>
 	since === null ? "none" : since === undefined ? "" : String(since);
-
-const flag = (text: unknown): boolean | undefined =>
-	text === "1" ? true : text === "0" ? false : undefined;
-
-/** A generation as a script answers it: decimal text of a safe whole number; `undefined` for anything else. */
-const generationText = (text: unknown): number | undefined =>
-	typeof text === "string" && /^[1-9][0-9]*$/.test(text) && Number.isSafeInteger(Number(text))
-		? Number(text)
-		: undefined;
-
-/** The apply script's reply as the port's answer, for core's reading to hold to the port. */
-function recoveryAnswerOf(reply: unknown): unknown {
-	if (!Array.isArray(reply)) return undefined;
-	const [outcome, a, b, c, d, e, f] = reply;
-	if (outcome === "refused") return { outcome, reason: a, hard: flag(b) };
-	if (outcome === "already") {
-		return {
-			outcome: "already_applied",
-			recoveryId: a,
-			generation: generationText(b),
-			hard: flag(c),
-		};
-	}
-	if (outcome === "applied") {
-		return {
-			outcome,
-			recoveryId: a,
-			generation: generationText(b),
-			cleared: { week: flag(c), run: flag(d), hard: flag(e) },
-			hard: flag(f),
-		};
-	}
-	return undefined;
-}
 
 /**
  * The `MfaTransactionStore`'s client over one ioredis connection. Also part of
@@ -276,9 +241,10 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			);
 			const [outcome, pttl] = Array.isArray(reply) ? reply : [];
 			if (outcome === "acquired" || outcome === "stale") return { outcome };
-			// A lease with no deadline (PTTL -1) is none this store wrote: no verdict.
-			if (outcome === "busy" && typeof pttl === "number" && pttl > 0) {
-				return { outcome, retryAfterMs: pttl };
+			// A lease at its last millisecond answers 0: still busy, for at least one more. One with
+			// no deadline (PTTL -1) is none this store wrote: no verdict.
+			if (outcome === "busy" && typeof pttl === "number" && pttl >= 0) {
+				return { outcome, retryAfterMs: Math.max(pttl, 1) };
 			}
 			throw new Error("MfaTransactionStore: the lease script answered nothing it knows");
 		},
@@ -305,13 +271,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 				io,
 				MFA_SUBJECT_RECOVERY_AUTHORIZE,
 				[keys.recovery],
-				[
-					input.field,
-					input.recoveryId,
-					String(input.expiresAtMs),
-					String(input.maxAheadMs),
-					String(input.allowanceMs),
-				],
+				[input.field, input.recoveryId, String(input.expiresAtMs), String(input.maxAheadMs)],
 			);
 			const [authorized, now] = Array.isArray(reply) ? reply : [];
 			const serverNowMs = serverMs(now);
@@ -331,15 +291,13 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 					input.leaseToken,
 					input.sessionsBoundaryMs === undefined ? "" : String(input.sessionsBoundaryMs),
 					rebindArgument(input.guessableBoundSinceMs),
-					String(input.skewMs),
-					String(input.allowanceMs),
+					String(input.clockSkewMs),
 				],
 			);
-			const answer = readMfaSubjectRecoveryAnswer(recoveryAnswerOf(reply));
-			if (answer === undefined) {
+			if (!Array.isArray(reply) || !reply.every((part) => typeof part === "string")) {
 				throw new Error("MfaTransactionStore: the apply script answered nothing it knows");
 			}
-			return answer;
+			return reply;
 		},
 		durability: () => redisDurability(io),
 	};

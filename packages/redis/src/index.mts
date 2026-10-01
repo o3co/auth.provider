@@ -39,6 +39,7 @@ export type {
 	AcquireMfaSubjectLeaseReply,
 	ActivateFederationGrantInput,
 	ApplyMfaSubjectRecoveryInput,
+	ApplyMfaSubjectRecoveryReply,
 	AuthorizeMfaSubjectRecoveryInput,
 	AuthorizeMfaSubjectRecoveryReply,
 	ChallengeStoreClient,

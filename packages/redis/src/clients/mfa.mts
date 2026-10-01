@@ -24,7 +24,6 @@ import type {
 	MfaLockoutPolicy,
 	MfaSubjectAttemptOutcome,
 	MfaSubjectHold,
-	MfaSubjectRecoveryAnswer,
 	MfaSubjectRecoveryOperation,
 } from "@o3co/auth-provider-core";
 
@@ -158,8 +157,6 @@ export interface AuthorizeMfaSubjectRecoveryInput {
 	readonly expiresAtMs: number;
 	/** How far ahead of the server's clock its end may lie. */
 	readonly maxAheadMs: number;
-	/** How long past its latest authorization's end a hash with no generation stays (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). */
-	readonly allowanceMs: number;
 }
 
 /** What an authorize answers: written, or refused on the server's clock, which it names. */
@@ -187,11 +184,17 @@ export interface ApplyMfaSubjectRecoveryInput {
 	readonly sessionsBoundaryMs: number | undefined;
 	/** A recover's earliest guessable record's time, or `null` when none remains; a reset's `undefined`. */
 	readonly guessableBoundSinceMs: number | null | undefined;
-	/** `DEFAULT_CLOCK_SKEW_MS`. */
-	readonly skewMs: number;
-	/** `MFA_CLOCK_SKEW_ALLOWANCE_MS`. */
-	readonly allowanceMs: number;
+	/** The clock skew allowed between the caller's times (`DEFAULT_CLOCK_SKEW_MS`). */
+	readonly clockSkewMs: number;
 }
+
+/**
+ * What the apply script answers, each part as its text: `refused, reason, hard`;
+ * `already, recoveryId, generation, hard`; or
+ * `applied, recoveryId, generation, week, run, liftedHard, hard`, each flag `1` or `0`. The
+ * adapter reads it into the port's answer.
+ */
+export type ApplyMfaSubjectRecoveryReply = readonly string[];
 
 /** What an acquire answers, as the port's `acquireSubjectLease` but for the token, which the caller made. */
 export type AcquireMfaSubjectLeaseReply =
@@ -379,11 +382,11 @@ export interface MfaTransactionStoreClient {
 		keys: MfaSubjectKeys,
 		input: RaiseMfaRecoverySetFloorInput,
 	): Promise<RaiseMfaRecoverySetFloorReply>;
-	/** The port's `applySubjectRecovery`, one script over the four keys; a reply it does not know rejects. */
+	/** The port's `applySubjectRecovery`, one script over the four keys, its reply as text; one that is not a list of text rejects. */
 	applySubjectRecovery(
 		keys: MfaSubjectKeys,
 		input: ApplyMfaSubjectRecoveryInput,
-	): Promise<MfaSubjectRecoveryAnswer>;
+	): Promise<ApplyMfaSubjectRecoveryReply>;
 	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }

@@ -166,7 +166,7 @@ return fields
 
 const LUA_MFA_SUBJECT_PRELUDE = `
 local WEEK = 604800000
-local SKEW = 86400000
+local ALLOWANCE = 86400000
 
 local function corrupt()
   error({err = 'MFA subject state: a stored value is not one this store wrote; the operation is refused'})
@@ -263,7 +263,7 @@ local function keep()
     redis.call('DEL', KEYS[1], KEYS[2])
     return
   end
-  local at = string.format('%.0f', math.ceil(num(last[2]) + WEEK + SKEW))
+  local at = string.format('%.0f', math.ceil(num(last[2]) + WEEK + ALLOWANCE))
   redis.call('PEXPIREAT', KEYS[1], at)
   redis.call('PEXPIREAT', KEYS[2], at)
 end
@@ -289,7 +289,7 @@ local budget, hard = num(ARGV[6]), num(ARGV[7])
 local id = ARGV[8]
 local run, pending, week, held_hard = load()
 local forgot
-week, forgot = prune(run, pending, week, math.min(now, server_ms()) - SKEW)
+week, forgot = prune(run, pending, week, math.min(now, server_ms()) - ALLOWANCE)
 
 -- A refusal writes only the mark that its episode began, once, and the hard
 -- hold when it fixes it: the deadlines are set again only then, when the
@@ -415,7 +415,7 @@ if hard == nil or hard ~= hard or hard == math.huge or hard == -math.huge then
 end
 local now = num(ARGV[1])
 local run, pending, week, held_hard = load()
-prune(run, pending, week, math.min(now, server_ms()) - SKEW)
+prune(run, pending, week, math.min(now, server_ms()) - ALLOWANCE)
 if held_hard == nil and #run >= hard then
   redis.call('HSETNX', KEYS[1], 'hard', fixed_at(run, now))
 elseif held_hard == nil then
@@ -428,64 +428,108 @@ return 1
 `;
 
 // A subject's recovery hash, under the subject's hash tag: `g`, its generation, `floor`, its
-// recovery-set floor, and one field per
+// recovery-set floor (a recovery-code set's generation, not the subject's), and one field per
 // authorization, `a:<operation>:<sid>` → `p|<expiresAtMs>|<recoveryId>` while pending, or
 // `a|<generation>|<expiresAtMs>|<recoveryId>` once applied. An authorization ends on the
-// server's clock. The hash has no TTL while it holds a generation or a floor; before that it expires the
-// skew allowance after its latest authorization ends.
+// server's clock. The hash has no TTL while it holds a generation or a floor; before that it
+// expires a day (ALLOWANCE) after its latest authorization ends. Every script reads and
+// validates the whole hash before its first write: a value it cannot read is an error with
+// nothing written, never a write half made.
 
 const LUA_MFA_RECOVERY_PRELUDE = `
+local MAX_COUNT = 9007199254740991
+
+-- A count the recovery hash keeps: canonical decimal text of a safe whole number.
+local function count_of(text)
+  if text == '0' or string.match(text, '^[1-9]%d*$') ~= nil then
+    local n = tonumber(text)
+    if n <= MAX_COUNT then return n end
+  end
+  corrupt()
+end
+
 local function slot_of(value)
   local ends, id = string.match(value, '^p|(%d+)|(.+)$')
   if ends ~= nil then return {ends = num(ends), id = id} end
-  local gen, applied_ends, applied_id = string.match(value, '^a|(%d+)|(%d+)|(.+)$')
+  local gen, applied_ends, applied_id = string.match(value, '^a|([1-9]%d*)|(%d+)|(.+)$')
   if gen == nil then corrupt() end
+  count_of(gen)
   return {applied = gen, ends = num(applied_ends), id = applied_id}
 end
 
-local function recovery_keep(key, allowance)
-  local latest = nil
+-- The recovery hash, read and validated whole: its generation and floor (nil when absent) and
+-- its authorizations by field.
+local function recovery_load(key)
+  local g, floor, slots = nil, nil, {}
   local flat = redis.call('HGETALL', key)
   for i = 1, #flat, 2 do
-    local field = flat[i]
-    if field == 'g' or field == 'floor' then
-      redis.call('PERSIST', key)
-      return
+    local field, value = flat[i], flat[i + 1]
+    if field == 'g' then
+      g = count_of(value)
+    elseif field == 'floor' then
+      floor = count_of(value)
+    elseif string.sub(field, 1, 2) == 'a:' then
+      slots[field] = slot_of(value)
     end
-    if string.sub(field, 1, 2) == 'a:' then
-      local ends = slot_of(flat[i + 1]).ends
-      if latest == nil or ends > latest then latest = ends end
-    end
+  end
+  return g, floor, slots
+end
+
+-- Sets the hash's deadline from what it holds, as validated: none while it holds a generation or
+-- a floor; else the latest authorization's end and a day; nothing left, it goes.
+local function recovery_keep(key, counted, slots)
+  if counted then
+    redis.call('PERSIST', key)
+    return
+  end
+  local latest = nil
+  for _, slot in pairs(slots) do
+    if latest == nil or slot.ends > latest then latest = slot.ends end
   end
   if latest == nil then
     redis.call('DEL', key)
     return
   end
-  redis.call('PEXPIREAT', key, string.format('%.0f', latest + allowance))
+  redis.call('PEXPIREAT', key, string.format('%.0f', latest + ALLOWANCE))
+end
+
+-- Whether the lease holds token, with a deadline: a lease with none is not one this store wrote.
+local function lease_held(key, token)
+  return redis.call('GET', key) == token and redis.call('PTTL', key) > 0
+end
+
+local function argument(text)
+  local n = tonumber(text)
+  if n == nil or n ~= n or n == math.huge or n == -math.huge then
+    error({err = 'MFA subject recovery: an argument is not a number'})
+  end
+  return n
 end
 `;
 
 /**
  * `MfaTransactionStoreClient.authorizeSubjectRecovery`. `KEYS[1]` = the recovery hash;
  * `ARGV[1]` = the authorization's field, `ARGV[2]` = its recoveryId, `ARGV[3]` = its end,
- * `ARGV[4]` = how far ahead of the server's clock an end may lie, `ARGV[5]` = the skew
- * allowance. Refuses, writing nothing, an end not after the server's clock or further ahead
- * than `ARGV[4]`: `{0, now}`. Otherwise drops the authorizations ended on that clock, writes
- * this one pending over whatever its field held, and answers `{1, now}`.
+ * `ARGV[4]` = how far ahead of the server's clock an end may lie. Refuses, writing nothing, an
+ * end not after the server's clock or further ahead than `ARGV[4]`: `{0, now}`. Otherwise, the
+ * hash read whole first, drops the authorizations ended on that clock, writes this one pending
+ * over whatever its field held, and answers `{1, now}`.
  */
 const LUA_MFA_SUBJECT_RECOVERY_AUTHORIZE = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
 local now = server_ms()
 local stamp = string.format('%.0f', now)
-local ends = tonumber(ARGV[3])
-if not (ends > now) or ends > now + tonumber(ARGV[4]) then return {0, stamp} end
-local flat = redis.call('HGETALL', KEYS[1])
-for i = 1, #flat, 2 do
-  if string.sub(flat[i], 1, 2) == 'a:' and slot_of(flat[i + 1]).ends <= now then
-    redis.call('HDEL', KEYS[1], flat[i])
+local ends = argument(ARGV[3])
+if not (ends > now) or ends > now + argument(ARGV[4]) then return {0, stamp} end
+local g, floor, slots = recovery_load(KEYS[1])
+for field, slot in pairs(slots) do
+  if slot.ends <= now then
+    redis.call('HDEL', KEYS[1], field)
+    slots[field] = nil
   end
 end
 redis.call('HSET', KEYS[1], ARGV[1], 'p|' .. ARGV[3] .. '|' .. ARGV[2])
-recovery_keep(KEYS[1], tonumber(ARGV[5]))
+slots[ARGV[1]] = {ends = ends}
+recovery_keep(KEYS[1], g ~= nil or floor ~= nil, slots)
 return {1, stamp}
 `;
 
@@ -493,28 +537,43 @@ return {1, stamp}
  * `MfaTransactionStoreClient.applySubjectRecovery`. `KEYS`: the lock hash, the week, the
  * recovery hash, the lease. `ARGV`: the operation, the authorization's field, now, the lease
  * token, the sessions boundary or empty, the earliest guessable record's time or `none` when no
- * guessable record remains (empty for a reset), the
- * clock skew (`DEFAULT_CLOCK_SKEW_MS`), the skew allowance. Refuses, in the port's order, with
- * `{'refused', reason, hard}`; answers `{'already', recoveryId, generation, hard}` for an
- * authorization applied, and `{'applied', recoveryId, generation, week, run, liftedHard, hard}`
- * once it applies, each flag `1` or `0`, `hard` read after the apply.
+ * guessable record remains (empty for a reset), and the clock skew (`DEFAULT_CLOCK_SKEW_MS`).
+ * The recovery hash, and for a recover the lock state, are read and validated whole before the
+ * first write. Refuses, in the port's order, with `{'refused', reason, hard}`; answers
+ * `{'already', recoveryId, generation, hard}` for an authorization applied, and
+ * `{'applied', recoveryId, generation, week, run, liftedHard, hard}` once it applies, each flag
+ * `1` or `0`, `hard` read after the apply.
  */
 const LUA_MFA_SUBJECT_RECOVERY_APPLY = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
-local field, token = ARGV[2], ARGV[4]
-local now, skew, allowance = tonumber(ARGV[3]), tonumber(ARGV[7]), tonumber(ARGV[8])
+local operation, field, token = ARGV[1], ARGV[2], ARGV[4]
+local now, clock_skew = argument(ARGV[3]), argument(ARGV[7])
+local boundary, since = nil, nil
+if operation == 'recover' then
+  if ARGV[5] ~= '' then boundary = argument(ARGV[5]) end
+  -- A recover names its rebind: the earliest guessable record's time, or 'none' when none remains.
+  if ARGV[6] ~= 'none' then since = argument(ARGV[6]) end
+end
+
+-- Everything read and validated before the first write.
+local g, floor, slots = recovery_load(KEYS[3])
+local next_generation = (g or 0) + 1
+if next_generation > MAX_COUNT then corrupt() end
+local run, pending, week, held_hard = nil, nil, nil, nil
+if operation == 'recover' then run, pending, week, held_hard = load() end
+
 local function hard_flag()
   if redis.call('HEXISTS', KEYS[1], 'hard') == 1 then return '1' end
   return '0'
 end
 local function refused(reason) return {'refused', reason, hard_flag()} end
 
-if redis.call('GET', KEYS[4]) ~= token then return refused('lease_not_held') end
-local held = redis.call('HGET', KEYS[3], field)
-if not held then return refused('unauthorized') end
-local slot = slot_of(held)
+if not lease_held(KEYS[4], token) then return refused('lease_not_held') end
+local slot = slots[field]
+if slot == nil then return refused('unauthorized') end
 if slot.ends <= server_ms() then
   redis.call('HDEL', KEYS[3], field)
-  recovery_keep(KEYS[3], allowance)
+  slots[field] = nil
+  recovery_keep(KEYS[3], g ~= nil or floor ~= nil, slots)
   return refused('unauthorized')
 end
 if slot.applied ~= nil then return {'already', slot.id, slot.applied, hard_flag()} end
@@ -522,40 +581,31 @@ if slot.ends <= now then return refused('expired') end
 
 -- Applied: the slot is marked at the generation this moves to.
 local function applied(ended_week, ended_run, lifted)
-  local gen = string.format('%.0f', redis.call('HINCRBY', KEYS[3], 'g', 1))
-  redis.call('HSET', KEYS[3], field, 'a|' .. gen .. '|' .. string.format('%.0f', slot.ends) .. '|' .. slot.id)
-  recovery_keep(KEYS[3], allowance)
+  local gen = string.format('%.0f', next_generation)
+  redis.call('HSET', KEYS[3], 'g', gen, field, 'a|' .. gen .. '|' .. string.format('%.0f', slot.ends) .. '|' .. slot.id)
+  redis.call('PERSIST', KEYS[3])
   return {'applied', slot.id, gen, ended_week, ended_run, lifted, hard_flag()}
 end
 
-if ARGV[1] == 'reset' then
+if operation == 'reset' then
   -- The lock state whole, unread, and every other authorization of the subject.
   redis.call('DEL', KEYS[1], KEYS[2])
-  local flat = redis.call('HGETALL', KEYS[3])
-  for i = 1, #flat, 2 do
-    if string.sub(flat[i], 1, 2) == 'a:' and flat[i] ~= field then redis.call('HDEL', KEYS[3], flat[i]) end
+  for other in pairs(slots) do
+    if other ~= field then redis.call('HDEL', KEYS[3], other) end
   end
   return applied('1', '1', '1')
 end
 
-local boundary, since = nil, nil
-if ARGV[5] ~= '' then boundary = tonumber(ARGV[5]) end
--- A recover names its rebind: the earliest guessable record's time, or 'none' when none remains.
-if ARGV[6] ~= 'none' then
-  since = tonumber(ARGV[6])
-  if since == nil then error({err = 'MFA subject recovery: a recover names its rebind'}) end
-end
-if boundary ~= nil and boundary > now + skew then return refused('boundary_ahead') end
-local run, pending, week, held_hard = load()
+if boundary ~= nil and boundary > now + clock_skew then return refused('boundary_ahead') end
 
 -- The earliest failure the week counts up to now must come before the boundary by more than the skew.
 local earliest = nil
 for _, a in ipairs(week) do
   if a.at <= now and a.at + WEEK > now and (earliest == nil or a.at < earliest) then earliest = a.at end
 end
-local revoked = earliest == nil or (boundary ~= nil and boundary > earliest + skew)
+local revoked = earliest == nil or (boundary ~= nil and boundary > earliest + clock_skew)
 -- The hard hold lifts on a rebind alone: no guessable record from before it, by more than the skew.
-local rebound = held_hard ~= nil and (since == nil or since > held_hard + skew)
+local rebound = held_hard ~= nil and (since == nil or since > held_hard + clock_skew)
 if not revoked and not rebound then return refused('not_revoked_since') end
 
 local ended_week, ended_run, lifted = '0', '0', '0'
@@ -597,23 +647,21 @@ return applied(ended_week, ended_run, lifted)
  * the subject's lease; `ARGV[1]` = a recovery-code set's generation (not the subject's), as
  * decimal text, `ARGV[2]` = the lease token. Answers `{0}` when the lease is not held under the
  * token, writing nothing. Otherwise writes the set generation as `floor` when it is higher than
- * the floor held, takes off the hash's deadline, and answers `{1, floor}`. A `floor` that is not
- * decimal text is an error.
+ * the floor held, compared as numbers, takes off the hash's deadline, and answers `{1, floor}`.
+ * A `floor` that is not canonical decimal text is an error.
  */
-const LUA_MFA_RECOVERY_SET_FLOOR_RAISE = `
-if redis.call('GET', KEYS[2]) ~= ARGV[2] then return {0} end
+const LUA_MFA_RECOVERY_SET_FLOOR_RAISE = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
+if not lease_held(KEYS[2], ARGV[2]) then return {0} end
 local held = redis.call('HGET', KEYS[1], 'floor')
-if held and string.match(held, '^%d+$') == nil then
-  error({err = 'MFA subject state: a stored value is not one this store wrote; the operation is refused'})
-end
+local raise = count_of(ARGV[1])
 local floor = held
-if not held or tonumber(ARGV[1]) > tonumber(held) then
+if not held or raise > count_of(held) then
   redis.call('HSET', KEYS[1], 'floor', ARGV[1])
   floor = ARGV[1]
 end
 redis.call('PERSIST', KEYS[1])
 return {1, floor}
-`.trim();
+`;
 
 // A subject's first-binding mark is judged on one clock, the server's (`TIME`): its end, which
 // mark a note keeps, and the key's deadline. A replica's clock decides none of them.
@@ -673,17 +721,16 @@ return {1, stamp}
  * `MfaTransactionStoreClient.acquireSubjectLease`. `KEYS[1]` = the subject's lease, `KEYS[2]` =
  * its recovery hash; `ARGV[1]` = the new holder's token, `ARGV[2]` = the lease's length in ms,
  * `ARGV[3]` = the generation the writer captured, as decimal text. Returns
- * `{'stale'}` when that is not the hash's `g` (absent is `0`), else `{'busy', pttl}` while
- * another holder's lease stands, else `{'acquired'}` with the lease written (`SET NX PX`, on the
- * server's clock). A `g` that is not decimal text is an error.
+ * `{'stale'}` when that is not the hash's `g` (absent is `0`), compared as numbers, else
+ * `{'busy', pttl}` while another holder's lease stands, else `{'acquired'}` with the lease
+ * written (`SET NX PX`, on the server's clock). A `g` that is not canonical decimal text is an
+ * error.
  */
-const LUA_MFA_SUBJECT_LEASE_ACQUIRE = `
+const LUA_MFA_SUBJECT_LEASE_ACQUIRE = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
 local g = redis.call('HGET', KEYS[2], 'g')
-if not g then g = '0' end
-if string.match(g, '^%d+$') == nil then
-  error({err = 'MFA subject state: a stored value is not one this store wrote; the operation is refused'})
-end
-if g ~= ARGV[3] then return {'stale'} end
+local current = 0
+if g then current = count_of(g) end
+if current ~= argument(ARGV[3]) then return {'stale'} end
 if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then return {'acquired'} end
 return {'busy', redis.call('PTTL', KEYS[1])}
 `.trim();

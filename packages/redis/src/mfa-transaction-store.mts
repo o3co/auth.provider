@@ -112,6 +112,7 @@ import {
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
+	readMfaSubjectRecoveryAnswer,
 	type SessionEmailProof,
 	sessionEmailProofAnswer,
 } from "@o3co/auth-provider-core";
@@ -304,6 +305,39 @@ function firstBindingMarkOf(text: string | null, subject: string): FirstBindingM
 		return unreadable();
 	}
 	return { atMs: atMs as number, untilMs: untilMs as number };
+}
+
+const flag = (text: string | undefined): boolean | undefined =>
+	text === "1" ? true : text === "0" ? false : undefined;
+
+/** A generation as the apply script answers it: canonical decimal text of a safe whole number from 1; `undefined` for anything else. */
+const generationText = (text: string | undefined): number | undefined =>
+	text !== undefined && /^[1-9][0-9]*$/.test(text) && Number.isSafeInteger(Number(text))
+		? Number(text)
+		: undefined;
+
+/** The apply script's reply in the port's terms, for core's reading to hold to the port. */
+function recoveryAnswerOf(reply: readonly string[]): unknown {
+	const [outcome, a, b, c, d, e, f] = reply;
+	if (outcome === "refused") return { outcome, reason: a, hard: flag(b) };
+	if (outcome === "already") {
+		return {
+			outcome: "already_applied",
+			recoveryId: a,
+			generation: generationText(b),
+			hard: flag(c),
+		};
+	}
+	if (outcome === "applied") {
+		return {
+			outcome,
+			recoveryId: a,
+			generation: generationText(b),
+			cleared: { week: flag(c), run: flag(d), hard: flag(e) },
+			hard: flag(f),
+		};
+	}
+	return undefined;
 }
 
 /** An authorization's field in the recovery hash: its operation and its sid (`-` for none). */
@@ -545,7 +579,6 @@ export function createRedisMfaTransactionStore(
 				recoveryId: checked.recoveryId,
 				expiresAtMs: checked.expiresAtMs,
 				maxAheadMs: MFA_RECOVERY_AUTHORIZATION_MAX_MS + DEFAULT_CLOCK_SKEW_MS,
-				allowanceMs: MFA_CLOCK_SKEW_ALLOWANCE_MS,
 			});
 			if (reply.authorized) return;
 			checkSubjectRecoveryAuthorization(subject, authorization, reply.serverNowMs);
@@ -556,16 +589,20 @@ export function createRedisMfaTransactionStore(
 
 		async applySubjectRecovery(subject, application) {
 			const checked = checkSubjectRecoveryApplication(subject, application);
-			return client.applySubjectRecovery(subjectKeys(subject), {
+			const reply = await client.applySubjectRecovery(subjectKeys(subject), {
 				operation: checked.operation,
 				field: recoveryField(checked.operation, checked.sid),
 				nowMs: checked.nowMs,
 				leaseToken: checked.leaseToken,
 				sessionsBoundaryMs: checked.sessionsBoundaryMs,
 				guessableBoundSinceMs: checked.guessableBoundSinceMs,
-				skewMs: DEFAULT_CLOCK_SKEW_MS,
-				allowanceMs: MFA_CLOCK_SKEW_ALLOWANCE_MS,
+				clockSkewMs: DEFAULT_CLOCK_SKEW_MS,
 			});
+			const answer = readMfaSubjectRecoveryAnswer(recoveryAnswerOf(reply));
+			if (answer === undefined) {
+				throw new Error("MfaTransactionStore: the apply script answered nothing it knows");
+			}
+			return answer;
 		},
 	};
 }

@@ -1552,13 +1552,13 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		expect((await store.reserveSubjectAttempt("user-1", Date.now(), POLICY)).ok).toBe(true);
 	});
 
-	/** Each key's serialized value and deadline: equal only for keys left byte for byte as they were. */
+	/** Each key's serialized value and absolute deadline: equal only for keys left byte for byte as they were. */
 	const snapshot = async (keys: readonly string[]) =>
 		Promise.all(
 			keys.map(async (key) => ({
 				key,
 				value: await first().dumpBuffer(key),
-				ttl: await first().pttl(key),
+				deadline: await deadlineOf(key),
 			})),
 		);
 
