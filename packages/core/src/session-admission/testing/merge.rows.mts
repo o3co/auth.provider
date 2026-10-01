@@ -82,7 +82,7 @@ export type MergeDecision =
 	  }
 	| { readonly outcome: "unmet"; readonly requirement: "acr" | "baseline" };
 
-/** One row: what it pins, as the ADR words it; its mode, session, request and factors; and the rule's decision. */
+/** One row: what it checks; its mode, session, store, request and factors; and the rule's decision. */
 export interface MergeRow {
 	readonly row: string;
 	/** The MFA module's `mfa.mode` the row runs under. */
@@ -546,12 +546,12 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				expected: { outcome: "met", acr: MFA },
 			},
 			{
-				row: "the requirement's own step-up stands onto a store that cannot record: the requirement answers for it",
+				row: "the baseline onto a store that cannot record → a new login: the requirement answers for its own step-up",
 				mode: "required",
 				session: passwordSession(["pwd"]),
 				storeRecords: false,
 				factors: "installed",
-				expected: { outcome: "step_up", requirement: "baseline", acrValues: [] },
+				expected: { outcome: "reauthenticate", requirement: "baseline" },
 			},
 		],
 	},
