@@ -1067,6 +1067,15 @@ wires it.
   Investigate row for it says what to do. To keep the audit trail and
   notify at once, contribute the notifier as `auditHooks` from a module of
   your own: core hands every event to the `auditSink` and to each hook.
+  Boot names each hook's position and module (`audit_hooks_registered`,
+  info); a sink that fails one event is `audit_sink_failed` (error) with
+  that position (`sink`, 0 for the `auditSink`) and the event's `type`; an
+  event a hook records while it runs reaches only the `auditSink`
+  (`audit_sink_reentered`, warn — a hook that emits). With hooks, the
+  `auditSink` is handed a frozen copy, so a sink that changes its event
+  now fails with `audit_sink_failed` alone, and
+  `federation_grant_audit_failed` no longer fires: alert on
+  `audit_sink_failed` instead.
 
 ### Federation grants — what each answer means (#593)
 

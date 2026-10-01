@@ -65,10 +65,11 @@ export type SessionRequirement = ConcreteSessionRequirement;
 /**
  * Type produced by an `AuditHookFactory<Deps>` contribution: an `AuditSink`
  * core hands every event the `auditSink` slot records, after the slot's own
- * sink and the hooks registered before it (`createAuditFanOut`). A module
- * that contributes one may not read `auditSink`. A hook that reaches the
- * slot another way, through a component whose provider read it, is handed
- * back what it emits: it must not emit from `record`.
+ * sink and the hooks registered before it (`createAuditFanOut`). An event
+ * recorded while a hook runs, in its async context, reaches the slot's own
+ * sink alone (`audit_sink_reentered`); work a hook hands to something made
+ * outside that context escapes the guard, so a hook must not emit from
+ * `record`. Its `record` must be a function, or boot refuses it.
  */
 export type AuditHook = AuditSink;
 

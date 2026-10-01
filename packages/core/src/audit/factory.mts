@@ -99,7 +99,7 @@ function handTo(sink: AuditSink, event: AuditEvent): Promise<void> {
  * and detaches. The federation-grants routes' bridge returns its promise,
  * because core bounds audit waits and a shutdown drains them; oauth's
  * subject-revocation auditor neither waits nor leaves it unobserved, logging
- * a rejection (`federation_grant_audit_failed`).
+ * a rejection (`federation_grant_audit_failed`), which a fan-out never gives.
  */
 export async function recordAuditEvent(sink: AuditSink, event: AuditEvent): Promise<void> {
 	await handTo(sink, withBoundedRequestFields(event));
