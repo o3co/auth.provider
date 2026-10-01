@@ -26,11 +26,11 @@ import {
 	supportsSessionEnd,
 } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionFamilyIndexClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
+import type { SessionFamilyIndexClient, SessionSidSortedSetMultiClient } from "#/clients.mjs";
 import {
 	createRedisSessionFamilyIndex,
 	redisSessionFamilyIndexBuilder,
-} from "../src/sessionFamilyIndex.mjs";
+} from "#/sessionFamilyIndex.mjs";
 
 /** A client that logs when each call starts and when its reply is in. */
 const recordingClient = (

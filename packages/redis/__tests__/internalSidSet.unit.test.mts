@@ -23,8 +23,8 @@
 // `createRedisSidSortedSet`.
 
 import { describe, expect, it, vi } from "vitest";
-import type { RedisSidSetClient } from "../src/internal/redisSidSet.mjs";
-import { createRedisSidSet } from "../src/internal/redisSidSet.mjs";
+import type { RedisSidSetClient } from "#/internal/redisSidSet.mjs";
+import { createRedisSidSet } from "#/internal/redisSidSet.mjs";
 
 const client: RedisSidSetClient = {
 	sAddWithTtl: vi.fn(async () => {}),

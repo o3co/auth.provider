@@ -5,7 +5,7 @@
 
 import type { RateLimiter } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { redisRateLimiterBuilder } from "../src/ratelimit.mjs";
+import { redisRateLimiterBuilder } from "#/ratelimit.mjs";
 
 // `createRedisRateLimiter`'s own behaviour lives in ratelimit-atomicity.test.mts,
 // which exercises it against the atomic `incrementWithTtl` contract.

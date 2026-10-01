@@ -34,8 +34,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRedisFederationGrantStore,
 	type FederationGrantKey,
-} from "../src/federation-grant-store.mjs";
-import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+} from "#/federation-grant-store.mjs";
+import { makeIoredisFederationGrantStoreClient } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
 let redis: Redis;

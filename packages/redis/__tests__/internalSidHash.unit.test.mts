@@ -22,8 +22,8 @@
 // `internalSidHash.test.mts`.
 
 import { describe, expect, it, vi } from "vitest";
-import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "../src/clients.mjs";
-import { createRedisSidHash } from "../src/internal/redisSidHash.mjs";
+import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "#/clients.mjs";
+import { createRedisSidHash } from "#/internal/redisSidHash.mjs";
 
 type Pair = readonly [field: string, value: string];
 

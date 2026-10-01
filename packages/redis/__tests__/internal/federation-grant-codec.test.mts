@@ -35,7 +35,7 @@ import {
 	decodeCredentials,
 	encodeCredentials,
 	parseCanonicalAuthorization,
-} from "../../src/internal/federation-grant-codec.mjs";
+} from "#/internal/federation-grant-codec.mjs";
 
 const T0 = 1_789_000_000_137;
 const at = (ms: number): Date => new Date(T0 + ms);

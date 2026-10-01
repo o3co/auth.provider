@@ -26,9 +26,9 @@
 
 import type { FederationGrantAuthorization } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import type { FederationGrantHashFields, FederationGrantStoreClient } from "../src/clients.mjs";
-import { createRedisFederationGrantStore } from "../src/federation-grant-store.mjs";
-import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+import type { FederationGrantHashFields, FederationGrantStoreClient } from "#/clients.mjs";
+import { createRedisFederationGrantStore } from "#/federation-grant-store.mjs";
+import { makeIoredisFederationGrantStoreClient } from "#/ioredis.mjs";
 
 const MIN = 60_000;
 const DAY = 86_400_000;

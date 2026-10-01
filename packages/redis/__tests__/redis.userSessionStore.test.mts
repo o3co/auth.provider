@@ -17,8 +17,8 @@
 import { sessionAuthentication, vouchedAmr } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisClients } from "../src/ioredis.mjs";
-import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
+import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisUserSessionStore } from "#/userSessionStore.mjs";
 import {
 	PRE_UPGRADE_FEDERATED_ENVELOPE,
 	PRE_UPGRADE_FEDERATED_SID,
