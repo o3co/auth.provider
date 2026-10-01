@@ -218,7 +218,8 @@ address nor its username; a hint that never shows the account's address; a proof
 verifies the factor it enrolled; and, for a factor that answers `identity`, a
 non-empty string for its enrolled data, the same at each reading, through a
 JSON round trip and for a verification's next data, and over data it cannot
-read a non-empty string or `undefined`, never a throw. A code and an address are looked for in the
+read a non-empty string or `undefined`, never one string for two such data
+unless it is the enrolled data's own, never a throw. A code and an address are looked for in the
 strings an answer holds as a reader decodes them — object keys, map and set
 entries included — in any case, an address with its percent-escapes decoded
 too, never in its JSON text, so no escaping hides one. It enrolls at one instant and verifies an hour later,

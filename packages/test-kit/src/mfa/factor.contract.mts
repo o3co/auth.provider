@@ -41,7 +41,8 @@
  * enrolled; and, for a factor that answers an identity, a non-empty string
  * for its enrolled data, the same at each reading, through a JSON round trip
  * and for a verification's next data, and over data it cannot read a
- * non-empty string or `undefined`, never a throw. The suite enrolls at one instant and verifies an hour later, so a
+ * non-empty string or `undefined`, never one string for two such data
+ * unless it is the enrolled data's own, never a throw. The suite enrolls at one instant and verifies an hour later, so a
  * factor that refuses reuse within a time step is not asked to verify at the
  * step it enrolled. Every call is made for the account's `User.id` as its
  * subject, and handed core's test digests (`createTestMfaDigests`), made for
@@ -112,6 +113,9 @@ const UNREADABLE_DIGESTS: readonly unknown[] = [
 	{ keyId: 1, digest: 2 },
 	[],
 ];
+
+/** What the suite puts in place of each member of a factor's data, to see an identity read it as none. */
+const UNREADABLE_MEMBERS: readonly unknown[] = [null, 7, "x", [], {}];
 
 /** When the suite enrolls, and an hour later, when it verifies. */
 const ENROLLED_AT_MS = Date.UTC(2026, 0, 1);
@@ -987,20 +991,30 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 			},
 		},
 		{
-			name: "identity, when present, answers a non-empty string or undefined over data it cannot read, and never throws",
+			name: "identity, when present, answers a non-empty string or undefined over data it cannot read, never one string for two of them unless it is the enrolled data's own, and never throws",
 			run: async () => {
 				const factor = input.build();
 				const { identity } = factor;
 				if (identity === undefined) return;
 				const { data } = await enroll(factor);
-				const unreadable: MfaFactorData[] = [
+				const own = identity.call(factor, data);
+				const damagedData: MfaFactorData[] = [
 					{},
 					{ unexpected: true },
 					...Object.keys(data).flatMap((key) => {
 						const { [key]: _removed, ...without } = data;
-						return [without, { ...data, [key]: null }];
+						return [
+							without,
+							...UNREADABLE_MEMBERS.map((value) => ({ ...data, [key]: value })),
+						];
 					}),
 				];
+				// Each once: data with its one member removed is `{}` again.
+				const unreadable = [
+					...new Map(damagedData.map((damaged) => [JSON.stringify(damaged), damaged])).values(),
+				];
+				/** Which damaged data answered each string other than the enrolled data's own. */
+				const answeredBy = new Map<string, string>();
 				for (const damaged of unreadable) {
 					const what = `over data ${JSON.stringify(damaged)}`;
 					let answered: unknown;
@@ -1008,13 +1022,20 @@ export function mfaFactorContract(input: MfaFactorContractInput): readonly Contr
 						answered = identity.call(factor, damaged);
 					} catch (error) {
 						assert.fail(
-							`identity threw ${what} (${String(error)}): a record it cannot read is no duplicate, never an outage`,
+							`identity threw ${what} (${String(error)}): the coordinator reads a throw as no identity, so the record is judged a duplicate of none`,
 						);
 					}
 					assert.ok(
 						answered === undefined || (typeof answered === "string" && answered.length > 0),
 						`identity ${what} answers ${JSON.stringify(answered)}, neither a non-empty string nor undefined`,
 					);
+					if (answered === undefined || answered === own) continue;
+					const earlier = answeredBy.get(answered);
+					assert.ok(
+						earlier === undefined,
+						`identity answers ${JSON.stringify(answered)} both ${earlier} and ${what}: records it cannot read would be judged one authenticator`,
+					);
+					answeredBy.set(answered, what);
 				}
 			},
 		},
