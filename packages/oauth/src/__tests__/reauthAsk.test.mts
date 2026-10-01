@@ -27,6 +27,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createReauthAskStore,
 	REAUTH_ASK_KEY_PREFIX,
+	REAUTH_ASK_MAX_CHAIN_MS,
 	REAUTH_ASK_TTL_MS,
 	type ReauthAskRecord,
 	type ReauthAskSessionStore,
@@ -95,6 +96,51 @@ describe("createReauthAskStore — minting and spending an ask", () => {
 		expect(await store.consume(id, REQUEST)).toEqual(loginAsk(askedAt));
 		expect(backing.records.size).toBe(0);
 		expect(await store.consume(id, REQUEST)).toBeNull();
+	});
+
+	it("read hands the record back and leaves it, so a later pass of the same request finds it again", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const askedAt = Date.now();
+		const id = await store.ask(loginAsk(askedAt));
+
+		expect(await store.read(id, REQUEST)).toEqual(loginAsk(askedAt));
+		expect(backing.records.size).toBe(1);
+		expect(await store.read(id, REQUEST)).toEqual(loginAsk(askedAt));
+	});
+
+	it("consume after read spends the record: neither finds it again", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const askedAt = Date.now();
+		const id = await store.ask(loginAsk(askedAt));
+
+		expect(await store.read(id, REQUEST)).toEqual(loginAsk(askedAt));
+		expect(await store.consume(id, REQUEST)).toEqual(loginAsk(askedAt));
+		expect(backing.records.size).toBe(0);
+		expect(await store.read(id, REQUEST)).toBeNull();
+		expect(await store.consume(id, REQUEST)).toBeNull();
+	});
+
+	it("read refuses an ask minted for another request, and spends it", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const id = await store.ask(loginAsk(Date.now()));
+
+		expect(await store.read(id, `${REQUEST}&state=another`)).toBeNull();
+		expect(backing.records.size).toBe(0);
+		expect(await store.read(id, REQUEST)).toBeNull();
+	});
+
+	it("read refuses one whose last write has aged past its window, and anything that is not the record it wrote", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const old = Date.now() - REAUTH_ASK_TTL_MS - 1000;
+		const id = await store.ask(loginAsk(old));
+		expect(await store.read(id, REQUEST)).toBeNull();
+
+		backing.records.set(`${REAUTH_ASK_KEY_PREFIX}planted`, { reauth: { request: REQUEST } });
+		expect(await store.read("planted", REQUEST)).toBeNull();
 	});
 
 	it("records a step-up trip per requirement beside the login, and hands both back", async () => {
@@ -172,6 +218,42 @@ describe("createReauthAskStore — minting and spending an ask", () => {
 		expect(await store.consume(id, REQUEST)).toEqual(record);
 	});
 
+	it("caps a chain of trips at 30 minutes from its first ask, however recent its last write", async () => {
+		expect(REAUTH_ASK_MAX_CHAIN_MS).toBe(30 * 60 * 1000);
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const now = Date.now();
+		const record: ReauthAskRecord = {
+			request: REQUEST,
+			createdAt: now - REAUTH_ASK_MAX_CHAIN_MS - 1000,
+			loginAskedAt: now - 60_000,
+			stepUpAskedAt: { fixture: now },
+		};
+		const id = await store.ask(record);
+
+		expect(await store.read(id, REQUEST)).toBeNull();
+		expect(await store.consume(id, REQUEST)).toBeNull();
+	});
+
+	it("holds a chain inside its cap: a record written late in it expires at the cap, not a whole window later", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const createdAt = Date.now() - REAUTH_ASK_MAX_CHAIN_MS + 60_000;
+		const id = await store.ask({
+			request: REQUEST,
+			createdAt,
+			loginAskedAt: Date.now(),
+			stepUpAskedAt: {},
+		});
+		const stored = backing.records.get(`${REAUTH_ASK_KEY_PREFIX}${id}`) as {
+			cookie: { expires: Date; maxAge: number };
+		};
+		// What the store reaps the record by.
+		expect(stored.cookie.expires.getTime()).toBe(createdAt + REAUTH_ASK_MAX_CHAIN_MS);
+		expect(stored.cookie.maxAge).toBeLessThanOrEqual(60_000);
+		expect(await store.read(id, REQUEST)).not.toBeNull();
+	});
+
 	it("writes askedAt beside a login ask, for one release, so an older replica reads the record it would have written", async () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
@@ -238,6 +320,10 @@ describe("createReauthAskStore — minting and spending an ask", () => {
 
 		await expect(
 			createReauthAskStore(failing({ get: (_sid, cb) => cb(boom) })).consume("id", REQUEST),
+		).rejects.toThrow(/unavailable/);
+
+		await expect(
+			createReauthAskStore(failing({ get: (_sid, cb) => cb(boom) })).read("id", REQUEST),
 		).rejects.toThrow(/unavailable/);
 
 		const backing = memoryStore();

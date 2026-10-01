@@ -85,6 +85,50 @@ describe("in-memory FederationTokenStore", () => {
 		expect((await store.get("sid-1", "google"))?.tokenType).toBe("DPoP");
 	});
 
+	describe("obtainedAt", () => {
+		const obtainedAt = new Date("2026-04-21T23:00:00.000Z");
+
+		it.each([
+			["attach", "attach"],
+			["update", "update"],
+		] as const)("round-trips it on %s", async (_label, write) => {
+			const dated: FederationTokens = { ...tokens, obtainedAt };
+			if (write === "update") await store.attach("sid-1", "google", tokens);
+			await store[write]("sid-1", "google", dated);
+			const got = await store.get("sid-1", "google");
+			expect(got).toStrictEqual(dated);
+			expect(got?.obtainedAt).toBeInstanceOf(Date);
+		});
+
+		it("leaves it absent when the record has none", async () => {
+			await store.attach("sid-1", "google", tokens);
+			const got = await store.get("sid-1", "google");
+			expect(got).not.toBeNull();
+			expect(Object.hasOwn(got as object, "obtainedAt")).toBe(false);
+		});
+
+		it("drops it when an update replaces a dated record with an undated one", async () => {
+			await store.attach("sid-1", "google", { ...tokens, obtainedAt });
+			await store.update("sid-1", "google", tokens);
+			const got = await store.get("sid-1", "google");
+			expect(got).toStrictEqual(tokens);
+			expect(Object.hasOwn(got as object, "obtainedAt")).toBe(false);
+		});
+
+		it("is not moved by a later change to the caller's Date", async () => {
+			const callers = new Date(obtainedAt.getTime());
+			await store.attach("sid-1", "google", { ...tokens, obtainedAt: callers });
+			callers.setTime(0);
+			expect((await store.get("sid-1", "google"))?.obtainedAt).toStrictEqual(obtainedAt);
+		});
+
+		it("is not moved by a change to a Date that get handed back", async () => {
+			await store.attach("sid-1", "google", { ...tokens, obtainedAt });
+			(await store.get("sid-1", "google"))?.obtainedAt?.setTime(0);
+			expect((await store.get("sid-1", "google"))?.obtainedAt).toStrictEqual(obtainedAt);
+		});
+	});
+
 	it("get returns null for missing (sid, name)", async () => {
 		expect(await store.get("sid-1", "google")).toBeNull();
 		await store.attach("sid-1", "google", tokens);
