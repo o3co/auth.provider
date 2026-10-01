@@ -23,6 +23,7 @@
 - Amended 2026-09-30 (build-order step 18; owner, provisional): a WebAuthn factor is `hwk` only when it is not backup-eligible (BE = 0), and keeps its BE from registration (D14's amendment of that date).
 - Amended 2026-10-01 (#857): a second factor's credential shown in the passwordless grant's picker is not cosmetic; the grant refuses an assertion whose user handle is not its record owner's, and `webauthnMfaFactorModule` refuses the boot while `webauthn.allowCredentialsForKnownUser` is on (F7's amendment of that date).
 - Amended 2026-10-01 (build-order step 19b, owner decision): the Store answers the enrollment witness on `authenticateByToken` as on `authenticate` (D12's amendment of that date).
+- Amended 2026-10-01 (build-order step 10, owner decision): an exempt success no longer lifts the hard limit; a rebind or an operator reset does (D21's amendment of that date).
 
 ## Context
 
@@ -456,8 +457,8 @@ export interface MfaTransactionStore {
 	>;
 	/** failure: stands. success: ends the consecutive run, and is not a failure. void: the proof was right, the write lost. */
 	settleSubjectAttempt(subject: string, reservation: string, outcome: "failure" | "success" | "void"): Promise<void>;
-	/** An exempt success: ends the run and a hard hold, and trusts this browser against the weekly hold. */
-	noteExemptSuccess(subject: string, nowMs: number, policy: LockoutPolicy): Promise<{ readonly browser: string }>;
+	/** An exempt success: ends a run shorter than `policy.hardLimit`; at or past it the run stands (D21's amendment of 2026-10-01). */
+	noteExemptSuccess(subject: string, nowMs: number, policy: LockoutPolicy): Promise<void>;
 	/** The operator reset, and a credential change (D21, D25). */
 	clearSubjectState(subject: string): Promise<void>;
 }
@@ -812,6 +813,8 @@ Core's reference and schema hold what core's consumers read with the MFA package
 - **Credential change**: `revokeAllForSubject` — what a Store calls after a password change — clears the subject's MFA lock state (`clearSubjectState`) when an `MfaTransactionStore` is wired. The password change is the remedy for an attacker who holds the password, and it ends the lock that attacker caused.
 
 **Amended 2026-09-27 (build-order step 3): the lock's readings, as the port states them.** (a) Before any lock, `memorySeconds` without a failure starts the count again, as it does after a lock ends; neither ends the run the hard limit counts. (b) A guessable success ends the run up to its own reservation, and an exempt success up to its time: an attempt reserved after it, still in flight, starts the next run. (c) Each answer is judged on the time its caller passes, so callers' clocks must agree (NTP, D22); a store forgets a failure or a trust only a day (`MFA_CLOCK_SKEW_ALLOWANCE_MS`) after it stops counting, judged no later than the store's own clock, so a caller ahead by less than the allowance erases nothing another still counts, and a caller far ahead — on any subject, the in-process sweep included — erases nothing. (d) An exempt success from a browser already trusted renews that browser's trust under a fresh cookie value rather than adding one, so a user's daily WebAuthn sign-ins never push their other browsers out of the five. (e) `threshold` must not exceed `hardLimit`, and `hardLimit` must not exceed NIST's 100. (f) A password change clearing the week (`clearSubjectState`) is kept, as decided: it ends the hold the password's holder caused.
+
+**Amended 2026-10-01 (build-order step 10, owner decision): a rebind lifts the hard limit; an exempt success does not.** `hardLimit` consecutive failures (100) hold the subject's guessable proofs until the subject rebinds: the held factor is replaced (step 12), or an operator resets the subject, applied through the authorized-recovery entry (NIST SP 800-63B-4 §3.2.2). An exempt proof still passes during the hard hold, and an exempt success still ends a run below the limit, but at or past the limit it ends nothing: `noteExemptSuccess` takes the lockout policy, and a store keeps a run at `hardLimit` through it. Until step 12, only the operator's deletion of the lock state lifts it.
 
 | Other control | Scope | Default | Where | On its store's outage |
 | --- | --- | --- | --- | --- |
