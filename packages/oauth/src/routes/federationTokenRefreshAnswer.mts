@@ -35,12 +35,9 @@ import { isUsableToken } from "./federationTokenCredential.mjs";
  * bar in `federation-grants/retrieve.mts`.
  */
 
-/**
- * Seconds a token has left: finite and at least one. `NaN`, `-5` and `0.5`
- * are not: below a second, the answer's `expires_in` would be `0`.
- */
+/** Seconds a token has left: finite and in the future. `NaN` and `-5` are neither. */
 const isUsableLifetime = (value: unknown): value is number =>
-	typeof value === "number" && Number.isFinite(value) && value >= 1;
+	typeof value === "number" && Number.isFinite(value) && value > 0;
 
 /**
  * One field of an adapter's answer, or `undefined` if its getter throws: an
@@ -155,11 +152,13 @@ export interface RefreshReading {
 
 /**
  * Reads `refreshed` once. `currentTokens` is the freshest snapshot of the
- * record, whose type stands when the answer names none.
+ * record, whose type stands when the answer names none. `calledAt` is when
+ * the refresh was asked for (epoch ms): an `expiresIn` counts from it.
  */
 export const readRefreshAnswer = (
 	refreshed: RefreshedTokens,
 	currentTokens: FederationTokens,
+	calledAt: number,
 ): RefreshReading => {
 	// The adapter's answer is unverified third-party data, read field by
 	// field behind guards: it may be `null`, a getter may throw, and an
@@ -192,12 +191,12 @@ export const readRefreshAnswer = (
 	// route has always stored as `null`.
 	const now = Date.now();
 	const instant = isUsableDate(answer.expiresAt) ? answer.expiresAt : undefined;
+	// Dated from the call, so time the upstream took is not counted as life left.
 	const fromLifetime = isUsableLifetime(answer.expiresIn)
-		? new Date(now + answer.expiresIn * 1000)
+		? new Date(calledAt + answer.expiresIn * 1000)
 		: undefined;
 	// Both usable: the earlier stands, so neither field can lengthen the
-	// other (core's `retrieve.mts` dates a token the same way). A lifetime
-	// past the Date range is later than any instant.
+	// other. A lifetime past the Date range is later than any instant.
 	const derivedExpiry: Date | null =
 		instant !== undefined
 			? fromLifetime !== undefined &&
@@ -227,8 +226,9 @@ export const readRefreshAnswer = (
 		(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
 		(statedInstant && !isUsableDate(answer.expiresAt)) ||
 		((statedLifetime || statedInstant) && derivedExpiry !== null && !isUsableDate(derivedExpiry)) ||
-		// Already expired: stored, it would be refreshed again on every request.
-		(derivedExpiry !== null && derivedExpiry.getTime() <= now);
+		// Less than a whole second left: answered `expires_in: 0`, and stored,
+		// refreshed again on every request.
+		(derivedExpiry !== null && derivedExpiry.getTime() < now + 1000);
 
 	// The refreshed token's type: unreadable or not a type name is broken
 	// (joins the refusals of an unusable answer, as core's `retrieve.mts`

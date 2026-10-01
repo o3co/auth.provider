@@ -1470,7 +1470,7 @@ describe("POST /oauth/federation/:name/token", () => {
 				},
 			);
 
-			describe("judges the lifetime it derives, as core's retrieve.mts does", () => {
+			describe("judges the lifetime it derives: at least one second left, dated from the call", () => {
 				const withFrozenDate = async (run: () => Promise<void>) => {
 					vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
 					try {
@@ -1536,6 +1536,48 @@ describe("POST /oauth/federation/:name/token", () => {
 						const res = await postFedToken(app, "google", await mintAccessToken());
 
 						expectInvalidExpiry(res, fedTokenStore, auditSink);
+					});
+				});
+
+				it("refuses an expiresAt less than one second away", async () => {
+					// `expires_in` would be answered `0`: a token with no whole second left.
+					await withFrozenDate(async () => {
+						const { app, fedTokenStore, auditSink } = auditedApp({
+							accessToken: "new-at",
+							expiresAt: new Date(Date.now() + 500),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expectInvalidExpiry(res, fedTokenStore, auditSink);
+					});
+				});
+
+				it("dates an expiresIn from the start of the call, so a slow refresh does not lengthen it", async () => {
+					await withFrozenDate(async () => {
+						const CALL_MS = 120_000;
+						const fedTokenStore = makeFedTokenStore({
+							get: vi.fn().mockResolvedValue({
+								...baseFedTokens,
+								expiresAt: new Date(Date.now() - 1000),
+							}),
+						});
+						const refreshProvider = {
+							...federationBase("google"),
+							refreshToken: vi.fn(async () => {
+								vi.setSystemTime(Date.now() + CALL_MS);
+								return { accessToken: "new-at", expiresIn: 3600 };
+							}),
+						} as unknown as FederationProvider;
+						const app = buildApp({
+							fedTokenStore,
+							getFederationProviders: () =>
+								new Map<string, FederationProvider>([["google", refreshProvider]]),
+						});
+
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(200);
+						expect(res.body.expires_in).toBe(3600 - CALL_MS / 1000);
 					});
 				});
 
