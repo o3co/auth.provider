@@ -30,6 +30,7 @@ import {
 	createMemoryMfaTransactionStore,
 	type MfaFactor,
 	type MfaFactorRecord,
+	type MfaTransactionStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createRecordingMailSender, createTestMfaFactor } from "@o3co/auth-provider-core/testing";
@@ -570,13 +571,26 @@ function barrier(n: number): () => Promise<void> {
 	};
 }
 
+/**
+ * Holds each first-binding mark `store` is asked to note until `n` are:
+ * every completion reads the mark, and passes its checks, before any notes it.
+ */
+function notingTogether(store: MfaTransactionStore, n: number): void {
+	const arrive = barrier(n);
+	const note = store.noteFirstBinding.bind(store);
+	vi.spyOn(store, "noteFirstBinding").mockImplementation(async (subject, atMs, untilMs) => {
+		await arrive();
+		return note(subject, atMs, untilMs);
+	});
+}
+
 describe("two transactions of one subject racing the first binding", () => {
 	it("leaves at most one first factor: a completion that finds another record beside its own after writing it removes its own, answers 401 login_required and records mfa.first_binding_conflict", async () => {
 		const memory = createMemoryMfaFactorStore();
 		const arrive = barrier(2);
 		const audit = recordingAuditSink();
 		const directory = new WitnessingUserRepository();
-		const { app, userSessionStore } = await boot({
+		const { app, userSessionStore, transactionStore } = await boot({
 			config: configFor("required"),
 			// Both completions pass the zero-records check before either writes.
 			factorStore: {
@@ -589,6 +603,7 @@ describe("two transactions of one subject racing the first binding", () => {
 			auditSink: audit,
 			userRepository: directory,
 		});
+		notingTogether(transactionStore, 2);
 		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
 		const owner = await beginFirstBinding(app);
 		const other = await beginFirstBinding(app);
@@ -641,6 +656,7 @@ describe("two transactions of one subject racing the first binding", () => {
 			},
 			auditSink: audit,
 		});
+		notingTogether(booted.transactionStore, 2);
 		const logins = [await beginFirstBinding(booted.app), await beginFirstBinding(booted.app)];
 		const begun = await Promise.all(
 			logins.map((login) => beginEnrollment(login.agent, login.transaction, "totp")),

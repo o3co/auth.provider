@@ -414,6 +414,13 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		sites: { revokedBefore: 1 },
 		why: `${TOKEN_SIDE}: the device_code grant's boundary read at the poll`,
 	},
+	// A login's MFA transaction, before any session exists: the MFA ADR's D8
+	// (build-order step 11-B).
+	{
+		file: "packages/mfa/src/coordinator.mts",
+		sites: { revokedBefore: 1 },
+		why: "a login's MFA transaction held to its subject's sessions boundary at every use: no session exists yet for admission to read, and a ceremony begun before a revocation must bind nothing (the MFA ADR's D8)",
+	},
 	// The token side's boundary, permanent.
 	{
 		file: "packages/core/src/jwt/verify.mts",

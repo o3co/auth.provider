@@ -45,8 +45,8 @@ import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import type { MfaEnrollmentWitness, MfaWitnessMark } from "./witness.mjs";
 
-/** The MFA store that could not answer. */
-export type MfaStoreName = "mfa_transaction" | "mfa_factor";
+/** The store that could not answer: an MFA store, or the subjects' sessions boundary. */
+export type MfaStoreName = "mfa_transaction" | "mfa_factor" | "revocation_boundary";
 
 /** A store that could not answer: the operation, and why. */
 export interface MfaStoreOutage {
@@ -100,14 +100,38 @@ export type UnknownTransaction = typeof UNKNOWN_TRANSACTION;
 export type UnknownFactor = typeof UNKNOWN_FACTOR;
 
 /**
+ * A login transaction of `subject` whose continuation was authenticated at
+ * or before the subject's sessions boundary — a revocation or a password
+ * change since: it completes nothing, and the user signs in again.
+ */
+export interface Revoked {
+	readonly outcome: "revoked";
+	readonly subject: string;
+}
+
+/**
+ * A first binding of `subject` whose authentication — the login's, or the
+ * session's — the subject's first-binding mark distrusts
+ * (`firstBindingMark.mts`): nothing is spent or written, and the user signs
+ * in again, binding once `retryAfterMs` has passed on this clock.
+ */
+export interface MfaFirstBindingDistrusted {
+	readonly outcome: "first_binding_distrusted";
+	readonly subject: string;
+	readonly retryAfterMs: number;
+}
+
+/**
  * The signed-in session a ceremony outside a login runs in, as the route
- * admitted it: its `sid`, its subject, and the `User` its cookie holds
- * (core's `cookieSessionUser`).
+ * admitted it: its `sid`, its subject, the `User` its cookie holds (core's
+ * `cookieSessionUser`), and its primary sign-in as admission's view holds
+ * it — `undefined` without one, which any first-binding mark distrusts.
  */
 export interface MfaCeremonySession {
 	readonly sid: string;
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
+	readonly authTimeMs: number | undefined;
 }
 
 /** One call's request: the transaction named, the binding the browser presents, and what a factor may read of the request. */
@@ -139,11 +163,13 @@ export type MfaRefusalReason = Extract<MfaVerification, { ok: false }>["reason"]
 
 export type MfaDescribeOutcome =
 	| UnknownTransaction
+	| Revoked
 	| MfaStoreOutage
 	| { readonly outcome: "described"; readonly view: MfaTransactionView };
 
 export type MfaChallengeOutcome =
 	| UnknownTransaction
+	| Revoked
 	| UnknownFactor
 	| MfaStoreOutage
 	| MfaFactorUnreadable
@@ -163,6 +189,7 @@ export type MfaChallengeOutcome =
 
 export type MfaVerifyOutcome =
 	| UnknownTransaction
+	| Revoked
 	| UnknownFactor
 	| MfaStoreOutage
 	| MfaFactorUnreadable
@@ -218,8 +245,10 @@ export type MfaVerifyOutcome =
 			readonly continuation: PrimaryContinuation | undefined;
 			/** What the verification adds to the login: the factor's `amr`, `mfa` when it adds it, and when. */
 			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
-			/** The witness marked for a login's `User` that lacked it; `undefined` when none was due. */
+			/** The witness marked for a login's `User` that lacked it; `undefined` when none was due, or no mark was noted before it. */
 			readonly witness: MfaWitnessMark | undefined;
+			/** Why the first-binding mark due before the witness could not be noted, leaving the witness unmarked; `undefined` otherwise. */
+			readonly firstBindingUnnoted: MfaStoreOutage | undefined;
 			/** The codes the set holds once a recovery code was spent; `undefined` for any other factor. */
 			readonly recoveryCodesRemaining: number | undefined;
 	  } & MfaCeremonySubject);
@@ -233,6 +262,7 @@ export type MfaVerifyOutcome =
  * reached beside a record that may count.
  */
 export type MfaReopenRefusal =
+	| MfaFirstBindingDistrusted
 	| {
 			readonly outcome: "enrollment_state_inconsistent";
 			readonly witness: "enrolled" | "malformed";
@@ -247,6 +277,8 @@ export type MfaReopenRefusal =
 /** Why an enrollment is refused before anything is spent. */
 export type MfaEnrollmentRefusal =
 	| UnknownTransaction
+	| Revoked
+	| MfaFirstBindingDistrusted
 	| MfaStoreOutage
 	/** The transaction opened no enrollment, or it is not a login's first binding. */
 	| { readonly outcome: "enrollment_not_open" }
@@ -372,9 +404,37 @@ export interface MfaCeremonyKit {
 	/**
 	 * The transaction `call` names, bound to its binding: a login's, or an
 	 * `enroll` one whose `sid` and subject are `call.session`'s; `null` when
-	 * there is none to use.
+	 * there is none to use; `revoked` for a login's past its subject's
+	 * sessions boundary.
 	 */
-	readonly bound: (call: MfaCeremonyCall) => Promise<MfaTransaction | null | MfaStoreOutage>;
+	readonly bound: (
+		call: MfaCeremonyCall,
+	) => Promise<MfaTransaction | null | Revoked | MfaStoreOutage>;
+	/** As `bound`, for an `enroll` transaction of `call.session` alone: a login's is none, and its boundary is never read. */
+	readonly boundInSession: (
+		call: MfaCeremonyCall,
+	) => Promise<MfaTransaction | null | MfaStoreOutage>;
+	/**
+	 * Whether `subject`'s first-binding mark distrusts an authentication at
+	 * `authTimeMs` (`firstBindingMark.mts`): the refusal; `undefined` when it
+	 * does not, or there is none; the outage when it cannot be read.
+	 */
+	readonly firstBindingDistrust: (
+		subject: string,
+		authTimeMs: number | undefined,
+	) => Promise<MfaFirstBindingDistrusted | MfaStoreOutage | undefined>;
+	/** `subject`'s first-binding mark noted at the clock's reading as it is noted, standing its lifetime; the outage otherwise. */
+	readonly noteFirstBinding: (subject: string) => Promise<MfaStoreOutage | undefined>;
+	/**
+	 * D12's reconciliation for `subject`, just verified with a counting factor
+	 * its `User` does not say it enrolled: the first-binding mark noted, then
+	 * the witness marked — only once the mark was noted, and never by a
+	 * directory that cannot write it. Never throws.
+	 */
+	readonly reconcileWitness: (subject: string) => Promise<{
+		readonly witness: MfaWitnessMark | undefined;
+		readonly firstBindingUnnoted: MfaStoreOutage | undefined;
+	}>;
 	/** A new `enroll` transaction for `session`, bound to the browser `call` presents; the outage otherwise. */
 	readonly openEnrollment: (
 		call: MfaCeremonyCall,

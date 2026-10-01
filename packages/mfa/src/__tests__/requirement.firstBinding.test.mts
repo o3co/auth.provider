@@ -188,6 +188,7 @@ function build(options: BuildOptions = {}) {
 			transactionStore.emailProofRequiredAtNextBinding(subject),
 		sessionEmailProofAt: (subject, sid, nowMs) =>
 			transactionStore.sessionEmailProofAt(subject, sid, nowMs),
+		firstBindingAt: (subject, nowMs) => transactionStore.firstBindingAt(subject, nowMs),
 	});
 	return { requirement, transactionStore };
 }
@@ -693,6 +694,84 @@ describe("the gate over a first binding in a session", () => {
 			const session = sessionOf("fed", facts());
 			await expect(requirement.admit(inputFor(session))).rejects.toBeInstanceOf(Error);
 			expect(await admit(requirement, session, "webauthn.register")).toEqual({
+				outcome: "unavailable",
+				store: "mfa",
+			});
+		}
+	});
+});
+
+describe("a subject with no counting factor whose first-binding mark distrusts the session", () => {
+	/** The requirement with no proof asked, `SUBJECT`'s mark answered by `answer` at the time asked about. */
+	const markedAt = (answer: (now: number) => unknown) => {
+		const transactionStore = createMemoryMfaTransactionStore();
+		const read = vi
+			.spyOn(transactionStore, "firstBindingAt")
+			.mockImplementation(async (_subject, now) => answer(now) as number | null);
+		return { ...build({ transactionStore, requireEmailProof: "never" }), read };
+	};
+
+	for (const mode of MODES) {
+		for (const kind of KINDS) {
+			it(`${mode} · ${kind}: sends a session authenticated no later than the mark and the clock skew to log in again, for each first binding, asking no gate`, async () => {
+				const transactionStore = createMemoryMfaTransactionStore();
+				const flag = vi.spyOn(transactionStore, "emailProofRequiredAtNextBinding");
+				const { requirement } = build({ mode, transactionStore });
+				const session = sessionOf(kind, facts());
+				// Another session of the subject bound its first factor after this one signed in.
+				const now = Date.now();
+				await transactionStore.noteFirstBinding(SUBJECT, now, now + 1_800_000);
+				for (const action of ACTIONS) {
+					expect(await requirement.admit(inputFor(session, action)), action).toEqual(
+						REAUTHENTICATE,
+					);
+					expect(await admit(requirement, session, action), action).toMatchObject({
+						outcome: "reauthenticate",
+						requirement: "mfa",
+					});
+				}
+				expect(flag).not.toHaveBeenCalled();
+			});
+		}
+	}
+
+	it("refuses a session authenticated at the mark plus the clock skew, and admits one a millisecond later", async () => {
+		const session = sessionOf("pwd", facts());
+		const authTime = session.authTime.getTime();
+		const at = markedAt(() => authTime - DEFAULT_CLOCK_SKEW_MS);
+		expect(await at.requirement.admit(inputFor(session))).toEqual(REAUTHENTICATE);
+		const after = markedAt(() => authTime - DEFAULT_CLOCK_SKEW_MS - 1);
+		expect(await after.requirement.admit(inputFor(session))).toEqual(MET);
+		const none = markedAt(() => null);
+		expect(await none.requirement.admit(inputFor(session))).toEqual(MET);
+	});
+
+	it("reads the mark of the session's subject at admission's clock, once its witness and its recent primary hold", async () => {
+		const { requirement, read } = markedAt(() => null);
+		const input = inputFor(sessionOf("fed", facts()));
+		await requirement.admit(input);
+		expect(read.mock.calls).toEqual([[SUBJECT, input.now.getTime()]]);
+
+		const stale = markedAt(() => null);
+		await stale.requirement.admit(inputFor(sessionOf("fed", facts(), { ageMs: 301_000 })));
+		await expect(
+			stale.requirement.admit(inputFor(sessionOf("fed", facts("enrolled")))),
+		).rejects.toMatchObject({ name: "MfaEnrollmentStateInconsistentError" });
+		expect(stale.read).not.toHaveBeenCalled();
+	});
+
+	it("throws where the mark cannot be read, or reads other than a time or none — never admitted", async () => {
+		for (const answer of [
+			() => Promise.reject(new Error("transaction store unreachable")),
+			() => "now",
+			(now: number) => now + DEFAULT_CLOCK_SKEW_MS + 1,
+			() => Number.NaN,
+			(now: number) => now - 0.5,
+		]) {
+			const { requirement } = markedAt(answer as (now: number) => unknown);
+			const session = sessionOf("pwd", facts());
+			await expect(requirement.admit(inputFor(session))).rejects.toBeInstanceOf(Error);
+			expect(await admit(requirement, session, "mfa.manage")).toEqual({
 				outcome: "unavailable",
 				store: "mfa",
 			});
