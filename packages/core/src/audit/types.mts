@@ -77,7 +77,7 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// `purpose` in its details. The MFA package is private until the template
 	// wires it, so no released composition emits them; the inventory's drift
 	// test names the step that emits each. A deployment notifies the account
-	// holder from six of them, each carrying, beside those, in its details:
+	// holder from seven of them, each carrying, beside those, in its details:
 	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`,
 	// `federated` or `mfa`) and `by: "user"`; `mfa.factor.removed` its `binding` and `by`
 	// (`user` or `operator`); `mfa.recovery_codes.generated` its `binding`,
@@ -87,7 +87,10 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// on purpose; `mfa.locked.first`, the refusal that begins an episode (the
 	// store's `first`), its `hold` and the refused attempt's factor `binding`;
 	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` it
-	// removed, `requireEmailProof` and `revokeSessions`; and
+	// removed, `requireEmailProof` and `revokeSessions`;
+	// `mfa.lock.recovered`, an authorized recovery applied to the subject's
+	// lock state, its `operation`, the `generation` it moved to and what it
+	// `cleared`; and
 	// `mfa.email_address_mismatch`, the email factor refused because the
 	// account's address no longer matches the one it was enrolled with,
 	// nothing more — never an address. The event's `timestamp` is when.
@@ -101,6 +104,7 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"mfa.factor.enrolled",
 	"mfa.factor.removed",
 	"mfa.first_binding_conflict",
+	"mfa.lock.recovered",
 	"mfa.locked",
 	"mfa.locked.first",
 	"mfa.recovery_code.used",
@@ -163,6 +167,10 @@ export interface AuditSink {
 	 * Fire-and-forget recording. Implementations MAY buffer or batch internally.
 	 * Errors thrown here are swallowed by auth.provider core (audit failure
 	 * does NOT block auth flow).
+	 *
+	 * Once a module contributes `auditHooks`, `record` may run concurrently
+	 * with the other sinks' for the same event; it must not mutate the event,
+	 * which they share; and its failure is isolated from theirs.
 	 */
 	record(event: AuditEvent): Promise<void>;
 }

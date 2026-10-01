@@ -23,6 +23,7 @@
 
 import {
 	type AppConfig,
+	advertisedIssuer,
 	type ClientRepository,
 	type ConsentStore,
 	checkCanonicalIssuer,
@@ -38,6 +39,10 @@ import {
 	withClientIdMetadataDocuments,
 } from "./clients/clientIdMetadataDocument.mjs";
 import { type ResolvedOAuthOptions, resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
+import {
+	type AuthorizationResponse,
+	authorizationResponseFor,
+} from "./routes/authorizationResponse.mjs";
 
 /** What {@link resolveRouterSettings} resolved. */
 export interface RouterSettings {
@@ -45,6 +50,8 @@ export interface RouterSettings {
 	/** Undefined when `/authorize` is not mounted. */
 	readonly acrTable: ReturnType<typeof vouchableAcrValues>["table"] | undefined;
 	readonly canonicalIssuer: string;
+	/** Builds every authorization response, its `iss` (RFC 9207) bound to `advertisedIssuer(canonicalIssuer)`. */
+	readonly authorizationResponse: AuthorizationResponse;
 	readonly clientRepository: ClientRepository;
 }
 
@@ -140,5 +147,11 @@ export const resolveRouterSettings = ({
 					...clientIdMetadataDocumentSeams,
 				})
 			: registeredClients;
-	return { options, acrTable, canonicalIssuer, clientRepository };
+	return {
+		options,
+		acrTable,
+		canonicalIssuer,
+		authorizationResponse: authorizationResponseFor(advertisedIssuer(canonicalIssuer)),
+		clientRepository,
+	};
 };

@@ -19,7 +19,7 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	auditErrorText,
-	authTimeClaim,
+	authTimeAt,
 	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
@@ -41,7 +41,6 @@ import {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 	resolveTokenBindingSettings,
-	supportsSessionEnd,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -50,6 +49,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
+import { joinSession } from "../logout/sessionEnd.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
@@ -514,6 +514,34 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				subject = typeof rawUserId === "string" ? rawUserId : null;
 			}
 
+			// The primary authentication's time, which a step-up never moves, read
+			// once against the minting clock (core's `authTimeAt`): never later
+			// than it, and the same on the access, refresh and id tokens (RFC 9470
+			// §6.1). One this clock cannot read — further ahead than the skew
+			// allows — refuses the exchange before anything is signed.
+			// One issuance instant for the exchange: `authTime` is read against it
+			// and every token signed here carries it as `iat` (the id_token's own
+			// `auth_time` is read against the clock it signs with, never later than
+			// its `iat`), so a wall clock moved back before the signing cannot put
+			// `auth_time` after `iat`.
+			const mintingNow = Date.now();
+			const issuedAt = Math.floor(mintingNow / 1000);
+			const authTime =
+				userSession === null ? undefined : authTimeAt(userSession.authTime, mintingNow);
+			if (userSession !== null && authTime === undefined) {
+				logger?.warn(
+					{
+						sid,
+						clientId: authenticatedClientId,
+						aheadMs: userSession.authTime.getTime() - mintingNow,
+					},
+					"auth_time_ahead_of_clock",
+				);
+				return {
+					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
+				};
+			}
+
 			// Initial rt+jwt opens a new refresh-token family for replay detection
 			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same
 			// family_id; revoking the family revokes every descendant.
@@ -594,9 +622,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// liveness, the subject, `auth_time` and the id_token's claims.
 			const amr = wellFormedAmr(codeData.amr);
 			const acr = wellFormedAcr(codeData.acr);
-			// The primary authentication's time, which a step-up never moves: the
-			// id_token's `auth_time`, on the access and refresh tokens too (RFC 9470 §6.1).
-			const authTime = userSession ? authTimeClaim(userSession.authTime) : undefined;
 
 			// Both tokens carry family_id and, when present, sid, so introspect and
 			// refresh need not re-read the session store. No sid without a
@@ -619,6 +644,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					issuedAt,
 					...(confirmation ? { confirmation } : {}),
 				},
 			);
@@ -626,7 +652,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// family below is registered under exactly the `jti` and `exp` the
 			// token carries. Never read back from the signer's output, which a
 			// `KeyStore` may return in a form this grant cannot decode.
-			const refreshTokenIssuedAt = Math.floor(Date.now() / 1000);
+			const refreshTokenIssuedAt = issuedAt;
 			const refreshTokenJti = crypto.randomUUID();
 			const refreshToken = await generateToken(
 				{
@@ -683,9 +709,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// to logout. With a store wired, the first read already refused a code
 			// without a sid.
 			if (deps.userSessionStore && sid) {
-				// Which dependency the block is waiting on, so the one catch can log
-				// the one that failed.
-				let linking: "client" | "session_family_index" | "session_rp_registry" = "client";
 				try {
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
 
@@ -695,7 +718,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// this read and the add is caught by the add itself (below).
 					//
 					// The claim carries the first read's `sub`: the tokens were signed
-					// from it and the id_token is minted from this read, so a different
+					// from it and the id_token's other claims are read from this one, so a different
 					// subject under the same `sid` would yield tokens that disagree on
 					// the user. That is a store invariant violation, refused by
 					// admission (`subject_mismatch`, audited).
@@ -714,68 +737,59 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 							}),
 						};
 					}
-					// The revalidated session drives the TTLs below and the id_token.
+					// The revalidated session drives the TTLs below and the id_token's other claims.
 					userSession = revalidation.session;
 
 					// Composition-root invariant: the session-stores module wires its
 					// sibling stores together, so with userSessionStore present these
 					// two are too. `?.` would silently no-op on a misconfigured root.
-					linking = "session_family_index";
-					// biome-ignore lint/style/noNonNullAssertion: intentional — see invariant comment above
-					const familyIndex = deps.sessionFamilyIndex!;
-					// With the session-end capability, either the logout's listing
-					// includes this family or the add answers "ended"; no token is
-					// served for a family a logout could miss. Without it, the add is
-					// unguarded; `oauthAuthorizationModule` warns of that at boot.
-					if (supportsSessionEnd(familyIndex)) {
-						const added = await familyIndex.addFamilyIdUnlessEnded(
-							sid,
-							familyId,
-							userSession.expiresAt,
-						);
-						if (added === "ended") {
-							const at = { sid, clientId: authenticatedClientId };
-							const refusal = sessionInvalidated(at);
-							await revokeRefusedFamily(familyId, at);
-							return { result: refusal };
-						}
-					} else {
-						await familyIndex.addFamilyId(sid, familyId, userSession.expiresAt);
-					}
-					linking = "session_rp_registry";
-					// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
-					await deps.sessionRPRegistry!.registerRP(
-						sid,
+					const joined = await joinSession(
 						{
-							clientId: authenticatedClientId,
-							// Typed reads: a misspelt field would silently drop the RP
-							// from the logout cascade.
-							backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
-							backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-							frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
-							frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
-							registeredAt: new Date(),
+							// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
+							sessionRPRegistry: deps.sessionRPRegistry!,
+							// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
+							sessionFamilyIndex: deps.sessionFamilyIndex!,
 						},
-						userSession.expiresAt,
+						{
+							sid,
+							rp: {
+								clientId: authenticatedClientId,
+								// Typed reads: a misspelt field would silently drop the RP
+								// from the logout cascade.
+								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
+								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
+								frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
+								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
+								registeredAt: new Date(),
+							},
+							familyId,
+							expiresAt: userSession.expiresAt,
+						},
 					);
-				} catch (err) {
-					// Fail closed on any throw here. The errorDescription is generic
-					// because the try spans the client lookup and the store writes; the
-					// log line names the one that threw.
-					if (linking === "client") {
-						logClientRepositoryUnavailable(
-							logger,
-							{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
-							err,
-						);
-					} else {
-						storeUnavailable(
-							linking,
-							linking === "session_family_index" ? "add" : "register",
-							authenticatedClientId,
-							err,
-						);
+					if (joined.outcome === "ended") {
+						const at = { sid, clientId: authenticatedClientId };
+						const refusal = sessionInvalidated(at);
+						await revokeRefusedFamily(familyId, at);
+						return { result: refusal };
 					}
+					if (joined.outcome === "unavailable") {
+						storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "session linking unavailable",
+							},
+						};
+					}
+				} catch (err) {
+					// Fail closed: the client lookup threw (the joins answer their
+					// outages above, and admission answers its own).
+					logClientRepositoryUnavailable(
+						logger,
+						{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
+						err,
+					);
 					return {
 						result: {
 							status: 503,
@@ -790,12 +804,19 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// userSessionStore) and a configured issuer (see `configuredIssuer`).
 			// A session implies a sid here; `&& sid` is defensive.
 			let idToken: Token | undefined;
-			if (grantedScopes?.includes("openid") && userSession && sid && configuredIssuer) {
+			if (
+				grantedScopes?.includes("openid") &&
+				userSession &&
+				sid &&
+				configuredIssuer &&
+				authTime !== undefined
+			) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
 					aud: authenticatedClientId,
 					azp: authenticatedClientId,
-					authTime: userSession.authTime,
+					// The instant read above, so the three tokens agree.
+					authTime: new Date(authTime * 1000),
 					...(nonce ? { nonce } : {}),
 					sid,
 					...(amr ? { amr } : {}),

@@ -35,7 +35,13 @@ export {
 // ---------------------------------------------------------------------------
 export type {
 	AccessTokenDenylistClient,
+	AcquireMfaSubjectLeaseInput,
+	AcquireMfaSubjectLeaseReply,
 	ActivateFederationGrantInput,
+	ApplyMfaSubjectRecoveryInput,
+	ApplyMfaSubjectRecoveryReply,
+	AuthorizeMfaSubjectRecoveryInput,
+	AuthorizeMfaSubjectRecoveryReply,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
 	ConsentRecordFields,
@@ -71,6 +77,8 @@ export type {
 	ParkPendingConsentInput,
 	PendingConsentKeyspace,
 	PendingConsentStoreClient,
+	RaiseMfaRecoverySetFloorInput,
+	RaiseMfaRecoverySetFloorReply,
 	RateLimiterClient,
 	RateLimitIncrement,
 	RedisDurability,

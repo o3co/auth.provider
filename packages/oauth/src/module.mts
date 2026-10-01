@@ -429,6 +429,12 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// and `claims_parameter_supported` stay omitted: both
 							// default to `false`.
 							...(authorizationEndpoint ? { request_uri_parameter_supported: false } : {}),
+							// RFC 9207 §3: every authorization response carries `iss`
+							// (`routes/authorizationResponse.mts`); with no authorization
+							// endpoint there is none to carry it.
+							...(authorizationEndpoint
+								? { authorization_response_iss_parameter_supported: true }
+								: {}),
 							...(cimdSupported ? { client_id_metadata_document_supported: true } : {}),
 							subject_types_supported: ["public"],
 							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)

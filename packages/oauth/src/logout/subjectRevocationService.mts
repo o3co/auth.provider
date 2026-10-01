@@ -42,7 +42,7 @@ import {
 	resolveFederationGrantKeepPolicy,
 	resolveSubjectRevocationHorizonMs,
 } from "@o3co/auth-provider-core";
-import { cascadeLogout } from "./cascadeLogout.mjs";
+import { cascadeLogoutUnmarked } from "./cascadeLogout.mjs";
 
 const NAME = "subjectRevocationServiceModule";
 
@@ -213,13 +213,13 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				// can leave its family unrevoked; with one, the subject watermark
 				// covers it.
 				cascadeSession: async (sid: string) => ({
-					// `cascadeLogout` answers with its own union, and its `step`
+					// The cascade answers with its own union, and its `step`
 					// is what makes a failure retryable. What this needs is the
 					// one bit the helper's loop branches on; the detail is
 					// already in the log the cascade wrote.
 					ok:
 						(
-							await cascadeLogout({
+							await cascadeLogoutUnmarked({
 								sid,
 								refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
 								federationTokenStore: deps.federationTokenStore,

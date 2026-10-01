@@ -16,8 +16,9 @@
 
 /**
  * Redis {@link MfaTransactionStore}: the single-use record of each
- * second-factor ceremony, the subject lock that bounds guessable proofs, the
- * email proof an operator reset requires, the account-email proof given in a
+ * second-factor ceremony, the subject lock that bounds guessable proofs and
+ * its authorized recovery, a subject's generation, lease and recovery-set
+ * floor, the email proof an operator reset requires, the account-email proof given in a
  * session, and a subject's first-binding mark (see
  * packages/core/docs/adr/2026-09-25-multi-factor-authentication.md).
  *
@@ -25,14 +26,20 @@
  * <keyPrefix>tx:{<id>}                          HASH   one transaction, expiring at its expiresAtMs
  * <keyPrefix>lock:{<subject>}                   HASH   the lockout run, reservations in flight, the hard hold
  * <keyPrefix>week:{<subject>}                   ZSET   the weekly window: one member per attempt, scored by time
+ * <keyPrefix>recovery:{<subject>}               HASH   the generation, the recovery-set floor, the recovery authorizations
+ * <keyPrefix>lease:{<subject>}                  STRING the lease holder's token, expiring at the lease's end
  * <keyPrefix>proof:{<subject>}                  STRING the email-proof requirement, with no TTL
  * <keyPrefix>session-proof:{<subject>}:<sid>    STRING a session's account-email proof, expiring at its end
  * <keyPrefix>first-binding:{<subject>}          STRING a subject's first-binding mark, expiring at its end
  * ```
  *
  * `<id>`, `<subject>` and `<sid>` are base64url of their JSON (`internal/mfa-keys.mts`).
- * A subject's lock and week share its hash tag, so each operation on them is one
- * script on one Cluster slot. Every operation a race could split is one script
+ * A subject's lock, week, recovery hash and lease share its hash tag, so each
+ * operation on them is one script on one Cluster slot. The recovery hash
+ * carries no TTL once it holds a generation or a floor (losing either would
+ * refuse a writer or bring an older recovery-code set back); before that it
+ * expires a day after its latest authorization ends. A lease and an
+ * authorization end on the server's clock. Every operation a race could split is one script
  * (`makeIoredisClients`): insert-only create, compare-and-set update,
  * `reserveAttempt`, `takeChallenge`, `consume`, and each lockout step, which
  * reads, decides and writes the subject state at once.
@@ -51,8 +58,8 @@
  * Lockout answers are judged on the time the caller passes; what the scripts
  * forget and Redis reclaims is judged no later than the server's clock less
  * `MFA_CLOCK_SKEW_ALLOWANCE_MS`. While a run is counted (until a success, an
- * exempt success before the hard hold or `clearSubjectState`) or the hard
- * hold stands (until `clearSubjectState`) the subject's keys carry no TTL,
+ * exempt success before the hard hold or an applied recovery) or the hard
+ * hold stands (until an applied recovery) the subject's keys carry no TTL,
  * and a subject state a script cannot read is refused, never read as empty.
  *
  * The requirement must last as enrolled factors do: it has no TTL, and the
@@ -83,8 +90,14 @@ import {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
 	checkMfaVersionAdvances,
+	checkRecoverySetFloorRaise,
 	checkSessionEmailProof,
 	checkSessionEmailProofQuestion,
+	checkSubjectLeaseRelease,
+	checkSubjectLeaseRequest,
+	checkSubjectQuestion,
+	checkSubjectRecoveryApplication,
+	checkSubjectRecoveryAuthorization,
 	consoleLogger,
 	DEFAULT_CLOCK_SKEW_MS,
 	defineModule,
@@ -92,11 +105,14 @@ import {
 	firstBindingAnswer,
 	isStorableExpiry,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
+	type MfaSubjectRecoveryOperation,
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
+	readMfaSubjectRecoveryAnswer,
 	type SessionEmailProof,
 	sessionEmailProofAnswer,
 } from "@o3co/auth-provider-core";
@@ -291,6 +307,52 @@ function firstBindingMarkOf(text: string | null, subject: string): FirstBindingM
 	return { atMs: atMs as number, untilMs: untilMs as number };
 }
 
+const flag = (text: string | undefined): boolean | undefined =>
+	text === "1" ? true : text === "0" ? false : undefined;
+
+/** A generation as the apply script answers it: canonical decimal text of a safe whole number from 1; `undefined` for anything else. */
+const generationText = (text: string | undefined): number | undefined =>
+	text !== undefined && /^[1-9][0-9]*$/.test(text) && Number.isSafeInteger(Number(text))
+		? Number(text)
+		: undefined;
+
+/** The apply script's reply in the port's terms, for core's reading to hold to the port. */
+function recoveryAnswerOf(reply: readonly string[]): unknown {
+	const [outcome, a, b, c, d, e, f] = reply;
+	if (outcome === "refused") return { outcome, reason: a, hard: flag(b) };
+	if (outcome === "already") {
+		return {
+			outcome: "already_applied",
+			recoveryId: a,
+			generation: generationText(b),
+			hard: flag(c),
+		};
+	}
+	if (outcome === "applied") {
+		return {
+			outcome,
+			recoveryId: a,
+			generation: generationText(b),
+			cleared: { week: flag(c), run: flag(d), hard: flag(e) },
+			hard: flag(f),
+		};
+	}
+	return undefined;
+}
+
+/** An authorization's field in the recovery hash: its operation and its sid (`-` for none). */
+const recoveryField = (operation: MfaSubjectRecoveryOperation, sid: string | undefined): string =>
+	`a:${operation}:${sid === undefined ? "-" : mfaKeyPart(sid)}`;
+
+/** A count the recovery hash keeps (the generation, the floor): absent is 0; anything but decimal text of a safe whole number is an outage. */
+function countIn(text: string | null, what: string): number {
+	if (text === null) return 0;
+	const count = countOf(text);
+	if (!Number.isSafeInteger(count))
+		throw new Error(`MfaTransactionStore: a ${what} it cannot read`);
+	return count;
+}
+
 function checkInstant(nowMs: number, operation: string): void {
 	if (!isStorableExpiry(nowMs)) {
 		throw new RangeError(
@@ -311,7 +373,12 @@ export function createRedisMfaTransactionStore(
 	const txKey = (id: string): string => `${keyPrefix}tx:{${mfaKeyPart(id)}}`;
 	const subjectKeys = (subject: string): MfaSubjectKeys => {
 		const tag = `{${mfaKeyPart(subject)}}`;
-		return { lock: `${keyPrefix}lock:${tag}`, week: `${keyPrefix}week:${tag}` };
+		return {
+			lock: `${keyPrefix}lock:${tag}`,
+			week: `${keyPrefix}week:${tag}`,
+			recovery: `${keyPrefix}recovery:${tag}`,
+			lease: `${keyPrefix}lease:${tag}`,
+		};
 	};
 	const proofKey = (subject: string): string => `${keyPrefix}proof:{${mfaKeyPart(subject)}}`;
 	const sessionProofKey = (subject: string, sid: string): string =>
@@ -417,11 +484,6 @@ export function createRedisMfaTransactionStore(
 			await client.noteExemptSuccess(subjectKeys(subject), { nowMs, policy: checked });
 		},
 
-		async clearSubjectState(subject) {
-			// The email-proof requirement is not lock state: it stays.
-			await client.clearSubjectState(subjectKeys(subject));
-		},
-
 		async requireEmailProofAtNextBinding(subject) {
 			await client.requireEmailProof(proofKey(subject));
 		},
@@ -474,6 +536,74 @@ export function createRedisMfaTransactionStore(
 			const mark = firstBindingMarkOf(value, subject);
 			return mark === null ? null : firstBindingAnswer(mark, serverNowMs);
 		},
+
+		async subjectGeneration(subject) {
+			checkSubjectQuestion("subjectGeneration", subject);
+			return countIn(await client.subjectGeneration(subjectKeys(subject)), "subject generation");
+		},
+
+		async acquireSubjectLease(subject, request) {
+			const { ttlMs, generation } = checkSubjectLeaseRequest(subject, request);
+			const token = randomBytes(16).toString("base64url");
+			const reply = await client.acquireSubjectLease(subjectKeys(subject), {
+				token,
+				ttlMs,
+				generation,
+			});
+			return reply.outcome === "acquired" ? { outcome: "acquired", token } : reply;
+		},
+
+		async releaseSubjectLease(subject, token) {
+			checkSubjectLeaseRelease(subject, token);
+			return client.releaseSubjectLease(subjectKeys(subject), token);
+		},
+
+		async raiseRecoverySetFloor(subject, raise) {
+			const checked = checkRecoverySetFloorRaise(subject, raise);
+			const reply = await client.raiseRecoverySetFloor(subjectKeys(subject), checked);
+			return reply.raised
+				? { outcome: "raised", floor: countIn(reply.floor, "recovery-set floor") }
+				: { outcome: "refused", reason: "lease_not_held" };
+		},
+
+		async recoverySetFloor(subject) {
+			checkSubjectQuestion("recoverySetFloor", subject);
+			return countIn(await client.recoverySetFloor(subjectKeys(subject)), "recovery-set floor");
+		},
+
+		async authorizeSubjectRecovery(subject, authorization) {
+			// The shape here; the clock's bounds in the script, on the server's clock.
+			const checked = checkSubjectRecoveryAuthorization(subject, authorization);
+			const reply = await client.authorizeSubjectRecovery(subjectKeys(subject), {
+				field: recoveryField(checked.operation, checked.sid),
+				recoveryId: checked.recoveryId,
+				expiresAtMs: checked.expiresAtMs,
+				maxAheadMs: MFA_RECOVERY_AUTHORIZATION_MAX_MS + DEFAULT_CLOCK_SKEW_MS,
+			});
+			if (reply.authorized) return;
+			checkSubjectRecoveryAuthorization(subject, authorization, reply.serverNowMs);
+			throw new RangeError(
+				"MfaTransactionStore.authorizeSubjectRecovery: the authorization does not stand on the store's clock",
+			);
+		},
+
+		async applySubjectRecovery(subject, application) {
+			const checked = checkSubjectRecoveryApplication(subject, application);
+			const reply = await client.applySubjectRecovery(subjectKeys(subject), {
+				operation: checked.operation,
+				field: recoveryField(checked.operation, checked.sid),
+				nowMs: checked.nowMs,
+				leaseToken: checked.leaseToken,
+				sessionsBoundaryMs: checked.sessionsBoundaryMs,
+				guessableBoundSinceMs: checked.guessableBoundSinceMs,
+				clockSkewMs: DEFAULT_CLOCK_SKEW_MS,
+			});
+			const answer = readMfaSubjectRecoveryAnswer(recoveryAnswerOf(reply));
+			if (answer === undefined) {
+				throw new Error("MfaTransactionStore: the apply script answered nothing it knows");
+			}
+			return answer;
+		},
 	};
 }
 
@@ -496,7 +626,9 @@ export function createRedisMfaTransactionStore(
  * (`mfa_transaction_store_lock_evictable`, naming `evictableFamilies`): the
  * lock state carries a TTL once no run is counted, and evicting it lifts a
  * lockout hold early; a first-binding mark carries one always, and evicting
- * it fails open — a stale session's first binding is no longer refused.
+ * it fails open — a stale session's first binding is no longer refused; a
+ * subject's lease carries one always, and evicting it lets a second writer
+ * at the subject's factor set.
  */
 export const redisMfaTransactionStoreModule = defineModule({
 	name: "redis-mfa-transaction-store",

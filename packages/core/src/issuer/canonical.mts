@@ -67,6 +67,14 @@ export function checkCanonicalIssuer(value: unknown): IssuerRejection | null {
 	return null;
 }
 
+/**
+ * The issuer as discovery advertises it (`issuer` in the OIDC discovery
+ * document, RFC 8414 §2): `issuer` with every trailing slash removed.
+ */
+export function advertisedIssuer(issuer: string): string {
+	return issuer.replace(/\/+$/, "");
+}
+
 /** Whether `value` is a usable canonical issuer. */
 export function isCanonicalIssuer(value: unknown): value is string {
 	return checkCanonicalIssuer(value) === null;

@@ -62,7 +62,15 @@ export type MfaFactor = ConcreteMfaFactor;
  */
 export type SessionRequirement = ConcreteSessionRequirement;
 
-/** Type produced by an `AuditHookFactory<Deps>` contribution: an `AuditSink`. */
+/**
+ * Type produced by an `AuditHookFactory<Deps>` contribution: an `AuditSink`
+ * core hands every event the `auditSink` slot records, after the slot's own
+ * sink and the hooks registered before it (`createAuditFanOut`). An event
+ * recorded while a hook runs, in its async context, reaches the slot's own
+ * sink alone (`audit_sink_reentered`); work a hook hands to something made
+ * outside that context escapes the guard, so a hook must not emit from
+ * `record`. Its `record` must be a function, or boot refuses it.
+ */
 export type AuditHook = AuditSink;
 
 /**
