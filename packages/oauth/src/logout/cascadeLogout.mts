@@ -33,6 +33,12 @@ export interface CascadeLogoutOptions {
 	 * rather than left unrevoked. Without it, the families are only listed.
 	 */
 	readonly expiresAt?: Date;
+	/**
+	 * The session's families as `beginLogout` read them when it ended the
+	 * session. Given, step 1 reads nothing and revokes these: no family joins
+	 * an ended session.
+	 */
+	readonly familyIds?: ReadonlyArray<string>;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	readonly federationTokenStore: FederationTokenStore;
 	readonly userSessionStore: UserSessionStore;
@@ -59,7 +65,8 @@ export type CascadeLogoutResult =
 /**
  * Runs the logout store cascade in a fixed order:
  *
- *   1. Read the fanout context: `sessionFamilyIndex.endSession` when the
+ *   1. Read the fanout context: the families `beginLogout` read, when given
+ *      (`familyIds`); else `sessionFamilyIndex.endSession` when the
  *      index has the session-end capability and `expiresAt` is given, which
  *      marks the session ended before it lists; `listFamilyIds` otherwise.
  *      Failure returns `failed` step 1; nothing else ran but, possibly, the
@@ -94,9 +101,10 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	let familyIds: ReadonlyArray<string>;
 	try {
 		familyIds =
-			opts.expiresAt !== undefined && supportsSessionEnd(index)
+			opts.familyIds ??
+			(opts.expiresAt !== undefined && supportsSessionEnd(index)
 				? await index.endSession(opts.sid, opts.expiresAt)
-				: await index.listFamilyIds(opts.sid);
+				: await index.listFamilyIds(opts.sid));
 	} catch (error) {
 		return { outcome: "failed", step: 1, errors: [error] };
 	}

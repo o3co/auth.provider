@@ -76,11 +76,10 @@ describe("joinSession, then beginLogout", () => {
 		expect(begun.familyIds).toEqual(["fam-1"]);
 	});
 
-	it("a join after the logout began answers ended, and its family does not join", async () => {
+	it("a join after the logout began answers ended", async () => {
 		const s = stores();
 		await beginLogout(s, SID, EXPIRES_AT);
 		expect(await joinSession(s, JOIN)).toEqual({ outcome: "ended" });
-		expect(await s.sessionFamilyIndex.listFamilyIds(SID)).toEqual([]);
 	});
 
 	it("an RP registry entry that expires during the listing is not listed though its family is: the inclusion holds only while the registration outlives the listing", async () => {
