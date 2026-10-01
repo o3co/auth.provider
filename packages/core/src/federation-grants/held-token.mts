@@ -56,7 +56,7 @@ export function federationGrantAccessToken(
 export function federationGrantHeldToken(token: StoredAccessToken): HeldUpstreamToken {
 	const obtainedAt = instantOf(token.obtainedAt) ?? Number.NaN;
 	const lifetime = token.issuedLifetime;
-	const issuedEnd = typeof lifetime === "number" ? obtainedAt + lifetime * 1000 : Number.NaN;
+	const issuedEnd = Number.isFinite(lifetime) ? obtainedAt + lifetime * 1000 : Number.NaN;
 	const effective = token.effectiveExpiresAt;
 	const end =
 		effective === undefined ? issuedEnd : Math.min(instantOf(effective) ?? Number.NaN, issuedEnd);
