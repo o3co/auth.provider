@@ -100,13 +100,6 @@ describe("readMfaSubjectAttemptReservation", () => {
 		});
 	});
 
-	it("reads a pass whose reservation is empty as a pass", () => {
-		expect(readMfaSubjectAttemptReservation({ ok: true, reservation: "" })).toStrictEqual({
-			ok: true,
-			reservation: "",
-		});
-	});
-
 	it("reads a hold with its time to come back, none for the hard hold, and whether it is first", () => {
 		expect(
 			readMfaSubjectAttemptReservation({
@@ -153,7 +146,9 @@ describe("readMfaSubjectAttemptReservation", () => {
 		["nothing", undefined],
 		["null", null],
 		["a string", "r-1"],
+		["an array carrying a pass's fields", Object.assign([], { ok: true, reservation: "r-1" })],
 		["a pass without its reservation", { ok: true }],
+		["a pass whose reservation is empty", { ok: true, reservation: "" }],
 		["a pass whose reservation is not a string", { ok: true, reservation: 1 }],
 		["an ok that is truthy but not true", { ok: "yes", reservation: "r-1" }],
 		["an ok that is missing", { reservation: "r-1" }],
