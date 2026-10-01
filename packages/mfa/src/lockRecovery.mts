@@ -189,17 +189,17 @@ export function createMfaLockRecovery(options: MfaLockRecoveryOptions): MfaLockR
 				step: "revokedBefore",
 				cause,
 			}) as const;
-		let read: unknown;
+		let at: number | null;
 		try {
-			read = await subjectRevocation.revokedBefore(subject);
+			const read: unknown = await subjectRevocation.revokedBefore(subject);
+			// Read inside the guard: a Date whose reads throw (a proxy, say) is the boundary's outage.
+			at = read === null ? null : read instanceof Date ? read.getTime() : Number.NaN;
 		} catch (cause) {
 			return outage(cause);
 		}
-		if (read === null) return { at: undefined };
-		if (!(read instanceof Date) || !Number.isSafeInteger(read.getTime()) || read.getTime() < 0) {
-			return outage(OUTSIDE_CONTRACT);
-		}
-		return { at: read.getTime() };
+		if (at === null) return { at: undefined };
+		if (!Number.isSafeInteger(at) || at < 0) return outage(OUTSIDE_CONTRACT);
+		return { at };
 	};
 
 	/** The store's answer as the page reads it. */
