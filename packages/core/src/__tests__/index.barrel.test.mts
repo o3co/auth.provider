@@ -129,6 +129,13 @@ describe("core barrel — federation grant domain rules", () => {
 	});
 });
 
+describe("core barrel — the grant policy's answers", () => {
+	it("re-exports the answer to a policy that throws, beside the answer to one past its ceiling", () => {
+		expect(typeof core.policyUnavailable).toBe("function");
+		expect(typeof core.policyOutOfBounds).toBe("function");
+	});
+});
+
 describe("core barrel — the federation adapter toolkit", () => {
 	it("re-exports the pure helpers every adapter builds its requests with", () => {
 		// They were `@o3co/auth-provider-session`'s, which is a router; an
