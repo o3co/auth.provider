@@ -142,6 +142,21 @@ describe("createInMemorySubjectRevocation — its clock", () => {
 		]);
 	});
 
+	it("records the clamped boundary even when its logger throws", async () => {
+		// The boundary is what ends tokens already issued: a failing log sink
+		// must not cost the revocation.
+		const logger = {
+			warn: () => {
+				throw new Error("log sink down");
+			},
+		};
+		const store = createInMemorySubjectRevocation({ now: () => NOW, logger });
+		const ahead = new Date(NOW + DEFAULT_CLOCK_SKEW_MS + 60_000);
+		await store.revokeBefore("u", ahead, new Date(NOW + 600_000));
+		expect((await store.revokedBefore("u"))?.getTime()).toBe(NOW + DEFAULT_CLOCK_SKEW_MS);
+		expect((await store.grantsRevokedBefore("u"))?.getTime()).toBe(NOW + DEFAULT_CLOCK_SKEW_MS);
+	});
+
 	it("refuses an instant that is no Date, writing nothing", async () => {
 		const store = createInMemorySubjectRevocation({ now: () => NOW });
 		const until = new Date(NOW + 600_000);

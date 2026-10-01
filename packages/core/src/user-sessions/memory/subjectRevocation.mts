@@ -100,11 +100,23 @@ export function createInMemorySubjectRevocation(
 		});
 	};
 
-	/** The boundary to record for `before`, on this store's clock; a clamp is said at warn. */
-	const boundaryOf = (subject: string, before: Date, expiresAt: Date): [number, number] => {
+	/**
+	 * Records `before`, clamped on this store's clock, and then says a clamp
+	 * at warn. The write comes first and a failing logger is ignored: the
+	 * boundary is what ends tokens already issued.
+	 */
+	const record = (
+		subject: string,
+		before: Date,
+		expiresAt: Date,
+		grants: "advance" | "keep",
+	): void => {
 		const expiresAtMs = checkSubjectRevocationInstant(expiresAt, "expiresAt");
 		const { boundary, clamped } = clampSubjectRevocationBoundary(before, clock());
-		if (clamped) {
+		const beforeMs = boundary.getTime();
+		write(subject, beforeMs, grants === "advance" ? beforeMs : null, expiresAtMs);
+		if (!clamped) return;
+		try {
 			options.logger?.warn(
 				{
 					store: "memory",
@@ -114,21 +126,20 @@ export function createInMemorySubjectRevocation(
 				},
 				"subject_revocation_boundary_clamped",
 			);
+		} catch {
+			// The boundary is recorded; only its signal is lost.
 		}
-		return [boundary.getTime(), expiresAtMs];
 	};
 
 	return {
 		kind: "memory",
 
 		async revokeBefore(subject, before, expiresAt) {
-			const [beforeMs, expiresAtMs] = boundaryOf(subject, before, expiresAt);
-			write(subject, beforeMs, beforeMs, expiresAtMs);
+			record(subject, before, expiresAt, "advance");
 		},
 
 		async revokeSessionsBefore(subject, before, expiresAt) {
-			const [beforeMs, expiresAtMs] = boundaryOf(subject, before, expiresAt);
-			write(subject, beforeMs, null, expiresAtMs);
+			record(subject, before, expiresAt, "keep");
 		},
 
 		async revokedBefore(subject) {
