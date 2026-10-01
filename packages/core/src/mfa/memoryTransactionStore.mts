@@ -480,14 +480,23 @@ export function createMemoryMfaTransactionStore(
 			settleEmpty(subject, state);
 		},
 
-		async noteExemptSuccess(subject: string, nowMs: number): Promise<void> {
+		async noteExemptSuccess(
+			subject: string,
+			nowMs: number,
+			policy: MfaLockoutPolicy,
+		): Promise<void> {
+			const { hardLimit } = checkMfaLockoutPolicy(policy);
 			checkInstant(nowMs, "noteExemptSuccess");
 			sawCallerTime(nowMs);
 			const state = subjects.get(subject);
 			if (state === undefined) return;
 			prune(state, nowMs);
-			// The run up to this success ends; an attempt reserved later stays.
-			state.run = state.run.filter((a) => a.atMs > nowMs);
+			// The attempts up to this success end while fewer than the hard
+			// limit; at it they stand until cleared. A later attempt stays.
+			const upTo = state.run.filter((a) => a.atMs <= nowMs);
+			if (upTo.length < hardLimit) {
+				state.run = state.run.filter((a) => a.atMs > nowMs);
+			}
 			settleEmpty(subject, state);
 			if (schedule.wrote()) sweep(clock());
 		},

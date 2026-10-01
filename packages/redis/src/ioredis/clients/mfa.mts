@@ -164,7 +164,12 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			await runScript(io, MFA_SUBJECT_SETTLE, [keys.lock, keys.week], [reservation, outcome]);
 		},
 		async noteExemptSuccess(keys, input) {
-			await runScript(io, MFA_SUBJECT_EXEMPT, [keys.lock, keys.week], [String(input.nowMs)]);
+			await runScript(
+				io,
+				MFA_SUBJECT_EXEMPT,
+				[keys.lock, keys.week],
+				[String(input.nowMs), String(input.policy.hardLimit)],
+			);
 		},
 		async clearSubjectState(keys) {
 			await io.del(keys.lock, keys.week);
