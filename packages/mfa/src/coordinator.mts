@@ -148,11 +148,7 @@ import { createLoginReopen } from "./reopen.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import { createMfaStepUp } from "./stepUp.mjs";
-import {
-	openEnrollTransaction,
-	openLoginBinding,
-	openStepUpTransaction,
-} from "./transactions.mjs";
+import { openEnrollTransaction, openLoginBinding, openStepUpTransaction } from "./transactions.mjs";
 import { type MfaEnrollmentWitness, reconciles, reconcilesSession } from "./witness.mjs";
 
 /** A transaction id as the login makes one: 32 bytes, base64url. */

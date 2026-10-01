@@ -201,6 +201,18 @@ type Escalation =
 	| "invalid"
 	| "unavailable";
 
+/** What a step-up answers an escalation that did not land: a new login, an outage, or one nobody can retry. */
+const ESCALATION_REFUSALS: Readonly<
+	Record<Exclude<Escalation, "escalated">, readonly [status: number, body: object]>
+> = {
+	unrecordable_store: [401, LOGIN_REQUIRED],
+	not_recorded: [401, LOGIN_REQUIRED],
+	not_renewed: [503, SESSION_STORE_UNAVAILABLE],
+	unavailable: [503, SESSION_STORE_UNAVAILABLE],
+	unbound: [500, STEP_UP_UNRECORDED],
+	invalid: [500, STEP_UP_UNRECORDED],
+};
+
 /** Which route a line is logged by: the enrollment's two share one name. */
 type RouteName = "transaction" | "challenge" | "verify" | "enrollment" | "step-up";
 
@@ -318,7 +330,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 	const admitCookie = async (
 		req: Request,
 		action: MfaAdmissionAction | IssuedRemediationAction,
-	): Promise<{ readonly admitted: Admission; readonly expectedRenewalNonce: string | undefined }> => {
+	): Promise<{
+		readonly admitted: Admission;
+		readonly expectedRenewalNonce: string | undefined;
+	}> => {
 		// express-session's `req.session`, read without its type package.
 		const claim = cookieClaim(req as unknown as CookieCarrier);
 		return {
@@ -695,27 +710,14 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		return "escalated";
 	};
 
-	/** A step-up's answer for how its escalation ended (`escalateSession`). */
+	/** A step-up's answer for how its escalation ended (`escalateSession`): `answer` once escalated. */
 	const answerEscalation = (res: Response, escalation: Escalation, answer: object): void => {
-		switch (escalation) {
-			case "escalated":
-				res.status(200).json(answer);
-				return;
-			case "unrecordable_store":
-			case "not_recorded":
-				res.status(401).json(LOGIN_REQUIRED);
-				return;
-			case "not_renewed":
-			case "unavailable":
-				res.status(503).json(SESSION_STORE_UNAVAILABLE);
-				return;
-			case "unbound":
-			case "invalid":
-				res.status(500).json(STEP_UP_UNRECORDED);
-				return;
-			default:
-				return escalation satisfies never;
+		if (escalation === "escalated") {
+			res.status(200).json(answer);
+			return;
 		}
+		const [status, body] = ESCALATION_REFUSALS[escalation];
+		res.status(status).json(body);
 	};
 
 	router

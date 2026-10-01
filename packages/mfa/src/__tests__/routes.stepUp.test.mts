@@ -476,9 +476,7 @@ describe("the step-up of a subject holding a counting factor", () => {
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(res.body.email_proof).toBe(false);
-		expect((await transactionStore.get(res.body.transaction as string))?.purpose).toBe(
-			"step_up",
-		);
+		expect((await transactionStore.get(res.body.transaction as string))?.purpose).toBe("step_up");
 	});
 
 	it("answers the session's own step_up transaction again when named, and opens no other", async () => {
@@ -527,9 +525,7 @@ describe("the step-up of a subject holding a counting factor", () => {
 			"urn:o3co:acr:mfa",
 			"urn:example:gold",
 		]);
-		expect(await opened(Array.from({ length: 16 }, (_, n) => `a${n}`).join(" "))).toHaveLength(
-			16,
-		);
+		expect(await opened(Array.from({ length: 16 }, (_, n) => `a${n}`).join(" "))).toHaveLength(16);
 		expect(await opened("x".repeat(256))).toEqual(["x".repeat(256)]);
 		for (const malformed of [
 			"urn:o3co:acr:mfa\turn:example:gold",
@@ -570,9 +566,7 @@ describe("the step-up of a subject holding a counting factor", () => {
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		const listed = (await readTransaction(agent, res.body.transaction as string)).body.factors;
-		expect(listed).toEqual(
-			expect.arrayContaining([expect.objectContaining({ id: recovery.id })]),
-		);
+		expect(listed).toEqual(expect.arrayContaining([expect.objectContaining({ id: recovery.id })]));
 		expect(await transactionStore.get(res.body.transaction as string)).toMatchObject({
 			purpose: "step_up",
 		});
