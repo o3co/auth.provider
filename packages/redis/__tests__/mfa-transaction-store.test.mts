@@ -1551,4 +1551,143 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		expect(await first().exists(lock, week)).toBe(0);
 		expect((await store.reserveSubjectAttempt("user-1", Date.now(), POLICY)).ok).toBe(true);
 	});
+
+	/** Each key's serialized value and deadline: equal only for keys left byte for byte as they were. */
+	const snapshot = async (keys: readonly string[]) =>
+		Promise.all(
+			keys.map(async (key) => ({
+				key,
+				value: await first().dumpBuffer(key),
+				ttl: await first().pttl(key),
+			})),
+		);
+
+	/** A subject with failures in its run and week, a pending recover and reset authorized, and the lease held. */
+	async function primed(prefix: string): Promise<{ store: MfaTransactionStore; token: string }> {
+		const store = storeAt(prefix);
+		for (let i = 0; i < 3; i++) {
+			const reserved = await store.reserveSubjectAttempt("user-1", Date.now() - HOUR + i, POLICY);
+			if (!reserved.ok) throw new Error("expected a reservation");
+			await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
+		}
+		for (const operation of ["recover", "reset"] as const) {
+			await store.authorizeSubjectRecovery("user-1", {
+				operation,
+				sid: operation === "recover" ? "sid-1" : undefined,
+				recoveryId: `${operation}-1`,
+				expiresAtMs: Date.now() + 10 * MINUTE,
+			});
+		}
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
+		if (lease.outcome !== "acquired") throw new Error("expected a lease");
+		return { store, token: lease.token };
+	}
+
+	const applyOf = (
+		store: MfaTransactionStore,
+		operation: "recover" | "reset",
+		leaseToken: string,
+	): Promise<MfaSubjectRecoveryAnswer> =>
+		store.applySubjectRecovery("user-1", {
+			operation,
+			sid: operation === "recover" ? "sid-1" : undefined,
+			nowMs: Date.now(),
+			leaseToken,
+			sessionsBoundaryMs: operation === "recover" ? Date.now() : undefined,
+			guessableBoundSinceMs: operation === "recover" ? null : undefined,
+		});
+
+	it.each([
+		["a generation that is not a count", "g", "x"],
+		["a generation with a leading zero", "g", "01"],
+		["a floor with a leading zero", "floor", "01"],
+		["another session's authorization it cannot read", `a:recover:${keyPart("sid-2")}`, "garbage"],
+		["an applied authorization at generation 0", `a:recover:${keyPart("sid-2")}`, "a|0|1|r"],
+	])(
+		"answers a recover and a reset an outage when the recovery hash holds %s, leaving the lock, week and recovery keys as they were",
+		async (_label, field, value) => {
+			const prefix = freshPrefix();
+			const { store, token } = await primed(prefix);
+			const keys = keysOf(prefix);
+			await first().hset(keys.recovery, field, value);
+			const before = await snapshot([keys.lock, keys.week, keys.recovery]);
+			for (const operation of ["recover", "reset"] as const) {
+				await expect(applyOf(store, operation, token), operation).rejects.toThrow(/subject state/);
+				expect(await snapshot([keys.lock, keys.week, keys.recovery]), operation).toEqual(before);
+			}
+		},
+	);
+
+	it("answers an authorize an outage when the recovery hash holds another authorization it cannot read, writing nothing", async () => {
+		const prefix = freshPrefix();
+		const { store } = await primed(prefix);
+		const { recovery } = keysOf(prefix);
+		await first().hset(recovery, `a:recover:${keyPart("sid-2")}`, "garbage");
+		const before = await snapshot([recovery]);
+		await expect(
+			store.authorizeSubjectRecovery("user-1", {
+				operation: "recover",
+				sid: "sid-3",
+				recoveryId: "r-3",
+				expiresAtMs: Date.now() + 10 * MINUTE,
+			}),
+		).rejects.toThrow(/subject state/);
+		expect(await snapshot([recovery])).toEqual(before);
+	});
+
+	it("reads a generation or a floor with a leading zero as an outage, in the reads and in the scripts alike", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const { recovery } = keysOf(prefix);
+		const lease = await store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 });
+		if (lease.outcome !== "acquired") throw new Error("expected a lease");
+		await first().hset(recovery, "g", "01", "floor", "02");
+		await expect(store.subjectGeneration("user-1")).rejects.toThrow(/generation/);
+		await expect(
+			store.acquireSubjectLease("user-2", { ttlMs: 60_000, generation: 0 }),
+		).resolves.toMatchObject({ outcome: "acquired" });
+		await expect(
+			store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 1 }),
+		).rejects.toThrow(/subject state/);
+		await expect(store.recoverySetFloor("user-1")).rejects.toThrow(/floor/);
+		await expect(
+			store.raiseRecoverySetFloor("user-1", { setGeneration: 3, leaseToken: lease.token }),
+		).rejects.toThrow(/subject state/);
+		expect(await first().hget(recovery, "floor")).toBe("02");
+	});
+
+	it("refuses an apply, and a floor raise, under a lease key with no deadline, which it never writes", async () => {
+		const prefix = freshPrefix();
+		const { store, token } = await primed(prefix);
+		const { lease } = keysOf(prefix);
+		await first().persist(lease);
+		expect(await applyOf(store, "reset", token)).toMatchObject({
+			outcome: "refused",
+			reason: "lease_not_held",
+		});
+		expect(
+			await store.raiseRecoverySetFloor("user-1", { setGeneration: 1, leaseToken: token }),
+		).toEqual({ outcome: "refused", reason: "lease_not_held" });
+	});
+
+	it("answers a lease at its last millisecond as busy for at least one more, and one with no deadline as an outage", async () => {
+		const keys = keysOf("mfat:stub:");
+		const input = { token: "t", ttlMs: 60_000, generation: 0 };
+		const answering = (reply: unknown) =>
+			makeIoredisMfaTransactionStoreClient({
+				evalsha: async () => reply,
+				eval: async () => reply,
+			} as unknown as Redis);
+		await expect(answering(["busy", 0]).acquireSubjectLease(keys, input)).resolves.toEqual({
+			outcome: "busy",
+			retryAfterMs: 1,
+		});
+		await expect(answering(["busy", 250]).acquireSubjectLease(keys, input)).resolves.toEqual({
+			outcome: "busy",
+			retryAfterMs: 250,
+		});
+		await expect(answering(["busy", -1]).acquireSubjectLease(keys, input)).rejects.toThrow(
+			/lease script/,
+		);
+	});
 });
