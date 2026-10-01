@@ -272,6 +272,38 @@ describe("http — the rest of the section", () => {
 	});
 
 	it.each([
+		[8080, 8080],
+		[" 8080 ", 8080],
+		[65_535, 65_535],
+	])("reads the port %j as %j", (port, read) => {
+		expect(httpSectionSchema.parse(http({ port })).port).toBe(read);
+	});
+
+	it.each([0, "0"])("keeps an explicit %j as the port, the OS choosing a free one", (port) => {
+		expect(httpSectionSchema.parse(http({ port })).port).toBe(0);
+	});
+
+	it.each([
+		["the empty string an exported-but-empty HTTP_PORT carries", ""],
+		["a blank variable", "  "],
+		["hexadecimal", "0x50"],
+		["an exponent", "8e3"],
+		["a sign", "+80"],
+		["a negative number", -1],
+		["a fraction", 80.5],
+		["a number above 65535", 65_536],
+		["a number above 65535, as the variable's string", "65536"],
+		["null", null],
+		["true", true],
+	])("refuses %s as the port, naming http.port and HTTP_PORT", (_what, port) => {
+		const result = httpSectionSchema.safeParse(http({ port }));
+		expect(issuePaths(result)).toEqual(["port"]);
+		const message = result.error?.issues.map((issue) => issue.message).join("\n");
+		expect(message).toContain("http.port");
+		expect(message).toContain("HTTP_PORT");
+	});
+
+	it.each([
 		["a key the section does not declare", http({ host: "0.0.0.0" })],
 		["a key cors does not declare", http({ cors: { allowedOrigins: [], credentials: true } })],
 	])("refuses %s", (_what, section) => {
