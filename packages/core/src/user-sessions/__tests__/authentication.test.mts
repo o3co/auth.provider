@@ -183,6 +183,50 @@ describe("vouchedAmr — the amr this provider vouches for", () => {
 			expect(vouchedAmr(recorded(amr, FEDERATED))).toEqual([]);
 		},
 	);
+
+	it.each([
+		["an empty string", ["", "fed"]],
+		["a non-string", ["fed", 1]],
+	])(
+		"is fed alone for a pre-upgrade federated session whose amr also holds %s: the split comes first",
+		(_label, stored) => {
+			// An older federation callback recorded such values beside `fed`; none
+			// of them is vouched for, and `fed` still is.
+			const amr = stored as unknown as readonly string[];
+			expect(vouchedAmr(session(amr))).toEqual(["fed"]);
+			expect(vouchedAmr(recorded(amr, FEDERATED))).toEqual([]);
+		},
+	);
+});
+
+describe("sessionAfterSecondFactor — a recorded session whose stored amr is not well formed", () => {
+	const PASSWORD: SessionAuthentication = {
+		primary: "pwd",
+		federation: undefined,
+		upstreamAmr: undefined,
+		mfaAt: undefined,
+	};
+	const at = new Date("2026-09-28T00:10:00Z");
+	const event = { amr: ["otp", "mfa"], at };
+
+	it.each([
+		["a string", "pwd"],
+		["an array holding an empty string", ["pwd", ""]],
+		["an array holding a non-string", ["pwd", 1]],
+		["an object", { 0: "pwd", length: 1 }],
+	])("is null for one whose amr is %s: what it vouches for cannot be told", (_label, stored) => {
+		const amr = stored as unknown as readonly string[];
+		expect(sessionAfterSecondFactor(recorded(amr, PASSWORD), event, at.getTime())).toBeNull();
+	});
+
+	it("records the factor on one that recorded no amr, or an empty one", () => {
+		for (const amr of [undefined, []]) {
+			expect(sessionAfterSecondFactor(recorded(amr, PASSWORD), event, at.getTime())?.amr).toEqual([
+				"otp",
+				"mfa",
+			]);
+		}
+	});
 });
 
 describe("requirementSession — the requirement rule's input, built from sessionAuthentication and vouchedAmr", () => {

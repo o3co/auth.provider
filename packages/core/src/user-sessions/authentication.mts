@@ -96,16 +96,31 @@ export function sessionAuthentication(session: UserSession): SessionAuthenticati
  * The `amr` this provider vouches for in `session`, copied: what `acr` is
  * matched against and a token may carry. A recorded session's `amr`, which
  * holds nothing else; for one written before the `authentication` key, the
- * split: a federated session vouches for `fed` alone. A stored `amr` that is
- * not `wellFormedAmr` vouches for nothing: a custom store's record is not
- * trusted for its shape.
+ * split: a federated session vouches for `fed` alone. Otherwise a stored
+ * `amr` that is not `wellFormedAmr` vouches for nothing: a custom store's
+ * record is not trusted for its shape.
  */
 export function vouchedAmr(session: UserSession): readonly string[] {
-	const amr = wellFormedAmr(session.amr) ?? [];
-	if (session.authentication === undefined && amr.includes(FEDERATED_AMR)) {
+	return readVouchedAmr(session) ?? [];
+}
+
+/**
+ * `vouchedAmr`'s answer, or `undefined` for a stored `amr` it cannot tell:
+ * present, not an empty array, and not `wellFormedAmr`. The split is made on
+ * the array before its shape is read, so a pre-upgrade federated record that
+ * also holds a value no token may carry still vouches for `fed`.
+ */
+function readVouchedAmr(session: UserSession): readonly string[] | undefined {
+	const stored: unknown = session.amr;
+	if (
+		session.authentication === undefined &&
+		Array.isArray(stored) &&
+		stored.includes(FEDERATED_AMR)
+	) {
 		return [FEDERATED_AMR];
 	}
-	return amr;
+	if (stored === undefined || (Array.isArray(stored) && stored.length === 0)) return [];
+	return wellFormedAmr(stored);
 }
 
 /** What a login path records about how the user authenticated: the `amr` and `authentication` a session is created with. */
@@ -319,7 +334,8 @@ export function recordableSessionAuthentication(
  * A pre-upgrade session is split first: `["hwk", "fed"]` plus TOTP becomes
  * `amr` `["fed", "otp", "mfa"]` and `upstreamAmr` `["hwk"]`, so an untrusted
  * IdP's `hwk` never meets `phr`. `null` for one whose primary cannot be
- * told. The event is checked first (`checkSecondFactorEvent`).
+ * told, or whose stored `amr` `vouchedAmr` cannot read. The event is checked
+ * first (`checkSecondFactorEvent`).
  */
 export function sessionAfterSecondFactor(
 	session: UserSession,
@@ -329,6 +345,8 @@ export function sessionAfterSecondFactor(
 	checkSecondFactorEvent(event, nowMs);
 	const authentication = sessionAuthentication(session);
 	if (authentication === undefined) return null;
+	const vouched = readVouchedAmr(session);
+	if (vouched === undefined) return null;
 	const atMs = Math.min(event.at.getTime(), nowMs);
 	const storedMs =
 		authentication.mfaAt === undefined
@@ -336,7 +354,7 @@ export function sessionAfterSecondFactor(
 			: Math.min(authentication.mfaAt.getTime(), nowMs);
 	const mfaAt = new Date(storedMs !== undefined && storedMs >= atMs ? storedMs : atMs);
 	return {
-		amr: [...new Set([...vouchedAmr(session), ...event.amr])],
+		amr: [...new Set([...vouched, ...event.amr])],
 		authentication: { ...authentication, mfaAt },
 	};
 }
