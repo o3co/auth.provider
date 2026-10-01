@@ -17,9 +17,9 @@
 /**
  * The MFA stores' answers, read as their ports promise them, beside the
  * bound read: a reservation, a subject attempt's reservation, a consumed
- * transaction, a factor's compare-and-set and a session's account-email proof. An answer outside the
- * promise is `undefined` or `false`, which a caller answers as the store's
- * outage — never as a verdict.
+ * transaction, a factor's compare-and-set and a session's account-email
+ * proof. An answer outside the promise is `undefined` or `false`, which a
+ * caller answers as the store's outage — never as a verdict.
  */
 
 import { describe, expect, it } from "vitest";
@@ -199,6 +199,24 @@ describe("readMfaSubjectAttemptReservation", () => {
 			ok: true,
 			reservation: "r-1",
 		});
+
+		let holdReads = 0;
+		const hold = {
+			ok: false,
+			hold: "backoff",
+			get retryAfterMs() {
+				holdReads++;
+				return holdReads === 1 ? 900_000 : -1;
+			},
+			first: true,
+		};
+		expect(readMfaSubjectAttemptReservation(hold)).toStrictEqual({
+			ok: false,
+			hold: "backoff",
+			retryAfterMs: 900_000,
+			first: true,
+		});
+		expect(holdReads).toBe(1);
 	});
 
 	it("reads an answer whose field throws as no answer", () => {

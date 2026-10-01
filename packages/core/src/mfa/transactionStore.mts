@@ -643,7 +643,10 @@ export type MfaSubjectAttemptReservation =
 	| {
 			readonly ok: false;
 			readonly hold: MfaSubjectHold;
-			/** Milliseconds from the time asked about until an attempt may be reserved; `null` for the hard hold. */
+			/**
+			 * Milliseconds from the time asked about until an attempt may be
+			 * reserved; above 0 for a backoff or weekly hold, `null` for the hard hold.
+			 */
 			readonly retryAfterMs: number | null;
 			/**
 			 * Whether this refusal begins an episode: the refusals from the first
