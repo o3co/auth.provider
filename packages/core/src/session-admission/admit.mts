@@ -65,6 +65,7 @@ import type {
 } from "../user-sessions/types.mjs";
 import { type AcrSelection, type AcrTable, selectAcr, stepUpReach } from "./acr.mjs";
 import type { AdmissionAction } from "./actions.mjs";
+import { isObject, nonEmptyString } from "./input-values.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -180,12 +181,6 @@ export function checkResolver(
 // ---------------------------------------------------------------------------
 // The claim builders
 // ---------------------------------------------------------------------------
-
-const nonEmptyString = (value: unknown): string | undefined =>
-	typeof value === "string" && value.length > 0 ? value : undefined;
-
-const isObject = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null;
 
 const claim = (fields: Omit<SessionClaim, never>): SessionClaim => {
 	const built = Object.freeze({ ...fields });
