@@ -19,9 +19,9 @@
  * order they can interleave: either the logout revokes the family the
  * exchange opened, or the exchange serves no token and revokes it itself.
  *
- * Driven through `cascadeLogout` and the real grant over core's memory
- * stores. A checkpoint holds one side at a store call while the other runs
- * to its answer.
+ * Driven through `cascadeLogout` or the real logout router, and the real
+ * grant, over core's memory stores. A checkpoint holds one side at a store
+ * call while the other runs to its answer.
  */
 
 import crypto from "node:crypto";
