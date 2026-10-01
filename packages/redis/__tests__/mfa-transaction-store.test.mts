@@ -44,7 +44,10 @@ import type { MfaTransactionStoreClient } from "#/clients.mjs";
 import {
 	MFA_FIRST_BINDING_NOTE,
 	MFA_FIRST_BINDING_READ,
+	MFA_RECOVERY_SET_FLOOR_RAISE,
 	MFA_SUBJECT_EXEMPT,
+	MFA_SUBJECT_LEASE_RELEASE,
+	MFA_SUBJECT_RECOVERY_APPLY,
 } from "#/ioredis/scripts/mfa.mjs";
 import { makeIoredisMfaTransactionStoreClient } from "#/ioredis.mjs";
 import { createRedisMfaTransactionStore } from "#/mfa-transaction-store.mjs";
@@ -1687,6 +1690,67 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		await expect(
 			store.acquireSubjectLease("user-1", { ttlMs: 60_000, generation: 0 }),
 		).rejects.toThrow(/subject state/);
+	});
+
+	/**
+	 * A connection on which every `PTTL` the release, apply and floor scripts ask answers 0: the
+	 * lease at its last millisecond, its token still held. The scripts run on the real server.
+	 */
+	const atLastMillisecond = (): Redis => {
+		const real = first();
+		const scripts = [
+			MFA_SUBJECT_LEASE_RELEASE,
+			MFA_SUBJECT_RECOVERY_APPLY,
+			MFA_RECOVERY_SET_FLOOR_RAISE,
+		];
+		const zeroed = (source: string): string =>
+			source
+				.replaceAll("redis.call('PTTL', KEYS[1])", "0")
+				.replaceAll("redis.call('PTTL', key)", "0");
+		const run = (script: (typeof scripts)[number] | undefined, rest: unknown[]) => {
+			if (script === undefined) throw new Error("a script the stub does not stand in for");
+			return real.eval(zeroed(script.source), ...(rest as [number, ...string[]]));
+		};
+		return new Proxy(real, {
+			get(target, property, receiver) {
+				if (property === "evalsha") {
+					return (sha: string, ...rest: unknown[]) =>
+						run(
+							scripts.find((script) => script.sha === sha),
+							rest,
+						);
+				}
+				if (property === "eval") {
+					return (source: string, ...rest: unknown[]) =>
+						run(
+							scripts.find((script) => script.source === source),
+							rest,
+						);
+				}
+				const value = Reflect.get(target, property, receiver);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+	};
+
+	it("answers a release at the lease's last millisecond false, as a lease that lapsed, never an outage", async () => {
+		const prefix = freshPrefix();
+		const { token } = await primed(prefix);
+		const store = storeAt(prefix, atLastMillisecond());
+		expect(await store.releaseSubjectLease("user-1", token)).toBe(false);
+	});
+
+	it("refuses an apply and a floor raise at the lease's last millisecond lease_not_held, never an outage", async () => {
+		const prefix = freshPrefix();
+		const { token } = await primed(prefix);
+		const store = storeAt(prefix, atLastMillisecond());
+		expect(await applyOf(store, "reset", token)).toMatchObject({
+			outcome: "refused",
+			reason: "lease_not_held",
+		});
+		expect(
+			await store.raiseRecoverySetFloor("user-1", { setGeneration: 1, leaseToken: token }),
+		).toEqual({ outcome: "refused", reason: "lease_not_held" });
 	});
 
 	it("refuses an apply, and a floor raise, under a lease key with no deadline, which it never writes", async () => {
