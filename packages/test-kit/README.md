@@ -10,8 +10,8 @@ it; production code never does.
 
 **Role.** The executable specification of a port or capability whose
 implementations live outside core: a suite that an adapter in this repository
-and a deployment's own implementation run alike, the fakes a suite needs, and
-a refused connection for tests. It depends on core alone — `@o3co/auth-provider-core`, as a peer — and no
+and a deployment's own implementation run alike, and the fakes a suite needs.
+It depends on core alone — `@o3co/auth-provider-core`, as a peer — and no
 package depends on it at run time: a package's tests list it among their
 devDependencies.
 
@@ -35,9 +35,7 @@ devDependencies.
   [`src/mfa/factor.contract.mts`](src/mfa/factor.contract.mts);
 - `mailSenderContract`, the conformance suite of a mail sender — the value of
   core's `mailSender` slot — in
-  [`src/mail/mailSender.contract.mts`](src/mail/mailSender.contract.mts);
-- `refusedOrigin`, the one refused connection the repository's tests use, in
-  [`src/net/refusedOrigin.mts`](src/net/refusedOrigin.mts).
+  [`src/mail/mailSender.contract.mts`](src/mail/mailSender.contract.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
@@ -321,16 +319,6 @@ what it holds is `factors(subject)` and `enrolled(subject)`. `close()` stops
 it. It keeps every request it records, headers included — the bearer token
 too — for as long as it runs: give it test data only.
 
-## A refused connection
-
-`await refusedOrigin()` answers a loopback origin, `http://127.0.0.1:2`, after
-a probe has seen a connection to it refused; the probe rejects, naming the
-origin and what happened instead, when something answers there or nothing
-answers in time. The origin is fixed: a port bound with `listen(0)` and
-closed again is handed to the next `listen(0)`, so a test file running beside
-may take it before the request, and the refusal becomes an answer. Port 2 is
-below every ephemeral range, and fetch does not refuse to dial it.
-
 ## Public API
 
 Exported from [`src/index.mts`](src/index.mts):
@@ -348,8 +336,7 @@ Exported from [`src/index.mts`](src/index.mts):
   `WebAuthnCredentialStoreContractInput` and `WebAuthnCredentialStoreHarness`;
 - `startFakeStore`, with `FAKE_STORE_MAX_BODY_BYTES`, `FakeStore`,
   `FakeStoreOptions`, `FakeStoreUser`, `FakeStoreUrls`, `FakeStoreEndpoint`,
-  `FakeStoreRequest`, `FakeStoreAnswer` and `FakeStoreAnswerer`;
-- `refusedOrigin`.
+  `FakeStoreRequest`, `FakeStoreAnswer` and `FakeStoreAnswerer`.
 
 ## Tests
 
@@ -360,7 +347,6 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`credentialStore.contract.test.mts`](src/webauthn/__tests__/credentialStore.contract.test.mts) | the WebAuthn credential store's suite over core's in-process store; each broken store — one that lets a registration take a credential id another user holds, overwrites a held credential's record and then throws `duplicate-credential`, refuses a held id with another error, lists a credential under the user it refused, lets a user register a held id again over its record, checks for a held id and inserts in two steps, finds a credential with a sign count of 0, lists every credential whoever's, updates a sign count whatever the count it expects, leaves a removed credential, keeps the `lastUsedAt` it held, answers `true` to a sign count update of an id it does not hold, throws on or empties itself at a removal of an id it does not hold, keeps a removed credential in its user's list, removes every credential of the user, or drops a credential's transports, backup state or nickname — refused by the case that names what it breaks; a store that answers transports in another order accepted; a harness built and closed per case |
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
-| [`refusedOrigin.test.mts`](src/net/__tests__/refusedOrigin.test.mts) | a fetch to the origin refused with `ECONNREFUSED`; one fixed origin below the ephemeral ranges; the probe rejecting, naming the origin, where something listens |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 
 ## See also

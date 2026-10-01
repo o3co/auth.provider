@@ -16,9 +16,8 @@
 
 /**
  * `@o3co/auth-provider-test-kit`: the contract suites of the ports code
- * outside core implements, the fakes they run against, and the one refused
- * connection the repository's tests use. Test code imports it; production
- * code never does. It depends on core alone.
+ * outside core implements, and the fakes they run against. Test code imports
+ * it; production code never does. It depends on core alone.
  */
 
 /** A suite's case, as core's slot suites give them: run each with any test runner's `it`. */
@@ -59,7 +58,6 @@ export {
 	type FakeStoreUser,
 	startFakeStore,
 } from "./mfa/fakeStore.mjs";
-export { refusedOrigin } from "./net/refusedOrigin.mjs";
 export {
 	type WebAuthnCredentialStoreContractInput,
 	type WebAuthnCredentialStoreHarness,
