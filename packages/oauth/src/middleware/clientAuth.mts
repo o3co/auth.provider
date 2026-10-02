@@ -26,7 +26,6 @@ import {
 	type TokenEndpointAuthMethod,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Response } from "express";
-import { behindClientBoundary } from "../clients/clientBoundary.mjs";
 import { createClientAssertionVerifier, hasClientAssertion } from "./clientAssertion.mjs";
 
 // Exposes `req.oauthClient` to consumers composing this middleware onto their
@@ -161,9 +160,6 @@ export function createClientAuthMiddleware(
 			? { logger: loggerOrOptions as Logger }
 			: (loggerOrOptions as ClientAuthMiddlewareOptions);
 	const logger: Logger = opts.logger ?? consoleLogger;
-	// Read through core's client-record boundary, outermost, whoever composed
-	// this middleware: a record it refuses is an unknown client.
-	const clients = behindClientBoundary(clientRepository, logger);
 	// `resolveRealm` sanitises the issuer. Shared with the sender-constrained
 	// reject path in `routes/token.mts` so the two emission sites cannot drift.
 	const wwwAuth = `Basic realm="${resolveRealm(opts.issuer)}"`;
@@ -249,7 +245,7 @@ export function createClientAuthMiddleware(
 				);
 				return;
 			}
-			const outcome = await assertionVerifier.verify(body, (id) => clients.findById(id));
+			const outcome = await assertionVerifier.verify(body, (id) => clientRepository.findById(id));
 			if (outcome.kind === "ok") {
 				req.oauthClient = outcome.client;
 				next();
@@ -312,7 +308,7 @@ export function createClientAuthMiddleware(
 		// credential check. For a `none` client it is the final answer.
 		let client: PublicClient | null;
 		try {
-			client = await clients.findById(clientId);
+			client = await clientRepository.findById(clientId);
 		} catch (err) {
 			// Fail-closed: repository unavailability must not grant access — and
 			// is not the client's fault either.
@@ -381,7 +377,7 @@ export function createClientAuthMiddleware(
 
 		let authenticated: PublicClient | null;
 		try {
-			authenticated = await clients.authenticate(clientId, secret);
+			authenticated = await clientRepository.authenticate(clientId, secret);
 		} catch (err) {
 			repositoryUnavailable(res, "authenticate", clientId, err);
 			return;

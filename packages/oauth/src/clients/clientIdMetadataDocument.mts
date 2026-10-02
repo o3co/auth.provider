@@ -562,15 +562,6 @@ export function createClientIdMetadataDocumentResolver(
 const documentFallbacks = new WeakSet<ClientRepository>();
 
 /**
- * Whether `repository` is a document fallback {@link withClientIdMetadataDocuments}
- * built. Such a repository already reads its registered clients through core's
- * boundary, and answers its document clients as this module built them.
- */
-export function isClientIdMetadataDocumentRepository(repository: ClientRepository): boolean {
-	return documentFallbacks.has(repository);
-}
-
-/**
  * A {@link ClientRepository} that answers pre-registered clients from `inner`
  * first and Client ID Metadata Documents second.
  *
@@ -593,6 +584,13 @@ export function isClientIdMetadataDocumentRepository(repository: ClientRepositor
  * One fallback per composition: `inner` that is already such a repository is
  * refused with a `TypeError`. Its own lookup answers a refusal `null`, so a
  * second fallback over it would read the refusal as an absence.
+ *
+ * Interim composition rule, until core installs its boundary in the
+ * `clientRepository` slot: the boundary is the outermost layer over the
+ * registered clients, this fallback is the only one and is never wrapped,
+ * and one copy of core and of this package is loaded. A fallback is
+ * recognised by object identity, so a forwarder over one, or a fallback or
+ * boundary from another loaded copy, would read a refusal as an absence.
  */
 export function withClientIdMetadataDocuments(
 	inner: ClientRepository,
