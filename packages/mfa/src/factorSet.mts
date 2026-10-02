@@ -830,8 +830,8 @@ export function createMfaFactorSet(options: {
 			readSubjectRecords({ factors, sealing }, subject, {
 				list,
 				recoverySetFloor: floorOf,
-				floorUnread: (unread, cause) =>
-					logger.warn({ sub: unread, err: loggableError(cause) }, "mfa_recovery_set_floor_unread"),
+				floorUnread: (held, cause) =>
+					logger.warn({ sub: held, err: loggableError(cause) }, "mfa_recovery_set_floor_unread"),
 			}),
 
 		async markEnrolled(start, subject) {
