@@ -1262,8 +1262,11 @@ describe("redis FederationTokenStore conditional members", () => {
 	beforeEach(() => {
 		redis = createFakeRedis();
 	});
+	// Restores what a test changed on every path, a failed expect included: the
+	// fake clock, and the lag the fake judges a deadline by.
 	afterEach(() => {
 		vi.useRealTimers();
+		redis.clock.lagMs = 0;
 	});
 	const storeOver = (client: FederationTokenStoreClient = redis) =>
 		createRedisFederationTokenStore({
@@ -1313,11 +1316,11 @@ describe("redis FederationTokenStore conditional members", () => {
 		if (read === null) throw new Error("not live");
 		redis.replaceIfGeneration.mockResolvedValueOnce("late");
 		await expect(store.replaceIf("sid-1", "google", read.generation, tokens)).rejects.toThrow(
-			/replaceIf was answered past its deadline; the outcome is unknown: an earlier copy may have committed/,
+			/replaceIf was answered past its deadline; the outcome is unknown: another copy may have committed, or may still commit within W/,
 		);
 		redis.removeIfGeneration.mockResolvedValueOnce("late");
 		await expect(store.removeIf("sid-1", "google", read.generation)).rejects.toThrow(
-			/removeIf was answered past its deadline; the outcome is unknown: an earlier copy may have committed/,
+			/removeIf was answered past its deadline; the outcome is unknown: another copy may have committed, or may still commit within W/,
 		);
 		// No add to the index on an unknown outcome.
 		expect(redis.sAddWithTtl).toHaveBeenCalledTimes(1);
@@ -1354,7 +1357,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		);
 		const next = { ...tokens, accessToken: "at-2" };
 		await expect(store.replaceIf("sid-1", "google", read.generation, next)).rejects.toThrow(
-			/replaceIf was answered past its deadline; the outcome is unknown: an earlier copy may have committed/,
+			/replaceIf was answered past its deadline; the outcome is unknown: another copy may have committed, or may still commit within W/,
 		);
 		expect(redis.data.get("ft:sid-1:google")).toBe(written);
 		expect((await store.get("sid-1", "google"))?.accessToken).toBe("at-2");
@@ -1370,7 +1373,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		if (remove === undefined) throw new Error("no fake removal");
 		redis.removeIfGeneration.mockImplementationOnce(firstCopyLandsThenLateCopy(remove));
 		await expect(store.removeIf("sid-1", "google", read.generation)).rejects.toThrow(
-			/removeIf was answered past its deadline; the outcome is unknown: an earlier copy may have committed/,
+			/removeIf was answered past its deadline; the outcome is unknown: another copy may have committed, or may still commit within W/,
 		);
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
@@ -1384,7 +1387,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		redis.replaceIfGeneration.mockImplementationOnce(() => new Promise(() => {}));
 		const replaced = store.replaceIf("sid-1", "google", read.generation, tokens);
 		const settled = expect(replaced).rejects.toThrow(
-			/replaceIf had no answer within 1000 ms; the outcome is unknown: it may have committed/,
+			/replaceIf had no answer within 1000 ms; the outcome is unknown: it may have committed, or may still commit within W/,
 		);
 		await vi.advanceTimersByTimeAsync(1_000);
 		await settled;

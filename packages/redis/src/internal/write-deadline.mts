@@ -47,8 +47,8 @@ export const WRITE_LIFETIME_MS = WRITE_TIMEOUT_MS + CLOCK_SKEW_MS;
 /**
  * `write` run with its deadline, {@link WRITE_TIMEOUT_MS} from now, and its
  * answer awaited no longer than that: past it, the wait ends in
- * `unanswered()`, whose outcome is unknown (the write may have committed, no
- * later than its deadline).
+ * `unanswered()`, whose outcome is unknown (the write may have committed, or
+ * may still commit within W).
  */
 export async function withWriteDeadline<T>(
 	write: (deadlineMs: number) => Promise<T>,

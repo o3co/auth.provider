@@ -155,8 +155,9 @@ export interface FederationTokenStoreClient {
 	 * first refuses at or after `input.deadlineMs` on the server's clock, then
 	 * answers a copy of a write it already took from `input.replayKey`, writing
 	 * nothing. `missing`: no key; `conflict`: another generation, or none;
-	 * `late`: at or after the deadline, this copy wrote nothing (an earlier
-	 * copy may have committed). Only the first `updated` writes.
+	 * `late`: at or after the deadline, this copy wrote nothing (another copy
+	 * may have committed, or may still commit within W). Only the first
+	 * `updated` writes.
 	 */
 	replaceIfGeneration(
 		key: string,

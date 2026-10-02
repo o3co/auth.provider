@@ -609,8 +609,10 @@ conditional-write convention for a record
   (`removeIfGeneration`). `missing` means no key, so a record past its `PX`
   is `missing` on Redis's own clock. The delete's script declares
   `allow-oom` (`#!lua flags=allow-oom`, Redis 7.0+), so a full `noeviction`
-  server still runs it: it only deletes and keeps its answer, and a record
-  stays removable when nothing more can be written.
+  server still runs it, and a record stays removable when nothing more can
+  be written. Besides the delete, it writes only its answer: one small
+  replay key per call, living about 2 s, and on `missing` or `conflict` that
+  key is all it writes.
 - **A versioned read never removes a record `get` reads.** It mints a
   generation into a record that decodes to a `v: 2` wrapper with no `g` and
   whose first byte is `{`, splicing `"g"` in after that byte rather than
@@ -623,20 +625,20 @@ conditional-write convention for a record
   anything, and at or after it writes nothing (`late`). The adapter stops
   waiting at the same timeout. Either way it rejects with an unknown
   outcome, never that nothing was written: a `late` answer says only that
-  the copy that answered wrote nothing, and an earlier copy of the same
-  write, whose reply was lost, may have committed before the deadline. So
-  the write lifetime W is 2 s: the 1 s write timeout plus the 1 s clock skew
-  allowed between the app's and Redis's clocks (NTP; the operator runbook's
-  "Replica clocks"). An issued conditional write commits or fails within W.
-  That holds while the two clocks agree within the skew. The skew tolerance
-  is one-sided: a Redis clock δ ahead of the app's shortens the usable
-  window to the write timeout less δ, and at the full declared skew every
-  conditional write is refused, an outage (it fails closed), never a wrong
-  write. A late command — resent by the driver after a reconnect, queued
-  while the connection was down, or held by a stalled server — writes
-  nothing. The check bounds when a script starts, so one assumption stands
-  beside it: the server does not stall inside a running script, between its
-  clock check and its write, for the whole of W.
+  the copy that answered wrote nothing, and another copy of the same write
+  may have committed, or may still commit within W. So the write lifetime W
+  is 2 s: the 1 s write timeout plus the 1 s clock skew allowed between the
+  app's and Redis's clocks (NTP; the operator runbook's "Replica clocks").
+  An issued conditional write commits or fails within W. That holds while
+  the two clocks agree within the skew. The skew tolerance is one-sided: a
+  Redis clock δ ahead of the app's shortens the usable window to the write
+  timeout less δ, and at the full declared skew every conditional write is
+  refused, an outage (it fails closed), never a wrong write. A late command
+  — resent by the driver after a reconnect, queued while the connection was
+  down, or held by a stalled server — writes nothing. The check bounds when
+  a script starts, so one assumption stands beside it: the server does not
+  stall inside a running script, between its clock check and its write, for
+  the whole of W.
 - **Replay.** Each conditional write therefore keeps its answer under a
   replay key of its own (`${keyPrefix}w:{<record key>}:<id>`, or
   `<record key>:w:<id>` for a record key with a hash tag of its own; on the
@@ -645,7 +647,8 @@ conditional-write convention for a record
   answered and writes nothing, so it does not answer `conflict` or `missing`
   for a write that landed, even when another server, whose clock may lag by
   the skew, judges the copy after a failover or a slot migration; one that
-  reaches it later is `late`, though the first copy may have committed.
+  reaches it later is `late`, though another copy may have committed, or may
+  still commit within W on a server whose clock lags by the skew.
 - **The index.** A conditional write never removes an index member, and
   `missing` and `conflict` never add one. `replaceIf` raises the index's TTL
   before its script (`pExpireGT`, which adds no member and makes no key), and

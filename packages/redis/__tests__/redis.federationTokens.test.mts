@@ -25,6 +25,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationTokenStore, type EncryptionConfig } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
 import { CLOCK_SKEW_MS } from "#/internal/write-deadline.mjs";
+import { FT_PRELUDE } from "#/ioredis/scripts/federation-tokens.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { serverClock, testRedis, until } from "./support/redis.mjs";
 
@@ -613,6 +614,22 @@ describe("conditional writes over a real Redis", () => {
 			}),
 		).toBe("removed");
 		expect(await raw.pexpiretime(replayKey)).toBe(deadlineMs + CLOCK_SKEW_MS + 1);
+	});
+
+	it("judges a write late at its deadline on the server's clock, not only after it", async () => {
+		// The deadline is the server's TIME, read in the same script that asks
+		// ft_late. TIME does not move within one script (Redis 7.2 samples it
+		// once per script), so ft_late judges exactly the instant of the
+		// deadline: late at it, not only after it.
+		const reply = await raw.eval(
+			`${FT_PRELUDE}
+local t = redis.call('TIME')
+local deadline = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if ft_late(deadline) then return 1 end
+return 0`,
+			0,
+		);
+		expect(reply).toBe(1);
 	});
 
 	it("a conditional write that reaches the server past its deadline writes nothing", async () => {

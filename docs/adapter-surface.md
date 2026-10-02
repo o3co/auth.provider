@@ -585,7 +585,7 @@ see, and a store's own tests must:
   declared clock skew past its deadline, so a copy resent before then answers
   as the first did and writes nothing, even when a server whose clock lags by
   the skew judges it after a failover. A `late` answer is an unknown outcome:
-  an earlier copy may have committed.
+  another copy may have committed, or may still commit within W.
 - The port's owning module states its issue window, the longest from a
   versioned read to issuing a write conditional on it, and that the window
   is at most the bound less the adapter's W (rule 6).

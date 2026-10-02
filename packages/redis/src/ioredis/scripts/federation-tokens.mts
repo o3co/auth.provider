@@ -21,9 +21,10 @@
  * scripts make no generation: the adapter hands each one in.
  *
  * The removal declares `allow-oom`: under `noeviction` a full server still
- * runs it, since it only deletes and keeps its answer, and a record must stay
- * removable when nothing more can be written. The replace and the versioned
- * read declare no flags.
+ * runs it, since a record must stay removable when nothing more can be
+ * written. Besides the delete, it writes only its answer: one small replay key
+ * per call, living about 2 s, and on `missing` or `conflict` that key is all
+ * it writes. The replace and the versioned read declare no flags.
  */
 
 import { defineScript } from "./define.mjs";
@@ -37,8 +38,9 @@ const ALLOW_OOM = "#!lua flags=allow-oom";
  * server's clock is at or after `deadline`, in epoch milliseconds.
  * `ft_keep(replay, answer, untilMs)`: `answer` kept under the replay key
  * until `untilMs` (epoch ms), for a copy of the write that arrives before then.
+ * Exported for the tests that pin these helpers on a real Redis.
  */
-const PRELUDE = `
+export const FT_PRELUDE = `
 local function ft_generation(raw)
   local ok, rec = pcall(cjson.decode, raw)
   if not ok or type(rec) ~= 'table' then return nil end
@@ -65,7 +67,7 @@ end
  * than re-encoding the object, which could change its numbers. Any other
  * value without a generation is answered with the generation `""`.
  */
-const LUA_READ_VERSIONED = `${PRELUDE}
+const LUA_READ_VERSIONED = `${FT_PRELUDE}
 local raw = redis.call('GET', KEYS[1])
 if not raw then return false end
 local g = ft_generation(raw)
@@ -91,7 +93,7 @@ return {raw, ''}
  * written), or the answer kept there until `ARGV[2]`: `missing` (no key, or
  * past its `PX`), `conflict` (another generation, or none) or `updated`.
  */
-const LUA_REPLACE_IF = `${PRELUDE}
+const LUA_REPLACE_IF = `${FT_PRELUDE}
 if ft_late(ARGV[1]) then return 'late' end
 local kept = redis.call('GET', KEYS[2])
 if kept then return kept end
@@ -109,7 +111,7 @@ return ft_keep(KEYS[2], 'updated', ARGV[2])
  * kept answer, `missing`, `conflict` or `removed`, as the replace does. Its
  * first line declares `allow-oom`, so it must stay the script's first line.
  */
-const LUA_REMOVE_IF = `${ALLOW_OOM}${PRELUDE}
+const LUA_REMOVE_IF = `${ALLOW_OOM}${FT_PRELUDE}
 if ft_late(ARGV[1]) then return 'late' end
 local kept = redis.call('GET', KEYS[2])
 if kept then return kept end

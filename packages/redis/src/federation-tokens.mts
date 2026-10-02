@@ -46,8 +46,8 @@
  * driver sends again before then answers as the first did and writes nothing,
  * even when a server whose clock lags by the skew judges it. A conditional
  * write answered `late`, like one unanswered within the write timeout, rejects
- * with an unknown outcome: the copy that answered wrote nothing, but an
- * earlier copy whose reply was lost may have committed. A conditional write
+ * with an unknown outcome: the copy that answered wrote nothing, but another
+ * copy may have committed, or may still commit within W. A conditional write
  * never shrinks the index, and adds to it only after `updated`, so the index
  * outlives the record it names. The store assumes acknowledged writes are not
  * rolled back (persistence, plus a failover setup that keeps acknowledged
@@ -439,14 +439,14 @@ export function createRedisFederationTokenStore(
 
 	/**
 	 * Answered `late`: the copy that answered reached the server at or after its
-	 * deadline and wrote nothing, but an earlier copy the driver sent of the
-	 * same write, whose reply was lost, may have committed before it.
+	 * deadline and wrote nothing, but another copy of the same write may have
+	 * committed, or may still commit within W.
 	 */
 	const late = (operation: string): Error =>
 		unknownOutcome(
 			operation,
 			"was answered past its deadline",
-			"an earlier copy may have committed",
+			"another copy may have committed, or may still commit within W",
 		);
 
 	/** Unanswered within the write timeout. */
@@ -454,7 +454,7 @@ export function createRedisFederationTokenStore(
 		unknownOutcome(
 			operation,
 			`had no answer within ${WRITE_TIMEOUT_MS} ms`,
-			"it may have committed, no later than its deadline",
+			"it may have committed, or may still commit within W",
 		);
 
 	/** Unlink `keys` in bounded batches. */
