@@ -307,10 +307,11 @@ an answer outside its type fails the case.
 - `conditionalRecordContract(input)`, for a generation that guards one
   record. The target (`ConditionalRecordTarget`) is the port's create path,
   `getVersioned`, `replaceIf`, `removeIf`, and its unconditional writes of a
-  key by name. `values()` answers two distinct values, equal on every call;
-  `mutate`, when given, changes a value in place, each mutable part on its
-  own and leaving a frozen part without throwing, to prove the store keeps its
-  own copy.
+  key by name. Each writes the value it is given, or, named in the input's
+  `removals` (a logout-style delete), removes the key. `values()` answers
+  two distinct values, equal on every call; `mutate`, when given, changes a
+  value in place, each mutable part on its own and leaving a frozen part
+  without throwing, to prove the store keeps its own copy.
 - `conditionalSetContract(input)`, for a generation that guards a set's
   membership. The target (`ConditionalSetTarget`) is `listVersioned`,
   `createIf`, `removeIf`, `reset`, and, when the port has them, `list`,
@@ -388,6 +389,9 @@ What the suites cannot see, and a store's own tests must:
   access token's `expiresAt` (rule 3);
 - an HTTP adapter's mapping of statuses: a bare `404` or `409`, without its
   body, throws (the status table in "Conditional writes");
+- a set's unconditional membership writes other than the reset raced
+  against conditional ones (rule 1); the record suite races every
+  unconditional write;
 - with `forceExpire` undeclared, expiry (rule 3), and with `unreachable`
   undeclared, the outage (rule 4): the suite then names those cases as not
   run.

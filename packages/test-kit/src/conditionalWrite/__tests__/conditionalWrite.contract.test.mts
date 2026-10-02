@@ -114,6 +114,12 @@ interface RecordFaults {
 	readonly removeSkipsLock?: boolean;
 	/** The unconditional delete skips the lock the other writes take. */
 	readonly deleteSkipsLock?: boolean;
+	/** The unconditional delete rejects the first value, so it races only with the second. */
+	readonly deleteRefusesFirst?: boolean;
+	/** The unconditional delete rewrites the record at a new generation and keeps it. */
+	readonly deleteRewrites?: boolean;
+	/** The unconditional put writes the value outside the lock, then moves the generation under it. */
+	readonly putTorn?: boolean;
 	/** Reads drop an expired record, and writes do not check expiry. */
 	readonly writesIgnoreExpiry?: boolean;
 	/** The second instance answers a versioned read from its own cache. */
@@ -336,8 +342,17 @@ function recordBackend(faults: RecordFaults = {}) {
 				);
 			},
 			unconditional: {
-				put: (key, value) =>
-					serialised(key, async () => {
+				put: async (key, value) => {
+					const held = entries.get(key);
+					if (faults.putTorn === true && held !== undefined) {
+						held.value = copy(value);
+						await serialised(key, async () => {
+							const current = entries.get(key);
+							if (current !== undefined) current.generation = issue(key, current.value);
+						});
+						return;
+					}
+					return serialised(key, async () => {
 						const held = live(key, true);
 						const keeps =
 							faults.legacyKeepsGeneration === true ||
@@ -349,15 +364,22 @@ function recordBackend(faults: RecordFaults = {}) {
 							return;
 						}
 						write(key, value, true);
-					}),
-				delete: (key) =>
-					serialised(
+					});
+				},
+				delete: (key, value) => {
+					if (faults.deleteRefusesFirst === true && value.name === VALUES()[0].name) {
+						return outage();
+					}
+					return serialised(
 						key,
 						async () => {
-							drop(key);
+							const held = entries.get(key);
+							if (faults.deleteRewrites === true && held !== undefined) write(key, held.value);
+							else drop(key);
 						},
 						faults.deleteSkipsLock,
-					),
+					);
+				},
 			},
 		};
 	};
@@ -405,6 +427,7 @@ const recordInput = (faults: RecordFaults = {}): ConditionalRecordContractInput<
 	build: async () => recordHarness(faults),
 	values: VALUES,
 	mutate: MUTATE,
+	removals: ["delete"],
 	supports: { forceExpire: true, unreachable: true, unconditional: true },
 });
 
@@ -481,6 +504,21 @@ describe("conditionalRecordContract refuses a record store that breaks a rule", 
 		[
 			"an unconditional delete that skips the lock, against a replace",
 			{ deleteSkipsLock: true },
+			RECORD.unconditionalRace,
+		],
+		[
+			"an unconditional delete that skips the lock and refuses the first value",
+			{ deleteSkipsLock: true, deleteRefusesFirst: true },
+			RECORD.unconditionalRace,
+		],
+		[
+			"an unconditional delete that keeps the record",
+			{ deleteRewrites: true },
+			RECORD.unconditional,
+		],
+		[
+			"an unconditional put that writes the value before it takes the lock",
+			{ putTorn: true },
 			RECORD.unconditionalRace,
 		],
 		["writes that do not check expiry", { writesIgnoreExpiry: true }, RECORD.expiry],

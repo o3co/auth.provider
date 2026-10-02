@@ -429,6 +429,9 @@ see, and a store's own tests must:
   access token's `expiresAt` (rule 3);
 - an HTTP adapter's mapping of statuses: a bare `404` or `409`, without its
   body, throws (the status table below);
+- a set's unconditional membership writes other than the reset raced
+  against conditional ones (rule 1); the record suite races every
+  unconditional write;
 - with `forceExpire` undeclared, expiry (rule 3), and with `unreachable`
   undeclared, the outage (rule 4): the suite then names those cases as not
   run.

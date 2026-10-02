@@ -87,7 +87,11 @@ export interface ConditionalRecordTarget<V> {
 	getVersioned(key: string): Promise<Versioned<V> | null>;
 	replaceIf(key: string, expected: StoreGeneration, value: V): Promise<ConditionalReplaceAnswer>;
 	removeIf(key: string, expected: StoreGeneration): Promise<ConditionalRemoveAnswer>;
-	/** The port's unconditional writes of one key, by name: each must move or end the generation. */
+	/**
+	 * The port's unconditional writes of one key, by name. Each writes the value
+	 * it is given at a new generation, or, named in the input's `removals`,
+	 * removes the key.
+	 */
 	readonly unconditional: Readonly<Record<string, (key: string, value: V) => Promise<void>>>;
 }
 
@@ -121,6 +125,11 @@ export interface ConditionalRecordContractInput<V> {
 	 * Absent for an immutable value.
 	 */
 	readonly mutate?: (value: V) => void;
+	/**
+	 * The names in the target's `unconditional` that remove the key, as a
+	 * logout does. Every other one must leave the value it was given.
+	 */
+	readonly removals?: readonly string[];
 	/**
 	 * The hooks every harness `build` answers, declared up front, so the case
 	 * list is fixed when the suite is built. A declared hook that a harness
@@ -620,15 +629,37 @@ export function conditionalRecordContract<V>(
 						writes.length > 0,
 						"supports.unconditional is declared, and the target names no write",
 					);
+					const removals = new Set(input.removals ?? []);
+					for (const name of removals) {
+						assert.ok(
+							name in raw.unconditional,
+							`removals names ${name}, which the target does not`,
+						);
+					}
 					const ran = new Set<string>();
 					for (const [[name, write], same] of writes.flatMap((entry) => [
 						[entry, true] as const,
 						[entry, false] as const,
 					])) {
 						const { key, read } = await seeded(raw, `legacy-${name}`);
-						if (!(await resolved(write(key, input.values()[same ? 0 : 1])))) continue;
+						const given = input.values()[same ? 0 : 1];
+						if (!(await resolved(write(key, given)))) continue;
 						ran.add(name);
 						const left = await store.get(key);
+						if (removals.has(name)) {
+							assert.equal(left, null, `${name} is a removal, and left the record`);
+						} else {
+							assert.notEqual(
+								left,
+								null,
+								`${name} removed the record, and is not named in removals`,
+							);
+							assert.deepStrictEqual(
+								left?.value,
+								given,
+								`${name} left another value than it was given`,
+							);
+						}
 						assert.notEqual(
 							left?.generation,
 							read.generation,
@@ -659,7 +690,7 @@ export function conditionalRecordContract<V>(
 
 	cases.push(
 		input.supports?.unconditional === true
-			? test("an unconditional write racing a replace at one generation, either started first, is serialised with it: a removal leaves the record absent, and no replace outlives the write", async (store, harness, raw) => {
+			? test("an unconditional write racing a replace at one generation, either started first, is serialised with it: a removal leaves the record absent, and no replace outlives the write", async (_store, harness, raw) => {
 					const [a, b] = both(harness);
 					const writes = Object.keys(raw.unconditional);
 					assert.ok(
@@ -667,17 +698,16 @@ export function conditionalRecordContract<V>(
 						"supports.unconditional is declared, and the target names no write",
 					);
 					for (const name of writes) {
-						const alone = await seeded(raw, `alone-${name}`);
-						const solo = declared(raw.unconditional[name], name);
-						if (!(await resolved(solo(alone.key, input.values()[0])))) continue;
-						const removes = (await store.get(alone.key)) === null;
+						const removes = (input.removals ?? []).includes(name);
 						let ran = 0;
 						for (let round = 0; round < RACE_ROUNDS * 2; round += 1) {
 							const { key, read } = await seeded(raw, `race-${name}-${round}`);
 							const [writer, replacer] = round % 2 === 0 ? [a, b] : [b, a];
 							const write = declared(writer.unconditional[name], name);
 							const writeFirst = Math.floor(round / 2) % 2 === 0;
-							const unconditional = () => resolved(write(key, input.values()[0]));
+							// Both values, so a write that refuses one of them still races.
+							const given = input.values()[Math.floor(round / 4) % 2];
+							const unconditional = () => resolved(write(key, given));
 							const replace = () =>
 								readRecord(replacer).replace(key, read.generation, input.values()[1]);
 							const started = writeFirst ? unconditional() : replace();
@@ -696,6 +726,7 @@ export function conditionalRecordContract<V>(
 								continue;
 							}
 							assert.notEqual(after, null, where);
+							assert.deepStrictEqual(after?.value, given, `${where}: the write's value was lost`);
 							assert.notEqual(
 								after?.generation,
 								read.generation,
