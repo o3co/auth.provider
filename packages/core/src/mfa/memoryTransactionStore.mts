@@ -257,6 +257,13 @@ function backoffUntil(
 const fixedAt = (run: readonly Attempt[], nowMs: number): number =>
 	run.reduce((latest, a) => Math.max(latest, a.atMs), nowMs);
 
+/**
+ * From when a rebind counts against a hard hold fixed at `hardAtMs`: a
+ * guessable record created after it, in whole milliseconds. The one bound a
+ * recover judges a rebind by and an answer carries.
+ */
+const rebindAfter = (hardAtMs: number): number => Math.floor(hardAtMs + DEFAULT_CLOCK_SKEW_MS);
+
 /** The failures the rolling week counts at `nowMs`. The store keeps them a while longer (see `prune`). */
 const inWeek = (week: readonly Attempt[], nowMs: number): Attempt[] =>
 	week.filter((a) => a.atMs + MFA_WEEKLY_WINDOW_MS > nowMs);
@@ -491,8 +498,7 @@ export function createMemoryMfaTransactionStore(
 		const rebound =
 			hard !== undefined &&
 			(guessableBoundSinceMs === null ||
-				(guessableBoundSinceMs !== undefined &&
-					guessableBoundSinceMs > hard + DEFAULT_CLOCK_SKEW_MS));
+				(guessableBoundSinceMs !== undefined && guessableBoundSinceMs > rebindAfter(hard)));
 		if (!revokedSince && !rebound) return "not_revoked_since";
 		if (state === undefined) return { week: true, run: true, hard: false };
 		let run = false;
@@ -833,11 +839,17 @@ export function createMemoryMfaTransactionStore(
 				checkSubjectRecoveryApplication(subject, application);
 			sawCallerTime(nowMs);
 			const storeNowMs = clock();
-			const hard = (): boolean => subjects.get(subject)?.hard !== undefined;
+			// The hard hold as it stands now, with from when a rebind counts against it.
+			const hold = () => {
+				const hardAtMs = subjects.get(subject)?.hard;
+				return hardAtMs === undefined
+					? { hard: false as const, rebindAfterMs: null }
+					: { hard: true as const, rebindAfterMs: rebindAfter(hardAtMs) };
+			};
 			const refused = (reason: MfaSubjectRecoveryRefusal): MfaSubjectRecoveryAnswer => ({
 				outcome: "refused",
 				reason,
-				hard: hard(),
+				...hold(),
 			});
 			if (!holds(subject, leaseToken)) return refused("lease_not_held");
 			const slots = recoveries.get(subject);
@@ -853,7 +865,7 @@ export function createMemoryMfaTransactionStore(
 					outcome: "already_applied",
 					recoveryId: slot.recoveryId,
 					generation: slot.appliedAt,
-					hard: hard(),
+					...hold(),
 				};
 			}
 			if (slot.expiresAtMs <= nowMs) return refused("expired");
@@ -881,7 +893,7 @@ export function createMemoryMfaTransactionStore(
 				recoveryId: slot.recoveryId,
 				generation,
 				cleared,
-				hard: hard(),
+				...hold(),
 			};
 		},
 

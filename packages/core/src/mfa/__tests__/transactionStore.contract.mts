@@ -1810,6 +1810,7 @@ export function runMfaTransactionStoreContract(
 				generation: 1,
 				cleared: { week: true, run: true, hard: false },
 				hard: false,
+				rebindAfterMs: null,
 			};
 
 			/** The week filled an hour before the host's clock: answers when its first failure was. */
@@ -1826,6 +1827,7 @@ export function runMfaTransactionStoreContract(
 					outcome: "refused",
 					reason: "unauthorized",
 					hard: false,
+					rebindAfterMs: null,
 				});
 				await store.authorizeSubjectRecovery("user-1", authorization());
 				expect(await recover(store, now, { sid: "sid-2" })).toMatchObject({
@@ -1847,7 +1849,12 @@ export function runMfaTransactionStoreContract(
 				const store = await factory();
 				const now = start();
 				await store.authorizeSubjectRecovery("user-1", authorization());
-				const refused = { outcome: "refused", reason: "lease_not_held", hard: false };
+				const refused = {
+					outcome: "refused",
+					reason: "lease_not_held",
+					hard: false,
+					rebindAfterMs: null,
+				};
 				expect(await recover(store, now, { leaseToken: "no-such-lease" })).toEqual(refused);
 				const other = await leased(store, "user-2");
 				expect(await recover(store, now, { leaseToken: other })).toEqual(refused);
@@ -1883,6 +1890,7 @@ export function runMfaTransactionStoreContract(
 					recoveryId: "recovery-1",
 					generation: 1,
 					hard: false,
+					rebindAfterMs: null,
 				});
 				expect(await store.subjectGeneration("user-1")).toBe(1);
 				// Ten failures fit the week again: the next five reach the backoff, not the weekly hold.
@@ -1928,7 +1936,12 @@ export function runMfaTransactionStoreContract(
 				const from = await attacked(store);
 				const now = start();
 				await store.authorizeSubjectRecovery("user-1", authorization());
-				const refused = { outcome: "refused", reason: "not_revoked_since", hard: false };
+				const refused = {
+					outcome: "refused",
+					reason: "not_revoked_since",
+					hard: false,
+					rebindAfterMs: null,
+				};
 				expect(await recover(store, now)).toEqual(refused);
 				expect(await recover(store, now, { sessionsBoundaryMs: from - 1 })).toEqual(refused);
 				expect(await recover(store, now, { sessionsBoundaryMs: from + SKEW })).toEqual(refused);
@@ -1971,6 +1984,7 @@ export function runMfaTransactionStoreContract(
 					outcome: "refused",
 					reason: "boundary_ahead",
 					hard: false,
+					rebindAfterMs: null,
 				});
 				expect(await store.subjectGeneration("user-1")).toBe(0);
 				expect(held(await check(store, now))).toMatchObject({ hold: "weekly" });
@@ -1985,6 +1999,7 @@ export function runMfaTransactionStoreContract(
 					outcome: "refused",
 					reason: "expired",
 					hard: false,
+					rebindAfterMs: null,
 				});
 				expect(await recover(store, ends - 1)).toEqual(RELEASED);
 
@@ -2145,7 +2160,7 @@ export function runMfaTransactionStoreContract(
 					return last;
 				}
 
-				it("stays without a rebind: a recover with a boundary ends the week alone, keeps the run it counted, and answers that it stands", async () => {
+				it("stays without a rebind: a recover with a boundary ends the week alone, keeps the run it counted, and answers that it stands and from when a rebind counts", async () => {
 					const store = await factory();
 					const last = await latched(store);
 					const answer = await recover(store, last + MINUTE, {
@@ -2158,6 +2173,7 @@ export function runMfaTransactionStoreContract(
 						generation: 1,
 						cleared: { week: true, run: false, hard: false },
 						hard: true,
+						rebindAfterMs: last + SKEW,
 					});
 					expect(held(await check(store, last + 2 * MINUTE, SMALL_HARD))).toEqual(HARD);
 					expect(
@@ -2167,15 +2183,21 @@ export function runMfaTransactionStoreContract(
 						recoveryId: "recovery-1",
 						generation: 1,
 						hard: true,
+						rebindAfterMs: last + SKEW,
 					});
 				});
 
-				it("refuses not_revoked_since without a rebind or a boundary, answering that it stands", async () => {
+				it("refuses not_revoked_since without a rebind or a boundary, answering that it stands and from when a rebind counts", async () => {
 					const store = await factory();
 					const last = await latched(store);
 					expect(
 						await recover(store, last + MINUTE, { guessableBoundSinceMs: OLD_RECORD() }),
-					).toEqual({ outcome: "refused", reason: "not_revoked_since", hard: true });
+					).toEqual({
+						outcome: "refused",
+						reason: "not_revoked_since",
+						hard: true,
+						rebindAfterMs: last + SKEW,
+					});
 					expect(await store.subjectGeneration("user-1")).toBe(0);
 				});
 
@@ -2190,6 +2212,7 @@ export function runMfaTransactionStoreContract(
 						generation: 1,
 						cleared: { week: false, run: true, hard: true },
 						hard: false,
+						rebindAfterMs: null,
 					});
 					// The week still counts the six failures; the run counts none.
 					expect(held(await check(store, last + 2 * MINUTE, WEEK_OF_SIX))).toMatchObject({
@@ -2217,6 +2240,7 @@ export function runMfaTransactionStoreContract(
 						outcome: "applied",
 						cleared: { hard: true },
 						hard: false,
+						rebindAfterMs: null,
 					});
 				});
 
@@ -2272,6 +2296,94 @@ export function runMfaTransactionStoreContract(
 						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
 					).toMatchObject({ outcome: "applied", hard: false });
 				});
+
+				it("answers as rebindAfterMs the bound it lifts by: a record created at it leaves the hold standing, one a millisecond after it lifts the hold", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					const standing = await recover(store, last + MINUTE, {
+						guessableBoundSinceMs: OLD_RECORD(),
+					});
+					if (!standing.hard) throw new Error("expected the hard hold to stand");
+					const after = standing.rebindAfterMs;
+					expect(await recover(store, last + MINUTE, { guessableBoundSinceMs: after })).toEqual({
+						outcome: "refused",
+						reason: "not_revoked_since",
+						hard: true,
+						rebindAfterMs: after,
+					});
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: after + 1 }),
+					).toMatchObject({ outcome: "applied", hard: false, rebindAfterMs: null });
+				});
+
+				it("answers the standing hold and from when a rebind counts on every refusal, a reset's included", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					const standing = { hard: true, rebindAfterMs: last + SKEW };
+					expect(await recover(store, last + MINUTE, { leaseToken: "no-such-lease" })).toEqual({
+						outcome: "refused",
+						reason: "lease_not_held",
+						...standing,
+					});
+					expect(await recover(store, last + MINUTE, { sid: "sid-2" })).toEqual({
+						outcome: "refused",
+						reason: "unauthorized",
+						...standing,
+					});
+					expect(
+						await recover(store, last + MINUTE, {
+							operation: "reset",
+							sid: undefined,
+							guessableBoundSinceMs: undefined,
+						}),
+					).toEqual({ outcome: "refused", reason: "unauthorized", ...standing });
+				});
+
+				it("answers from when a rebind counts after the later of the time the hold was fixed at and the run's newest attempt", async () => {
+					for (const offset of [-30_000, 30_000]) {
+						const store = await factory();
+						let at = start();
+						for (let i = 0; i < 6; i++) {
+							at += MINUTE;
+							await fail(store, at, { ...SMALL_HARD, hardLimit: 7 });
+						}
+						// A call under SMALL_HARD finds the run at its limit and fixes the hold.
+						expect(held(await check(store, at + offset, SMALL_HARD))).toEqual(HARD);
+						await store.authorizeSubjectRecovery("user-1", authorization());
+						expect(
+							await recover(store, at + MINUTE, { guessableBoundSinceMs: OLD_RECORD() }),
+							String(offset),
+						).toEqual({
+							outcome: "refused",
+							reason: "not_revoked_since",
+							hard: true,
+							rebindAfterMs: Math.max(at, at + offset) + SKEW,
+						});
+					}
+				});
+
+				it("answers, for an apply already made, the hold that stands now: one fixed again after the lift", async () => {
+					const store = await factory();
+					const last = await latched(store);
+					expect(
+						await recover(store, last + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
+					).toMatchObject({ outcome: "applied", hard: false, rebindAfterMs: null });
+					let at = last + MINUTE;
+					for (let i = 0; i < 6; i++) {
+						at += MINUTE;
+						await fail(store, at, SMALL_HARD);
+					}
+					expect(held(await check(store, at + 1, SMALL_HARD))).toEqual(HARD);
+					expect(
+						await recover(store, at + MINUTE, { guessableBoundSinceMs: last + SKEW + 1 }),
+					).toEqual({
+						outcome: "already_applied",
+						recoveryId: "recovery-1",
+						generation: 1,
+						hard: true,
+						rebindAfterMs: at + SKEW,
+					});
+				});
 			});
 
 			describe("the reset", () => {
@@ -2294,6 +2406,7 @@ export function runMfaTransactionStoreContract(
 						generation: 1,
 						cleared: { week: true, run: true, hard: true },
 						hard: false,
+						rebindAfterMs: null,
 					});
 					expect(await store.subjectGeneration("user-1")).toBe(1);
 					// Neither the hard hold nor a week of six holds: the state starts empty.
@@ -2325,6 +2438,7 @@ export function runMfaTransactionStoreContract(
 						recoveryId: "reset-1",
 						generation: 1,
 						hard: false,
+						rebindAfterMs: null,
 					});
 					expect(await recover(store, now, {}, "user-2")).toMatchObject({ outcome: "applied" });
 				});

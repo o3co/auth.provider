@@ -31,6 +31,7 @@
 import { createHash } from "node:crypto";
 import {
 	createMemoryMfaTransactionStore,
+	DEFAULT_CLOCK_SKEW_MS,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_MAX_TRANSACTIONS_PER_BINDING,
 	type MfaLockoutPolicy,
@@ -1948,5 +1949,131 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		await expect(answering(["busy", -1]).acquireSubjectLease(keys, input)).rejects.toThrow(
 			/lease script/,
 		);
+	});
+
+	it("answers from when a rebind counts off the lock hash's hard field as the scripts write it: its time plus the skew, whole, the bound a recover lifts by", async () => {
+		const t = Date.now() - HOUR;
+		for (const written of [String(t), `${t}.5`]) {
+			const prefix = freshPrefix();
+			const { store, token } = await primed(prefix);
+			await first().hset(keysOf(prefix).lock, "hard", written);
+			const after = t + DEFAULT_CLOCK_SKEW_MS;
+			expect(await applyOf(store, "reset", `${token}x`), written).toEqual({
+				outcome: "refused",
+				reason: "lease_not_held",
+				hard: true,
+				rebindAfterMs: after,
+			});
+			const recover = (guessableBoundSinceMs: number) =>
+				store.applySubjectRecovery("user-1", {
+					operation: "recover",
+					sid: "sid-1",
+					nowMs: Date.now(),
+					leaseToken: token,
+					sessionsBoundaryMs: undefined,
+					guessableBoundSinceMs,
+				});
+			expect(await recover(after), written).toEqual({
+				outcome: "refused",
+				reason: "not_revoked_since",
+				hard: true,
+				rebindAfterMs: after,
+			});
+			expect(await recover(after + 1), written).toMatchObject({
+				outcome: "applied",
+				cleared: { hard: true },
+				hard: false,
+				rebindAfterMs: null,
+			});
+		}
+	});
+
+	it("answers an apply an outage on a hard field it cannot read, a refused reset's included, and a reset applied still ends it", async () => {
+		const prefix = freshPrefix();
+		const { store, token } = await primed(prefix);
+		const keys = keysOf(prefix);
+		for (const garbage of ["garbage", "inf", ""]) {
+			await first().hset(keys.lock, "hard", garbage);
+			await expect(applyOf(store, "recover", token), garbage).rejects.toThrow(/subject state/);
+			await expect(applyOf(store, "reset", `${token}x`), garbage).rejects.toThrow(/subject state/);
+		}
+		expect(await applyOf(store, "reset", token)).toMatchObject({
+			outcome: "applied",
+			hard: false,
+			rebindAfterMs: null,
+		});
+		expect(await first().exists(keys.lock)).toBe(0);
+	});
+
+	it.each<[string, readonly string[]]>([
+		["a refusal without its last element", ["refused", "unauthorized", "0"]],
+		["an apply already made without its last element", ["already", "r-1", "1", "1"]],
+		["an apply without its last element", ["applied", "r-1", "1", "1", "1", "0", "0"]],
+		["a time to rebind after with no hard hold", ["refused", "unauthorized", "0", "1"]],
+		["no time to rebind after with the hard hold", ["refused", "unauthorized", "1", ""]],
+		["a time to rebind after that is not decimal", ["refused", "unauthorized", "1", "1e3"]],
+		["a time to rebind after with a leading zero", ["refused", "unauthorized", "1", "01"]],
+		["a time to rebind after before the epoch", ["refused", "unauthorized", "1", "-1"]],
+		[
+			"a time to rebind after past the safe integers",
+			["refused", "unauthorized", "1", "9007199254740992"],
+		],
+	])("answers an apply an outage when the script's reply carries %s", async (_label, reply) => {
+		const store = createRedisMfaTransactionStore({
+			client: {
+				...makeIoredisMfaTransactionStoreClient(first()),
+				applySubjectRecovery: async () => reply,
+			},
+			keyPrefix: freshPrefix(),
+		});
+		await expect(
+			store.applySubjectRecovery("user-1", {
+				operation: "reset",
+				sid: undefined,
+				nowMs: Date.now(),
+				leaseToken: "token",
+				sessionsBoundaryMs: undefined,
+				guessableBoundSinceMs: undefined,
+			}),
+		).rejects.toThrow(/apply script/);
+	});
+
+	it("reads a time to rebind after as the script's decimal text, 0 included", async () => {
+		const answered = (reply: readonly string[]) =>
+			createRedisMfaTransactionStore({
+				client: {
+					...makeIoredisMfaTransactionStoreClient(first()),
+					applySubjectRecovery: async () => reply,
+				},
+				keyPrefix: freshPrefix(),
+			}).applySubjectRecovery("user-1", {
+				operation: "reset",
+				sid: undefined,
+				nowMs: Date.now(),
+				leaseToken: "token",
+				sessionsBoundaryMs: undefined,
+				guessableBoundSinceMs: undefined,
+			});
+		await expect(answered(["refused", "unauthorized", "1", "0"])).resolves.toEqual({
+			outcome: "refused",
+			reason: "unauthorized",
+			hard: true,
+			rebindAfterMs: 0,
+		});
+		await expect(answered(["already", "r-1", "2", "1", "9007199254740991"])).resolves.toEqual({
+			outcome: "already_applied",
+			recoveryId: "r-1",
+			generation: 2,
+			hard: true,
+			rebindAfterMs: Number.MAX_SAFE_INTEGER,
+		});
+		await expect(answered(["applied", "r-1", "1", "1", "1", "1", "0", ""])).resolves.toEqual({
+			outcome: "applied",
+			recoveryId: "r-1",
+			generation: 1,
+			cleared: { week: true, run: true, hard: true },
+			hard: false,
+			rebindAfterMs: null,
+		});
 	});
 });

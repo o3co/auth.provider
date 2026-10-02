@@ -1069,7 +1069,15 @@ apply script runs over the lock hash, the week, the recovery hash and the
 lease: it checks the lease's token, then the authorization, then judges the
 lock state exactly as core's in-process store does, and moves the generation
 (computed before the first write, set with `HSET g`) in the same step; a reset deletes the lock and week keys unread,
-so it ends a lock state the other scripts cannot read. The acquire script
+so it ends a lock state the other scripts cannot read. Every reply of the apply
+script ends with the hard hold as it stands after the call: `1` and from when a
+rebind counts — the `hard` field's time plus the skew, floored to whole
+milliseconds, as decimal text, the same bound the script lifts the hold by — or
+`0` and an empty string. A `hard` field the script cannot read is an outage, a
+refused reset's answer included; an applied reset still deletes it unread. A
+`MfaTransactionStoreClient` of your own whose `applySubjectRecovery` answers
+the shorter reply, without that last element, is refused as an outage: answer
+as `ApplyMfaSubjectRecoveryReply` says. The acquire script
 compares the generation a writer captured with `g` (absent is `0`) and writes
 the lease with `SET NX PX`; the release is a compare-and-delete of its own,
 which answers a lease at its last millisecond (`PTTL` 0) as lapsed, `false`,
