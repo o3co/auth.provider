@@ -156,6 +156,17 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * the first major release.
 	 */
 	readonly renamedVariables?: Readonly<Record<string, string>>;
+	/**
+	 * The module's own switch, read from its parsed section: `false` and the
+	 * module registers nothing — no slot, contribution, route, requirement,
+	 * absence policy or lifecycle, and none of its factories runs — as if it
+	 * were not installed, except that its section is still parsed and its old
+	 * paths still refused. A module that requires a slot only the switched-off
+	 * module provides is refused, as when that module is not installed. Unset,
+	 * the module is always on. An answer that is not a boolean, or a throw,
+	 * refuses boot (`config-validation-failed`, naming the section's path).
+	 */
+	readonly isEnabled?: (section: z.output<S>) => boolean;
 }
 
 /**
