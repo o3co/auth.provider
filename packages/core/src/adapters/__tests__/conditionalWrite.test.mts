@@ -145,6 +145,20 @@ describe("readVersioned", () => {
 		});
 	});
 
+	it("refuses an answer whose value reads as undefined and whose keys cannot be told, with a TypeError", () => {
+		const untellable = new Proxy(
+			{ generation: G },
+			{
+				has() {
+					throw new Error("unreadable");
+				},
+			},
+		);
+		expect(() => readVersioned(untellable as unknown as Versioned<unknown>)).toThrow(
+			new TypeError("versioned read: value could not be read"),
+		);
+	});
+
 	it("reads each property once", () => {
 		let reads = 0;
 		const answer = {
@@ -213,6 +227,18 @@ describe("readVersionedSet", () => {
 		});
 		expect(readVersionedSet({ items, generation: G }).items).toEqual(["a", "b"]);
 		expect(lengthReads).toBe(1);
+	});
+
+	it("refuses items whose length is no whole, non-negative count, with a TypeError", () => {
+		for (const length of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "2"]) {
+			const items = new Proxy([], {
+				get: (target, key, receiver) =>
+					key === "length" ? length : Reflect.get(target, key, receiver),
+			});
+			expect(() => readVersionedSet({ items, generation: G }), String(length)).toThrow(
+				new TypeError("versioned set read: items could not be read"),
+			);
+		}
 	});
 
 	it("refuses members with a null generation: null is only an absent set's", () => {
