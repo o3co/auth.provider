@@ -84,6 +84,7 @@ function makeAssertionResponse(challenge = "test-challenge-value"): Authenticati
 			clientDataJSON,
 			authenticatorData: "stub-authdata",
 			signature: "stub-signature",
+			userHandle: Buffer.from(USER_ID, "utf8").toString("base64url"),
 		},
 		clientExtensionResults: {},
 		type: "public-key",
@@ -333,6 +334,65 @@ describe("createWebAuthnGrant — assertion verification", () => {
 
 		const expected = mockVerifyAssertion.mock.calls[0]?.[0].expectedUserHandle;
 		expect(expected && Buffer.from(expected).equals(Buffer.from("u-é-1", "utf8"))).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// User handle presence (WebAuthn Level 3 §7.2 step 6)
+// ---------------------------------------------------------------------------
+
+describe("createWebAuthnGrant — an assertion without a user handle", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	const withoutUserHandle = (userHandle: undefined | null): AuthenticationResponseJSON => {
+		const assertion = makeAssertionResponse();
+		const { userHandle: _omitted, ...response } = assertion.response;
+		return {
+			...assertion,
+			response: (userHandle === null
+				? { ...response, userHandle: null }
+				: response) as AuthenticationResponseJSON["response"],
+		};
+	};
+
+	it.each([
+		["absent", undefined],
+		["null", null],
+	] as const)(
+		"is refused as 400 invalid_grant user_handle_missing when it is %s and allowCredentialsForKnownUser is off",
+		async (_what, userHandle) => {
+			const store = createMemoryWebAuthnCredentialStore();
+			await store.registerCredential(makeCredential());
+			mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+			const { result } = await createWebAuthnGrant(makeBaseDeps(store)).handle(
+				makeCtx({ assertion: withoutUserHandle(userHandle) }),
+			);
+
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "user_handle_missing",
+			});
+			expect(mockVerifyAssertion).not.toHaveBeenCalled();
+		},
+	);
+
+	it("is verified and answered with tokens when allowCredentialsForKnownUser is on", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.registerCredential(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+		const deps = {
+			...makeBaseDeps(store),
+			webauthnConfig: createTestWebAuthnConfig({ allowCredentialsForKnownUser: true }),
+		};
+
+		const { result } = await createWebAuthnGrant(deps).handle(
+			makeCtx({ assertion: withoutUserHandle(undefined) }),
+		);
+
+		expect(result.status).toBe(200);
+		expect(mockVerifyAssertion).toHaveBeenCalledTimes(1);
 	});
 });
 

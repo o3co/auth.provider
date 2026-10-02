@@ -104,6 +104,11 @@ export interface WebAuthnGrantDeps
 		 * behind an assertion may have been made, which `auth_time` allows for.
 		 */
 		readonly challengeTtlMs: number;
+		/**
+		 * Whether `authentication/options` may list a known user's credentials. Off, no ceremony
+		 * identifies the user, so an assertion must carry a user handle (WebAuthn §7.2 step 6).
+		 */
+		readonly allowCredentialsForKnownUser: boolean;
 	};
 }
 
@@ -195,6 +200,17 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			}
 			const { assertion, challengeValue } = parseResult;
 			const clientId = ctx.authenticatedClient?.clientId;
+			// With the flag off the user is never identified before the ceremony, so the handle is
+			// what names the account (WebAuthn §7.2 step 6); with it on, the grant cannot tell.
+			const userHandle = assertion.response.userHandle;
+			if (
+				!deps.webauthnConfig.allowCredentialsForKnownUser &&
+				(userHandle === undefined || userHandle === null)
+			) {
+				return {
+					result: { status: 400, error: "invalid_grant", errorDescription: "user_handle_missing" },
+				};
+			}
 
 			// ------------------------------------------------------------------
 			// Step 2: Look up credential
