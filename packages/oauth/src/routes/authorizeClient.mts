@@ -21,6 +21,8 @@
  */
 
 import {
+	auditErrorText,
+	checkRedirectUri,
 	isGrantTypeAllowed,
 	isWellFormedClientId,
 	logClientRepositoryUnavailable,
@@ -37,10 +39,8 @@ import {
 
 /**
  * RFC 6749 §4.1.1 identification: `client_id`/`redirect_uri` presence, client
- * lookup and the `redirect_uri` allowlist. The client comes from the router's
- * repository, which holds every registered entry to core's
- * `checkRedirectUri` (core's client-record boundary, or a document's own
- * check). Everything here answers 400/503 JSON because no trusted
+ * lookup and the `redirect_uri` allowlist, then core's `checkRedirectUri` on
+ * the presented URI. Everything here answers 400/503 JSON because no trusted
  * redirect target exists yet. A malformed `client_id` is answered as unknown
  * and never reaches the repository (which may throw on it); a repository that
  * throws is `503 temporarily_unavailable`.
@@ -103,6 +103,23 @@ export const resolveClientAndRedirectUri = async (
 		!client.allowedRedirectUris.some((entry) => matchesRegisteredRedirectUri(entry, redirect_uri))
 	) {
 		// Cannot redirect — redirect_uri not trusted
+		res
+			.status(400)
+			.json({ error: "invalid_request", error_description: "redirect_uri not allowed" });
+		return null;
+	}
+
+	// The presented URI, held to what registration refuses. It may differ from
+	// the matched entry in a loopback port, which is compared as raw text, so
+	// the entry passing the rule does not make the presented URI pass it.
+	// Answered as an unregistered URI is, and never redirected to (RFC 6749
+	// §4.1.2.1).
+	const rejection = checkRedirectUri(redirect_uri);
+	if (rejection !== null) {
+		opts.logger.warn(
+			{ site: "authorize", clientId: auditErrorText(client_id), reason: rejection.reason },
+			"authorize_registered_redirect_uri_refused",
+		);
 		res
 			.status(400)
 			.json({ error: "invalid_request", error_description: "redirect_uri not allowed" });
