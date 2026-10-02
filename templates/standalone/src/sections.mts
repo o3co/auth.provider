@@ -35,6 +35,7 @@ import {
 	MAX_TRUST_PROXY_HOPS,
 	normalizeAllowedOrigins,
 	wholeNumberFromEnv,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
@@ -170,7 +171,7 @@ export const httpSectionSchema = z
 	.object({
 		port: portSchema,
 		trustProxy: trustProxySchema,
-		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
+		readinessTimeoutMs: wholeNumberInRangeFromEnv(1, 2_147_483_647),
 		cors: z.object({ allowedOrigins: allowedOriginsSchema }).strict(),
 	})
 	.strict();
@@ -332,7 +333,7 @@ export function repositoriesSectionSchemaFor(selection: {
 
 /** The in-process code repository's section: the default lifetime, in positive whole seconds. */
 export const inMemoryCodeRepositorySectionSchema = z
-	.object({ defaultExpiresIn: z.coerce.number().int().positive() })
+	.object({ defaultExpiresIn: wholeNumberInRangeFromEnv(1) })
 	.strict();
 
 /**
