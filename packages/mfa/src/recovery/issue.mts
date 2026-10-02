@@ -53,9 +53,11 @@
  *   since fails it. A set is marked once, so its codes are answered once.
  *
  * `mfa.maxFactorsPerSubject` counts what stands once a replacement is
- * complete: the sets a new one replaces are not counted, though they are
- * removed only after it is written. While a sweep is stopped, the subject
- * may hold one record past the limit, every set left retired.
+ * complete: no set stored is counted — those an earlier sweep left included
+ * — though each is removed only after the new one is written. A sweep that
+ * stops leaves its sets stored, each retired, so the subject may hold one
+ * record past the limit for each set left, until a later replacement's
+ * sweep removes them.
  *
  * A binding by `password` — no account-email proof was asked — replaces
  * nothing: whoever holds the password and one code could make it, so the

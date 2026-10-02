@@ -240,7 +240,7 @@ export interface MfaCoordinator {
 
 export interface MfaCoordinatorOptions {
 	readonly factors: MfaFactorResolver;
-	readonly factorStore: MfaFactorStore;
+	readonly factorStore: Pick<MfaFactorStore, "update">;
 	readonly transactions: MfaTransactionStore;
 	readonly sealing: MfaSealing;
 	/** `mfa.maxAttemptsPerTransaction`. */

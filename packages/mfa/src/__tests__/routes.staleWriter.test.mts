@@ -373,7 +373,7 @@ describe("a removal racing a binding past a lease the store does not hold", () =
 });
 
 describe("a first binding's recovery codes when another counting factor lands before them", () => {
-	it("writes no codes past mfa.maxFactorsPerSubject: the factor binds, its codes not issued, the subject at the limit", async () => {
+	it("writes no codes past mfa.maxFactorsPerSubject: the factor binds, its codes not issued, the subject at the limit, said at warn as a conflict", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const stalled = gate();
 		holdingAdd(factorStore, (record) => record.kind === RECOVERY_CODE_FACTOR_KIND, stalled);
@@ -406,6 +406,8 @@ describe("a first binding's recovery codes when another counting factor lands be
 		expect(res.body.recovery_codes_issued).toBe(false);
 		expect(await factorStore.list(ALICE.id)).toHaveLength(2);
 		expect(await ofKind(factorStore, RECOVERY_CODE_FACTOR_KIND)).toEqual([]);
-		expect(events(logger, "error")).toContain("mfa_recovery_codes_unwritten");
+		// The set lost to another writer: a conflict, not an outage.
+		expect(events(logger, "warn")).toContain("mfa_recovery_codes_conflict");
+		expect(events(logger, "error")).not.toContain("mfa_recovery_codes_unwritten");
 	});
 });

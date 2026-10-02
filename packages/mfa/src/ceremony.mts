@@ -367,18 +367,19 @@ export type MfaEnrollmentCompleteOutcome = (
 			readonly attemptsRemaining: number;
 	  } & MfaCeremonySubject)
 	/**
-	 * A first binding that found another record beside its own once written
-	 * (`first_binding_conflict`), or could not read the records again to tell
-	 * (`first_binding_unchecked`). No binding answers either, nor
-	 * `factor_standing`: a binding's writes are fenced on the records read
-	 * under the subject's lease (`factorSet.mts`), so none is checked after
-	 * its write.
+	 * A first binding its read before the subject's lease let through, refused
+	 * by a record that may count found by its read under the lease: another
+	 * binding of the subject landed between the two. Nothing was written and
+	 * the transaction stands; answered as `first_binding_closed`, and audited.
 	 */
-	| ({
-			readonly outcome: "first_binding_conflict";
-			readonly standing: { readonly cause: unknown } | undefined;
-	  } & MfaCeremonySubject)
-	/** Another factor found past `mfa.maxFactorsPerSubject` once written, and not removed: answered by no binding, as above. */
+	| ({ readonly outcome: "first_binding_conflict" } & MfaCeremonySubject)
+	/**
+	 * A first binding that could not read the records again to tell
+	 * (`first_binding_unchecked`), or another factor found past the limit once
+	 * written (`factor_standing`). No binding answers either: a binding's
+	 * writes are fenced on the records read under the subject's lease
+	 * (`factorSet.mts`), so none is checked after its write.
+	 */
 	| ({
 			readonly outcome: "factor_standing";
 			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
@@ -438,7 +439,7 @@ export type MfaStepUpOutcome =
  */
 export interface MfaCeremonyKit {
 	readonly factors: MfaFactorResolver;
-	readonly factorStore: MfaFactorStore;
+	readonly factorStore: Pick<MfaFactorStore, "update">;
 	readonly sealing: MfaSealing;
 	readonly mailSender: MailSender | undefined;
 	readonly witness: MfaEnrollmentWitness;

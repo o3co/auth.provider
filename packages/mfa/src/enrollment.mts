@@ -60,7 +60,9 @@
  *   binding again on the subject's records as the lease's read gave them —
  *   a first one beside a record that may count, another beside none, or one
  *   past `mfa.maxFactorsPerSubject` is refused, nothing written and the
- *   transaction standing; for a first binding notes the subject's
+ *   transaction standing — a first one refused there beside a record the
+ *   read before the lease did not find is `first_binding_conflict`, which
+ *   the routes audit; for a first binding notes the subject's
  *   first-binding mark — a note that fails refuses it, nothing written —
  *   consumes the transaction, writes the factor. Every write of the
  *   subject's factor set is fenced on that read (`factorSet.mts`): a factor
@@ -590,6 +592,11 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				// Judged again on the records read under the lease, before anything is
 				// written: every write after is fenced on them.
 				const refusedNow = refusedBy(tx.purpose, first, writes.factors.records, firstBy);
+				// A first binding closed here was let through by the read before the
+				// lease, which found no record that may count: another binding landed.
+				if (first && refusedNow?.outcome === "first_binding_closed") {
+					return { outcome: "first_binding_conflict", ...about };
+				}
 				if (refusedNow !== undefined) return refusedNow;
 				// Noted before the factor is written: a first binding the mark misses
 				// would leave a stale session trusted.

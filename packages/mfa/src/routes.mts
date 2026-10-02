@@ -1244,13 +1244,8 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						subject: outcome.subject,
 						ip: call.request.ip,
 						userAgent: call.request.userAgent,
-						details: { kind: outcome.kind, removed: outcome.standing === undefined },
+						details: { kind: outcome.kind },
 					});
-					if (outcome.standing !== undefined) {
-						factorStanding(outcome.subject, outcome.kind, outcome.standing.cause);
-						res.status(503).json(MFA_UNAVAILABLE);
-						return;
-					}
 					answerClosed(res, outcome.purpose);
 					return;
 				case "factor_standing":
@@ -1342,6 +1337,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 									"mfa_recovery_codes_unreplaced",
 								);
 							}
+						} else if (codes?.issued === false && codes.conflict === true) {
+							// Another writer's set landed first: a conflict, not an outage.
+							logger.warn({ sub: outcome.subject }, "mfa_recovery_codes_conflict");
 						} else if (codes?.issued === false) {
 							logger.error(
 								{ sub: outcome.subject, err: loggableError(codes.cause) },

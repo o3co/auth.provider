@@ -103,7 +103,7 @@ export type MfaManagingSession = MfaCeremonySession & {
 
 export interface MfaManagementOptions {
 	readonly factors: MfaFactorResolver;
-	readonly factorStore: MfaFactorStore;
+	readonly factorStore: Pick<MfaFactorStore, "update">;
 	/** The subject's records as read, and their removal with the witness after it. */
 	readonly factorSet: MfaFactorSet;
 	readonly sealing: MfaSealing;

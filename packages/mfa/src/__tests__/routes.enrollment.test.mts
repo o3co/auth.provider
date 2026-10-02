@@ -840,9 +840,113 @@ describe("two first bindings of one subject completed at once under the lease", 
 		expect(bound).toHaveLength(1);
 		const loser = answers.find((res) => res.status !== 200);
 		expect(loser?.body.error).toBe(loser?.status === 401 ? "login_required" : "mfa_factors_busy");
-		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
+		// Audited only when the loser's own read under the lease refused it.
+		expect(audit.of("mfa.first_binding_conflict").length).toBeLessThanOrEqual(1);
 		expect(removeIf).not.toHaveBeenCalled();
 		expect(overruns(logger)).toBe(0);
+	});
+});
+
+/**
+ * Holds the first two acquires of the subject's lease on `store` until both
+ * are asked — every completion has passed its checks before the lease — and
+ * the later one until the earlier's lease is released.
+ */
+function leasingOneAfterAnother(store: MfaTransactionStore): void {
+	const arrive = barrier(2);
+	let released: () => void = () => {};
+	const firstReleased = new Promise<void>((resolve) => {
+		released = resolve;
+	});
+	let asked = 0;
+	const acquire = store.acquireSubjectLease.bind(store);
+	vi.spyOn(store, "acquireSubjectLease").mockImplementation(async (subject, options) => {
+		asked += 1;
+		if (asked === 2) {
+			await arrive();
+			await firstReleased;
+		} else if (asked === 1) {
+			await arrive();
+		}
+		return acquire(subject, options);
+	});
+	const release = store.releaseSubjectLease.bind(store);
+	vi.spyOn(store, "releaseSubjectLease").mockImplementation(async (subject, token) => {
+		const answer = await release(subject, token);
+		released();
+		return answer;
+	});
+}
+
+describe("a first binding refused by a counting factor its read under the lease finds and its read before the lease did not", () => {
+	it("is audited once as mfa.first_binding_conflict, with the subject and the kind alone: 401 login_required, its factor never written, its transaction kept", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const audit = recordingAuditSink();
+		const { app, transactionStore } = await boot({
+			config: configFor("required"),
+			factorStore: memory,
+			auditSink: audit,
+		});
+		const owner = await beginFirstBinding(app);
+		const other = await beginFirstBinding(app);
+		const ownerBegun = await beginEnrollment(owner.agent, owner.transaction, "totp");
+		const otherBegun = await beginEnrollment(other.agent, other.transaction, "totp");
+		leasingOneAfterAnother(transactionStore);
+
+		const answers = await Promise.all([
+			completeEnrollment(owner.agent, owner.transaction, totpProofOf(ownerBegun.body.secret)),
+			completeEnrollment(other.agent, other.transaction, totpProofOf(otherBegun.body.secret)),
+		]);
+
+		expect(answers.map((res) => res.status).sort()).toEqual([200, 401]);
+		const lost = answers.findIndex((res) => res.status === 401);
+		expect(answers[lost]?.body).toEqual({
+			error: "login_required",
+			error_description: "Log in again",
+		});
+		expect((await memory.list(ALICE.id)).filter((record) => record.kind === "totp")).toHaveLength(
+			1,
+		);
+		const conflicts = audit.of("mfa.first_binding_conflict");
+		expect(conflicts).toHaveLength(1);
+		expect(conflicts[0]).toMatchObject({ subject: ALICE.id });
+		expect(conflicts[0]?.details).toEqual({ kind: "totp" });
+		const loser = [owner, other][lost];
+		if (loser === undefined) throw new Error("no completion lost");
+		expect(await transactionStore.get(loser.transaction)).toBeDefined();
+	});
+
+	it("is not audited when the read before the lease already found the counting factor: 401 login_required, nothing written", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const audit = recordingAuditSink();
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore: memory,
+			auditSink: audit,
+		});
+		const owner = await beginFirstBinding(app);
+		const other = await beginFirstBinding(app);
+		const ownerBegun = await beginEnrollment(owner.agent, owner.transaction, "totp");
+		const otherBegun = await beginEnrollment(other.agent, other.transaction, "totp");
+		const bound = await completeEnrollment(
+			owner.agent,
+			owner.transaction,
+			totpProofOf(ownerBegun.body.secret),
+		);
+		expect(bound.status, JSON.stringify(bound.body)).toBe(200);
+
+		const res = await completeEnrollment(
+			other.agent,
+			other.transaction,
+			totpProofOf(otherBegun.body.secret),
+		);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body.error).toBe("login_required");
+		expect((await memory.list(ALICE.id)).filter((record) => record.kind === "totp")).toHaveLength(
+			1,
+		);
+		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
 	});
 });
 
