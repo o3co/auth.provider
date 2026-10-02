@@ -53,20 +53,40 @@ describe("replayKeyOf", () => {
 		expect(crc16(Buffer.from("123456789"))).toBe(0x31c3);
 	});
 
+	// A record key is `${prefix}${sid}:${name}`; `removeBySid`'s migration scan
+	// sweeps `${prefix}${sid}:*`, which a replay key must never match.
 	it.each([
-		["ft:", "ft:sid-1:google"],
-		["ft:", "ft:c2lkLTE:okta-prod"],
-		["{ft}:", "{ft}:sid-1:google"],
-		["app:{ft}:", "app:{ft}:sid-1:google"],
-		["ft:", "ft:{sid}:google"],
-		["ft:", "ft:sid{1:google"],
-	])("keeps the record's slot under the prefix %s (%s)", (prefix, key) => {
-		const replay = replayKeyOf(key, prefix, "w-1");
-		expect(slotOf(replay)).toBe(slotOf(key));
-		expect(replay.startsWith(prefix)).toBe(true);
-		expect(replay).not.toBe(key);
-		expect(replayKeyOf(key, prefix, "w-2")).not.toBe(replay);
-	});
+		["ft:", "sid-1", "google"],
+		["ft:", "c2lkLTE", "okta-prod"],
+		["{ft}:", "sid-1", "google"],
+		["app:{ft}:", "sid-1", "google"],
+		["ft:", "{sid}", "google"],
+		["ft:", "sid", "{google}"],
+		["ft:", "sid{1", "google"],
+	])(
+		"keeps the record's slot, outside its session's scan, under the prefix %s (sid %s, name %s)",
+		(prefix, sid, name) => {
+			const key = `${prefix}${sid}:${name}`;
+			const replay = replayKeyOf(key, prefix, "w-1");
+			if (replay === null) throw new Error("refused");
+			expect(slotOf(replay)).toBe(slotOf(key));
+			expect(replay.startsWith(`${prefix}w:{`)).toBe(true);
+			expect(replay.startsWith(`${prefix}${sid}:`)).toBe(false);
+			expect(replayKeyOf(key, prefix, "w-2")).not.toBe(replay);
+		},
+	);
+
+	it.each([
+		["ft:", "sid-1", "go}ogle"],
+		["ft:", "sid}1", "google"],
+		["ft:", "sid{}1", "go}ogle"],
+		["ft:", "a{}b", "google"],
+	])(
+		"answers null for a key whose braces leave no tag a replay key can carry (prefix %s, sid %s, name %s)",
+		(prefix, sid, name) => {
+			expect(replayKeyOf(`${prefix}${sid}:${name}`, prefix, "w-1")).toBeNull();
+		},
+	);
 });
 
 describe("the Redis store hands each conditional write a replay key of its own, on its record's slot", () => {
@@ -116,8 +136,49 @@ describe("the Redis store hands each conditional write a replay key of its own, 
 		].map((input) => (input as { replayKey: string }).replayKey);
 		expect(new Set(keys).size).toBe(4);
 		for (const replayKey of keys) {
-			expect(replayKey.startsWith("ft:")).toBe(true);
+			expect(replayKey.startsWith("ft:w:{")).toBe(true);
 			expect(slotOf(replayKey)).toBe(slotOf("ft:sid-1:google"));
 		}
 	});
+
+	it.each([
+		["sid-1", "go}ogle"],
+		["sid}1", "google"],
+	])(
+		"refuses a replace and a removal of a record whose key no replay key can share a slot with, before any command (sid %s, name %s)",
+		async (sid, name) => {
+			const calls: string[] = [];
+			const client = new Proxy(
+				{},
+				{
+					get: (_target, method: string) => {
+						if (method === "then") return undefined;
+						return (..._args: unknown[]) => {
+							calls.push(method);
+							throw new Error(`${method} must not run`);
+						};
+					},
+				},
+			) as FederationTokenStoreClient;
+			const store = createRedisFederationTokenStore({
+				deploymentMode: "unset",
+				client,
+				encryption: { mode: "allow-plaintext" },
+			});
+			const expected = "00000000-0000-4000-8000-000000000000" as Parameters<
+				typeof store.replaceIf
+			>[2];
+			await expect(store.replaceIf(sid, name, expected, tokens)).rejects.toThrow(
+				new RangeError(
+					"FederationTokenStore (redis): replaceIf refused: no replay key can share the record's Redis Cluster slot (its key holds a brace but no hash tag)",
+				),
+			);
+			await expect(store.removeIf(sid, name, expected)).rejects.toThrow(
+				new RangeError(
+					"FederationTokenStore (redis): removeIf refused: no replay key can share the record's Redis Cluster slot (its key holds a brace but no hash tag)",
+				),
+			);
+			expect(calls).toEqual([]);
+		},
+	);
 });

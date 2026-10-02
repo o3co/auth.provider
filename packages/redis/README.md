@@ -532,7 +532,7 @@ handful of named keys rather than a search:
 | `${keyPrefix}${sid}:${federationName}` | string | one federation token envelope |
 | `${keyPrefix}idx:${sid}` | **set** | the federation names attached to `${sid}` |
 | `${keyPrefix}lock:${sid}:${federationName}` | string | the advisory lock |
-| `${keyPrefix}w:{${keyPrefix}${sid}:${federationName}}:${writeId}` | string | one conditional write's answer, until the declared clock skew past its deadline (a few seconds); on the record's Cluster slot. A record key that carries a hash tag of its own keeps it instead: `${recordKey}:w:${writeId}` |
+| `${keyPrefix}w:{${tag}}:${writeId}` | string | one conditional write's answer, until the declared clock skew past its deadline (a few seconds). `${tag}` is the part of the record key Redis hashes (its hash tag, else the whole key), so the answer is on the record's Cluster slot, and outside the `${keyPrefix}${sid}:*` a logout's migration scan sweeps. A record key whose braces leave it no hash tag a replay key can carry (a `}` without a tag, or an empty `{}`) is refused (`RangeError`) before any command, by `replaceIf` and `removeIf` |
 
 The index (`idx:`) is what lets `removeBySid` name the keys it must delete
 instead of hunting for them, at a cost of O(that session's federations).
@@ -645,15 +645,15 @@ conditional-write convention for a record
   stall inside a running script, between its clock check and its write, for
   the whole of W.
 - **Replay.** Each conditional write therefore keeps its answer under a
-  replay key of its own (`${keyPrefix}w:{<record key>}:<id>`, or
-  `<record key>:w:<id>` for a record key with a hash tag of its own; on the
-  record's Cluster slot) until the declared clock skew past its deadline: a
-  copy that reaches the server before then answers what the first copy
-  answered and writes nothing, so it does not answer `conflict` or `missing`
-  for a write that landed, even when another server, whose clock may lag by
-  the skew, judges the copy after a failover or a slot migration; one that
-  reaches it later is `late`, though another copy may have committed, or may
-  still commit within W on a server whose clock lags by the skew.
+  replay key of its own (`${keyPrefix}w:{<tag>}:<id>`, in the key table
+  above, on the record's Cluster slot) until the declared clock skew past
+  its deadline: a copy that reaches the server before then answers what the
+  first copy answered and writes nothing, so it does not answer `conflict`
+  or `missing` for a write that landed, even when another server, whose
+  clock may lag by the skew, judges the copy after a failover or a slot
+  migration; one that reaches it later is `late`, though another copy may
+  have committed, or may still commit within W on a server whose clock lags
+  by the skew.
 - **The index.** A conditional write never removes an index member, and
   `missing` and `conflict` never add one. `replaceIf` raises the index's TTL
   before its script (`pExpireGT`, which adds no member and makes no key), and

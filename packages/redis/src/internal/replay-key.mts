@@ -16,25 +16,34 @@
 
 /**
  * Where a conditional write keeps its answer for a copy the driver sends
- * again: a key of its own, under the store's prefix, on its record's Redis
- * Cluster slot, so the write's script touches one slot.
+ * again: a key of its own in the store's `w:` namespace, outside every
+ * session's `${prefix}${sid}:*` (the pattern `removeBySid`'s migration scan
+ * sweeps, so a logout never removes an answer before it expires), on its
+ * record's Redis Cluster slot, so the write's script touches one slot.
  */
 
-/** Whether `key` carries a Redis Cluster hash tag: a `{`, then a `}` after at least one character. */
-const hasHashTag = (key: string): boolean => {
+/**
+ * The part of `key` Redis Cluster hashes: its first `{…}` holding at least one
+ * character, else the whole key.
+ */
+const hashedPartOf = (key: string): string => {
 	const open = key.indexOf("{");
-	return open !== -1 && key.indexOf("}", open + 1) > open + 1;
+	if (open !== -1) {
+		const close = key.indexOf("}", open + 1);
+		if (close > open + 1) return key.slice(open + 1, close);
+	}
+	return key;
 };
 
 /**
- * The replay key of the write `writeId` to `key`, a key under `prefix`.
- * `<key>:w:<writeId>` when `key` carries a hash tag, which the suffix keeps;
- * otherwise `<prefix>w:{<key>}:<writeId>`, whose tag is the whole of `key`, so
- * it hashes as `key` does. A key holding a `}` but no tag can share no slot by
- * either form, and is given the first: one Redis node serves it, a Cluster
- * refuses the script.
+ * The replay key of the write `writeId` to `key`, a key under `prefix`:
+ * `<prefix>w:{<tag>}:<writeId>`, where `<tag>` is the part of `key` Redis
+ * hashes, so it hashes as `key` does. `null` when no such key hashes as `key`
+ * does: a key whose braces leave it no tag (a `}` with no `{` before it, or an
+ * empty `{}`) is hashed whole, and `{<key>}` would end at its first `}`.
  */
-export function replayKeyOf(key: string, prefix: string, writeId: string): string {
-	if (hasHashTag(key) || key.includes("}")) return `${key}:w:${writeId}`;
-	return `${prefix}w:{${key}}:${writeId}`;
+export function replayKeyOf(key: string, prefix: string, writeId: string): string | null {
+	const hashed = hashedPartOf(key);
+	const replayKey = `${prefix}w:{${hashed}}:${writeId}`;
+	return hashedPartOf(replayKey) === hashed ? replayKey : null;
 }

@@ -301,9 +301,10 @@ export function createRedisFederationTokenStore(
 	// Per-session key index: one SET per sid naming its federations, so
 	// `removeBySid` deletes named keys instead of scanning. Its own `idx:`
 	// sub-namespace (like `lock:`) keeps it out of the `${prefix}${sid}:*`
-	// pattern the scan fallback sweeps. A sid equal to a sub-namespace token
-	// ("idx", "lock") would make the layouts ambiguous; sids are opaque
-	// generated identifiers, so that bounds what may be passed in.
+	// pattern the scan fallback sweeps, as the replay keys' `w:` does. A sid
+	// equal to a sub-namespace token ("idx", "lock", "w") would make the
+	// layouts ambiguous; sids are opaque generated identifiers, so that bounds
+	// what may be passed in.
 	const index = createRedisSidSet({
 		client: opts.client,
 		keyPrefix: `${prefix}idx:`,
@@ -457,6 +458,20 @@ export function createRedisFederationTokenStore(
 			"it may have committed, or may still commit within W",
 		);
 
+	/**
+	 * The replay key of a conditional write, on its record's Cluster slot, or a
+	 * refusal before any command when there is none (`replayKeyOf`).
+	 */
+	const replayKeyFor = (operation: string, key: string, writeId: string): string => {
+		const replayKey = replayKeyOf(key, prefix, writeId);
+		if (replayKey === null) {
+			throw new RangeError(
+				`FederationTokenStore (redis): ${operation} refused: no replay key can share the record's Redis Cluster slot (its key holds a brace but no hash tag)`,
+			);
+		}
+		return replayKey;
+	};
+
 	/** Unlink `keys` in bounded batches. */
 	const unlinkBatched = async (keys: AsyncIterable<string>): Promise<void> => {
 		const batch: string[] = [];
@@ -513,6 +528,7 @@ export function createRedisFederationTokenStore(
 		async replaceIf(sid, name, expected, tokens) {
 			const key = k(sid, name);
 			const generation = newStoreGeneration();
+			const replayKey = replayKeyFor("replaceIf", key, generation);
 			const value = seal(key, toEnvelope(tokens), generation);
 			// The index's TTL raised first, so it lapses at most this step's time
 			// before the record when the add after `updated` fails.
@@ -524,7 +540,7 @@ export function createRedisFederationTokenStore(
 						value,
 						ttlMs: storeTtlMs,
 						deadlineMs,
-						replayKey: replayKeyOf(key, prefix, generation),
+						replayKey,
 						clockSkewMs: CLOCK_SKEW_MS,
 					}),
 				unanswered("replaceIf"),
@@ -538,7 +554,7 @@ export function createRedisFederationTokenStore(
 		},
 		async removeIf(sid, name, expected) {
 			const key = k(sid, name);
-			const replayKey = replayKeyOf(key, prefix, newStoreGeneration());
+			const replayKey = replayKeyFor("removeIf", key, newStoreGeneration());
 			const outcome = await withWriteDeadline(
 				(deadlineMs) =>
 					opts.client.removeIfGeneration(key, {

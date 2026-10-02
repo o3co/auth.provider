@@ -24,6 +24,7 @@ import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationTokenStore, type EncryptionConfig } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
+import { replayKeyOf } from "#/internal/replay-key.mjs";
 import { CLOCK_SKEW_MS } from "#/internal/write-deadline.mjs";
 import { FT_PRELUDE } from "#/ioredis/scripts/federation-tokens.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
@@ -595,6 +596,33 @@ describe("conditional writes over a real Redis", () => {
 		const relinked = await raw.get(key);
 		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
 		expect(await raw.get(key)).toBe(relinked);
+	});
+
+	it("a logout between a replace and its resent copy leaves the replay answer: the copy answers updated and writes nothing", async () => {
+		// The migration scan is on, and the session id carries a hash tag: the
+		// shape whose replay key could fall under the session's `${prefix}${sid}:*`.
+		const { keyPrefix, store } = makeStore(true);
+		const sid = "{sid-1}";
+		const key = `${keyPrefix}${sid}:google`;
+		await store.attach(sid, "google", tokens);
+		const read = await live(store, sid, "google");
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const replayKey = replayKeyOf(key, keyPrefix, "logout-1");
+		if (replayKey === null) throw new Error("no replay key");
+		const copy = {
+			expected: read.generation,
+			value: '{"v":2,"g":"logout-1","p":{}}',
+			ttlMs: 60_000,
+			deadlineMs: Date.now() + 60_000,
+			replayKey,
+			clockSkewMs: CLOCK_SKEW_MS,
+		};
+		expect(await client.replaceIfGeneration(key, copy)).toBe("updated");
+		await store.removeBySid(sid);
+		expect(await raw.exists(key)).toBe(0);
+		expect(await raw.exists(replayKey)).toBe(1);
+		expect(await client.replaceIfGeneration(key, copy)).toBe("updated");
+		expect(await raw.exists(key)).toBe(0);
 	});
 
 	it("keeps a write's answer until the declared clock skew past its deadline, and no longer", async () => {
