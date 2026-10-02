@@ -521,6 +521,29 @@ describe("the release's answers", () => {
 	});
 });
 
+describe("the hard hold before an exempt proof", () => {
+	it("answers a login's 429 mfa_locked with no time: neither rebind_after nor the instant in any form", async () => {
+		const setup = await composed();
+		const third = await wrongCodesToTheHardLimit(setup.app, setup.totp);
+		const rebindAfterMs = Date.now() + DEFAULT_CLOCK_SKEW_MS;
+
+		const held = await verify(
+			third.agent,
+			third.transaction,
+			setup.totp.record.id,
+			totpCode(setup.totp.secret),
+		);
+
+		expect(held.status, JSON.stringify(held.body)).toBe(429);
+		expect(held.body).toMatchObject({ error: "mfa_locked", hold: "hard" });
+		expect(held.body).not.toHaveProperty("rebind_after");
+		expect(held.headers["retry-after"]).toBeUndefined();
+		const body = JSON.stringify(held.body);
+		expect(body).not.toContain(new Date(rebindAfterMs).toISOString());
+		expect(body).not.toContain(String(rebindAfterMs));
+	});
+});
+
 describe("a login that has not passed its second factor", () => {
 	it("acquires no lease of the subject's while its codes fail", async () => {
 		const setup = await composed();

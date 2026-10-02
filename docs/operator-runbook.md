@@ -830,7 +830,10 @@ wires it.
   `mfa.rateLimit.routes` bounds the MFA requests of each client address
   (`mfa:ip:<ip>`), challenges included. A held proof is answered
   `429 {"error":"mfa_locked","hold":…,"usable_kinds":[…],"attempts_remaining":…}`
-  — `Retry-After` in whole seconds, none for the hard hold. `usable_kinds`
+  — `Retry-After` in whole seconds, none for the hard hold, whose answer
+  carries no time: the page asks for a recovery code or a passkey, a
+  rebind, then the release, and only the release, after that proof, says
+  from when a rebind counts (`rebind_after`). `usable_kinds`
   names the exempt kinds the subject holds, whether or not each still works:
   a recovery set with no code left is named, and refuses at its verification.
   So a TOTP-only user whose password an attacker holds needs a recovery code
