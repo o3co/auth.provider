@@ -38,7 +38,9 @@
  *   held to the start the admission carries — the subject's generation read
  *   before it — one write of the subject's at a time: another in the way past
  *   its wait is `409 mfa_factors_busy` with `Retry-After`; a recovery or a
- *   reset since it began, `409 mfa_factors_changed`, nothing removed; one that
+ *   reset since it began, or another write of the subject's factors landing
+ *   after the removal read them (a writer past its own lease), `409
+ *   mfa_factors_changed`, nothing removed; one that
  *   ran past its hold said at error whatever it came to, a removal it made
  *   audited and answered `409 mfa_factors_changed`. Under `required`, removing
  *   an installed counting factor is refused `409` when no other usable counting

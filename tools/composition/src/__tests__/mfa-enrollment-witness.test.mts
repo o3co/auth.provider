@@ -186,7 +186,7 @@ describe.each(["store", "memory"] as const)(
 	(factors) => {
 		it("marks the subject enrolled in the Store once its first factor is written, and the login completes", async () => {
 			const set = await boot(factors);
-			const create = vi.spyOn(storesOf(set).mfaFactorStore, "create");
+			const create = vi.spyOn(storesOf(set).mfaFactorStore, "createIf");
 			const mark = vi.spyOn(storesOf(set).userRepository, "markMfaEnrolled");
 			const { done } = await firstBinding(set.app);
 			expect(done.status, JSON.stringify(done.body)).toBe(200);

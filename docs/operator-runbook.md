@@ -886,8 +886,14 @@ wires it.
   provider cannot read by subject: check the address in the Store first.
   Audited `mfa.reset`; logged `mfa_reset`, or `mfa_reset_incomplete` at warn.
   An `mfa_subject_lease_overrun` line for the same `sub` with
-  `route: "enrollment"` around the reset is a binding whose write stalled past
-  its lease and may have landed after the reset: run the reset again.
+  `route: "enrollment"` around the reset is a binding that ran past its lease
+  beside the reset: the factor store refuses its factor and its recovery
+  codes once the reset ran, but its witness mark or its consume of D25's
+  flag may have landed after: run the reset again. A reset whose own report
+  says `overran` may have removed a factor bound after it began — its removal
+  is unconditional and always wins, so a binding made while its removal
+  stalled is gone with it: run the reset again, and tell the user to bind
+  again.
   A report with `witness: "unwritable"` is complete, but the directory has
   no `markMfaEnrolled`: clear the subject's enrollment witness in the Store
   yourself, or the subject's next password login is answered `503`.
@@ -1202,10 +1208,7 @@ wires it.
   an operator reset (`mfa.reset`), the first lock of
   an episode (`mfa.locked.first`) and an email factor refused at a changed
   address (`mfa.email_address_mismatch`). Wire it: it is how a user learns that a
-  leaked password bound a factor first (D24). Route one event to an operator
-  as well: `mfa.first_binding_conflict` with `removed: false`, a first factor
-  that may be a password holder's and could not be removed — the
-  Investigate row for it says what to do. To keep the audit trail and
+  leaked password bound a factor first (D24). To keep the audit trail and
   notify at once, contribute the notifier as `auditHooks` from a module of
   your own: core hands every event to the `auditSink` and to each hook.
   Boot names each hook's position and module (`audit_hooks_registered`,
@@ -1410,7 +1413,7 @@ stream — its level is fixed at `info`.
 | `mfa_first_binding_factor_standing` (error — `sub`, `kind`, the removal's failure) | `mfa/src/routes.mts` | a first binding that could not stand — its records read again did not show its own as the only one that may count (another login of the subject bound one at once), or could not be read to tell — could not remove its own factor after three tries: the factor may be a password holder's, and it stands. Beside audit `mfa.first_binding_conflict` with `removed: false` (Investigate): remove the subject's factors, or set D25's flag and reset them |
 | `mfa_enrollment_factor_standing` (error — `sub`, `kind`, the removal's failure) | `mfa/src/routes.mts` | another factor added from the account page found the subject's records past `mfa.maxFactorsPerSubject` — enrollments made at once — or could not read them again, and could not be removed after three tries: it **stands and is usable**, and the user was answered `503`. Its enrollment is audited (`mfa.factor.enrolled`, `binding: "mfa"`), so the account holder's notice goes out as for any factor added; a failed read is the `mfa_store_unavailable` line beside it. The subject holds one record past the limit until a factor is removed. Sustained, the factor store is refusing removals |
 | `mfa_recovery_codes_unwritten` (error — `sub`, the error's projection) | `mfa/src/routes.mts`, `mfa/src/recoveryCodes.mts` | a first binding wrote its factor, or a regeneration ran, and the recovery codes could not be written or marked shown: no codes were answered, and the user was told so (a binding's `recovery_codes_issued: false`, a regeneration's `503`); a set left unshown is listed `recovery_codes_shown: false`. Once the factor store answers, have them regenerate their codes. When the cause reads "the set changed before it was marked shown", another writer (a regeneration, a recovery or an operator reset) replaced or removed the set between the binding and the login's answer: nothing is out, and the codes that stand are that writer's — check the subject's factors before asking for another regeneration |
-| `mfa_recovery_codes_conflict` (warn — `sub`) | `mfa/src/recoveryCodes.mts` | a regeneration read, after its write, another writer's set at its generation or a later one, and yielded (two writers the lease let in together — an evicted lease, a store slower than `mfa.storeTimeoutMs`): it removed its own and answered `409`, its codes never shown. The other set's codes were answered to whoever wrote it; if the account holder did not regenerate twice, look for the other session |
+| `mfa_recovery_codes_conflict` (warn — `sub`) | `mfa/src/recoveryCodes.mts` | a regeneration's new set was refused by the factor store: another write of the subject's factors landed after the regeneration read them (two writers the lease let in together — an evicted lease, a store slower than `mfa.storeTimeoutMs`). Nothing was written, the floor was not raised, and `409` was answered, its codes never shown. If the other write was a regeneration, its codes were answered to whoever made it; if the account holder did not regenerate twice, look for the other session |
 | `mfa_recovery_set_floor_unread` (warn — `sub`, the error's projection) | `mfa/src/factorSet.mts`, `mfa/src/requirement.mts` | a reading of a subject's records — a password login's ask, a transaction's offers, the account page's list, a step-up — found a recovery set and could not read the subject's recovery-set floor within `mfa.storeTimeoutMs`: every set was read as without it, so a retired set may be offered or listed usable (its codes are still refused: a verification reads the floor itself and answers `503` while it cannot). Only subjects holding a recovery set pay the read. Sustained, the MFA transaction store is out — see its row |
 | `mfa_recovery_codes_unreplaced` (error — `sub`, the error's projection) + audit `mfa.recovery_codes.generated` with `unreplaced: true` | `mfa/src/routes.mts`, `mfa/src/recoveryCodes.mts` | a first binding by the account-email proof, or a regeneration, over a subject's standing recovery codes wrote the new set and raised the recovery-set floor, and could not list or remove the old one: the old record is still stored, **retired** — its codes are refused, no transaction offers it, and the account page lists it `retired`. Once the factor store answers, remove the subject's older `recovery_code` record (the one created before), or let the next regeneration remove it. The audit's `unreplaced: true` **without** this line, and with `kept: "password_binding"`, is on purpose: a first binding by `password` (no account-email proof was asked) — at a login reopened after a recovery code, or from the account page — kept the owner's set, so the owner's remaining codes stay usable. If the account holder did not bind that factor, the password and one of their codes are in other hands: remove the factor (or reset the subject) and have them change the password |
 | `mfa_enrollment_state_inconsistent` (error — `route`, `sub`, `witness`) + audit `mfa.enrollment_state_inconsistent` (`purpose: "login"`) | `mfa/src/routes.mts` | a recovery code was verified for a subject with no record that may count while the login's `User` says it enrolled (`witness: "enrolled"`) or says nothing readable (`malformed`): answered `503`, the code and the transaction unspent — never a first binding (D12). The factor store lost the subject's records, or the Store answers `mfaEnrolled` wrongly: see the row for the same audit event at a login |

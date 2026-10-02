@@ -458,7 +458,7 @@ describe("noting the mark", () => {
 		for (const mode of ["optional", "required"] as const) {
 			const { app, factorStore, transactionStore, userSessionStore } = await composed(mode);
 			const note = vi.spyOn(transactionStore, "noteFirstBinding");
-			const create = vi.spyOn(factorStore, "create");
+			const create = vi.spyOn(factorStore, "createIf");
 			let res: Awaited<ReturnType<typeof completeEnrollment>>;
 			if (mode === "optional") {
 				res = await bindFromAccount((await signIn(app, userSessionStore)).agent);

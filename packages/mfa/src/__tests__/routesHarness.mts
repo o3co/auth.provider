@@ -39,7 +39,7 @@ import type {
 	SessionRequirement,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { defineModule } from "@o3co/auth-provider-core";
+import { defineModule, readConditionalCreateAnswer } from "@o3co/auth-provider-core";
 import type { RecordingMailSender } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import type request from "supertest";
@@ -113,6 +113,17 @@ export const seedTotp = (
 		...options,
 	});
 
+/**
+ * `record` added to its subject's set as a writer of the set adds one: by
+ * `createIf`, at the generation the set is read at. Throws when the store
+ * refuses it.
+ */
+export async function addRecord(store: MfaFactorStore, record: MfaFactorRecord): Promise<void> {
+	const { generation } = await store.listVersioned(record.subject);
+	const answer = readConditionalCreateAnswer(await store.createIf(record, generation));
+	if (answer.outcome !== "created") throw new Error(`${record.id} was not stored`);
+}
+
 /** Seeds a record of `kind` for `subject` whose data is `data`, sealed to it. */
 export async function seedFactor(
 	store: MfaFactorStore,
@@ -132,7 +143,7 @@ export async function seedFactor(
 		version: 0,
 		data: suiteSealing().sealFactorData({ subject, id, kind }, data),
 	};
-	await store.create(record);
+	await addRecord(store, record);
 	return record;
 }
 

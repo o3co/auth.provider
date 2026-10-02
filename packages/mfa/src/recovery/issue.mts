@@ -18,10 +18,13 @@
  * Issuing a subject's recovery codes (the MFA ADR's D22, D25): a set made by
  * the installed recovery-code factor, written as one `recovery_code` record
  * sealed to it, as the binding it follows authorized it, under the subject's
- * lease (`factorSet.mts`), whose writes it is handed. Never throws: a set
- * that cannot be made, written or shown is answered not issued, with why,
- * so what it follows stands.
+ * lease (`factorSet.mts`), through the subject's factor set the lease hands
+ * it — each write applied only while the set stands as the lease's read, or
+ * this binding's own writes since, left it. Never throws: a set that cannot
+ * be made, written or shown is answered not issued, with why, so what it
+ * follows stands.
  *
+ * - The sets that stand are those among the records read under the lease.
  * - A set's generation is one past the newest it replaces — the subject's
  *   recovery-set floor, or a readable set's generation, whichever is higher
  *   (a set it cannot read counts for nothing) — and the floor is raised to
@@ -30,15 +33,15 @@
  *   writes nothing; one that cannot be raised removes the new set and keeps
  *   those that stood — a removal that fails too is said beside it, the set
  *   left stored and unshown.
- * - Every set listed before the write, readable or not, is then removed; a
- *   set written after the listing (another binding's) never is. One that
- *   cannot be removed, or a listing that failed, leaves a retired set
- *   stored, answered with why (`unreplaced`); it never undoes the new set.
- * - The records are read again after: a readable set of another writer at
- *   the new set's generation or a later one wins — the new set is removed and
- *   answered as the loser (`conflict`), shown to nobody. Whichever of two
- *   writers reads the other after its own write yields, so two never both
- *   stand; both may yield. Records that cannot be read again show nothing.
+ * - A set whose write finds the subject's factor set changed since it was
+ *   read — another write landed, which under the lease only a writer past
+ *   its own lease can make — is not written: not issued, as the loser
+ *   (`conflict`), the floor untouched.
+ * - Every set that stood, readable or not, is then removed, until one
+ *   removal finds the factor set changed: the rest are left. One that cannot
+ *   be removed, or is left, is a retired set still stored, answered with why
+ *   (`unreplaced`); it never undoes the new set. Each set left stays retired
+ *   by the floor, and the next replacement removes it.
  * - Last, the set is marked shown by compare-and-set at the version it was
  *   written; only once it is are its codes answered, so codes are never
  *   answered while the set says it was not shown. A mark that fails, or
@@ -48,6 +51,11 @@
  *   codes (`show`), for a caller whose answer may still be another one. The
  *   mark needs no lease: a writer that replaced, removed or changed the set
  *   since fails it. A set is marked once, so its codes are answered once.
+ *
+ * `mfa.maxFactorsPerSubject` counts what stands once a replacement is
+ * complete: the sets a new one replaces are not counted, though they are
+ * removed only after it is written. While a sweep is stopped, the subject
+ * may hold one record past the limit, every set left retired.
  *
  * A binding by `password` — no account-email proof was asked — replaces
  * nothing: whoever holds the password and one code could make it, so the
@@ -62,11 +70,12 @@ import {
 	isMfaFactorUpdateWritten,
 	type MfaFactor,
 	type MfaFactorRecord,
+	type MfaFactorRecordUpdate,
 	type MfaFactorResolver,
 	type MfaFactorStore,
 } from "@o3co/auth-provider-core";
 import { OUTSIDE_CONTRACT } from "../ceremony.mjs";
-import type { MfaFactorSetWrites } from "../factorSet.mjs";
+import type { MfaFactorSetWriter, MfaFactorSetWrites } from "../factorSet.mjs";
 import type { MfaSealing } from "../sealing.mjs";
 import {
 	generateRecoveryCodes,
@@ -82,9 +91,10 @@ export type MfaUnreplacedRecoveryCodes =
 
 /**
  * What issuing came to: nothing while the factor is off, or not issued, with
- * why — `conflict` when another writer's set won; or the codes to answer once,
- * whether the new set replaces one — `regenerated`: one stood, or could not
- * be ruled out — and why one may still be stored (`unreplaced`).
+ * why — `conflict` when the subject's factor set changed before the new set
+ * was written; or the codes to answer once, whether the new set replaces one
+ * — `regenerated`: one stood — and why one may still be stored
+ * (`unreplaced`).
  */
 export type MfaIssuedRecoveryCodes =
 	| {
@@ -110,19 +120,17 @@ export type MfaWrittenRecoveryCodes =
 
 export interface IssueRecoveryCodesOptions {
 	readonly factors: MfaFactorResolver;
-	/** The factor store and the subject's recovery-set floor, as the subject's lease hands them. */
-	readonly writes: Pick<MfaFactorSetWrites, "factorStore" | "recoverySetFloor">;
+	/** The subject's factor set and recovery-set floor, as the subject's lease hands them. */
+	readonly writes: Pick<MfaFactorSetWrites, "factors" | "recoverySetFloor">;
 	readonly sealing: MfaSealing;
 	readonly subject: string;
 	/** What authorized the binding the set is issued beside: `mfa` for a regeneration. */
 	readonly binding: NonNullable<MfaFactorRecord["binding"]>;
 	readonly nowMs: number;
-	/** The subject's records as the caller read them under the same lease, just before: not listed again. */
-	readonly listed?: readonly MfaFactorRecord[];
 }
 
 export interface WriteRecoveryCodesOptions extends IssueRecoveryCodesOptions {
-	/** The factor store `show` marks the set shown through: the lease's while it is held, else one outside it. */
+	/** The factor store `show` marks the set shown through, once the lease that wrote it is released. */
 	readonly markedThrough: Pick<MfaFactorStore, "update">;
 }
 
@@ -130,17 +138,16 @@ export interface WriteRecoveryCodesOptions extends IssueRecoveryCodesOptions {
 export const replacesStandingSets = (binding: NonNullable<MfaFactorRecord["binding"]>): boolean =>
 	binding !== "password";
 
-/** Thrown inside issuing when another writer's set won. */
-class LostToAnotherSet extends Error {}
+/** What a write of the subject's factor set that found it changed since its read is answered with. */
+const SET_CHANGED = "the subject's factor set changed since it was read: another write landed";
 
-/** A new set for `options.subject`, marked shown at once (see this file's header). */
+/** A new set for `options.subject`, marked shown at once through the writes it is handed (see this file's header). */
 export async function issueRecoveryCodes(
 	options: IssueRecoveryCodesOptions,
 ): Promise<MfaIssuedRecoveryCodes> {
-	const written = await writeRecoveryCodes({
-		...options,
-		markedThrough: options.writes.factorStore,
-	});
+	const written = await writeSet(options, (id, expectedVersion, next) =>
+		options.writes.factors.update(id, expectedVersion, next),
+	);
 	return written !== undefined && "written" in written ? written.show() : written;
 }
 
@@ -148,31 +155,43 @@ export async function issueRecoveryCodes(
 export async function writeRecoveryCodes(
 	options: WriteRecoveryCodesOptions,
 ): Promise<MfaWrittenRecoveryCodes> {
+	const { markedThrough, subject } = options;
+	return writeSet(options, (id, expectedVersion, next) =>
+		markedThrough.update(subject, id, expectedVersion, next),
+	);
+}
+
+/** A record's update by compare-and-set: the subject's record `id`, at `expectedVersion`. */
+type MarkShown = (
+	id: string,
+	expectedVersion: number,
+	next: MfaFactorRecordUpdate,
+) => Promise<MfaFactorRecord | null>;
+
+/** A new set written unshown, its mark through `mark` (see this file's header). */
+async function writeSet(
+	options: IssueRecoveryCodesOptions,
+	mark: MarkShown,
+): Promise<MfaWrittenRecoveryCodes> {
 	const { factors, writes, sealing, subject } = options;
-	const { factorStore, recoverySetFloor } = writes;
+	const { factors: set, recoverySetFloor } = writes;
 	const factor = factors.get(RECOVERY_CODE_FACTOR_KIND);
 	if (factor === undefined) return undefined;
 	const replacing = replacesStandingSets(options.binding);
 	const id = randomBytes(16).toString("base64url");
 	try {
 		const digests = sealing.digestsFor(RECOVERY_CODE_FACTOR_KIND);
-		const standing =
-			options.listed === undefined
-				? await setsOf(factorStore, subject)
-				: { records: setsAmong(options.listed) };
+		const standing = set.records.filter((record) => record.kind === RECOVERY_CODE_FACTOR_KIND);
 		const floor = await recoverySetFloor.read(subject);
-		const newest = Math.max(
-			floor,
-			...("records" in standing ? standing.records.map((record) => generationOf(record)) : []),
-		);
+		const newest = Math.max(floor, ...standing.map((record) => generationOf(record)));
 		const generation = replacing ? newest + 1 : newest;
-		const set = generateRecoveryCodes(factor, digests, generation);
-		if (set === undefined) return undefined;
+		const made = generateRecoveryCodes(factor, digests, generation);
+		if (made === undefined) return undefined;
 		const binding = { subject, id, kind: RECOVERY_CODE_FACTOR_KIND };
-		const shown = shownRecoverySet(set.data);
+		const shown = shownRecoverySet(made.data);
 		if (shown === undefined) throw new TypeError("the factor issued data that is not a set");
 		const sealedShown = sealing.sealFactorData(binding, shown);
-		await factorStore.create({
+		const created = await set.create({
 			id,
 			subject,
 			kind: RECOVERY_CODE_FACTOR_KIND,
@@ -181,19 +200,20 @@ export async function writeRecoveryCodes(
 			createdAt: new Date(options.nowMs),
 			lastUsedAt: undefined,
 			version: 0,
-			data: sealing.sealFactorData(binding, set.data),
+			data: sealing.sealFactorData(binding, made.data),
 		});
+		if (created === "changed") {
+			return { issued: false, cause: new Error(SET_CHANGED), conflict: true };
+		}
 
 		let unreplaced: MfaUnreplacedRecoveryCodes | undefined;
 		if (!replacing) {
-			if ("cause" in standing || standing.records.length > 0) {
-				unreplaced = { kept: "password_binding" };
-			}
+			if (standing.length > 0) unreplaced = { kept: "password_binding" };
 		} else {
 			try {
 				await recoverySetFloor.raise(subject, generation);
 			} catch (cause) {
-				const unremoved = await removeEach(factorStore, subject, [id]);
+				const unremoved = await removeEach(set, [id]);
 				return {
 					issued: false,
 					cause:
@@ -205,39 +225,23 @@ export async function writeRecoveryCodes(
 								),
 				};
 			}
-			if ("cause" in standing) {
-				unreplaced = { cause: standing.cause };
-			} else {
-				const failed = await removeEach(
-					factorStore,
-					subject,
-					standing.records.map((record) => record.id),
-				);
-				if (failed !== undefined) unreplaced = failed;
-			}
-			const after = await setsOf(factorStore, subject);
-			if ("cause" in after) throw after.cause;
-			const winner = after.records.find(
-				(record) => record.id !== id && generationOf(record) >= generation,
+			unreplaced = await removeEach(
+				set,
+				standing.map((record) => record.id),
 			);
-			if (winner !== undefined) throw new LostToAnotherSet("another set of the subject's won");
 		}
 
 		const issued = {
 			issued: true as const,
-			codes: set.codes,
-			regenerated: "cause" in standing || standing.records.length > 0,
+			codes: made.codes,
+			regenerated: standing.length > 0,
 			...(unreplaced === undefined ? {} : { unreplaced }),
 		};
 		return {
 			written: "unshown",
-			show: () => markShown(options.markedThrough, subject, id, sealedShown, issued),
+			show: () => markShown(mark, subject, id, sealedShown, issued),
 		};
 	} catch (cause) {
-		if (cause instanceof LostToAnotherSet) {
-			await removeEach(factorStore, subject, [id]);
-			return { issued: false, cause, conflict: true };
-		}
 		return { issued: false, cause };
 	}
 
@@ -259,14 +263,14 @@ export async function writeRecoveryCodes(
  * the set changed. Never throws.
  */
 async function markShown(
-	factorStore: Pick<MfaFactorStore, "update">,
+	mark: MarkShown,
 	subject: string,
 	id: string,
 	sealedShown: string,
 	issued: Extract<MfaIssuedRecoveryCodes, { readonly issued: true }>,
 ): Promise<Exclude<MfaIssuedRecoveryCodes, undefined>> {
 	try {
-		const marked: unknown = await factorStore.update(subject, id, 0, {
+		const marked: unknown = await mark(id, 0, {
 			data: sealedShown,
 			label: undefined,
 			lastUsedAt: undefined,
@@ -290,36 +294,19 @@ async function markShown(
 	}
 }
 
-/** The subject's recovery-code sets among `records`. */
-const setsAmong = (records: readonly MfaFactorRecord[]): MfaFactorRecord[] =>
-	records.filter((record) => record.kind === RECOVERY_CODE_FACTOR_KIND);
-
-/** The subject's sets as listed now, or why they could not be. */
-async function setsOf(
-	factorStore: MfaFactorSetWrites["factorStore"],
-	subject: string,
-): Promise<{ readonly records: readonly MfaFactorRecord[] } | { readonly cause: unknown }> {
-	try {
-		const records: unknown = await factorStore.list(subject);
-		if (!Array.isArray(records)) {
-			throw new TypeError("MfaFactorStore.list answered something that is not a list");
-		}
-		return { records: setsAmong(records as MfaFactorRecord[]) };
-	} catch (cause) {
-		return { cause };
-	}
-}
-
-/** Each of `ids` removed: `undefined` once all are, else the first failure. */
+/**
+ * Each of `ids` removed from `set`: `undefined` once all are, else the first
+ * failure. A removal that finds the set changed leaves the rest: every later
+ * one would find it so.
+ */
 async function removeEach(
-	factorStore: MfaFactorSetWrites["factorStore"],
-	subject: string,
+	set: MfaFactorSetWriter,
 	ids: readonly string[],
 ): Promise<{ readonly cause: unknown } | undefined> {
 	let failed: { readonly cause: unknown } | undefined;
 	for (const id of ids) {
 		try {
-			await factorStore.remove(subject, id);
+			if ((await set.remove(id)) === "changed") return failed ?? { cause: new Error(SET_CHANGED) };
 		} catch (cause) {
 			failed ??= { cause };
 		}

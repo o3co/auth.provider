@@ -367,22 +367,18 @@ export type MfaEnrollmentCompleteOutcome = (
 			readonly attemptsRemaining: number;
 	  } & MfaCeremonySubject)
 	/**
-	 * Once this binding's factor was written, another record stood beside it
-	 * (`first_binding_conflict`), or the records could not be read again to
-	 * tell (`first_binding_unchecked`, with that outage). Its own was removed
-	 * — or, `standing` saying why, still stands after every try — and the
-	 * login starts again.
+	 * A first binding that found another record beside its own once written
+	 * (`first_binding_conflict`), or could not read the records again to tell
+	 * (`first_binding_unchecked`). No binding answers either, nor
+	 * `factor_standing`: a binding's writes are fenced on the records read
+	 * under the subject's lease (`factorSet.mts`), so none is checked after
+	 * its write.
 	 */
 	| ({
 			readonly outcome: "first_binding_conflict";
 			readonly standing: { readonly cause: unknown } | undefined;
 	  } & MfaCeremonySubject)
-	/**
-	 * Another factor, once written, found its subject's records past
-	 * `mfa.maxFactorsPerSubject` — or could not read them again to tell
-	 * (`listing`) — and could not be removed after every try: it stands, and
-	 * is usable.
-	 */
+	/** Another factor found past `mfa.maxFactorsPerSubject` once written, and not removed: answered by no binding, as above. */
 	| ({
 			readonly outcome: "factor_standing";
 			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
