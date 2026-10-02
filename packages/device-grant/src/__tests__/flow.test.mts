@@ -620,6 +620,44 @@ describe("verification endpoint", () => {
 });
 
 describe("rate limiting (RFC 8628 §5.1)", () => {
+	/** A limiter that runs `during` while it is asked, then answers as the memory limiter does. */
+	const slowLimiter = () => {
+		const inner = createMemoryRateLimiter({
+			limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		});
+		const slow = {
+			during: (): void => undefined,
+			limiter: {
+				kind: "slow",
+				check: async (key: string, ctx: Parameters<RateLimiter["check"]>[1]) => {
+					slow.during();
+					return inner.check(key, ctx);
+				},
+			} satisfies RateLimiter,
+		};
+		return slow;
+	};
+
+	it.each([
+		["lookup", 404, "invalid_user_code"],
+		["approve", 410, "expired_token"],
+		["deny", 410, "expired_token"],
+	] as const)(
+		"judges a %s against the clock after the budget: a code that expires while the limiter answers is refused",
+		async (action, status, error) => {
+			const slow = slowLimiter();
+			const { app, clock } = makeHarness({ rateLimiter: slow.limiter });
+			const started = await startDevice(app);
+			slow.during = () => clock.advance(settings.codeLifetimeSeconds * 1000 + 1_000);
+
+			const res = await verify(app, { action, user_code: started.body.user_code });
+
+			expect(res.status).toBe(status);
+			expect(res.body.error).toBe(error);
+		},
+	);
+
 	it("counts lookups against the same budget as approvals", async () => {
 		// The lookup is the same brute-force oracle: it answers "is this a real
 		// code?". A lookup route that did not count would be a free oracle

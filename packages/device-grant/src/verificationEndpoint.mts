@@ -28,8 +28,9 @@
  * - Order: JSON media type (415), the body's `action` (400), session
  *   admission, what an approval records (401, below; `approve` only), the
  *   email gate (`approve` only), the budget, the code's shape (a malformed
- *   code is 404), then the store's answers. Refusals before the budget spend
- *   no attempt and read no code.
+ *   code is 404), then the store's answers, on a clock read after the budget:
+ *   a code that expires while the limiter answers is expired. Refusals before
+ *   the budget spend no attempt and read no code.
  * - Admission (`admitSession`; see the session-admission ADR) reads the live
  *   `UserSession` behind the cookie's `sid`, not the cookie's claim: the
  *   device token carries no `sid` or `family_id`, so no later logout reaches
@@ -39,7 +40,8 @@
  *   (core's `recordableDeviceApproval`: an `authTime` further ahead of the
  *   approval's clock than the skew, or before the epoch) is refused
  *   `401 login_required` before the email gate, the budget and the store are
- *   asked: no attempt is spent on it, and a store error stays an outage.
+ *   asked, so no attempt is spent on it; and again on the clock the store is
+ *   handed, so a store error stays an outage.
  * - Outages fail closed as 503 (a limiter outage follows the limiter's own
  *   `failMode`), never as `login_required`.
  * - A record the store answers is read through core's
@@ -342,27 +344,28 @@ export const createDeviceVerificationHandler = (
 			return;
 		}
 		const subject = session.sub;
-		const nowMs = now();
 
-		// What an approval records, held to the store's own rule on the clock the
-		// store is handed, before the email gate, the budget and the code — see
-		// the file header.
+		// What an approval records, held to the store's own rule: refused, and
+		// answered, when the store would not record it at `atMs`.
 		const amr = wellFormedAmr(vouchedAmr(session));
 		const authTime = session.authTime;
-		if (action === "approve") {
-			const recorded = { nowMs, amr, authTime };
+		const refusedToRecord = (atMs: number): boolean => {
+			const recorded = { atMs, amr, authTime };
 			try {
-				recordableDeviceApproval(recorded, recorded.nowMs);
+				recordableDeviceApproval(recorded, recorded.atMs);
+				return false;
 			} catch {
 				(options.logger ?? consoleLogger).warn(
-					{ sid: session.sid, aheadMs: authTime.getTime() - nowMs },
+					{ sid: session.sid, aheadMs: authTime.getTime() - atMs },
 					"auth_time_ahead_of_clock",
 				);
 				const refusal = loginRequired(SIGN_IN_AGAIN);
 				respond(res, refusal.status, refusal.body);
-				return;
+				return true;
 			}
-		}
+		};
+		// Before the email gate, the budget and the code — see the file header.
+		if (action === "approve" && refusedToRecord(now())) return;
 
 		// Before the budget and the code — see the file header.
 		if (
@@ -428,6 +431,10 @@ export const createDeviceVerificationHandler = (
 			});
 			return;
 		}
+
+		// The store judges the code's expiry by this instant, so it is taken after
+		// the budget, which may wait on its backend.
+		const nowMs = now();
 
 		/**
 		 * The store could not answer: an outage, not a verdict on the code.
@@ -513,6 +520,9 @@ export const createDeviceVerificationHandler = (
 		// client's allowlist when the device asked. Re-reading it here to pass
 		// it back would open a window between the lookup that showed the user
 		// a scope and the write that grants one.
+		// Held to the store's rule again, on the instant the store is handed, so
+		// a store error stays an outage.
+		if (action === "approve" && refusedToRecord(nowMs)) return;
 		const approval: ApproveDeviceAuthorizationInput | undefined =
 			action === "approve" ? { userCode, subject, nowMs, amr, authTime } : undefined;
 
