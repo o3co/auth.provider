@@ -336,9 +336,9 @@ loaded module owns is kept and logged once at boot as
 `config_sections_ignored`: that is where a misspelt section name shows.
 
 Values in the overlay take precedence over `application.conf`. The scaffold
-ships with `development.conf` and `production.conf`, and `mailpit.conf`, the
+ships with `development.conf`, `production.conf` and `mailpit.conf` (the
 development overlay under the name the
-[Mailpit overlay](#mailpit-for-the-smtp-sender-development-only) selects. To add another
+[Mailpit overlay](#mailpit-for-the-smtp-sender-development-only) selects). To add another
 environment (e.g. `staging`), create `config/staging.conf` and set
 `CONFIG_ENV=staging`. A missing `{ENV}.conf` is a boot-time error — typos
 fail fast rather than silently falling back to defaults.

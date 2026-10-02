@@ -5,7 +5,9 @@
 #
 # Mailpit keeps every mail the provider sends and delivers none; read them at
 # http://localhost:8025. Never use it in production, where
-# STANDARD_SMTP_MAIL_SENDER_* name a real relay.
+# STANDARD_SMTP_MAIL_SENDER_* name a real relay. Leave every
+# STANDARD_SMTP_MAIL_SENDER_* unset in .env for this run, USER and PASSWORD
+# included: the overlay sets HOST, PORT, SECURE and FROM, not the credentials.
 #
 # The SMTP sender sends in plaintext (`none`) only to a loopback host, so
 # Mailpit shares the app container's network namespace and listens on its
