@@ -713,7 +713,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				refreshed(`n${h.refresh.mock.calls.length}`, now(), { scope: "openid" }),
 			);
 			for (let i = 0; i < 4; i++) {
-				expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
+				expect(await retrieve({ scope: ["calendar.write"] })).toStrictEqual({
 					ok: false,
 					code: "invalid_scope",
 				});
@@ -733,7 +733,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			});
 		it.each<[string, Partial<typeof request>]>([
 			["a min_ttl above what is left", { minTtlSeconds: 3600 }],
-			["a scope the token lacks", { scope: ["calendar.read"] }],
+			["a scope the token lacks", { scope: ["calendar.write"] }],
 		])(
 			"is not made to rotate on every request by %s when the adapter's expiry is earlier than its lifetime",
 			async (_, ask) => {

@@ -40,6 +40,10 @@ import {
 	type WrittenAccessToken,
 } from "./held-token.mjs";
 import { federationGrantEffectiveExpiry } from "./lifetime.mjs";
+import {
+	federationGrantRotationBudget,
+	judgeFederationGrantRotationBudget,
+} from "./rotation-budget.mjs";
 import type { FederationGrantStore } from "./store.mjs";
 import {
 	type AuthorizedFederationGrant,
@@ -155,6 +159,14 @@ export interface FederationGrantRetrievalLimits {
 	 */
 	readonly lockWaitMs: number;
 	readonly persistRetryBudgetMs: number;
+	/**
+	 * Upstream refresh-token rotations a grant may take in a window (24 when
+	 * absent): what bounds the rotations a client and an upstream can cause
+	 * together. Kept by a store with `takeRotation`; one without keeps none.
+	 */
+	readonly rotationBudget?: number;
+	/** The budget's window (an hour when absent). */
+	readonly rotationWindowMs?: number;
 }
 
 /**
@@ -241,6 +253,8 @@ const MAX_TIMER_MS = 2_147_483_647;
  * - `upstreamHardTimeoutMs + persistRetryBudgetMs + margin <= refreshLockTtlMs`:
  *   the lock has no renewal, and one that expires mid-refresh lets two
  *   replicas present the same refresh token.
+ * - A rotation budget, where one is given, is one a store takes: a whole
+ *   number of at least one, in a positive finite window.
  *
  * Only configured durations are compared; every deadline counts from lock
  * acquisition (see `refresh`).
@@ -286,6 +300,18 @@ export function assertFederationGrantRetrievalLimits(limits: FederationGrantRetr
 	// The store is given `SIDE_EFFECT_WAIT_MS` over the lock wait (`refresh`).
 	if (limits.lockWaitMs + SIDE_EFFECT_WAIT_MS > MAX_TIMER_MS) {
 		throw new RangeError("federation-grants: lockWaitMs does not fit a timer");
+	}
+	if (
+		limits.rotationBudget !== undefined &&
+		!(Number.isSafeInteger(limits.rotationBudget) && limits.rotationBudget >= 1)
+	) {
+		throw new RangeError("federation-grants: rotationBudget must be a whole number of at least 1");
+	}
+	if (
+		limits.rotationWindowMs !== undefined &&
+		!(Number.isFinite(limits.rotationWindowMs) && limits.rotationWindowMs > 0)
+	) {
+		throw new RangeError("federation-grants: rotationWindowMs must be a positive finite number");
 	}
 	if (!(limits.refreshFailureBackoffMs <= limits.ineligibleRetryAfterMs)) {
 		throw new RangeError(
@@ -751,6 +777,24 @@ async function evaluate(
 						}
 					: { code: "temporarily_unavailable", reason: "upstream", retryAfterSeconds };
 	}
+	// The rotation budget, read as a hint: while it is spent the upstream is
+	// not asked, and the store's take would refuse anyway. Reported after the
+	// marker and the stamp.
+	let spent: FederationGrantDenial | undefined;
+	if (notAsked === undefined) {
+		const budget = judgeFederationGrantRotationBudget(
+			grant.rotations,
+			federationGrantRotationBudget(deps.limits),
+			now.getTime(),
+		);
+		if (budget.spent) {
+			spent = {
+				code: "rate_limited",
+				reason: "provider",
+				retryAfterSeconds: budget.retryAfterSeconds,
+			};
+		}
+	}
 
 	// What the request asserts is checked here, so that a request that can
 	// never succeed does not cost an upstream call.
@@ -819,12 +863,9 @@ async function evaluate(
 			// Against the scopes THIS token carries, not what the grant once got.
 			const carries = request.scope === undefined || scopesWithin(request.scope, token.scopes);
 			// Never refreshed before it is half spent: an earlier refresh gains
-			// little and rotates the refresh token at a rotating IdP. Without this
-			// bound a client could force a rotation on every request (a `min_ttl`
-			// near the lifetime, a scope the upstream never grants, a lifetime
-			// below the buffer), a path the ineligibility marker does not cover.
-			// With it, at most two rotations per token lifetime while the
-			// upstream answers. A FAILING upstream is bounded by the stamp.
+			// little and rotates the refresh token at a rotating IdP. That is when
+			// a refresh is worth asking for; what bounds the rotations is the
+			// budget, and a FAILING upstream the stamp.
 			const ranDown = remainingMs <= deps.limits.refreshBufferMs;
 			const wantsMore = !carries || remainingMs <= minTtlSeconds * 1000;
 			// The call's own token, at the last look: what the upstream just gave is
@@ -832,7 +873,10 @@ async function evaluate(
 			// `invalid_scope`, half spent or not — the upstream was asked.
 			const own = look.fetched !== undefined && token.value === look.fetched;
 			const refreshIt = !own && halfSpent && (ranDown || wantsMore);
-			if (carries && (!refreshIt || notAsked !== undefined || look.attempted === true)) {
+			if (
+				carries &&
+				(!refreshIt || notAsked !== undefined || spent !== undefined || look.attempted === true)
+			) {
 				const grantEndsAt = federationGrantEffectiveExpiry(grant, deps.limits.maxExpiresInMs);
 				return {
 					kind: "token",
@@ -844,15 +888,16 @@ async function evaluate(
 					),
 				};
 			}
-			if (!carries && !refreshIt) {
+			if (!carries && (!refreshIt || spent !== undefined)) {
 				// A token that is good, does not carry what was asked for, and is not
-				// one to ask the upstream again about yet. That is not
-				// `scope_exceeded`: nothing exceeded the consent.
+				// one to ask the upstream again about yet, or not within the budget.
+				// That is not `scope_exceeded`: nothing exceeded the consent.
 				return { kind: "deny", denial: { code: "invalid_scope" }, grant };
 			}
 		}
 	}
-	if (notAsked !== undefined) return { kind: "deny", denial: notAsked, grant };
+	const refusal = notAsked ?? spent;
+	if (refusal !== undefined) return { kind: "deny", denial: refusal, grant };
 	let guard: WriteGuard;
 	try {
 		guard = writeGuard(grant, request.grantId);
@@ -1296,8 +1341,21 @@ async function refreshUnderLock(
 	// is judged again, against the maximum and the clock, at every disclosure.
 	let credentials: FederationGrantCredentialsInput = { refreshToken, accessToken: held.keep };
 	let ineligible: FederationGrantIneligibilityMarker | null = null;
+	/** The access token this call writes, when it writes the one it fetched. */
+	let fetched: string | undefined;
 	if (answered.accessToken.eligible) {
-		credentials = { refreshToken, accessToken: answered.accessToken.token };
+		const fresh = answered.accessToken.token;
+		// Nor is a held token that serves what was asked given up for one that
+		// does not: the call is answered from the held token.
+		const servesLess =
+			held.keep !== undefined &&
+			request.scope !== undefined &&
+			scopesWithin(request.scope, held.keep.scopes) &&
+			!scopesWithin(request.scope, fresh.scopes);
+		if (!servesLess) {
+			credentials = { refreshToken, accessToken: fresh };
+			fetched = fresh.value;
+		}
 	} else {
 		ineligible = {
 			reason: answered.accessToken.reason,
@@ -1310,7 +1368,6 @@ async function refreshUnderLock(
 	// Bounded twice: by the clock, and by a count, for a clock that does not move.
 	const persistDeadline = receivedAt + limits.persistRetryBudgetMs;
 	const attempts = Math.max(1, Math.ceil(limits.persistRetryBudgetMs / PERSIST_RETRY_DELAY_MS));
-	const fetched = ineligible === null ? credentials.accessToken?.value : undefined;
 	const refreshedAudit: PendingAudit = [
 		"federation.grant.refreshed",
 		ineligible === null ? "success" : `upstream_token_ineligible/${ineligible.reason}`,
@@ -1452,6 +1509,52 @@ async function stamp(
 	// Refused on the version, the stamp says nothing about the credentials the
 	// grant has now: nothing to report.
 	return { outcome: noted.value.ok ? "written" : "refused" };
+}
+
+/**
+ * Takes one rotation from the grant's budget: the last step before the
+ * upstream is asked, under the lock and at the version the refresh's writes
+ * are guarded by. Waited for until `deadline`, the soft one, and an answer
+ * that comes later is not used: nobody waits for the rotation it would admit.
+ * What is answered instead is the take's outage, or a refusal, which the last
+ * look tells apart: a budget spent meanwhile, or a grant that changed. A store
+ * without the member keeps no budget, and nothing is taken. `at`: when the
+ * take was answered.
+ */
+async function takeRotation(
+	deps: RetrieveFederationGrantTokenDeps,
+	request: RetrieveFederationGrantTokenRequest,
+	guard: WriteGuard,
+	deadline: number,
+): Promise<
+	| { readonly taken: true; readonly at: number }
+	| { readonly taken: false; readonly denial: FederationGrantDenial }
+> {
+	const { store } = deps;
+	const take = store.takeRotation;
+	if (take === undefined) return { taken: true, at: deps.now().getTime() };
+	const { limit, windowMs } = federationGrantRotationBudget(deps.limits);
+	const askedAt = deps.now();
+	const taken = await within(
+		settle(() => take.call(store, { ...guard, limit, windowMs, now: askedAt })),
+		deadline - askedAt.getTime(),
+	);
+	const at = deps.now().getTime();
+	if (taken !== "elapsed" && !taken.ok) {
+		return {
+			taken: false,
+			denial: unavailable("storage", report(deps, request, "rotation", taken.error)),
+		};
+	}
+	if (taken === "elapsed" || !(at < deadline)) {
+		return {
+			taken: false,
+			denial: unavailable("storage", report(deps, request, "rotation", NOT_ANSWERED)),
+		};
+	}
+	return taken.value.ok
+		? { taken: true, at }
+		: { taken: false, denial: unavailable("concurrent_update") };
 }
 
 /** Lets go of a lock, waiting so long and no longer, and tells the logger when it could not. Never rejects. */
@@ -1613,6 +1716,18 @@ async function refresh(
 			);
 			return lastLook(deps, request, unavailable("storage", spent));
 		}
+		const take = await takeRotation(
+			deps,
+			request,
+			again.guard,
+			leaseStartedAt + deps.limits.upstreamTimeoutMs,
+		);
+		if (!take.taken) {
+			handOver(deps, request, release());
+			return lastLook(deps, request, take.denial);
+		}
+		// The take's time is spent of the soft deadline.
+		startedAt = take.at;
 		held = again;
 		refresher = found;
 	} catch (error) {

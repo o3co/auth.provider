@@ -296,7 +296,8 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE, { scope: "openid" }));
-			expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
+			// Consented, and carried by neither the stored token nor the fresh one.
+			expect(await retrieve({ scope: ["calendar.write"] })).toStrictEqual({
 				ok: false,
 				code: "invalid_scope",
 			});
@@ -910,10 +911,11 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 					grant: { status: "active", version: grant.version },
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
-				// Nothing but the failure stamp: the credentials whole, and the grant
-				// whole apart from it — key for key.
+				// Nothing but the failure stamp and the rotation taken for the
+				// attempt: the credentials whole, and the grant whole apart from
+				// them — key for key.
 				expect(after?.credentials).toStrictEqual(before?.credentials);
-				const { refreshFailure: _after, ...afterRest } = after?.grant ?? {};
+				const { refreshFailure: _after, rotations: _taken, ...afterRest } = after?.grant ?? {};
 				const { refreshFailure: _before, ...beforeRest } = before?.grant ?? {};
 				expect(afterRest).toStrictEqual(beforeRest);
 				expect(
@@ -1544,10 +1546,11 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			let readings = 0;
 			h.deps.now = () => {
 				readings += 1;
-				// The eighth reading is the worker's first: two for each of the two
+				// The tenth reading is the worker's first: two for each of the two
 				// looks, one before the lock is asked for, one when it is acknowledged,
-				// and one when the upstream is about to be asked.
-				if (readings === 8) throw new Error("clock bug");
+				// one when the upstream is about to be asked, and two for the rotation
+				// taken from the budget.
+				if (readings === 10) throw new Error("clock bug");
 				return now();
 			};
 			expect(await retrieve()).toStrictEqual({
@@ -1652,6 +1655,24 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 describe("assertFederationGrantRetrievalLimits", () => {
 	it("accepts the defaults: 25 s + 3 s leave two of the lock's 30", () => {
 		expect(() => assertFederationGrantRetrievalLimits(limits)).not.toThrow();
+	});
+
+	it("refuses a rotation budget a store would refuse, and takes one that is absent as the default", () => {
+		expect(() =>
+			assertFederationGrantRetrievalLimits({ ...limits, rotationBudget: 1, rotationWindowMs: 1 }),
+		).not.toThrow();
+		for (const rotationBudget of [0, 1.5, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(
+				() => assertFederationGrantRetrievalLimits({ ...limits, rotationBudget }),
+				String(rotationBudget),
+			).toThrow(RangeError);
+		}
+		for (const rotationWindowMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(
+				() => assertFederationGrantRetrievalLimits({ ...limits, rotationWindowMs }),
+				String(rotationWindowMs),
+			).toThrow(RangeError);
+		}
 	});
 
 	it("refuses a lock that could run out before a refresh has settled, and wants a margin: a fit by a millisecond is not one", () => {

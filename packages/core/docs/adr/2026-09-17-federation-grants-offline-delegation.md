@@ -1110,6 +1110,39 @@ through `/revoke` or `revokeAllForSubject`. A Shared Signals receiver that
 would carry them is recorded under *Outside the first release* as an option
 with no delivery commitment.
 
+**Amended 2026-10-03 (#1032, #1071): the bound on rotations is the per-grant
+rotation budget; half-spent is only when to refresh.** "When a stored token is
+refreshed" above still says when a refresh is worth asking for, but it does
+not bound rotations: a re-answer of the same token, an effective life far
+below the issued one, or a token stored already past half its life each let a
+client rotate on most requests. The bound is now a budget per grant: at most
+`rotationBudget` rotations (24) in a window of `rotationWindow` (an hour),
+counted in the record's non-secret `rotations` by the store's optional
+`takeRotation`, without a version bump. The rotation is taken under the refresh
+lock, after the look under it and immediately before the upstream is asked, at
+the version the refresh's writes are guarded by, and its time is spent of the
+soft deadline. A take that throws or does not answer in time asks the upstream
+nothing and answers `temporarily_unavailable` / `storage`; a refused take ends
+in the last look, where a grant that changed is `concurrent_update` and
+otherwise the budget is spent. Every look reads `rotations` as a hint by the
+same rule, so a spent budget takes no lock. With the budget spent, a good
+stored token is answered with the life it has, below `min_ttl` too; one that
+lacks an asked-for scope answers `invalid_scope`; and where nothing stored
+serves the request the answer is `rate_limited` / `provider` (429) with
+`Retry-After` until the window closes. No code is added. Where more than one
+keeps the upstream from being asked, the marker is reported first, then the
+failure stamp, then the budget. A store without `takeRotation` keeps no budget
+and the retrieval behaves as before; boot warns once. What "two rotations per
+lifetime" above promised is replaced by this bound, and it holds whatever the
+upstream answers.
+
+With the budget bounding how often the upstream is asked again, a refresh no
+longer has to take whatever it is answered with: a fresh token that carries
+less of the asked-for scope than a held token that is still good and carries
+it does not replace that token. The rotated refresh token is stored, the held
+access token is kept, and the call is answered from it. Once the held token has
+died, the narrower one is stored like any other.
+
 ### D11 — One typed result, one HTTP mapping
 
 ```ts
@@ -2434,7 +2467,8 @@ field can lengthen the other. What it changes:
   dated back, it would be half spent at once, and a client asking for more
   than it has could force a rotation on every request. Its half-spent point
   is half of the life from the call to its end. Half-spent is an
-  approximation of D10's rotation bound, not a guarantee of it (#1032).
+  approximation of D10's rotation bound, not a guarantee of it (#1032); the
+  bound is the rotation budget of D10's amendment of 2026-10-03.
 - Neither is the issued lifetime shortened to fit the end: stored shortened,
   a token issued for longer than a maximum lowered later would still be
   disclosed (D5).

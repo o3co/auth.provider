@@ -395,6 +395,7 @@ export interface FederationGrantRetrievalFailure {
 		| "backstop_revoke"
 		| "lock"
 		| "release"
+		| "rotation"
 		| "upstream"
 		| "mark"
 		| "write"
