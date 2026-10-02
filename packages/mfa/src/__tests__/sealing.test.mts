@@ -491,6 +491,11 @@ describe("what is sealed is what opening gives back", () => {
 				return SECRET_TEXT;
 			}
 		}
+		class Packed extends Array<number> {
+			toJSON(): string {
+				return SECRET_TEXT;
+			}
+		}
 		class Listish extends Array<number> {}
 		const holed = Listish.from([1, 2, 3]);
 		delete holed[1];
@@ -499,6 +504,7 @@ describe("what is sealed is what opening gives back", () => {
 			["a toJSON that answers a string", { secret: SECRET_TEXT, toJSON: () => SECRET_TEXT }],
 			["a toJSON that answers an object", { toJSON: () => ({ secret: SECRET_TEXT }) }],
 			["a class's instance JSON writes through its toJSON", { amount: new Amount() }],
+			["an Array subclass JSON writes through its toJSON", { list: Packed.from([1, 2]) }],
 			["a Map", new Map([["secret", SECRET_TEXT]])],
 			["a BigInt inside", { secret: SECRET_TEXT, n: 1n }],
 			["a cycle", cycle],

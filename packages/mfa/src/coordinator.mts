@@ -1091,7 +1091,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					const { named: self, all } = opened;
 					let result: MfaVerification;
 					try {
-						result = await factor.verify({
+						const answer = await factor.verify({
 							subject: tx.subject,
 							transactionId: tx.id,
 							nowMs,
@@ -1105,10 +1105,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 								: { addressDigest: pending.addressDigest }),
 							proof: call.proof,
 						});
+						// The factor's answer, each field read once, however it holds them: a
+						// read that throws is the factor's failure, as a throw of its own.
+						result = answer.ok
+							? { ok: true, factorId: answer.factorId, next: answer.next }
+							: { ok: false, reason: answer.reason, factorId: answer.factorId };
 					} catch (cause) {
 						return unreadable(cause);
 					}
-					// The factor's answer, each field read once, however it holds them.
 					if (!result.ok) {
 						const { reason, factorId } = result;
 						if (factorId === undefined) return { reason };

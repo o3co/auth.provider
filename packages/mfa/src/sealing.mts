@@ -178,8 +178,8 @@ const writtenAsFields = (value: object): boolean =>
  *   holds is not a field, as JSON says.
  *
  * Anything else is not JSON data: a bigint, NaN, an infinity, a symbol, a
- * function, `undefined`, a Date, a Map, an object with a `toJSON` (JSON
- * writes what that answers, not its fields), and a cycle. `copies` keeps one copy
+ * function, `undefined`, a Date, a Map, an object or a list with a `toJSON`
+ * (JSON writes what that answers, not its fields), and a cycle. `copies` keeps one copy
  * of an object two fields share, so it is read once. A read that throws is
  * let through as it was thrown.
  */
@@ -191,7 +191,15 @@ function copyByName(value: unknown, copies: Map<object, unknown>): unknown {
 	if (known === COPYING) return NOT_JSON;
 	if (known !== undefined) return known;
 	copies.set(value, COPYING);
-	const copy = Array.isArray(value) ? copyList(value, copies) : copyFields(value, copies);
+	// JSON writes an object or a list with a `toJSON` as what that answers, not
+	// as its fields. Read once, and kept: an own `toJSON` is one of the fields.
+	const toJSON = (value as { readonly toJSON?: unknown }).toJSON;
+	const copy =
+		typeof toJSON === "function"
+			? NOT_JSON
+			: Array.isArray(value)
+				? copyList(value, copies)
+				: copyFields(value, toJSON, copies);
 	copies.set(value, copy);
 	return copy;
 }
@@ -210,13 +218,10 @@ function copyList(list: readonly unknown[], copies: Map<object, unknown>): unkno
 	return copy;
 }
 
-function copyFields(value: object, copies: Map<object, unknown>): unknown {
+/** `value`'s fields, `toJSON` the value its `toJSON` was read as. */
+function copyFields(value: object, toJSON: unknown, copies: Map<object, unknown>): unknown {
 	if (!writtenAsFields(value)) return NOT_JSON;
 	const source = value as Readonly<Record<string, unknown>>;
-	// JSON writes an object with a `toJSON` as what that answers, not as its
-	// fields. Read once, and kept: an own `toJSON` is one of the fields.
-	const toJSON = source.toJSON;
-	if (typeof toJSON === "function") return NOT_JSON;
 	const copy: Record<string, unknown> = Object.create(null);
 	for (const key of Object.keys(source)) {
 		const field = key === "toJSON" ? toJSON : source[key];

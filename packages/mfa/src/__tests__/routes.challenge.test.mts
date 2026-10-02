@@ -561,4 +561,32 @@ describe("a factor's challenge, read by name", () => {
 		});
 		expect((await storedData(factorStore, record)).data).toEqual({ secret: "s3cret" });
 	});
+
+	it("answers 503 once, the factor unreadable, when reading its verification's answer throws, as when the verification itself throws", async () => {
+		const base = challenged();
+		const { app, logger, record } = await withChallengedFactor({
+			...base,
+			verify: async () =>
+				new (class {
+					get ok(): boolean {
+						throw new Error("the answer cannot be read");
+					}
+				})() as never,
+		});
+		const { agent, transaction } = await beginLogin(app);
+		const issued = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+
+		const res = await verify(
+			agent,
+			transaction,
+			record.id,
+			`s3cret:${issued.body.nonce as string}`,
+		);
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+	});
 });
