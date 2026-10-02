@@ -444,9 +444,9 @@ every relying party must be handed the shared secret — which also lets it
 | `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | **Deprecated** alias of `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` (config key `oauth.accessToken.expiresIn`, of `oauth.accessToken.defaultExpiresIn`), read only while the new one is unset; while it still decides the default, boot logs `config_key_deprecated` (warn). Move the value to the new variable. |
 | `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | Refresh token lifetime in seconds. Whole positive number, at most one year (`31536000`). |
 
-Exporting one of these as an empty string is a boot failure, not a fallback:
-HOCON resolves `FOO=` to `""`, which coerces to `0`, and a zero lifetime mints
-tokens that have already expired.
+Each is read only as decimal digits. Exporting one as an empty string is a
+boot failure, not a fallback (HOCON resolves `FOO=` to `""`), and so is a hex
+(`0x10`), exponent (`1e3`), sign (`+5`) or fraction (`5.0`).
 
 Only token exchange (RFC 8693) reads an `expires_in` request parameter; every
 other grant ignores it and mints the default.
@@ -478,7 +478,7 @@ they boot.
 | `SESSION_STORE_SECURE` | `true` | Set `Secure` flag on session cookie |
 | `SESSION_STORE_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`). `none` **requires** `SESSION_STORE_SECURE=true` — browsers drop a `SameSite=None` cookie that is not `Secure`, so boot refuses the combination rather than letting every login fail silently in the client. |
 | `SESSION_STORE_DOMAIN` | — | Cookie domain (unset by default) |
-| `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds. Integer, 1–86400; boot fails otherwise (an *empty* value coerces to `0` and would silently disable the token arm). |
+| `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds. Whole number in decimal digits, 1–86400; boot fails otherwise, an *empty* or blank value included. |
 | `SESSION_STORE_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory`. `memory` is per process and is refused under `CORE_DEPLOYMENT_MODE=multi` like the other in-memory stores (#474) |
 | `SESSION_STORE_STORAGE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL for session storage |
 | `SESSION_STORE_STORAGE_REDIS_PASSWORD` | — | Redis password for session storage |
