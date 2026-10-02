@@ -288,7 +288,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` の**非推奨（deprecated）**エイリアス（config キーでは `oauth.accessToken.expiresIn` が `oauth.accessToken.defaultExpiresIn` のエイリアス）。新しい変数が未設定の間だけ読まれる。これがまだデフォルトを決めている間は、起動時に `config_key_deprecated`（warn）がログに出る。値は新しい変数へ移すこと。 |
 | `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | リフレッシュトークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
 
-これらを空文字で export すると、フォールバックではなく起動失敗になる: HOCON は `FOO=` を `""` に解決し、それが `0` に coerce され、有効期間 0 は発行時点で既に期限切れのトークンを発行するため。
+どれも 10 進数字だけを読む。空文字で export すると、フォールバックではなく起動失敗になる（HOCON は `FOO=` を `""` に解決する）。16 進（`0x10`）、指数（`1e3`）、符号（`+5`）、小数（`5.0`）も同じく起動失敗になる。
 
 `expires_in` リクエストパラメータを読むのは token exchange（RFC 8693）だけで、他のグラントはそれを無視してデフォルトを発行する。
 
@@ -314,7 +314,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `SESSION_STORE_SECURE` | `true` | セッション Cookie に `Secure` フラグを設定 |
 | `SESSION_STORE_SAME_SITE` | `lax` | `SameSite` 属性（`lax`、`strict`、`none`）。`none` は `SESSION_STORE_SECURE=true` が**必須** — ブラウザは `Secure` でない `SameSite=None` Cookie を破棄するため、クライアント側で全ログインが黙って失敗するのを放置せず、起動時にこの組み合わせを拒否する。 |
 | `SESSION_STORE_DOMAIN` | — | Cookie ドメイン（デフォルト未設定） |
-| `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒）。1〜86400 の整数で、それ以外なら起動に失敗する（*空文字*は `0` に coerce され、トークン側の判定を黙って無効化してしまうため）。 |
+| `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒）。10 進数字で書いた 1〜86400 の整数で、それ以外なら起動に失敗する（*空文字*や空白だけの値も含む）。 |
 | `SESSION_STORE_STORAGE_TYPE` | `redis` | セッションストアのバックエンド: `redis` または `memory`。`memory` はプロセスごとで、他の in-memory ストアと同様に `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される（#474） |
 | `SESSION_STORE_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
 | `SESSION_STORE_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
