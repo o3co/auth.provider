@@ -41,6 +41,9 @@
  *   than the attack (`not_revoked_since`), or none wired to be later
  *   (`no_revocation_boundary`); `busy`; or an outage. An authorization
  *   already applied answers what it came to, applying nothing more.
+ * - `held`, and `not_revoked_since` while the hard hold stands, carry from
+ *   when a rebind counts (`rebindAfter`), the store's own bound as a date;
+ *   one no date can hold is the store's outage, whatever the outcome.
  * - The operator reset mints its own authorization here
  *   (`mintSubjectRecovery`) and applies it under the lease it holds across
  *   the reset (`reset.mts`).
@@ -82,10 +85,22 @@ type Applied =
 export type MfaLockRelease =
 	| ({ readonly outcome: "released"; readonly generation: number } & Applied)
 	/** The hard hold stands, until every guessable factor is bound again: never read as released. */
-	| ({ readonly outcome: "held"; readonly hold: "hard"; readonly generation: number } & Applied)
+	| ({
+			readonly outcome: "held";
+			readonly hold: "hard";
+			readonly generation: number;
+			/** From when a rebind counts: a guessable factor created after it is a rebind, one created at or before it is not. */
+			readonly rebindAfter: Date;
+	  } & Applied)
 	| {
 			readonly outcome: "refused";
-			readonly reason: "exempt_proof_required" | "not_revoked_since" | "no_revocation_boundary";
+			readonly reason: "not_revoked_since";
+			/** From when a rebind counts while the hard hold stands, as `held` says it; `null` when it does not. */
+			readonly rebindAfter: Date | null;
+	  }
+	| {
+			readonly outcome: "refused";
+			readonly reason: "exempt_proof_required" | "no_revocation_boundary";
 	  }
 	| { readonly outcome: "busy"; readonly retryAfterSeconds: number }
 	| {
@@ -160,6 +175,15 @@ const guessableBoundSince =
 		return earliest;
 	};
 
+/** The hard hold an answer carries, from when a rebind counts as a date; `undefined` for a bound no date can hold. */
+const hardHoldOf = (
+	answer: MfaSubjectRecoveryAnswer,
+): { readonly rebindAfter: Date } | null | undefined => {
+	if (!answer.hard) return null;
+	const rebindAfter = new Date(answer.rebindAfterMs);
+	return Number.isNaN(rebindAfter.getTime()) ? undefined : { rebindAfter };
+};
+
 /** The authorized-recovery entry over `options` (see this file's header). */
 export function createMfaLockRecovery(options: MfaLockRecoveryOptions): MfaLockRecovery {
 	const { store, factorSet, factors, subjectRevocation, manageMaxAgeMs } = options;
@@ -204,6 +228,15 @@ export function createMfaLockRecovery(options: MfaLockRecoveryOptions): MfaLockR
 
 	/** The store's answer as the page reads it. */
 	const answered = (answer: MfaSubjectRecoveryAnswer): MfaLockRelease => {
+		const hard = hardHoldOf(answer);
+		if (hard === undefined) {
+			return {
+				outcome: "unavailable",
+				store: "mfa_transaction",
+				step: "applySubjectRecovery",
+				cause: new RangeError("the store answered a rebind bound no date can hold"),
+			};
+		}
 		switch (answer.outcome) {
 			case "refused":
 				switch (answer.reason) {
@@ -211,11 +244,13 @@ export function createMfaLockRecovery(options: MfaLockRecoveryOptions): MfaLockR
 					case "expired":
 						return { outcome: "refused", reason: "exempt_proof_required" };
 					case "not_revoked_since":
-						return {
-							outcome: "refused",
-							reason:
-								subjectRevocation === undefined ? "no_revocation_boundary" : "not_revoked_since",
-						};
+						return subjectRevocation === undefined
+							? { outcome: "refused", reason: "no_revocation_boundary" }
+							: {
+									outcome: "refused",
+									reason: "not_revoked_since",
+									rebindAfter: hard?.rebindAfter ?? null,
+								};
 					default:
 						// A boundary ahead of the clock, or a lease the store did not find held: neither is the user's to mend.
 						return {
@@ -226,13 +261,14 @@ export function createMfaLockRecovery(options: MfaLockRecoveryOptions): MfaLockR
 						};
 				}
 			case "applied":
-				return answer.hard
+				return hard !== null
 					? {
 							outcome: "held",
 							hold: "hard",
 							applied: true,
 							generation: answer.generation,
 							cleared: answer.cleared,
+							rebindAfter: hard.rebindAfter,
 						}
 					: {
 							outcome: "released",
@@ -241,8 +277,14 @@ export function createMfaLockRecovery(options: MfaLockRecoveryOptions): MfaLockR
 							cleared: answer.cleared,
 						};
 			case "already_applied":
-				return answer.hard
-					? { outcome: "held", hold: "hard", applied: false, generation: answer.generation }
+				return hard !== null
+					? {
+							outcome: "held",
+							hold: "hard",
+							applied: false,
+							generation: answer.generation,
+							rebindAfter: hard.rebindAfter,
+						}
 					: { outcome: "released", applied: false, generation: answer.generation };
 		}
 	};

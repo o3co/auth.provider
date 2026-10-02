@@ -23,16 +23,20 @@
  *
  * - `200 {"lock":"released"}`: given back — or given back before, on the
  *   same authorization.
- * - `200 {"lock":"held","hold":"hard"}` with a description: the week and
- *   the backoff may be given back, but guessable factors stay held until
- *   each is replaced; the page says so, never "released". Replacing them
+ * - `200 {"lock":"held","hold":"hard"}` with a description and
+ *   `rebind_after`: the week and the backoff may be given back, but
+ *   guessable factors stay held until each is replaced after
+ *   `rebind_after`; the page says so, never "released". Replacing them
  *   first, then releasing, spends one exempt proof.
  * - `403 mfa_exempt_proof_required`: no authorization stands in this
  *   session — a recovery code or a passkey verifies one.
  * - `409 mfa_lock_release_refused` with `reason`: `not_revoked_since`, no
  *   revocation of the subject's sessions since the attack began — the page
- *   asks for a password change; `no_revocation_boundary`, none can be read
- *   here.
+ *   asks for a password change — with `rebind_after` while the hard hold
+ *   stands; `no_revocation_boundary`, none can be read here.
+ * - `rebind_after` is from when a rebind counts, in ISO 8601 as
+ *   `created_at` is in `GET /factors`: shown to the account holder, never
+ *   logged.
  * - `409 mfa_factors_busy` with `Retry-After`; `503` for an outage, logged
  *   once at error.
  * - Logged `mfa_lock_released`, `mfa_lock_release_held` (the hard hold
@@ -129,13 +133,26 @@ export function createMfaLockReleaseRouter(options: MfaLockReleaseOptions): Rout
 						},
 					});
 				}
-				res.status(200).json(released.outcome === "held" ? HELD : RELEASED);
+				res
+					.status(200)
+					.json(
+						released.outcome === "held"
+							? { ...HELD, rebind_after: released.rebindAfter.toISOString() }
+							: RELEASED,
+					);
 				return;
 			}
 			case "refused":
 				logger.info({ sub: session.subject, reason: released.reason }, "mfa_lock_release_refused");
 				if (released.reason === "exempt_proof_required") {
 					res.status(403).json(EXEMPT_PROOF_REQUIRED);
+					return;
+				}
+				if (released.reason === "not_revoked_since" && released.rebindAfter !== null) {
+					res.status(409).json({
+						...REFUSED.not_revoked_since,
+						rebind_after: released.rebindAfter.toISOString(),
+					});
 					return;
 				}
 				res.status(409).json(REFUSED[released.reason]);
