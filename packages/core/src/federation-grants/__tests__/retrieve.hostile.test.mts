@@ -422,9 +422,10 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		it("keeps the stored refresh token when the new one is not a usable string", async () => {
 			await h.seed();
 			setNow(DUE);
+			// A new access token each time: a re-answer of one that has ended is refused.
 			for (const refreshToken of ["", 42, null]) {
 				h.refresh.mockResolvedValueOnce({
-					...refreshed("1", now()),
+					...refreshed(String(refreshToken), now()),
 					refreshToken,
 				} as unknown as DelegatedTokens);
 				expect((await retrieve()).ok).toBe(true);
@@ -436,11 +437,14 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		it("reads an empty scope as none named — the grant's — and not as a token that carries nothing (RFC 6749 §6)", async () => {
 			await h.seed();
 			setNow(GONE);
-			for (const scope of ["", "  "]) {
-				h.refresh.mockResolvedValue(refreshed("1", now(), { scope }));
+			for (const [tag, scope] of [
+				["1", ""],
+				["2", "  "],
+			]) {
+				h.refresh.mockResolvedValue(refreshed(tag, now(), { scope }));
 				expect(await retrieve({ scope: ["calendar.read"] }), JSON.stringify(scope)).toMatchObject({
 					ok: true,
-					accessToken: "at-1",
+					accessToken: `at-${tag}`,
 					scopes: [...SCOPES],
 				});
 				setNow(new Date(now().getTime() + 2 * HOUR));

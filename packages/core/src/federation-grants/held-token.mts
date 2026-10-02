@@ -57,7 +57,9 @@ export function federationGrantAccessToken(
  * that is no instant or no finite number reads as an Invalid Date, which
  * `judgeHeldUpstreamToken` does not believe: the token is refreshed.
  */
-export function federationGrantHeldToken(token: StoredAccessToken): HeldUpstreamToken {
+export function federationGrantHeldToken(
+	token: Pick<StoredAccessToken, "obtainedAt" | "issuedLifetime" | "effectiveExpiresAt">,
+): HeldUpstreamToken {
 	const obtainedAt = instantOf(token.obtainedAt) ?? Number.NaN;
 	const lifetime = token.issuedLifetime;
 	const issuedEnd = Number.isFinite(lifetime) ? obtainedAt + lifetime * 1000 : Number.NaN;

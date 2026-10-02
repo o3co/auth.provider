@@ -160,6 +160,49 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 		});
 	});
 
+	describe("an upstream that answers the token the grant holds again", () => {
+		// The seeded token ends an hour after T0.
+		const END = T0.getTime() + HOUR;
+
+		it.each([
+			// What a re-answer dated from the call costs: its half-spent point halves each time.
+			[1_000, 11],
+			[31_000, 6],
+		])(
+			"costs no more rotations than dating each answer from its call, a fixed end, polled every %d ms",
+			async (step, most) => {
+				await h.seed();
+				h.refresh.mockImplementation(async () =>
+					refreshed(`n${h.refresh.mock.calls.length}`, now(), {
+						accessToken: "at-0",
+						expiresIn: Math.max(1, Math.floor((END - now().getTime()) / 1000)),
+						expiresAt: new Date(END),
+					}),
+				);
+				for (let elapsed = 0; elapsed < HOUR; elapsed += step) {
+					setNow(at(elapsed));
+					expect((await retrieve({ minTtlSeconds: 3600 })).ok).toBe(true);
+				}
+				expect(h.refresh.mock.calls.length).toBeLessThanOrEqual(most);
+			},
+		);
+
+		it("never lengthens the end the token had: a later end answered for it is not believed", async () => {
+			await h.seed();
+			h.refresh.mockImplementation(async () => refreshed("1", now(), { accessToken: "at-0" }));
+			setNow(at(30 * MIN));
+			expect(await retrieve({ minTtlSeconds: 3600 })).toMatchObject({
+				ok: true,
+				accessToken: "at-0",
+				expiresIn: 1800,
+			});
+			expect((await stored())?.accessToken).toMatchObject({
+				value: "at-0",
+				effectiveExpiresAt: new Date(END),
+			});
+		});
+	});
+
 	describe("a stored token that is dated in the future", () => {
 		const seedDated = (obtainedAt: Date) =>
 			h.seed({
