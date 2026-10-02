@@ -72,10 +72,7 @@ export const resolveRouterSettings = ({
 	readonly getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
 	readonly registeredClients: ClientRepository;
 	readonly consentStore: ConsentStore | undefined;
-	readonly clientIdMetadataDocumentSeams: Pick<
-		ClientIdMetadataDocumentOptions,
-		"fetch" | "lookup" | "now"
-	>;
+	readonly clientIdMetadataDocumentSeams: Pick<ClientIdMetadataDocumentOptions, "fetch" | "now">;
 	readonly logger: Logger;
 }): RouterSettings => {
 	// Every `oauth.*` knob this router consumes is resolved exactly once,
@@ -143,6 +140,8 @@ export const resolveRouterSettings = ({
 					...(cimd.maxConcurrentFetches === undefined
 						? {}
 						: { maxConcurrentFetches: cimd.maxConcurrentFetches }),
+					// `core.outbound`: the document fetch is held to it.
+					config,
 					logger,
 					...clientIdMetadataDocumentSeams,
 				})

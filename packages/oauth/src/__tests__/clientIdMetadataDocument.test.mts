@@ -18,10 +18,18 @@
  * Client ID Metadata Documents: a client whose `client_id` is the
  * `https` URL of its own registration. Almost every case is a refusal, and
  * the ones that are not pin what the fetched document turns into. No network:
- * `fetch` and `lookup` are the resolver's seams.
+ * `fetch` is the resolver's seam, a canned `fetch` or core's outbound fetch
+ * over a resolver and a transport the test supplies; the cases that pass
+ * neither are refused before any name is resolved.
  */
 
 import type { ClientRepository, Logger } from "@o3co/auth-provider-core";
+import {
+	createOutboundFetchForTesting,
+	type OutboundAnswer,
+	type OutboundExchange,
+	withOutbound,
+} from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import {
 	type ClientIdMetadataDocumentOptions,
@@ -67,7 +75,7 @@ const json = (body: unknown, headers: Record<string, string> = {}, status = 200)
 		headers: { "content-type": "application/json", ...headers },
 	});
 
-const publicLookup = async () => ["93.184.216.34"];
+const publicLookup = async (): Promise<readonly string[]> => ["93.184.216.34"];
 
 const resolver = (
 	over: Partial<ClientIdMetadataDocumentOptions> = {},
@@ -80,11 +88,78 @@ const resolver = (
 		allowedScopes: ["read", "write"],
 		allowedAudiences: ["https://mcp.example"],
 		fetch,
-		lookup: publicLookup,
 		logger,
 		...over,
 	});
 	return { resolve: (id = CLIENT_URL) => r.resolve(id), calls, warn };
+};
+
+/** A peer's answer as core's transport hands it on: `body` arrives in one chunk. */
+const answer = (
+	status: number,
+	headers: Record<string, string> = {},
+	body = "",
+): OutboundAnswer => ({
+	status,
+	statusText: "",
+	headers: Object.entries(headers),
+	body: (async function* () {
+		if (body !== "") yield new TextEncoder().encode(body);
+	})(),
+	close: () => undefined,
+});
+
+/** A peer's answer whose body never arrives. */
+const stalled = (status: number, headers: Record<string, string> = {}): OutboundAnswer => ({
+	status,
+	statusText: "",
+	headers: Object.entries(headers),
+	body: { [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => undefined) }) },
+	close: () => undefined,
+});
+
+const jsonAnswer = (body: unknown, headers: Record<string, string> = {}, status = 200) =>
+	answer(status, { "content-type": "application/json", ...headers }, JSON.stringify(body));
+
+/**
+ * Core's outbound fetch for a URL a request names, as the resolver builds it,
+ * over a resolver and a transport the test supplies (both below the policy):
+ * what it resolved, and every exchange with the addresses it may connect to.
+ */
+const outbound = (
+	answers: Array<() => OutboundAnswer>,
+	opts: {
+		readonly lookup?: (hostname: string) => Promise<readonly string[]>;
+		readonly config?: unknown;
+		readonly maxResponseBytes?: number;
+	} = {},
+) => {
+	const lookups: string[] = [];
+	const exchanges: OutboundExchange[] = [];
+	const lookup = opts.lookup ?? publicLookup;
+	const fetch = createOutboundFetchForTesting({
+		config: opts.config,
+		source: "request",
+		maxResponseBytes: opts.maxResponseBytes ?? DEFAULT_CIMD_MAX_BYTES,
+		lookup: async (hostname) => {
+			lookups.push(hostname);
+			return lookup(hostname);
+		},
+		transport: async (exchange) => {
+			exchanges.push(exchange);
+			const next = answers.shift();
+			if (next === undefined) throw new Error("transport: no answer queued");
+			return next();
+		},
+	});
+	return { fetch, lookups, exchanges };
+};
+
+/** The `reason` of the one warn line logged as `event`. */
+const reasonOf = (warn: ReturnType<typeof vi.fn>, event: string): string => {
+	const line = warn.mock.calls.find(([, name]) => name === event);
+	expect(line, event).toBeDefined();
+	return String((line?.[0] as { reason?: unknown } | undefined)?.reason);
 };
 
 describe("isClientIdMetadataDocumentUrl (draft §3.1)", () => {
@@ -143,7 +218,7 @@ describe("createClientIdMetadataDocumentResolver — what a document becomes", (
 		});
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.url).toBe(CLIENT_URL);
-		expect(calls[0]?.init).toMatchObject({ method: "GET", redirect: "manual" });
+		expect(calls[0]?.init).toMatchObject({ method: "GET" });
 		const headers = (calls[0]?.init?.headers ?? {}) as Record<string, string>;
 		expect(headers.accept).toBe("application/json");
 	});
@@ -176,8 +251,8 @@ describe("createClientIdMetadataDocumentResolver — what a document becomes", (
 	});
 });
 
-describe("createClientIdMetadataDocumentResolver — the SSRF guard and the host policy", () => {
-	it("refuses a host that resolves to a special-use address, before any fetch", async () => {
+describe("createClientIdMetadataDocumentResolver — the destination and the host policy", () => {
+	it("refuses a host that resolves to a special-use address, before any connection", async () => {
 		for (const address of [
 			"127.0.0.1",
 			"10.0.0.5",
@@ -185,28 +260,38 @@ describe("createClientIdMetadataDocumentResolver — the SSRF guard and the host
 			"::1",
 			"::ffff:192.168.0.1",
 		]) {
-			const { resolve, calls, warn } = resolver({ lookup: async () => ["93.184.216.34", address] });
+			const { fetch, exchanges } = outbound([() => jsonAnswer(document())], {
+				lookup: async () => ["93.184.216.34", address],
+			});
+			const { resolve, warn } = resolver({ fetch });
 			expect(await resolve(), address).toBeNull();
-			expect(calls).toHaveLength(0);
-			expect(warn).toHaveBeenCalledWith(
-				expect.objectContaining({ reason: expect.stringContaining("special-use") }),
-				"cimd_document_rejected",
-			);
+			expect(exchanges, address).toHaveLength(0);
+			expect(reasonOf(warn, "cimd_document_rejected"), address).toContain("special_use_address");
 		}
 	});
 
-	it("refuses a name that does not resolve, or whose lookup fails, without fetching", async () => {
-		const empty = resolver({ lookup: async () => [] });
-		expect(await empty.resolve()).toBeNull();
-		expect(empty.calls).toHaveLength(0);
-		const failing = resolver({
+	it("refuses a name that does not resolve, or whose lookup fails, without connecting", async () => {
+		// Resolution failing is the network, not the document: a fetch failure.
+		const empty = outbound([() => jsonAnswer(document())], { lookup: async () => [] });
+		const emptyResolver = resolver({ fetch: empty.fetch });
+		expect(await emptyResolver.resolve()).toBeNull();
+		expect(empty.exchanges).toHaveLength(0);
+		expect(emptyResolver.warn).toHaveBeenCalledWith(
+			expect.anything(),
+			"cimd_document_fetch_failed",
+		);
+		const failing = outbound([() => jsonAnswer(document())], {
 			lookup: async () => {
 				throw new Error("ENOTFOUND");
 			},
 		});
-		expect(await failing.resolve()).toBeNull();
-		expect(failing.calls).toHaveLength(0);
-		expect(failing.warn).toHaveBeenCalledWith(expect.anything(), "cimd_document_fetch_failed");
+		const failingResolver = resolver({ fetch: failing.fetch });
+		expect(await failingResolver.resolve()).toBeNull();
+		expect(failing.exchanges).toHaveLength(0);
+		expect(failingResolver.warn).toHaveBeenCalledWith(
+			expect.anything(),
+			"cimd_document_fetch_failed",
+		);
 	});
 
 	it("honours allowedHosts (exact or .suffix) and deniedHosts, deny winning", async () => {
@@ -327,16 +412,23 @@ describe("createClientIdMetadataDocumentResolver — what a refusal logs of the 
 });
 
 describe("createClientIdMetadataDocumentResolver — the fetch", () => {
-	it("refuses a redirect, a non-200, and a non-JSON body", async () => {
+	it("refuses a redirect, and follows none", async () => {
+		const { fetch, exchanges } = outbound([
+			() => answer(302, { location: "https://elsewhere.example/meta" }),
+			() => jsonAnswer(document()),
+		]);
+		const { resolve, warn } = resolver({ fetch });
+		expect(await resolve()).toBeNull();
+		expect(exchanges).toHaveLength(1);
+		expect(reasonOf(warn, "cimd_document_rejected")).toContain("redirect_refused");
+	});
+
+	it("refuses a non-200 and a non-JSON body", async () => {
 		// Each of these is the client's own registration being wrong or absent,
 		// so each is logged as a rejection — the log an operator reads to tell
 		// "this client is misconfigured" from "their server is having a bad
 		// day", which is the `cimd_document_fetch_failed` case below.
 		for (const [name, response] of [
-			[
-				"redirect",
-				() => new Response(null, { status: 302, headers: { location: "https://elsewhere" } }),
-			],
 			["404", () => json({}, {}, 404)],
 			["403", () => json({}, {}, 403)],
 			[
@@ -372,26 +464,31 @@ describe("createClientIdMetadataDocumentResolver — the fetch", () => {
 
 	it("caps the document at maxBytes, by Content-Length and by what actually arrives", async () => {
 		const big = JSON.stringify(document({ client_name: "x".repeat(DEFAULT_CIMD_MAX_BYTES) }));
-		const declared = resolver({}, [
+		const declared = outbound([
 			() =>
-				new Response(big, {
-					status: 200,
-					headers: { "content-type": "application/json", "content-length": String(big.length) },
-				}),
+				answer(
+					200,
+					{ "content-type": "application/json", "content-length": String(big.length) },
+					big,
+				),
 		]);
-		expect(await declared.resolve()).toBeNull();
+		const declaredResolver = resolver({ fetch: declared.fetch });
+		expect(await declaredResolver.resolve()).toBeNull();
+		expect(reasonOf(declaredResolver.warn, "cimd_document_rejected")).toContain(
+			"response_too_large",
+		);
 		// No Content-Length: the stream is what stops it.
-		const streamed = resolver({}, [
-			() => new Response(big, { status: 200, headers: { "content-type": "application/json" } }),
-		]);
-		expect(await streamed.resolve()).toBeNull();
-		expect(streamed.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ reason: expect.stringContaining("exceeds") }),
-			"cimd_document_rejected",
+		const streamed = outbound([() => answer(200, { "content-type": "application/json" }, big)]);
+		const streamedResolver = resolver({ fetch: streamed.fetch });
+		expect(await streamedResolver.resolve()).toBeNull();
+		expect(reasonOf(streamedResolver.warn, "cimd_document_rejected")).toContain(
+			"response_too_large",
 		);
 		// A small cap can be raised by the operator.
-		const roomy = resolver({ maxBytes: big.length + 1 }, [() => json(JSON.parse(big))]);
-		expect(await roomy.resolve()).not.toBeNull();
+		const roomy = outbound([() => jsonAnswer(JSON.parse(big))], {
+			maxResponseBytes: big.length + 1,
+		});
+		expect(await resolver({ fetch: roomy.fetch }).resolve()).not.toBeNull();
 	});
 
 	it("treats a fetch that throws (timeout, network) as no client, logged as a fetch failure", async () => {
@@ -619,7 +716,6 @@ describe("withClientIdMetadataDocuments", () => {
 			allowedScopes: [],
 			allowedAudiences: [],
 			fetch,
-			lookup: publicLookup,
 		});
 		expect((await repo.findById("registered"))?.firstParty).toBe(true);
 		expect((await repo.findById(CLIENT_URL))?.firstParty).toBe(true);
@@ -635,7 +731,6 @@ describe("withClientIdMetadataDocuments", () => {
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			fetch,
-			lookup: publicLookup,
 		});
 		expect((await repo.findById("https://other.example/meta"))?.firstParty).toBe(false);
 		expect(await repo.authenticate("https://other.example/meta", "secret")).toBeNull();
@@ -659,7 +754,6 @@ describe("the document cache is bounded", () => {
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
 			maxCacheEntries: 2,
-			lookup: publicLookup,
 			fetch: (async (input: string | URL | Request, init?: RequestInit) => {
 				const url = typeof input === "string" ? input : input.toString();
 				void (await fetch(url, init));
@@ -722,7 +816,6 @@ describe("the cache tells the truth about an outage", () => {
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
 			fetch,
-			lookup: publicLookup,
 			now: () => clock.now,
 		});
 
@@ -747,7 +840,6 @@ describe("the cache tells the truth about an outage", () => {
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
 			fetch,
-			lookup: publicLookup,
 			now: () => clock.now,
 		});
 
@@ -770,7 +862,6 @@ describe("the cache tells the truth about an outage", () => {
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
 			fetch,
-			lookup: publicLookup,
 			now: () => clock.now,
 		});
 
@@ -791,7 +882,6 @@ describe("the cache tells the truth about an outage", () => {
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			fetch,
-			lookup: publicLookup,
 			now: () => clock.now,
 		});
 
@@ -816,7 +906,6 @@ describe("the cache tells the truth about an outage", () => {
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			fetch,
-			lookup: publicLookup,
 			now: () => clock.now,
 		});
 
@@ -849,7 +938,6 @@ describe("the cache tells the truth about an outage", () => {
 			allowedAudiences: [],
 			maxConcurrentFetches: 2,
 			fetch: slowFetch,
-			lookup: publicLookup,
 		});
 
 		const ids = Array.from({ length: 6 }, (_, i) => `https://client.example/meta-${i}`);
@@ -874,7 +962,6 @@ describe("the refusal memo and the stale window are bounded", () => {
 			allowedAudiences: [],
 			maxCacheEntries: 2,
 			fetch: (async () => json({ error: "nope" }, {}, 404)) as typeof fetch,
-			lookup: publicLookup,
 			now: () => clock.now,
 		});
 
@@ -892,7 +979,6 @@ describe("the refusal memo and the stale window are bounded", () => {
 				fetched.push(String(input));
 				return json({ error: "nope" }, {}, 404);
 			}) as typeof fetch,
-			lookup: publicLookup,
 			now: () => clock.now,
 		});
 		for (let i = 0; i < 3; i += 1) await counting.resolve(`https://client.example/m-${i}`);
@@ -916,7 +1002,6 @@ describe("the refusal memo and the stale window are bounded", () => {
 				if (fail) throw new Error("connect ETIMEDOUT");
 				return json(document(), { "cache-control": "max-age=1" });
 			}) as typeof fetch,
-			lookup: publicLookup,
 			now: () => clock.now,
 		});
 
@@ -926,5 +1011,195 @@ describe("the refusal memo and the stale window are bounded", () => {
 		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
 		clock.now += 10_000; // past the deadline from the last success
 		expect(await r.resolve(CLIENT_URL)).toBeNull();
+	});
+});
+
+describe("the document is fetched through core's outbound policy", () => {
+	it("resolves the name once and connects only to the address it checked", async () => {
+		// A resolver that answers differently the second time: the one answer
+		// that was checked is the one connected to.
+		let answered = 0;
+		const { fetch, lookups, exchanges } = outbound([() => jsonAnswer(document())], {
+			lookup: async () => (answered++ === 0 ? ["93.184.216.34"] : ["10.0.0.5"]),
+		});
+		const { resolve } = resolver({ fetch });
+
+		expect(await resolve()).not.toBeNull();
+		expect(lookups).toEqual(["client.example"]);
+		expect(exchanges.map((exchange) => exchange.addresses)).toEqual([["93.184.216.34"]]);
+	});
+
+	it("refuses a host core.outbound.deniedHosts lists, before resolving it", async () => {
+		const { resolve, warn } = resolver({
+			fetch: undefined,
+			config: withOutbound({}, { deniedHosts: ["client.example"] }),
+		});
+
+		expect(await resolve()).toBeNull();
+		expect(reasonOf(warn, "cimd_document_rejected")).toContain("host_not_allowed");
+	});
+
+	it("refuses a document on a port fetch never connects to, before resolving it", async () => {
+		const id = "https://client.example:636/meta";
+		const { resolve, warn } = resolver({ fetch: undefined });
+
+		expect(await resolve(id)).toBeNull();
+		expect(reasonOf(warn, "cimd_document_rejected")).toContain("port_not_allowed");
+	});
+
+	it("never admits a special-use address for a document, even for a host core.outbound.internalHosts lists", async () => {
+		const config = withOutbound({}, { internalHosts: ["client.example"] });
+		const { fetch, exchanges } = outbound([() => jsonAnswer(document())], {
+			config,
+			lookup: async () => ["10.0.0.5"],
+		});
+		const { resolve, warn } = resolver({ fetch, config });
+
+		expect(await resolve()).toBeNull();
+		expect(exchanges).toHaveLength(0);
+		expect(reasonOf(warn, "cimd_document_rejected")).toContain("special_use_address");
+	});
+
+	it("rejects a document sent in an encoding other than identity", async () => {
+		const { fetch } = outbound([() => jsonAnswer(document(), { "content-encoding": "gzip" })]);
+		const { resolve, warn } = resolver({ fetch });
+
+		expect(await resolve()).toBeNull();
+		expect(reasonOf(warn, "cimd_document_rejected")).toContain("unsupported_encoding");
+	});
+
+	it("builds its fetch from core.outbound when it is built, and refuses a malformed section then", () => {
+		expect(() =>
+			createClientIdMetadataDocumentResolver({
+				allowedScopes: [],
+				allowedAudiences: [],
+				config: { core: { outbound: { allowedHost: ["client.example"] } } },
+			}),
+		).toThrow(/core\.outbound/);
+	});
+});
+
+describe("revalidation and the stale window, through core's outbound policy", () => {
+	const warmThen = (...later: Array<() => OutboundAnswer>) => {
+		const clock = { now: 1_000_000 };
+		const { fetch, exchanges } = outbound([
+			() => jsonAnswer(document(), { "cache-control": "max-age=1", etag: '"v1"' }),
+			...later,
+		]);
+		const { resolve, warn } = resolver({ fetch, now: () => clock.now });
+		return { resolve, warn, exchanges, clock };
+	};
+
+	it("keeps the cached registration on a 304, whatever Content-Length the 304 states", async () => {
+		const { resolve, exchanges, clock } = warmThen(() =>
+			answer(304, { "content-length": "10000000", "cache-control": "max-age=30" }),
+		);
+
+		expect((await resolve())?.clientName).toBe("Acme Chat");
+		clock.now += 2_000;
+		expect((await resolve())?.clientName).toBe("Acme Chat");
+		expect(exchanges).toHaveLength(2);
+		expect(exchanges[1]?.headers["if-none-match"]).toBe('"v1"');
+		clock.now += 20_000; // within the 30 s the 304 granted
+		expect((await resolve())?.clientName).toBe("Acme Chat");
+		expect(exchanges).toHaveLength(2);
+	});
+
+	it("serves the stale registration through a 503 whose body is over the cap and never arrives", async () => {
+		const { resolve, warn, clock } = warmThen(() =>
+			stalled(503, { "content-type": "application/json", "content-length": "10000000" }),
+		);
+
+		expect(await resolve()).not.toBeNull();
+		clock.now += 2_000;
+		expect(await resolve()).not.toBeNull();
+		expect(warn).toHaveBeenCalledWith(expect.anything(), "cimd_document_fetch_failed");
+	});
+
+	it("evicts on a 404 whose body never arrives", async () => {
+		const { resolve, warn, clock } = warmThen(() => stalled(404));
+
+		expect(await resolve()).not.toBeNull();
+		clock.now += 2_000;
+		expect(await resolve()).toBeNull();
+		expect(await resolve()).toBeNull();
+		expect(warn).toHaveBeenCalledWith(expect.anything(), "cimd_document_rejected");
+	});
+
+	it("evicts on a refused destination, and rides out a failed resolution", async () => {
+		const evicting = (() => {
+			const clock = { now: 1_000_000 };
+			let answered = 0;
+			const { fetch } = outbound([() => jsonAnswer(document(), { "cache-control": "max-age=1" })], {
+				lookup: async () => (answered++ === 0 ? ["93.184.216.34"] : ["10.0.0.5"]),
+			});
+			return { ...resolver({ fetch, now: () => clock.now }), clock };
+		})();
+		expect(await evicting.resolve()).not.toBeNull();
+		evicting.clock.now += 2_000;
+		expect(await evicting.resolve()).toBeNull();
+
+		const riding = (() => {
+			const clock = { now: 1_000_000 };
+			let answered = 0;
+			const { fetch } = outbound([() => jsonAnswer(document(), { "cache-control": "max-age=1" })], {
+				lookup: async () => {
+					if (answered++ === 0) return ["93.184.216.34"];
+					throw Object.assign(new Error("lookup failed"), { code: "EAI_AGAIN" });
+				},
+			});
+			return { ...resolver({ fetch, now: () => clock.now }), clock };
+		})();
+		expect(await riding.resolve()).not.toBeNull();
+		riding.clock.now += 2_000;
+		expect(await riding.resolve()).not.toBeNull();
+		expect(riding.warn).toHaveBeenCalledWith(expect.anything(), "cimd_document_fetch_failed");
+	});
+});
+
+describe("the host lists are read in core's host-list grammar", () => {
+	const IDN_URL = "https://xn--bcher-kva.example/meta";
+	const SUB_IDN_URL = "https://a.xn--bcher-kva.example/meta";
+
+	it("matches an entry however it is spelled: Unicode or punycode, with or without the root dot", async () => {
+		for (const [entry, id] of [
+			["bücher.example", IDN_URL],
+			["BÜCHER.example.", IDN_URL],
+			["client.example.", CLIENT_URL],
+			[".client.example.", CLIENT_URL],
+		] as const) {
+			const { resolve, calls, warn } = resolver({ deniedHosts: [entry] });
+			expect(await resolve(id), entry).toBeNull();
+			expect(calls, entry).toHaveLength(0);
+			expect(warn, entry).toHaveBeenCalledWith(expect.anything(), "cimd_host_not_allowed");
+		}
+		const allowed = resolver({ allowedHosts: [".bücher.example"] }, [
+			() => json(document({ client_id: SUB_IDN_URL })),
+		]);
+		expect(await allowed.resolve(SUB_IDN_URL)).not.toBeNull();
+	});
+
+	it("refuses a host with an empty label before any fetch", async () => {
+		const { resolve, calls } = resolver();
+		expect(await resolve("https://a..example/meta")).toBeNull();
+		expect(calls).toHaveLength(0);
+	});
+
+	it("refuses to be built with an entry the grammar cannot read, naming the list", () => {
+		for (const [list, entry] of [
+			["allowedHosts", "*.example"],
+			["deniedHosts", "https://client.example"],
+			["deniedHosts", "client.example:443"],
+		] as const) {
+			expect(
+				() =>
+					createClientIdMetadataDocumentResolver({
+						allowedScopes: [],
+						allowedAudiences: [],
+						[list]: [entry],
+					}),
+				entry,
+			).toThrow(new RegExp(list));
+		}
 	});
 });

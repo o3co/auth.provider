@@ -457,11 +457,12 @@ export const createOAuthRouter = async (
 		 */
 		loginEntry?: LoginEntry;
 		/**
-		 * The seams of the Client ID Metadata Document fetch (`fetch`,
-		 * `lookup`, `now`), for tests. Everything else about the feature comes
-		 * from `oauth.clientIdMetadataDocuments` in the config.
+		 * The seams of the Client ID Metadata Document fetch (`fetch`, which
+		 * replaces core's outbound policy with it, and `now`), for tests.
+		 * Everything else about the feature comes from
+		 * `oauth.clientIdMetadataDocuments` and `core.outbound` in the config.
 		 */
-		clientIdMetadataDocuments?: Pick<ClientIdMetadataDocumentOptions, "fetch" | "lookup" | "now">;
+		clientIdMetadataDocuments?: Pick<ClientIdMetadataDocumentOptions, "fetch" | "now">;
 		/**
 		 * Getter for the installed federation providers Map. Defaults to
 		 * `() => undefined` (no federation) when not provided.

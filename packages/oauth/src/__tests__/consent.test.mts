@@ -218,7 +218,6 @@ describe("the page is told which host a URL-shaped client_id names", () => {
 		const clientRepository = withClientIdMetadataDocuments(inner, {
 			allowedScopes: ["read", "write"],
 			allowedAudiences: [],
-			lookup: async () => ["93.184.216.34"],
 			fetch: (async () =>
 				new Response(
 					JSON.stringify({
