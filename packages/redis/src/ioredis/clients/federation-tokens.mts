@@ -100,7 +100,7 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 					[key, input.replayKey],
 					[
 						String(input.deadlineMs),
-						String(input.deadlineMs + 1),
+						String(input.deadlineMs + input.clockSkewMs + 1),
 						input.expected,
 						input.value,
 						String(input.ttlMs),
@@ -115,7 +115,11 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 					io,
 					FT_REMOVE_IF,
 					[key, input.replayKey],
-					[String(input.deadlineMs), String(input.deadlineMs + 1), input.expected],
+					[
+						String(input.deadlineMs),
+						String(input.deadlineMs + input.clockSkewMs + 1),
+						input.expected,
+					],
 				),
 				["removed", "missing", "conflict", "late"] as const,
 				"removeIfGeneration",

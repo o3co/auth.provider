@@ -24,6 +24,7 @@ import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationTokenStore, type EncryptionConfig } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
+import { CLOCK_SKEW_MS } from "#/internal/write-deadline.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { serverClock, testRedis, until } from "./support/redis.mjs";
 
@@ -413,6 +414,41 @@ describe("conditional writes over a real Redis", () => {
 		expect(again.generation).not.toBe(read.generation);
 	});
 
+	it("mints a generation into a v2 record without one whatever the order of its fields, splicing it in before the bytes it read", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const { c } = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
+		const reordered = JSON.stringify({ c, v: 2 });
+		await raw.set(key, reordered, "PX", 600_000);
+
+		const read = await live(store, "sid-1", "google");
+		expect(read.value).toEqual(tokens);
+		expect(isStoreGeneration(read.generation)).toBe(true);
+		expect(await raw.get(key)).toBe(
+			`{"g":${JSON.stringify(read.generation)},${reordered.slice(1)}`,
+		);
+	});
+
+	it("rejects a versioned read of a record get still reads but it cannot mint a generation into, and keeps the record", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const { g: _g, ...rest } = JSON.parse((await raw.get(key)) as string) as Record<
+			string,
+			unknown
+		>;
+		// Leading whitespace: valid JSON, but its first byte is not the `{` the mint splices after.
+		const bytes = ` ${JSON.stringify(rest)}`;
+		await raw.set(key, bytes, "PX", 600_000);
+
+		await expect(store.getVersioned("sid-1", "google")).rejects.toThrow(
+			/getVersioned found no generation in a readable record/,
+		);
+		expect(await raw.get(key)).toBe(bytes);
+		expect(await store.get("sid-1", "google")).toEqual(tokens);
+	});
+
 	it("answers null to a versioned read of an unreadable record, removes it, and keeps its index member", async () => {
 		const { keyPrefix, store } = makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
@@ -522,6 +558,7 @@ describe("conditional writes over a real Redis", () => {
 			ttlMs: 60_000,
 			deadlineMs: Date.now() + 60_000,
 			replayKey: `${key}:w:replayed-1`,
+			clockSkewMs: CLOCK_SKEW_MS,
 		};
 		expect(await client.replaceIfGeneration(key, first)).toBe("updated");
 		// The copy a reconnect sends again: the write landed, so it is not a conflict.
@@ -549,6 +586,7 @@ describe("conditional writes over a real Redis", () => {
 			expected: read.generation,
 			deadlineMs: Date.now() + 60_000,
 			replayKey: `${key}:w:removal-1`,
+			clockSkewMs: CLOCK_SKEW_MS,
 		};
 		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
 		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
@@ -558,7 +596,7 @@ describe("conditional writes over a real Redis", () => {
 		expect(await raw.get(key)).toBe(relinked);
 	});
 
-	it("keeps a write's answer until a millisecond past its deadline, and no longer", async () => {
+	it("keeps a write's answer until the declared clock skew past its deadline, and no longer", async () => {
 		const { keyPrefix, store } = makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
 		await store.attach("sid-1", "google", tokens);
@@ -567,9 +605,14 @@ describe("conditional writes over a real Redis", () => {
 		const deadlineMs = (await serverClock(() => raw)()) + 30_000;
 		const replayKey = `${key}:w:kept`;
 		expect(
-			await client.removeIfGeneration(key, { expected: read.generation, deadlineMs, replayKey }),
+			await client.removeIfGeneration(key, {
+				expected: read.generation,
+				deadlineMs,
+				replayKey,
+				clockSkewMs: CLOCK_SKEW_MS,
+			}),
 		).toBe("removed");
-		expect(await raw.pexpiretime(replayKey)).toBe(deadlineMs + 1);
+		expect(await raw.pexpiretime(replayKey)).toBe(deadlineMs + CLOCK_SKEW_MS + 1);
 	});
 
 	it("a conditional write that reaches the server past its deadline writes nothing", async () => {
@@ -587,6 +630,7 @@ describe("conditional writes over a real Redis", () => {
 				ttlMs: 60_000,
 				deadlineMs: past,
 				replayKey: `${key}:w:late-1`,
+				clockSkewMs: CLOCK_SKEW_MS,
 			}),
 		).toBe("late");
 		expect(
@@ -594,6 +638,7 @@ describe("conditional writes over a real Redis", () => {
 				expected: read.generation,
 				deadlineMs: past,
 				replayKey: `${key}:w:late-2`,
+				clockSkewMs: CLOCK_SKEW_MS,
 			}),
 		).toBe("late");
 		expect(await raw.exists(`${key}:w:late-1`, `${key}:w:late-2`)).toBe(0);
@@ -604,6 +649,7 @@ describe("conditional writes over a real Redis", () => {
 				expected: read.generation,
 				deadlineMs: Date.now() + 60_000,
 				replayKey: `${key}:w:late-3`,
+				clockSkewMs: CLOCK_SKEW_MS,
 			}),
 		).toBe("removed");
 		expect(await raw.exists(key)).toBe(0);

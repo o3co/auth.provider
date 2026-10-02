@@ -527,7 +527,7 @@ handful of named keys rather than a search:
 | `${keyPrefix}${sid}:${federationName}` | string | one federation token envelope |
 | `${keyPrefix}idx:${sid}` | **set** | the federation names attached to `${sid}` |
 | `${keyPrefix}lock:${sid}:${federationName}` | string | the advisory lock |
-| `${keyPrefix}w:{${keyPrefix}${sid}:${federationName}}:${writeId}` | string | one conditional write's answer, until a millisecond past its deadline (a few seconds); on the record's Cluster slot. A record key that carries a hash tag of its own keeps it instead: `${recordKey}:w:${writeId}` |
+| `${keyPrefix}w:{${keyPrefix}${sid}:${federationName}}:${writeId}` | string | one conditional write's answer, until the declared clock skew past its deadline (a few seconds); on the record's Cluster slot. A record key that carries a hash tag of its own keeps it instead: `${recordKey}:w:${writeId}` |
 
 The index (`idx:`) is what lets `removeBySid` name the keys it must delete
 instead of hunting for them, at a cost of O(that session's federations).
@@ -606,30 +606,46 @@ conditional-write convention for a record
 - **One script per conditional member**, on the record's key, and for a
   write its replay key, on one Cluster slot: the versioned read
   (`readVersioned`), the replace (`replaceIfGeneration`) and the delete
-  (`removeIfGeneration`). `missing`
-  means no key, so a record past its `PX` is `missing` on Redis's own clock.
+  (`removeIfGeneration`). `missing` means no key, so a record past its `PX`
+  is `missing` on Redis's own clock. The delete's script declares
+  `allow-oom` (`#!lua flags=allow-oom`, Redis 7.0+), so a full `noeviction`
+  server still runs it: it only deletes and keeps its answer, and a record
+  stays removable when nothing more can be written.
+- **A versioned read never removes a record `get` reads.** It mints a
+  generation into a record that decodes to a `v: 2` wrapper with no `g` and
+  whose first byte is `{`, splicing `"g"` in after that byte rather than
+  re-encoding the record. A record `get` reads but that the read can neither
+  find a generation in nor mint one into makes `getVersioned` reject, as an
+  outage would; only a record `get` cannot read either is removed.
 - **The deadline.** Each conditional write carries a deadline the adapter
   sets at issue, its `Date.now()` plus the 1 s write timeout, in `ARGV`; the
   script compares it with `redis.call('TIME')` before it reads or writes
-  anything, and past it writes nothing (`late`). The adapter stops waiting
-  at the same timeout. Either way it rejects with an unknown outcome, never
-  that nothing was written: a `late` answer says only that the copy that
-  answered wrote nothing, and an earlier copy of the same write, whose reply
-  was lost, may have committed before the deadline. So the write
-  lifetime W is 2 s: the 1 s write timeout plus the 1 s clock skew allowed
-  between the app's and Redis's clocks (NTP; the operator runbook's "Replica
-  clocks"). An issued conditional write commits or fails within W. That holds
-  while the two clocks agree within the skew. A late command — resent by the
-  driver after a reconnect, queued while the connection was down, or held by
-  a stalled server — writes nothing. The check bounds when a script starts,
-  so one assumption stands beside it: the server does not stall inside a
-  running script, between its clock check and its write, for the whole of W.
-- **Replay.** Each conditional write keeps its answer under a replay key of
-  its own (in the key table above, on the record's Cluster slot) until a
-  millisecond past its deadline: a copy that reaches the server before then
-  answers what the first copy answered and writes nothing, so a write that
-  landed is not answered `conflict` or `missing`; one that reaches it later
-  is `late`, an unknown outcome (above).
+  anything, and at or after it writes nothing (`late`). The adapter stops
+  waiting at the same timeout. Either way it rejects with an unknown
+  outcome, never that nothing was written: a `late` answer says only that
+  the copy that answered wrote nothing, and an earlier copy of the same
+  write, whose reply was lost, may have committed before the deadline. So
+  the write lifetime W is 2 s: the 1 s write timeout plus the 1 s clock skew
+  allowed between the app's and Redis's clocks (NTP; the operator runbook's
+  "Replica clocks"). An issued conditional write commits or fails within W.
+  That holds while the two clocks agree within the skew. The skew tolerance
+  is one-sided: a Redis clock δ ahead of the app's shortens the usable
+  window to the write timeout less δ, and at the full declared skew every
+  conditional write is refused, an outage (it fails closed), never a wrong
+  write. A late command — resent by the driver after a reconnect, queued
+  while the connection was down, or held by a stalled server — writes
+  nothing. The check bounds when a script starts, so one assumption stands
+  beside it: the server does not stall inside a running script, between its
+  clock check and its write, for the whole of W.
+- **Replay.** Each conditional write therefore keeps its answer under a
+  replay key of its own (`${keyPrefix}w:{<record key>}:<id>`, or
+  `<record key>:w:<id>` for a record key with a hash tag of its own; on the
+  record's Cluster slot) until the declared clock skew past its deadline: a
+  copy that reaches the server before then answers what the first copy
+  answered and writes nothing, so it does not answer `conflict` or `missing`
+  for a write that landed, even when another server, whose clock may lag by
+  the skew, judges the copy after a failover or a slot migration; one that
+  reaches it later is `late`, though the first copy may have committed.
 - **The index.** A conditional write never removes an index member, and
   `missing` and `conflict` never add one. `replaceIf` raises the index's TTL
   before its script (`pExpireGT`, which adds no member and makes no key), and
@@ -644,9 +660,10 @@ conditional-write convention for a record
 
 A `FederationTokenStoreClient` of your own implements the four primitives
 the conditional members use: `readVersioned`, `replaceIfGeneration`,
-`removeIfGeneration` (each one atomic step, the last two refusing past the
-deadline they are handed and keeping their answer under the replay key they
-are handed) and `pExpireGT`. The builder refuses a client
+`removeIfGeneration` (each one atomic step, the last two refusing at or
+after the deadline they are handed and keeping their answer under the replay
+key they are handed until the clock skew they are handed past it) and
+`pExpireGT`. The builder refuses a client
 without them. [`federation-tokens.conditional.test.mts`](__tests__/federation-tokens.conditional.test.mts)
 runs `federationTokenStoreConditionalContract` (`@o3co/auth-provider-test-kit`)
 over the store on two connections.

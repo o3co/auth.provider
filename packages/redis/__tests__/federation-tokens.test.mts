@@ -20,6 +20,12 @@ import {
 	redisFederationTokenStoreBuilder,
 } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
+import { CLOCK_SKEW_MS } from "#/internal/write-deadline.mjs";
+import {
+	FT_READ_VERSIONED,
+	FT_REMOVE_IF,
+	FT_REPLACE_IF,
+} from "#/ioredis/scripts/federation-tokens.mjs";
 
 /** The `g` a stored value carries, as the scripts read it. */
 const generationIn = (raw: string): string | undefined => {
@@ -32,11 +38,20 @@ const generationIn = (raw: string): string | undefined => {
 	}
 };
 
-/** Whether a stored value is a JSON object with no `g`: what the versioned read mints into. */
-const lacksGeneration = (raw: string): boolean => {
+/**
+ * Whether the versioned read mints into a stored value: it decodes to a v2
+ * record with no `g`, and its first byte is the `{` the mint splices after.
+ */
+const mintable = (raw: string): boolean => {
 	try {
 		const record = JSON.parse(raw) as unknown;
-		return record !== null && typeof record === "object" && !("g" in record);
+		return (
+			raw.startsWith("{") &&
+			record !== null &&
+			typeof record === "object" &&
+			(record as { v?: unknown }).v === 2 &&
+			!("g" in record)
+		);
 	} catch {
 		return false;
 	}
@@ -48,8 +63,18 @@ function createFakeRedis() {
 	// string-valued envelopes so assertions on `data` still see only envelopes.
 	const sets = new Map<string, Set<string>>();
 	const ttls = new Map<string, number>();
-	// Each conditional write's answer, by its replay key, as the scripts keep it.
-	const replays = new Map<string, string>();
+	// Each conditional write's answer, by its replay key, as the scripts keep
+	// it: until the declared clock skew past the write's deadline (`PXAT`),
+	// judged on `Date.now()`, the clock of the server that kept it.
+	const replays = new Map<string, { answer: string; untilMs: number }>();
+	const keptAnswer = (replayKey: string): string | undefined => {
+		const kept = replays.get(replayKey);
+		return kept !== undefined && Date.now() < kept.untilMs ? kept.answer : undefined;
+	};
+	// How far the clock that judges a deadline lags `Date.now()`: another
+	// server's, after a failover or a slot migration.
+	const clock = { lagMs: 0 };
+	const lateAt = (deadlineMs: number): boolean => Date.now() - clock.lagMs >= deadlineMs;
 	const removeKey = (k: string): number => {
 		let removed = 0;
 		if (data.delete(k)) removed += 1;
@@ -61,6 +86,7 @@ function createFakeRedis() {
 		data,
 		sets,
 		ttls,
+		clock,
 		get: vi.fn(async (k: string) => data.get(k) ?? null),
 		// Positional form: (key, value, mode: "PX", ttlMs, condition?: "NX")
 		set: vi.fn(
@@ -119,7 +145,7 @@ function createFakeRedis() {
 			if (stored === undefined) return null;
 			const g = generationIn(stored);
 			if (g !== undefined) return { raw: stored, generation: g };
-			if (stored.startsWith('{"v":2,') && lacksGeneration(stored)) {
+			if (mintable(stored)) {
 				const minted = `{"g":${JSON.stringify(candidate)},${stored.slice(1)}`;
 				data.set(k, minted);
 				return { raw: minted, generation: candidate };
@@ -127,8 +153,8 @@ function createFakeRedis() {
 			return { raw: stored, generation: "" };
 		}),
 		replaceIfGeneration: vi.fn(async (k: string, input: FederationTokenReplaceIfInput) => {
-			if (Date.now() > input.deadlineMs) return "late" as const;
-			const kept = replays.get(input.replayKey) as "updated" | "missing" | "conflict" | undefined;
+			if (lateAt(input.deadlineMs)) return "late" as const;
+			const kept = keptAnswer(input.replayKey) as "updated" | "missing" | "conflict" | undefined;
 			if (kept !== undefined) return kept;
 			const stored = data.get(k);
 			let answer: "updated" | "missing" | "conflict" = "updated";
@@ -138,19 +164,25 @@ function createFakeRedis() {
 				data.set(k, input.value);
 				ttls.set(k, input.ttlMs);
 			}
-			replays.set(input.replayKey, answer);
+			replays.set(input.replayKey, {
+				answer,
+				untilMs: input.deadlineMs + input.clockSkewMs + 1,
+			});
 			return answer;
 		}),
 		removeIfGeneration: vi.fn(async (k: string, input: FederationTokenRemoveIfInput) => {
-			if (Date.now() > input.deadlineMs) return "late" as const;
-			const kept = replays.get(input.replayKey) as "removed" | "missing" | "conflict" | undefined;
+			if (lateAt(input.deadlineMs)) return "late" as const;
+			const kept = keptAnswer(input.replayKey) as "removed" | "missing" | "conflict" | undefined;
 			if (kept !== undefined) return kept;
 			const stored = data.get(k);
 			let answer: "removed" | "missing" | "conflict" = "removed";
 			if (stored === undefined) answer = "missing";
 			else if (generationIn(stored) !== input.expected) answer = "conflict";
 			else removeKey(k);
-			replays.set(input.replayKey, answer);
+			replays.set(input.replayKey, {
+				answer,
+				untilMs: input.deadlineMs + input.clockSkewMs + 1,
+			});
 			return answer;
 		}),
 		pExpireGT: vi.fn(async (key: string, ttlMs: number) => {
@@ -161,6 +193,7 @@ function createFakeRedis() {
 		data: Map<string, string>;
 		sets: Map<string, Set<string>>;
 		ttls: Map<string, number>;
+		clock: { lagMs: number };
 	};
 }
 
@@ -1280,11 +1313,11 @@ describe("redis FederationTokenStore conditional members", () => {
 		if (read === null) throw new Error("not live");
 		redis.replaceIfGeneration.mockResolvedValueOnce("late");
 		await expect(store.replaceIf("sid-1", "google", read.generation, tokens)).rejects.toThrow(
-			/replaceIf was answered past its deadline; its outcome is unknown/,
+			/replaceIf was answered past its deadline; the outcome is unknown: an earlier copy may have committed/,
 		);
 		redis.removeIfGeneration.mockResolvedValueOnce("late");
 		await expect(store.removeIf("sid-1", "google", read.generation)).rejects.toThrow(
-			/removeIf was answered past its deadline; its outcome is unknown/,
+			/removeIf was answered past its deadline; the outcome is unknown: an earlier copy may have committed/,
 		);
 		// No add to the index on an unknown outcome.
 		expect(redis.sAddWithTtl).toHaveBeenCalledTimes(1);
@@ -1321,7 +1354,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		);
 		const next = { ...tokens, accessToken: "at-2" };
 		await expect(store.replaceIf("sid-1", "google", read.generation, next)).rejects.toThrow(
-			/replaceIf was answered past its deadline; its outcome is unknown: it may have committed/,
+			/replaceIf was answered past its deadline; the outcome is unknown: an earlier copy may have committed/,
 		);
 		expect(redis.data.get("ft:sid-1:google")).toBe(written);
 		expect((await store.get("sid-1", "google"))?.accessToken).toBe("at-2");
@@ -1337,7 +1370,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		if (remove === undefined) throw new Error("no fake removal");
 		redis.removeIfGeneration.mockImplementationOnce(firstCopyLandsThenLateCopy(remove));
 		await expect(store.removeIf("sid-1", "google", read.generation)).rejects.toThrow(
-			/removeIf was answered past its deadline; its outcome is unknown: it may have committed/,
+			/removeIf was answered past its deadline; the outcome is unknown: an earlier copy may have committed/,
 		);
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
@@ -1351,7 +1384,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		redis.replaceIfGeneration.mockImplementationOnce(() => new Promise(() => {}));
 		const replaced = store.replaceIf("sid-1", "google", read.generation, tokens);
 		const settled = expect(replaced).rejects.toThrow(
-			/replaceIf had no answer within 1000 ms; its outcome is unknown: it may have committed/,
+			/replaceIf had no answer within 1000 ms; the outcome is unknown: it may have committed/,
 		);
 		await vi.advanceTimersByTimeAsync(1_000);
 		await settled;
@@ -1361,6 +1394,121 @@ describe("redis FederationTokenStore conditional members", () => {
 		);
 		// No add to the index on an unknown outcome.
 		expect(redis.sAddWithTtl).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps a write's answer the declared clock skew past its deadline: a copy a lagging server judges at deadline + skew/2 answers the first copy's answer and writes nothing", async () => {
+		const store = storeOver();
+		await store.attach("sid-1", "google", tokens);
+		const read = await store.getVersioned("sid-1", "google");
+		if (read === null) throw new Error("not live");
+		vi.useFakeTimers({ toFake: ["Date"] });
+		// Copy 1 lands and its reply is lost. A server whose clock lags by the
+		// skew judges copy 2 at deadline + skew/2 on the clock that kept the
+		// answer: on its own clock the copy is on time.
+		const resentLagging = <I extends { deadlineMs: number }, A>(
+			write: (k: string, input: I) => Promise<A>,
+		) => {
+			return async (k: string, input: I): Promise<A> => {
+				await write(k, input);
+				const after = redis.data.get(k);
+				vi.setSystemTime(input.deadlineMs + CLOCK_SKEW_MS / 2);
+				redis.clock.lagMs = CLOCK_SKEW_MS;
+				const answer = await write(k, input);
+				expect(redis.data.get(k)).toBe(after);
+				return answer;
+			};
+		};
+		const replace = redis.replaceIfGeneration.getMockImplementation();
+		if (replace === undefined) throw new Error("no fake replace");
+		redis.replaceIfGeneration.mockImplementationOnce(resentLagging(replace));
+		const next = { ...tokens, accessToken: "at-2" };
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, next);
+		expect(replaced.outcome).toBe("updated");
+		redis.clock.lagMs = 0;
+		vi.useRealTimers();
+		expect((await store.get("sid-1", "google"))?.accessToken).toBe("at-2");
+
+		const now = await store.getVersioned("sid-1", "google");
+		if (now === null) throw new Error("not live");
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const remove = redis.removeIfGeneration.getMockImplementation();
+		if (remove === undefined) throw new Error("no fake removal");
+		redis.removeIfGeneration.mockImplementationOnce(resentLagging(remove));
+		expect(await store.removeIf("sid-1", "google", now.generation)).toEqual({
+			outcome: "removed",
+		});
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+	});
+
+	it("hands each conditional write the declared clock skew, which its replay key outlives the deadline by", async () => {
+		const store = storeOver();
+		await store.attach("sid-1", "google", tokens);
+		const read = await store.getVersioned("sid-1", "google");
+		if (read === null) throw new Error("not live");
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, tokens);
+		if (replaced.outcome !== "updated") throw new Error("not updated");
+		await store.removeIf("sid-1", "google", replaced.generation);
+		expect(redis.replaceIfGeneration).toHaveBeenLastCalledWith(
+			"ft:sid-1:google",
+			expect.objectContaining({ clockSkewMs: CLOCK_SKEW_MS }),
+		);
+		expect(redis.removeIfGeneration).toHaveBeenLastCalledWith(
+			"ft:sid-1:google",
+			expect.objectContaining({ clockSkewMs: CLOCK_SKEW_MS }),
+		);
+	});
+
+	it("judges a conditional write late at its deadline, not only after it", async () => {
+		const store = storeOver();
+		await store.attach("sid-1", "google", tokens);
+		const read = await store.getVersioned("sid-1", "google");
+		if (read === null) throw new Error("not live");
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const replace = redis.replaceIfGeneration.getMockImplementation();
+		if (replace === undefined) throw new Error("no fake replace");
+		redis.replaceIfGeneration.mockImplementationOnce(async (k, input) => {
+			vi.setSystemTime(input.deadlineMs);
+			return replace(k, input);
+		});
+		await expect(store.replaceIf("sid-1", "google", read.generation, tokens)).rejects.toThrow(
+			/the outcome is unknown/,
+		);
+	});
+
+	it("rejects a versioned read of a readable record it found no generation in and could not mint one into, and keeps the record", async () => {
+		const store = storeOver();
+		await store.attach("sid-1", "google", tokens);
+		const stored = redis.data.get("ft:sid-1:google") as string;
+		redis.readVersioned.mockResolvedValueOnce({ raw: stored, generation: "" });
+		await expect(store.getVersioned("sid-1", "google")).rejects.toThrow(
+			/getVersioned found no generation in a readable record/,
+		);
+		expect(redis.compareAndDelete).not.toHaveBeenCalled();
+		expect(redis.data.get("ft:sid-1:google")).toBe(stored);
+		expect(await store.get("sid-1", "google")).toEqual(tokens);
+	});
+
+	it("mints a generation into a v2 record without one whatever the order of its fields", async () => {
+		const store = storeOver();
+		await store.attach("sid-1", "google", tokens);
+		const { g: _g, ...rest } = JSON.parse(redis.data.get("ft:sid-1:google") as string) as Record<
+			string,
+			unknown
+		>;
+		const reordered = JSON.stringify({ c: rest.c, v: rest.v });
+		redis.data.set("ft:sid-1:google", reordered);
+		const read = await store.getVersioned("sid-1", "google");
+		expect(read?.value).toEqual(tokens);
+		expect(redis.data.get("ft:sid-1:google")).toBe(
+			`{"g":${JSON.stringify(read?.generation)},${reordered.slice(1)}`,
+		);
+		expect(redis.compareAndDelete).not.toHaveBeenCalled();
+	});
+
+	it("runs the removal's script on a full server: it alone starts with the allow-oom shebang", () => {
+		expect(FT_REMOVE_IF.source.startsWith("#!lua flags=allow-oom\n")).toBe(true);
+		expect(FT_REPLACE_IF.source.startsWith("#!")).toBe(false);
+		expect(FT_READ_VERSIONED.source.startsWith("#!")).toBe(false);
 	});
 
 	it("the builder refuses a client without the conditional primitives", () => {

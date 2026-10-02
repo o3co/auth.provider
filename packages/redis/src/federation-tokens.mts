@@ -33,24 +33,26 @@
  * writes"), outside the ciphertext, so a replica that does not know it reads
  * the record as before. Every write sets a fresh one. A record written without
  * one (by such a replica) is given one by its first versioned read, its TTL
- * kept; a conditional write against it answers `conflict`.
+ * kept; a conditional write against it answers `conflict`. A record `get`
+ * reads that the versioned read can neither find a generation in nor mint one
+ * into makes `getVersioned` reject, as an outage would: it is never removed.
  *
- * Each conditional member is one script on the record's key, refused past a
- * deadline the adapter stamps at issue and the server's clock judges, so its
- * write lifetime W is the write timeout plus the declared clock skew
+ * Each conditional member is one script on the record's key, refused at or
+ * after a deadline the adapter stamps at issue and the server's clock judges,
+ * so its write lifetime W is the write timeout plus the declared clock skew
  * (`internal/write-deadline.mts`), while the app's and Redis's clocks agree
- * within that skew. A conditional write keeps its answer under a replay key
- * of its own until a millisecond past its deadline, so a copy the driver
- * sends again within it answers as the first did and writes nothing. A
- * conditional write answered `late`, like one unanswered within the write
- * timeout, rejects with an unknown outcome: the copy that answered wrote
- * nothing, but an earlier copy whose reply was lost may have committed. A
- * conditional write never shrinks the index, and adds to it only after
- * `updated`, so the index outlives the record it names. The
- * store assumes acknowledged writes are not rolled back (persistence, plus a
- * failover setup that keeps acknowledged writes); a deployment that accepts
- * acknowledged-write loss on failover also accepts that a conditional write
- * may see a restored, older generation.
+ * within that skew. A conditional write keeps its answer under a replay key of
+ * its own until the declared clock skew past its deadline, so a copy the
+ * driver sends again before then answers as the first did and writes nothing,
+ * even when a server whose clock lags by the skew judges it. A conditional
+ * write answered `late`, like one unanswered within the write timeout, rejects
+ * with an unknown outcome: the copy that answered wrote nothing, but an
+ * earlier copy whose reply was lost may have committed. A conditional write
+ * never shrinks the index, and adds to it only after `updated`, so the index
+ * outlives the record it names. The store assumes acknowledged writes are not
+ * rolled back (persistence, plus a failover setup that keeps acknowledged
+ * writes); a deployment that accepts acknowledged-write loss on failover also
+ * accepts that a conditional write may see a restored, older generation.
  */
 
 import {
@@ -83,7 +85,7 @@ import { createRedisLock } from "./internal/lock.mjs";
 import { createRedisSidSet } from "./internal/redisSidSet.mjs";
 import { replayKeyOf } from "./internal/replay-key.mjs";
 import { redisReference } from "./internal/section.mjs";
-import { WRITE_TIMEOUT_MS, withWriteDeadline } from "./internal/write-deadline.mjs";
+import { CLOCK_SKEW_MS, WRITE_TIMEOUT_MS, withWriteDeadline } from "./internal/write-deadline.mjs";
 
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
@@ -429,26 +431,31 @@ export function createRedisFederationTokenStore(
 	};
 
 	/**
-	 * A conditional write whose outcome is unknown: it may have committed, no
-	 * later than its deadline. A rejection of a conditional write means only
-	 * that, never that nothing was written.
+	 * A conditional write whose outcome is unknown. A rejection of a
+	 * conditional write means only that, never that nothing was written.
 	 */
-	const unknownOutcome = (operation: string, what: string): Error =>
-		new Error(
-			`FederationTokenStore (redis): ${operation} ${what}; its outcome is unknown: it may have committed, no later than its deadline`,
-		);
+	const unknownOutcome = (operation: string, what: string, why: string): Error =>
+		new Error(`FederationTokenStore (redis): ${operation} ${what}; the outcome is unknown: ${why}`);
 
 	/**
-	 * Answered `late`: the copy that answered reached the server past its
+	 * Answered `late`: the copy that answered reached the server at or after its
 	 * deadline and wrote nothing, but an earlier copy the driver sent of the
 	 * same write, whose reply was lost, may have committed before it.
 	 */
 	const late = (operation: string): Error =>
-		unknownOutcome(operation, "was answered past its deadline");
+		unknownOutcome(
+			operation,
+			"was answered past its deadline",
+			"an earlier copy may have committed",
+		);
 
 	/** Unanswered within the write timeout. */
 	const unanswered = (operation: string) => (): Error =>
-		unknownOutcome(operation, `had no answer within ${WRITE_TIMEOUT_MS} ms`);
+		unknownOutcome(
+			operation,
+			`had no answer within ${WRITE_TIMEOUT_MS} ms`,
+			"it may have committed, no later than its deadline",
+		);
 
 	/** Unlink `keys` in bounded batches. */
 	const unlinkBatched = async (keys: AsyncIterable<string>): Promise<void> => {
@@ -487,14 +494,21 @@ export function createRedisFederationTokenStore(
 			const key = k(sid, name);
 			const read = await opts.client.readVersioned(key, newStoreGeneration());
 			if (read === null) return null;
+			let value: FederationTokens;
 			try {
-				const value = fromEnvelope(open(key, read.raw));
-				// `""`: a value the read found no generation in and could not mint one into.
-				if (!isStoreGeneration(read.generation)) throw new Error("no generation");
-				return { value, generation: read.generation };
+				value = fromEnvelope(open(key, read.raw));
 			} catch {
 				return selfHeal(key, read.raw);
 			}
+			// `""` for a record `get` still serves: the read found no generation in
+			// it and could not mint one. Removing it would lose tokens `get` reads,
+			// so this answers as an outage would.
+			if (!isStoreGeneration(read.generation)) {
+				throw new Error(
+					"FederationTokenStore (redis): getVersioned found no generation in a readable record and could not mint one",
+				);
+			}
+			return { value, generation: read.generation };
 		},
 		async replaceIf(sid, name, expected, tokens) {
 			const key = k(sid, name);
@@ -511,6 +525,7 @@ export function createRedisFederationTokenStore(
 						ttlMs: storeTtlMs,
 						deadlineMs,
 						replayKey: replayKeyOf(key, prefix, generation),
+						clockSkewMs: CLOCK_SKEW_MS,
 					}),
 				unanswered("replaceIf"),
 			);
@@ -525,7 +540,13 @@ export function createRedisFederationTokenStore(
 			const key = k(sid, name);
 			const replayKey = replayKeyOf(key, prefix, newStoreGeneration());
 			const outcome = await withWriteDeadline(
-				(deadlineMs) => opts.client.removeIfGeneration(key, { expected, deadlineMs, replayKey }),
+				(deadlineMs) =>
+					opts.client.removeIfGeneration(key, {
+						expected,
+						deadlineMs,
+						replayKey,
+						clockSkewMs: CLOCK_SKEW_MS,
+					}),
 				unanswered("removeIf"),
 			);
 			if (outcome === "late") throw late("removeIf");

@@ -18,8 +18,8 @@
  * A conditional write's write lifetime W (docs/adapter-surface.md,
  * "Conditional writes", rule 6). The adapter stamps each write with a deadline,
  * its issue time plus {@link WRITE_TIMEOUT_MS} on the app's clock; the write's
- * script refuses it past that deadline on the server's clock, writing nothing;
- * and the adapter stops waiting at the same timeout. A command the driver
+ * script refuses it at or after that deadline on the server's clock, writing
+ * nothing; and the adapter stops waiting at the same timeout. A command the driver
  * queues, sends again after a reconnect, or a stalled server holds therefore
  * commits within W of its issue or writes nothing, while the app's and
  * Redis's clocks agree within {@link CLOCK_SKEW_MS}, and the server does not
