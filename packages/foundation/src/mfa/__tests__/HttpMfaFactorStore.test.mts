@@ -63,6 +63,9 @@ const RECORD: MfaFactorRecord = {
 	data: "v2.opaque-sealed-data",
 };
 const WIRE = toMfaStoreFactor(RECORD);
+/** A generation as a Store might mint one. */
+const G1 = "4f1c2a3b-5d6e-4f70-8192-a3b4c5d6e7f8" as StoreGeneration;
+const G2 = "0e9d8c7b-6a59-4483-9271-605f4e3d2c1b" as StoreGeneration;
 const NEXT = {
 	data: "v2.re-sealed",
 	label: "Work phone",
@@ -182,14 +185,16 @@ describe("what it sends", () => {
 			} else if (request.url === "/mfa/update") {
 				response.writeHead(404).end();
 			} else {
-				response.writeHead(204).end();
+				const outcome = request.url === "/mfa/create" ? "created" : "removed";
+				response.writeHead(200, { "Content-Type": "application/json" });
+				response.end(JSON.stringify({ outcome, generation: G2 }));
 			}
 		});
 		const store = storeAt(origin, TOKEN);
 		await store.list("user-1");
-		await store.create(RECORD);
+		await store.createIf(RECORD, null);
 		await store.update("user-1", ID, 1, NEXT);
-		await store.remove("user-1", ID);
+		await store.removeIf("user-1", ID, G1);
 		await store.removeAllForSubject("user-1");
 		expect(seen.map(({ method, url }) => [method, url])).toEqual([
 			["POST", "/mfa/list?tenant=a"],
@@ -204,14 +209,14 @@ describe("what it sends", () => {
 		}
 		expect(seen.map((request) => request.body)).toEqual([
 			{ subject: "user-1" },
-			{ factor: WIRE },
+			{ factor: WIRE, expectedGeneration: null, deadlineMs: expect.any(Number) },
 			{
 				subject: "user-1",
 				id: ID,
 				expectedVersion: 1,
 				changes: { data: NEXT.data, label: NEXT.label, lastUsedAtMs: NEXT.lastUsedAt.getTime() },
 			},
-			{ subject: "user-1", id: ID },
+			{ subject: "user-1", id: ID, expectedGeneration: G1, deadlineMs: expect.any(Number) },
 			{ subject: "user-1", all: true },
 		]);
 	});
@@ -234,7 +239,7 @@ describe("what it sends", () => {
 		const created = seal('{"secret":"PLAINTEXT-SECRET-ONE"}');
 		const resealed = seal('{"secret":"PLAINTEXT-SECRET-TWO"}');
 		const store = storeOver();
-		await store.create({ ...RECORD, data: created });
+		await store.createIf({ ...RECORD, data: created }, null);
 		await store.update("user-1", ID, 1, { ...NEXT, data: resealed });
 		expect(fake.requests.map((request) => request.body)).toMatchObject([
 			{ factor: { data: created } },
@@ -254,11 +259,11 @@ describe("what it sends", () => {
 
 	it("refuses, with a RangeError and sending nothing, a record or an update the wire cannot carry", async () => {
 		const store = storeOver();
-		await expect(store.create({ ...RECORD, id: "factor-1" })).rejects.toThrow(RangeError);
-		await expect(store.create({ ...RECORD, label: "" })).rejects.toThrow(RangeError);
-		await expect(store.create({ ...RECORD, createdAt: new Date(Number.NaN) })).rejects.toThrow(
-			RangeError,
-		);
+		await expect(store.createIf({ ...RECORD, id: "factor-1" }, null)).rejects.toThrow(RangeError);
+		await expect(store.createIf({ ...RECORD, label: "" }, null)).rejects.toThrow(RangeError);
+		await expect(
+			store.createIf({ ...RECORD, createdAt: new Date(Number.NaN) }, null),
+		).rejects.toThrow(RangeError);
 		await expect(store.update("user-1", "factor-1", 1, NEXT)).rejects.toThrow(RangeError);
 		await expect(store.update("user-1", ID, Number.MAX_SAFE_INTEGER, NEXT)).rejects.toThrow(
 			RangeError,
@@ -356,31 +361,6 @@ describe("list", () => {
 	});
 });
 
-describe("create", () => {
-	it("answers a 409 with a throw, the duplicate refused", async () => {
-		const store = storeOver();
-		await store.create(RECORD);
-		await expect(store.create({ ...RECORD, data: "v2.other" })).rejects.toThrow(/already exists/);
-		expect(fake.factors("user-1")).toEqual([WIRE]);
-	});
-
-	it("takes any 2xx as created", async () => {
-		for (const status of [200, 201, 202, 204]) {
-			fake.answer("create", () => ({ status, body: status === 204 ? undefined : "{}" }));
-			await expect(storeOver().create(RECORD), String(status)).resolves.toBeUndefined();
-		}
-	});
-
-	it("throws on any other status, a redirect included", async () => {
-		for (const status of [400, 404, 500, 503, 307, 302]) {
-			fake.answer("create", () => ({ status, headers: { Location: fake.urls.createUrl } }));
-			const error = await rejection(storeOver().create(RECORD));
-			expect((error as MfaStoreError).reason, String(status)).toBe("unexpected_status");
-			expect((error as MfaStoreError).operation).toBe("create");
-		}
-	});
-});
-
 describe("update", () => {
 	it("answers a 409 or a 404 with null", async () => {
 		for (const status of [409, 404]) {
@@ -451,38 +431,31 @@ describe("update", () => {
 	});
 });
 
-describe("delete", () => {
-	it("answers a 404 as done, for one record and for a subject's", async () => {
+describe("removeAllForSubject", () => {
+	it("answers a 404 as done", async () => {
 		fake.answer("delete", () => ({ status: 404 }));
-		await expect(storeOver().remove("user-1", ID)).resolves.toBeUndefined();
 		await expect(storeOver().removeAllForSubject("user-1")).resolves.toBeUndefined();
 	});
 
 	it("takes any 2xx as done", async () => {
 		for (const status of [200, 202, 204]) {
 			fake.answer("delete", () => ({ status, body: status === 204 ? undefined : "{}" }));
-			await expect(storeOver().remove("user-1", ID), String(status)).resolves.toBeUndefined();
+			await expect(
+				storeOver().removeAllForSubject("user-1"),
+				String(status),
+			).resolves.toBeUndefined();
 		}
 	});
 
 	it("throws on any other status, a redirect included", async () => {
 		for (const status of [400, 409, 500, 503, 307]) {
 			fake.answer("delete", () => ({ status, headers: { Location: fake.urls.deleteUrl } }));
-			for (const call of [
-				() => storeOver().remove("user-1", ID),
-				() => storeOver().removeAllForSubject("user-1"),
-			]) {
-				const error = await rejection(call());
-				expect((error as MfaStoreError).reason, String(status)).toBe("unexpected_status");
-				expect((error as MfaStoreError).operation).toBe("delete");
-			}
+			const error = await rejection(storeOver().removeAllForSubject("user-1"));
+			expect((error as MfaStoreError).reason, String(status)).toBe("unexpected_status");
+			expect((error as MfaStoreError).operation).toBe("delete");
 		}
 	});
 });
-
-/** A generation as a Store might mint one. */
-const G1 = "4f1c2a3b-5d6e-4f70-8192-a3b4c5d6e7f8" as StoreGeneration;
-const G2 = "0e9d8c7b-6a59-4483-9271-605f4e3d2c1b" as StoreGeneration;
 
 describe("the conditional members: what they send", () => {
 	it("posts a versioned read as a list, a conditional create and removal with expectedGeneration, to the URLs as configured", async () => {
@@ -552,7 +525,7 @@ describe("listVersioned", () => {
 
 	it("answers an emptied set's tombstone: no records, at a generation", async () => {
 		const store = storeOver();
-		await store.create(RECORD);
+		await store.createIf(RECORD, null);
 		await store.removeAllForSubject("user-1");
 		const { items, generation } = await store.listVersioned("user-1");
 		expect(items).toEqual([]);
@@ -726,7 +699,9 @@ describe("a conditional write at the request deadline", () => {
 			expect((created as MfaStoreError).reason).toBe("unexpected_status");
 			expect((created as MfaStoreError).storeStatus).toBe(408);
 			expect(ahead.factors("user-1")).toEqual([]);
-			await store.create(RECORD);
+			// The fake's own seeding: a create through this store would be late too.
+			// The read then mints the set's generation, which the removal is held to.
+			ahead.holdFactor("user-1", WIRE);
 			const { generation } = await store.listVersioned("user-1");
 			const removed = await rejection(store.removeIf("user-1", ID, generation as StoreGeneration));
 			expect((removed as MfaStoreError).reason).toBe("unexpected_status");
@@ -815,9 +790,10 @@ describe("nothing the Store sends reaches what it throws", () => {
 		const store = storeAt(origin);
 		const calls = [
 			() => store.list("user-1"),
-			() => store.create(RECORD),
+			() => store.createIf(RECORD, G1),
 			() => store.update("user-1", ID, 1, NEXT),
-			() => store.remove("user-1", ID),
+			() => store.removeIf("user-1", ID, G1),
+			() => store.removeAllForSubject("user-1"),
 		];
 		let thrown = 0;
 		for (const answer of [
@@ -843,8 +819,8 @@ describe("nothing the Store sends reaches what it throws", () => {
 				expect(everyForm(error), `${answer.status} ${answer.body}`).not.toContain(MARKER);
 			}
 		}
-		// Create and delete take the four 200s as done; every other call throws.
-		expect(thrown).toBe(9 * calls.length - 2 * 4);
+		// The set's reset takes the four 200s as done; every other call throws.
+		expect(thrown).toBe(9 * calls.length - 4);
 	});
 
 	it("in a credential refusal, which names this store", async () => {
@@ -873,9 +849,11 @@ describe("the transport", () => {
 			});
 			for (const call of [
 				() => store.list("user-1"),
-				() => store.create(RECORD),
+				() => store.listVersioned("user-1"),
+				() => store.createIf(RECORD, null),
 				() => store.update("user-1", ID, 1, NEXT),
-				() => store.remove("user-1", ID),
+				() => store.removeIf("user-1", ID, G1),
+				() => store.removeAllForSubject("user-1"),
 			]) {
 				const error = await rejection(call());
 				expect(error).toBeInstanceOf(StoreCredentialRefusedError);
@@ -930,6 +908,12 @@ describe("the transport", () => {
 describe("construction", () => {
 	it("is kind store", () => {
 		expect(storeOver().kind).toBe("store");
+	});
+
+	it("has no unconditional create or remove", () => {
+		const store = storeOver();
+		expect("create" in store).toBe(false);
+		expect("remove" in store).toBe(false);
 	});
 
 	it("refuses a URL that is not https or http to a loopback host, naming the option and quoting no value", () => {
