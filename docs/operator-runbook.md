@@ -212,6 +212,22 @@ config-parse time unless noted.
 | `http.readinessTimeoutMs`, `session.csrf.ttlSeconds`, token lifetimes, `session-store.maxAge`, `session.rateLimit.login` | positive integers. An **exported-but-empty** variable is `""`, which coerces to `0` and is refused — the failure it prevents is a zero lifetime or a probe that always times out | `application.schema.mts`; the session package's section schemas for `session.*` and `session-store.*` |
 | `oauth.accessToken.defaultExpiresIn` / `maxExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` / `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`) | the default must not exceed the max; the message names both keys. An unset max is the default, and an unset default is the deprecated `oauth.accessToken.expiresIn` (shipped `3600`) — so a max below `3600` set on its own fails until the default is lowered too | `application.schema.mts` (`resolveAccessTokenLifetime`) |
 
+### `core.outbound` — where the outbound fetch may connect
+
+`createOutboundFetch` (core) is the fetch for URLs a client registration or a
+request supplies. Its policy is `core.outbound`; the defaults need no setting.
+
+| Setting (env) | Default | Rule |
+| --- | --- | --- |
+| `core.outbound.allowedHosts` / `deniedHosts` / `internalHosts` (`CORE_OUTBOUND_ALLOWED_HOSTS`, `CORE_OUTBOUND_DENIED_HOSTS`, `CORE_OUTBOUND_INTERNAL_HOSTS`) | `[]` | host names (letters, digits and hyphens once IDNA has run; no wildcard), IP addresses or `.suffix` entries, as a list or comma-separated. `deniedHosts` wins; a non-empty `allowedHosts` admits only what it lists. A non-empty `allowedHosts` also narrows `internalHosts`: an internal host must be listed in both. `internalHosts` admits a host at loopback, private or link-local addresses, for a registration's URL only, and plain `http` only to a loopback one. An entry that is not a bare host fails boot as `config-validation-failed`, naming its index |
+| `core.outbound.timeoutMs` / `maxResponseBytes` (`CORE_OUTBOUND_TIMEOUT_MS`, `CORE_OUTBOUND_MAX_RESPONSE_BYTES`) | `5000` / `65536` | positive integers. The deadline covers the whole exchange. Both are ceilings: a caller may ask for a shorter deadline or a lower cap, never more |
+| `core.outbound.egress` (`CORE_OUTBOUND_EGRESS`) | unset | `"direct"` only. A proxy or dispatcher installed in code is not consulted: outbound client-metadata fetches connect directly. While `HTTPS_PROXY` / `HTTP_PROXY` is set, building the fetch refuses until this is set |
+
+Every address a host resolves to is checked, and the connection goes to the
+checked address. Egress filtering at the network is still expected. IPv6-only
+networks that reach IPv4 through NAT64 (`64:ff9b::/96`) are not supported:
+those addresses are special-use, so an IPv4-only host is refused there.
+
 ### Boot refusals you will meet
 
 Every boot-time failure is a `BootError` with a `reason` and a `stage`

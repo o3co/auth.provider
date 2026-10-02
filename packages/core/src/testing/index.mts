@@ -89,6 +89,18 @@ export {
 	type TestMfaFactorOptions,
 	testMfaFactorProofs,
 } from "./mfaFactor.mjs";
+// The outbound fetch over a resolver and a transport a test supplies, below
+// its policy, and the builder for `core.outbound`.
+export {
+	createOutboundFetchForTesting,
+	type OutboundAnswer,
+	type OutboundExchange,
+	OutboundFetchError,
+	type OutboundFetchForTestingOptions,
+	type OutboundSectionForTests,
+	type OutboundTransport,
+	withOutbound,
+} from "./outboundFetch.mjs";
 export {
 	createRecordingMailSender,
 	type RecordingMailSender,
