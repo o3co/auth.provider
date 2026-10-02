@@ -210,9 +210,14 @@ describe("create", () => {
 	it("answers 409 conflict to a duplicate (subject, id), keeping the record held", async () => {
 		const fake = await start();
 		const g1 = generationAnswered(await createIf(fake, WIRE, null));
-		expect((await createIf(fake, { ...WIRE, data: "v2.other" }, g1)).status).toBe(409);
+		expect(await createIf(fake, { ...WIRE, data: "v2.other" }, g1)).toMatchObject({
+			status: 409,
+			body: { outcome: "conflict" },
+		});
 		expect((await createIf(fake, { ...WIRE, subject: "user-2" }, null)).status).toBe(200);
 		expect(fake.factors("user-1")).toStrictEqual([WIRE]);
+		// The refusal kept the generation: a create of another id at it still lands.
+		expect((await createIf(fake, { ...WIRE, id: ID_2 }, g1)).status).toBe(200);
 	});
 
 	it("answers 400 to a record that is not one, null for an optional field included, and holds nothing", async () => {
@@ -376,7 +381,13 @@ describe("delete", () => {
 
 	it("answers 400 to a body that names neither one record nor all", async () => {
 		const { urls } = await start();
-		for (const body of [{ subject: "user-1" }, { subject: "user-1", all: "yes" }, { id: "x" }]) {
+		for (const body of [
+			{ subject: "user-1" },
+			{ subject: "user-1", all: "yes" },
+			{ id: "x" },
+			{ subject: "user-1", id: ID_1, all: true },
+			{ subject: "user-1", id: ID_1, all: true, expectedGeneration: "g" },
+		]) {
 			expect((await post(urls.deleteUrl, body)).status, JSON.stringify(body)).toBe(400);
 		}
 	});
