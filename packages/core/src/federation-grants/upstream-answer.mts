@@ -185,9 +185,10 @@ export function readFederationGrantUpstreamAnswer(
 	if (reading.verdict !== "finite" || reading.stated !== "both") {
 		return refused("no_finite_lifetime");
 	}
+	const held = context.held;
 	const expiresAtMs = Math.min(
 		reading.expiresAt.getTime(),
-		accessToken === context.held?.value ? heldEnd(context.held) : Number.POSITIVE_INFINITY,
+		held !== undefined && accessToken === held.value ? heldEnd(held) : Number.POSITIVE_INFINITY,
 	);
 	if (expiresAtMs <= context.receivedAt) return refused("no_finite_lifetime");
 	const judgement = judgeUpstreamAccessToken({

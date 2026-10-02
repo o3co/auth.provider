@@ -201,6 +201,26 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				effectiveExpiresAt: new Date(END),
 			});
 		});
+
+		it("does not revive a token that has ended: the answer is ineligible, its refresh token kept, and the upstream not asked again under the marker", async () => {
+			await h.seed();
+			h.refresh.mockImplementation(async () =>
+				refreshed("rotated", now(), { accessToken: "at-0" }),
+			);
+			setNow(at(HOUR + MIN));
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "upstream_token_ineligible",
+				reason: "no_finite_lifetime",
+				retryAfterSeconds: limits.ineligibleRetryAfterMs / 1000,
+			});
+			expect((await stored())?.refreshToken).toBe(`${SECRET}-rotated`);
+			expect((await stored())?.accessToken).toBeUndefined();
+
+			setNow(at(HOUR + MIN + limits.ineligibleRetryAfterMs - 1));
+			expect(await retrieve()).toMatchObject({ ok: false, code: "upstream_token_ineligible" });
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	describe("a stored token that is dated in the future", () => {
