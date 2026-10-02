@@ -27,6 +27,7 @@ import type {
 	GrantContext,
 	GrantHandlerResult,
 	GrantPolicyHook,
+	SubjectRevocation,
 } from "@o3co/auth-provider-core";
 import { createMemoryDeviceCodeStore, createSymmetricKeyStore } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
@@ -49,6 +50,7 @@ const client = {
 const approvedWith = async (
 	evaluate: GrantPolicyHook["evaluate"],
 	grantedScope: readonly string[] | undefined = ["openid", "profile"],
+	subjectRevocation?: SubjectRevocation,
 ) => {
 	const store = createMemoryDeviceCodeStore();
 	await store.create({
@@ -72,6 +74,7 @@ const approvedWith = async (
 		accessTokenExpiresIn: 300,
 		now: () => NOW + 10_000,
 		grantPolicy: { kind: "stub", evaluate },
+		...(subjectRevocation === undefined ? {} : { subjectRevocation }),
 	});
 	const poll = () =>
 		grant.handle({
@@ -259,5 +262,26 @@ describe("device-code grant — the minting instant", () => {
 		);
 		expect(token.iat).toBe(answered / 1000);
 		expect(token.exp).toBe(answered / 1000 + 300);
+	});
+});
+
+describe("device-code grant — the revocation boundary is read after the policy answers", () => {
+	it("refuses an approval a revocation landing while the policy evaluates covers", async () => {
+		// A boundary on the fixture's clock: a store clamps one to its own.
+		let boundary: Date | null = null;
+		const subjectRevocation: SubjectRevocation = {
+			kind: "stub",
+			revokeBefore: async () => {},
+			revokedBefore: async () => boundary,
+		};
+		const { poll } = await approvedWith(
+			async () => {
+				boundary = new Date(NOW + 5_000);
+				return { outcome: "allow" };
+			},
+			["openid"],
+			subjectRevocation,
+		);
+		expect((await poll()).result).toMatchObject({ status: 400, error: "invalid_grant" });
 	});
 });
