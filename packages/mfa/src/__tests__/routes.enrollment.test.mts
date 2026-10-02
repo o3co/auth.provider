@@ -144,8 +144,10 @@ describe("the first login of a subject with no factor", () => {
 		});
 		const totp = await storedData(factorStore, records.totp as MfaFactorRecord);
 		expect(totp.data).toMatchObject({ secret: begun.body.secret, algorithm: "SHA1", digits: 6 });
-		expect(records.recovery_code).toMatchObject({ binding: "password", version: 0 });
+		// Written unshown, then marked shown by compare-and-set before its codes were answered.
+		expect(records.recovery_code).toMatchObject({ binding: "password", version: 1 });
 		const recovery = await storedData(factorStore, records.recovery_code as MfaFactorRecord);
+		expect(recovery.data).toMatchObject({ generation: 0, shown: true });
 		const kept = recovery.data.codes as { keyId: string; digest: string }[];
 		const digests = suiteSealing().digestsFor("recovery_code");
 		codes.forEach((code, index) => {

@@ -26,6 +26,7 @@ import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	type SubjectRevocationReport,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createRecordingMailSender } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,8 +46,11 @@ import {
 	completeEnrollment,
 	freezeClock,
 	giveEmailProof,
+	mfaPost,
 	recoverySet,
 	seedFactor,
+	seedTotp,
+	signInWithTotp,
 	thawClock,
 	totpProofOf,
 	verify,
@@ -169,7 +173,39 @@ describe("the subject lease's call budget", () => {
 				"email_proof",
 				"email_proof",
 			]);
-			expect(counted.most()).toBeGreaterThanOrEqual(8 + sets);
+			// The note, the consume, the factor, the records read again, D25's flag, the sets
+			// read, the floor read, the new set, the floor raised, each old set's removal,
+			// the records read again, the set marked shown, the witness.
+			expect(counted.most()).toBe(12 + sets);
+			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
+		},
+	);
+
+	it.each([1, 2, 8])(
+		"covers a regeneration of recovery codes over %i standing set(s)",
+		async (sets) => {
+			const factorStore = createMemoryMfaFactorStore();
+			const transactionStore = createMemoryMfaTransactionStore();
+			const totp = await seedTotp(factorStore);
+			for (let n = 0; n < sets; n++) {
+				await seedFactor(factorStore, "recovery_code", recoverySet(3).data);
+			}
+			const users = new WitnessingUserRepository(directoryEntries());
+			const { app, userSessionStore } = await boot({
+				config: configFor("required"),
+				factorStore,
+				transactionStore,
+				userRepository: users,
+			});
+			const { agent } = await signInWithTotp(app, userSessionStore as UserSessionStore, totp);
+			const counted = countUnderLease(transactionStore, transactionStore, factorStore, users);
+
+			const done = await mfaPost(agent, "/recovery-codes", {});
+
+			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			// The records read, the floor read, the new set, the floor raised, each old set's
+			// removal, the records read again, the set marked shown.
+			expect(counted.most()).toBe(6 + sets);
 			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
 		},
 	);

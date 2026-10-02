@@ -36,6 +36,7 @@ import {
 	freezeClock,
 	HARD_AT_TEN,
 	loggedText,
+	raiseRecoverySetFloor,
 	recordingAuditSink,
 	type SeededTotp,
 	seedFactor,
@@ -193,7 +194,11 @@ describe("a recovery code at a login", () => {
 		expect(res.status).toBe(200);
 		expect(res.body.recovery_codes_remaining).toBe(0);
 		expect(audit.of("mfa.recovery_code.used")[0]?.details).toMatchObject({ remaining: 0 });
-		expect((await storedData(factorStore, set.record)).data).toEqual({ codes: [] });
+		expect((await storedData(factorStore, set.record)).data).toEqual({
+			codes: [],
+			generation: 0,
+			shown: false,
+		});
 		const next = await beginLogin(app);
 		expect((await verify(next.agent, next.transaction, set.record.id, set.codes[0])).status).toBe(
 			401,
@@ -215,5 +220,99 @@ describe("a recovery code at a login", () => {
 				expect(audited).not.toContain(spelling);
 			}
 		}
+	});
+});
+
+describe("a recovery code of a retired set", () => {
+	it("is refused unchecked, as an invalid code, once the subject's recovery-set floor passed its set: no code spent, no attempt, no session", async () => {
+		const { app, set, audit, factorStore, transactionStore, userSessionStore } = await withCodes();
+		await raiseRecoverySetFloor(transactionStore, 1);
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, set.record.id, set.codes[0]);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toMatchObject({ error: "mfa_invalid", attempts_remaining: 5 });
+		expect(create).not.toHaveBeenCalled();
+		expect((await storedData(factorStore, set.record)).data.codes).toHaveLength(3);
+		expect(audit.of("mfa.verify.failure").map((event) => event.details)).toEqual([
+			{ kind: "recovery_code", purpose: "login", reason: "invalid" },
+		]);
+		expect(audit.of("mfa.recovery_code.used")).toEqual([]);
+	});
+
+	it("verifies a set at the floor", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await seedTotp(factorStore);
+		const set = generateRecoveryCodes(
+			createRecoveryCodeFactor({ count: 3 }),
+			suiteSealing().digestsFor("recovery_code"),
+			2,
+		);
+		if (set === undefined) throw new Error("no set");
+		const record = await seedFactor(factorStore, "recovery_code", set.data);
+		const { app, transactionStore } = await boot({ config: configFor("required"), factorStore });
+		await raiseRecoverySetFloor(transactionStore, 2);
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, record.id, set.codes[0]);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+	});
+
+	it("is refused, its transaction spent and no session written, when the floor passed its set while the code was being spent", async () => {
+		const memory = createMemoryMfaFactorStore();
+		await seedTotp(memory);
+		const set = await seedRecoveryCodes(memory);
+		let raise: () => Promise<void> = async () => undefined;
+		const factorStore: MfaFactorStore = {
+			...memory,
+			update: async (...args) => {
+				// A regeneration raises the floor while this spend's write is in flight.
+				await raise();
+				return memory.update(...args);
+			},
+		};
+		const { app, transactionStore, userSessionStore } = await boot({
+			config: configFor("required"),
+			factorStore,
+		});
+		raise = () => raiseRecoverySetFloor(transactionStore, 1);
+		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, set.record.id, set.codes[0]);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toMatchObject({ error: "mfa_invalid", attempts_remaining: 0 });
+		expect(create).not.toHaveBeenCalled();
+		expect(await transactionStore.get(transaction)).toBeNull();
+	});
+
+	it("is 503, nothing spent, when the floor cannot be read — and a TOTP code reads no floor", async () => {
+		const { app, set, totp, transactionStore, logger } = await withCodes();
+		const floor = vi
+			.spyOn(transactionStore, "recoverySetFloor")
+			.mockRejectedValue(new Error("transaction store unreachable"));
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await verify(agent, transaction, set.record.id, set.codes[0]);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(logger.error.mock.calls.at(-1)?.[0]).toMatchObject({
+			store: "mfa_transaction",
+			step: "recoverySetFloor",
+		});
+		expect((await transactionStore.get(transaction))?.attempts).toBe(0);
+		floor.mockClear();
+		const totpLogin = await verify(
+			agent,
+			transaction,
+			totpOf(totp).record.id,
+			totpCode(totpOf(totp).secret),
+		);
+		expect(totpLogin.status, JSON.stringify(totpLogin.body)).toBe(200);
+		expect(floor).not.toHaveBeenCalled();
 	});
 });
