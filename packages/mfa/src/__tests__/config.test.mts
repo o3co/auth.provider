@@ -42,15 +42,18 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
+import { MFA_RECOVERY_AUTHORIZATION_MAX_MS } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
+	MFA_RECENT_WINDOW_SECONDS,
 	type MfaSettingsOptions,
 	mfaConfigSchema,
 	mfaSectionSchema,
 	readMfaSettings,
 	readMfaTotpSettings,
 } from "#/config.mjs";
+import { FACTOR_SET_STORE_CALLS } from "#/factorSet.mjs";
 
 /** `readMfaSettings` over the `mfa` section of `config`, under the deployment mode a configuration that states none has, unless `options` names one. */
 const readSettings = (config: unknown, options: Partial<MfaSettingsOptions> = {}) =>
@@ -745,15 +748,16 @@ describe("the transaction's life and attempts, and the lock", () => {
 		}
 	});
 
-	it("holds mfa.storeTimeoutMs to a whole number of milliseconds from 1000, and refuses one whose lease — six of it, one more than the most Store calls a factor-set write makes — passes the longest subject lease, naming the key", () => {
-		for (const value of [1_000, 5_000, 100_000]) {
+	it("holds mfa.storeTimeoutMs to a whole number of milliseconds from 1000, and refuses one whose lease — FACTOR_SET_STORE_CALLS + 2 of it: the most Store calls a writer makes, the acquire and one to spare — passes the longest subject lease, naming the key", () => {
+		const longest = Math.floor(600_000 / (FACTOR_SET_STORE_CALLS + 2));
+		for (const value of [1_000, 5_000, longest]) {
 			expect(readSettings(valid({ storeTimeoutMs: value })).storeTimeoutMs).toBe(value);
 		}
 		for (const value of [999, 100, 0, 10.5, "5e3", null, undefined]) {
 			const message = refusal(() => readSettings(valid({ storeTimeoutMs: value })));
 			expect(message, String(value)).toContain("mfa.storeTimeoutMs");
 		}
-		const tooLong = refusal(() => readSettings(valid({ storeTimeoutMs: 100_001 })));
+		const tooLong = refusal(() => readSettings(valid({ storeTimeoutMs: longest + 1 })));
 		expect(tooLong).toContain("mfa.storeTimeoutMs");
 		expect(tooLong).toContain("600000");
 	});
@@ -769,6 +773,10 @@ describe("the transaction's life and attempts, and the lock", () => {
 			expect(message, String(value)).toContain("mfa.manage.maxAgeSeconds");
 			expect(message, String(value)).toContain("60 to 3600 seconds");
 		}
+	});
+
+	it("ends recent MFA's window where core's longest recovery authorization ends: a release authorization lives that long", () => {
+		expect(MFA_RECENT_WINDOW_SECONDS.max * 1000).toBe(MFA_RECOVERY_AUTHORIZATION_MAX_MS);
 	});
 
 	it("refuses a configuration without the lock's section, naming the reference.conf that carries it", () => {

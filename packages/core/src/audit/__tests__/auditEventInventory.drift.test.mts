@@ -41,10 +41,7 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../../..");
  * build-order step named here. An entry is listed and not emitted; the step
  * that emits it deletes it here.
  */
-const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {
-	"mfa.lock.recovered": "the MFA ADR's build-order step 12",
-	"mfa.reset": "the MFA ADR's build-order step 12",
-};
+const DECLARED_NOT_EMITTED: Readonly<Record<string, string>> = {};
 
 /** Shipped sources: packages/*\/src and the standalone template, tests excluded. */
 function listShippedSources(): string[] {

@@ -27,7 +27,12 @@
  * guard".
  */
 
-import type { AppConfig, ClientRepository, Logger } from "@o3co/auth-provider-core";
+import type {
+	AppConfig,
+	ClientRepository,
+	Logger,
+	UserSessionStore,
+} from "@o3co/auth-provider-core";
 import { createMemoryDeviceCodeStore, createMemoryRateLimiter } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import {
@@ -73,6 +78,21 @@ const makeLogger = () => ({
 	debug: vi.fn(),
 });
 
+/**
+ * `liveSessionStore()` with each record authenticated a minute before the
+ * wall clock the module-built route reads: an approval records when its
+ * session authenticated, and refuses one dated further ahead than the skew.
+ */
+const sessionsAuthenticatedBeforeNow = (): UserSessionStore => {
+	const store = liveSessionStore();
+	const get = store.get.bind(store);
+	store.get = async (sid) => {
+		const record = await get(sid);
+		return record === null ? null : { ...record, authTime: new Date(Date.now() - 60_000) };
+	};
+	return store;
+};
+
 const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 	const store = createMemoryDeviceCodeStore();
 	const logger = makeLogger();
@@ -102,7 +122,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 		},
 		clientRepository,
 		deviceCodeStore: store,
-		userSessionStore: liveSessionStore(),
+		userSessionStore: sessionsAuthenticatedBeforeNow(),
 		sessionRequirementResolver: resolverForTests([], { actions: DEVICE_GRANT_ADMISSION_ACTIONS }),
 		rateLimitBudgetResolver: {
 			get: (prefix: string) =>

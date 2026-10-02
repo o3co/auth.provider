@@ -584,13 +584,86 @@ function notingTogether(store: MfaTransactionStore, n: number): void {
 	});
 }
 
-describe("two transactions of one subject racing the first binding", () => {
+/**
+ * Lets every acquire of the subject's lease on `store` through, and finds
+ * none held at its release, as a store that dropped a lease early would (an
+ * evicting Redis): two completions can then write past each other, only the
+ * checks after the write stand between them, and each says it overran.
+ */
+function leaseAdmittingEveryWriter(store: MfaTransactionStore): void {
+	let tokens = 0;
+	vi.spyOn(store, "acquireSubjectLease").mockImplementation(async () => ({
+		outcome: "acquired",
+		token: `admitted-${++tokens}`,
+	}));
+	vi.spyOn(store, "releaseSubjectLease").mockResolvedValue(false);
+}
+
+/** How many times `logger` said a write overran the subject's lease. */
+const overruns = (logger: { readonly error: { readonly mock: { readonly calls: unknown[][] } } }) =>
+	logger.error.mock.calls.filter((call) => call[1] === "mfa_subject_lease_overrun").length;
+
+describe("a binding's transaction-store writes under the lease", () => {
+	it("answers 503, nothing bound, when the first-binding note is not answered within a Store call's time", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const { app, transactionStore } = await boot({
+			config: configFor("required", { storeTimeoutMs: 1_000 }),
+			factorStore: memory,
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+		vi.spyOn(transactionStore, "noteFirstBinding").mockReturnValue(new Promise<never>(() => {}));
+		const create = vi.spyOn(memory, "create");
+
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(done.status, JSON.stringify(done.body)).toBe(503);
+		expect(create).not.toHaveBeenCalled();
+	});
+});
+
+describe("two first bindings of one subject completed at once under the lease", () => {
+	it("serialises them: one binds; the other is refused — 401 login_required, by the first-binding mark or by the conflict it finds after its write, or 409 busy — and one factor stands, with no overrun", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const audit = recordingAuditSink();
+		const { app, logger } = await boot({
+			config: configFor("required"),
+			factorStore: memory,
+			auditSink: audit,
+		});
+		const owner = await beginFirstBinding(app);
+		const other = await beginFirstBinding(app);
+		const ownerBegun = await beginEnrollment(owner.agent, owner.transaction, "totp");
+		const otherBegun = await beginEnrollment(other.agent, other.transaction, "totp");
+
+		const answers = await Promise.all([
+			completeEnrollment(owner.agent, owner.transaction, totpProofOf(ownerBegun.body.secret)),
+			completeEnrollment(other.agent, other.transaction, totpProofOf(otherBegun.body.secret)),
+		]);
+
+		const statuses = answers.map((res) => res.status).sort();
+		expect([
+			[200, 401],
+			[200, 409],
+		]).toContainEqual(statuses);
+		const bound = (await memory.list(ALICE.id)).filter((record) => record.kind === "totp");
+		expect(bound).toHaveLength(1);
+		const loser = answers.find((res) => res.status !== 200);
+		expect(loser?.body.error).toBe(loser?.status === 401 ? "login_required" : "mfa_factors_busy");
+		for (const event of audit.of("mfa.first_binding_conflict")) {
+			expect(event.details).toEqual({ kind: "totp", removed: true });
+		}
+		expect(overruns(logger)).toBe(0);
+	});
+});
+
+describe("two transactions of one subject racing the first binding past a lease the store does not hold", () => {
 	it("leaves at most one first factor: a completion that finds another record beside its own after writing it removes its own, answers 401 login_required and records mfa.first_binding_conflict", async () => {
 		const memory = createMemoryMfaFactorStore();
 		const arrive = barrier(2);
 		const audit = recordingAuditSink();
 		const directory = new WitnessingUserRepository();
-		const { app, userSessionStore, transactionStore } = await boot({
+		const { app, userSessionStore, transactionStore, logger } = await boot({
 			config: configFor("required"),
 			// Both completions pass the zero-records check before either writes.
 			factorStore: {
@@ -603,6 +676,7 @@ describe("two transactions of one subject racing the first binding", () => {
 			auditSink: audit,
 			userRepository: directory,
 		});
+		leaseAdmittingEveryWriter(transactionStore);
 		notingTogether(transactionStore, 2);
 		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
 		const owner = await beginFirstBinding(app);
@@ -637,6 +711,7 @@ describe("two transactions of one subject racing the first binding", () => {
 			expect(event).toMatchObject({ subject: ALICE.id });
 			expect(event.details).toEqual({ kind: "totp", removed: true });
 		}
+		expect(overruns(logger)).toBe(2);
 	});
 
 	/** Two logins of alice, each with a TOTP enrollment begun, whose completions write their factors past each other; `remove` as given. */
@@ -656,6 +731,7 @@ describe("two transactions of one subject racing the first binding", () => {
 			},
 			auditSink: audit,
 		});
+		leaseAdmittingEveryWriter(booted.transactionStore);
 		notingTogether(booted.transactionStore, 2);
 		const logins = [await beginFirstBinding(booted.app), await beginFirstBinding(booted.app)];
 		const begun = await Promise.all(
@@ -678,6 +754,7 @@ describe("two transactions of one subject racing the first binding", () => {
 
 		expect(answers.map((res) => res.status)).toEqual([503, 503]);
 		expect(removals).toBe(6);
+		expect(overruns(logger)).toBe(2);
 		// Both first factors stand; what an operator sees says so.
 		expect((await memory.list(ALICE.id)).filter((record) => record.kind === "totp")).toHaveLength(
 			2,
@@ -698,7 +775,7 @@ describe("two transactions of one subject racing the first binding", () => {
 
 	it("leaves at most one factor when a removal fails once and then succeeds: removed true", async () => {
 		const failed = new Set<string>();
-		const { answers, audit, memory } = await racing(async (_subject, id) => {
+		const { answers, audit, memory, logger } = await racing(async (_subject, id) => {
 			if (!failed.has(id)) {
 				failed.add(id);
 				throw new Error("factor store unreachable");
@@ -711,6 +788,7 @@ describe("two transactions of one subject racing the first binding", () => {
 		for (const event of audit.of("mfa.first_binding_conflict")) {
 			expect(event.details).toEqual({ kind: "totp", removed: true });
 		}
+		expect(overruns(logger)).toBe(2);
 	});
 
 	it("says a factor it could neither check nor remove still stands: the re-read's outage and the standing factor, each once", async () => {
