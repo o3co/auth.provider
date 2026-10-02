@@ -19,7 +19,10 @@
  * the fields `User` declares, each read by name once, that everything the
  * login derives — and the session's `user` — is read from. It sits with
  * `User`, its owner, so a field added to `User` changes this file alone.
- * Core-internal: not exported from the package.
+ *
+ * Its copy of plain data (`readPlainFields`) is core's one: the claims
+ * envelope a login records is read through it too, so what a login stores
+ * is copied by one rule. Core-internal: not exported from the package.
  */
 
 import type { User } from "./types.mjs";
@@ -157,12 +160,51 @@ function define(copy: Record<string, unknown>, key: string, value: unknown): voi
 	Object.defineProperty(copy, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
+/** What `readPlainFields` answers: the fields copied, or the first that is not plain data. */
+export type PlainFieldsReading<F extends string> =
+	| { readonly ok: true; readonly copy: Readonly<Record<string, unknown>> }
+	| { readonly ok: false; readonly field: F };
+
+/**
+ * `fields` of `record`, each read by name once — however the object holds
+ * it: own data, an accessor, inherited, behind a Proxy — and copied as
+ * plain data (`copyByName`), into one object frozen at every depth that
+ * shares nothing with `record`. A field named twice is read once; one read
+ * as `undefined` is left out; nothing else of `record` is read.
+ *
+ * Answers the first field holding what is not plain data. `record` is a
+ * record, not a value: a field that refers back to it is not plain data,
+ * and it is not read again. A read that throws is let through as it was
+ * thrown.
+ */
+export function readPlainFields<F extends string>(
+	record: object,
+	fields: Iterable<F>,
+): PlainFieldsReading<F> {
+	const source = record as Record<string, unknown>;
+	const copy: Record<string, unknown> = {};
+	// One map for every field: an object two fields share is read once.
+	const copies = new Map<object, unknown>([[source, NOT_PLAIN]]);
+	for (const field of new Set(fields)) {
+		const value = source[field];
+		if (value === undefined) continue;
+		try {
+			define(copy, field, copyByName(value, copies));
+		} catch (err) {
+			if (!(err instanceof NotPlainData)) throw err;
+			return { ok: false, field };
+		}
+	}
+	return { ok: true, copy: Object.freeze(copy) };
+}
+
 /**
  * The plain snapshot a login takes of `user`, its one read of it: each field
  * `User` declares, read by name, once, however the object holds it — own
  * data, an accessor, inherited, as a class instance or an ORM entity holds
- * it — and nothing else of it. A field read as `undefined` is left out.
- * Frozen at every depth, sharing nothing with `user`.
+ * it — and nothing else of it (`readPlainFields`). A field read as
+ * `undefined` is left out. Frozen at every depth, sharing nothing with
+ * `user`.
  *
  * Refused: a `user` that is not an object (`not_an_object`); a declared
  * field holding what is not plain data (`not_plain_data`, naming it), which
@@ -176,22 +218,11 @@ export function readUserSnapshot(user: unknown): UserSnapshotReading {
 	if (typeof user !== "object" || user === null || Array.isArray(user)) {
 		return { ok: false, refused: "not_an_object" };
 	}
-	const source = user as Record<string, unknown>;
-	const snapshot: Record<string, unknown> = {};
-	// One map for every field: an object two fields share is read once.
-	const copies = new Map<object, unknown>([[source, NOT_PLAIN]]);
-	for (const field of USER_FIELDS) {
-		const value = source[field];
-		if (value === undefined) continue;
-		try {
-			define(snapshot, field, copyByName(value, copies));
-		} catch (err) {
-			if (!(err instanceof NotPlainData)) throw err;
-			return { ok: false, refused: "not_plain_data", field };
-		}
-	}
+	const reading = readPlainFields(user, USER_FIELDS);
+	if (!reading.ok) return { ok: false, refused: "not_plain_data", field: reading.field };
+	const snapshot = reading.copy;
 	if (typeof snapshot.id !== "string" || snapshot.id.length === 0) {
 		return { ok: false, refused: "id" };
 	}
-	return { ok: true, snapshot: Object.freeze(snapshot) };
+	return { ok: true, snapshot };
 }
