@@ -74,10 +74,9 @@ describe("dpopModule — discoveryMetadata contribution", () => {
 		expect(meta.metadata?.dpop_signing_alg_values_supported).toEqual(["ES256"]);
 	});
 
-	it("contributes nothing when DPoP is disabled (the secure default)", async () => {
-		const meta = await contribution(dpopSection());
-		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
-		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
+	it("is switched off by its section when DPoP is disabled (the secure default), so nothing is contributed", () => {
+		expect(dpopModule.section?.isEnabled?.(dpopConfigSchema.parse({}))).toBe(false);
+		expect(dpopModule.section?.isEnabled?.(dpopConfigSchema.parse({ enabled: true }))).toBe(true);
 	});
 
 	it("contributes nothing when algWhitelist is empty, rather than advertising no algorithm", async () => {
@@ -86,10 +85,8 @@ describe("dpopModule — discoveryMetadata contribution", () => {
 		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
 	});
 
-	it("contributes nothing when the dpop section is absent entirely", async () => {
-		const meta = await contribution(dpopSection(undefined));
-		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
-		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
+	it("is switched off when the dpop section is absent entirely", () => {
+		expect(dpopModule.section?.isEnabled?.(dpopConfigSchema.parse(undefined))).toBe(false);
 	});
 
 	it("stays an ancillary contributor — it never claims the provider root", async () => {
