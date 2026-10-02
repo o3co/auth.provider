@@ -364,7 +364,9 @@ describe("deviceGrantModule — boot", () => {
 	});
 
 	it("takes csrfGuard as an optional slot, and imports nothing of the session package", () => {
-		const installed = deviceGrantModule({ config: makeBoot({}).config as AppConfig });
+		const installed = deviceGrantModule({
+			config: makeBoot({ deviceGrant: ENABLED }).config as AppConfig,
+		});
 		expect(installed.optional).toContain("csrfGuard");
 		expect(installed.requires).not.toContain("csrfGuard");
 	});
@@ -385,15 +387,11 @@ describe("deviceGrantModule — boot", () => {
 		);
 	});
 
-	it("boots when the operator declares the store absent on purpose and leaves the grant off", async () => {
-		// The absence policy is applied whether or not the feature is on, so
-		// this is the declaration a deployment that installs the package and
-		// never enables the grant has to write.
-		const handle = await boot({
-			deviceGrant: { enabled: false, store: "unsupported" },
-			withStore: false,
-		});
-		await handle.dispose();
+	it("boots with the grant off and no store, with or without the declaration: a switched-off module declares no absence policy", async () => {
+		for (const deviceGrant of [{ enabled: false }, { enabled: false, store: "unsupported" }]) {
+			const handle = await boot({ deviceGrant, withStore: false, withoutAuditDeclaration: true });
+			await handle.dispose();
+		}
 	});
 
 	it("refuses to boot enabled with the store declared absent, naming the component", async () => {
@@ -561,21 +559,13 @@ describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 		});
 	});
 
-	it("advertises nothing when disabled", async () => {
+	it("advertises nothing when disabled: the module built off declares nothing but its section", () => {
 		// The discovery document must not claim a capability the deployment
 		// does not have.
-		const deps = {
-			config: {
-				oauth: {
-					jwt: { issuer: "https://as.example.test" },
-				},
-				"device-grant": { enabled: false },
-			},
-		};
-		const contribution = contributionsFor(deps)?.discoveryMetadata?.[0] as (
-			deps: unknown,
-		) => Record<string, unknown>;
-		expect(contribution(deps)).toEqual({});
+		const built = deviceGrantModule({
+			config: { "device-grant": { enabled: false } } as unknown as AppConfig,
+		});
+		expect(Object.keys(built).sort()).toEqual(["name", "section"]);
 	});
 });
 
@@ -1641,17 +1631,18 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(() => factory(deps)).not.toThrow();
 	});
 
-	it("answers 404 with no-store when the grant is disabled", async () => {
-		// A 404 carrying no cache directives is the shape an intermediary
-		// heuristically caches, and a cached "no device grant here" would
-		// outlive the operator turning it on.
-		const app = mountContributedRoute(0, {
-			config: { "device-grant": { enabled: false } },
+	it("mounts nothing when the grant is disabled: the host answers its paths", async () => {
+		const handle = await boot({});
+		const app = express();
+		app.use(handle.router);
+		app.use((_req, res) => {
+			res.status(404).json({ answeredBy: "host" });
 		});
-		const res = await request(app).post("/oauth/device_authorization").send({});
-
-		expect(res.status).toBe(404);
-		expect(res.headers["cache-control"]).toContain("no-store");
+		for (const path of ["/oauth/device_authorization", "/oauth/device/verification"]) {
+			const res = await request(app).post(path).send({});
+			expect(res.body, path).toEqual({ answeredBy: "host" });
+		}
+		await handle.dispose();
 	});
 });
 

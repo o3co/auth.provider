@@ -55,7 +55,9 @@ type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number
 describe("deviceGrantModule's deps are the slots it declares", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		expectTypeOf<DeviceGrantModuleDeps>().branded.toEqualTypeOf<Declared>();
-		const installed = deviceGrantModule({ config: makeValidAppConfig() });
+		const installed = deviceGrantModule({
+			config: { ...makeValidAppConfig(), "device-grant": { enabled: true } } as never,
+		});
 		expect([...(installed.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(installed.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
 	});
