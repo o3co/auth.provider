@@ -48,9 +48,9 @@ import { resolveConfigPaths, type Switches } from "../configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import { installGracefulShutdown } from "../shutdown.mjs";
 import {
-	adaptersOf,
 	capturedRenames,
 	libraryLayers,
+	rootSectionsOf,
 	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
@@ -164,7 +164,7 @@ function resolveConfig(env: Record<string, string>): Switches {
 	const config = {
 		...sectionsCoreDoesNotDeclare(layers),
 		...validate(layers, AppConfigSchema),
-		adapters: adaptersOf(layers, env),
+		...rootSectionsOf(layers, env),
 	};
 	// The key ring has no environment form (a list of { id, key } is HOCON's);
 	// the Redis grant store refuses to construct without one under "required".

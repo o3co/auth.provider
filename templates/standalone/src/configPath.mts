@@ -44,9 +44,15 @@ import {
 } from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 import { ADAPTERS_SECTION, readAdapters } from "./adapters.mjs";
+import { MFA_SWITCH, readMfaSwitch } from "./mfaSwitch.mjs";
 import { loggingModule, templateReference } from "./modules.mjs";
 import { refuseRenamedVariables, SHIPPED_FEDERATION_RENAMES } from "./rootRenames.mjs";
-import { type Adapters, type LoggingSettings, loggingSectionSchema } from "./sections.mjs";
+import {
+	type Adapters,
+	type LoggingSettings,
+	loggingSectionSchema,
+	type MfaSwitch,
+} from "./sections.mjs";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
@@ -135,14 +141,7 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  * `expectedSessionRequirements` reads (the log level is `readLogging`'s). A
  * module a deployment adds that reads its configuration when it is built adds
  * those paths here, or passes them to `readSwitches` as `reads`.
- * `two-phase-config.test.mts` holds this list and `OWN_READS` to what the
- * template reads.
- *
- * Beside these the template reads `mfa.mode`, the MFA module's key, itself
- * (`OWN_READS`, `readMfaMode`): a composition root reads no module's key, and
- * the template reads this one before it chooses its modules only until it
- * installs the MFA module (the MFA ADR's build order, step 20), which removes
- * this reading.
+ * `two-phase-config.test.mts` holds this list to what the template reads.
  *
  * Every path here and in `reads` must be one core's transitional base
  * declares (a section core's schema has, or mirrors for a package), or
@@ -161,22 +160,6 @@ export const SWITCHES: readonly string[] = [
 	"oauth.accessToken",
 ];
 
-/**
- * What the template reads before it knows its modules and outside `SWITCHES`:
- * `mfa.mode`, the MFA module's key, which core's schema does not declare, read
- * raw from the template's own layers and held to its values by `readMfaMode`.
- * Read only until the template installs the MFA module (the MFA ADR's build
- * order, step 20), which removes this reading. (`adapters`, the composition
- * root's own section, is read with the template's own schema: `readAdapters`.)
- */
-export const OWN_READS: readonly string[] = ["mfa.mode"];
-
-/** The values `mfa.mode` takes. */
-const MFA_MODES = ["off", "optional", "required"] as const;
-
-/** What an `mfa` that is not a section of keys reads as: no mode `readMfaMode` accepts. */
-const REFUSED = Symbol("refused");
-
 /** A section of keys: an object whose prototype is `Object.prototype` or none. */
 function isPlainSection(value: unknown): value is Readonly<Record<string, unknown>> {
 	if (typeof value !== "object" || value === null) return false;
@@ -187,67 +170,56 @@ function isPlainSection(value: unknown): value is Readonly<Record<string, unknow
 /** `core.sessionRequirements`, as the composition declares it to boot. */
 export type SessionRequirements = NonNullable<AppConfig["core"]>["sessionRequirements"];
 
-/** `mfa.mode`, as `readMfaMode` answers it. */
-export type MfaMode = (typeof MFA_MODES)[number];
-
-/**
- * `mfa.mode` as the template reads it before it chooses its modules: raw,
- * off phase one's switches — the template's own layers, where
- * `config/application.conf` binds `MFA_MODE`, since core's `reference.conf`
- * does not — and held to its values here, as the template cannot import the
- * MFA package's schema (the template does not depend on it). Absent is `off`; anything else is a
- * `RangeError` naming `mfa.mode` that quotes nothing of the value, never read
- * as `off`, which would drop the declaration on a typo.
- *
- * The MFA module's key, which a composition root does not read: the template
- * reads it only until it installs the MFA module (the MFA ADR's build order,
- * step 20), which removes this reading.
- */
-export function readMfaMode(switches: unknown): MfaMode {
-	const section = (switches as { mfa?: unknown } | undefined)?.mfa;
-	if (section === undefined) return "off";
-	const mode = isPlainSection(section) ? section.mode : REFUSED;
-	if (mode === undefined) return "off";
-	const known = MFA_MODES.find((value) => value === mode);
-	if (known === undefined) {
-		throw new RangeError('mfa.mode must be "off", "optional" or "required"');
-	}
-	return known;
-}
-
 export interface SwitchesOptions {
 	/** Paths read beside `SWITCHES`: what a module a deployment adds reads when it is built. */
 	readonly reads?: readonly string[];
 }
 
 /**
- * What phase one answers: the switches core's reader parsed, and the
- * composition root's own `adapters`, parsed with the template's schema.
+ * What phase one answers: the switches core's reader parsed; the composition
+ * root's own `adapters` and `mfaMode`, parsed with the template's schema;
+ * and the Store transport settings — the user repository's HTTP settings,
+ * `repositories.user.http`, as the template's own layers hold them, unparsed
+ * — which the Store-backed MFA factor store is built over.
  */
-export type Switches = AppConfig & { readonly adapters: Adapters };
+export type Switches = AppConfig & {
+	readonly adapters: Adapters;
+	readonly mfaMode: MfaSwitch;
+	readonly storeTransport: unknown;
+};
 
 /**
  * Phase one: the switches (`SWITCHES`, and `reads`) from the composition's
  * own layers over core's `reference.conf` alone, read with core's
  * `readTransitionalConfig`: each parsed with the schema core declares at its
- * path, everything else as written; and `adapters`, the composition root's
- * own section, from its own layers over the template's `config/reference.conf`
+ * path, everything else as written; and, from its own layers over the
+ * template's `config/reference.conf`, the composition root's own `adapters`
  * (`readAdapters`), which refuses a selection at the path it moved from and a
- * variable renamed with one. A variable the template bound for a federation it
- * ships, renamed after the entry's path under `core.federations`
- * (`SHIPPED_FEDERATION_RENAMES`), is refused here too. Use it for those
- * choices only. A switch whose
+ * variable renamed with one, its own MFA switch `mfaMode` (`readMfaSwitch`),
+ * and the Store transport settings. A variable the template bound for a
+ * federation it ships, renamed after the entry's path under
+ * `core.federations` (`SHIPPED_FEDERATION_RENAMES`), is refused here too.
+ * Use it for those choices only. A switch whose
  * default only a package ships reads as unset here; set it in the template's
  * own files.
  */
 export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): Switches {
-	const adapters = readAdapters(resolveLayers(own, [templateReference()]), own.env);
+	const template = resolveLayers(own, [templateReference()]);
+	const adapters = readAdapters(template, own.env);
+	const mfaMode = readMfaSwitch(template);
 	refuseRenamedVariables(own.env, SHIPPED_FEDERATION_RENAMES);
 	const switches = readTransitionalConfig(resolveLayers(own, [coreReference()]), [
 		...SWITCHES,
 		...(options.reads ?? []),
 	]);
-	return { ...switches, adapters };
+	return { ...switches, adapters, mfaMode, storeTransport: storeTransportOf(template) };
+}
+
+/** `repositories.user.http` in `resolved`, as written; `undefined` when absent. */
+function storeTransportOf(resolved: Readonly<Record<string, unknown>>): unknown {
+	const repositories = resolved.repositories;
+	const user = isPlainSection(repositories) ? repositories.user : undefined;
+	return isPlainSection(user) ? user.http : undefined;
 }
 
 /**
@@ -273,21 +245,20 @@ export function readLogging(own: OwnLayers): LoggingSettings {
 /**
  * What this composition expects of session admission, from phase one: the
  * configuration's `core.sessionRequirements.expected` as written, with `mfa`
- * appended when `mfa.mode` (`readMfaMode`) is not `off` and the list does not
- * name it. Boot's checks never act on `mfa.mode`, and the template installs no
- * MFA module, so it is here that a mode asking for a second factor becomes a
- * declaration boot refuses (`session-requirement-missing`) rather than a
- * composition that logs users in on a password alone. A mode that is none of
- * the three is a `RangeError` naming the key. With no list written and the
- * mode `off`, nothing is declared, and boot's rule for an unwritten key
- * applies. Computed here because HOCON has no conditional. See ADR
- * 2026-09-28-session-admission; the reading of `mfa.mode` goes at the MFA
- * ADR's build-order step 20.
+ * appended when the template's MFA switch, `mfaMode`, is not `off` and
+ * the list does not name it — the switch installs the MFA module, whose
+ * requirement registers `mfa`, and boot refuses a declared name nothing
+ * registers (`session-requirement-missing`). With no list written and the
+ * switch `off`, nothing is declared, and boot's rule for an unwritten key
+ * applies. Computed here because HOCON has no conditional.
  */
-export function expectedSessionRequirements(switches: AppConfig): SessionRequirements {
+export function expectedSessionRequirements(
+	switches: Pick<Switches, "core" | "mfaMode">,
+): SessionRequirements {
 	const written = switches.core?.sessionRequirements?.expected;
-	const mode = readMfaMode(switches);
-	if (mode === "off") return written === undefined ? undefined : { expected: [...written] };
+	if (switches.mfaMode === "off") {
+		return written === undefined ? undefined : { expected: [...written] };
+	}
 	const declared = [...(written ?? [])];
 	return { expected: declared.includes("mfa") ? declared : [...declared, "mfa"] };
 }
@@ -307,15 +278,6 @@ function ownsSection(modules: readonly Module[], name: string): boolean {
 		return old.some((path) => topOf(path) === name);
 	});
 }
-
-/**
- * Whether `mfa` is only what the template consumed — no key, or the mode
- * alone — with no loaded module owning the section.
- */
-const consumedMfa = (mfa: unknown, modules: readonly Module[]): boolean =>
-	isPlainSection(mfa) &&
-	Object.keys(mfa).every((key) => key === "mode") &&
-	!ownsSection(modules, "mfa");
 
 /** A section's `keyPrefix`, when the section is one of keys and the prefix a string. */
 function keyPrefixOf(
@@ -382,6 +344,12 @@ function refuseIntentPrefixLeftAtDefault(
 }
 
 /**
+ * The composition root's own keys, which phase one consumes and boot is never
+ * handed: the `adapters` section and the `mfaMode` switch.
+ */
+const ROOT_SECTIONS: readonly string[] = [ADAPTERS_SECTION, MFA_SWITCH];
+
+/**
  * The sections the template's own `config/reference.conf` sets that no module
  * in `modules` owns and that nothing has changed: as that file sets them with
  * no environment. Boot is not handed them, so a module of the template's the
@@ -397,7 +365,7 @@ function unownedTemplateDefaults(
 	return Object.keys(defaults).filter(
 		(name) =>
 			name !== RENAMED_VARIABLES &&
-			name !== ADAPTERS_SECTION &&
+			!ROOT_SECTIONS.includes(name) &&
 			!ownsSection(modules, name) &&
 			isDeepStrictEqual(resolved[name], defaults[name]),
 	);
@@ -405,18 +373,18 @@ function unownedTemplateDefaults(
 
 /**
  * Refuses, with a `RangeError` naming it, a module whose section is at or
- * under `adapters`, the composition root's own section, which phase one
- * consumes and boot is never handed: the module would read nothing its
- * operator wrote.
+ * under one of the composition root's own sections, which phase one consumes
+ * and boot is never handed: the module would read nothing its operator wrote.
  */
-function refuseModuleAtAdapters(modules: readonly Module[]): void {
+function refuseModuleAtRootSections(modules: readonly Module[]): void {
 	for (const module of modules) {
 		const section = module.section;
 		if (section === undefined) continue;
 		const path = section.at ?? module.name;
-		if (path.split(".")[0] === ADAPTERS_SECTION) {
+		const top = path.split(".")[0] ?? path;
+		if (ROOT_SECTIONS.includes(top)) {
 			throw new RangeError(
-				`Module "${module.name}" has its section at ${path}, under ${ADAPTERS_SECTION}: the composition root's own section, which boot is not handed. Give the module a section of another name.`,
+				`Module "${module.name}" has its section at ${path}, under ${top}: the composition root's own section, which boot is not handed. Give the module a section of another name.`,
 			);
 		}
 	}
@@ -425,24 +393,64 @@ function refuseModuleAtAdapters(modules: readonly Module[]): void {
 /** The section a resolution captures renamed variables in: never left out. */
 const RENAMED_VARIABLES = "renamed-variables";
 
+/** The MFA module's section, which the template's MFA switch decides. */
+const MFA_SECTION = "mfa";
+
+/** What an `mfa` that is not a section of keys reads as: a mode no switch says. */
+const NOT_A_SECTION = Symbol("not a section");
+
+/**
+ * The `mfa` section boot is handed, from `layered`, under the template's MFA
+ * switch `mode`; `undefined` hands none. None when no module in `modules`
+ * owns it: what the configuration writes there — `config/development.conf`'s
+ * key ring included — sets nothing while the switch installs no MFA. Owned,
+ * it is handed as resolved, with `mfa.mode` written from the switch when the
+ * switch installs MFA (`optional`, `required`).
+ *
+ * Refuses, with a `RangeError` naming `mfa.mode` and `mfaMode` and
+ * quoting no value, an `mfa.mode` the composition's own layers write that
+ * the switch does not say — or an `mfa` written as a value rather than a
+ * section of keys — whatever the switch: so a configuration that asks for a
+ * second factor by the module's key, with the switch off, is not booted on a
+ * password alone, and one that asks for less than the switch says is not
+ * silently raised.
+ */
+function mfaSectionForBoot(
+	own: OwnLayers,
+	layered: Readonly<Record<string, unknown>>,
+	modules: readonly Module[],
+	mode: MfaSwitch,
+): unknown {
+	const written = (own.config.toObject() as Record<string, unknown>)[MFA_SECTION];
+	const writtenMode =
+		written === undefined ? undefined : isPlainSection(written) ? written.mode : NOT_A_SECTION;
+	if (writtenMode !== undefined && writtenMode !== mode) {
+		throw new RangeError(
+			"mfa.mode is written in the configuration and differs from mfaMode (MFA_MODE), which decides whether the template installs MFA and writes mfa.mode from it. Set MFA_MODE or mfaMode, and remove mfa.mode",
+		);
+	}
+	if (!ownsSection(modules, MFA_SECTION)) return undefined;
+	const section = layered[MFA_SECTION];
+	return mode !== "off" && isPlainSection(section) ? { ...section, mode } : section;
+}
+
 /**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
  * `reference.conf` of every package `modules` come from, core's last,
  * resolved and unparsed, with `core.sessionRequirements` — what phase one
  * says the composition expects (`expectedSessionRequirements`) — written over
- * the resolved section when there is one to write. An `mfa` section holding
- * nothing but the mode, which the template read for itself (`readMfaMode`),
- * is left out when no loaded module owns it; anything more reaches boot,
- * which names an unowned section once. The MFA ADR's build-order step 20
- * removes this with the template's reading. So is `adapters`, the
- * composition root's own section, which phase one consumed, and a section the
- * template's own `reference.conf` sets for a module the composition does not
- * load, left as that file sets it (`unownedTemplateDefaults`).
+ * the resolved section when there is one to write, and the `mfa` section as
+ * the template's MFA switch decides it (`mfaSectionForBoot`). Left out:
+ * `adapters` and `mfaMode`, the composition root's own keys, which phase one
+ * consumed, and a section the template's own `reference.conf` sets for a
+ * module the composition does not load, left as that file sets it
+ * (`unownedTemplateDefaults`).
  *
- * Refuses, with a `RangeError`, a module whose section is under `adapters`
- * (`refuseModuleAtAdapters`), and the Redis intent store left on its default
- * key prefix where the grant store's was moved
+ * Refuses, with a `RangeError`, a module whose section is under a section of
+ * the composition root's (`refuseModuleAtRootSections`), an `mfa.mode` the
+ * switch does not say (`mfaSectionForBoot`), and the Redis intent store left
+ * on its default key prefix where the grant store's was moved
  * (`refuseIntentPrefixLeftAtDefault`).
  *
  * Typed `AppConfig` because that is the `config` slot's type; read the parsed
@@ -451,19 +459,23 @@ const RENAMED_VARIABLES = "renamed-variables";
 export function resolveForBoot(
 	own: OwnLayers,
 	modules: readonly Module[],
-	sessionRequirements: SessionRequirements,
+	switches: Pick<Switches, "core" | "mfaMode">,
 ): AppConfig {
-	refuseModuleAtAdapters(modules);
+	refuseModuleAtRootSections(modules);
 	const all = resolveLayers(own, moduleReferences(modules));
 	refuseIntentPrefixLeftAtDefault(all, modules);
-	const unowned = new Set([ADAPTERS_SECTION, ...unownedTemplateDefaults(all, modules)]);
+	const unowned = new Set([...ROOT_SECTIONS, ...unownedTemplateDefaults(all, modules)]);
 	const layered = Object.fromEntries(Object.entries(all).filter(([name]) => !unowned.has(name)));
-	const { mfa: _consumed, ...withoutMfa } = layered;
-	const resolved = consumedMfa(layered.mfa, modules) ? withoutMfa : layered;
-	return (sessionRequirements === undefined
-		? resolved
-		: {
-				...resolved,
-				core: { ...(resolved.core as Record<string, unknown> | undefined), sessionRequirements },
-			}) as unknown as AppConfig;
+	const { [MFA_SECTION]: _decided, ...resolved } = layered;
+	const mfa = mfaSectionForBoot(own, layered, modules, switches.mfaMode);
+	const sessionRequirements = expectedSessionRequirements(switches);
+	return {
+		...resolved,
+		...(mfa === undefined ? {} : { [MFA_SECTION]: mfa }),
+		...(sessionRequirements === undefined
+			? {}
+			: {
+					core: { ...(resolved.core as Record<string, unknown> | undefined), sessionRequirements },
+				}),
+	} as unknown as AppConfig;
 }

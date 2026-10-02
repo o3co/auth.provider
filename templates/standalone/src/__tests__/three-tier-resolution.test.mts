@@ -21,7 +21,8 @@ import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { readAdapters } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
-import { readMfaMode, resolveConfigPaths, type Switches } from "../configPath.mjs";
+import { resolveConfigPaths, type Switches } from "../configPath.mjs";
+import { readMfaSwitch } from "../mfaSwitch.mjs";
 import { templateReference } from "../modules.mjs";
 
 // config/ is two levels above this test file:
@@ -40,8 +41,8 @@ const testEnv = {
 
 /**
  * The three tiers under `env`, parsed with core's schema, beside the
- * composition root's `adapters` phase one reads from the template's own
- * layers.
+ * composition root's `adapters` and `mfaMode` phase one reads from the
+ * template's own layers.
  */
 function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): Switches {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, env);
@@ -56,6 +57,8 @@ function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {})
 			AppConfigSchema,
 		),
 		adapters: readAdapters(own.toObject() as Record<string, unknown>, resolvedEnv),
+		mfaMode: readMfaSwitch(own.toObject() as Record<string, unknown>),
+		storeTransport: undefined,
 	};
 }
 
@@ -95,26 +98,18 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(grants(config).authorizationCode?.enabled).toBe("false");
 	});
 
-	it("reads mfa.mode as off where MFA_MODE is unset, and the template installs no MFA module", () => {
-		// No layer the template loads writes a default: its application.conf
-		// binds MFA_MODE alone (ADR 2026-09-25-multi-factor-authentication), and
-		// the template composes no MFA module under any mode.
-		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "development");
-		const raw = (env: Record<string, string>) =>
-			parseFile(envConfPath, { env })
-				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(fileURLToPath(templateReference()), { env }))
-				.withFallback(parseFile(fileURLToPath(coreReference()), { env }))
-				.toObject();
-		expect(raw(testEnv)).toHaveProperty("mfa", {});
-		expect(readMfaMode(raw(testEnv))).toBe("off");
-		expect(readMfaMode(raw({ ...testEnv, MFA_MODE: "optional" }))).toBe("optional");
-		const config = buildResolvedConfig("development");
-		expect(
+	it("reads the MFA switch, mfaMode, as off where MFA_MODE is unset, and installs no MFA module until MFA_MODE does", () => {
+		// The template's reference.conf ships the switch off and binds MFA_MODE.
+		const mfaNames = (config: Switches) =>
 			buildModules(config)
 				.map((m) => m.name)
-				.filter((name) => /mfa/i.test(name)),
-		).toEqual([]);
+				.filter((name) => /mfa/i.test(name));
+		const off = buildResolvedConfig("development");
+		expect(off.mfaMode).toBe("off");
+		expect(mfaNames(off)).toEqual([]);
+		const optional = buildResolvedConfig("development", { MFA_MODE: "optional" });
+		expect(optional.mfaMode).toBe("optional");
+		expect(mfaNames(optional)).toContain("mfa");
 	});
 
 	it("core's reference.conf ships no rateLimit.failMode: it is the Redis limiter's own key", () => {

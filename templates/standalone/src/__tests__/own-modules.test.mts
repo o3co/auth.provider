@@ -56,7 +56,6 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { ADAPTERS_SECTION } from "../adapters.mjs";
 import { buildModules } from "../buildModules.mjs";
 import {
-	expectedSessionRequirements,
 	readLogging,
 	readOwnLayers,
 	readSwitches,
@@ -65,6 +64,7 @@ import {
 	SWITCHES,
 } from "../configPath.mjs";
 import { createAppLogger } from "../logger.mjs";
+import { MFA_SWITCH } from "../mfaSwitch.mjs";
 import {
 	auditSinkModuleFor,
 	httpModule,
@@ -177,7 +177,7 @@ async function bootTemplate(options: BootOptions = {}): Promise<AppHandle> {
 		...(options.repositories ? {} : { repositoriesModule: testRepositoriesModule }),
 		...(options.redis ? {} : { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),
 	});
-	const resolved = resolveForBoot(own, modules, expectedSessionRequirements(switches));
+	const resolved = resolveForBoot(own, modules, switches);
 	return createApp({
 		modules,
 		bootstrapComponents: {
@@ -216,15 +216,20 @@ const REFERENCED_MODULES = [
 ];
 
 describe("the template's config/reference.conf", () => {
-	it("holds only its own modules' sections and the composition root's adapters, each module's parsing its part without losing a path", () => {
+	it("holds only its own modules' sections and the composition root's adapters and mfaMode, each module's parsing its part without losing a path", () => {
 		expect(
 			packageReferenceProblems({
 				reference: TEMPLATE_REFERENCE,
 				modules: REFERENCED_MODULES,
-				// `adapters` is the composition root's own section, which phase
-				// one reads with its own schema (`adapters.test.mts`).
+				// `adapters` and `mfaMode` are the composition root's own,
+				// which phase one reads with its own schema
+				// (`adapters.test.mts`, `mfa-switch.test.mts`).
 				read: (path, env) => {
-					const { [ADAPTERS_SECTION]: _adapters, ...tree } = parseFile(path, {
+					const {
+						[ADAPTERS_SECTION]: _adapters,
+						[MFA_SWITCH]: _mfaMode,
+						...tree
+					} = parseFile(path, {
 						env: { ...env },
 					}).toObject() as Record<string, unknown>;
 					return tree;

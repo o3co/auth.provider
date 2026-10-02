@@ -43,6 +43,7 @@ import {
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 import { ADAPTERS_SECTION, readAdapters } from "../adapters.mjs";
+import { MFA_SWITCH, readMfaSwitch } from "../mfaSwitch.mjs";
 import {
 	httpModule,
 	inMemoryCodeRepositoryModule,
@@ -52,7 +53,7 @@ import {
 	standaloneRedisClientsModule,
 	templateReference,
 } from "../modules.mjs";
-import type { Adapters } from "../sections.mjs";
+import type { Adapters, MfaSwitch } from "../sections.mjs";
 
 /** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
 const OAUTH_MODULES = [
@@ -110,7 +111,8 @@ export function sectionsCoreDoesNotDeclare(layers: Config): Record<string, unkno
 			([key]) =>
 				!Object.hasOwn(AppConfigSchema.shape, key) &&
 				key !== "renamed-variables" &&
-				key !== ADAPTERS_SECTION,
+				key !== ADAPTERS_SECTION &&
+				key !== MFA_SWITCH,
 		),
 	);
 }
@@ -122,6 +124,25 @@ export function sectionsCoreDoesNotDeclare(layers: Config): Record<string, unkno
  */
 export function adaptersOf(layers: Config, env: Readonly<Record<string, string>>): Adapters {
 	return readAdapters(layers.toObject() as Record<string, unknown>, env);
+}
+
+/**
+ * What phase one reads from a resolution beside core's switches —
+ * `layers`, the template's `config/reference.conf` among them, under `env` —
+ * as `readSwitches` reads it: the composition root's `adapters` and
+ * `mfaMode`, and the Store transport settings.
+ */
+export function rootSectionsOf(
+	layers: Config,
+	env: Readonly<Record<string, string>>,
+): { readonly adapters: Adapters; readonly mfaMode: MfaSwitch; readonly storeTransport: unknown } {
+	const raw = layers.toObject() as Record<string, unknown>;
+	const repositories = raw.repositories as { user?: { http?: unknown } } | undefined;
+	return {
+		adapters: readAdapters(raw, env),
+		mfaMode: readMfaSwitch(raw),
+		storeTransport: repositories?.user?.http,
+	};
 }
 
 /** The adapters the template ships, as its `config/reference.conf` sets them with no environment. */

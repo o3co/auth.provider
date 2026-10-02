@@ -25,12 +25,16 @@ import {
 	memoryConsentStoreModule,
 	memoryFederationGrantIntentStoreModule,
 	memoryFederationGrantStoreModule,
+	memoryMfaFactorStoreModule,
+	memoryMfaTransactionStoreModule,
 	memoryRateLimiterModule,
 	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import { oidcFederationModule, oidcFederationNames } from "@o3co/auth-provider-federation-oidc";
+import { foundationMfaFactorStoreModule } from "@o3co/auth-provider-foundation";
+import { mfaModules, mfaResetModule } from "@o3co/auth-provider-mfa";
 import {
 	oauthAuthorizationModule,
 	oauthModule,
@@ -44,6 +48,8 @@ import {
 	redisFederationGrantIntentStoreModule,
 	redisFederationGrantStoreModuleFor,
 	redisFederationTokenStoreModuleFor,
+	redisMfaFactorStoreModule,
+	redisMfaTransactionStoreModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 	redisReplaySeenSetModule,
@@ -51,6 +57,7 @@ import {
 } from "@o3co/auth-provider-redis";
 import {
 	extractFederationSection,
+	loginCompletionModule,
 	sessionModule,
 	sessionStoreModuleFor,
 } from "@o3co/auth-provider-session";
@@ -88,7 +95,8 @@ export interface BuildModulesOverrides {
 	 * (and the `deploymentMode` slot core fills from `core.deployment.mode`, which it
 	 * reads either way). Unless `mailSenderModules` is given, it also chooses
 	 * the mail sender: `development` installs the one that logs each code, any
-	 * other name the SMTP one, and none is installed when it is omitted.
+	 * other name the SMTP one, and none is installed when it is omitted. The
+	 * MFA module reads it too, for the development sample key's refusal.
 	 */
 	readonly environment?: string;
 	/**
@@ -178,6 +186,15 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 	const federationGrantsEnabled =
 		config["federation-grants"]?.enabled === true || setsAnything(config.federationGrants);
 
+	// MFA: the template's own switch, `mfaMode` (MFA_MODE). `off` installs
+	// nothing of MFA. `optional` and `required` install the MFA package's
+	// modules, the operator reset and the session package's login completion,
+	// which a verified second factor finishes a login through, over the two
+	// MFA stores `adapters` selects; the configuration then expects `mfa`
+	// (`expectedSessionRequirements`) and `mfa.mode` is written from the
+	// switch (`resolveForBoot`).
+	const mfaInstalled = config.mfaMode !== "off";
+
 	// The deprecated alias `oauth.accessToken.expiresIn`
 	// (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is still read as the default while
 	// `defaultExpiresIn` is unset; `resolveAccessTokenLifetime` does that, and
@@ -226,7 +243,9 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		// feature that is off must not open a socket.
 		(federationGrantsEnabled &&
 			(adapters.federationGrantStore === "redis" ||
-				adapters.federationGrantIntentStore === "redis"));
+				adapters.federationGrantIntentStore === "redis")) ||
+		(mfaInstalled &&
+			(adapters.mfaFactorStore === "redis" || adapters.mfaTransactionStore === "redis"));
 
 	// The four user-session stores and the subject-level revocation pair
 	// follow `adapters.userSessionStores`; the federation-token store is always
@@ -315,6 +334,33 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 				? [memoryFederationGrantIntentStoreModule]
 				: [];
 
+	// One module per MFA store, nothing while MFA is off. The memory ones
+	// declare themselves replica-unsafe, so `core.deployment.mode = "multi"`
+	// refuses them by name. `store` keeps the factors in the Store, over the
+	// user repository's HTTP settings, so one credential goes to every Store
+	// endpoint.
+	const mfaStoreModules: Module[] = !mfaInstalled
+		? []
+		: [
+				adapters.mfaFactorStore === "redis"
+					? redisMfaFactorStoreModule
+					: adapters.mfaFactorStore === "store"
+						? foundationMfaFactorStoreModule({ storeTransport: config.storeTransport })
+						: memoryMfaFactorStoreModule,
+				adapters.mfaTransactionStore === "redis"
+					? redisMfaTransactionStoreModule
+					: memoryMfaTransactionStoreModule,
+			];
+	const mfaInstalledModules: Module[] = !mfaInstalled
+		? []
+		: [
+				...mfaModules(
+					overrides.environment === undefined ? {} : { environment: overrides.environment },
+				),
+				mfaResetModule,
+				loginCompletionModule,
+			];
+
 	// The mail sender behind core's `mailSender` slot: the deployment's own when
 	// given, otherwise the bundled one for the environment. The development one
 	// logs each code and refuses the boot where the configuration or NODE_ENV
@@ -372,13 +418,19 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		...accessTokenDenylistModules,
 		...replaySeenSetModules,
 		...consentStoreModules,
+		...mfaStoreModules,
 		...refreshTokenFamilyModules,
 		defaultRefreshTokenFamilyRotationModule,
 		defaultRefreshTokenFamilyRevocationModule,
+		// MFA's modules, after the session middleware, which the MFA routes
+		// order themselves after.
+		...mfaInstalledModules,
 		// The composed "end everything this subject holds" a credential change
 		// calls, reached as `handle.components.subjectRevocationService`.
-		// Installed with the feature, which is what makes it reach the grants;
-		// without grants a Store calls core's revokeAllForSubject.
-		...(federationGrantsEnabled ? [subjectRevocationServiceModule] : []),
+		// Installed with federation grants, which is what makes it reach the
+		// grants, and with MFA, whose operator reset ends every session and
+		// token of the subject's through it; otherwise a Store calls core's
+		// revokeAllForSubject.
+		...(federationGrantsEnabled || mfaInstalled ? [subjectRevocationServiceModule] : []),
 	];
 }

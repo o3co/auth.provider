@@ -64,6 +64,8 @@ const baseConfig: Switches & Record<string, unknown> = {
 		codeRepository: "memory",
 		userRepository: "yaml",
 	},
+	mfaMode: "off",
+	storeTransport: undefined,
 	// What a resolution under an environment that sets none captures of
 	// core's renamed variables.
 	...{
