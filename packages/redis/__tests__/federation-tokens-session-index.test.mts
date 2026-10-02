@@ -111,6 +111,7 @@ const tokens: FederationTokens = {
 	tokenType: undefined,
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 const plaintext = { mode: "allow-plaintext" } as const;
@@ -129,17 +130,6 @@ describe("per-session federation key index", () => {
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);
 		expect(indexMembers(redis, "sid-1")).toEqual(["github", "google"]);
-	});
-
-	it("update records the federation name too (a store that only ever saw update stays indexed)", async () => {
-		const redis = createFakeRedis();
-		const store = createRedisFederationTokenStore({
-			deploymentMode: "unset",
-			client: redis,
-			encryption: plaintext,
-		});
-		await store.update("sid-1", "google", tokens);
-		expect(indexMembers(redis, "sid-1")).toEqual(["google"]);
 	});
 
 	it("the index key carries the store TTL, not the access-token expiry", async () => {

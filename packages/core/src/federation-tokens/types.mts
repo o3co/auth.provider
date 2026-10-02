@@ -19,11 +19,11 @@ import type {
 /**
  * One upstream connection's tokens, as a `FederationTokenStore` holds them.
  *
- * Every field but `obtainedAt` is a required key, holding `undefined` when
- * there is nothing to record: a store that copies the record field by field
- * and forgets one fails to compile instead of silently dropping it (a marker
- * field would be dropped too). `record-fields.types.test.mts` lists what each
- * field's loss changes.
+ * Every field is a required key, holding `undefined` (or `null` for
+ * `expiresAt`) when there is nothing to record: a store that copies the record
+ * field by field and forgets one fails to compile instead of silently dropping
+ * it (a marker field would be dropped too). `record-fields.types.test.mts`
+ * lists what each field's loss changes.
  */
 export interface FederationTokens {
 	readonly accessToken: string;
@@ -52,7 +52,8 @@ export interface FederationTokens {
 	 * reaches the consumer. A non-string an adapter named is recorded as `""`,
 	 * which the consumer refuses.
 	 *
-	 * A store MUST round-trip this field through `attach`, `update` and `get`.
+	 * A store MUST round-trip this field through `attach`, `replaceIf` and the
+	 * reads.
 	 * A store that drops it fails OPEN: the token is then handed on as Bearer
 	 * even when it is sender-constrained. The required key catches this only
 	 * in TypeScript code that builds a `FederationTokens` (and in a storage
@@ -93,21 +94,19 @@ export interface FederationTokens {
 	readonly grantedScope: string | undefined;
 	/**
 	 * When the upstream token was obtained: the instant its lifetime counts
-	 * from, never after the refresh call that obtained it began. The lifetime
+	 * from, never after the upstream call that obtained it began. The lifetime
 	 * is `expiresAt − obtainedAt`.
 	 *
-	 * Absent when no refresh wrote it: link-time records, and records written
-	 * before the field or by a replica that does not know it.
+	 * `undefined` when the token's age is unknown: an upstream that stated no
+	 * lifetime, an expiry stated only as an instant, or a record written before
+	 * the field.
 	 *
-	 * A store MUST round-trip it through `attach`, `update` and `get`, as a
-	 * `Date`, and leave it absent when the record has none. A store that drops
-	 * it fails CLOSED: a token of unknown age is refreshed sooner, never kept
-	 * longer.
-	 *
-	 * The one optional key: session's link-time writes, whose code is reserved
-	 * for the MFA work, leave it out, and its loss fails closed.
+	 * A store MUST round-trip it through `attach`, `replaceIf` and the reads,
+	 * as a `Date`, and hand back an unknown age as `undefined` with the key
+	 * named, never `null`. A store that drops it fails CLOSED: a token of
+	 * unknown age is refreshed sooner, never kept longer.
 	 */
-	readonly obtainedAt?: Date;
+	readonly obtainedAt: Date | undefined;
 }
 
 /**
@@ -115,11 +114,11 @@ export interface FederationTokens {
  *
  * The record of one `(sid, federationName)` carries a store generation, under
  * the record rules of docs/adapter-surface.md, "Conditional writes": every
- * write of the record issues a new one (`attach`, `update`, `replaceIf`), and
- * `delete`, `removeIf` and `removeBySid` end it. "Live" means within the
- * store's own retention, never judged by `tokens.expiresAt`: a record whose
- * access token has expired is live, and is refreshed. A store that cannot
- * answer rejects; it never answers `null` or `missing` for an outage.
+ * write of the record issues a new one (`attach`, `replaceIf`), and `delete`,
+ * `removeIf` and `removeBySid` end it. "Live" means within the store's own
+ * retention, never judged by `tokens.expiresAt`: a record whose access token
+ * has expired is live, and is refreshed. A store that cannot answer rejects;
+ * it never answers `null` or `missing` for an outage.
  */
 export interface FederationTokenStore {
 	readonly kind: string;
@@ -163,9 +162,6 @@ export interface FederationTokenStore {
 		federationName: string,
 		expected: StoreGeneration,
 	): Promise<ConditionalRemoveAnswer>;
-
-	/** Unconditional replace, as one atomic step, at a new generation. */
-	update(sid: string, federationName: string, tokens: FederationTokens): Promise<void>;
 
 	/** Remove all federation entries for a session. Idempotent; always wins. */
 	removeBySid(sid: string): Promise<void>;

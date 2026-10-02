@@ -414,6 +414,7 @@ describe("a grant outlives the browser session at both logout endpoints", () => 
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
+			obtainedAt: undefined,
 		});
 		expect(await userSessionStore.get(sid)).not.toBeNull();
 		await expectGrantUntouched(app, federationGrantStore);
@@ -446,6 +447,7 @@ describe("a grant outlives the browser session at both logout endpoints", () => 
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
+			obtainedAt: undefined,
 		});
 		expect(await userSessionStore.get(sid)).not.toBeNull();
 		await expectGrantUntouched(app, federationGrantStore);

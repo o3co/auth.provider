@@ -104,6 +104,7 @@ const baseFedTokens: FederationTokens = {
 	tokenType: "Bearer",
 	scope: "openid email",
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 // Client with allowedAzpForFederationToken: true
@@ -168,7 +169,6 @@ function makeFedTokenStore(override?: Partial<FederationTokenStore>): Federation
 			.fn()
 			.mockResolvedValue({ outcome: "updated", generation: "g-written" as StoreGeneration }),
 		removeIf: vi.fn().mockResolvedValue({ outcome: "removed" }),
-		update: vi.fn().mockResolvedValue(undefined),
 		removeBySid: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn().mockResolvedValue(undefined),
 		...override,
@@ -1927,7 +1927,6 @@ describe("POST /oauth/federation/:name/token", () => {
 				expect(res.status).toBe(404);
 				expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
 				expect(fedTokenStore.attach).not.toHaveBeenCalled();
-				expect(fedTokenStore.update).not.toHaveBeenCalled();
 			});
 
 			it("refuses rather than storing no-expiry when a lifetime getter throws", async () => {
@@ -1989,7 +1988,6 @@ describe("POST /oauth/federation/:name/token", () => {
 				expect(res.body.access_token).toBe("concurrent-at");
 				expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
 				expect(fedTokenStore.attach).not.toHaveBeenCalled();
-				expect(fedTokenStore.update).not.toHaveBeenCalled();
 			});
 
 			it("keeps the rotated token on the record the refresh was made from", async () => {
@@ -2725,7 +2723,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			const res = await postFedToken(app, "google", token);
 
 			expect(res.status).toBe(200);
-			// Verify that update was called with the original refreshToken preserved
+			// The replace keeps the original refreshToken
 			expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
 				"sid-1",
 				"google",
@@ -4611,7 +4609,8 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 			vi.setSystemTime(Date.now() + 1000);
 			const second = await postFedToken(app, "google", await mintAccessToken());
 
-			expect(stored !== null && "obtainedAt" in stored).toBe(false);
+			expect(stored !== null && Object.hasOwn(stored, "obtainedAt")).toBe(true);
+			expect(stored?.obtainedAt).toBeUndefined();
 			expect(second.body.access_token).toBe("instant-at-2");
 			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
 		});
@@ -4630,7 +4629,8 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 
 		expect(res.status).toBe(200);
 		expect(stored?.expiresAt).toBeNull();
-		expect(stored !== null && "obtainedAt" in stored).toBe(false);
+		expect(stored !== null && Object.hasOwn(stored, "obtainedAt")).toBe(true);
+		expect(stored?.obtainedAt).toBeUndefined();
 	});
 
 	it.each([

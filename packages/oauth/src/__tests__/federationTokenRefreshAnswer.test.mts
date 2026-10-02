@@ -32,6 +32,7 @@ const stored: FederationTokens = {
 	tokenType: "Bearer",
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 describe("readRefreshAnswer — a lifetime verdict the route does not know", () => {

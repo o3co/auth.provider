@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 ## Responsibility
 
@@ -627,7 +627,7 @@ Two groups of optional slots for federation and OIDC support, provided by a modu
 
 - `userSessionStore` and its sid- and subject-keyed siblings: session metadata (auth_time, how the session was established — `authentication` — active RPs, family IDs, OIDC claims), the logout fan-out indexes, and subject-wide revocation — [`src/user-sessions/README.md`](src/user-sessions/README.md). `SupportsSecondFactorUpdate` — optional capability on `UserSessionStore` that records a second factor verified in a live session (`recordSecondFactor`), which a step-up needs. Both bundled stores implement it; detect it with the `supportsSecondFactorUpdate(store)` guard.
 - `SupportsSessionEnd` — optional capability on `SessionFamilyIndex` (`endSession`, `addFamilyIdUnlessEnded`): for a logout's end and a grant's add on one session, the end lists the family or the add answers `"ended"`. Both bundled indexes implement it (the Redis one over a client that can write the mark); detect it with the `supportsSessionEnd(index)` guard. It trusts the store to keep its reads and writes linearizable, and reads served by the primary: each sees every write completed before it began. Redis's asynchronous replication does not guarantee that across a failover, where a promoted replica may lack a write the old primary acknowledged, nor does a read answered by a replica. The guarantee holds for operations inside the session's life on every clock involved; the mark lasts the life plus the clock-skew allowance (`DEFAULT_CLOCK_SKEW_MS`).
-- `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens, deleted at logout. The Redis adapter encrypts `refresh_token` with AES-256-GCM; `allow-plaintext` is opt-in and emits a warning. A store must round-trip every field of `FederationTokens` — `expiresAt: null` included, and `undefined`, never `null`, for a field with nothing recorded (`obtainedAt` is left out instead). The port contract, field by field, is in [src/README.md](src/README.md#federation-tokens), and what a store implementer changes for the required keys is [docs/upgrading-required-record-keys.md](../../docs/upgrading-required-record-keys.md).
+- `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens, deleted at logout. The Redis adapter encrypts `refresh_token` with AES-256-GCM; `allow-plaintext` is opt-in and emits a warning. A store must round-trip every field of `FederationTokens` — `expiresAt: null` included, and `undefined`, never `null`, for a field with nothing recorded (`obtainedAt` included, with the key named). The port contract, field by field, is in [src/README.md](src/README.md#federation-tokens), and what a store implementer changes for the required keys is [docs/upgrading-required-record-keys.md](../../docs/upgrading-required-record-keys.md).
 
 `@o3co/auth-provider-oauth` consumes both: logout and cascading revocation, id_token and `/userinfo`, and `POST /oauth/federation/:name/token`. When any `core.federations.<name>.enabled` is true, boot refuses a composition missing any of `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore` and `refreshTokenFamilyRevocation` (`federation-stores-incomplete`).
 

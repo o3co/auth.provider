@@ -75,6 +75,7 @@ describe("POST /oauth/federation/google/token: an upstream outage never ends the
 				tokenType: "Bearer",
 				scope: "openid profile email",
 				grantedScope: "openid profile email",
+				obtainedAt: undefined,
 			},
 		});
 		const res = await request(session.app)
