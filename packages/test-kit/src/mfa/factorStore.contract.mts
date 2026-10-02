@@ -39,9 +39,8 @@
  * split their writers across `store` and `second`.
  *
  * Records are written and removed through the factor set's conditional
- * members, at the generation the set is at, so the suite runs over a store
- * with or without the port's optional unconditional `create` and `remove`.
- * Each answer is read with core's readers.
+ * members, at the generation the set is at. Each answer is read with core's
+ * readers.
  *
  * The harness is the factor set's binding's too
  * (`mfaFactorStoreConditionalContract`): one `build` serves both suites.

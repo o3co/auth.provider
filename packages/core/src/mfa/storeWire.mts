@@ -125,7 +125,7 @@ export interface MfaStoreVersionedListAnswer {
 /**
  * `createMfaFactor`, conditional: one new record, written only while the
  * subject's set is at `expectedGeneration`; `null`: only while the set is
- * absent. Never left out: a request without it is the unconditional create.
+ * absent.
  */
 export interface MfaStoreCreateIfRequest {
 	readonly factor: MfaStoreFactor;
@@ -173,11 +173,6 @@ export type MfaStoreRemoveIfAnswer =
 	| { readonly outcome: "missing" }
 	| { readonly outcome: "conflict" };
 
-/** `createMfaFactor`: one new record, refused as a duplicate when its `(subject, id)` is held. */
-export interface MfaStoreCreateRequest {
-	readonly factor: MfaStoreFactor;
-}
-
 /**
  * `updateMfaFactor`: `subject` and `id` name the record, `expectedVersion`
  * is the compare-and-set token, and `changes` is all it writes.
@@ -194,10 +189,11 @@ export interface MfaStoreUpdateAnswer {
 	readonly factor: unknown;
 }
 
-/** `deleteMfaFactor`: one record, or every record of the subject. */
-export type MfaStoreDeleteRequest =
-	| { readonly subject: string; readonly id: string }
-	| { readonly subject: string; readonly all: true };
+/** `deleteMfaFactor`, the reset: every record of the subject, unconditionally. */
+export interface MfaStoreDeleteRequest {
+	readonly subject: string;
+	readonly all: true;
+}
 
 /** `markMfaEnrolled`: the enrollment witness the Store answers back as `User.mfaEnrolled`. */
 export interface MfaStoreMarkEnrolledRequest {

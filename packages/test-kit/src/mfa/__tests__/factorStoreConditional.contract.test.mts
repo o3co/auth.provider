@@ -80,11 +80,11 @@ const isNotRun = (contractCase: ContractCase): boolean => contractCase.name.star
 /**
  * `store` with `members` taken away. Without one of the factor set's members
  * it is outside the port's type, as a store written in JavaScript can be,
- * which the binding refuses when it runs; `create` and `remove` are optional.
+ * which the binding refuses when it runs.
  */
 const without = (
 	store: MfaFactorStore,
-	...members: readonly ("listVersioned" | "createIf" | "removeIf" | "create" | "remove")[]
+	...members: readonly ("listVersioned" | "createIf" | "removeIf")[]
 ): MfaFactorStore =>
 	Object.fromEntries(
 		Object.entries(store).filter(([name]) => !(members as readonly string[]).includes(name)),
@@ -95,21 +95,6 @@ describe("mfaFactorStoreConditionalContract over core's in-process store", () =>
 	// proves no fence across processes. No unreachable: it has no backend.
 	for (const contractCase of mfaFactorStoreConditionalContract({
 		build: async () => memoryOnItsClock(),
-		supports: { forceExpire: true },
-	})) {
-		it(contractCase.name, contractCase.run);
-	}
-});
-
-/** Core's in-process store on its own clock, without the port's optional unconditional `create` and `remove`. */
-const memoryWithoutUnconditional = (): MfaFactorStoreHarness => {
-	const harness = memoryOnItsClock();
-	return { ...harness, store: without(harness.store, "create", "remove") };
-};
-
-describe("mfaFactorStoreConditionalContract over a store without the unconditional create and remove", () => {
-	for (const contractCase of mfaFactorStoreConditionalContract({
-		build: async () => memoryWithoutUnconditional(),
 		supports: { forceExpire: true },
 	})) {
 		it(contractCase.name, contractCase.run);
@@ -128,6 +113,7 @@ type Fault =
 	| "create-upserts-held-id"
 	| "counter-generation"
 	| "reset-of-empty-keeps-generation"
+	| "reset-keeps-generation"
 	| "removed-answers-another-generation"
 	| "tombstone-never-expires"
 	| "reset-tombstone-never-expires"
@@ -339,12 +325,6 @@ function modelStore(fault: Fault): Model {
 					};
 				},
 			),
-		create: async (record) => {
-			if (live(record.subject)?.records.has(record.id) === true) {
-				throw new Error("held");
-			}
-			write(record.subject, (records) => records.set(record.id, copyOf(record)));
-		},
 		update: async (subject, id, expectedVersion, next) => {
 			const set = live(subject);
 			const current = set?.records.get(id);
@@ -362,17 +342,17 @@ function modelStore(fault: Fault): Model {
 			if (fault === "update-moves-generation") set.generation = fresh(set);
 			return copyOf(written);
 		},
-		remove: async (subject, id) => {
-			if (live(subject)?.records.has(id) === true) {
-				write(subject, (records) => records.delete(id));
-			}
-		},
 		removeAllForSubject: async (subject) => {
 			if (fault === "reset-deletes-set") {
 				sets.delete(subject);
 				return;
 			}
 			if (fault === "reset-of-empty-keeps-generation" && live(subject)?.records.size === 0) {
+				return;
+			}
+			const held = live(subject);
+			if (fault === "reset-keeps-generation" && held !== undefined) {
+				held.records.clear();
 				return;
 			}
 			write(subject, (records) => records.clear());
@@ -411,9 +391,7 @@ function unreachableStore(outage: Outage = "rejects"): MfaFactorStore {
 			listVersioned: outage === "lists-undefined" ? async () => undefined as never : down,
 			createIf: down,
 			removeIf: down,
-			create: down,
 			update: outage === "update-resolves" ? async () => null : down,
-			remove: down,
 			removeAllForSubject: down,
 		};
 	}
@@ -423,9 +401,7 @@ function unreachableStore(outage: Outage = "rejects"): MfaFactorStore {
 		listVersioned: async () => ({ generation: null, items: [] }),
 		createIf: async () => ({ outcome: "conflict" }),
 		removeIf: async () => ({ outcome: "missing" }),
-		create: down,
 		update: async () => null,
-		remove: async () => {},
 		removeAllForSubject: down,
 	};
 }
@@ -480,8 +456,6 @@ const CASE = {
 		"a set created again after its tombstone expired is at a generation it is then read at, never one seen before",
 	outage: "a store that cannot reach its backend rejects every member",
 	update: "an update keeps the set's generation, and a write at it still lands",
-	legacy:
-		"where the store still provides create and remove: create refuses a held id and keeps the record and the generation; remove is idempotent and moves the generation only when it removes",
 	tombstone:
 		"a tombstone stands: a late first binding and a late write at a generation read before the reset are refused, and write nothing",
 	unconditional:
@@ -508,39 +482,6 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 		expect(await refusedBy(() => ({ store: withoutMembers, forceExpire: async () => {} }))).toEqual(
 			cases.map((contractCase) => contractCase.name),
 		);
-	});
-
-	it("runs the unconditional cases over create and remove only when the store has them", async () => {
-		const unreachableWithout = () => without(unreachableStore(), "create", "remove");
-		expect(await refusedBy(memoryWithoutUnconditional, unreachableWithout)).toEqual([]);
-		const createRefusing = (): MfaFactorStoreHarness => {
-			const harness = memoryOnItsClock();
-			const create = async (): Promise<void> => {
-				throw new Error("refused");
-			};
-			return { ...harness, store: { ...harness.store, create } };
-		};
-		expect(await refusedBy(createRefusing)).toContain(CASE.unconditional);
-		const removeIgnoring = (): MfaFactorStoreHarness => {
-			const harness = memoryOnItsClock();
-			const remove = async (): Promise<void> => {};
-			return { ...harness, store: { ...harness.store, remove } };
-		};
-		expect(await refusedBy(removeIgnoring)).toContain(CASE.unconditional);
-	});
-
-	it("holds a store's own create and remove to their promises when it still provides them", async () => {
-		const createOverwriting = (): MfaFactorStoreHarness => {
-			const harness = memoryOnItsClock();
-			const { store } = harness;
-			const create = async (record: MfaFactorRecord): Promise<void> => {
-				await store.remove?.(record.subject, record.id);
-				await store.create?.(record);
-			};
-			return { ...harness, store: { ...store, create } };
-		};
-		expect(await refusedBy(createOverwriting)).toContain(CASE.legacy);
-		expect(await refusedBy(memoryOnItsClock)).not.toContain(CASE.legacy);
 	});
 
 	const faults: ReadonlyArray<readonly [string, Fault, readonly string[]]> = [
@@ -588,6 +529,11 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 			"one whose reset of an emptied set keeps its generation",
 			"reset-of-empty-keeps-generation",
 			[CASE.resetEmpty],
+		],
+		[
+			"one whose reset of a set that holds members keeps its generation",
+			"reset-keeps-generation",
+			[CASE.resetAfterRead, CASE.unconditional],
 		],
 		[
 			"one whose removal answers a generation other than the one it wrote",
@@ -669,14 +615,7 @@ describe("the binding", () => {
 			supports: { unreachable: true, forceExpire: true },
 		}).map((contractCase) => contractCase.name);
 		expect(generic.filter((name) => name.startsWith("not run:"))).toEqual([]);
-		expect(names).toEqual([
-			...generic,
-			CASE.update,
-			CASE.legacy,
-			CASE.tombstone,
-			CASE.race,
-			CASE.resetExpiry,
-		]);
+		expect(names).toEqual([...generic, CASE.update, CASE.tombstone, CASE.race, CASE.resetExpiry]);
 	});
 
 	it("calls the harness's hooks on the harness, so one that uses this keeps working", async () => {

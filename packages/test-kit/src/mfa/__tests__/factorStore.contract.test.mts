@@ -38,22 +38,6 @@ describe("mfaFactorStoreContract over core's in-process store", () => {
 	}
 });
 
-/** Core's in-process store without the port's optional unconditional `create` and `remove`. */
-const withoutUnconditional = (): MfaFactorStore =>
-	Object.fromEntries(
-		Object.entries(createMemoryMfaFactorStore()).filter(
-			([name]) => name !== "create" && name !== "remove",
-		),
-	) as unknown as MfaFactorStore;
-
-describe("mfaFactorStoreContract over a store without the unconditional create and remove", () => {
-	for (const contractCase of mfaFactorStoreContract({
-		build: async () => ({ store: withoutUnconditional() }),
-	})) {
-		it(contractCase.name, contractCase.run);
-	}
-});
-
 const UNREACHABLE_NOT_RUN = "not run: the outage case (unreachable not declared)";
 const OUTAGE =
 	"rejects every member when it cannot reach its backend, and answers none as no factors, null or done";

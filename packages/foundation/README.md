@@ -530,9 +530,8 @@ const modules = [
   (`provides-factory-failed`), naming `HttpMfaFactorStore`.
 - It declares no replica-unsafe state: the factors are the Store's.
 
-It has none of the port's optional unconditional members, `create` and
-`remove`: it writes the factor set's membership through `createIf` and
-`removeIf` alone. It answers the port as the
+It writes the factor set's membership through `createIf`, `removeIf` and
+the reset. It answers the port as the
 [contract](#the-stores-mfa-endpoints) gives each answer, and throws on
 anything else:
 

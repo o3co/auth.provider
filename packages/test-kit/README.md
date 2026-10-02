@@ -169,9 +169,7 @@ taken again; and, with `unreachable`, every member rejecting rather than answeri
 base64url characters, the shape the provider makes and the Store's wire
 codec requires. Core's in-process store, the Redis store and foundation's
 Store-backed store run it. It writes and removes records through the
-factor set's `createIf` and `removeIf`, at the generation the set is at, so it
-runs over a store with or without the port's optional unconditional `create`
-and `remove`.
+factor set's `createIf` and `removeIf`, at the generation the set is at.
 
 ## The factor set's conditional writes
 
@@ -214,9 +212,8 @@ It maps the store onto
 [`conditionalSetContract`](#the-conditional-write-suites)'s target and runs
 that suite, so the factor set is held to every rule of a set the suite
 holds: a subject is the scope, a record the item, `removeAllForSubject` the
-reset, `update` the member's own update, and `removeAllForSubject` and,
-when the store provides them, the port's optional `create` and `remove` the
-unconditional membership writes. Every versioned
+reset, `update` the member's own update, and `removeAllForSubject` the
+unconditional membership write. Every versioned
 listing is read with core's `readMfaFactorSet`, so a record that is not a
 whole record of its subject, or an id listed twice, fails the case that read
 it. The unreachable store is mapped bare: each member is the port's call
@@ -225,7 +222,7 @@ resolves, whatever it is, fails the case.
 `second`, `forceExpire`, `unreachable` and `close` pass through, bound to the
 harness, so a hook that uses `this` keeps working, and
 `supports` is the suite's; the port has `list`, `update` and its
-unconditional writes, so their cases always run. Beside the suite, it holds
+unconditional reset, so their cases always run. Beside the suite, it holds
 the store to the factor set's own: an update keeping the generation, so a
 write at it still lands; a tombstone standing — a late first binding and
 a late write at a generation read before the reset refused, nothing
