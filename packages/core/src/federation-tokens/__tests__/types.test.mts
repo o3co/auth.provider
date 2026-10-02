@@ -33,7 +33,6 @@ describe("supportsLock type guard", () => {
 			removeIf: async () => ({ outcome: "missing" as const }),
 			attach: async () => {},
 			delete: async () => {},
-			update: async () => {},
 			removeBySid: async () => {},
 		};
 		expect(supportsLock(store as FederationTokenStore)).toBe(false);
@@ -48,7 +47,6 @@ describe("supportsLock type guard", () => {
 			removeIf: async () => ({ outcome: "missing" as const }),
 			attach: async () => {},
 			delete: async () => {},
-			update: async () => {},
 			removeBySid: async () => {},
 			acquireLock: async () => ({ acquired: true as const, release: async () => {} }),
 		};

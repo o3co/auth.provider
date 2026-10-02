@@ -19,7 +19,7 @@ import { refreshIsDue } from "#/routes/federationTokenRefreshDue.mjs";
 
 const NOW = Date.UTC(2026, 9, 2, 12, 0, 0);
 const BUFFER_MS = 30_000;
-const at = (ms: number) => ({ expiresAt: new Date(ms) });
+const at = (ms: number) => ({ expiresAt: new Date(ms), obtainedAt: undefined });
 
 describe("refreshIsDue", () => {
 	beforeEach(() => {
@@ -30,7 +30,9 @@ describe("refreshIsDue", () => {
 	});
 
 	it("never refreshes a token with no finite expiry", () => {
-		expect(refreshIsDue({ refreshBufferMs: BUFFER_MS }, { expiresAt: null })).toBe(false);
+		expect(
+			refreshIsDue({ refreshBufferMs: BUFFER_MS }, { expiresAt: null, obtainedAt: undefined }),
+		).toBe(false);
 	});
 
 	it("refreshes a token whose remaining life equals the buffer", () => {
@@ -56,7 +58,7 @@ describe("refreshIsDue", () => {
 			obtainedAt: new Date(obtainedAt),
 			expiresAt: new Date(obtainedAt + lifeMs),
 		});
-		const due = (tokens: { obtainedAt?: Date; expiresAt: Date | null }) =>
+		const due = (tokens: { obtainedAt: Date | undefined; expiresAt: Date | null }) =>
 			refreshIsDue({ refreshBufferMs: BUFFER_MS }, tokens);
 
 		it("does not refresh a lifetime shorter than the buffer before its midpoint", () => {
@@ -83,7 +85,7 @@ describe("refreshIsDue", () => {
 		});
 
 		it("keeps the buffer rule for a record without obtainedAt", () => {
-			expect(due({ expiresAt: new Date(NOW + LIFE_MS) })).toBe(true);
+			expect(due({ obtainedAt: undefined, expiresAt: new Date(NOW + LIFE_MS) })).toBe(true);
 		});
 
 		it("keeps the buffer rule for an obtainedAt that names no instant, as for an absent one", () => {

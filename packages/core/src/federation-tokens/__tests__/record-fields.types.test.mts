@@ -15,7 +15,7 @@
  */
 
 /**
- * Every `FederationTokens` field but `obtainedAt` is a required key.
+ * Every `FederationTokens` field is a required key.
  *
  * A `FederationTokenStore` often copies a record field by field (the bundled
  * in-memory store does), and a field it forgets is dropped silently. Each
@@ -30,11 +30,9 @@
  * - `scope` / `grantedScope`: what the response reports, and the ceiling a
  *   refresh is bounded by.
  * - `expiresAt` (`Date | null`) is required for the same reason.
- *
- * `obtainedAt` is the one optional key, and its loss fails CLOSED: a record
- * without it is one whose token's age is unknown, which is refreshed sooner,
- * never kept longer. Session's link-time writes leave it out, and their code is
- * reserved for the MFA work, so a required key could not compile there.
+ * - `obtainedAt`: lost, it makes the token's age unknown, so it is refreshed
+ *   sooner, never kept longer. Fails CLOSED, but every writer still names it,
+ *   `undefined` where the age is unknown.
  *
  * A marker in the record cannot catch a store that drops fields (it would drop
  * the marker too); the type can, since an object literal that leaves a
@@ -54,10 +52,8 @@ type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, 
 type OptionalKeys<T> = { [K in keyof T]-?: IsRequiredKey<T, K> extends true ? never : K }[keyof T];
 
 describe("FederationTokens — a store cannot forget a field", () => {
-	it("has one optional key, obtainedAt, whose loss fails closed", () => {
-		expectTypeOf<OptionalKeys<FederationTokens>>().toEqualTypeOf<"obtainedAt">();
-		expectTypeOf<IsRequiredKey<FederationTokens, "obtainedAt">>().toEqualTypeOf<false>();
-		expectTypeOf<FederationTokens["obtainedAt"]>().toEqualTypeOf<Date | undefined>();
+	it("has no optional key", () => {
+		expectTypeOf<OptionalKeys<FederationTokens>>().toEqualTypeOf<never>();
 	});
 
 	it("names each field, so a failure says which one regressed", () => {
@@ -68,12 +64,14 @@ describe("FederationTokens — a store cannot forget a field", () => {
 		expectTypeOf<IsRequiredKey<FederationTokens, "tokenType">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationTokens, "scope">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationTokens, "grantedScope">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<FederationTokens, "obtainedAt">>().toEqualTypeOf<true>();
 	});
 
 	it("still lets a field hold undefined where there is nothing to record", () => {
 		expectTypeOf<FederationTokens["tokenType"]>().toEqualTypeOf<string | undefined>();
 		expectTypeOf<FederationTokens["grantedScope"]>().toEqualTypeOf<string | undefined>();
 		expectTypeOf<FederationTokens["refreshToken"]>().toEqualTypeOf<string | undefined>();
+		expectTypeOf<FederationTokens["obtainedAt"]>().toEqualTypeOf<Date | undefined>();
 	});
 
 	it("tells an optional key from a required one — the helper's control", () => {
