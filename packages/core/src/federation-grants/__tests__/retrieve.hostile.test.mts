@@ -1222,6 +1222,74 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			});
 		};
 
+		/** What `deps.report` was told: each stored date that holds no instant is told once per call. */
+		const reportedDates = () => {
+			const told: { during: string; error: unknown }[] = [];
+			h.deps.report = (failure) => {
+				told.push(failure);
+			};
+			return () =>
+				told.filter(
+					(failure) =>
+						failure.during === "open" &&
+						failure.error instanceof TypeError &&
+						failure.error.message.includes("holds no instant"),
+				);
+		};
+
+		it.each([
+			[
+				"ineligible.at",
+				(grant: AuthorizedFederationGrant) => ({
+					...grant,
+					ineligible: {
+						reason: "scope_exceeded",
+						at: ISO,
+						judgedAgainst: connection.maxAccessTokenLifetime,
+					},
+				}),
+			],
+			[
+				"refreshFailure.at",
+				(grant: AuthorizedFederationGrant) => ({
+					...grant,
+					refreshFailure: {
+						at: ISO,
+						kind: "unavailable",
+						count: 3,
+						retryAfterSeconds: undefined,
+						upstreamCode: undefined,
+					},
+				}),
+			],
+		])(
+			"tells the logger once, by the field's name and never its value, when %s holds no instant",
+			async (field, edit) => {
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockResolvedValue(refreshed("1", DUE));
+				const told = reportedDates();
+				answeredWith(edit);
+				await retrieve();
+				// Asked again under the lock: still told once.
+				expect(h.refresh).toHaveBeenCalledTimes(1);
+				const dates = told();
+				expect(dates).toHaveLength(1);
+				const message = String((dates[0]?.error as Error | undefined)?.message);
+				expect(message).toContain(field);
+				expect(message).not.toContain(ISO);
+			},
+		);
+
+		it("tells the logger nothing when the stored dates are Dates", async () => {
+			await h.seed();
+			setNow(DUE);
+			h.refresh.mockResolvedValue(refreshed("1", DUE));
+			const told = reportedDates();
+			await retrieve();
+			expect(told()).toEqual([]);
+		});
+
 		it("answers a consent date it cannot compare as the storage outage: neither revoked nor live", async () => {
 			await h.seed();
 			answeredWith((grant) => ({ ...grant, consent: { ...grant.consent, at: ISO } }));

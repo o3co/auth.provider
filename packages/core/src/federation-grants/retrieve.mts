@@ -1088,6 +1088,29 @@ const markerInstant = (
 ): number | undefined => (marker === undefined ? undefined : (instantOf(marker.at) ?? Number.NaN));
 
 /**
+ * Tells the logger, once per call and by the field's name alone, of a stored
+ * marker or failed-refresh stamp whose date holds no instant. Each reads as a
+ * retry that is due, so a store that answers them so would have every request
+ * ask the upstream with nothing else to say why.
+ */
+function reportUndatedStamps(
+	deps: RetrieveFederationGrantTokenDeps,
+	request: RetrieveFederationGrantTokenRequest,
+	grant: FederationGrant | undefined,
+): void {
+	if (grant === undefined || !hasFederationGrantAuthorization(grant)) return;
+	const stamps = [
+		["ineligible.at", grant.ineligible],
+		["refreshFailure.at", grant.refreshFailure],
+	] as const;
+	for (const [field, stamp] of stamps) {
+		if (stamp !== undefined && instantOf(stamp.at) === undefined) {
+			report(deps, request, "open", new TypeError(`the stored ${field} holds no instant`));
+		}
+	}
+}
+
+/**
  * Whether the record holds what this call tried to store: the credentials,
  * and the marker beside them. Two replicas can come to store the very same
  * credentials — an IdP that does not rotate, an answer that brought no access
@@ -1774,6 +1797,7 @@ export async function retrieveFederationGrantToken(
 	request: RetrieveFederationGrantTokenRequest,
 ): Promise<FederationGrantTokenResult> {
 	const first = await evaluate(deps, request);
+	reportUndatedStamps(deps, request, first.grant);
 	if (first.kind !== "refresh") {
 		return conclude(deps, request, first, false, unavailable("upstream"));
 	}
