@@ -97,6 +97,8 @@ type Knobs = {
 	malformedSessionStore?: boolean;
 	/** Make one store method fail. */
 	failOn?: "get" | "set" | "destroy" | ReadonlyArray<"get" | "set" | "destroy">;
+	/** Make the store's `destroy` throw this value, whatever it is, instead of answering. */
+	destroyThrows?: { readonly reason: unknown };
 	/** Register this callback URL instead of a well-formed one. */
 	callbackUrl?: string | null;
 	/** Passed straight through as the router's `config`. */
@@ -170,6 +172,7 @@ function buildApp(knobs: Knobs = {}) {
 			backing.set(sid, record, cb);
 		},
 		destroy(sid: string, cb?: (err?: unknown) => void) {
+			if (knobs.destroyThrows) throw knobs.destroyThrows.reason;
 			if (fails("destroy")) return cb?.(new Error("store down"));
 			backing.destroy(sid, cb);
 		},
@@ -197,8 +200,9 @@ function buildApp(knobs: Knobs = {}) {
 		next();
 	});
 
+	const apple = makeApple();
 	const providers = new Map<string, FederationProvider>([
-		["apple", makeApple()],
+		["apple", apple],
 		["query-idp", makeQueryProvider()],
 	]);
 	const callbackUrls = new Map<string, string>([["query-idp", QUERY_CALLBACK_URL]]);
@@ -226,7 +230,7 @@ function buildApp(knobs: Knobs = {}) {
 		}),
 	);
 
-	return { app, records };
+	return { app, records, apple };
 }
 
 /** Start a flow and return the transaction cookie to replay. */
@@ -414,6 +418,50 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 			step: "delete",
 		});
 	});
+
+	it.each([
+		["undefined", undefined],
+		["null", null],
+		["0", 0],
+		["an empty string", ""],
+	])(
+		"503s rather than exchanging the code when the delete rejects with %s",
+		async (_name, reason) => {
+			// `Promise.reject()` with no argument rejects with `undefined`: a
+			// falsy reason is still a failed delete, and the transaction is still
+			// replayable.
+			const { app, records } = buildApp();
+			const flow = await start(app, records);
+
+			const logger = spyLogger();
+			const {
+				app: undeletable,
+				records: sharedRecords,
+				apple,
+			} = buildApp({ destroyThrows: { reason }, logger });
+			sharedRecords.set(
+				`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`,
+				records.get(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`),
+			);
+			const exchangeCode = vi.spyOn(apple, "exchangeCode");
+
+			const res = await request(undeletable)
+				.post("/oauth/federation/apple/callback")
+				.set("Cookie", flow.cookie)
+				.type("form")
+				.send({ state: flow.state, code: "c" });
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual(STORE_UNAVAILABLE);
+			expect(exchangeCode).not.toHaveBeenCalled();
+			expectOneErrorLine(
+				logger,
+				"federation_callback_store_unavailable",
+				{ store: "federation_transaction", step: "delete" },
+				false,
+			);
+		},
+	);
 
 	it("still refuses cleanly when the provider has no callback URL to scope the cleared cookie to", async () => {
 		const { app } = buildApp({ callbackUrl: null });
