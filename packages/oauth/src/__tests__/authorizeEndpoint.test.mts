@@ -1204,7 +1204,7 @@ describe("/authorize — request objects are refused, not ignored", () => {
 describe("/authorize — response_mode other than query is refused", () => {
 	// Discovery advertises `response_modes_supported: ["query"]`. Once the
 	// client and redirect_uri validate, the refusal is `invalid_request` on the
-	// redirect, in the query (the one mode served), with `state`.
+	// redirect, in the query (the one mode served), with `state` and `iss`.
 	it.each(["form_post", "fragment", "no_such_mode"])(
 		"redirects invalid_request for response_mode=%s",
 		async (mode) => {
@@ -1216,6 +1216,7 @@ describe("/authorize — response_mode other than query is refused", () => {
 			expect(params.get("error")).toBe("invalid_request");
 			expect(params.get("error_description")).toBe(`response_mode '${mode}' is not supported`);
 			expect(params.get("state")).toBe("xyz");
+			expect(params.getAll("iss")).toEqual([advertisedIssuer("https://issuer.example")]);
 			expect(params.get("code")).toBeNull();
 			expect(createCode).not.toHaveBeenCalled();
 		},
