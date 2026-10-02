@@ -580,7 +580,7 @@ const clientRepo = new InMemoryClientRepository(
 - 例外を投げるポリシーは allow にならない: core の答えは `policyUnavailable()`、説明 `policy evaluation unavailable` 付きの `503 temporarily_unavailable` で、`evaluateGrantPolicy` を通してポリシーを参照するすべてのグラントがこれを返す
 - deny の `error` は RFC 6749 のエラーコード `1*NQSCHAR`（空でない、`"` と `\` を除く印字可能な ASCII）でなければならない（`isWellFormedErrorCode`、[`errors/envelope.mts`](src/errors/envelope.mts)）。それ以外のコードを `/oauth/token` は `invalid_request`、`/oauth/authorize` は `access_denied` として返し、ポリシーのコードをサニタイズしてログに残す
 - `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用（`authorization_code` では再評価しない）
-- その他のグラント（refresh / client_credentials / token-exchange）はトークンエンドポイントで評価
+- トークンを発行する同梱のその他のグラントは、`grantPolicy` が配線されていれば、すべてトークンエンドポイントでそれを参照する: `client_credentials`、`session`、`refresh_token`、jwt-bearer、token exchange、WebAuthn グラント、device code グラント（承認を引き換えるポーリングで）。デプロイメントが追加するグラントハンドラは、自分で `evaluateGrantPolicy` を呼んだときだけポリシーを参照する
 
 5 つとも任意です。audit sink は absence policy（`AUDIT_SINK_ABSENCE_POLICY`）を持ちます: スロットを埋めるもの — シンクも `auditHooks` の寄与も — がなければ、設定で不在を宣言する（`core.declaredAbsent = ["auditSink"]`）必要があり、宣言がなければ boot は拒否されます。他の 4 つは、ないときは単に無効です。
 
