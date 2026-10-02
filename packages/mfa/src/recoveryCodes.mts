@@ -36,8 +36,10 @@
  *   sign-in — one made before a first binding, which admission may have taken
  *   on a recent primary while no factor stood; said at info
  *   (`mfa_first_binding_distrusted`). A mark that cannot be read is `503`.
- *   Every mark distrusts, so it also refuses, until the sign-in is later than
- *   the mark plus `DEFAULT_CLOCK_SKEW_MS`: the session that bound the first
+ *   The distrust is widened by one lease — the owner's factor may land up to
+ *   a lease after its mark, and a sign-in in that stretch on a clock up to
+ *   the skew ahead must not pass. Every mark distrusts, so it also refuses,
+ *   until the sign-in is later than the mark plus the skew and a lease: the session that bound the first
  *   factor (it got codes then), one whose login reconciled the witness, one
  *   signed in before a binding and stepped up after it, and a fresh MFA login
  *   on another device within the skew; a step-up in a session whose witness
@@ -197,8 +199,13 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 				} catch (cause) {
 					return { outcome: "unmarked", cause };
 				}
-				if (distrustedByFirstBinding(session.authTimeMs, mark) && mark !== null) {
-					return { outcome: "distrusted", retryAfterMs: firstBindingRetryAfterMs(mark, nowMs) };
+				// Widened by a lease: the owner's factor may land up to a lease after its mark,
+				// so a sign-in in that stretch — a clock up to the skew ahead — is distrusted too.
+				if (distrustedByFirstBinding(session.authTimeMs, mark, options.leaseMs) && mark !== null) {
+					return {
+						outcome: "distrusted",
+						retryAfterMs: firstBindingRetryAfterMs(mark, nowMs, options.leaseMs),
+					};
 				}
 				// Two legs: admission's own mark read covers a mark noted before this request
 				// began; this read covers one noted since, while it stands — the mark's

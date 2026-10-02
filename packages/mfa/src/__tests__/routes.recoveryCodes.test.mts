@@ -403,10 +403,10 @@ describe("a regeneration's own checks under the lease", () => {
 	});
 
 	it.each([
-		["refuses 409 mfa_request_stale", 24, 409],
-		["answers", 23, 200],
+		["refuses 409 mfa_request_stale", 26, 409],
+		["answers", 24, 200],
 	] as const)(
-		"%s a request that reached its lease %i minutes after it began: a mark lives 30 here, less 5 of skew and 80 s of lease",
+		"%s a request that reached its lease %i minutes after it began: a mark lives 30 minutes and a lease here, relied on 25",
 		async (_, minutes, status) => {
 			const built = await composed();
 			const { agent } = await signedIn(built);
@@ -427,13 +427,15 @@ describe("a regeneration's own checks under the lease", () => {
 
 	it("sends to log in again a session signed in later than the mark by just over the skew: the owner's factor may still have been landing, up to a lease after its mark", async () => {
 		const built = await composed({ mode: "optional", requireEmailProof: "never", enrolled: false });
-		const { agent } = await signIn(built.app, built.userSessionStore);
 		const store = built.transactionStore;
+		// The owner's first binding notes its mark; its factor is still landing.
+		await store.noteFirstBinding(ALICE.id, Date.now(), Date.now() + 1_800_000);
+		// A sign-in dated 301 s after the mark: a clock just under the skew ahead, or a real wait.
+		vi.setSystemTime(Date.now() + 301_000);
+		const { agent } = await signIn(built.app, built.userSessionStore);
 		const acquire = store.acquireSubjectLease.bind(store);
 		vi.spyOn(store, "acquireSubjectLease").mockImplementationOnce(async (subject, asked) => {
-			// The mark dated 301 s before this session's sign-in — a clock just under the skew apart.
-			const at = Date.now() - 301_000;
-			await store.noteFirstBinding(subject, at, at + 1_800_000);
+			// The owner's factor lands between this request's admission and its lease.
 			await seedTotp(built.factorStore);
 			return acquire(subject, asked);
 		});

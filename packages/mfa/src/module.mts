@@ -579,6 +579,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								firstBindingMarkMs: firstBindingMarkLifetimeMs({
 									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
 									transactionTtlSeconds: settings.transactionTtlSeconds,
+									leaseMs: leaseMsFor(settings.storeTimeoutMs),
 								}),
 								...(deps.subjectRevocation === undefined
 									? {}
@@ -621,6 +622,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								firstBindingMarkMs: firstBindingMarkLifetimeMs({
 									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
 									transactionTtlSeconds: settings.transactionTtlSeconds,
+									leaseMs: leaseMsFor(settings.storeTimeoutMs),
 								}),
 								leaseMs: leaseMsFor(settings.storeTimeoutMs),
 							},

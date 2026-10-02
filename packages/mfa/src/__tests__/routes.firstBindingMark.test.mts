@@ -76,7 +76,8 @@ const MFA_UNAVAILABLE = {
 };
 
 /** How long the mark stands under the package's defaults: max(300 s, 2 × 600 s) and twice the skew. */
-const LIFETIME_MS = 1_200_000 + 2 * DEFAULT_CLOCK_SKEW_MS;
+// max(300, 2 × 600) s, twice the skew, and one factor-set lease (16 × the default 5000 ms Store timeout).
+const LIFETIME_MS = 1_200_000 + 2 * DEFAULT_CLOCK_SKEW_MS + 80_000;
 
 /** Boots `mode` with no mail sender, so no first binding asks the account-email proof; alice's witness as `enrolled` says. */
 async function composed(mode: "optional" | "required", enrolled?: true) {
@@ -453,7 +454,7 @@ describe("a first binding at a login after the subject's first binding elsewhere
 });
 
 describe("noting the mark", () => {
-	it("notes it at a first binding, before the factor is written, standing max(mfa.manage.maxAgeSeconds, 2 × mfa.transactionTtlSeconds) and twice the clock skew", async () => {
+	it("notes it at a first binding, before the factor is written, standing max(mfa.manage.maxAgeSeconds, 2 × mfa.transactionTtlSeconds), twice the clock skew and a factor-set lease", async () => {
 		for (const mode of ["optional", "required"] as const) {
 			const { app, factorStore, transactionStore, userSessionStore } = await composed(mode);
 			const note = vi.spyOn(transactionStore, "noteFirstBinding");
