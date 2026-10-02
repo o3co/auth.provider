@@ -206,7 +206,8 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 					"resetMfaForSubject: requireEmailProof needs a mail sender, and none is wired: nobody could give the account-email proof, so nobody could bind a factor",
 				);
 			}
-			const nowMs = now();
+			/** Whether each revocation ended every session, as read once, inside its guard: the deployment's report is never read again. */
+			const ended: { sessions: boolean; sessionsAgain?: boolean } = { sessions: false };
 
 			/** `report` audited once, said once, and answered. */
 			const finish = (report: MfaResetReport): MfaResetReport => {
@@ -220,10 +221,8 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 							? {}
 							: { kinds: [...report.removed.kinds], count: report.removed.count }),
 						requireEmailProof: asked.requireEmailProof,
-						sessions: report.sessions?.complete === true,
-						...(report.sessionsAgain === undefined
-							? {}
-							: { sessionsAgain: report.sessionsAgain.complete === true }),
+						sessions: ended.sessions,
+						...(ended.sessionsAgain === undefined ? {} : { sessionsAgain: ended.sessionsAgain }),
 						complete: report.complete,
 						...(asked.requestedBy === undefined ? {} : { requestedBy: asked.requestedBy }),
 					},
@@ -247,10 +246,14 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 			};
 			const base = { subject, requireEmailProof: asked.requireEmailProof };
 
-			/** Every session and token of the subject's ended: the report, or why not. */
+			/** Every session and token of the subject's ended: the report and its completeness, read once, or why not. */
 			const revoke = async (): Promise<
-				| { readonly report: SubjectRevocationReport }
-				| { readonly cause: unknown; readonly report?: SubjectRevocationReport }
+				| { readonly report: SubjectRevocationReport; readonly complete: true }
+				| {
+						readonly cause: unknown;
+						readonly report?: SubjectRevocationReport;
+						readonly complete: false;
+				  }
 			> => {
 				let report: SubjectRevocationReport;
 				let complete: unknown;
@@ -264,17 +267,25 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 					// The service is the deployment's: a report that is none, or whose read throws, ends nothing.
 					complete = (report as { readonly complete?: unknown } | null | undefined)?.complete;
 				} catch (cause) {
-					return { cause };
+					return { cause, complete: false };
 				}
 				if (typeof report !== "object" || report === null) {
-					return { cause: new TypeError("the subject revocation service answered no report") };
+					return {
+						cause: new TypeError("the subject revocation service answered no report"),
+						complete: false,
+					};
 				}
 				return complete === true
-					? { report }
-					: { report, cause: new Error("the subject's sessions could not all be ended") };
+					? { report, complete: true }
+					: {
+							report,
+							cause: new Error("the subject's sessions could not all be ended"),
+							complete: false,
+						};
 			};
 
 			const first = await revoke();
+			ended.sessions = first.complete;
 			if ("cause" in first) {
 				return finish({
 					...base,
@@ -285,6 +296,8 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 				});
 			}
 
+			// Taken after the revocation, which has no deadline: an authorization minted at an earlier time could have ended already.
+			const nowMs = now();
 			const done = await underLease.reset(subject, {
 				nowMs,
 				...(asked.requireEmailProof
@@ -301,6 +314,7 @@ export function createMfaReset(options: MfaResetOptions): MfaReset {
 
 			// A login made with a factor before its removal ends too.
 			const again = await revoke();
+			ended.sessionsAgain = again.complete;
 			const removed =
 				done.removed === undefined
 					? undefined

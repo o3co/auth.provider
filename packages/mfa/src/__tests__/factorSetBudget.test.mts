@@ -193,7 +193,7 @@ describe("the subject lease's call budget", () => {
 			true,
 		);
 
-		expect(counted.most()).toBeGreaterThanOrEqual(7);
+		expect(counted.most()).toBeGreaterThanOrEqual(8);
 		expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
 	});
 });

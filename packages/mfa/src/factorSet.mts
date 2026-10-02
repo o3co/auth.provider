@@ -104,9 +104,9 @@ const LEASE_WAITS_MS = [25, 50, 100, 200, 400] as const;
  * recovery-code sets (a binding by password keeps the one that stood) makes
  * ten (the first-binding note, the consume, the factor, the records read
  * again, D25's flag, the sets read, the new set, each old set's removal, the
- * witness); the operator reset seven (the read, D25's flag, its
+ * witness); the operator reset eight (the read, D25's flag, its
  * authorization, the lock state's reset, the removal, the read again, the
- * witness); a removal five; a mark four; a release two. More standing sets
+ * witness, D25's flag again); a removal five; a mark four; a release two. More standing sets
  * than two each add a removal, which the lease's time cuts off when it runs
  * short: the set left is reported unreplaced.
  */
@@ -1090,6 +1090,24 @@ export function createMfaFactorSetReset(options: {
 					progress.stage = "witness";
 					time.beforeWrite();
 					const cleared = await witness.clear(subject);
+					// D25's flag set again, last: a binding's consume that timed out before the reset and landed since does not leave it cleared.
+					if (steps.requireEmailProof !== undefined) {
+						progress.stage = "email_proof";
+						time.beforeWrite();
+						try {
+							await within(
+								steps.requireEmailProof,
+								storeTimeoutMs,
+								"requireEmailProofAtNextBinding",
+							);
+						} catch (cause) {
+							return stopped("email_proof", cause, {
+								generation: answer.generation,
+								removed: progress.snapshot,
+								removedDone: true,
+							});
+						}
+					}
 					return {
 						outcome: "reset",
 						generation: answer.generation,
