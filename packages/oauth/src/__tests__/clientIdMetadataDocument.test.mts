@@ -85,6 +85,7 @@ const resolver = (
 	const warn = vi.fn();
 	const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 	const r = createClientIdMetadataDocumentResolver({
+		config: {},
 		allowedScopes: ["read", "write"],
 		allowedAudiences: ["https://mcp.example"],
 		fetch,
@@ -720,6 +721,7 @@ describe("withClientIdMetadataDocuments", () => {
 	it("answers pre-registered clients first — a registered URL wins over its document, unfetched", async () => {
 		const { fetch, calls } = fakeFetch([() => json(document())]);
 		const repo = withClientIdMetadataDocuments(inner, {
+			config: {},
 			allowedScopes: [],
 			allowedAudiences: [],
 			fetch,
@@ -735,6 +737,7 @@ describe("withClientIdMetadataDocuments", () => {
 			() => json(document({ client_id: "https://other.example/meta" })),
 		]);
 		const repo = withClientIdMetadataDocuments(inner, {
+			config: {},
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			fetch,
@@ -758,6 +761,7 @@ describe("the document cache is bounded", () => {
 		);
 		// Each response must name the URL it was fetched from.
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
 			maxCacheEntries: 2,
@@ -820,6 +824,7 @@ describe("the cache tells the truth about an outage", () => {
 			},
 		]);
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
 			fetch,
@@ -844,6 +849,7 @@ describe("the cache tells the truth about an outage", () => {
 			() => json({ error: "slow down" }, {}, 429),
 		]);
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
 			fetch,
@@ -866,6 +872,7 @@ describe("the cache tells the truth about an outage", () => {
 			() => json({ error: "gone" }, {}, 404),
 		]);
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read", "write"],
 			allowedAudiences: ["https://mcp.example"],
 			fetch,
@@ -886,6 +893,7 @@ describe("the cache tells the truth about an outage", () => {
 			() => json({ ...document(), redirect_uris: [] }),
 		]);
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			fetch,
@@ -910,6 +918,7 @@ describe("the cache tells the truth about an outage", () => {
 			() => json({ error: "nope" }, {}, 404),
 		]);
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			fetch,
@@ -941,6 +950,7 @@ describe("the cache tells the truth about an outage", () => {
 			return json(document({ client_id: String(input) }));
 		}) as typeof fetch;
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			maxConcurrentFetches: 2,
@@ -965,6 +975,7 @@ describe("the refusal memo and the stale window are bounded", () => {
 		// memory back to whoever was being throttled.
 		const clock = { now: 1_000_000 };
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			maxCacheEntries: 2,
@@ -979,6 +990,7 @@ describe("the refusal memo and the stale window are bounded", () => {
 		// rather than answered from a memo that grew without limit.
 		const fetched: string[] = [];
 		const counting = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read"],
 			allowedAudiences: [],
 			maxCacheEntries: 2,
@@ -1000,6 +1012,7 @@ describe("the refusal memo and the stale window are bounded", () => {
 		const clock = { now: 1_000_000 };
 		let fail = false;
 		const r = createClientIdMetadataDocumentResolver({
+			config: {},
 			allowedScopes: ["read", "write"],
 			allowedAudiences: [],
 			cacheMaxAgeMs: 1_000,
@@ -1073,6 +1086,32 @@ describe("the document is fetched through core's outbound policy", () => {
 
 		expect(await resolve()).toBeNull();
 		expect(reasonOf(warn, "cimd_document_rejected")).toContain("unsupported_encoding");
+	});
+
+	it("refuses to be built without the composition's configuration, so core.outbound is never skipped", () => {
+		expect(() =>
+			// @ts-expect-error `config` is required.
+			createClientIdMetadataDocumentResolver({ allowedScopes: [], allowedAudiences: [] }),
+		).toThrow(TypeError);
+		for (const config of [undefined, null, false, ""]) {
+			expect(
+				() =>
+					createClientIdMetadataDocumentResolver({
+						allowedScopes: [],
+						allowedAudiences: [],
+						// @ts-expect-error `config` is the composition's configuration object.
+						config,
+					}),
+				String(config),
+			).toThrow(/config/);
+		}
+		expect(() =>
+			withClientIdMetadataDocuments(
+				{ findById: async () => null, authenticate: async () => null },
+				// @ts-expect-error `config` is required.
+				{ allowedScopes: [], allowedAudiences: [] },
+			),
+		).toThrow(/config/);
 	});
 
 	it("builds its fetch from core.outbound when it is built, and refuses a malformed section then", () => {
@@ -1201,6 +1240,7 @@ describe("the host lists are read in core's host-list grammar", () => {
 			expect(
 				() =>
 					createClientIdMetadataDocumentResolver({
+						config: {},
 						allowedScopes: [],
 						allowedAudiences: [],
 						[list]: [entry],

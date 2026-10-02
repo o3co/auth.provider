@@ -216,6 +216,7 @@ describe("the page is told which host a URL-shaped client_id names", () => {
 	it("adds client_id_host for a client resolved from its metadata document", async () => {
 		const inner: ClientRepository = { findById: async () => null, authenticate: async () => null };
 		const clientRepository = withClientIdMetadataDocuments(inner, {
+			config: {},
 			allowedScopes: ["read", "write"],
 			allowedAudiences: [],
 			fetch: (async () =>

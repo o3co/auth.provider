@@ -83,8 +83,13 @@ export interface ClientIdMetadataDocumentOptions {
 	readonly maxBytes?: number;
 	/** Fetch deadline. Default 5000 ms; `core.outbound.timeoutMs` is its ceiling. */
 	readonly timeoutMs?: number;
-	/** The composition's configuration, whose `core.outbound` the document fetch is held to. Absent → that section's defaults. */
-	readonly config?: unknown;
+	/**
+	 * The composition's configuration, whose `core.outbound` the document
+	 * fetch is held to. Required: building the resolver without a
+	 * configuration object is a `TypeError`, so the operator's section is
+	 * never skipped by accident.
+	 */
+	readonly config: object;
 	/** Upper bound on how long a valid document is served from cache. Default 10 minutes. */
 	readonly cacheMaxAgeMs?: number;
 	/** Bound on remembered documents. Default {@link DEFAULT_CIMD_MAX_CACHE_ENTRIES}. */
@@ -360,6 +365,11 @@ export function createClientIdMetadataDocumentResolver(
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_CIMD_TIMEOUT_MS;
 	const allowedHosts = hostPatterns(opts.allowedHosts, "allowedHosts");
 	const deniedHosts = hostPatterns(opts.deniedHosts, "deniedHosts");
+	if (typeof opts.config !== "object" || opts.config === null) {
+		throw new TypeError(
+			"Client ID Metadata Documents: config is required; its core.outbound governs the document fetch",
+		);
+	}
 	// Built once, here: a `core.outbound` it refuses fails construction, not a request.
 	const fetchImpl =
 		opts.fetch ??
