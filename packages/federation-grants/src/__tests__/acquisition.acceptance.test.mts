@@ -592,7 +592,7 @@ describe("a grant created end to end, and spent", () => {
 		}
 	});
 
-	it("hands the browser half the session requirements the composition registered: a step-up at connect is the plain 403", async () => {
+	it("hands the browser half the session requirements the composition registered: a step-up at connect is the requirement's trip", async () => {
 		// The session-admission ADR's D1: the module requires the synthetic key
 		// and hands the planner's resolver to the browser routes, so a
 		// requirement some other module contributes reaches connect.
@@ -610,11 +610,12 @@ describe("a grant created end to end, and spent", () => {
 		try {
 			const connect = await lodgeFor(app);
 			signIn("b-stepped", new Date());
-			const refused = await request(app)
+			const sent = await request(app)
 				.get(`${connect.pathname}${connect.search}`)
 				.set("x-browser", "b-stepped");
-			expect(refused.status).toBe(403);
-			expect(refused.text).toBe("Sign in again to continue.");
+			expect(sent.status).toBe(303);
+			const page = new URL(sent.headers.location as string);
+			expect(`${page.origin}${page.pathname}`).toBe(new URL("/step-up", ISSUER).href);
 		} finally {
 			await handle.dispose();
 		}

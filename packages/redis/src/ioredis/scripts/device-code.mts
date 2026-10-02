@@ -85,14 +85,17 @@ return flat
  * `decide`: `pending` → `approved` | `denied`, refusing a second decision. `KEYS[1]` =
  * user-code index; `ARGV[1]` = record key prefix, `ARGV[2]` = now (epoch ms; an approval's
  * `approvedAtMs`), `ARGV[3]` = `approved` | `denied`, `ARGV[4]` = subject, `ARGV[5]` =
- * `requested` | `narrow`, `ARGV[6]` = the caller's grantedScope as a JSON array (`narrow` only).
- * Returns `{'ok', record}`, `{'already_decided', status}`, `{'expired'}` or `{'not_found'}`.
+ * `requested` | `narrow`, `ARGV[6]` = the caller's grantedScope as a JSON array (`narrow` only),
+ * `ARGV[7]` = the approving session's `amr` as a JSON array, `ARGV[8]` = its authentication
+ * instant (epoch ms); an empty or missing `ARGV[7]` or `ARGV[8]` is not written. Returns
+ * `{'ok', record}`, `{'already_decided', status}`, `{'expired'}` or `{'not_found'}`.
  *
  * Check and write are one step, so a denial and an approval cannot interleave with the second
  * overwriting the first. The scope intersection is inside it too, so no read sits between
  * showing the user a scope and granting one: `narrow` filters the caller's list by
  * `requestedScope` in the caller's order, `requested` grants it whole. An empty result is
- * written as `[]` literally, because `cjson.encode({})` is `{}`.
+ * written as `[]` literally, because `cjson.encode({})` is `{}`. The `amr` is stored as handed,
+ * never decoded or re-encoded, in the same `HSET` as the approval.
  */
 const LUA_DEVICE_CODE_DECIDE = `
 ${LUA_DEVICE_CODE_RECORD_OF}
@@ -124,7 +127,16 @@ if ARGV[3] == 'approved' then
   end
   local encoded = '[]'
   if #granted > 0 then encoded = cjson.encode(granted) end
-  redis.call('HSET', codeKey, 'status', 'approved', 'subject', ARGV[4], 'grantedScope', encoded, 'approvedAtMs', ARGV[2])
+  local fields = {'status', 'approved', 'subject', ARGV[4], 'grantedScope', encoded, 'approvedAtMs', ARGV[2]}
+  if ARGV[7] and ARGV[7] ~= '' then
+    fields[#fields + 1] = 'amr'
+    fields[#fields + 1] = ARGV[7]
+  end
+  if ARGV[8] and ARGV[8] ~= '' then
+    fields[#fields + 1] = 'authTimeMs'
+    fields[#fields + 1] = ARGV[8]
+  end
+  redis.call('HSET', codeKey, unpack(fields))
 else
   redis.call('HSET', codeKey, 'status', 'denied')
 end

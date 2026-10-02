@@ -56,6 +56,8 @@ describe("DeviceAuthorization — what a store answers with", () => {
 		expectTypeOf<IsRequiredKey<DeviceAuthorization, "subject">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<DeviceAuthorization, "grantedScope">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<DeviceAuthorization, "approvedAtMs">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<DeviceAuthorization, "amr">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<DeviceAuthorization, "authTimeMs">>().toEqualTypeOf<true>();
 	});
 
 	it("still lets a field be absent in value, as undefined", () => {
@@ -64,6 +66,8 @@ describe("DeviceAuthorization — what a store answers with", () => {
 			readonly string[] | undefined
 		>();
 		expectTypeOf<DeviceAuthorization["approvedAtMs"]>().toEqualTypeOf<number | undefined>();
+		expectTypeOf<DeviceAuthorization["amr"]>().toEqualTypeOf<readonly string[] | undefined>();
+		expectTypeOf<DeviceAuthorization["authTimeMs"]>().toEqualTypeOf<number | undefined>();
 	});
 });
 
@@ -72,8 +76,14 @@ describe("the inputs", () => {
 		expectTypeOf<OptionalKeys<CreateDeviceAuthorizationInput>>().toEqualTypeOf<never>();
 	});
 
-	it("approve leaves grantedScope optional — omitted, requestedScope is granted whole", () => {
-		expectTypeOf<OptionalKeys<ApproveDeviceAuthorizationInput>>().toEqualTypeOf<"grantedScope">();
+	it("approve leaves grantedScope, amr and authTime optional — omitted, requestedScope is granted whole and neither is recorded", () => {
+		expectTypeOf<OptionalKeys<ApproveDeviceAuthorizationInput>>().toEqualTypeOf<
+			"grantedScope" | "amr" | "authTime"
+		>();
+		expectTypeOf<ApproveDeviceAuthorizationInput["amr"]>().toEqualTypeOf<
+			readonly string[] | undefined
+		>();
+		expectTypeOf<ApproveDeviceAuthorizationInput["authTime"]>().toEqualTypeOf<Date | undefined>();
 	});
 });
 

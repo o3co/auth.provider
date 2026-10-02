@@ -58,6 +58,19 @@ export interface DeviceAuthorization {
 	 * between approval and poll is honoured.
 	 */
 	readonly approvedAtMs: number | undefined;
+	/**
+	 * Set by an approval handed one: the approving session's `amr`, as device
+	 * verification read it with `vouchedAmr`. `undefined` otherwise, which the
+	 * grant reads as "cannot tell" and stamps no `amr` for.
+	 */
+	readonly amr: readonly string[] | undefined;
+	/**
+	 * Set by an approval handed one: when the approving session authenticated,
+	 * in epoch milliseconds — never the approval's own instant. `undefined`
+	 * otherwise, which the grant reads as "cannot tell" and stamps no
+	 * `auth_time` for.
+	 */
+	readonly authTimeMs: number | undefined;
 }
 
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied";
@@ -113,6 +126,18 @@ export interface ApproveDeviceAuthorizationInput {
 	 */
 	readonly grantedScope?: readonly string[];
 	readonly nowMs: number;
+	/**
+	 * The approving session's `amr`, a non-empty list of non-empty strings,
+	 * filled by device verification from the session it admitted. Omitted, the
+	 * record holds none. Copied: the caller's array is not kept.
+	 */
+	readonly amr?: readonly string[];
+	/**
+	 * When the approving session authenticated: a valid `Date` at or after the
+	 * epoch, no further ahead of `nowMs` than `DEFAULT_CLOCK_SKEW_MS`. Omitted,
+	 * the record holds none.
+	 */
+	readonly authTime?: Date;
 }
 
 export interface DeviceCodeStore {
@@ -145,7 +170,16 @@ export interface DeviceCodeStore {
 	 */
 	findPendingByUserCode(userCode: string, nowMs: number): Promise<DeviceAuthorization | null>;
 
-	/** Atomically move `pending` → `approved`. */
+	/**
+	 * Atomically move `pending` → `approved`, recording what
+	 * `recordableDeviceApproval(input, input.nowMs)` answers for `amr` and
+	 * `authTime` (absent stays absent; `authTime` no later than `nowMs`).
+	 *
+	 * @throws `RangeError`, recording nothing, when `amr` is present and not a
+	 * non-empty list of non-empty strings (`wellFormedAmr`), or `authTime` is
+	 * present and not a valid `Date` at or after the epoch, or is further
+	 * ahead of `nowMs` than `DEFAULT_CLOCK_SKEW_MS`.
+	 */
 	approve(input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome>;
 
 	/** Atomically move `pending` → `denied`. */
