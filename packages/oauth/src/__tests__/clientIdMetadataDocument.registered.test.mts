@@ -126,7 +126,7 @@ describe("a refused registration never falls through to a document", () => {
 		);
 	});
 
-	it("refuses a registration under another id, an answer that is not an object, and an unreadable value alike", async () => {
+	it("refuses a registration under another id, an answer that is not an object, and a value JSON does not hold alike", async () => {
 		for (const answer of [
 			() => registered({ clientId: "https://client.example/other" }),
 			() => "client",
@@ -139,6 +139,37 @@ describe("a refused registration never falls through to a document", () => {
 			).toBeNull();
 			expect(calls).toEqual([]);
 		}
+	});
+
+	it("answers a lookup that finds the registration refused without joining a document fetch already in flight", async () => {
+		// Lookup A saw no registration and is fetching the document; the
+		// registration then turns refused. Lookup B reads the refusal and
+		// answers no client at once, never waiting on or taking A's document.
+		let release: () => void = () => {};
+		const paused = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const calls: string[] = [];
+		const fetchImpl = (async (input: string | URL | Request) => {
+			calls.push(String(input));
+			await paused;
+			return json(document());
+		}) as typeof fetch;
+		const state = switchable(() => null);
+		const repo = cimd(state.repository, fetchImpl, { logger: recordingLogger() });
+		const lookupA = repo.findById(CLIENT_URL);
+		await vi.waitFor(() => expect(calls).toHaveLength(1));
+		state.set(() => registered({ clientName: "" }));
+		const lookupB = repo.findById(CLIENT_URL);
+		const first = await Promise.race([
+			lookupB.then((answer) => ({ who: "B", answer })),
+			lookupA.then(() => ({ who: "A", answer: undefined })),
+		]);
+		expect(first).toEqual({ who: "B", answer: null });
+		release();
+		// A answers what it saw when it started: absent, so the document.
+		expect(isClientIdMetadataDocumentClient(await lookupA)).toBe(true);
+		expect(calls).toHaveLength(1);
 	});
 
 	it("refuses even when the document is cached from before the registration went bad", async () => {
@@ -156,13 +187,18 @@ describe("a refused registration never falls through to a document", () => {
 });
 
 describe("an absent registration still resolves the document", () => {
-	it("resolves the document as before, unvalidated by core and recognised as a document client", async () => {
+	it("resolves the document as before, the resolver's own object rather than core's copy, recognised as a document client", async () => {
 		const { fetch, calls } = fakeFetch([() => json(document())]);
 		const { repository } = switchable(() => null);
-		const client = await cimd(repository, fetch).findById(CLIENT_URL);
+		const repo = cimd(repository, fetch);
+		const client = await repo.findById(CLIENT_URL);
 		expect(client?.clientId).toBe(CLIENT_URL);
 		expect(client?.firstParty).toBe(false);
 		expect(isClientIdMetadataDocumentClient(client)).toBe(true);
+		// Not passed through core's boundary, whose answers are frozen copies:
+		// the same object again from the resolver's cache, unfrozen.
+		expect(Object.isFrozen(client)).toBe(false);
+		expect(await repo.findById(CLIENT_URL)).toBe(client);
 		expect(calls).toHaveLength(1);
 	});
 
@@ -239,13 +275,30 @@ describe("one fallback, over one boundary", () => {
 		expect(() => cimd(once, fetch)).toThrow(/Client ID Metadata Document/);
 	});
 
-	it("reads a repository already behind core's boundary once per lookup, not twice", async () => {
-		const { fetch } = fakeFetch([]);
-		const { repository } = switchable(() => registered());
-		const findById = vi.spyOn(repository, "findById");
-		const repo = cimd(validatedClientRepository(repository), fetch);
-		expect(await repo.findById(CLIENT_URL)).not.toBeNull();
-		expect(findById).toHaveBeenCalledTimes(1);
+	it("refuses a registration through a boundary built before the fallback, and never fetches", async () => {
+		// The composition core's slot wrap will produce: the fallback over a
+		// repository already behind the boundary, read as the same boundary.
+		const { fetch, calls } = fakeFetch([() => json(document())]);
+		const logger = recordingLogger();
+		const { repository } = switchable(() => registered({ clientName: "" }));
+		const repo = cimd(validatedClientRepository(repository, { logger }), fetch);
+		expect(await repo.findById(CLIENT_URL)).toBeNull();
+		expect(calls).toEqual([]);
+		expect(
+			logger.warn.mock.calls.filter(([, message]) => message === "client_record_refused"),
+		).toHaveLength(1);
+	});
+
+	it("says nothing of a refused registration when given no logger, as it says nothing of a refused document", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { fetch } = fakeFetch([]);
+			const { repository } = switchable(() => registered({ clientName: "" }));
+			expect(await cimd(repository, fetch).findById(CLIENT_URL)).toBeNull();
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	it("authenticates through the boundary, a refused record answering null", async () => {

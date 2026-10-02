@@ -581,16 +581,20 @@ const documentFallbacks = new WeakSet<ClientRepository>();
  * `authenticate` is `inner`'s alone, through the boundary: a document never
  * carries a secret.
  *
- * One fallback per composition: `inner` that is already such a repository is
- * refused with a `TypeError`. Its own lookup answers a refusal `null`, so a
- * second fallback over it would read the refusal as an absence.
+ * One fallback per composition. Its own `findById` answers a refusal `null`,
+ * so anything over it reads the refusal as an absence. A fallback passed in
+ * directly as `inner` is refused with a `TypeError`; that check recognises
+ * only the object this function returned, not one behind a forwarder or
+ * built by another loaded copy of this package.
  *
- * Interim composition rule, until core installs its boundary in the
- * `clientRepository` slot: the boundary is the outermost layer over the
- * registered clients, this fallback is the only one and is never wrapped,
- * and one copy of core and of this package is loaded. A fallback is
- * recognised by object identity, so a forwarder over one, or a fallback or
- * boundary from another loaded copy, would read a refusal as an absence.
+ * Interim composition rule, until a refusal is carried on the answer itself
+ * rather than recognised by object identity (the step that installs core's
+ * boundary in the `clientRepository` slot): the boundary sits over the
+ * registered clients, under this fallback, never over it; this fallback is
+ * the only one and is never wrapped by anything, including core's
+ * `validatedClientRepository`; and one copy of core and of this package is
+ * loaded. Without a logger, a refused registration is not logged, as a
+ * refused document is not.
  */
 export function withClientIdMetadataDocuments(
 	inner: ClientRepository,
@@ -602,10 +606,12 @@ export function withClientIdMetadataDocuments(
 				"a composition has one such fallback, over its registered clients",
 		);
 	}
-	const registered = validatedClientRepository(
-		inner,
-		opts.logger === undefined ? {} : { logger: opts.logger },
-	);
+	// Without a logger the fallback says nothing of a refused registration, as
+	// the resolver says nothing of a refused document; core's own default
+	// would write it to the console.
+	const registered = validatedClientRepository(inner, {
+		logger: opts.logger ?? { warn: () => {} },
+	});
 	const resolver = createClientIdMetadataDocumentResolver(opts);
 	const fallback: ClientRepository = {
 		async findById(clientId) {
@@ -617,6 +623,12 @@ export function withClientIdMetadataDocuments(
 					return null;
 				case "absent":
 					return resolver.resolve(clientId);
+				default: {
+					// Fail closed: a verdict this code does not know (core newer than
+					// it) is no client, never a document, and never `undefined`.
+					lookup satisfies never;
+					return null;
+				}
 			}
 		},
 		authenticate: (clientId, secret) => registered.authenticate(clientId, secret),
