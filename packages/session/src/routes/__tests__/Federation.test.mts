@@ -1502,6 +1502,42 @@ describe("account linking across federations", () => {
 			);
 		});
 
+		describe.each(["login", "link"] as const)("on the %s path", (path) => {
+			it.each([
+				["an Invalid Date", () => new Date(Number.NaN)],
+				["an ISO string", () => new Date(Date.now() + 3_600_000).toISOString()],
+				["a number", () => Date.now() + 3_600_000],
+			])(
+				"an expiresAt that is %s names no end a store can keep: refused as a failed exchange, and nothing is linked",
+				async (_label, expiresAt) => {
+					// A store keeps an Invalid Date as no finite end, never refreshed,
+					// and refuses any other value as an outage.
+					const provider = makeFakeProvider({
+						exchangeCode: vi.fn(
+							async () =>
+								({
+									issuer: "https://idp.example.com",
+									sub: "external-42",
+									accessToken: "at",
+									expiresAt: expiresAt(),
+								}) as unknown as FederationProfile,
+						),
+					});
+					const logger = spyLogger();
+					const { res, fts, repo } = await runCallback(path, provider, logger as unknown as Logger);
+
+					expect(res.status).toBe(502);
+					expect(res.body.error).toBe("exchange_failed");
+					expect(fts.attach).not.toHaveBeenCalled();
+					expect(repo.authenticateByToken).not.toHaveBeenCalled();
+					expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+					const warned = logger.warn.mock.calls.map((call) => call[1]);
+					expect(warned).toEqual(["federation_callback_exchange_failed"]);
+					expect(logger.error).not.toHaveBeenCalled();
+				},
+			);
+		});
+
 		it.each(["login", "link"] as const)(
 			"on the %s path, an expires_in lifetime is counted from the instant before the exchange",
 			async (path) => {

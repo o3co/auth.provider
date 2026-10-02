@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -848,7 +848,8 @@ URL is exactly what the adapter returned.
 2. **`exchangeCode` throwing is `502 exchange_failed`.** Every refusal inside an
    adapter — a wrong `iss`, a bad id_token, a UserInfo mismatch — surfaces this
    way and never reaches the Store, and so does an answer whose `expiresIn` or
-   `expiresAt` throws when read. A profile without `sub` is
+   `expiresAt` throws when read, or whose `expiresAt` is neither absent,
+   `null` nor a `Date` holding an instant. A profile without `sub` is
    `400 invalid_profile`. The warning, `federation_callback_exchange_failed`
    (the provider bound on the line), carries core's `loggableError(err)`,
    never the error itself: an OAuth
