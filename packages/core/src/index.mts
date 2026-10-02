@@ -666,6 +666,8 @@ export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./m
 // and a Store's own implementation (or a fake of one)
 export {
 	fromMfaStoreFactor,
+	type MfaStoreCreateIfAnswer,
+	type MfaStoreCreateIfRequest,
 	type MfaStoreCreateRequest,
 	type MfaStoreDeleteRequest,
 	type MfaStoreFactor,
@@ -675,13 +677,21 @@ export {
 	type MfaStoreListReading,
 	type MfaStoreListRequest,
 	type MfaStoreMarkEnrolledRequest,
+	type MfaStoreRemoveIfAnswer,
+	type MfaStoreRemoveIfRequest,
 	type MfaStoreUpdateAnswer,
 	type MfaStoreUpdateRequest,
+	type MfaStoreVersionedListAnswer,
+	readMfaStoreCreateIfAnswer,
 	readMfaStoreFactor,
 	readMfaStoreFactorChanges,
 	readMfaStoreListAnswer,
+	readMfaStoreRemoveIfAnswer,
+	readMfaStoreVersionedListAnswer,
+	toMfaStoreCreateIfRequest,
 	toMfaStoreFactor,
 	toMfaStoreFactorChanges,
+	toMfaStoreRemoveIfRequest,
 	toMfaStoreUpdateRequest,
 } from "./mfa/storeWire.mjs";
 export {

@@ -34,6 +34,9 @@ export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal" |
  * trailing `...args` keeps string-first call sites compiling; `consoleLogger`
  * forwards them verbatim to `console.*`, and is the fallback when the
  * optional `ComponentMap.logger` slot is empty.
+ *
+ * A logger must not throw; a throwing logger may turn an outage into a
+ * rejection.
  */
 export interface Logger {
 	// Two overload shapes mirror pino: object-first carries structured
