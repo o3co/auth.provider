@@ -91,7 +91,10 @@ describe("what the template expects of session admission", () => {
 				env: { ...SINGLE_ENV, ...MFA_ENV, MFA_MODE: mode },
 				environment: "test",
 			});
-			expect(current.config.core?.sessionRequirements).toEqual({ expected: ["mfa"] });
+			expect(current.config.core?.sessionRequirements).toEqual({
+				expected: ["mfa"],
+				secondFactorAuthority: "mfa",
+			});
 			expect(
 				[...(current.handle.components.sessionRequirementResolver?.entries() ?? [])].map(
 					([name]) => name,
@@ -203,23 +206,62 @@ describe("what the template hands boot of the mfa section", () => {
 });
 
 describe("expectedSessionRequirements", () => {
-	const of = (mfa: string, expected?: readonly string[]) =>
+	const of = (mfa: string, expected?: readonly string[], authority?: string) =>
 		expectedSessionRequirements({
 			mfaMode: mfa,
-			...(expected === undefined ? {} : { core: { sessionRequirements: { expected } } }),
+			...(expected === undefined && authority === undefined
+				? {}
+				: {
+						core: {
+							sessionRequirements: {
+								...(expected === undefined ? {} : { expected }),
+								...(authority === undefined ? {} : { secondFactorAuthority: authority }),
+							},
+						},
+					}),
 		} as unknown as Switches);
+	const AUTHORITY = { secondFactorAuthority: "mfa" } as const;
 
-	it("is the configuration's list, with mfa added once when the switch is not off", () => {
+	it("is the configuration's list, with mfa added once and named the second-factor authority when the switch is not off", () => {
 		expect(of("off", ["risk"])).toEqual({ expected: ["risk"] });
-		expect(of("optional", ["risk"])).toEqual({ expected: ["risk", "mfa"] });
-		expect(of("required", ["mfa"])).toEqual({ expected: ["mfa"] });
-		expect(of("required")).toEqual({ expected: ["mfa"] });
+		expect(of("optional", ["risk"])).toEqual({ expected: ["risk", "mfa"], ...AUTHORITY });
+		expect(of("required", ["mfa"])).toEqual({ expected: ["mfa"], ...AUTHORITY });
+		expect(of("required")).toEqual({ expected: ["mfa"], ...AUTHORITY });
 	});
 
 	it("keeps the configuration's list as written, repeats included, and adds mfa only when it is absent", () => {
-		expect(of("required", ["risk", "risk"])).toEqual({ expected: ["risk", "risk", "mfa"] });
-		expect(of("required", ["mfa", "risk", "mfa"])).toEqual({ expected: ["mfa", "risk", "mfa"] });
+		expect(of("required", ["risk", "risk"])).toEqual({
+			expected: ["risk", "risk", "mfa"],
+			...AUTHORITY,
+		});
+		expect(of("required", ["mfa", "risk", "mfa"])).toEqual({
+			expected: ["mfa", "risk", "mfa"],
+			...AUTHORITY,
+		});
 		expect(of("off", ["risk", "risk"])).toEqual({ expected: ["risk", "risk"] });
+	});
+
+	it("accepts a written second-factor authority the switch says, and keeps one written under the switch off", () => {
+		expect(of("required", ["mfa"], "mfa")).toEqual({ expected: ["mfa"], ...AUTHORITY });
+		expect(of("off", ["risk"], "risk")).toEqual({
+			expected: ["risk"],
+			secondFactorAuthority: "risk",
+		});
+	});
+
+	it("refuses, with the switch on, a written second-factor authority other than mfa, naming the key and the switch and quoting nothing", () => {
+		let err: unknown;
+		try {
+			of("required", ["mfa", "sentinel-requirement"], "sentinel-requirement");
+		} catch (caught) {
+			err = caught;
+		}
+		expect(err).toBeInstanceOf(RangeError);
+		const message = (err as RangeError).message;
+		expect(message).toContain("core.sessionRequirements.secondFactorAuthority");
+		expect(message).toContain("mfaMode");
+		expect(message).toContain("MFA_MODE");
+		expect(message).not.toContain("sentinel-requirement");
 	});
 
 	it("declares nothing when the configuration writes no list and the switch is off, so boot's own rule for an unwritten key applies", () => {

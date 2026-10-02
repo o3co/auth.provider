@@ -35,6 +35,7 @@ import {
 	BootError,
 	createApp,
 	defineModule,
+	type Module,
 	memoryMfaFactorStoreModule,
 	memoryMfaTransactionStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
@@ -232,9 +233,12 @@ describe.each(["optional", "required"] as const)("MFA_MODE=%s", (mode) => {
 		}
 	});
 
-	it("declares mfa, which the MFA module registers as the second-factor authority, and writes mfa.mode from the switch", async () => {
+	it("declares mfa as the second-factor authority, which the MFA module registers, and writes mfa.mode from the switch", async () => {
 		current = await boot({ env: on(mode) });
-		expect(current.config.core?.sessionRequirements).toEqual({ expected: ["mfa"] });
+		expect(current.config.core?.sessionRequirements).toEqual({
+			expected: ["mfa"],
+			secondFactorAuthority: "mfa",
+		});
 		const mfa = current.handle.components.sessionRequirementResolver?.get("mfa");
 		expect(mfa?.secondFactorAuthority).toBe(true);
 		expect((current.config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe(mode);
@@ -568,16 +572,19 @@ async function bootShipped(
 	env: Readonly<Record<string, string>>,
 	configEnv: string,
 	environment: string = configEnv,
+	adjustModules: (modules: Module[]) => Module[] = (modules) => modules,
 ): Promise<{ readonly logger: RecordingLogger; readonly config: AppConfig }> {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
 	const own = readOwnLayers([envConfPath, applicationConfPath], { env });
 	const switches = readSwitches(own);
 	const logger = createRecordingLogger();
-	const modules = buildModules(switches, {
-		environment,
-		logger,
-		refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
-	});
+	const modules = adjustModules(
+		buildModules(switches, {
+			environment,
+			logger,
+			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+		}),
+	);
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
@@ -619,6 +626,33 @@ describe("over the Store's HTTP user repository", () => {
 			"test",
 		);
 		expect(warned(logger, "mfa_enrollment_witness_unwritable")).toEqual([]);
+	});
+});
+
+describe("a deployment that takes MFA's modules out of buildModules() under MFA_MODE=required", () => {
+	it("is refused at boot when it registers an mfa of its own that is not the second-factor authority", async () => {
+		const impostor = defineModule({
+			name: "deployment:named-mfa",
+			contributes: {
+				sessionRequirements: {
+					mfa: (): SessionRequirement => ({
+						name: "mfa",
+						secondFactorAuthority: false,
+						reach: new Set(),
+						stepUpPage: undefined,
+						remediations: [],
+						hintKeys: [],
+						admit: async () => ({ outcome: "met" }),
+					}),
+				},
+			},
+		} as never);
+		await expect(
+			bootShipped({ ...SHIPPED_ENV, ...MAIL_ENV }, "production", "test", (modules) => [
+				...modules.filter((m) => !MFA_MODULE_NAMES.includes(m.name)),
+				impostor,
+			]),
+		).rejects.toBeInstanceOf(BootError);
 	});
 });
 

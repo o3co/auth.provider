@@ -768,7 +768,9 @@ install the MFA module, the TOTP, recovery-code and email factors (email off
 unless `MFA_EMAIL_FACTOR_ENABLED`), the operator reset
 (`handle.components.mfaReset`), the session package's login completion and
 the two MFA stores `adapters` selects. The template then adds `mfa` to
-`core.sessionRequirements.expected` and writes `mfa.mode` from the switch, so
+`core.sessionRequirements.expected`, names it
+`core.sessionRequirements.secondFactorAuthority` and writes `mfa.mode` from
+the switch, so
 a composition that asks for a second factor and cannot enforce one is refused
 at boot rather than let a password alone sign in; a value that is none of the
 three is refused before boot, naming `mfaMode` and `MFA_MODE`.
@@ -1190,7 +1192,7 @@ To add a custom module, import it in `src/buildModules.mts` and add it to the ar
 
 Keep the other rules there too: the session store module stays first, and a module that fills a store slot replaces that slot's adapter switch rather than being added beside it. [`src/app.mts`](src/app.mts) needs no change: it passes `buildModules(config, …)` to `createApp`, mounts the router `createApp` returns, and wires the server's lifetime — `installGracefulShutdown` (below) drains it and calls `handle.dispose()`. The exception is a mail sender of your own: it goes in through the `mailSenderModules` override in that call (rule 7), not into the list, where it would collide with the bundled sender on the `mailSender` slot.
 
-A module that contributes a session requirement changes what "logged in" means, so its name goes in `core.sessionRequirements.expected`, which `config/application.conf` ships as `[]`. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `MFA_MODE` installs MFA, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote; the MFA module it installs registers `mfa` and declares the second-factor authority. Core refuses a second requirement named `mfa`, and a second requirement declaring the authority (`duplicate-second-factor-authority`), so a module you add cannot stand in for it. Install MFA through `MFA_MODE`, not by adding its modules to the list: the template would install them a second time.
+A module that contributes a session requirement changes what "logged in" means, so its name goes in `core.sessionRequirements.expected`, which `config/application.conf` ships as `[]`. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). When `MFA_MODE` installs MFA, the template adds `mfa` to the list (`expectedSessionRequirements`, [`src/configPath.mts`](src/configPath.mts)), keeping the names you wrote, and writes `core.sessionRequirements.secondFactorAuthority = "mfa"` beside it; a value of your own there other than `mfa` is refused before boot. The MFA module it installs registers `mfa` and declares the second-factor authority. Core refuses a declared authority whose requirement does not declare it, a second requirement named `mfa`, and a second requirement declaring the authority (`duplicate-second-factor-authority`), so a module you add cannot stand in for it. Install MFA through `MFA_MODE`, not by adding its modules to the list: the template would install them a second time.
 
 ### Shutdown guarantees
 

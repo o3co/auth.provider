@@ -268,7 +268,10 @@ describe("phase two: what createApp is handed", () => {
 		) as unknown as Record<string, Record<string, unknown>>;
 		// An environment variable's string, as HOCON substituted it: createApp parses it.
 		expect(resolved.http?.port).toBe("8080");
-		expect(resolved.core?.sessionRequirements).toEqual({ expected: ["mfa"] });
+		expect(resolved.core?.sessionRequirements).toEqual({
+			expected: ["mfa"],
+			secondFactorAuthority: "mfa",
+		});
 	});
 });
 

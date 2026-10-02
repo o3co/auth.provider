@@ -238,23 +238,47 @@ export function readLogging(own: OwnLayers): LoggingSettings {
 
 /**
  * What this composition expects of session admission, from phase one: the
- * configuration's `core.sessionRequirements.expected` as written, with `mfa`
- * appended when the template's MFA switch, `mfaMode`, is not `off` and
- * the list does not name it — the switch installs the MFA module, whose
- * requirement registers `mfa`, and boot refuses a declared name nothing
- * registers (`session-requirement-missing`). With no list written and the
- * switch `off`, nothing is declared, and boot's rule for an unwritten key
- * applies. Computed here because HOCON has no conditional.
+ * configuration's `core.sessionRequirements` as written, with `mfa` appended
+ * to `expected` when the template's MFA switch, `mfaMode`, is not `off` and
+ * the list does not name it, and `secondFactorAuthority` written as `mfa`
+ * beside it — the switch installs the MFA module, whose requirement registers
+ * `mfa` as the second-factor authority, and boot refuses a declared name
+ * nothing registers (`session-requirement-missing`) and a declared authority
+ * the requirement of that name does not declare. With the switch on, a
+ * written `secondFactorAuthority` other than `mfa` is a `RangeError` naming
+ * the key, `mfaMode` and `MFA_MODE`, quoting nothing. With the switch `off`
+ * the section is as written, and with nothing written nothing is declared:
+ * boot's rule for an unwritten key applies. Computed here because HOCON has
+ * no conditional.
  */
 export function expectedSessionRequirements(
 	switches: Pick<Switches, "core" | "mfaMode">,
 ): SessionRequirements {
-	const written = switches.core?.sessionRequirements?.expected;
+	const written = switches.core?.sessionRequirements as
+		| { readonly expected?: readonly string[]; readonly secondFactorAuthority?: unknown }
+		| undefined;
 	if (switches.mfaMode === "off") {
-		return written === undefined ? undefined : { expected: [...written] };
+		return (
+			written === undefined
+				? undefined
+				: {
+						...written,
+						...(written.expected === undefined ? {} : { expected: [...written.expected] }),
+					}
+		) as SessionRequirements;
 	}
-	const declared = [...(written ?? [])];
-	return { expected: declared.includes("mfa") ? declared : [...declared, "mfa"] };
+	const authority = written?.secondFactorAuthority;
+	if (authority !== undefined && authority !== "mfa") {
+		throw new RangeError(
+			`core.sessionRequirements.secondFactorAuthority is written and names a requirement other than the one ${MFA_SWITCH} (MFA_MODE) installs as the second-factor authority: remove it, or write mfa`,
+		);
+	}
+	const declared = [...(written?.expected ?? [])];
+	return {
+		...written,
+		expected: declared.includes("mfa") ? declared : [...declared, "mfa"],
+		secondFactorAuthority: "mfa",
+	} as SessionRequirements;
 }
 
 /**

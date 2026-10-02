@@ -474,7 +474,7 @@ core.federations {
 
 ### 多要素認証
 
-パスワードログインの後の第二要素と、relying party が `/authorize` で求めたときのステップアップ — [MFA パッケージ](../../packages/mfa/README.md)。`MFA_MODE` はテンプレート自身のスイッチ `mfaMode`（[`config/reference.conf`](config/reference.conf)）である: デフォルトの `off` は MFA を何も組み込まない。`optional`（要素を持つユーザーには求め、誰にも強制しない）と `required`（すべてのパスワードログインに第二要素がある）は、MFA モジュール、TOTP・リカバリーコード・メールの各要素（メールは `MFA_EMAIL_FACTOR_ENABLED` が無ければ off）、オペレーターによるリセット（`handle.components.mfaReset`）、session パッケージのログイン完了、`adapters` が選ぶ 2 つの MFA ストアを組み込む。そのときテンプレートは `core.sessionRequirements.expected` に `mfa` を加え、`mfa.mode` をスイッチから書く。したがって、第二要素を求めながらそれを強制できない合成は、パスワードだけでサインインさせるのではなく boot で拒否される。3 つのどれでもない値は、`mfaMode` と `MFA_MODE` を名指して boot の前に拒否される。
+パスワードログインの後の第二要素と、relying party が `/authorize` で求めたときのステップアップ — [MFA パッケージ](../../packages/mfa/README.md)。`MFA_MODE` はテンプレート自身のスイッチ `mfaMode`（[`config/reference.conf`](config/reference.conf)）である: デフォルトの `off` は MFA を何も組み込まない。`optional`（要素を持つユーザーには求め、誰にも強制しない）と `required`（すべてのパスワードログインに第二要素がある）は、MFA モジュール、TOTP・リカバリーコード・メールの各要素（メールは `MFA_EMAIL_FACTOR_ENABLED` が無ければ off）、オペレーターによるリセット（`handle.components.mfaReset`）、session パッケージのログイン完了、`adapters` が選ぶ 2 つの MFA ストアを組み込む。そのときテンプレートは `core.sessionRequirements.expected` に `mfa` を加え、それを `core.sessionRequirements.secondFactorAuthority` に書き、`mfa.mode` をスイッチから書く。したがって、第二要素を求めながらそれを強制できない合成は、パスワードだけでサインインさせるのではなく boot で拒否される。3 つのどれでもない値は、`mfaMode` と `MFA_MODE` を名指して boot の前に拒否される。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
@@ -736,7 +736,7 @@ probe は接続を開いた builder が登録するため、リストはこの�
 
 そこにある他のルールも守ること: セッションストアモジュールは先頭のままにし、ストアスロットを埋めるモジュールは、そのスロットのアダプタースイッチの横に追加するのではなく、スイッチを置き換える。[`src/app.mts`](src/app.mts) は変更不要である: `buildModules(config, …)` を `createApp` に渡し、`createApp` が返すルーターをマウントし、サーバーのライフタイムを配線している — `installGracefulShutdown`（下記）がサーバーを drain し、`handle.dispose()` を呼ぶ。例外は独自のメール送信者で、これはリストに足すのではなく、その呼び出しの `mailSenderModules` override から入れる（ルール 7）。リストに足すと、同梱の送信者と `mailSender` スロットで衝突する。
 
-セッション要件を寄与するモジュールは「ログイン済み」の意味を変えるので、その名前を `core.sessionRequirements.expected` に書く。`config/application.conf` はこれを `[]` として出荷する。boot はこのリストをモジュールが登録したものと比較する。リストにあって何も登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件をリストが書き漏らしても拒否する（`session-requirements-undeclared`）。`MFA_MODE` が MFA を組み込むとき、テンプレートはリストに `mfa` を加える（`expectedSessionRequirements`、[`src/configPath.mts`](src/configPath.mts)）。書いた名前はそのまま残る。テンプレートが組み込む MFA モジュールが `mfa` を登録し、第二要素の権限（second-factor authority）を宣言する。core は `mfa` という名前の二つ目の要件も、権限を宣言する二つ目の要件（`duplicate-second-factor-authority`）も拒否するので、追加したモジュールがその代わりになることはない。MFA はリストにモジュールを加えるのではなく `MFA_MODE` で組み込む: そうしなければテンプレートがそれらを二度組み込むことになる。
+セッション要件を寄与するモジュールは「ログイン済み」の意味を変えるので、その名前を `core.sessionRequirements.expected` に書く。`config/application.conf` はこれを `[]` として出荷する。boot はこのリストをモジュールが登録したものと比較する。リストにあって何も登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件をリストが書き漏らしても拒否する（`session-requirements-undeclared`）。`MFA_MODE` が MFA を組み込むとき、テンプレートはリストに `mfa` を加える（`expectedSessionRequirements`、[`src/configPath.mts`](src/configPath.mts)）。書いた名前はそのまま残り、その横に `core.sessionRequirements.secondFactorAuthority = "mfa"` を書く。そこに `mfa` 以外の値を自分で書くと boot の前に拒否される。テンプレートが組み込む MFA モジュールが `mfa` を登録し、第二要素の権限（second-factor authority）を宣言する。core は、宣言された権限の要件がそれを宣言していないことも、`mfa` という名前の二つ目の要件も、権限を宣言する二つ目の要件（`duplicate-second-factor-authority`）も拒否するので、追加したモジュールがその代わりになることはない。MFA はリストにモジュールを加えるのではなく `MFA_MODE` で組み込む: そうしなければテンプレートがそれらを二度組み込むことになる。
 
 ### シャットダウンの保証
 

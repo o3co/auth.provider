@@ -954,7 +954,10 @@ describe("the shipped config boots with every documented override supplied as a 
 			it(`reads MFA_MODE=${mode} as the switch that installs MFA, expecting mfa`, () => {
 				const switches = readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: mode });
 				expect(switches.mfaMode).toBe(mode);
-				expect(expectedSessionRequirements(switches)).toEqual({ expected: ["mfa"] });
+				expect(expectedSessionRequirements(switches)).toEqual({
+					expected: ["mfa"],
+					secondFactorAuthority: "mfa",
+				});
 			});
 		}
 
