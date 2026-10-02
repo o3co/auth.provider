@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-10-01
+最終更新: 2026-10-02
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -797,6 +797,8 @@ audit-sink {
   splunk-hec { endpoint = ${?SPLUNK_HEC_URL}, token = ${?SPLUNK_HEC_TOKEN} }
 }
 ```
+
+設定した送り先と並べて監査の送り先を加えるには、自分のモジュールから `auditHooks` を寄与する。core は `auditSink` と `auditHooks` をまとめてファンアウトする。
 
 sink は契約上 fire-and-forget である: core は await せずにディスパッチし、reject を握りつぶすため、遅い sink や失敗する sink が認証フローにレイテンシを加えたり、フローを失敗させたりすることはない。その裏返しとして、配信できない sink はイベントを黙って落とし、その取りこぼしはまだカウントされていない — 下記「メトリクス」の **まだ公開していないもの** を参照。
 

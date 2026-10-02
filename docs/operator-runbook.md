@@ -1080,6 +1080,13 @@ wires it.
   they date both the sign-ins and the mark. The mark stands
   `max(mfa.manage.maxAgeSeconds, 2 × mfa.transactionTtlSeconds)` plus
   10 minutes and one factor-set lease (31 minutes 20 seconds by default).
+  **What the mark leaves open.** The stretch between a mark's note and the
+  witness's mark is a documented residual (the MFA ADR's D12): the mark is
+  noted once, so a sign-in past it can make a first binding only when all
+  three hold — a request stalled past `DEFAULT_CLOCK_SKEW_MS` between its
+  note and its witness's mark; another sign-in of the same subject in that
+  stretch; and a lost factor-store record, the one that request wrote. A
+  durable factor store (AOF on, no eviction) stands against the third.
   A login whose subject's sessions were revoked, or whose password changed,
   after it began is `401 login_required` at its next call on the MFA
   routes (`mfa_login_revoked`, info), and binds and spends nothing; with
