@@ -98,7 +98,8 @@ function spyLogger() {
 
 /**
  * The router over a per-request session and an express-session store backed
- * by `records`, whose `destroy` fails when `failDestroy` is set. `trail`
+ * by `records`, whose `destroy` fails when `failDestroy` is set, throwing
+ * its `reason` when one is given. `trail`
  * receives `"session_dropped"` when a route drops the request's session.
  */
 function buildApp({
@@ -108,7 +109,7 @@ function buildApp({
 	dropThrows = false,
 	withoutPolicies = false,
 }: {
-	failDestroy?: boolean;
+	failDestroy?: boolean | { readonly reason: unknown };
 	logger?: ReturnType<typeof spyLogger>;
 	trail?: string[];
 	/** Make dropping the request's session throw. */
@@ -122,7 +123,10 @@ function buildApp({
 		get: backing.get,
 		set: backing.set,
 		destroy(sid: string, cb?: (err?: unknown) => void) {
-			if (failDestroy) return cb?.(new Error("store down"));
+			if (failDestroy) {
+				if (failDestroy !== true) throw failDestroy.reason;
+				return cb?.(new Error("store down"));
+			}
 			backing.destroy(sid, cb);
 		},
 	};
@@ -325,6 +329,44 @@ describe("a refused form_post callback whose transaction cannot be discarded", (
 		// express-session does not write to the failing store again.
 		expect(trail).toEqual(["federation_cleanup_failed", "session_dropped"]);
 	});
+
+	it.each([
+		["undefined", undefined],
+		["null", null],
+		["0", 0],
+		["an empty string", ""],
+	])(
+		"still logs the failed discard and drops the session when the delete rejects with %s",
+		async (_name, reason) => {
+			const { app, records } = buildApp();
+			const flow = await startFormPost(app);
+			const logger = spyLogger();
+			const trail: string[] = [];
+			logger.warn.mockImplementation((_context: unknown, name: string) => {
+				trail.push(name);
+			});
+			const { app: broken, records: brokenRecords } = buildApp({
+				failDestroy: { reason },
+				logger,
+				trail,
+			});
+			for (const [key, value] of records) brokenRecords.set(key, value);
+
+			const res = await request(broken)
+				.post("/oauth/federation/apple/callback")
+				.set("Cookie", flow.cookie)
+				.type("form")
+				.send({ state: "not-the-state", code: "c" });
+
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("invalid_state");
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+			const [context, name] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+			expect(name).toBe("federation_cleanup_failed");
+			expect(context).toMatchObject({ store: "federation_transaction", step: "delete" });
+			expect(trail).toEqual(["federation_cleanup_failed", "session_dropped"]);
+		},
+	);
 
 	it("keeps the session when the discard succeeds", async () => {
 		const trail: string[] = [];

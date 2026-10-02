@@ -45,7 +45,7 @@ import {
 	recoverySetRefusal,
 	recoverySetShown,
 } from "#/recovery/factor.mjs";
-import { issueRecoveryCodes } from "#/recovery/issue.mjs";
+import { issueRecoveryCodes, writeRecoveryCodes } from "#/recovery/issue.mjs";
 import { mfaRecoveryCodeFactorModule } from "#/recovery/module.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 import { mfaRecoveryCodeFactorConfigForTests } from "#/testing/index.mjs";
@@ -449,6 +449,86 @@ describe("issueRecoveryCodes", () => {
 			},
 		};
 		expect(await issue({ sealing: brokenSealing })).toEqual({ issued: false, cause: broken });
+	});
+});
+
+describe("writeRecoveryCodes", () => {
+	const sealing = createMfaSealing({ ring: [{ id: "k1", key: randomBytes(32) }] });
+	const factor = createRecoveryCodeFactor({ count: 10 });
+	const factors: MfaFactorResolver = {
+		get: (kind) => (kind === RECOVERY_CODE_FACTOR_KIND ? factor : undefined),
+		entries: function* () {
+			yield [RECOVERY_CODE_FACTOR_KIND, factor] as const;
+		},
+	};
+	const write = (factorStore: MfaFactorStore, markedThrough: MfaFactorStore = factorStore) =>
+		writeRecoveryCodes({
+			factors,
+			writes: { factorStore, recoverySetFloor: floorAt() },
+			sealing,
+			subject: "u-alice",
+			binding: "email_proof",
+			nowMs: 1_900_000_000_000,
+			markedThrough,
+		});
+	/** The subject's one set as stored: its version, and whether it was shown. */
+	const storedSet = async (factorStore: MfaFactorStore) => {
+		const [record, ...rest] = await factorStore.list("u-alice");
+		expect(rest).toEqual([]);
+		if (record === undefined) throw new Error("no set");
+		const opened = sealing.openFactorData(record, record.data);
+		return {
+			version: record.version,
+			shown: opened.state === "ok" ? opened.value.shown : "unreadable",
+		};
+	};
+
+	it("writes the set unshown, its codes reached only by show, which marks it shown through the store it names", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const outside = createMemoryMfaFactorStore();
+		const update = vi
+			.spyOn(outside, "update")
+			.mockImplementation(factorStore.update.bind(factorStore));
+
+		const written = await write(factorStore, outside);
+
+		expect(written).toEqual({ written: "unshown", show: expect.any(Function) });
+		expect(await storedSet(factorStore)).toEqual({ version: 0, shown: false });
+		if (written === undefined || !("written" in written)) throw new Error("not written");
+		const shown = await written.show();
+		expect(shown).toEqual({ issued: true, codes: expect.any(Array), regenerated: false });
+		expect(update).toHaveBeenCalledTimes(1);
+		expect(await storedSet(factorStore)).toEqual({ version: 1, shown: true });
+	});
+
+	it("answers the codes once: a second show finds the set changed and answers none", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const written = await write(factorStore);
+		if (written === undefined || !("written" in written)) throw new Error("not written");
+		expect((await written.show()).issued).toBe(true);
+
+		const again = await written.show();
+
+		expect(again).toEqual({ issued: false, cause: expect.any(Error) });
+		expect(again).not.toHaveProperty("codes");
+		expect(await storedSet(factorStore)).toEqual({ version: 1, shown: true });
+	});
+
+	it("answers no codes, and never throws, when the set was removed or the mark fails: the set left unshown", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const removed = await write(factorStore);
+		if (removed === undefined || !("written" in removed)) throw new Error("not written");
+		const [record] = await factorStore.list("u-alice");
+		if (record === undefined) throw new Error("no set");
+		await factorStore.remove("u-alice", record.id);
+		expect(await removed.show()).toEqual({ issued: false, cause: expect.any(Error) });
+
+		const down = new Error("factor store unreachable");
+		const failing = { ...factorStore, update: vi.fn().mockRejectedValue(down) };
+		const unmarked = await write(factorStore, failing);
+		if (unmarked === undefined || !("written" in unmarked)) throw new Error("not written");
+		expect(await unmarked.show()).toEqual({ issued: false, cause: down });
+		expect(await storedSet(factorStore)).toEqual({ version: 0, shown: false });
 	});
 });
 

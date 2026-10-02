@@ -40,8 +40,9 @@
  *   an `enroll` transaction owing the account-email proof (`stepUp.mts`); a verified proof
  *   on one is recorded for its session alone, standing
  *   `mfa.manage.maxAgeSeconds`. The step-up of a subject holding one opens,
- *   or uses, a `step_up` transaction, opened only when the session store can
- *   record it.
+ *   or uses, a `step_up` transaction, opened only where admission's view says
+ *   a second factor can be recorded on the session
+ *   (`MfaCeremonySession.secondFactorRecordable`).
  * - A verification reserves its attempt before the proof is checked, consumes
  *   the transaction before the factor moves on, and on a lost compare-and-set
  *   reads the factor again and checks the proof again: a code used twice at
@@ -257,8 +258,6 @@ export interface MfaCoordinatorOptions {
 	readonly firstBindingMarkMs: number;
 	/** The subjects' sessions boundary a login's transaction is held to; none wired, none is read. */
 	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
-	/** Whether the session store can record a second factor verified in a session (`supportsSecondFactorUpdate`). */
-	readonly stepUpRecordable: boolean;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -289,7 +288,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		sessionProofSeconds,
 		firstBindingMarkMs,
 		subjectRevocation,
-		stepUpRecordable,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
@@ -656,7 +654,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "create", cause);
 			}
 		},
-		stepUpRecordable,
 		holdsUsable,
 		readSubject,
 		openLoginBinding: async (binding, continuation, shape) => {

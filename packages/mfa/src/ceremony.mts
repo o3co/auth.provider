@@ -43,7 +43,7 @@ import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
 import type { MfaSubjectRecords } from "./factorState.mjs";
 import type { RequireEmailProof, UnprovableReason } from "./firstBinding.mjs";
 import type { MfaMailRefusal } from "./mail.mjs";
-import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
+import type { MfaIssuedRecoveryCodes, MfaUnshownRecoveryCodes } from "./recovery/issue.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import type { MfaEnrollmentWitness, MfaWitnessMark } from "./witness.mjs";
 
@@ -137,6 +137,12 @@ export interface MfaCeremonySession {
 	readonly user: Readonly<Record<string, unknown>>;
 	readonly authTimeMs: number | undefined;
 	readonly witness: "enrolled" | "not_enrolled" | "malformed" | undefined;
+	/**
+	 * Whether a second factor can be recorded on the session, as admission's
+	 * view holds it (`secondFactorRecordable`); `false` without a view. A
+	 * step-up is opened only when it is `true`.
+	 */
+	readonly secondFactorRecordable: boolean;
 	/** Where a write to the subject's factor set begins, taken before the session was admitted for one (`factorSet.mts`); none for an action that writes none. */
 	readonly factorSetStart?: MfaFactorSetStart;
 }
@@ -397,7 +403,8 @@ export type MfaEnrollmentCompleteOutcome = (
 			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
 			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
 			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
-			readonly recoveryCodes: MfaIssuedRecoveryCodes;
+			/** A login's set is written unshown: the answer that carries its codes marks it (`show`). */
+			readonly recoveryCodes: MfaIssuedRecoveryCodes | MfaUnshownRecoveryCodes;
 			/** The witness marked after a first binding; `undefined` for a factor bound beside another. */
 			readonly witness: MfaWitnessMark | undefined;
 			/** Why D25's flag could not be cleared after the proof was given; `undefined` when it was, or none was due. */
@@ -417,7 +424,7 @@ export type MfaEnrollmentCompleteOutcome = (
 export type MfaStepUpOutcome =
 	| UnknownTransaction
 	| MfaStoreOutage
-	/** The session store cannot record a second factor: the session logs in again instead. */
+	/** No second factor can be recorded on the session (`MfaCeremonySession.secondFactorRecordable`): it logs in again instead. */
 	| { readonly outcome: "step_up_unrecordable" }
 	/** The subject holds no record of an installed kind whose data opens: nothing could step it up. */
 	| { readonly outcome: "no_qualifying_factor" }
@@ -507,8 +514,6 @@ export interface MfaCeremonyKit {
 	readonly holdsUsable: (read: MfaSubjectRecords) => boolean;
 	/** The subject's records read for a judgment over them (`factorState.mts`'s `readSubjectRecords`); a listing that fails is the outage. */
 	readonly readSubject: (subject: string) => Promise<MfaSubjectRecords | MfaStoreOutage>;
-	/** Whether the session store can record a second factor verified in a session: a step-up is opened only then. */
-	readonly stepUpRecordable: boolean;
 	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */
 	readonly provedInSession: (subject: string, sid: string) => Promise<boolean | MfaStoreOutage>;
 	/**

@@ -44,6 +44,7 @@ import {
 	beginEnrollment,
 	beginLogin,
 	completeEnrollment,
+	enrollFromAccount,
 	freezeClock,
 	giveEmailProof,
 	mfaPost,
@@ -51,6 +52,7 @@ import {
 	seedFactor,
 	seedTotp,
 	signInWithTotp,
+	stepUp,
 	thawClock,
 	totpProofOf,
 	verify,
@@ -140,7 +142,58 @@ const COMPLETE: SubjectRevocationReport = {
 
 describe("the subject lease's call budget", () => {
 	it.each([1, 2])(
-		"covers the longest binding: a first binding by the account-email proof, reopened after a recovery code, over %i standing set(s)",
+		"covers the longest binding: a first binding by the account-email proof in a session, over %i standing set(s)",
+		async (sets) => {
+			const factorStore = createMemoryMfaFactorStore();
+			const transactionStore = createMemoryMfaTransactionStore();
+			const set = recoverySet(3);
+			const record = await seedFactor(factorStore, "recovery_code", set.data);
+			for (let more = 1; more < sets; more++) {
+				await seedFactor(factorStore, "recovery_code", recoverySet(3).data);
+			}
+			const users = new WitnessingUserRepository(directoryEntries());
+			const sender = createRecordingMailSender();
+			const { app } = await boot({
+				config: configFor("optional"),
+				factorStore,
+				transactionStore,
+				userRepository: users,
+				mailSender: sender,
+			});
+			const { agent, transaction } = await beginLogin(app);
+			const signedIn = await verify(agent, transaction, record.id, set.codes[0]);
+			expect(signedIn.status, JSON.stringify(signedIn.body)).toBe(200);
+			const owed = await enrollFromAccount(agent, "totp");
+			expect(owed.status, JSON.stringify(owed.body)).toBe(403);
+			const opened = await stepUp(agent);
+			expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+			const proved = await giveEmailProof(agent, opened.body.transaction as string, sender);
+			expect(proved.status, JSON.stringify(proved.body)).toBe(200);
+			const begun = await enrollFromAccount(agent, "totp");
+			expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+			const counted = countUnderLease(transactionStore, transactionStore, factorStore, users);
+
+			const done = await completeEnrollment(
+				agent,
+				begun.body.transaction as string,
+				totpProofOf(begun.body.secret),
+			);
+
+			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			expect((await factorStore.list(ALICE.id)).map((one) => one.binding).sort()).toEqual([
+				"email_proof",
+				"email_proof",
+			]);
+			// The note, the consume, the factor, the records read again, D25's flag, the sets
+			// read, the floor read, the new set, the floor raised, each old set's removal,
+			// the records read again, the set marked shown, the witness.
+			expect(counted.most()).toBe(12 + sets);
+			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
+		},
+	);
+
+	it.each([1, 2])(
+		"covers a login's first binding by the account-email proof, reopened after a recovery code, over %i standing set(s)",
 		async (sets) => {
 			const factorStore = createMemoryMfaFactorStore();
 			const transactionStore = createMemoryMfaTransactionStore();
@@ -175,8 +228,8 @@ describe("the subject lease's call budget", () => {
 			]);
 			// The note, the consume, the factor, the records read again, D25's flag, the sets
 			// read, the floor read, the new set, the floor raised, each old set's removal,
-			// the records read again, the set marked shown, the witness.
-			expect(counted.most()).toBe(12 + sets);
+			// the records read again, the witness: its answer marks the set shown, past the lease.
+			expect(counted.most()).toBe(11 + sets);
 			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
 		},
 	);
