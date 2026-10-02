@@ -59,6 +59,7 @@ import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TestRedis, testRedis } from "../../../../packages/redis/__tests__/support/redis.mts";
 import {
+	addFactorRecord,
 	BINDER,
 	browser,
 	composeFullSet,
@@ -66,10 +67,9 @@ import {
 	type FullSet,
 	type FullSetOptions,
 	memoryWebAuthnCredentialStoreModule,
+	removeFactorRecords,
 	seedTotp,
 	TV,
-	addFactorRecord,
-	removeFactorRecords,
 } from "./full-set.fixture.mts";
 
 let redis: TestRedis;

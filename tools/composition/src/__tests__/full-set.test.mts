@@ -111,6 +111,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { BUNDLED_ACTIONS } from "../../../../packages/mfa/src/__tests__/bundled-actions.fixture.mts";
 import {
 	APPLE_LANDING,
+	addFactorRecord,
 	BINDER,
 	browser,
 	CLIENT_CERTIFICATE,
@@ -130,7 +131,6 @@ import {
 	REQUIRED_BINDER,
 	seedTotp,
 	TV,
-	addFactorRecord,
 } from "./full-set.fixture.mts";
 import { softwarePasskey } from "./software-passkey.mts";
 

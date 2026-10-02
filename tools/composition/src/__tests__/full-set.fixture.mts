@@ -235,7 +235,9 @@ export async function addFactorRecord(
 	const { generation } = await factorStore.listVersioned(record.subject);
 	const answer = await factorStore.createIf(record, generation);
 	if (answer.outcome !== "created") {
-		throw new Error(`the factor set moved while a test wrote to it: ${answer.outcome}`);
+		throw new Error(
+			`createIf answered ${answer.outcome}: the set moved, or the id is already stored`,
+		);
 	}
 }
 
