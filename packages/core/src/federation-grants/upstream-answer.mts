@@ -30,7 +30,12 @@ import { parseScopeTokens } from "../federations/scope.mjs";
 import { instantOf, readUpstreamTokenLifetime } from "../federations/token-lifetime.mjs";
 import type { DelegatedTokens } from "../federations/types.mjs";
 import { judgeUpstreamAccessToken } from "./eligibility.mjs";
-import { federationGrantAccessToken, type WrittenAccessToken } from "./held-token.mjs";
+import {
+	federationGrantAccessToken,
+	federationGrantHeldToken,
+	type StoredAccessToken,
+	type WrittenAccessToken,
+} from "./held-token.mjs";
 import type { FederationGrantIneligibilityReason } from "./types.mjs";
 
 export interface FederationGrantUpstreamAnswerContext {
@@ -44,6 +49,15 @@ export interface FederationGrantUpstreamAnswerContext {
 	readonly consentedScopes: readonly string[];
 	/** Seconds: the connection's current maximum. */
 	readonly maxAccessTokenLifetime: number;
+	/**
+	 * The access token the grant holds. An answer that carries the same value
+	 * never ends it later than it ends now: at `effectiveExpiresAt`, or without
+	 * one at `obtainedAt` + `issuedLifetime`. Ignored when its dates hold no instant.
+	 */
+	readonly held?: Pick<
+		StoredAccessToken,
+		"value" | "obtainedAt" | "issuedLifetime" | "effectiveExpiresAt"
+	>;
 }
 
 export interface FederationGrantUpstreamAnswer {
@@ -111,6 +125,13 @@ function snapshot(answer: unknown): AnswerSnapshot {
 	};
 }
 
+/** Epoch ms: when the held token ends; no bound when its dates hold no instant. */
+function heldEnd(held: NonNullable<FederationGrantUpstreamAnswerContext["held"]>): number {
+	const { obtainedAt, expiresAt } = federationGrantHeldToken(held);
+	const end = expiresAt.getTime();
+	return Number.isNaN(obtainedAt.getTime()) || Number.isNaN(end) ? Number.POSITIVE_INFINITY : end;
+}
+
 /**
  * Reads an upstream token answer once, and judges its access token: eligible,
  * with the token to store, or refused with the ineligibility reason. The
@@ -123,6 +144,8 @@ function snapshot(answer: unknown): AnswerSnapshot {
  *   the token type.
  * - Only a lifetime both `expiresIn` and `expiresAt` state, with life left at
  *   `receivedAt`, is finite (`readUpstreamTokenLifetime`).
+ * - The same access token as `held` ends no later than `held` does: a
+ *   re-answer never lengthens a token's life.
  *
  * Throws a `RangeError` only for a clock that is not a finite instant.
  */
@@ -164,6 +187,12 @@ export function readFederationGrantUpstreamAnswer(
 	if (reading.verdict !== "finite" || reading.stated !== "both") {
 		return refused("no_finite_lifetime");
 	}
+	const held = context.held;
+	const expiresAtMs = Math.min(
+		reading.expiresAt.getTime(),
+		held !== undefined && accessToken === held.value ? heldEnd(held) : Number.POSITIVE_INFINITY,
+	);
+	if (expiresAtMs <= context.receivedAt) return refused("no_finite_lifetime");
 	const judgement = judgeUpstreamAccessToken({
 		issuedLifetime: reading.issuedLifetime,
 		scopes,
@@ -176,7 +205,10 @@ export function readFederationGrantUpstreamAnswer(
 		refreshToken,
 		accessToken: {
 			eligible: true,
-			token: federationGrantAccessToken({ value: accessToken, tokenType, scopes }, reading),
+			token: federationGrantAccessToken(
+				{ value: accessToken, tokenType, scopes },
+				{ ...reading, expiresAt: new Date(expiresAtMs) },
+			),
 		},
 	};
 }

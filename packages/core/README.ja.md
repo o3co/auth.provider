@@ -636,7 +636,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 
 ### フェデレーショングラント
 
-フェデレーショングラントのドメイン — グラントのレコード、そのストア、lodging、取得、失効 — は [`src/federation-grants/README.md`](src/federation-grants/README.md) に記述されています。上流のトークン応答からグラントの credential を書き込むパッケージは、応答を `readFederationGrantUpstreamAnswer(answer, context)`（[`src/federation-grants/upstream-answer.mts`](src/federation-grants/upstream-answer.mts)）で読みます。取得が使うのと同じ規則です。各フィールドを一度だけ読み、リフレッシュトークンと、`federationGrantAccessToken` で組み立てた保存するアクセストークン、または不適格の理由を返します。保存するのは `readUpstreamTokenLifetime` の読み取りが `verdict: "finite"` かつ `stated: "both"` のときだけで、それ以外の読み取り（`expiresIn` だけのものを含む）は `no_finite_lifetime` として拒否します。そうした読み取りから組み立てたトークンでは、`obtainedAt` は呼び出しの開始、`issuedLifetime` は発行されたままの `expiresIn`、`effectiveExpiresAt` は読み取りの終わり `min(expiresAt, calledAt + expiresIn)` になります。
+フェデレーショングラントのドメイン — グラントのレコード、そのストア、lodging、取得、失効 — は [`src/federation-grants/README.md`](src/federation-grants/README.md) に記述されています。上流のトークン応答からグラントの credential を書き込むパッケージは、応答を `readFederationGrantUpstreamAnswer(answer, context)`（[`src/federation-grants/upstream-answer.mts`](src/federation-grants/upstream-answer.mts)）で読みます。取得が使うのと同じ規則です。各フィールドを一度だけ読み、リフレッシュトークンと、`federationGrantAccessToken` で組み立てた保存するアクセストークン、または不適格の理由を返します。保存するのは `readUpstreamTokenLifetime` の読み取りが `verdict: "finite"` かつ `stated: "both"` のときだけで、それ以外の読み取り（`expiresIn` だけのものを含む）は `no_finite_lifetime` として拒否します。そうした読み取りから組み立てたトークンでは、`obtainedAt` は呼び出しの開始、`issuedLifetime` は発行されたままの `expiresIn`、`effectiveExpiresAt` は読み取りの終わり `min(expiresAt, calledAt + expiresIn)` になります。コンテキストがグラントの保持するトークンを `held` として渡し、応答が同じアクセストークンを返したときは、`effectiveExpiresAt` は保持するトークンの終わりより後になりません。同じトークンの再応答で寿命が延びることはなく、応答が届いた時点で保持するトークンの終わりが過ぎていれば `no_finite_lifetime` として拒否します。
 
 ### OIDC id_token とクレームフィルター
 

@@ -233,6 +233,75 @@ describe("readFederationGrantUpstreamAnswer", () => {
 		});
 	});
 
+	describe("a re-answer of the token the grant holds", () => {
+		const HALF = HOUR / 2;
+		// Obtained half an hour before this call, issued for an hour: it ends half an hour after it.
+		const held = {
+			value: "at-1",
+			obtainedAt: new Date(CALLED_AT - HALF),
+			issuedLifetime: 3600,
+			effectiveExpiresAt: new Date(CALLED_AT + HALF),
+		};
+
+		it("never lengthens the end it holds: an answer that names a later end ends where the token held did", () => {
+			const read_ = read(answer(), { held });
+			if (!read_.accessToken.eligible) throw new Error("refused");
+			expect(read_.accessToken.token).toStrictEqual({
+				value: "at-1",
+				tokenType: "bearer",
+				// Dated from the call, as any answer: its half-spent point is half of what is left.
+				obtainedAt: new Date(CALLED_AT),
+				issuedLifetime: 3600,
+				effectiveExpiresAt: new Date(CALLED_AT + HALF),
+				scopes: ["openid", "calendar.read"],
+			});
+			expect(read_.accessToken.token.effectiveExpiresAt).not.toBe(held.effectiveExpiresAt);
+		});
+
+		it("ends at the answer's end when that is earlier", () => {
+			const over = { expiresIn: 600, expiresAt: new Date(CALLED_AT + 600_000) };
+			expect(read(answer(over), { held })).toStrictEqual(read(answer(over)));
+		});
+
+		it("never ends after the held token's start plus its issued lifetime, whatever end it stated", () => {
+			const stated = { ...held, effectiveExpiresAt: new Date(CALLED_AT + HOUR) };
+			const read_ = read(answer(), { held: stated });
+			if (!read_.accessToken.eligible) throw new Error("refused");
+			expect(read_.accessToken.token.effectiveExpiresAt).toStrictEqual(new Date(CALLED_AT + HALF));
+		});
+
+		it("held without its end, as a record from before the end was stored, ends at its start plus its issued lifetime", () => {
+			const { effectiveExpiresAt: _, ...legacy } = held;
+			const read_ = read(answer(), { held: legacy });
+			if (!read_.accessToken.eligible) throw new Error("refused");
+			expect(read_.accessToken.token.effectiveExpiresAt).toStrictEqual(new Date(CALLED_AT + HALF));
+		});
+
+		it("held ended by the time the answer arrives, is refused as no_finite_lifetime: the answer does not revive it", () => {
+			const ended = { ...held, effectiveExpiresAt: new Date(RECEIVED_AT) };
+			expect(read(answer(), { held: ended }).accessToken).toStrictEqual(
+				refusedFor("no_finite_lifetime"),
+			);
+		});
+
+		it.each([
+			["a start", { obtainedAt: new Date(Number.NaN) }],
+			["an end", { effectiveExpiresAt: new Date(Number.NaN) }],
+			["an issued lifetime", { issuedLifetime: Number.NaN }],
+		])(
+			"held with %s that is no instant is not believed: the answer is read as a new token",
+			(_, over) => {
+				expect(read(answer(), { held: { ...held, ...over } })).toStrictEqual(read(answer()));
+			},
+		);
+
+		it("does not touch an answer with another token", () => {
+			expect(read(answer({ accessToken: "at-2" }), { held })).toStrictEqual(
+				read(answer({ accessToken: "at-2" })),
+			);
+		});
+	});
+
 	describe("one snapshot: each field read once, and nothing of the adapter's kept", () => {
 		it("reads every field exactly once", () => {
 			const reads = new Map<PropertyKey, number>();

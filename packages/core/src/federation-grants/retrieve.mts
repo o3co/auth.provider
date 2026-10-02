@@ -489,7 +489,7 @@ type Evaluation =
 			 */
 			readonly keep?: WrittenAccessToken;
 			/** The access token that is stored, whether or not it could be disclosed. */
-			readonly stored?: string;
+			readonly stored?: WrittenAccessToken;
 	  };
 
 /** `value`, carrying the failure it was turned from where nothing enumerates it (`carry.mts`). */
@@ -870,7 +870,7 @@ async function evaluate(
 		connection,
 		refreshToken: credentials.refreshToken,
 		...(keep !== undefined ? { keep } : {}),
-		...(token !== undefined ? { stored: token.value } : {}),
+		...(token !== undefined ? { stored: token } : {}),
 	};
 }
 
@@ -1285,6 +1285,7 @@ async function refreshUnderLock(
 		requestedScopes: grant.scopes,
 		consentedScopes: grant.consent.scopes,
 		maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+		...(held.stored !== undefined ? { held: held.stored } : {}),
 	});
 	// The rotated refresh token, or the stored one when the upstream sent none that is usable.
 	const refreshToken = answered.refreshToken ?? held.refreshToken;
@@ -1490,7 +1491,8 @@ async function lastLook(
 	});
 	// A write that was replaced before this look was overtaken, whatever the
 	// caller says the attempt came to.
-	const replaced = fetched !== undefined && stored.kind === "refresh" && stored.stored !== fetched;
+	const replaced =
+		fetched !== undefined && stored.kind === "refresh" && stored.stored?.value !== fetched;
 	return conclude(
 		deps,
 		request,
