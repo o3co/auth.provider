@@ -203,6 +203,7 @@ const makeHarness = (
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 		accessTokenExpiresIn: 300,
 		now: clock.now,
+		grantPolicy: undefined,
 		...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
 		...(overrides.logger ? { logger: overrides.logger } : {}),
 	});
@@ -1273,6 +1274,7 @@ describe("the access-token lifetime it is built with", () => {
 						store: createMemoryDeviceCodeStore(),
 						keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 						accessTokenExpiresIn,
+						grantPolicy: undefined,
 					}),
 				String(accessTokenExpiresIn),
 			).toThrow(RangeError);
@@ -1289,6 +1291,7 @@ describe("the access-token lifetime it is built with", () => {
 				store: createMemoryDeviceCodeStore(),
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 				accessTokenExpiresIn,
+				grantPolicy: undefined,
 			});
 		expect(() => build(31_536_001)).toThrow(RangeError);
 		expect(() => build(31_536_000)).not.toThrow();
