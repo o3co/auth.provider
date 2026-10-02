@@ -1006,19 +1006,15 @@ export {
 } from "./repositories/clientId.mjs";
 // Core's boundary over a ClientRepository, which boot installs in the
 // `clientRepository` slot: each record answered is read by name once and held
-// to the registration schema. A refused record makes
-// `findById` and `authenticate` reject with the branded refusal, recognised
-// by `isClientRecordRefused` and never by `instanceof`; `lookupClient` answers
-// it as a verdict, so a caller falls back to another source of clients only
-// on `absent`.
+// to the registration schema. A refused record makes `findById` and
+// `authenticate` reject with the branded refusal, recognised by
+// `isClientRecordRefused` and never by `instanceof`.
 export {
 	ClientRecordRefusedError,
 	isClientRecordRefused,
 } from "./repositories/clientRecordRefused.mjs";
 export {
-	type ClientLookup,
 	type ClientRepositoryBoundaryOptions,
-	type ValidatedClientRepository,
 	validatedClientRepository,
 } from "./repositories/clientRepositoryBoundary.mjs";
 export {
