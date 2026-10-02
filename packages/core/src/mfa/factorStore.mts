@@ -22,11 +22,34 @@
  * kept byte for byte, never decoded, logged or derived from. Only a subject
  * with no record that may count opens a first binding, so losing this store
  * is guarded separately by the enrollment witness on `UserRepository`.
+ *
+ * A subject's records are one set, and the store keeps one generation for
+ * it: the factor set's store generation, a {@link StoreGeneration}. It is a
+ * third thing beside two numeric generations of core's mfa module, and none
+ * stands for another:
+ *
+ * - the subject's generation, on `MfaTransactionStore`: a count the subject's
+ *   lease is acquired at, moved only by an applied recovery or reset;
+ * - a recovery-code set's generation: a count kept inside that set's sealed
+ *   `data`, which this store never reads;
+ * - the factor set's store generation, here: an opaque value this store
+ *   issues at every membership write, compared only with `===`. A
+ *   conditional write names it as `expected`; an answer carries the new one
+ *   as `generation`.
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { lineSafeText } from "../logging/loggableError.mjs";
 import { isHintToken } from "../session-admission/requirement.mjs";
+// Stand-in for core's conditional-write convention until it lands; then these
+// come from "../adapters/conditionalWrite.mjs".
+import {
+	type ConditionalCreateAnswer,
+	type ConditionalSetRemoveAnswer,
+	isStoreGeneration,
+	type StoreGeneration,
+	type VersionedSet,
+} from "./conditionalWriteStandIn.mjs";
 
 /** One second factor bound to one subject. Every field is a required key: a store that drops one does not compile. */
 export interface MfaFactorRecord {
@@ -125,20 +148,93 @@ export function isMfaFactorUpdateWritten(
  *
  * Every operation is atomic on its own. A store that cannot answer throws:
  * an outage is never "no factors", which a caller could read as a subject
- * with nothing enrolled.
+ * with nothing enrolled. A rejection after a write was sent is unknown: the
+ * write may have committed.
+ *
+ * **The factor set's store generation.** A subject's records are one set,
+ * and the store keeps one generation for it, which lets a writer fence its
+ * write against the set it read:
+ *
+ * - Every membership write — `createIf`, `removeIf`, `create`, `remove`,
+ *   `removeAllForSubject` — issues a fresh generation in the same atomic step
+ *   as its write. A generation never repeats for a subject: not after a
+ *   removal and a re-create, and not when the set returns to the same
+ *   records. An application-made random UUID is one; a counter that restarts,
+ *   a digest of the set and a timestamp are none.
+ * - `update` keeps the generation: it changes a record, not the set's
+ *   membership, and its own fence is the record's `version`. A membership
+ *   decision that read a record's data is therefore not fenced against an
+ *   update of that record. That holds only while every factor's next data
+ *   keeps the three things `MfaVerification.next` names.
+ * - A set never written has no generation (`null`). Once written, the set
+ *   stays, empty when its last record goes, and is never purged — account
+ *   deletion included, since a first binding sent before it could otherwise
+ *   land after it.
+ * - The check and the write are one atomic step in the store, across every
+ *   instance on the same backend: a transaction, a script, one synchronous
+ *   block. An in-process lock does not count.
+ *
+ * In SQL, keep the set as a row of its own beside the factor rows, and have
+ * every membership write take that row first, in one transaction — an
+ * upsert of it for `removeAllForSubject` — so the writes lock in one order.
+ * `update` takes only the factor's row. `listVersioned` reads the set row
+ * and the factor rows in one statement or one snapshot.
+ *
+ * `listVersioned`, `createIf` and `removeIf` are optional while the bundled
+ * adapters gain them, and become required; `create` and `remove` then leave
+ * the port.
  */
 export interface MfaFactorStore {
 	readonly kind: string;
 	/** Every record of `subject`, in no particular order; `[]` for a subject with none. */
 	list(subject: string): Promise<readonly MfaFactorRecord[]>;
-	/** Insert a record. Rejects a `(subject, id)` already present, and leaves that record as it was. */
+	/**
+	 * Every record of `subject`, in no particular order, and the set's
+	 * generation, from one snapshot. `generation` is `null` only for a set
+	 * never written; a set whose records all went, or that a reset left
+	 * empty, answers its generation and no records. Read it with
+	 * {@link readMfaFactorSet}.
+	 */
+	listVersioned?(subject: string): Promise<VersionedSet<MfaFactorRecord>>;
+	/**
+	 * Insert `record` only while its subject's set is at `expected`; `null`:
+	 * only while the set was never written, which makes a first binding
+	 * atomic against a concurrent one. Answers `created` with the set's new
+	 * generation, or `conflict` with nothing written: the set at another
+	 * generation, absent where `expected` names one, present where `expected`
+	 * is `null`, or a `(subject, id)` already held. Never `missing`. Read it
+	 * with `readConditionalCreateAnswer`.
+	 */
+	createIf?(
+		record: MfaFactorRecord,
+		expected: StoreGeneration | null,
+	): Promise<ConditionalCreateAnswer>;
+	/**
+	 * Remove `(subject, id)` only while the set is at `expected`. Answers
+	 * `removed` with the set's new generation (the set stays, empty when that
+	 * was its last record); `missing` for no set, or no such record at
+	 * `expected`; `conflict` for the set at another generation. `missing` and
+	 * `conflict` write nothing, the generation included. Read it with
+	 * `readConditionalSetRemoveAnswer`.
+	 */
+	removeIf?(
+		subject: string,
+		id: string,
+		expected: StoreGeneration,
+	): Promise<ConditionalSetRemoveAnswer>;
+	/**
+	 * Insert a record, unconditionally, issuing a new generation. Rejects a
+	 * `(subject, id)` already present, and leaves that record and the
+	 * generation as they were.
+	 */
 	create(record: MfaFactorRecord): Promise<void>;
 	/**
 	 * Compare-and-set on `version`: replaces `data`, `label` and `lastUsedAt`
 	 * and bumps `version`, only if the record is still at `expectedVersion`.
 	 * Answers the record as written, or `null` when the version moved or the
-	 * record is gone. `Number.MAX_SAFE_INTEGER` as `expectedVersion` is a
-	 * `RangeError` whatever the stored version (`checkMfaVersionAdvances`).
+	 * record is gone; it never creates one. Keeps the set's generation.
+	 * `Number.MAX_SAFE_INTEGER` as `expectedVersion` is a `RangeError` whatever
+	 * the stored version (`checkMfaVersionAdvances`).
 	 */
 	update(
 		subject: string,
@@ -146,10 +242,55 @@ export interface MfaFactorStore {
 		expectedVersion: number,
 		next: MfaFactorRecordUpdate,
 	): Promise<MfaFactorRecord | null>;
-	/** Remove one record. Idempotent. */
+	/** Remove one record, unconditionally. Idempotent. A new generation when it removed one; the set stays. */
 	remove(subject: string, id: string): Promise<void>;
-	/** Remove every record of `subject` — account deletion, the operator reset. Idempotent. */
+	/**
+	 * Remove every record of `subject` — account deletion, the operator reset —
+	 * unconditionally: it always wins. Leaves the set present and empty at a
+	 * new generation, creating it for a subject never written, so a
+	 * conditional write read before it answers `conflict`. Idempotent in what
+	 * it leaves listed.
+	 */
 	removeAllForSubject(subject: string): Promise<void>;
+}
+
+/**
+ * What `listVersioned` answered for `subject`, read as the port promises it:
+ * `generation` a {@link StoreGeneration} or `null`, `items` a list of records
+ * each naming `subject`, no id twice, and none for a set never written. A
+ * fresh answer; the records are the ones answered. Throws a `RangeError` for
+ * anything else, a read that throws included, which the caller answers as
+ * the store's outage: never as a set with nothing in it.
+ */
+export function readMfaFactorSet(answer: unknown, subject: string): VersionedSet<MfaFactorRecord> {
+	const refuse = (what: string): RangeError =>
+		new RangeError(`MfaFactorStore.listVersioned: ${what}`);
+	try {
+		if (typeof answer !== "object" || answer === null || Array.isArray(answer)) {
+			throw refuse("the answer is not a set");
+		}
+		const { generation, items } = answer as Readonly<Record<string, unknown>>;
+		if (generation !== null && !isStoreGeneration(generation)) {
+			throw refuse("generation is neither a store generation nor null");
+		}
+		if (!Array.isArray(items)) throw refuse("items is not a list");
+		if (generation === null && items.length > 0) {
+			throw refuse("a set never written holds records");
+		}
+		const ids = new Set<string>();
+		for (const item of items as unknown[]) {
+			if (typeof item !== "object" || item === null) throw refuse("an item is not a record");
+			const { id, subject: owner } = item as Readonly<Record<string, unknown>>;
+			if (typeof id !== "string" || owner !== subject || ids.has(id)) {
+				throw refuse("a record is another subject's, has no id, or repeats one");
+			}
+			ids.add(id);
+		}
+		return { generation, items: [...(items as MfaFactorRecord[])] };
+	} catch (cause) {
+		if (cause instanceof RangeError) throw cause;
+		throw new RangeError("MfaFactorStore.listVersioned: the answer could not be read", { cause });
+	}
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaFactorStore}. */

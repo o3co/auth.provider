@@ -585,6 +585,18 @@ export {
 	type MailSender,
 	type MailSendResult,
 } from "./mail/types.mjs";
+// STAND-IN for core's conditional-write convention, which has not landed: the
+// part of it MfaFactorStore's set members are typed by, under the names it
+// plans. The convention's own export replaces this block.
+export {
+	type ConditionalCreateAnswer,
+	type ConditionalSetRemoveAnswer,
+	isStoreGeneration,
+	readConditionalCreateAnswer,
+	readConditionalSetRemoveAnswer,
+	type StoreGeneration,
+	type VersionedSet,
+} from "./mfa/conditionalWriteStandIn.mjs";
 // MFA — the second-factor contract (the manifest group below exports its
 // MfaFactor name)
 export type {
@@ -618,6 +630,7 @@ export {
 	type MfaFactorStore,
 	type MfaFactorStoreFactory,
 	type MfaFactorUpdateRequest,
+	readMfaFactorSet,
 } from "./mfa/factorStore.mjs";
 export {
 	createMfaFactorStoreFactory,

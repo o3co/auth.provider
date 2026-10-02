@@ -59,6 +59,65 @@ describe("the in-process MfaFactorStore", () => {
 	});
 });
 
+describe("the in-process store's factor set generation", () => {
+	// test-kit's mfaFactorStoreConditionalContract holds this store to the
+	// whole of it; these name the store's own steps.
+	const second = { ...RECORD, id: "factor-2" };
+
+	it("answers no generation for a set never written, and a fresh one at each membership write", async () => {
+		const store = createMemoryMfaFactorStore();
+		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
+		const first = await store.createIf?.(RECORD, null);
+		if (first?.outcome !== "created") throw new Error("the first binding was refused");
+		const next = await store.createIf?.(second, first.generation);
+		if (next?.outcome !== "created") throw new Error("the second binding was refused");
+		expect(next.generation).not.toBe(first.generation);
+		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+			generation: next.generation,
+			items: [RECORD, second],
+		});
+	});
+
+	it("writes nothing at a generation that moved, and keeps the set when its last record goes", async () => {
+		const store = createMemoryMfaFactorStore();
+		const first = await store.createIf?.(RECORD, null);
+		if (first?.outcome !== "created") throw new Error("the first binding was refused");
+		expect(await store.createIf?.(RECORD, null)).toStrictEqual({ outcome: "conflict" });
+		const removed = await store.removeIf?.("user-1", RECORD.id, first.generation);
+		if (removed?.outcome !== "removed") throw new Error("the removal was refused");
+		expect(await store.removeIf?.("user-1", RECORD.id, first.generation)).toStrictEqual({
+			outcome: "conflict",
+		});
+		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+			generation: removed.generation,
+			items: [],
+		});
+		expect(await store.createIf?.(second, first.generation)).toStrictEqual({
+			outcome: "conflict",
+		});
+		expect(await store.list("user-1")).toStrictEqual([]);
+	});
+
+	it("keeps the generation through an update, and moves it at a reset, even of a set never written", async () => {
+		const store = createMemoryMfaFactorStore();
+		await store.create(RECORD);
+		const before = await store.listVersioned?.("user-1");
+		await store.update("user-1", RECORD.id, 1, {
+			data: "v2.next",
+			label: undefined,
+			lastUsedAt: undefined,
+		});
+		expect((await store.listVersioned?.("user-1"))?.generation).toBe(before?.generation);
+		await store.removeAllForSubject("user-1");
+		const after = await store.listVersioned?.("user-1");
+		expect(after?.items).toStrictEqual([]);
+		expect(after?.generation).not.toBe(before?.generation);
+		expect(after?.generation).not.toBeNull();
+		await store.removeAllForSubject("nobody");
+		expect((await store.listVersioned?.("nobody"))?.generation).not.toBeNull();
+	});
+});
+
 describe("memoryMfaFactorStoreModule", () => {
 	it("declares itself replica-unsafe, saying what forks and what a restart loses", () => {
 		expect(memoryMfaFactorStoreModule.name).toBe("core-mfa-factor-store-memory");

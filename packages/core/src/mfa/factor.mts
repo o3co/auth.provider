@@ -235,7 +235,18 @@ export type MfaVerification =
 			readonly ok: true;
 			/** The factor the proof verified — the named one, or another of its kind (a WebAuthn assertion names its credential). */
 			readonly factorId: string;
-			/** The factor's data after this use (a TOTP step, a sign count); absent when nothing changed. */
+			/**
+			 * The factor's data after this use (a TOTP step, a sign count); absent when nothing changed.
+			 *
+			 * It is written by `MfaFactorStore.update`, which keeps the factor
+			 * set's store generation, so a membership decision made on the set
+			 * (a last-factor check, a duplicate check, a recovery-code set's
+			 * replacement) is not fenced against it. So `next` keeps three
+			 * things the record's data had: a usable factor that counts stays
+			 * usable (a recovery-code set may run out of codes: it does not
+			 * count); {@link MfaFactor.identity} answers the same; and a
+			 * recovery-code set's generation, kept in its data, stays the same.
+			 */
 			readonly next?: MfaFactorData;
 	  }
 	| {

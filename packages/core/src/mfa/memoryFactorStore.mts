@@ -19,10 +19,24 @@
  * Records fork per replica and vanish on restart, after which every subject
  * reads as having nothing enrolled; the enrollment witness catches that loss.
  *
- * Each operation is one synchronous `Map` step, so atomic. Records are copied
- * in and out: changing a returned or written record changes nothing kept here.
+ * Each operation is one synchronous `Map` step, so atomic: no `await` falls
+ * between a check and its write. Records are copied in and out: changing a
+ * returned or written record changes nothing kept here.
+ *
+ * A subject's set is an entry holding its records and its store generation,
+ * a random UUID made fresh at every membership write. The entry is made by
+ * the first membership write and never deleted: removing the last record,
+ * or a reset, leaves it empty at a new generation. One process is one
+ * instance, so a second instance on the same backend is this one.
  */
 
+import { randomUUID } from "node:crypto";
+import type {
+	ConditionalCreateAnswer,
+	ConditionalSetRemoveAnswer,
+	StoreGeneration,
+	VersionedSet,
+} from "./conditionalWriteStandIn.mjs";
 import type { MfaFactorRecord, MfaFactorRecordUpdate, MfaFactorStore } from "./factorStore.mjs";
 import { checkMfaVersionAdvances } from "./version.mjs";
 
@@ -39,23 +53,72 @@ const copyOf = (record: MfaFactorRecord): MfaFactorRecord => ({
 	data: record.data,
 });
 
+/** A subject's set: its records by id, and the generation its last membership write issued. */
+interface FactorSet {
+	readonly records: Map<string, MfaFactorRecord>;
+	generation: StoreGeneration;
+}
+
+const newGeneration = (): StoreGeneration => randomUUID() as StoreGeneration;
+
 export function createMemoryMfaFactorStore(): MfaFactorStore {
-	const bySubject = new Map<string, Map<string, MfaFactorRecord>>();
+	const bySubject = new Map<string, FactorSet>();
+
+	/** `subject`'s set at a new generation, made when the subject has none: every membership write's last step. */
+	const moved = (subject: string): FactorSet => {
+		const set = bySubject.get(subject);
+		if (set !== undefined) {
+			set.generation = newGeneration();
+			return set;
+		}
+		const made: FactorSet = { records: new Map(), generation: newGeneration() };
+		bySubject.set(subject, made);
+		return made;
+	};
 
 	return {
 		kind: "memory",
 
 		async list(subject: string): Promise<readonly MfaFactorRecord[]> {
-			return [...(bySubject.get(subject)?.values() ?? [])].map(copyOf);
+			return [...(bySubject.get(subject)?.records.values() ?? [])].map(copyOf);
+		},
+
+		async listVersioned(subject: string): Promise<VersionedSet<MfaFactorRecord>> {
+			const set = bySubject.get(subject);
+			return set === undefined
+				? { generation: null, items: [] }
+				: { generation: set.generation, items: [...set.records.values()].map(copyOf) };
+		},
+
+		async createIf(
+			record: MfaFactorRecord,
+			expected: StoreGeneration | null,
+		): Promise<ConditionalCreateAnswer> {
+			const set = bySubject.get(record.subject);
+			const atExpected = expected === null ? set === undefined : set?.generation === expected;
+			if (!atExpected || set?.records.has(record.id) === true) return { outcome: "conflict" };
+			const written = moved(record.subject);
+			written.records.set(record.id, copyOf(record));
+			return { outcome: "created", generation: written.generation };
+		},
+
+		async removeIf(
+			subject: string,
+			id: string,
+			expected: StoreGeneration,
+		): Promise<ConditionalSetRemoveAnswer> {
+			const set = bySubject.get(subject);
+			if (set === undefined) return { outcome: "missing" };
+			if (set.generation !== expected) return { outcome: "conflict" };
+			if (!set.records.delete(id)) return { outcome: "missing" };
+			return { outcome: "removed", generation: moved(subject).generation };
 		},
 
 		async create(record: MfaFactorRecord): Promise<void> {
-			const records = bySubject.get(record.subject) ?? new Map<string, MfaFactorRecord>();
-			if (records.has(record.id)) {
+			if (bySubject.get(record.subject)?.records.has(record.id) === true) {
 				throw new Error("an MFA factor record with this id already exists for the subject");
 			}
-			records.set(record.id, copyOf(record));
-			bySubject.set(record.subject, records);
+			moved(record.subject).records.set(record.id, copyOf(record));
 		},
 
 		async update(
@@ -65,7 +128,7 @@ export function createMemoryMfaFactorStore(): MfaFactorStore {
 			next: MfaFactorRecordUpdate,
 		): Promise<MfaFactorRecord | null> {
 			checkMfaVersionAdvances(expectedVersion, "MfaFactorStore.update");
-			const records = bySubject.get(subject);
+			const records = bySubject.get(subject)?.records;
 			const current = records?.get(id);
 			if (records === undefined || current === undefined || current.version !== expectedVersion) {
 				return null;
@@ -82,14 +145,11 @@ export function createMemoryMfaFactorStore(): MfaFactorStore {
 		},
 
 		async remove(subject: string, id: string): Promise<void> {
-			const records = bySubject.get(subject);
-			if (records === undefined) return;
-			records.delete(id);
-			if (records.size === 0) bySubject.delete(subject);
+			if (bySubject.get(subject)?.records.delete(id) === true) moved(subject);
 		},
 
 		async removeAllForSubject(subject: string): Promise<void> {
-			bySubject.delete(subject);
+			moved(subject).records.clear();
 		},
 	};
 }
