@@ -16,6 +16,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { retrieveFederationGrantToken } from "#/federation-grants/retrieve.mjs";
+import type { AuthorizedFederationGrant } from "#/federation-grants/types.mjs";
 import type { DelegatedTokens } from "#/federations/types.mjs";
 import {
 	at,
@@ -1203,6 +1204,99 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 					outcome: "grant_not_found",
 				},
 			]);
+		});
+	});
+
+	describe("a stored date a store answers as something other than a Date", () => {
+		/** A driver's default for a column it does not type: the instant as an ISO string. */
+		const ISO = "2026-09-18T00:00:00.000Z";
+
+		/** Every `open` answers the authorized grant with `edit` applied, as a store that reads its dates back so would. */
+		const answeredWith = (edit: (grant: AuthorizedFederationGrant) => object) => {
+			const real = h.store.open.bind(h.store);
+			vi.spyOn(h.store, "open").mockImplementation(async (grantId, at) => {
+				const opened = await real(grantId, at);
+				if (opened === null || !("consent" in opened.grant)) return opened;
+				const grant = opened.grant as AuthorizedFederationGrant;
+				return { ...opened, grant: edit(grant) as AuthorizedFederationGrant };
+			});
+		};
+
+		it("answers a consent date it cannot compare as the storage outage: neither revoked nor live", async () => {
+			await h.seed();
+			answeredWith((grant) => ({ ...grant, consent: { ...grant.consent, at: ISO } }));
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "storage",
+			});
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
+		it("lets the retry through for an ineligibility marker it cannot date", async () => {
+			await h.seed();
+			setNow(DUE);
+			h.refresh.mockResolvedValue(refreshed("1", DUE));
+			answeredWith((grant) => ({
+				...grant,
+				ineligible: {
+					reason: "scope_exceeded",
+					at: ISO,
+					judgedAgainst: connection.maxAccessTokenLifetime,
+				},
+			}));
+			await retrieve();
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+		});
+
+		it("lets the retry through for a failed-refresh stamp it cannot date, and counts the next failure as the first of its row", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockRejectedValue(Object.assign(new Error("x"), { status: 503 }));
+			answeredWith((grant) => ({
+				...grant,
+				refreshFailure: {
+					at: ISO,
+					kind: "rejected",
+					count: 5,
+					retryAfterSeconds: undefined,
+					upstreamCode: "invalid_client",
+				},
+			}));
+			// The first of a row is retried promptly: no wait is told.
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "upstream",
+			});
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+			expect((await h.store.find("g-1", now()))?.refreshFailure).toMatchObject({
+				kind: "unavailable",
+				count: 1,
+			});
+		});
+
+		it("does not take a marker it cannot date for the one its own lost write stored: the write is lost, and nothing throws", async () => {
+			const grant = await h.seed();
+			setNow(GONE);
+			h.refresh.mockResolvedValue({ refreshToken: SECRET } as DelegatedTokens);
+			const real = h.store.replaceCredentials.bind(h.store);
+			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async (input) => {
+				await real(input);
+				throw new Error("connection reset after commit");
+			});
+			answeredWith((stored) =>
+				stored.ineligible === undefined
+					? stored
+					: { ...stored, ineligible: { ...stored.ineligible, at: ISO } },
+			);
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(500);
+			await answer;
+			await Promise.all(h.background);
+			const told = h.events.map((event) => `${event.type} ${event.outcome}`);
+			expect(told).toContain("federation.grant.refresh_failed write_lost");
+			expect(grant.version).toBeLessThan((await h.store.find("g-1", now()))?.version ?? 0);
 		});
 	});
 

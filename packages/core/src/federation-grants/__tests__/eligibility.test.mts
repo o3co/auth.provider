@@ -254,6 +254,18 @@ describe("upstream token eligibility", () => {
 				).toEqual({ due: true });
 			});
 
+			it("is due for a marker whose date a store answered as something other than a Date: it is no instant", () => {
+				// A driver's default: an ISO string, or `null`, where a Date was written.
+				for (const stored of ["2026-09-18T00:00:00.000Z", null, 1_789_000_000_000, {}]) {
+					expect(
+						federationGrantIneligibilityRetry(
+							{ ...marker, at: stored as unknown as Date },
+							{ now: at, retryAfterMs: 300_000, allowanceMs: 30_000 },
+						),
+					).toEqual({ due: true });
+				}
+			});
+
 			it("is due when there is no marker", () => {
 				expect(
 					federationGrantIneligibilityRetry(undefined, {
@@ -370,6 +382,14 @@ describe("upstream token eligibility", () => {
 				stands: false,
 			});
 			expect(standing(undefined, at)).toEqual({ stands: false });
+		});
+
+		it("does not stand on a date a store answered as something other than a Date: it is no instant", () => {
+			for (const stored of ["2026-09-18T00:00:00.000Z", null, 1_789_000_000_000, {}]) {
+				expect(standing(stamp({ kind: "rejected", at: stored as unknown as Date }), at)).toEqual({
+					stands: false,
+				});
+			}
 		});
 	});
 });

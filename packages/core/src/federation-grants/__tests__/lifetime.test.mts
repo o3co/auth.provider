@@ -180,5 +180,25 @@ describe("federation grant lifetime", () => {
 				"operator_maximum",
 			);
 		});
+
+		it("reads a stored date that is not a Date as one holding no instant: expired, never live, and never a throw", () => {
+			for (const stored of ["2026-12-18T00:00:00.000Z", null, 1_789_000_000_000, {}]) {
+				const notADate = stored as unknown as Date;
+				expect(
+					federationGrantExpiryState(
+						{ consent: { at: CONSENT }, expiresAt: notADate },
+						at(DAY),
+						90 * DAY,
+					),
+				).toBe("consented_lifetime");
+				expect(
+					federationGrantExpiryState(
+						{ consent: { at: notADate }, expiresAt: at(90 * DAY) },
+						at(DAY),
+						90 * DAY,
+					),
+				).toBe("operator_maximum");
+			}
+		});
 	});
 });

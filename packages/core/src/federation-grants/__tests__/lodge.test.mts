@@ -1370,6 +1370,53 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 			});
 		});
 
+		/** `inspect`, answering the grant's consent date as an ISO string from its `from`-th call on. */
+		const consentAsStringFrom =
+			(from: number): FederationGrantStore["inspect"] =>
+			async (grantId, at) => {
+				const inspection = await grants.inspect(grantId, at);
+				from -= 1;
+				if (from > 0 || inspection === null || !("consent" in inspection.grant)) return inspection;
+				const { grant } = inspection;
+				const consent = { ...grant.consent, at: "2026-09-18T00:00:00.000Z" as unknown as Date };
+				return { ...inspection, grant: { ...grant, consent } as typeof grant };
+			};
+
+		it("names the grant store's read when the grant it answered holds a date that is not one", async () => {
+			await establish();
+			const result = await lodgeFederationGrantReauthorization(
+				deps({ grantStore: { ...grants, inspect: consentAsStringFrom(1) } }),
+				renewal(),
+			);
+			expect(result).toEqual({ ok: false, reason: "storage" });
+			expect(failureOf(result)).toMatchObject({
+				store: "federation_grant",
+				step: "inspect",
+				error: expect.any(RangeError),
+			});
+			expect(intents.size).toBe(0);
+		});
+
+		it("names it on the re-read after a pointer write that lost, too", async () => {
+			await establish();
+			const result = await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: {
+						...grants,
+						inspect: consentAsStringFrom(2),
+						nameIntent: async () => ({ ok: false }) as never,
+					},
+				}),
+				renewal(),
+			);
+			expect(result).toEqual({ ok: false, reason: "storage" });
+			expect(failureOf(result)).toMatchObject({
+				store: "federation_grant",
+				step: "inspect",
+				error: expect.any(RangeError),
+			});
+		});
+
 		it("names a pointer write it could not confirm", async () => {
 			await establish();
 			const reset = new Error("connection reset");
