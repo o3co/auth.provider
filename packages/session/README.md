@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -506,10 +506,10 @@ is written. On both paths core reads the `User` into the primary as a plain snap
 exactly the fields `User` declares, each by name, once, however the object
 holds it, so a class instance with getters or an ORM entity logs in — and
 `req.session.user` holds that snapshot: the declared fields alone, nothing
-else the Store answered, and no Store's `toJSON` applied. A `User` core
-refuses (an `id` that is not a non-empty string or not the subject, a
-declared field holding what is not plain data) refuses the login with
-nothing written (`500`). It runs, in order: the
+else the Store answered, and no Store's `toJSON` applied. Core refuses a
+`User` whose `id` is not a non-empty string or not the subject, or whose
+declared field holds what is not plain data; the login then answers `500`
+with nothing written. It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session-store.maxAge` after
 `authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the

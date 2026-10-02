@@ -222,12 +222,15 @@ export interface Client {
  * objects inside are copied by name. The snapshot is what the session's
  * `user` holds: exactly the declared fields, whether the `User` is a plain
  * object or an instance. A field the index signature carries is not read
- * and does not reach the session. A login refuses with a `RangeError` (a
- * `500`) a `User` that is not an object, an `id` that is not a non-empty
- * string, and a declared field holding what JSON does not hold as it is (a
- * `Date`, a `Map`, an instance, a function, a bigint, a non-finite number, a
- * list with a hole, a cycle), which left out would read the witness as not
- * enrolled.
+ * and does not reach the session.
+ *
+ * Plain data is what JSON holds as it is: a string, a finite number, a
+ * boolean, `null`, and lists and plain objects of those. A login refuses
+ * with a `RangeError` (a `500`) a `User` that is not an object, an `id` that
+ * is not a non-empty string, and a declared field holding anything that is
+ * not plain data — a `Date`, a `Map`, an instance, a function, a bigint, a
+ * non-finite number, a list with a hole, a cycle — which left out would read
+ * the witness as not enrolled.
  */
 export interface User {
 	readonly id: string;
