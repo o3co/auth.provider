@@ -638,6 +638,7 @@ export {
 	type MfaFactorStore,
 	type MfaFactorStoreFactory,
 	type MfaFactorUpdateRequest,
+	readMfaFactorSet,
 } from "./mfa/factorStore.mjs";
 export {
 	createMfaFactorStoreFactory,
@@ -645,7 +646,10 @@ export {
 	registerBuiltinMfaFactorStores,
 	registerBuiltinMfaTransactionStores,
 } from "./mfa/factory.mjs";
-export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
+export {
+	createMemoryMfaFactorStore,
+	type MemoryMfaFactorStoreOptions,
+} from "./mfa/memoryFactorStore.mjs";
 export {
 	createMemoryMfaTransactionStore,
 	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,
