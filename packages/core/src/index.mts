@@ -845,6 +845,14 @@ export {
 	normalizeAllowedOrigins,
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
+// The one fetch for a URL a client registration or a request supplies,
+// under `core.outbound`'s destination policy.
+export {
+	createOutboundFetch,
+	isOutboundRefusal,
+	type OutboundFetchOptions,
+	type OutboundUrlSource,
+} from "./net/outbound-fetch.mjs";
 // The registered-redirect-URI shape vocabulary, the query's parameter names
 // included — enforced by ClientEntrySchema at boot; exported so a custom
 // ClientRepository, which bypasses that schema by design, can hold its

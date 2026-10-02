@@ -405,6 +405,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isSpecialUseAddress\b/,
 	},
 	{
+		concept: "outbound destination policy — the fetch",
+		home: "packages/core/src/net/outbound-fetch.mts",
+		definition: /(?:function|const)\s+createOutboundFetch\b/,
+	},
+	{
+		concept: "outbound destination policy — the host-list grammar",
+		home: "packages/core/src/net/outbound-policy.mts",
+		definition: /(?:function|const)\s+readHostEntry\b/,
+	},
+	{
 		concept: "RFC 8707 resource indicator — reading `resource` (#172, #173)",
 		home: "packages/core/src/grants/resourceIndicator.mts",
 		definition: /(?:function|const)\s+extractResourceParam\b/,

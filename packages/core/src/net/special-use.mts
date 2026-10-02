@@ -17,13 +17,17 @@
 import { BlockList, isIP } from "node:net";
 
 /**
- * The IPv4 and IPv6 special-use ranges of RFC 6890 (with the RFC 8190
- * additions), and the IPv4-mapped and IPv4-compatible IPv6 forms of all of
- * them.
+ * The IPv4 and IPv6 special-use ranges: every entry of the IANA IPv4 and
+ * IPv6 special-purpose address registries (RFC 6890, RFC 8190) that is not
+ * globally reachable, plus multicast, the deprecated site-local range, the
+ * IPv4-translated form, and the IPv4-mapped and IPv4-compatible IPv6 forms of
+ * every IPv4 range. A globally reachable entry inside a refused block (the
+ * anycast addresses in `192.0.0.0/24` and `2001::/23`) is refused with its
+ * block, and `64:ff9b::/96` is refused because it embeds any IPv4 address.
  *
  * One list, so every fetch of a URL that **a stranger chose** refuses the same
  * addresses (the Client ID Metadata Document fetch, where the `client_id` is
- * the URL, and any later caller-supplied fetch). Map row in
+ * the URL, and the outbound fetch, `outbound-fetch.mts`). Map row in
  * `docs/design-vocabulary.md`; the drift guard fails a second definition.
  *
  * mtls revocation (`packages/mtls/src/fullPki/fetchGuard.mts`) is a different
@@ -59,13 +63,20 @@ for (const [net, prefix] of [
 	// NOT listed as subnets: Node checks an IPv4 address against IPv6 rules
 	// through its mapped form, so either subnet would refuse every IPv4
 	// address. Both forms are judged by their IPv4 half below instead.
+	// IPv4-translated (SIIT, RFC 2765): not a global form, whatever it embeds.
+	["::ffff:0:0:0", 96],
 	["64:ff9b::", 96], // IPv4/IPv6 translation, RFC 6052
+	["64:ff9b:1::", 48], // local-use IPv4/IPv6 translation, RFC 8215
 	["100::", 64], // discard-only, RFC 6666
+	["100:0:0:1::", 64], // dummy prefix, RFC 9780
 	["2001::", 23], // IETF protocol assignments (TEREDO, ORCHID, …)
 	["2001:db8::", 32], // documentation
 	["2002::", 16], // 6to4
+	["3fff::", 20], // documentation, RFC 9637
+	["5f00::", 16], // SRv6 SIDs, RFC 9602
 	["fc00::", 7], // unique local, RFC 4193
 	["fe80::", 10], // link-local
+	["fec0::", 10], // site-local (deprecated), RFC 3879
 	["ff00::", 8], // multicast
 ] as const) {
 	SPECIAL_USE.addSubnet(net, prefix, "ipv6");
