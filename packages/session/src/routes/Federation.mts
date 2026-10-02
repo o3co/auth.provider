@@ -35,6 +35,7 @@ import {
 	federationTrustsUpstreamAmr,
 	type Logger,
 	loggableError,
+	readUserSnapshot,
 	type SessionClaim,
 	type SessionFederationIndex,
 	type SessionRequirementResolver,
@@ -299,12 +300,21 @@ export const createRouter = (
 			});
 		}
 
+		// The login's one read of the user: everything after reads the
+		// snapshot. A user core refuses is the route's error, a 500.
+		const reading = readUserSnapshot(user);
+		if (!reading.ok) {
+			const field = reading.refused === "not_plain_data" ? ` (${reading.field})` : "";
+			throw new RangeError(`federation callback: the user is refused: ${reading.refused}${field}`);
+		}
+		const { snapshot } = reading;
+
 		// Build claims. The local record is authoritative; the provider's mapped
 		// claims may fill a promotable field it left absent, and are otherwise
 		// recorded under `claims.federated[<provider>]` rather than merged into
 		// the envelope this deployment authorizes on.
 		const claims = mergeFederatedClaims({
-			localClaims: extractUserClaims(user),
+			localClaims: extractUserClaims(snapshot),
 			providerName: provider.name,
 			mappedClaims: supportsClaimMapping(provider) ? provider.mapClaims(profile) : undefined,
 		});
@@ -358,8 +368,8 @@ export const createRouter = (
 		// redirects by its policy below.
 		const establishment = establishWithoutAsking(
 			{
-				subject: user.id,
-				user,
+				subject: snapshot.id,
+				user: snapshot,
 				claims,
 				federation: fed.name,
 				upstreamAmr: upstreamAmrOf(profile),
@@ -401,7 +411,7 @@ export const createRouter = (
 						cleanupFailed: (store, step, cause) => logCleanupFailed(log, store, step, cause),
 						subjectIndexWriteFailed: (cause) =>
 							log.error(
-								{ err: loggableError(cause), sub: user.id },
+								{ err: loggableError(cause), sub: snapshot.id },
 								"subject_session_index_write_failed",
 							),
 					};

@@ -46,6 +46,7 @@ import {
 	loggableError,
 	passwordPrimary,
 	type RateLimiter,
+	readUserSnapshot,
 	type SessionCookiePolicy,
 	type SessionFederationIndex,
 	type SessionRequirementResolver,
@@ -412,6 +413,17 @@ export const createRouter = (
 					});
 				}
 
+				// The login's one read of the user: everything after reads the
+				// snapshot. A user core refuses is the route's error, a 500.
+				const reading = readUserSnapshot(user);
+				if (!reading.ok) {
+					const field = reading.refused === "not_plain_data" ? ` (${reading.field})` : "";
+					throw new RangeError(
+						`POST /session/login: the user is refused: ${reading.refused}${field}`,
+					);
+				}
+				const { snapshot } = reading;
+
 				const redirectTo = req.body.redirect_to as string | undefined;
 
 				// The user is verified and nothing is written yet: ask every
@@ -420,9 +432,9 @@ export const createRouter = (
 				const admission = await admitPrimary(
 					admissionDeps,
 					passwordPrimary({
-						subject: user.id,
-						user,
-						claims: extractUserClaims(user),
+						subject: snapshot.id,
+						user: snapshot,
+						claims: extractUserClaims(snapshot),
 						authTime: new Date(),
 						redirectTo: redirectTo || undefined,
 						request: loginRequestFacts(req),
