@@ -32,6 +32,26 @@ export {
 	type LifecycleCleanupOptions,
 	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
+// The conditional-write convention every store's conditional members follow
+// (docs/adapter-surface.md, "Conditional writes").
+export {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	type ConditionalCreateAnswer,
+	type ConditionalRemoveAnswer,
+	type ConditionalReplaceAnswer,
+	type ConditionalSetRemoveAnswer,
+	isStoreGeneration,
+	newStoreGeneration,
+	readConditionalCreateAnswer,
+	readConditionalRemoveAnswer,
+	readConditionalReplaceAnswer,
+	readConditionalSetRemoveAnswer,
+	readVersioned,
+	readVersionedSet,
+	type StoreGeneration,
+	type Versioned,
+	type VersionedSet,
+} from "./adapters/conditionalWrite.mjs";
 export {
 	isStorableExpiry,
 	isStorableLifetime,

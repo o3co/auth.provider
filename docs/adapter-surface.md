@@ -391,3 +391,131 @@ What the suites hold an adapter to:
   adapter, and its own tests cover it. For example, the bundled device-code
   stores' tests cover a falsy `requestedScope`, which the device-code suite
   does not.
+
+## Conditional writes
+
+A port whose callers must not overwrite or restore what another writer
+changed since they read it has **conditional members**: a versioned read that
+answers what is stored with its **store generation**, and writes applied only
+while what they guard is still at the generation the caller read. The types,
+`isStoreGeneration`, `newStoreGeneration` and core's readers of every answer
+are in `packages/core/src/adapters/conditionalWrite.mts`, on core's root
+entry, with `BUNDLED_STORE_WRITE_LIFETIME_MS`, the bundled stores'
+write-lifetime bound. These are the rules every store with conditional members keeps.
+
+**Scopes.** A generation guards one of two things:
+
+- **A record** (record-scoped): every write of the record issues a new
+  generation. `replaceIf` answers `ConditionalReplaceAnswer` (`updated` with
+  the new generation, `missing` or `conflict`), `removeIf` answers
+  `ConditionalRemoveAnswer` (`removed`, which carries no generation since the
+  record is gone, `missing` or `conflict`), and the versioned read answers
+  `Versioned<T>` or `null`.
+- **A set's membership** (set-scoped): every membership write issues a new
+  generation, and a member's own update, fenced by the member's own version,
+  keeps it. The versioned read answers `VersionedSet<T>`, whose `generation`
+  is `null` only for an absent set: never written, or its tombstone expired.
+  `createIf` answers
+  `ConditionalCreateAnswer` (`created` with the new generation, or
+  `conflict`; never `missing`), and `removeIf` answers
+  `ConditionalSetRemoveAnswer` (`removed`, always with the set's new
+  generation, `missing` or `conflict`).
+
+**The rules.**
+
+1. **Atomic.** The check and the write are one atomic step in the store: a
+   transaction, a compare-and-set or a script. An in-process lock counts only
+   for an in-process store.
+2. **One snapshot, and every write moves the generation.** A versioned read
+   answers the value (or the members) and the generation from one snapshot.
+   Every write that changes what the generation guards issues a new one,
+   legacy and unconditional writes included.
+3. **Expiry is the store's retention.** A record or set past it answers
+   `missing` (or `null` from the read), and the conditional check includes the
+   expiry predicate. The retention is the store's own (a Redis `PX`, a SQL
+   `expires_at` set from the store's TTL), never a domain field such as an
+   access token's `expiresAt`.
+4. **Outcomes.** An outage rejects; it is never `missing` or `null`. A
+   rejection after the request was sent means "unknown", never "not
+   written". `missing` and `conflict` each write nothing. A set's
+   `createIf` with the set absent and an `expected` generation, with the set
+   present and `expected` `null`, or with a member id already held answers
+   `conflict`; a set's `removeIf` checks the generation before the member, so
+   a moved set answers `conflict` and an absent member at `expected` answers
+   `missing`. Core's readers refuse any answer outside its type with a
+   `TypeError` (a `RangeError` stays a caller's own input), which the caller
+   treats as the store's outage.
+5. **Unconditional writes that must win stay**: a logout, a removal of
+   everything a session or subject holds, an operator reset. They still remove
+   what they write, or issue a new generation.
+6. **Sets.** The generation belongs to the set's membership. Removing the
+   last member keeps the set, at a new generation. The unconditional reset
+   upserts the set at a new generation, creating it when absent, so a
+   `createIf(…, null)` sent before it answers `conflict`. A set's generation
+   outlives its members, and an emptied set's tombstone is kept for at least
+   the store's write-lifetime bound (24 h for the bundled stores,
+   `BUNDLED_STORE_WRITE_LIFETIME_MS`); once it
+   expires, the set reads as absent (`generation: null`). So a membership
+   write must commit or fail, server-side, within a bound the store sets,
+   well under 24 h: a write sent before a reset then never lands after the
+   reset's tombstone expired.
+7. **A generation fences only its own store's records.** It does not fence a
+   write to another port, unless both are in the same atomic step.
+8. **Generations are minted, never derived.** A generation is never issued
+   twice for one key: not after a delete and a re-create, and not for a
+   byte-identical value. So it is never a counter, a digest or a timestamp; a
+   random UUID (`newStoreGeneration`) is one. A record or set with no
+   generation (written before the store had conditional members, or by an old
+   replica during a rolling upgrade) is given a fresh one, atomically, by its
+   first versioned read, which keeps its retention. A conditional write
+   against one with no generation answers `conflict` and does not mint: a
+   caller holds a generation only from a read that minted it, so a state
+   without one was rewritten after that read.
+
+**A SQL store.** One row per record, `(key…, body, generation, expires_at)`;
+`generation` is `NOT NULL`, a `uuid` (Postgres) or `CHAR(36)` (MySQL), made by
+the application with `randomUUID()`, and `expires_at` is the retention.
+
+- `replaceIf`: `UPDATE … SET body = :body, generation = :new WHERE <key> AND
+  generation = :expected AND (expires_at IS NULL OR expires_at > <db now>)`.
+  One row is `updated`. Zero rows: a `SELECT 1` of a live row with that key
+  tells `conflict` (a row) from `missing` (none); a write that lands between
+  the two still leaves "nothing written" true. Postgres can do both in one
+  statement with a CTE, MySQL in one short `SELECT … FOR UPDATE` transaction.
+  `removeIf` is the same with `DELETE`.
+- **Adding the column to an existing table.** Backfill every existing row
+  with its own random value, never a constant. For the whole time an older
+  writer may run, keep a column default or a `BEFORE INSERT` trigger, so an
+  `INSERT` that leaves the column out still gets a fresh value, and a
+  `BEFORE UPDATE` trigger that renews a generation the statement left
+  unchanged, so an older writer's `UPDATE` still moves it. Postgres:
+  `IF NEW.generation IS NOT DISTINCT FROM OLD.generation THEN NEW.generation
+  := gen_random_uuid(); END IF`. MySQL: `IF NEW.generation <=> OLD.generation
+  THEN SET NEW.generation = UUID(); END IF`, under row-based binary logging.
+  Without that trigger, no older writer may run once a conditional caller
+  does.
+- **Generators.** Any scheme that never repeats a value for a key: an
+  application-made random UUID (v4) is preferred, Postgres
+  `gen_random_uuid()` is one; MySQL `UUID()` is time- and node-based (v1),
+  unique but not random, acceptable as the default or trigger value for older
+  writers.
+- **Sets.** Every membership write is one transaction that locks the set's
+  row first, then its members' rows, so there is one lock order. The reset
+  upserts the set's row first, then deletes the members. The versioned read
+  is one statement, or one snapshot, never a cache or a lagging replica.
+
+**Over HTTP.** One `POST` per operation. The request carries
+`expectedGeneration`; an absent `expectedGeneration` and a `null` one are
+different requests. The answer carries `generation` where its type has one.
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Done, with the new `generation` where the answer's type has one |
+| `404` | `missing` (a record's write, and a set's `removeIf`) |
+| `409` | `conflict` |
+| Anything else, `412` included | The adapter throws |
+
+A REST layer that offers ETags exposes the store's generation itself, the
+never-repeating value the store issued, as a strong ETag of the whole record
+or set, never a digest of its content: content returns to earlier bytes, so a
+digest repeats.
