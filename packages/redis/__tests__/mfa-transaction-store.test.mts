@@ -330,7 +330,9 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 
 	it("spends an attempt on, and takes the challenge of, a login whose continuation nests deeper than cjson decodes: the scripts judge the deadline without decoding the record", async () => {
 		// JSON.parse reads a thousand-and-more levels; Redis's cjson refuses
-		// past a thousand. What a read answers live, the scripts must too.
+		// past a thousand. What a read answers live, the scripts must too. The
+		// depth sits in the claims envelope, a custom claim's value: the
+		// continuation's user carries the declared User fields alone.
 		let deep: Record<string, unknown> = { leaf: true };
 		for (let level = 0; level < 1100; level += 1) deep = { next: deep };
 		const now = Date.now();
@@ -341,8 +343,8 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 			continuation: {
 				primary: {
 					subject: "user-1",
-					user: { id: "user-1", deep },
-					claims: {},
+					user: { id: "user-1" },
+					claims: { deep },
 					recorded: {
 						amr: ["pwd"],
 						authentication: {
@@ -362,10 +364,7 @@ describe("createRedisMfaTransactionStore — the transaction", () => {
 		});
 		const store = storeAt(freshPrefix());
 		await store.create(tx);
-		expect((await store.get("tx-1"))?.continuation?.primary.user).toStrictEqual({
-			id: "user-1",
-			deep,
-		});
+		expect((await store.get("tx-1"))?.continuation?.primary.claims).toStrictEqual({ deep });
 		expect(await store.reserveAttempt("tx-1", 5)).toEqual({ ok: true, attempts: 1 });
 		expect(await store.takeChallenge("tx-1", 1)).toStrictEqual(CHALLENGE);
 	});
