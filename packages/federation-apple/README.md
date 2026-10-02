@@ -138,6 +138,11 @@ schema fills in no default.
 | `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package's redirect rules](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
 | `endSessionEndpoint` | no | An upstream logout endpoint ([Refresh and logout](#refresh-and-logout)). Apple publishes none. |
 
+Migrating from a bridge for the deprecated module: an entry takes the PEM
+inline, as `privateKey` (through an environment substitution, as above); a
+`privateKeyPath` the bridge read the file from is not an entry key, and is
+refused as an unknown one.
+
 `fetch` and `jwksUri` are not entry keys: they are test seams of
 `AppleProviderConfig`, for `createAppleProvider` and the deprecated slot, and
 the type module's seam is its `fetch` option (above), which reaches Apple's
@@ -216,10 +221,12 @@ restart. A signature still in progress under the old key is neither handed to a
 caller that arrives after the rotation nor kept once it completes. That works
 through whatever you passed as `privateKey`, to `createAppleProvider` as much as
 to `createAppleClientSecret`: the option is read at every token exchange, not
-copied at construction. An entry's `privateKey` is the PEM the configuration
-held at boot, so a key replaced under the type module takes effect on the next
-restart. To pick one up without a restart, build the provider with
-`createAppleProvider` and make `privateKey` a getter that re-reads the file —
+copied at construction. **Rotating the key without a restart is available only
+through `createAppleProvider`** — in the deprecated `appleFederationConfig`
+slot, or in a module you write — never for a named `core.federations` entry: an
+entry's `privateKey` is the PEM the configuration held at boot, so a key
+replaced under the type module takes effect on the next restart. Through
+`createAppleProvider`, make `privateKey` a getter that re-reads the file —
 `get privateKey() { return readFileSync(path, "utf8"); }` — which then runs on
 every token exchange.
 

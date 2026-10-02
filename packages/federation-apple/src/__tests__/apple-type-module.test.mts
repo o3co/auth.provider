@@ -423,6 +423,24 @@ describe("appleFederationTypeModule through createApp", () => {
 		expect(issuePaths(err)).toContain(path);
 	});
 
+	it.each([
+		["an empty clientSecret", { ...entryWeb, clientSecret: "" }, "clientSecret"],
+		["an empty teamId", withKeyMaterial({ ...KEY_MATERIAL, teamId: "" }), "teamId"],
+		["a keyId that is a number", withKeyMaterial({ ...KEY_MATERIAL, keyId: 42 }), "keyId"],
+		["an empty privateKey", withKeyMaterial({ ...KEY_MATERIAL, privateKey: "" }), "privateKey"],
+	])(
+		"refuses %s as a key that must be a non-empty string, not as a missing one",
+		async (_what, entry, key) => {
+			const err = await refusal(boot({ "apple-web": entry }));
+			expect(err.reason).toBe("config-validation-failed");
+			expect(issuePaths(err)).toEqual([`core.federations.apple-web.${key}`]);
+			expect(err.message).toContain(
+				`core.federations.apple-web.${key}: must be a non-empty string`,
+			);
+			expect(err.message).not.toMatch(/is required/);
+		},
+	);
+
 	it("reads a key written null as absent", async () => {
 		const fake = await fakeApple(entryWeb.clientId);
 		const { handle } = await boot(

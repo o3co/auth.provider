@@ -38,6 +38,9 @@ const withoutNulls = (value: unknown): unknown =>
 
 const REQUIRED = "is required (a non-empty string)";
 const required = z.string({ error: REQUIRED }).min(1, { error: REQUIRED });
+const NON_EMPTY = "must be a non-empty string";
+/** An optional key that, when written, holds a non-empty string. */
+const nonEmpty = z.string({ error: NON_EMPTY }).min(1, { error: NON_EMPTY });
 const text = z.string({ error: "must be a string" });
 const strings = z.array(text, { error: "must be a list of strings" });
 
@@ -46,10 +49,10 @@ const KEY_MATERIAL = ["teamId", "keyId", "privateKey"] as const;
 
 const entryKeys = z.strictObject({
 	clientId: required,
-	clientSecret: required.optional(),
-	teamId: required.optional(),
-	keyId: required.optional(),
-	privateKey: required.optional(),
+	clientSecret: nonEmpty.optional(),
+	teamId: nonEmpty.optional(),
+	keyId: nonEmpty.optional(),
+	privateKey: nonEmpty.optional(),
 	redirectAllowlist: strings.optional(),
 	sessionDomain: text.optional(),
 	authCallbackUrl: text.optional(),
