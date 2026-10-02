@@ -77,6 +77,13 @@
  *   binding was made in by what it adds.
  * - A codes write or a witness mark that fails never undoes the factor:
  *   the outcome says so, and the binding stands.
+ * - The factor's answers — its enrollment's start and end — are read once,
+ *   field by field, however the factor holds them (a getter, a class's
+ *   instance). The state and data in them are taken as their plain copy
+ *   (`copyFactorValue`) where the answer is read, and that one copy is what
+ *   `amrFor` and the seal act on; a state or data that is not plain
+ *   JSON-shaped is the factor's failure (`503`), nothing kept or bound. The
+ *   start's `response` must be a plain object: it is answered as built.
  */
 
 import { randomBytes } from "node:crypto";
@@ -108,6 +115,7 @@ import type { MfaFactorSetCarried, MfaFactorSetWrites } from "./factorSet.mjs";
 import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes, writeRecoveryCodes } from "./recovery/issue.mjs";
+import { copyFactorValue } from "./sealing.mjs";
 
 const NOT_OPEN = Object.freeze({ outcome: "enrollment_not_open" as const });
 const PROOF_REQUIRED = Object.freeze({ outcome: "email_proof_required" as const });
@@ -447,9 +455,13 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				kind: factor.kind,
 				cause,
 			});
-			let started: MfaEnrollmentStart;
+			let started: {
+				readonly state: MfaEnrollmentStart["state"];
+				readonly response: MfaEnrollmentStart["response"];
+				readonly mail: MfaEnrollmentStart["mail"] | undefined;
+			};
 			try {
-				started = await factor.beginEnrollment({
+				const answer = await factor.beginEnrollment({
 					subject: tx.subject,
 					transactionId: tx.id,
 					nowMs,
@@ -458,9 +470,17 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					user,
 					factors: isFirstBinding(tx) ? [] : enrolledOfKind(tx.subject, factor.kind, records),
 				});
-				if (!kit.answerable(started?.response) || !kit.answerable(started.state)) {
+				// The factor's answer, each field read once, however it holds them; its
+				// state as the plain copy that is sealed (`copyFactorValue`). The response
+				// is answered as the factor built it.
+				started = {
+					state: copyFactorValue(answer?.state),
+					response: answer?.response,
+					mail: answer?.mail,
+				};
+				if (!kit.answerable(started.response)) {
 					throw new TypeError(
-						"the factor's enrollment answered a response or a state that is not an object",
+						"the factor's enrollment answered a response that is not a plain object",
 					);
 				}
 			} catch (cause) {
@@ -624,7 +644,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			let completion: MfaEnrollmentCompletion;
 			let amr: readonly string[] | undefined;
 			try {
-				completion = await factor.completeEnrollment({
+				const answer = await factor.completeEnrollment({
 					subject: tx.subject,
 					transactionId: tx.id,
 					nowMs,
@@ -636,6 +656,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),
 					proof: call.proof,
 				});
+				// The factor's answer, each field read once, however it holds them; its
+				// data as the plain copy that is sealed (`copyFactorValue`) and that
+				// `amrFor` is handed.
+				completion = answer.ok
+					? { ok: true, data: copyFactorValue(answer.data), label: answer.label }
+					: { ok: false, reason: answer.reason };
 				if (completion.ok) amr = kit.declaredAmr(factor, completion.data);
 			} catch (cause) {
 				return unreadable("enrollment", { cause });
