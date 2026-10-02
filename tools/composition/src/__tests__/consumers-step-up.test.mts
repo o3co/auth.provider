@@ -106,13 +106,21 @@ afterEach(async () => {
 	await Promise.all(booted.splice(0).map((set) => set.handle.dispose()));
 });
 
+/** Recent MFA's window, `mfa.manage.maxAgeSeconds`, as every boot here sets it. */
+const RECENT_MFA_SECONDS = 300;
+
 /** The MFA package's configuration under `mode`, the TOTP factor on, with `extra` laid over it. */
 const adjust =
 	(mode: "optional" | "required", extra: Record<string, unknown> = {}) =>
 	(config: Switches): Switches =>
 		({
 			...config,
-			...mfaConfigForTests({ key: MFA_KEY, mode, ...extra }),
+			...mfaConfigForTests({
+				key: MFA_KEY,
+				mode,
+				manage: { maxAgeSeconds: RECENT_MFA_SECONDS },
+				...extra,
+			}),
 			...mfaTotpFactorConfigForTests(),
 		}) as unknown as Switches;
 
@@ -497,7 +505,7 @@ describe.each(CONSUMERS)("$name, under mfa.mode = required", (consumer) => {
 			await signInWithFactor(set.app, page, user, factor);
 			const visit = await consumer.arrange(set.app, user);
 
-			// The same session, read as if it signed in and verified its factor six minutes ago.
+			// The same session, read as if it signed in and verified its factor a minute before the window.
 			readAged(set, { authTime: true, mfaAt: true });
 
 			const res = await visit(set.app, page);
@@ -514,18 +522,18 @@ describe.each(CONSUMERS)("$name, under mfa.mode = required", (consumer) => {
 		await signInWithFactor(set.app, page, user, factor);
 		const visit = await consumer.arrange(set.app, user);
 
-		// The same session, read as if it signed in six minutes ago and verified its factor now.
+		// The same session, read as if it signed in a minute before the window and verified its factor now.
 		readAged(set, { authTime: true, mfaAt: false });
 
 		await consumer.admitted(await visit(set.app, page), set.app, page);
 	});
 });
 
-/** Every read of a session record on `set` from here on, with the named times six minutes older. */
+/** Every read of a session record on `set` from here on, with the named times a minute older than recent MFA's window. */
 function readAged(set: FullSet, which: { readonly authTime: boolean; readonly mfaAt: boolean }) {
 	const store = sessionStoreOf(set);
 	const read = store.get.bind(store);
-	const aged = (at: Date) => new Date(at.getTime() - 6 * 60_000);
+	const aged = (at: Date) => new Date(at.getTime() - (RECENT_MFA_SECONDS + 60) * 1_000);
 	vi.spyOn(store, "get").mockImplementation(async (sid) => {
 		const session = await read(sid);
 		if (session === null) return null;
@@ -657,7 +665,7 @@ describe("the device token, under mfa.mode = required", () => {
 		return claimsOf(tokens.body.access_token as string);
 	}
 
-	it("carries the approving session's vouched amr and its primary authentication time as auth_time — not the approval's instant, never after iat — and no acr", async () => {
+	it("carries the approving session's amr and its primary authentication time as auth_time — not the approval's instant, never after iat — and no acr", async () => {
 		const user = newUser();
 		const set = await boot([user]);
 		const factor = await seedTotp(set.handle.components, set.config, user.id);
@@ -685,14 +693,51 @@ describe("the device token, under mfa.mode = required", () => {
 		expect(claims).not.toHaveProperty("acr");
 	});
 
+	it("carries the step-up's amr and the password login's auth_time after an approval the session stepped up for, minted on another replica (two replicas over Redis)", async () => {
+		const user = newUser();
+		const { before, after } = await rollout([user]);
+		const page = browser();
+		const sid = await sidOfLogin(before, () => signIn(before.app, page, user));
+		const factor = await seedTotp(after.handle.components, after.config, user.id);
+		const { deviceCode, userCode } = await deviceAuthorization(after.app);
+		const approve = () =>
+			page.post(after.app, "/oauth/device/verification", {
+				action: "approve",
+				user_code: userCode,
+			});
+		deviceApproval.steppedUp(await approve(), approve);
+		// The step-up is made in a later second than the login, so auth_time tells them apart.
+		await nextSecond();
+		await stepUp(after.app, page, factor);
+
+		const approved = await approve();
+		expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+		const claims = await poll(before.app, deviceCode);
+
+		const session = await sessionStoreOf(before).get(sid);
+		if (session === null) throw new Error("the session record is gone");
+		const authTime = Math.floor(session.authTime.getTime() / 1000);
+		const mfaAt = session.authentication?.mfaAt;
+		expect(mfaAt).toBeInstanceOf(Date);
+		expect(Math.floor((mfaAt as Date).getTime() / 1000)).toBeGreaterThan(authTime);
+		// The password, then the TOTP step-up's otp and mfa.
+		expect(claims.amr).toEqual(["pwd", "otp", "mfa"]);
+		expect(claims.auth_time).toBe(authTime);
+		expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+		expect(claims).not.toHaveProperty("acr");
+	});
+
 	it("carries neither amr nor auth_time from an approval recorded without them, as a replica of an earlier release records one", async () => {
 		// The device-code store as such a replica writes to it: an approval names neither field.
 		const deviceCodes = createMemoryDeviceCodeStore();
 		const earlierRelease = new Proxy(deviceCodes, {
 			get(target, property) {
 				if (property === "approve") {
-					return ({ userCode, subject, nowMs }: ApproveDeviceAuthorizationInput) =>
-						target.approve({ userCode, subject, nowMs });
+					return ({
+						amr: _amr,
+						authTime: _authTime,
+						...earlier
+					}: ApproveDeviceAuthorizationInput) => target.approve(earlier);
 				}
 				const value: unknown = Reflect.get(target, property, target);
 				return typeof value === "function" ? value.bind(target) : value;
