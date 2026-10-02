@@ -99,6 +99,10 @@ const CONFLICT = {
 	error_description:
 		"The recovery codes were regenerated elsewhere at the same time: read them again",
 };
+const REQUEST_STALE = {
+	error: "mfa_request_stale",
+	error_description: "The request took too long to be checked safely: try again",
+};
 const NO_COUNTING_FACTOR = {
 	error: "mfa_enrollment_required",
 	error_description:
@@ -375,24 +379,49 @@ describe("a regeneration's own checks under the lease", () => {
 		expect(await built.transactionStore.recoverySetFloor(ALICE.id)).toBe(0);
 	});
 
-	it("refuses 409 mfa_factors_changed, nothing written, a request that reached the lease longer after it began than a first-binding mark stands: a mark noted meanwhile may have lapsed", async () => {
-		const built = await composed();
-		const { agent } = await signedIn(built);
+	it("refuses 409 mfa_request_stale, nothing written, a password-only request that stalled inside its admission past the owner's first-binding mark", async () => {
+		const built = await composed({ mode: "optional", requireEmailProof: "never", enrolled: false });
+		const { agent } = await signIn(built.app, built.userSessionStore);
 		const store = built.transactionStore;
-		const acquire = store.acquireSubjectLease.bind(store);
-		vi.spyOn(store, "acquireSubjectLease").mockImplementationOnce(async (subject, asked) => {
-			// The request stalled between its start and its lease past the mark's lifetime (30 minutes here).
+		const flag = store.emailProofRequiredAtNextBinding.bind(store);
+		vi.spyOn(store, "emailProofRequiredAtNextBinding").mockImplementationOnce(async (subject) => {
+			// The first-binding gate's read stalls after the recency check: the owner binds,
+			// noting the mark, and the mark (30 minutes here) lapses before the read answers.
+			await store.noteFirstBinding(subject, Date.now(), Date.now() + 30 * 60_000);
+			await seedTotp(built.factorStore);
 			vi.setSystemTime(Date.now() + 31 * 60_000);
-			return acquire(subject, asked);
+			return flag(subject);
 		});
-		const create = vi.spyOn(built.factorStore, "create");
 
 		const res = await regenerate(agent);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(409);
-		expect(res.body).toEqual(FACTORS_CHANGED);
-		expect(create).not.toHaveBeenCalled();
+		expect(res.body).toEqual(REQUEST_STALE);
+		expect(await setsOf(built.factorStore)).toEqual([]);
 	});
+
+	it.each([
+		["refuses 409 mfa_request_stale", 24, 409],
+		["answers", 23, 200],
+	] as const)(
+		"%s a request that reached its lease %i minutes after it began: a mark lives 30 here, less 5 of skew and 80 s of lease",
+		async (_, minutes, status) => {
+			const built = await composed();
+			const { agent } = await signedIn(built);
+			const store = built.transactionStore;
+			const acquire = store.acquireSubjectLease.bind(store);
+			vi.spyOn(store, "acquireSubjectLease").mockImplementationOnce(async (subject, asked) => {
+				// After the admission, before the lease: the store's own lease runs from here.
+				vi.setSystemTime(Date.now() + minutes * 60_000);
+				return acquire(subject, asked);
+			});
+
+			const res = await regenerate(agent);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(status);
+			if (status === 409) expect(res.body).toEqual(REQUEST_STALE);
+		},
+	);
 
 	it("is 503, nothing written, when the subject's first-binding mark cannot be read", async () => {
 		const built = await composed();
@@ -747,6 +776,10 @@ describe("a retired set left stored", () => {
 			return snapshot;
 		});
 
+		const floor = vi.spyOn(built.transactionStore, "recoverySetFloor");
+		const listed = vi.mocked(built.factorStore.list);
+		listed.mockClear();
+
 		const res = await readTransaction(browser, transaction);
 
 		expect(
@@ -754,6 +787,9 @@ describe("a retired set left stored", () => {
 				.filter((factor) => factor.kind === "recovery_code")
 				.map((factor) => factor.id),
 		).toEqual([newest?.id]);
+		// At most two listings and one floor read.
+		expect(listed).toHaveBeenCalledTimes(2);
+		expect(floor).toHaveBeenCalledTimes(1);
 		expect(current.record.id).not.toBe(newest?.id);
 	});
 
@@ -798,6 +834,33 @@ describe("a retired set left stored", () => {
 				.filter((factor) => factor.kind === "recovery_code")
 				.map((factor) => factor.id),
 		).toContain(newest?.id);
+	});
+
+	it("lists the records again when the floor cannot be read, so a set written while the floor read hung is offered", async () => {
+		const built = await composed();
+		await leftStored(built);
+		const { agent: browser, transaction } = await beginLogin(built.app);
+		let newest: MfaFactorRecord | undefined;
+		vi.spyOn(built.transactionStore, "recoverySetFloor").mockImplementationOnce(async () => {
+			const next = generateRecoveryCodes(
+				createRecoveryCodeFactor({ count: 2 }),
+				suiteSealing().digestsFor("recovery_code"),
+				2,
+			);
+			if (next === undefined) throw new Error("no set");
+			newest = await seedFactor(built.factorStore, "recovery_code", next.data);
+			throw new Error("down");
+		});
+		const listed = vi.spyOn(built.factorStore, "list");
+
+		const res = await readTransaction(browser, transaction);
+
+		expect(
+			(res.body.factors as { id: string; kind: string }[])
+				.filter((factor) => factor.kind === "recovery_code")
+				.map((factor) => factor.id),
+		).toContain(newest?.id);
+		expect(listed).toHaveBeenCalledTimes(2);
 	});
 
 	it("reads no floor for a subject holding no recovery set: a password login's ask, the offers, the list and a step-up", async () => {
