@@ -19,7 +19,9 @@
  * What a `federationTypes` declaration registers as, read once; at stage 1,
  * the refusal of an enabled entry no module handles and the parse of each
  * entry dispatched to a registered type; at stage 4, the provider and the
- * redirect policy one dispatched entry builds.
+ * redirect policy one dispatched entry builds, and the check that holds a
+ * provider — dispatched, or contributed directly by its key — to the name it
+ * registers under.
  */
 
 import type { z } from "zod";
@@ -170,12 +172,15 @@ const quoted = (names: readonly string[]): string =>
 const BARE_KEY = /^[A-Za-z0-9_-]+$/;
 
 /**
- * Where an entry is written, as the operator writes the path: its name bare
- * when it is a bare key, and otherwise quoted as JSON, so a name with a dot,
- * a quote or a newline in it reads as one key on one line.
+ * `section.<name>`, as the path is written: the name bare when it is a bare
+ * key, and otherwise quoted as JSON, so a name with a dot, a quote or a
+ * newline in it reads as one key on one line.
  */
-const entryAt = (name: string): string =>
-	`core.federations.${BARE_KEY.test(name) ? name : JSON.stringify(name)}`;
+const keyAt = (section: string, name: string): string =>
+	`${section}.${BARE_KEY.test(name) ? name : JSON.stringify(name)}`;
+
+/** Where an entry is written, as the operator writes the path (`keyAt`). */
+const entryAt = (name: string): string => keyAt("core.federations", name);
 
 /**
  * Every enabled `core.federations` entry is handled by an installed module:
@@ -394,9 +399,9 @@ export interface DispatchedPair {
  * Builds the provider and the redirect policy of one dispatched entry with
  * its type's registered factories, the provider first. Throws — for the
  * caller to report as the contribution's failure — when a factory throws,
- * when the provider is not an object or names another federation (the
- * redirect policy is found by the provider's name), or when the policy is not
- * an object. Registers nothing: the caller registers both, or neither.
+ * when the provider is not an object named after its entry
+ * (`namedProvider`), or when the policy is not an object. Registers nothing:
+ * the caller registers both, or neither.
  * @internal
  */
 export async function buildDispatchedFederation(
@@ -411,18 +416,60 @@ export async function buildDispatchedFederation(
 		);
 	}
 	const subject = `the type ${JSON.stringify(federation.type)}'s`;
-	const provider: unknown = await registered.create(instance);
-	if (typeof provider !== "object" || provider === null) {
-		throw new RangeError(`${subject} factory must answer a provider, an object`);
-	}
-	if ((provider as { readonly name?: unknown }).name !== instance.name) {
-		throw new RangeError(
-			`${subject} factory must answer a provider named after its entry, ${JSON.stringify(instance.name)}: its redirect policy is found by that name`,
-		);
-	}
+	const provider = namedProvider(
+		await registered.create(instance),
+		instance.name,
+		`${subject} factory`,
+		`its entry, ${JSON.stringify(instance.name)}`,
+	);
 	const redirectPolicy: unknown = await registered.redirectPolicy(instance);
 	if (typeof redirectPolicy !== "object" || redirectPolicy === null) {
 		throw new RangeError(`${subject} redirectPolicy must answer a redirect policy, an object`);
 	}
-	return { provider: provider as FederationProvider, redirectPolicy };
+	return { provider, redirectPolicy };
+}
+
+/**
+ * The provider a module contributes or overrides directly under
+ * `federations.<key>`, held to what a dispatched entry's provider is held to
+ * (`namedProvider`): an object named `key`. Throws — for the caller to report
+ * as the contribution's failure — otherwise; the message names the key as a
+ * path (`keyAt`).
+ * @internal
+ */
+export function checkDirectFederation(key: string, provider: unknown): FederationProvider {
+	return namedProvider(provider, key, `${keyAt("federations", key)}: the factory`, "its key");
+}
+
+/**
+ * `provider` when it is an object whose `name` is `name`, or a `RangeError`:
+ * the session finds a federation's redirect policy and callback URL by its
+ * provider's name, so a provider registered under another name would be
+ * served there with another federation's. `subject` is what answered the
+ * provider and `namedAfter` what its name must be, as the message says them.
+ * The provider's name is read once and quoted only as JSON, and only when it
+ * is a string; nothing else of the provider is quoted.
+ */
+function namedProvider(
+	provider: unknown,
+	name: string,
+	subject: string,
+	namedAfter: string,
+): FederationProvider {
+	if (typeof provider !== "object" || provider === null) {
+		throw new RangeError(`${subject} must answer a provider, an object`);
+	}
+	const answered = (provider as { readonly name?: unknown }).name;
+	if (answered !== name) {
+		const named =
+			typeof answered === "string"
+				? `named ${JSON.stringify(answered)}`
+				: answered === undefined
+					? "without a name"
+					: "whose name is not a string";
+		throw new RangeError(
+			`${subject} must answer a provider named after ${namedAfter} (it answered one ${named}): its redirect policy and callback URL are found by that name`,
+		);
+	}
+	return provider as FederationProvider;
 }

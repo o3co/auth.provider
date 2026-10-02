@@ -48,7 +48,7 @@ import {
 } from "../session-admission/requirement.mjs";
 import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
-import { buildDispatchedFederation } from "./federation-entries.mjs";
+import { buildDispatchedFederation, checkDirectFederation } from "./federation-entries.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
 	CleanupRecord,
@@ -450,6 +450,10 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  * - a `grants` value that is not an object with a callable `handle`: the
  *   grant resolver would list the name as registered while `/oauth/token`
  *   could not call it;
+ * - a `federations` value that is not an object named after its key
+ *   (`checkDirectFederation`, which holds a dispatched entry's provider to
+ *   the same): the session finds a federation's redirect policy and callback
+ *   URL by its provider's name;
  * - an `mfaFactors` factor whose `kind` is not its key: the resolver answers
  *   by key and a record's kind is read back through it, so a misfiled factor
  *   would verify another kind's records;
@@ -486,6 +490,7 @@ function checkNameKeyedValue(
 		}
 		return value;
 	}
+	if (kind === "federations") return checkDirectFederation(name, value);
 	if (kind === "mfaFactors") {
 		if (value === null) return value;
 		if ((value as { kind?: unknown } | undefined)?.kind !== name) {
