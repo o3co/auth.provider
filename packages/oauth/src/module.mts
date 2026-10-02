@@ -27,6 +27,7 @@ import {
 	readAcrTable,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	stepUpReach,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -78,13 +79,13 @@ export const oauthSectionSchema = z.object({
 			allowedAudiences: commaList.optional(),
 			allowedHosts: commaList.optional(),
 			deniedHosts: commaList.optional(),
-			maxBytes: z.coerce.number().int().positive().optional(),
-			timeoutMs: z.coerce.number().int().positive().optional(),
-			cacheMaxAgeMs: z.coerce.number().int().nonnegative().optional(),
-			maxCacheEntries: z.coerce.number().int().positive().optional(),
-			staleIfErrorMs: z.coerce.number().int().nonnegative().optional(),
-			negativeCacheMs: z.coerce.number().int().nonnegative().optional(),
-			maxConcurrentFetches: z.coerce.number().int().positive().optional(),
+			maxBytes: wholeNumberInRangeFromEnv(1).optional(),
+			timeoutMs: wholeNumberInRangeFromEnv(1).optional(),
+			cacheMaxAgeMs: wholeNumberInRangeFromEnv(0).optional(),
+			maxCacheEntries: wholeNumberInRangeFromEnv(1).optional(),
+			staleIfErrorMs: wholeNumberInRangeFromEnv(0).optional(),
+			negativeCacheMs: wholeNumberInRangeFromEnv(0).optional(),
+			maxConcurrentFetches: wholeNumberInRangeFromEnv(1).optional(),
 		})
 		.strict()
 		.optional(),
