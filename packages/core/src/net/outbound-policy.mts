@@ -384,7 +384,7 @@ export function admitUrl(
 /**
  * Whether `addresses`, every address the destination's host resolved to,
  * may be connected to: each an IP address; none special-use unless the host
- * is internal (a mixed answer is refused, so a rebinding name cannot choose);
+ * is internal (a mixed answer is refused: no address is picked from it);
  * each loopback for plain http. Throws an {@link OutboundFetchError} otherwise.
  */
 export function admitAddresses(
