@@ -1071,8 +1071,11 @@ exported as `mergeFederatedClaims`):
   (`PROMOTABLE_FEDERATED_CLAIMS`) — only where the local record left the field
   absent, and only when the federated value is a string.
 - **Everything else is namespaced** under `claims.federated[<providerName>]`,
-  verbatim and complete — including values that were also promoted and values
-  that lost to a local claim.
+  in its JSON form and complete — including values that were also promoted and
+  values that lost to a local claim. Core stores `federated` as one custom claim:
+  a mapped value JSON cannot hold (a bigint, a cycle) drops the whole
+  `federated` claim, warned once on the callback's logger as
+  `login_claim_dropped`, and the login continues.
 
 So an IdP cannot contribute `groups` (nor a `roles` / `scope` / `permissions` an
 adapter invents): those reach `claims.federated[<providerName>]` and nothing
