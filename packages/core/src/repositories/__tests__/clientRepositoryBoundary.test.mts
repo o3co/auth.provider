@@ -19,15 +19,18 @@
  * record is read by name once, into a plain copy, and held to the
  * registration schema. A record that fails makes the lookup reject with the
  * branded refusal (`isClientRecordRefused`), with one warn naming the client
- * id and the reasons; a read that throws is the store's outage and is let
- * through as it was thrown. A layer that lets rejections through keeps the
- * refusal.
+ * id and the reasons. A field whose read throws is refused as unreadable,
+ * never its value or what was thrown; the repository's own throw is the
+ * store's outage. A logger that throws changes nothing of the answer, and
+ * the boundary itself is frozen. A layer that lets rejections through keeps
+ * the refusal.
  */
 
 import { describe, expect, it, vi } from "vitest";
 import type { ClientRepository, PublicClient } from "#/repositories/ClientRepository.mjs";
 import { isClientRecordRefused } from "#/repositories/clientRecordRefused.mjs";
 import { validatedClientRepository } from "#/repositories/clientRepositoryBoundary.mjs";
+import { logClientRepositoryUnavailable } from "#/repositories/clientRepositoryUnavailable.mjs";
 import { InMemoryClientRepository } from "#/repositories/InMemoryClientRepository.mjs";
 import { clientEntries } from "#/testing/index.mjs";
 
@@ -541,6 +544,28 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		expect(first).not.toBe(second);
 	});
 
+	it("answers a refused record with the refusal when its logger throws, and a valid one as it is", async () => {
+		const SAID = "logger sink down: tok-3f9a";
+		const logger = {
+			warn: vi.fn(() => {
+				throw new Error(SAID);
+			}),
+		};
+		const refusing = validatedClientRepository(
+			repositoryAnswering({ ...validRecord(), firstParty: "true" }),
+			{ logger },
+		);
+		const found = await rejectionOf(refusing.findById(CLIENT_ID));
+		const authenticated = await rejectionOf(refusing.authenticate(CLIENT_ID, "secret"));
+		expect(isClientRecordRefused(found) && isClientRecordRefused(authenticated)).toBe(true);
+		expect(logger.warn).toHaveBeenCalledTimes(2);
+		const outage = { error: vi.fn() };
+		logClientRepositoryUnavailable(outage, { step: "find", clientId: CLIENT_ID }, found);
+		expect(JSON.stringify(outage.error.mock.calls)).not.toContain("tok-3f9a");
+		const valid = validatedClientRepository(repositoryAnswering(validRecord()), { logger });
+		expect(await valid.findById(CLIENT_ID)).toEqual(validRecord());
+	});
+
 	it("answers no record as no client, silently", async () => {
 		for (const answer of [null, undefined]) {
 			const logger = recordingLogger();
@@ -552,23 +577,88 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 	});
 });
 
-describe("validatedClientRepository — a read that throws is the store's outage", () => {
-	it("lets a getter's throw through as it was thrown, for the caller to answer 503", async () => {
-		const outage = new Error("connection reset");
-		const record = Object.defineProperty({ ...validRecord() }, "allowedScopes", {
-			get() {
-				throw outage;
-			},
-		});
-		const logger = recordingLogger();
-		const boundary = validatedClientRepository(repositoryAnswering(record), { logger });
-		await expect(boundary.findById(CLIENT_ID)).rejects.toBe(outage);
-		await expect(boundary.authenticate(CLIENT_ID, "secret")).rejects.toBe(outage);
-		expect(isClientRecordRefused(outage)).toBe(false);
-		expect(logger.warn).not.toHaveBeenCalled();
-	});
+describe("validatedClientRepository — a field whose read throws is refused as unreadable", () => {
+	/** What a throw may carry: the field's value, quoted by a driver's message. */
+	const VALUE = "https://rp.example/cb?token=tok-3f9a";
 
-	it("lets the repository's own throw through", async () => {
+	/** `validRecord()` whose `field` is read through `read`, which throws. */
+	const unreadableAt = (field: string, read: () => unknown): object =>
+		Object.defineProperty({ ...validRecord() }, field, { get: read, enumerable: true });
+
+	const CASES: ReadonlyArray<readonly [string, object, string]> = [
+		[
+			"a getter throwing an Error that quotes the value",
+			unreadableAt("allowedRedirectUris", () => {
+				throw new Error(`column allowedRedirectUris failed to load: ${VALUE}`);
+			}),
+			"allowedRedirectUris: unreadable",
+		],
+		[
+			"a getter throwing a string",
+			unreadableAt("clientName", () => {
+				throw `lazy load of ${VALUE}`;
+			}),
+			"clientName: unreadable",
+		],
+		[
+			"a nested object's getter",
+			{
+				...validRecord(),
+				senderConstrained: Object.defineProperty({ required: true }, "methods", {
+					get() {
+						throw new TypeError(`cannot read ${VALUE}`);
+					},
+					enumerable: true,
+				}),
+			},
+			"senderConstrained: unreadable",
+		],
+		[
+			"a Proxy-backed list whose element read throws",
+			{
+				...validRecord(),
+				allowedScopes: new Proxy(["openid"], {
+					get(target, key, receiver) {
+						if (key === "0") throw new RangeError(VALUE);
+						return Reflect.get(target, key, receiver);
+					},
+				}),
+			},
+			"allowedScopes: unreadable",
+		],
+	];
+
+	for (const [name, record, reason] of CASES) {
+		it(`refuses ${name}, naming the field, never the value or what was thrown`, async () => {
+			const logger = recordingLogger();
+			const boundary = validatedClientRepository(repositoryAnswering(record), { logger });
+			const found = await rejectionOf(boundary.findById(CLIENT_ID));
+			const authenticated = await rejectionOf(boundary.authenticate(CLIENT_ID, "secret"));
+			expect(isClientRecordRefused(found) && isClientRecordRefused(authenticated)).toBe(true);
+			expect(logger.warn.mock.calls).toEqual([
+				[{ step: "find", clientId: CLIENT_ID, reasons: [reason] }, "client_record_refused"],
+				[{ step: "authenticate", clientId: CLIENT_ID, reasons: [reason] }, "client_record_refused"],
+			]);
+			// Neither the warn, the refusal, nor the outage line a caller writes
+			// for it carries the value or the thrown message.
+			const outage = { error: vi.fn() };
+			logClientRepositoryUnavailable(outage, { step: "find", clientId: CLIENT_ID }, found);
+			expect(outage.error.mock.calls[0]?.[0]).toMatchObject({
+				err: { reason: "client_record_refused" },
+			});
+			const said = JSON.stringify([
+				logger.warn.mock.calls,
+				outage.error.mock.calls,
+				{ ...(found as object), message: (found as Error).message },
+			]);
+			expect(said).not.toContain("tok-3f9a");
+			expect(said).not.toContain("failed to load");
+			expect(said).not.toContain("lazy load");
+			expect(said).not.toContain("cannot read");
+		});
+	}
+
+	it("still lets the repository's own throw through, as the store's outage", async () => {
 		const outage = new Error("store down");
 		const boundary = validatedClientRepository({
 			findById: async () => {
@@ -813,6 +903,26 @@ describe("validatedClientRepository — one boundary", () => {
 		expect(twice).toBe(once);
 		await twice.findById(CLIENT_ID);
 		expect(reads.get("clientId")).toBe(1);
+	});
+
+	it("is frozen: no consumer can replace its lookups or its dispose", async () => {
+		const boundary = validatedClientRepository(repositoryAnswering(validRecord()));
+		expect(Object.isFrozen(boundary)).toBe(true);
+		const replacement = async () => null;
+		expect(() => {
+			(boundary as { findById: unknown }).findById = replacement;
+		}).toThrow(TypeError);
+		expect(() => {
+			(boundary as { authenticate: unknown }).authenticate = replacement;
+		}).toThrow(TypeError);
+		expect(() => {
+			(boundary as { [Symbol.asyncDispose]?: unknown })[Symbol.asyncDispose] = replacement;
+		}).toThrow(TypeError);
+		expect(() => Object.defineProperty(boundary, "findById", { value: replacement })).toThrow(
+			TypeError,
+		);
+		expect(validatedClientRepository(boundary)).toBe(boundary);
+		expect(await boundary.findById(CLIENT_ID)).toEqual(validRecord());
 	});
 
 	it("disposes the repository it holds when the repository is disposable", async () => {

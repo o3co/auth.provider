@@ -19,8 +19,9 @@
  * core's client-record boundary over the `clientRepository` slot's
  * repository: a record the registration schema refuses rejects the lookup
  * with the boundary's refusal, answered `503` like the repository's outage
- * and warned once; a record whose field read throws is the repository's
- * outage; and an ORM entity is read by name. The slot's boundary is the one
+ * and warned once; a record whose field read throws is refused the same
+ * way, naming the field and never what was thrown; and an ORM entity is
+ * read by name. The slot's boundary is the one
  * oauth reads: a boundary the host put there is kept, with its own logger.
  */
 
@@ -182,11 +183,12 @@ describe("oauth endpoints behind core's client-record boundary", () => {
 		await handle.dispose();
 	});
 
-	it("answer a record whose field read throws as the repository's outage", async () => {
+	it("answer a record whose field read throws 503 as a refusal, saying nothing of what was thrown", async () => {
+		const LEAK = "tok-3f9a";
 		const unreadable = () =>
 			Object.defineProperty({ ...VALID }, "allowedScopes", {
 				get() {
-					throw new Error("lazy column failed to load");
+					throw new Error(`lazy column allowedScopes failed to load: openid ${LEAK}`);
 				},
 			});
 		const { app, handle, logger } = await boot(answering(unreadable));
@@ -196,7 +198,24 @@ describe("oauth endpoints behind core's client-record boundary", () => {
 		const exchanged = await token(app);
 		expect(exchanged.status).toBe(503);
 		expect(exchanged.body).toMatchObject({ error: "temporarily_unavailable" });
-		expect(refusals(logger)).toEqual([]);
+		expect(refusals(logger).map(([line]) => line.reasons)).toEqual([
+			["allowedScopes: unreadable"],
+			["allowedScopes: unreadable"],
+		]);
+		expect(
+			logger.error.mock.calls
+				.filter(([, message]) => message === "client_repository_unavailable")
+				.map(([line]) => (line as { err?: { reason?: string } }).err?.reason),
+		).toEqual(["client_record_refused", "client_record_refused"]);
+		const said = JSON.stringify([
+			authorized.text,
+			exchanged.text,
+			authorized.headers,
+			exchanged.headers,
+			...Object.values(logger).map((method) => (method as { mock: { calls: unknown } }).mock.calls),
+		]);
+		expect(said).not.toContain(LEAK);
+		expect(said).not.toContain("failed to load");
 		await handle.dispose();
 	});
 

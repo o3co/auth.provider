@@ -40,7 +40,9 @@
  *   mistake; a default scope outside the allowed ones is named by its
  *   position too. A rule about a scheme or a host names that scheme or host,
  *   and the reserved parameter and JWK member names come from fixed lists.
- *   The record object is never logged.
+ *   A field whose read throws is `<field>: unreadable`: what was thrown can
+ *   quote the value, so it is dropped. The record object is never logged,
+ *   and a logger that throws changes nothing of the answer.
  *
  * - **What a refused lookup answers.** `findById` and `authenticate` reject
  *   with a {@link ClientRecordRefusedError}, never `null`: a refusal is the
@@ -51,7 +53,8 @@
  *   as it answers any rejection of the lookup.
  *
  * Boot installs the boundary in the `clientRepository` slot, over whatever
- * fills it, so every module that reads the slot reads through it. A record
+ * fills it, so every module that reads the slot reads through it; it is
+ * frozen, so no reader can replace a lookup the others read through. A record
  * is validated at each boundary it passes; a boundary this module built is
  * recognised and reused, never wrapped twice. A boundary over another lets
  * the inner one's refusal through unchanged, without a second warn.
@@ -65,7 +68,7 @@ import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 import { ClientRecordRefusedError } from "./clientRecordRefused.mjs";
 import type { ClientRepositoryOutage } from "./clientRepositoryUnavailable.mjs";
 import { PublicClientRecordSchema } from "./InMemoryClientRepository.mjs";
-import { readPlainFields } from "./userSnapshot.mjs";
+import { type PlainFieldsReading, readPlainFields } from "./userSnapshot.mjs";
 
 /**
  * The fields `PublicClient` declares, each read by name however the record
@@ -125,6 +128,31 @@ type ClientRecordReading =
 	| { readonly ok: false; readonly reasons: readonly string[] };
 
 /**
+ * `record`'s declared fields as plain data, each read once, by name. A read
+ * that throws refuses the record as `<field>: unreadable`: what was thrown
+ * can quote the value, so it is dropped, never answered or logged.
+ */
+function readFields(
+	record: object,
+):
+	| { readonly ok: true; readonly copy: Readonly<Record<string, unknown>> }
+	| { readonly ok: false; readonly reasons: readonly string[] } {
+	if (Array.isArray(record)) return { ok: false, reasons: ["not an object"] };
+	const copy: Record<string, unknown> = {};
+	for (const field of CLIENT_RECORD_FIELDS) {
+		let plain: PlainFieldsReading<ClientRecordField>;
+		try {
+			plain = readPlainFields(record, [field]);
+		} catch {
+			return { ok: false, reasons: [`${field}: unreadable`] };
+		}
+		if (!plain.ok) return { ok: false, reasons: [`${field}: not plain data`] };
+		Object.assign(copy, plain.copy);
+	}
+	return { ok: true, copy };
+}
+
+/**
  * `record`, answered for `clientId`, as the plain validated copy every
  * consumer reads: each field `PublicClient` declares read once, by name,
  * however the record holds it (own data, a prototype getter, an ORM entity, a
@@ -135,14 +163,13 @@ type ClientRecordReading =
  * `clientId` must be the id that was looked up, and an id no request could
  * name (`isWellFormedClientId`) is refused, as at boot.
  *
- * Refused, with each reason: a record that is not an object, a field holding
- * what JSON does not hold as it is, a field the schema refuses, an id that
- * is not `clientId`. A read that throws is let through as it was thrown.
+ * Refused, with each reason: a record that is not an object, a field whose
+ * read throws (`unreadable`), a field holding what JSON does not hold as it
+ * is, a field the schema refuses, an id that is not `clientId`.
  */
 function readClientRecord(record: object, clientId: string): ClientRecordReading {
-	if (Array.isArray(record)) return { ok: false, reasons: ["not an object"] };
-	const plain = readPlainFields(record, CLIENT_RECORD_FIELDS);
-	if (!plain.ok) return { ok: false, reasons: [`${plain.field}: not plain data`] };
+	const plain = readFields(record);
+	if (!plain.ok) return plain;
 	const parsed = PublicClientRecordSchema.safeParse(plain.copy);
 	if (!parsed.success) {
 		return {
@@ -191,16 +218,20 @@ const boundaries = new WeakSet<ClientRepository>();
  *   sanitised and capped (`reasonCount` when more). The record itself is
  *   never logged.
  * - `null` or `undefined` is no record: `null`, silently.
- * - A throw, the repository's or a field read's, is let through as it was
- *   thrown. So is an inner boundary's refusal, which stays a refusal and is
- *   not warned again; anything else is the store's outage.
+ * - A field whose read throws is refused, as `<field>: unreadable`; what was
+ *   thrown is dropped. A throw from the logger changes nothing: the refusal
+ *   is still the answer.
+ * - The repository's own throw is let through as it was thrown. So is an
+ *   inner boundary's refusal, which stays a refusal and is not warned again;
+ *   anything else is the store's outage.
  *
  * A layer over the boundary keeps a refusal as long as it lets rejections
  * through unchanged (see the file header). A boundary handed to it is
  * answered as it is, never wrapped twice, so it keeps the logger it was
- * first built with; `options` are not read. Building the boundary reads
- * nothing of `inner`. The boundary is always disposable: disposing it reads
- * `inner`'s `Symbol.asyncDispose` then, and calls it when it is a function.
+ * first built with; `options` are not read. The boundary is frozen.
+ * Building it reads nothing of `inner`. The boundary is always disposable:
+ * disposing it reads `inner`'s `Symbol.asyncDispose` then, and calls it when
+ * it is a function.
  *
  * The reasons a refusal logs name the field and an entry's position, never a
  * URI (see the file header). The record object is never logged.
@@ -222,17 +253,21 @@ export function validatedClientRepository(
 				? readClientRecord(record, clientId)
 				: ({ ok: false, reasons: ["not an object"] } as const);
 		if (reading.ok) return reading.client;
-		logger.warn(
-			{
-				step,
-				clientId: auditErrorText(clientId),
-				reasons: auditErrorList(reading.reasons, LOGGED_REASONS_MAX),
-				...(reading.reasons.length > LOGGED_REASONS_MAX
-					? { reasonCount: reading.reasons.length }
-					: {}),
-			},
-			"client_record_refused",
-		);
+		// The refusal is the answer whatever the logger does: a logger that
+		// throws must not turn it into an outage carrying the logger's error.
+		try {
+			logger.warn(
+				{
+					step,
+					clientId: auditErrorText(clientId),
+					reasons: auditErrorList(reading.reasons, LOGGED_REASONS_MAX),
+					...(reading.reasons.length > LOGGED_REASONS_MAX
+						? { reasonCount: reading.reasons.length }
+						: {}),
+				},
+				"client_record_refused",
+			);
+		} catch {}
 		throw new ClientRecordRefusedError();
 	};
 	const boundary: ClientRepository & AsyncDisposable = {
@@ -244,6 +279,9 @@ export function validatedClientRepository(
 			if (typeof dispose === "function") await dispose.call(inner);
 		},
 	};
+	// Frozen: it is shared by every reader of the slot, so none can replace
+	// a lookup the others read through. It holds no object of its own.
+	Object.freeze(boundary);
 	boundaries.add(boundary);
 	return boundary;
 }
