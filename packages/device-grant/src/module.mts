@@ -55,6 +55,7 @@ import {
 	type Module,
 	type ProviderDeps,
 	resolveAccessTokenLifetime,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express, { type ErrorRequestHandler, type RequestHandler, type Response } from "express";
@@ -75,15 +76,14 @@ import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 /**
  * `device-grant.rateLimit` — the budget RFC 8628 §5.1 sizes the user code
- * against. `.int().positive()` is load-bearing: an empty environment variable
- * coerces to `0`, and a zero budget locks every user out.
+ * against. The floor of 1 is load-bearing: a zero budget locks every user out.
  */
 const rateLimitSpecSchema = z
 	.object({
-		limit: z.coerce.number().int().positive(),
+		limit: wholeNumberInRangeFromEnv(1),
 		// One year at most, as core's schema holds every duration an operator
 		// writes: a window past the Date range is one the limiter refuses anyway.
-		windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
 	})
 	.strict();
 
@@ -119,19 +119,15 @@ export const deviceGrantConfigSchema = z
 		 * §5.4: "long enough lifetime to be useable ... but sufficiently short
 		 * to limit the usability of a code obtained for phishing".
 		 */
-		codeLifetimeSeconds: z.coerce
-			.number()
-			.int()
-			.min(DEVICE_CODE_LIFETIME_SECONDS.min)
-			.max(DEVICE_CODE_LIFETIME_SECONDS.max)
-			.default(600),
+		codeLifetimeSeconds: wholeNumberInRangeFromEnv(
+			DEVICE_CODE_LIFETIME_SECONDS.min,
+			DEVICE_CODE_LIFETIME_SECONDS.max,
+		).default(600),
 		/** Advertised as `interval`; also what the store enforces. */
-		pollingIntervalSeconds: z.coerce
-			.number()
-			.int()
-			.min(DEVICE_POLLING_INTERVAL_SECONDS.min)
-			.max(DEVICE_POLLING_INTERVAL_SECONDS.max)
-			.default(5),
+		pollingIntervalSeconds: wholeNumberInRangeFromEnv(
+			DEVICE_POLLING_INTERVAL_SECONDS.min,
+			DEVICE_POLLING_INTERVAL_SECONDS.max,
+		).default(5),
 		/**
 		 * The verification endpoint's budget per authenticated subject, which
 		 * the module contributes as the `device_verification` budget every
