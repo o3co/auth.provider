@@ -34,7 +34,7 @@ import {
 	type MfaTransactionStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createRecordingMailSender, createTestMfaFactor } from "@o3co/auth-provider-core/testing";
+import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readLongCode } from "#/codes.mjs";
 import { mfaRecoveryCodeFactorConfigForTests } from "#/testing/index.mjs";
@@ -57,7 +57,6 @@ import {
 	EXTRA_INTERRUPTION,
 	extraRequirement,
 	freezeClock,
-	mfaPost,
 	recordingAuditSink,
 	seedTotp,
 	setsCsrfToken,
@@ -66,7 +65,6 @@ import {
 	T0,
 	thawClock,
 	totpProofOf,
-	verify,
 	wrongCode,
 } from "./routesHarness.mjs";
 
@@ -211,9 +209,9 @@ describe("the first login of a subject with no factor", () => {
 			},
 			factorStore: {
 				...factors,
-				create: async (record) => {
+				createIf: async (record, expected) => {
 					calls.push(`create ${record.kind}`);
-					return factors.create(record);
+					return factors.createIf(record, expected);
 				},
 				update: async (...args) => {
 					calls.push("update");
@@ -458,9 +456,9 @@ describe("a first binding that races or fails part-way", () => {
 			config: configFor("required"),
 			factorStore: {
 				...factors,
-				create: async (record) => {
+				createIf: async (record, expected) => {
 					if (record.kind === "recovery_code") throw new Error("factor store unreachable");
-					return factors.create(record);
+					return factors.createIf(record, expected);
 				},
 			},
 			auditSink: audit,
@@ -494,7 +492,7 @@ describe("a first binding that races or fails part-way", () => {
 			config: configFor("required"),
 			factorStore: {
 				...factors,
-				create: async () => {
+				createIf: async () => {
 					throw new Error("factor store unreachable");
 				},
 			},
@@ -656,9 +654,9 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 			config: configFor("required", {}, {}, ["mfa", extra.name]),
 			factorStore: {
 				...factors,
-				create: async (record) => {
+				createIf: async (record, expected) => {
 					if (record.kind === "recovery_code") throw new Error("factor store unreachable");
-					return factors.create(record);
+					return factors.createIf(record, expected);
 				},
 			},
 			extraModules: [extra.module],
@@ -740,10 +738,11 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 				...sessions,
 				// Another writer replaces the set while the session is written.
 				create: async (...args) => {
-					const set = (await factors.list(ALICE.id)).find(
-						(record) => record.kind === "recovery_code",
-					);
-					if (set !== undefined) await factors.remove(ALICE.id, set.id);
+					const { items, generation } = await factors.listVersioned(ALICE.id);
+					const set = items.find((record) => record.kind === "recovery_code");
+					if (set !== undefined && generation !== null) {
+						await factors.removeIf(ALICE.id, set.id, generation);
+					}
 					return sessions.create(...args);
 				},
 			} as UserSessionStore,
@@ -803,7 +802,7 @@ describe("a binding's transaction-store writes under the lease", () => {
 		const { agent, transaction } = await beginFirstBinding(app);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 		vi.spyOn(transactionStore, "noteFirstBinding").mockReturnValue(new Promise<never>(() => {}));
-		const create = vi.spyOn(memory, "create");
+		const create = vi.spyOn(memory, "createIf");
 
 		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
 
@@ -813,7 +812,7 @@ describe("a binding's transaction-store writes under the lease", () => {
 });
 
 describe("two first bindings of one subject completed at once under the lease", () => {
-	it("serialises them: one binds; the other is refused — 401 login_required, by the first-binding mark or by the conflict it finds after its write, or 409 busy — and one factor stands, with no overrun", async () => {
+	it("serialises them: one binds; the other is refused — 401 login_required, by the first-binding mark or by the records it reads under the lease, or 409 busy — and one factor stands, with no overrun and nothing removed", async () => {
 		const memory = createMemoryMfaFactorStore();
 		const audit = recordingAuditSink();
 		const { app, logger } = await boot({
@@ -821,6 +820,7 @@ describe("two first bindings of one subject completed at once under the lease", 
 			factorStore: memory,
 			auditSink: audit,
 		});
+		const removeIf = vi.spyOn(memory, "removeIf");
 		const owner = await beginFirstBinding(app);
 		const other = await beginFirstBinding(app);
 		const ownerBegun = await beginEnrollment(owner.agent, owner.transaction, "totp");
@@ -840,261 +840,227 @@ describe("two first bindings of one subject completed at once under the lease", 
 		expect(bound).toHaveLength(1);
 		const loser = answers.find((res) => res.status !== 200);
 		expect(loser?.body.error).toBe(loser?.status === 401 ? "login_required" : "mfa_factors_busy");
-		for (const event of audit.of("mfa.first_binding_conflict")) {
-			expect(event.details).toEqual({ kind: "totp", removed: true });
-		}
+		// Audited only when the loser's own read under the lease refused it.
+		expect(audit.of("mfa.first_binding_conflict").length).toBeLessThanOrEqual(1);
+		expect(removeIf).not.toHaveBeenCalled();
 		expect(overruns(logger)).toBe(0);
 	});
 });
 
-describe("two transactions of one subject racing the first binding past a lease the store does not hold", () => {
-	it("leaves at most one first factor: a completion that finds another record beside its own after writing it removes its own, answers 401 login_required and records mfa.first_binding_conflict", async () => {
+/**
+ * Holds the first two acquires of the subject's lease on `store` until both
+ * are asked — every completion has passed its checks before the lease — and
+ * the later one until the earlier's lease is released.
+ */
+function leasingOneAfterAnother(store: MfaTransactionStore): void {
+	const arrive = barrier(2);
+	let released: () => void = () => {};
+	const firstReleased = new Promise<void>((resolve) => {
+		released = resolve;
+	});
+	let asked = 0;
+	const acquire = store.acquireSubjectLease.bind(store);
+	vi.spyOn(store, "acquireSubjectLease").mockImplementation(async (subject, options) => {
+		asked += 1;
+		if (asked === 2) {
+			await arrive();
+			await firstReleased;
+		} else if (asked === 1) {
+			await arrive();
+		}
+		return acquire(subject, options);
+	});
+	const release = store.releaseSubjectLease.bind(store);
+	vi.spyOn(store, "releaseSubjectLease").mockImplementation(async (subject, token) => {
+		const answer = await release(subject, token);
+		released();
+		return answer;
+	});
+}
+
+describe("a first binding refused by a counting factor its read under the lease finds and its read before the lease did not", () => {
+	it("is audited once as mfa.first_binding_conflict, with the subject and the kind alone: 401 login_required, its factor never written, its transaction kept", async () => {
 		const memory = createMemoryMfaFactorStore();
-		const arrive = barrier(2);
 		const audit = recordingAuditSink();
-		const directory = new WitnessingUserRepository();
-		const { app, userSessionStore, transactionStore, logger } = await boot({
+		const { app, transactionStore } = await boot({
 			config: configFor("required"),
-			// Both completions pass the zero-records check before either writes.
-			factorStore: {
-				...memory,
-				create: async (record) => {
-					if (record.kind === "totp") await arrive();
-					return memory.create(record);
-				},
-			},
+			factorStore: memory,
 			auditSink: audit,
-			userRepository: directory,
 		});
-		leaseAdmittingEveryWriter(transactionStore);
-		notingTogether(transactionStore, 2);
-		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
 		const owner = await beginFirstBinding(app);
 		const other = await beginFirstBinding(app);
-		expect(owner.transaction).not.toBe(other.transaction);
 		const ownerBegun = await beginEnrollment(owner.agent, owner.transaction, "totp");
 		const otherBegun = await beginEnrollment(other.agent, other.transaction, "totp");
+		leasingOneAfterAnother(transactionStore);
 
 		const answers = await Promise.all([
 			completeEnrollment(owner.agent, owner.transaction, totpProofOf(ownerBegun.body.secret)),
 			completeEnrollment(other.agent, other.transaction, totpProofOf(otherBegun.body.secret)),
 		]);
 
-		const records = await memory.list(ALICE.id);
-		const bound = records.filter((record) => record.kind === "totp");
-		expect(bound.length).toBeLessThanOrEqual(1);
-		const completed = answers.filter((res) => res.status === 200);
-		const refused = answers.filter((res) => res.status === 401);
-		expect(completed.length + refused.length).toBe(2);
-		expect(completed).toHaveLength(bound.length);
-		for (const res of refused) {
-			expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
-		}
-		// Only a binding that stands issues codes, marks the witness, is audited and signs in.
-		expect(records.filter((record) => record.kind === "recovery_code")).toHaveLength(bound.length);
-		expect(directory.marks).toHaveLength(bound.length);
-		expect(audit.of("mfa.factor.enrolled")).toHaveLength(bound.length);
-		expect(audit.of("mfa.recovery_codes.generated")).toHaveLength(bound.length);
-		expect(create).toHaveBeenCalledTimes(bound.length);
-		expect(audit.of("mfa.first_binding_conflict")).toHaveLength(refused.length);
-		for (const event of audit.of("mfa.first_binding_conflict")) {
-			expect(event).toMatchObject({ subject: ALICE.id });
-			expect(event.details).toEqual({ kind: "totp", removed: true });
-		}
-		expect(overruns(logger)).toBe(2);
+		expect(answers.map((res) => res.status).sort()).toEqual([200, 401]);
+		const lost = answers.findIndex((res) => res.status === 401);
+		expect(answers[lost]?.body).toEqual({
+			error: "login_required",
+			error_description: "Log in again",
+		});
+		expect((await memory.list(ALICE.id)).filter((record) => record.kind === "totp")).toHaveLength(
+			1,
+		);
+		const conflicts = audit.of("mfa.first_binding_conflict");
+		expect(conflicts).toHaveLength(1);
+		expect(conflicts[0]).toMatchObject({ subject: ALICE.id });
+		expect(conflicts[0]?.details).toEqual({ kind: "totp" });
+		const loser = [owner, other][lost];
+		if (loser === undefined) throw new Error("no completion lost");
+		expect(await transactionStore.get(loser.transaction)).toBeDefined();
 	});
 
-	/** Two logins of alice, each with a TOTP enrollment begun, whose completions write their factors past each other; `remove` as given. */
-	async function racing(remove: (subject: string, id: string) => Promise<void>) {
+	it("is not audited when the read before the lease already found the counting factor: 401 login_required, nothing written", async () => {
 		const memory = createMemoryMfaFactorStore();
-		const arrive = barrier(2);
 		const audit = recordingAuditSink();
-		const booted = await boot({
+		const { app } = await boot({
 			config: configFor("required"),
-			factorStore: {
-				...memory,
-				create: async (record) => {
-					if (record.kind === "totp") await arrive();
-					return memory.create(record);
-				},
-				remove: (subject, id) => remove(subject, id).then(() => memory.remove(subject, id)),
-			},
+			factorStore: memory,
 			auditSink: audit,
 		});
-		leaseAdmittingEveryWriter(booted.transactionStore);
-		notingTogether(booted.transactionStore, 2);
-		const logins = [await beginFirstBinding(booted.app), await beginFirstBinding(booted.app)];
-		const begun = await Promise.all(
-			logins.map((login) => beginEnrollment(login.agent, login.transaction, "totp")),
+		const owner = await beginFirstBinding(app);
+		const other = await beginFirstBinding(app);
+		const ownerBegun = await beginEnrollment(owner.agent, owner.transaction, "totp");
+		const otherBegun = await beginEnrollment(other.agent, other.transaction, "totp");
+		const bound = await completeEnrollment(
+			owner.agent,
+			owner.transaction,
+			totpProofOf(ownerBegun.body.secret),
 		);
-		const answers = await Promise.all(
-			logins.map((login, index) =>
-				completeEnrollment(login.agent, login.transaction, totpProofOf(begun[index]?.body.secret)),
-			),
+		expect(bound.status, JSON.stringify(bound.body)).toBe(200);
+
+		const res = await completeEnrollment(
+			other.agent,
+			other.transaction,
+			totpProofOf(otherBegun.body.secret),
 		);
-		return { ...booted, memory, audit, answers };
-	}
 
-	it("tries its own factor's removal three times, and when it still cannot remove it says so: 503, mfa.first_binding_conflict with removed false, and one error line naming the subject and the kind", async () => {
-		let removals = 0;
-		const { answers, audit, logger, memory } = await racing(async () => {
-			removals += 1;
-			throw new Error("factor store unreachable");
-		});
-
-		expect(answers.map((res) => res.status)).toEqual([503, 503]);
-		expect(removals).toBe(6);
-		expect(overruns(logger)).toBe(2);
-		// Both first factors stand; what an operator sees says so.
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body.error).toBe("login_required");
 		expect((await memory.list(ALICE.id)).filter((record) => record.kind === "totp")).toHaveLength(
-			2,
+			1,
 		);
-		expect(audit.of("mfa.first_binding_conflict").map((event) => event.details)).toEqual([
-			{ kind: "totp", removed: false },
-			{ kind: "totp", removed: false },
-		]);
-		const standing = logger.error.mock.calls.filter(
-			(call) => call[1] === "mfa_first_binding_factor_standing",
-		);
-		expect(standing).toHaveLength(2);
-		for (const [line] of standing) {
-			expect(line).toMatchObject({ sub: ALICE.id, kind: "totp", err: { name: "Error" } });
-			expect(Object.keys(line as object).sort()).toEqual(["err", "kind", "sub"]);
-		}
-	});
-
-	it("leaves at most one factor when a removal fails once and then succeeds: removed true", async () => {
-		const failed = new Set<string>();
-		const { answers, audit, memory, logger } = await racing(async (_subject, id) => {
-			if (!failed.has(id)) {
-				failed.add(id);
-				throw new Error("factor store unreachable");
-			}
-		});
-
-		const bound = (await memory.list(ALICE.id)).filter((record) => record.kind === "totp");
-		expect(bound.length).toBeLessThanOrEqual(1);
-		expect(answers.filter((res) => res.status === 200)).toHaveLength(bound.length);
-		for (const event of audit.of("mfa.first_binding_conflict")) {
-			expect(event.details).toEqual({ kind: "totp", removed: true });
-		}
-		expect(overruns(logger)).toBe(2);
-	});
-
-	it("says a factor it could neither check nor remove still stands: the re-read's outage and the standing factor, each once", async () => {
-		const memory = createMemoryMfaFactorStore();
-		let written = false;
-		const { app, logger } = await boot({
-			config: configFor("required"),
-			factorStore: {
-				...memory,
-				create: async (record) => {
-					await memory.create(record);
-					written = true;
-				},
-				list: async (subject) => {
-					if (written) throw new Error("factor store unreachable");
-					return memory.list(subject);
-				},
-				remove: async () => {
-					throw new Error("factor store unreachable");
-				},
-			},
-		});
-		const { agent, transaction } = await beginFirstBinding(app);
-		const begun = await beginEnrollment(agent, transaction, "totp");
-
-		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
-
-		expect(res.status).toBe(503);
-		expect(events(logger, "error")).toEqual([
-			"mfa_store_unavailable",
-			"mfa_first_binding_factor_standing",
-		]);
-		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ store: "mfa_factor", step: "list" });
-		expect(logger.error.mock.calls[1]?.[0]).toMatchObject({ sub: ALICE.id, kind: "totp" });
-		expect(await memory.list(ALICE.id)).toHaveLength(1);
-	});
-
-	it("removes its own factor and answers 503 once when the records cannot be read again after it was written: never a binding it could not check", async () => {
-		const memory = createMemoryMfaFactorStore();
-		let written = false;
-		const { app, logger, userSessionStore } = await boot({
-			config: configFor("required"),
-			factorStore: {
-				...memory,
-				create: async (record) => {
-					await memory.create(record);
-					written = true;
-				},
-				list: async (subject) => {
-					if (written) throw new Error("factor store unreachable");
-					return memory.list(subject);
-				},
-			},
-		});
-		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
-		const { agent, transaction } = await beginFirstBinding(app);
-		const begun = await beginEnrollment(agent, transaction, "totp");
-
-		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
-
-		expect(res.status).toBe(503);
-		expect(events(logger, "error")).toEqual(["mfa_store_unavailable"]);
-		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
-			route: "enrollment",
-			store: "mfa_factor",
-			step: "list",
-		});
-		expect(await memory.list(ALICE.id)).toEqual([]);
-		expect(create).not.toHaveBeenCalled();
+		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
 	});
 });
 
-describe("a first binding whose own factor is gone when it reads the records again", () => {
-	it("does not stand: removed as its own, 401 login_required, mfa.first_binding_conflict removed true — no codes, no witness mark, D25's flag kept, no session", async () => {
+describe("two transactions of one subject racing the first binding past a lease the store does not hold", () => {
+	/** Two logins of alice, each with a TOTP enrollment begun, whose completions reach their factors' writes together. */
+	async function racing() {
 		const memory = createMemoryMfaFactorStore();
-		const transactions = createMemoryMfaTransactionStore();
-		// An operator reset left D25's flag, so the binding is given with the proof and would clear it.
-		await transactions.requireEmailProofAtNextBinding(ALICE.id);
-		const sender = createRecordingMailSender();
+		const arrive = barrier(2);
 		const audit = recordingAuditSink();
 		const directory = new WitnessingUserRepository();
-		const { app, userSessionStore } = await boot({
-			config: configFor("required", { enrollment: { requireEmailProof: "never" } }),
+		const booted = await boot({
+			config: configFor("required"),
+			// Both completions read the set, and pass its checks, before either writes.
 			factorStore: {
 				...memory,
-				// The factor is written, and a reset removes the subject's records before the re-read.
-				create: async (record) => {
-					await memory.create(record);
-					if (record.kind === "totp") await memory.removeAllForSubject(record.subject);
+				createIf: async (record, expected) => {
+					if (record.kind === "totp") await arrive();
+					return memory.createIf(record, expected);
 				},
 			},
-			transactionStore: transactions,
-			mailSender: sender,
 			auditSink: audit,
 			userRepository: directory,
 		});
-		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+		leaseAdmittingEveryWriter(booted.transactionStore);
+		notingTogether(booted.transactionStore, 2);
+		const removeIf = vi.spyOn(memory, "removeIf");
+		const remove = vi.spyOn(memory, "remove");
+		const create = vi.spyOn(booted.userSessionStore as UserSessionStore, "create");
+		const logins = [await beginFirstBinding(booted.app), await beginFirstBinding(booted.app)];
+		expect(logins[0]?.transaction).not.toBe(logins[1]?.transaction);
+		const begun = await Promise.all(
+			logins.map((login) => beginEnrollment(login.agent, login.transaction, "totp")),
+		);
+		const proofs = begun.map((res) => totpProofOf(res.body.secret));
+		const answers = await Promise.all(
+			logins.map((login, index) =>
+				completeEnrollment(login.agent, login.transaction, proofs[index]),
+			),
+		);
+		return {
+			...booted,
+			memory,
+			audit,
+			directory,
+			logins,
+			proofs,
+			answers,
+			removeIf,
+			remove,
+			create,
+		};
+	}
+
+	it("lets exactly one bind: the other's factor is never written, 401 login_required, and only the one that stands issues codes, marks the witness, is audited and signs in", async () => {
+		const { answers, memory, audit, directory, create, logger } = await racing();
+
+		const records = await memory.list(ALICE.id);
+		expect(records.filter((record) => record.kind === "totp")).toHaveLength(1);
+		expect(records.filter((record) => record.kind === "recovery_code")).toHaveLength(1);
+		expect(answers.map((res) => res.status).sort()).toEqual([200, 401]);
+		expect(answers.find((res) => res.status === 401)?.body).toEqual({
+			error: "login_required",
+			error_description: "Log in again",
+		});
+		expect(directory.marks).toHaveLength(1);
+		expect(audit.of("mfa.factor.enrolled")).toHaveLength(1);
+		expect(audit.of("mfa.recovery_codes.generated")).toHaveLength(1);
+		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
+		expect(create).toHaveBeenCalledTimes(1);
+		expect(overruns(logger)).toBe(2);
+	});
+
+	it("removes nothing to settle the race, and spends the loser's transaction: a second completion of it is 400", async () => {
+		const { answers, removeIf, remove, logins, proofs, logger } = await racing();
+
+		expect(removeIf).not.toHaveBeenCalled();
+		expect(remove).not.toHaveBeenCalled();
+		expect(events(logger, "error")).not.toContain("mfa_first_binding_factor_standing");
+		const lost = answers.findIndex((res) => res.status === 401);
+		const loser = logins[lost];
+		if (loser === undefined) throw new Error("no completion lost");
+		const again = await completeEnrollment(loser.agent, loser.transaction, proofs[lost]);
+		expect(again.status, JSON.stringify(again.body)).toBe(400);
+	});
+});
+
+describe("a first binding whose factor a reset's removal, stalled past its lease, removes before its codes", () => {
+	it("writes no codes after the removal: the set's write is refused, nothing of the binding's stands, and the answer says no codes were issued", async () => {
+		const memory = createMemoryMfaFactorStore();
+		const audit = recordingAuditSink();
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore: {
+				...memory,
+				// The factor is written, and a reset's removal lands before the codes.
+				createIf: async (record, expected) => {
+					const answer = await memory.createIf(record, expected);
+					if (record.kind === "totp") await memory.removeAllForSubject(record.subject);
+					return answer;
+				},
+			},
+			auditSink: audit,
+		});
 		const { agent, transaction } = await beginFirstBinding(app);
-		await mfaPost(agent, "/challenge", { transaction_id: transaction, factor_id: "account-email" });
-		const code = sender.sent.at(-1)?.code;
-		expect((await verify(agent, transaction, "account-email", code)).status).toBe(200);
 		const begun = await beginEnrollment(agent, transaction, "totp");
 
 		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
 
-		expect(res.status).toBe(401);
-		expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(res.body).not.toHaveProperty("recovery_codes");
+		expect(res.body.recovery_codes_issued).toBe(false);
 		expect(await memory.list(ALICE.id)).toEqual([]);
-		expect(directory.marks).toEqual([]);
-		expect(await transactions.emailProofRequiredAtNextBinding(ALICE.id)).toBe(true);
-		expect(create).not.toHaveBeenCalled();
-		expect(audit.of("mfa.first_binding_conflict").map((event) => event.details)).toEqual([
-			{ kind: "totp", removed: true },
-		]);
-		expect(audit.of("mfa.factor.enrolled")).toEqual([]);
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
+		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
 	});
 });
 

@@ -38,6 +38,7 @@ import { createRecoveryCodeFactor, generateRecoveryCodes } from "#/recovery/fact
 import { createMfaSealing } from "#/sealing.mjs";
 import { BOB, boot, configFor, disposeAll, events } from "./moduleHarness.mjs";
 import {
+	addRecord,
 	beginLogin,
 	contributing,
 	freezeClock,
@@ -201,7 +202,7 @@ describe("a held subject's guessable proof", () => {
 		const res = await heldWith(async (factorStore) => {
 			// Sealed to another subject's record: it does not open as alice's.
 			const id = newFactorId();
-			await factorStore.create({
+			await addRecord(factorStore, {
 				id,
 				subject: "u-alice",
 				kind: "key",
