@@ -117,7 +117,7 @@ export interface MfaResetOptions {
 	readonly userRepository?: UserRepository;
 	/** Whether a mail sender is wired: `requireEmailProof` needs one. */
 	readonly mailWired: boolean;
-	/** The boot's lease owner, the one every writer of a subject's factor set holds (`mfaModule`'s `mfaSubjectLeases`). */
+	/** A lease owner of the rules every writer of a subject's factor set holds (`mfaModule`'s `mfaSubjectLeases`). */
 	readonly leases: MfaSubjectLeases;
 	readonly auditSink?: AuditSink;
 	readonly logger?: Logger;

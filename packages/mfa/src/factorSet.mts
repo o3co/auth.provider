@@ -74,8 +74,14 @@
  *   every record and the witness's clear, in that order.
  *
  * The lease is logical: it cannot fence a write the factor store or the
- * directory applies after the deadline check. Never throws for a store's
- * failure: `list` alone throws, for its caller to answer.
+ * directory applies after the deadline check, nor a transaction-store write
+ * that was not answered within its bound and lands later. A binding's
+ * consume of D25's flag that timed out may so land after the lease is
+ * released and clear the flag a later reset set: the reset sets the flag
+ * again as its last write under its lease, which narrows this to a consume
+ * landing after the reset's own release, until the stores fence their
+ * writes. Never throws for a store's failure: `list` alone throws, for its
+ * caller to answer.
  */
 
 import {
@@ -518,10 +524,12 @@ function subjectLeases(options: {
 }
 
 /**
- * The subject's lease owner a boot builds once — over the MFA transaction
- * store and `mfa.storeTimeoutMs` — and every writer of a subject's factor set
- * holds: the factor set's writes and the operator reset. Opaque to its
- * holders, read by this file alone.
+ * A subject's lease owner over the MFA transaction store and
+ * `mfa.storeTimeoutMs`. `mfaModule` builds one for its routes and one for the
+ * slot it provides; they share the store and the rules, not the instance, and
+ * hold no state of their own, so every writer of a subject's factor set — the
+ * factor set's writes and the operator reset — holds a lease of the same
+ * rules. Opaque to its holders, read by this file alone.
  */
 export interface MfaSubjectLeases {
 	readonly __mfaSubjectLeases: never;
@@ -568,7 +576,7 @@ export function createMfaFactorSet(options: {
 	readonly factors: MfaFactorResolver;
 	readonly factorStore: MfaFactorStore;
 	readonly witness: MfaEnrollmentWitness;
-	/** The boot's lease owner ({@link createMfaSubjectLeases}). */
+	/** A lease owner ({@link createMfaSubjectLeases}) of the rules every writer holds. */
 	readonly leases: MfaSubjectLeases;
 }): MfaFactorSet {
 	const { factors, factorStore, witness } = options;
@@ -951,21 +959,22 @@ export type MfaFactorSetResetOutcome =
 	  };
 
 /**
- * The operator reset's writes under one lease of the subject's, held by the
- * one lease owner (see this file's header): the lease waited for up to two
+ * The operator reset's writes under one lease of the subject's, held through
+ * the lease owner it is handed (see this file's header): the lease waited for up to two
  * of the reset's own leases, at the subject's current generation, pausing on
  * one that moved — then `stopped` at `lease`, nothing written — then, in this
  * order, each write started only with one Store call's time of the lease
  * left: the records read for the report, D25's flag when asked, the reset's
  * own authorization, the lock state's reset, every record removed, the
- * witness cleared; and the lease released. An authorization the store
+ * records read again, the witness cleared, D25's flag set again when asked;
+ * and the lease released. An authorization the store
  * answers applied before stops it at `lock`: a reset that applied nothing
  * moved no generation. Out of time after a write, it stops where it was.
  */
 export function createMfaFactorSetReset(options: {
 	readonly factorStore: MfaFactorStore;
 	readonly witness: MfaEnrollmentWitness;
-	/** The boot's lease owner ({@link createMfaSubjectLeases}): the same every writer holds. */
+	/** A lease owner ({@link createMfaSubjectLeases}) of the rules every writer holds. */
 	readonly leases: MfaSubjectLeases;
 }): { reset(subject: string, steps: MfaFactorSetResetSteps): Promise<MfaFactorSetResetOutcome> } {
 	const { factorStore, witness } = options;

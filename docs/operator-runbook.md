@@ -841,7 +841,9 @@ wires it.
   under the subject's lease (twelve `mfa.storeTimeoutMs`, as every MFA write
   holds it, waited for up to two of them), sets D25's
   flag when asked, resets the lock state whole, removes every factor record
-  and clears the enrollment witness, in that order, and then ends all of the
+  and clears the enrollment witness, in that order, sets D25's flag again
+  when asked (a binding's consume of it that timed out and landed during the
+  reset would otherwise clear it), and then ends all of the
   user's logins again, so a login made with a factor before its removal ends
   too. Tell the user they will sign in again and enroll again. It answers a
   report: `complete: false` names where it stopped (`stoppedAt`: `sessions`,
