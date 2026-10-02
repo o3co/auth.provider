@@ -72,6 +72,7 @@ import {
 	SEALING_KEY_BYTES,
 	type StoreGeneration,
 	type SupportsLock,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { FederationTokenStoreClient } from "./clients.mjs";
@@ -711,7 +712,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 export const redisFederationTokenStoreSectionSchema = z
 	.object({
 		keyPrefix: z.string().default("ft:"),
-		ttl: z.coerce.number().int().positive().default(86400),
+		ttl: wholeNumberInRangeFromEnv(1).default(86400),
 		encryptionMode: z.enum(["required", "allow-plaintext"]).default("required"),
 		encryptionKey: z.string().optional(),
 		// Migration flag; see `RedisFederationTokenStoreOptions.scanFallback`.

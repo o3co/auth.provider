@@ -26,6 +26,7 @@ import {
 	type Logger,
 	loggableError,
 	wellFormedAmr,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { CodeRepositoryClient } from "./clients.mjs";
@@ -253,7 +254,7 @@ export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (confi
 const redisCodeRepositorySectionSchema = z
 	.object({
 		keyPrefix: z.string().optional(),
-		defaultExpiresIn: z.coerce.number().int().positive().optional(),
+		defaultExpiresIn: wholeNumberInRangeFromEnv(1).optional(),
 	})
 	.strict()
 	.optional();
