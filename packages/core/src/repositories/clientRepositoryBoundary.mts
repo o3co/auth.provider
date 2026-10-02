@@ -37,9 +37,10 @@
  *   the client id sanitised and capped, and the reasons. A reason names the
  *   field, an entry's position (`allowedRedirectUris[2]`) and the rule it
  *   broke, never a URI: a URI's query can carry a credential registered by
- *   mistake. A rule about a scheme or a host names that scheme or host, and
- *   one about default scopes names the scopes outside the allowed ones. The
- *   record object is never logged.
+ *   mistake; a default scope outside the allowed ones is named by its
+ *   position too. A rule about a scheme or a host names that scheme or host,
+ *   and the reserved parameter and JWK member names come from fixed lists.
+ *   The record object is never logged.
  *
  * The boundary tells a refused record from an absent one
  * ({@link ValidatedClientRepository.lookupClient}): a caller that falls back

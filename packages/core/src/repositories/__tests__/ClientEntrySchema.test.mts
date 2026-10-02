@@ -372,6 +372,22 @@ describe("ClientEntrySchema — defaultScopes field", () => {
 		allowedScopes: ["read", "write"],
 	};
 
+	it("names a default scope outside allowedScopes by its position, never by its value", () => {
+		const SECRET = "https://x.example/?token=tok-3f9a";
+		const result = ClientEntrySchema.safeParse({
+			...base,
+			defaultScopes: ["read", SECRET, "admin"],
+		});
+		expect(result.success).toBe(false);
+		const messages = result.success ? "" : result.error.issues.map((i) => i.message).join("\n");
+		expect(messages).toContain("defaultScopes[1]");
+		expect(messages).toContain("defaultScopes[2]");
+		expect(messages).not.toContain("defaultScopes[0]");
+		expect(messages).not.toContain("tok-3f9a");
+		expect(messages).not.toContain("admin");
+		expect(result.success ? "" : result.error.message).not.toContain("tok-3f9a");
+	});
+
 	it("accepts defaultScopes that are a subset of allowedScopes", () => {
 		const result = ClientEntrySchema.safeParse({ ...base, defaultScopes: ["read"] });
 		expect(result.success).toBe(true);
@@ -384,7 +400,7 @@ describe("ClientEntrySchema — defaultScopes field", () => {
 		if (result.success) expect(result.data.defaultScopes).toBeUndefined();
 	});
 
-	it("refuses defaultScopes outside allowedScopes at boot, naming them", () => {
+	it("refuses defaultScopes outside allowedScopes at boot, naming their positions", () => {
 		// A default the allowlist would refuse could never be granted to a
 		// scope-carrying request; letting it ride the omitted-scope path would
 		// make omission the wider grant.
@@ -392,8 +408,8 @@ describe("ClientEntrySchema — defaultScopes field", () => {
 		expect(result.success).toBe(false);
 		if (!result.success) {
 			const message = result.error.issues.map((issue) => issue.message).join("\n");
-			expect(message).toContain("admin");
-			expect(message).not.toContain('"read"');
+			expect(message).toContain("defaultScopes[1]");
+			expect(message).not.toContain("defaultScopes[0]");
 		}
 	});
 });

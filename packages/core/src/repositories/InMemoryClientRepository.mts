@@ -240,16 +240,17 @@ type Registration = z.output<typeof registrationFields> & { readonly clientSecre
  */
 function checkRegistration(data: Registration, ctx: z.RefinementCtx, secretHeld: boolean): void {
 	// defaultScopes ⊆ allowedScopes: otherwise omitting `scope` would grant
-	// more than any scope-carrying request could.
-	if (data.defaultScopes !== undefined) {
-		const outside = data.defaultScopes.filter((s) => !data.allowedScopes.includes(s));
-		if (outside.length > 0) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: `defaultScopes entries not in allowedScopes: ${outside.join(" ")}`,
-				path: ["defaultScopes"],
-			});
-		}
+	// more than any scope-carrying request could. Named by position, never by
+	// value: a scope is any string, and a misplaced one can be a credential.
+	const outside = (data.defaultScopes ?? []).flatMap((scope, index) =>
+		data.allowedScopes.includes(scope) ? [] : [`defaultScopes[${index}]`],
+	);
+	if (outside.length > 0) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message: `defaultScopes entries not in allowedScopes: ${outside.join(", ")}`,
+			path: ["defaultScopes"],
+		});
 	}
 	// Confidential clients (basic / post) must carry a secret. Public clients
 	// (`"none"`) must not: a secret left in config invites an operator to assume
