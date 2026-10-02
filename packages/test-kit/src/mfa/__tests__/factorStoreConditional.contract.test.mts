@@ -56,6 +56,7 @@ import {
 	type MfaFactorStoreContractInput,
 	type MfaFactorStoreHarness,
 	mfaFactorStoreConditionalContract,
+	mfaFactorStoreContract,
 } from "#/index.mjs";
 
 /** An input over one store per case, no second instance, no outage and no expiry. */
@@ -103,7 +104,8 @@ type Fault =
 	| "tombstone-never-expires"
 	| "reset-tombstone-never-expires"
 	| "expiry-kept-after-write"
-	| "recreate-answers-another-generation";
+	| "recreate-answers-another-generation"
+	| "race-winner-stale-generation";
 
 /** A model store and its `forceExpire`. */
 interface Model {
@@ -206,8 +208,31 @@ function modelStore(fault: Fault): Model {
 		return set.generation;
 	};
 
-	/** `check`'s refusal, or `apply`: in one step, or, with check-then-write, apart. */
-	const fenced = async <T,>(check: () => T | undefined, apply: () => T): Promise<T> => {
+	// Conditional writes started so far: one started while another is in
+	// flight contends with it.
+	let conditionalStarts = 0;
+
+	/**
+	 * `check`'s refusal, or `apply`: in one step, or, with check-then-write,
+	 * apart. With race-winner-stale-generation, a write that lands while
+	 * another conditional write starts answers the generation `subject`'s set
+	 * was at before it.
+	 */
+	const fenced = async <T extends { readonly outcome: string }>(
+		subject: string,
+		check: () => T | undefined,
+		apply: () => T,
+	): Promise<T> => {
+		if (fault === "race-winner-stale-generation") {
+			conditionalStarts += 1;
+			const mine = conditionalStarts;
+			const refusal = check();
+			if (refusal !== undefined) return refusal;
+			const prior = live(subject)?.generation ?? (randomUUID() as StoreGeneration);
+			const answer = apply();
+			await batchStarted();
+			return conditionalStarts > mine ? { ...answer, generation: prior } : answer;
+		}
 		if (fault !== "check-then-write") return check() ?? apply();
 		inFlight += 1;
 		try {
@@ -244,6 +269,7 @@ function modelStore(fault: Fault): Model {
 		},
 		createIf: (record, expected) =>
 			fenced<ConditionalCreateAnswer>(
+				record.subject,
 				() => {
 					const set = live(record.subject);
 					const atExpected = expected === null ? set === undefined : set?.generation === expected;
@@ -265,6 +291,7 @@ function modelStore(fault: Fault): Model {
 			),
 		removeIf: (subject, id, expected) =>
 			fenced<ConditionalSetRemoveAnswer>(
+				subject,
 				() => {
 					const set = live(subject);
 					if (set === undefined) return { outcome: "missing" } as const;
@@ -336,20 +363,28 @@ function modelStore(fault: Fault): Model {
 	};
 }
 
-/** A store over the same backend that cannot reach it: every member rejects, or, `answers`, answers as if empty. */
-function unreachableStore(answers = false): MfaFactorStore {
+/**
+ * How a store out of reach answers: `rejects`, every member, as it must; the
+ * others, broken: `answers-empty` as if the set were empty, `lists-undefined`
+ * a versioned listing of `undefined`, `update-resolves` an update of `null`,
+ * every other member rejecting.
+ */
+type Outage = "rejects" | "answers-empty" | "lists-undefined" | "update-resolves";
+
+/** A store over the same backend that cannot reach it, answering as `outage` says. */
+function unreachableStore(outage: Outage = "rejects"): MfaFactorStore {
 	const down = async (): Promise<never> => {
 		throw new Error("ECONNREFUSED");
 	};
-	if (!answers) {
+	if (outage !== "answers-empty") {
 		return {
-			kind: "unreachable",
+			kind: `unreachable:${outage}`,
 			list: down,
-			listVersioned: down,
+			listVersioned: outage === "lists-undefined" ? async () => undefined as never : down,
 			createIf: down,
 			removeIf: down,
 			create: down,
-			update: down,
+			update: outage === "update-resolves" ? async () => null : down,
 			remove: down,
 			removeAllForSubject: down,
 		};
@@ -419,6 +454,7 @@ const CASE = {
 	update: "an update keeps the set's generation, and a write at it still lands",
 	tombstone:
 		"a tombstone stands: a late first binding and a late write at a generation read before the reset are refused, and write nothing",
+	race: "the winner of a race answers the generation the set is then read at: two first bindings, two removals, many creates, a removal and a create, split across both instances",
 	resetExpiry:
 		"a reset's tombstone expires: a set reset, and a set never written reset, read as absent once the clock passes the deadline, and a re-create repeats neither tombstone's generation",
 } as const;
@@ -527,14 +563,25 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 		});
 	}
 
-	it("one that answers, out of reach, as if the set were empty", async () => {
-		expect(
-			await refusedBy(
-				() => modelStore("none"),
-				() => unreachableStore(true),
-			),
-		).toEqual([CASE.outage]);
+	it("one whose race winner answers a stale generation under contention, refused by the race case alone", async () => {
+		expect(await refusedBy(() => modelStore("race-winner-stale-generation"))).toEqual([CASE.race]);
 	});
+
+	const outages: ReadonlyArray<readonly [string, Outage]> = [
+		["one that answers, out of reach, as if the set were empty", "answers-empty"],
+		["one that answers, out of reach, a versioned listing of undefined", "lists-undefined"],
+		["one whose update, out of reach, resolves", "update-resolves"],
+	];
+	for (const [what, outage] of outages) {
+		it(what, async () => {
+			expect(
+				await refusedBy(
+					() => modelStore("none"),
+					() => unreachableStore(outage),
+				),
+			).toEqual([CASE.outage]);
+		});
+	}
 });
 
 describe("the binding", () => {
@@ -560,7 +607,42 @@ describe("the binding", () => {
 			supports: { unreachable: true, forceExpire: true },
 		}).map((contractCase) => contractCase.name);
 		expect(generic.filter((name) => name.startsWith("not run:"))).toEqual([]);
-		expect(names).toEqual([...generic, CASE.update, CASE.tombstone, CASE.resetExpiry]);
+		expect(names).toEqual([...generic, CASE.update, CASE.tombstone, CASE.race, CASE.resetExpiry]);
+	});
+
+	it("calls the harness's hooks on the harness, so one that uses this keeps working", async () => {
+		class Harness implements MfaFactorStoreHarness {
+			private nowMs = Date.parse("2026-10-02T00:00:00.000Z");
+			private readonly down = unreachableStore();
+			readonly store = createMemoryMfaFactorStore({ now: () => this.nowMs });
+			closed = false;
+			unreachable(): MfaFactorStore {
+				return this.down;
+			}
+			async forceExpire(): Promise<void> {
+				this.nowMs += BUNDLED_STORE_WRITE_LIFETIME_MS;
+			}
+			async close(): Promise<void> {
+				this.closed = true;
+			}
+		}
+		const built: Harness[] = [];
+		const input: MfaFactorStoreContractInput = {
+			build: async () => {
+				const harness = new Harness();
+				built.push(harness);
+				return harness;
+			},
+			supports: { unreachable: true, forceExpire: true },
+		};
+		for (const contractCase of [
+			...mfaFactorStoreConditionalContract(input),
+			...mfaFactorStoreContract(input),
+		]) {
+			await contractCase.run();
+		}
+		expect(built.length).toBeGreaterThan(0);
+		expect(built.every((harness) => harness.closed)).toBe(true);
 	});
 });
 

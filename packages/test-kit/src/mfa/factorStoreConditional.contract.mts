@@ -28,20 +28,26 @@
  * the reset, `update` the member's own update, `create`, `remove` and
  * `removeAllForSubject` the unconditional membership writes. Every versioned
  * listing is read with `readMfaFactorSet`, so a record that is not a whole
- * record of its subject, or an id listed twice, fails the case that read it. `second`,
- * `forceExpire`, `unreachable` and `close` pass through, and the harness's
- * `supports` is the suite's; the port has `list`, `update` and its
- * unconditional writes, so their cases always run.
+ * record of its subject, or an id listed twice, fails the case that read it.
+ * The unreachable store is mapped bare: each member is the port's call
+ * alone, so its rejection reaches the outage case unchanged and an answer it
+ * resolves, whatever it is, fails the case. `second`, `forceExpire`,
+ * `unreachable` and `close` pass through, bound to the harness, and the
+ * harness's `supports` is the suite's; the port has `list`, `update` and
+ * its unconditional writes, so their cases always run.
  *
  * Beside the suite, the factor set's own cases: an update keeps the
  * generation and a write at it lands, and a tombstone refuses a late first
- * binding as well as a late write read before the reset. With
+ * binding as well as a late write read before the reset; the winner of each
+ * race answers the generation the set is then read at. With
  * `supports.forceExpire`, a reset's tombstone expires, of a set written and
  * of one never written.
  *
- * STAND-IN: the reset's tombstone expiry case stands in for the generic
- * suite's expiry cases, which expire only a set emptied by removals. It goes
- * once they expire a set a reset emptied.
+ * STAND-IN: two of them stand in for what the generic suite does not check
+ * yet. The race case goes once its races compare the winner's generation
+ * with the set read after them; the reset's tombstone expiry case goes once
+ * its expiry cases expire a set a reset emptied, not only one removals
+ * emptied.
  *
  * The cases talk only to the port and read every answer with core's
  * readers, so a SQL-backed, a REST-backed and a bundled store run them
@@ -88,6 +94,15 @@ const FACTOR_A = factorId("set-a");
 const FACTOR_B = factorId("set-b");
 const FACTOR_X = factorId("set-x");
 
+/** The version every record is created at. */
+const SEEDED_VERSION = 1;
+
+/** How many rounds the race case runs. */
+const ROUNDS = 10;
+
+/** How many writers race in one batch of creates. */
+const WRITERS = 6;
+
 const RECORD = (
 	id: string,
 	subject: string,
@@ -100,7 +115,7 @@ const RECORD = (
 	binding: "password",
 	createdAt: new Date("2026-09-01T00:00:00.000Z"),
 	lastUsedAt: undefined,
-	version: 1,
+	version: SEEDED_VERSION,
 	data: `v2.${id}`,
 	...overrides,
 });
@@ -140,34 +155,49 @@ function mutate(record: MfaFactorRecord): void {
 
 type SetMember = "listVersioned" | "createIf" | "removeIf";
 
-/** The store's set member `name`; the case fails for a store without it. */
+/**
+ * The store's set member `name`. A store without it fails the case; one out
+ * of reach (`bare`) answers `undefined` instead, so the outage case fails on
+ * the answer rather than passing on the binding's own refusal.
+ */
 function memberOf<K extends SetMember>(
 	store: MfaFactorStore,
 	name: K,
+	bare: boolean,
 ): NonNullable<MfaFactorStore[K]> {
 	const member = store[name];
-	assert.ok(typeof member === "function", `the store has no ${name}`);
+	if (typeof member !== "function") {
+		assert.ok(bare, `the store has no ${name}`);
+		return (async () => undefined) as unknown as NonNullable<MfaFactorStore[K]>;
+	}
 	return (member as (...args: never[]) => unknown).bind(store) as NonNullable<MfaFactorStore[K]>;
 }
 
-/** `store` as the generic suite's target: each member a call of the port, every versioned listing read by `readMfaFactorSet`. */
-function targetOf(store: MfaFactorStore): ConditionalSetTarget<MfaFactorRecord> {
+/**
+ * `store` as the generic suite's target: each member a call of the port,
+ * every versioned listing read by `readMfaFactorSet`. `bare`, for a store out
+ * of reach: each member is the port's call alone, its answer unread and
+ * unchecked, so only the store's own rejection passes the outage case.
+ */
+function targetOf(store: MfaFactorStore, bare = false): ConditionalSetTarget<MfaFactorRecord> {
 	return {
-		listVersioned: async (subject) =>
-			readMfaFactorSet(await memberOf(store, "listVersioned")(subject), subject),
+		listVersioned: async (subject) => {
+			const answer = await memberOf(store, "listVersioned", bare)(subject);
+			return bare ? answer : readMfaFactorSet(answer, subject);
+		},
 		list: (subject) => store.list(subject),
-		createIf: async (record, expected) => memberOf(store, "createIf")(record, expected),
-		removeIf: async (subject, id, expected) => memberOf(store, "removeIf")(subject, id, expected),
+		createIf: async (record, expected) => memberOf(store, "createIf", bare)(record, expected),
+		removeIf: async (subject, id, expected) =>
+			memberOf(store, "removeIf", bare)(subject, id, expected),
 		reset: (subject) => store.removeAllForSubject(subject),
+		// The suite updates a member it seeded, at the version `recordsOf` gave it.
 		updateMember: async (subject, id) => {
-			const current = (await store.list(subject)).find((record) => record.id === id);
-			assert.ok(current !== undefined, `${id} is not listed`);
-			const updated = await store.update(subject, id, current.version, {
-				data: `${current.data}.next`,
+			const updated = await store.update(subject, id, SEEDED_VERSION, {
+				data: `v2.${id}.next`,
 				label: "Updated",
 				lastUsedAt: new Date("2026-09-03T00:00:00.000Z"),
 			});
-			assert.ok(updated !== null, "the update did not land");
+			if (!bare) assert.ok(updated !== null, "the update did not land");
 		},
 		unconditional: {
 			create: (record) => store.create(record),
@@ -177,13 +207,15 @@ function targetOf(store: MfaFactorStore): ConditionalSetTarget<MfaFactorRecord> 
 	};
 }
 
-/** The generic suite's harness over `harness`: its stores as targets, its hooks as they are. */
+/** The generic suite's harness over `harness`: its stores as targets, its hooks bound to it. */
 function setHarnessOf(harness: MfaFactorStoreHarness): ConditionalSetHarness<MfaFactorRecord> {
-	const { second, unreachable, forceExpire, close } = harness;
+	const unreachable = harness.unreachable?.bind(harness);
+	const forceExpire = harness.forceExpire?.bind(harness);
+	const close = harness.close?.bind(harness);
 	return {
 		store: targetOf(harness.store),
-		...(second === undefined ? {} : { second: targetOf(second) }),
-		...(unreachable === undefined ? {} : { unreachable: () => targetOf(unreachable()) }),
+		...(harness.second === undefined ? {} : { second: targetOf(harness.second) }),
+		...(unreachable === undefined ? {} : { unreachable: () => targetOf(unreachable(), true) }),
 		...(forceExpire === undefined ? {} : { forceExpire }),
 		...(close === undefined ? {} : { close }),
 	};
@@ -310,9 +342,77 @@ export function mfaFactorStoreConditionalContract(
 			assert.deepStrictEqual(await one.read("user-1"), tombstone);
 		}),
 
+		test("the winner of a race answers the generation the set is then read at: two first bindings, two removals, many creates, a removal and a create, split across both instances", async (one, two) => {
+			const at = (i: number): SetView => (i % 2 === 0 ? one : two);
+			const winnerRead = async (
+				subject: string,
+				answers: readonly (ConditionalCreateAnswer | ConditionalSetRemoveAnswer)[],
+				where: string,
+			): Promise<void> => {
+				const won = answers.flatMap((answer) =>
+					answer.outcome === "created" || answer.outcome === "removed" ? [answer.generation] : [],
+				);
+				assert.equal(won.length, 1, `${where}: ${won.length} writes landed`);
+				assert.equal(
+					(await at(1).read(subject)).generation,
+					won[0],
+					`${where}: the set is at another generation than the winner answered`,
+				);
+			};
+			for (let i = 0; i < ROUNDS; i += 1) {
+				const first = `first-${i}`;
+				await winnerRead(
+					first,
+					await Promise.all([
+						at(i).createIf(RECORD(FACTOR_A, first), null),
+						at(i + 1).createIf(RECORD(FACTOR_B, first), null),
+					]),
+					`round ${i}, first bindings`,
+				);
+
+				const removals = `removals-${i}`;
+				const held = await seed(at(0), removals, [
+					RECORD(FACTOR_A, removals),
+					RECORD(FACTOR_B, removals),
+				]);
+				await winnerRead(
+					removals,
+					await Promise.all([
+						at(i).removeIf(removals, FACTOR_A, held),
+						at(i + 1).removeIf(removals, FACTOR_B, held),
+					]),
+					`round ${i}, removals`,
+				);
+
+				const creates = `creates-${i}`;
+				const before = await seed(at(0), creates, [RECORD(FACTOR_A, creates)]);
+				await winnerRead(
+					creates,
+					await Promise.all(
+						Array.from({ length: WRITERS }, (_, w) =>
+							at(i + w).createIf(RECORD(factorId(`writer-${w}`), creates), before),
+						),
+					),
+					`round ${i}, creates`,
+				);
+
+				const mixed = `mixed-${i}`;
+				const read = await seed(at(0), mixed, [RECORD(FACTOR_A, mixed)]);
+				const removal = () => at(i).removeIf(mixed, FACTOR_A, read);
+				const create = () => at(i + 1).createIf(RECORD(FACTOR_B, mixed), read);
+				await winnerRead(
+					mixed,
+					i % 2 === 0
+						? await Promise.all([removal(), create()])
+						: await Promise.all([create(), removal()]),
+					`round ${i}, a removal and a create`,
+				);
+			}
+		}),
+
 		input.supports?.forceExpire === true
 			? test("a reset's tombstone expires: a set reset, and a set never written reset, read as absent once the clock passes the deadline, and a re-create repeats neither tombstone's generation", async (one, two, harness) => {
-					const { forceExpire } = harness;
+					const forceExpire = harness.forceExpire?.bind(harness);
 					assert.ok(
 						forceExpire !== undefined,
 						"supports.forceExpire is declared, and the harness gives no forceExpire",

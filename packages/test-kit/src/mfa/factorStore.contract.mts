@@ -87,14 +87,14 @@ export function notRunCase(left: readonly string[]): ContractCase[] {
 	return left.length === 0 ? [] : [{ name: `not run: ${left.join("; ")}`, run: async () => {} }];
 }
 
-/** `harness.unreachable`, or the case's failure when a harness that declared it lacks it. */
+/** `harness.unreachable`, bound to the harness, or the case's failure when a harness that declared it lacks it. */
 export function unreachableOf(harness: MfaFactorStoreHarness): () => MfaFactorStore {
-	assert.equal(
-		typeof harness.unreachable,
-		"function",
+	const unreachable = harness.unreachable?.bind(harness);
+	assert.ok(
+		unreachable !== undefined,
 		"supports.unreachable is declared, and the harness gives no unreachable",
 	);
-	return harness.unreachable as () => MfaFactorStore;
+	return unreachable;
 }
 
 /** Whether `run` rejects; `what` names it in the failure. */
