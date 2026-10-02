@@ -54,8 +54,11 @@ const validRecord = (): Record<string, unknown> => ({
 	allowPlainPkce: false,
 });
 
-/** Every field the boundary reads: `PublicClient`'s, never `clientSecret`. */
+/** The fields `validRecord` sets: `PublicClient`'s but the two key sources, never `clientSecret`. */
 const RECORD_FIELDS = Object.keys(validRecord());
+
+/** Every field `PublicClient` declares: what the boundary reads, set or not, and nothing else. */
+const DECLARED_FIELDS = [...RECORD_FIELDS, "jwks", "jwksUri"];
 
 const repositoryAnswering = (record: unknown): ClientRepository => ({
 	findById: async () => record as PublicClient | null,
@@ -181,17 +184,47 @@ describe("validatedClientRepository — a valid record", () => {
 		expect(client).not.toHaveProperty("clientSecret");
 	});
 
-	it("reads each field of a Proxy-backed record once", async () => {
+	it("reads each of the 22 declared fields of a Proxy-backed record once, and nothing else of it", async () => {
 		const reads = new Map<PropertyKey, number>();
-		const record = new Proxy(validRecord(), {
-			get(target, key, receiver) {
+		const otherTraps: string[] = [];
+		const target = {
+			...validRecord(),
+			tokenEndpointAuthMethod: "private_key_jwt",
+			jwks: {
+				keys: [{ kty: "OKP", crv: "Ed25519", x: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo" }],
+			},
+			clientSecret: "never-read",
+			internalNote: "never-read",
+		};
+		const record = new Proxy(target, {
+			get(source, key, receiver) {
 				reads.set(key, (reads.get(key) ?? 0) + 1);
-				return Reflect.get(target, key, receiver);
+				return Reflect.get(source, key, receiver);
+			},
+			has: (source, key) => {
+				otherTraps.push(`has ${String(key)}`);
+				return Reflect.has(source, key);
+			},
+			ownKeys: (source) => {
+				otherTraps.push("ownKeys");
+				return Reflect.ownKeys(source);
+			},
+			getOwnPropertyDescriptor: (source, key) => {
+				otherTraps.push(`getOwnPropertyDescriptor ${String(key)}`);
+				return Reflect.getOwnPropertyDescriptor(source, key);
 			},
 		});
 		const boundary = validatedClientRepository(repositoryAnswering(record));
-		await boundary.findById(CLIENT_ID);
-		for (const field of RECORD_FIELDS) expect(reads.get(field), field).toBe(1);
+		expect((await boundary.lookupClient(CLIENT_ID)).outcome).toBe("found");
+		expect(DECLARED_FIELDS).toHaveLength(22);
+		// `then` is read once by the promise the repository answers with, as any
+		// async answer is, before the boundary sees the record.
+		expect(reads.get("then")).toBe(1);
+		reads.delete("then");
+		expect(Object.fromEntries(reads)).toEqual(
+			Object.fromEntries(DECLARED_FIELDS.map((field) => [field, 1])),
+		);
+		expect(otherTraps).toEqual([]);
 	});
 
 	it("copies a list in index order, whatever order a Proxy enumerates its keys in", async () => {
@@ -343,19 +376,60 @@ describe("validatedClientRepository — a malformed record is answered as no cli
 		]);
 	});
 
+	it("refuses a record whose id no request could name, as a registered id is refused at boot", async () => {
+		for (const clientId of ["a\nb", "a\u0000b", "a\u007fb", "x".repeat(257)]) {
+			const logger = recordingLogger();
+			const boundary = validatedClientRepository(
+				repositoryAnswering({ ...validRecord(), clientId }),
+				{ logger },
+			);
+			const lookup = await boundary.lookupClient(clientId);
+			expect(lookup.outcome, JSON.stringify(clientId)).toBe("refused");
+			expect(
+				lookup.outcome === "refused" && lookup.reasons.some((r) => r.startsWith("clientId:")),
+			).toBe(true);
+		}
+		const longest = validatedClientRepository(
+			repositoryAnswering({ ...validRecord(), clientId: "x".repeat(256) }),
+		);
+		expect((await longest.lookupClient("x".repeat(256))).outcome).toBe("found");
+	});
+
 	it("sanitises the client id it logs, the client's own input", async () => {
 		const logger = recordingLogger();
-		const boundary = validatedClientRepository(
+		const refusing = validatedClientRepository(
 			repositoryAnswering({ ...validRecord(), clientId: "a\nb" }),
 			{ logger },
 		);
-		expect(await boundary.findById("a\nb")).not.toBeNull();
-		const refusing = validatedClientRepository(
-			repositoryAnswering({ ...validRecord(), clientId: "a\nb", firstParty: "x" }),
+		expect(await refusing.findById("a\nb")).toBeNull();
+		expect(logger.warn.mock.calls[0]?.[0]).toMatchObject({ clientId: "a?b" });
+	});
+
+	it("keeps ten reasons and counts them all when a record breaks more rules", async () => {
+		const logger = recordingLogger();
+		const boundary = validatedClientRepository(
+			repositoryAnswering({
+				...validRecord(),
+				allowedRedirectUris: Array.from({ length: 12 }, (_, i) => `javascript:alert(${i})`),
+			}),
 			{ logger },
 		);
-		await refusing.findById("a\nb");
-		expect(logger.warn.mock.calls[0]?.[0]).toMatchObject({ clientId: "a?b" });
+		const lookup = await boundary.lookupClient(CLIENT_ID);
+		expect(lookup.outcome === "refused" && lookup.reasons.length).toBe(12);
+		const [line] = logger.warn.mock.calls[0] as [Record<string, unknown>];
+		expect(line.reasons).toHaveLength(10);
+		expect(line.reasonCount).toBe(12);
+	});
+
+	it("refuses a function answered as the record", async () => {
+		const logger = recordingLogger();
+		const record = Object.assign(() => {}, validRecord());
+		const boundary = validatedClientRepository(repositoryAnswering(record), { logger });
+		expect(await boundary.lookupClient(CLIENT_ID)).toEqual({
+			outcome: "refused",
+			reasons: ["not an object"],
+		});
+		expect(await boundary.findById(CLIENT_ID)).toBeNull();
 	});
 
 	it("answers no record as no client, silently", async () => {

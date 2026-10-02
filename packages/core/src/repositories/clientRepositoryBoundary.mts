@@ -26,6 +26,12 @@
  * to another source of clients when none is registered falls back only on
  * `absent`, never in place of a record it refused. That verdict is the
  * boundary's own, never one a repository claims.
+ *
+ * The boundary is the outermost layer over a repository. Its `findById`
+ * answers a refused record `null`, so a layer in front of it that forwards
+ * that answer — a cache, a decorator, a `{ ...boundary }` copy — turns the
+ * refusal into an absence, and a fallback behind that layer would serve
+ * something in the refused record's place. Wrap the repository last.
  */
 
 import type { z } from "zod";
@@ -98,9 +104,12 @@ type ClientRecordReading =
  * `record`, answered for `clientId`, as the plain validated copy every
  * consumer reads: each field `PublicClient` declares read once, by name,
  * however the record holds it (own data, a prototype getter, an ORM entity, a
- * Proxy), and nothing else of it — never a `clientSecret` beside them. The
- * copy is held to the registration schema, its defaults filled, and its
- * `clientId` must be the id that was looked up.
+ * Proxy), and nothing else of it — never a `clientSecret` beside them. That
+ * copy is frozen at every depth before it is parsed; what is answered is the
+ * schema's parse of it, its defaults filled: a fresh object per lookup that
+ * shares nothing with the record or with another answer, and is not frozen.
+ * Its `clientId` must be the id that was looked up, and an id no request
+ * could name (`isWellFormedClientId`) is refused, as at boot.
  *
  * Refused, with each reason: a record that is not an object, a field holding
  * what JSON does not hold as it is, a field the schema refuses, an id that
@@ -157,7 +166,10 @@ export interface ValidatedClientRepository extends ClientRepository {
 
 /** What {@link validatedClientRepository} takes beside the repository. */
 export interface ClientRepositoryBoundaryOptions {
-	/** Where a refused record is said. Default: `consoleLogger`. */
+	/**
+	 * Where a refused record is said. Default: `consoleLogger`. Ignored when
+	 * the repository is already a boundary, which keeps its own.
+	 */
 	readonly logger?: Pick<EventLogger, "warn">;
 }
 
@@ -180,8 +192,16 @@ const boundaries = new WeakSet<ClientRepository>();
  *   thrown: the store's outage, which each caller answers as one (`503`;
  *   the logout routes go on without the redirect).
  *
- * A boundary handed to it is answered as it is, never wrapped twice. The
- * boundary is disposable when `inner` is, and disposing it disposes `inner`.
+ * The boundary must be the outermost layer: anything that forwards its
+ * `findById` hides a refusal as an absence (see the file header). A boundary
+ * handed to it is answered as it is, never wrapped twice, so it keeps the
+ * logger it was first built with; `options` are not read. The boundary is
+ * disposable when `inner` is, and disposing it disposes `inner`.
+ *
+ * The reasons a refusal logs name each field and the rule it broke, and some
+ * quote the field's value (a refused redirect URI, a scope outside the
+ * allowed ones): registration data, none of it secret. The record object is
+ * never logged.
  */
 export function validatedClientRepository(
 	inner: ClientRepository,

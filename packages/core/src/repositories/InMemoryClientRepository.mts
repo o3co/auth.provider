@@ -21,7 +21,11 @@ import { federationGrantRedirectUriReservedParameter } from "../federation-grant
 import { isLoopbackHostname } from "../net/loopback.mjs";
 import { checkRedirectUri, describeRedirectUriRejection } from "../net/redirect-uri.mjs";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
-import { assertRegistrableClientIds } from "./clientId.mjs";
+import {
+	assertRegistrableClientIds,
+	isWellFormedClientId,
+	MAX_CLIENT_ID_LENGTH,
+} from "./clientId.mjs";
 
 /**
  * Validates that a URL string uses only `http:` or `https:` schemes.
@@ -369,7 +373,15 @@ export const ClientEntrySchema = registrationFields
  * (`clientRepositoryBoundary.mts`) holds every answer to; not public API.
  */
 export const PublicClientRecordSchema = registrationFields
-	.extend({ clientId: z.string().min(1) })
+	.extend({
+		// The rule a registered id is held to at boot (`assertRegistrableClientIds`)
+		// and a requested one before the repository is asked: an id no request
+		// could name is not a client's. Never quoted: it may hold a control
+		// character.
+		clientId: z.string().refine(isWellFormedClientId, {
+			message: `must be 1 to ${MAX_CLIENT_ID_LENGTH} characters with no control character`,
+		}),
+	})
 	.strict()
 	.superRefine((data, ctx) => checkRegistration(data, ctx, false));
 
