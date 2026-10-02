@@ -34,6 +34,12 @@ export type PublicClient = Omit<Client, "clientSecret">;
  *   (`isWellFormedClientId`) before asking the repository, but any other
  *   character may still be in it: bind it as a query parameter, never
  *   interpolate it.
+ * - When a repository is wrapped with core's boundary
+ *   (`validatedClientRepository`), each record it answers is read once, by
+ *   name, and held to the registration's rules: a record the boundary
+ *   refuses is an unknown client, and the boundary's `lookupClient` tells
+ *   that refusal from an absent record. The boundary is the outermost layer
+ *   over the repository; a layer that forwards its answers hides a refusal.
  */
 export interface ClientRepository {
 	/**

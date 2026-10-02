@@ -121,6 +121,15 @@ describe("a login whose User's groups is an ORM's list logs in, its claims' grou
 		}
 	});
 
+	it("copies a Proxy-backed list in index order, whatever order the Proxy lists its keys in", () => {
+		const groups = new Proxy(["staff", "admin"], {
+			ownKeys: (target) => Reflect.ownKeys(target).reverse(),
+		});
+		for (const build of bothLogins(seededClaims({ groups }))) {
+			expect(build().groups).toStrictEqual(["staff", "admin"]);
+		}
+	});
+
 	it("takes an Array subclass carrying own enumerable properties of its own, and copies its elements alone", () => {
 		class TrackedArray<T> extends Array<T> {}
 		const groups = Object.assign(TrackedArray.from(["staff", "admin"]), {
