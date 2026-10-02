@@ -192,8 +192,8 @@ describe("oauth.accessToken schema", () => {
 	for (const key of ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const) {
 		for (const bad of [0, -1, 31_536_001, ""]) {
 			it(`rejects ${key} = ${JSON.stringify(bad)} at that key`, () => {
-				// `""` is the exported-but-empty environment variable, which
-				// `z.coerce.number()` turns into 0: a token already expired.
+				// `""` is the exported-but-empty environment variable: not a
+				// whole number, so never read as 0, a token already expired.
 				const found = issues({ defaultExpiresIn: 600, maxExpiresIn: 600, [key]: bad });
 				expect(found.map((i) => i.path)).toContain(`oauth.accessToken.${key}`);
 			});
