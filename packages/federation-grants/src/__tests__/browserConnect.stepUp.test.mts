@@ -39,6 +39,7 @@ import {
 	type RequirementVerdict,
 	type SessionRequirement,
 	type UserSession,
+	validatedClientRepository,
 } from "@o3co/auth-provider-core";
 import {
 	createTestCsrfGuard,
@@ -75,6 +76,7 @@ const CONNECTION: FederationGrantAcquisitionConnection = {
 
 const CLIENT = {
 	clientId: "worker",
+	tokenEndpointAuthMethod: "client_secret_basic" as const,
 	clientName: "Calendar Agent",
 	allowedFederationGrantConnections: ["calendar"],
 	federationGrantRedirectUris: [REDIRECT],
@@ -157,10 +159,15 @@ function world(options: WorldOptions = {}) {
 		createFederationGrantBrowserRouter({
 			intentStore: recordingIntents,
 			grantStore: grants,
-			clientRepository: {
-				findById: async (id: string) => (id === CLIENT.clientId ? (CLIENT as never) : null),
-				authenticate: async () => null,
-			} as never,
+			// Behind core's client-record boundary, as boot installs it in the
+			// `clientRepository` slot the module hands the router.
+			clientRepository: validatedClientRepository(
+				{
+					findById: async (id: string) => (id === CLIENT.clientId ? (CLIENT as never) : null),
+					authenticate: async () => null,
+				},
+				{ logger: spy.logger },
+			),
 			userSessionStore:
 				options.withoutUserSessionStore === true
 					? (undefined as never)
