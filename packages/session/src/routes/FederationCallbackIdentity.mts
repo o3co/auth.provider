@@ -16,8 +16,15 @@
 
 /**
  * Who the callback's user is: the authorization code exchanged with the
- * upstream IdP for its profile, and the local account that profile's
- * identity resolves to, if any. Runs only on a state the callback retired.
+ * upstream IdP for its profile, the local account that profile's identity
+ * resolves to, if any, and the lifetime its access token is recorded with.
+ * Runs only on a state the callback retired.
+ *
+ * The lifetime is read once, through core's reading at a floor of 0 with no
+ * cap. Finite with `expiresIn` stated: `obtainedAt` is the instant before the
+ * exchange and `expiresAt` the reading's end. Otherwise: the adapter's
+ * `expiresAt` and no `obtainedAt`. A lifetime that cannot be read is a failed
+ * exchange (502).
  */
 
 import {

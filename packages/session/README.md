@@ -842,7 +842,8 @@ URL is exactly what the adapter returned.
    `iss` from them through core's `callbackUrlForExchange`.
 2. **`exchangeCode` throwing is `502 exchange_failed`.** Every refusal inside an
    adapter — a wrong `iss`, a bad id_token, a UserInfo mismatch — surfaces this
-   way and never reaches the Store. A profile without `sub` is
+   way and never reaches the Store, and so does an answer whose `expiresIn` or
+   `expiresAt` throws when read. A profile without `sub` is
    `400 invalid_profile`. The warning, `federation_callback_exchange_failed`
    (the provider bound on the line), carries core's `loggableError(err)`,
    never the error itself: an OAuth
@@ -882,17 +883,24 @@ URL is exactly what the adapter returned.
    (`subject_session_index_write_failed`) and the login proceeds.
 6. **Tokens** are attached to `federationTokenStore` under the new `sid` only
    when the profile carries an `accessToken`:
-   - `accessToken`, `refreshToken`, `idToken` and `expiresAt` as the adapter
-     returned them — `expiresAt: null` is stored as `null` ("do not refresh"),
-     and the router never invents an expiry;
+   - `accessToken`, `refreshToken` and `idToken` as the adapter returned them;
+   - the lifetime, read once from `profile.expiresIn` and `profile.expiresAt`
+     through core's `readUpstreamTokenLifetime`, at a floor of 0 and with no
+     cap. When `expires_in` is stated and the reading is finite, `obtainedAt`
+     is the instant just before `exchangeCode` was called and `expiresAt` is
+     the reading's end, the earlier of the adapter's instant and
+     `obtainedAt + expiresIn`. Otherwise (an end stated only as an instant,
+     which is on the upstream's clock; none; a malformed, contradictory or
+     spent one) `expiresAt` is the adapter's, `null` stored as `null` ("do not
+     refresh"), and the record has no `obtainedAt`, so `oauth` keeps its
+     refresh buffer for it. The router never invents an expiry. The link
+     callback writes the same lifetime;
    - `scope` and `grantedScope`: `profile.scope` when the adapter returned one
      (an empty or unusable string names nothing), otherwise the provider's
      requested `scope` — RFC 6749 §3.3 reads an absent answer as "as requested"
      ([`src/federations/consented-scope.mts`](src/federations/consented-scope.mts));
    - `tokenType`: `profile.tokenType` verbatim, `""` when it is not a string,
      `undefined` when the adapter returned none (`oauth` reads that as `Bearer`).
-
-   `profile.expiresIn` is not read here.
 7. **The redirect** is the federation's redirect policy's
    `resolveCallbackRedirect`. The default policy answers its `authCallbackUrl`
    with `redirect_to` appended when the start carried one, otherwise its
