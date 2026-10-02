@@ -135,7 +135,7 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 		},
 	);
 
-	it.each(["authorization_pending", "slow_down", "consent_required"])(
+	it.each(["authorization_pending", "slow_down", "consent_required", "invalid_client"])(
 		"answers a deny with %s invalid_grant, so the device stops polling a spent approval",
 		async (code) => {
 			const logger = { warn: vi.fn(), error: vi.fn() };

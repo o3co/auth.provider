@@ -45,7 +45,8 @@
  * - A wired `grantPolicy` is consulted on the approval once its client is
  *   checked, before the revocation read and the minting instant, through
  *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error when
- *   it is a token-endpoint code (RFC 6749 §5.2's, `invalid_target`) or
+ *   it is a token-endpoint code (RFC 6749 §5.2's but `invalid_client`,
+ *   `invalid_target`) or
  *   RFC 8628 §3.5's terminal `access_denied` or `expired_token`, and
  *   `invalid_grant` otherwise (never `authorization_pending` or `slow_down`:
  *   the approval is spent), a

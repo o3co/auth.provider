@@ -123,11 +123,13 @@ export function logGrantPolicyUnavailable(
 /**
  * The codes registered for the token endpoint that a policy refusal may
  * carry: RFC 6749 §5.2's, and `invalid_target` (RFC 8707 §2, RFC 8693
- * §2.2.2). The only codes a policy refusal is answered with there.
+ * §2.2.2). The only codes a policy refusal is answered with there. Not
+ * `invalid_client`: §5.2 answers it `401` with a `WWW-Authenticate`
+ * challenge to a client that authenticated by header, which a refusal's
+ * fixed `400` cannot.
  */
 export type TokenEndpointRefusalCode =
 	| "invalid_request"
-	| "invalid_client"
 	| "invalid_grant"
 	| "unauthorized_client"
 	| "unsupported_grant_type"
@@ -136,7 +138,6 @@ export type TokenEndpointRefusalCode =
 
 const TOKEN_ENDPOINT_REFUSAL_CODES: ReadonlySet<unknown> = new Set<TokenEndpointRefusalCode>([
 	"invalid_request",
-	"invalid_client",
 	"invalid_grant",
 	"unauthorized_client",
 	"unsupported_grant_type",
@@ -217,7 +218,7 @@ export function policyDenied(
 		TOKEN_ENDPOINT_REFUSAL_CODES.has(code) ||
 		(options.allowed?.includes(code as string) === true && !KEEP_POLLING_CODES.has(code));
 	const error = allowed ? (code as string) : (options.fallback ?? "invalid_request");
-	if (!allowed) logRewrite(logger, options, recorded, error);
+	if (!allowed) logRewrite(logger, options, code, recorded, error);
 	return {
 		status: 400,
 		error,
@@ -229,6 +230,7 @@ export function policyDenied(
 function logRewrite(
 	logger: Partial<Pick<Logger, "warn">> | undefined,
 	options: PolicyDeniedOptions,
+	code: unknown,
 	recorded: string,
 	answered: string,
 ): void {
@@ -243,7 +245,10 @@ function logRewrite(
 		consoleLogger.warn(line, "grant_policy_refusal_rewritten");
 		return;
 	}
-	const key = JSON.stringify([recorded, options.grantType, options.site ?? null, answered]);
+	// The policy's exact code, not `recorded`: codes that sanitise or cap
+	// alike are distinct codes.
+	const exact = typeof code === "string" ? code : `(${typeof code})`;
+	const key = JSON.stringify([exact, options.grantType, options.site ?? null, answered]);
 	let written = loggedRewrites.get(options.hook);
 	if (written === undefined) {
 		written = new Set();

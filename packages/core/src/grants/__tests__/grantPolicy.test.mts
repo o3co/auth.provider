@@ -726,7 +726,6 @@ describe("policyDenied", () => {
 
 	it.each([
 		"invalid_request",
-		"invalid_client",
 		"invalid_grant",
 		"unauthorized_client",
 		"unsupported_grant_type",
@@ -749,6 +748,10 @@ describe("policyDenied", () => {
 		["the RFC 8628 polling code slow_down", "slow_down"],
 		["the RFC 8628 polling code expired_token", "expired_token"],
 		["another extension code", "consent_required"],
+		[
+			"invalid_client, which RFC 6749 §5.2 answers 401 with a challenge for a client that authenticated by header",
+			"invalid_client",
+		],
 		["a code that differs only in case", "Invalid_Grant"],
 	])("answers %s invalid_request by default, logging the policy's code", (_label, code) => {
 		const logger = { warn: vi.fn() };
@@ -831,6 +834,22 @@ describe("policyDenied", () => {
 		expect(logger.warn.mock.calls.map(([fields]) => fields.error)).toEqual([
 			"access_denied",
 			"slow_down",
+		]);
+	});
+
+	it("tells apart codes that sanitise or cap to the same text", () => {
+		const logger = { warn: vi.fn() };
+		const site = fresh();
+		const long = "x".repeat(300);
+		policyDenied(deny('bad"code'), logger, site);
+		policyDenied(deny("bad\\code"), logger, site);
+		policyDenied(deny(`${long}a`), logger, site);
+		policyDenied(deny(`${long}b`), logger, site);
+		expect(logger.warn.mock.calls.map(([fields]) => fields.error)).toEqual([
+			"bad?code",
+			"bad?code",
+			`${"x".repeat(197)}...`,
+			`${"x".repeat(197)}...`,
 		]);
 	});
 
