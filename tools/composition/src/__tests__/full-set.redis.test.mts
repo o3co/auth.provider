@@ -59,6 +59,7 @@ import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TestRedis, testRedis } from "../../../../packages/redis/__tests__/support/redis.mts";
 import {
+	addFactorRecord,
 	BINDER,
 	browser,
 	composeFullSet,
@@ -66,6 +67,7 @@ import {
 	type FullSet,
 	type FullSetOptions,
 	memoryWebAuthnCredentialStoreModule,
+	removeFactorRecords,
 	seedTotp,
 	TV,
 } from "./full-set.fixture.mts";
@@ -261,7 +263,7 @@ describe("two replicas on one Redis database share every flow's state", () => {
 				mfaTransactionStore: MfaTransactionStore;
 			};
 		// A factor enrolled through one replica's store is the other's too.
-		await components(a).mfaFactorStore.create({
+		await addFactorRecord(components(a).mfaFactorStore, {
 			id: "f-alice",
 			subject: ALICE.sub,
 			kind: "totp",
@@ -326,8 +328,7 @@ describe("two replicas on one Redis database share every flow's state", () => {
 		// database are set aside for the test, and put back after it, whatever it came to.
 		const factors = (a.handle.components as unknown as { mfaFactorStore: MfaFactorStore })
 			.mfaFactorStore;
-		const setAside = await factors.list(ALICE.sub);
-		for (const record of setAside) await factors.remove(ALICE.sub, record.id);
+		const setAside = await removeFactorRecords(factors, ALICE.sub);
 		try {
 			const create = vi.spyOn(sessions(a), "create");
 			const page = browser();
@@ -369,10 +370,8 @@ describe("two replicas on one Redis database share every flow's state", () => {
 				200,
 			);
 		} finally {
-			for (const record of await factors.list(ALICE.sub)) {
-				await factors.remove(ALICE.sub, record.id);
-			}
-			for (const record of setAside) await factors.create(record);
+			await removeFactorRecords(factors, ALICE.sub);
+			for (const record of setAside) await addFactorRecord(factors, record);
 		}
 	});
 
