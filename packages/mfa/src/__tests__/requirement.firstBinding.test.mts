@@ -44,6 +44,7 @@ import {
 	requirementSession,
 	type SessionEnrollmentFacts,
 	type SessionRequirement,
+	type SupportsSecondFactorUpdate,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -177,7 +178,6 @@ function build(options: BuildOptions = {}) {
 		factorStore: factorStoreHolding(...(options.records ?? [])),
 		transactions: createLoginTransactions({ store: transactionStore, ttlSeconds: 600 }),
 		stepUpPage: PAGE,
-		stepUpRecordable: true,
 		recentMfaMaxAgeSeconds: 300,
 		logger: options.logger ?? silentLogger(),
 		...(events === undefined
@@ -197,7 +197,7 @@ function build(options: BuildOptions = {}) {
 	return { requirement, transactionStore };
 }
 
-/** What admission hands the requirement for `session`, admitted for `action`. */
+/** What admission hands the requirement for `session`, admitted for `action`, over a store that records a second factor. */
 const inputFor = (session: UserSession, action: FirstBindingAction = "mfa.manage") => ({
 	session: {
 		sid: session.sid,
@@ -205,6 +205,7 @@ const inputFor = (session: UserSession, action: FirstBindingAction = "mfa.manage
 		authTime: session.authTime,
 		expiresAt: session.expiresAt,
 		...(session.enrollmentFacts === undefined ? {} : { enrollmentFacts: session.enrollmentFacts }),
+		secondFactorRecordable: true,
 	},
 	authentication: requirementSession(session),
 	carrier: "cookie" as const,
@@ -214,11 +215,13 @@ const inputFor = (session: UserSession, action: FirstBindingAction = "mfa.manage
 	now: new Date(),
 });
 
-const storeHolding = (session: UserSession): UserSessionStore => ({
+/** A store holding `session`, with the step-up capability: its `recordSecondFactor` records nothing. */
+const storeHolding = (session: UserSession): UserSessionStore & SupportsSecondFactorUpdate => ({
 	kind: "test",
 	create: async () => {},
 	get: async (sid) => (sid === session.sid ? session : null),
 	delete: async () => {},
+	recordSecondFactor: async () => null,
 });
 
 /** `session` admitted for `action` through core's admission, as the consumer that registers it asks. */

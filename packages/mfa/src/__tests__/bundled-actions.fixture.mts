@@ -82,16 +82,17 @@ export const TOKEN_SITUATIONS: readonly (readonly string[] | undefined)[] = [
 
 /**
  * The setups a verdict table is taken under: the factors installed, whether
- * the session store can record a step-up, and the kinds of the factor records
- * the subject holds.
+ * admission's view says a second factor can be recorded on the session
+ * (`secondFactorRecordable`), and the kinds of the factor records the
+ * subject holds.
  */
 export const SETUPS = {
-	"totp, recordable": { factors: ["totp"], stepUpRecordable: true, holds: [] },
-	"no factor": { factors: [], stepUpRecordable: true, holds: [] },
-	"totp, not recordable": { factors: ["totp"], stepUpRecordable: false, holds: [] },
+	"totp, recordable": { factors: ["totp"], secondFactorRecordable: true, holds: [] },
+	"no factor": { factors: [], secondFactorRecordable: true, holds: [] },
+	"totp, not recordable": { factors: ["totp"], secondFactorRecordable: false, holds: [] },
 	"totp, recordable, holding totp": {
 		factors: ["totp"],
-		stepUpRecordable: true,
+		secondFactorRecordable: true,
 		holds: ["totp"],
 	},
 } as const;

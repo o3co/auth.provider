@@ -49,8 +49,9 @@
  * with the requirement core issues `mfa.step_up` to and the enrollment
  * witness, for the same boot's routes (`mfaBootState`). It warns once each:
  * when the development sample key is in use; when the user-session store
- * cannot record a step-up (`mfa_step_up_unsupported`), the requirement then
- * sending the session to log in instead; when `when-mail` meets no
+ * cannot record a step-up (`mfa_step_up_unsupported`), admission's view then
+ * saying no second factor can be recorded on any session, so the requirement
+ * sends it to log in instead; when `when-mail` meets no
  * `mailSender`, so a first binding asks no proof
  * (`mfa_first_binding_without_email_proof`); and when the directory cannot
  * write the witness (`mfa_enrollment_witness_unwritable`).
@@ -435,10 +436,9 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							"mfa_development_sample_key_in_use",
 						);
 					}
-					// A session store that cannot record a step-up is warned about once; the
-					// requirement then sends a session to log in where it would step it up.
-					const stepUpRecordable = supportsSecondFactorUpdate(deps.userSessionStore);
-					if (!stepUpRecordable) {
+					// A session store that cannot record a step-up is warned about once; admission's
+					// view then says so of every session, and the requirement sends it to log in.
+					if (!supportsSecondFactorUpdate(deps.userSessionStore)) {
 						logger.warn(
 							{ store: "userSessionStore", kind: deps.userSessionStore.kind },
 							"mfa_step_up_unsupported",
@@ -475,7 +475,6 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							ttlSeconds: settings.transactionTtlSeconds,
 						}),
 						stepUpPage,
-						stepUpRecordable,
 						recentMfaMaxAgeSeconds: settings.manage.maxAgeSeconds,
 						logger,
 						auditSink: deps.auditSink,
@@ -543,7 +542,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 					if (stepUp === undefined) {
 						throw new Error("core issued the mfa requirement no mfa.step_up remediation");
 					}
-					// The session store's step-up capability, read once: what records an escalation, and whether a step-up opens.
+					// The session store's step-up capability, read once: what records an escalation.
 					const secondFactorStore = supportsSecondFactorUpdate(deps.userSessionStore)
 						? deps.userSessionStore
 						: undefined;
@@ -584,7 +583,6 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								...(deps.subjectRevocation === undefined
 									? {}
 									: { subjectRevocation: deps.subjectRevocation }),
-								stepUpRecordable: secondFactorStore !== undefined,
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,

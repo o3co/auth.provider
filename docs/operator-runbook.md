@@ -751,8 +751,11 @@ it, so a replica whose clock runs ahead stretches recent MFA by its lead.
 A user who holds a counting factor and is answered `403 step_up_required`
 steps up on the MFA page — `POST /session/mfa/step-up`, then one of their
 factors verified on its transaction — which records recent MFA on the
-session; the start is then admitted. Where the session store cannot record a
-step-up, the user signs in again instead. It fails closed.
+session; the start is then admitted. Where no second factor can be recorded
+on the session, the user signs in again instead: session admission says so
+(`SessionView.secondFactorRecordable`) when the session store cannot record a
+step-up, and when the session's record is not in a shape one can be recorded
+on. It fails closed.
 Successes and refusals are audited (`federation.identity.linked`,
 `federation.identity.link_refused`, `subject` = the account,
 `details.reason` on a refusal).

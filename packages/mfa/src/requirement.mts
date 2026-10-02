@@ -32,7 +32,11 @@
  * under `optional` it is met. The baseline steps a password session without a
  * second factor up only when its subject may hold a counting factor to step
  * up with; without one it sends the session to log in, where the login's
- * first binding is made. An action graded `credential_change` changes the
+ * first binding is made. A second factor's step-up is answered only where
+ * admission's view says one can be recorded on the session
+ * (`SessionView.secondFactorRecordable`, decided by core over the store and
+ * the record); elsewhere the session is sent to log in, where the login
+ * records it. An action graded `credential_change` changes the
  * ways into the account — adds one, or renames or removes a factor — and is
  * held to recent MFA (`isRecentMfa`) over a primary the
  * baseline knows — under `required` on top of the baseline, so it is never
@@ -131,12 +135,6 @@ export interface MfaRequirementOptions {
 	readonly transactions: LoginTransactions;
 	/** `mfa.page.url`, as the page a step-up starts on. */
 	readonly stepUpPage: StepUpPage;
-	/**
-	 * Whether the session store can record a step-up (core's
-	 * `supportsSecondFactorUpdate`): without it a stepped-up session could never be
-	 * written, so the baseline sends it to log in instead.
-	 */
-	readonly stepUpRecordable: boolean;
 	/** `mfa.manage.maxAgeSeconds`: how long a second factor verified in a session stays recent. */
 	readonly recentMfaMaxAgeSeconds: number;
 	/** Where a first binding that offers nothing, or asks a proof nobody can give, is said. */
@@ -280,7 +278,6 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		factorStore,
 		transactions,
 		stepUpPage,
-		stepUpRecordable,
 		recentMfaMaxAgeSeconds,
 		logger,
 		auditSink,
@@ -409,10 +406,15 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		);
 	};
 
-	/** Where a second factor would meet the rule: a step-up, `unmet` when no factor could finish one, a new login when none could be recorded. */
-	const stepUp = (): RequirementVerdict => {
+	/**
+	 * Where a second factor would meet the rule over `session`: a step-up;
+	 * `unmet` when no factor could finish one; a new login when admission
+	 * found none could be recorded on it (`secondFactorRecordable`, absent
+	 * read as `false`).
+	 */
+	const stepUp = (session: SessionView): RequirementVerdict => {
 		if (reach().size === 0) return UNMET;
-		return stepUpRecordable ? STEP_UP : REAUTHENTICATE;
+		return session.secondFactorRecordable === true ? STEP_UP : REAUTHENTICATE;
 	};
 
 	/**
@@ -428,7 +430,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		if (recorded?.primary === FEDERATED_AMR) return MET;
 		if (recorded?.primary !== PASSWORD_AMR) return REAUTHENTICATE;
 		if (recorded.mfaAt !== undefined) return MET;
-		const verdict = stepUp();
+		const verdict = stepUp(session);
 		if (verdict.outcome !== "step_up") return verdict;
 		return (await mayHoldCountingFactor(session.sub)) ? verdict : REAUTHENTICATE;
 	};
@@ -495,7 +497,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			recentMfaMaxAgeSeconds,
 			nowMs,
 		);
-		return recentMfa ? MET : stepUp();
+		return recentMfa ? MET : stepUp(session);
 	};
 
 	/** A session a cookie, a code or a link carries, held over its record to the rule its mode and grade name. */
