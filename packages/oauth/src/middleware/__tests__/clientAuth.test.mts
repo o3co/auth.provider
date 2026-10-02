@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import {
 	type ClientRepository,
 	createMemoryReplaySeenSet,
+	createOutboundFetch,
 	type PublicClient,
 	type TokenEndpointAuthMethod,
 } from "@o3co/auth-provider-core";
@@ -26,7 +27,17 @@ import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "../clientAssertion.mjs";
-import { createClientAuthMiddleware } from "../clientAuth.mjs";
+import {
+	type ClientAuthMiddlewareOptions,
+	createClientAuthMiddleware as createMiddleware,
+} from "../clientAuth.mjs";
+
+/** The middleware over core's outbound fetch, as a composition builds it, unless a test hands its own. */
+const outboundFetch = createOutboundFetch({ source: "registration" });
+const createClientAuthMiddleware = (
+	repository: ClientRepository,
+	options: Partial<ClientAuthMiddlewareOptions> = {},
+) => createMiddleware(repository, { fetch: outboundFetch, ...options });
 
 interface FakeClient {
 	clientId: string;
@@ -84,6 +95,12 @@ const publicClient = (clientId: string): FakeClient => ({
 });
 
 describe("createClientAuthMiddleware", () => {
+	it("refuses to build without a fetch for jwksUri", () => {
+		expect(() =>
+			createMiddleware(fakeRepo([]), {} as unknown as ClientAuthMiddlewareOptions),
+		).toThrow(/fetch is required/);
+	});
+
 	describe("confidential + public client paths", () => {
 		it("no credentials at all → 401 invalid_client + WWW-Authenticate", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
@@ -623,7 +640,9 @@ describe("createClientAuthMiddleware", () => {
 				authenticate: async () => null,
 			};
 			const app = express().use(express.urlencoded({ extended: false }));
-			app.post("/test", createClientAuthMiddleware(throwingRepo, logger), (_req, res) => res.end());
+			app.post("/test", createClientAuthMiddleware(throwingRepo, { logger }), (_req, res) =>
+				res.end(),
+			);
 			const basic = Buffer.from("alice:s3cret").toString("base64");
 			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
 			expect(res.status).toBe(503);

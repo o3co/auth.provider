@@ -13,7 +13,13 @@
  * limitations under the License.
  */
 
-import { createSymmetricKeyStore } from "@o3co/auth-provider-core";
+import { createOutboundFetch, createSymmetricKeyStore } from "@o3co/auth-provider-core";
+import {
+	createOutboundFetchForTesting,
+	type OutboundExchange,
+	type OutboundTransport,
+	withOutbound,
+} from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createMockLogger } from "#/__tests__/_helpers/mockLogger.mjs";
@@ -280,5 +286,182 @@ describe("broadcastBackchannelLogout", () => {
 		const { clientId } = logged as { clientId?: unknown };
 		expect(typeof clientId).toBe("string");
 		expect(String(clientId).length).toBeLessThanOrEqual(200);
+	});
+});
+
+describe("broadcastBackchannelLogout — core's outbound fetch", () => {
+	const answering =
+		(status: number, body = "", headers: [string, string][] = []): OutboundTransport =>
+		async () => ({
+			status,
+			statusText: "",
+			headers,
+			body: (async function* () {
+				if (body.length > 0) yield new TextEncoder().encode(body);
+			})(),
+			close: () => {},
+		});
+
+	const broadcast = (
+		rps: { clientId: string; backchannelLogoutUri: string }[],
+		logger: ReturnType<typeof createMockLogger>,
+		fetchImpl: typeof fetch = createOutboundFetch({ source: "registration" }),
+	) =>
+		broadcastBackchannelLogout({
+			rps,
+			issuer: "iss",
+			sub: "u",
+			sid: "sid",
+			keyStore,
+			logger,
+			fetchImpl,
+		});
+
+	it.each([
+		"https://127.0.0.1/bc",
+		"https://[::1]/bc",
+		"https://[::ffff:169.254.0.1]/bc",
+		"https://u:p@127.0.0.1/bc",
+		"http://127.0.0.1/bc",
+	])(
+		"through core's outbound fetch, %s is refused as a destination and logout still completes",
+		async (uri) => {
+			const logger = createMockLogger();
+			await expect(
+				broadcast([{ clientId: "rp1", backchannelLogoutUri: uri }], logger),
+			).resolves.toBe(undefined);
+			expectBestEffortWarn(
+				logger,
+				"logout_backchannel_failed",
+				{ clientId: "rp1", step: "destination" },
+				"OutboundFetchError",
+			);
+		},
+	);
+
+	it("refuses one RP's destination and still posts to the next", async () => {
+		const exchanges: OutboundExchange[] = [];
+		const transport: OutboundTransport = async (exchange) => {
+			exchanges.push(exchange);
+			return answering(204)(exchange);
+		};
+		const lookup = vi.fn(async () => ["93.184.216.34"]);
+		const logger = createMockLogger();
+		await broadcast(
+			[
+				{ clientId: "refused", backchannelLogoutUri: "https://10.0.0.1/bc" },
+				{ clientId: "reached", backchannelLogoutUri: "https://rp.example/bc" },
+			],
+			logger,
+			createOutboundFetchForTesting({ source: "registration", lookup, transport }),
+		);
+		expectBestEffortWarn(
+			logger,
+			"logout_backchannel_failed",
+			{ clientId: "refused", step: "destination" },
+			"OutboundFetchError",
+		);
+		expect(exchanges).toHaveLength(1);
+		expect(exchanges[0]?.url.href).toBe("https://rp.example/bc");
+		expect(exchanges[0]?.addresses).toEqual(["93.184.216.34"]);
+		expect(exchanges[0]?.method).toBe("POST");
+	});
+
+	it("refuses an http URI on a host that is not listed, before any lookup", async () => {
+		const lookup = vi.fn(async () => ["93.184.216.34"]);
+		const transport = vi.fn(answering(204));
+		const logger = createMockLogger();
+		await broadcast(
+			[{ clientId: "rp1", backchannelLogoutUri: "http://rp.example/bc" }],
+			logger,
+			createOutboundFetchForTesting({ source: "registration", lookup, transport }),
+		);
+		expectBestEffortWarn(
+			logger,
+			"logout_backchannel_failed",
+			{ clientId: "rp1", step: "destination" },
+			"OutboundFetchError",
+		);
+		expect(lookup).not.toHaveBeenCalled();
+		expect(transport).not.toHaveBeenCalled();
+	});
+
+	it("posts over http to a loopback host core.outbound.internalHosts lists", async () => {
+		const transport = vi.fn(answering(204));
+		const logger = createMockLogger();
+		await broadcast(
+			[{ clientId: "rp1", backchannelLogoutUri: "http://localhost:8080/bc" }],
+			logger,
+			createOutboundFetchForTesting({
+				config: withOutbound({}, { internalHosts: ["localhost"] }),
+				source: "registration",
+				lookup: async () => ["127.0.0.1"],
+				transport,
+			}),
+		);
+		expect(transport).toHaveBeenCalledOnce();
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("treats a redirect as an unreachable destination and does not follow it", async () => {
+		const transport = vi.fn(answering(307, "", [["location", "https://rp.example/elsewhere"]]));
+		const logger = createMockLogger();
+		await broadcast(
+			[{ clientId: "rp1", backchannelLogoutUri: "https://rp.example/bc" }],
+			logger,
+			createOutboundFetchForTesting({
+				source: "registration",
+				lookup: async () => ["93.184.216.34"],
+				transport,
+			}),
+		);
+		expect(transport).toHaveBeenCalledOnce();
+		expectBestEffortWarn(
+			logger,
+			"logout_backchannel_failed",
+			{ clientId: "rp1", step: "destination" },
+			"OutboundFetchError",
+		);
+	});
+
+	it("treats an answer over the size cap as an unreachable destination", async () => {
+		const logger = createMockLogger();
+		await broadcast(
+			[{ clientId: "rp1", backchannelLogoutUri: "https://rp.example/bc" }],
+			logger,
+			createOutboundFetchForTesting({
+				config: withOutbound({}, { maxResponseBytes: 16 }),
+				source: "registration",
+				lookup: async () => ["93.184.216.34"],
+				transport: answering(200, "x".repeat(64)),
+			}),
+		);
+		expectBestEffortWarn(
+			logger,
+			"logout_backchannel_failed",
+			{ clientId: "rp1", step: "destination" },
+			"OutboundFetchError",
+		);
+	});
+
+	it("keeps step post for an exchange that fails rather than is refused", async () => {
+		const logger = createMockLogger();
+		await broadcast(
+			[{ clientId: "rp1", backchannelLogoutUri: "https://rp.example/bc" }],
+			logger,
+			createOutboundFetchForTesting({
+				source: "registration",
+				lookup: async () => {
+					throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });
+				},
+				transport: answering(204),
+			}),
+		);
+		expectBestEffortWarn(
+			logger,
+			"logout_backchannel_failed",
+			{ clientId: "rp1", step: "post" },
+			"OutboundFetchError",
+		);
 	});
 });

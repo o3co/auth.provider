@@ -16,6 +16,7 @@
 import {
 	auditErrorText,
 	generateLogoutToken,
+	isOutboundRefusal,
 	type KeyStore,
 	type Logger,
 	loggableError,
@@ -40,8 +41,12 @@ export interface BroadcastBackchannelLogoutOptions {
 	/** Session ID being terminated. Included in each logout_token when the RP requires sid. */
 	readonly sid: string;
 	readonly keyStore: KeyStore;
-	/** Override for unit tests. Defaults to the global `fetch`. */
-	readonly fetchImpl?: typeof fetch;
+	/**
+	 * The fetch every POST goes through: core's
+	 * `createOutboundFetch({ config, source: "registration" })`, built once, so
+	 * `core.outbound` applies. Anything else replaces that policy.
+	 */
+	readonly fetchImpl: typeof fetch;
 	/** Per-request timeout in milliseconds. Defaults to 5000ms. */
 	readonly timeoutMs?: number;
 	/** Optional structured logger. Defaults to `console`. */
@@ -52,13 +57,15 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 
 /**
  * Best-effort parallel POST of OIDC Back-Channel Logout 1.0 logout_token to each RP's
- * `backchannelLogoutUri`. Never throws; 4xx/5xx/network/timeout failures are logged via
- * `opts.logger ?? console`. RPs without a `backchannelLogoutUri` are skipped.
+ * `backchannelLogoutUri`. Never throws; 4xx/5xx/network/timeout failures, and a
+ * destination the outbound fetch refuses (`step: "destination"`, the RP treated as
+ * unreachable), are logged via `opts.logger ?? console`. RPs without a
+ * `backchannelLogoutUri` are skipped.
  */
 export async function broadcastBackchannelLogout(
 	opts: BroadcastBackchannelLogoutOptions,
 ): Promise<void> {
-	const fetchImpl = opts.fetchImpl ?? fetch;
+	const fetchImpl = opts.fetchImpl;
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const logger = opts.logger ?? console;
 
@@ -96,8 +103,9 @@ export async function broadcastBackchannelLogout(
 						);
 					}
 				} catch (err) {
+					const step = isOutboundRefusal(err) ? "destination" : "post";
 					logger.warn(
-						{ clientId: auditErrorText(rp.clientId), step: "post", err: loggableError(err) },
+						{ clientId: auditErrorText(rp.clientId), step, err: loggableError(err) },
 						"logout_backchannel_failed",
 					);
 				} finally {

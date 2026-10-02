@@ -26,6 +26,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	createMemoryReplaySeenSet,
+	createOutboundFetch,
 	type Logger,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
@@ -95,6 +96,7 @@ const verify = async (dates: Partial<Record<"exp" | "iat" | "nbf", string>>) => 
 		tokenEndpoint: TOKEN_ENDPOINT,
 		replaySeenSet: createMemoryReplaySeenSet(),
 		logger: logger as unknown as Logger,
+		fetch: createOutboundFetch({ source: "registration" }),
 	}).verify(
 		{
 			client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,

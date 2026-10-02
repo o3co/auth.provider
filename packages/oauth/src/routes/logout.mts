@@ -204,8 +204,8 @@ export interface LogoutRouterOptions {
 	 * configured.
 	 */
 	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
-	/** Override for unit tests. Defaults to the global `fetch`. */
-	fetchImpl?: typeof fetch;
+	/** The fetch for back-channel logout POSTs; see `broadcastBackchannelLogout`. */
+	fetchImpl: typeof fetch;
 	/** Structured logger shared with broadcastBackchannelLogout and the cascade. */
 	logger?: Logger;
 	/** Audit sink for operator observability events. No-op when undefined. */
@@ -752,7 +752,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		}
 		const { rps, federations } = begun;
 
-		// Step 4: Broadcast Back-Channel Logout (best-effort — never throws).
+		// Step 4: Broadcast Back-Channel Logout (best-effort: a failed or refused
+		// POST is logged, never thrown).
 		if (sub) {
 			await broadcastBackchannelLogout({
 				rps,

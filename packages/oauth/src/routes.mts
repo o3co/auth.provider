@@ -30,6 +30,7 @@ import {
 	type ConsentStore,
 	checkResolver,
 	consoleLogger,
+	createOutboundFetch,
 	createRateLimitGuard,
 	emitAuditEvent,
 	type FederationProvider,
@@ -519,12 +520,17 @@ export const createOAuthRouter = async (
 	// `private_key_jwt` on every client-authenticated endpoint: the
 	// assertion's `aud` may name the issuer or this token endpoint.
 	const tokenEndpoint = `${canonicalIssuer}/oauth/token`;
+	// Every URL a client registration names — a `jwksUri`, a back-channel
+	// logout URI — is fetched through this one, built from `core.outbound`
+	// here, so a section it refuses fails the build.
+	const registrationFetch = createOutboundFetch({ config, source: "registration" });
 	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
 		issuer: canonicalIssuer,
 		logger,
 		allowPublicClients: true,
 		replaySeenSet,
 		tokenEndpoint,
+		fetch: registrationFetch,
 	});
 	// `/oauth/introspect` MUST reject public clients per RFC 7662 §2.1 — a
 	// known client_id is a non-secret value and would otherwise let any party
@@ -534,6 +540,7 @@ export const createOAuthRouter = async (
 		logger,
 		replaySeenSet,
 		tokenEndpoint,
+		fetch: registrationFetch,
 	});
 
 	// The check and outage policy (the limiter's failMode, context, 429
@@ -725,6 +732,7 @@ export const createOAuthRouter = async (
 				refreshTokenFamilyRevocation: refreshTokenFamilyRevocation!,
 				clientRepository,
 				getFederationProviders,
+				fetchImpl: registrationFetch,
 				auditSink,
 				logger,
 				legacyTypAccept: legacyTypAcceptOpt,
@@ -786,6 +794,7 @@ export const createOAuthRouter = async (
 			// private_key_jwt at /oauth/revoke, verified as at /oauth/token.
 			replaySeenSet,
 			tokenEndpoint,
+			fetch: registrationFetch,
 		}),
 	);
 

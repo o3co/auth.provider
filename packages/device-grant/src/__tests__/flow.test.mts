@@ -41,6 +41,7 @@ import {
 	createInMemorySubjectRevocation,
 	createMemoryDeviceCodeStore,
 	createMemoryRateLimiter,
+	createOutboundFetch,
 	createSymmetricKeyStore,
 	DEFAULT_CLOCK_SKEW_MS,
 	generateUserCode,
@@ -173,6 +174,7 @@ const makeHarness = (
 		createClientAuthMiddleware(clientRepository, {
 			issuer: ISSUER,
 			allowPublicClients: true,
+			fetch: createOutboundFetch({ source: "registration" }),
 		}),
 		createDeviceAuthorizationHandler({
 			store,

@@ -45,6 +45,7 @@ import {
 	checkOAuthTokenSettings,
 	coerceBooleanFromEnv,
 	consoleLogger,
+	createOutboundFetch,
 	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
@@ -697,6 +698,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							// derived from `issuer`, as at `/oauth/revoke`.
 							...(deps.replaySeenSet ? { replaySeenSet: deps.replaySeenSet } : {}),
 							...(deps.logger ? { logger: deps.logger } : {}),
+							fetch: createOutboundFetch({ config: deps.config, source: "registration" }),
 						}),
 					);
 					router.post(
