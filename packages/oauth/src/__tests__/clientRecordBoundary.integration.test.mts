@@ -17,9 +17,10 @@
 /**
  * The oauth endpoints, booted by `createApp`, read a client record through
  * core's client-record boundary over the `clientRepository` slot's
- * repository: a record the registration schema refuses is an unknown
- * client, a record whose field read throws is the repository's outage, and
- * an ORM entity is read by name.
+ * repository: a record the registration schema refuses rejects the lookup
+ * with the boundary's refusal, answered `503` like the repository's outage
+ * and warned once; a record whose field read throws is the repository's
+ * outage; and an ORM entity is read by name.
  */
 
 import {
@@ -154,17 +155,22 @@ const refusals = (logger: ReturnType<typeof createMockLogger>) =>
 	logger.warn.mock.calls.filter(([, message]) => message === "client_record_refused");
 
 describe("oauth endpoints behind core's client-record boundary", () => {
-	it("answer a record the registration schema refuses as an unknown client", async () => {
+	it("answer a record the registration schema refuses 503, naming the refusal as the cause", async () => {
 		const { app, handle, logger } = await boot(
 			answering(() => ({ ...VALID, allowedRedirectUris: ["javascript:alert(1)"] })),
 		);
 		const authorized = await authorize(app);
-		expect(authorized.status).toBe(400);
-		expect(authorized.body).toMatchObject({ error: "invalid_client" });
+		expect(authorized.status).toBe(503);
+		expect(authorized.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(authorized.headers.location).toBeUndefined();
 		const exchanged = await token(app);
-		expect(exchanged.status).toBe(401);
-		expect(exchanged.body).toMatchObject({ error: "invalid_client" });
+		expect(exchanged.status).toBe(503);
+		expect(exchanged.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(
+			logger.error.mock.calls
+				.filter(([, message]) => message === "client_repository_unavailable")
+				.map(([line]) => (line as { err?: { reason?: string } }).err?.reason),
+		).toEqual(["client_record_refused", "client_record_refused"]);
 		// Client authentication looks the client up before it checks the secret,
 		// so both requests stop at the lookup.
 		expect(refusals(logger).map(([line]) => [line.step, line.clientId])).toEqual([

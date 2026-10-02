@@ -145,10 +145,10 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  *   cannot be pinned in the header and another in the body.
  * - `WWW-Authenticate: Basic` is sent only when the failed attempt was Basic
  *   or no credentials were sent, never to steer other callers to Basic.
- * - Clients are read through core's client-record boundary, outermost over
+ * - Clients are read through core's client-record boundary over
  *   `clientRepository` (a boundary or a document fallback is read as it is):
- *   a record the boundary refuses is an unknown client.
- * - A repository that throws is an outage, `503 temporarily_unavailable`, not
+ *   a record the boundary refuses rejects the lookup, answered as below.
+ * - A repository lookup that rejects is an outage, `503 temporarily_unavailable`, not
  *   `invalid_client` (which a client reads as a bad secret). A malformed
  *   `client_id` (control characters, over-long) is refused as unknown before
  *   the repository is asked, so a client cannot provoke that outage.

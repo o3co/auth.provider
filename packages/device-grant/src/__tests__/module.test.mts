@@ -1087,10 +1087,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		}
 	});
 
-	it("answers a client whose registration the boundary refuses 401 invalid_client on the mounted device_authorization route", async () => {
+	it("answers a client whose registration the boundary refuses 503 on the mounted device_authorization route", async () => {
 		// `defaultScopes` a string rather than a list: the client authentication
 		// reads registrations through core's client-record boundary, which
-		// refuses the record, so the handler never sees it.
+		// refuses the record, so the lookup rejects and the handler never sees it.
 		const { lines, logger } = serialisingLogger();
 		const malformed = { ...confidentialClient, defaultScopes: "openid" };
 		const app = mountContributedRoute(0, {
@@ -1108,12 +1108,19 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
 			.send({});
 
-		expect(res.status).toBe(401);
-		expect(res.body.error).toBe("invalid_client");
-		expect(logger.error).not.toHaveBeenCalled();
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expect(logger.warn).toHaveBeenCalledTimes(1);
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ step: "find", clientId: CONFIDENTIAL_ID }),
 			"client_record_refused",
+		);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				step: "find",
+				err: expect.objectContaining({ reason: "client_record_refused" }),
+			}),
+			"client_repository_unavailable",
 		);
 		for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
 	});

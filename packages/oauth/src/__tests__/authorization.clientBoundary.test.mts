@@ -16,8 +16,8 @@
 
 // The code exchange reads the client's logout metadata through core's
 // client-record boundary: a record the registration schema refuses puts no
-// logout URI in the session RP registry, as an unknown client does, and a
-// read that throws is still an outage.
+// logout URI in the session RP registry, and is answered as the store's
+// outage is, with the refusal named as the cause.
 
 import crypto from "node:crypto";
 import {
@@ -148,32 +148,51 @@ describe("createAuthorizationGrant — the client's logout metadata is read thro
 		["a clientId that is not the id looked up", { clientId: "another-client" }],
 		["no token endpoint auth method", { tokenEndpointAuthMethod: undefined }],
 	])(
-		"registers the RP as for an unknown client, and warns client_record_refused, for a record with %s",
+		"answers 503 temporarily_unavailable and registers no RP, warning client_record_refused, for a record with %s",
 		async (_label, change) => {
 			const refused = await exchangeWith(
 				async () => ({ ...validRecord, ...change }) as PublicClient,
 			);
-			const absent = await exchangeWith(async () => null);
 
-			// The exchange answers as it does for a client the repository does not
-			// hold: tokens, and the RP registered under the authenticated id with
-			// no logout metadata.
-			expect(absent.result.status).toBe(200);
-			expect(refused.result.status).toBe(200);
-			expect(refused.rps.map(withoutRegisteredAt)).toEqual(absent.rps.map(withoutRegisteredAt));
-			expect(refused.rps[0]?.frontchannelLogoutUri).toBeUndefined();
-			expect(refused.rps[0]?.backchannelLogoutUri).toBeUndefined();
+			// The refusal is the lookup's rejection, so the exchange answers it as
+			// it answers a repository that throws, never as a client it does not
+			// hold.
+			expect(refused.result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "session linking unavailable",
+			});
+			expect(refused.rps).toEqual([]);
 			const warned = refused.logger.warn.mock.calls.filter(
 				([, event]) => event === "client_record_refused",
 			);
 			expect(warned).toHaveLength(1);
 			expect(warned[0]?.[0]).toMatchObject({ step: "find", clientId: CLIENT_ID });
+			expect(refused.logger.error.mock.calls).toEqual([
+				[
+					expect.objectContaining({
+						site: "authorization_code",
+						step: "find",
+						clientId: CLIENT_ID,
+						err: expect.objectContaining({ reason: "client_record_refused" }),
+					}),
+					"client_repository_unavailable",
+				],
+			]);
 			const logged = serialisedCalls(refused.logger);
 			for (const uri of [FRONT, BACK, "javascript:alert(1)", REDIRECT_URI]) {
 				expect(logged).not.toContain(uri);
 			}
 		},
 	);
+
+	it("registers an absent client's RP with no logout metadata, and issues tokens", async () => {
+		const { result, rps, logger } = await exchangeWith(async () => null);
+
+		expect(result.status).toBe(200);
+		expect(rps.map(withoutRegisteredAt)).toEqual([{ clientId: CLIENT_ID }]);
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
 
 	it("answers a repository that throws 503 temporarily_unavailable and registers no RP", async () => {
 		const { result, rps, logger } = await exchangeWith(async () => {
