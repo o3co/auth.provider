@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 ## Responsibility
 
@@ -242,7 +242,7 @@ The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientR
 
 `createCode` requires `client_id` and `redirect_uri`, and `Client.tokenEndpointAuthMethod` is required. Every other `Code` field is a required key holding `undefined` where nothing was recorded, and `createCode` takes `CreateCodeInput`, in which only `expiresIn` may be left out (the repository's default then applies). `nonce` and `sid` carry the OIDC nonce and the session id from `/authorize` to `/token`; `grantedScope` / `grantedAudience` are the grant policy's decision at `/authorize`, which the `authorization_code` grant reads instead of evaluating the policy again. The directory's responsibility map is [`src/repositories/README.md`](src/repositories/README.md).
 
-`readUserSnapshot(user)` ([`src/repositories/userSnapshot.mts`](src/repositories/userSnapshot.mts)) is a login's one read of the `User` a repository answers: each field `User` declares, read by name once however the object holds it (a getter, an ORM entity), into a plain snapshot frozen at every depth. It answers `{ ok: true, snapshot }`, whose `id` is a non-empty string, or `{ ok: false, refused }` — `not_an_object`, `id`, or `not_plain_data` with the `field`. A login route reads the subject and the claims from the snapshot, never from the `User` again.
+`readUserSnapshot(user)` is a login's one read of the `User` a repository answers: each field `User` declares, read by name once however the object holds it (a getter, an ORM entity), into a plain snapshot frozen at every depth, or a refusal. A login route reads the subject and the claims from the snapshot, never from the `User` again. The answer and the refusals are defined by `UserSnapshotReading` in [`src/repositories/userSnapshot.mts`](src/repositories/userSnapshot.mts).
 
 #### Built-in implementations
 
