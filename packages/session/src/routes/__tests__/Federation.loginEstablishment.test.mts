@@ -340,3 +340,48 @@ describe("the federation callback's login — the User the Store answers is read
 		expect(failed[0]?.args[0]).toMatchObject({ sub: "user-1" });
 	});
 });
+
+describe("the federation callback's login — a User the snapshot refuses", () => {
+	it("answers 500 having read each getter once, with nothing written: no record, no index entry of either kind, no tokens, no authenticated session", async () => {
+		const { user, reads } = countingUser({
+			id: "user-1",
+			username: "alice",
+			email: "alice@example.com",
+			mfaEnrolled: new Date(0),
+		});
+		const subjectSessionIndex = {
+			kind: "memory",
+			addSid: vi.fn(async () => {}),
+			listSids: vi.fn(async () => []),
+			removeSid: vi.fn(async () => {}),
+			removeBySubject: vi.fn(async () => {}),
+		};
+		const harness = buildFederationApp({
+			providers: new Map([["test", provider]]),
+			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
+			userRepository: makeUserRepository(user),
+			subjectSessionIndex: subjectSessionIndex as unknown as SubjectSessionIndex,
+		});
+		harness.store.set("browser", {
+			data: { federation: { name: "test", state: "st-1", codeVerifier: "cv-1" } },
+			cookie: { sameSite: "lax", secure: false, httpOnly: true },
+		});
+
+		const res = await request(harness.app)
+			.get("/oauth/federation/test/callback?state=st-1&code=c-1")
+			.set("Cookie", "sid=browser");
+
+		expect(res.status).toBe(500);
+		for (const field of ["id", "username", "email", "mfaEnrolled"]) {
+			expect(reads.get(field), field).toBe(1);
+		}
+		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
+		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
+		expect(subjectSessionIndex.addSid).not.toHaveBeenCalled();
+		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
+		const session = harness.store.get("browser")?.data ?? {};
+		for (const field of ["isAuthenticated", "user", "sid"]) {
+			expect(session, field).not.toHaveProperty(field);
+		}
+	});
+});
