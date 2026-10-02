@@ -178,6 +178,20 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect(payload.scope).toBe("s1");
 	});
 
+	it("filters the defaultScopes of a hand-built client by its allowlist", async () => {
+		// A caller reaching the handler through `grantHandlerResolver` may hand
+		// it a client that never passed core's client-record boundary.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const client = makeClient({ allowedScopes: ["s1"], defaultScopes: ["s1", "admin"] });
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+		expect(payload.scope).toBe("s1");
+	});
+
 	it("returns 400 invalid_scope when scope is omitted and no defaultScopes are declared", async () => {
 		const handler = createClientCredentialsGrant(baseDeps);
 		const client = makeClient({ allowedScopes: ["s1", "s2"], defaultScopes: undefined });

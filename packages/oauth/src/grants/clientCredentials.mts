@@ -210,10 +210,11 @@ function resolveScope(
 		| { scopes: readonly string[] }
 		| { status: 400; error: "invalid_scope"; errorDescription: string } => {
 		if (client.defaultScopes !== undefined) {
-			// Within the allowlist already: `/token` authenticates the client
-			// through core's client-record boundary, whose copy holds
-			// defaultScopes to a subset of allowedScopes.
-			return { scopes: client.defaultScopes };
+			// Filtered even so: a grant handler is reachable through
+			// `grantHandlerResolver`, so its caller may hand it an
+			// `authenticatedClient` that did not come through core's
+			// client-record boundary, which holds defaultScopes ⊆ allowedScopes.
+			return { scopes: client.defaultScopes.filter((s) => allowed.includes(s)) };
 		}
 		if (allowed.length === 0) return { scopes: [] };
 		return {

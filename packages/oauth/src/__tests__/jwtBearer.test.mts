@@ -493,15 +493,22 @@ describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never th
 		expect(scopeOf(result)).toBe("read");
 	});
 
-	it("bounds the defaultScopes by the client's allowlist, a ceiling like the assertion's", async () => {
-		// A client `/token` authenticated through core's boundary never declares
-		// a default outside its allowlist; one handed to the grant directly can,
-		// and the allowlist is still one of the ceilings.
+	it("filters the defaultScopes of a hand-built client by its allowlist", async () => {
+		// A caller reaching the handler through `grantHandlerResolver` may hand
+		// it a client that never passed core's client-record boundary.
 		const { result } = await build({}).handle(
 			ctx({}, client({ allowedScopes: ["read"], defaultScopes: ["read", "admin"] })),
 		);
 		expect(result.status).toBe(200);
 		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("grants a hand-built client without an allowlist none of its defaultScopes", async () => {
+		// With no allowlist and no assertion scope there is no ceiling to read
+		// the default against; the allowlist filter alone keeps it from granting.
+		const { result } = await build({}).handle(ctx({}, client({ defaultScopes: ["admin"] })));
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBeUndefined();
 	});
 
 	it("keeps the empty grant for a scope-less client (empty allowlist, no defaults)", async () => {
