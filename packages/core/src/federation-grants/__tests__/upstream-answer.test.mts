@@ -270,6 +270,13 @@ describe("readFederationGrantUpstreamAnswer", () => {
 			expect(read_.accessToken.token.effectiveExpiresAt).toStrictEqual(new Date(CALLED_AT + HALF));
 		});
 
+		it("held without its end, as a record from before the end was stored, ends at its start plus its issued lifetime", () => {
+			const { effectiveExpiresAt: _, ...legacy } = held;
+			const read_ = read(answer(), { held: legacy });
+			if (!read_.accessToken.eligible) throw new Error("refused");
+			expect(read_.accessToken.token.effectiveExpiresAt).toStrictEqual(new Date(CALLED_AT + HALF));
+		});
+
 		it("held ended by the time the answer arrives, is refused as no_finite_lifetime: the answer does not revive it", () => {
 			const ended = { ...held, effectiveExpiresAt: new Date(RECEIVED_AT) };
 			expect(read(answer(), { held: ended }).accessToken).toStrictEqual(

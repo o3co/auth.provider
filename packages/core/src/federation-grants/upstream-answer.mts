@@ -33,6 +33,7 @@ import { judgeUpstreamAccessToken } from "./eligibility.mjs";
 import {
 	federationGrantAccessToken,
 	federationGrantHeldToken,
+	type StoredAccessToken,
 	type WrittenAccessToken,
 } from "./held-token.mjs";
 import type { FederationGrantIneligibilityReason } from "./types.mjs";
@@ -50,10 +51,11 @@ export interface FederationGrantUpstreamAnswerContext {
 	readonly maxAccessTokenLifetime: number;
 	/**
 	 * The access token the grant holds. An answer that carries the same value
-	 * never ends it later than it ends now. Ignored when its dates hold no instant.
+	 * never ends it later than it ends now: at `effectiveExpiresAt`, or without
+	 * one at `obtainedAt` + `issuedLifetime`. Ignored when its dates hold no instant.
 	 */
 	readonly held?: Pick<
-		WrittenAccessToken,
+		StoredAccessToken,
 		"value" | "obtainedAt" | "issuedLifetime" | "effectiveExpiresAt"
 	>;
 }
