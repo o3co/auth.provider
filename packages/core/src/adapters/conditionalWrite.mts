@@ -55,8 +55,9 @@ export function newStoreGeneration(): StoreGeneration {
  * The bundled stores' write-lifetime bound, 24 hours. A set reads absent only
  * once this has passed since its last membership write, and a
  * `createIf(…, null)` commits or fails within it of the read that answered
- * `null`: from the read to issuing the write, kept by the port's owning
- * module; from issuing it to its commit or failure, kept by the adapter
+ * `null`. The bound is allocated: the adapter declares its write lifetime W
+ * (issue to commit or failure), and the port's owning module issues a
+ * conditional write only within (bound − W) of its read
  * (docs/adapter-surface.md, "Conditional writes", rule 6).
  */
 export const BUNDLED_STORE_WRITE_LIFETIME_MS = 24 * 60 * 60 * 1000;

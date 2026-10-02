@@ -465,13 +465,19 @@ write-lifetime bound. These are the rules every store with conditional members k
      meets `conflict` or `missing`, because a generation is never re-issued
      (rule 8); a stale `null` would otherwise find a set that had come and
      gone, its tombstone expired.
-   - The bound has two halves. From the read to issuing the write, the
-     port's owning module keeps it (for example, under its lease); callers
-     outside that module never hold a generation. From issuing the write to
-     its commit or failure in the store, the adapter keeps it, and documents
-     how, with the operational assumption that rests on (for example, a
-     Redis command timeout cannot withdraw a command already written to the
-     socket).
+   - The bound is allocated between two parties, each keeping its own
+     share without the other's deadline:
+     - **The adapter declares its write lifetime W**: the longest an issued
+       conditional write may take to commit or fail, under its documented
+       operational assumption (for example, a Redis command timeout cannot
+       withdraw a command already written to the socket). W is well under
+       the bound.
+     - **The port's owning module issues a conditional write only within
+       (bound − W) of the read** that produced its expected generation (for
+       example, under a lease far shorter than that). Callers outside that
+       module never hold a generation.
+     - Together, read to commit is at most (bound − W) + W = the bound. No
+       deadline crosses the port: the adapter never needs the read's.
    - What remains is a named assumption: the process or the store does not
      stall for the whole bound between a `null` read and its commit.
 7. **A generation fences only its own store's records.** It does not fence a
@@ -518,9 +524,12 @@ write-lifetime bound. These are the rules every store with conditional members k
 - An outage rejects, and `missing` and `conflict` write nothing (rule 4).
 - A set keeps its tombstone, and reads absent only once the bound has passed
   since its last membership write (rule 6).
-- The adapter keeps the second half of the bound: a write it issues commits
-  or fails within the bound. Its documentation says how, and states the
-  operational assumption that rests on (rule 6).
+- The adapter states its write lifetime W, well under the bound: an issued
+  conditional write commits or fails within W. Its documentation says how,
+  and states the operational assumption that rests on (rule 6).
+- The port's owning module states its issue window, the longest from a
+  versioned read to issuing a write conditional on it, and that the window
+  is at most the bound less the adapter's W (rule 6).
 - An adapter whose store can lose acknowledged writes (asynchronous
   replication on failover, say) states it: the store assumes acknowledged
   writes are not rolled back (persistence, plus a failover setup that keeps
