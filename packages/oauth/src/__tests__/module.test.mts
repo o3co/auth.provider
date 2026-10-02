@@ -792,7 +792,6 @@ describe("oauthModule — federation logout via typed deps", () => {
 			getVersioned: vi.fn(),
 			replaceIf: vi.fn(),
 			removeIf: vi.fn(),
-			update: vi.fn(),
 			removeBySid: vi.fn().mockResolvedValue(undefined),
 			delete: vi.fn().mockResolvedValue(undefined),
 		};
@@ -945,7 +944,6 @@ describe("oauthModule — federation logout via typed deps", () => {
 			getVersioned: vi.fn(),
 			replaceIf: vi.fn(),
 			removeIf: vi.fn(),
-			update: vi.fn(),
 			removeBySid: vi.fn(),
 			delete: vi.fn(),
 		};

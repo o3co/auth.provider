@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -587,7 +587,7 @@ dual-read path by design.
 
 The envelope also carries `obtainedAt`, when the access token's lifetime counts
 from, as `obtainedAtMs`, and only when the record has one. A record without it
-reads back with no `obtainedAt`. When the value is not a whole millisecond
+reads back with `obtainedAt` named, as `undefined`. When the value is not a whole millisecond
 within the Date range, the record is deleted on read, like any unreadable
 record. Adding it left the wrapper at `v: 2`: the reader ignores envelope keys
 it does not know, so a rolling deploy or a rollback reads records either
@@ -602,7 +602,7 @@ conditional-write convention for a record
 ([docs/adapter-surface.md, "Conditional writes"](../../docs/adapter-surface.md#conditional-writes)).
 
 - **The generation** is the wrapper's `g`, a random UUID every write sets
-  (`attach`, `update`, `replaceIf`). It sits outside the ciphertext and the
+  (`attach`, `replaceIf`). It sits outside the ciphertext and the
   wrapper stays `v: 2`, so a replica that does not know `g` reads the record
   as before, and its own write leaves `g` out. Such a record is given a fresh
   `g` by its first versioned read, in the same script, its TTL kept; a

@@ -206,6 +206,7 @@ const tokens: FederationTokens = {
 	tokenType: undefined,
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 describe("redis FederationTokenStore (encryption = required)", () => {
@@ -476,6 +477,7 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
+			obtainedAt: undefined,
 		});
 		const r = await (store as FederationTokenStore & SupportsLock).acquireLock({
 			sid: "s",
@@ -515,6 +517,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
+			obtainedAt: undefined,
 		};
 		await store.attach("sid-1", "google", shortLivedAT);
 		const ttl = redis.ttls.get("ft:sid-1:google");
@@ -895,6 +898,7 @@ const fullTokens: FederationTokens = {
 	tokenType: "Bearer",
 	scope: "openid email",
 	grantedScope: "openid email profile",
+	obtainedAt: undefined,
 };
 
 // Values that must not reach Redis in clear. Each is long enough that a
@@ -930,10 +934,14 @@ describe("mode=required stores one ciphertext over the whole envelope", () => {
 		expect(await store.get("sid-1", "google")).toStrictEqual(fullTokens);
 	});
 
-	it("update() writes the same shape and round-trips too", async () => {
+	it("replaceIf() writes the same shape and round-trips too", async () => {
 		const store = requiredStore();
 		await store.attach("sid-1", "google", tokens);
-		await store.update("sid-1", "google", fullTokens);
+		const read = await store.getVersioned("sid-1", "google");
+		if (read === null) throw new Error("sid-1/google is not live");
+		expect(await store.replaceIf("sid-1", "google", read.generation, fullTokens)).toMatchObject({
+			outcome: "updated",
+		});
 		const record = JSON.parse(redis.data.get("ft:sid-1:google") as string) as Record<
 			string,
 			unknown
@@ -1169,6 +1177,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 					tokenType: undefined,
 					scope: undefined,
 					grantedScope: undefined,
+					obtainedAt: undefined,
 				});
 				expect(redis.data.has("ft:sid-1:google")).toBe(true);
 			});
@@ -1210,7 +1219,7 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 				expect(read && "addedLater" in read).toBe(false);
 			});
 
-			it("reads obtainedAtMs as obtainedAt, and its absence as no key", async () => {
+			it("reads obtainedAtMs as obtainedAt, and its absence as undefined, the key named", async () => {
 				const store = storeFor(mode);
 				writeV2(
 					mode,
@@ -1221,7 +1230,9 @@ describe("a v2 record with a malformed inner envelope self-heals like corrupt JS
 				expect(read?.accessToken).toBe("at");
 				expect(read?.obtainedAt).toEqual(new Date(1_899_999_000_000));
 				writeV2(mode, "ft:sid-2:google", '{"accessToken":"at","expiresAtMs":null}');
-				expect(Object.hasOwn((await store.get("sid-2", "google")) ?? {}, "obtainedAt")).toBe(false);
+				const undated = await store.get("sid-2", "google");
+				expect(Object.hasOwn(undated ?? {}, "obtainedAt")).toBe(true);
+				expect(undated?.obtainedAt).toBeUndefined();
 			});
 
 			it.each([

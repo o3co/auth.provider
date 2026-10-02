@@ -95,6 +95,7 @@ const tokens: FederationTokens = {
 	tokenType: undefined,
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 describe("redis FederationTokenStore.removeBySid, and no deleteBySession", () => {

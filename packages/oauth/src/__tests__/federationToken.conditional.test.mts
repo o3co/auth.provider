@@ -68,6 +68,7 @@ const linkA = (): FederationTokens => ({
 	tokenType: "Bearer",
 	scope: "openid email",
 	grantedScope: "openid email",
+	obtainedAt: undefined,
 });
 
 /** A relink of the same federation in the same session: a new, narrower connection, not due. */
@@ -79,6 +80,7 @@ const linkB = (): FederationTokens => ({
 	tokenType: "Bearer",
 	scope: "openid",
 	grantedScope: "openid",
+	obtainedAt: undefined,
 });
 
 const invalidGrant = (): Error =>

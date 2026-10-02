@@ -162,7 +162,6 @@ async function buildApp(userSessionStore: UserSessionStore) {
 			kind: "memory",
 			attach: vi.fn(async () => {}),
 			get: vi.fn(async () => null),
-			update: vi.fn(async () => {}),
 			delete: vi.fn(async () => {}),
 			removeBySid: vi.fn(async () => {}),
 		} as unknown as FederationTokenStore,

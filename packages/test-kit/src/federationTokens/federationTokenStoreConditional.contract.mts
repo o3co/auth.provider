@@ -18,9 +18,8 @@
  * `FederationTokenStore`'s binding of the record-scoped conditional-write
  * contract: one `(sid, federationName)` record and its store generation,
  * held to `conditionalRecordContract` through `getVersioned`, `replaceIf`
- * and `removeIf`, with `attach` as the create path and `attach`, `update`,
- * `delete` and `removeBySid` as the unconditional writes, the last two
- * removals. The cases of the port's own add that a record's generation
+ * and `removeIf`, with `attach` as the create path and `attach`, `delete` and
+ * `removeBySid` as the unconditional writes, the last two removals. The cases of the port's own add that a record's generation
  * fences that record alone: another federation of the session, and another
  * session's record of the federation, are left as they were.
  *
@@ -123,7 +122,6 @@ const targetOf = (store: FederationTokenStore): ConditionalRecordTarget<Federati
 	removeIf: (key, expected) => store.removeIf(key, NAME, expected),
 	unconditional: {
 		attach: (key, value) => store.attach(key, NAME, value),
-		update: (key, value) => store.update(key, NAME, value),
 		delete: (key) => store.delete(key, NAME),
 		removeBySid: (key) => store.removeBySid(key),
 	},
@@ -226,6 +224,34 @@ export function federationTokenStoreConditionalContract(
 				).outcome,
 				"conflict",
 			);
+		}),
+
+		test("a record with no obtainedAt is read back with the key named, as undefined, through every read and write", async ({
+			store,
+		}) => {
+			const sid = freshSid("undated");
+			const undated: FederationTokens = { ...values()[0], obtainedAt: undefined };
+			const named = (read: FederationTokens | null | undefined, where: string): void => {
+				assert.ok(
+					read !== null && read !== undefined && Object.hasOwn(read, "obtainedAt"),
+					`${where}: obtainedAt is named`,
+				);
+				assert.deepStrictEqual(read, undated, `${where}: obtainedAt is undefined, never null`);
+			};
+			await store.attach(sid, NAME, undated);
+			named(await store.get(sid, NAME), "get after attach");
+			const read = await live(store, sid, NAME);
+			named(read.value, "getVersioned after attach");
+			const dated = readConditionalReplaceAnswer(
+				await store.replaceIf(sid, NAME, read.generation, values()[0]),
+			);
+			assert.ok(dated.outcome === "updated");
+			const undatedAgain = readConditionalReplaceAnswer(
+				await store.replaceIf(sid, NAME, dated.generation, undated),
+			);
+			assert.ok(undatedAgain.outcome === "updated");
+			named(await store.get(sid, NAME), "get after replaceIf");
+			named((await live(store, sid, NAME)).value, "getVersioned after replaceIf");
 		}),
 
 		test("removeBySid ends every federation of the session and no other session's record", async ({

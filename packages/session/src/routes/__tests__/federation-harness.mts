@@ -238,7 +238,6 @@ export function makeFederationTokenStore(): FederationTokenStore & {
 		getVersioned: vi.fn(async () => null),
 		replaceIf: vi.fn(async () => ({ outcome: "missing" as const })),
 		removeIf: vi.fn(async () => ({ outcome: "missing" as const })),
-		update: vi.fn(async () => {}),
 		removeBySid: vi.fn(async () => {}),
 		delete: vi.fn(async () => {}),
 	};
