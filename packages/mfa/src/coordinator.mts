@@ -110,6 +110,9 @@
  *   state that is not plain JSON-shaped is the factor's failure (`503`), the
  *   stored data left as it was. A challenge's `response` must be a plain
  *   object: it is answered as the factor built it.
+ * - A factor's `identity` is read as a non-empty string or none; one that
+ *   throws is none — the record a duplicate of none — and is said through
+ *   `identityFailed`.
  */
 
 import {
@@ -269,6 +272,8 @@ export interface MfaCoordinatorOptions {
 	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
+	/** Where a factor's `identity` that threw is said; the record is judged a duplicate of none. */
+	readonly identityFailed?: (kind: string, cause: unknown) => void;
 }
 
 /** Whether `value` is an object `res.json` answers as the factor built it: a plain object. */
@@ -297,6 +302,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		sessionProofSeconds,
 		firstBindingMarkMs,
 		subjectRevocation,
+		identityFailed,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
@@ -774,6 +780,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				const amr: unknown = factor.amrFor(data);
 				return declaresEach(factor, amr) ? amr : undefined;
 			} catch {
+				return undefined;
+			}
+		},
+		identityOf: (factor, data) => {
+			try {
+				const identity: unknown = factor.identity?.(data);
+				return typeof identity === "string" && identity !== "" ? identity : undefined;
+			} catch (cause) {
+				identityFailed?.(factor.kind, cause);
 				return undefined;
 			}
 		},

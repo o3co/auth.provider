@@ -25,16 +25,16 @@
  * both. It maps the store onto `conditionalSetContract`'s target and runs
  * that suite, so the factor set is held to every rule of a set the suite
  * holds: a subject is the scope, a record the item, `removeAllForSubject`
- * the reset, `update` the member's own update, `create`, `remove` and
- * `removeAllForSubject` the unconditional membership writes. Every versioned
- * listing is read with `readMfaFactorSet`, so a record that is not a whole
- * record of its subject, or an id listed twice, fails the case that read it.
+ * the reset, `update` the member's own update, `removeAllForSubject` the
+ * unconditional membership write. Every versioned listing is read with
+ * `readMfaFactorSet`, so a record that is not a whole record of its subject,
+ * or an id listed twice, fails the case that read it.
  * The unreachable store is mapped bare: each member is the port's call
  * alone, so its rejection reaches the outage case unchanged and an answer it
  * resolves, whatever it is, fails the case. `second`, `forceExpire`,
  * `unreachable` and `close` pass through, bound to the harness, and the
  * harness's `supports` is the suite's; the port has `list`, `update` and
- * its unconditional writes, so their cases always run.
+ * its unconditional reset, so their cases always run.
  *
  * Beside the suite, the factor set's own cases: an update keeps the
  * generation and a write at it lands, and a tombstone refuses a late first
@@ -200,8 +200,6 @@ function targetOf(store: MfaFactorStore, bare = false): ConditionalSetTarget<Mfa
 			if (!bare) assert.ok(updated !== null, "the update did not land");
 		},
 		unconditional: {
-			create: (record) => store.create(record),
-			remove: (record) => store.remove(record.subject, record.id),
 			removeAllForSubject: (record) => store.removeAllForSubject(record.subject),
 		},
 	};

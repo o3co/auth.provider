@@ -15,15 +15,17 @@
  */
 
 /**
- * The success answer's own guard: whatever stage hands it a token, one with no
- * usable access token is never answered `200`. The route's stages judge
- * usability before they get here, so this is reached only by a stage's bug.
+ * The success answer's own guards: whatever stage hands it a token, one with no
+ * usable access token, or less than a second left as the answer is built, is
+ * never answered `200`. The route's stages judge usability before they get
+ * here, so that guard is reached only by a stage's bug; time spent after a
+ * stage judged the token's life (a store write, the audit) reaches the other.
  */
 
 import type { AuditSink, FederationTokens } from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createStoreUnavailableLog,
 	type FederationTokenContext,
@@ -33,14 +35,18 @@ import { isDisclosable } from "#/routes/federationTokenDisclosure.mjs";
 import { answerToken } from "#/routes/federationTokenSuccess.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
-const answered = async (accessToken: string) => {
+const answered = async (
+	accessToken: string,
+	expiresAt: Date | null = null,
+	record: () => Promise<void> = async () => {},
+) => {
 	const logger = createMockLogger();
-	const auditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) } as AuditSink & {
+	const auditSink = { kind: "mock", record: vi.fn(record) } as AuditSink & {
 		record: ReturnType<typeof vi.fn>;
 	};
 	const token: Pick<FederationTokens, "accessToken" | "expiresAt" | "scope" | "tokenType"> = {
 		accessToken,
-		expiresAt: null,
+		expiresAt,
 		scope: "openid",
 		tokenType: "Bearer",
 	};
@@ -70,6 +76,10 @@ const answered = async (accessToken: string) => {
 };
 
 describe("answerToken", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("answers a token with no usable access token as no record, never 200, and audits no success", async () => {
 		const { res, logger, auditSink } = await answered("");
 
@@ -100,5 +110,48 @@ describe("answerToken", () => {
 				details: { federation: "google", refreshed: false },
 			}),
 		);
+	});
+
+	describe("never answers 200 for a token with less than a second left when the answer is built", () => {
+		const NOW = Date.UTC(2026, 9, 3);
+
+		it.each([
+			["999 ms left", () => new Date(NOW + 999)],
+			["none left", () => new Date(NOW)],
+			["an end already past", () => new Date(NOW - 60_000)],
+			["an end that names no instant", () => new Date(Number.NaN)],
+		])("answers %s 503 for the client to retry, and audits no success", async (_label, end) => {
+			vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+			const { res, auditSink } = await answered("upstream-at", end());
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "the federation token has less than a second left; retry",
+			});
+			expect(auditSink.record).not.toHaveBeenCalled();
+		});
+
+		it("answers 503 when the success audit holds the turn past the floor", async () => {
+			vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+			const { res, auditSink } = await answered("upstream-at", new Date(NOW + 1500), async () => {
+				vi.setSystemTime(Date.now() + 600);
+			});
+
+			expect(auditSink.record).toHaveBeenCalledTimes(1);
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+
+		it("answers one with exactly a second left 200, with expires_in 1", async () => {
+			vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+			const { res, auditSink } = await answered("upstream-at", new Date(NOW + 1000));
+
+			expect(res.status).toBe(200);
+			expect(res.body.expires_in).toBe(1);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "federation.token.success" }),
+			);
+		});
 	});
 });

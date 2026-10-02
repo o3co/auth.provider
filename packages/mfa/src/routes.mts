@@ -69,7 +69,11 @@
  *   otherwise — another requirement's interruption, `401`, `503` — leaves
  *   the set unshown, and a mark that fails answers `recovery_codes_issued:
  *   false`.
- * - A factor's own failure is logged by its name and code, never its text.
+ * - A factor's own failure is logged by its name and code, never its text;
+ *   one that cannot start an enrollment, or say whether the user may enroll
+ *   it, is `503` (`mfa_factor_enrollment_unavailable`, its kind).
+ * - An enrollment of a factor the subject holds already is `409
+ *   mfa_factor_duplicate`, at its start or its completion, naming no record.
  * - Each outage is answered `503` and logged once, at error. A mail the
  *   sender refused at its limit is `429`; a factor whose recorded address no
  *   longer matches the login's is `403`, recorded as
@@ -102,6 +106,7 @@ import {
 	describeAdmissionOutage,
 	emitAuditEvent,
 	errorEnvelope,
+	FEDERATED_AMR,
 	type IssuedRemediationAction,
 	isMfaFactorId,
 	type Logger,
@@ -113,6 +118,7 @@ import {
 	resumePrimary,
 	type SessionView,
 	type SupportsSecondFactorUpdate,
+	sessionAuthentication,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
@@ -181,6 +187,10 @@ const EMAIL_PROOF_UNAVAILABLE = errorEnvelope(
 const FACTOR_LIMIT = errorEnvelope(
 	"mfa_factor_limit",
 	"The subject holds as many second factors as it may",
+);
+const FACTOR_DUPLICATE = errorEnvelope(
+	"mfa_factor_duplicate",
+	"This second factor is already enrolled",
 );
 const NO_QUALIFYING_FACTOR = errorEnvelope(
 	"mfa_no_qualifying_factor",
@@ -370,6 +380,17 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		};
 	};
 
+	/** A factor that could not start an enrollment, or say whether the user may enroll it: `503`, once at error, by its kind. */
+	const answerEnrollmentFailed = (
+		route: RouteName,
+		res: Response,
+		kind: string,
+		cause: unknown,
+	): void => {
+		logger.error({ route, kind, err: mailFailureOf(cause) }, "mfa_factor_enrollment_unavailable");
+		res.status(503).json(MFA_UNAVAILABLE);
+	};
+
 	/**
 	 * A binding the subject's records no longer allow: a login starts again
 	 * (`401 login_required`); a session, which stands, is told the factors
@@ -448,6 +469,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				subject: session.sub,
 				user,
 				authTimeMs,
+				federated: sessionAuthentication(session)?.primary === FEDERATED_AMR,
 				witness,
 				secondFactorRecordable,
 				...(factorSetStart === undefined ? {} : { factorSetStart }),
@@ -947,11 +969,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					res.status(503).json(MFA_UNAVAILABLE);
 					return;
 				case "enrollable_failed":
-					logger.error(
-						{ route: "verify", kind: outcome.factorKind, err: mailFailureOf(outcome.cause) },
-						"mfa_factor_enrollment_unavailable",
-					);
-					res.status(503).json(MFA_UNAVAILABLE);
+					answerEnrollmentFailed("verify", res, outcome.factorKind, outcome.cause);
 					return;
 				case "binding_refused":
 					if (outcome.unprovable !== undefined) {
@@ -1139,6 +1157,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				case "factor_limit":
 					res.status(409).json(FACTOR_LIMIT);
 					return;
+				case "factor_duplicate":
+					res.status(409).json(FACTOR_DUPLICATE);
+					return;
 				case "unavailable":
 					answerOutage("enrollment", res, outcome);
 					return;
@@ -1147,11 +1168,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					answerMail("enrollment", res, outcome);
 					return;
 				case "enrollment_failed":
-					logger.error(
-						{ route: "enrollment", kind: outcome.kind, err: mailFailureOf(outcome.cause) },
-						"mfa_factor_enrollment_unavailable",
-					);
-					res.status(503).json(MFA_UNAVAILABLE);
+					answerEnrollmentFailed("enrollment", res, outcome.kind, outcome.cause);
 					return;
 				case "begun": {
 					const opened = outcome.transaction;
@@ -1223,6 +1240,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				case "factor_limit":
 					res.status(409).json(FACTOR_LIMIT);
 					return;
+				case "factor_duplicate":
+					res.status(409).json(FACTOR_DUPLICATE);
+					return;
 				case "first_binding_conflict":
 					// Another transaction bound the subject's first factor at once: a
 					// password holder may be racing the owner.
@@ -1239,6 +1259,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				case "unavailable":
 				case "unreadable":
 					answerOutage("enrollment", res, outcome);
+					return;
+				case "enrollment_failed":
+					answerEnrollmentFailed("enrollment", res, outcome.kind, outcome.cause);
 					return;
 				case "refused":
 					res.status(401).json(notAccepted(outcome.attemptsRemaining));

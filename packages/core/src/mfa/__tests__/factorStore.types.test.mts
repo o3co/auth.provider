@@ -17,8 +17,9 @@
 /**
  * What `MfaFactorStore` requires of a store: the factor set's members
  * `listVersioned`, `createIf` and `removeIf` are part of the port, so a store
- * without one of them does not compile. These are type assertions: the file
- * is in core's typecheck list.
+ * without one of them does not compile; it has no unconditional `create`
+ * or `remove`. These are type assertions: the file is in core's typecheck
+ * list.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -62,6 +63,12 @@ describe("the MfaFactorStore port", () => {
 		asStore({} as Omit<MfaFactorStore, "createIf">);
 		// @ts-expect-error removeIf is required
 		asStore({} as Omit<MfaFactorStore, "removeIf">);
+		expect(true).toBe(true);
+	});
+
+	it("has no unconditional create or remove", () => {
+		expectTypeOf<MfaFactorStore>().not.toHaveProperty("create");
+		expectTypeOf<MfaFactorStore>().not.toHaveProperty("remove");
 		expect(true).toBe(true);
 	});
 });

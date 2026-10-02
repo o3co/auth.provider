@@ -46,10 +46,8 @@ import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-	MFA_FACTOR_CREATE,
 	MFA_FACTOR_CREATE_IF,
 	MFA_FACTOR_LIST_VERSIONED,
-	MFA_FACTOR_REMOVE,
 	MFA_FACTOR_REMOVE_ALL,
 	MFA_FACTOR_REMOVE_IF,
 } from "#/ioredis/scripts/mfa.mjs";
@@ -189,18 +187,6 @@ const seed = async (store: MfaFactorStore, record: MfaFactorRecord): Promise<voi
 	if (answer.outcome !== "created") throw new Error(`${record.id} was not seeded`);
 };
 
-/**
- * The store's unconditional `create` and `remove`, for the cases that pin
- * what the Redis store does with them: a store without them fails the case.
- */
-const unconditionalWrites = (store: MfaFactorStore) => {
-	const { create, remove } = store;
-	if (create === undefined || remove === undefined) {
-		throw new Error("the store has no unconditional create and remove");
-	}
-	return { create: create.bind(store), remove: remove.bind(store) };
-};
-
 describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(storeAt(freshPrefix()).kind).toBe("redis");
@@ -273,33 +259,27 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 		// the type the record declares, is not a record.
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		const writes = [
-			["createIf", (record: MfaFactorRecord) => store.createIf(record, null)],
-			["create", unconditionalWrites(store).create],
-		] as const;
-		for (const [write, put] of writes) {
-			for (const [name, overrides] of [
-				["createdAt invalid", { createdAt: new Date(Number.NaN) }],
-				["createdAt not a date", { createdAt: 1_700_000_000_000 }],
-				["lastUsedAt invalid", { lastUsedAt: new Date(Number.NaN) }],
-				["lastUsedAt not a date", { lastUsedAt: "2026-09-02" }],
-				["version fractional", { version: 1.5 }],
-				["version negative", { version: -1 }],
-				["version NaN", { version: Number.NaN }],
-				["binding outside the four", { binding: "admin" }],
-				["binding null", { binding: null }],
-				["kind not a string", { kind: 7 }],
-				["data not a string", { data: 7 }],
-				["data missing", { data: undefined }],
-				["label not a string", { label: 7 }],
-				["label null", { label: null }],
-				["id not a string", { id: 7 }],
-				["subject not a string", { subject: 7 }],
-			] as const) {
-				await expect(put(RECORD(overrides as never)), `${write}: ${name}`).rejects.toThrow(
-					RangeError,
-				);
-			}
+		for (const [name, overrides] of [
+			["createdAt invalid", { createdAt: new Date(Number.NaN) }],
+			["createdAt not a date", { createdAt: 1_700_000_000_000 }],
+			["lastUsedAt invalid", { lastUsedAt: new Date(Number.NaN) }],
+			["lastUsedAt not a date", { lastUsedAt: "2026-09-02" }],
+			["version fractional", { version: 1.5 }],
+			["version negative", { version: -1 }],
+			["version NaN", { version: Number.NaN }],
+			["binding outside the four", { binding: "admin" }],
+			["binding null", { binding: null }],
+			["kind not a string", { kind: 7 }],
+			["data not a string", { data: 7 }],
+			["data missing", { data: undefined }],
+			["label not a string", { label: 7 }],
+			["label null", { label: null }],
+			["id not a string", { id: 7 }],
+			["subject not a string", { subject: 7 }],
+		] as const) {
+			await expect(store.createIf(RECORD(overrides as never), null), name).rejects.toThrow(
+				RangeError,
+			);
 		}
 		expect(await first().keys(`${prefix}*`)).toEqual([]);
 		await seed(store, RECORD());
@@ -383,19 +363,15 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 		};
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		const writes = [
-			["createIf", (record: MfaFactorRecord) => store.createIf(record, null)],
-			["create", unconditionalWrites(store).create],
-		] as const;
-		for (const [write, put] of writes) {
-			for (const ms of [8_640_000_000_000_001, -8_640_000_000_000_001, 1.5]) {
-				await expect(put(RECORD({ createdAt: lying(ms) })), `${write}: ${ms}`).rejects.toThrow(
-					RangeError,
-				);
-				await expect(put(RECORD({ lastUsedAt: lying(ms) })), `${write}: ${ms}`).rejects.toThrow(
-					RangeError,
-				);
-			}
+		for (const ms of [8_640_000_000_000_001, -8_640_000_000_000_001, 1.5]) {
+			await expect(
+				store.createIf(RECORD({ createdAt: lying(ms) }), null),
+				String(ms),
+			).rejects.toThrow(RangeError);
+			await expect(
+				store.createIf(RECORD({ lastUsedAt: lying(ms) }), null),
+				String(ms),
+			).rejects.toThrow(RangeError);
 		}
 		expect(await first().keys(`${prefix}*`)).toEqual([]);
 		await seed(store, RECORD());
@@ -462,11 +438,12 @@ const FACTOR_A = factorId("a");
 const FACTOR_B = factorId("b");
 
 /** The generation a write that had to land answered. */
-const landed = (
-	answer: { readonly outcome: string; readonly generation?: StoreGeneration } | undefined,
-): StoreGeneration => {
-	expect(answer?.outcome).toMatch(/^(created|removed)$/);
-	return answer?.generation as StoreGeneration;
+const landed = (answer: {
+	readonly outcome: string;
+	readonly generation?: StoreGeneration;
+}): StoreGeneration => {
+	expect(answer.outcome).toMatch(/^(created|removed)$/);
+	return answer.generation as StoreGeneration;
 };
 
 /** Whether `pttl` is a tombstone's retention, started within the last minute. */
@@ -478,10 +455,10 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const key = keyAt(prefix, "user-1");
-		const created = landed(await store.createIf?.(RECORD({ id: FACTOR_A }), null));
+		const created = landed(await store.createIf(RECORD({ id: FACTOR_A }), null));
 		expect(await first().hget(key, "~g")).toBe(created);
 		expect(await first().pttl(key)).toBe(-1);
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+		expect(await store.listVersioned("user-1")).toStrictEqual({
 			generation: created,
 			items: [RECORD({ id: FACTOR_A })],
 		});
@@ -492,17 +469,13 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const key = keyAt(prefix, "user-1");
-		const created = landed(await store.createIf?.(RECORD({ id: FACTOR_A }), null));
-		const emptied = landed(await store.removeIf?.("user-1", FACTOR_A, created));
+		const created = landed(await store.createIf(RECORD({ id: FACTOR_A }), null));
+		const emptied = landed(await store.removeIf("user-1", FACTOR_A, created));
 		expect(await first().hgetall(key)).toStrictEqual({ "~g": emptied });
 		expect(freshTombstone(await first().pttl(key))).toBe(true);
 		expect(await store.list("user-1")).toStrictEqual([]);
 
-		landed(await store.createIf?.(RECORD({ id: FACTOR_B }), emptied));
-		expect(await first().pttl(key)).toBe(-1);
-		await unconditionalWrites(store).remove("user-1", FACTOR_B);
-		expect(freshTombstone(await first().pttl(key))).toBe(true);
-		await unconditionalWrites(store).create(RECORD({ id: FACTOR_A }));
+		landed(await store.createIf(RECORD({ id: FACTOR_B }), emptied));
 		expect(await first().pttl(key)).toBe(-1);
 	});
 
@@ -532,7 +505,7 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 		await seed(store, RECORD({ id: FACTOR_A }));
 		for (const value of ['bad"generation', "", "x".repeat(129)]) {
 			await first().hset(key, "~g", value);
-			const read = store.listVersioned?.("user-1");
+			const read = store.listVersioned("user-1");
 			await expect(read, JSON.stringify(value)).rejects.toThrow(/MfaFactorStore/);
 			await expect(read).rejects.not.toThrow(/bad/);
 		}
@@ -544,7 +517,7 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 		await seed(store, RECORD({ id: FACTOR_A }));
 		await first().hset(keyAt(prefix, "user-1"), "__proto__", "not a record");
 		await expect(store.list("user-1")).rejects.toThrow(/MfaFactorStore/);
-		await expect(store.listVersioned?.("user-1")).rejects.toThrow(/MfaFactorStore/);
+		await expect(store.listVersioned("user-1")).rejects.toThrow(/MfaFactorStore/);
 	});
 
 	it("refuses, with a RangeError and writing nothing, an expected generation no store answers", async () => {
@@ -552,10 +525,10 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 		const store = storeAt(prefix);
 		for (const expected of ["", 'a"b', "x".repeat(129), 7]) {
 			await expect(
-				store.createIf?.(RECORD({ id: FACTOR_A }), expected as never),
+				store.createIf(RECORD({ id: FACTOR_A }), expected as never),
 				String(expected),
 			).rejects.toThrow(RangeError);
-			await expect(store.removeIf?.("user-1", FACTOR_A, expected as never)).rejects.toThrow(
+			await expect(store.removeIf("user-1", FACTOR_A, expected as never)).rejects.toThrow(
 				RangeError,
 			);
 		}
@@ -577,13 +550,13 @@ describe("createRedisMfaFactorStore — a hash written before the set had a gene
 		const prefix = freshPrefix();
 		const { store, key } = await legacy(prefix);
 		const before = await first().hgetall(key);
-		expect(await store.createIf?.(RECORD({ id: FACTOR_B }), generation("any-g"))).toStrictEqual({
+		expect(await store.createIf(RECORD({ id: FACTOR_B }), generation("any-g"))).toStrictEqual({
 			outcome: "conflict",
 		});
-		expect(await store.createIf?.(RECORD({ id: FACTOR_B }), null)).toStrictEqual({
+		expect(await store.createIf(RECORD({ id: FACTOR_B }), null)).toStrictEqual({
 			outcome: "conflict",
 		});
-		expect(await store.removeIf?.("user-1", FACTOR_A, generation("any-g"))).toStrictEqual({
+		expect(await store.removeIf("user-1", FACTOR_A, generation("any-g"))).toStrictEqual({
 			outcome: "conflict",
 		});
 		expect(await first().hgetall(key)).toStrictEqual(before);
@@ -598,15 +571,15 @@ describe("createRedisMfaFactorStore — a hash written before the set had a gene
 		await first().hdel(key, "~g");
 		await first().pexpire(key, 600_000);
 
-		const read = await store.listVersioned?.("user-1");
-		const minted = read?.generation as StoreGeneration;
-		expect(read?.items).toStrictEqual([RECORD({ id: FACTOR_A })]);
+		const read = await store.listVersioned("user-1");
+		const minted = read.generation as StoreGeneration;
+		expect(read.items).toStrictEqual([RECORD({ id: FACTOR_A })]);
 		expect(minted).not.toBe(earlier);
 		expect(await first().hget(key, "~g")).toBe(minted);
 		const pttl = await first().pttl(key);
 		expect(pttl > 0 && pttl <= 600_000).toBe(true);
-		expect((await storeAt(prefix, second()).listVersioned?.("user-1"))?.generation).toBe(minted);
-		landed(await store.removeIf?.("user-1", FACTOR_A, minted));
+		expect((await storeAt(prefix, second()).listVersioned("user-1")).generation).toBe(minted);
+		landed(await store.removeIf("user-1", FACTOR_A, minted));
 	});
 });
 
@@ -627,8 +600,6 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 	const SCRIPTS = {
 		createIf: MFA_FACTOR_CREATE_IF,
 		removeIf: MFA_FACTOR_REMOVE_IF,
-		create: MFA_FACTOR_CREATE,
-		remove: MFA_FACTOR_REMOVE,
 		removeAll: MFA_FACTOR_REMOVE_ALL,
 	};
 
@@ -681,22 +652,15 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		},
 	);
 
-	it("lets the removals and the versioned read run on a full server, and keeps the creates refused there", () => {
+	it("lets the removal, the reset and the versioned read run on a full server, and keeps the create refused there", () => {
 		// Under `noeviction` a full Redis refuses a `#!lua` script without
 		// `allow-oom`. A removal, the reset and the read a removal starts from
 		// write only `~g`, the replay key and an expiry; an attacker's factor
 		// must still be removable, and the reset must still run.
-		for (const script of [
-			MFA_FACTOR_REMOVE_IF,
-			MFA_FACTOR_REMOVE,
-			MFA_FACTOR_REMOVE_ALL,
-			MFA_FACTOR_LIST_VERSIONED,
-		]) {
+		for (const script of [MFA_FACTOR_REMOVE_IF, MFA_FACTOR_REMOVE_ALL, MFA_FACTOR_LIST_VERSIONED]) {
 			expect(script.source.split("\n")[0]).toBe("#!lua flags=allow-oom");
 		}
-		for (const script of [MFA_FACTOR_CREATE_IF, MFA_FACTOR_CREATE]) {
-			expect(script.source.split("\n")[0]).toBe("#!lua");
-		}
+		expect(MFA_FACTOR_CREATE_IF.source.split("\n")[0]).toBe("#!lua");
 	});
 
 	it("declares its write lifetime as the write timeout plus the clock skew, well under the bound", () => {
@@ -711,7 +675,7 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		const store = storeAt(prefix);
 		const client = makeIoredisMfaFactorStoreClient(first());
 		const key = keyAt(prefix, "user-1");
-		const at = landed(await store.createIf?.(RECORD({ id: FACTOR_A }), null));
+		const at = landed(await store.createIf(RECORD({ id: FACTOR_A }), null));
 		const fieldA = keyPart(FACTOR_A);
 		const fieldB = keyPart(FACTOR_B);
 		const value = (await first().hget(key, fieldA)) as string;
@@ -740,26 +704,9 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 			}),
 		).toBe("late");
 		expect(
-			await client.create(key, fieldB, value, {
+			await client.removeAll(key, {
 				next: "n3",
 				replayKey: `${key}:w:n3`,
-				clockSkewMs: SKEW_MS,
-				deadlineMs: past,
-			}),
-		).toBe("late");
-		expect(
-			await client.remove(key, fieldA, {
-				next: "n4",
-				replayKey: `${key}:w:n4`,
-				clockSkewMs: SKEW_MS,
-				deadlineMs: past,
-				tombstoneMs,
-			}),
-		).toBe("late");
-		expect(
-			await client.removeAll(key, {
-				next: "n5",
-				replayKey: `${key}:w:n5`,
 				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 				tombstoneMs,
@@ -768,8 +715,8 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		const absent = keyAt(prefix, "nobody");
 		expect(
 			await client.removeAll(absent, {
-				next: "n6",
-				replayKey: `${absent}:w:n6`,
+				next: "n4",
+				replayKey: `${absent}:w:n4`,
 				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 				tombstoneMs,
@@ -783,8 +730,8 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		const future = now + 60_000;
 		expect(
 			await client.createIf(key, fieldB, value, {
-				next: "n7",
-				replayKey: `${key}:w:n7`,
+				next: "n5",
+				replayKey: `${key}:w:n5`,
 				clockSkewMs: SKEW_MS,
 				deadlineMs: future,
 				expected: at,
@@ -792,41 +739,24 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		).toBe("created");
 		expect(
 			await client.removeIf(key, fieldB, {
-				next: "n8",
-				replayKey: `${key}:w:n8`,
+				next: "n6",
+				replayKey: `${key}:w:n6`,
 				clockSkewMs: SKEW_MS,
 				deadlineMs: future,
 				tombstoneMs,
-				expected: generation("n7"),
-			}),
-		).toBe("removed");
-		expect(
-			await client.create(key, fieldB, value, {
-				next: "n9",
-				replayKey: `${key}:w:n9`,
-				clockSkewMs: SKEW_MS,
-				deadlineMs: future,
-			}),
-		).toBe("created");
-		expect(
-			await client.remove(key, fieldB, {
-				next: "n10",
-				replayKey: `${key}:w:n10`,
-				clockSkewMs: SKEW_MS,
-				deadlineMs: future,
-				tombstoneMs,
+				expected: generation("n5"),
 			}),
 		).toBe("removed");
 		expect(
 			await client.removeAll(key, {
-				next: "n11",
-				replayKey: `${key}:w:n11`,
+				next: "n7",
+				replayKey: `${key}:w:n7`,
 				clockSkewMs: SKEW_MS,
 				deadlineMs: future,
 				tombstoneMs,
 			}),
 		).toBe("removed");
-		expect(await first().hgetall(key)).toStrictEqual({ "~g": "n11" });
+		expect(await first().hgetall(key)).toStrictEqual({ "~g": "n7" });
 	});
 
 	it("answers a copy of a membership write sent again within its deadline with the first one's outcome, and writes nothing again", async () => {
@@ -855,7 +785,7 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 			clockSkewMs,
 		};
 		expect(await client.removeAll(key, reset)).toBe("removed");
-		const later = landed(await store.createIf?.(RECORD({ id: FACTOR_A }), generation("reset-g")));
+		const later = landed(await store.createIf(RECORD({ id: FACTOR_A }), generation("reset-g")));
 		expect(await client.removeAll(key, reset)).toBe("removed");
 		expect(await first().hget(key, "~g")).toBe(later);
 		expect(await first().hexists(key, fieldA)).toBe(1);
@@ -879,17 +809,7 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		};
 		expect(await client.removeIf(key, fieldB, removal)).toBe("removed");
 		expect(await client.removeIf(key, fieldB, removal)).toBe("removed");
-		const unconditional = {
-			next: "legacy-g",
-			deadlineMs,
-			replayKey: replayKey("legacy-g"),
-			clockSkewMs,
-		};
-		expect(await client.create(key, fieldB, value, unconditional)).toBe("created");
-		landed(await store.removeIf("user-1", FACTOR_B, generation("legacy-g")));
-		const moved = await first().hget(key, "~g");
-		expect(await client.create(key, fieldB, value, unconditional)).toBe("created");
-		expect(await first().hget(key, "~g")).toBe(moved);
+		expect(await first().hget(key, "~g")).toBe("remove-g");
 		expect(await first().hexists(key, fieldB)).toBe(0);
 
 		// A copy's answer is kept until the declared clock skew past its
@@ -915,16 +835,12 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 				...real,
 				createIf: async () => "late",
 				removeIf: async () => "late",
-				create: async () => "late",
-				remove: async () => "late",
 				removeAll: async () => "late",
 			},
 		});
 		const writes: (() => Promise<unknown>)[] = [
-			() => store.createIf?.(RECORD({ id: FACTOR_A }), null) as Promise<unknown>,
-			() => store.removeIf?.("user-1", FACTOR_A, generation("g")) as Promise<unknown>,
-			() => unconditionalWrites(store).create(RECORD({ id: FACTOR_A })),
-			() => unconditionalWrites(store).remove("user-1", FACTOR_A),
+			() => store.createIf(RECORD({ id: FACTOR_A }), null),
+			() => store.removeIf("user-1", FACTOR_A, generation("g")),
 			() => store.removeAllForSubject("user-1"),
 		];
 		for (const write of writes) {
@@ -984,9 +900,9 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 		const io = open(replica);
 		const store = storeAt("mfaf:", io);
 		expect(await io.hgetall(keyAt("mfaf:", "user-1"))).toStrictEqual({});
-		await expect(store.listVersioned?.("user-1")).rejects.toThrow(/READONLY/);
-		await expect(store.createIf?.(RECORD({ id: FACTOR_A }), null)).rejects.toThrow(/READONLY/);
-		await expect(store.removeIf?.("user-1", FACTOR_A, generation("g"))).rejects.toThrow(/READONLY/);
+		await expect(store.listVersioned("user-1")).rejects.toThrow(/READONLY/);
+		await expect(store.createIf(RECORD({ id: FACTOR_A }), null)).rejects.toThrow(/READONLY/);
+		await expect(store.removeIf("user-1", FACTOR_A, generation("g"))).rejects.toThrow(/READONLY/);
 		await expect(store.removeAllForSubject("user-1")).rejects.toThrow(/READONLY/);
 	});
 
@@ -996,19 +912,18 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 		const store = storeAt(prefix, admin);
 		await seed(store, RECORD({ id: FACTOR_A }));
 		await seed(store, RECORD({ id: FACTOR_B }));
-		const at = (await store.listVersioned?.("user-1"))?.generation as StoreGeneration;
+		const at = (await store.listVersioned("user-1")).generation as StoreGeneration;
 		await admin.config("SET", "maxmemory-policy", "noeviction");
 		await admin.config("SET", "maxmemory", "1");
 		try {
-			await expect(store.createIf?.(RECORD({ id: factorId("c") }), at)).rejects.toThrow(/OOM/);
-			const read = await store.listVersioned?.("user-1");
-			expect(read?.generation).toBe(at);
-			const removed = landed(await store.removeIf?.("user-1", FACTOR_A, at));
-			await unconditionalWrites(store).remove("user-1", FACTOR_B);
+			await expect(store.createIf(RECORD({ id: factorId("c") }), at)).rejects.toThrow(/OOM/);
+			const read = await store.listVersioned("user-1");
+			expect(read.generation).toBe(at);
+			const removed = landed(await store.removeIf("user-1", FACTOR_A, at));
 			await store.removeAllForSubject("user-1");
-			const reset = await store.listVersioned?.("user-1");
-			expect(reset?.items).toStrictEqual([]);
-			expect(reset?.generation).not.toBe(removed);
+			const reset = await store.listVersioned("user-1");
+			expect(reset.items).toStrictEqual([]);
+			expect(reset.generation).not.toBe(removed);
 		} finally {
 			await admin.config("SET", "maxmemory", "0");
 		}
@@ -1019,11 +934,11 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 		const io = open(paused);
 		const prefix = freshPrefix();
 		const store = storeAt(prefix, io);
-		const at = landed(await store.createIf?.(RECORD({ id: FACTOR_A }), null));
+		const at = landed(await store.createIf(RECORD({ id: FACTOR_A }), null));
 
 		await admin.call("CLIENT", "PAUSE", "2500", "WRITE");
 		const started = Date.now();
-		await expect(store.createIf?.(RECORD({ id: FACTOR_B }), at)).rejects.toThrow(
+		await expect(store.createIf(RECORD({ id: FACTOR_B }), at)).rejects.toThrow(
 			/no answer within 1000 ms; it may have committed, or may still commit within W/,
 		);
 		const waited = Date.now() - started;
@@ -1032,7 +947,7 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 		// Queued behind the held write on the same socket: answered once it ran.
 		await io.ping();
 		expect(Date.now() - started).toBeGreaterThanOrEqual(2_000);
-		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+		expect(await store.listVersioned("user-1")).toStrictEqual({
 			generation: at,
 			items: [RECORD({ id: FACTOR_A })],
 		});
@@ -1042,7 +957,7 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 		const admin = open(paused);
 		const prefix = freshPrefix();
 		const key = keyAt(prefix, "user-1");
-		const at = landed(await storeAt(prefix, admin).createIf?.(RECORD({ id: FACTOR_A }), null));
+		const at = landed(await storeAt(prefix, admin).createIf(RECORD({ id: FACTOR_A }), null));
 		const value = (await admin.hget(key, keyPart(FACTOR_A))) as string;
 
 		/**

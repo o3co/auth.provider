@@ -77,7 +77,6 @@ export {
 	coreConfigForTests,
 	makeValidAppConfig,
 	makeValidCoreConfig,
-	makeValidFullSections,
 } from "./fixtures/valid-config.mjs";
 // The doubles a second factor's tests use: a factor with a trivial protocol,
 // its proofs, and the keyed digests a factor is handed. The factor's
@@ -95,7 +94,6 @@ export {
 	createOutboundFetchForTesting,
 	type OutboundAnswer,
 	type OutboundExchange,
-	OutboundFetchError,
 	type OutboundFetchForTestingOptions,
 	type OutboundSectionForTests,
 	type OutboundTransport,

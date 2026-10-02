@@ -30,7 +30,7 @@
  * drop a key with a TTL.
  *
  * A record is `<version>\n<fixed>\n<mutable>`: the version as decimal text,
- * one JSON line for what never changes after `create` (id, subject, kind,
+ * one JSON line for what never changes after `createIf` (id, subject, kind,
  * binding, createdAt) and one for what `update` replaces (data, label,
  * lastUsedAt), so the compare-and-set is one script that never decodes the
  * JSON (`MfaFactorStoreClient`). `data` arrives sealed by the coordinator and
@@ -52,14 +52,13 @@
  *   skew past its deadline, so a copy the driver sends again answers the
  *   first copy's answer and writes nothing: no generation is issued twice
  *   (rule 8), and no write that landed answers `conflict` (rule 4).
- *   `listVersioned`, `createIf`, `removeIf`, `create`, `remove` and
- *   `removeAllForSubject` are one script each (rules 1 and 2); `update`
- *   keeps `~g`.
+ *   `listVersioned`, `createIf`, `removeIf` and `removeAllForSubject` are
+ *   one script each (rules 1 and 2); `update` keeps `~g`.
  * - Every one of those scripts may write, so a read-only replica
  *   (`replica-read-only yes`, Redis's default) refuses it: the versioned read
- *   is answered by the primary, never such a replica (rule 2). The removals,
+ *   is answered by the primary, never such a replica (rule 2). `removeIf`,
  *   the reset and `listVersioned` declare `allow-oom`, so a full
- *   `noeviction` server still runs them; the creates are refused there.
+ *   `noeviction` server still runs them; `createIf` is refused there.
  * - A write that leaves the hash holding `~g` alone keeps it as the set's
  *   tombstone for `BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 hours, from that
  *   write, a reset of an already empty set included; a write that leaves a
@@ -414,18 +413,6 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 			return outcome === "removed" ? { outcome, generation: next as StoreGeneration } : { outcome };
 		},
 
-		async create(factor) {
-			const value = storedValueOf(factor);
-			const key = keyOf(factor.subject);
-			const outcome = await withDeadline("create", (deadlineMs) =>
-				client.create(key, mfaKeyPart(factor.id), value, writeOf(key, deadlineMs)),
-			);
-			if (outcome === "late") throw late("create");
-			if (outcome === "conflict") {
-				throw new Error("an MFA factor record with this id already exists for the subject");
-			}
-		},
-
 		async update(subject, id, expectedVersion, next) {
 			checkMutable(next);
 			const mutable = mutablePart(next);
@@ -442,17 +429,6 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 				mutable,
 			});
 			return written === null ? null : recordOf(written, subject, field);
-		},
-
-		async remove(subject, id) {
-			const key = keyOf(subject);
-			const outcome = await withDeadline("remove", (deadlineMs) =>
-				client.remove(key, mfaKeyPart(id), {
-					...writeOf(key, deadlineMs),
-					tombstoneMs: BUNDLED_STORE_WRITE_LIFETIME_MS,
-				}),
-			);
-			if (outcome === "late") throw late("remove");
 		},
 
 		async removeAllForSubject(subject) {

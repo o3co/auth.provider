@@ -27,6 +27,10 @@
  * nothing the Store sent; the sealed `data` it is handed is sent as it is,
  * and nothing is sent that the wire codec would not read back.
  *
+ * A record is created or removed only conditionally: every create and every
+ * single-record removal it sends carries `expectedGeneration`, and only the
+ * whole set's reset (`removeAllForSubject`) is sent without one.
+ *
  * The factor set's members (`listVersioned`, `createIf`, `removeIf`) read
  * every answer through core's codec alone, once: a status the operation does
  * not give is `unexpected_status`, read before any body, and whatever the
@@ -46,7 +50,6 @@ import {
 	type MfaFactorRecord,
 	type MfaFactorRecordUpdate,
 	type MfaFactorStore,
-	type MfaStoreCreateRequest,
 	type MfaStoreDeleteRequest,
 	type MfaStoreFactor,
 	type MfaStoreFactorChanges,
@@ -58,7 +61,6 @@ import {
 	readMfaStoreVersionedListAnswer,
 	type StoreGeneration,
 	toMfaStoreCreateIfRequest,
-	toMfaStoreFactor,
 	toMfaStoreRemoveIfRequest,
 	toMfaStoreUpdateRequest,
 	type VersionedSet,
@@ -84,9 +86,6 @@ import {
 
 /** What this adapter's messages lead with. */
 const OWNER = "HttpMfaFactorStore";
-
-/** The port's refusal of a `(subject, id)` already held, as the bundled stores word it. */
-const DUPLICATE = "an MFA factor record with this id already exists for the subject";
 
 /** The statuses a conditional create is answered with, each with its outcome body. */
 const CREATE_IF_STATUSES: ReadonlySet<number> = new Set([200, 409]);
@@ -203,14 +202,6 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		return this.#read("delete", () => readMfaStoreRemoveIfAnswer(response.status, parsed(text)));
 	}
 
-	async create(record: MfaFactorRecord): Promise<void> {
-		const body: MfaStoreCreateRequest = { factor: toMfaStoreFactor(record) };
-		const { response } = await this.#post("create", body, () => false);
-		if (response.ok) return;
-		if (response.status === 409) throw new Error(DUPLICATE);
-		throw mfaStoreStatusError("create", this.#urls.create, response);
-	}
-
 	async update(
 		subject: string,
 		id: string,
@@ -241,16 +232,9 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		return fromMfaStoreFactor(factor);
 	}
 
-	async remove(subject: string, id: string): Promise<void> {
-		await this.#delete({ subject, id });
-	}
-
+	/** The subject's whole set reset: done on a `2xx` or a `404`. */
 	async removeAllForSubject(subject: string): Promise<void> {
-		await this.#delete({ subject, all: true });
-	}
-
-	/** A delete: done on a `2xx` or a `404`. */
-	async #delete(body: MfaStoreDeleteRequest): Promise<void> {
+		const body: MfaStoreDeleteRequest = { subject, all: true };
 		const { response } = await this.#post("delete", body, () => false);
 		if (response.ok || response.status === 404) return;
 		throw mfaStoreStatusError("delete", this.#urls.delete, response);

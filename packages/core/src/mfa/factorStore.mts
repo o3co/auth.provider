@@ -155,12 +155,12 @@ export function isMfaFactorUpdateWritten(
  * conditional-write convention for a set (docs/adapter-surface.md,
  * "Conditional writes"); what follows is only what it means here.
  *
- * - The membership writes are `createIf`, `removeIf`, `create`, `remove` and
+ * - The membership writes are `createIf`, `removeIf` and
  *   `removeAllForSubject`: each issues a fresh generation. `update` is a
- *   member's own update, fenced by the record's `version`, and keeps it. A
- *   membership decision that read a record's data is therefore not fenced
- *   against an update of that record, which holds only while every factor's
- *   next data keeps the three things `MfaVerification.next` names.
+ *   member's own update, fenced by the record's `version`, and keeps it. A membership decision that read a
+ *   record's data is therefore not fenced against an update of that record,
+ *   which holds only while every factor's next data keeps the three things
+ *   `MfaVerification.next` names.
  * - `removeAllForSubject` (account deletion, the operator reset) is
  *   unconditional and always wins, yet it is one atomic step serialised with
  *   `createIf` and `removeIf`, so neither interleaves with it (rule 1). It
@@ -219,12 +219,6 @@ export interface MfaFactorStore {
 		expected: StoreGeneration,
 	): Promise<ConditionalSetRemoveAnswer>;
 	/**
-	 * Insert a record, unconditionally, issuing a new generation. Rejects a
-	 * `(subject, id)` already present, and leaves that record and the
-	 * generation as they were.
-	 */
-	create(record: MfaFactorRecord): Promise<void>;
-	/**
 	 * Compare-and-set on `version`: replaces `data`, `label` and `lastUsedAt`
 	 * and bumps `version`, only if the record is still at `expectedVersion`.
 	 * Answers the record as written, or `null` when the version moved or the
@@ -238,8 +232,6 @@ export interface MfaFactorStore {
 		expectedVersion: number,
 		next: MfaFactorRecordUpdate,
 	): Promise<MfaFactorRecord | null>;
-	/** Remove one record, unconditionally. Idempotent. A new generation when it removed one; a set it empties stays as its tombstone. */
-	remove(subject: string, id: string): Promise<void>;
 	/**
 	 * Remove every record of `subject` — account deletion, the operator reset —
 	 * unconditionally: it always wins, as one atomic step serialised with the

@@ -154,20 +154,22 @@ describe("my store keeps the MfaFactorStore contract", () => {
 It holds the store to: nothing listed for a subject with none; a created
 record listed whole, as plain data, its undefined fields named; `data` kept
 byte for byte; every binding and any kind round-tripped; a duplicate
-`(subject, id)` refused and the record kept, and one of ten concurrent
-creates let through; subjects kept apart; an update at the current version
+`(subject, id)` refused at the current generation and the record kept, and
+one of ten concurrent creates at one generation let through; subjects kept
+apart; an update at the current version
 replacing `data`, `label` and `lastUsedAt` and nothing else, at version + 1,
 and clearing what it says `undefined`; `null` for a version that moved or a
 record that is gone, nothing changed; a `RangeError` for an update at
 `Number.MAX_SAFE_INTEGER`; one winner among ten concurrent updates at one
 version; a successful update reaching no other record — the same id under
-another subject, the subject's other factors; removal of one record and of
-a subject's records, idempotent and no further; a removed record taken
-again; and, with `unreachable`, every member rejecting rather than answering
+another subject, the subject's other factors; removal of one record, once,
+and of a subject's records, idempotently, and no further; a removed record
+taken again; and, with `unreachable`, every member rejecting rather than answering
 "no factors", `null` or done. Every record id is 22
 base64url characters, the shape the provider makes and the Store's wire
 codec requires. Core's in-process store, the Redis store and foundation's
-Store-backed store run it.
+Store-backed store run it. It writes and removes records through the
+factor set's `createIf` and `removeIf`, at the generation the set is at.
 
 ## The factor set's conditional writes
 
@@ -210,8 +212,8 @@ It maps the store onto
 [`conditionalSetContract`](#the-conditional-write-suites)'s target and runs
 that suite, so the factor set is held to every rule of a set the suite
 holds: a subject is the scope, a record the item, `removeAllForSubject` the
-reset, `update` the member's own update, and `create`, `remove` and
-`removeAllForSubject` the unconditional membership writes. Every versioned
+reset, `update` the member's own update, and `removeAllForSubject` the
+unconditional membership write. Every versioned
 listing is read with core's `readMfaFactorSet`, so a record that is not a
 whole record of its subject, or an id listed twice, fails the case that read
 it. The unreachable store is mapped bare: each member is the port's call
@@ -220,7 +222,7 @@ resolves, whatever it is, fails the case.
 `second`, `forceExpire`, `unreachable` and `close` pass through, bound to the
 harness, so a hook that uses `this` keeps working, and
 `supports` is the suite's; the port has `list`, `update` and its
-unconditional writes, so their cases always run. Beside the suite, it holds
+unconditional reset, so their cases always run. Beside the suite, it holds
 the store to the factor set's own: an update keeping the generation, so a
 write at it still lands; a tombstone standing — a late first binding and
 a late write at a generation read before the reset refused, nothing
@@ -541,9 +543,12 @@ the bodies of core's `mfa/storeWire.mts`:
   and writes without yielding, so concurrent updates are a compare-and-set;
 - a subject's records are one set at a store generation, as the contract's
   table says: a list answers it with the records, `null` for an absent set;
-  every membership write mints a fresh one and an update keeps it; a
-  conditional create or removal checks it and answers `200`, `404` or `409`
-  with its outcome body, and concurrent ones are atomic too; an emptied set
+  every membership write mints a fresh one and an update keeps it; a create
+  or a removal of one record is a conditional write, which checks it and
+  answers `200`, `404` or `409` with its outcome body, and concurrent ones are
+  atomic too, while one without `expectedGeneration` is `400` and writes
+  nothing (`null` is a create's "only while the set is absent"), the reset
+  alone going without one; an emptied set
   stays as its tombstone until `BUNDLED_STORE_WRITE_LIFETIME_MS` has passed
   since its last membership write on the Store's clock, `now` (default
   `Date.now`); a set held without a generation is given one by its first
@@ -614,7 +619,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
 | [`conditionalWrite.contract.test.mts`](src/conditionalWrite/__tests__/conditionalWrite.contract.test.mts) | both suites over a reference record store, whose writes take a lock per key, and a reference set store, each serving two instances over one backend and keeping retention deadlines on a clock of its own, which `forceExpire` moves; every case refuses a store broken one way (a write that skips the lock, an unconditional delete among them, a counter or a digest as the generation, a torn versioned read, a write on `conflict`, a create that upserts a held id, a reset or a last removal that leaves no tombstone, a reset in two steps, a store that ignores its own deadline, a set revived from its tombstone that keeps the tombstone's deadline, a re-create after expiry at a generation seen before, an outage answered as absent, writes that skip the expiry check, a second instance reading from a cache, a member update that changes nothing, a value or a member shared with the caller, among them); stores answering frozen values, listing members in another order, or labelling a losing write from a read taken before their lock pass; an undeclared hook's or member's cases left out and named; a declared one missing fails its case; items of another scope fail the case |
 | [`federationTokenStoreConditional.contract.test.mts`](src/federationTokens/__tests__/federationTokenStoreConditional.contract.test.mts) | the federation token store's binding over core's in-process store; a store without the conditional members refused by every case; a `get` that answers another record than `getVersioned`, a replace that moves a sibling federation's generation, a `removeBySid` that leaves a federation of the session or reaches another session's, a replace that restores a record a logout removed, and a store that drops `obtainedAt`, leaves an unset one out or answers it as `null`, each refused by the case that names it; the outage and expiry cases named as not run when undeclared |
-| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, a record held into a set dropping its generation, `400` for an expected generation or a `deadlineMs` that is none, a late conditional write answered `408` and not applied while one before its deadline is, a deadline checked on the request clock and never the tombstones', and one winner among concurrent conditional writes |
+| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; a create or a removal of one record without `expectedGeneration` refused `400` and writing nothing, the reset still applied; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, a record held into a set dropping its generation, `400` for an expected generation or a `deadlineMs` that is none, a late conditional write answered `408` and not applied while one before its deadline is, a deadline checked on the request clock and never the tombstones', and one winner among concurrent conditional writes |
 
 ## See also
 

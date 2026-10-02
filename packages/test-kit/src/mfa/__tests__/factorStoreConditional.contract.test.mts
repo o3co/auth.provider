@@ -78,9 +78,9 @@ const memoryOnItsClock = (): MfaFactorStoreHarness => {
 const isNotRun = (contractCase: ContractCase): boolean => contractCase.name.startsWith("not run:");
 
 /**
- * `store` with the factor set's `members` taken away: outside the port's
- * type, as a store written in JavaScript can be, which the binding refuses
- * when it runs.
+ * `store` with `members` taken away. Without one of the factor set's members
+ * it is outside the port's type, as a store written in JavaScript can be,
+ * which the binding refuses when it runs.
  */
 const without = (
 	store: MfaFactorStore,
@@ -113,6 +113,7 @@ type Fault =
 	| "create-upserts-held-id"
 	| "counter-generation"
 	| "reset-of-empty-keeps-generation"
+	| "reset-keeps-generation"
 	| "removed-answers-another-generation"
 	| "tombstone-never-expires"
 	| "reset-tombstone-never-expires"
@@ -324,12 +325,6 @@ function modelStore(fault: Fault): Model {
 					};
 				},
 			),
-		create: async (record) => {
-			if (live(record.subject)?.records.has(record.id) === true) {
-				throw new Error("held");
-			}
-			write(record.subject, (records) => records.set(record.id, copyOf(record)));
-		},
 		update: async (subject, id, expectedVersion, next) => {
 			const set = live(subject);
 			const current = set?.records.get(id);
@@ -347,17 +342,17 @@ function modelStore(fault: Fault): Model {
 			if (fault === "update-moves-generation") set.generation = fresh(set);
 			return copyOf(written);
 		},
-		remove: async (subject, id) => {
-			if (live(subject)?.records.has(id) === true) {
-				write(subject, (records) => records.delete(id));
-			}
-		},
 		removeAllForSubject: async (subject) => {
 			if (fault === "reset-deletes-set") {
 				sets.delete(subject);
 				return;
 			}
 			if (fault === "reset-of-empty-keeps-generation" && live(subject)?.records.size === 0) {
+				return;
+			}
+			const held = live(subject);
+			if (fault === "reset-keeps-generation" && held !== undefined) {
+				held.records.clear();
 				return;
 			}
 			write(subject, (records) => records.clear());
@@ -396,9 +391,7 @@ function unreachableStore(outage: Outage = "rejects"): MfaFactorStore {
 			listVersioned: outage === "lists-undefined" ? async () => undefined as never : down,
 			createIf: down,
 			removeIf: down,
-			create: down,
 			update: outage === "update-resolves" ? async () => null : down,
-			remove: down,
 			removeAllForSubject: down,
 		};
 	}
@@ -408,9 +401,7 @@ function unreachableStore(outage: Outage = "rejects"): MfaFactorStore {
 		listVersioned: async () => ({ generation: null, items: [] }),
 		createIf: async () => ({ outcome: "conflict" }),
 		removeIf: async () => ({ outcome: "missing" }),
-		create: down,
 		update: async () => null,
-		remove: async () => {},
 		removeAllForSubject: down,
 	};
 }
@@ -467,6 +458,8 @@ const CASE = {
 	update: "an update keeps the set's generation, and a write at it still lands",
 	tombstone:
 		"a tombstone stands: a late first binding and a late write at a generation read before the reset are refused, and write nothing",
+	unconditional:
+		"every unconditional membership write that changes the members moves the generation: the old one then answers conflict",
 	race: "the winner of a race answers the generation the set is then read at: two first bindings, two removals, many creates, a removal and a create, split across both instances",
 	resetExpiry:
 		"a reset's tombstone expires: a set reset, and a set never written reset, read as absent once the clock passes the deadline, and a re-create repeats neither tombstone's generation",
@@ -536,6 +529,11 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 			"one whose reset of an emptied set keeps its generation",
 			"reset-of-empty-keeps-generation",
 			[CASE.resetEmpty],
+		],
+		[
+			"one whose reset of a set that holds members keeps its generation",
+			"reset-keeps-generation",
+			[CASE.resetAfterRead, CASE.unconditional],
 		],
 		[
 			"one whose removal answers a generation other than the one it wrote",
