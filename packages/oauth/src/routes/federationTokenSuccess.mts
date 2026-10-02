@@ -75,7 +75,9 @@ export const answerToken = async (
 		userAgent: req.get("user-agent"),
 		details: { federation, refreshed },
 	});
-	// A sink that held this turn past the floor: audited, still never handed on.
+	// Fires only when a synchronous audit sink held this turn past the floor
+	// (`emitAuditEvent` does not await it): the success is already audited, and
+	// the token is still never handed on.
 	const remainingMs = remainingNow(token);
 	if (isSpent(remainingMs)) return refuseSpent(res);
 	const expiresIn = remainingMs === undefined ? undefined : Math.floor(remainingMs / 1000);
