@@ -471,6 +471,7 @@
 . PendingConsentStoreFactory type
 . PendingFederationGrant type
 . PolicyAudienceOutcome type
+. PolicyDeniedOptions type
 . PolicyScopeCeiling type
 . PrimaryAdditions type
 . PrimaryAdditionsDto type
@@ -637,6 +638,7 @@
 . TokenBindingSettings type
 . TokenCarrier type
 . TokenEndpointAuthMethod type
+. TokenEndpointRefusalCode type
 . TokenExchangeValidatorResolver type
 . TokenResponse type
 . TokenSettingsLifetimeExceedsConfigurationDetails type
@@ -952,6 +954,7 @@
 . parseScopeTokens value
 . passwordPrimary value
 . passwordSessionAuthentication value
+. policyDenied value
 . policyOutOfBounds value
 . policyUnavailable value
 . producibleAmr value

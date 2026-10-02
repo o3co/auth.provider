@@ -968,7 +968,7 @@ describe("createWebAuthnGrant — grantPolicy", () => {
 		};
 	}
 
-	it("returns 400 with policy error when policy denies", async () => {
+	it("answers a policy's access_denied deny 400 invalid_request, the token endpoint's code", async () => {
 		const { store, deps } = makeDepsWith(async () => ({
 			outcome: "deny",
 			error: "access_denied",
@@ -981,8 +981,12 @@ describe("createWebAuthnGrant — grantPolicy", () => {
 		const assertion = makeAssertionResponse();
 		const { result } = await handler.handle(makeCtx({ assertion, resource: "https://rs1" }));
 
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("access_denied");
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "policy denied",
+			policyDenial: { error: "access_denied" },
+		});
 	});
 
 	it("returns 503 temporarily_unavailable when policy throws", async () => {

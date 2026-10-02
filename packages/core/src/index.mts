@@ -435,10 +435,13 @@ export {
 	type GrantPolicyReading,
 	logGrantPolicyUnavailable,
 	type PolicyAudienceOutcome,
+	type PolicyDeniedOptions,
 	type PolicyScopeCeiling,
+	policyDenied,
 	policyOutOfBounds,
 	policyUnavailable,
 	readGrantPolicyDecision,
+	type TokenEndpointRefusalCode,
 } from "./grants/grantPolicy.mjs";
 // id_token generation (OIDC Core §2)
 export {

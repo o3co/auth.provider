@@ -46,7 +46,12 @@
  *   `slow_down` interval that is not a number of seconds), logged at error.
  * - A wired `grantPolicy` is consulted on the approval once its client is
  *   checked, before the revocation read and the minting instant, through
- *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error, a
+ *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error when
+ *   it is a token-endpoint code (RFC 6749 §5.2's but `invalid_client`,
+ *   `invalid_target`) or
+ *   RFC 8628 §3.5's terminal `access_denied` or `expired_token`, and
+ *   `invalid_grant` otherwise (never `authorization_pending` or `slow_down`:
+ *   the approval is spent), a
  *   throw is 503, a scope or audience past the approval or `allowedAudiences`
  *   is 500. It may only narrow; its audience, within `allowedAudiences`, is
  *   `aud`.
@@ -73,18 +78,19 @@
 
 import type {
 	DeviceCodeStore,
+	EvaluateGrantPolicyOptions,
 	GrantContext,
 	GrantError,
 	GrantHandler,
 	GrantHandlerResult,
 	GrantPolicyHook,
 	KeyStore,
-	Logger,
 	SubjectRevocation,
 } from "@o3co/auth-provider-core";
 import {
 	authTimeAt,
 	boundPolicyAudience,
+	consoleLogger,
 	coveredByRevocationBoundary,
 	DEFAULT_CLOCK_SKEW_MS,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
@@ -130,16 +136,27 @@ const error = (status: number, code: string, description: string): GrantHandlerR
 });
 
 /**
- * Where core writes a policy's outage and invalid-decision lines, object-first
- * at error; a logger with no error channel leaves them to core's console logger.
+ * Where core writes a policy's lines, object-first: its outage and
+ * invalid-decision lines at error, a deny it rewrites at warn. A channel the
+ * logger lacks is left to core's console logger.
  */
 const policyLoggerOf = (
 	logger: DeviceCodeGrantOptions["logger"],
-): Pick<Logger, "error"> | undefined => {
-	if (typeof logger?.error !== "function") return undefined;
-	const write = logger.error.bind(logger);
+): EvaluateGrantPolicyOptions["logger"] => {
+	if (logger === undefined) return undefined;
+	const writeError =
+		typeof logger.error === "function"
+			? logger.error.bind(logger)
+			: consoleLogger.error.bind(consoleLogger);
+	const writeWarn = typeof logger.warn === "function" ? logger.warn.bind(logger) : undefined;
 	return {
-		error: (obj: unknown, msg?: unknown) => write(obj as Record<string, unknown>, String(msg)),
+		error: (obj: unknown, msg?: unknown) => writeError(obj as Record<string, unknown>, String(msg)),
+		...(writeWarn !== undefined
+			? {
+					warn: (obj: unknown, msg?: unknown) =>
+						writeWarn(obj as Record<string, unknown>, String(msg)),
+				}
+			: {}),
 	};
 };
 
@@ -298,7 +315,14 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
 					scope,
-					{ logger: policyLogger },
+					// The poll has spent the approval: a refusal ends the device's
+					// polling. RFC 8628 §3.5's terminal codes pass; anything else is
+					// `invalid_grant`, never a keep-polling code.
+					{
+						logger: policyLogger,
+						denyFallback: "invalid_grant",
+						denyAllowed: ["access_denied", "expired_token"],
+					},
 				);
 				if (!policy.ok) return policyRefusal(policy.result);
 				scope = policy.scopes;

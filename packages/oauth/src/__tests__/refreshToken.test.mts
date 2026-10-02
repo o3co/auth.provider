@@ -1528,7 +1528,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(observedUa).toBe("test-agent/1.0");
 		});
 
-		it("denies with policy-provided error", async () => {
+		it("answers a policy's access_denied deny invalid_request, never invalid_grant, which would kill the refresh token", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			const policy = createStubPolicy(async () => ({
 				outcome: "deny",
@@ -1549,11 +1549,59 @@ describe("createRefreshTokenGrant", () => {
 
 			expect(result.status).toBe(400);
 			if ("error" in result) {
-				expect(result.error).toBe("access_denied");
+				expect(result.error).toBe("invalid_request");
 				expect(result.errorDescription).toBe("policy");
 			} else {
 				expect.fail("Expected error in result");
 			}
+		});
+
+		it("leaves the refresh token usable after a policy deny: the same token refreshes once the policy allows", async () => {
+			const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
+			const accessTokenHorizonMs = 3_600_000;
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore,
+				accessTokenHorizonMs,
+			});
+			const revocation = createRefreshTokenFamilyRevocation({
+				refreshTokenFamilyStore,
+				accessTokenHorizonMs,
+			});
+			await rotation.register("prev-jti-policy", "fam-policy", Date.now() + 86_400_000);
+			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-policy" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuedAt()
+				.setIssuer("localhost")
+				.setAudience(DEFAULT_CLIENT_ID)
+				.setExpirationTime("24h")
+				.setJti("prev-jti-policy")
+				.sign(secretKey);
+			let denying = true;
+			const handler = createRefreshTokenGrant({
+				...mockDeps,
+				refreshTokenFamilyRotation: rotation,
+				refreshTokenFamilyRevocation: revocation,
+				grantPolicy: createStubPolicy(async () =>
+					denying ? { outcome: "deny", error: "access_denied" } : { outcome: "allow" },
+				),
+			});
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			};
+
+			const denied = await handler.handle(ctx);
+			expect(denied.result).toMatchObject({ status: 400, error: "invalid_request" });
+
+			denying = false;
+			const refreshed = await handler.handle(ctx);
+			expect(refreshed.result.status).toBe(200);
+			expect("tokens" in refreshed.result && refreshed.result.tokens.refresh_token).toEqual(
+				expect.any(String),
+			);
 		});
 
 		it("answers 500 server_error when policy grantedScope exceeds the original grant (RFC 6749 §6)", async () => {

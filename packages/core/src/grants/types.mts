@@ -150,6 +150,12 @@ export interface GrantError {
 	status: number;
 	error: string;
 	errorDescription?: string;
+	/**
+	 * Present when the refusal is a grant policy's deny: the policy's own
+	 * code, sanitised and capped, which the token endpoint's audit records
+	 * beside the code it answered. Never sent to the client.
+	 */
+	readonly policyDenial?: { readonly error: string };
 }
 
 export type GrantResult = GrantSuccess | GrantError;

@@ -79,7 +79,7 @@ const minted = (result: Awaited<ReturnType<ReturnType<typeof grantWith>["handle"
 };
 
 describe("session grant — grantPolicy refusals", () => {
-	it("answers a deny 400 with the policy's own error", async () => {
+	it("answers a deny whose code the token endpoint does not define 400 invalid_request", async () => {
 		const { result } = await grantWith(async () => ({
 			outcome: "deny",
 			error: "access_denied",
@@ -87,8 +87,9 @@ describe("session grant — grantPolicy refusals", () => {
 		})).handle(ctx());
 		expect(result).toEqual({
 			status: 400,
-			error: "access_denied",
+			error: "invalid_request",
 			errorDescription: "browser tokens are closed",
+			policyDenial: { error: "access_denied" },
 		});
 	});
 

@@ -35,12 +35,11 @@ import type {
 	ValidatedToken,
 } from "@o3co/auth-provider-core";
 import {
-	auditErrorText,
 	checkOAuthTokenSettings,
 	consoleLogger,
-	isWellFormedErrorCode,
 	logGrantPolicyUnavailable,
 	loggableError,
+	policyDenied,
 	policyOutOfBounds,
 	policyUnavailable,
 	readGrantPolicyDecision,
@@ -287,33 +286,14 @@ async function applyGrantPolicy(
 		});
 		if (reading.verdict === "invalid") return { result: reading.result };
 		if (reading.verdict === "deny") {
-			// RFC 6749 §5.2 makes `error` 1*NQSCHAR: a malformed policy code is logged
-			// (sanitised) and replaced by `invalid_request`, RFC 8693 §2.2.2's code for a
-			// request refused by policy. `/oauth/token` checks too; this covers a
-			// composition dispatching the handler from its own route.
-			let error = reading.decision.error;
-			if (!isWellFormedErrorCode(error)) {
-				deps.logger?.warn(
-					{ error: auditErrorText(String(error)) },
-					"token_exchange_policy_deny_error_malformed",
-				);
-				error = "invalid_request";
-			}
-			// A JavaScript policy can return anything as its description; one
-			// that is empty or not a string is not sent (RFC 6749 A.8 makes the
-			// field 1*NQSCHAR), and nothing replaces it, as `/oauth/token` answers
-			// the other grants' deny.
-			const description = reading.decision.errorDescription;
-			// `400` whatever the code (RFC 6749 §5.2), as core's
-			// `evaluateGrantPolicy` answers the other grants' deny.
+			// Core's answer to a deny, as on every grant: a code that is not a
+			// token-endpoint code is `invalid_request`, also RFC 8693 §2.2.2's code for
+			// a request refused by policy.
 			return {
-				result: {
-					status: 400,
-					error,
-					...(typeof description === "string" && description !== ""
-						? { errorDescription: description }
-						: {}),
-				},
+				result: policyDenied(reading, deps.logger, {
+					grantType: GRANT_TYPE,
+					hook: deps.grantPolicy,
+				}),
 			};
 		}
 		const { decision } = reading;

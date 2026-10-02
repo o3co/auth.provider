@@ -159,6 +159,10 @@ describe("core barrel — the grant policy's answers", () => {
 		expect(typeof core.policyUnavailable).toBe("function");
 		expect(typeof core.policyOutOfBounds).toBe("function");
 	});
+
+	it("re-exports the token endpoint's answer to a deny", () => {
+		expect(typeof core.policyDenied).toBe("function");
+	});
 });
 
 describe("core barrel — the federation adapter toolkit", () => {
