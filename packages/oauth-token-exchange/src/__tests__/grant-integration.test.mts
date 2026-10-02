@@ -655,6 +655,80 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			if (!("tokens" in result)) return;
 			expect(decodeJwt(result.tokens.access_token)).not.toHaveProperty("family_id");
 		});
+
+		// A family or a session this provider's stores key by string: any other
+		// value would be checked against nothing and minted into a claim that
+		// introspection and the session rule read as absent.
+		describe("a validator that reports a family or a session as something other than a string", () => {
+			const REPORTING_TOKEN_TYPE = "urn:example:params:oauth:token-type:reporting";
+			const reporting = (answer: Record<string, unknown>) =>
+				defineModule({
+					name: "test:reporting-validator",
+					contributes: {
+						tokenExchangeValidators: {
+							[REPORTING_TOKEN_TYPE]: () => ({
+								validate: async () =>
+									({ sub: "user-1", claims: { sub: "user-1" }, ...answer }) as never,
+							}),
+						},
+					},
+				});
+			const malformed: ReadonlyArray<[string, Record<string, unknown>]> = [
+				["a numeric familyId", { familyId: 42 }],
+				["a null familyId", { familyId: null }],
+				["an object familyId", { familyId: { id: "fam-1" } }],
+				["a numeric sid", { sid: 42 }],
+				["a null sid", { sid: null }],
+				["a boolean sid", { sid: true }],
+			];
+
+			it.each(malformed)(
+				"refuses %s on the subject_token as a failed validation, and mints nothing",
+				async (_label, answer) => {
+					const { grant } = await boot([reporting(answer)]);
+					const { result } = await exchange(grant, {
+						subject_token: "opaque-subject-token",
+						subject_token_type: REPORTING_TOKEN_TYPE,
+					});
+					expect(result).toEqual({
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "subject_token validation failed",
+					});
+				},
+			);
+
+			it.each(malformed)(
+				"refuses %s on the actor_token as a failed validation, and mints nothing",
+				async (_label, answer) => {
+					const { grant } = await boot([reporting(answer)]);
+					const { result } = await exchange(grant, {
+						subject_token: await signSelfIssuedAccessToken({}),
+						subject_token_type: ACCESS_TOKEN_TYPE,
+						actor_token: "opaque-actor-token",
+						actor_token_type: REPORTING_TOKEN_TYPE,
+					});
+					expect(result).toEqual({
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "actor_token validation failed",
+					});
+				},
+			);
+
+			it("still reads an empty string as unset, and a non-empty one as the value", async () => {
+				const { grant } = await boot([reporting({ familyId: "", sid: "" })]);
+				const { result } = await exchange(grant, {
+					subject_token: "opaque-subject-token",
+					subject_token_type: REPORTING_TOKEN_TYPE,
+				});
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) return;
+				const claims = decodeJwt(result.tokens.access_token);
+				expect(claims).not.toHaveProperty("family_id");
+				expect(claims).not.toHaveProperty("liveness_sid");
+			});
+		});
 	});
 
 	// RFC 8693 §2.2.2: "If the request itself is not valid or if either the

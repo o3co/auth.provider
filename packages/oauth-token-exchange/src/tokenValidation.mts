@@ -17,7 +17,9 @@
 /**
  * The presented tokens: each token type backed by a validator, the subject and the
  * actor validated, and each held to the sender constraint this request proves. A
- * validator that cannot reach an answer is a `503`, never a verdict on the token.
+ * validator that cannot reach an answer is a `503`, never a verdict on the token;
+ * one whose answer names a family or a session other than as a string is a failed
+ * validation.
  */
 
 import {
@@ -115,7 +117,9 @@ export async function validateSubject(
 			},
 		};
 	}
-	if (!subjectValidated) return invalidRequest("subject_token validation failed");
+	if (!subjectValidated || !namesBindingsAsStrings(subjectValidated)) {
+		return invalidRequest("subject_token validation failed");
+	}
 
 	// Sender constraint (RFC 9449 §5, RFC 8705 §4) through core's
 	// `matchConfirmation`, as the refresh grant does. Without it a stolen DPoP- or
@@ -187,7 +191,9 @@ export async function validateActor(
 				},
 			};
 		}
-		if (!actorValidated) return invalidRequest("actor_token validation failed");
+		if (!actorValidated || !namesBindingsAsStrings(actorValidated)) {
+			return invalidRequest("actor_token validation failed");
+		}
 	}
 
 	// The actor is held to the same sender-constraint rule: `buildActClaim` records
@@ -220,6 +226,21 @@ export async function validateActor(
 		}
 	}
 	return { actorValidated };
+}
+
+/**
+ * Whether a validator's answer names its family and its session as the
+ * contract has them: each absent or a string. Any other value is no answer:
+ * the stores key families and sessions by string, and introspection and the
+ * session rule read any other claim as none, so the check and the minted
+ * token would both miss it.
+ */
+function namesBindingsAsStrings(validated: ValidatedToken): boolean {
+	const { familyId, sid } = validated;
+	return (
+		(familyId === undefined || typeof familyId === "string") &&
+		(sid === undefined || typeof sid === "string")
+	);
 }
 
 /**
