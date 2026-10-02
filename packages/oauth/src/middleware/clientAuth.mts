@@ -148,10 +148,13 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  * - Clients are read through core's client-record boundary over
  *   `clientRepository` (a boundary or a document fallback is read as it is):
  *   a record the boundary refuses rejects the lookup, answered as below.
- * - A repository lookup that rejects is an outage, `503 temporarily_unavailable`, not
- *   `invalid_client` (which a client reads as a bad secret). A malformed
- *   `client_id` (control characters, over-long) is refused as unknown before
- *   the repository is asked, so a client cannot provoke that outage.
+ * - A repository lookup that rejects is an outage, `503
+ *   temporarily_unavailable`, not `invalid_client` (which a client reads as
+ *   a bad secret). A malformed `client_id` (control characters, over-long)
+ *   is refused as unknown before the repository is asked, so it cannot
+ *   provoke that answer. A registered id whose record the boundary refuses
+ *   can: anyone who knows it gets `503`, with no credentials, until the
+ *   record is fixed.
  */
 export function createClientAuthMiddleware(
 	clientRepository: ClientRepository,
