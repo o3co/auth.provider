@@ -48,6 +48,7 @@ import {
 	type RequirementVerdict,
 	type SessionRequirement,
 	type UserSession,
+	validatedClientRepository,
 } from "@o3co/auth-provider-core";
 import {
 	createTestCsrfGuard,
@@ -99,6 +100,7 @@ const CONNECTION: FederationGrantAcquisitionConnection = {
 
 const CLIENT = {
 	clientId: "worker",
+	tokenEndpointAuthMethod: "client_secret_basic" as const,
 	clientName: "Calendar Agent",
 	allowedFederationGrantConnections: ["calendar"],
 	federationGrantRedirectUris: [REDIRECT],
@@ -274,13 +276,18 @@ function world(options: WorldOptions = {}) {
 		createFederationGrantBrowserRouter({
 			intentStore: faulty(intents),
 			grantStore: faulty(grants),
-			clientRepository: {
-				findById: async (id: string) => {
-					await intercept("findById");
-					return id === CLIENT.clientId ? (state.client as never) : null;
+			// Behind core's client-record boundary, as boot installs it in the
+			// `clientRepository` slot the module hands the router.
+			clientRepository: validatedClientRepository(
+				{
+					findById: async (id: string) => {
+						await intercept("findById");
+						return id === CLIENT.clientId ? (state.client as never) : null;
+					},
+					authenticate: async () => null,
 				},
-				authenticate: async () => null,
-			} as never,
+				{ logger: spy.logger },
+			),
 			userSessionStore: {
 				get: async (sid: string) => {
 					await intercept("userSessionStore.get");
@@ -2244,7 +2251,10 @@ describe("connect, when the world fails or moves", () => {
 		const w = world();
 		const { handle } = await w.lodge();
 		w.signIn("b-1");
-		w.state.client = { clientId: CLIENT.clientId } as never;
+		w.state.client = {
+			clientId: CLIENT.clientId,
+			tokenEndpointAuthMethod: CLIENT.tokenEndpointAuthMethod,
+		} as never;
 		const response = await w.connect(handle, "b-1");
 		expect(response.status).toBe(403);
 		expect(response.text).toMatch(/may no longer use this connection/);
@@ -2337,17 +2347,17 @@ describe("the consent, when the world fails or moves", () => {
 			error_description: "connection_not_permitted",
 		});
 		// A deployment's own repository that answers a string instead of a list
-		// would turn the check into a substring match; the field is read as a
-		// list or as nothing, the rule the token route already applies.
+		// would turn the check into a substring match; the boundary refuses the
+		// record, and a client that cannot be read is not a yes.
 		w.state.client = {
 			...CLIENT,
 			allowedFederationGrantConnections: "calendar-prod" as unknown as string[],
 		};
 		const misread = await w.page(challenge, "b-1");
-		expect(misread.status).toBe(403);
+		expect(misread.status).toBe(503);
 		expect(misread.body).toEqual({
-			error: "access_denied",
-			error_description: "connection_not_permitted",
+			error: "temporarily_unavailable",
+			error_description: "client registry unavailable",
 		});
 		w.state.client = { ...CLIENT };
 
