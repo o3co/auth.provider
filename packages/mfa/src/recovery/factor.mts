@@ -193,6 +193,17 @@ export function shownRecoverySet(data: MfaFactorData): MfaFactorData | undefined
 	return setIn(data) === undefined ? undefined : { ...data, shown: true };
 }
 
+/** Whether the set `data` holds is below `floor`, the subject's recovery-set floor, for a factor this file made: retired. */
+export function isRetiredRecoverySet(
+	factor: MfaFactor,
+	data: MfaFactorData,
+	floor: number,
+): boolean {
+	if (!issuers.has(factor)) return false;
+	const generation = setIn(data)?.generation;
+	return generation !== undefined && generation < floor;
+}
+
 /** Why a verification is not handed a set: retired below the floor, or a digest under a key the ring lost. */
 export type RecoverySetRefusal =
 	| { readonly reason: "retired" }
@@ -213,7 +224,7 @@ export function recoverySetRefusal(
 	if (!issuers.has(factor)) return undefined;
 	const set = setIn(data);
 	if (set === undefined) return undefined;
-	if (set.generation < context.floor) return { reason: "retired" };
+	if (isRetiredRecoverySet(factor, data, context.floor)) return { reason: "retired" };
 	const missing = set.codes.find((stored) => !context.holdsKey(stored.keyId));
 	return missing === undefined ? undefined : { reason: "key_unavailable", keyId: missing.keyId };
 }

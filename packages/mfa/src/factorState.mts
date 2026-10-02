@@ -21,6 +21,9 @@
  * - `not_installed`: no installed factor verifies its kind.
  * - `unreadable`: its data does not open, or a digest it holds names a key
  *   the ring no longer holds (`keyId`, when the key is known).
+ * - `retired`, read only where the subject's recovery-set floor was read
+ *   (`withRecoverySetFloor`): a recovery-code set below it, replaced by a
+ *   newer set and kept until it is removed. Its codes verify nothing.
  * - `exhausted`: a recovery-code set whose data opened and holds no code
  *   left. It stays on record, for audit.
  * - `address_changed`, read for a signed-in session alone
@@ -30,9 +33,11 @@
  * - `usable`: anything else.
  *
  * The judgments made over these stay apart:
- * - what a transaction offers (`isOffered`): every record but `not_installed`
- *   and `exhausted` — an `unreadable` one is offered, and its verification
- *   is the outage;
+ * - what a transaction offers (`isOffered`): every record but `not_installed`,
+ *   `exhausted` and `retired` — an `unreadable` one is offered, and its
+ *   verification is the outage. A floor that cannot be read reads every set
+ *   as it would without one: the offer locks nobody out, and the
+ *   verification, which reads the floor itself, refuses a retired set;
  * - whether the subject holds a factor it can use — a step-up's
  *   `no_qualifying_factor`, a login reopened under `required`: `usable`
  *   alone (`holdsUsableRecord`);
@@ -52,13 +57,20 @@ import type {
 } from "@o3co/auth-provider-core";
 import { enrolledAddressDigest } from "./email/factor.mjs";
 import { matchesRecordedAddress } from "./mail.mjs";
-import { isExhaustedRecoverySet, recoverySetKeyIds } from "./recovery/factor.mjs";
+import {
+	isExhaustedRecoverySet,
+	isRecoveryCodeFactor,
+	isRetiredRecoverySet,
+	recoverySetKeyIds,
+} from "./recovery/factor.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 
 /** What a record is read over: the installed factors and the key ring's sealing. */
 export interface MfaRecordContext {
 	readonly factors: MfaFactorResolver;
 	readonly sealing: MfaSealing;
+	/** The subject's recovery-set floor, where it was read: a set below it is `retired`. */
+	readonly recoverySetFloor?: number;
 }
 
 /** A record as read (this file's header), with the factor of its kind and its data where they are had. */
@@ -66,7 +78,7 @@ export type MfaRecordReading =
 	| { readonly state: "not_installed" }
 	| { readonly state: "unreadable"; readonly factor: MfaFactor; readonly keyId?: string }
 	| {
-			readonly state: "usable" | "exhausted" | "address_changed";
+			readonly state: "usable" | "exhausted" | "address_changed" | "retired";
 			readonly factor: MfaFactor;
 			readonly data: MfaFactorData;
 	  };
@@ -89,6 +101,10 @@ export function readFactorRecord(
 		return { state: "unreadable", factor, keyId: opened.keyId };
 	}
 	if (opened.state !== "ok") return { state: "unreadable", factor };
+	const floor = context.recoverySetFloor;
+	if (floor !== undefined && isRetiredRecoverySet(factor, opened.value, floor)) {
+		return { state: "retired", factor, data: opened.value };
+	}
 	const missing = recoverySetKeyIds(factor, opened.value)?.find(
 		(keyId) => !context.sealing.holdsKey(keyId),
 	);
@@ -124,9 +140,32 @@ export function readFactorRecordAt(
 		: { state: "unreadable", factor: read.factor, keyId: compared.keyUnavailable };
 }
 
-/** Whether a transaction offers a record read as `read`: every state but `not_installed` and `exhausted`. */
+/** Whether a transaction offers a record read as `read`: every state but `not_installed`, `exhausted` and `retired`. */
 export const isOffered = (read: MfaRecordReading): boolean =>
-	read.state !== "not_installed" && read.state !== "exhausted";
+	read.state !== "not_installed" && read.state !== "exhausted" && read.state !== "retired";
+
+/**
+ * `context` with the subject's recovery-set floor, read by `readFloor` only
+ * when `records` hold a recovery-code set; `context` as given when they hold
+ * none, or the floor cannot be read — sets are then read as without one.
+ */
+export async function withRecoverySetFloor(
+	context: MfaRecordContext,
+	subject: string,
+	records: readonly Pick<MfaFactorRecord, "kind">[],
+	readFloor: (subject: string) => Promise<number>,
+): Promise<MfaRecordContext> {
+	const holdsSet = records.some((record) => {
+		const factor = context.factors.get(record.kind);
+		return factor !== undefined && isRecoveryCodeFactor(factor);
+	});
+	if (!holdsSet) return context;
+	try {
+		return { ...context, recoverySetFloor: await readFloor(subject) };
+	} catch {
+		return context;
+	}
+}
 
 /** Whether a password login asks for a second factor over `record`: every state but `exhausted`. */
 export const asksForSecondFactor = (

@@ -22,8 +22,11 @@
  *
  * - `GET /factors`, admitted as `mfa.view`: every record of the subject, oldest
  *   first, with its state as `factorState.mts` reads it for the session's login
- *   address, and a recovery set's codes left and whether they were ever
- *   answered (`recovery_codes_shown`); never a record's data. A record
+ *   address — a recovery set below the subject's recovery-set floor
+ *   `retired`, the floor read once, and every set read as without it when
+ *   it cannot be — and a usable or exhausted recovery set's codes left and
+ *   whether they were ever answered (`recovery_codes_shown`); never a
+ *   record's data. A record
  *   whose data or digest needs a key the ring no longer holds is said at error
  *   with that key's id.
  * - `POST /factors/rename {factor_id, label}`, admitted as `mfa.manage`: the
@@ -62,7 +65,7 @@ import express, { type Request, type Response, type Router } from "express";
 import type { MfaAdmissionAction } from "./admissionActions.mjs";
 import { type MfaCeremonySession, OUTSIDE_CONTRACT } from "./ceremony.mjs";
 import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
-import { type MfaRecordReading, readFactorRecordAt } from "./factorState.mjs";
+import { type MfaRecordReading, readFactorRecordAt, withRecoverySetFloor } from "./factorState.mjs";
 import { recoveryCodesLeft, recoverySetShown } from "./recovery/factor.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
@@ -182,9 +185,16 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 			if (session === undefined) return;
 			const records = await recordsOf(res, session.subject);
 			if (records === undefined) return;
+			// A floor that cannot be read lists every set as read without it.
+			const context = await withRecoverySetFloor(
+				{ factors, sealing },
+				session.subject,
+				records,
+				factorSet.recoverySetFloor,
+			);
 			res.status(200).json({
 				factors: records.map((record) => {
-					const read = readFor(session, record);
+					const read = readFactorRecordAt(context, session.subject, record, session.user.email);
 					if (read.state === "unreadable" && read.keyId !== undefined) {
 						logger.error(
 							{
