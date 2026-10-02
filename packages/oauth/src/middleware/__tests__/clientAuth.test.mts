@@ -95,6 +95,12 @@ const publicClient = (clientId: string): FakeClient => ({
 });
 
 describe("createClientAuthMiddleware", () => {
+	it("refuses to build without a fetch for jwksUri", () => {
+		expect(() =>
+			createMiddleware(fakeRepo([]), {} as unknown as ClientAuthMiddlewareOptions),
+		).toThrow(/fetch is required/);
+	});
+
 	describe("confidential + public client paths", () => {
 		it("no credentials at all → 401 invalid_client + WWW-Authenticate", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));

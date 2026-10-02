@@ -161,6 +161,13 @@ export function createClientAssertionVerifier(
 	);
 	// One remote key set per `jwksUri`, shared across requests (core's
 	// `createRemoteKeySetCache`, which the trust-registry verifier uses too).
+	// Required at run time too: an absent fetch would leave the key-set cache
+	// on the global fetch, outside `core.outbound`.
+	if (typeof options.fetch !== "function") {
+		throw new TypeError(
+			'createClientAssertionVerifier: fetch is required; pass createOutboundFetch({ config, source: "registration" })',
+		);
+	}
 	const remoteKeySets = createRemoteKeySetCache({ fetch: options.fetch });
 
 	const keySetFor = (client: PublicClient): JWTVerifyGetKey | undefined => {

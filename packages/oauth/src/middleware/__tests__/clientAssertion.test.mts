@@ -308,6 +308,23 @@ describe("createClientAssertionVerifier", () => {
 		});
 	});
 
+	describe("the fetch is required", () => {
+		it.each([undefined, null, "fetch"])(
+			"refuses to build without a fetch function (%s), so the global fetch is never used",
+			(fetch) => {
+				const global = vi.spyOn(globalThis, "fetch");
+				try {
+					expect(() => build({ fetch: fetch as unknown as typeof globalThis.fetch })).toThrow(
+						/fetch is required/,
+					);
+					expect(global).not.toHaveBeenCalled();
+				} finally {
+					global.mockRestore();
+				}
+			},
+		);
+	});
+
 	describe("jwks_uri through core's outbound fetch", () => {
 		const warnings = () => {
 			const lines: Record<string, unknown>[] = [];
