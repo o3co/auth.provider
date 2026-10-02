@@ -19,10 +19,10 @@
  * index that finds them, and the atomic release of the store's advisory lock.
  */
 
-/** What `replaceIfGeneration` writes, the deadline at or after which it writes nothing, and where it keeps its answer. */
-export interface FederationTokenReplaceIfInput {
-	/** The generation the stored value must carry: its wrapper's `g`. */
-	readonly expected: string;
+import type { RedisDurability } from "./durability.mjs";
+
+/** What `attachRecord` writes, the deadline at or after which it writes nothing, and where it keeps its answer. */
+export interface FederationTokenAttachInput {
 	/** The new stored value, carrying its new generation. */
 	readonly value: string;
 	/** The store TTL the value is written with (`PX`), in whole milliseconds. */
@@ -45,6 +45,12 @@ export interface FederationTokenReplaceIfInput {
 	readonly clockSkewMs: number;
 }
 
+/** What `replaceIfGeneration` writes, as `attachRecord` does, and the generation it requires. */
+export interface FederationTokenReplaceIfInput extends FederationTokenAttachInput {
+	/** The generation the stored value must carry: its wrapper's `g`. */
+	readonly expected: string;
+}
+
 /** What `removeIfGeneration` checks, the deadline at or after which it writes nothing, and where it keeps its answer, as for `replaceIfGeneration`. */
 export interface FederationTokenRemoveIfInput {
 	readonly expected: string;
@@ -56,13 +62,14 @@ export interface FederationTokenRemoveIfInput {
 // --- FederationTokenStoreClient --------------------------------------------
 
 /**
- * Backing client for FederationTokenStore adapters: `get`, `set` (PX form,
- * always `"OK"`; PX+NX form for atomic insert-only, `null` when the key
- * already existed), single-key `del`, variadic `unlink` for the batched
- * removal in `removeBySid`, the SET primitives backing the per-session key
- * index (`sAddWithTtl` / `sRem` / `sScanIterator`), `scanIterator` for the
- * legacy keyspace-scan migration fallback, and `compareAndDelete` for atomic
- * advisory-lock release.
+ * Backing client for FederationTokenStore adapters: `get`, `set` (the
+ * advisory lock's: PX form, always `"OK"`; PX+NX form for atomic insert-only,
+ * `null` when the key already existed), single-key `del`, variadic `unlink`
+ * for the batched removal in `removeBySid`, the SET primitives backing the
+ * per-session key index (`sAddWithTtl` / `sRem` / `sScanIterator`),
+ * `scanIterator` for the legacy keyspace-scan migration fallback,
+ * `compareAndDelete` for atomic advisory-lock release, and the record's
+ * writes and conditional members below.
  */
 export interface FederationTokenStoreClient {
 	get(key: string): Promise<string | null>;
@@ -150,6 +157,15 @@ export interface FederationTokenStoreClient {
 		candidate: string,
 	): Promise<{ raw: string; generation: string } | null>;
 	/**
+	 * Write `input.value` at `key` (`PX input.ttlMs`) whatever it holds, as one
+	 * atomic step that first refuses at or after `input.deadlineMs` on the
+	 * server's clock, then answers a copy of a write it already took from
+	 * `input.replayKey`, writing nothing. `late`: at or after the deadline, this
+	 * copy wrote nothing (another copy may have committed, or may still commit
+	 * within W). Only the first `attached` writes.
+	 */
+	attachRecord(key: string, input: FederationTokenAttachInput): Promise<"attached" | "late">;
+	/**
 	 * Replace the value at `key` with `input.value` (`PX input.ttlMs`) only while
 	 * the stored value's generation is `input.expected`, as one atomic step that
 	 * first refuses at or after `input.deadlineMs` on the server's clock, then
@@ -174,4 +190,10 @@ export interface FederationTokenStoreClient {
 	 * member.
 	 */
 	pExpireGT(key: string, ttlMs: number): Promise<void>;
+	/**
+	 * What the server says about keeping what it is written, read once at boot
+	 * by the store's module for its eviction policy: a policy that may evict a
+	 * replay key lets a resent write apply again.
+	 */
+	durability(): Promise<RedisDurability>;
 }

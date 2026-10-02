@@ -14,7 +14,15 @@
  * limitations under the License.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	cpSync,
+	existsSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shouldCopyTemplateEntry } from "./internal/template-filter.mjs";
@@ -88,10 +96,34 @@ export const isValidDirName = (name: string): boolean => {
 	return UNSCOPED_NAME_RE.test(name);
 };
 
+/** What `scaffold()` changes in the copy beyond the name and the versions. */
+export interface ScaffoldOptions {
+	/**
+	 * Write the template's MFA switch off (`MFA_OFF_LINES`), so the scaffold
+	 * stays off whatever default a later template ships; `MFA_MODE` still
+	 * turns MFA on.
+	 */
+	readonly noMfa?: boolean;
+}
+
+/**
+ * Appended to the scaffold's `config/application.conf` by `noMfa`: the
+ * template's switch `mfaMode` written off, then bound to `MFA_MODE` so the
+ * variable wins over the written value. The MFA package stays a dependency.
+ */
+const MFA_OFF_LINES: readonly string[] = [
+	"",
+	"# written by create-app --no-mfa: MFA is off unless MFA_MODE turns it on",
+	'mfaMode = "off"',
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: a HOCON substitution, not a template
+	"mfaMode = ${?MFA_MODE}",
+];
+
 export const scaffold = (
 	targetDir: string,
 	projectName: string,
 	template: string = DEFAULT_TEMPLATE,
+	options: ScaffoldOptions = {},
 ): void => {
 	const refusal = templateRefusal(template, availableTemplates());
 	if (refusal !== undefined) throw new Error(refusal);
@@ -110,6 +142,13 @@ export const scaffold = (
 	const stagedGitignore = resolve(targetDir, "gitignore");
 	if (existsSync(stagedGitignore)) {
 		renameSync(stagedGitignore, resolve(targetDir, ".gitignore"));
+	}
+
+	if (options.noMfa === true) {
+		appendFileSync(
+			resolve(targetDir, "config", "application.conf"),
+			`${MFA_OFF_LINES.join("\n")}\n`,
+		);
 	}
 
 	// Rewrite package.json
@@ -224,6 +263,7 @@ interface ParsedArgs {
 	dir: string | undefined;
 	template: string | undefined;
 	lockfile: boolean;
+	noMfa: boolean;
 }
 
 /** The flags that take a value, as `--flag <value>` or `--flag=<value>`. */
@@ -234,6 +274,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
 	const positionals: string[] = [];
 	const values = new Map<ValueFlag, string>();
 	let lockfile = true;
+	let noMfa = false;
 
 	const setValue = (flag: ValueFlag, value: string): void => {
 		if (values.has(flag)) throw new Error(`${flag} specified more than once`);
@@ -253,6 +294,8 @@ const parseArgs = (args: string[]): ParsedArgs => {
 			setValue(joined, a.slice(`${joined}=`.length));
 		} else if (a === "--no-lockfile") {
 			lockfile = false;
+		} else if (a === "--no-mfa") {
+			noMfa = true;
 		} else if (a.startsWith("-")) {
 			// Treats `--` and any --unknown as an unknown flag.
 			throw new Error(`unknown flag: ${a}`);
@@ -269,6 +312,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
 		dir: values.get("--dir"),
 		template: values.get("--template"),
 		lockfile,
+		noMfa,
 	};
 };
 
@@ -297,7 +341,7 @@ export const main = (): void => {
 	} catch (e) {
 		console.error(`Error: ${(e as Error).message}`);
 		console.error(
-			"Usage: @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]",
+			"Usage: @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile] [--no-mfa]",
 		);
 		console.error(
 			"<project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped).",
@@ -308,7 +352,7 @@ export const main = (): void => {
 		process.exit(1);
 	}
 
-	const { projectName, dir, lockfile } = parsed;
+	const { projectName, dir, lockfile, noMfa } = parsed;
 	const template = parsed.template ?? DEFAULT_TEMPLATE;
 
 	if (!isValidProjectName(projectName)) {
@@ -340,7 +384,7 @@ export const main = (): void => {
 	}
 
 	console.log(`Creating ${projectName} from the ${template} template...`);
-	scaffold(targetDir, projectName, template);
+	scaffold(targetDir, projectName, template, { noMfa });
 
 	let lockfileGenerated = false;
 	if (lockfile) {

@@ -1,5 +1,7 @@
 # Upgrading: store records name every field (#626)
 
+Upgrading from v0.16.0 as a whole — every other breaking change, and the Store implementer checklist — is [upgrading-from-v0.16.0.md](upgrading-from-v0.16.0.md).
+
 The records a store, registry or repository hands back now name every field as a **required key** whose value may be `undefined`, instead of an optional field that may be left out. A copy of such a record, built as an object literal of its type, fails to compile when it forgets a field. Before, it dropped that field without an error.
 
 That compile error is the whole guarantee. It does not stop:

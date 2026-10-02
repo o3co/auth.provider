@@ -620,6 +620,44 @@ describe("verification endpoint", () => {
 });
 
 describe("rate limiting (RFC 8628 §5.1)", () => {
+	/** A limiter that runs `during` while it is asked, then answers as the memory limiter does. */
+	const slowLimiter = () => {
+		const inner = createMemoryRateLimiter({
+			limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		});
+		const slow = {
+			during: (): void => undefined,
+			limiter: {
+				kind: "slow",
+				check: async (key: string, ctx: Parameters<RateLimiter["check"]>[1]) => {
+					slow.during();
+					return inner.check(key, ctx);
+				},
+			} satisfies RateLimiter,
+		};
+		return slow;
+	};
+
+	it.each([
+		["lookup", 404, "invalid_user_code"],
+		["approve", 410, "expired_token"],
+		["deny", 410, "expired_token"],
+	] as const)(
+		"judges a %s against the clock after the budget: a code that expires while the limiter answers is refused",
+		async (action, status, error) => {
+			const slow = slowLimiter();
+			const { app, clock } = makeHarness({ rateLimiter: slow.limiter });
+			const started = await startDevice(app);
+			slow.during = () => clock.advance(settings.codeLifetimeSeconds * 1000 + 1_000);
+
+			const res = await verify(app, { action, user_code: started.body.user_code });
+
+			expect(res.status).toBe(status);
+			expect(res.body.error).toBe(error);
+		},
+	);
+
 	it("counts lookups against the same budget as approvals", async () => {
 		// The lookup is the same brute-force oracle: it answers "is this a real
 		// code?". A lookup route that did not count would be a free oracle
@@ -1437,6 +1475,165 @@ describe("a record the store answers that cannot be read", () => {
 			expect(events[0]).toMatchObject({ subject: "user-1", details: { action } });
 		},
 	);
+});
+
+describe("a store answer that cannot be read around its record", () => {
+	/** A memory store whose `method` runs, then answers what `answer` builds instead. */
+	const answering = (method: "poll" | "approve" | "deny", answer: () => unknown) => {
+		const inner = createMemoryDeviceCodeStore();
+		const run = inner[method] as (...args: unknown[]) => Promise<unknown>;
+		return {
+			...inner,
+			[method]: async (...args: unknown[]) => {
+				await run(...args);
+				return answer();
+			},
+		} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+	};
+
+	const throwingOn = (field: string, rest: Record<string, unknown>): object =>
+		Object.defineProperty({ ...rest }, field, {
+			enumerable: true,
+			get() {
+				throw new Error(`${field} unreadable`);
+			},
+		});
+
+	const STORE_UNAVAILABLE = {
+		status: 503,
+		error: "temporarily_unavailable",
+		errorDescription: "the device authorization store is unavailable; retry later",
+	} as const;
+
+	const POLL_ANSWERS: ReadonlyArray<readonly [string, () => unknown, Record<string, unknown>]> = [
+		["null", () => null, { refused: "outcome_not_an_object" }],
+		["a string", () => "approved", { refused: "outcome_not_an_object" }],
+		[
+			"an unknown status",
+			() => ({ status: "granted" }),
+			{ refused: "outcome_malformed", field: "status" },
+		],
+		[
+			"a status whose read throws",
+			() => throwingOn("status", {}),
+			{ refused: "outcome_malformed", field: "status" },
+		],
+		[
+			"a slow_down with a text interval",
+			() => ({ status: "slow_down", intervalSeconds: "10 seconds; retry" }),
+			{ refused: "outcome_malformed", field: "intervalSeconds" },
+		],
+		[
+			"a slow_down with no interval",
+			() => ({ status: "slow_down" }),
+			{ refused: "outcome_malformed", field: "intervalSeconds" },
+		],
+		[
+			"a slow_down with a negative interval",
+			() => ({ status: "slow_down", intervalSeconds: -5 }),
+			{ refused: "outcome_malformed", field: "intervalSeconds" },
+		],
+		[
+			"a slow_down whose interval's read throws",
+			() => throwingOn("intervalSeconds", { status: "slow_down" }),
+			{ refused: "outcome_malformed", field: "intervalSeconds" },
+		],
+	];
+
+	it.each(POLL_ANSWERS)(
+		"answers a poll the store answers with %s as a store outage: 503, logged at error",
+		async (_label, answer, logged) => {
+			const logger = makeLogger();
+			const { app, poll } = makeHarness({ logger, store: answering("poll", answer) });
+			const started = await startDevice(app);
+			const { result } = await poll(started.body.device_code as string);
+			expect(result).toEqual(STORE_UNAVAILABLE);
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, ...logged },
+				"device_code_grant_record_unreadable",
+			);
+		},
+	);
+
+	it("still answers a readable slow_down with its interval", async () => {
+		const { app, poll } = makeHarness({
+			store: answering("poll", () => ({ status: "slow_down", intervalSeconds: 15 })),
+		});
+		const started = await startDevice(app);
+		const { result } = await poll(started.body.device_code as string);
+		expect(result).toEqual({
+			status: 400,
+			error: "slow_down",
+			errorDescription: "polling too frequently; the interval is now 15 seconds",
+		});
+	});
+
+	const DECISION_ANSWERS: ReadonlyArray<readonly [string, () => unknown, Record<string, unknown>]> =
+		[
+			["null", () => null, { refused: "outcome_not_an_object" }],
+			[
+				"an unknown status",
+				() => ({ status: "done" }),
+				{ refused: "outcome_malformed", field: "status" },
+			],
+			[
+				"an already_decided with a current no status holds",
+				() => ({ status: "already_decided", current: "<b>approved</b>" }),
+				{ refused: "outcome_malformed", field: "current" },
+			],
+			[
+				"an already_decided that is still pending",
+				() => ({ status: "already_decided", current: "pending" }),
+				{ refused: "outcome_malformed", field: "current" },
+			],
+			[
+				"an already_decided whose current's read throws",
+				() => throwingOn("current", { status: "already_decided" }),
+				{ refused: "outcome_malformed", field: "current" },
+			],
+		];
+
+	for (const action of ["approve", "deny"] as const) {
+		it.each(DECISION_ANSWERS)(
+			`answers a ${action} the store answers with %s with 503, audited as an unknown outcome`,
+			async (_label, answer, logged) => {
+				const logger = makeLogger();
+				const { sink, events } = makeSink();
+				const { app } = makeHarness({
+					logger,
+					auditSink: sink,
+					store: answering(action, answer),
+				});
+				const started = await startDevice(app);
+				const res = await verify(app, { action, user_code: started.body.user_code });
+				await settle();
+				expect(res.status).toBe(503);
+				expect(res.body).toEqual({
+					error: "temporarily_unavailable",
+					error_description: "the device authorization store is unavailable; retry later",
+				});
+				expect(logger.error).toHaveBeenCalledWith(
+					{ action, ...logged },
+					"device_verification_record_unreadable",
+				);
+				expect(events.map((event) => event.type)).toEqual(["device.decision_outcome_unknown"]);
+			},
+		);
+	}
+
+	it("still answers a readable already_decided with the decision it holds", async () => {
+		const { app } = makeHarness({
+			store: answering("approve", () => ({ status: "already_decided", current: "denied" })),
+		});
+		const started = await startDevice(app);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(409);
+		expect(res.body).toEqual({
+			error: "already_decided",
+			error_description: "this code was already denied",
+		});
+	});
 });
 
 describe("the access-token lifetime it is built with", () => {

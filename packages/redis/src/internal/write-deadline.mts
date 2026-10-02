@@ -15,16 +15,17 @@
  */
 
 /**
- * A conditional write's write lifetime W (docs/adapter-surface.md,
- * "Conditional writes", rule 6). The adapter stamps each write with a deadline,
- * its issue time plus {@link WRITE_TIMEOUT_MS} on the app's clock; the write's
- * script refuses it at or after that deadline on the server's clock, writing
- * nothing; and the adapter stops waiting at the same timeout. A command the driver
- * queues, sends again after a reconnect, or a stalled server holds therefore
- * commits within W of its issue or writes nothing, while the app's and
- * Redis's clocks agree within {@link CLOCK_SKEW_MS}, and the server does not
- * stall inside a running script, between its clock check and its write, for
- * the whole of W.
+ * The write lifetime W of a store's bounded writes: its conditional writes
+ * (docs/adapter-surface.md, "Conditional writes", rule 6) and any unconditional
+ * write it bounds the same way, such as the federation token store's `attach`.
+ * The adapter stamps each write with a deadline, its issue time plus
+ * {@link WRITE_TIMEOUT_MS} on the app's clock; the write's script refuses it at
+ * or after that deadline on the server's clock, writing nothing; and the
+ * adapter stops waiting at the same timeout. A command the driver queues,
+ * sends again after a reconnect, or a stalled server holds therefore commits
+ * within W of its issue or writes nothing, while the app's and Redis's clocks
+ * agree within {@link CLOCK_SKEW_MS}, and the server does not stall inside a
+ * running script, between its clock check and its write, for the whole of W.
  */
 
 /**
@@ -41,7 +42,7 @@ export const WRITE_TIMEOUT_MS = 1_000;
  */
 export const CLOCK_SKEW_MS = 1_000;
 
-/** W: a conditional write commits or fails within this of its issue. */
+/** W: a bounded write, conditional or not, commits or fails within this of its issue. */
 export const WRITE_LIFETIME_MS = WRITE_TIMEOUT_MS + CLOCK_SKEW_MS;
 
 /**

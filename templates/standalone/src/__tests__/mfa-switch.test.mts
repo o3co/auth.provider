@@ -127,11 +127,17 @@ const textOf = (err: unknown): string => {
 const warned = (logger: RecordingLogger, event: string) =>
 	logger.lines.filter((line) => line.level === "warn" && line.args[1] === event);
 
+/** `env` with MFA_MODE unset: the switch as the template ships it. */
+const unset = (env: Readonly<Record<string, string>>): Record<string, string> => {
+	const { MFA_MODE: _unset, ...rest } = env;
+	return rest;
+};
+
 describe("the switch is the template's own key, mfaMode, bound to MFA_MODE", () => {
-	it("is off unless MFA_MODE says otherwise", () => {
+	it("is required unless MFA_MODE says otherwise", () => {
 		const switches = (env: Readonly<Record<string, string>>) =>
 			readSwitches(readOwnLayers(ownFiles(), { env })).mfaMode;
-		expect(switches(SINGLE_ENV)).toBe("off");
+		expect(switches(unset(SINGLE_ENV))).toBe("required");
 		for (const mode of ["off", "optional", "required"] as const) {
 			expect(switches({ ...SINGLE_ENV, MFA_MODE: mode })).toBe(mode);
 		}
@@ -177,7 +183,39 @@ describe("the switch is the template's own key, mfaMode, bound to MFA_MODE", () 
 	});
 });
 
-describe("MFA_MODE unset: nothing of MFA is installed", () => {
+describe("MFA_MODE unset: the template requires a second factor", () => {
+	it("installs every MFA module and declares mfa, as MFA_MODE=required does", async () => {
+		current = await boot({ env: unset(on("required")) });
+		const names = current.modules.map((m) => m.name);
+		expect(names.filter((name) => MFA_MODULE_NAMES.includes(name)).sort()).toEqual(
+			MFA_MODULE_NAMES,
+		);
+		expect(current.config.core?.sessionRequirements).toEqual({
+			expected: ["mfa"],
+			secondFactorAuthority: "mfa",
+		});
+		expect((current.config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("required");
+	});
+
+	it("interrupts a password login, opening no session /authorize accepts", async () => {
+		current = await boot({ env: unset(on("required")) });
+		const csrf = await request(current.app).get("/session/csrf");
+		const res = await request(current.app)
+			.post("/session/login")
+			.set("Cookie", cookiesOf(csrf))
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.type("form")
+			.send({ username: ALICE.username, password: ALICE.password });
+		expect(res.status).toBe(403);
+		expect(res.body.error).toBe("mfa_enrollment_required");
+		const answer = await authorize(current.app, [...cookiesOf(csrf), ...cookiesOf(res)]);
+		const location = String(answer.headers.location ?? "");
+		expect(location.startsWith(WEB.redirectUri)).toBe(false);
+		expect(location).not.toMatch(/[?&]code=/);
+	});
+});
+
+describe("MFA_MODE=off: nothing of MFA is installed", () => {
 	it("lists no MFA module, registers no requirement, and hands boot no mfa section", async () => {
 		current = await compose();
 		const names = current.modules.map((m) => m.name);
@@ -659,6 +697,43 @@ describe("a deployment that takes MFA's modules out of buildModules() under MFA_
 		expect((err as BootError).details).toMatchObject({
 			unmet: expect.arrayContaining(["not-declared"]),
 		});
+	});
+});
+
+describe("the shipped configuration with nothing set about MFA", () => {
+	it("boots under CONFIG_ENV=development with MFA required: the sample key, the development mail sender, the MFA stores in memory", async () => {
+		const { logger, config } = await bootShipped(unset(SHIPPED_ENV), "development");
+		expect((config as unknown as { mfa: { mode: unknown } }).mfa.mode).toBe("required");
+		expect(config.core?.sessionRequirements?.expected).toContain("mfa");
+		expect(warned(logger, "mfa_development_sample_key_in_use")).toHaveLength(1);
+	});
+
+	it("is refused in production before boot, naming the MFA stores, MFA_ENCRYPTION_KEY, the SMTP relay and MFA_MODE=off", async () => {
+		let err: unknown;
+		await bootShipped(unset(SHIPPED_ENV), "production").catch((caught: unknown) => {
+			err = caught;
+		});
+		expect(err).toBeInstanceOf(RangeError);
+		const message = (err as RangeError).message;
+		for (const named of [
+			"ADAPTERS_MFA_FACTOR_STORE",
+			"ADAPTERS_MFA_TRANSACTION_STORE",
+			"MFA_ENCRYPTION_KEY",
+			"STANDARD_SMTP_MAIL_SENDER_HOST",
+			"STANDARD_SMTP_MAIL_SENDER_FROM",
+			"MFA_PAGE_URL",
+			"MFA_MODE=off",
+		]) {
+			expect(message).toContain(named);
+		}
+		// A deployment may pass its own sender in place of the SMTP relay.
+		expect(message).toContain("or your own mail sender");
+	});
+
+	it("boots in production under MFA_MODE=off", async () => {
+		const { config } = await bootShipped({ ...SHIPPED_ENV, MFA_MODE: "off" }, "production");
+		expect(config).not.toHaveProperty("mfa");
+		expect(config.core?.sessionRequirements?.expected ?? []).not.toContain("mfa");
 	});
 });
 

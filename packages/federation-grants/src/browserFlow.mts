@@ -61,6 +61,10 @@ export type FederationGrantDelegatedAuthorizer = Pick<
 export interface FederationGrantBrowserRouterOptions {
 	readonly intentStore: FederationGrantIntentStore;
 	readonly grantStore: FederationGrantStore;
+	/**
+	 * The `clientRepository` slot, which holds core's client-record boundary:
+	 * each record it answers is validated and frozen, and a refused one rejects.
+	 */
 	readonly clientRepository: ClientRepository;
 	/** The durable sessions behind the cookie, which admission re-reads at every step. */
 	readonly userSessionStore: UserSessionStore;

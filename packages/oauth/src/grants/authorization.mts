@@ -317,6 +317,30 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
+			// The client's logout metadata, read before the code is spent: a
+			// record the boundary refuses, or a repository that cannot answer, is
+			// a logged `503` that leaves the code redeemable and nothing signed or
+			// registered. Read only where it is used, with a session store wired.
+			let clientRecord: Awaited<ReturnType<typeof clientRepository.findById>> = null;
+			if (deps.userSessionStore) {
+				try {
+					clientRecord = await clientRepository.findById(authenticatedClientId);
+				} catch (err) {
+					logClientRepositoryUnavailable(
+						logger,
+						{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
+						err,
+					);
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session linking unavailable",
+						},
+					};
+				}
+			}
+
 			// Atomic consume (replay prevention). A store that cannot answer is a
 			// logged `503`, not `500`: the client did nothing wrong. If the
 			// consume never ran, a retry redeems the code; if it ran and the reply
@@ -716,12 +740,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// to logout. With a store wired, the first read already refused a code
 			// without a sid.
 			if (deps.userSessionStore && sid) {
+				const at = { sid, clientId: authenticatedClientId };
 				try {
-					const clientRecord = await clientRepository.findById(authenticatedClientId);
-
 					// The second read, right before the family is added: a session
-					// ended since the first read (spanning both signings, the family
-					// registration and `findById`) is refused here. A logout between
+					// ended since the first read (spanning both signings and the
+					// family registration) is refused here. A logout between
 					// this read and the add is caught by the add itself (below).
 					//
 					// The claim carries the first read's `sub`: the tokens were signed
@@ -738,10 +761,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					});
 					if (revalidation.outcome !== "admitted" || revalidation.session === null) {
 						return {
-							result: revalidationRefusal(revalidation, {
-								sid,
-								clientId: authenticatedClientId,
-							}),
+							result: revalidationRefusal(revalidation, at),
 						};
 					}
 					// The revalidated session drives the TTLs below and the id_token's other claims.
@@ -790,7 +810,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						},
 					);
 					if (joined.outcome === "ended") {
-						const at = { sid, clientId: authenticatedClientId };
 						const refusal = sessionInvalidated(at);
 						await revokeRefusedFamily(familyId, at);
 						return { result: refusal };
@@ -806,20 +825,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						};
 					}
 				} catch (err) {
-					// Fail closed: the client lookup threw (the joins answer their
-					// outages above, and admission answers its own).
-					logClientRepositoryUnavailable(
-						logger,
-						{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
-						err,
-					);
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "session linking unavailable",
-						},
-					};
+					// The family is registered and its tokens are never served: revoked
+					// before the throw leaves, so none is left live outside the index.
+					await revokeRefusedFamily(familyId, at);
+					throw err;
 				}
 			}
 

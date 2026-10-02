@@ -37,6 +37,7 @@ import type {
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 } from "./clients/device-code.mjs";
+import type { RedisDurability } from "./clients/durability.mjs";
 import type {
 	ActivateFederationGrantInput,
 	CreatePendingFederationGrantInput,
@@ -56,6 +57,7 @@ import type {
 	FederationGrantIntentStoreClient,
 } from "./clients/federation-grant-intent.mjs";
 import type {
+	FederationTokenAttachInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
@@ -83,7 +85,6 @@ import type {
 	NoteMfaFirstBindingReply,
 	RaiseMfaRecoverySetFloorInput,
 	RaiseMfaRecoverySetFloorReply,
-	RedisDurability,
 	ReserveMfaSubjectAttemptInput,
 	ReserveMfaSubjectAttemptReply,
 } from "./clients/mfa.mjs";
@@ -139,6 +140,7 @@ export type {
 	FederationGrantIntentStoreClient,
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
+	FederationTokenAttachInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,

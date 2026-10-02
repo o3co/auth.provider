@@ -17,7 +17,7 @@
 /**
  * The MFA stores' clients: the enrolled factors, one hash per subject; the transactions, a
  * subject's lock state, the email-proof requirement, a session's proof and a subject's
- * first-binding mark; and the durability report both are checked by at boot.
+ * first-binding mark.
  */
 
 import type {
@@ -26,25 +26,9 @@ import type {
 	MfaSubjectHold,
 	MfaSubjectRecoveryOperation,
 } from "@o3co/auth-provider-core";
+import type { RedisDurability } from "./durability.mjs";
 
 // --- MfaFactorStoreClient --------------------------------------------------
-
-/**
- * What a Redis server says about keeping what it is written — read at boot
- * by the two MFA store modules (ADR 2026-09-25-multi-factor-authentication,
- * on durability). Each part is `undefined` when it could not be read: the server
- * refused the question (`refusal`), or answered without the value.
- */
-export interface RedisDurability {
-	/** `INFO memory`'s `maxmemory_policy`, or `CONFIG GET maxmemory-policy` where INFO does not say. */
-	readonly maxmemoryPolicy: string | undefined;
-	/** `INFO persistence`'s `aof_enabled`. */
-	readonly appendOnly: boolean | undefined;
-	/** `CONFIG GET save` is not empty: RDB snapshots are taken. Asked only when AOF is off. */
-	readonly snapshots: boolean | undefined;
-	/** The first reply that refused a question — an unknown or renamed command, `NOPERM`, a disabled command — as the driver raised it. Logged by its projection only. */
-	readonly refusal: unknown;
-}
 
 /**
  * What an update writes over a factor record's version and its mutable part,

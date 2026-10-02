@@ -138,7 +138,11 @@ redis-rate-limiter {
 Redis にあり、ユーザーセッションストアのデフォルトは memory で、`tsx watch` は
 保存のたびにプロセスを再起動する — 両者が分かれていると、再起動のあとブラウザの
 セッションは既に存在しない `UserSession` を指し、`/authorize` がループする
-（[Docker](#docker) を参照）。
+（[Docker](#docker) を参照）。MFA はデフォルトで有効で、その 2 つのストアの
+デフォルトも memory である: 同じ理由で `ADAPTERS_MFA_FACTOR_STORE=redis` と
+`ADAPTERS_MFA_TRANSACTION_STORE=redis` を設定する。さもないと保存のたびに、
+セッションが残ったままストアだけが空になる。MFA なしで動かすなら `MFA_MODE=off`
+（[多要素認証](#多要素認証) を参照）。
 
 クライアントレジストリ `config/clients.yaml`（`REPOSITORIES_CLIENT_YAML_PATH`）も読む。このファイルは
 デプロイごとのもの: scaffold は空のものを作るが、`.gitignore` がそれをプロジェクトの
@@ -169,6 +173,7 @@ export OAUTH_JWT_ISSUER=http://localhost:3000 \
   SESSION_STORE_SECRET="$(openssl rand -hex 32)" \
   SESSION_STORE_SECURE=false SESSION_STORE_NAME=auth.sid \
   ADAPTERS_USER_SESSION_STORES=redis \
+  ADAPTERS_MFA_FACTOR_STORE=redis ADAPTERS_MFA_TRANSACTION_STORE=redis \
   REPOSITORIES_USER_HTTP_AUTHENTICATE_URL=http://localhost:8080/authenticate \
   REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL=http://localhost:8080/authenticate-by-token
 
@@ -474,11 +479,13 @@ core.federations {
 
 ### 多要素認証
 
-パスワードログインの後の第二要素と、relying party が `/authorize` で求めたときのステップアップ — [MFA パッケージ](../../packages/mfa/README.md)。`MFA_MODE` はテンプレート自身のスイッチ `mfaMode`（[`config/reference.conf`](config/reference.conf)）である: デフォルトの `off` は MFA を何も組み込まない。`optional`（要素を持つユーザーには求め、誰にも強制しない）と `required`（すべてのパスワードログインに第二要素がある）は、MFA モジュール、TOTP・リカバリーコード・メールの各要素（メールは `MFA_EMAIL_FACTOR_ENABLED` が無ければ off）、オペレーターによるリセット（`handle.components.mfaReset`）、session パッケージのログイン完了、`adapters` が選ぶ 2 つの MFA ストアを組み込む。そのときテンプレートは `core.sessionRequirements.expected` に `mfa` を加え、それを `core.sessionRequirements.secondFactorAuthority` に書き、`mfa.mode` をスイッチから書く。したがって、第二要素を求めながらそれを強制できない合成は、パスワードだけでサインインさせるのではなく boot で拒否される。3 つのどれでもない値は、`mfaMode` と `MFA_MODE` を名指して boot の前に拒否される。
+パスワードログインの後の第二要素と、relying party が `/authorize` で求めたときのステップアップ — [MFA パッケージ](../../packages/mfa/README.md)。`MFA_MODE` はテンプレート自身のスイッチ `mfaMode`（[`config/reference.conf`](config/reference.conf)）である: デフォルトの `required`（すべてのパスワードログインに第二要素がある）と `optional`（要素を持つユーザーには求め、誰にも強制しない）は、MFA モジュール、TOTP・リカバリーコード・メールの各要素（メールは `MFA_EMAIL_FACTOR_ENABLED` が無ければ off）、オペレーターによるリセット（`handle.components.mfaReset`）、session パッケージのログイン完了、`adapters` が選ぶ 2 つの MFA ストアを組み込む。そのときテンプレートは `core.sessionRequirements.expected` に `mfa` を加え、それを `core.sessionRequirements.secondFactorAuthority` に書き、`mfa.mode` をスイッチから書く。したがって、第二要素を求めながらそれを強制できない合成は、パスワードだけでサインインさせるのではなく boot で拒否される。`off` は MFA を何も組み込まない。3 つのどれでもない値は、`mfaMode` と `MFA_MODE` を名指して boot の前に拒否される。
+
+**デフォルトで有効。** development（`make dev`）では MFA にほかに何も要らない: `config/development.conf` のサンプル鍵、各コードをログに出す送信者、2 つのストアには `docker-compose.yml` の Redis を使う。development 以外では、デプロイは MFA に要るもの — 2 つのストアを `redis`（または要素を `store`）、`MFA_ENCRYPTION_KEY`、SMTP リレー（`STANDARD_SMTP_MAIL_SENDER_HOST` と `_FROM`、または `buildModules` の `mailSenderModules` で渡す独自の送信者） — を設定するか、`MFA_MODE=off` を設定する。決めるまでは、アプリが作られる前に boot が拒否される: 最初に来るのはストアの拒否で、そのそれぞれと `MFA_MODE=off` を名指す。MFA ページが拒否されることは無い: `MFA_PAGE_URL` のデフォルトは `/mfa` で、デプロイは development でもそこでページを用意しなければならない。無ければ、すべてのパスワードログインはそこで止まる。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `MFA_MODE` | `off` | `mfaMode`: `off`、`optional` または `required` |
+| `MFA_MODE` | `required` | `mfaMode`: `required`、`optional` または `off` |
 | `MFA_ENCRYPTION_KEY` | — | MFA の鍵リングの最初の鍵で、すべての要素のデータを封じる: 32 バイトの canonical な base64（`openssl rand -base64 32`）。MFA が有効なら必須。`CONFIG_ENV=development` では `config/development.conf` が代わりに MFA パッケージの公開サンプル鍵を置く: 自分の鍵はそこに書く。そのリングの横でこの変数を設定すると boot は拒否される。サンプル鍵は `CONFIG_ENV` か `NODE_ENV` が `production` か `staging` のとき、また `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `MFA_PAGE_URL` | `/mfa` | デプロイの MFA ページ。ログインの第二要素とステップアップはここから始まる。テンプレートはページを同梱しない: ページの契約は [MFA パッケージのもの](../../packages/mfa/README.md#the-routes) |
 | `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`、Store の呼び出し 1 回の時間: 各ストアの呼び出しごとのタイムアウト以上でなければならない。Store を呼ぶ構成（`ADAPTERS_USER_REPOSITORY=http`、または要素を Store に置く）で `REPOSITORIES_USER_HTTP_TIMEOUT` を下回ると boot を拒否するので、二つは一緒に上げる。37500 ms を超えても拒否する |
@@ -648,6 +655,8 @@ make test
 
 レコードが 1 プロセスより長く生き残らなければならないストアは、継承に任せるのではなく、すべてそのファイルの `environment:` ブロックで名指しされている — `SESSION_STORE_STORAGE_TYPE=redis` と必ずセットで設定しなければならない `ADAPTERS_USER_SESSION_STORES=redis` も含めて。両者が揃っていないとき、`CORE_DEPLOYMENT_MODE=single` はそれを教えてくれない: レプリカガードが答えるのは「これらのストアは共有できるか」であって、「この 2 つのストアは同じ寿命を持つか」ではない。両者を分けると、再起動後にすべてのブラウザが、生き残った express-session — 背後に `UserSession` が無いのにまだ `isAuthenticated` と読めるもの — を保持したままになる。`/authorize` はログインへ飛ばし、Cookie がそれを送り返し、このループはユーザーが Cookie を削除するまで解消しない。
 
+2 つの MFA ストアは例外である。MFA はデフォルトで有効で、それを残すかはデプロイが決めることなので、本番用のファイルはそれらを `memory` のままにしている。テンプレートは本番ではこれを boot の前に拒否し、ストア、`MFA_ENCRYPTION_KEY`、SMTP リレー、`MFA_PAGE_URL`、`MFA_MODE=off` を名指す。`.env` で設定する — `ADAPTERS_MFA_FACTOR_STORE=redis` と `ADAPTERS_MFA_TRANSACTION_STORE=redis`（そのファイルの永続化された Redis 上）を、[多要素認証](#多要素認証) の残りとともに — か、`MFA_MODE=off` を設定する。`docker-compose.yml` は両方をその Redis に置くので、ホットリロードでセッションが残ったままストアだけが空になることは無い。
+
 ```bash
 # 署名鍵は必須の入力である。デフォルトは EdDSA で鍵素材のデフォルト値は存在しないため、
 # 鍵を生成していないデプロイは起動時に失敗する。
@@ -690,8 +699,8 @@ docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
 オーバーレイが app サービスに設定するもの:
 
 - `CONFIG_ENV=mailpit`。`development` ではテンプレートは各コードをログに出す送信者を入れる（[モジュール合成順序](#モジュール合成順序) のルール 7）。[`config/mailpit.conf`](config/mailpit.conf) は `development.conf` を include するので、それ以外は MFA のサンプル鍵も含めて development の実行と同じである。
-- `MFA_MODE` は `.env` の値、`.env` が設定していなければ `optional`: MFA が off ならメールを送るものが無い。
-- `ADAPTERS_MFA_FACTOR_STORE=redis` と `ADAPTERS_MFA_TRANSACTION_STORE=redis`（compose の Redis 上）: `development` と `test` 以外の名前では、MFA のストアをメモリに置けない。
+- `MFA_MODE` は設定しない: MFA はテンプレートの出荷どおり、または `.env` が設定するとおりに有効である。MFA が off ならメールを送るものが無い。
+- `ADAPTERS_MFA_FACTOR_STORE=redis` と `ADAPTERS_MFA_TRANSACTION_STORE=redis`（compose の Redis 上、`docker-compose.yml` と同じ）: `development` と `test` 以外の名前では、MFA のストアをメモリに置けない。
 - `STANDARD_SMTP_MAIL_SENDER_HOST=localhost`、`STANDARD_SMTP_MAIL_SENDER_PORT=1025`、`STANDARD_SMTP_MAIL_SENDER_SECURE=none`、`STANDARD_SMTP_MAIL_SENDER_FROM=auth@example.com`。SMTP 送信者が平文で送るのはループバックのホストにだけなので、Mailpit は app コンテナのネットワーク名前空間で動き（`network_mode: service:app`）、その `localhost` で待ち受ける。そのため Mailpit の Web UI のポートは、Mailpit ではなく app サービスがループバックに公開する。
 
 compose の profile ではなくオーバーレイにしているのは、profile はサービスを足すことしかできず、app サービスの環境変数やポートを変えられないからである。

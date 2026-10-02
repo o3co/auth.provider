@@ -1,6 +1,6 @@
 # @o3co/create-auth-provider
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03
 
 CLI scaffolder for auth.provider. Generates a new server project from one of the built-in templates.
 
@@ -31,7 +31,7 @@ of the library versions they pin ([How the templates are bundled](#how-the-templ
 ## Usage
 
 ```bash
-npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]
+npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile] [--no-mfa]
 ```
 
 `--template` names the template to copy, `standalone` by default. The
@@ -73,6 +73,20 @@ cd provider
 
 `--no-lockfile` skips the lockfile step (step 7 below).
 
+The scaffold requires a second factor at every password login: the
+template's MFA switch, `mfaMode` (`MFA_MODE`), defaults to `required`. In
+development that needs nothing more; outside it, the project's boot is
+refused until it sets what MFA needs (its two stores on Redis, a key, an SMTP
+relay) or turns MFA off with `MFA_MODE=off`. The MFA page defaults to `/mfa`,
+which the project must serve, or every password login stops there. What the
+switch installs and needs is in the template's README.
+
+`--no-mfa` writes the switch off in the scaffold instead:
+it appends `mfaMode = "off"` and then `mfaMode = ${?MFA_MODE}` to
+`config/application.conf`, so the project stays off whatever default a later
+template ships, and `MFA_MODE` still turns MFA on without re-scaffolding. The
+MFA package stays a dependency; nothing else is removed or changed.
+
 The generated project is a pnpm project: its `Dockerfile` installs with
 `pnpm install --frozen-lockfile`, and its build allowlist lives in
 `pnpm-workspace.yaml`.
@@ -91,7 +105,7 @@ template's README, which the project carries, gives the commands under
 1. Validates `<project-name>` (see [Validation Rules](#validation-rules)).
 2. Derives the target directory name: `--dir <value>` if given, else the unscoped part of a scoped name, else the name itself.
 3. Checks that `--template` (default `standalone`) names a bundled template, and resolves the target directory as `<cwd>/<dir-name>`, erroring if it already exists.
-4. Copies the named template to the target directory, excluding `node_modules/` and `dist/`, and restores its `.gitignore` (the tarball carries it as `gitignore`, because npm drops a file named `.gitignore` from a published package).
+4. Copies the named template to the target directory, excluding `node_modules/` and `dist/`, and restores its `.gitignore` (the tarball carries it as `gitignore`, because npm drops a file named `.gitignore` from a published package). With `--no-mfa`, appends the MFA switch lines to its `config/application.conf`.
 5. Rewrites `package.json` in the generated directory:
    - Sets `name` to `<project-name>` verbatim (scope-preserving).
    - Keeps `"private": true` on purpose: a scaffolded identity provider should not be publishable by accident. Remove the field yourself if you really intend to publish.
@@ -170,7 +184,7 @@ the composition, which is the host process, and what the scaffold owns.
 The module exports the functions the CLI is built from; their signatures are
 in [`src/index.mts`](src/index.mts).
 
-- `scaffold(targetDir, projectName, template?)` — steps 4–6, from `template` (default `DEFAULT_TEMPLATE`, `"standalone"`). Throws, before writing anything, with `templateRefusal`'s message; and throws if a `workspace:*` dependency has no entry in `versions.json`.
+- `scaffold(targetDir, projectName, template?, options?)` — steps 4–6, from `template` (default `DEFAULT_TEMPLATE`, `"standalone"`); `options.noMfa` is `--no-mfa`. Throws, before writing anything, with `templateRefusal`'s message; and throws if a `workspace:*` dependency has no entry in `versions.json`.
 - `availableTemplates(templatesRoot?)` — the bundled templates' names, sorted.
 - `templateRefusal(template, templates)` — why `template` cannot be scaffolded (none bundled, or not one of them), or `undefined`.
 - `generateLockfile(targetDir)` — step 7. Returns `{ ok: true, command }` or `{ ok: false, reason }` rather than throwing.

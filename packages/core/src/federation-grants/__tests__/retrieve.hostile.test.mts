@@ -1372,6 +1372,88 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		});
 	});
 
+	describe("a grant whose id or version cannot guard a write", () => {
+		/** Every `open` answers the authorized grant with `edit` applied. */
+		const answeredWith = (edit: (grant: AuthorizedFederationGrant) => object) => {
+			const real = h.store.open.bind(h.store);
+			vi.spyOn(h.store, "open").mockImplementation(async (grantId, at) => {
+				const opened = await real(grantId, at);
+				if (opened === null || !("consent" in opened.grant)) return opened;
+				const grant = opened.grant as AuthorizedFederationGrant;
+				return { ...opened, grant: edit(grant) as AuthorizedFederationGrant };
+			});
+		};
+		/** The grant with `field` answered by a getter that throws, as an ORM entity's unloaded column does. */
+		const throwing = (field: "id" | "version") => (grant: AuthorizedFederationGrant) =>
+			Object.defineProperty({ ...grant }, field, {
+				enumerable: true,
+				get() {
+					throw new Error(`${field} was not loaded`);
+				},
+			});
+
+		const cases: Array<[string, (grant: AuthorizedFederationGrant) => object]> = [
+			["a version whose read throws", throwing("version")],
+			["a version read as a string", (grant) => ({ ...grant, version: String(grant.version) })],
+			["a version that is not an integer", (grant) => ({ ...grant, version: grant.version + 0.5 })],
+			["a version past the safe integers", (grant) => ({ ...grant, version: 2 ** 53 })],
+			["an id whose read throws", throwing("id")],
+			["an id that is not the one asked for", (grant) => ({ ...grant, id: "g-2" })],
+			["an id that is not a string", (grant) => ({ ...grant, id: 1 })],
+		];
+		for (const [what, edit] of cases) {
+			it(`answers ${what} as the storage outage, before the upstream is asked`, async () => {
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockResolvedValue(refreshed("rotated", GONE));
+				const reported: string[] = [];
+				h.deps.report = (failure) => reported.push(failure.during);
+				answeredWith(edit);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(h.refresh).not.toHaveBeenCalled();
+				expect(reported).toContain("open");
+				vi.mocked(h.store.open).mockRestore();
+				expect((await stored())?.refreshToken).toBe(SECRET);
+				await Promise.all(h.background);
+				expect(await lockIsFree(h)).toBe(true);
+			});
+		}
+
+		it("still answers a stored token that needs no refresh: nothing is written", async () => {
+			await h.seed();
+			answeredWith(throwing("version"));
+			expect(await retrieve()).toMatchObject({ ok: true, refreshed: false });
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
+		const idCases: Array<[string, (grant: AuthorizedFederationGrant) => object]> = [
+			["an id that is not the one asked for", (grant) => ({ ...grant, id: "g-2" })],
+			["an id whose read throws", throwing("id")],
+		];
+		for (const [what, edit] of idCases) {
+			it(`serves no stored token for ${what}, and records no use of either grant`, async () => {
+				await h.seed();
+				const touch = vi.spyOn(h.store, "touch");
+				const reported: string[] = [];
+				h.deps.report = (failure) => reported.push(failure.during);
+				answeredWith(edit);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				await Promise.all(h.background);
+				expect(touch).not.toHaveBeenCalled();
+				expect(h.refresh).not.toHaveBeenCalled();
+				expect(reported).toContain("open");
+			});
+		}
+	});
+
 	it("never repeats a secret the upstream echoes as its error code: only codes this provider knows are repeated", async () => {
 		await h.seed();
 		setNow(GONE);

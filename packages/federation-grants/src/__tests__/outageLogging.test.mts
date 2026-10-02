@@ -256,6 +256,61 @@ describe("the status route", () => {
 		});
 	});
 
+	it("logs a stored date that holds no instant as one error line, naming the field and not its value", async () => {
+		const h = harness();
+		await h.seed();
+		const inspect = h.store.inspect.bind(h.store);
+		vi.spyOn(h.store, "inspect").mockImplementation(async (...args) => {
+			const inspection = await inspect(...args);
+			return inspection === null
+				? null
+				: ({
+						...inspection,
+						grant: { ...inspection.grant, createdAt: "secret-ish" as unknown as Date },
+					} as typeof inspection);
+		});
+		expect((await call(h, "status")).status).toBe(503);
+		expect(written(await settled(h))).toEqual(["error federation_grant_status_unavailable"]);
+		const payload = payloadOf(h.lines, "federation_grant_status_unavailable");
+		expect(payload).toMatchObject({
+			reason: "storage",
+			store: "federation_grant",
+			step: "inspect",
+			err: { name: "TypeError", detail: expect.stringContaining("created_at") },
+		});
+		expect(JSON.stringify(payload)).not.toContain("secret-ish");
+	});
+
+	it("logs a stored consent instant that holds no instant as one error line, never its value", async () => {
+		const h = harness();
+		await h.seed();
+		const inspect = h.store.inspect.bind(h.store);
+		vi.spyOn(h.store, "inspect").mockImplementation(async (...args) => {
+			const inspection = await inspect(...args);
+			if (inspection === null || inspection.grant.status !== "active") return inspection;
+			return {
+				...inspection,
+				grant: {
+					...inspection.grant,
+					consent: { ...inspection.grant.consent, at: "secret-ish" as unknown as Date },
+				},
+			};
+		});
+		expect((await call(h, "status")).status).toBe(503);
+		expect(written(await settled(h))).toEqual(["error federation_grant_status_unavailable"]);
+		const payload = payloadOf(h.lines, "federation_grant_status_unavailable");
+		expect(payload).toMatchObject({
+			reason: "storage",
+			store: "federation_grant",
+			step: "status",
+			err: {
+				name: "RangeError",
+				detail: expect.stringContaining("the instant is not a valid date"),
+			},
+		});
+		expect(JSON.stringify(payload)).not.toContain("secret-ish");
+	});
+
 	it("logs a boundary the answer needed as the outage, once", async () => {
 		const h = harness();
 		await h.seed();

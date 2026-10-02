@@ -174,8 +174,9 @@ describe("REPOSITORIES_USER_HTTP_BEARER_TOKEN reaches the Store through the ship
 });
 
 describe("a token the Store refuses, seen from outside the booted app", () => {
-	/** Every store on memory, so the boot opens no socket but the Store's. */
+	/** Every store on memory, so the boot opens no socket but the Store's; MFA off. */
 	const MEMORY_ENV: Readonly<Record<string, string>> = {
+		MFA_MODE: "off",
 		SESSION_STORE_SECURE: "false",
 		SESSION_STORE_NAME: "auth.session",
 		SESSION_STORE_STORAGE_TYPE: "memory",

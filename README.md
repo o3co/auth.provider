@@ -271,6 +271,7 @@ section and `docker-compose.production.yml`.
 
 ## Operating
 
+- [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md) — upgrading from v0.16.0: every breaking change since, what to do about each, and the Store implementer checklist.
 - [docs/operator-runbook.md](docs/operator-runbook.md) — running it: deployment shapes and boot refusals, liveness vs readiness, what fail-closed looks like on each dependency, which log and audit events to alert on, Redis key families and sizing, key rotation, upgrading and rollback.
 - [docs/release-runbook.md](docs/release-runbook.md) — cutting a release; [docs/release-policy.md](docs/release-policy.md) — how releases and retired config keys are labelled.
 - [docs/adapter-surface.md](docs/adapter-surface.md) — every component slot a composition root can fill, and the boundary that decides what may become one.

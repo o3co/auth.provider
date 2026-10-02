@@ -86,7 +86,7 @@ function buildDeps(
 ): Record<string, unknown> {
 	const deps: Record<string, unknown> = {};
 	for (const key of requires) {
-		if (!(key in components)) {
+		if (!Object.hasOwn(components, key)) {
 			throw new Error(
 				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/2 should have caught this`,
 			);
