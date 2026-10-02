@@ -23,7 +23,7 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { FederationGrantStoreClient } from "#/clients.mjs";
+import type { FederationGrantStoreClient, TakeFederationGrantRotationInput } from "#/clients.mjs";
 import { makeIoredisFederationGrantStoreClient } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
@@ -865,6 +865,174 @@ describe("noteRefreshFailure", () => {
 	it("refuses once the stored expiry has passed", async () => {
 		await activeWithCredential();
 		expect(await stamp({ nowMs: at(30 * DAY), atMs: at(30 * DAY) })).toBeNull();
+	});
+});
+
+describe("takeRotation", () => {
+	const HOUR = 3_600_000;
+	const take = (over: Partial<TakeFederationGrantRotationInput> = {}, id = "g-1") => {
+		if (client.takeRotation === undefined)
+			throw new Error("fixture: the client has no takeRotation");
+		return client.takeRotation(grantKey(id), {
+			nowMs: at(DAY),
+			expectedVersion: 2,
+			limit: 2,
+			windowMs: HOUR,
+			...over,
+		});
+	};
+	const fieldsOf = async (id = "g-1") => (await client.snapshot(grantKey(id), credKey(id)))?.fields;
+
+	it("opens a window with the first take, bumps no version, and touches nothing else", async () => {
+		await activeWithCredential();
+		const before = await redis.hgetall(grantKey("g-1"));
+		const fields = await take();
+		expect(fields).toStrictEqual({
+			...before,
+			rotationsSince: String(at(DAY)),
+			rotationsCount: "1",
+		});
+		expect(await redis.get(credKey("g-1"))).toBe("v2.sealed-1");
+		expect(await deadline(grantKey("g-1"))).toBe(at(30 * DAY) + RETENTION);
+	});
+
+	it("counts on within the window up to the limit, then refuses and writes nothing", async () => {
+		await activeWithCredential();
+		await take();
+		expect(await take({ nowMs: at(DAY + MIN) })).toMatchObject({
+			rotationsSince: String(at(DAY)),
+			rotationsCount: "2",
+		});
+		const before = await redis.hgetall(grantKey("g-1"));
+		expect(await take({ nowMs: at(DAY + 2 * MIN) })).toBeNull();
+		expect(await redis.hgetall(grantKey("g-1"))).toStrictEqual(before);
+	});
+
+	it("opens a new window from since + windowMs on, and not a millisecond before", async () => {
+		await activeWithCredential();
+		await take({ limit: 1 });
+		expect(await take({ limit: 1, nowMs: at(DAY + HOUR - 1) })).toBeNull();
+		expect(await take({ limit: 1, nowMs: at(DAY + HOUR) })).toMatchObject({
+			rotationsSince: String(at(DAY + HOUR)),
+			rotationsCount: "1",
+		});
+	});
+
+	it("refuses a stale version, a time past the stored expiry, and a grant that is not active", async () => {
+		await activeWithCredential();
+		expect(await take({ expectedVersion: 3 })).toBeNull();
+		expect(await take({ nowMs: at(30 * DAY) })).toBeNull();
+		await pending("g-p");
+		expect(await take({ expectedVersion: 1, nowMs: at(MIN) }, "g-p")).toBeNull();
+		await activeWithCredential("g-r");
+		await client.requireReauthorization(grantKey("g-r"), credKey("g-r"), {
+			nowMs: at(MIN),
+			expectedVersion: 2,
+		});
+		expect(await take({ expectedVersion: 3 }, "g-r")).toBeNull();
+		expect(await take({}, "g-none")).toBeNull();
+		for (const id of ["g-1", "g-p", "g-r"]) {
+			expect((await fieldsOf(id))?.rotationsSince, id).toBeUndefined();
+		}
+		expect(await redis.exists(grantKey("g-none"))).toBe(0);
+	});
+
+	it("refuses a bound it cannot count with, in the script as well, and writes nothing", async () => {
+		await activeWithCredential();
+		for (const over of [
+			{ limit: 0 },
+			{ limit: -1 },
+			{ limit: Number.NaN },
+			{ windowMs: 0 },
+			{ windowMs: -1 },
+			{ windowMs: Number.NaN },
+			{ windowMs: Number.POSITIVE_INFINITY },
+		]) {
+			expect(await take(over), JSON.stringify(over)).toBeNull();
+		}
+		expect((await fieldsOf())?.rotationsSince).toBeUndefined();
+	});
+
+	it("reads a window it cannot parse as none, and opens a new one over it", async () => {
+		await activeWithCredential();
+		for (const [since, count] of [
+			[String(at(DAY)), "1e0"],
+			[String(at(DAY)), "0"],
+			[`${at(DAY)}.5`, "1"],
+			[String(at(DAY)), undefined],
+		] as const) {
+			await redis.hdel(grantKey("g-1"), "rotationsSince", "rotationsCount");
+			await redis.hset(grantKey("g-1"), {
+				rotationsSince: since,
+				...(count === undefined ? {} : { rotationsCount: count }),
+			});
+			expect(await take({ nowMs: at(DAY + MIN), limit: 1 }), `${since} ${count}`).toMatchObject({
+				rotationsSince: String(at(DAY + MIN)),
+				rotationsCount: "1",
+			});
+		}
+	});
+
+	it("is kept by every write but an activation, which clears it", async () => {
+		await activeWithCredential();
+		await take();
+		const kept = { rotationsSince: String(at(DAY)), rotationsCount: "1" };
+		await client.touch(grantKey("g-1"), at(DAY + MIN));
+		await client.noteRefreshFailure(grantKey("g-1"), {
+			nowMs: at(DAY + MIN),
+			expectedVersion: 2,
+			atMs: at(DAY + MIN),
+			kind: "unavailable",
+			rowMs: 300_000,
+			retryAfterSeconds: undefined,
+			upstreamCode: undefined,
+		});
+		await client.nameIntent(grantKey("g-1"), {
+			nowMs: at(DAY + MIN),
+			handle: JSON.stringify("h-re"),
+			intentExpiresAtMs: at(DAY + 10 * MIN),
+		});
+		await client.retireIntent(grantKey("g-1"), { nowMs: at(DAY + MIN) });
+		expect(
+			await client.replaceCredentials(grantKey("g-1"), credKey("g-1"), {
+				nowMs: at(DAY + MIN),
+				expectedVersion: 2,
+				credential: "v2.sealed-2",
+				ineligible: null,
+			}),
+		).toMatchObject({ version: "3", ...kept });
+		expect(
+			await client.requireReauthorization(grantKey("g-1"), credKey("g-1"), {
+				nowMs: at(DAY + MIN),
+				expectedVersion: 3,
+			}),
+		).toMatchObject({ status: "reauthorization_required", ...kept });
+		await client.nameIntent(grantKey("g-1"), {
+			nowMs: at(DAY + MIN),
+			handle: JSON.stringify("h-renew"),
+			intentExpiresAtMs: at(DAY + 10 * MIN),
+		});
+		const renewed = await client.activate(grantKey("g-1"), credKey("g-1"), {
+			nowMs: at(DAY + 2 * MIN),
+			handle: JSON.stringify("h-renew"),
+			authorization: authorization(),
+			expiresAtMs: at(30 * DAY),
+			identityRevision: "identity-1",
+			upstreamIssuer: "https://dev-1.okta.test",
+			upstreamSubject: "00u-alice",
+			credential: "v2.sealed-3",
+		});
+		expect(renewed?.status).toBe("active");
+		expect(renewed?.rotationsSince).toBeUndefined();
+		expect(renewed?.rotationsCount).toBeUndefined();
+	});
+
+	it("is kept by a revocation, which keeps what the grant was", async () => {
+		await activeWithCredential();
+		await take();
+		expect(
+			await client.revoke(grantKey("g-1"), credKey("g-1"), { atMs: at(DAY + MIN), by: "client" }),
+		).toMatchObject({ status: "revoked", rotationsSince: String(at(DAY)), rotationsCount: "1" });
 	});
 });
 

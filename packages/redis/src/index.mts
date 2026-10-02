@@ -107,6 +107,7 @@ export type {
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	SubjectSessionIndexMultiClient,
+	TakeFederationGrantRotationInput,
 	UserSessionStoreClient,
 } from "./clients.mjs";
 // makeIoredisClients lives at the `/ioredis` subpath

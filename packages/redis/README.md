@@ -725,7 +725,7 @@ prefix `fg:` (`redis-federation-grant-store.keyPrefix`).
 
 | Key | Type | Holds |
 | --- | --- | --- |
-| `fg:{<id>}:grant` | **hash** | the non-secret record: status, version, the authorization as one canonical text, the current intent |
+| `fg:{<id>}:grant` | **hash** | the non-secret record: status, version, the authorization as one canonical text, the current intent, the rotation budget |
 | `fg:{<id>}:cred` | string | one sealed credential (`v2.<key id>.<iv>.<ciphertext>.<tag>`) |
 | `fg:{<id>}:lock` | string | the lock one refresh holds |
 | `fg:sub:<subject>` | **zset** | that subject's grants, scored by the instant each stops answering |
@@ -752,9 +752,17 @@ honours from the text itself (#627) — read as the TypeScript reader reads it,
 so a value the reader refuses gives no horizon and the revocation proceeds —
 and a copy moved into the past cannot keep a live grant from being ended.
 
-The Redis adapter does not implement the port's optional `takeRotation` yet,
-so it keeps no rotation budget, and the contract's rotation cases skip
-against it.
+The port's optional `takeRotation` is one script over two fields of the
+grant hash, `rotationsSince` and `rotationsCount`: non-secret, outside the
+envelope, compared against the version and written without bumping it.
+`replaceCredentials` and every other write keep them; `activate` removes
+both. A record without both, or with one that is not a whole number, has no
+window, and the script and the reader agree on that. The store offers
+`takeRotation` only over a client that has the primitive: a
+`FederationGrantStoreClient` of your own without it gives a store that keeps
+no rotation budget. During a rolling deploy, an activation by an earlier
+release leaves the fields in place, so a renewed grant can start with the
+budget it had.
 
 The credential is sealed under a key **ring**, in core's `v2` key-ring
 envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the

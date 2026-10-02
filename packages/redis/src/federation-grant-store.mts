@@ -32,6 +32,7 @@ import {
 	type FederationGrantLockResult,
 	type FederationGrantRefreshFailureKind,
 	type FederationGrantRevokedBy,
+	type FederationGrantRotations,
 	type FederationGrantStore,
 	type FederationGrantUsage,
 	type FederationGrantWrite,
@@ -260,6 +261,22 @@ const parseMarker = (text: string | undefined): FederationGrantIneligibilityMark
 	};
 };
 
+/**
+ * The rotation budget's window, or none: both fields whole numbers, the
+ * opening a date and the count at least 1, as the take script reads them.
+ */
+const parseRotations = (
+	since: string | undefined,
+	count: string | undefined,
+): FederationGrantRotations | undefined => {
+	const opened = dateFrom(since);
+	const taken = numberFrom(count);
+	if (opened === undefined || !isDate(opened) || taken === undefined || taken < 1) {
+		return undefined;
+	}
+	return { since: opened, count: taken };
+};
+
 const encodeMarker = (marker: FederationGrantIneligibilityMarker): string =>
 	JSON.stringify([marker.reason, String(marker.at.getTime()), String(marker.judgedAgainst)]);
 
@@ -360,6 +377,7 @@ function decode(
 	const failureAt = dateFrom(fields.failureAt);
 	const failureCount = numberFrom(fields.failureCount);
 	const retryAfterSeconds = fields.failureRetryAfterSeconds;
+	const rotations = parseRotations(fields.rotationsSince, fields.rotationsCount);
 	// Typed literals, each field named: a HASH field this read forgot is a
 	// compile error, where a spread of conditional parts and a cast of the
 	// whole to the grant type would let one go without a sound.
@@ -379,6 +397,8 @@ function decode(
 						count: failureCount,
 					}
 				: undefined,
+		// Optional on the port: a record without a window has no key at all.
+		...(rotations === undefined ? {} : { rotations }),
 	};
 	const grant: AuthorizedFederationGrant | RevokedFederationGrant =
 		revocation === undefined
@@ -653,6 +673,39 @@ export function createRedisFederationGrantStore(
 		ms: number,
 		recordRetentionMs = retentionMs,
 	): number => (status === "pending" ? ms : ms + recordRetentionMs);
+
+	/**
+	 * The port's optional `takeRotation`, offered only over a client that has
+	 * the primitive. The bounds are refused before anything is sent; the
+	 * script checks every state.
+	 */
+	const clientTake = client.takeRotation?.bind(client);
+	const takeRotationOver: FederationGrantStore["takeRotation"] =
+		clientTake === undefined
+			? undefined
+			: async (input) => {
+					const nowMs = instant(input.now, "now");
+					if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+						throw RANGE("takeRotation: limit must be a whole number of at least 1");
+					}
+					if (!Number.isFinite(input.windowMs) || input.windowMs <= 0) {
+						throw RANGE("takeRotation: windowMs must be a positive finite number");
+					}
+					// As in `replaceCredentials`: a fractional version would round into a match.
+					if (!Number.isSafeInteger(input.expectedVersion)) return { ok: false };
+					return written(
+						await clientTake(grantKey(input.grantId), {
+							nowMs,
+							expectedVersion: input.expectedVersion,
+							limit: input.limit,
+							// Rounded up: the instants are whole milliseconds, so
+							// `now >= since + windowMs` holds exactly when it does for the
+							// next whole number, and the client sends whole numbers.
+							windowMs: Math.ceil(input.windowMs),
+						}),
+						input.grantId,
+					);
+				};
 
 	return {
 		kind: "redis",
@@ -983,6 +1036,8 @@ export function createRedisFederationGrantStore(
 				input.grantId,
 			);
 		},
+
+		...(takeRotationOver === undefined ? {} : { takeRotation: takeRotationOver }),
 
 		async touch(grantId, at) {
 			const atMs = at?.getTime?.();
