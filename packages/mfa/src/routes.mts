@@ -46,7 +46,8 @@
  *   `step_up` transaction, with the `acr_values` the body hints read
  *   strictly — at most 16 values of at most 256 characters, else none — as a
  *   hint only; `403 mfa_no_qualifying_factor` when no factor can be used, and
- *   `401` where the session store cannot record a step-up.
+ *   `401` where admission's view says no second factor can be recorded on
+ *   the session (`secondFactorRecordable`), before anything is opened.
  * - The account page's management of the subject's factors, under
  *   `/factors`, is `management.mts`'s, mounted here behind the same guards
  *   and admitted through `sessionFor`, which takes a session admitted as
@@ -431,10 +432,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		}
 		let authTimeMs: number | undefined;
 		let witness: MfaCeremonySession["witness"];
+		let secondFactorRecordable = false;
 		if (admitted.outcome === "admitted" && admitted.view !== null) {
 			const view: SessionView = admitted.view;
 			authTimeMs = view.authTime.getTime();
 			witness = view.enrollmentFacts?.witness;
+			secondFactorRecordable = view.secondFactorRecordable === true;
 		}
 		return {
 			session: {
@@ -443,6 +446,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				user,
 				authTimeMs,
 				witness,
+				secondFactorRecordable,
 				...(factorSetStart === undefined ? {} : { factorSetStart }),
 			},
 			expectedRenewalNonce,
