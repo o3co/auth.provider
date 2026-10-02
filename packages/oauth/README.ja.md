@@ -639,8 +639,18 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 6. そうでなければリフレッシュする:
    - 同時リフレッシュのファンアウトを防ぐため advisory lock を取得する（`FederationTokenStore` が `SupportsLock` を実装している場合）。
    - ロック取得後に再読み込みする — 待機中に別のウェイターがリフレッシュしたか、ログアウトやリンク解除がレコードを消したかもしれない。その時点で消えていたレコードは、最初の読み込みと同じく `404 federation_not_linked` と答え、上流を呼ばず、レコードは書き戻さない。
-   - `provider.refreshToken(refreshToken)` を呼び、結果を永続化する。その有効期間は core の `readUpstreamTokenLifetime` で読む。述べた有効期間が不正な応答、もう一方のフィールドと矛盾する応答、残りが 1 秒未満の応答は `500 refresh_failed`（`invalid_expiry`）となる。有効期間を述べない応答は有限の有効期限なしとして保存し、上限はこれには適用しない。有限の期限は応答を読んだ時点から `maxTokenLifetimeMs`（既定 24 時間）で切り詰める。それより長い有効期間は短くするだけで拒否はしないので、そのようなトークンはその期間内にリフレッシュの対象になる。リフレッシュ自体は、対象になった後の次のリクエストで行われる。
+   - `provider.refreshToken(refreshToken)` を呼び、結果を、リフレッシュの元にしたレコードにだけ永続化する（下記）。その有効期間は core の `readUpstreamTokenLifetime` で読む。述べた有効期間が不正な応答、もう一方のフィールドと矛盾する応答、残りが 1 秒未満の応答は `500 refresh_failed`（`invalid_expiry`）となる。有効期間を述べない応答は有限の有効期限なしとして保存し、上限はこれには適用しない。有限の期限は応答を読んだ時点から `maxTokenLifetimeMs`（既定 24 時間）で切り詰める。それより長い有効期間は短くするだけで拒否はしないので、そのようなトークンはその期間内にリフレッシュの対象になる。リフレッシュ自体は、対象になった後の次のリクエストで行われる。
    - ロックを解放する。
+
+**書き込みは、読んだレコードにだけ届く。** ルートはレコードをストアの世代（generation）付きで読み、その世代のときだけ書く（`replaceIf` / `removeIf`。core の [条件付き書き込みの規約](../../docs/adapter-surface.md#conditional-writes)）。そのため、リフレッシュの途中に入ったログアウト、リンク解除、再リンクを取り消したり上書きしたりしない:
+
+- **その間に消された**（ログアウトかリンク解除）: リフレッシュのトークンは、ローテーションされたリフレッシュトークンも含めて捨て、`404 federation_not_linked` と答える。`federation_token_refresh_discarded`（`reason: "record_gone"`）として warn でログに出す。捨てたリフレッシュトークンを上流で失効させはしない。
+- **その間に書き換えられた**（再リンクか、別のリフレッシュ）: リフレッシュのトークンは捨て、`federation_token_refresh_discarded`（`reason: "record_replaced"`）としてログに出し、勝ったレコードをもう一度読む。リフレッシュの対象でなければ保存されたまま答え、対象なら `503 temporarily_unavailable`（"the federation token was replaced concurrently; retry"）と答える。1 回のリクエストの中でリフレッシュを繰り返すことはなく、置き換えられたコネクションのものは何も渡さない。捨てたリフレッシュで上流がローテーションしたリフレッシュトークンは一緒に失われる: 上流がそれによって勝ったレコードの持つものを無効にしていれば、そのコネクションの次のリフレッシュは失敗し（`410`）、ユーザーは接続し直す。
+- **拒否時にローテーションされたリフレッシュトークン**（下の `500` と `502`）も同じく、ローテーションの元になったレコードにだけ残す。その後に消された・書き換えられたレコードはそのままにする（`federation_token_keep_rotated_skipped`）。
+- **上流の `invalid_grant`** は、拒否されたレコードを読んだとおりのときだけ消す。その後に書き換えられたレコードは、`410` ではなく上と同じように答える。
+- **このルートはセッションのフェデレーションインデックスに書かない。** レコードの無いリンクは `404` と答える。それは資格情報を持たず、フェデレーションログアウトで外れ、セッションとともに終わる。それまでは、RP-initiated logout が IdP の end-session 呼び出しにそれを選び、`id_token_hint` を送らないことがある。
+
+この防ぎはストアの不可分な一歩で成り立ち、応答の時点では成り立たない: 同時のリンク解除が終わる直前に読んだ、または書いたトークンは、まだ答えられうる。無条件に書く古いレプリカは、ローリングアップグレードが終わるまでレコードを復元・上書きしうる。
 
 ### レスポンス
 
@@ -696,10 +706,12 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 
 ストアの契約は core の `FederationTokenStore` と `FederationTokens`（[`federation-tokens/types.mts`](../core/src/federation-tokens/types.mts)）である。レコードの `obtainedAt` 以外のすべてのフィールドは必須キーで、ストアを実装する・呼ぶ人向けには [Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md) が説明している。`obtainedAt` は省略可能: このルートは上流が `expires_in` を述べたリフレッシュ済みレコードに、リフレッシュ呼び出しの開始時刻として書く。リンク時のレコードと、時刻だけで述べた期限のレコードは持たない。このルートが依存すること:
 
-- **すべてのフィールドが `attach`、`update`、`get` を通して保たれること。** `tokenType` を失うと**開いたまま**失敗する: レコードが沈黙して返り、沈黙は `Bearer` と読まれ、sender-constrained なトークンが Bearer として渡される。`refreshToken` を失うとコネクションはリフレッシュできなくなり（`410 refresh_token_absent`）、`idToken` を失うとログアウトで上流の `id_token_hint` が落ち、`grantedScope` を失うと現在のスコープがリフレッシュの上限になる（過小に報告する）。
+- **すべてのフィールドが `attach`、`replaceIf`、`get`、`getVersioned` を通して保たれること。** `tokenType` を失うと**開いたまま**失敗する: レコードが沈黙して返り、沈黙は `Bearer` と読まれ、sender-constrained なトークンが Bearer として渡される。`refreshToken` を失うとコネクションはリフレッシュできなくなり（`410 refresh_token_absent`）、`idToken` を失うとログアウトで上流の `id_token_hint` が落ち、`grantedScope` を失うと現在のスコープがリフレッシュの上限になる（過小に報告する）。
 - **アダプター独自の保存形式もすべてのフィールドを名指すこと。** 必須キーが届くのは `FederationTokens` までで、アダプターがそれを変換する行やドキュメントには届かない: その形式にも同じ必須キーを宣言すること — 同梱の Redis ストアは envelope でそうしている — さもなければ変換がフィールドを落としたままコンパイルが通る。`obtainedAt` も、レコード上は省略可能だが、その形式に宣言すること。
 - **`obtainedAt` も `Date` として保たれるか、不在のままであること。** 落とすと閉じた側に失敗する: そのレコードは半分経過による抑制を失い、フィールド以前のレコードと同じくバッファ内でリフレッシュされる。
 - **未設定の値は `undefined` か不在で返し、決して `null` にしないこと。** このルートは保存された `null` を拒否するので、`undefined` を `null` として書くシリアライザー — MongoDB のドライバーは `ignoreUndefined` を設定しない限りそうする — では、型を名乗らないアダプターのコネクションがすべて `502` になる。同梱の Redis コーデックは `null` を含むレコードを拒否する。
+
+- **`getVersioned`、`replaceIf`、`removeIf` が [条件付き書き込みの規約](../../docs/adapter-surface.md#conditional-writes) を守ること。** 規約の外の答え（別の outcome、不正な世代）を返すストアは、このルートにとって障害である: `503`、またはログに出す best effort の失敗であり、書けたものとは決して見なさない。
 
 同梱の 2 つのストアはこれらを満たし、テストで固定されている。
 
@@ -709,15 +721,15 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 | --- | --- | --- |
 | 401 | `invalid_token` | Bearer 未指定・不正・型が `at+jwt` でない・ファミリーが失効済み |
 | 403 | `forbidden` | クライアントが `allowedAzpForFederationToken` でオプトインしていない |
-| 404 | `federation_not_linked` | 指定のフェデレーションがこのセッションに紐付いていない。またはそのトークンレコードが（最初の読み込みか、リフレッシュのロック取得後に）無いか、使えるアクセストークンを持たない（このときリンクは外される。後者は `federation_token_record_unusable` として warn レベルでログに出す） |
+| 404 | `federation_not_linked` | 指定のフェデレーションがこのセッションに紐付いていない。またはそのトークンレコードが（最初の読み込みか、リフレッシュのロック取得後に）無いか、リフレッシュの間に消されたか、渡すときに使えるアクセストークンを持たない（このときそのレコードを読んだとおりに消し、後者は `federation_token_record_unusable` として warn レベルでログに出す。リフレッシュの対象ならリフレッシュする）。セッションのインデックスはそのままにする |
 | 410 | `refresh_token_absent` | 保存済みトークンにリフレッシュトークンが無い（ログイン時に上流が返さなかった、またはロック後の再読み込みでそれの無いレコードが見つかった） |
-| 410 | `re_authentication_required` | IdP がリフレッシュトークンを拒否した: ライブラリが投げたものの `error` が `invalid_grant` / `invalid_token` で、ステータスが 429 でも 5xx でもない — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要。429 や 5xx は本文が何を名乗ってもこれにならず、メッセージにコードを含むだけのエラーもならない。それらは保存済みトークンを残す（下の `429`、`503`、`500`） |
+| 410 | `re_authentication_required` | IdP がリフレッシュトークンを拒否した: ライブラリが投げたものの `error` が `invalid_grant` / `invalid_token` で、ステータスが 429 でも 5xx でもない — リフレッシュの元にしたトークンレコードを消す。ユーザーは IdP で再認証が必要。その間に再リンクが書いたレコードは残し、代わりにそれを答える。429 や 5xx は本文が何を名乗ってもこれにならず、メッセージにコードを含むだけのエラーもならない。それらは保存済みトークンを残す（下の `429`、`503`、`500`） |
 | 429 | `rate_limited` | 上流 IdP のレート制限超過（本文がどのコードを名乗っていても `status: 429`、または `error: "too_many_requests"`）。保存済みトークンは残す。上流が秒数（1〜86400）で待ち時間を示したときは `Retry-After` にそれを載せ、示さなければ付けない |
 | 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー（`error` にコードが無く、メッセージが `invalid_grant` を名乗るだけのものを含む）、またはこのルートが読めない応答。保存済みトークンは残す。SIEM は監査の `details.reason` フィールドでグループ化すること |
 | 502 | `upstream_token_ineligible` | 上流のトークンがこのプロバイダーの渡せないもの。理由は `error_description` が名乗る — `token_type_unsupported` だけである。`Retry-After: 300` を付ける |
 | 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない。デプロイ側で直すべきものとして `federation_token_refresh_unsupported` を error レベルでログに出す |
 | 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった。続く競合が見えるよう、`federation`、`clientId`、`sid` 付きの `federation_token_lock_timeout` として warn でログに出す |
-| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、または上流の障害: 5xx を返した IdP（本文がどの OAuth コードを名乗っていても — ただし `too_many_requests` は上の `429` — 、ライブラリが本文を読んだか `Response` の上で投げたかにかかわらず）、時間内に答えなかった IdP、到達できなかった IdP（エラーやその cause に包まれた接続・トランスポートのコード）。判定は core の `isFederationUpstreamOutage` で、リフレッシュトークンを拒否するコードよりも先に行う。保存済みトークンは再試行のために残す。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
+| 503 | `temporarily_unavailable` | リフレッシュの間にレコードが置き換えられ、置き換えたレコード自体がリフレッシュの対象である（"the federation token was replaced concurrently; retry"。上記）。それ以外は、ストア障害（リフレッシュトークンファミリーの確認と、ストアの契約の外で答えた条件付き書き込みを含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、または上流の障害: 5xx を返した IdP（本文がどの OAuth コードを名乗っていても — ただし `too_many_requests` は上の `429` — 、ライブラリが本文を読んだか `Response` の上で投げたかにかかわらず）、時間内に答えなかった IdP、到達できなかった IdP（エラーやその cause に包まれた接続・トランスポートのコード）。判定は core の `isFederationUpstreamOutage` で、リフレッシュトークンを拒否するコードよりも先に行う。保存済みトークンは再試行のために残す。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 

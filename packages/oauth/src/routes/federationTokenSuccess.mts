@@ -45,7 +45,7 @@ export const answerToken = async (
 	// none. Logged with the federation alone, never what the record holds.
 	if (!isUsableToken(token.accessToken)) {
 		logger.warn({ federation }, "federation_token_record_unusable");
-		return answerUnlinkedRecord(ctx, caller);
+		return answerUnlinkedRecord(ctx);
 	}
 	emitAuditEvent(opts.auditSink, {
 		timestamp: new Date(),

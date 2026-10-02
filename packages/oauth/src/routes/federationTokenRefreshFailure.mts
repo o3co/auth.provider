@@ -17,8 +17,9 @@
 /**
  * A refresh the upstream did not complete, read through core's classifier: an
  * outage (`503`) or a rate limit (`429`) keeps the stored tokens for a retry;
- * only the upstream's structured `invalid_grant` ends them (`410`); anything
- * else is `500 refresh_failed`, audited.
+ * only the upstream's structured `invalid_grant` ends them (`410`), and only
+ * the record the refresh was made from; anything else is `500
+ * refresh_failed`, audited.
  */
 
 import {
@@ -28,18 +29,26 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
+import {
+	answerDiscardedRefresh,
+	removeRecord,
+	type StoredRecord,
+} from "./federationTokenRecord.mjs";
 
 /**
- * The answer when the provider's refresh threw. On `invalid_grant` the record
- * and the link are removed, best effort, before the `410`.
+ * The answer when the provider's refresh of `current` threw. On
+ * `invalid_grant` that record is removed, best effort, before the `410`; the
+ * session's index is left as it is. A record rewritten since (a relink, or
+ * another refresh) is not this refresh's to end: it is answered as it stands.
  */
 export const answerRefreshFailure = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
+	current: StoredRecord,
 	error: unknown,
 ): Promise<Response> => {
-	const { opts, req, res, name, federation, logger } = ctx;
-	const { sid, sub } = caller;
+	const { opts, req, res, federation, logger } = ctx;
+	const { sub } = caller;
 
 	// Core's classifier: an outage (unreachable, timeout, 5xx) is
 	// `network`, a 429 is `rate_limited`, and `invalid_grant` is only
@@ -63,33 +72,21 @@ export const answerRefreshFailure = async (
 	}
 
 	if (reason === "invalid_grant") {
-		// Cleanup: delete federation token + remove federation link.
+		let outcome: Awaited<ReturnType<typeof removeRecord>> | undefined;
 		try {
-			await opts.federationTokenStore.delete(sid, name);
+			outcome = await removeRecord(ctx, caller, current);
 		} catch (cleanupErr) {
 			logger.warn(
 				{
 					federation,
 					store: "federation_token",
-					step: "delete",
+					step: "remove_if",
 					err: loggableError(cleanupErr),
 				},
 				"federation_token_cleanup_failed",
 			);
 		}
-		try {
-			await opts.sessionFederationIndex.removeFederation(sid, name);
-		} catch (cleanupErr) {
-			logger.warn(
-				{
-					federation,
-					store: "session_federation_index",
-					step: "remove",
-					err: loggableError(cleanupErr),
-				},
-				"federation_token_cleanup_failed",
-			);
-		}
+		if (outcome === "conflict") return answerDiscardedRefresh(ctx, caller, outcome);
 		emitAuditEvent(opts.auditSink, {
 			timestamp: new Date(),
 			type: "federation.token.reauthentication_required",

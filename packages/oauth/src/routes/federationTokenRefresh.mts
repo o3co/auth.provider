@@ -19,11 +19,11 @@
  * able to refresh and the record to hold a refresh token. The record's lock,
  * when the store has one, is taken before the re-read and released, always,
  * once the answer is sent. A record the re-read finds gone is answered as
- * unlinked, and neither refreshed nor written back.
+ * unlinked, and neither refreshed nor written back. Every write lands only on
+ * the record the refresh was made from (`federationTokenRecord.mts`).
  */
 
 import {
-	type FederationTokens,
 	loggableError,
 	sanitizeErrorText,
 	supportsLock,
@@ -31,19 +31,17 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
-import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
+import { readRecord, type StoredRecord, serveStored } from "./federationTokenRecord.mjs";
 import { readRefreshAnswer } from "./federationTokenRefreshAnswer.mjs";
 import { refreshIsDue } from "./federationTokenRefreshDue.mjs";
 import { answerRefreshFailure } from "./federationTokenRefreshFailure.mjs";
 import { recordRefresh } from "./federationTokenRefreshRecord.mjs";
-import { answerToken } from "./federationTokenSuccess.mjs";
-import { answerUnlinkedRecord } from "./federationTokenUnlinked.mjs";
 
-/** Step 11. `tokens` is the record as read before the lock. */
+/** Step 11. `read` is the record as read before the lock. */
 export const refreshStoredTokens = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
-	tokens: FederationTokens,
+	read: StoredRecord,
 ): Promise<Response> => {
 	const { opts, res, name, federation, logger, storeUnavailable, maxTokenLifetimeMs } = ctx;
 	const { sid, azp } = caller;
@@ -63,7 +61,7 @@ export const refreshStoredTokens = async (
 	}
 
 	// 11b: refreshToken must be present.
-	if (!tokens.refreshToken) {
+	if (!read.value.refreshToken) {
 		return res.status(410).json({
 			error: "refresh_token_absent",
 			error_description: "no refresh token available for this federation",
@@ -100,47 +98,30 @@ export const refreshStoredTokens = async (
 	}
 
 	try {
-		// currentTokens tracks the freshest snapshot of stored federation tokens.
-		// It starts as the pre-lock read and is updated to the post-lock re-read
-		// value (11d) so that all downstream IdP calls and store writes use the
-		// most up-to-date refresh_token and id_token — never a stale pre-lock snapshot.
-		let currentTokens = tokens;
+		// The record the refresh is made from, and the only one its writes may
+		// land on: the post-lock re-read when there is a lock, so the IdP call
+		// uses the freshest refresh_token and id_token.
+		let current = read;
 
-		// 11d: Re-read tokens after lock acquisition to detect concurrent refresh.
+		// 11d: Re-read after the lock to detect a concurrent refresh, or a
+		// logout or unlink that removed the record (answered `404`, and neither
+		// refreshed nor written back).
 		if (release !== undefined) {
-			let freshTokens: Awaited<ReturnType<typeof opts.federationTokenStore.get>>;
-			try {
-				freshTokens = await opts.federationTokenStore.get(sid, name);
-			} catch (error) {
-				storeUnavailable(federation, "federation_token", "get_after_lock", error);
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "federation token store unavailable",
-				});
+			const fresh = await readRecord(ctx, caller, "get_after_lock");
+			if (fresh === null) return res;
+			if (!refreshIsDue(ctx, fresh.value)) {
+				// Another caller refreshed, or the token is not due: served as on
+				// the fast path, without calling the IdP. Awaited inside the
+				// `try`, so the lock is released after the answer.
+				return await serveStored(ctx, caller, fresh);
 			}
-			if (!freshTokens) {
-				// A concurrent logout or unlink removed the record: refreshing it
-				// would write back a refresh token the user asked to drop.
-				// Awaited inside the `try`, so the lock is released after the answer.
-				return await answerUnlinkedRecord(ctx, caller);
-			}
-			if (!refreshIsDue(ctx, freshTokens)) {
-				// Another caller refreshed, or the token is not due: return
-				// the stored token without calling the IdP, judging its type as on
-				// the fast path.
-				if (!isDisclosable(freshTokens)) {
-					return refuseUndisclosableTokenType(ctx, caller, freshTokens.tokenType);
-				}
-				// Awaited inside the `try`, so the lock is released after the answer.
-				return await answerToken(ctx, caller, freshTokens, false);
-			}
-			currentTokens = freshTokens;
+			current = fresh;
 		}
 
 		// The post-lock re-read may lack a refresh token too (a concurrent
 		// revoke, or a rotation without one): 410 gives a precise re-auth
 		// signal instead of an opaque upstream failure.
-		if (!currentTokens.refreshToken) {
+		if (!current.value.refreshToken) {
 			return res.status(410).json({
 				error: "refresh_token_absent",
 				error_description: "no refresh token available for this federation (post-lock re-read)",
@@ -149,23 +130,23 @@ export const refreshStoredTokens = async (
 
 		// 11e: refresh with the freshest snapshot. The lock is held across the
 		// IdP call; its TTL should cover the IdP timeout, else a second waiter
-		// also calls the IdP — harmless, since `update` is atomic and the last
-		// write wins.
+		// also calls the IdP. Only one of their writes lands: each lands only
+		// on the record it refreshed from.
 		let refreshed: Awaited<ReturnType<typeof provider.refreshToken>>;
 		const calledAt = Date.now();
 		try {
-			refreshed = await provider.refreshToken(currentTokens.refreshToken);
+			refreshed = await provider.refreshToken(current.value.refreshToken);
 		} catch (error) {
 			// Awaited inside the `try`, so the lock is released after the answer.
-			return await answerRefreshFailure(ctx, caller, error);
+			return await answerRefreshFailure(ctx, caller, current, error);
 		}
 
 		// Awaited inside the `try`, so the lock is released after the answer.
 		return await recordRefresh(
 			ctx,
 			caller,
-			currentTokens,
-			readRefreshAnswer(refreshed, currentTokens, { calledAt, maxTokenLifetimeMs }),
+			current,
+			readRefreshAnswer(refreshed, current.value, { calledAt, maxTokenLifetimeMs }),
 		);
 	} finally {
 		// 11g: Release lock if acquired.
