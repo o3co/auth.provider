@@ -15,9 +15,43 @@
  */
 
 /**
- * The federation token store's client: the envelopes, the per-session index that finds them,
- * and the atomic release of the store's advisory lock.
+ * The federation token store's client: the envelopes, their conditional writes, the per-session
+ * index that finds them, and the atomic release of the store's advisory lock.
  */
+
+/** What `replaceIfGeneration` writes, the deadline at or after which it writes nothing, and where it keeps its answer. */
+export interface FederationTokenReplaceIfInput {
+	/** The generation the stored value must carry: its wrapper's `g`. */
+	readonly expected: string;
+	/** The new stored value, carrying its new generation. */
+	readonly value: string;
+	/** The store TTL the value is written with (`PX`), in whole milliseconds. */
+	readonly ttlMs: number;
+	/** Epoch ms on the server's clock at or after which the write is refused (`late`), nothing read or written. */
+	readonly deadlineMs: number;
+	/**
+	 * Where this write keeps its answer until `clockSkewMs` past `deadlineMs`
+	 * (`SET … PXAT deadlineMs + clockSkewMs + 1`), on the record's Cluster slot:
+	 * a copy of the write that reaches the server before then answers what the
+	 * first copy answered and writes nothing.
+	 */
+	readonly replayKey: string;
+	/**
+	 * The clock skew the adapter allows between servers' clocks: the replay key
+	 * outlives the deadline by it, so a server whose clock lags the one that
+	 * kept the key (after a failover or a slot migration) still finds it before
+	 * it would judge the copy on time.
+	 */
+	readonly clockSkewMs: number;
+}
+
+/** What `removeIfGeneration` checks, the deadline at or after which it writes nothing, and where it keeps its answer, as for `replaceIfGeneration`. */
+export interface FederationTokenRemoveIfInput {
+	readonly expected: string;
+	readonly deadlineMs: number;
+	readonly replayKey: string;
+	readonly clockSkewMs: number;
+}
 
 // --- FederationTokenStoreClient --------------------------------------------
 
@@ -104,4 +138,40 @@ export interface FederationTokenStoreClient {
 	 *          the holder — a different process acquired the lock).
 	 */
 	compareAndDelete(key: string, expectedValue: string): Promise<boolean>;
+	/**
+	 * The stored value at `key` and the generation its wrapper carries, read in
+	 * one atomic step: `null` when there is no key. A value the store's format
+	 * wrote without a generation is given `candidate` in the same step, its TTL
+	 * kept. Any other value is answered with the generation `""`. Implementations
+	 * MUST be atomic (`makeIoredisClients()` runs one script).
+	 */
+	readVersioned(
+		key: string,
+		candidate: string,
+	): Promise<{ raw: string; generation: string } | null>;
+	/**
+	 * Replace the value at `key` with `input.value` (`PX input.ttlMs`) only while
+	 * the stored value's generation is `input.expected`, as one atomic step that
+	 * first refuses at or after `input.deadlineMs` on the server's clock, then
+	 * answers a copy of a write it already took from `input.replayKey`, writing
+	 * nothing. `missing`: no key; `conflict`: another generation, or none;
+	 * `late`: at or after the deadline, this copy wrote nothing (another copy
+	 * may have committed, or may still commit within W). Only the first
+	 * `updated` writes.
+	 */
+	replaceIfGeneration(
+		key: string,
+		input: FederationTokenReplaceIfInput,
+	): Promise<"updated" | "missing" | "conflict" | "late">;
+	/** Delete `key` only while its value's generation is `input.expected`, as `replaceIfGeneration` checks. */
+	removeIfGeneration(
+		key: string,
+		input: FederationTokenRemoveIfInput,
+	): Promise<"removed" | "missing" | "conflict" | "late">;
+	/**
+	 * Raise the TTL of `key` to `ttlMs` from now when it is nearer (Redis
+	 * `PEXPIRE … GT`): never lowers it, never creates the key, never adds a
+	 * member.
+	 */
+	pExpireGT(key: string, ttlMs: number): Promise<void>;
 }
