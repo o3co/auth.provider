@@ -338,11 +338,16 @@ export interface DelegatedTokens {
 	 */
 	readonly expiresAt?: Date | null;
 	/**
-	 * Space-delimited, as in the token response. Absent means the scope the
-	 * request already carried — for a refresh, the grant's (RFC 6749 §6).
+	 * Space-delimited, as in the token response. Absent or blank means the
+	 * scope the request already carried — for a refresh, the grant's (RFC 6749 §6).
 	 */
 	readonly scope?: string;
-	/** As the library reports it — lower-cased by oauth4webapi. */
+	/**
+	 * As the library reports it — lower-cased by oauth4webapi. Required to be
+	 * stored (RFC 6749 §5.1): a federation grant refuses an answer without one
+	 * as `malformed_token_response`, keeping the rotated refresh token and
+	 * leaving an ineligibility marker.
+	 */
 	readonly tokenType?: string;
 }
 

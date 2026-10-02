@@ -187,6 +187,7 @@ describe("scaffold", () => {
 			"@o3co/auth-provider-federation-google": "../packages/federation-google/package.json",
 			"@o3co/auth-provider-federation-oidc": "../packages/federation-oidc/package.json",
 			"@o3co/auth-provider-foundation": "../packages/foundation/package.json",
+			"@o3co/auth-provider-mfa": "../packages/mfa/package.json",
 			"@o3co/auth-provider-oauth": "../packages/oauth/package.json",
 			"@o3co/auth-provider-oauth-token-exchange": "../packages/oauth-token-exchange/package.json",
 			"@o3co/auth-provider-redis": "../packages/redis/package.json",

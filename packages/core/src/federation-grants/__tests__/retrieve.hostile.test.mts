@@ -435,12 +435,16 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 		it("reads an empty scope as none named — the grant's — and not as a token that carries nothing (RFC 6749 §6)", async () => {
 			await h.seed();
-			setNow(DUE);
-			h.refresh.mockResolvedValue(refreshed("1", DUE, { scope: "  " }));
-			expect(await retrieve({ scope: ["calendar.read"] })).toMatchObject({
-				ok: true,
-				scopes: [...SCOPES],
-			});
+			setNow(GONE);
+			for (const scope of ["", "  "]) {
+				h.refresh.mockResolvedValue(refreshed("1", now(), { scope }));
+				expect(await retrieve({ scope: ["calendar.read"] }), JSON.stringify(scope)).toMatchObject({
+					ok: true,
+					accessToken: "at-1",
+					scopes: [...SCOPES],
+				});
+				setNow(new Date(now().getTime() + 2 * HOUR));
+			}
 		});
 
 		it("never writes a token whose adapter expiry is already past: neither field can lengthen the other", async () => {

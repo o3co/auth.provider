@@ -19,9 +19,7 @@ import express from "express";
 import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import {
-	expectedSessionRequirements,
 	readLogging,
-	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -32,7 +30,6 @@ import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
 import { mountRoutes } from "./routes.mjs";
-import { requireMfaSecondFactorAuthority } from "./secondFactorAuthority.mjs";
 import { installGracefulShutdown } from "./shutdown.mjs";
 
 // Step 1: the configuration, in two phases (`configPath.mts`; template
@@ -45,14 +42,11 @@ const { applicationConfPath, envConfPath } = resolveConfigPaths(configDirPath, e
 // Read once, so both phases read the same thing.
 const own = readOwnLayers([envConfPath, applicationConfPath]);
 // Phase one: what the template reads before it knows its modules, only for
-// those choices — its own `adapters`, and the switches core's reader parses —
-// and for what the composition expects of session admission
-// (`expectedSessionRequirements`): the configuration's list, with `mfa` added
-// when `mfa.mode`, which the template reads itself (`readMfaMode`), asks for a
-// second factor.
+// those choices — its own `adapters` and MFA switch (`mfaMode`, MFA_MODE),
+// and the switches core's reader parses — and for what the composition
+// expects of session admission: the configuration's list, with `mfa` added
+// when the MFA switch installs MFA.
 const switches: Switches = readSwitches(own);
-// `mfa.mode`, read once, for the second-factor authority's guard.
-const mfaMode = readMfaMode(switches);
 
 // From the `logging` module's section, so the level holds from the first line;
 // wired into `bootstrapComponents` so every module logs through it (template
@@ -89,19 +83,17 @@ await (async (): Promise<void> => {
 	// so `CONFIG_ENV=production` is production to the guard too.
 	//
 	// Phase two: `createApp` parses the configuration as resolved once, with
-	// every loaded module's schema, stripping no section (`configPath.mts`).
-	// From here on the template reads the parsed configuration.
+	// every loaded module's schema (`configPath.mts`). From here on the
+	// template reads the parsed configuration.
 	const modules = buildModules(switches, { environment: env, logger });
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
-			config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
+			config: resolveForBoot(own, modules, switches),
 			pathResolver: import.meta.resolve,
 			logger,
 		},
 	});
-	// A second factor asked for needs `mfa` registered as the declared authority.
-	await requireMfaSecondFactorAuthority(mfaMode, handle);
 	// The `http` module's settings: core's slot and the host's own.
 	const { httpSettings, httpHostSettings } = handle.components;
 	if (httpSettings === undefined || httpHostSettings === undefined) {

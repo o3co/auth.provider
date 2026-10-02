@@ -43,8 +43,7 @@ describe("readRefreshAnswer — a lifetime verdict the route does not know", () 
 			{ calledAt: Date.now(), maxTokenLifetimeMs: 86_400_000 },
 		);
 
-		expect(reading.lifetimeIsBroken).toBe(true);
-		expect(reading.derivedExpiry).toBeNull();
+		expect(reading.lifetime).toEqual({ accepted: false, verdict: "unrecognised" });
 		expect(reading.rotatedRefreshToken).toBe("rotated-rt");
 	});
 });

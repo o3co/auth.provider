@@ -628,7 +628,9 @@ export const CoreConfigSchema = z.object({
 			// compared at the end of boot's stage 4 with what registered, both ways
 			// once written. Required whenever a consumer of admission is installed,
 			// `[]` allowed, and no default anywhere: every composition states its
-			// posture.
+			// posture. `secondFactorAuthority`, optional with no default, names the
+			// expected requirement boot holds to declaring the second-factor
+			// authority.
 			sessionRequirements: z
 				.object({
 					expected: z.array(
@@ -636,6 +638,14 @@ export const CoreConfigSchema = z.object({
 							error: "core.sessionRequirements.expected names each requirement",
 						}),
 					),
+					secondFactorAuthority: z
+						.string({
+							error: "core.sessionRequirements.secondFactorAuthority names a requirement",
+						})
+						.min(1, {
+							error: "core.sessionRequirements.secondFactorAuthority names a requirement",
+						})
+						.optional(),
 				})
 				.strict()
 				.optional(),

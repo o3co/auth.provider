@@ -487,6 +487,7 @@ describe("resetMfaForSubject", () => {
 			recoveryId: "an-earlier-one",
 			generation: 1,
 			hard: false,
+			rebindAfterMs: null,
 		});
 
 		const report = await reset.resetMfaForSubject(ALICE.id);

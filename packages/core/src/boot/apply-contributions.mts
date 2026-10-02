@@ -708,6 +708,85 @@ const quotedNames = (names: readonly string[]): string =>
 const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
 	a.size === b.size && [...a].every((value) => b.has(value));
 
+/** `core.sessionRequirements` as boot reads it: the expected names, when a list of strings, and the authority, when a string. */
+interface SessionRequirementsDeclaration {
+	readonly declared: readonly string[] | undefined;
+	readonly authority: string | undefined;
+}
+
+function sessionRequirementsDeclaration(
+	components: Record<string, unknown>,
+): SessionRequirementsDeclaration {
+	const section = (
+		components.config as
+			| { core?: { sessionRequirements?: { expected?: unknown; secondFactorAuthority?: unknown } } }
+			| undefined
+	)?.core?.sessionRequirements;
+	const expected = section?.expected;
+	return {
+		declared:
+			Array.isArray(expected) && expected.every((name) => typeof name === "string")
+				? (expected as readonly string[])
+				: undefined,
+		authority:
+			typeof section?.secondFactorAuthority === "string"
+				? section.secondFactorAuthority
+				: undefined,
+	};
+}
+
+/**
+ * Once `core.sessionRequirements.secondFactorAuthority` is written, refuses
+ * the requirement it names unless the list expects it, a module registers it
+ * and it declares the second-factor authority
+ * (`second-factor-authority-not-declared`, every unmet condition listed).
+ * Runs the stage-3 cleanups first.
+ */
+async function checkDeclaredAuthority(
+	material: ComponentWorld,
+	{ declared, authority }: SessionRequirementsDeclaration,
+	registrations: readonly RequirementRegistration[],
+): Promise<void> {
+	if (authority === undefined) return;
+	const registration = registrations.find(({ name }) => name === authority);
+	const unmet: ("not-expected" | "not-registered" | "not-declared")[] = [];
+	const fixes: string[] = [];
+	if (declared?.includes(authority) !== true) {
+		unmet.push("not-expected");
+		fixes.push("core.sessionRequirements.expected does not list it: add it there");
+	}
+	if (registration === undefined) {
+		unmet.push("not-registered");
+		fixes.push(
+			"no installed module registers it: install a module whose requirement declares the second-factor authority",
+		);
+	} else if (!registration.requirement.secondFactorAuthority) {
+		unmet.push("not-declared");
+		fixes.push(
+			`module ${JSON.stringify(registration.module)} registers it without declaring the second-factor authority, ` +
+				`so it enforces no second factor: replace module ${JSON.stringify(registration.module)} with a module ` +
+				"whose requirement declares the second-factor authority",
+		);
+	}
+	if (unmet.length === 0) return;
+	const cleanupErrors = await runCleanupsReverse(material.cleanups);
+	throw new BootError({
+		message:
+			`core.sessionRequirements.secondFactorAuthority names ${JSON.stringify(authority)}, and ${fixes.join("; ")}. ` +
+			"Or name the requirement this composition holds to the second-factor authority.",
+		reason: "second-factor-authority-not-declared",
+		stage: "applyContributions",
+		details: {
+			reason: "second-factor-authority-not-declared",
+			configKey: "core.sessionRequirements.secondFactorAuthority",
+			name: authority,
+			...(registration === undefined ? {} : { module: registration.module }),
+			unmet,
+			...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+		},
+	});
+}
+
 /**
  * Step 2b: once the name-keyed pass is done and before any list-shaped
  * factory reads a reach, check every registered session requirement (see ADR
@@ -731,11 +810,16 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *   a name in it that no module registers is `session-requirement-missing`
  *   (the composition would believe a requirement is in force that is not),
  *   checked first so a composition is told to install the module rather than
- *   to fix the list; a registered name it leaves out is
+ *   to fix the list; then, once
+ *   `core.sessionRequirements.secondFactorAuthority` is written, the
+ *   requirement it names must be expected, registered and declare the
+ *   second-factor authority (`checkDeclaredAuthority`); a registered name the
+ *   list leaves out is
  *   `session-requirements-undeclared`;
  * - when a module requires or reads `sessionRequirementResolver`, require the
  *   key written (`session-requirements-undeclared`). With no such module and
- *   no key, nothing is compared.
+ *   no key, nothing is compared. Without a `sessionRequirements` collector
+ *   nothing registers, and only a written authority is checked.
  *
  * A refused requirement is `contribute-factory-failed`. Logs
  * `session_requirements_registered` at info when a consumer or a requirement
@@ -748,7 +832,11 @@ async function checkSessionRequirements(
 	collector: NameKeyedCollector<RegisteredRequirement> | undefined,
 	actions: NameKeyedCollector<AdmissionAction> | undefined,
 ): Promise<void> {
-	if (collector === undefined) return;
+	const declaration = sessionRequirementsDeclaration(components);
+	if (collector === undefined) {
+		await checkDeclaredAuthority(material, declaration, []);
+		return;
+	}
 	const registrants = admissionActionRegistrants(material);
 	const registrations: RequirementRegistration[] = [];
 	// An override of the kind never reaches here: stage 1's guard refuses it
@@ -861,21 +949,19 @@ async function checkSessionRequirements(
 			...(normalised.optional as readonly string[]),
 		].includes("sessionRequirementResolver");
 	});
-	const expected = (
-		components.config as { core?: { sessionRequirements?: { expected?: unknown } } } | undefined
-	)?.core?.sessionRequirements?.expected;
-	const declared =
-		Array.isArray(expected) && expected.every((name) => typeof name === "string")
-			? (expected as readonly string[])
-			: undefined;
+	const { declared, authority } = declaration;
 	const missing = [...new Set(declared)].filter((name) => !registered.includes(name));
 	if (declared !== undefined && missing.length > 0) {
+		const authorityMissing = authority !== undefined && missing.includes(authority);
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({
 			message:
 				`core.sessionRequirements.expected names ${quotedNames(missing)}, which no installed module registers ` +
 				`(${quotedNames(registered)} registered): install the module that registers each, ` +
-				"or remove the name from core.sessionRequirements.expected.",
+				"or remove the name from core.sessionRequirements.expected" +
+				(authorityMissing
+					? `; core.sessionRequirements.secondFactorAuthority names ${JSON.stringify(authority)} too, so remove it there as well.`
+					: "."),
 			reason: "session-requirement-missing",
 			stage: "applyContributions",
 			details: {
@@ -884,10 +970,12 @@ async function checkSessionRequirements(
 				missing,
 				declared,
 				registered,
+				...(authorityMissing ? { secondFactorAuthority: authority } : {}),
 				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
 			},
 		});
 	}
+	await checkDeclaredAuthority(material, declaration, registrations);
 	if (
 		declared === undefined
 			? consumedBy.length > 0

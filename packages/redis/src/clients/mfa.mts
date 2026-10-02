@@ -289,10 +289,13 @@ export interface ApplyMfaSubjectRecoveryInput {
 }
 
 /**
- * What the apply script answers, each part as its text: `refused, reason, hard`;
- * `already, recoveryId, generation, hard`; or
- * `applied, recoveryId, generation, week, run, liftedHard, hard`, each flag `1` or `0`. The
- * adapter reads it into the port's answer.
+ * What the apply script answers, each part as its text: `refused, reason, hard, rebindAfter`;
+ * `already, recoveryId, generation, hard, rebindAfter`; or
+ * `applied, recoveryId, generation, week, run, liftedHard, hard, rebindAfter`, each flag `1` or
+ * `0`. `hard` is whether the hard hold stands after the call and `rebindAfter`, while it does,
+ * from when a rebind counts — the port's `rebindAfterMs`, as canonical decimal text — empty
+ * while it does not. The adapter reads it into the port's answer; a reply without
+ * `rebindAfter` is an outage.
  */
 export type ApplyMfaSubjectRecoveryReply = readonly string[];
 

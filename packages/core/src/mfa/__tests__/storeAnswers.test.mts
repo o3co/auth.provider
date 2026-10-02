@@ -494,6 +494,12 @@ describe("readMfaSubjectLeaseAnswer", () => {
 });
 
 describe("readMfaSubjectRecoveryAnswer", () => {
+	/** From when a rebind counts, in the answers below that keep the hard hold. */
+	const AFTER = 1_759_000_300_000;
+
+	/** The hold as an answer carries it: from when a rebind counts while it stands, `null` otherwise. */
+	const holdOf = (hard: boolean) => ({ hard, rebindAfterMs: hard ? AFTER : null });
+
 	const applied = (
 		cleared: { week: boolean; run: boolean; hard: boolean },
 		hard: boolean,
@@ -502,7 +508,7 @@ describe("readMfaSubjectRecoveryAnswer", () => {
 		recoveryId: "r",
 		generation: 1,
 		cleared,
-		hard,
+		...holdOf(hard),
 	});
 
 	it.each<[string, Record<string, unknown>]>([
@@ -526,10 +532,10 @@ describe("readMfaSubjectRecoveryAnswer", () => {
 				outcome: "already_applied",
 				recoveryId: "r",
 				generation: 3,
-				hard: true,
+				...holdOf(true),
 				cleared: { week: true, run: true, hard: true },
 			}),
-		).toEqual({ outcome: "already_applied", recoveryId: "r", generation: 3, hard: true });
+		).toEqual({ outcome: "already_applied", recoveryId: "r", generation: 3, ...holdOf(true) });
 		for (const reason of [
 			"unauthorized",
 			"expired",
@@ -537,11 +543,18 @@ describe("readMfaSubjectRecoveryAnswer", () => {
 			"boundary_ahead",
 			"lease_not_held",
 		]) {
-			expect(readMfaSubjectRecoveryAnswer({ outcome: "refused", reason, hard: false })).toEqual({
-				outcome: "refused",
-				reason,
-				hard: false,
-			});
+			for (const hard of [false, true]) {
+				expect(
+					readMfaSubjectRecoveryAnswer({ outcome: "refused", reason, ...holdOf(hard) }),
+				).toEqual({ outcome: "refused", reason, ...holdOf(hard) });
+			}
+		}
+	});
+
+	it("reads from when a rebind counts as whole epoch milliseconds from 0, exactly while the hard hold stands", () => {
+		for (const rebindAfterMs of [0, AFTER, Number.MAX_SAFE_INTEGER]) {
+			const answer = { outcome: "refused", reason: "expired", hard: true, rebindAfterMs };
+			expect(readMfaSubjectRecoveryAnswer(answer)).toEqual(answer);
 		}
 	});
 
@@ -583,18 +596,75 @@ describe("readMfaSubjectRecoveryAnswer", () => {
 			"a cleared part that is not a boolean",
 			applied({ week: true, run: 1 as never, hard: false }, false),
 		],
-		["no cleared parts", { outcome: "applied", recoveryId: "r", generation: 1, hard: false }],
+		["no cleared parts", { outcome: "applied", recoveryId: "r", generation: 1, ...holdOf(false) }],
 		[
 			"a hard hold that is not a boolean",
 			applied({ week: true, run: true, hard: false }, "no" as never),
 		],
 		[
 			"an apply already made at generation 0",
-			{ outcome: "already_applied", recoveryId: "r", generation: 0, hard: false },
+			{ outcome: "already_applied", recoveryId: "r", generation: 0, ...holdOf(false) },
 		],
-		["a refusal it does not know", { outcome: "refused", reason: "busy", hard: false }],
-		["a refusal with no hard hold named", { outcome: "refused", reason: "expired" }],
-		["an outcome it does not know", { outcome: "released", hard: false }],
+		["a refusal it does not know", { outcome: "refused", reason: "busy", ...holdOf(false) }],
+		[
+			"a refusal with no hard hold named",
+			{ outcome: "refused", reason: "expired", rebindAfterMs: null },
+		],
+		[
+			"no rebindAfterMs, with no hard hold standing",
+			{ outcome: "refused", reason: "expired", hard: false },
+		],
+		[
+			"no rebindAfterMs, with the hard hold standing",
+			{ outcome: "refused", reason: "expired", hard: true },
+		],
+		[
+			"no rebindAfterMs on an apply",
+			{
+				outcome: "applied",
+				recoveryId: "r",
+				generation: 1,
+				cleared: { week: true, run: true, hard: false },
+				hard: false,
+			},
+		],
+		[
+			"no rebindAfterMs on an apply already made",
+			{ outcome: "already_applied", recoveryId: "r", generation: 1, hard: true },
+		],
+		[
+			"a time to rebind after with no hard hold standing",
+			{ outcome: "refused", reason: "expired", hard: false, rebindAfterMs: AFTER },
+		],
+		[
+			"no time to rebind after while the hard hold stands",
+			{ outcome: "refused", reason: "expired", hard: true, rebindAfterMs: null },
+		],
+		[
+			"an undefined time while the hard hold stands",
+			{ outcome: "refused", reason: "expired", hard: true, rebindAfterMs: undefined },
+		],
+		[
+			"a time to rebind after that is not whole",
+			{ outcome: "refused", reason: "expired", hard: true, rebindAfterMs: AFTER + 0.5 },
+		],
+		[
+			"a time to rebind after before the epoch",
+			{ outcome: "refused", reason: "expired", hard: true, rebindAfterMs: -1 },
+		],
+		[
+			"a time to rebind after past the safe integers",
+			{ outcome: "refused", reason: "expired", hard: true, rebindAfterMs: 2 ** 53 },
+		],
+		[
+			"a time to rebind after that is not a number",
+			{ outcome: "refused", reason: "expired", hard: true, rebindAfterMs: String(AFTER) },
+		],
+		[
+			"a time to rebind after that is no number at all",
+			{ outcome: "refused", reason: "expired", hard: true, rebindAfterMs: Number.NaN },
+		],
+		["an outcome it does not know", { outcome: "released", ...holdOf(false) }],
 		["nothing", undefined],
 		["null", null],
 	])("reads %s as no answer", (_label, answer) => {
@@ -603,6 +673,7 @@ describe("readMfaSubjectRecoveryAnswer", () => {
 
 	it("reads each field once, and a getter that throws as no answer", () => {
 		let reads = 0;
+		let rebindReads = 0;
 		const answer = {
 			outcome: "refused",
 			reason: "expired",
@@ -610,11 +681,16 @@ describe("readMfaSubjectRecoveryAnswer", () => {
 				reads++;
 				return reads === 1 ? true : "no";
 			},
+			get rebindAfterMs() {
+				rebindReads++;
+				return rebindReads === 1 ? AFTER : null;
+			},
 		};
 		expect(readMfaSubjectRecoveryAnswer(answer)).toEqual({
 			outcome: "refused",
 			reason: "expired",
 			hard: true,
+			rebindAfterMs: AFTER,
 		});
 		expect(
 			readMfaSubjectRecoveryAnswer({

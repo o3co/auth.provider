@@ -720,6 +720,9 @@ importers:
       '@o3co/auth-provider-foundation':
         specifier: workspace:*
         version: link:../../packages/foundation
+      '@o3co/auth-provider-mfa':
+        specifier: workspace:*
+        version: link:../../packages/mfa
       '@o3co/auth-provider-oauth':
         specifier: workspace:*
         version: link:../../packages/oauth

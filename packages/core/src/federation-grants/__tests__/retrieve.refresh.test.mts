@@ -207,7 +207,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			expect((await stored())?.refreshToken).toBe(SECRET);
 		});
 
-		it("records the scopes and the token type the response names, and the grant's scopes and Bearer when it names none", async () => {
+		it("records the scopes and the token type the response names, and the grant's scopes when it names none", async () => {
 			await h.seed();
 			setNow(DUE);
 			// As the upstream spelled it: a bearer token in any case is one (ADR
@@ -222,7 +222,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			});
 
 			setNow(new Date(DUE.getTime() + HOUR));
-			h.refresh.mockResolvedValue(refreshed("2", now(), { tokenType: undefined }));
+			h.refresh.mockResolvedValue(refreshed("2", now(), { scope: undefined }));
 			expect(await retrieve()).toMatchObject({
 				ok: true,
 				scopes: [...SCOPES],
@@ -343,6 +343,8 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			// Named, but naming no scope-token, is not silence: it must not read as
 			// "the grant's scopes" and so be disclosed as if it were.
 			["a scope that names no scope-token", { scope: '"openid"' }, "malformed_token_response"],
+			// RFC 6749 §5.1: `token_type` is REQUIRED, so an answer without one is not taken for Bearer.
+			["no token type", { tokenType: undefined }, "malformed_token_response"],
 			// oauth4webapi lower-cases what the upstream sent; a route with no proof
 			// key cannot present a sender-constrained token.
 			["a token that is not a bearer token", { tokenType: "dpop" }, "token_type_unsupported"],

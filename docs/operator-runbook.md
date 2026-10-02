@@ -245,9 +245,10 @@ each names:
 | `replica-unsafe-adapter` | `core.deployment.mode = "multi"` with a listed module wired | the message lists every offender; switch the adapter or set `single` |
 | `federation-stores-incomplete` | `core.federations.<name>.enabled = true` without all of `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore`, `refreshTokenFamilyRevocation` | the message lists the missing slots |
 | `grant-policy-without-issuer` | a `grantPolicy` is wired and `oauth.jwt.issuer` is empty | set the issuer |
-| `session-requirement-missing` | `core.sessionRequirements.expected` names a session requirement no installed module registers — `mfa` without the MFA package, say — whether or not a module consults session admission (`packages/core/src/boot/apply-contributions.mts`). The standalone template adds `mfa` to the list when `mfa.mode` (`MFA_MODE`) is not `off`, and installs no MFA module, so there `MFA_MODE=optional` or `required` lands here with `missing: ["mfa"]`. | the message names each missing name and what registered: install the module that registers it, or remove the name — for `mfa` under the template, set `MFA_MODE=off` |
+| `session-requirement-missing` | `core.sessionRequirements.expected` names a session requirement no installed module registers — `mfa` without the MFA package, say — whether or not a module consults session admission (`packages/core/src/boot/apply-contributions.mts`). The standalone template adds `mfa` to the list when `MFA_MODE` installs MFA, and installs the MFA module that registers it with the same switch, so there `missing: ["mfa"]` means a configuration that lists `mfa` itself under `MFA_MODE=off`. | the message names each missing name and what registered: install the module that registers it, or remove the name — for `mfa` under the template, set `MFA_MODE` to `optional` or `required`, or remove it from the list |
 | `session-requirements-undeclared` | `core.sessionRequirements.expected` is written and leaves out a registered requirement, whether or not a module consults session admission; or it is unset while such a module is installed (`oauth` and `session` are). The standalone template's `config/application.conf` writes `[]`; a deployment that replaces that file rather than layering over it writes the key itself | the message names what is declared, what registered and the modules that consult admission: write the key naming exactly the registered requirements (`[]` for none) |
 | `duplicate-second-factor-authority` | more than one installed session requirement declares the second-factor authority — the one requirement that may vouch for a second factor, the MFA package's `mfa` requirement among them — whatever their names (`packages/core/src/boot/apply-contributions.mts`) | the message and `details.requirements` name each requirement with the module that contributed it: install only one of those modules |
+| `second-factor-authority-not-declared` | `core.sessionRequirements.secondFactorAuthority` is written and the requirement it names is not in `core.sessionRequirements.expected`, is registered by no module, or is registered without declaring the second-factor authority — so a login would meet it with no second factor (`packages/core/src/boot/apply-contributions.mts`). `details.unmet` lists every one that holds (`not-expected`, `not-registered`, `not-declared`). A name the list expects that nothing registers is `session-requirement-missing` instead, checked first, whose message and `details.secondFactorAuthority` say the key names it too | the message and `details` name the requirement and, when one registered it, its module: add the name to `expected`; replace a module whose requirement does not declare the authority with one whose requirement does — the MFA package's, for `mfa` — since installing one beside it registers the name twice (`duplicate-contribute`); or name the requirement that is the authority |
 | `provides-factory-failed` / `contribute-factory-failed` | a module's own check threw; the module's message is the `cause` (`boot/materialize-components.mts`) | see the module messages below |
 
 Module-level messages that arrive wrapped in a factory failure:
@@ -356,8 +357,8 @@ Module-level messages that arrive wrapped in a factory failure:
   left out or are anything else, and a `bearerToken`, `timeout` or
   `maxResponseBytes` the user repository would refuse is refused the same
   way, the message leading with `HttpMfaFactorStore`.
-- The MFA module (`mfaModule`, `packages/mfa/src/module.mts` — private
-  until the template wires it): `mfa.mode is "off" (or unset) while the MFA
+- The MFA module (`mfaModule`, `packages/mfa/src/module.mts`):
+  `mfa.mode is "off" (or unset) while the MFA
   module is installed: remove the MFA module, or set mfa.mode to "required"
   or "optional"` — installed is on, so an MFA-off deployment does not install
   it; the package's settings, each a `RangeError` `cause` naming its key — the
@@ -418,7 +419,7 @@ Module-level messages that arrive wrapped in a factory failure:
 - mTLS: `source = "header"` with empty `trustedProxies`; `mode = "pki"`/`"full-pki"` with empty `trustedCas`; `mode = "pki"` with `source = "tls-layer"`; `full-pki` without `fullPki.revocation.mode` + `onUnavailable`; `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` with empty `allowedHosts` (`packages/mtls/README.md` "Boot-time fail-loud invariants", `packages/mtls/src/module.mts`).
 - Remote signing: `the signer's output does not verify against publicKeyPem for kid "…"` — the boot self-check in `createRemoteSigningKeyStore` (`packages/core/src/keys/remoteSigning.mts`).
 - A library's refusal at boot — OIDC discovery (`discovery of <issuer> failed …`), a private key (`privateKey could not be parsed`, `privateKey cannot sign <alg>`), an mTLS trust anchor (`trustedCas[<i>] is not a parseable X.509 certificate`, `… failed to read file at <path>`) — says what failed in fixed words; the library's own error (openid-client's, OpenSSL's, jose's, the file read's `ENOENT`) is the error's `cause`, which Node prints below it (`packages/federation-oidc/src/oidc.mts`, `client-auth.mts`, `packages/mtls/src/extractor.mts`).
-- The standalone's MFA posture: with `MFA_MODE` (`mfa.mode`) not `off`, a requirement registered as `mfa` that does not declare the second-factor authority refuses the boot before the server listens — `MfaRequirementNotAuthorityError`, `reason` `mfa-requirement-not-second-factor-authority`, not a `BootError` — after disposing what boot built; a cleanup that fails is its `cause` (`templates/standalone/src/secondFactorAuthority.mts`). Install the MFA package's modules, whose requirement declares the authority, or set `MFA_MODE=off`.
+- The standalone's MFA switch (`templates/standalone/src/mfaSwitch.mts`), each refused before boot as a `RangeError`, not a `BootError`, quoting no value: an `MFA_MODE` that is none of `off`, `optional` and `required`, or that a file's `mfaMode` contradicts; an `mfa.mode` the configuration writes that the switch does not say; with MFA on, a written `core.sessionRequirements.secondFactorAuthority` other than `mfa`; with MFA on, an MFA store in memory unless every environment name says development or test (`ADAPTERS_MFA_FACTOR_STORE`, `ADAPTERS_MFA_TRANSACTION_STORE`: select redis, or store for the factors); `MFA_ENCRYPTION_KEY` set beside `config/development.conf`'s sample-key ring; and `mfa.storeTimeoutMs` below `repositories.user.http.timeout` where the Store is called. Set `MFA_MODE`, and remove `mfa.mode`. With MFA on, a second requirement named `mfa`, or a second one declaring the second-factor authority (`duplicate-second-factor-authority`), refuses the boot in core.
 - The standalone's listener: a port it cannot bind (`EADDRINUSE`, `EACCES`) fails boot with that error; the process no longer announces a server it never started. A bound listener logs `server_listening` (info, `port`) once, and each later server error — an `accept` failing with `EMFILE`, say — as `server_error` (error, the error's projection), where it was lost and a second one crashed the process (`templates/standalone/src/listen.mts`).
 
 Warnings that mean "fix before the next deploy" rather than "boot failed" are
@@ -545,7 +546,7 @@ refresh grant takes care to answer `503` for outages.
 | **The Store as the MFA factor store** (`foundationMfaFactorStoreModule`) down or slow, answering a redirect or anything else outside its contract, or refusing this deployment's `bearerToken` | `POST /session/login` (the `mfa` requirement reads the subject's factors), and every MFA route that reads or writes a factor | `503 temporarily_unavailable`, never "no factors": a login under `mfa.mode = "optional"` is not let through without the second factor, and a subject with an unreadable record never opens a first binding. Nothing the Store sent — its status, text, headers or records — reaches the client | the caller's one error line — at login `session_admission_unavailable` (error, `store: "mfa"`) — whose `err` projection is what the adapter threw: `MfaStoreError` (`reason` `unexpected_status` with `storeStatus`, `malformed_answer`, `unreadable_record`, `version_skipped`; `operation`), `StoreTransportError`, a `TimeoutError`, `StoreCredentialRefusedError` (leading with `HttpMfaFactorStore`), an `Error` for an answer over the cap (`HttpMfaFactorStore: upstream <url> response exceeds the <n>-byte cap`), an `Error` for a `409` to a create (`an MFA factor record with this id already exists for the subject`), or a `RangeError` for a record or an update the wire codec would not read back, thrown before any request. `version_skipped` leads with the subject and the factor id (`packages/foundation/src/mfa/storeFailure.mts`) | the user repository's `timeout` (`repositories.user.http.timeout`) |
 | **The mail sender** down, answering outside its port, or refusing at its limit | `POST /session/mfa/challenge` — a factor's login code (the email factor's six-digit code), the account-email proof (`factor_id: "account-email"`) — and `POST /session/mfa/enrollment` for a factor that mails its enrollment code (the email factor's) | `429 rate_limited` at the sender's limit; `503 temporarily_unavailable` "MFA temporarily unavailable" otherwise. Either way the pending code is cleared and nothing was "sent"; the transaction stands, and the page asks again. With no mail sender wired, a factor that asks for a mail is the same `503`; the account-email proof is `403 mfa_email_proof_unavailable` (`packages/mfa/src/mail.mts`, `proof.mts`) | `mfa_mail_unavailable` (error — `route`, `purpose`, `kind`, `reason` `outage` or `no_sender`, `cleared` when a pending code was to be cleared, and the sender's failure by its `name`, `code` and `status` alone — never its text, which may quote the address or the code); at the limit `mfa_mail_refused_at_limit` (warn — `route`, `purpose`, `kind`, `cleared`). `cleared: false` means the clear was not written: the kept code stands until the transaction ends | the sender's own |
 | **The Store's enrollment witness** (`UserRepository.markMfaEnrolled`; foundation's at `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL`) failing its write — down, slow, or answering anything but `204` | a verification of a counting factor where the login's `User` does not say it enrolled — a login's, or a step-up's — and a first binding, at a login or in a signed-in session | nothing: the login completes and the factor stands — the witness is marked after the factor, so a failure leaves a factor without a witness, never the reverse, and the next such verification of a counting factor marks it again (the MFA ADR's D12) | `mfa_enrollment_witness_unwritten` (warn — `sub`, the error's projection) | the directory's |
-| **A login's `User` says it enrolled, and no counting factor is on record** — the factor store lost its records; the Store answers `mfaEnrolled` wrongly or malformed; a removal from the account page left no record that may count and could not clear the witness (`mfa_enrollment_witness_uncleared`), or a store failed after removing the record and could not be read again (`503`, the witness left as it was); or a login's witness mark raced a removal's clear and its own clear after it failed | `POST /session/login`, under either mode; in a federated signed-in session whose login recorded it, every first binding — the link start, WebAuthn registration, `POST /session/mfa/enrollment`, `/step-up`, a rename or removal of a factor. A password session in that state is not answered so: its first bindings are sent to log in again (`401`), recording nothing, and the fresh login reads the `User` | `503 temporarily_unavailable` "session requirement unavailable", nothing written — never a first binding (D12). See the MFA ADR's D12 for recovering a lost factor store; after a removal, clear the subject's flag in the Store | `session_admission_unavailable` (error, `store: "mfa"`, `phase: "establishment"` at a login, the `action` in a session) whose `err` is `MfaEnrollmentStateInconsistentError` (`reason` `mfa_enrollment_state_inconsistent`); audit `mfa.enrollment_state_inconsistent` (`details.witness`: `enrolled` or `malformed`; `details.purpose` `login`, or `session` with `details.action` for a federated session) | — |
+| **A login's `User` says it enrolled, and no counting factor is on record** — the factor store lost its records; the Store answers `mfaEnrolled` wrongly or malformed; a removal from the account page left no record that may count and could not clear the witness (`mfa_enrollment_witness_uncleared`), or a store failed after removing the record and could not be read again (`503`, the witness left as it was); or a login's witness mark raced a removal's clear and its own clear after it failed | `POST /session/login`, under either mode; in a federated signed-in session whose login recorded it, every first binding — the link start, WebAuthn registration, `POST /session/mfa/enrollment`, `/step-up`, a rename or removal of a factor. A password session in that state is not answered so: its first bindings are sent to log in again (`401`), recording nothing, and the fresh login reads the `User` | `503 temporarily_unavailable` "session requirement unavailable", nothing written — never a first binding (D12). See [§5](#key-families), "When the factor store loses writes", for recovering a lost factor store (for factors kept in the Store, "[Keeping MFA factors in the Store](#keeping-mfa-factors-in-the-store)" below); after a removal, clear the subject's flag in the Store | `session_admission_unavailable` (error, `store: "mfa"`, `phase: "establishment"` at a login, the `action` in a session) whose `err` is `MfaEnrollmentStateInconsistentError` (`reason` `mfa_enrollment_state_inconsistent`); audit `mfa.enrollment_state_inconsistent` (`details.witness`: `enrolled` or `malformed`; `details.purpose` `login`, or `session` with `details.action` for a federated session) | — |
 | **Client repository** lookup throws, or rejects with core's client-record refusal (a record the boundary refuses, see `client_record_refused` in [§4](#4-alerts)) | client authentication on `/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, device authorization and the federation-grant client routes — a secret (`findById` or `authenticate`) or a `private_key_jwt` assertion (`findById`) — the client lookup at `/authorize`, token exchange's own lookup, the federation token route's `azp` lookup, the code exchange's logout-metadata lookup, the consent page's and answer's lookup, the federation-grants connect and consent pages' lookup, and the two logout routes' check of a `post_logout_redirect_uri` against the client's registered list (`/oauth/logout`, `POST /oauth/federation/:name/logout` — asked only when the request names one and the hint names a session) | `503 temporarily_unavailable` "client repository unavailable" (`/oauth/consent`: "client registry unavailable") — except at the two logout routes, which complete the logout without the redirect, as if no `post_logout_redirect_uri` had been sent: an outage costs the redirect, never the logout (it used to be dropped without a log line), no `WWW-Authenticate` challenge — repository unavailability never admits a client, and is not answered `invalid_client` either: the client did nothing wrong, and a proxy holding client credentials would read `401 invalid_client` as its own misconfiguration. `/authorize` answers it as JSON (no redirect target is trusted yet); it was `500 server_error` "Failed to fetch client", unlogged. An unknown client or a wrong secret is still `401 invalid_client` (`400` at `/authorize`). A `client_id` that cannot name a client — a control character, or longer than 256 characters (`MAX_CLIENT_ID_LENGTH`) — is refused the same way before the repository is asked, so a store that throws on such input (a SQL driver refusing a NUL byte) cannot be made to answer `503` (`packages/oauth/src/middleware/clientAuth.mts`, `clientAssertion.mts`, `routes/authorizeClient.mts`; the check is core's `isWellFormedClientId`). A registered id whose record the boundary refuses can: anyone who knows it gets `503`, with no credentials, until the record is fixed (see `client_record_refused` in [§4](#4-alerts)) | `client_repository_unavailable` (error, `step`: `find` / `authenticate`, `clientId` sanitised and capped at 200 characters, the error's projection; `site` where it is not client authentication: `authorize`, `token_exchange`, `federation_token`, `authorization_code`, `consent`, `federation_grant_connect`, `federation_grant_consent`, `logout`, `federation_logout` — and `federation_grants` for client authentication on the federation-grant client routes) — every client lookup in core, oauth, token exchange and federation grants writes this one line through core's `logClientRepositoryUnavailable` (the consent route's own `consent_client_repository_unavailable` is gone); `client_assertion_refused` (error, `reason: "client_repository_unavailable"`) for an assertion. For a refused record the error's projection carries `reason: "client_record_refused"`, after the boundary's `client_record_refused` warn | the repository's own I/O, or a client record that fails the registration schema |
 | **`grantPolicy` hook** throws | the grants that consult it at `/oauth/token` — `client_credentials` (under `oauth.resourceIndicator.enabled`), jwt-bearer, `refresh_token`, the WebAuthn grant and token exchange — and `/oauth/authorize` for the code flow (the code exchange does not consult it again; the device grant never does) | `503 temporarily_unavailable` "policy evaluation unavailable" (`packages/core/src/grants/grantPolicy.mts`); redirect `error=temporarily_unavailable` at `/authorize` | `grant_policy_unavailable` (error, `grantType`, the policy's `kind`, `site: "authorize"` at `/authorize`, the error's projection) — from every token grant (oauth's, token exchange, webauthn) and `/authorize`; `evaluateGrantPolicy` takes the logger as a required option, so no grant can leave it out, and core writes the line on its console logger when the composition wires none | the hook's own |
 | **`grantPolicy` hook** returns a decision that is neither allow nor deny — an `outcome` other than exactly `"allow"` or `"deny"` (another string or case), no `outcome`, a value that is not an object, or a field that throws when read | the grants that consult it at `/oauth/token` — `client_credentials` (under `oauth.resourceIndicator.enabled`), jwt-bearer, `refresh_token`, the WebAuthn grant and token exchange — and `/oauth/authorize` for the code flow (the code exchange does not consult it again; the device grant never does) | `500 server_error` `policy_decision_invalid`, never a token (`packages/core/src/grants/grantPolicy.mts`, `readGrantPolicyDecision`); redirect `error=server_error` at `/authorize`, never a code. Not `503`: the policy is misconfigured, and a retry gets the same answer | `grant_policy_decision_invalid` (error, `grantType`, the policy's `kind`, `site: "authorize"` at `/authorize`, never the decision; on core's console logger when the composition wires no logger); audit `token.issued.failure` / `authorize.rejected` with reason `policy_decision_invalid` | the hook's own |
@@ -801,8 +802,7 @@ upstream `amr` (`profile.amr`); a custom adapter may.
 ### Multi-factor authentication: the lock, mail and notices
 
 What a composition that installs the MFA package owns beside it (the MFA
-ADR's D5, D21, D24). The package is private until the standalone template
-wires it.
+ADR's D5, D21, D24).
 
 - **The lock on guessable proofs.** Five attempts per transaction. From the
   fifth consecutive failure a lock of 15 minutes, doubling to 24 hours. Ten
@@ -830,7 +830,10 @@ wires it.
   `mfa.rateLimit.routes` bounds the MFA requests of each client address
   (`mfa:ip:<ip>`), challenges included. A held proof is answered
   `429 {"error":"mfa_locked","hold":…,"usable_kinds":[…],"attempts_remaining":…}`
-  — `Retry-After` in whole seconds, none for the hard hold. `usable_kinds`
+  — `Retry-After` in whole seconds, none for the hard hold, whose answer
+  carries no time: the page asks for a recovery code or a passkey, a
+  rebind, then the release, and only the release, after that proof, says
+  from when a rebind counts (`rebind_after`). `usable_kinds`
   names the exempt kinds the subject holds, whether or not each still works:
   a recovery set with no code left is named, and refuses at its verification.
   So a TOTP-only user whose password an attacker holds needs a recovery code
@@ -1525,7 +1528,7 @@ stream — its level is fixed at `info`.
 | `mfa_email_proof_unprovable` (warn — `sub`, `reason`: `no_sender`, `no_address` or `unreadable_address`; per such login, per admission of a first binding in a session, and per login reopened for a first binding after a recovery code) | `mfa/src/requirement.mts`, `mfa/src/routes.mts` | a first binding asks the account-email proof and nobody can give it — no mail sender (`always`, or D25's flag), an account without an address (`always`, or the flag), or one whose address the provider cannot read (any of those, or `when-mail` with a sender; see the spellings refused on purpose, under "The email factor's address"): the user cannot bind — a factor, a passkey or a linked identity — and cannot sign in under `required`. Fix the account's address in the Store, or wire a mail sender |
 | `mfa_mail_refused_at_limit` (warn — `route`, `purpose`, `kind`, `cleared`) | `mfa/src/routes.mts` | the mail sender refused a code at its limit, and the user was answered `429`. A run for one account, or overall, is the limit working — or a user resending — and the sender's to tune |
 | audit `mfa.locked` (`details.kind`, `purpose`, `hold`) and `mfa.locked.first` (with `binding`) | `mfa/src/routes.mts` | a guessable second factor was held by the subject lock (`429 mfa_locked`): someone holding the account's password — or, for a federated account, its upstream account — is guessing its second factor, or the user mistyped often. `mfa.locked.first` is the first refusal of an episode — notify the account holder of it (the MFA ADR's D24). Tell them to sign in with a recovery code or a passkey, and to change the password — or, for a federated account, secure the upstream account at its identity provider. That locks out whoever holds it, but does not end the hold (D21): a backoff or the week ends on its own time, or at the user's release after the password change and a recovery code or a passkey; the hard hold at the user's release once every guessable factor is replaced, or at the operator reset (`resetMfaForSubject`). `hold: "hard"` is `mfa.lockout.hardLimit` failures in a row. Many subjects at once is a credential-stuffing run that got past the passwords |
-| audit `mfa.lock.recovered` (`details.operation: "recover"`, `generation`, `cleared`), `mfa_lock_released` and `mfa_lock_release_held` (info — `sub`, `generation`, `applied`; `hold` on the second) | `mfa/src/lockRelease.mts` | the user released their own lock after a recovery code or a passkey: `cleared.week` and `cleared.run` the attempts given back, `cleared.hard` the hard hold lifted on a rebind. Notify the account holder: a release they did not make means someone holds their password and an exempt factor. `mfa_lock_release_held` means the hard hold still stands — the user has not yet replaced every TOTP or email factor, or a factor of a kind no longer installed still stands from before the hold: remove it from the account page |
+| audit `mfa.lock.recovered` (`details.operation: "recover"`, `generation`, `cleared`), `mfa_lock_released` and `mfa_lock_release_held` (info — `sub`, `generation`, `applied`; `hold` on the second) | `mfa/src/lockRelease.mts` | the user released their own lock after a recovery code or a passkey: `cleared.week` and `cleared.run` the attempts given back, `cleared.hard` the hard hold lifted on a rebind. Notify the account holder: a release they did not make means someone holds their password and an exempt factor. `mfa_lock_release_held` means the hard hold still stands — the user has not yet replaced every TOTP or email factor, or replaced one at or before the answer's `rebind_after` (the hold's time plus five minutes), or a factor of a kind no longer installed still stands from before the hold: remove it from the account page |
 | `mfa_lock_release_refused` (info — `sub`, `reason`) | `mfa/src/lockRelease.mts` | a release refused: `exempt_proof_required` (no recovery code or passkey verified in that session within `mfa.manage.maxAgeSeconds`), `not_revoked_since` (no revocation of the subject's sessions more than five minutes after the attack's first failure — have the user change the password again), `no_revocation_boundary` (no `subjectRevocation` wired: only time or the operator reset gives the week back) |
 | `mfa_lock_recovery_unauthorized` (warn — `route`, `sub`, the error's projection) | `mfa/src/routes.mts` | a recovery code or a passkey verified, and the transaction store did not record the authorization a release takes: the login or step-up stood, and that session's release is `403`. Repair the transaction store (the MFA stores' outage row); the user verifies again |
 | `mfa_lock_release_unavailable` (warn — `slot: "subjectRevocation"`, once at boot) | `mfa/src/module.mts` | no subjects' sessions boundary is wired, so no release can show a revocation came after an attack: a user's release lifts the hard hold on a rebind but never gives the week or a backoff back early. Wire `subjectRevocation`, and have the Store call `revokeAllForSubject` on every password change |
@@ -1679,8 +1682,7 @@ check this page, so when the two disagree, the constant is right:
 `token.issued`, `token.issued.failure`.
 
 The `mfa.*` events are the multi-factor authentication package's (the MFA
-ADR's D28). The MFA package is private until the standalone template wires
-it, so no released composition emits them. Its routes emit
+ADR's D28), emitted by a composition that installs it. Its routes emit
 `mfa.challenge.sent`, `mfa.verified` and `mfa.verify.failure` (`reason`:
 `invalid`, `expired`, `replayed`, `malformed`, `sign_count_regression`, or
 `exhausted` for a verification that arrives after the transaction's attempts
@@ -1819,6 +1821,32 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `mfat:session-proof:{<subject>}:<sid>` | string, JSON `{provedAtMs, untilMs}` — the account-email proof (D24) given in one session of a subject: written when the MFA page's step-up proof is verified, `untilMs` `mfa.manage.maxAgeSeconds` later; read by the `mfa` requirement at each first binding in that session that asks the proof | `untilMs` less the store's clock (`SET … PX`), set when it is recorded; a later proof for the session replaces it. Losing one fails closed — the user proves again — so no durability is required of it, and a `volatile-*` policy evicting one costs only a re-proof | same |
 | `mfat:first-binding:{<subject>}` | string, JSON `{atMs, untilMs}` — the subject's first-binding mark (D12): when a first counting factor was last bound for the subject, or its witness marked. A session or a login continuation authenticated no later than it may hold a stale enrollment witness; the mark does not stand in for the witness, and covers only the window in which one can be stale | its `untilMs` on the server's clock (`SET … PXAT`), which alone judges the mark: one script keeps the later time and the later end of the mark held and the one noted, so a note never moves it back or shortens it. A mark the store cannot read back is an outage, never absent — `DEL` the key, as for the lock keys, and the next first binding notes it again. Losing it together with the subject's `mfaf:` records — one Redis flushed inside its lifetime — reopens that window, so it is kept as `mfat:proof:` is, under the same boot check; it always carries a TTL, so a `volatile-*` policy may evict it, and an evicted mark fails open — the module warns (`mfa_transaction_store_lock_evictable`). At `maxmemory`, `volatile-lru` and `volatile-random` were seen to evict nearly every mark, while `volatile-lfu` and `volatile-ttl` spared them in the same probe; run `noeviction` | same (`LUA_MFA_FIRST_BINDING_*`) |
 
+**When the factor store loses writes.** If your factor store can lose acknowledged writes on failover, a failover may restore a factor that was removed or undo a reset; after such a failover, re-run any operator reset performed in the lost window, and have affected users review their factors.
+Such a failover can also undo an acknowledged update, which brings back a
+spent recovery code or a TOTP step already used, and lose a new enrollment,
+which leaves the account's `mfaEnrolled` true beside no factor. So keep
+authentication paused until it is dealt with, and apply the procedure for
+factors kept in the Store
+([§3](#keeping-mfa-factors-in-the-store), "Failover and restore"): expire
+the MFA state written in the lost window, or have the affected users enroll
+again.
+
+A factor store lost whole — `mfaf:` emptied by a flush or by a restart
+without persistence — is not read as "no factor": a login whose `User`
+says it enrolled is answered `503` ([§3](#3-what-fail-closed-looks-like-on-each-path),
+the row on a `User` that says it enrolled), never a first binding (the MFA
+ADR's D12). Restore the factor store from an AOF taken before the loss —
+after a flush, stop AOF rewrites at once, since a rewrite after the
+`FLUSHALL` / `FLUSHDB` destroys what could be recovered, and remove that
+trailing command before replaying — or from a backup. A backup rolls back as
+a failover does, so re-run the operator resets made since it was taken, and
+have affected users review their factors. Where no restore is possible,
+reset the affected subjects — `resetMfaForSubject` with
+`requireEmailProof: true`
+([§3](#multi-factor-authentication-the-lock-mail-and-notices), "The operator
+reset"), in bulk from the Store's list of users marked enrolled — and tell
+them they will enroll again.
+
 The MFA transaction store judges when a subject's lock state stops counting
 on the time each caller passes, but what it reclaims — the TTL on
 `mfat:lock:` and `mfat:week:`, and the prune inside its scripts — on the Redis
@@ -1893,7 +1921,14 @@ pending authorization, `devauth:{devauth}:code:<device_code>` (a hash) and
 authorization's deadline (`device-grant.codeLifetimeSeconds`,
 default 600 s) and all on one Cluster slot (`packages/redis/src/device-code-store.mts`).
 The memory adapter instead caps itself at 10 000 records "at a few hundred
-bytes each" (`packages/core/src/device-authorization/memory.mts`).
+bytes each" (`packages/core/src/device-authorization/memory.mts`). The Redis
+store has no counterpart to that cap: it keeps no count and never refuses a
+new authorization as full, so `device_authorization_store_full` is, among the
+bundled stores, the memory adapter's alone. What bounds it is the authorizations' lifetime, the rate
+limit on `/oauth/device_authorization` (`device_authorization:ip:<ip>`), and
+past those the server's `maxmemory`: under `noeviction` a write the server
+refuses there is an outage to the endpoint — `503 temporarily_unavailable`,
+`device_authorization_store_unavailable` — never `device_authorization_store_full`.
 
 Core's in-process challenge store and replay seen-set, on a single replica,
 hold their live entries plus at most those that expired since the last sweep:
@@ -2185,6 +2220,88 @@ before you flip — and a relying party holding the secret can also mint.
   decrypt, is **deleted**, and the user is asked to re-authenticate with the
   upstream IdP (`packages/redis/src/federation-tokens.mts` `get`). Rotating
   it is a mass upstream re-login, by design rather than a migration.
+
+### Rotating the MFA key ring
+
+`mfa.encryptionKeys` is a ring of `{ id?, key }` entries, each key canonical
+base64 of 32 bytes (`openssl rand -base64 32`): **the first key seals**,
+**every listed key opens**, and each sealed value names the key that sealed
+it (the MFA ADR's D11; `packages/mfa/README.md`, "Key ids and rotation").
+`MFA_ENCRYPTION_KEY` feeds the first entry of `reference.conf`'s one-entry
+ring; a ring of two is written in a deployment-owned HOCON layer, and since
+that layer replaces the whole array, `MFA_ENCRYPTION_KEY` then feeds nothing
+unless the layer writes `${?MFA_ENCRYPTION_KEY}` into an entry itself. An entry
+without an `id` is named by its key's fingerprint, so it keeps its name
+wherever it moves in the ring; an entry with an `id` keeps that id — never
+change its key in place. The ring is read at boot: changing it means a
+restart.
+
+What a key holds once it no longer seals:
+
+- **A factor's data**, until that factor's next successful verification:
+  only that re-seals it under the first key
+  (`packages/mfa/src/coordinator.mts`). Listing the factors, renaming one,
+  or verifying another factor opens its data without rewriting it, so
+  ordinary activity does not move a record, and a factor nobody verifies
+  stays where it is. A record's `data` is `v2.<key id>.…`, the key id in
+  base64url (`packages/core/src/sealing/envelope.mts`), so the Store or the
+  `mfaf:` hash shows which key sealed each one.
+- **Digests**, which sit inside the sealed data and name a key of their own,
+  so the data's key id does not show them. A recovery-code set's digests are
+  made once, with the key of the day it was made, and never again: the set
+  stays under that key until the user regenerates it. An email factor's
+  address digest moves to the first key at the factor's next verification,
+  in the write that re-seals its data (`packages/mfa/src/email/factor.mts`).
+- **A ceremony in flight**: a pending challenge's or enrollment's sealed
+  state, and an email code's digest, for at most `mfa.transactionTtlSeconds`.
+
+1. **Add the new key at the end** of the ring on every replica, and deploy.
+   Every replica can now open what the new key seals; none seals with it yet.
+2. **Move it to the first position** on every replica, and deploy. New
+   writes seal under it, and each successful verification of a factor moves
+   that factor's data to it. Keep the old key listed.
+3. **Record when the last replica that sealed with the old key stopped**,
+   and prevent a rollback to a ring that has the old key first.
+4. **Keep the old key listed until nothing under it is left**: no record's
+   `data` names it, no recovery-code set made before step 3 is still stored,
+   and `mfa.transactionTtlSeconds` has passed since step 3. A recovery set
+   is the one only its user can move — by regenerating it from the account
+   page (`POST /session/mfa/recovery-codes`, with recent MFA) — so ask the
+   users who hold one, or keep the key for as long as their sets are kept.
+   While the old key is still read, the processes say so:
+   `mfa_factor_sealed_with_retired_key` (data opened under it) and
+   `mfa_digest_made_with_retired_key` (a digest matched under it), each info
+   with the `keyId`, once per key id per process. Neither line proves the
+   key unused: a factor nobody lists or verifies is never opened.
+5. **Remove it from every replica together**, with the rollback
+   configuration. Never reuse an id with different material.
+
+A key dropped too early is `503` on everything it still holds —
+`mfa_factor_unreadable`, `state: "key_unavailable"`, naming the `keyId` — and
+a factor listed `unreadable` on the account page; it is never read as "no
+factor" or as a wrong code, and putting the key back cures it. A recovery set
+under a missing key is cured only by putting the key back or by regenerating
+the set.
+
+**The email factor's identity changes with the key.** An email factor is
+known by its address digest together with that digest's key id, so the same
+address enrolled under the old key and again under the new one is not seen
+as a duplicate (`409 mfa_factor_duplicate` is not answered): a user may hold
+the address twice, as `mfa.maxFactorsPerSubject` allows, and can remove the
+extra one from the account page.
+
+**The development sample key.** `MFA_DEVELOPMENT_SAMPLE_KEY` is published,
+so the boot refuses it wherever it sits in the ring when the configuration
+was selected by `production` or `staging` (the composition root hands that
+name to `mfaModule({ environment })`), when `NODE_ENV` is either, and under
+`core.deployment.mode = "multi"`; where it is accepted, the boot warns
+`mfa_development_sample_key_in_use`. Since the ring cannot carry it into
+production, nothing sealed under it opens there (`key_unavailable`): start
+production with a factor store that holds nothing sealed under it, or reset
+the subjects that do.
+
+Rotate each key well before 2^32 seals under it: the envelope uses a random
+96-bit AES-GCM nonce, and NIST SP 800-38D bounds random nonces at that.
 
 ---
 
