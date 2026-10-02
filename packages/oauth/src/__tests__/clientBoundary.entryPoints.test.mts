@@ -256,7 +256,7 @@ describe("createOAuthRouter handed a document fallback", () => {
 		withClientIdMetadataDocuments(answering(null), {
 			allowedScopes: ["openid", "read"],
 			allowedAudiences: [],
-			lookup: async () => ["93.184.216.34"],
+			config: {},
 			fetch: (async () =>
 				new Response(
 					JSON.stringify({
@@ -346,7 +346,7 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 		const fallback = withClientIdMetadataDocuments(answering(null), {
 			allowedScopes: ["read"],
 			allowedAudiences: [],
-			lookup: async () => ["93.184.216.34"],
+			config: {},
 			fetch: (async () =>
 				new Response(
 					JSON.stringify({

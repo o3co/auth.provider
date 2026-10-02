@@ -110,7 +110,7 @@ const buildRouter = async (
 					pendingConsentStore: createMemoryPendingConsentStore(),
 				}
 			: {}),
-		clientIdMetadataDocuments: { fetch: fetchImpl, lookup: async () => ["93.184.216.34"] },
+		clientIdMetadataDocuments: { fetch: fetchImpl },
 		logger,
 	});
 	const app = express();
@@ -168,7 +168,11 @@ describe("the router's one document fallback reads every registered client throu
 
 describe("one document fallback per router", () => {
 	const fallback = () =>
-		withClientIdMetadataDocuments(answering(null), { allowedScopes: [], allowedAudiences: [] });
+		withClientIdMetadataDocuments(answering(null), {
+			allowedScopes: [],
+			allowedAudiences: [],
+			config: {},
+		});
 
 	it("refuses to build over a fallback when documents are on, with a consent store and /authorize", async () => {
 		await expect(buildRouter(fallback())).rejects.toThrow(TypeError);
