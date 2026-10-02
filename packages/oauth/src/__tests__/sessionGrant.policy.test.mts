@@ -180,6 +180,18 @@ describe("session grant — grantPolicy narrows what is minted", () => {
 		expect(minted(result).aud).toBe("https://rs-b");
 	});
 
+	it.each([
+		["no allowedAudiences", { allowedAudiences: undefined }],
+		["empty allowedAudiences", { allowedAudiences: [] }],
+		["allowedAudiences that do not list it", {}],
+	])("mints for the client id the policy chooses, with %s", async (_label, change) => {
+		const { result } = await grantWith(async () => ({
+			outcome: "allow",
+			grantedAudience: ["app"],
+		})).handle(ctx(undefined, { authenticatedClient: { ...CLIENT, ...change } }));
+		expect(minted(result).aud).toBe("app");
+	});
+
 	it("keeps the grant's own audience when the policy names none", async () => {
 		const { result } = await grantWith(async () => ({ outcome: "allow" })).handle(ctx());
 		expect(minted(result).aud).toBe("https://rs-a");
