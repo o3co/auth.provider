@@ -86,8 +86,9 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// (`mfa` for a regeneration from the account page),
 	// `by: "user"`, `regenerated` (true when a set stood, or may have)
 	// and, when an older set is still stored beside the new one,
-	// `unreplaced: true` — with `kept: "password_binding"` when it was kept
-	// on purpose and still verifies; without it, a retired set left stored,
+	// `unreplaced: true` — with `kept` when it was kept on purpose and still
+	// verifies, naming the binding by a sign-in alone it was kept for
+	// (`password_binding` or `federated_binding`); without it, a retired set left stored,
 	// whose codes verify nothing; `mfa.locked.first`, the refusal that begins an episode (the
 	// store's `first`), its `hold` and the refused attempt's factor `binding`;
 	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` and

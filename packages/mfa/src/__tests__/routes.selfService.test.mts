@@ -34,6 +34,7 @@ import {
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	federatedSessionAuthentication,
 	MFA_AMR,
 	type MfaFactor,
 	type MfaFactorRecord,
@@ -184,6 +185,24 @@ const percentDecoded = (text: string): string =>
 			return run;
 		}
 	});
+
+/** Every session `store` answers read as one signed in through a federation, as its callback records it. */
+function federatedSessions(store: UserSessionStore): void {
+	const get = store.get.bind(store);
+	vi.spyOn(store, "get").mockImplementation(async (sid) => {
+		const session = await get(sid);
+		return session === null
+			? null
+			: {
+					...session,
+					...federatedSessionAuthentication({
+						federation: "google",
+						upstreamAmr: [],
+						trusted: false,
+					}),
+				};
+	});
+}
 
 /** Alice's records as the factor store holds them, by kind. */
 const recordsOf = async (store: { list(subject: string): Promise<readonly MfaFactorRecord[]> }) =>
@@ -581,6 +600,72 @@ describe("the enroll transaction", () => {
 			unreplaced: true,
 			kept: "password_binding",
 		});
+	});
+
+	it("binds a first factor in a session signed in through a federation by federated, and keeps its recovery codes beside the new ones: the federation proved no second factor", async () => {
+		const { app, factorStore, userSessionStore, audit } = await composed();
+		const { agent } = await signIn(app, userSessionStore);
+		federatedSessions(userSessionStore);
+		const old = await seedFactor(factorStore, "recovery_code", { codes: [] });
+
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body.recovery_codes).toHaveLength(10);
+		const records = await factorStore.list(ALICE.id);
+		expect(records.map((record) => [record.kind, record.binding]).sort()).toEqual([
+			["recovery_code", "federated"],
+			["recovery_code", "password"],
+			["totp", "federated"],
+		]);
+		expect(records.some((record) => record.id === old.id)).toBe(true);
+		expect(audit.of("mfa.factor.enrolled")[0]?.details).toMatchObject({ binding: "federated" });
+		expect(audit.of("mfa.recovery_codes.generated")[0]?.details).toEqual({
+			kind: "recovery_code",
+			purpose: "enroll",
+			binding: "federated",
+			by: "user",
+			regenerated: true,
+			unreplaced: true,
+			kept: "federated_binding",
+		});
+	});
+
+	it("binds a first factor in a session signed in through a federation by email_proof once the proof was given there, replacing the recovery codes that stood", async () => {
+		const sender = createRecordingMailSender();
+		const { app, factorStore, userSessionStore, audit } = await composed({ sender });
+		const { agent } = await signIn(app, userSessionStore);
+		federatedSessions(userSessionStore);
+		const old = await seedFactor(factorStore, "recovery_code", { codes: [] });
+
+		const asked = await enrollFromAccount(agent, "totp");
+		expect(asked.status, JSON.stringify(asked.body)).toBe(403);
+		expect(asked.body).toMatchObject(STEP_UP_REQUIRED);
+		const opened = await stepUp(agent);
+		const proved = await giveEmailProof(agent, opened.body.transaction as string, sender);
+		expect(proved.status, JSON.stringify(proved.body)).toBe(200);
+		const begun = await enrollFromAccount(agent, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const done = await completeEnrollment(
+			agent,
+			begun.body.transaction as string,
+			totpProofOf(begun.body.secret),
+		);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		const records = await factorStore.list(ALICE.id);
+		expect(records.map((record) => [record.kind, record.binding]).sort()).toEqual([
+			["recovery_code", "email_proof"],
+			["totp", "email_proof"],
+		]);
+		expect(records.some((record) => record.id === old.id)).toBe(false);
+		expect(audit.of("mfa.recovery_codes.generated")[0]?.details).not.toHaveProperty("kept");
 	});
 
 	it("refuses a first factor 409 mfa_factor_limit, opening nothing, when the factor and its codes beside a record that does not count would pass mfa.maxFactorsPerSubject", async () => {

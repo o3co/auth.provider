@@ -59,12 +59,14 @@
  * record past the limit for each set left, until a later replacement's
  * sweep removes them.
  *
- * A binding by `password` — no account-email proof was asked — replaces
- * nothing: whoever holds the password and one code could make it, so the
- * sets that stood are kept, the new one written at the newest generation
- * beside them, the floor untouched, and the owner's remaining codes stay
- * usable (D25's amendment). Wherever the binding is made, this is the one
- * rule.
+ * A binding by `password` or `federated` — a sign-in alone, no
+ * account-email proof asked and no second factor proven — replaces nothing:
+ * whoever holds the password, or the upstream account, and one code could
+ * make it, so the sets that stood are kept, the new one written at the
+ * newest generation beside them, the floor untouched, and the owner's
+ * remaining codes stay usable (D25's amendment). Each binding's effect is
+ * decided once, in `STANDING_SETS_BY`; wherever the binding is made, this is
+ * the one rule.
  */
 
 import { randomBytes } from "node:crypto";
@@ -86,10 +88,13 @@ import {
 	shownRecoverySet,
 } from "./factor.mjs";
 
-/** Why a set that stood may still be stored beside the new one: kept for a `password` binding, or retired and not removed. */
-export type MfaUnreplacedRecoveryCodes =
-	| { readonly kept: "password_binding" }
-	| { readonly cause: unknown };
+/** Why the sets that stood were kept on purpose: the binding, by a sign-in alone, they were kept for. */
+export interface MfaKeptRecoveryCodes {
+	readonly kept: "password_binding" | "federated_binding";
+}
+
+/** Why a set that stood may still be stored beside the new one: kept for a binding by a sign-in alone, or retired and not removed. */
+export type MfaUnreplacedRecoveryCodes = MfaKeptRecoveryCodes | { readonly cause: unknown };
 
 /**
  * What issuing came to: nothing while the factor is off, or not issued, with
@@ -136,9 +141,24 @@ export interface WriteRecoveryCodesOptions extends IssueRecoveryCodesOptions {
 	readonly markedThrough: Pick<MfaFactorStore, "update">;
 }
 
+/**
+ * What a set issued beside a binding by each binding does to the sets that
+ * stood: replaces them, or keeps them, with why (see this file's header).
+ * Decided for every binding the record admits.
+ */
+const STANDING_SETS_BY = {
+	password: { kept: "password_binding" },
+	federated: { kept: "federated_binding" },
+	email_proof: "replaced",
+	mfa: "replaced",
+} as const satisfies Record<
+	NonNullable<MfaFactorRecord["binding"]>,
+	MfaKeptRecoveryCodes | "replaced"
+>;
+
 /** Whether a set issued beside a binding by `binding` replaces the sets that stood: the one rule (see this file's header). */
 export const replacesStandingSets = (binding: NonNullable<MfaFactorRecord["binding"]>): boolean =>
-	binding !== "password";
+	STANDING_SETS_BY[binding] === "replaced";
 
 /** What a write of the subject's factor set that found it changed since its read is answered with. */
 const SET_CHANGED = "the subject's factor set changed since it was read: another write landed";
@@ -179,14 +199,14 @@ async function writeSet(
 	const { factors: set, recoverySetFloor } = writes;
 	const factor = factors.get(RECOVERY_CODE_FACTOR_KIND);
 	if (factor === undefined) return undefined;
-	const replacing = replacesStandingSets(options.binding);
+	const standingSets = STANDING_SETS_BY[options.binding];
 	const id = randomBytes(16).toString("base64url");
 	try {
 		const digests = sealing.digestsFor(RECOVERY_CODE_FACTOR_KIND);
 		const standing = set.records.filter((record) => record.kind === RECOVERY_CODE_FACTOR_KIND);
 		const floor = await recoverySetFloor.read(subject);
 		const newest = Math.max(floor, ...standing.map((record) => generationOf(record)));
-		const generation = replacing ? newest + 1 : newest;
+		const generation = standingSets === "replaced" ? newest + 1 : newest;
 		const made = generateRecoveryCodes(factor, digests, generation);
 		if (made === undefined) return undefined;
 		const binding = { subject, id, kind: RECOVERY_CODE_FACTOR_KIND };
@@ -209,8 +229,8 @@ async function writeSet(
 		}
 
 		let unreplaced: MfaUnreplacedRecoveryCodes | undefined;
-		if (!replacing) {
-			if (standing.length > 0) unreplaced = { kept: "password_binding" };
+		if (standingSets !== "replaced") {
+			if (standing.length > 0) unreplaced = { kept: standingSets.kept };
 		} else {
 			try {
 				await recoverySetFloor.raise(subject, generation);

@@ -88,9 +88,12 @@
  *   binding never passes the limit another made at once, and of two
  *   bindings of one authenticator at once one stands. A first binding —
  *   `binding` `email_proof` when the proof was given, on the transaction or
- *   in the session, else `password` — then clears D25's flag where the proof
- *   was given, issues the recovery codes — replacing the sets that stood,
- *   unless bound by `password` (`recovery/issue.mts`); a login's written
+ *   in the session, else the sign-in it rests on: `federated` for a session
+ *   signed in through a federation, else `password` (a login's always: only
+ *   a password login is interrupted for a binding) — then clears D25's flag
+ *   where the proof was given, issues the recovery codes — replacing the
+ *   sets that stood, unless bound by a sign-in alone
+ *   (`recovery/issue.mts`); a login's written
  *   unshown, for the answer that carries them to mark shown — and marks the
  *   witness. The caller resumes a login, or escalates the session the
  *   binding was made in by what it adds.
@@ -150,8 +153,8 @@ const FACTOR_LIMIT = Object.freeze({ outcome: "factor_limit" as const });
 const FACTOR_DUPLICATE = Object.freeze({ outcome: "factor_duplicate" as const });
 const NO_PENDING = Object.freeze({ outcome: "no_pending_enrollment" as const });
 
-/** What a first binding is bound by: `password`, or `email_proof` after the account-email proof. */
-type FirstBindingBy = "password" | "email_proof";
+/** What a first binding is bound by: the sign-in alone, `password` or `federated`, or `email_proof` after the account-email proof. */
+type FirstBindingBy = "password" | "federated" | "email_proof";
 
 /**
  * The binding a first binding's start counts by when the completion alone
@@ -185,6 +188,15 @@ const openedPending = (
 
 /** Whether `tx` binds the subject's first counting factor: one opened `required`, a login's or an `enroll` one. */
 const isFirstBinding = (tx: MfaTransaction): boolean => tx.enrollment === "required";
+
+/**
+ * What a first binding on `tx` without the account-email proof is bound by:
+ * the sign-in it rests on — `federated` for a session `call` was admitted in
+ * that was signed in through a federation, else `password`. A login's is a
+ * password's: only a password login is interrupted for a binding.
+ */
+const signedInBy = (tx: MfaTransaction, call: MfaCeremonyCall): "password" | "federated" =>
+	tx.purpose === "enroll" && call.session?.federated === true ? "federated" : "password";
 
 /** The authentication a binding on `tx` rests on: the login's primary, or the sign-in of the session `call` was admitted in. */
 const authTimeOf = (tx: MfaTransaction, call: MfaCeremonyCall): number | undefined =>
@@ -553,7 +565,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				if (typeof standing !== "boolean") return standing;
 				proved = standing;
 			}
-			const firstBy: FirstBindingBy = proved ? "email_proof" : "password";
+			const firstBy: FirstBindingBy = proved ? "email_proof" : signedInBy(tx, call);
 			const refused = refusedBy(tx.purpose, first, records, firstBy);
 			if (refused !== undefined) return refused;
 			if (first) {

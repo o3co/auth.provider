@@ -128,14 +128,17 @@ export interface MfaFirstBindingDistrusted {
  * admitted it: its `sid`, its subject, the `User` its cookie holds (core's
  * `cookieSessionUser`), its primary sign-in as admission's view holds
  * it — `undefined` without one, which any first-binding mark distrusts —
- * and the enrollment witness its login's `User` carried as admission's view
- * holds it, `undefined` when it recorded none.
+ * whether that sign-in was a federation's, and the enrollment witness its
+ * login's `User` carried as admission's view holds it, `undefined` when it
+ * recorded none.
  */
 export interface MfaCeremonySession {
 	readonly sid: string;
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
 	readonly authTimeMs: number | undefined;
+	/** Whether the session was signed in through a federation, as core's `sessionAuthentication` reads its record; `false` when that cannot be told. */
+	readonly federated: boolean;
 	readonly witness: "enrolled" | "not_enrolled" | "malformed" | undefined;
 	/**
 	 * Whether a second factor can be recorded on the session, as admission's
