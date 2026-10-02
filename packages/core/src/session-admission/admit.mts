@@ -27,7 +27,9 @@ import {
 	PASSWORD_AMR,
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
+import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
+import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
 import {
 	canRecordSecondFactor,
 	copySessionAuthentication,
@@ -42,12 +44,12 @@ import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
 import { readLiveSession, readRecord, renewedAway } from "./live-session.mjs";
+import { warnDroppedClaims } from "./login-claims.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
-	frozenUserCopy,
 	primaryFromDto,
 } from "./primary.mjs";
 import { brandClaim, checkRequest } from "./request-check.mjs";
@@ -118,11 +120,12 @@ export function cookieClaim(req: CookieCarrier): SessionClaim {
 }
 
 /**
- * The `User` the cookie session holds — its login's — copied as plain data,
- * frozen at every depth and sharing nothing with it (`frozenUserCopy`), when
- * the session is authenticated (`isAuthenticated === true`, as `cookieClaim`
- * reads it) and the copy's `id` is `subject`; else `undefined`, a user that
- * is not plain data included. For a route that admitted `subject` over the
+ * The `User` the cookie session holds — its login's snapshot — read back as
+ * a login reads one (`readUserSnapshot`: the fields `User` declares, each by
+ * name once, frozen at every depth and sharing nothing with it), when the
+ * session is authenticated (`isAuthenticated === true`, as `cookieClaim`
+ * reads it) and the copy's `id` is `subject`; else `undefined`, a user the
+ * snapshot refuses included. For a route that admitted `subject` over the
  * cookie's claim. A request that is not an object, or a `subject` that is
  * not a non-empty string, is a `RangeError`.
  */
@@ -137,8 +140,8 @@ export function cookieSessionUser(
 	const session = isObject(req.session) ? req.session : undefined;
 	if (session?.isAuthenticated !== true) return undefined;
 	// Judged on the copy it answers: the session's user is read once.
-	const user = frozenUserCopy(session.user);
-	return user?.id === subject ? user : undefined;
+	const reading = readUserSnapshot(session.user);
+	return reading.ok && reading.snapshot.id === subject ? reading.snapshot : undefined;
 }
 
 /** What a code claim is built from: the code record, which carries a `sid` when a session minted it. */
@@ -447,7 +450,30 @@ const knownPrimaries = new WeakSet<object>();
 export interface PasswordLoginFacts {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
-	/** The route's `extractUserClaims(user)`: what the session record's `claims` will hold. */
+	/**
+	 * The route's `extractUserClaims(user)`: what the session record's `claims` will hold.
+	 *
+	 * Core reads it by name, each claim once, into a plain frozen copy. It
+	 * must be an object; a class instance is read by the declared claims'
+	 * names and its own enumerable keys, nothing else of it. A claim
+	 * `UserSessionClaims` declares must, when present, be of its declared
+	 * type: `email`, `name` and `picture` a string, `emailVerified` a
+	 * boolean, `groups` a list of strings (an ORM's list or an Array
+	 * subclass is copied by index into a plain array). `null`, or any other
+	 * value, is refused with a `RangeError`. A claim read as `undefined` is
+	 * left out.
+	 *
+	 * A custom claim is stored as its JSON form — `JSON.stringify`, parsed
+	 * back — so it should be JSON data: a string, a finite number, a
+	 * boolean, `null`, or a list or plain object of those. Anything else is
+	 * stored as JSON stores it, as a Redis-backed session store already read
+	 * it back: a `Date` as its ISO string, an object with `toJSON` as what it
+	 * answers, NaN or Infinity as `null`, and one whose JSON form is nothing
+	 * (`undefined`, a function, a symbol) left out. One whose JSON form
+	 * cannot be taken — a bigint, a cycle, a `toJSON` or a getter that
+	 * throws — is dropped, and the login goes on; `admitPrimary` logs
+	 * `login_claim_dropped` (warn) with its key, never its value.
+	 */
 	readonly claims: UserSessionClaims;
 	readonly authTime: Date;
 	readonly redirectTo: string | undefined;
@@ -494,6 +520,8 @@ export async function admitPrimary(
 			"admitPrimary: the primary must be one passwordPrimary or establishWithoutAsking built",
 		);
 	}
+	// A custom claim the builder dropped is said here, where the logger is.
+	warnDroppedClaims(deps.logger, primary.claims);
 	return askEvery(deps, requirements, primary, primary, []);
 }
 
@@ -584,6 +612,9 @@ export async function resumePrimary(
 		throw new RangeError(`resumePrimary: "${completed.requirement}" already completed`);
 	}
 	const adds = checkPrimaryAdditions(completing, completed.adds);
+	// A custom claim the continuation's check dropped — one a store answered
+	// that JSON cannot hold — is said once the resumption is admissible.
+	warnDroppedClaims(deps.logger, read.primary.claims);
 	// Rehydrated: the continuation carries epoch milliseconds; `recorded` is
 	// the password kind's, not the DTO's.
 	const primary: PrimaryAuthentication = Object.freeze({
@@ -620,7 +651,14 @@ export async function resumePrimary(
 export interface FederatedLogin {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
-	/** The merged claims envelope the callback composed: what the session record's `claims` will hold. */
+	/**
+	 * The merged claims envelope the callback composed: what the session
+	 * record's `claims` will hold. Read as {@link PasswordLoginFacts.claims}
+	 * is: declared claims of their declared types, `null` refused; custom
+	 * claims stored as their JSON form, one that cannot be taken dropped —
+	 * said as `login_claim_dropped` only when `establishWithoutAsking` is
+	 * handed a logger.
+	 */
 	readonly claims: UserSessionClaims;
 	/** The federation's name (`core.federations.<name>`). */
 	readonly federation: string;
@@ -643,8 +681,14 @@ export interface FederatedLogin {
  * A federated login asks no requirement's `admitPrimary`: the requirements
  * judge the resulting session only through `admit`, when a consumer admits it
  * (ADR 2026-09-28-session-admission, D5).
+ *
+ * `options.logger`, when given, is told of each custom claim the envelope
+ * dropped (`login_claim_dropped`); without one, a dropped claim is silent.
  */
-export function establishWithoutAsking(login: FederatedLogin): Establishment {
+export function establishWithoutAsking(
+	login: FederatedLogin,
+	options: { readonly logger?: Logger } = {},
+): Establishment {
 	if (!isObject(login)) throw new RangeError("establishWithoutAsking: the login must be an object");
 	if (nonEmptyString(login.federation) === undefined) {
 		throw new RangeError(
@@ -672,5 +716,6 @@ export function establishWithoutAsking(login: FederatedLogin): Establishment {
 		request: login.request,
 	});
 	knownPrimaries.add(primary);
+	warnDroppedClaims(options.logger, primary.claims);
 	return establish(primary);
 }

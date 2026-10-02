@@ -105,3 +105,24 @@ export const expectBestEffortWarn = (
 	expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 	return line;
 };
+
+/**
+ * No warn or error line carries `uri` in any form: as written, as `URL`
+ * serialises it (a tab inside the scheme is stripped, the scheme is
+ * lowercased), or its scheme alone: with the colon, and without it unless
+ * the scheme is http(s), whose bare name a reason such as
+ * `http-non-loopback` carries.
+ */
+export const expectUriNotLogged = (logger: MockLogger, uri: string): void => {
+	const logged = serialisedCalls(logger);
+	const forms = [JSON.stringify(uri).slice(1, -1)];
+	try {
+		const url = new URL(uri);
+		forms.push(url.href, url.protocol);
+		if (url.protocol !== "http:" && url.protocol !== "https:")
+			forms.push(url.protocol.slice(0, -1));
+	} catch {
+		// Not a URL: the written form is the only one.
+	}
+	for (const form of forms) expect(logged, `the log carries ${form}`).not.toContain(form);
+};

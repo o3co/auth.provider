@@ -35,6 +35,7 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { expectBestEffortWarn, expectUriNotLogged } from "./_helpers/projectedLog.mjs";
 
 // codeData must carry client_id and redirect_uri (required fields), and
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
@@ -2036,6 +2037,202 @@ describe("createAuthorizationGrant", () => {
 					});
 				},
 			);
+
+			describe("a frontchannelLogoutUri must be http(s)", () => {
+				/** One code exchange against `record`; the RP registration it made and the logger. */
+				const exchangeWith = async (record: object, warn?: () => void, wired = true) => {
+					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
+					const logger = createMockLogger();
+					if (warn !== undefined) logger.warn.mockImplementation(warn);
+					const clientRepository: ClientRepository = {
+						...mockClientRepository,
+						findById: vi.fn().mockResolvedValue(record),
+					};
+					const handler = createAuthorizationGrant({
+						...makeDeps(
+							vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz", ...validCode }),
+							clientRepository,
+						),
+						userSessionStore: {
+							kind: "spy",
+							async create() {},
+							async get() {
+								return {
+									sid: "session-xyz",
+									sub: "u1",
+									authTime: new Date(),
+									createdAt: new Date(),
+									expiresAt: new Date(Date.now() + 3600_000),
+									claims: {},
+									amr: undefined,
+									authentication: undefined,
+								};
+							},
+							async delete() {},
+						},
+						sessionFamilyIndex: makeSessionFamilyIndex({ addFamilyId: vi.fn(async () => {}) }),
+						sessionRPRegistry: makeSessionRPRegistry({ registerRP: registerRPSpy }),
+						...(wired ? { logger } : {}),
+					});
+					const { result } = await handler.handle({
+						body: {
+							code: "abc",
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_verifier: CODE_VERIFIER,
+						},
+						session: { code: "abc", user: { id: "u1" } },
+						issuer: "localhost",
+						metadata: { ip: "127.0.0.1" },
+						authenticatedClient: DEFAULT_AUTH_CLIENT,
+					});
+					expect(registerRPSpy).toHaveBeenCalledTimes(1);
+					const [, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>, Date];
+					return { result, rpData, logger };
+				};
+
+				const baseRecord = {
+					clientId: "client1",
+					allowedRedirectUris: [RP_URI],
+					allowedScopes: ["read"],
+					backchannelLogoutUri: "https://rp.example/back",
+				};
+
+				it.each([
+					["a non-http(s) scheme (lower case)", "javascript:void(0)", "not-http"],
+					["a non-http(s) scheme (upper case)", "JAVASCRIPT:void(0)", "not-http"],
+					// The URL parser strips the tab, so this parses as the scheme above.
+					["a non-http(s) scheme (a tab inside the scheme)", "java\tscript:void(0)", "not-http"],
+					["a non-http(s) scheme (a data URL)", "data:text/plain,signed-out", "not-http"],
+					["a non-http(s) scheme (a blob URL)", "blob:https://rp.example/x", "not-http"],
+					["a non-http(s) scheme (a custom scheme)", "com.example.app:/x", "not-http"],
+					["a non-http(s) scheme (an ftp URL)", "ftp://rp.example/front", "not-http"],
+					["a value that is not a URL", "not-a-url", "unparsable"],
+					["a value that is not a string", 42, "not-a-string"],
+				])(
+					"refuses %s from a custom repository: the RP is registered without it, the exchange still succeeds, and one warn names the reason, never the URI",
+					async (_label, uri, reason) => {
+						const { result, rpData, logger } = await exchangeWith({
+							...baseRecord,
+							frontchannelLogoutUri: uri,
+						});
+
+						expect(result.status).toBe(200);
+						expect(rpData.frontchannelLogoutUri).toBeUndefined();
+						// The other logout channel is untouched.
+						expect(rpData.backchannelLogoutUri).toBe("https://rp.example/back");
+						expect(logger.warn).toHaveBeenCalledTimes(1);
+						expectBestEffortWarn(
+							logger,
+							"logout_frontchannel_uri_refused",
+							{ site: "authorization_code", clientId: "client1", reason },
+							null,
+						);
+						expectUriNotLogged(logger, String(uri));
+					},
+				);
+
+				it("warns through the console fallback when the grant has no logger", async () => {
+					const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+					try {
+						const { result, rpData } = await exchangeWith(
+							{ ...baseRecord, frontchannelLogoutUri: "ftp://rp.example/front" },
+							undefined,
+							false,
+						);
+						expect(result.status).toBe(200);
+						expect(rpData.frontchannelLogoutUri).toBeUndefined();
+						const refused = warn.mock.calls.filter(
+							([, name]) => name === "logout_frontchannel_uri_refused",
+						);
+						expect(refused).toHaveLength(1);
+						expect(refused[0]?.[0]).toMatchObject({
+							site: "authorization_code",
+							clientId: "client1",
+							reason: "not-http",
+						});
+					} finally {
+						warn.mockRestore();
+					}
+				});
+
+				it("names the authenticated client in the warn, not the record's clientId", async () => {
+					const { rpData, logger } = await exchangeWith({
+						...baseRecord,
+						clientId: "record-client",
+						frontchannelLogoutUri: "ftp://rp.example/front",
+					});
+
+					expect(rpData.clientId).toBe("client1");
+					expectBestEffortWarn(
+						logger,
+						"logout_frontchannel_uri_refused",
+						{ site: "authorization_code", clientId: "client1", reason: "not-http" },
+						null,
+					);
+				});
+
+				it("refuses a non-http(s) scheme without failing the exchange when the logger throws", async () => {
+					const { result, rpData, logger } = await exchangeWith(
+						{ ...baseRecord, frontchannelLogoutUri: "ftp://rp.example/front" },
+						() => {
+							throw new Error("logger unavailable");
+						},
+					);
+
+					expect(result.status).toBe(200);
+					expect(rpData.frontchannelLogoutUri).toBeUndefined();
+					expect(logger.warn).toHaveBeenCalledTimes(1);
+				});
+
+				it("refuses a frontchannelLogoutUri whose read throws, without failing the exchange", async () => {
+					const record = {
+						...baseRecord,
+						get frontchannelLogoutUri(): string {
+							throw new Error("field unavailable");
+						},
+					};
+					const { result, rpData, logger } = await exchangeWith(record);
+
+					expect(result.status).toBe(200);
+					expect(rpData.frontchannelLogoutUri).toBeUndefined();
+					expect(rpData.backchannelLogoutUri).toBe("https://rp.example/back");
+					expect(logger.error).not.toHaveBeenCalled();
+					expectBestEffortWarn(
+						logger,
+						"logout_frontchannel_uri_refused",
+						{ site: "authorization_code", clientId: "client1", reason: "unreadable" },
+						null,
+					);
+				});
+
+				it("registers an http(s) frontchannelLogoutUri on any host, with a query or a fragment, without a warn", async () => {
+					for (const uri of [
+						"https://rp.example/front?state=a",
+						"https://rp.example/front#section",
+						"http://rp.example/front",
+						"http://127.0.0.1:8080/front",
+					]) {
+						const { rpData, logger } = await exchangeWith({
+							...baseRecord,
+							frontchannelLogoutUri: uri,
+						});
+						expect(rpData.frontchannelLogoutUri).toBe(uri);
+						expect(logger.warn).not.toHaveBeenCalled();
+					}
+				});
+
+				it("registers no front-channel entry, silently, for a record without one", async () => {
+					for (const uri of [undefined, null, ""]) {
+						const { rpData, logger } = await exchangeWith({
+							...baseRecord,
+							frontchannelLogoutUri: uri,
+						});
+						expect(rpData.frontchannelLogoutUri).toBeUndefined();
+						expect(logger.warn).not.toHaveBeenCalled();
+					}
+				});
+			});
 
 			it("issues tokens carrying family_id and sid without userSessionStore", async () => {
 				// No userSessionStore in deps — grant must succeed without linkFamily/registerRP.

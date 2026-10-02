@@ -27,10 +27,14 @@
  * caller's object; a value the contract does not admit is a `RangeError`
  * naming what is wrong and quoting nothing but an `amr` value's marker.
  *
- * A primary's `enrollmentFacts` are derived here from its copied `user`, as
- * it is checked and as it is rehydrated, and never read from what a caller
- * hands in; a continuation carries none, and its holder reads them through
- * `enrollmentFactsOfContinuation`, the same derivation.
+ * A primary's `user` is a plain snapshot of the fields `User` declares, each
+ * read by name once (`readUserSnapshot`), and its `enrollmentFacts` are derived here from
+ * that snapshot, as it is checked and as it is rehydrated, and never read
+ * from what a caller hands in; a continuation carries none, and its holder
+ * reads them through `enrollmentFactsOfContinuation`, the same derivation.
+ * Its `claims` are read once by `readLoginClaims` (`copyClaims`): each
+ * declared claim by name, of its declared type, and each custom claim as
+ * its JSON form.
  */
 
 import {
@@ -41,6 +45,7 @@ import {
 } from "../grants/authenticationClaims.mjs";
 import { normaliseMailAddress } from "../mail/address.mjs";
 import { readMfaEnrollmentWitness } from "../repositories/UserRepository.mjs";
+import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
 import type {
 	MailAddressFact,
@@ -49,6 +54,7 @@ import type {
 	UserSessionClaims,
 } from "../user-sessions/types.mjs";
 import { SECOND_FACTOR_AMR } from "./acr.mjs";
+import { readLoginClaims } from "./login-claims.mjs";
 import type {
 	CompletedRequirement,
 	CompletedRequirementDto,
@@ -76,98 +82,26 @@ const isStringList = (value: unknown): value is readonly string[] =>
 const isEpochMs = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-/** Freezes `value` and every plain object or array it holds, in place; answers it. */
-function deepFreeze<T>(value: T): T {
-	if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-	Object.freeze(value);
-	for (const entry of Object.values(value as Record<string, unknown>)) deepFreeze(entry);
-	return value;
-}
-
-/** What `plainCopy` throws for a value that is not plain data. */
-class NotPlainData extends Error {}
-
 /**
- * `value` copied as plain data — a primitive; an array; or an object whose
- * prototype is `Object.prototype` or `null` — frozen at every depth and
- * sharing nothing with it. Every own property must be an enumerable data
- * property under a string key, read once from its descriptor, so no accessor
- * of the object runs (a Proxy's traps are read once); anything else throws
- * `NotPlainData`. `copies` keeps a shared or
- * cyclic reference one copy.
+ * `user` as `readUserSnapshot` reads it — the fields `User` declares, each
+ * read by name once — or refused, quoting nothing of it.
  */
-function plainCopy(value: unknown, copies: Map<object, unknown>): unknown {
-	if (value === null) return null;
-	switch (typeof value) {
-		case "string":
-		case "number":
-		case "boolean":
-		case "bigint":
-		case "undefined":
-			return value;
-		case "object":
-			break;
-		default:
-			throw new NotPlainData();
-	}
-	const source = value as object;
-	const known = copies.get(source);
-	if (known !== undefined) return known;
-	const isArray = Array.isArray(source);
-	const prototype = Reflect.getPrototypeOf(source);
-	if (
-		isArray ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null
-	) {
-		throw new NotPlainData();
-	}
-	const copy: object = isArray ? [] : {};
-	copies.set(source, copy);
-	for (const key of Reflect.ownKeys(source)) {
-		if (typeof key !== "string") throw new NotPlainData();
-		const descriptor = Reflect.getOwnPropertyDescriptor(source, key);
-		if (descriptor === undefined || !Object.hasOwn(descriptor, "value")) throw new NotPlainData();
-		if (isArray && key === "length") {
-			(copy as unknown[]).length = descriptor.value as number;
-			continue;
-		}
-		if (descriptor.enumerable !== true) throw new NotPlainData();
-		Object.defineProperty(copy, key, {
-			value: plainCopy(descriptor.value, copies),
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
-	}
-	return Object.freeze(copy);
-}
-
-/**
- * `user` copied as plain data, frozen at every depth and sharing nothing
- * with it (`plainCopy`); `undefined` for a value that is not an object, or
- * holds anything but plain data — a field an accessor, a prototype or a
- * non-enumerable property holds would be lost from the copy.
- */
-export function frozenUserCopy(user: unknown): Readonly<Record<string, unknown>> | undefined {
-	if (!isPlainObject(user)) return undefined;
-	try {
-		return plainCopy(user, new Map()) as Readonly<Record<string, unknown>>;
-	} catch {
-		return undefined;
-	}
-}
-
-/** `user` as `frozenUserCopy` copies it; a value that is not plain data is refused, quoting nothing of it. */
-function copyUser(
+function userSnapshot(
 	user: unknown,
 	refuse: (what: string) => never,
 ): Readonly<Record<string, unknown>> {
-	if (!isPlainObject(user)) return refuse("user must be an object");
-	return (
-		frozenUserCopy(user) ??
-		refuse(
-			"user must be plain data: own enumerable data properties holding primitives, arrays and plain objects",
-		)
-	);
+	const reading = readUserSnapshot(user);
+	if (reading.ok) return reading.snapshot;
+	switch (reading.refused) {
+		case "not_an_object":
+			return refuse("user must be an object");
+		case "id":
+			return refuse("user.id must be a non-empty string");
+		case "not_plain_data":
+			return refuse(
+				`user.${reading.field} must be plain data: a string, a finite number, a boolean, null, or a list or plain object of those`,
+			);
+	}
 }
 
 /**
@@ -192,13 +126,21 @@ export function enrollmentFactsOf(user: Readonly<Record<string, unknown>>): Sess
 	});
 }
 
-/** A deep copy of `claims` — the session record's `claims` to be — that shares nothing with it, frozen at every depth. */
+/**
+ * `claims` — the session record's `claims` to be — as `readLoginClaims`
+ * reads them: each declared claim by name, of its declared type; each
+ * custom claim as its JSON form, one that cannot be taken dropped (the
+ * caller holding a logger warns of it). Refused as a `RangeError`, quoting
+ * nothing of them.
+ */
 function copyClaims(claims: unknown, refuse: (what: string) => never): UserSessionClaims {
-	if (!isPlainObject(claims)) return refuse("claims must be an object");
-	try {
-		return deepFreeze(structuredClone(claims)) as UserSessionClaims;
-	} catch {
-		return refuse("claims hold a value that cannot be copied");
+	const reading = readLoginClaims(claims);
+	if (reading.ok) return reading.claims;
+	switch (reading.refused) {
+		case "not_an_object":
+			return refuse("claims must be an object");
+		case "declared_claim":
+			return refuse(`claims.${reading.claim} must be ${reading.as} or absent`);
 	}
 }
 
@@ -255,7 +197,10 @@ function copyPrimaryFields(
 	refuse: (what: string) => never,
 ): Omit<PrimaryAuthentication, "authTime" | "enrollmentFacts"> {
 	if (!isNonEmptyString(value.subject)) refuse("subject must be a non-empty string");
-	const user = copyUser(value.user, refuse);
+	const user = userSnapshot(value.user, refuse);
+	// What reads the session's user back (`cookieClaim`, `cookieSessionUser`)
+	// takes its `id` for the subject.
+	if (user.id !== value.subject) refuse("user.id must be the subject");
 	const claims = copyClaims(value.claims, refuse);
 	const recorded = copyRecorded(value.recorded, refuse);
 	if (value.redirectTo !== undefined && typeof value.redirectTo !== "string") {
@@ -283,8 +228,9 @@ function copyPrimaryFields(
 /**
  * `value` as a `PrimaryAuthentication` core's builders make: `recorded` has
  * a non-empty `amr`, no `mfaAt`, and no second-factor value beside a
- * password primary; `user` and `claims` must be copyable. A frozen deep copy,
- * its `enrollmentFacts` derived from the copied `user`.
+ * password primary; `user` is read into its snapshot (`userSnapshot`) and
+ * `claims` read by `readLoginClaims` (`copyClaims`). A frozen deep copy, its `enrollmentFacts`
+ * derived from the snapshot.
  */
 export function checkPrimaryAuthentication(value: unknown): PrimaryAuthentication {
 	const refuse = (what: string): never => {

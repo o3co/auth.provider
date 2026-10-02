@@ -905,6 +905,8 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	readonly ceremonies?: FixtureCeremony[];
 	/** A fixture requirement whose next `admitPrimary` throws, once: an outage of its own store. */
 	readonly failAskOnce?: FixtureCeremony["requirement"];
+	/** A test's own modules, after the full set's: an operator component the template does not install. */
+	readonly modules?: readonly Module[];
 }
 
 export interface FullSet extends Composition {
@@ -952,6 +954,7 @@ export async function fullSetOptions(
 		interruptLogins,
 		ceremonies,
 		failAskOnce,
+		modules: ownModules,
 		...compose
 	} = options;
 	const interrupt = new Set(interruptLogins ?? []);
@@ -969,7 +972,10 @@ export async function fullSetOptions(
 			const users = userHttp === undefined ? stored : withUserRepositoryHttp(stored, userHttp);
 			return options.adjust ? options.adjust(users) : users;
 		},
-		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened, outage),
+		extraModules: (config) => [
+			...addedModules(config, features, added, f, interrupt, opened, outage),
+			...(ownModules ?? []),
+		],
 		// The caller's own overrides win, its own mail sender included.
 		extraOverrides: (config) => ({
 			mailSender: mail,

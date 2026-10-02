@@ -17,11 +17,13 @@
 /**
  * The identity a WebAuthn second factor answers for its data: the credential id the record
  * holds, over `@simplewebauthn/server`'s real verification of software authenticators. Data the
- * factor cannot read answers none, and the identity never throws.
+ * factor cannot read answers none, and the identity never throws. The factor contract, given two
+ * software authenticators, holds them to two identities.
  */
 
 import type { MfaEnrolledFactor, MfaFactor, MfaFactorData } from "@o3co/auth-provider-core";
 import { createTestMfaDigests } from "@o3co/auth-provider-core/testing";
+import { mfaFactorContract } from "@o3co/auth-provider-test-kit";
 import { describe, expect, it } from "vitest";
 import { createWebAuthnMfaFactor, WEBAUTHN_MFA_FACTOR_KIND } from "#/mfaFactor/factor.mjs";
 import { createTestWebAuthnConfig } from "#/testing/index.mjs";
@@ -184,4 +186,25 @@ describe("the identity of a WebAuthn second factor's data", () => {
 			expect(answered, what).toBeUndefined();
 		}
 	});
+});
+
+describe("the WebAuthn second factor keeps the MFA factor contract with two software authenticators", () => {
+	const first = softwareAuthenticator(RELYING_PARTY);
+	const second = softwareAuthenticator(RELYING_PARTY);
+	const challengeOf = (state: unknown): string =>
+		(state as { readonly challenge: string }).challenge;
+
+	for (const { name, run } of mfaFactorContract({
+		build: newFactor,
+		user: { ...USER, email: "alice@example.com" },
+		enrollmentProof: (start) => first.register(challengeOf(start.state)),
+		secondEnrollmentProof: (start) => second.register(challengeOf(start.state)),
+		verificationProof: (enrolled, challenge) => {
+			const { credentialId } = enrolled.data as { readonly credentialId: unknown };
+			const passkey = credentialId === second.credentialId ? second : first;
+			return passkey.assert(challengeOf(challenge?.state));
+		},
+	})) {
+		it(name, run);
+	}
 });

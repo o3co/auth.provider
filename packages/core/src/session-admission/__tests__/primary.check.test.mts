@@ -57,7 +57,7 @@ describe("CompletingRequirement — what the addition checks read of a requireme
 const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 	({
 		subject: "user-1",
-		user: { id: "user-1", groups: ["staff"], joined: "2020-01-01T00:00:00Z" },
+		user: { id: "user-1", groups: ["staff"], name: "User One" },
 		claims: { email: "user-1@example.test", emailVerified: true, groups: ["staff"] },
 		recorded: {
 			amr: ["pwd"],
@@ -80,14 +80,16 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 	it("freezes user and claims deeply: a nested object or list in the copy cannot be changed either", () => {
 		const checked = checkPrimaryAuthentication(
 			primary({
-				user: { id: "user-1", profile: { roles: ["staff"], address: { city: "x" } } },
+				// A declared field holding what an untyped Store's JSON may: a list and an object.
+				user: { id: "user-1", groups: [{ roles: ["staff"], address: { city: "x" } }] },
 				claims: { email: "u@example.test", groups: ["staff"], custom: { nested: [1] } },
 			}),
 		);
-		const user = checked.user as { profile: { roles: string[]; address: object } };
-		expect(Object.isFrozen(user.profile)).toBe(true);
-		expect(Object.isFrozen(user.profile.roles)).toBe(true);
-		expect(Object.isFrozen(user.profile.address)).toBe(true);
+		const user = checked.user as { groups: [{ roles: string[]; address: object }] };
+		expect(Object.isFrozen(user.groups)).toBe(true);
+		expect(Object.isFrozen(user.groups[0])).toBe(true);
+		expect(Object.isFrozen(user.groups[0].roles)).toBe(true);
+		expect(Object.isFrozen(user.groups[0].address)).toBe(true);
 		const claims = checked.claims as { groups: string[]; custom: { nested: number[] } };
 		expect(Object.isFrozen(claims.groups)).toBe(true);
 		expect(Object.isFrozen(claims.custom)).toBe(true);
@@ -152,20 +154,20 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 		["not an object", "pwd"],
 		["no subject", { subject: "" }],
 		["a user that is not an object", { user: "alice" }],
-		["a user that cannot be copied", { user: { f: () => 1 } }],
-		["a user holding a Date", { user: { id: "user-1", joined: new Date(0) } }],
-		["a user holding a Map", { user: { id: "user-1", roles: new Map() } }],
+		["a user without an id", { user: { username: "alice" } }],
+		["a user whose email is a function", { user: { id: "user-1", email: () => "a@example.com" } }],
+		["a user whose witness is a Date", { user: { id: "user-1", mfaEnrolled: new Date(0) } }],
+		["a user whose groups hold a Map", { user: { id: "user-1", groups: [new Map()] } }],
 		[
-			"a user that is a class instance",
+			"a user whose email is a class instance",
 			{
-				user: new (class User {
-					id = "user-1";
-				})(),
+				user: {
+					id: "user-1",
+					email: new (class Address {
+						value = "a@example.com";
+					})(),
+				},
 			},
-		],
-		[
-			"a user with a field it does not enumerate",
-			{ user: Object.defineProperty({ id: "user-1" }, "mfaEnrolled", { value: true }) },
 		],
 		["no recorded", { recorded: undefined }],
 		["an empty amr", { recorded: { amr: [], authentication: primary().recorded.authentication } }],
@@ -544,9 +546,9 @@ describe("the refusals each field names", () => {
 
 	it.each([
 		[
-			"claims that cannot be copied",
-			{ claims: { hook: () => 1 } },
-			/claims hold a value that cannot be copied/,
+			"a declared claim that is not of its declared type",
+			{ claims: { email: () => "u@example.test" } },
+			/claims\.email must be a string or absent/,
 		],
 		[
 			"an authentication that is not an object",
