@@ -50,10 +50,11 @@
  *   behind such a layer can read it as an absent client. A caller answers it
  *   as it answers any rejection of the lookup.
  *
- * A record is validated at each boundary it passes; a boundary this module
- * built is recognised and reused, never wrapped twice. A boundary over
- * another lets the inner one's refusal through unchanged, without a second
- * warn.
+ * Boot installs the boundary in the `clientRepository` slot, over whatever
+ * fills it, so every module that reads the slot reads through it. A record
+ * is validated at each boundary it passes; a boundary this module built is
+ * recognised and reused, never wrapped twice. A boundary over another lets
+ * the inner one's refusal through unchanged, without a second warn.
  *
  * The boundary also tells a refused record from an absent one as a verdict
  * ({@link ValidatedClientRepository.lookupClient}), for a caller that falls
@@ -231,8 +232,9 @@ const boundaries = new WeakSet<ClientRepository>();
  * A layer over the boundary keeps a refusal as long as it lets rejections
  * through unchanged (see the file header). A boundary handed to it is
  * answered as it is, never wrapped twice, so it keeps the logger it was
- * first built with; `options` are not read. The boundary is disposable when
- * `inner` is, and disposing it disposes `inner`.
+ * first built with; `options` are not read. Building the boundary reads
+ * nothing of `inner`. The boundary is always disposable: disposing it reads
+ * `inner`'s `Symbol.asyncDispose` then, and calls it when it is a function.
  *
  * The reasons a refusal logs name the field and an entry's position, never a
  * URI (see the file header). The record object is never logged.
@@ -273,22 +275,16 @@ export function validatedClientRepository(
 	};
 	const lookupClient = async (clientId: string): Promise<ClientLookup> =>
 		judge("find", clientId, await inner.findById(clientId));
-	const boundary: ValidatedClientRepository = {
+	const boundary: ValidatedClientRepository & AsyncDisposable = {
 		lookupClient,
 		findById: async (clientId) => clientOf(await lookupClient(clientId)),
 		authenticate: async (clientId, secret) =>
 			clientOf(judge("authenticate", clientId, await inner.authenticate(clientId, secret))),
+		[Symbol.asyncDispose]: async () => {
+			const dispose = (inner as { [Symbol.asyncDispose]?: unknown })[Symbol.asyncDispose];
+			if (typeof dispose === "function") await dispose.call(inner);
+		},
 	};
-	const dispose = (inner as { [Symbol.asyncDispose]?: unknown })[Symbol.asyncDispose];
-	const answered: ValidatedClientRepository & Partial<AsyncDisposable> =
-		typeof dispose === "function"
-			? {
-					...boundary,
-					[Symbol.asyncDispose]: async () => {
-						await dispose.call(inner);
-					},
-				}
-			: boundary;
-	boundaries.add(answered);
-	return answered;
+	boundaries.add(boundary);
+	return boundary;
 }
