@@ -1,0 +1,629 @@
+# Upgrading from v0.16.0
+
+This is the one place to start when you upgrade a deployment, a composition
+root or an adapter from v0.16.0. It lists every breaking change merged since
+v0.16.0, grouped by area, each with what to do and a link to where its
+details live. The release's `CHANGELOG.md` section is written when the release
+is cut ([release-policy.md](release-policy.md), R2); until then this guide and
+the pull requests it cites are the record.
+
+Changes to a surface that did not exist in v0.16.0 — the MFA ports, the
+Store's MFA endpoints, session admission, the test kit — are not breaks for
+you. Where you implement one of them, its current contract is what this guide
+describes.
+
+**Who reads what.**
+
+| You | Read |
+| --- | --- |
+| Run the standalone template, or a scaffold made by `create-app` | [Your scaffold](#your-scaffold), [Configuration](#configuration), [What clients and operators see](#what-clients-and-operators-see), [Client records](#client-records-the-boundary-in-the-clientrepository-slot), [Rolling out](#rolling-out-across-a-mixed-fleet) |
+| Run a composition root of your own | All of the above, and [Compositions and code](#compositions-and-code) |
+| Implement a port: a store, a repository, a limiter, a refresher | [Stores and records you implement](#stores-and-records-you-implement) |
+| Run the Store behind `@o3co/auth-provider-foundation` | [The Store implementer checklist](#store-implementer-checklist-before-switching-to-required) |
+| Want multi-factor authentication | [Turning MFA on](#turning-mfa-on), after everything above |
+
+**The order of work.**
+
+1. Fix the configuration. Every moved or removed key, and every value now
+   read strictly, refuses to start and names itself, so a start against a
+   staging copy lists what is left.
+2. Check the data the provider reads from you: client records, redirect URIs,
+   the users your Store answers.
+3. Update code that implements a port or calls an API that changed, and run
+   the conformance suites.
+4. Roll the whole fleet onto the new release.
+5. Only then decide on MFA, with `optional` before `required`.
+
+## Your scaffold
+
+A scaffold owns its `src/` and `config/`: upgrading the packages never
+changes them, and never turns MFA on. The template's composition root changed
+throughout this window — its own `logging`, `http`, `cors`, `redis-clients`
+and `key-store` modules (#783), the `adapters {}` selections (#853), the
+federation grant stores' defaults (#1177), the MFA switch (#1245) and a mail
+sender override (#1241) — and core no longer ships the defaults and bindings
+an old scaffold relied on (`logging`, `http`, `oauth.jwt.signingKey`,
+`refreshTokenFamilyStore.redis`). An old `app.mts` fails `tsc` against the
+new core, and its `createAppLogger` throws at run time.
+
+Take the new template's `src/` whole, `src/__tests__/` included, and its
+`config/` (`reference.conf`, `application.conf`, `development.conf`), then
+re-apply your own edits. Then:
+
+- `HTTP_PORT` set to the empty string, or to anything but decimal digits,
+  refuses the boot; it used to boot on a random port (#948).
+- `ADAPTERS_FEDERATION_GRANT_STORE` and `ADAPTERS_FEDERATION_GRANT_INTENT_STORE`
+  default to `none`. With `FEDERATION_GRANTS_ENABLED=true`, set both to
+  `redis` (or `memory` on one replica), or the boot is refused naming the
+  store (#1177).
+- A mail sender of your own goes through `buildModules`'
+  `overrides.mailSenderModules`, never into the module list (#1241).
+- Install MFA only through `MFA_MODE`
+  ([Turning MFA on](#turning-mfa-on)).
+
+## Configuration
+
+### Paths and variables that moved
+
+Every setting now lives under the name of the module that owns it (#728).
+An old path refuses the boot, naming the new one and the variable bound to
+it, while the module that owns it is loaded. A renamed variable refuses the
+boot when it is set alone or beside its new name at a different value; set
+to the same value as its new name, it boots, so a fleet can carry both
+through a rolling upgrade. Sections are strict: a key a section does not
+declare refuses the boot, naming it, where it used to be dropped.
+
+| What moved | Where it is listed |
+| --- | --- |
+| Core's own settings under `core {}` (`deployment.mode` → `core.deployment.mode`, `DEPLOYMENT_MODE` → `CORE_DEPLOYMENT_MODE`; `sessionRequirements` → `core.sessionRequirements`), the JWKS settings under `jwks {}` (`JWKS_PATH`, `JWKS_CACHE_MAX_AGE`); an unknown key under `core` is refused (#796) | the [core README](../packages/core/README.md#configuration) |
+| `dpop {}`, `mtls {}`, `device-grant {}` and `oauth-token-exchange {}` at the top level, camelCase; `OAUTH_DPOP_NONCE_*` → `DPOP_NONCE_*` (#804) | each package's README |
+| Each in-process and Redis store's settings, and `federationGrants` → `federation-grants {}`, under their modules' names, with eight renamed variables (`RATE_LIMIT_FAIL_MODE` → `REDIS_RATE_LIMITER_FAIL_MODE` among them) (#811) | the [redis README](../packages/redis/README.md), the [federation-grants README](../packages/federation-grants/README.md) |
+| The oauth and session settings: the grant switches, `oauth-session`, `session-store {}`, the login and consent pages, `OAUTH_CIMD_*` → `OAUTH_CLIENT_ID_METADATA_DOCUMENTS_*`; the PKCE key retired (#827) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 5 |
+| The template's own settings, the adapter selections (`adapters.<slot>`), the repositories, `audit-sink`, `core.federations`, `key-store`, `redis-clients`, `LOG_LEVEL` → `LOGGING_LEVEL` (#853) | [operator runbook §7](operator-runbook.md#before-you-upgrade), step 6 |
+| Module names are kebab-case, as their sections are (#738): boot error details and anything that finds a module by name see the new names | — |
+
+Two changes in that table go beyond a rename. **The grant switches read the
+boolean vocabulary every other switch reads**: a grant set to `"TRUE"`, `"1"`
+or `" true "`, which used to leave it off, now turns it on (runbook §7,
+step 5). And **unset `CLIENT_CODE_ENDPOINT_URI` and `CLIENT_CODE_PASSWORD`
+first**: both were removed, and set at all they refuse the boot, even beside
+the new names (step 6).
+
+### Keys removed
+
+The table in [operator runbook §7](operator-runbook.md#before-you-upgrade),
+step 2, lists every retired key and what you see. New since v0.16.0:
+
+- `webauthn.allowCredentialsForKnownUser` and
+  `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`, at any value, refuse the boot
+  wherever `webauthnModule` is installed (#1217). Every passkey assertion must
+  carry the user handle the authenticator returned, so users on
+  non-discoverable (non-resident) keys can no longer sign in through the
+  passkey grant: re-enroll them with discoverable credentials.
+  `POST /oauth/webauthn/authentication/options` no longer reads `userId`.
+- `oauth.grants.authorization_code.pkce.*` and
+  `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` refuse the boot; S256
+  is mandatory regardless (#827).
+- `repositories.code.type` (`CLIENT_CODE_TYPE`) is refused; use
+  `ADAPTERS_CODE_REPOSITORY` (#853).
+
+### Values read more strictly
+
+- **Numbers in decimal digits (#956).** The number settings of the packages
+  below read only a number, or a whole number written in decimal digits. `"0x10"`,
+  `"1e3"`, `"5.0"`, `"+5"` and `true`, which `z.coerce.number()` used to read
+  as numbers, refuse the boot naming the key; so do `""` and blank strings
+  where they used to read as `0` (`mtls.fullPki.revocation.cacheTtlSeconds`,
+  the Client ID Metadata Documents' cache settings: write `0` to disable).
+  This covers core (#1184), dpop (#1191), oauth-token-exchange (#1192), mtls
+  (#1193), the Client ID Metadata Documents (#1194), session and
+  session-store (#1195), webauthn (#1196), device-grant (#1197), the Redis
+  modules (#1199), the Store transport's `timeout` and `maxResponseBytes`
+  (#1200) and the template (#1201). Every refusal at these keys carries one
+  message, `must be a whole number … in decimal digits`: an alert matching
+  zod's old wording needs the new one. Core's exported `configuredNumber`
+  answers `undefined` for those strings, so a rate-limit budget given as one
+  is no budget, or a `RangeError` naming the key (#1208).
+- **An issuer ending in a slash.** `oauth.jwt.issuer` with a trailing slash
+  refuses the boot (#1150). Set it without the slash. Tokens then carry the
+  slashless `iss`, which is what discovery already advertised.
+- **Unknown keys.** A key under `oauth.clientIdMetadataDocuments` that the
+  oauth package's `reference.conf` does not list refuses the boot (#1151).
+  A key named after an `Object.prototype` member (`__proto__`,
+  `constructor`, `toString`, …), at any depth, refuses the boot naming its
+  path (#1216).
+- **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
+  or is empty, a `__Secure-` or `__Host-` name (in any case) without what the
+  prefix requires, and a `SESSION_STORE_DOMAIN` that is not a host name refuse
+  the boot at config validation (#785). Before, browsers dropped the cookie.
+- **The session requirements.** A composition that installs `oauthModule`,
+  `sessionModule`, `deviceGrantModule` or `federationGrantsModule` declares
+  `core.sessionRequirements.expected` — `[]` until a requirement is installed
+  — or the boot is refused (`session-requirements-undeclared`) (#715, #772,
+  #796). The template's `application.conf` writes it; a deployment that
+  replaced that file writes it itself.
+  `core.sessionRequirements.secondFactorAuthority` is new and optional: once
+  set, the boot is refused (`second-factor-authority-not-declared`) unless
+  the requirement it names is expected, registered and declares the
+  second-factor authority (#1249).
+
+The boot refusals you can meet, with their messages, are in
+[operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).
+
+## What clients and operators see
+
+### `/authorize`, discovery and tokens
+
+- **`response_mode`.** A request with a `response_mode` other than `query`,
+  or one that repeats it, gets an `invalid_request` error redirect (#1214).
+  Discovery advertises `response_modes_supported: ["query"]` (#1151).
+- **`acr` and `claims`.** An `oauth.authorize.acrValues` entry nothing
+  installed can satisfy is dropped from discovery and answered
+  `unmet_authentication_requirements`, with one `acr_value_unsatisfiable`
+  line at boot. A `claims` parameter that names `acr`, is not a JSON object,
+  or is repeated is `invalid_request`; an empty `max_age=` is read as omitted
+  (#706).
+- **A federated session's `amr` is `["fed"]`.** An upstream IdP's `amr` is
+  kept as `authentication.upstreamAmr` and no longer reaches a token or meets
+  an `acr`, unless the federation sets `trustUpstreamAmr = true` (#707).
+  Decide it per federation before you upgrade: [operator runbook §7](operator-runbook.md#before-you-upgrade),
+  step 3, has what codes and refresh tokens issued before the upgrade keep,
+  and the remedy.
+- **`/authorize` exists only with the `authorization_code` grant.** Without
+  it, `/oauth/authorize` and `/oauth/consent` answer `404` and discovery names
+  no authorization endpoint (#775).
+- **Session admission.** Every consumer reads the browser session through
+  core's one decision point (#715–#719). What changes: `isAuthenticated` must
+  be exactly `true`; a session record past its `expiresAt`, one without
+  `user.id`, or one whose `sub` differs from it is not live; with
+  `subjectRevocation` wired, the subject's revocation boundary applies at
+  `/authorize`, consent, the code-minting grants, device verification and the
+  link start; a session-store outage on an interactive `/authorize` is
+  `temporarily_unavailable` on the redirect URI. A link transaction in flight
+  across the upgrade is refused and the user starts it again. Log lines such
+  as `authorize_session_liveness_unavailable` become
+  `session_admission_unavailable`.
+- **The re-authentication ask (#992).** A session still `reauthenticate`
+  after the login trip `/authorize` sent it on is refused at the
+  `redirect_uri` rather than sent to log in again. Every live session at the
+  upgrade predates the record of how it was established: one whose `amr`
+  holds `pwd` or `fed` is read as before; the rest are sent to log in by an
+  `acr` `reauthenticate` verdict, a login trip that no longer signs the
+  browser out.
+- **`grantPolicy`.** A wired policy is consulted by the `session` grant, by
+  `client_credentials` whether or not `oauth.resourceIndicator.enabled` is
+  on (#1168), and by the device-code grant at the poll (#1169). Make sure it
+  answers `allow` for those grant types wherever they should keep minting. A
+  decision that is neither an exact `allow` nor an exact `deny` is
+  `500 server_error` (`policy_decision_invalid`) (#874). A policy that throws
+  at those three grants is `503`; at the device poll, a deny, a `503` or a
+  `500` spends the approval.
+- **Token exchange.** A policy refusal with `access_denied` is `400`, not
+  `403` (#859). `token.issued.failure`'s `details.reason` is the refusal's
+  description, or its error code: a dashboard keyed on `denied by policy` or
+  `grant policy evaluation failed` stops matching (#889).
+- **Federation grants.** `/reauthorize` answers a removed connection, or a
+  client that may no longer use it, `403 access_denied/connection_not_permitted`
+  (#883), and a revoked or pending grant whose boundary cannot be read `410` /
+  `400` rather than `503` (#963). A requirement's step-up at
+  `GET /session/federation-grants/connect` is a `303` to the requirement's
+  page (#1097). A refresh answer without a `tokenType` is refused as
+  `upstream_token_ineligible` / `malformed_token_response` (#1228). With
+  `federation-grants.enabled = false` nothing is mounted under either path,
+  so the host's own fallback answers (#1174).
+- **The federation token route** stores a refreshed upstream token for at
+  most 24 hours, so a long-lived one is refreshed upstream at least daily
+  (#1060).
+
+### Passkeys, users and sessions
+
+- **WebAuthn.** An assertion whose user handle is not its credential owner's
+  canonical handle is `400 invalid_grant` (`user_handle_mismatch`) (#863); one
+  without a handle is refused too (#1153, #1217). Migrated passkeys and
+  clients that pad or re-encode the handle are the ones to watch:
+  `token.issued.failure` with `details.reason: "user_handle_mismatch"`.
+- **The Store's users.** A `2xx` user with an empty `id` or `username` is
+  refused as malformed, `503` on every login path (#862). A Store sends a
+  stable label as `username` for a user without one.
+- **`req.session.user`** holds the eight fields `User` declares and nothing
+  else (#1100). A page of yours that reads another field of it fetches that
+  from your user repository by `user.id`:
+  [upgrading-required-record-keys.md](upgrading-required-record-keys.md#reqsessionuser-holds-the-declared-user-fields-alone).
+- **The consent pages.** A consent page must not be served under
+  `Referrer-Policy: no-referrer`: the standalone's `helmet()` sends it on
+  every response, so a consent route served by that app sets `same-origin`
+  itself. The federation-grants consent answer is held to the deployment's
+  `csrfGuard`, which reads `http.trustProxy` and the forwarded headers (#784).
+- **The CSRF token.** One whose expiry is more than `ttlSeconds` + 60 s ahead
+  is refused, so after lowering `ttlSeconds` older tokens are refused until
+  within the new bound (#774).
+
+### Redirect and logout URIs
+
+Check every `allowedRedirectUris`, `postLogoutRedirectUris`,
+`federationGrantRedirectUris` and `frontchannelLogoutUri`, and every Client ID
+Metadata Document you depend on. A query name outside `[A-Za-z0-9_-]`, a
+parameter with no name, a `;`, or a reserved name (`code`, `state`, `iss`,
+`error`, `error_description`, and on a grant URI `grant_id`; on a
+front-channel logout URI `iss` and `sid`) is refused, at boot for a `yaml` /
+`static` client (#1044, #1053, #1157). A front-channel logout URI is held to
+`http(s)` where it is used (#1096). The cases, their answers and the fix are
+[operator runbook §7](operator-runbook.md#before-you-upgrade), step 7.
+
+## Client records: the boundary in the `clientRepository` slot
+
+Core installs its client-record boundary in the `clientRepository` slot, over
+whatever repository a provider or the host puts there (#1120, #1167, #1180,
+#1183). Every module that reads the slot — the `/oauth` router, client
+authentication, the code exchange, token exchange, the federation-grants
+connect and consent pages — reads each record once, through it:
+
+- **The fields `PublicClient` declares, by name**, held to the rules a `yaml`
+  / `static` client meets at boot, defaults filled, never `clientSecret`.
+- **A record it refuses is `503 temporarily_unavailable` everywhere**,
+  warned `client_record_refused` with the client id and the reasons, then
+  logged `client_repository_unavailable` with `reason:
+  "client_record_refused"`. It is never answered with a Client ID Metadata
+  Document. Refused: a record breaking any registration rule (no
+  `tokenEndpointAuthMethod`, a redirect URI the rules above refuse,
+  `defaultScopes` outside `allowedScopes`, `firstParty: "true"` as a string,
+  …), a value JSON does not hold as it is (a `Date`, a class instance), a
+  `clientId` with a control character or over 256 characters, and a record
+  whose `clientId` is not exactly the id looked up (a case-folding store).
+- **What to do.** Run against a staging copy and grep for
+  `client_record_refused`: each line names the fields to fix. Give
+  `client_record_refused` its own alert, apart from the repository outage:
+  until a record is fixed, anyone who knows its id gets `503`. A cache or a
+  decorator over a `ClientRepository` lets a lookup's rejection through
+  unchanged and never caches it. A repository you hand to a component
+  yourself, outside the slot, is read as you hand it: wrap it with
+  `validatedClientRepository`.
+- **The Client ID Metadata Document fallback** is installed only by the
+  `/oauth` router, from `oauth.clientIdMetadataDocuments` (#1186).
+  `withClientIdMetadataDocuments`, `createClientIdMetadataDocumentResolver`
+  and their option and resolver types are no longer exported. A deployment
+  that built the fallback by hand passes its plain repository and sets
+  `oauth.clientIdMetadataDocuments` (`enabled = true` and the same policy
+  fields) instead: the [oauth README](../packages/oauth/README.md#client-id-metadata-documents-529).
+  A document is resolved only when no registered client is found (#1128).
+
+## Compositions and code
+
+### A module switched off registers nothing
+
+A module whose own switch is off registers nothing and runs none of its
+factories (#1166, #728 B7): no routes, no slots, no budgets, no admission
+actions.
+
+- **device-grant** off: no `404` on its two paths, no `device_verification`
+  budget, no requirement on `clientRepository` or `keyStore`, no absence
+  policy. A deployment that leaves it off may drop `device-grant.store =
+  "unsupported"`, and `"auditSink"` from `core.declaredAbsent` if only the
+  device grant asked for it (#1175).
+- **federation-grants** off: nothing mounted; a composition that wants the
+  JSON `404` mounts `createDisabledFederationGrantRouter()` at
+  `FEDERATION_GRANTS_MOUNT_PATH` itself (#1174).
+- **dpop**, **mtls**: a factory called directly, outside `createApp`, with a
+  disabled section now builds the mechanism; read `dpopModule.section.isEnabled`
+  / `mtlsModule.section.isEnabled` instead of relying on its answer (#1171,
+  #1172).
+- **An MFA factor module** off no longer claims its `mfaFactors` kind
+  (#1173); `webauthn-mfa-factor` off registers nothing (#1217).
+- Stage 1 parses the configuration before the manifest and wiring checks, so
+  a configuration that fails to parse is reported first (#1166).
+
+### Slots, admission and wiring
+
+A composition root built by hand meets these; `createApp` with the bundled
+modules fills them.
+
+- **Session admission.** `createOAuthRouter`, the grant factories, the
+  session router, `createDeviceVerificationHandler` and the federation-grants
+  browser router require the requirements resolver (#715–#719). A consumer
+  registers the actions it admits under `admissionActions`, each with one of
+  core's grades; a hand-mounted handler registers the exported declarations
+  (`DEVICE_GRANT_ADMISSION_ACTIONS`, `OAUTH_ROUTER_ADMISSION_ACTIONS`) (#793).
+  A hand-written requirement that reaches or adds a second factor declares
+  `secondFactorAuthority: true` (#781).
+- **Slots one module owns.** An enabled device grant requires the
+  `csrfGuard` slot, and enabled federation grants `csrfGuard` and
+  `loginEntry` (#746, #784); `sessionModule` requires `csrfTokenSigner`, and
+  `createCsrfProtection` takes `{ signer }` (#774); `deploymentMode` is core's
+  and reserved (#773); `sessionCookiePolicy`, `httpSettings` and
+  `oauthTokenSettings` are authoritative while their module is loaded (#783,
+  #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
+  and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **Rate limits.** The module that keys a prefix contributes its budget
+  (`rateLimitBudgets`); the bundled limiters seed none (#782). An override
+  that loosens a budget refuses the boot.
+- **Renamed variables.** A configuration handed to `createApp` carries core's
+  `renamed-variables` captures: layer core's `reference.conf`, or call
+  `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
+  `@o3co/auth-provider-core/testing` (#796, #803).
+- **Shutdown.** A cleanup registers the allowance it needs; the template's
+  `installGracefulShutdown` takes `cleanupAllowanceMs` (#797).
+
+### Exports removed, and signatures changed
+
+- **Core's public entries no longer export 42 undocumented names** (#1234):
+  tuning defaults (`DEFAULT_MEMORY_*`, `DEFAULT_REMOTE_JWKS_*`,
+  `DEFAULT_JWKS_*`, `LOGGED_STACK_*`), `federationGrantRedirectUriReservedParameter`,
+  `resolveJwksPath`, `resolveJwksCacheMaxAge`, `readConfiguredRateLimitSpec`,
+  `revokedFamilyExpiresAtMs`, and on `./testing` `makeValidFullSections`,
+  among others; the pull request lists all 42. Stop importing them; for a
+  tuning default, pass the value explicitly. Core's surface is pinned by
+  `packages/core/public-surface.txt` (#1225).
+- **Core's unwired MFA surface** (`createMfaRouter`, `MfaProvider`,
+  `createMfaProviderFactory` and their types) is gone, and `BootErrorReason`
+  loses `"mfa-partial-wiring"` (#702). MFA is `@o3co/auth-provider-mfa`.
+- **Rate-limit helpers** (`resolveSeededLimitSpecs`, `resolveLoginLimitSpec`,
+  the per-feature prefixes and specs) are gone from core; the prefixes are
+  exported by the packages that key them (#782).
+- **Signatures.** `renderFrontchannelLogoutHtml` takes
+  `postLogoutRedirect: { uri, state? }` (#1096); `createDeviceCodeGrant`
+  requires a `grantPolicy` key, `undefined` for none (#1169); the federation
+  token route's `createRouter` throws when `refreshBufferMs` is 24 hours or
+  more without a larger `maxTokenLifetimeMs` (#1060);
+  `resolveRedisFederationGrantStoreOptions` takes `deploymentMode` (#773);
+  `FederationGrantLodgingRefused` takes no parameter (#996).
+- **Unions that grew.** `IssuerRejection` gains `"trailing-slash"` (#1150),
+  `RedirectUriRejection` `query-name-invalid` and `reserved-parameter` (#1044);
+  `FederationGrantReauthorizationResult` loses `connection_not_configured`
+  (#963). An exhaustive `switch` over one needs the change.
+
+## Stores and records you implement
+
+The records a store hands back name every field, and the ones added in this
+window — `CodeData.amr`, `UserSession.authentication`,
+`DeviceAuthorization.approvedAtMs`, `amr` and `authTimeMs`,
+`FederationTokens.obtainedAt`, a federation-grant credential's
+`effectiveExpiresAt` — are rows of
+[upgrading-required-record-keys.md](upgrading-required-record-keys.md#what-changed),
+with what a store of yours records and refuses. Per port:
+
+- **`CodeRepository`.** Round-trip `amr` (#932): the `amr` `/authorize`
+  vouched for, which `/token` stamps on the code's tokens. Callers of
+  `createCode` pass it, `undefined` without a user-session store. A repository
+  that drops it yields tokens without `amr`, and their refresh family carries
+  none forward; under `mfa.mode = "required"` such a family is refused at its
+  first refresh.
+- **`UserSessionStore`.**
+  - `authentication` (the MFA ADR's BREAKING item 10): round-trip it and
+    record what `recordableSessionAuthentication` answers —
+    [`UserSession.authentication`](upgrading-required-record-keys.md#usersessionauthentication).
+    Implement `recordSecondFactor` (`supportsSecondFactorUpdate`), or a step-up
+    asks for a new login instead.
+  - `enrollmentFacts` (#836):
+    [`UserSession.enrollmentFacts`](upgrading-required-record-keys.md#usersessionenrollmentfacts).
+  - `authTime`: record what `recordableAuthTime(sid, authTime, now)` answers,
+    never your input (#1155).
+  - `renewalNonce` (#923): round-trip `UserSession.renewalNonce`, and in
+    `recordSecondFactor` record the event only while the session's nonce is
+    the event's `expectedRenewalNonce`, in the same atomic step, answering
+    `null` otherwise. A store that drops it leaves a stepped-up session
+    unbound from the cookie session it was renewed into
+    ([core's `user-sessions` README](../packages/core/src/user-sessions/README.md)).
+  - Run `runUserSessionStoreContract`, and `runSecondFactorUpdateContract`
+    if your store implements `recordSecondFactor`.
+- **A `loginCompletion` of your own** implements `renewSession` (#923), the
+  renewal of a signed-in session's id a step-up finishes with: the
+  [session README](../packages/session/README.md#renewing-a-signed-in-sessions-id).
+- **`SessionRPRegistry`.** A resolved `registerRP` is visible to every later
+  `listRPs` on that sid: no replica or eventually consistent reads (#1155).
+- **`DeviceCodeStore`.** Record `approvedAtMs`, and what
+  `recordableDeviceApproval({ amr, authTime }, nowMs)` answers (#1093).
+- **`FederationTokenStore`.** Implement the conditional members
+  `getVersioned`, `replaceIf` and `removeIf` (#1176); `update` is gone, and
+  `obtainedAt` is a required key read back as a `Date` or `undefined`, never
+  left out and never `null` (#1215). Run
+  `federationTokenStoreConditionalContract`. Records written by v0.16.0 stay
+  readable and get a generation at their first versioned read.
+- **`FederationGrantStore` callers** give an access token's
+  `effectiveExpiresAt` on `activate` / `replaceCredentials` (#1078). A
+  **`FederationGrantRefresher`** of your own reports `tokenType` (#1228).
+- **`UserRepository`.** A login reads the eight declared `User` fields by
+  name, once, so an ORM entity or a getter-backed `User` logs in (#1100,
+  #1206). A Store answers `mfaEnrolled` on both reads (#903): the
+  [checklist](#store-implementer-checklist-before-switching-to-required).
+- **`ClientRepository`.** Its records pass core's boundary
+  ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
+- **`RateLimiter`.** One that declares no `failMode` fails closed, whatever
+  `rateLimit.failMode` says; a wrapper forwards `failMode` and
+  `defaultLimit` (#782).
+- **Redis clients of your own.** `SubjectRevocationClient` implements
+  `advanceRevocationBoundaries`, and `setRevocationBoundaries` is gone (#993):
+  add the method on the current release first.
+  `UserSessionStoreClient` implements `replaceIfUnchanged` (#707). A
+  `FederationTokenStoreClient` wrapper implements `readVersioned`,
+  `replaceIfGeneration`, `removeIfGeneration` and `pExpireGT` (#1176).
+  `makeIoredisClients` provides them all.
+- **The MFA ports**, new since v0.16.0. An `MfaFactorStore`'s membership
+  writes are `createIf`, `removeIf` and the reset `removeAllForSubject`, at
+  the generation `listVersioned` answered; it has no unconditional `create`
+  or `remove` (#1121, #1179, #1236). An `MfaTransactionStore` answers
+  `rebindAfterMs` on every subject-recovery answer (#1238). The contracts and
+  their suites are in [adapter-surface.md](adapter-surface.md#conditional-writes)
+  and the [test kit](../packages/test-kit/README.md).
+
+## Store implementer checklist (before switching to `required`)
+
+For the Store behind `@o3co/auth-provider-foundation`: its user endpoints,
+and, where the factors are kept in it, its MFA endpoints. The wire is
+foundation's README,
+[The Store's MFA endpoints](../packages/foundation/README.md#the-stores-mfa-endpoints);
+the rules every store with conditional writes keeps are
+[adapter-surface.md, Conditional writes](adapter-surface.md#conditional-writes).
+Do every item before `mfa.mode = "required"`; under `optional` a Store that
+misses one lets a password-only login through where a factor was lost.
+
+**The enrollment witness.**
+
+1. **Both reads answer `mfaEnrolled`**: `authenticate` and
+   `authenticateByToken` alike, a boolean, left out until the subject is
+   first marked (#903). A federated login records the witness from
+   `authenticateByToken`; a Store that answers it on `authenticate` alone
+   leaves every federated session reading "not enrolled".
+2. **The Store provides the `markMfaEnrolledUrl` endpoint**
+   (`REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL`), which gives the user
+   repository the `markMfaEnrolled` capability. Without it, boot warns once
+   (`mfa_enrollment_witness_unwritable`) and nothing but the Store keeps a
+   subject's factor list whole.
+3. **Backfill `mfaEnrolled = true`** in the Store for every subject that
+   holds a counting factor, when you set that URL
+   ([foundation's README](../packages/foundation/README.md#the-witness-written-through-the-user-repository)).
+4. **Run the test kit's witness contract suite in the Store's CI**
+   (`mfaEnrollmentWitnessContract`): it is the only guard on
+   `authenticateByToken`
+   ([the suite](../packages/test-kit/README.md#the-enrollment-witnesss-contract-suite)).
+
+**The factor store, where the factors are kept in the Store.**
+
+5. **Conditional writes.** A factor create (`createIf`) and a single removal
+   (`removeIf`) carry `expectedGeneration` and `deadlineMs`, and each is one
+   atomic step in your database: applied only while the subject's factor set
+   is at that generation, answered `409 { outcome: "conflict" }` otherwise,
+   and answered `408` without being applied at or after `deadlineMs` on the
+   Store's own clock. The list answers `generation` from the same snapshot as
+   `factors`, never from a cache or a lagging replica. Every membership
+   write, the reset included, mints a new random generation; an update keeps
+   it.
+6. **The Store refuses a factor create or a single removal without
+   `expectedGeneration`**, and may answer it `400`. The provider sends none
+   (#1232, #1235); the only unconditional write is the reset,
+   `{ subject, all: true }`.
+7. **An emptied set stays as its tombstone** for at least
+   `BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 hours, after its last membership
+   write.
+8. **The write-lifetime bound.** A write conditional on a read is valid only within the store's write-lifetime bound of that read: the bound runs from the versioned read that produced the write's expected generation to the write's commit or failure, transport and queues included. The port's owning module keeps it; callers outside it never hold a generation. An emptied set's tombstone is kept for at least that bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h, for the bundled stores).
+   A Store bounds its own write commit server-side (SQL statement/transaction timeout; HTTP deadline never retried after it passes). For MFA the factor-set writer keeps the bound under its lease.
+9. **No rollback.** A generation is never issued again, a failover or a
+   restore included (adapter-surface rule 8). A Store either re-mints the
+   generation of everything it restores, or runs so that acknowledged state
+   never rolls back, and its documentation says which. Where it is the
+   second, the operational assumption to state is: “this store assumes acknowledged writes are not rolled back (persistence plus a failover setup that keeps acked writes); a deployment that accepts acked-write loss on failover also accepts that a conditional write may see a restored older generation”.
+   If your factor store can lose acknowledged writes on failover, a failover may restore a factor that was removed or undo a reset; after such a failover, re-run any operator reset performed in the lost window, and have affected users review their factors.
+   The procedure is [operator runbook §3, Keeping MFA factors in the Store](operator-runbook.md#keeping-mfa-factors-in-the-store).
+10. **Run the factor store's suites in the Store's CI**:
+    `mfaFactorStoreContract` and `mfaFactorStoreConditionalContract`, against
+    `HttpMfaFactorStore` over your Store, with `second` — another adapter on
+    the same Store — so the races prove the fence across processes
+    ([the factor store's suite](../packages/test-kit/README.md#the-factor-stores-contract-suite),
+    [the factor set's conditional writes](../packages/test-kit/README.md#the-factor-sets-conditional-writes)).
+11. **The Store, and anything in front of it, answers `421` only for a
+    request it did not apply**: the HTTP client may send it again.
+
+**Timeouts.**
+
+12. **Raise `mfa.storeTimeoutMs` together with the user repository's HTTP
+    timeout** (`MFA_STORE_TIMEOUT_MS`, `REPOSITORIES_USER_HTTP_TIMEOUT`). The
+    template refuses the boot while the first is below the second where the
+    Store is called; above 37500 ms it is refused too.
+
+## Turning MFA on
+
+**To turn MFA on in production, set `adapters.mfaFactorStore` and
+`adapters.mfaTransactionStore` (`ADAPTERS_MFA_FACTOR_STORE`,
+`ADAPTERS_MFA_TRANSACTION_STORE`) to `redis` or `store`** — `store`, the
+factors kept in the Store, is for the factor store alone, so the transaction
+store is `redis`. The template's default for both is `memory`, which is
+refused while MFA is on outside development and test: the start is refused,
+naming each store left in `memory` and its variable, unless the
+configuration's name, `CONFIG_ENV` and `NODE_ENV` each say `development` or
+`test`, and core refuses `memory` under `CORE_DEPLOYMENT_MODE=multi` whatever
+the name. A restart of a
+`memory` store loses every factor, every lock and every recorded email proof,
+after which whoever holds a password can bind a factor of their own.
+
+MFA is new since v0.16.0, and off until you turn it on. Roll the whole fleet
+onto this release first ([below](#rolling-out-across-a-mixed-fleet)), work
+through the [Store implementer checklist](#store-implementer-checklist-before-switching-to-required)
+if you run a Store, then go `optional` — users enroll at their own pace — and
+`required` once most have. Switching to `required`, a live password session
+of a user with no counting factor is asked to log in again, and that login
+binds their first factor.
+
+### The standalone template
+
+`MFA_MODE` binds the template's own key, `mfaMode`, default `off` (#1245).
+`off` installs nothing of MFA, and discovery is as it was. `optional` and
+`required` install the MFA package's modules, the operator reset, the session
+package's login completion and the two MFA stores `adapters` selects; declare
+`mfa` in `core.sessionRequirements.expected` and name it
+`core.sessionRequirements.secondFactorAuthority`; write `mfa.mode`; and add
+`"urn:o3co:acr:mfa" = ["mfa"]` to the acr table unless yours writes it.
+Turning it on needs:
+
+- **Durable MFA stores**, [above](#turning-mfa-on).
+- **`MFA_ENCRYPTION_KEY`**, canonical base64 of 32 bytes
+  (`openssl rand -base64 32`). In development, write your own key in
+  `config/development.conf` rather than exporting it beside the sample key.
+- **`MFA_PAGE_URL`** (default `/mfa`): your MFA page, on the issuer's origin.
+  The template ships none; what it keeps is
+  [The MFA page's contract](../packages/mfa/README.md#the-mfa-pages-contract).
+- **SMTP**, outside development: `STANDARD_SMTP_MAIL_SENDER_HOST` and
+  `STANDARD_SMTP_MAIL_SENDER_FROM`, with `_PORT`, `_SECURE`, `_USER` and
+  `_PASSWORD` as your relay needs.
+- **`MFA_STORE_TIMEOUT_MS`** at least `REPOSITORIES_USER_HTTP_TIMEOUT` where
+  the Store is called, and `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` with
+  `ADAPTERS_USER_REPOSITORY=http`.
+
+Install MFA only through `MFA_MODE`: do not add its modules to
+`buildModules`, and do not write `mfa.mode`, a contradicting `mfaMode`, or a
+`secondFactorAuthority` other than `mfa`. The variables and what each refuses
+are the template README's
+[Multi-factor authentication](../templates/standalone/README.md#multi-factor-authentication).
+
+### A composition of your own: the port checklist
+
+1. Add `@o3co/auth-provider-mfa`, and `@o3co/auth-provider-standard` for
+   mail, to `package.json`.
+2. Port the template's MFA switch (`src/mfaSwitch.mts` and its calls in
+   `configPath.mts` and `buildModules.mts`), or install what the
+   [MFA README's Installing](../packages/mfa/README.md#installing) lists. Port
+   the configuration with its `${?…}` lines: the `mfa` section
+   ([its keys](../packages/mfa/README.md#configuration)); the
+   `core.sessionRequirements` block, `expected` naming `mfa` and
+   `secondFactorAuthority = "mfa"`; the two MFA store selections; the acr
+   table. The page is `mfa.page.url` (`MFA_PAGE_URL`): `endpoints.mfa.url` and
+   `ENDPOINTS_MFA_URL`, which some pre-release builds read, refuse the boot.
+3. Set `MFA_ENCRYPTION_KEY`, and `STANDARD_SMTP_MAIL_SENDER_*` where mail is
+   sent. There is no `MFA_NOTICES`: notices to the account holder are yours,
+   built from the audit events
+   ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
+4. Make the Redis the factor store uses durable; give the Store `mfaEnrolled`
+   and `markMfaEnrolledUrl` ([the checklist](#store-implementer-checklist-before-switching-to-required)).
+5. Teach the login page `403 mfa_required` / `mfa_enrollment_required`; build
+   the MFA page and the account page.
+6. Teach BFFs using the `session` grant its `step_up` member, and the
+   device-verification page `403 step_up_required` with its `requirement`;
+   install `webauthnSessionSubjectModule` in place of a `req.webauthnSubject`
+   middleware of your own.
+7. Decide `trustUpstreamAmr` per federation.
+8. Set `mfa.mode = "optional"`; move to `required` later.
+
+## Rolling out across a mixed fleet
+
+[Operator runbook §7, Rolling out](operator-runbook.md#rolling-out) has the
+detail; what a mixed fleet of v0.16.0 and this release does:
+
+- **Codes cross releases** for at most one code lifetime. A code a v0.16.0
+  replica issued, redeemed by this release, yields tokens without `amr`, and
+  its refresh family carries none until it ends or the user signs in again;
+  under `mfa.mode = "required"` it is refused at its first refresh. A
+  deployment for which that matters revokes the families issued during the
+  roll, or calls `revokeAllForSubject`, once the fleet is upgraded.
+- **Do not turn `mfa.mode` on until no replica older than the release in
+  which an authorization code carries its own `amr` remains**: an older
+  replica redeeming a code stamps the record's `amr`, a step-up's included,
+  and one older than the renewal nonce admits an old cookie put back after a
+  step-up.
+- **The re-authentication ask.** A v0.16.0 replica spends the ask when it
+  reads it, so consent after a login trip can ask for a second login once
+  ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
+- **Federated sessions** live at the upgrade stamp `["fed"]` until the user
+  logs in again ([operator runbook §7](operator-runbook.md#before-you-upgrade),
+  step 3).
+- **Redis.** Records v0.16.0 wrote stay readable: a federation token record
+  gets a generation at its first versioned read, and one without `obtainedAt`
+  reads it as `undefined`, which is refreshed within the buffer. Scripts
+  whose text changed load by `EVAL` on `NOSCRIPT`.

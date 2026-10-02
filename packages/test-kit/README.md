@@ -116,7 +116,9 @@ that `authenticateByToken` answers; a Store that answers it on
 `authenticate` alone leaves every federated session reading "not enrolled",
 so a lost factor store lets whoever holds the federated identity make a
 first binding. The harness's `token` is required for this reason: no
-harness passes the suite without proving both reads.
+harness passes the suite without proving both reads. Everything a Store
+does before `mfa.mode = "required"` is the
+[Store implementer checklist](../../docs/upgrading-from-v0.16.0.md#store-implementer-checklist-before-switching-to-required).
 
 ## The factor store's contract suite
 

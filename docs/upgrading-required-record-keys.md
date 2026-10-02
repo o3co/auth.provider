@@ -115,6 +115,8 @@ The behaviour of the library itself is otherwise unchanged. For example, a devic
 
 ## `UserSession.authentication`
 
+Upgrading from v0.16.0 as a whole — every other breaking change, and the Store implementer checklist — is [upgrading-from-v0.16.0.md](upgrading-from-v0.16.0.md).
+
 Since the MFA ADR's build-order step 5, a session says how it was established: `authentication: { primary, federation, upstreamAmr, mfaAt }` — `"pwd"` or `"fed"`, which federation, what an untrusted upstream IdP asserted (kept for the record, never stamped), and when a second factor was last verified. Its `amr` holds only what this provider vouches for.
 
 - **A login path of your own** passes it. Core composes the pair with `amr` for the two login paths this library has: `...passwordSessionAuthentication()` for a password login, `...federatedSessionAuthentication({ federation, upstreamAmr, trusted })` for a federated one, with `trusted` from `federationTrustsUpstreamAmr(config, name)`. `undefined` writes a session read as one from before the key existed.
