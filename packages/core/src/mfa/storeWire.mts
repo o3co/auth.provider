@@ -38,8 +38,12 @@
  * `expectedGeneration` (`null`, for a create only: the set was read as
  * absent) and `deadlineMs`, and is answered `200`, `404` or `409` with an
  * outcome body. `deadlineMs` is an instant on the provider's clock, the send
- * time plus the adapter's request timeout; a Store that reads the request at
- * or after it on its own clock writes nothing and answers `408`. This codec is
+ * time plus the adapter's request timeout. The Store checks it against its own
+ * clock in the same atomic step as the conditional write; at or after it, the
+ * write is not applied and the answer is `408`. This assumes the provider's
+ * and the Store's clocks agree within the clock skew assumed between the two;
+ * under that assumption a conditional write commits or fails within W, the
+ * request timeout plus that skew. This codec is
  * the only place those field names and statuses meet the port's words: its
  * readers answer the port's types, and throw a `TypeError` for any other
  * answer, a bare `404` or `409` and a `408` included.
@@ -127,9 +131,10 @@ export interface MfaStoreCreateIfRequest {
 	readonly factor: MfaStoreFactor;
 	readonly expectedGeneration: string | null;
 	/**
-	 * Epoch milliseconds on the provider's clock: the send time plus the
-	 * adapter's request timeout. A Store that reads the request at or after
-	 * it, on its own clock, writes nothing and answers `408`.
+	 * Epoch milliseconds on the provider's clock, within the Date range: the
+	 * send time plus the adapter's request timeout. The Store checks it against
+	 * its own clock in the same atomic step as the write; at or after it, the
+	 * write is not applied and the answer is `408`.
 	 */
 	readonly deadlineMs: number;
 }
@@ -151,9 +156,10 @@ export interface MfaStoreRemoveIfRequest {
 	readonly id: string;
 	readonly expectedGeneration: string;
 	/**
-	 * Epoch milliseconds on the provider's clock: the send time plus the
-	 * adapter's request timeout. A Store that reads the request at or after
-	 * it, on its own clock, writes nothing and answers `408`.
+	 * Epoch milliseconds on the provider's clock, within the Date range: the
+	 * send time plus the adapter's request timeout. The Store checks it against
+	 * its own clock in the same atomic step as the write; at or after it, the
+	 * write is not applied and the answer is `408`.
 	 */
 	readonly deadlineMs: number;
 }
@@ -422,10 +428,14 @@ function checkGeneration(expected: unknown): StoreGeneration {
 	return expected;
 }
 
-/** `deadlineMs` as the wire carries it; a `RangeError` for one that is not a safe integer above 0. */
+/**
+ * `deadlineMs` as the wire carries it; a `RangeError` for one that is not a
+ * whole instant above 0 within the Date range, which a Store could not read
+ * as a time and so would never refuse.
+ */
 function checkDeadline(deadlineMs: unknown): number {
-	if (typeof deadlineMs !== "number" || !Number.isSafeInteger(deadlineMs) || deadlineMs <= 0) {
-		throw refuse("deadlineMs must be a safe integer above 0");
+	if (!isInstant(deadlineMs) || deadlineMs <= 0) {
+		throw refuse("deadlineMs must be a whole instant above 0 within the Date range");
 	}
 	return deadlineMs;
 }
@@ -482,8 +492,8 @@ export function readMfaStoreVersionedListAnswer(
  * `null`: while the set is absent. `deadlineMs` is the send time plus the
  * adapter's request timeout, in epoch milliseconds. A `RangeError` for an
  * `expected` that is neither a store generation nor `null`, a `deadlineMs`
- * that is not a safe integer above 0, and a record {@link toMfaStoreFactor}
- * refuses.
+ * that is not a whole instant above 0 within the Date range, and a record
+ * {@link toMfaStoreFactor} refuses.
  */
 export function toMfaStoreCreateIfRequest(
 	record: MfaFactorRecord,
@@ -502,8 +512,8 @@ export function toMfaStoreCreateIfRequest(
  * `deadlineMs` is the send time plus the adapter's request timeout, in epoch
  * milliseconds. A `RangeError` for an `expected` that is no store generation
  * (`null` included: a removal never targets an absent set), a `deadlineMs`
- * that is not a safe integer above 0, an id no record can have, and a
- * `subject` that is no string.
+ * that is not a whole instant above 0 within the Date range, an id no record
+ * can have, and a `subject` that is no string.
  */
 export function toMfaStoreRemoveIfRequest(
 	subject: string,

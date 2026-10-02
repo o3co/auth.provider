@@ -30,6 +30,7 @@
 
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { StoreGeneration } from "#/adapters/conditionalWrite.mjs";
+import { MAX_STORABLE_EXPIRY_MS } from "#/adapters/expiry.mjs";
 import type { MfaFactorRecord, MfaFactorRecordUpdate } from "#/mfa/factorStore.mjs";
 import {
 	fromMfaStoreFactor,
@@ -91,7 +92,7 @@ const FULL_WIRE: MfaStoreFactor = {
 /** A conditional write's deadline: the send time plus the adapter's request timeout, on the provider's clock. */
 const DEADLINE_MS = Date.parse("2026-09-03T00:00:05.000Z");
 
-/** Deadlines no conditional write may carry: each is not a finite safe integer above 0. */
+/** Deadlines no conditional write may carry: each is not a whole instant above 0 within the Date range. */
 const NOT_DEADLINES: readonly unknown[] = [
 	0,
 	-1,
@@ -99,6 +100,8 @@ const NOT_DEADLINES: readonly unknown[] = [
 	Number.NaN,
 	Number.POSITIVE_INFINITY,
 	Number.NEGATIVE_INFINITY,
+	MAX_STORABLE_EXPIRY_MS + 1,
+	Number.MAX_SAFE_INTEGER,
 	Number.MAX_SAFE_INTEGER + 1,
 	String(DEADLINE_MS),
 	BigInt(DEADLINE_MS),
@@ -585,7 +588,7 @@ describe("a conditional create on the wire", () => {
 		expect(() => toMfaStoreCreateIfRequest(FULL, GENERATION)).toThrow(RangeError);
 	});
 
-	it("refuses, with a RangeError, a deadline that is not a finite safe integer above 0", () => {
+	it("refuses, with a RangeError, a deadline that is not a whole instant above 0 within the Date range", () => {
 		for (const deadline of NOT_DEADLINES) {
 			expect(
 				() => toMfaStoreCreateIfRequest(FULL, GENERATION, deadline as number),
@@ -593,9 +596,9 @@ describe("a conditional create on the wire", () => {
 			).toThrow(RangeError);
 		}
 		expect(toMfaStoreCreateIfRequest(FULL, GENERATION, 1)).toHaveProperty("deadlineMs", 1);
-		expect(toMfaStoreCreateIfRequest(FULL, GENERATION, Number.MAX_SAFE_INTEGER)).toHaveProperty(
+		expect(toMfaStoreCreateIfRequest(FULL, GENERATION, MAX_STORABLE_EXPIRY_MS)).toHaveProperty(
 			"deadlineMs",
-			Number.MAX_SAFE_INTEGER,
+			MAX_STORABLE_EXPIRY_MS,
 		);
 	});
 
@@ -703,7 +706,7 @@ describe("a conditional remove on the wire", () => {
 		expect(() => toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION)).toThrow(RangeError);
 	});
 
-	it("refuses, with a RangeError, a deadline that is not a finite safe integer above 0", () => {
+	it("refuses, with a RangeError, a deadline that is not a whole instant above 0 within the Date range", () => {
 		for (const deadline of NOT_DEADLINES) {
 			expect(
 				() => toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION, deadline as number),
@@ -714,6 +717,9 @@ describe("a conditional remove on the wire", () => {
 			"deadlineMs",
 			1,
 		);
+		expect(
+			toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION, MAX_STORABLE_EXPIRY_MS),
+		).toHaveProperty("deadlineMs", MAX_STORABLE_EXPIRY_MS);
 	});
 
 	it("refuses, with a RangeError, an expected generation that is no store generation, null included", () => {
