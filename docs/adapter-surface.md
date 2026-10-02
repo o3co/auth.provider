@@ -425,9 +425,13 @@ write-lifetime bound. These are the rules every store with conditional members k
 
 1. **Atomic.** The check and the write are one atomic step in the store: a
    transaction, a compare-and-set or a script. An in-process lock counts only
-   for an in-process store.
+   for an in-process store. An unconditional write (a reset, a logout-style
+   delete, a create such as `attach`) is one atomic step too, serialised with
+   the conditional ones, so a conditional write never interleaves with it.
 2. **One snapshot, and every write moves the generation.** A versioned read
-   answers the value (or the members) and the generation from one snapshot.
+   answers the value (or the members) and the generation from one snapshot,
+   which reflects every write acknowledged before the read began: never a
+   cache or a lagging replica.
    Every write that changes what the generation guards issues a new one,
    legacy and unconditional writes included.
 3. **Expiry is the store's retention.** A record past it reads as `null`
@@ -546,8 +550,9 @@ retention.
 - `replaceIf`: `UPDATE … SET body = :body, generation = :new WHERE <key> AND
   generation = :expected AND (expires_at IS NULL OR expires_at > <db now>)`.
   One row is `updated`. Zero rows: a `SELECT 1` of a live row with that key
-  tells `conflict` (a row) from `missing` (none); a write that lands between
-  the two still leaves "nothing written" true. Postgres can do both in one
+  tells `conflict` (a row) from `missing` (none). A write that lands between
+  the two can decide that label, so under a race the loser answers `missing`
+  or `conflict`; either way it wrote nothing. Postgres can do both in one
   statement with a CTE, MySQL in one short `SELECT … FOR UPDATE` transaction.
   `removeIf` is the same with `DELETE`.
 - **Adding the column to an existing table.** Backfill every existing row
