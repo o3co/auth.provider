@@ -56,6 +56,7 @@ import {
 	loggedText,
 	mfaPost,
 	newFactorId,
+	raiseRecoverySetFloor,
 	readTransaction,
 	recordingAuditSink,
 	recoverySet,
@@ -622,8 +623,39 @@ describe("a retired set left stored", () => {
 		expect((await loginWithCode(built, old.record, old.codes[0])).status).toBe(401);
 	});
 
-	it("reads no floor for a subject holding no recovery set", async () => {
+	it("never hides the current set when a regeneration lands between the floor read and the list: the floor is read first", async () => {
 		const built = await composed();
+		const { agent } = await signedIn(built);
+		expect((await regenerate(agent)).status).toBe(200);
+		const [current] = await setsOf(built.factorStore);
+		if (current === undefined) throw new Error("no set");
+		const { agent: browser, transaction } = await beginLogin(built.app);
+		const list = built.factorStore.list.bind(built.factorStore);
+		vi.spyOn(built.factorStore, "list").mockImplementationOnce(async (subject) => {
+			const snapshot = await list(subject);
+			// Another regeneration lands after this listing: a newer set, and the floor raised to it.
+			const next = generateRecoveryCodes(
+				createRecoveryCodeFactor({ count: 2 }),
+				suiteSealing().digestsFor("recovery_code"),
+				2,
+			);
+			if (next === undefined) throw new Error("no set");
+			await seedFactor(built.factorStore, "recovery_code", next.data);
+			await raiseRecoverySetFloor(built.transactionStore, 2);
+			return snapshot;
+		});
+
+		const res = await readTransaction(browser, transaction);
+
+		expect(
+			(res.body.factors as { id: string; kind: string }[])
+				.filter((factor) => factor.kind === "recovery_code")
+				.map((factor) => factor.id),
+		).toEqual([current.record.id]);
+	});
+
+	it("reads no floor while the recovery-code factor is off", async () => {
+		const built = await composed({ recoveryCodes: false });
 		const totp = await seedTotp(built.factorStore);
 		const { agent } = await signInWithTotp(built.app, built.userSessionStore, totp);
 		const floor = vi.spyOn(built.transactionStore, "recoverySetFloor");
