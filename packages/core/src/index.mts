@@ -1669,6 +1669,10 @@ export {
 } from "./device-authorization/memory.mjs";
 export { memoryDeviceCodeStoreModule } from "./device-authorization/module.mjs";
 export {
+	type DeviceAuthorizationReading,
+	readDeviceAuthorization,
+} from "./device-authorization/reading.mjs";
+export {
 	type ApproveDeviceAuthorizationInput,
 	type CreateDeviceAuthorizationInput,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,

@@ -32,8 +32,12 @@ export interface RecordableDeviceApproval {
 	readonly authTimeMs: number | undefined;
 }
 
-/** Whole epoch milliseconds at or after the epoch: what a store records and reads back. */
-const isRecordableInstant = (ms: number): boolean => Number.isSafeInteger(ms) && ms >= 0;
+/**
+ * Whole epoch milliseconds at or after the epoch: what a store records and
+ * reads back. Core-internal: `readDeviceAuthorization` reads a recorded
+ * instant by it too.
+ */
+export const isRecordableInstant = (ms: number): boolean => Number.isSafeInteger(ms) && ms >= 0;
 
 /**
  * The approval's `amr` and `authTime` as a store records them, each read
