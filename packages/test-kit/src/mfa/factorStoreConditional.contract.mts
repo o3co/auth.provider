@@ -26,16 +26,22 @@
  * that suite, so the factor set is held to every rule of a set the suite
  * holds: a subject is the scope, a record the item, `removeAllForSubject`
  * the reset, `update` the member's own update, `create`, `remove` and
- * `removeAllForSubject` the unconditional membership writes. Every listing is
- * read with `readMfaFactorSet`, so a record that is not a whole record of its
- * subject, or an id listed twice, fails the case that read it. `second`,
+ * `removeAllForSubject` the unconditional membership writes. Every versioned
+ * listing is read with `readMfaFactorSet`, so a record that is not a whole
+ * record of its subject, or an id listed twice, fails the case that read it. `second`,
  * `forceExpire`, `unreachable` and `close` pass through, and the harness's
  * `supports` is the suite's; the port has `list`, `update` and its
  * unconditional writes, so their cases always run.
  *
  * Beside the suite, the factor set's own cases: an update keeps the
  * generation and a write at it lands, and a tombstone refuses a late first
- * binding as well as a late write read before the reset.
+ * binding as well as a late write read before the reset. With
+ * `supports.forceExpire`, a reset's tombstone expires, of a set written and
+ * of one never written.
+ *
+ * STAND-IN: the reset's tombstone expiry case stands in for the generic
+ * suite's expiry cases, which expire only a set emptied by removals. It goes
+ * once they expire a set a reset emptied.
  *
  * The cases talk only to the port and read every answer with core's
  * readers, so a SQL-backed, a REST-backed and a bundled store run them
@@ -80,6 +86,7 @@ const factorId = (name: string): string => name.padEnd(22, "A");
 
 const FACTOR_A = factorId("set-a");
 const FACTOR_B = factorId("set-b");
+const FACTOR_X = factorId("set-x");
 
 const RECORD = (
 	id: string,
@@ -98,12 +105,21 @@ const RECORD = (
 	...overrides,
 });
 
-/** `n` records of `subject`, the same on every call. */
+const BINDINGS: readonly MfaFactorRecord["binding"][] = [
+	"password",
+	"email_proof",
+	"federated",
+	"mfa",
+	undefined,
+];
+
+/** `n` records of `subject`, the same on every call: each with a `lastUsedAt`, its label and binding varied. */
 const recordsOf = (subject: string, n: number): readonly MfaFactorRecord[] =>
 	Array.from({ length: n }, (_, i) =>
 		RECORD(factorId(`member-${i}`), subject, {
-			label: i % 2 === 0 ? `Factor ${i}` : undefined,
-			lastUsedAt: i % 2 === 0 ? undefined : new Date("2026-09-02T00:00:00.000Z"),
+			label: i % 3 === 2 ? undefined : `Factor ${i}`,
+			binding: BINDINGS[i % BINDINGS.length],
+			lastUsedAt: new Date(Date.UTC(2026, 8, 2 + i)),
 		}),
 	);
 
@@ -134,7 +150,7 @@ function memberOf<K extends SetMember>(
 	return (member as (...args: never[]) => unknown).bind(store) as NonNullable<MfaFactorStore[K]>;
 }
 
-/** `store` as the generic suite's target: each member a call of the port, every listing read by `readMfaFactorSet`. */
+/** `store` as the generic suite's target: each member a call of the port, every versioned listing read by `readMfaFactorSet`. */
 function targetOf(store: MfaFactorStore): ConditionalSetTarget<MfaFactorRecord> {
 	return {
 		listVersioned: async (subject) =>
@@ -233,14 +249,14 @@ export function mfaFactorStoreConditionalContract(
 ): readonly ContractCase[] {
 	const test = (
 		name: string,
-		body: (one: SetView, two: SetView) => Promise<void>,
+		body: (one: SetView, two: SetView, harness: MfaFactorStoreHarness) => Promise<void>,
 	): ContractCase => ({
 		name,
 		run: async () => {
 			const harness = await input.build();
 			try {
 				const one = viewOf(harness.store);
-				await body(one, harness.second === undefined ? one : viewOf(harness.second));
+				await body(one, harness.second === undefined ? one : viewOf(harness.second), harness);
 			} finally {
 				await harness.close?.();
 			}
@@ -293,5 +309,45 @@ export function mfaFactorStoreConditionalContract(
 			});
 			assert.deepStrictEqual(await one.read("user-1"), tombstone);
 		}),
+
+		input.supports?.forceExpire === true
+			? test("a reset's tombstone expires: a set reset, and a set never written reset, read as absent once the clock passes the deadline, and a re-create repeats neither tombstone's generation", async (one, two, harness) => {
+					const { forceExpire } = harness;
+					assert.ok(
+						forceExpire !== undefined,
+						"supports.forceExpire is declared, and the harness gives no forceExpire",
+					);
+					await seed(one, "user-1", [RECORD(FACTOR_A, "user-1"), RECORD(FACTOR_B, "user-1")]);
+					await two.store.removeAllForSubject("user-1");
+					await one.store.removeAllForSubject("nobody");
+					const tombstones = [
+						{ subject: "user-1", generation: (await one.read("user-1")).generation },
+						{ subject: "nobody", generation: (await two.read("nobody")).generation },
+					];
+					for (const { subject, generation } of tombstones) {
+						assert.ok(generation !== null, `the reset of ${subject} left no tombstone`);
+						await forceExpire(subject);
+					}
+					for (const { subject, generation } of tombstones) {
+						assert.deepStrictEqual(
+							await two.read(subject),
+							{ generation: null, items: [] },
+							`${subject}'s tombstone did not expire`,
+						);
+						const again = landed(
+							await one.createIf(RECORD(FACTOR_X, subject), null),
+							`the re-create of ${subject}`,
+						);
+						assert.notEqual(
+							again,
+							generation,
+							`the re-create of ${subject} repeated the tombstone's generation`,
+						);
+					}
+				})
+			: {
+					name: "not run: the reset tombstone expiry case (supports.forceExpire not declared)",
+					run: async () => {},
+				},
 	];
 }
