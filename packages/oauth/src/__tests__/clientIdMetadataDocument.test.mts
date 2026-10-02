@@ -1260,3 +1260,100 @@ describe("the host lists are read in core's host-list grammar", () => {
 		}
 	});
 });
+
+describe("a deadline or cap above core.outbound's is said once, at construction", () => {
+	const build = (over: Partial<ClientIdMetadataDocumentOptions>) => {
+		const warn = vi.fn();
+		const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
+		createClientIdMetadataDocumentResolver({
+			allowedScopes: [],
+			allowedAudiences: [],
+			config: {},
+			logger,
+			...over,
+		});
+		return warn;
+	};
+	const cappedLines = (warn: ReturnType<typeof vi.fn>) =>
+		warn.mock.calls.filter(([, event]) => event === "cimd_limit_capped");
+
+	it("names both keys and the value in effect when maxBytes is above core.outbound.maxResponseBytes", () => {
+		const warn = build({
+			config: withOutbound({}, { maxResponseBytes: 4096 }),
+			maxBytes: 8192,
+		});
+
+		expect(cappedLines(warn)).toEqual([
+			[
+				{
+					limits: [
+						{
+							key: "oauth.clientIdMetadataDocuments.maxBytes",
+							value: 8192,
+							ceiling: "core.outbound.maxResponseBytes",
+							effective: 4096,
+						},
+					],
+				},
+				"cimd_limit_capped",
+			],
+		]);
+	});
+
+	it("names both keys and the value in effect when timeoutMs is above core.outbound.timeoutMs", () => {
+		const warn = build({ timeoutMs: 10_000 });
+
+		expect(cappedLines(warn)).toEqual([
+			[
+				{
+					limits: [
+						{
+							key: "oauth.clientIdMetadataDocuments.timeoutMs",
+							value: 10_000,
+							ceiling: "core.outbound.timeoutMs",
+							effective: 5000,
+						},
+					],
+				},
+				"cimd_limit_capped",
+			],
+		]);
+	});
+
+	it("says both in one line when both are above", () => {
+		const warn = build({ timeoutMs: 10_000, maxBytes: 100_000 });
+
+		expect(cappedLines(warn)).toHaveLength(1);
+		const [fields] = cappedLines(warn)[0] as [{ limits: Array<{ key: string }> }];
+		expect(fields.limits.map((limit) => limit.key)).toEqual([
+			"oauth.clientIdMetadataDocuments.timeoutMs",
+			"oauth.clientIdMetadataDocuments.maxBytes",
+		]);
+	});
+
+	it("says nothing for a deadline and cap equal to or below core.outbound's", () => {
+		expect(cappedLines(build({}))).toEqual([]);
+		expect(
+			cappedLines(
+				build({
+					config: withOutbound({}, { timeoutMs: 3000, maxResponseBytes: 4096 }),
+					timeoutMs: 3000,
+					maxBytes: 4096,
+				}),
+			),
+		).toEqual([]);
+		expect(cappedLines(build({ timeoutMs: 1000, maxBytes: 1024 }))).toEqual([]);
+	});
+
+	it("says it once per configuration, however many resolvers are built from it", () => {
+		const config = withOutbound({}, { maxResponseBytes: 4096 });
+		expect(cappedLines(build({ config, maxBytes: 8192 }))).toHaveLength(1);
+		expect(cappedLines(build({ config, maxBytes: 8192 }))).toEqual([]);
+	});
+
+	it("says nothing when a fetch substitute replaces the policy", () => {
+		const warn = build({ maxBytes: 100_000, fetch: fakeFetch([]).fetch });
+
+		expect(cappedLines(warn)).toEqual([]);
+	});
+});

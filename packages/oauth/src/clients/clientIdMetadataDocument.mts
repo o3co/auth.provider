@@ -60,6 +60,7 @@ import {
 	type Logger,
 	loggableError,
 	matchesHostList,
+	outboundLimitsOf,
 	type PublicClient,
 	parseScopeTokens,
 	readHostEntry,
@@ -352,6 +353,56 @@ export function isClientIdMetadataDocumentClient(client: PublicClient | null | u
 	return client != null && documentClients.has(client);
 }
 
+/** The configurations whose capped document limits were already said: once per configuration. */
+const cappedLimitsSaid = new WeakSet<object>();
+
+/**
+ * Core's outbound fetch for a document URL, with this resolver's deadline and
+ * cap. `core.outbound`'s are ceilings over them; one above its ceiling is said
+ * once per configuration (`cimd_limit_capped`), with the value in effect.
+ */
+function outboundDocumentFetch(
+	config: object,
+	timeoutMs: number,
+	maxBytes: number,
+	logger: Logger | undefined,
+): typeof fetch {
+	const documentFetch = createOutboundFetch({
+		config,
+		source: "request",
+		timeoutMs,
+		maxResponseBytes: maxBytes,
+	});
+	const ceilings = outboundLimitsOf(config);
+	const limits = [
+		...(timeoutMs > ceilings.timeoutMs
+			? [
+					{
+						key: "oauth.clientIdMetadataDocuments.timeoutMs",
+						value: timeoutMs,
+						ceiling: "core.outbound.timeoutMs",
+						effective: ceilings.timeoutMs,
+					},
+				]
+			: []),
+		...(maxBytes > ceilings.maxResponseBytes
+			? [
+					{
+						key: "oauth.clientIdMetadataDocuments.maxBytes",
+						value: maxBytes,
+						ceiling: "core.outbound.maxResponseBytes",
+						effective: ceilings.maxResponseBytes,
+					},
+				]
+			: []),
+	];
+	if (limits.length > 0 && logger !== undefined && !cappedLimitsSaid.has(config)) {
+		cappedLimitsSaid.add(config);
+		logger.warn({ limits }, "cimd_limit_capped");
+	}
+	return documentFetch;
+}
+
 export interface ClientIdMetadataDocumentResolver {
 	/** The registration the document at `clientId` describes, or `null` when there is none to honour. */
 	resolve(clientId: string): Promise<PublicClient | null>;
@@ -372,13 +423,7 @@ export function createClientIdMetadataDocumentResolver(
 	}
 	// Built once, here: a `core.outbound` it refuses fails construction, not a request.
 	const fetchImpl =
-		opts.fetch ??
-		createOutboundFetch({
-			config: opts.config,
-			source: "request",
-			timeoutMs,
-			maxResponseBytes: maxBytes,
-		});
+		opts.fetch ?? outboundDocumentFetch(opts.config, timeoutMs, maxBytes, opts.logger);
 	const cacheMaxAgeMs = opts.cacheMaxAgeMs ?? DEFAULT_CIMD_CACHE_MAX_AGE_MS;
 	const logger = opts.logger;
 	const maxCacheEntries = opts.maxCacheEntries ?? DEFAULT_CIMD_MAX_CACHE_ENTRIES;
