@@ -19,6 +19,7 @@ import {
 	copySessionAuthentication,
 	expectsRenewalNonce,
 	readRenewalNonces,
+	recordableAuthTime,
 	recordableSessionAuthentication,
 	sessionAfterSecondFactor,
 } from "../authentication.mjs";
@@ -107,15 +108,9 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 			if (!Number.isFinite(input.expiresAt.getTime())) {
 				throw new RangeError(`UserSession ${input.sid}: expiresAt must be a valid date`);
 			}
-			// A login time, handed back as the id_token's `auth_time`: an Invalid
-			// Date is none, and one before the epoch is none the Redis store can
-			// read back. Refused as there.
-			const authTimeMs = input.authTime.getTime();
-			if (!Number.isFinite(authTimeMs) || authTimeMs < 0) {
-				throw new RangeError(
-					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
-				);
-			}
+			// The login time: what core's `recordableAuthTime` answers, no later
+			// than this store's clock, as the Redis store records it.
+			const authTime = recordableAuthTime(input.sid, input.authTime, Date.now());
 			// How the session was established: what core's
 			// `recordableSessionAuthentication` answers — only what
 			// `SessionAuthentication` admits, its `mfaAt` no later than this
@@ -138,7 +133,7 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 			sessions.set(input.sid, {
 				sid: input.sid,
 				sub: input.sub,
-				authTime: new Date(input.authTime.getTime()),
+				authTime,
 				createdAt: new Date(),
 				expiresAt: new Date(input.expiresAt.getTime()),
 				claims: cloneClaims(input.claims),

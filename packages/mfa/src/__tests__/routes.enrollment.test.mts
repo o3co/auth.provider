@@ -1097,3 +1097,175 @@ describe("a first binding whose own factor is gone when it reads the records aga
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
 	});
 });
+
+describe("a factor's answers, read by name, and the copy of what it hands to be sealed", () => {
+	/** Counts each named read in `reads`. */
+	const counter = () => {
+		const reads: Record<string, number> = {};
+		const counted =
+			<T,>(name: string, value: T) =>
+			(): T => {
+				reads[name] = (reads[name] ?? 0) + 1;
+				return value;
+			};
+		/** An answer whose every field is a getter on its class: an answer is read by name. */
+		const answer = (name: string, fields: Record<string, unknown>): never => {
+			class Answer {}
+			for (const [key, value] of Object.entries(fields)) {
+				Object.defineProperty(Answer.prototype, key, { get: counted(`${name}.${key}`, value) });
+			}
+			return new Answer() as never;
+		};
+		/** Plain JSON-shaped data whose `secret` is an own getter. */
+		const plainSecret = (name: string, secret: string) =>
+			Object.defineProperty({}, "secret", {
+				get: counted(`${name}.secret`, secret),
+				enumerable: true,
+			});
+		return { reads, answer, plainSecret };
+	};
+
+	/** Boots with `factor` installed, and alice at her first binding. */
+	async function atFirstBinding(factor: MfaFactor) {
+		const factorStore = createMemoryMfaFactorStore();
+		const booted = await boot({
+			config: configFor("required"),
+			factorStore,
+			extraModules: [contributing(factor)],
+		});
+		const { agent, transaction } = await beginFirstBinding(booted.app);
+		return { ...booted, factorStore, agent, transaction };
+	}
+
+	it("binds a factor whose enrollment answers class instances behind getters, reading each field once, and hands amrFor and the seal one plain copy of the data", async () => {
+		const { reads, answer, plainSecret } = counter();
+		const base = createTestMfaFactor({ kind: "orm" });
+		const handed: unknown[] = [];
+		const { factorStore, agent, transaction } = await atFirstBinding({
+			...base,
+			amrFor: (data) => {
+				handed.push(data);
+				return base.amrFor(data);
+			},
+			beginEnrollment: async (ctx) => {
+				const started = await base.beginEnrollment(ctx);
+				return answer("start", {
+					state: plainSecret("state", String(started.state.secret)),
+					response: started.response,
+					mail: undefined,
+				});
+			},
+			completeEnrollment: async (ctx) => {
+				const completion = await base.completeEnrollment(ctx);
+				if (!completion.ok) return completion;
+				return answer("completion", {
+					ok: true,
+					data: plainSecret("data", String(completion.data.secret)),
+					label: undefined,
+				});
+			},
+		});
+
+		const begun = await beginEnrollment(agent, transaction, "orm");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const done = await completeEnrollment(agent, transaction, begun.body.secret);
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+
+		expect(reads).toEqual({
+			"start.state": 1,
+			"start.response": 1,
+			"start.mail": 1,
+			"state.secret": 1,
+			"completion.ok": 1,
+			"completion.data": 1,
+			"completion.label": 1,
+			"data.secret": 1,
+		});
+		const [bound] = (await factorStore.list(ALICE.id)).filter((record) => record.kind === "orm");
+		if (bound === undefined) throw new Error("no factor was bound");
+		// amrFor was handed the copy: plain, frozen, the getter not read again — what was sealed.
+		const [copy] = handed;
+		expect(Object.isFrozen(copy)).toBe(true);
+		expect((await storedData(factorStore, bound)).data).toEqual(copy);
+		expect(copy).toEqual({ secret: begun.body.secret });
+	});
+
+	it("refuses, 503 once and keeping nothing, an enrollment whose state is a class's instance or a list", async () => {
+		class SecretState {
+			get secret(): string {
+				return "s";
+			}
+		}
+		for (const state of [new SecretState(), ["s"]]) {
+			const base = createTestMfaFactor({ kind: "strict" });
+			const { logger, transactionStore, agent, transaction } = await atFirstBinding({
+				...base,
+				beginEnrollment: async () => ({ state: state as never, response: { secret: "s" } }),
+			});
+
+			const res = await beginEnrollment(agent, transaction, "strict");
+
+			expect(res.status).toBe(503);
+			expect(events(logger, "error")).toEqual(["mfa_factor_enrollment_unavailable"]);
+			expect((await transactionStore.get(transaction))?.version).toBe(0);
+			await disposeAll();
+		}
+	});
+
+	it("refuses a completion whose data is a class's instance — 503 once, nothing bound — never sealing it as an empty object", async () => {
+		class TotpData {
+			get secret(): string {
+				return "s";
+			}
+		}
+		const base = createTestMfaFactor({ kind: "strict" });
+		const { logger, factorStore, agent, transaction } = await atFirstBinding({
+			...base,
+			completeEnrollment: async (ctx) => {
+				const completion = await base.completeEnrollment(ctx);
+				return completion.ok ? { ok: true, data: new TotpData() as never } : completion;
+			},
+		});
+		const begun = await beginEnrollment(agent, transaction, "strict");
+
+		const done = await completeEnrollment(agent, transaction, begun.body.secret);
+
+		expect(done.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+		expect((await factorStore.list(ALICE.id)).filter((record) => record.kind === "strict")).toEqual(
+			[],
+		);
+	});
+
+	it("answers 503 once, the enrollment unreadable, when reading a completion's reason or label throws", async () => {
+		for (const throwing of ["reason", "label"] as const) {
+			const base = createTestMfaFactor({ kind: "strict" });
+			const { logger, factorStore, agent, transaction } = await atFirstBinding({
+				...base,
+				completeEnrollment: async () =>
+					Object.defineProperties(
+						{ ok: throwing === "label", data: { secret: "s" } },
+						{
+							[throwing]: {
+								get: () => {
+									throw new Error("the answer cannot be read");
+								},
+								enumerable: true,
+							},
+						},
+					) as never,
+			});
+			const begun = await beginEnrollment(agent, transaction, "strict");
+
+			const done = await completeEnrollment(agent, transaction, begun.body.secret, "Phone");
+
+			expect(done.status, throwing).toBe(503);
+			expect(events(logger, "error"), throwing).toEqual(["mfa_factor_unreadable"]);
+			expect(
+				(await factorStore.list(ALICE.id)).filter((record) => record.kind === "strict"),
+				throwing,
+			).toEqual([]);
+			await disposeAll();
+		}
+	});
+});

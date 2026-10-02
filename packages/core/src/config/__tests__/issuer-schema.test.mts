@@ -86,6 +86,19 @@ describe("oauth.jwt.issuer", () => {
 		expect(result.success).toBe(false);
 	});
 
+	it.each(["https://auth.example.com/", "https://auth.example.com/tenant-a/"])(
+		"rejects %s, naming the key: a trailing slash is refused",
+		(issuer) => {
+			const result = CoreConfigSchema.safeParse(configWithIssuer(issuer));
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error.issues.map((i) => i.message)).toContain(
+					"oauth.jwt.issuer must not end with a slash",
+				);
+			}
+		},
+	);
+
 	it("rejects an empty issuer", () => {
 		const result = CoreConfigSchema.safeParse(configWithIssuer(""));
 		expect(result.success).toBe(false);

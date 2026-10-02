@@ -1041,9 +1041,56 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it("answers an unexpected failure on the mounted device_authorization route with JSON 500, and logs a projection of it", async () => {
-		// A client repository that hands back a malformed registration —
-		// `defaultScopes` a string rather than a list — is a failure of the
-		// host's data, not of the request.
+		// A rate limiter that answers a decision whose `resetAt` is not a
+		// `Date` is a failure of the host's adapter, not of the request: the
+		// throttle in front of the route fails on it.
+		// Chosen because no fault this package owns escapes the handler: its
+		// store errors are answered, and a malformed registration is refused
+		// before it (see the test below).
+		const { lines, logger } = serialisingLogger();
+		const app = mountContributedRoute(0, {
+			...enabledDeps(),
+			logger,
+			rateLimiter: {
+				kind: "buggy",
+				check: async () =>
+					({ allowed: true, resetAt: "soon" }) as unknown as Awaited<
+						ReturnType<RateLimiter["check"]>
+					>,
+			} satisfies RateLimiter,
+		});
+
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		// The frames are what an operator finds the failing code by — and the
+		// header line, which repeats the message, is not among them.
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				err: {
+					name: "TypeError",
+					detail: expect.any(String),
+					stack: FRAMES,
+				},
+			},
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) {
+			expect(line).not.toContain(CONFIDENTIAL_SECRET);
+			expect(line).not.toContain("TypeError:");
+		}
+	});
+
+	it("answers a client whose registration the boundary refuses 401 invalid_client on the mounted device_authorization route", async () => {
+		// `defaultScopes` a string rather than a list: the client authentication
+		// reads registrations through core's client-record boundary, which
+		// refuses the record, so the handler never sees it.
 		const { lines, logger } = serialisingLogger();
 		const malformed = { ...confidentialClient, defaultScopes: "openid" };
 		const app = mountContributedRoute(0, {
@@ -1061,27 +1108,14 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
 			.send({});
 
-		expect(res.status).toBe(500);
-		expect(res.headers["content-type"]).toMatch(/^application\/json/);
-		expect(res.headers["cache-control"]).toBe("no-store");
-		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
-		// This package's own code failed on the data: the frames are what an
-		// operator finds it by — and the header line, which repeats the
-		// message, is not among them.
-		expect(logger.error).toHaveBeenCalledWith(
-			{
-				err: {
-					name: "TypeError",
-					detail: expect.any(String),
-					stack: FRAMES,
-				},
-			},
-			"device_route_unexpected_error",
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_client");
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ step: "find", clientId: CONFIDENTIAL_ID }),
+			"client_record_refused",
 		);
-		for (const line of lines) {
-			expect(line).not.toContain(CONFIDENTIAL_SECRET);
-			expect(line).not.toContain("TypeError:");
-		}
+		for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
 	});
 
 	/** The verification route, signed in, with a store whose lookup throws `thrown`. */

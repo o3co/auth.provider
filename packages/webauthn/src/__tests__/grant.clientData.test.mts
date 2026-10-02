@@ -48,7 +48,11 @@ const WITH_A_ZERO_SEXTET = { extension: "@@@" };
 async function grant() {
 	const challengeStore = createMemoryChallengeStore();
 	const credentialStore = createMemoryWebAuthnCredentialStore();
-	const passkey = softwareAuthenticator({ rpId: "test.example", origin: "https://test.example" });
+	const passkey = softwareAuthenticator({
+		rpId: "test.example",
+		origin: "https://test.example",
+		userHandle: Buffer.from("alice", "utf8").toString("base64url"),
+	});
 	await credentialStore.registerCredential({
 		userId: "alice",
 		credentialId: passkey.credentialId,

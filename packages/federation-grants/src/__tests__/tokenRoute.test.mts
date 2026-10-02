@@ -257,7 +257,9 @@ describe("the token route — who may ask", () => {
 		expect(response.body.error).toBe("access_denied");
 	});
 
-	it("reads an allowlist that is not a list as allowing nothing", async () => {
+	it("refuses a client whose allowlist is not a list as an unknown client", async () => {
+		// Core's client-record boundary, in front of this route's client
+		// authentication, refuses the record: nothing is allowed.
 		const h = harness();
 		await h.seed();
 		h.world.allowedConnections = "calendar,mail" as unknown as readonly string[];
@@ -267,7 +269,8 @@ describe("the token route — who may ask", () => {
 			.set("Authorization", basic())
 			.send({ sub: SUBJECT });
 
-		expect(response.status).toBe(403);
+		expect(response.status).toBe(401);
+		expect(response.body.error).toBe("invalid_client");
 	});
 
 	it("refuses a public client, whose only credential is not a secret", async () => {

@@ -18,7 +18,8 @@
  * What the `/oauth` router resolves once, when it is built, and hands its
  * endpoints: the `oauth.*` options, the acr table `/authorize` answers from,
  * the canonical issuer (one that is not canonical refuses the build) and the
- * one client repository every endpoint looks a client up in.
+ * one client repository every endpoint looks a client up in, which reads
+ * registered clients through core's client-record boundary.
  */
 
 import {
@@ -34,6 +35,7 @@ import {
 	stepUpReach,
 } from "@o3co/auth-provider-core";
 import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
+import { behindClientBoundary } from "./clients/clientBoundary.mjs";
 import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
@@ -114,9 +116,14 @@ export const resolveRouterSettings = ({
 	}
 	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
 	const canonicalIssuer = options.issuer as string;
+	// Every endpoint reads registered clients through core's client-record
+	// boundary, outermost: the document fallback over it, or the boundary
+	// itself (`behindClientBoundary`).
+	//
 	// Client ID Metadata Documents. Pre-registered clients answer first; a
 	// client_id that is an https URL is then resolved from the document it
-	// names, under the operator's ceilings. One repository for every endpoint
+	// names, under the operator's ceilings, only when no client is registered
+	// under it (`withClientIdMetadataDocuments`). One repository for every endpoint
 	// the router mounts — /authorize, /token, /revoke — so a document client is
 	// the same client everywhere.
 	//
@@ -146,7 +153,7 @@ export const resolveRouterSettings = ({
 					logger,
 					...clientIdMetadataDocumentSeams,
 				})
-			: registeredClients;
+			: behindClientBoundary(registeredClients, logger);
 	return {
 		options,
 		acrTable,

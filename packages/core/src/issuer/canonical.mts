@@ -35,13 +35,16 @@ export type IssuerRejection =
 	| "insecure-scheme"
 	| "has-query"
 	| "has-fragment"
-	| "has-credentials";
+	| "has-credentials"
+	| "trailing-slash";
 
 /**
  * Returns `null` when `value` is a usable canonical issuer, otherwise the
  * reason it is not. Accepts an absolute `https:` URL (a path prefix allowed),
  * or `http:` for a loopback host only. Rejects a query or fragment (OIDC
- * Discovery derives the metadata URL from the issuer) and embedded credentials.
+ * Discovery derives the metadata URL from the issuer), embedded credentials,
+ * and a trailing slash: tokens carry the issuer as written while discovery
+ * advertises it without the slash, and OIDC requires the two to be equal.
  */
 export function checkCanonicalIssuer(value: unknown): IssuerRejection | null {
 	if (typeof value !== "string") return "not-a-string";
@@ -63,6 +66,7 @@ export function checkCanonicalIssuer(value: unknown): IssuerRejection | null {
 	if (url.search !== "") return "has-query";
 	if (url.hash !== "") return "has-fragment";
 	if (url.username !== "" || url.password !== "") return "has-credentials";
+	if (value.endsWith("/")) return "trailing-slash";
 
 	return null;
 }
@@ -99,5 +103,7 @@ export function describeIssuerRejection(reason: IssuerRejection): string {
 			return "must not carry a fragment";
 		case "has-credentials":
 			return "must not embed credentials";
+		case "trailing-slash":
+			return "must not end with a slash";
 	}
 }

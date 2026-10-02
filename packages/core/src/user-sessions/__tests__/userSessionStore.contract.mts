@@ -280,13 +280,18 @@ export function runUserSessionStoreContract(
 			expect(await store.get("sid-invalid")).not.toBeNull();
 		});
 
-		it("create refuses an authTime that is not a valid date, or is before 1970, and records nothing", async () => {
-			// Kept, either would come back from a memory store (an Invalid Date as
-			// the id_token's `auth_time`), and a Redis store would write it (NaN
-			// as JSON `null`) and read the session back as corrupt, logging the
-			// user out by their own login. Neither is a login time.
+		it("create refuses an authTime that is not a valid date, is before 1970, or is further ahead than hosts' clocks are tolerated to drift, and records nothing", async () => {
+			// Kept, either of the first two would come back from a memory store (an
+			// Invalid Date as the id_token's `auth_time`), and a Redis store would
+			// write it (NaN as JSON `null`) and read the session back as corrupt,
+			// logging the user out by their own login. Neither is a login time, nor
+			// is one further ahead of the store's clock than DEFAULT_CLOCK_SKEW_MS.
 			const store = await factory();
-			for (const authTime of [new Date(Number.NaN), new Date(-1)]) {
+			for (const authTime of [
+				new Date(Number.NaN),
+				new Date(-1),
+				new Date(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000),
+			]) {
 				await expect(store.create(INPUT({ sid: "sid-bad-auth", authTime }))).rejects.toThrow(
 					RangeError,
 				);
@@ -295,6 +300,18 @@ export function runUserSessionStoreContract(
 			// The epoch itself is a valid instant, and round-trips.
 			await store.create(INPUT({ sid: "sid-bad-auth", authTime: new Date(0) }));
 			expect((await store.get("sid-bad-auth"))?.authTime.getTime()).toBe(0);
+		});
+
+		it("create records an authTime a minute ahead of the store's clock as the store's now: never a time still to come", async () => {
+			// A login dated ahead would count as recent, and stay ahead of a
+			// subject's revocation boundary, for as long as it is ahead.
+			const store = await factory();
+			const before = Date.now();
+			await store.create(INPUT({ sid: "sid-ahead-auth", authTime: new Date(before + 60_000) }));
+			const after = Date.now();
+			const recorded = (await store.get("sid-ahead-auth"))?.authTime.getTime();
+			expect(recorded).toBeGreaterThanOrEqual(before);
+			expect(recorded).toBeLessThanOrEqual(after);
 		});
 
 		it("create refuses an authentication.mfaAt that is not a valid date, is before 1970, or is further ahead than hosts' clocks are tolerated to drift, and records nothing", async () => {
