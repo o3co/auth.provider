@@ -54,7 +54,7 @@ describe("the in-process MfaFactorStore", () => {
 	it("hands out copies: changing what it returned changes nothing it holds", async () => {
 		const store = createMemoryMfaFactorStore();
 		const written = { ...RECORD, createdAt: new Date(RECORD.createdAt) };
-		await store.create(written);
+		expect((await store.createIf(written, null)).outcome).toBe("created");
 		written.createdAt.setTime(0);
 		const [listed] = await store.list("user-1");
 		listed?.createdAt.setTime(0);
@@ -104,7 +104,7 @@ describe("the in-process store's factor set generation", () => {
 
 	it("keeps the generation through an update, and moves it at a reset, even of a set never written", async () => {
 		const store = createMemoryMfaFactorStore();
-		await store.create(RECORD);
+		expect((await store.createIf(RECORD, null)).outcome).toBe("created");
 		const before = await store.listVersioned("user-1");
 		await store.update("user-1", RECORD.id, 1, {
 			data: "v2.next",
@@ -172,7 +172,7 @@ describe("the in-process store's tombstone", () => {
 
 	it("keeps a reset's tombstone until the bound has passed on its clock, then reads it as never written", async () => {
 		const { store, advance } = clocked();
-		await store.create(RECORD);
+		expect((await store.createIf(RECORD, null)).outcome).toBe("created");
 		const read = await store.listVersioned("user-1");
 		const stale = read.generation;
 		if (stale === null) throw new Error("the create left no generation");

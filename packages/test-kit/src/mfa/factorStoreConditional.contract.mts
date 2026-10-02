@@ -25,10 +25,11 @@
  * both. It maps the store onto `conditionalSetContract`'s target and runs
  * that suite, so the factor set is held to every rule of a set the suite
  * holds: a subject is the scope, a record the item, `removeAllForSubject`
- * the reset, `update` the member's own update, `create`, `remove` and
- * `removeAllForSubject` the unconditional membership writes. Every versioned
- * listing is read with `readMfaFactorSet`, so a record that is not a whole
- * record of its subject, or an id listed twice, fails the case that read it.
+ * the reset, `update` the member's own update, `removeAllForSubject` and,
+ * when the store provides them, the port's optional `create` and `remove`
+ * the unconditional membership writes. Every versioned listing is read with
+ * `readMfaFactorSet`, so a record that is not a whole record of its subject,
+ * or an id listed twice, fails the case that read it.
  * The unreachable store is mapped bare: each member is the port's call
  * alone, so its rejection reaches the outage case unchanged and an answer it
  * resolves, whatever it is, fails the case. `second`, `forceExpire`,
@@ -180,6 +181,8 @@ function memberOf<K extends SetMember>(
  * unchecked, so only the store's own rejection passes the outage case.
  */
 function targetOf(store: MfaFactorStore, bare = false): ConditionalSetTarget<MfaFactorRecord> {
+	const create = store.create?.bind(store);
+	const remove = store.remove?.bind(store);
 	return {
 		listVersioned: async (subject) => {
 			const answer = await memberOf(store, "listVersioned", bare)(subject);
@@ -200,8 +203,10 @@ function targetOf(store: MfaFactorStore, bare = false): ConditionalSetTarget<Mfa
 			if (!bare) assert.ok(updated !== null, "the update did not land");
 		},
 		unconditional: {
-			create: (record) => store.create(record),
-			remove: (record) => store.remove(record.subject, record.id),
+			...(create === undefined ? {} : { create }),
+			...(remove === undefined
+				? {}
+				: { remove: (record: MfaFactorRecord) => remove(record.subject, record.id) }),
 			removeAllForSubject: (record) => store.removeAllForSubject(record.subject),
 		},
 	};
