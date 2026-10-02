@@ -47,6 +47,7 @@ import {
 	directoryEntries,
 	disposeAll,
 	events,
+	login,
 	spyLogger,
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
@@ -64,6 +65,7 @@ import {
 	seedFactor,
 	seedTotp,
 	signInWithTotp,
+	stepUp,
 	storedData,
 	suiteSealing,
 	T0,
@@ -664,6 +666,70 @@ describe("a retired set left stored", () => {
 		await agent.get("/session/mfa/factors");
 
 		expect(floor).not.toHaveBeenCalled();
+	});
+});
+
+describe("routing over a retired set: one reading of usable, the floor's", () => {
+	/** Alice's TOTP, a record of a kind no longer installed, and a recovery set below the raised floor; signed in with the TOTP, which is then removed. */
+	async function retiredOnly(
+		options: { readonly mode?: "optional" | "required"; readonly signIn?: boolean } = {},
+	) {
+		const built = await composed({ mode: options.mode ?? "optional" });
+		const totp = await seedTotp(built.factorStore);
+		await seedFactor(built.factorStore, "uninstalled_kind", { anything: true });
+		const set = recoverySet(3);
+		const retired = await seedFactor(built.factorStore, "recovery_code", set.data);
+		await raiseRecoverySetFloor(built.transactionStore, 1);
+		const agent =
+			options.signIn === false
+				? undefined
+				: (await signInWithTotp(built.app, built.userSessionStore, totp)).agent;
+		await built.factorStore.remove(ALICE.id, totp.record.id);
+		return { built, agent, retired, set };
+	}
+
+	it("answers a step-up 403 mfa_no_qualifying_factor when only a retired set and a kind no longer installed stand — never an empty transaction", async () => {
+		const { built, agent } = await retiredOnly();
+		if (agent === undefined) throw new Error("not signed in");
+		const opened = vi.spyOn(built.transactionStore, "create");
+
+		const res = await stepUp(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(403);
+		expect(res.body).toMatchObject({ error: "mfa_no_qualifying_factor" });
+		expect(opened).not.toHaveBeenCalled();
+	});
+
+	it("opens the step-up as before when the floor cannot be read: an outage never hides the way in", async () => {
+		const { built, agent } = await retiredOnly();
+		if (agent === undefined) throw new Error("not signed in");
+		vi.spyOn(built.transactionStore, "recoverySetFloor").mockRejectedValue(new Error("down"));
+
+		const res = await stepUp(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+	});
+
+	it("does not ask a password login for a second factor over a retired set alone: under optional the login is established, as over an exhausted set", async () => {
+		const built = await composed({ mode: "optional" });
+		await seedFactor(built.factorStore, "recovery_code", recoverySet(3).data);
+		await raiseRecoverySetFloor(built.transactionStore, 1);
+
+		const { res } = await login(built.app, { username: ALICE.username, password: ALICE.password });
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+	});
+
+	it("still asks over a retired set alone when the floor cannot be read: an outage never lowers the bar", async () => {
+		const built = await composed({ mode: "optional" });
+		await seedFactor(built.factorStore, "recovery_code", recoverySet(3).data);
+		await raiseRecoverySetFloor(built.transactionStore, 1);
+		vi.spyOn(built.transactionStore, "recoverySetFloor").mockRejectedValue(new Error("down"));
+
+		const { res } = await login(built.app, { username: ALICE.username, password: ALICE.password });
+
+		expect(res.status, JSON.stringify(res.body)).toBe(403);
+		expect(res.body).toMatchObject({ error: "mfa_required" });
 	});
 });
 
