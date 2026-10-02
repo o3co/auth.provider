@@ -630,6 +630,16 @@ retention.
 - A conditional write's request carries `expectedGeneration`: a generation,
   or, for a set's `createIf` only, `null` for a set the caller read as
   absent. A request without `expectedGeneration` is `400`.
+- A conditional create or delete carries `deadlineMs`: the instant, in
+  epoch milliseconds on the provider's clock, after which it must not be
+  applied. The adapter sets it to the moment it sends plus its request
+  timeout, and gives up at that moment itself. The Store checks
+  `deadlineMs` against its own clock in the same atomic step as the
+  conditional write; at or after it, the write is not applied and the
+  answer is `408`.
+- The adapter's write lifetime W is its request timeout plus the clock skew
+  assumed between the provider and the Store. The provider's and the
+  Store's clocks agree within that skew.
 - `200` answers the operation's answer as its type states it:
   - a record's versioned read: `{ "value": <record>, "generation": "<g>" }`,
     or, for an absent record, `{ "value": null, "generation": null }`;
