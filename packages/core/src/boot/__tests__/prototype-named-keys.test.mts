@@ -15,20 +15,20 @@
  */
 
 /**
- * A configuration key named after an `Object.prototype` member refuses boot
- * at its one parse, naming the key's full path. The HOCON loader keeps such a
+ * A configuration key named after an `Object.prototype` member, or
+ * `prototype`, refuses boot at its one parse, naming the key's full path. The HOCON loader keeps such a
  * key as an own key; a schema would drop it (`__proto__` in a record or a
  * passthrough object) or keep a name the code reads as an inherited member.
  */
 
 import { parseString } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import type { Module } from "../../modules/manifest/index.mjs";
-import { memoryRateLimiterModule } from "../../ratelimit/module.mjs";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
-import type { BootstrapMap } from "../types.mjs";
-import { BootError } from "../types.mjs";
-import { validateManifests } from "../validate-manifests.mjs";
+import type { BootstrapMap } from "#/boot/types.mjs";
+import { BootError } from "#/boot/types.mjs";
+import { validateManifests } from "#/boot/validate-manifests.mjs";
+import type { Module } from "#/modules/manifest/index.mjs";
+import { memoryRateLimiterModule } from "#/ratelimit/module.mjs";
+import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /** The configuration as a composition root hands it over: HOCON, loaded, never parsed. */
 const loaded = (hocon: string): Record<string, unknown> =>
@@ -61,7 +61,7 @@ function refusal(modules: readonly Module[], config: Record<string, unknown>): B
 const limiterSection = (limits: string) =>
 	loaded(`"core-rate-limiter-memory" { limits { ${limits} } }`);
 
-describe("a configuration key named after an Object.prototype member refuses boot", () => {
+describe("a configuration key named after an Object.prototype member, or prototype, refuses boot", () => {
 	it.each(["__proto__", "constructor", "prototype", "toString", "hasOwnProperty", "valueOf"])(
 		"a rate-limit `limits` entry named %s, naming its path",
 		(name) => {
@@ -109,6 +109,17 @@ describe("a configuration key named after an Object.prototype member refuses boo
 
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toContain("extra.1.__proto__");
+	});
+
+	it("says which reserved group each key is in", () => {
+		const err = refusal([], resolved(loaded(`extra { prototype = 1, toString = 2 }`)));
+
+		expect(err.message).toContain(
+			'extra.prototype: the key "prototype" is "prototype", which configuration cannot carry',
+		);
+		expect(err.message).toContain(
+			'extra.toString: the key "toString" is named after an Object.prototype member',
+		);
 	});
 
 	it("names a key under every path that reaches it when one object is shared", () => {
