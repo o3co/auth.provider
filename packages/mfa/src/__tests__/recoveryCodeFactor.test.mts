@@ -492,9 +492,9 @@ describe("writeRecoveryCodes", () => {
 
 		const written = await write(factorStore, outside);
 
-		expect(written).toEqual({ issued: "unshown", show: expect.any(Function) });
+		expect(written).toEqual({ written: "unshown", show: expect.any(Function) });
 		expect(await storedSet(factorStore)).toEqual({ version: 0, shown: false });
-		if (written?.issued !== "unshown") throw new Error("not written");
+		if (written === undefined || !("written" in written)) throw new Error("not written");
 		const shown = await written.show();
 		expect(shown).toEqual({ issued: true, codes: expect.any(Array), regenerated: false });
 		expect(update).toHaveBeenCalledTimes(1);
@@ -504,7 +504,7 @@ describe("writeRecoveryCodes", () => {
 	it("answers the codes once: a second show finds the set changed and answers none", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const written = await write(factorStore);
-		if (written?.issued !== "unshown") throw new Error("not written");
+		if (written === undefined || !("written" in written)) throw new Error("not written");
 		expect((await written.show()).issued).toBe(true);
 
 		const again = await written.show();
@@ -517,7 +517,7 @@ describe("writeRecoveryCodes", () => {
 	it("answers no codes, and never throws, when the set was removed or the mark fails: the set left unshown", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const removed = await write(factorStore);
-		if (removed?.issued !== "unshown") throw new Error("not written");
+		if (removed === undefined || !("written" in removed)) throw new Error("not written");
 		const [record] = await factorStore.list("u-alice");
 		if (record === undefined) throw new Error("no set");
 		await factorStore.remove("u-alice", record.id);
@@ -526,7 +526,7 @@ describe("writeRecoveryCodes", () => {
 		const down = new Error("factor store unreachable");
 		const failing = { ...factorStore, update: vi.fn().mockRejectedValue(down) };
 		const unmarked = await write(factorStore, failing);
-		if (unmarked?.issued !== "unshown") throw new Error("not written");
+		if (unmarked === undefined || !("written" in unmarked)) throw new Error("not written");
 		expect(await unmarked.show()).toEqual({ issued: false, cause: down });
 		expect(await storedSet(factorStore)).toEqual({ version: 0, shown: false });
 	});

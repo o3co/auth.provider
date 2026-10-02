@@ -608,7 +608,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		req: Request,
 		res: Response,
 		verified: Pick<Extract<MfaVerifyOutcome, { outcome: "verified" }>, "continuation" | "adds">,
-		/** What the login's answer carries; made last, once nothing else can answer the login, when it marks what it carries as answered. */
+		/** What the login's answer carries: made last, after the session and the CSRF token; must not throw. */
 		answer:
 			| Readonly<Record<string, unknown>>
 			| (() => Promise<Readonly<Record<string, unknown>>>) = {},
@@ -1313,8 +1313,8 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 							by: "user",
 						},
 					});
-					/** What the binding's codes came to, audited and said once: the answer's part of them. */
-					const codesAnswered = (codes: MfaIssuedRecoveryCodes) => {
+					/** What the binding's codes came to, audited and said once: a failed write before the answer, the mark's outcome once it is sent. */
+					const codesSaid = (codes: MfaIssuedRecoveryCodes) => {
 						if (codes?.issued === true) {
 							emitAuditEvent(auditSink, {
 								...audited,
@@ -1344,20 +1344,44 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 								"mfa_recovery_codes_unwritten",
 							);
 						}
-						// A page that got none points to their regeneration.
-						return codes === undefined
-							? {}
-							: codes.issued
-								? { recovery_codes: codes.codes }
-								: { recovery_codes_issued: false };
 					};
-					/** The binding's answer, made just before it is sent: a set written unshown is marked shown there. */
+					const written = outcome.recoveryCodes;
+					// A set that could not be written is said now, whatever the answer comes to.
+					if (written !== undefined && !("written" in written) && !written.issued) {
+						codesSaid(written);
+					}
+					/** The codes a sent answer carried, or said it could not carry: `undefined` until it is made. */
+					let answered: { readonly codes: MfaIssuedRecoveryCodes } | undefined;
+					/** The binding's answer, made just before it is sent: a set written unshown is shown there, nothing else done. */
 					const answer = async () => {
-						const codes = outcome.recoveryCodes;
+						let codes: MfaIssuedRecoveryCodes;
+						if (written !== undefined && "written" in written) {
+							codes = await written.show();
+							answered = { codes };
+						} else {
+							codes = written;
+							if (written?.issued === true) answered = { codes };
+						}
+						// A page that got none points to their regeneration.
 						return {
 							factor: outcome.factor,
-							...codesAnswered(codes?.issued === "unshown" ? await codes.show() : codes),
+							...(codes === undefined
+								? {}
+								: codes.issued
+									? { recovery_codes: codes.codes }
+									: { recovery_codes_issued: false }),
 						};
+					};
+					/**
+					 * Once the answer is sent: what the codes it carried came to. A logger
+					 * that throws here no longer changes the answer, and is not let past it.
+					 */
+					const answerSaid = () => {
+						try {
+							if (answered !== undefined) codesSaid(answered.codes);
+						} catch {
+							// The answer stands; there is nowhere left to say it.
+						}
 					};
 					witnessUnwritten(outcome.subject, outcome.witness);
 					if (outcome.flagUncleared !== undefined) {
@@ -1381,9 +1405,11 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 							);
 						}
 						res.status(200).json(await answer());
+						answerSaid();
 						return;
 					}
 					await completeLogin("enrollment", req, res, outcome, answer);
+					answerSaid();
 					return;
 				}
 			}

@@ -649,6 +649,31 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
 	});
 
+	it("says a set it could not write once even when another requirement interrupts the resumed login", async () => {
+		const factors = createMemoryMfaFactorStore();
+		const extra = extraRequirement();
+		const { app, logger } = await boot({
+			config: configFor("required", {}, {}, ["mfa", extra.name]),
+			factorStore: {
+				...factors,
+				create: async (record) => {
+					if (record.kind === "recovery_code") throw new Error("factor store unreachable");
+					return factors.create(record);
+				},
+			},
+			extraModules: [extra.module],
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(EXTRA_INTERRUPTION.body);
+		expect(events(logger, "error")).toEqual(["mfa_recovery_codes_unwritten"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ sub: ALICE.id });
+	});
+
 	it("leaves the set unshown when core will not resume the login: 401 login_required", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const store = createMemoryMfaTransactionStore();
@@ -703,11 +728,11 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 		expect(set.data).toMatchObject({ shown: false });
 	});
 
-	it("answers no codes when the set changed before the answer: the login completes, recovery_codes_issued false, said once, no codes event", async () => {
+	it("answers no codes when the set changed before the answer: the login completes with a fresh CSRF token, recovery_codes_issued false, said once, no codes event", async () => {
 		const factors = createMemoryMfaFactorStore();
 		const sessions = createInMemoryUserSessionStore();
 		const audit = recordingAuditSink();
-		const { app, logger } = await boot({
+		const { app, handle, logger } = await boot({
 			config: configFor("required"),
 			factorStore: factors,
 			auditSink: audit,
@@ -734,6 +759,9 @@ describe("a login's first binding marks its recovery codes shown only in the ans
 			factor: { id: expect.any(String), kind: "totp" },
 			recovery_codes_issued: false,
 		});
+		const guard = handle.components.csrfGuard;
+		if (guard === undefined) throw new Error("the composition holds no CSRF guard");
+		expect(setsCsrfToken(done, guard)).toBe(true);
 		expect(events(logger, "error")).toEqual(["mfa_recovery_codes_unwritten"]);
 		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ sub: ALICE.id });
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);

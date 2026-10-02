@@ -98,7 +98,7 @@ export type MfaIssuedRecoveryCodes =
 
 /** A set written and not yet shown: its codes are reached through `show` alone, which marks it shown (see this file's header). Never throws. */
 export interface MfaUnshownRecoveryCodes {
-	readonly issued: "unshown";
+	readonly written: "unshown";
 	show(): Promise<Exclude<MfaIssuedRecoveryCodes, undefined>>;
 }
 
@@ -141,7 +141,7 @@ export async function issueRecoveryCodes(
 		...options,
 		markedThrough: options.writes.factorStore,
 	});
-	return written?.issued === "unshown" ? written.show() : written;
+	return written !== undefined && "written" in written ? written.show() : written;
 }
 
 /** A new set for `options.subject`, written unshown for its answer to mark (see this file's header). */
@@ -230,7 +230,7 @@ export async function writeRecoveryCodes(
 			...(unreplaced === undefined ? {} : { unreplaced }),
 		};
 		return {
-			issued: "unshown",
+			written: "unshown",
 			show: () => markShown(options.markedThrough, subject, id, sealedShown, issued),
 		};
 	} catch (cause) {
