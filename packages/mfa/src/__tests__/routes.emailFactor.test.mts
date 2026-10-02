@@ -521,6 +521,26 @@ describe("enrolling the email factor", () => {
 		expect(await emailRecords(factorStore)).toHaveLength(1);
 	});
 
+	it("answers the duplicate before the limit at its start: a subject at mfa.maxFactorsPerSubject that enrolled the address already is 409 mfa_factor_duplicate", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const seeded = await seedTotp(factorStore);
+		await seedFactor(factorStore, KIND, { addressDigest: recordedDigest(ALICE.email) });
+		const { app, sender, userSessionStore } = await composed({
+			factorStore,
+			totp: true,
+			mfa: { maxFactorsPerSubject: 2 },
+		});
+		const { agent } = await signInWithTotp(app, userSessionStore as UserSessionStore, seeded);
+		expect(await factorStore.list(ALICE.id)).toHaveLength(2);
+		const mailed = sender.sent.length;
+
+		const begun = await enrollFromAccount(agent, KIND);
+
+		expect(begun.status, JSON.stringify(begun.body)).toBe(409);
+		expect(begun.body).toEqual(FACTOR_DUPLICATE);
+		expect(sender.sent).toHaveLength(mailed);
+	});
+
 	it("refuses a completion whose address another enrollment bound since its start, 409 mfa_factor_duplicate: the attempt spent, nothing added, the transaction standing", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const seeded = await seedTotp(factorStore);

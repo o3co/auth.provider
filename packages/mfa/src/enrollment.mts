@@ -59,14 +59,17 @@
  *   lease, or past it, answer what they wrote, and say so (`overran`).
  * - A factor enrolled already — a record of the subject, of its kind, answers
  *   the identity the binding would add (`MfaFactor.identity`) — is
- *   `factor_duplicate`, answered before the limit and after a binding the
- *   records no longer allow. At the start only where the identity is known
- *   before the factor begins (the email factor's, the digest of the
- *   account's address), nothing opened or sent; at the completion once the
- *   proof was checked — the factor's own `duplicate` refusal too — on the
- *   records read before the lease and again on the lease's read, which
+ *   `factor_duplicate`, answered after a binding the records no longer
+ *   allow and before the limit — at the start, and on the lease's read. At
+ *   the start only where the identity is known before the factor begins
+ *   (`enrollmentIdentity`), nothing opened or sent; at the completion once
+ *   the proof was checked — the factor's own `duplicate` refusal too — on
+ *   the records read before the lease and again on the lease's read, which
  *   decides: the attempt spent, nothing written, the transaction standing.
- *   For a factor without `identity`, only its own refusal finds one.
+ *   The completion's read before the lease judges the limit before the
+ *   proof is checked, no attempt spent, and finds a duplicate only after
+ *   it: there a subject at the limit is answered the limit. For a factor
+ *   without `identity`, only its own refusal finds one.
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, under the lease, in this order: judges the
  *   binding again on the subject's records as the lease's read gave them —
@@ -133,14 +136,7 @@ import {
 	recordsAfterFirstBinding,
 	reopenedEnrollment,
 } from "./firstBinding.mjs";
-import {
-	addressDigestOf,
-	keptState,
-	mailedAnswer,
-	mailRefusalOf,
-	readKeptState,
-	sendMfaMail,
-} from "./mail.mjs";
+import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes, writeRecoveryCodes } from "./recovery/issue.mjs";
 import { copyFactorValue } from "./sealing.mjs";
 
@@ -318,17 +314,14 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		);
 
 	/**
-	 * The identity `factor`'s enrollment for `user` would add, where it is
-	 * known before the enrollment begins: an email factor's, the digest of the
-	 * account's address its code goes to (`enrollmentIdentity`).
+	 * The identity `factor`'s enrollment for `user` would add, where its
+	 * factor's module can tell it before the enrollment begins
+	 * (`enrollmentIdentity`); else `undefined`.
 	 */
 	const identityAtBegin = (
 		factor: MfaFactor,
 		user: Readonly<Record<string, unknown>>,
-	): string | undefined => {
-		const digest = addressDigestOf(sealing.digestsFor(factor.kind), user.email);
-		return digest === undefined ? undefined : enrollmentIdentity(factor, digest);
-	};
+	): string | undefined => enrollmentIdentity(factor, sealing.digestsFor(factor.kind), user);
 
 	/**
 	 * The transaction a call begins on: the one it names, or — with none named,

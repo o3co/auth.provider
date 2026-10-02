@@ -165,8 +165,11 @@ export function matchesRecordedAddress(
  */
 export function addressDigestOf(digests: MfaDigests, address: unknown): MfaKeyedDigest | undefined {
 	const to = normaliseMailAddress(address);
-	return to === undefined ? undefined : digests.digest([to]);
+	return to === undefined ? undefined : digestOf(digests, to);
 }
+
+/** The keyed digest of `to`, an address as `normaliseMailAddress` spells it. */
+const digestOf = (digests: MfaDigests, to: string): MfaKeyedDigest => digests.digest([to]);
 
 /** Sends `options.mail` in the order this file's header states. */
 export async function sendMfaMail<Refusal>(
@@ -183,10 +186,9 @@ export async function sendMfaMail<Refusal>(
 			return { outcome: "address_mismatch" };
 		if (compared !== "match") return { outcome: "key_unavailable", keyId: compared.keyUnavailable };
 	}
-	const addressDigest = addressDigestOf(digests, options.address);
-	if (to === undefined || addressDigest === undefined) return { outcome: "no_address" };
+	if (to === undefined) return { outcome: "no_address" };
 	const expiresAtMs = Math.min(mail.expiresAtMs ?? notAfterMs, notAfterMs);
-	const kept = await options.keep(addressDigest, expiresAtMs);
+	const kept = await options.keep(digestOf(digests, to), expiresAtMs);
 	if (!kept.kept) return { outcome: "not_kept", refusal: kept.refusal };
 
 	let answer: "delivered" | "refused_at_limit" | "outage";

@@ -1013,6 +1013,42 @@ describe("a factor that answers an identity a record of the subject holds", () =
 	});
 });
 
+describe("a factor whose identity throws on a stored record", () => {
+	it("reads that record as no identity, said at warn by its kind for each read of it, and binds beside it", async () => {
+		const factor: MfaFactor = {
+			...createTestMfaFactor({ kind: "acme", amrValues: ["hwk"] }),
+			identity: (data) => {
+				if (data.secret === "stored") {
+					throw Object.assign(new Error(`no identity for ${ALICE.email}`), { code: "E_ACME" });
+				}
+				return `acme:${String(data.secret)}`;
+			},
+		};
+		const booted = await composed({ extraModules: [contributing(factor)] });
+		const seeded = await seedTotp(booted.factorStore);
+		await seedFactor(booted.factorStore, "acme", { secret: "stored" });
+		const { agent } = await signInWithTotp(booted.app, booted.userSessionStore, seeded);
+		const begun = await enrollFromAccount(agent, "acme");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+
+		const res = await completeEnrollment(agent, begun.body.transaction, begun.body.secret);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(
+			(await booted.factorStore.list(ALICE.id)).filter((record) => record.kind === "acme"),
+		).toHaveLength(2);
+		// The records read before the lease, then the lease's read: one line for each.
+		const said = booted.logger.warn.mock.calls.filter(
+			(call) => call[1] === "mfa_factor_identity_unavailable",
+		);
+		expect(said.map((call) => call[0])).toEqual([
+			{ kind: "acme", err: { name: "Error", code: "E_ACME" } },
+			{ kind: "acme", err: { name: "Error", code: "E_ACME" } },
+		]);
+		expect(loggedText(booted.logger)).not.toContain(ALICE.email);
+	});
+});
+
 describe("a factor's own failure", () => {
 	it("is logged by its name and code alone, never its message, which may quote the account", async () => {
 		const throwing: MfaFactor = {

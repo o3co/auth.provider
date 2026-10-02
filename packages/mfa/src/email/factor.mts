@@ -59,6 +59,7 @@ import {
 	readLongCode,
 	readSixDigitCode,
 } from "../codes.mjs";
+import { addressDigestOf } from "../mail.mjs";
 
 /** The kind an email factor's records carry, and the key it is contributed under. */
 export const EMAIL_FACTOR_KIND = "email";
@@ -119,14 +120,18 @@ export function enrolledAddressDigest(
 
 /**
  * The identity the record of an enrollment of `factor`, a factor this file
- * made, would answer once its code went to the address `addressDigest` is
- * the digest of; `undefined` for any other factor.
+ * made, would answer once its code went to `user`'s address — its digest
+ * under `digests` as the coordinator keeps it at the send
+ * (`addressDigestOf`); `undefined` for an account with no address, and for
+ * any other factor, which is answered before anything is digested.
  */
 export function enrollmentIdentity(
 	factor: MfaFactor,
-	addressDigest: MfaKeyedDigest,
+	digests: MfaDigests,
+	user: Readonly<Record<string, unknown>>,
 ): string | undefined {
-	return made.has(factor) ? identityOf(keyedDigest(addressDigest)) : undefined;
+	if (!made.has(factor)) return undefined;
+	return identityOf(addressDigestOf(digests, user.email));
 }
 
 /** The `email` factor, its codes living `settings.codeTtlSeconds`. */
