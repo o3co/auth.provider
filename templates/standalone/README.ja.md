@@ -203,7 +203,7 @@ pnpm run start
 
 上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — フェデレーション、機能 — と、期待するセッション要件を導く元の `sessionRequirements` を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。`adapters` — 各スロットをどのアダプターで埋めるか、composition root 自身のセクション — は、上の 2 ファイルをテンプレートの `config/reference.conf` の上に重ね、テンプレート自身のスキーマで読む（`readAdapters`）: 移動する前のパスにまだ書かれた選択や、それとともに改名された変数は、どのモジュールを選ぶよりも前にここで拒否され、新しいパスと変数を名指しする。composition root 自身のキーである MFA のスイッチ `mfaMode`（`MFA_MODE`）も同じように、テンプレート自身のスキーマで読み（`readMfaSwitch`）、それと並んで、Store を使う MFA 要素ストアの元になるユーザーリポジトリの HTTP 設定をパースせずに読む。boot には `adapters` も `mfaMode` も渡さない。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。ログレベルも boot の前に読むが、それは `logging` モジュールのセクションとして、そのモジュールのスキーマで、テンプレートの `reference.conf` の上に読む（`readLogging`）: テンプレートは設定を読みモジュールを選ぶ間もログを出すので、logger は boot の前に存在する。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込み、`mfa` セクションは MFA のスイッチが決めるとおりにして（[多要素認証](#多要素認証) を参照）、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースする。boot の後にテンプレートが読むもの — 信頼するホップ、ポート、readiness の期限 — は、`http` モジュールから読む: core の `httpSettings` スロットと、テンプレートの `httpHostSettings` である。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
 
-overlay の値は `application.conf` より優先される。scaffold には `development.conf` と `production.conf` が同梱されている。別の環境（例: `staging`）を追加するときは `config/staging.conf` を作成し、`CONFIG_ENV=staging` を設定する。`{ENV}.conf` が存在しない場合は起動時エラーになる — タイポは黙ってデフォルトにフォールバックせず、fail-fast する。
+overlay の値は `application.conf` より優先される。scaffold には `development.conf` と `production.conf`、そして `mailpit.conf` が同梱されている。`mailpit.conf` は、[Docker](#docker) の Mailpit オーバーレイが選ぶ名前のもとでの development の overlay である。別の環境（例: `staging`）を追加するときは `config/staging.conf` を作成し、`CONFIG_ENV=staging` を設定する。`{ENV}.conf` が存在しない場合は起動時エラーになる — タイポは黙ってデフォルトにフォールバックせず、fail-fast する。
 
 ### アダプター
 
@@ -494,6 +494,7 @@ core.federations {
 - **ストア。** 同梱の選択である `memory` は development と test のためだけのものである: 再起動ですべての要素、ロック、記録したメールの証明を失い、その後はパスワードを持つ者が自分の要素を紐付けられる。MFA が有効なら、設定の名前と、設定されていれば `CONFIG_ENV` と `NODE_ENV` のそれぞれが `development` か `test` でない限り boot の前に拒否され、`CORE_DEPLOYMENT_MODE=multi` のもとでは core が拒否する。本番には両方に `redis`、または要素に `store` が要る。`redis` は `REDIS_CLIENTS_URL` が開くソケットを共有する。`store`（要素のみ）は Store の 4 つのエンドポイント（`FOUNDATION_MFA_FACTOR_STORE_*`、[foundation の README](../../packages/foundation/README.md)）の向こうに保持し、ユーザーリポジトリと同じ bearer トークンを送る。
 - **登録の証人。** `ADAPTERS_USER_REPOSITORY=http` なら `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` を設定する（[ユーザーリポジトリ](#ユーザーリポジトリ)）。無ければ boot は一度警告する（`mfa_enrollment_witness_unwritable`）。
 - **`acr`。** MFA が有効なら、テンプレートは `oauth.authorize.acrValues` に `"urn:o3co:acr:mfa" = ["mfa"]` を加え（設定がそのエントリを書いていなければ）、ディスカバリーがそれを広告する。MFA が off なら何も加えない: acr の表とディスカバリーは MFA が無いときと同じである。
+- **development でのメール。** `CONFIG_ENV=development` では、テンプレートの送信者は各コードをログに出す（`mail_code_issued`）だけで何も送らない。SMTP 送信者を動かし、送ったものを読むには、[Docker](#docker) の Mailpit オーバーレイを使う。
 - **スイッチは一つ。** `MFA_MODE` が別の値に設定されているのにファイルが `mfaMode` を書くこと、また設定がスイッチと違う `mfa.mode` を書くことは、キーを名指して boot の前に拒否される。MFA が off の間、設定が `mfa` の下に書くものは何も boot に渡されない。
 
 ### フェデレーショングラント
@@ -675,6 +676,25 @@ docker run -e HTTP_PORT=8080 -p 8080:8080 my-auth-provider
 ```
 
 `EXPOSE` はイメージのメタデータであり、それだけではポートを公開しないため、明示的な `-p` マッピングが引き続き必要である。
+
+### SMTP 送信者のための Mailpit（開発専用）
+
+[`docker-compose.mailpit.yml`](docker-compose.mailpit.yml) は `docker-compose.yml` に重ねるオーバーレイで、メールを受け止める [Mailpit](https://mailpit.axllent.org/) を加える。これにより、MFA を有効にした開発時の実行は、そのメール — アカウントのメールの証明、メール要素のコード — を、各コードをログに出すだけの開発用送信者ではなく SMTP 送信者で送る:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
+```
+
+メールは <http://localhost:8025> で読む。Mailpit はメールを保持し、先へは何も配送しない。素の `docker compose up`（`make dev`）は Mailpit を起動せず、本番用のファイルにも Mailpit は無い。開発専用である: デプロイでは `STANDARD_SMTP_MAIL_SENDER_*` の変数で実際のリレーを指定する（[多要素認証](#多要素認証)）。
+
+オーバーレイが app サービスに設定するもの:
+
+- `CONFIG_ENV=mailpit`。`development` ではテンプレートは各コードをログに出す送信者を入れる（[モジュール合成順序](#モジュール合成順序) のルール 7）。[`config/mailpit.conf`](config/mailpit.conf) は `development.conf` を include するので、それ以外は MFA のサンプル鍵も含めて development の実行と同じである。
+- `MFA_MODE` は `.env` の値、`.env` が設定していなければ `optional`: MFA が off ならメールを送るものが無い。
+- `ADAPTERS_MFA_FACTOR_STORE=redis` と `ADAPTERS_MFA_TRANSACTION_STORE=redis`（compose の Redis 上）: `development` と `test` 以外の名前では、MFA のストアをメモリに置けない。
+- `STANDARD_SMTP_MAIL_SENDER_HOST=localhost`、`STANDARD_SMTP_MAIL_SENDER_PORT=1025`、`STANDARD_SMTP_MAIL_SENDER_SECURE=none`、`STANDARD_SMTP_MAIL_SENDER_FROM=auth@example.com`。SMTP 送信者が平文で送るのはループバックのホストにだけなので、Mailpit は app コンテナのネットワーク名前空間で動き（`network_mode: service:app`）、その `localhost` で待ち受ける。そのため Mailpit の Web UI のポートは、Mailpit ではなく app サービスがループバックに公開する。
+
+compose の profile ではなくオーバーレイにしているのは、profile はサービスを足すことしかできず、app サービスの環境変数やポートを変えられないからである。
 
 ### ヘルスエンドポイント
 
