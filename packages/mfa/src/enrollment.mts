@@ -30,7 +30,9 @@
  *   another factor only beside a record that may count and within
  *   `mfa.maxFactorsPerSubject`.
  * - Only a counting factor the `User` may enroll is offered: the login's, or
- *   the one the session's cookie holds. Its start is kept sealed on the
+ *   the one the session's cookie holds; a factor that cannot say
+ *   (`mayEnroll`) is an outage, at the start and at the completion, nothing
+ *   opened or spent. Its start is kept sealed on the
  *   transaction (`o3co:mfa:enrollment`), with the digest of the address its
  *   code went to when it mailed one (`sendMfaMail`); the page is then
  *   answered where it went, masked (`sent_to`), and how long it lives
@@ -55,22 +57,33 @@
  *   attempt reserved before the proof was checked counts, as any
  *   completion's does. Writes that ran out of the
  *   lease, or past it, answer what they wrote, and say so (`overran`).
+ * - A factor enrolled already — a record of the subject, of its kind, answers
+ *   the identity the binding would add (`MfaFactor.identity`) — is
+ *   `factor_duplicate`, answered before the limit and after a binding the
+ *   records no longer allow. At the start only where the identity is known
+ *   before the factor begins (the email factor's, the digest of the
+ *   account's address), nothing opened or sent; at the completion once the
+ *   proof was checked — the factor's own `duplicate` refusal too — on the
+ *   records read before the lease and again on the lease's read, which
+ *   decides: the attempt spent, nothing written, the transaction standing.
+ *   For a factor without `identity`, only its own refusal finds one.
  * - A completion reserves an attempt before the proof is checked, seals the
  *   factor's data, and then, under the lease, in this order: judges the
  *   binding again on the subject's records as the lease's read gave them —
- *   a first one beside a record that may count, another beside none, or one
- *   past `mfa.maxFactorsPerSubject` is refused, nothing written and the
- *   transaction standing — a first one refused there beside a record the
- *   read before the lease did not find is `first_binding_conflict`, which
- *   the routes audit; for a first binding notes the subject's
- *   first-binding mark — a note that fails refuses it, nothing written —
- *   consumes the transaction, writes the factor. Every write of the
+ *   a first one beside a record that may count, another beside none, a
+ *   duplicate, or one past `mfa.maxFactorsPerSubject` is refused, nothing
+ *   written and the transaction standing — a first one refused there
+ *   beside a record the read before the lease did not find is
+ *   `first_binding_conflict`, which the routes audit; for a first binding
+ *   notes the subject's first-binding mark — a note that fails refuses it,
+ *   nothing written — consumes the transaction, writes the factor. Every write of the
  *   subject's factor set is fenced on that read (`factorSet.mts`): a factor
  *   whose write finds the set changed since — another write landed, which
  *   under the lease only a writer past its own lease can make — is not
  *   written, and the binding is refused as one its records no longer allow,
- *   the transaction spent. So at most one first binding stands, and one
- *   binding never passes the limit another made at once. A first binding —
+ *   the transaction spent. So at most one first binding stands, one
+ *   binding never passes the limit another made at once, and of two
+ *   bindings of one authenticator at once one stands. A first binding —
  *   `binding` `email_proof` when the proof was given, on the transaction or
  *   in the session, else `password` — then clears D25's flag where the proof
  *   was given, issues the recovery codes — replacing the sets that stood,
@@ -106,14 +119,28 @@ import {
 	type MfaCeremonySubject,
 	type MfaEnrollmentBeginOutcome,
 	type MfaEnrollmentCompleteOutcome,
+	type MfaEnrollmentFailed,
 	type MfaEnrollmentRefusal,
 	type MfaFactorUnreadable,
 	outage,
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
+import { enrollmentIdentity } from "./email/factor.mjs";
 import type { MfaFactorSetCarried, MfaFactorSetWrites } from "./factorSet.mjs";
-import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
-import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
+import {
+	mayCount,
+	mayEnroll,
+	recordsAfterFirstBinding,
+	reopenedEnrollment,
+} from "./firstBinding.mjs";
+import {
+	addressDigestOf,
+	keptState,
+	mailedAnswer,
+	mailRefusalOf,
+	readKeptState,
+	sendMfaMail,
+} from "./mail.mjs";
 import { issueRecoveryCodes, writeRecoveryCodes } from "./recovery/issue.mjs";
 import { copyFactorValue } from "./sealing.mjs";
 
@@ -124,6 +151,7 @@ const UNKNOWN_KIND = Object.freeze({ outcome: "unknown_kind" as const });
 const closed = (purpose: MfaTransaction["purpose"]) =>
 	({ outcome: "first_binding_closed", purpose }) as const;
 const FACTOR_LIMIT = Object.freeze({ outcome: "factor_limit" as const });
+const FACTOR_DUPLICATE = Object.freeze({ outcome: "factor_duplicate" as const });
 const NO_PENDING = Object.freeze({ outcome: "no_pending_enrollment" as const });
 
 /** What a first binding is bound by: `password`, or `email_proof` after the account-email proof. */
@@ -211,42 +239,43 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		return { tx, user };
 	};
 
-	/** The counting factor of `kind` `user` may enroll; an `enrollable` that throws offers nothing. */
+	/**
+	 * The counting factor of `kind` `user` may enroll, `undefined` for none;
+	 * one whose `enrollable` throws is an outage (`mayEnroll`).
+	 */
 	const enrollable = (
 		kind: unknown,
 		user: Readonly<Record<string, unknown>>,
-	): MfaFactor | undefined => {
+	): MfaFactor | MfaEnrollmentFailed | undefined => {
 		if (typeof kind !== "string") return undefined;
 		const factor = factors.get(kind);
 		if (factor?.counting !== true) return undefined;
 		try {
-			return (factor.enrollable?.(user) ?? true) ? factor : undefined;
-		} catch {
-			return undefined;
+			return mayEnroll(kind, factor, user) ? factor : undefined;
+		} catch (cause) {
+			return { outcome: "enrollment_failed", kind, cause };
 		}
 	};
 
 	/**
 	 * Why the subject's `records` refuse a binding now — a first one beside a
-	 * record that may count, another beside none — or the limit: another
-	 * factor at it, or a first binding by `firstBy` whose factor and codes
-	 * would pass it (`recordsAfterFirstBinding`); else `undefined`.
+	 * record that may count, another beside none — then a `duplicate`, then
+	 * the limit: another factor at it, or a first binding by `firstBy` whose
+	 * factor and codes would pass it (`recordsAfterFirstBinding`); else
+	 * `undefined`.
 	 */
 	const refusedBy = (
 		purpose: MfaTransaction["purpose"],
 		first: boolean,
 		records: readonly MfaFactorRecord[],
 		firstBy: FirstBindingBy,
+		duplicate = false,
 	): MfaEnrollmentRefusal | undefined => {
 		const counted = records.some((record) => mayCount(factors, record));
-		if (first) {
-			if (counted) return closed(purpose);
-			return recordsAfterFirstBinding(factors, records, firstBy) <= kit.maxFactorsPerSubject
-				? undefined
-				: FACTOR_LIMIT;
-		}
-		if (!counted) return closed(purpose);
-		return records.length < kit.maxFactorsPerSubject ? undefined : FACTOR_LIMIT;
+		if (first ? counted : !counted) return closed(purpose);
+		if (duplicate) return FACTOR_DUPLICATE;
+		const after = first ? recordsAfterFirstBinding(factors, records, firstBy) : records.length + 1;
+		return after <= kit.maxFactorsPerSubject ? undefined : FACTOR_LIMIT;
 	};
 
 	/** The subject's factors of `kind` among `records`, opened, as a factor is handed them; one that does not open is left out. */
@@ -273,6 +302,35 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			});
 
 	/**
+	 * Whether one of the subject's `records` of `factor`'s kind answers
+	 * `identity` (`MfaFactor.identity`): the factor enrolled already. Never
+	 * for no identity.
+	 */
+	const holdsIdentity = (
+		subject: string,
+		factor: MfaFactor,
+		records: readonly MfaFactorRecord[],
+		identity: string | undefined,
+	): boolean =>
+		identity !== undefined &&
+		enrolledOfKind(subject, factor.kind, records).some(
+			(enrolled) => kit.identityOf(factor, enrolled.data) === identity,
+		);
+
+	/**
+	 * The identity `factor`'s enrollment for `user` would add, where it is
+	 * known before the enrollment begins: an email factor's, the digest of the
+	 * account's address its code goes to (`enrollmentIdentity`).
+	 */
+	const identityAtBegin = (
+		factor: MfaFactor,
+		user: Readonly<Record<string, unknown>>,
+	): string | undefined => {
+		const digest = addressDigestOf(sealing.digestsFor(factor.kind), user.email);
+		return digest === undefined ? undefined : enrollmentIdentity(factor, digest);
+	};
+
+	/**
 	 * The transaction a call begins on: the one it names, or — with none named,
 	 * in an admitted session — a new `enroll` one of the binding the subject's
 	 * records allow now; with the `User`, the factor of `kind` and the records.
@@ -287,15 +345,23 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				readonly records: readonly MfaFactorRecord[];
 		  }
 		| MfaEnrollmentRefusal
+		| MfaEnrollmentFailed
 	> => {
 		const session = call.session;
 		if (call.transactionId === undefined && session !== undefined) {
 			const factor = enrollable(call.kind, session.user);
 			if (factor === undefined) return UNKNOWN_KIND;
+			if ("outcome" in factor) return factor;
 			const records = await kit.recordsOf(session.subject);
 			if ("outcome" in records) return records;
 			const first = reopenedEnrollment(factors, records) === "required";
-			const refused = refusedBy("enroll", first, records, UNTIL_COMPLETION);
+			const refused = refusedBy(
+				"enroll",
+				first,
+				records,
+				UNTIL_COMPLETION,
+				holdsIdentity(session.subject, factor, records, identityAtBegin(factor, session.user)),
+			);
 			if (refused !== undefined) return refused;
 			if (first) {
 				const distrusted = await kit.firstBindingDistrust(session.subject, session.authTimeMs);
@@ -311,6 +377,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		if ("outcome" in open) return open;
 		const factor = enrollable(call.kind, open.user);
 		if (factor === undefined) return UNKNOWN_KIND;
+		if ("outcome" in factor) return factor;
 		const records = await kit.recordsOf(open.tx.subject);
 		if ("outcome" in records) return records;
 		const refused = refusedBy(
@@ -322,6 +389,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					? "email_proof"
 					: "password"
 				: UNTIL_COMPLETION,
+			holdsIdentity(open.tx.subject, factor, records, identityAtBegin(factor, open.user)),
 		);
 		if (refused !== undefined) return refused;
 		if (isFirstBinding(open.tx)) {
@@ -479,6 +547,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			if (pending === undefined || pending.expiresAtMs <= nowMs) return NO_PENDING;
 			const factor = enrollable(pending.kind, user);
 			if (factor === undefined) return UNKNOWN_KIND;
+			if ("outcome" in factor) return factor;
 			const label = call.label;
 			if (label !== undefined && !isMfaFactorLabel(label)) return INVALID_LABEL;
 			const records = await kit.recordsOf(tx.subject);
@@ -561,6 +630,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				return unreadable("enrollment", { cause });
 			}
 			if (!completion.ok) {
+				if (completion.reason === "duplicate") return FACTOR_DUPLICATE;
 				return {
 					outcome: "refused",
 					reason: completion.reason,
@@ -573,6 +643,9 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					cause: new TypeError("the factor's amrFor answered values it does not declare"),
 				});
 			}
+			// What the binding adds; the records read before the lease may hold it already.
+			const identity = kit.identityOf(factor, completion.data);
+			if (holdsIdentity(tx.subject, factor, records, identity)) return FACTOR_DUPLICATE;
 			const named = label ?? (isMfaFactorLabel(completion.label) ? completion.label : undefined);
 			const id = randomBytes(16).toString("base64url");
 			let data: string;
@@ -591,7 +664,13 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			): Promise<MfaEnrollmentCompleteOutcome> => {
 				// Judged again on the records read under the lease, before anything is
 				// written: every write after is fenced on them.
-				const refusedNow = refusedBy(tx.purpose, first, writes.factors.records, firstBy);
+				const refusedNow = refusedBy(
+					tx.purpose,
+					first,
+					writes.factors.records,
+					firstBy,
+					holdsIdentity(tx.subject, factor, writes.factors.records, identity),
+				);
 				// A first binding closed here was let through by the read before the
 				// lease, which found no record that may count: another binding landed.
 				if (first && refusedNow?.outcome === "first_binding_closed") {

@@ -61,6 +61,7 @@ import {
 	enrollFromAccount,
 	freezeClock,
 	giveEmailProof,
+	leasingOneAfterAnother,
 	loggedText,
 	mfaPost,
 	recordingAuditSink,
@@ -82,6 +83,10 @@ afterEach(async () => {
 const KIND = "email";
 const SENT_TO = "a***@example.com";
 const SIX_DIGITS = /^[0-9]{6}$/;
+const FACTOR_DUPLICATE = {
+	error: "mfa_factor_duplicate",
+	error_description: "This second factor is already enrolled",
+};
 const FACTOR_REFUSED = {
 	error: "mfa_factor_refused",
 	error_description: "This second factor cannot be used: use another",
@@ -152,6 +157,10 @@ const lastCode = (sender: RecordingMailSender): string => {
 	if (code === undefined) throw new Error("nothing was sent");
 	return code;
 };
+
+/** Alice's email records as `store` holds them. */
+const emailRecords = async (store: MfaFactorStore) =>
+	(await store.list(ALICE.id)).filter((entry) => entry.kind === KIND);
 
 /** A six-digit code that is not `code`. */
 const otherThan = (code: string): string => String((Number(code) + 1) % 1_000_000).padStart(6, "0");
@@ -491,20 +500,73 @@ describe("enrolling the email factor", () => {
 		expect((await transactionStore.get(begun.body.transaction))?.expiresAtMs).toBe(T0 + 600_000);
 	});
 
-	it("refuses (401) a second email factor for the same address, and keeps one record", async () => {
+	it("refuses a second email factor for the same address at its start, 409 mfa_factor_duplicate: no transaction opened, nothing sent, one record kept", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const seeded = await seedTotp(factorStore);
 		await seedFactor(factorStore, KIND, { addressDigest: recordedDigest(ALICE.email) });
-		const { app, sender, userSessionStore } = await composed({ factorStore, totp: true });
+		const { app, sender, userSessionStore, transactionStore } = await composed({
+			factorStore,
+			totp: true,
+		});
 		const { agent } = await signInWithTotp(app, userSessionStore as UserSessionStore, seeded);
+		const opened = vi.spyOn(transactionStore, "create");
+		const mailed = sender.sent.length;
+
 		const begun = await enrollFromAccount(agent, KIND);
 
-		const done = await completeEnrollment(agent, begun.body.transaction, lastCode(sender));
+		expect(begun.status, JSON.stringify(begun.body)).toBe(409);
+		expect(begun.body).toEqual(FACTOR_DUPLICATE);
+		expect(opened).not.toHaveBeenCalled();
+		expect(sender.sent).toHaveLength(mailed);
+		expect(await emailRecords(factorStore)).toHaveLength(1);
+	});
 
-		expect(done.status).toBe(401);
-		expect((await factorStore.list(ALICE.id)).filter((entry) => entry.kind === KIND)).toHaveLength(
-			1,
-		);
+	it("refuses a completion whose address another enrollment bound since its start, 409 mfa_factor_duplicate: the attempt spent, nothing added, the transaction standing", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const seeded = await seedTotp(factorStore);
+		const { app, sender, userSessionStore, transactionStore } = await composed({
+			factorStore,
+			totp: true,
+		});
+		const { agent } = await signInWithTotp(app, userSessionStore as UserSessionStore, seeded);
+		const begun = await enrollFromAccount(agent, KIND);
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const code = lastCode(sender);
+		await seedFactor(factorStore, KIND, { addressDigest: recordedDigest(ALICE.email) });
+
+		const done = await completeEnrollment(agent, begun.body.transaction, code);
+
+		expect(done.status, JSON.stringify(done.body)).toBe(409);
+		expect(done.body).toEqual(FACTOR_DUPLICATE);
+		expect(await emailRecords(factorStore)).toHaveLength(1);
+		const standing = await transactionStore.get(begun.body.transaction);
+		expect(standing?.attempts).toBe(1);
+	});
+
+	it("binds one of two enrollments of the same address completed at once: the later, holding the subject's lease after the earlier wrote, is 409 mfa_factor_duplicate, and one record stands", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const seeded = await seedTotp(factorStore);
+		const { app, sender, userSessionStore, transactionStore, logger } = await composed({
+			factorStore,
+			totp: true,
+		});
+		const { agent } = await signInWithTotp(app, userSessionStore as UserSessionStore, seeded);
+		const first = await enrollFromAccount(agent, KIND);
+		const firstCode = lastCode(sender);
+		const second = await enrollFromAccount(agent, KIND);
+		const secondCode = lastCode(sender);
+		expect([first.status, second.status]).toEqual([200, 200]);
+		leasingOneAfterAnother(transactionStore);
+
+		const answers = await Promise.all([
+			completeEnrollment(agent, first.body.transaction, firstCode),
+			completeEnrollment(agent, second.body.transaction, secondCode),
+		]);
+
+		expect(answers.map((res) => res.status).sort()).toEqual([200, 409]);
+		expect(answers.find((res) => res.status === 409)?.body).toEqual(FACTOR_DUPLICATE);
+		expect(await emailRecords(factorStore)).toHaveLength(1);
+		expect(events(logger, "error")).toEqual([]);
 	});
 
 	it("is not offered to an account without an address", async () => {

@@ -49,6 +49,7 @@ import {
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
 import {
+	barrier,
 	beginEnrollment,
 	beginFirstBinding,
 	beginLogin,
@@ -57,6 +58,7 @@ import {
 	EXTRA_INTERRUPTION,
 	extraRequirement,
 	freezeClock,
+	leasingOneAfterAnother,
 	recordingAuditSink,
 	seedTotp,
 	setsCsrfToken,
@@ -569,20 +571,6 @@ describe("a first binding that races or fails part-way", () => {
 	});
 });
 
-/** Every caller waits until `n` have arrived, then all go on. */
-function barrier(n: number): () => Promise<void> {
-	let arrived = 0;
-	let release: () => void = () => {};
-	const open = new Promise<void>((resolve) => {
-		release = resolve;
-	});
-	return async () => {
-		arrived += 1;
-		if (arrived >= n) release();
-		await open;
-	};
-}
-
 /**
  * Holds each first-binding mark `store` is asked to note until `n` are:
  * every completion reads the mark, and passes its checks, before any notes it.
@@ -846,37 +834,6 @@ describe("two first bindings of one subject completed at once under the lease", 
 		expect(overruns(logger)).toBe(0);
 	});
 });
-
-/**
- * Holds the first two acquires of the subject's lease on `store` until both
- * are asked — every completion has passed its checks before the lease — and
- * the later one until the earlier's lease is released.
- */
-function leasingOneAfterAnother(store: MfaTransactionStore): void {
-	const arrive = barrier(2);
-	let released: () => void = () => {};
-	const firstReleased = new Promise<void>((resolve) => {
-		released = resolve;
-	});
-	let asked = 0;
-	const acquire = store.acquireSubjectLease.bind(store);
-	vi.spyOn(store, "acquireSubjectLease").mockImplementation(async (subject, options) => {
-		asked += 1;
-		if (asked === 2) {
-			await arrive();
-			await firstReleased;
-		} else if (asked === 1) {
-			await arrive();
-		}
-		return acquire(subject, options);
-	});
-	const release = store.releaseSubjectLease.bind(store);
-	vi.spyOn(store, "releaseSubjectLease").mockImplementation(async (subject, token) => {
-		const answer = await release(subject, token);
-		released();
-		return answer;
-	});
-}
 
 describe("a first binding refused by a counting factor its read under the lease finds and its read before the lease did not", () => {
 	it("is audited once as mfa.first_binding_conflict, with the subject and the kind alone: 401 login_required, its factor never written, its transaction kept", async () => {

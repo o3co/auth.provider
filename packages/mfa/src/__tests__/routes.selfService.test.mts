@@ -45,6 +45,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createRecordingMailSender,
+	createTestMfaFactor,
 	type RecordingMailSender,
 } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
@@ -957,6 +958,61 @@ describe("another factor whose write finds the set changed since the lease read 
 	});
 });
 
+describe("a factor that answers an identity a record of the subject holds", () => {
+	const DUPLICATE = {
+		error: "mfa_factor_duplicate",
+		error_description: "This second factor is already enrolled",
+	};
+	/** A factor every record of which is one authenticator, and whose completion checks no duplicate of its own. */
+	const oneAuthenticator = (): MfaFactor => ({
+		...createTestMfaFactor({ kind: "acme", amrValues: ["hwk"] }),
+		identity: () => "the-one-authenticator",
+	});
+
+	/** Alice signed in with TOTP, an acme enrollment begun from her account page. */
+	async function begunBeside() {
+		const booted = await composed({ extraModules: [contributing(oneAuthenticator())] });
+		const seeded = await seedTotp(booted.factorStore);
+		const { agent } = await signInWithTotp(booted.app, booted.userSessionStore, seeded);
+		const begun = await enrollFromAccount(agent, "acme");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		return { ...booted, agent, begun: begun.body as { transaction: string; secret: string } };
+	}
+
+	it("refuses the completion on the records read before the lease, 409 mfa_factor_duplicate: the attempt spent, the lease never taken", async () => {
+		const { agent, begun, factorStore, transactionStore } = await begunBeside();
+		await seedFactor(factorStore, "acme", { secret: "enrolled-before" });
+		const leased = vi.spyOn(transactionStore, "acquireSubjectLease");
+
+		const res = await completeEnrollment(agent, begun.transaction, begun.secret);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(DUPLICATE);
+		expect(leased).not.toHaveBeenCalled();
+		expect((await transactionStore.get(begun.transaction))?.attempts).toBe(1);
+	});
+
+	it("refuses the completion on the records its lease reads, when the record landed after the read before it: nothing written", async () => {
+		const { agent, begun, factorStore, transactionStore } = await begunBeside();
+		const acquire = transactionStore.acquireSubjectLease.bind(transactionStore);
+		vi.spyOn(transactionStore, "acquireSubjectLease").mockImplementation(
+			async (subject, options) => {
+				await seedFactor(factorStore, "acme", { secret: "enrolled-at-once" });
+				return acquire(subject, options);
+			},
+		);
+
+		const res = await completeEnrollment(agent, begun.transaction, begun.secret);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual(DUPLICATE);
+		expect(
+			(await factorStore.list(ALICE.id)).filter((record) => record.kind === "acme"),
+		).toHaveLength(1);
+		expect(await transactionStore.get(begun.transaction)).toBeDefined();
+	});
+});
+
 describe("a factor's own failure", () => {
 	it("is logged by its name and code alone, never its message, which may quote the account", async () => {
 		const throwing: MfaFactor = {
@@ -981,6 +1037,80 @@ describe("a factor's own failure", () => {
 			(call) => call[1] === "mfa_factor_enrollment_unavailable",
 		);
 		expect(line?.[0]).toMatchObject({ kind: "acme", err: { name: "Error", code: "E_ACME" } });
+		expect(loggedText(booted.logger)).not.toContain(ALICE.email);
+	});
+
+	it("answers a kind whose enrollable throws 503, naming the kind, with nothing opened: an outage, never an unknown kind", async () => {
+		const throwing: MfaFactor = {
+			...stubFactor("acme", ["hwk"]),
+			enrollable: () => {
+				throw new TypeError("the directory's user could not be read");
+			},
+		};
+		const booted = await composed({ extraModules: [contributing(throwing)] });
+		const { agent } = await signIn(booted.app, booted.userSessionStore);
+		const opened = vi.spyOn(booted.transactionStore, "create");
+
+		const res = await enrollFromAccount(agent, "acme");
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(events(booted.logger, "error")).toEqual(["mfa_factor_enrollment_unavailable"]);
+		expect(booted.logger.error.mock.calls[0]?.[0]).toMatchObject({
+			route: "enrollment",
+			kind: "acme",
+			err: { name: "MfaEnrollableError" },
+		});
+		expect(opened).not.toHaveBeenCalled();
+		expect(await booted.factorStore.list(ALICE.id)).toEqual([]);
+	});
+
+	it("answers a completion whose factor's enrollable throws 503, naming the kind, before an attempt is spent", async () => {
+		let failing = false;
+		const throwing: MfaFactor = {
+			...stubFactor("acme", ["hwk"]),
+			enrollable: () => {
+				if (failing) throw new TypeError("the directory's user could not be read");
+				return true;
+			},
+		};
+		const booted = await composed({ extraModules: [contributing(throwing)] });
+		const { agent } = await signIn(booted.app, booted.userSessionStore);
+		const begun = await enrollFromAccount(agent, "acme");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		failing = true;
+
+		const res = await completeEnrollment(agent, begun.body.transaction, "proof");
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(events(booted.logger, "error")).toEqual(["mfa_factor_enrollment_unavailable"]);
+		expect(booted.logger.error.mock.calls[0]?.[0]).toMatchObject({
+			route: "enrollment",
+			kind: "acme",
+		});
+		expect((await booted.transactionStore.get(begun.body.transaction))?.attempts).toBe(0);
+	});
+
+	it("judges a factor whose identity throws a duplicate of none, said at warn by its kind and name alone: the binding stands", async () => {
+		const throwing: MfaFactor = {
+			...createTestMfaFactor({ kind: "acme", amrValues: ["hwk"] }),
+			identity: () => {
+				throw Object.assign(new Error(`no identity for ${ALICE.email}`), { code: "E_ACME" });
+			},
+		};
+		const booted = await composed({ extraModules: [contributing(throwing)] });
+		const { agent } = await signIn(booted.app, booted.userSessionStore);
+		const begun = await enrollFromAccount(agent, "acme");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+
+		const res = await completeEnrollment(agent, begun.body.transaction, begun.body.secret);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		const said = booted.logger.warn.mock.calls.filter(
+			(call) => call[1] === "mfa_factor_identity_unavailable",
+		);
+		expect(said.map((call) => call[0])).toEqual([
+			{ kind: "acme", err: { name: "Error", code: "E_ACME" } },
+		]);
 		expect(loggedText(booted.logger)).not.toContain(ALICE.email);
 	});
 });

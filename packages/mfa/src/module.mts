@@ -120,6 +120,7 @@ import {
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { createMfaLockRecovery } from "./lockRecovery.mjs";
+import { mailFailureOf } from "./mail.mjs";
 import { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
 import { createMfaRouter } from "./routes.mjs";
@@ -583,6 +584,12 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								...(deps.subjectRevocation === undefined
 									? {}
 									: { subjectRevocation: deps.subjectRevocation }),
+								// The record is judged a duplicate of none; the factor's failure by its name and code alone.
+								identityFailed: (kind, cause) =>
+									logger.warn(
+										{ kind, err: mailFailureOf(cause) },
+										"mfa_factor_identity_unavailable",
+									),
 							}),
 							admission: {
 								userSessionStore: deps.userSessionStore,
