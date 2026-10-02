@@ -183,7 +183,7 @@ describe("plain http to a listed loopback host", () => {
 
 	it("refuses a redirect, and contacts nothing else", async () => {
 		const peer = await httpPeer((_req, res) => {
-			res.writeHead(307, { location: "http://169.254.169.254/latest" });
+			res.writeHead(307, { location: "http://10.0.0.1/" });
 			res.end("moved");
 		});
 		const resolver = sequence(["127.0.0.1"]);
@@ -233,6 +233,22 @@ describe("plain http to a listed loopback host", () => {
 			await reason(localFetch({ maxResponseBytes: 64 })(`http://localhost:${streamed.port}/`)),
 		).toBe("response_too_large");
 		await expect.poll(() => streamed.closedSockets()).toBe(1);
+	});
+
+	it("reports a body the peer cuts short as a network failure, never a short 200", async () => {
+		const declared = await httpPeer((_req, res) => {
+			res.writeHead(200, { "content-length": "100" });
+			res.write("x".repeat(10));
+			setTimeout(() => res.socket?.destroy(), 10);
+		});
+		expect(await reason(localFetch()(`http://localhost:${declared.port}/`))).toBe("network_error");
+
+		const chunked = await httpPeer((_req, res) => {
+			res.writeHead(200);
+			res.write("x".repeat(10));
+			setTimeout(() => res.socket?.destroy(), 10);
+		});
+		expect(await reason(localFetch()(`http://localhost:${chunked.port}/`))).toBe("network_error");
 	});
 
 	it("refuses an encoded body", async () => {

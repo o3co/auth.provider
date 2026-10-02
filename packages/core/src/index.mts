@@ -853,6 +853,8 @@ export {
 	type OutboundFetchOptions,
 	type OutboundUrlSource,
 } from "./net/outbound-fetch.mjs";
+// The host-list grammar's public readers, for a list of the same form kept elsewhere.
+export { type HostPattern, matchesHostList, readHostEntry } from "./net/outbound-policy.mjs";
 // The registered-redirect-URI shape vocabulary, the query's parameter names
 // included — enforced by ClientEntrySchema at boot; exported so a custom
 // ClientRepository, which bypasses that schema by design, can hold its

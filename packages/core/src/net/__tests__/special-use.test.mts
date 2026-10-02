@@ -90,7 +90,7 @@ describe("isSpecialUseAddress (RFC 6890)", () => {
 		for (const ip of [
 			"fec0::1", // site-local, RFC 3879
 			"feff:ffff::1",
-			"64:ff9b:1::a9fe:a9fe", // local-use IPv4/IPv6 translation, RFC 8215
+			"64:ff9b:1::a00:1", // local-use IPv4/IPv6 translation, RFC 8215
 			"64:ff9b:1:ffff::1",
 		]) {
 			expect(isSpecialUseAddress(ip), ip).toBe(true);

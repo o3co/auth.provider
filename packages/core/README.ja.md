@@ -107,14 +107,14 @@ const config = handle.components.config; // boot がパースしたもの
 
 - `https` のみ。平文の `http` は、`internalHosts` が列挙するループバックホストに対して、登録の URL で、解決したアドレスがすべてループバックのときだけ認める。
 - 資格情報を含む URL は拒否し、Fetch 標準の bad port も拒否する。
-- `deniedHosts` は他のリストにかかわらずホストを拒否し、空でない `allowedHosts` は列挙しないホストを拒否する。エントリはホスト（完全一致）または `.suffix`（そのドメインとすべてのサブドメイン）で、エントリも URL のホストも URL パーサーがホストを読むように読む: 大文字小文字、IDNA、末尾のドット、IP の表記は一致を変えず、IPv4 アドレスとその IPv4-mapped IPv6 リテラルは互いに一致する。
+- `deniedHosts` は他のリストにかかわらずホストを拒否し、空でない `allowedHosts` は列挙しないホストを拒否する。空でない `allowedHosts` は `internalHosts` も絞る: 内部ホストは両方に列挙する必要がある。エントリはホスト名（IDNA 後に英数字とハイフンのみ、ワイルドカード不可）または IP アドレス（完全一致）、または `.suffix`（そのドメインとすべてのサブドメイン）で、エントリも URL のホストも URL パーサーがホストを読むように読む: 大文字小文字、IDNA、末尾のドット、IP の表記は一致を変えず、IPv4 アドレスとその IPv4-mapped IPv6 リテラルは互いに一致する。
 - ホストは一度だけ解決し、すべてのアドレスが special-use の範囲（`isSpecialUseAddress`）の外でなければならない。special-use のアドレスを 1 つでも含む応答は拒否する。`internalHosts` は列挙したホストについて、登録の URL に限りこれを外す。リクエストの URL には決して適用しない。
 - 接続は確認したアドレスにだけ行い、TLS のサーバー名と証明書の識別は URL のホストのままにする。
 - リダイレクトは追わない: `304` 以外の `3xx` は拒否する。`2xx` 以外のステータスと `204`・`205`・`304` は null の body で返す。`2xx` の body は全体を読む: identity エンコーディングのみ（リクエストでそれを求める）、`maxResponseBytes` まで。
-- 1 つの期限 `timeoutMs` が解決・接続・TLS・ヘッダー・body をまとめて覆う。呼び出し側の `signal` も効き、その中断は呼び出し側自身の理由で reject する。
+- 1 つの期限 `timeoutMs` が解決・接続・TLS・ヘッダー・body をまとめて覆う。`core.outbound` の `timeoutMs` と `maxResponseBytes` は上限で、呼び出し側の値（`createOutboundFetch` のオプション）はそれより小さいときだけ効く。呼び出し側の `signal` も効き、その中断は呼び出し側自身の理由で reject する。
 - 文字列または `URL`、`GET` または `POST`、文字列・`URLSearchParams`・`Uint8Array` の body を取る。
 
-`isOutboundRefusal(err)` はポリシーによる拒否と交換の失敗（解決、ネットワーク、期限）を区別する。理由はコードで、`loggableError` が `reason` として保つ。egress プロキシが設定されている間（`HTTPS_PROXY` または `HTTP_PROXY`）は、`core.outbound.egress` が `"direct"` でない限り fetch の構築を拒否する: 常に直接接続し、コードで設定された fetch dispatcher も経由しないため。NAT64（`64:ff9b::/96`）で IPv4 に到達する IPv6 のみのネットワークは対象外: それらのアドレスは special-use であるため。テストは `@o3co/auth-provider-core/testing` の `createOutboundFetchForTesting` と `withOutbound` を使い、ポリシーの下に自前の resolver と transport を置く。
+`matchesHostList` と `readHostEntry`（[`src/net/outbound-policy.mts`](src/net/outbound-policy.mts)）はホストリスト文法の公開リーダーで、同じ形のリストを別の場所で持つときに使う。`isOutboundRefusal(err)` はポリシーによる拒否と交換の失敗（解決、ネットワーク、期限）を区別する。理由はコードで、`loggableError` が `reason` として保つ。コードで設定されたプロキシや dispatcher は参照しない: 外向きのクライアントメタデータ fetch は直接接続する。`HTTPS_PROXY` または `HTTP_PROXY` が設定されている間は、`core.outbound.egress` が `"direct"` でない限り fetch の構築を拒否する。NAT64（`64:ff9b::/96`）で IPv4 に到達する IPv6 のみのネットワークは対象外: それらのアドレスは special-use であるため。テストは `@o3co/auth-provider-core/testing` の `createOutboundFetchForTesting` と `withOutbound` を使い、ポリシーの下に自前の resolver と transport を置く。
 
 ### エラーのテキスト（RFC 6749）
 

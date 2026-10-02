@@ -22,7 +22,7 @@ import { BlockList, isIP } from "node:net";
  * globally reachable, plus multicast, the deprecated site-local range, the
  * IPv4-translated form, and the IPv4-mapped and IPv4-compatible IPv6 forms of
  * every IPv4 range. A globally reachable entry inside a refused block (the
- * anycast addresses in `192.0.0.0/24` and `2001::/23`) is refused with its
+ * globally reachable entries in `192.0.0.0/24` and `2001::/23`) is refused with its
  * block, and `64:ff9b::/96` is refused because it embeds any IPv4 address.
  *
  * One list, so every fetch of a URL that **a stranger chose** refuses the same

@@ -90,6 +90,9 @@ export interface HostPattern {
 	readonly suffix: boolean;
 }
 
+/** A DNS label of letters, digits and inner hyphens (RFC 1123), after IDNA. */
+const LDH_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
 /** `hostname` as the URL parser gave it, less one trailing dot; `undefined` for an empty label. */
 const withoutRootDot = (hostname: string): string | undefined => {
 	const host = hostname.endsWith(".") ? hostname.slice(0, -1) : hostname;
@@ -109,10 +112,11 @@ export function urlHost(url: URL): string | undefined {
 }
 
 /**
- * `entry` read as a host-list entry: a host name, an IPv4 address or an IPv6
- * address (bracketed or not), optionally after a `.` that also covers every
- * subdomain of a name. `undefined` for anything else (a scheme, a port, a
- * path, credentials, an empty label, a suffix on an address).
+ * `entry` read as a host-list entry: a host name of letters, digits and
+ * hyphens once IDNA has run, an IPv4 address or an IPv6 address (bracketed
+ * or not), optionally after a `.` that also covers every subdomain of a
+ * name. `undefined` for anything else (a wildcard, a scheme, a port, a path,
+ * credentials, an empty label, a suffix on an address).
  */
 export function readHostEntry(entry: string): HostPattern | undefined {
 	const trimmed = entry.trim();
@@ -133,28 +137,54 @@ export function readHostEntry(entry: string): HostPattern | undefined {
 	}
 	const host = withoutRootDot(url.hostname);
 	if (host === undefined) return undefined;
-	if (suffix && (host.startsWith("[") || isIP(host) === 4)) return undefined;
+	const address = host.startsWith("[") || isIP(host) === 4;
+	if (suffix && address) return undefined;
+	if (!address && !host.split(".").every((label) => LDH_LABEL.test(label))) return undefined;
 	return { host: hostIdentity(host), suffix };
 }
 
+/** The eight groups of a canonical bracketed IPv6 host, or `undefined`. */
+const ipv6Groups = (host: string): number[] | undefined => {
+	if (!host.startsWith("[") || !host.endsWith("]")) return undefined;
+	const halves = host.slice(1, -1).split("::");
+	const part = (text: string | undefined) =>
+		text === undefined || text === "" ? [] : text.split(":").map((g) => Number.parseInt(g, 16));
+	const head = part(halves[0]);
+	const tail = part(halves[1]);
+	const groups =
+		halves.length === 2
+			? [...head, ...Array.from({ length: 8 - head.length - tail.length }, () => 0), ...tail]
+			: head;
+	return groups.length === 8 && groups.every((g) => g >= 0 && g <= 0xffff) ? groups : undefined;
+};
+
 /**
- * The identity a host is matched by: its canonical form, with an
- * IPv4-mapped or IPv4-translated IPv6 literal (`[::ffff:a00:5]`,
- * `[::ffff:0:a00:5]`) read as the IPv4 address it embeds (`10.0.0.5`).
- * Entries and URL hosts both go through it, so either spelling of one
- * address matches the other.
+ * The identity a host is matched by: its canonical form, with an IPv6
+ * literal that embeds an IPv4 address (IPv4-mapped `::ffff:a.b.c.d`,
+ * IPv4-translated `::ffff:0:a.b.c.d`, IPv4-compatible `::a.b.c.d` but for
+ * `::` and `::1`) read as that IPv4 address. Entries and URL hosts both go
+ * through it, so any spelling of one address matches any other.
  */
 const hostIdentity = (host: string): string => {
-	const match = /^\[::ffff:(?:0:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/.exec(host);
-	if (match === null) return host;
-	const high = Number.parseInt(match[1] ?? "", 16);
-	const low = Number.parseInt(match[2] ?? "", 16);
+	const g = ipv6Groups(host);
+	if (g === undefined) return host;
+	const zero = (from: number, to: number) => g.slice(from, to).every((group) => group === 0);
+	const embeds =
+		(zero(0, 5) && g[5] === 0xffff) ||
+		(zero(0, 4) && g[4] === 0xffff && g[5] === 0) ||
+		(zero(0, 6) && !(g[6] === 0 && (g[7] ?? 0) <= 1));
+	if (!embeds) return host;
+	const high = g[6] ?? 0;
+	const low = g[7] ?? 0;
 	return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
 };
 
-/** Whether `patterns` cover `host` (canonical, as {@link urlHost} gives it). */
+/**
+ * Whether `patterns` cover `host`: a URL's `hostname` as the URL parser gives
+ * it, a trailing dot or not.
+ */
 export function matchesHostList(patterns: readonly HostPattern[], host: string): boolean {
-	const key = hostIdentity(host);
+	const key = hostIdentity(withoutRootDot(host) ?? host);
 	return patterns.some(
 		(pattern) => key === pattern.host || (pattern.suffix && key.endsWith(`.${pattern.host}`)),
 	);

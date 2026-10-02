@@ -132,6 +132,8 @@ export function createNodeTransport(tls: { readonly ca?: string } = {}): Outboun
 				reject(reason);
 			};
 			req.on("error", (err) => {
+				// A body being read ends with this error, not as if complete.
+				res?.destroy(err);
 				close();
 				reject(err);
 			});

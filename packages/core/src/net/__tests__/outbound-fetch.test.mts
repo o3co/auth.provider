@@ -260,7 +260,7 @@ describe("IP-literal hosts", () => {
 			"https://[fe80::1]/",
 			"https://[fc00::1]/",
 			"https://[fec0::1]/",
-			"https://[64:ff9b:1::a9fe:a9fe]/",
+			"https://[64:ff9b:1::a00:1]/",
 			"https://[::ffff:169.254.169.254]/",
 			"https://[::ffff:a9fe:a9fe]/",
 			"https://[::ffff:127.0.0.1]/",
@@ -290,7 +290,7 @@ describe("resolved addresses", () => {
 			["10.0.0.5"],
 			["::ffff:10.0.0.5"],
 			["fec0::1"],
-			["64:ff9b:1::a9fe:a9fe"],
+			["64:ff9b:1::a00:1"],
 			["fe80::1%eth0"],
 		]) {
 			const recorder = answering();
@@ -435,7 +435,7 @@ describe("the answer", () => {
 			const lookup = resolver();
 			const recorder = answering({
 				status,
-				headers: [["location", "http://169.254.169.254/latest"]],
+				headers: [["location", "http://10.0.0.1/"]],
 				chunks: ["moved"],
 			});
 			await refusal(
@@ -593,7 +593,7 @@ describe("the deadline and the caller's signal", () => {
 		expect(recorder.closed()).toBe(1);
 	});
 
-	it("takes core.outbound.timeoutMs, and a per-use timeoutMs over it", async () => {
+	it("takes the shorter of core.outbound.timeoutMs and a per-use timeoutMs", async () => {
 		await failure(
 			outboundFetch({ transport: silent, outbound: { timeoutMs: 50 } })("https://rp.example/"),
 			"timeout",
@@ -603,6 +603,34 @@ describe("the deadline and the caller's signal", () => {
 				"https://rp.example/",
 			),
 			"timeout",
+		);
+		// The operator's value is a ceiling a caller cannot raise.
+		const started = Date.now();
+		await failure(
+			outboundFetch({ transport: silent, outbound: { timeoutMs: 50 }, timeoutMs: 60_000 })(
+				"https://rp.example/",
+			),
+			"timeout",
+		);
+		expect(Date.now() - started).toBeLessThan(5_000);
+	});
+
+	it("caps at the smaller of core.outbound.maxResponseBytes and a per-use maxResponseBytes", async () => {
+		await refusal(
+			outboundFetch({
+				transport: answering({ chunks: ["x".repeat(17)] }),
+				outbound: { maxResponseBytes: 16 },
+				maxResponseBytes: 1_000,
+			})("https://rp.example/"),
+			"response_too_large",
+		);
+		await refusal(
+			outboundFetch({
+				transport: answering({ chunks: ["x".repeat(17)] }),
+				outbound: { maxResponseBytes: 1_000 },
+				maxResponseBytes: 16,
+			})("https://rp.example/"),
+			"response_too_large",
 		);
 	});
 

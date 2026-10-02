@@ -55,9 +55,9 @@ export interface OutboundFetchOptions {
 	 * `"request"` (a URL a request names) never does.
 	 */
 	readonly source: OutboundUrlSource;
-	/** This use's deadline in milliseconds; absent → `core.outbound.timeoutMs`. */
+	/** This use's deadline in milliseconds, at most `core.outbound.timeoutMs` (the smaller applies). */
 	readonly timeoutMs?: number;
-	/** This use's cap on a 2xx body in bytes; absent → `core.outbound.maxResponseBytes`. */
+	/** This use's cap on a 2xx body in bytes, at most `core.outbound.maxResponseBytes` (the smaller applies). */
 	readonly maxResponseBytes?: number;
 }
 
@@ -319,10 +319,15 @@ export function buildOutboundFetch(
 				"direct egress is intended",
 		);
 	}
-	const timeoutMs =
-		positiveWholeNumber(options.timeoutMs, "timeoutMs", MAX_TIMEOUT_MS) ?? policy.timeoutMs;
-	const cap =
-		positiveWholeNumber(options.maxResponseBytes, "maxResponseBytes") ?? policy.maxResponseBytes;
+	// `core.outbound` is a ceiling: a use may shorten the deadline or lower the cap, never raise them.
+	const timeoutMs = Math.min(
+		positiveWholeNumber(options.timeoutMs, "timeoutMs", MAX_TIMEOUT_MS) ?? policy.timeoutMs,
+		policy.timeoutMs,
+	);
+	const cap = Math.min(
+		positiveWholeNumber(options.maxResponseBytes, "maxResponseBytes") ?? policy.maxResponseBytes,
+		policy.maxResponseBytes,
+	);
 
 	const outboundFetch = async (input: unknown, init?: RequestInit): Promise<Response> => {
 		const request = readRequest(input, init);

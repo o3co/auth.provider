@@ -60,6 +60,14 @@ describe("readHostEntry: a host-list entry, read as a URL's host is", () => {
 			"rp.example?q",
 			"rp.example#f",
 			"rp example",
+			"*.example.com",
+			"*",
+			"a,b.example",
+			"rp_x.example",
+			"-rp.example",
+			"rp-.example",
+			"rp.example!",
+			`${"a".repeat(64)}.example`,
 			".10.0.0.5",
 			".[::1]",
 			"[::1]:443",
@@ -113,6 +121,18 @@ describe("matchesHostList", () => {
 			matchesHostList(list("[::ffff:8.8.8.8]"), urlHost(new URL("https://8.8.8.8/")) ?? ""),
 		).toBe(true);
 		expect(matchesHostList(list("::ffff:0:8.8.8.8"), "8.8.8.8")).toBe(true);
+		// The IPv4-compatible form reads the same.
+		const compatible = urlHost(new URL("https://[::10.0.0.5]/")) ?? "";
+		expect(matchesHostList(list("10.0.0.5"), compatible)).toBe(true);
+		expect(matchesHostList(list("[::10.0.0.5]"), "10.0.0.5")).toBe(true);
+		// The unspecified and loopback addresses embed nothing.
+		expect(matchesHostList(list("0.0.0.1"), "[::1]")).toBe(false);
+	});
+
+	it("takes a URL's hostname as the parser gives it, a trailing dot included", () => {
+		expect(matchesHostList(list("rp.example"), new URL("https://RP.example./").hostname)).toBe(
+			true,
+		);
 	});
 
 	it("matches nothing when the list is empty", () => {
