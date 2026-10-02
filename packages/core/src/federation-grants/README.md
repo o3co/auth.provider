@@ -24,7 +24,7 @@ State ownership: `FederationGrantStore` holds the record, the sealed credential 
 - Every transition is a guarded write inside the store; a write that fails says only that it failed, and the caller re-reads and re-evaluates rather than acting on a reason.
 - `expired` is never stored; status is computed on every read by `effectiveFederationGrantStatus`, so reverting a configuration change or restoring a key restores the grant.
 - Intent handles and credentials never appear on a `FederationGrant`; reads return copies; a `FederationGrantConnection` is built by the package from configuration, with the issuer exactly as configured.
-- A client's registration fields are read through `federationGrantAllowlist`: anything but an array is an empty list.
+- A client record handed to an exported entry point — lodging takes one from its caller — has its registration fields read through `federationGrantAllowlist`: anything but an array is an empty list. A record read through the `clientRepository` slot is already the client-record boundary's validated copy.
 - A retrieval answers one typed `FederationGrantTokenResult`; the HTTP mapping is the package's. An upstream refresh answer is untrusted field by field, and the rotated refresh token is kept whatever else is wrong. No secret enters a denial or an audit event, and the upstream subject an event carries — the IdP's `sub` — is sanitised and capped (`auditErrorText`) where the metadata is built, [`auditMetadata.mts`](./auditMetadata.mts), so every emitter and a composer's own `audit` seam receive it bounded.
 
 ## Dependencies
