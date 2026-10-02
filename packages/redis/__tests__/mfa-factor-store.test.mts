@@ -34,6 +34,7 @@ import {
 	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	type MfaFactorRecord,
 	type MfaFactorStore,
+	readConditionalCreateAnswer,
 	type StoreGeneration,
 } from "@o3co/auth-provider-core";
 import {
@@ -181,6 +182,25 @@ const RECORD = (overrides: Partial<MfaFactorRecord> = {}): MfaFactorRecord => ({
 	...overrides,
 });
 
+/** Adds `record` to its subject's set at the set's current generation: a conditional create that must land. */
+const seed = async (store: MfaFactorStore, record: MfaFactorRecord): Promise<void> => {
+	const { generation } = await store.listVersioned(record.subject);
+	const answer = readConditionalCreateAnswer(await store.createIf(record, generation));
+	if (answer.outcome !== "created") throw new Error(`${record.id} was not seeded`);
+};
+
+/**
+ * The store's unconditional `create` and `remove`, for the cases that pin
+ * what the Redis store does with them: a store without them fails the case.
+ */
+const unconditionalWrites = (store: MfaFactorStore) => {
+	const { create, remove } = store;
+	if (create === undefined || remove === undefined) {
+		throw new Error("the store has no unconditional create and remove");
+	}
+	return { create: create.bind(store), remove: remove.bind(store) };
+};
+
 describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(storeAt(freshPrefix()).kind).toBe("redis");
@@ -189,9 +209,9 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 	it("keeps one hash per subject, <prefix>{<subject>}, with a field per factor and no TTL", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		await store.create(RECORD({ id: "a" }));
-		await store.create(RECORD({ id: "b" }));
-		await store.create(RECORD({ id: "a", subject: "user-2" }));
+		await seed(store, RECORD({ id: "a" }));
+		await seed(store, RECORD({ id: "b" }));
+		await seed(store, RECORD({ id: "a", subject: "user-2" }));
 		const key = `${prefix}{${keyPart("user-1")}}`;
 		expect((await hashesAt(prefix)).sort()).toEqual(
 			[key, `${prefix}{${keyPart("user-2")}}`].sort(),
@@ -214,7 +234,7 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const subjects = ["a}b", "{x}", "\uD800", "\uDBFF"];
-		for (const subject of subjects) await store.create(RECORD({ subject, data: subject }));
+		for (const subject of subjects) await seed(store, RECORD({ subject, data: subject }));
 		for (const subject of subjects) {
 			expect(await store.list(subject)).toStrictEqual([RECORD({ subject, data: subject })]);
 		}
@@ -226,7 +246,7 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 		// and re-encoded the record would turn "[]" into "{}" — and a label of
 		// "[]" into an object. The compare-and-set never decodes it.
 		const store = storeAt(freshPrefix());
-		await store.create(RECORD({ data: "{}", label: "[]" }));
+		await seed(store, RECORD({ data: "{}", label: "[]" }));
 		const next = { data: "[]", label: "{}", lastUsedAt: new Date("2026-09-03T00:00:00.123Z") };
 		const updated = await store.update("user-1", "factor-1", 1, next);
 		expect(updated).toStrictEqual({ ...RECORD({ data: "{}", label: "[]" }), ...next, version: 2 });
@@ -235,7 +255,7 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 
 	it("answers null for a version that is not a whole number, and changes nothing", async () => {
 		const store = storeAt(freshPrefix());
-		await store.create(RECORD());
+		await seed(store, RECORD());
 		const next = { data: "v2.late", label: undefined, lastUsedAt: undefined };
 		for (const version of [1.5, Number.NaN, -1, Number.POSITIVE_INFINITY]) {
 			expect(await store.update("user-1", "factor-1", version, next), String(version)).toBeNull();
@@ -253,28 +273,36 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 		// the type the record declares, is not a record.
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		for (const [name, overrides] of [
-			["createdAt invalid", { createdAt: new Date(Number.NaN) }],
-			["createdAt not a date", { createdAt: 1_700_000_000_000 }],
-			["lastUsedAt invalid", { lastUsedAt: new Date(Number.NaN) }],
-			["lastUsedAt not a date", { lastUsedAt: "2026-09-02" }],
-			["version fractional", { version: 1.5 }],
-			["version negative", { version: -1 }],
-			["version NaN", { version: Number.NaN }],
-			["binding outside the four", { binding: "admin" }],
-			["binding null", { binding: null }],
-			["kind not a string", { kind: 7 }],
-			["data not a string", { data: 7 }],
-			["data missing", { data: undefined }],
-			["label not a string", { label: 7 }],
-			["label null", { label: null }],
-			["id not a string", { id: 7 }],
-			["subject not a string", { subject: 7 }],
-		] as const) {
-			await expect(store.create(RECORD(overrides as never)), name).rejects.toThrow(RangeError);
+		const writes = [
+			["createIf", (record: MfaFactorRecord) => store.createIf(record, null)],
+			["create", unconditionalWrites(store).create],
+		] as const;
+		for (const [write, put] of writes) {
+			for (const [name, overrides] of [
+				["createdAt invalid", { createdAt: new Date(Number.NaN) }],
+				["createdAt not a date", { createdAt: 1_700_000_000_000 }],
+				["lastUsedAt invalid", { lastUsedAt: new Date(Number.NaN) }],
+				["lastUsedAt not a date", { lastUsedAt: "2026-09-02" }],
+				["version fractional", { version: 1.5 }],
+				["version negative", { version: -1 }],
+				["version NaN", { version: Number.NaN }],
+				["binding outside the four", { binding: "admin" }],
+				["binding null", { binding: null }],
+				["kind not a string", { kind: 7 }],
+				["data not a string", { data: 7 }],
+				["data missing", { data: undefined }],
+				["label not a string", { label: 7 }],
+				["label null", { label: null }],
+				["id not a string", { id: 7 }],
+				["subject not a string", { subject: 7 }],
+			] as const) {
+				await expect(put(RECORD(overrides as never)), `${write}: ${name}`).rejects.toThrow(
+					RangeError,
+				);
+			}
 		}
 		expect(await first().keys(`${prefix}*`)).toEqual([]);
-		await store.create(RECORD());
+		await seed(store, RECORD());
 		for (const [name, next] of [
 			["lastUsedAt invalid", { data: "v2.x", label: undefined, lastUsedAt: new Date(Number.NaN) }],
 			["lastUsedAt not a date", { data: "v2.x", label: undefined, lastUsedAt: 5 }],
@@ -296,7 +324,7 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 		// 503 — and quotes nothing it read.
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		await store.create(RECORD({ id: "good" }));
+		await seed(store, RECORD({ id: "good" }));
 		const key = `${prefix}{${keyPart("user-1")}}`;
 		for (const value of [
 			"not a record",
@@ -355,16 +383,22 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 		};
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		for (const ms of [8_640_000_000_000_001, -8_640_000_000_000_001, 1.5]) {
-			await expect(store.create(RECORD({ createdAt: lying(ms) })), String(ms)).rejects.toThrow(
-				RangeError,
-			);
-			await expect(store.create(RECORD({ lastUsedAt: lying(ms) })), String(ms)).rejects.toThrow(
-				RangeError,
-			);
+		const writes = [
+			["createIf", (record: MfaFactorRecord) => store.createIf(record, null)],
+			["create", unconditionalWrites(store).create],
+		] as const;
+		for (const [write, put] of writes) {
+			for (const ms of [8_640_000_000_000_001, -8_640_000_000_000_001, 1.5]) {
+				await expect(put(RECORD({ createdAt: lying(ms) })), `${write}: ${ms}`).rejects.toThrow(
+					RangeError,
+				);
+				await expect(put(RECORD({ lastUsedAt: lying(ms) })), `${write}: ${ms}`).rejects.toThrow(
+					RangeError,
+				);
+			}
 		}
 		expect(await first().keys(`${prefix}*`)).toEqual([]);
-		await store.create(RECORD());
+		await seed(store, RECORD());
 		for (const ms of [8_640_000_000_000_001, 1.5]) {
 			await expect(
 				store.update("user-1", "factor-1", 1, {
@@ -466,9 +500,9 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 
 		landed(await store.createIf?.(RECORD({ id: FACTOR_B }), emptied));
 		expect(await first().pttl(key)).toBe(-1);
-		await store.remove("user-1", FACTOR_B);
+		await unconditionalWrites(store).remove("user-1", FACTOR_B);
 		expect(freshTombstone(await first().pttl(key))).toBe(true);
-		await store.create(RECORD({ id: FACTOR_A }));
+		await unconditionalWrites(store).create(RECORD({ id: FACTOR_A }));
 		expect(await first().pttl(key)).toBe(-1);
 	});
 
@@ -485,7 +519,7 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 		expect(freshTombstone(await first().pttl(key))).toBe(true);
 		expect(await first().hget(key, "~g")).not.toBe(tombstone);
 
-		await store.create(RECORD({ id: FACTOR_A }));
+		await seed(store, RECORD({ id: FACTOR_A }));
 		await store.removeAllForSubject("user-1");
 		expect(await first().hkeys(key)).toStrictEqual(["~g"]);
 		expect(freshTombstone(await first().pttl(key))).toBe(true);
@@ -495,7 +529,7 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const key = keyAt(prefix, "user-1");
-		await store.create(RECORD({ id: FACTOR_A }));
+		await seed(store, RECORD({ id: FACTOR_A }));
 		for (const value of ['bad"generation', "", "x".repeat(129)]) {
 			await first().hset(key, "~g", value);
 			const read = store.listVersioned?.("user-1");
@@ -507,7 +541,7 @@ describe("createRedisMfaFactorStore — the set's generation and its tombstone",
 	it("refuses a versioned read of a hash holding a field named __proto__, as the plain read does: never fewer factors than there are", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
-		await store.create(RECORD({ id: FACTOR_A }));
+		await seed(store, RECORD({ id: FACTOR_A }));
 		await first().hset(keyAt(prefix, "user-1"), "__proto__", "not a record");
 		await expect(store.list("user-1")).rejects.toThrow(/MfaFactorStore/);
 		await expect(store.listVersioned?.("user-1")).rejects.toThrow(/MfaFactorStore/);
@@ -534,7 +568,7 @@ describe("createRedisMfaFactorStore — a hash written before the set had a gene
 	const legacy = async (prefix: string): Promise<{ store: MfaFactorStore; key: string }> => {
 		const store = storeAt(prefix);
 		const key = keyAt(prefix, "user-1");
-		await store.create(RECORD({ id: FACTOR_A }));
+		await seed(store, RECORD({ id: FACTOR_A }));
 		await first().hdel(key, "~g");
 		return { store, key };
 	};
@@ -559,7 +593,7 @@ describe("createRedisMfaFactorStore — a hash written before the set had a gene
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const key = keyAt(prefix, "user-1");
-		await store.create(RECORD({ id: FACTOR_A }));
+		await seed(store, RECORD({ id: FACTOR_A }));
 		const earlier = await first().hget(key, "~g");
 		await first().hdel(key, "~g");
 		await first().pexpire(key, 600_000);
@@ -806,7 +840,7 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		const key = keyAt(prefix, "user-1");
 		const fieldA = keyPart(FACTOR_A);
 		const fieldB = keyPart(FACTOR_B);
-		await store.create(RECORD({ id: FACTOR_A }));
+		await seed(store, RECORD({ id: FACTOR_A }));
 		const value = (await first().hget(key, fieldA)) as string;
 		const deadlineMs = (await serverClock(first)()) + 60_000;
 		const tombstoneMs = BUNDLED_STORE_WRITE_LIFETIME_MS;
@@ -852,7 +886,7 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 			clockSkewMs,
 		};
 		expect(await client.create(key, fieldB, value, unconditional)).toBe("created");
-		await store.remove("user-1", FACTOR_B);
+		landed(await store.removeIf("user-1", FACTOR_B, generation("legacy-g")));
 		const moved = await first().hget(key, "~g");
 		expect(await client.create(key, fieldB, value, unconditional)).toBe("created");
 		expect(await first().hget(key, "~g")).toBe(moved);
@@ -889,8 +923,8 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		const writes: (() => Promise<unknown>)[] = [
 			() => store.createIf?.(RECORD({ id: FACTOR_A }), null) as Promise<unknown>,
 			() => store.removeIf?.("user-1", FACTOR_A, generation("g")) as Promise<unknown>,
-			() => store.create(RECORD({ id: FACTOR_A })),
-			() => store.remove("user-1", FACTOR_A),
+			() => unconditionalWrites(store).create(RECORD({ id: FACTOR_A })),
+			() => unconditionalWrites(store).remove("user-1", FACTOR_A),
 			() => store.removeAllForSubject("user-1"),
 		];
 		for (const write of writes) {
@@ -960,8 +994,8 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 		const admin = open(paused);
 		const prefix = freshPrefix();
 		const store = storeAt(prefix, admin);
-		await store.create(RECORD({ id: FACTOR_A }));
-		await store.create(RECORD({ id: FACTOR_B }));
+		await seed(store, RECORD({ id: FACTOR_A }));
+		await seed(store, RECORD({ id: FACTOR_B }));
 		const at = (await store.listVersioned?.("user-1"))?.generation as StoreGeneration;
 		await admin.config("SET", "maxmemory-policy", "noeviction");
 		await admin.config("SET", "maxmemory", "1");
@@ -970,7 +1004,7 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 			const read = await store.listVersioned?.("user-1");
 			expect(read?.generation).toBe(at);
 			const removed = landed(await store.removeIf?.("user-1", FACTOR_A, at));
-			await store.remove("user-1", FACTOR_B);
+			await unconditionalWrites(store).remove("user-1", FACTOR_B);
 			await store.removeAllForSubject("user-1");
 			const reset = await store.listVersioned?.("user-1");
 			expect(reset?.items).toStrictEqual([]);

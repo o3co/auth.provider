@@ -24,6 +24,7 @@
 import {
 	createFederationTokenStoreFactory,
 	type FederationTokenStore,
+	type FederationTokens,
 	type Logger,
 	newStoreGeneration,
 	registerBuiltinFederationTokenStores,
@@ -82,7 +83,28 @@ const CASE = {
 	logout: "removeBySid ends every federation of the session and no other session's record",
 	restore:
 		"after removeBySid, a replace at a generation read before it answers missing and restores nothing",
+	undated:
+		"a record with no obtainedAt is read back with the key named, as undefined, through every read and write",
+	wholeRecord: "a created record is read back whole, at a well-formed generation",
 } as const;
+
+/** Core's store, with every record it answers passed through `answer`. */
+async function answering(
+	answer: (tokens: FederationTokens) => FederationTokens,
+): Promise<FederationTokenStore> {
+	const store = await createInMemoryFederationTokenStore();
+	return {
+		...store,
+		get: async (sid, name) => {
+			const read = await store.get(sid, name);
+			return read === null ? null : answer(read);
+		},
+		getVersioned: async (sid, name) => {
+			const read = await store.getVersioned(sid, name);
+			return read === null ? null : { value: answer(read.value), generation: read.generation };
+		},
+	};
+}
 
 describe("federationTokenStoreConditionalContract refuses a broken store", () => {
 	it("passes core's store, with every case's name listed", async () => {
@@ -135,7 +157,7 @@ describe("federationTokenStoreConditionalContract refuses a broken store", () =>
 					const answer = await store.replaceIf(sid, name, expected, tokens);
 					if (answer.outcome === "updated") {
 						const sibling = await store.getVersioned(sid, `${name}-other`);
-						if (sibling !== null) await store.update(sid, `${name}-other`, sibling.value);
+						if (sibling !== null) await store.attach(sid, `${name}-other`, sibling.value);
 					}
 					return answer;
 				},
@@ -184,5 +206,32 @@ describe("federationTokenStoreConditionalContract refuses a broken store", () =>
 			};
 		});
 		expect(refused).toContain(CASE.restore);
+	});
+
+	it("refuses a store that drops obtainedAt", async () => {
+		const refused = await refusedBy(() =>
+			answering(({ obtainedAt: _dropped, ...rest }) => rest as FederationTokens),
+		);
+		expect(refused).toContain(CASE.wholeRecord);
+		expect(refused).toContain(CASE.undated);
+	});
+
+	it("refuses a store that leaves an unset obtainedAt out, or answers it as null", async () => {
+		const leavesOut = await refusedBy(() =>
+			answering((tokens) => {
+				if (tokens.obtainedAt !== undefined) return tokens;
+				const { obtainedAt: _unset, ...rest } = tokens;
+				return rest as FederationTokens;
+			}),
+		);
+		expect(leavesOut).toEqual([CASE.undated]);
+		const answersNull = await refusedBy(() =>
+			answering((tokens) =>
+				tokens.obtainedAt === undefined
+					? ({ ...tokens, obtainedAt: null } as unknown as FederationTokens)
+					: tokens,
+			),
+		);
+		expect(answersNull).toEqual([CASE.undated]);
 	});
 });

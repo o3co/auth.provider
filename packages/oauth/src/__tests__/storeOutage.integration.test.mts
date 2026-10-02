@@ -180,7 +180,6 @@ async function buildApp(stores: Stores = {}): Promise<Harness> {
 			kind: "memory",
 			attach: async () => {},
 			get: async () => null,
-			update: async () => {},
 			delete: async () => {},
 			removeBySid: async () => {},
 		} as unknown as FederationTokenStore,

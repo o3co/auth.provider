@@ -186,7 +186,6 @@ function makeFedTokenStore(override?: Partial<FederationTokenStore>): Federation
 		getVersioned: vi.fn(),
 		replaceIf: vi.fn(),
 		removeIf: vi.fn(),
-		update: vi.fn(),
 		removeBySid: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn(),
 		...override,

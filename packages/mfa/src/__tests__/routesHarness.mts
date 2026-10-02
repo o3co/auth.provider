@@ -39,7 +39,11 @@ import type {
 	SessionRequirement,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { defineModule, readConditionalCreateAnswer } from "@o3co/auth-provider-core";
+import {
+	defineModule,
+	readConditionalCreateAnswer,
+	readConditionalSetRemoveAnswer,
+} from "@o3co/auth-provider-core";
 import type { RecordingMailSender } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import type request from "supertest";
@@ -122,6 +126,22 @@ export async function addRecord(store: MfaFactorStore, record: MfaFactorRecord):
 	const { generation } = await store.listVersioned(record.subject);
 	const answer = readConditionalCreateAnswer(await store.createIf(record, generation));
 	if (answer.outcome !== "created") throw new Error(`${record.id} was not stored`);
+}
+
+/**
+ * `id` removed from `subject`'s set as a writer of the set removes one: by
+ * `removeIf`, at the generation the set is read at. Throws when the store
+ * refuses it.
+ */
+export async function dropRecord(
+	store: MfaFactorStore,
+	subject: string,
+	id: string,
+): Promise<void> {
+	const { generation } = await store.listVersioned(subject);
+	if (generation === null) throw new Error(`${id} was not stored`);
+	const answer = readConditionalSetRemoveAnswer(await store.removeIf(subject, id, generation));
+	if (answer.outcome !== "removed") throw new Error(`${id} was not removed`);
 }
 
 /** Seeds a record of `kind` for `subject` whose data is `data`, sealed to it. */

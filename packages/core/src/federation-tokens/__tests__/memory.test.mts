@@ -23,6 +23,15 @@ describe("in-memory FederationTokenStore", () => {
 		tokenType: undefined,
 		scope: undefined,
 		grantedScope: undefined,
+		obtainedAt: undefined,
+	};
+
+	/** A replace of the live record of (sid-1, google), at its current generation. */
+	const replace = async (next: FederationTokens): Promise<void> => {
+		const read = await store.getVersioned("sid-1", "google");
+		if (read === null) throw new Error("sid-1/google is not live");
+		const answer = await store.replaceIf("sid-1", "google", read.generation, next);
+		if (answer.outcome !== "updated") throw new Error(answer.outcome);
 	};
 
 	beforeEach(() => {
@@ -40,7 +49,7 @@ describe("in-memory FederationTokenStore", () => {
 
 	it.each([
 		["attach", "attach"],
-		["update", "update"],
+		["replaceIf", "replaceIf"],
 	] as const)(
 		"names every field it has no value for on %s, rather than leaving it out",
 		async (_label, write) => {
@@ -55,9 +64,10 @@ describe("in-memory FederationTokenStore", () => {
 				tokenType: undefined,
 				scope: undefined,
 				grantedScope: undefined,
+				obtainedAt: undefined,
 			};
-			if (write === "update") await store.attach("sid-1", "google", tokens);
-			await store[write]("sid-1", "google", bare);
+			await store.attach("sid-1", "google", write === "attach" ? bare : tokens);
+			if (write === "replaceIf") await replace(bare);
 			expect(await store.get("sid-1", "google")).toStrictEqual(bare);
 		},
 	);
@@ -72,7 +82,7 @@ describe("in-memory FederationTokenStore", () => {
 
 	it.each([
 		["attach", "attach"],
-		["update", "update"],
+		["replaceIf", "replaceIf"],
 	] as const)("keeps tokenType through the defensive copy on %s", async (_label, write) => {
 		// The same field-by-field copy, and here a forgotten field fails OPEN:
 		// `POST /oauth/federation/:name/token` reads an absent `tokenType` as a
@@ -81,8 +91,8 @@ describe("in-memory FederationTokenStore", () => {
 		// `DPoP` rather than `Bearer` so the assertion cannot pass by coincidence
 		// with the default.
 		const senderConstrained = { ...tokens, tokenType: "DPoP" };
-		if (write === "update") await store.attach("sid-1", "google", tokens);
-		await store[write]("sid-1", "google", senderConstrained);
+		await store.attach("sid-1", "google", write === "attach" ? senderConstrained : tokens);
+		if (write === "replaceIf") await replace(senderConstrained);
 		expect((await store.get("sid-1", "google"))?.tokenType).toBe("DPoP");
 	});
 
@@ -91,29 +101,30 @@ describe("in-memory FederationTokenStore", () => {
 
 		it.each([
 			["attach", "attach"],
-			["update", "update"],
+			["replaceIf", "replaceIf"],
 		] as const)("round-trips it on %s", async (_label, write) => {
 			const dated: FederationTokens = { ...tokens, obtainedAt };
-			if (write === "update") await store.attach("sid-1", "google", tokens);
-			await store[write]("sid-1", "google", dated);
+			await store.attach("sid-1", "google", write === "attach" ? dated : tokens);
+			if (write === "replaceIf") await replace(dated);
 			const got = await store.get("sid-1", "google");
 			expect(got).toStrictEqual(dated);
 			expect(got?.obtainedAt).toBeInstanceOf(Date);
 		});
 
-		it("leaves it absent when the record has none", async () => {
+		it("names it as undefined when the record has none", async () => {
 			await store.attach("sid-1", "google", tokens);
 			const got = await store.get("sid-1", "google");
 			expect(got).not.toBeNull();
-			expect(Object.hasOwn(got as object, "obtainedAt")).toBe(false);
+			expect(Object.hasOwn(got as object, "obtainedAt")).toBe(true);
+			expect(got?.obtainedAt).toBeUndefined();
 		});
 
-		it("drops it when an update replaces a dated record with an undated one", async () => {
+		it("drops its value when a replace writes a dated record over with an undated one", async () => {
 			await store.attach("sid-1", "google", { ...tokens, obtainedAt });
-			await store.update("sid-1", "google", tokens);
+			await replace(tokens);
 			const got = await store.get("sid-1", "google");
 			expect(got).toStrictEqual(tokens);
-			expect(Object.hasOwn(got as object, "obtainedAt")).toBe(false);
+			expect(got?.obtainedAt).toBeUndefined();
 		});
 
 		it("is not moved by a later change to the caller's Date", async () => {
@@ -134,21 +145,6 @@ describe("in-memory FederationTokenStore", () => {
 		expect(await store.get("sid-1", "google")).toBeNull();
 		await store.attach("sid-1", "google", tokens);
 		expect(await store.get("sid-1", "github")).toBeNull();
-	});
-
-	it("update replaces atomically", async () => {
-		await store.attach("sid-1", "google", tokens);
-		const next: FederationTokens = {
-			accessToken: "at-new",
-			refreshToken: "rt-new",
-			expiresAt: new Date("2026-04-23"),
-			idToken: undefined,
-			tokenType: undefined,
-			scope: undefined,
-			grantedScope: undefined,
-		};
-		await store.update("sid-1", "google", next);
-		expect(await store.get("sid-1", "google")).toStrictEqual(next);
 	});
 
 	it("removeBySid removes all federation entries for sid", async () => {
@@ -212,7 +208,7 @@ describe("in-memory FederationTokenStore", () => {
 		it("every write moves the generation, a byte-identical one included", async () => {
 			await store.attach("sid-1", "google", tokens);
 			const first = (await live("sid-1", "google")).generation;
-			await store.update("sid-1", "google", tokens);
+			await replace(tokens);
 			const second = (await live("sid-1", "google")).generation;
 			await store.attach("sid-1", "google", tokens);
 			const third = (await live("sid-1", "google")).generation;
@@ -248,7 +244,7 @@ describe("in-memory FederationTokenStore", () => {
 			expect(await store.removeIf("sid-1", "okta", read.generation)).toEqual({
 				outcome: "missing",
 			});
-			await store.update("sid-1", "google", tokens);
+			await store.attach("sid-1", "google", tokens);
 			expect(await store.removeIf("sid-1", "google", read.generation)).toEqual({
 				outcome: "conflict",
 			});

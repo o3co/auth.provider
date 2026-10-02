@@ -98,28 +98,20 @@ function gate() {
 	};
 }
 
-/** Each of `store`'s ways to add a record held at `held` once, for the first record `which` picks. */
+/** `store`'s `createIf` held at `held` once, for the first record `which` picks. */
 function holdingAdd(
 	store: MfaFactorStore,
 	which: (record: MfaFactorRecord) => boolean,
 	held: ReturnType<typeof gate>,
 ): void {
 	let armed = true;
-	const hold = async (record: MfaFactorRecord) => {
+	const createIf = store.createIf.bind(store);
+	vi.spyOn(store, "createIf").mockImplementation(async (record, expected) => {
 		if (armed && which(record)) {
 			armed = false;
 			await held.pass();
 		}
-	};
-	const createIf = store.createIf.bind(store);
-	vi.spyOn(store, "createIf").mockImplementation(async (record, expected) => {
-		await hold(record);
 		return createIf(record, expected);
-	});
-	const create = store.create.bind(store);
-	vi.spyOn(store, "create").mockImplementation(async (record) => {
-		await hold(record);
-		return create(record);
 	});
 }
 
@@ -257,7 +249,6 @@ describe("two first bindings of one subject past a lease the store does not hold
 		// Both completions read the set under their lease, and pass their checks, before either writes.
 		notingTogether(transactionStore, 2);
 		const removeIf = vi.spyOn(factorStore, "removeIf");
-		const remove = vi.spyOn(factorStore, "remove");
 		const owner = await beginFirstBinding(app);
 		const other = await beginFirstBinding(app);
 		const ownerBegun = await beginEnrollment(owner.agent, owner.transaction, "totp");
@@ -273,7 +264,6 @@ describe("two first bindings of one subject past a lease the store does not hold
 		expect(await ofKind(factorStore, "totp")).toHaveLength(1);
 		expect(await ofKind(factorStore, RECOVERY_CODE_FACTOR_KIND)).toHaveLength(1);
 		expect(removeIf).not.toHaveBeenCalled();
-		expect(remove).not.toHaveBeenCalled();
 		expect(audit.of("mfa.first_binding_conflict")).toEqual([]);
 		expect(audit.of("mfa.factor.enrolled")).toHaveLength(1);
 	});
@@ -298,17 +288,13 @@ describe("two removals of the last two counting factors past a lease the store d
 		const both = new Promise<void>((resolve) => {
 			release = resolve;
 		});
-		for (const method of ["removeIf", "remove"] as const) {
-			const original = (factorStore[method] as (...args: unknown[]) => Promise<unknown>).bind(
-				factorStore,
-			);
-			vi.spyOn(factorStore, method).mockImplementation((async (...args: unknown[]) => {
-				arrived += 1;
-				if (arrived === 2) release();
-				await both;
-				return original(...args);
-			}) as never);
-		}
+		const removeIf = factorStore.removeIf.bind(factorStore);
+		vi.spyOn(factorStore, "removeIf").mockImplementation(async (...args) => {
+			arrived += 1;
+			if (arrived === 2) release();
+			await both;
+			return removeIf(...args);
+		});
 
 		const answers = await Promise.all([
 			mfaPost(agent, "/factors/remove", { factor_id: first.record.id }),
@@ -340,18 +326,14 @@ describe("a removal racing a binding past a lease the store does not hold", () =
 		leaseAdmittingEveryWriter(booted.transactionStore);
 		const stalled = gate();
 		let armed = true;
-		for (const method of ["removeIf", "remove"] as const) {
-			const original = (factorStore[method] as (...args: unknown[]) => Promise<unknown>).bind(
-				factorStore,
-			);
-			vi.spyOn(factorStore, method).mockImplementation((async (...args: unknown[]) => {
-				if (armed) {
-					armed = false;
-					await stalled.pass();
-				}
-				return original(...args);
-			}) as never);
-		}
+		const removeIf = factorStore.removeIf.bind(factorStore);
+		vi.spyOn(factorStore, "removeIf").mockImplementation(async (...args) => {
+			if (armed) {
+				armed = false;
+				await stalled.pass();
+			}
+			return removeIf(...args);
+		});
 
 		const removal = mfaPost(agent, "/factors/remove", { factor_id: removed.record.id });
 		await stalled.reached;

@@ -23,7 +23,7 @@
  * The lifetime is read once, through core's reading at a floor of 0 with no
  * cap. Finite with `expiresIn` stated: `obtainedAt` is the instant before the
  * exchange and `expiresAt` the reading's end. Otherwise: the adapter's
- * `expiresAt` and no `obtainedAt`. A lifetime that cannot be read is a failed
+ * `expiresAt` and `obtainedAt` undefined. A lifetime that cannot be read is a failed
  * exchange (502).
  */
 
@@ -62,7 +62,7 @@ export interface FederatedIdentity {
  * reading's end, and `obtainedAt` = `calledAt`. Any other reading (an end
  * stated only as an instant, which is on the upstream's clock; none;
  * malformed; contradictory; spent): the adapter's `expiresAt` as stated,
- * `null` included, and no `obtainedAt`, which fails closed. Throws only
+ * `null` included, and `obtainedAt` undefined, which fails closed. Throws only
  * where reading the answer's fields throws.
  */
 const readLinkedLifetime = (
@@ -77,7 +77,7 @@ const readLinkedLifetime = (
 	if (reading.verdict === "finite" && reading.stated !== "expiresAt") {
 		return { expiresAt: reading.expiresAt, obtainedAt: reading.obtainedAt };
 	}
-	return { expiresAt };
+	return { expiresAt, obtainedAt: undefined };
 };
 
 /**

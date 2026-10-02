@@ -15,8 +15,8 @@
  */
 
 /**
- * The request's shape: request objects, single-valued parameters, `claims`,
- * `response_type`, PKCE, `nonce` and `scope`. Every refusal is on the
+ * The request's shape: request objects, `response_mode`, single-valued
+ * parameters, `claims`, `response_type`, PKCE, `nonce` and `scope`. Every refusal is on the
  * validated `redirect_uri`, and none costs a store or policy call.
  */
 
@@ -61,6 +61,26 @@ export const checkRequestObjectUnsupported = (ctx: AuthorizeContext): boolean =>
 };
 
 /**
+ * OAuth 2.0 Multiple Response Type Encoding Practices §2.1 `response_mode`:
+ * only `query` is served (discovery's `response_modes_supported`), so any
+ * other value, or a repeat, is refused with `invalid_request` rather than
+ * answered in a mode the client did not ask for. An empty value is omitted
+ * (RFC 6749 §3.1).
+ */
+export const checkResponseMode = (ctx: AuthorizeContext): boolean => {
+	const raw = ctx.params.response_mode;
+	if (raw === undefined || raw === "" || raw === "query") return true;
+	redirectError(
+		ctx,
+		"invalid_request",
+		typeof raw === "string"
+			? `response_mode '${raw}' is not supported`
+			: "response_mode must be a single string value",
+	);
+	return false;
+};
+
+/**
  * `/authorize` parameters RFC 6749 §3.1 defines as single-valued. Express
  * surfaces a repeat as an array, which every read here narrows to
  * `undefined` — absence. Unchecked, a repeated `code_challenge_method` would
@@ -69,7 +89,7 @@ export const checkRequestObjectUnsupported = (ctx: AuthorizeContext): boolean =>
  * CSRF check.
  *
  * Deliberately absent: `response_type` (its own `unsupported_response_type`),
- * `resource` (repeatable, RFC 8707 §2), `client_id`/`redirect_uri` (checked
+ * `response_mode` (`checkResponseMode` owns it), `resource` (repeatable, RFC 8707 §2), `client_id`/`redirect_uri` (checked
  * before a redirect target exists, so 400 JSON) and `nonce` (`checkNonce`
  * owns it). One owner per parameter.
  */

@@ -1080,7 +1080,6 @@ describe("Session routes — POST /session/logout invalidates the session record
 				kind: "memory",
 				attach: vi.fn(),
 				get: vi.fn(),
-				update: vi.fn(),
 				removeBySid: removeFederationTokens,
 			} as unknown as FederationTokenStore,
 			sessionFederationIndex: {
@@ -1163,7 +1162,6 @@ describe("Session routes — POST /session/logout invalidates the session record
 				kind: "memory",
 				attach: vi.fn(),
 				get: vi.fn(),
-				update: vi.fn(),
 				removeBySid: vi.fn().mockRejectedValue(new Error("federation store down")),
 			} as unknown as FederationTokenStore,
 			logger,

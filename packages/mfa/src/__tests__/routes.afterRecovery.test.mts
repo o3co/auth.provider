@@ -54,6 +54,7 @@ import {
 	beginLogin,
 	completeEnrollment,
 	contributing,
+	dropRecord,
 	freezeClock,
 	giveEmailProof,
 	loggedText,
@@ -547,7 +548,7 @@ describe("recovery codes alone (required: a first binding)", () => {
 			const { agent, transaction } = await beginLogin(app);
 			// The TOTP record is gone by the time the code is given.
 			if (totp === undefined) throw new Error("no TOTP");
-			await factorStore.remove(ALICE.id, totp.record.id);
+			await dropRecord(factorStore, ALICE.id, totp.record.id);
 
 			const res = await verify(agent, transaction, set.record.id, set.codes[0]);
 
@@ -773,7 +774,7 @@ describe("a compare-and-set round lost to another write", () => {
 		vi.spyOn(factorStore, "update").mockImplementation(async (...args) => {
 			if (rounds++ === 0) {
 				if (totp === undefined) throw new Error("no TOTP");
-				await factorStore.remove(ALICE.id, totp.record.id);
+				await dropRecord(factorStore, ALICE.id, totp.record.id);
 				return null;
 			}
 			return update(...args);

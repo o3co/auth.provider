@@ -357,8 +357,7 @@ export function createRedisFederationTokenStore(
 		tokenType: e.tokenType,
 		scope: e.scope,
 		grantedScope: e.grantedScope,
-		// Absent stays absent, not `undefined`, as core's memory store answers.
-		...(e.obtainedAtMs === undefined ? {} : { obtainedAt: new Date(e.obtainedAtMs) }),
+		obtainedAt: e.obtainedAtMs === undefined ? undefined : new Date(e.obtainedAtMs),
 	});
 
 	/**
@@ -568,9 +567,6 @@ export function createRedisFederationTokenStore(
 			);
 			if (outcome === "late") throw late("removeIf");
 			return { outcome };
-		},
-		async update(sid, name, tokens) {
-			await writeEnv(sid, name, toEnvelope(tokens));
 		},
 		async removeBySid(sid) {
 			// The session's index names the keys: O(its federations), read in

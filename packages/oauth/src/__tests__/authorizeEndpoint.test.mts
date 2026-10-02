@@ -1201,6 +1201,80 @@ describe("/authorize — request objects are refused, not ignored", () => {
 	});
 });
 
+describe("/authorize — response_mode other than query is refused", () => {
+	// Discovery advertises `response_modes_supported: ["query"]`. Once the
+	// client and redirect_uri validate, the refusal is `invalid_request` on the
+	// redirect, in the query (the one mode served), with `state` and `iss`.
+	it.each(["form_post", "fragment", "no_such_mode"])(
+		"redirects invalid_request for response_mode=%s",
+		async (mode) => {
+			const createCode = vi.fn();
+			const { app } = await makeApp({ createCode });
+			const res = await authorize(app, { ...baseQuery, response_mode: mode });
+			const params = redirectParams(res);
+			expect(new URL(res.headers.location as string).hash).toBe("");
+			expect(params.get("error")).toBe("invalid_request");
+			expect(params.get("error_description")).toBe(`response_mode '${mode}' is not supported`);
+			expect(params.get("state")).toBe("xyz");
+			expect(params.getAll("iss")).toEqual([advertisedIssuer("https://issuer.example")]);
+			expect(params.get("code")).toBeNull();
+			expect(createCode).not.toHaveBeenCalled();
+		},
+	);
+
+	it("redirects invalid_request for a repeated response_mode, even one naming query", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, response_mode: ["query", "form_post"] }),
+		);
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe("response_mode must be a single string value");
+		expect(params.get("code")).toBeNull();
+	});
+
+	it("refuses response_mode on a POST authorization request too", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorizePost(app, { ...baseQuery, response_mode: "form_post" }),
+		);
+		expect(params.get("error")).toBe("invalid_request");
+	});
+
+	it("answers 400 invalid_client JSON when the client cannot be validated — the client refusal outranks response_mode", async () => {
+		const { app } = await makeApp({ clientNotFound: true });
+		const res = await authorize(app, { ...baseQuery, response_mode: "form_post" });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_client");
+	});
+
+	it("answers 400 JSON for an unregistered redirect_uri without redirecting to it", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, {
+			...baseQuery,
+			redirect_uri: "https://evil.example/cb",
+			response_mode: "fragment",
+		});
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_request");
+		expect(res.headers.location).toBeUndefined();
+	});
+
+	it.each([
+		["query", "query"],
+		["empty", ""],
+	])("issues a code for response_mode=%s", async (_label, mode) => {
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, response_mode: mode }));
+		expect(params.get("error")).toBeNull();
+		expect(params.get("code")).toBe("code-x");
+	});
+
+	it("issues a code when response_mode is absent", async () => {
+		const { app } = await makeApp({});
+		expect(redirectParams(await authorize(app, baseQuery)).get("code")).toBe("code-x");
+	});
+});
+
 describe("/authorize — prompt=none", () => {
 	it("answers login_required by redirect when there is no session", async () => {
 		// The point: a hidden iframe cannot act on a login page. This has to

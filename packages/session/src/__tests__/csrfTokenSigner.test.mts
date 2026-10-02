@@ -257,7 +257,6 @@ const fakeFederationTokenStore = (): FederationTokenStore =>
 		async get() {
 			return null;
 		},
-		async update() {},
 		async removeBySid() {},
 		async delete() {},
 	}) as unknown as FederationTokenStore;

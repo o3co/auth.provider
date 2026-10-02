@@ -68,6 +68,7 @@ import {
 	completeEnrollment,
 	contributing,
 	cookieSessionTap,
+	dropRecord,
 	enrollFromAccount,
 	freezeClock,
 	loggedText,
@@ -419,7 +420,7 @@ describe("a recovery code at a step-up", () => {
 		const setup = await composed({ mode: "required" });
 		const totp = await seedTotp(setup.factorStore);
 		const { agent, sid } = await signInWithTotp(setup.app, setup.userSessionStore, totp);
-		await setup.factorStore.remove(ALICE.id, totp.record.id);
+		await dropRecord(setup.factorStore, ALICE.id, totp.record.id);
 		await seedTotp(setup.factorStore, ALICE.id, { sealedFor: "u-someone-else" });
 		const codes = await seedRecoveryCodes(setup.factorStore);
 		freezeClock(T0 + 301_000);

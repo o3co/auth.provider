@@ -98,6 +98,7 @@ describe("the Redis store hands each conditional write a replay key of its own, 
 		tokenType: undefined,
 		scope: undefined,
 		grantedScope: undefined,
+		obtainedAt: undefined,
 	};
 
 	it("for a replace and a removal", async () => {

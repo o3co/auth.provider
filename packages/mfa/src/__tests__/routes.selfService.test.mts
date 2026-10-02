@@ -925,7 +925,7 @@ describe("the account page's calls", () => {
 
 describe("another factor whose write finds the set changed since the lease read it", () => {
 	it("is never written: 409, nothing audited as bound and nothing removed, when another binding past its lease landed first — the subject held at the limit", async () => {
-		const { app, factorStore, userSessionStore, audit, logger } = await composed({
+		const { app, factorStore, userSessionStore, audit } = await composed({
 			maxFactorsPerSubject: 2,
 		});
 		const seeded = await seedTotp(factorStore);
@@ -954,9 +954,6 @@ describe("another factor whose write finds the set changed since the lease read 
 		);
 		expect(audit.of("mfa.factor.enrolled")).toEqual([]);
 		expect(removeIf).not.toHaveBeenCalled();
-		expect(logger.error.mock.calls.map((call) => call[1])).not.toContain(
-			"mfa_enrollment_factor_standing",
-		);
 	});
 });
 
