@@ -591,23 +591,15 @@ export function isClientIdMetadataDocumentFallback(repository: ClientRepository)
  * `authenticate` is `inner`'s alone, through the boundary: a document never
  * carries a secret.
  *
- * A fallback passed in directly as `inner` is refused with a `TypeError`:
- * the outer one would copy the inner one's document clients away from their
- * provenance ({@link isClientIdMetadataDocumentClient}). That check
- * recognises only the object this function returned, not one behind a
- * forwarder or built by another loaded copy of this package. Without a
- * logger, a refused registration is not logged, as a refused document is not.
+ * Built only by the router, once, over the repository it is handed, from
+ * `oauth.clientIdMetadataDocuments`; the package entry does not export it.
+ * Without a logger, a refused registration is not logged, as a refused
+ * document is not.
  */
 export function withClientIdMetadataDocuments(
 	inner: ClientRepository,
 	opts: ClientIdMetadataDocumentOptions,
 ): ClientRepository {
-	if (documentFallbacks.has(inner)) {
-		throw new TypeError(
-			"withClientIdMetadataDocuments: the repository already resolves Client ID Metadata Documents; " +
-				"a fallback over it would answer its document clients as registered ones",
-		);
-	}
 	// Without a logger the fallback says nothing of a refused registration, as
 	// the resolver says nothing of a refused document; core's own default
 	// would write it to the console.

@@ -366,12 +366,6 @@ describe("a repository that cannot answer is an outage, never a document", () =>
 });
 
 describe("a fallback over one boundary", () => {
-	it("refuses to put a document fallback over another", () => {
-		const { fetch } = fakeFetch([]);
-		const once = cimd(switchable(() => null).repository, fetch);
-		expect(() => cimd(once, fetch)).toThrow(/Client ID Metadata Document/);
-	});
-
 	it("rejects a registration refused through a boundary built before the fallback, and never fetches", async () => {
 		// The composition core's slot wrap will produce: the fallback over a
 		// repository already behind the boundary, read as the same boundary.

@@ -22,8 +22,8 @@
  * replaced by a document. With documents off the router reads the
  * repository through the boundary itself, with the same answer. An id no
  * client is registered under still resolves its document, and consent names
- * the document's host. A router built over a repository that already is a
- * document fallback is refused, when it would stack its own.
+ * the document's host. The fallback is the router's own: the package entry
+ * exports neither it nor its resolver.
  */
 
 import crypto from "node:crypto";
@@ -40,7 +40,6 @@ import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { withClientIdMetadataDocuments } from "#/clients/clientIdMetadataDocument.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
@@ -248,17 +247,16 @@ describe("a refused registration under a URL-shaped id, with documents on", () =
 	});
 });
 
-describe("one document fallback per router", () => {
-	const fallback = () =>
-		withClientIdMetadataDocuments(answering(null), { allowedScopes: [], allowedAudiences: [] });
-
-	it("refuses to build over a fallback when documents are on, with a consent store and /authorize", async () => {
-		await expect(buildRouter(fallback())).rejects.toThrow(TypeError);
-		await expect(buildRouter(fallback())).rejects.toThrow(/Client ID Metadata Document/);
+describe("only the router installs the document fallback", () => {
+	it("leaves the fallback and its resolver out of the package entry", async () => {
+		const entry: Record<string, unknown> = await import("#/index.mjs");
+		expect(entry).not.toHaveProperty("withClientIdMetadataDocuments");
+		expect(entry).not.toHaveProperty("createClientIdMetadataDocumentResolver");
 	});
 
-	it("builds over one when it stacks none of its own: documents off, or no consent store", async () => {
-		await expect(buildRouter(fallback(), { documents: false })).resolves.toBeDefined();
-		await expect(buildRouter(fallback(), { consent: false })).resolves.toBeDefined();
+	it("still exports the predicates on a client id and on a resolved client", async () => {
+		const entry: Record<string, unknown> = await import("#/index.mjs");
+		expect(entry.isClientIdMetadataDocumentUrl).toBeTypeOf("function");
+		expect(entry.isClientIdMetadataDocumentClient).toBeTypeOf("function");
 	});
 });
