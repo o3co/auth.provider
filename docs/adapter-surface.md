@@ -123,7 +123,7 @@ Not adapters. These are the boot machinery every composition has.
 | --- | --- | --- | --- | --- |
 | `config` | `AppConfig` | required | `core/boot/types.mts` | The parsed application config. Every module that reads a knob requires it, until it declares its own section in its manifest (`section`, #728): boot parses that section out of this config and hands it to the module as `deps.section`, which is not a slot. |
 | `lifecycleRegistrar` | `LifecycleRegistrar` | required | `core/boot/types.mts` | Where a component registers its shutdown work, so `dispose()` drains in reverse-topological order, and with it a tail (`register(cleanup, { tailMs })`): the least time a host that bounds `dispose()` must allow the whole of `dispose()` for that work to settle, the cleanups around it included. `AppHandle.cleanupAllowanceMs` is the longest; tails do not add. |
-| `logger` | `Logger` | optional | `core/logging/Logger.mts` | Structured logger. Optional to wire; bundled modules fall back to a console logger rather than going silent. |
+| `logger` | `Logger` | optional | `core/logging/Logger.mts` | Structured logger. Optional to wire; bundled modules fall back to a console logger rather than going silent. A logger must not throw; a throwing logger may turn an outage into a rejection. |
 | `pathResolver` | `PathResolver` | required | `core/boot/types.mts` | Resolves a package-relative path (normally `import.meta.resolve`), so `reference.conf` is found without assuming a layout. |
 | `readinessRegistrar` | `ReadinessRegistrar` | required | `core/boot/types.mts` | Where a component registers a readiness probe. Distinct from liveness: this answers *can it serve*, not *is it up*. |
 
