@@ -1351,6 +1351,26 @@ describe("a deadline or cap above core.outbound's is said once, at construction"
 		expect(cappedLines(build({ config, maxBytes: 8192 }))).toEqual([]);
 	});
 
+	it("says each different capping of the same configuration", () => {
+		const config = withOutbound({}, { maxResponseBytes: 4096 });
+		expect(cappedLines(build({ config, maxBytes: 8192 }))).toHaveLength(1);
+		expect(cappedLines(build({ config, timeoutMs: 10_000, maxBytes: 1024 }))).toHaveLength(1);
+	});
+
+	it("says it again when a logger could not write it", () => {
+		const config = withOutbound({}, { maxResponseBytes: 4096 });
+		const failing = {
+			warn: () => {
+				throw new Error("log sink down");
+			},
+			info: vi.fn(),
+			error: vi.fn(),
+			debug: vi.fn(),
+		} as unknown as Logger;
+		expect(() => build({ config, maxBytes: 8192, logger: failing })).toThrow("log sink down");
+		expect(cappedLines(build({ config, maxBytes: 8192 }))).toHaveLength(1);
+	});
+
 	it("says nothing when a fetch substitute replaces the policy", () => {
 		const warn = build({ maxBytes: 100_000, fetch: fakeFetch([]).fetch });
 

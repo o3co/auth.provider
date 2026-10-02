@@ -353,13 +353,14 @@ export function isClientIdMetadataDocumentClient(client: PublicClient | null | u
 	return client != null && documentClients.has(client);
 }
 
-/** The configurations whose capped document limits were already said: once per configuration. */
-const cappedLimitsSaid = new WeakSet<object>();
+/** Each capping already said, per configuration: said once, at the first construction that logs it. */
+const cappedLimitsSaid = new WeakMap<object, Set<string>>();
 
 /**
  * Core's outbound fetch for a document URL, with this resolver's deadline and
  * cap. `core.outbound`'s are ceilings over them; one above its ceiling is said
- * once per configuration (`cimd_limit_capped`), with the value in effect.
+ * (`cimd_limit_capped`), with the value in effect, once per configuration and
+ * capping.
  */
 function outboundDocumentFetch(
 	config: object,
@@ -396,9 +397,14 @@ function outboundDocumentFetch(
 				]
 			: []),
 	];
-	if (limits.length > 0 && logger !== undefined && !cappedLimitsSaid.has(config)) {
-		cappedLimitsSaid.add(config);
-		logger.warn({ limits }, "cimd_limit_capped");
+	if (limits.length > 0 && logger !== undefined) {
+		const capping = JSON.stringify(limits);
+		const said = cappedLimitsSaid.get(config) ?? new Set<string>();
+		if (!said.has(capping)) {
+			logger.warn({ limits }, "cimd_limit_capped");
+			said.add(capping);
+			cappedLimitsSaid.set(config, said);
+		}
 	}
 	return documentFetch;
 }
