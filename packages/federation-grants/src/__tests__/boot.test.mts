@@ -261,9 +261,15 @@ const boot = (setup: Setup) => {
 			config: {
 				...makeValidCoreConfig(),
 				...coreConfigForTests({
-					federations: {
-						upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
-					},
+					// Configured only beside the module that contributes it, so no
+					// composition here holds an enabled federation that nothing handles.
+					...(setup.provider === null
+						? {}
+						: {
+								federations: {
+									upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
+								},
+							}),
 					...(setup.withAudit === false ? {} : { declaredAbsent: ["auditSink"] }),
 				}),
 				rateLimit: { failMode: "closed" },
@@ -419,7 +425,9 @@ describe("enabling the feature", () => {
 	});
 
 	it("refuses a connection pointing at a federation nothing contributes", async () => {
-		await expect(boot({ provider: null })).rejects.toThrow(/upstream/);
+		await expect(boot({ provider: null })).rejects.toThrow(
+			/federation-grants\.connections\.calendar: federation "upstream" is not configured/,
+		);
 	});
 
 	it("refuses a federation whose adapter cannot act without the user", async () => {
