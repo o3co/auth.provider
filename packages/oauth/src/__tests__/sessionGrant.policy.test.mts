@@ -27,6 +27,8 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 	type GrantPolicyHook,
+	type UserSession,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
@@ -235,5 +237,56 @@ describe("session grant — the minting instant", () => {
 		const token = minted(result);
 		expect(token.iat).toBe(answered / 1000);
 		expect(token.exp).toBe(answered / 1000 + 3600);
+	});
+
+	it("refuses a tracked session that expires while the policy evaluates", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const asked = Date.UTC(2026, 9, 2, 12, 0, 0);
+		const answered = asked + 600_000;
+		vi.setSystemTime(asked);
+		const tracked: UserSession = {
+			sid: "sid-1",
+			sub: "user-1",
+			authTime: new Date(asked - 300_000),
+			createdAt: new Date(asked - 300_000),
+			// Live when admitted, past by the time the policy answers.
+			expiresAt: new Date(asked + 60_000),
+			claims: {},
+			amr: ["pwd"],
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+		};
+		const userSessionStore = {
+			kind: "memory",
+			create: async () => {},
+			get: async (sid: string) => (sid === tracked.sid ? tracked : null),
+			delete: async () => {},
+		} as unknown as UserSessionStore;
+		const { result } = await createSessionGrant({
+			sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
+			config,
+			keyStore: createSymmetricKeyStore("session-policy-test-secret-32-bytes"),
+			userSessionStore,
+			grantPolicy: {
+				kind: "slow",
+				evaluate: async () => {
+					vi.setSystemTime(answered);
+					return { outcome: "allow" };
+				},
+			},
+		}).handle(
+			ctx(undefined, {
+				session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } },
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
 	});
 });

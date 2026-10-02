@@ -258,6 +258,13 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// signing cannot put `auth_time` after `iat`. Taken after the policy,
 			// so a slow policy cannot mint a token already expired.
 			const mintingNow = Date.now();
+			// Admission held the tracked session live on its own clock, before
+			// the policy's await: a session that expired since then mints nothing.
+			if (tracked !== null && !(tracked.expiresAt.getTime() > mintingNow)) {
+				return {
+					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
+				};
+			}
 			const trackedAuthTime =
 				tracked === null ? undefined : authTimeAt(tracked.authTime, mintingNow);
 			if (tracked !== null && trackedAuthTime === undefined) {
