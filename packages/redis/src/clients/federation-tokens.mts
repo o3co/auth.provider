@@ -29,12 +29,19 @@ export interface FederationTokenReplaceIfInput {
 	readonly ttlMs: number;
 	/** Epoch ms on the server's clock past which the write is refused (`late`), nothing read or written. */
 	readonly deadlineMs: number;
+	/**
+	 * Where this write keeps its answer until a millisecond past `deadlineMs`, on
+	 * the record's Cluster slot: a copy of the write that reaches the server
+	 * before then answers what the first copy answered and writes nothing.
+	 */
+	readonly replayKey: string;
 }
 
-/** What `removeIfGeneration` checks, and the deadline past which it writes nothing. */
+/** What `removeIfGeneration` checks, the deadline past which it writes nothing, and where it keeps its answer. */
 export interface FederationTokenRemoveIfInput {
 	readonly expected: string;
 	readonly deadlineMs: number;
+	readonly replayKey: string;
 }
 
 // --- FederationTokenStoreClient --------------------------------------------
@@ -136,9 +143,10 @@ export interface FederationTokenStoreClient {
 	/**
 	 * Replace the value at `key` with `input.value` (`PX input.ttlMs`) only while
 	 * the stored value's generation is `input.expected`, as one atomic step that
-	 * first refuses past `input.deadlineMs` on the server's clock. `missing`: no
-	 * key; `conflict`: another generation, or none; `late`: past the deadline.
-	 * Only `updated` writes.
+	 * first refuses past `input.deadlineMs` on the server's clock, then answers a
+	 * copy of a write it already took from `input.replayKey`, writing nothing.
+	 * `missing`: no key; `conflict`: another generation, or none; `late`: past
+	 * the deadline. Only the first `updated` writes.
 	 */
 	replaceIfGeneration(
 		key: string,

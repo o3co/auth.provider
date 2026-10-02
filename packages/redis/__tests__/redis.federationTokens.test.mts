@@ -510,6 +510,68 @@ describe("conditional writes over a real Redis", () => {
 		expect(await raw.exists(`${keyPrefix}sid-1:google`)).toBe(0);
 	});
 
+	it("a replace the driver sends again answers what its first copy answered and writes nothing, after a later write too", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const first = {
+			expected: read.generation,
+			value: '{"v":2,"g":"replayed-1","c":"one"}',
+			ttlMs: 60_000,
+			deadlineMs: Date.now() + 60_000,
+			replayKey: `${key}:w:replayed-1`,
+		};
+		expect(await client.replaceIfGeneration(key, first)).toBe("updated");
+		// The copy a reconnect sends again: the write landed, so it is not a conflict.
+		expect(await client.replaceIfGeneration(key, first)).toBe("updated");
+		expect(await raw.get(key)).toBe(first.value);
+		// A later write at the generation the first copy wrote, then the copy again.
+		const later = {
+			...first,
+			expected: "replayed-1",
+			value: '{"v":2,"g":"replayed-2","c":"two"}',
+			replayKey: `${key}:w:replayed-2`,
+		};
+		expect(await client.replaceIfGeneration(key, later)).toBe("updated");
+		expect(await client.replaceIfGeneration(key, first)).toBe("updated");
+		expect(await raw.get(key)).toBe(later.value);
+	});
+
+	it("a removal the driver sends again answers removed, and leaves a record made since", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const removal = {
+			expected: read.generation,
+			deadlineMs: Date.now() + 60_000,
+			replayKey: `${key}:w:removal-1`,
+		};
+		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
+		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
+		await store.attach("sid-1", "google", tokens);
+		const relinked = await raw.get(key);
+		expect(await client.removeIfGeneration(key, removal)).toBe("removed");
+		expect(await raw.get(key)).toBe(relinked);
+	});
+
+	it("keeps a write's answer until a millisecond past its deadline, and no longer", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const deadlineMs = (await serverClock(() => raw)()) + 30_000;
+		const replayKey = `${key}:w:kept`;
+		expect(
+			await client.removeIfGeneration(key, { expected: read.generation, deadlineMs, replayKey }),
+		).toBe("removed");
+		expect(await raw.pexpiretime(replayKey)).toBe(deadlineMs + 1);
+	});
+
 	it("a conditional write that reaches the server past its deadline writes nothing", async () => {
 		const { keyPrefix, store } = makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
@@ -524,17 +586,24 @@ describe("conditional writes over a real Redis", () => {
 				value: "replaced",
 				ttlMs: 60_000,
 				deadlineMs: past,
+				replayKey: `${key}:w:late-1`,
 			}),
 		).toBe("late");
 		expect(
-			await client.removeIfGeneration(key, { expected: read.generation, deadlineMs: past }),
+			await client.removeIfGeneration(key, {
+				expected: read.generation,
+				deadlineMs: past,
+				replayKey: `${key}:w:late-2`,
+			}),
 		).toBe("late");
+		expect(await raw.exists(`${key}:w:late-1`, `${key}:w:late-2`)).toBe(0);
 		expect(await raw.get(key)).toBe(before);
 		// Within its deadline, the same write commits.
 		expect(
 			await client.removeIfGeneration(key, {
 				expected: read.generation,
 				deadlineMs: Date.now() + 60_000,
+				replayKey: `${key}:w:late-3`,
 			}),
 		).toBe("removed");
 		expect(await raw.exists(key)).toBe(0);

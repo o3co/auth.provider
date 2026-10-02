@@ -16,9 +16,9 @@
 
 /**
  * The federation token store's conditional members, one script each over the
- * record's one key (no other key is touched, so each runs on one Cluster
- * slot). A record's generation is its wrapper's `g`, outside the ciphertext.
- * The scripts make no generation: the adapter hands each one in.
+ * record's key and, for a write, its replay key on the same Cluster slot. A
+ * record's generation is its wrapper's `g`, outside the ciphertext. The
+ * scripts make no generation: the adapter hands each one in.
  */
 
 import { defineScript } from "./define.mjs";
@@ -27,6 +27,8 @@ import { defineScript } from "./define.mjs";
  * `ft_generation(raw)`: the generation the stored value carries, or `nil` when
  * it carries none (or is no JSON object). `ft_late(deadline)`: whether the
  * server's clock is past `deadline`, in epoch milliseconds.
+ * `ft_keep(replay, answer, until)`: `answer` kept under the replay key until
+ * `until` (epoch ms), for a copy of the write that arrives before then.
  */
 const PRELUDE = `
 local function ft_generation(raw)
@@ -39,6 +41,10 @@ end
 local function ft_late(deadline)
   local t = redis.call('TIME')
   return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) > tonumber(deadline)
+end
+local function ft_keep(replay, answer, until)
+  redis.call('SET', replay, answer, 'PXAT', until)
+  return answer
 end
 `;
 
@@ -64,34 +70,41 @@ return {raw, ''}
 `.trim();
 
 /**
- * The conditional replace. `KEYS[1]` = the record; `ARGV[1]` = the deadline
- * (epoch ms), `ARGV[2]` = the expected generation, `ARGV[3]` = the new value
- * (carrying its new generation), `ARGV[4]` = the store TTL (ms). Returns
+ * The conditional replace. `KEYS[1]` = the record, `KEYS[2]` = the write's
+ * replay key; `ARGV[1]` = the deadline (epoch ms), `ARGV[2]` = a millisecond
+ * past it, `ARGV[3]` = the expected generation, `ARGV[4]` = the new value
+ * (carrying its new generation), `ARGV[5]` = the store TTL (ms). Returns
  * `late` (past the deadline on the server's clock: nothing read or written),
- * `missing` (no key, or past its `PX`), `conflict` (another generation, or
- * none) or `updated`.
+ * the answer the replay key holds (a copy of a write already taken: nothing
+ * written), or the answer kept there until `ARGV[2]`: `missing` (no key, or
+ * past its `PX`), `conflict` (another generation, or none) or `updated`.
  */
 const LUA_REPLACE_IF = `${PRELUDE}
 if ft_late(ARGV[1]) then return 'late' end
+local kept = redis.call('GET', KEYS[2])
+if kept then return kept end
 local raw = redis.call('GET', KEYS[1])
-if not raw then return 'missing' end
-if ft_generation(raw) ~= ARGV[2] then return 'conflict' end
-redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[4])
-return 'updated'
+if not raw then return ft_keep(KEYS[2], 'missing', ARGV[2]) end
+if ft_generation(raw) ~= ARGV[3] then return ft_keep(KEYS[2], 'conflict', ARGV[2]) end
+redis.call('SET', KEYS[1], ARGV[4], 'PX', ARGV[5])
+return ft_keep(KEYS[2], 'updated', ARGV[2])
 `.trim();
 
 /**
- * The conditional delete. `KEYS[1]` = the record; `ARGV[1]` = the deadline
- * (epoch ms), `ARGV[2]` = the expected generation. Returns `late`, `missing`,
- * `conflict` or `removed`, as the replace does.
+ * The conditional delete. `KEYS[1]` = the record, `KEYS[2]` = the write's
+ * replay key; `ARGV[1]` = the deadline (epoch ms), `ARGV[2]` = a millisecond
+ * past it, `ARGV[3]` = the expected generation. Returns `late`, a kept
+ * answer, `missing`, `conflict` or `removed`, as the replace does.
  */
 const LUA_REMOVE_IF = `${PRELUDE}
 if ft_late(ARGV[1]) then return 'late' end
+local kept = redis.call('GET', KEYS[2])
+if kept then return kept end
 local raw = redis.call('GET', KEYS[1])
-if not raw then return 'missing' end
-if ft_generation(raw) ~= ARGV[2] then return 'conflict' end
+if not raw then return ft_keep(KEYS[2], 'missing', ARGV[2]) end
+if ft_generation(raw) ~= ARGV[3] then return ft_keep(KEYS[2], 'conflict', ARGV[2]) end
 redis.call('DEL', KEYS[1])
-return 'removed'
+return ft_keep(KEYS[2], 'removed', ARGV[2])
 `.trim();
 
 export const FT_READ_VERSIONED = defineScript(LUA_READ_VERSIONED);

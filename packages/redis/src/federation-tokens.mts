@@ -39,8 +39,11 @@
  * deadline the adapter stamps at issue and the server's clock judges, so its
  * write lifetime W is the write timeout plus the declared clock skew
  * (`internal/write-deadline.mts`), while the app's and Redis's clocks agree
- * within that skew. A conditional write never shrinks the index, and adds to
- * it only after `updated`, so the index outlives the record it names. The
+ * within that skew. A conditional write keeps its answer under a replay key
+ * of its own until a millisecond past its deadline, so a copy the driver
+ * sends again within it answers as the first did and writes nothing. A
+ * conditional write never shrinks the index, and adds to it only after
+ * `updated`, so the index outlives the record it names. The
  * store assumes acknowledged writes are not rolled back (persistence, plus a
  * failover setup that keeps acknowledged writes); a deployment that accepts
  * acknowledged-write loss on failover also accepts that a conditional write
@@ -75,6 +78,7 @@ import {
 
 import { createRedisLock } from "./internal/lock.mjs";
 import { createRedisSidSet } from "./internal/redisSidSet.mjs";
+import { replayKeyOf } from "./internal/replay-key.mjs";
 import { redisReference } from "./internal/section.mjs";
 import { WRITE_TIMEOUT_MS, withWriteDeadline } from "./internal/write-deadline.mjs";
 
@@ -493,6 +497,7 @@ export function createRedisFederationTokenStore(
 						value,
 						ttlMs: storeTtlMs,
 						deadlineMs,
+						replayKey: replayKeyOf(key, prefix, generation),
 					}),
 				unanswered("replaceIf"),
 			);
@@ -504,8 +509,10 @@ export function createRedisFederationTokenStore(
 			return { outcome, generation };
 		},
 		async removeIf(sid, name, expected) {
+			const key = k(sid, name);
+			const replayKey = replayKeyOf(key, prefix, newStoreGeneration());
 			const outcome = await withWriteDeadline(
-				(deadlineMs) => opts.client.removeIfGeneration(k(sid, name), { expected, deadlineMs }),
+				(deadlineMs) => opts.client.removeIfGeneration(key, { expected, deadlineMs, replayKey }),
 				unanswered("removeIf"),
 			);
 			if (outcome === "late") throw late("removeIf");

@@ -97,15 +97,26 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 				await runScript(
 					io,
 					FT_REPLACE_IF,
-					[key],
-					[String(input.deadlineMs), input.expected, input.value, String(input.ttlMs)],
+					[key, input.replayKey],
+					[
+						String(input.deadlineMs),
+						String(input.deadlineMs + 1),
+						input.expected,
+						input.value,
+						String(input.ttlMs),
+					],
 				),
 				["updated", "missing", "conflict", "late"] as const,
 				"replaceIfGeneration",
 			),
 		removeIfGeneration: async (key, input) =>
 			answerOf(
-				await runScript(io, FT_REMOVE_IF, [key], [String(input.deadlineMs), input.expected]),
+				await runScript(
+					io,
+					FT_REMOVE_IF,
+					[key, input.replayKey],
+					[String(input.deadlineMs), String(input.deadlineMs + 1), input.expected],
+				),
 				["removed", "missing", "conflict", "late"] as const,
 				"removeIfGeneration",
 			),

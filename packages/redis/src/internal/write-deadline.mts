@@ -22,7 +22,9 @@
  * and the adapter stops waiting at the same timeout. A command the driver
  * queues, sends again after a reconnect, or a stalled server holds therefore
  * commits within W of its issue or writes nothing, while the app's and
- * Redis's clocks agree within {@link CLOCK_SKEW_MS}.
+ * Redis's clocks agree within {@link CLOCK_SKEW_MS}, and the server does not
+ * stall inside a running script, between its clock check and its write, for
+ * the whole of W.
  */
 
 /**

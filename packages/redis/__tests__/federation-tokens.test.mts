@@ -48,6 +48,8 @@ function createFakeRedis() {
 	// string-valued envelopes so assertions on `data` still see only envelopes.
 	const sets = new Map<string, Set<string>>();
 	const ttls = new Map<string, number>();
+	// Each conditional write's answer, by its replay key, as the scripts keep it.
+	const replays = new Map<string, string>();
 	const removeKey = (k: string): number => {
 		let removed = 0;
 		if (data.delete(k)) removed += 1;
@@ -126,20 +128,30 @@ function createFakeRedis() {
 		}),
 		replaceIfGeneration: vi.fn(async (k: string, input: FederationTokenReplaceIfInput) => {
 			if (Date.now() > input.deadlineMs) return "late" as const;
+			const kept = replays.get(input.replayKey) as "updated" | "missing" | "conflict" | undefined;
+			if (kept !== undefined) return kept;
 			const stored = data.get(k);
-			if (stored === undefined) return "missing" as const;
-			if (generationIn(stored) !== input.expected) return "conflict" as const;
-			data.set(k, input.value);
-			ttls.set(k, input.ttlMs);
-			return "updated" as const;
+			let answer: "updated" | "missing" | "conflict" = "updated";
+			if (stored === undefined) answer = "missing";
+			else if (generationIn(stored) !== input.expected) answer = "conflict";
+			else {
+				data.set(k, input.value);
+				ttls.set(k, input.ttlMs);
+			}
+			replays.set(input.replayKey, answer);
+			return answer;
 		}),
 		removeIfGeneration: vi.fn(async (k: string, input: FederationTokenRemoveIfInput) => {
 			if (Date.now() > input.deadlineMs) return "late" as const;
+			const kept = replays.get(input.replayKey) as "removed" | "missing" | "conflict" | undefined;
+			if (kept !== undefined) return kept;
 			const stored = data.get(k);
-			if (stored === undefined) return "missing" as const;
-			if (generationIn(stored) !== input.expected) return "conflict" as const;
-			removeKey(k);
-			return "removed" as const;
+			let answer: "removed" | "missing" | "conflict" = "removed";
+			if (stored === undefined) answer = "missing";
+			else if (generationIn(stored) !== input.expected) answer = "conflict";
+			else removeKey(k);
+			replays.set(input.replayKey, answer);
+			return answer;
 		}),
 		pExpireGT: vi.fn(async (key: string, ttlMs: number) => {
 			const held = ttls.get(key);
