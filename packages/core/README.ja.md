@@ -275,6 +275,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 - `wholeNumberFromEnv(bounds)` は整数を読みます。受け付けるのは、書かれたままの数値か、10 進数字の文字列（整数）です。数字の前後の空白は許します。それ以外はそのまま `bounds` に渡り、そこで `bounds` のメッセージとともに拒否されます。空文字列や空白だけの文字列、符号・小数・指数（`"8e3"`）・16 進（`"0x50"`）を含む文字列、そして `null`、`true`、リストがそうです。`z.coerce.number()` なら `""`、`null`、`[]` を `0` と、`"1e3"` を `1000` と読んでしまいます。`bounds` は `z.number()` のスキーマで、ほかの規則をすべて決めます: 数値として書かれた値の整数チェック、最小値、最大値、メッセージ。standalone テンプレートは `http.port` をこれで読むので、空のまま export された `HTTP_PORT` は、OS が選ぶポートで待ち受ける代わりに起動を失敗させます。
 - `durationFromEnv(bounds)` は同じ読み手を、期間を表す葉が使う名前で呼んだものです。
+- `wholeNumberInRangeFromEnv(min, max?)` は同じ読み手を `min` 以上（`max` があれば `max` 以下）に限ったもので、それ以外の値を、範囲と書き方を示す 1 つのメッセージ（`must be a whole number from 1 to 31536000, in decimal digits`）で拒否します。core は自分の数値設定をすべてこれで読みます。独自のメッセージが要らない数値設定はこれを使い、要るものは自分の `bounds` を `wholeNumberFromEnv` に渡します。
 - `coerceBooleanFromEnv` は真偽値を読みます: `"true"` / `"1"` と `"false"` / `"0"` / `""`（前後の空白を除き、大文字小文字を区別しない）。それ以外は起動を失敗させます。
 
 複数のモジュールが読むキーは所有者が 1 つで、ほかのモジュールは契約が core にあるスロットを通して受け取ります（[#728](https://github.com/o3co/auth.provider/issues/728)）: 所有者が自分のセクションを解釈して値を provide し、コード上パッケージは core だけを import します。core はこれらのスロットを宣言しています。`loginCompletion`、`loginEntry`、`csrfGuard`、`sessionCookiePolicy`、`csrfTokenSigner` は session パッケージのモジュールが、`oauthTokenSettings` は oauth モジュールが provide し、`deploymentMode` は core 自身が埋め、残りは提供者より先に宣言されています:

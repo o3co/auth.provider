@@ -39,7 +39,7 @@
  *
  * `z.preprocess` compiles to a pipe the `@o3co/ts.hocon` zod bridge does not
  * descend into, so every field under a wrapped section must coerce on its own
- * (`coerceBooleanFromEnv`, `z.coerce.number()`).
+ * (`coerceBooleanFromEnv`, `wholeNumberFromEnv`).
  *
  * Not for a value removed from a live enum (Zod's error names the accepted
  * values) or a key reshaped in place (`LEGACY_JWT_FIELDS`, whose message is a
