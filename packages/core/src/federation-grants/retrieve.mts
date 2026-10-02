@@ -16,12 +16,11 @@
 
 import {
 	classifyFederationRefreshError,
+	FEDERATION_UPSTREAM_OUTAGE_CODES,
+	isDefiniteFederationRefreshFailure,
 	isKnownFederationRefreshErrorCode,
 } from "../federation-tokens/refresh-error.mjs";
-import {
-	isDefiniteFederationUpstreamFailure,
-	isFederationUpstreamOutage,
-} from "../federation-tokens/upstreamOutage.mjs";
+import { isFederationUpstreamOutage } from "../federation-tokens/upstreamOutage.mjs";
 import { instantOf, judgeHeldUpstreamToken } from "../federations/token-lifetime.mjs";
 import type { DelegatedTokens } from "../federations/types.mjs";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
@@ -539,12 +538,6 @@ const unavailable = (
 /** How far ahead of `now` a stored date is believed: what the refresh buffer absorbs, or replicas' clocks may differ by. */
 const dateAllowanceMs = (limits: FederationGrantRetrievalLimits): number =>
 	Math.max(limits.refreshBufferMs, limits.revocationSkewMs);
-
-/** RFC 6749 §4.1.2.1's names for an outage: not refusals, whatever status they came with. */
-const UPSTREAM_OUTAGE_CODES: ReadonlySet<string> = new Set([
-	"server_error",
-	"temporarily_unavailable",
-]);
 
 /**
  * What `count` the store will give a failure at `at`: one more than a stamp no
@@ -1175,7 +1168,7 @@ async function refreshUnderLock(
 		const classified = classifyFederationRefreshError(settled.error);
 		// The upstream definitely did nothing with the refresh token: the rotation
 		// taken for the attempt is given back. Unknown, it stays spent.
-		const definite = isDefiniteFederationUpstreamFailure(settled.error);
+		const definite = isDefiniteFederationRefreshFailure(settled.error);
 		const giveBack = async (): Promise<{ readonly keepLock?: true }> =>
 			definite && rotation !== undefined
 				? giveBackRotation(deps, request, guard, rotation, failureDeadline)
@@ -1296,7 +1289,7 @@ async function refreshUnderLock(
 			failure = { at, kind: "unavailable" };
 		} else if (
 			classified.upstreamCode !== undefined &&
-			!UPSTREAM_OUTAGE_CODES.has(classified.upstreamCode)
+			!FEDERATION_UPSTREAM_OUTAGE_CODES.has(classified.upstreamCode)
 		) {
 			// The upstream's error code when it is one this provider knows, and
 			// never its message: this goes into a response. The IdP answered and
@@ -1334,8 +1327,10 @@ async function refreshUnderLock(
 				failureOf(denial),
 			);
 		}
-		await stamp(deps, request, guard, failure, limits.persistRetryBudgetMs);
-		const given = await giveBack();
+		const noted = await stamp(deps, request, guard, failure, limits.persistRetryBudgetMs);
+		// A stamp refused on the version lost a race: the grant moved on, and
+		// there is nothing of this attempt's to give back to.
+		const given = noted.outcome === "refused" ? {} : await giveBack();
 		// The lock is let go of, whatever the failure was, unless a give-back is
 		// still in flight. A failure that ARRIVED
 		// leaves nothing of this call's in flight, which is what keeping the lock

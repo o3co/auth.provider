@@ -479,6 +479,70 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			expect(await rotationsOf()).toMatchObject({ count: 0 });
 		});
 
+		it("gives back a refusal's: the upstream answered `invalid_client`", async () => {
+			await seedEndingAt(10 * MIN);
+			setNow(at(20 * MIN));
+			h.refresh.mockRejectedValueOnce(
+				Object.assign(new Error("x"), { error: "invalid_client", status: 401 }),
+			);
+			expect(await retrieve()).toMatchObject({
+				ok: false,
+				code: "upstream_rejected",
+				reason: "invalid_client",
+			});
+			expect(await rotationsOf()).toMatchObject({ count: 0 });
+		});
+
+		it.each([
+			["a gateway that timed out", { status: 504 }],
+			["a bad gateway", { status: 502 }],
+			["an outage the IdP names in its body", { status: 400, error: "temporarily_unavailable" }],
+		])(
+			"keeps the rotation spent for %s: the request may have reached the IdP",
+			async (_, fields) => {
+				await seedEndingAt(10 * MIN);
+				setNow(at(20 * MIN));
+				h.refresh.mockRejectedValueOnce(Object.assign(new Error("x"), fields));
+				expect((await retrieve()).ok).toBe(false);
+				expect(await rotationsOf()).toMatchObject({ count: 1 });
+			},
+		);
+
+		it("asks nothing back when the stamp lost on the version: the race is the grant's news, not the budget's", async () => {
+			await seedEndingAt(10 * MIN);
+			const refund = vi.fn(async () => ({ ok: true as const, grant: {} as never }));
+			h.deps.store = {
+				...h.store,
+				noteRefreshFailure: async () => ({ ok: false }),
+				refundRotation: refund,
+			};
+			const reported: string[] = [];
+			h.deps.report = (failure) => reported.push(failure.during);
+			setNow(at(20 * MIN));
+			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			expect(await retrieve()).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			expect(refund).not.toHaveBeenCalled();
+			expect(reported).not.toContain("rotation");
+			expect(await rotationsOf()).toMatchObject({ count: 1 });
+		});
+
+		it("keeps the lock when the give-back does not answer in time: it bumps the version, and must not land under the next holder", async () => {
+			await seedEndingAt(10 * MIN);
+			h.deps.store = { ...h.store, refundRotation: () => new Promise(() => {}) };
+			const reported: string[] = [];
+			h.deps.report = (failure) => reported.push(failure.during);
+			setNow(at(20 * MIN));
+			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs);
+			expect(await answer).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			expect(reported).toContain("rotation");
+			expect(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).toEqual({
+				acquired: false,
+				reason: "timeout",
+			});
+		});
+
 		it("keeps the rotation spent when the outcome is unknown: a request given up on may have rotated", async () => {
 			await seedEndingAt(10 * MIN);
 			setNow(at(20 * MIN));

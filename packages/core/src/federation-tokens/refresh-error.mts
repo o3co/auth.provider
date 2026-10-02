@@ -15,7 +15,7 @@
  */
 
 import { guardedRead, isError, thrownText } from "../logging/loggableError.mjs";
-import { readFederationUpstreamOutage } from "./upstreamOutage.mjs";
+import { readFederationUpstreamDelivery, readFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 /**
  * What an upstream federation refresh failed with.
@@ -114,6 +114,12 @@ export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
 	"login_required",
 	"consent_required",
 	"account_selection_required",
+]);
+
+/** RFC 6749 §4.1.2.1's names for an outage: not refusals, whatever status they came with. */
+export const FEDERATION_UPSTREAM_OUTAGE_CODES: ReadonlySet<string> = new Set([
+	"server_error",
+	"temporarily_unavailable",
 ]);
 
 /** A day: beyond it a `Retry-After` is not advice a worker can use. */
@@ -224,4 +230,33 @@ export function classifyFederationRefreshError(
 		return { reason: "network", structured: false, ...extras };
 	}
 	return { reason: "unknown", structured: false, ...extras };
+}
+
+/**
+ * Whether a failed refresh provably left the refresh token unused, so that
+ * a rotation counted for it may be given back. Anything that may have been
+ * acted on is not: the budget counts rotations that may have happened.
+ *
+ * The upstream's own code on the thrown value (`.error`) proves it only when
+ * it is one this provider knows and not an outage's
+ * ({@link FEDERATION_UPSTREAM_OUTAGE_CODES}, which a retrieval stamps as "may
+ * have been processed"); any other code there is a reason to doubt. Beside
+ * it, the transport and the status are read by
+ * `readFederationUpstreamDelivery`: `unknown` there decides, `unprocessed`
+ * proves it, and silence leaves it to the code. Never throws.
+ */
+export function isDefiniteFederationRefreshFailure(error: unknown): boolean {
+	let code: unknown;
+	if (error !== null && typeof error === "object") {
+		code = readOrUnreadable(error, "error");
+		if (code === UNREADABLE) return false;
+	}
+	const known =
+		code !== undefined &&
+		isKnownFederationRefreshErrorCode(code) &&
+		!FEDERATION_UPSTREAM_OUTAGE_CODES.has(code);
+	if (code !== undefined && !known) return false;
+	const delivery = readFederationUpstreamDelivery(error);
+	if (delivery === "unknown") return false;
+	return delivery === "unprocessed" || known;
 }

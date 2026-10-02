@@ -207,7 +207,12 @@ export function isFederationUpstreamOutage(error: unknown): boolean {
 	return readFederationUpstreamOutage(error) === "outage";
 }
 
-/** The connection codes of a request that never left: no connection was made. */
+/**
+ * The codes of a request that never left: no connection was made, or none
+ * that a request could be written to — refused, unresolvable, unreachable,
+ * a connect that timed out, a URL that could not be parsed, and a TLS
+ * handshake or certificate that failed ({@link X509_VERIFICATION}).
+ */
 const NOT_SENT: ReadonlySet<string> = new Set([
 	"ECONNREFUSED",
 	"ENOTFOUND",
@@ -218,62 +223,77 @@ const NOT_SENT: ReadonlySet<string> = new Set([
 	"ENETDOWN",
 	"UND_ERR_CONNECT_TIMEOUT",
 	"ERR_INVALID_URL",
+	"ERR_TLS_CERT_ALTNAME_INVALID",
+	"ERR_TLS_HANDSHAKE_TIMEOUT",
+	"ERR_TLS_INVALID_PROTOCOL_VERSION",
+	"ERR_TLS_PROTOCOL_VERSION_CONFLICT",
+	"ERR_TLS_DH_PARAM_SIZE",
+	"ERR_SSL_WRONG_VERSION_NUMBER",
+	"ERR_SSL_UNSUPPORTED_PROTOCOL",
+	"ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION",
+	"ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE",
 ]);
 
-const HTTP_ERROR = (status: unknown): boolean =>
-	typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599;
+/**
+ * What an HTTP status proves about the request it answered. A 4xx is the
+ * upstream refusing it, but a 408 or a 499 (the request or the client gave
+ * up), and a 501 or a 503 is a server that did not take it on; a 500, a 502,
+ * a 504 and any other 5xx may come back over a request that was forwarded
+ * and acted on. `undefined` for anything that is not an error status.
+ */
+const statusDelivery = (status: unknown): "unprocessed" | "unknown" | undefined => {
+	if (typeof status !== "number" || !Number.isInteger(status) || status < 400 || status > 599) {
+		return undefined;
+	}
+	if (status === 408 || status === 499) return "unknown";
+	if (status < 500 || status === 501 || status === 503) return "unprocessed";
+	return "unknown";
+};
 
 /**
- * Whether what a failed upstream call did is known, and it issued nothing:
- * the upstream answered with an HTTP error status (on the error, an Error
- * cause, or the `Response` it was raised over), the thrown value carries the
- * upstream's own error code (`.error`), or the request never left — refused,
- * unresolvable, unreachable, a connection that timed out before it was made,
- * a certificate or TLS handshake that failed. A request given up on
- * (`AbortError`, `TimeoutError`), a connection lost once the request may have
- * been sent, anything else, and a field that cannot be read are not: the
- * upstream may have acted on it. Read by the rule
- * {@link readFederationUpstreamOutage} reads by. Never throws.
+ * What the transport and the status of a failed upstream call prove: that
+ * the request was not acted on (`unprocessed`), that it may have been
+ * (`unknown`), or nothing (`silent`). Each level — the thrown value, then the
+ * Error causes and the `Response` it was raised over, as
+ * {@link readFederationUpstreamOutage} walks them — is read in one order: a
+ * request given up on (`AbortError`, `TimeoutError`) is `unknown` whatever
+ * else it carries; then the status; then the transport code — one of a
+ * request that never left is `unprocessed`, any other transport code
+ * `unknown`. A field that cannot be read is `unknown`. Never throws.
  */
-export function isDefiniteFederationUpstreamFailure(error: unknown): boolean {
+export function readFederationUpstreamDelivery(
+	error: unknown,
+): "unprocessed" | "unknown" | "silent" {
 	let unreadable = false;
 	const field = (value: unknown, key: string): unknown => {
 		const read = guardedRead(value as object, key);
 		if (read === null) unreadable = true;
 		return read?.value;
 	};
-	if (typeof error !== "object" || error === null) return false;
-	// The thrown value, whatever it is, may carry the upstream's answer.
-	if (!isResponse(error)) {
-		const status = field(error, "status");
-		const code = field(error, "error");
-		if (unreadable) return false;
-		if (HTTP_ERROR(status) || typeof code === "string") return true;
-	}
-	let current: unknown = isError(error) || isResponse(error) ? error : field(error, "cause");
-	for (let depth = 0; depth < MAX_CAUSE_DEPTH && !unreadable; depth++) {
+	if (typeof error !== "object" || error === null) return "silent";
+	let current: unknown = error;
+	for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
 		if (isResponse(current)) {
 			const status = field(current, "status");
-			return !unreadable && HTTP_ERROR(status);
+			if (unreadable) return "unknown";
+			return statusDelivery(status) ?? "silent";
 		}
-		if (!isError(current)) return false;
+		// The thrown value is read whatever it is; a cause only when it is an Error.
+		if (depth > 0 && !isError(current)) return "silent";
+		if (typeof current !== "object" || current === null) return "silent";
 		const name = field(current, "name");
-		const code = field(current, "code");
 		const status = field(current, "status");
-		if (unreadable) return false;
-		if (typeof name === "string" && ABANDONED.has(name)) return false;
-		if (HTTP_ERROR(status)) return true;
+		const code = field(current, "code");
+		if (unreadable) return "unknown";
+		if (typeof name === "string" && ABANDONED.has(name)) return "unknown";
+		const answered = statusDelivery(status);
+		if (answered !== undefined) return answered;
 		if (typeof code === "string") {
-			if (
-				NOT_SENT.has(code) ||
-				X509_VERIFICATION.has(code) ||
-				/^ERR_TLS_[A-Z_]{1,64}$/.test(code)
-			) {
-				return true;
-			}
-			if (isTransportCode(code)) return false;
+			if (NOT_SENT.has(code) || X509_VERIFICATION.has(code)) return "unprocessed";
+			if (isTransportCode(code)) return "unknown";
 		}
 		current = field(current, "cause");
+		if (unreadable) return "unknown";
 	}
-	return false;
+	return "silent";
 }

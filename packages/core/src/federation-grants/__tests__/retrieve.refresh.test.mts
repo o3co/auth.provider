@@ -859,11 +859,14 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			});
 		});
 
-		const refusals: Array<[string, unknown, object]> = [
+		// `refunded`: whether the rotation taken for the attempt is given back —
+		// only for an answer that proves the upstream did not rotate.
+		const refusals: Array<[string, unknown, object, boolean]> = [
 			[
 				"a message that only mentions invalid_grant",
 				new Error("invalid_grant: said a proxy's error page"),
 				{ code: "upstream_rejected", reason: "unknown" },
+				false,
 			],
 			[
 				"an error code this provider knows",
@@ -872,6 +875,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				// 2026-09-17-federation-grants-offline-delegation, D12): the wait
 				// is what the stamp says.
 				{ code: "upstream_rejected", reason: "invalid_client", retryAfterSeconds: 300 },
+				true,
 			],
 			// An upstream that echoes what it was sent, in the one field that gets
 			// echoed on: not a code, so not repeated.
@@ -879,6 +883,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				"an error code that is a secret",
 				Object.assign(new Error(`leaked ${SECRET}`), { error: `bad token ${SECRET}` }),
 				{ code: "upstream_rejected", reason: "unknown" },
+				false,
 			],
 			[
 				"a rate limit with advice",
@@ -888,34 +893,51 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				}),
 				// The advice is honoured for the backoff at least: thirty seconds.
 				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
+				true,
 			],
 			[
 				"a rate limit without",
 				Object.assign(new Error("x"), { status: 429 }),
 				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
+				true,
 			],
 			[
 				"an outage",
 				Object.assign(new Error("x"), { status: 503 }),
 				{ code: "temporarily_unavailable", reason: "upstream" },
+				true,
+			],
+			// A gateway that timed out forwarded the request: the IdP may have rotated.
+			[
+				"a gateway timeout",
+				Object.assign(new Error("x"), { status: 504 }),
+				{ code: "temporarily_unavailable", reason: "upstream" },
+				false,
+			],
+			[
+				"an outage the IdP names in its body, at a status that is not a 5xx",
+				Object.assign(new Error("x"), { error: "temporarily_unavailable", status: 400 }),
+				{ code: "upstream_rejected", reason: "temporarily_unavailable" },
+				false,
 			],
 		];
 
 		it.each(refusals)(
 			"changes nothing in the record for anything else — %s",
-			async (_, error, denial) => {
+			async (_, error, denial, refunded) => {
 				const grant = await h.seed();
 				setNow(GONE);
 				const before = await h.store.open("g-1", GONE);
 				h.refresh.mockRejectedValueOnce(error);
 				expect(await retrieve()).toStrictEqual({ ok: false, ...denial });
 				const after = await h.store.open("g-1", GONE);
-				// A rotation given back, for an attempt the upstream answered, bumps
-				// the version; one whose outcome is unknown stays taken.
-				const given =
-					(after?.grant as { rotations?: { count: number } } | undefined)?.rotations?.count === 0;
+				// A rotation given back bumps the version; one kept leaves it.
 				expect(after).toMatchObject({
-					grant: { status: "active", version: grant.version + (given ? 1 : 0) },
+					grant: {
+						status: "active",
+						version: grant.version + (refunded ? 1 : 0),
+						rotations: { count: refunded ? 0 : 1 },
+					},
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
 				// Nothing but the failure stamp and the rotation: the credentials

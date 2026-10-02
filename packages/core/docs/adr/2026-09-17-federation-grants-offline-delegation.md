@@ -1138,20 +1138,31 @@ and the retrieval behaves as before; boot warns once. What "two rotations per
 lifetime" above promised is replaced by this bound, and it holds whatever the
 upstream answers.
 
-The budget counts rotations, and D12's backoff counts failures; neither counts
-the other. A rotation the upstream definitely did not perform is given back
-(the store's `refundRotation`, optional as `takeRotation` is, and required with
-it later): an HTTP error answer, a 5xx or a 429 or a refusal, or a request that
-never left (refused, unresolvable, unreachable, a certificate not verified).
-The give-back is guarded by the version the take was made at and bumps it,
-which makes it once per attempt; one that is refused or throws is reported and
-leaves the rotation spent, and changes no answer. A failure whose outcome is
-unknown keeps its rotation: a request given up on, or a connection lost after
-it was sent, may have rotated. So an upstream that hangs still spends the
-budget: one attempt per refresh lock, thirty seconds under the defaults, so
-about twelve minutes of hanging spend all 24. Bounding that is the failure
-backoff's to do, not the budget's. An `invalid_grant` gives nothing back: it
-ends the credential, and an activation starts the budget afresh.
+The budget counts rotations that may have happened, and D12's backoff counts
+failures; neither counts the other. A rotation the upstream provably did not
+perform is given back (the store's `refundRotation`, optional as
+`takeRotation` is, and required with it later): an answer that proves the
+request was not acted on — a 4xx but 408 and 499, a 501 or a 503, or a code
+this provider knows that is not an outage's — or a request that never left
+(refused, unresolvable, unreachable, a connect that timed out, a TLS handshake
+or certificate that failed). Anything else keeps its rotation: a request given
+up on, a connection lost after it was sent, a 500, a 502, a 504 or any other
+5xx (a gateway that timed out had forwarded the request), an outage the IdP
+names in its body (stamped as "may have been processed"), and a code it does
+not know. The give-back is guarded by the version the take was made at and
+bumps it, which makes it once per attempt; one that is refused or throws is
+reported and leaves the rotation spent, and changes no answer, and a failure
+stamp that lost on the version gives nothing back. It is a version-bumping
+write made under the lock after a failure, the same class as a credential
+write in flight: one that may still land keeps the lock, and it is spent of
+the one persist budget the lock is sized for. So an upstream that hangs, or
+that answers 500, 502 or 504, still spends the budget: one attempt per refresh
+lock or per backoff, thirty seconds under the defaults, so about twelve
+minutes of it spend all 24. Bounding that is the failure backoff's to do, not
+the budget's. An `invalid_grant` gives nothing back: it ends the credential,
+and an activation starts the budget afresh. The budget binds only with a store
+that implements `takeRotation`, and gives back only with one that implements
+`refundRotation` too: the Redis store's members follow separately.
 
 A refresh no longer has to take whatever it is answered with: a fresh token
 that carries less of the asked-for scope than a held token that is still good
@@ -1168,7 +1179,9 @@ fresh token that lacks a scope of the grant's own is the user narrowing the
 grant upstream, and it is stored and answered like any other; so is the
 narrower token once the held one has died. The marker withholds a refresh only
 while a stored token serves the request: once none does, the upstream is asked
-as usual, within the budget.
+as usual, within the budget. That includes a request for a consented scope the
+held token lacks: it refreshes, and the fresh token is stored, so the broadened
+held token is gone.
 
 ### D11 — One typed result, one HTTP mapping
 

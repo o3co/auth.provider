@@ -25,8 +25,8 @@
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
-	isDefiniteFederationUpstreamFailure,
 	isFederationUpstreamOutage,
+	readFederationUpstreamDelivery,
 	readFederationUpstreamOutage,
 } from "#/federation-tokens/upstreamOutage.mjs";
 
@@ -373,79 +373,100 @@ describe("readFederationUpstreamOutage — the walk, saying when a field it read
 	});
 });
 
-describe("isDefiniteFederationUpstreamFailure — whether what the upstream did is known: nothing", () => {
-	it("is an answer with an HTTP error status, on the error, its cause or the Response it was raised over", () => {
-		for (const status of [400, 401, 429, 500, 503]) {
-			expect(isDefiniteFederationUpstreamFailure(Object.assign(new Error("e"), { status }))).toBe(
-				true,
+describe("readFederationUpstreamDelivery — whether the request is known not to have been acted on", () => {
+	const statusError = (status: number, over: object = {}) =>
+		Object.assign(new Error("e"), { status }, over);
+
+	it("is `unprocessed` for an answer the upstream gives without acting: a 4xx but 408 and 499, a 501 and a 503", () => {
+		for (const status of [400, 401, 403, 404, 429, 501, 503]) {
+			expect(readFederationUpstreamDelivery(statusError(status)), String(status)).toBe(
+				"unprocessed",
 			);
 			expect(
-				isDefiniteFederationUpstreamFailure(new Error("e", { cause: new ForeignResponse(status) })),
-			).toBe(true);
+				readFederationUpstreamDelivery(new Error("e", { cause: new ForeignResponse(status) })),
+				`Response ${status}`,
+			).toBe("unprocessed");
 		}
-		// openid-client's shape: the IdP's code on the error, the status beside it.
-		expect(
-			isDefiniteFederationUpstreamFailure(
-				Object.assign(new Error("server responded with an error"), {
-					error: "invalid_grant",
-					status: 400,
-				}),
-			),
-		).toBe(true);
-		// An adapter's own object carrying the IdP's code.
-		expect(isDefiniteFederationUpstreamFailure({ error: "temporarily_unavailable" })).toBe(true);
 	});
 
-	it("is a request that never left: refused, unresolvable, unreachable, or a certificate not verified", () => {
+	it("is `unknown` for a status that may follow a forwarded request: 408, 499, 500, 502, 504 and any other 5xx", () => {
+		for (const status of [408, 499, 500, 502, 504, 520, 522, 524, 599]) {
+			expect(readFederationUpstreamDelivery(statusError(status)), String(status)).toBe("unknown");
+			expect(
+				readFederationUpstreamDelivery(new Error("e", { cause: new ForeignResponse(status) })),
+				`Response ${status}`,
+			).toBe("unknown");
+		}
+	});
+
+	it("is `unprocessed` for a request that never left: refused, unresolvable, unreachable, a connect timeout, a certificate or handshake that failed", () => {
 		for (const code of [
 			"ECONNREFUSED",
 			"ENOTFOUND",
 			"EAI_AGAIN",
 			"EHOSTUNREACH",
 			"ENETUNREACH",
-			"CERT_HAS_EXPIRED",
-			"ERR_TLS_CERT_ALTNAME_INVALID",
 			"ERR_INVALID_URL",
 			"UND_ERR_CONNECT_TIMEOUT",
+			"CERT_HAS_EXPIRED",
+			"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+			"ERR_TLS_CERT_ALTNAME_INVALID",
+			"ERR_TLS_HANDSHAKE_TIMEOUT",
 		]) {
 			expect(
-				isDefiniteFederationUpstreamFailure(new TypeError("fetch failed", { cause: coded(code) })),
+				readFederationUpstreamDelivery(new TypeError("fetch failed", { cause: coded(code) })),
 				code,
-			).toBe(true);
+			).toBe("unprocessed");
 		}
 	});
 
-	it("is not a request given up on, or a connection lost once the request may have been sent: the upstream may have rotated", () => {
-		for (const name of ["AbortError", "TimeoutError"]) {
-			expect(
-				isDefiniteFederationUpstreamFailure(Object.assign(new Error("t"), { name })),
-				name,
-			).toBe(false);
-		}
+	it("is `unknown` for a request given up on, or a connection lost once it may have been sent", () => {
 		for (const code of [
 			"ECONNRESET",
 			"ETIMEDOUT",
 			"EPIPE",
 			"UND_ERR_SOCKET",
 			"HPE_INVALID_CONSTANT",
+			"ERR_TLS_RENEGOTIATION_DISABLED",
+			"ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
 		]) {
 			expect(
-				isDefiniteFederationUpstreamFailure(new TypeError("fetch failed", { cause: coded(code) })),
+				readFederationUpstreamDelivery(new TypeError("fetch failed", { cause: coded(code) })),
 				code,
-			).toBe(false);
+			).toBe("unknown");
 		}
-		expect(isDefiniteFederationUpstreamFailure(new Error("something"))).toBe(false);
-		expect(isDefiniteFederationUpstreamFailure("thrown string")).toBe(false);
-		expect(isDefiniteFederationUpstreamFailure(undefined)).toBe(false);
+		for (const name of ["AbortError", "TimeoutError"]) {
+			expect(readFederationUpstreamDelivery(Object.assign(new Error("t"), { name })), name).toBe(
+				"unknown",
+			);
+		}
 	});
 
-	it("is not what a field it cannot read might have said", () => {
+	it("reads the name first at every level, the thrown value's included: a timeout beside a 503 is unknown", () => {
+		expect(
+			readFederationUpstreamDelivery(
+				Object.assign(new Error("t"), { name: "TimeoutError", status: 503 }),
+			),
+		).toBe("unknown");
+		expect(
+			readFederationUpstreamDelivery(
+				new Error("wrapped", {
+					cause: Object.assign(new Error("t"), { name: "AbortError", status: 400 }),
+				}),
+			),
+		).toBe("unknown");
+	});
+
+	it("is `silent` for what says nothing, and `unknown` for a field it cannot read", () => {
+		expect(readFederationUpstreamDelivery(new Error("something"))).toBe("silent");
+		expect(readFederationUpstreamDelivery("thrown string")).toBe("silent");
+		expect(readFederationUpstreamDelivery(undefined)).toBe("silent");
 		const hostile = new Proxy(new Error("x"), {
 			get: (target, key) => {
 				if (key === "status") throw new Error("trap");
 				return Reflect.get(target, key);
 			},
 		});
-		expect(isDefiniteFederationUpstreamFailure(hostile)).toBe(false);
+		expect(readFederationUpstreamDelivery(hostile)).toBe("unknown");
 	});
 });
