@@ -93,6 +93,8 @@ function setup(
 		readonly boundary?: () => Promise<Date | null>;
 		readonly store?: MfaTransactionStore;
 		readonly factorStore?: MfaFactorStore;
+		/** `mfa.manage.maxAgeSeconds` in milliseconds; five minutes by default. */
+		readonly manageMaxAgeMs?: number;
 	} = {},
 ) {
 	const store = options.store ?? createMemoryMfaTransactionStore({ now: () => clock });
@@ -110,7 +112,7 @@ function setup(
 		...(options.boundary === undefined
 			? {}
 			: { subjectRevocation: { revokedBefore: options.boundary } }),
-		manageMaxAgeMs: MANAGE_MS,
+		manageMaxAgeMs: options.manageMaxAgeMs ?? MANAGE_MS,
 		now: () => clock,
 	});
 	return { store, factorStore, recovery };
@@ -429,6 +431,8 @@ describe("a release", () => {
 
 	it("judges the release at a time taken after the sessions boundary was read: a slow read of a boundary set meanwhile is no boundary ahead", async () => {
 		const { store, recovery } = setup({
+			// An authorization that outlives the slow read.
+			manageMaxAgeMs: 3_600_000,
 			boundary: async () => {
 				// The read takes ten minutes; the boundary it answers was set during it.
 				clock += 10 * 60_000;
