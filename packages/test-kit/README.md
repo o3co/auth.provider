@@ -226,17 +226,9 @@ harness, so a hook that uses `this` keeps working, and
 `supports` is the suite's; the port has `list`, `update` and its
 unconditional reset, so their cases always run. Beside the suite, it holds
 the store to the factor set's own: an update keeping the generation, so a
-write at it still lands; a tombstone standing — a late first binding and
-a late write at a generation read before the reset refused, nothing
-written; the winner of each race — two first bindings, two removals, many
-creates, a removal and a create, split across both instances — answering the
-generation the set is then read at; and, with `forceExpire`, a reset's
-tombstone expiring — of a set written and of one never written — to read as
-absent, a re-create then repeating neither tombstone's generation. The last
-two stand in for what the generic suite does not check yet: the race case
-until its races compare the winner's generation with the set read after
-them, and the expiry case until its expiry cases expire a set a reset
-emptied, not only one its removals emptied. A store reached over HTTP runs many requests per race case: give
+write at it still lands; and a tombstone standing — a late first binding
+and a late write at a generation read before the reset refused, nothing
+written. A store reached over HTTP runs many requests per race case: give
 its cases a longer per-case timeout.
 
 The rules are core's conditional-write convention for a set

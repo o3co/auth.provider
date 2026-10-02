@@ -460,9 +460,6 @@ const CASE = {
 		"a tombstone stands: a late first binding and a late write at a generation read before the reset are refused, and write nothing",
 	unconditional:
 		"every unconditional membership write that changes the members moves the generation: the old one then answers conflict",
-	race: "the winner of a race answers the generation the set is then read at: two first bindings, two removals, many creates, a removal and a create, split across both instances",
-	resetExpiry:
-		"a reset's tombstone expires: a set reset, and a set never written reset, read as absent once the clock passes the deadline, and a re-create repeats neither tombstone's generation",
 } as const;
 
 describe("the binding refuses a store that breaks the factor set's fence", () => {
@@ -549,7 +546,7 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 		[
 			"one whose tombstone never expires when a reset left it",
 			"reset-tombstone-never-expires",
-			[CASE.resetExpiry],
+			[CASE.tombstoneExpired],
 		],
 		[
 			"one that keeps a tombstone's deadline on a set written to after it",
@@ -577,7 +574,6 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 			CASE.twoRemovals,
 			CASE.manyCreates,
 			CASE.removalRacingCreate,
-			CASE.race,
 		]);
 	});
 
@@ -621,7 +617,7 @@ describe("the binding", () => {
 			supports: { unreachable: true, forceExpire: true },
 		}).map((contractCase) => contractCase.name);
 		expect(generic.filter((name) => name.startsWith("not run:"))).toEqual([]);
-		expect(names).toEqual([...generic, CASE.update, CASE.tombstone, CASE.race, CASE.resetExpiry]);
+		expect(names).toEqual([...generic, CASE.update, CASE.tombstone]);
 	});
 
 	it("calls the harness's hooks on the harness, so one that uses this keeps working", async () => {
@@ -720,7 +716,7 @@ describe("each case", () => {
 				build: async () => ({ store: createMemoryMfaFactorStore() }),
 				...(supports === undefined ? {} : { supports }),
 			}).map((contractCase) => contractCase.name);
-		const expiry = [CASE.tombstoneExpired, CASE.heldSet, CASE.recreate, CASE.resetExpiry];
+		const expiry = [CASE.tombstoneExpired, CASE.heldSet, CASE.recreate];
 		const notRun = (cases: readonly string[]) =>
 			cases.filter((name) => name.startsWith("not run:"));
 		const none = names();
@@ -729,7 +725,6 @@ describe("each case", () => {
 			"not run: the held-set expiry case (supports.forceExpire not declared)",
 			"not run: the re-create after expiry case (supports.forceExpire not declared)",
 			"not run: the outage case (supports.unreachable not declared)",
-			"not run: the reset tombstone expiry case (supports.forceExpire not declared)",
 		]);
 		for (const name of [...expiry, CASE.outage]) expect(none).not.toContain(name);
 		expect(none).toContain(CASE.tombstone);
@@ -751,7 +746,7 @@ describe("each case", () => {
 			build: async () => ({ store: createMemoryMfaFactorStore() }),
 			supports: { forceExpire: true },
 		});
-		for (const name of [CASE.tombstoneExpired, CASE.resetExpiry]) {
+		for (const name of [CASE.tombstoneExpired, CASE.heldSet, CASE.recreate]) {
 			const expired = cases.find((contractCase) => contractCase.name === name);
 			await expect(expired?.run(), name).rejects.toThrow(/forceExpire/);
 		}
