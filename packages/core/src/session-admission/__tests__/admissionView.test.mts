@@ -274,8 +274,8 @@ const unrecordable = (amr: unknown): UserSession => record({ amr: amr as never }
 const UNRECORDABLE_AMRS: readonly unknown[] = [["pwd", ""], ["pwd", 1], "pwd"];
 
 describe("secondFactorRecordable: whether a second factor can be recorded on the session", () => {
-	it("is typed `boolean | undefined` on SessionView", () => {
-		expectTypeOf<SessionView["secondFactorRecordable"]>().toEqualTypeOf<boolean | undefined>();
+	it("is typed `boolean` on SessionView: every view says it", () => {
+		expectTypeOf<SessionView["secondFactorRecordable"]>().toEqualTypeOf<boolean>();
 		expect(true).toBe(true);
 	});
 

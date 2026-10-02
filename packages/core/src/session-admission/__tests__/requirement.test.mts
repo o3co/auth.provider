@@ -870,7 +870,7 @@ describe("the shapes the contract names", () => {
 			readonly authTime: Date;
 			readonly expiresAt: Date;
 			readonly enrollmentFacts?: SessionEnrollmentFacts;
-			readonly secondFactorRecordable?: boolean;
+			readonly secondFactorRecordable: boolean;
 		}>();
 		expectTypeOf<SessionEnrollmentFacts>().toEqualTypeOf<{
 			readonly witness: MfaEnrollmentWitness;
