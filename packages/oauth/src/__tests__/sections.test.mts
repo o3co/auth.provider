@@ -488,6 +488,17 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toContain('"urll"');
 	});
+
+	it("refuses a key oauth.clientIdMetadataDocuments does not declare, naming it", async () => {
+		const err = await refusal((config) =>
+			oauthWith(config, {
+				clientIdMetadataDocuments: { enabled: false, allowdHosts: ["a.example"] },
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain('"allowdHosts"');
+	});
 });
 
 describe("the switches the modules were built with, held to the ones boot parses", () => {
