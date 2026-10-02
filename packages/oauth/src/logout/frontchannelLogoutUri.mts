@@ -28,10 +28,10 @@ export type FrontchannelLogoutUriRefusal =
 	| "not-a-string"
 	| "unreadable";
 
-/** Where the URI is used: the code exchange's RP registration, or logout. */
-export type FrontchannelLogoutUriSite = "authorization_code" | "logout";
+/** Where the URI is used: logout, from an RP the session RP registry answers. */
+export type FrontchannelLogoutUriSite = "logout";
 
-/** What a front-channel logout URI is read from: a client record or a registered RP. */
+/** What a front-channel logout URI is read from: a registered RP. */
 export interface FrontchannelLogoutUriSource {
 	readonly clientId?: unknown;
 	readonly frontchannelLogoutUri?: unknown;
@@ -89,32 +89,6 @@ const refuser =
 		return undefined;
 	};
 
-/**
- * The source's front-channel logout URI, when it may be used; otherwise
- * `undefined`. Absent (`undefined`, `null`, `""`) is silent. Anything else
- * must be a string whose parsed protocol is `http:` or `https:`, on any host,
- * the rule the bundled client schema applies at registration. A refused
- * value is one warn with the reason, never the value. Every read goes through
- * core's `guardedRead` and the warn is guarded, so this never throws:
- * front-channel logout is best-effort, so a refusal drops only this URI.
- *
- * Interim: a custom `ClientRepository` or session RP registry bypasses the
- * registration schema, so the value is checked where it is used. Exit
- * condition: core validating every client record at the repository
- * boundary; once it does, the rule moves to core and this helper goes.
- */
-export function usableFrontchannelLogoutUri(
-	source: FrontchannelLogoutUriSource | null | undefined,
-	site: FrontchannelLogoutUriSite,
-	logger: Pick<Logger, "warn">,
-): string | undefined {
-	if (source === null || source === undefined) return undefined;
-	return checkedUri(
-		guardedRead(source, "frontchannelLogoutUri"),
-		refuser(site, () => guardedRead(source, "clientId")?.value, logger),
-	);
-}
-
 /** An RP's front-channel registration as read once: plain values, the URI checked. */
 export interface UsableFrontchannelRP {
 	readonly clientId: string;
@@ -123,9 +97,17 @@ export interface UsableFrontchannelRP {
 }
 
 /**
- * The RP's front-channel fields, each read once, when its URI may be used
- * (the rule of {@link usableFrontchannelLogoutUri}); otherwise `undefined`.
- * A session flag whose read throws skips the RP with one
+ * The RP's front-channel fields, each read once, when its URI may be used;
+ * otherwise `undefined`. Absent (`undefined`, `null`, `""`) is silent.
+ * Anything else must be a string whose parsed protocol is `http:` or
+ * `https:`, on any host, the scheme rule core's client-record schema applies. A
+ * refused value is one warn with the reason, never the value. Every read goes
+ * through core's `guardedRead` and the warn is guarded: front-channel logout
+ * is best-effort, so a refusal drops only this RP.
+ *
+ * Checked where it is used: an entry a custom session RP registry answers is
+ * not read through core's client-record boundary, so nothing upstream holds
+ * it to that rule. A session flag whose read throws skips the RP with one
  * `logout_frontchannel_iframe_skipped` warn, as an iframe that cannot be
  * built does. Never throws. Who renders from the answer reads nothing of the
  * RP again.

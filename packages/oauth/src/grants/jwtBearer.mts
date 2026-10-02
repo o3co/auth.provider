@@ -436,8 +436,12 @@ function resolveScope(
 	if (requested.length === 0) {
 		if (client) {
 			// The DECLARED default, never the whole allowlist: "forgot to send
-			// scope" must not be the maximum grant. The allowlist filter still
-			// applies because custom repositories are not schema-validated.
+			// scope" must not be the maximum grant. Filtered by the allowlist
+			// even so: a grant handler is reachable through
+			// `grantHandlerResolver`, so its caller may hand it an
+			// `authenticatedClient` that did not come through core's
+			// client-record boundary, which holds defaultScopes ⊆ allowedScopes.
+			// The assertion's `scope` is a ceiling on it too (`within`).
 			const allowed = client.allowedScopes ?? [];
 			if (client.defaultScopes !== undefined) {
 				return { scopes: client.defaultScopes.filter((s) => allowed.includes(s) && within(s)) };

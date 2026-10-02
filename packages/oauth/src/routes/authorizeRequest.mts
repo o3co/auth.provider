@@ -270,8 +270,10 @@ export const resolveScopes = async (
 	if (requestedScopes.length > 0) {
 		allowedFilteredScopes = requestedScopes.filter((s) => allowedScopes.includes(s));
 	} else if (client.defaultScopes !== undefined) {
-		// Filtered even so: a custom ClientRepository is not schema-validated.
-		allowedFilteredScopes = client.defaultScopes.filter((s) => allowedScopes.includes(s));
+		// Within the allowlist already: the client is the boundary's validated
+		// copy, whose defaultScopes are a subset of its allowedScopes (a
+		// document client declares none).
+		allowedFilteredScopes = client.defaultScopes;
 	} else if (allowedScopes.length === 0) {
 		allowedFilteredScopes = [];
 	} else {
