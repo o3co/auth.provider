@@ -589,6 +589,7 @@ describe("a composition with no authorization_code grant", () => {
 		expect(meta.metadata).not.toHaveProperty("code_challenge_methods_supported");
 		expect(meta.metadata).not.toHaveProperty("request_uri_parameter_supported");
 		expect(meta.metadata).not.toHaveProperty("authorization_response_iss_parameter_supported");
+		expect(meta.metadata).not.toHaveProperty("response_modes_supported");
 	});
 
 	it("advertises no acr table: acr_values are asked for at /authorize", async () => {
@@ -618,5 +619,12 @@ describe("a composition with no authorization_code grant", () => {
 			grantHandlerResolver: grantResolver("authorization_code"),
 		});
 		expect(meta.metadata?.authorization_response_iss_parameter_supported).toBe(true);
+	});
+
+	it("with the grant, advertises the query response mode alone: /authorize answers in the query", async () => {
+		const meta = await discoveryContribution({
+			grantHandlerResolver: grantResolver("authorization_code"),
+		});
+		expect(meta.metadata?.response_modes_supported).toEqual(["query"]);
 	});
 });
