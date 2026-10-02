@@ -18,7 +18,9 @@
  * What a refresh the upstream answered ends in: an answer that cannot be read
  * as a token, or whose type may not be handed on, is refused, while a rotated
  * refresh token is still kept, best effort; otherwise the refreshed record is
- * written and its token answered. Every write lands only on the record the
+ * written and its token answered. A record with no finite expiry, refreshed
+ * because it holds a refresh token, keeps answering its stored token when the
+ * answer's lifetime is refused, as it did before it was due. Every write lands only on the record the
  * refresh was made from; a refresh whose record was removed or rewritten
  * meanwhile is dropped, never written over what replaced it.
  */
@@ -52,9 +54,7 @@ export const recordRefresh = async (
 		accessToken,
 		rotatedRefreshToken,
 		rotatedIdToken,
-		derivedExpiry,
-		obtainedAt,
-		lifetimeIsBroken,
+		lifetime,
 		tokenTypeIsBroken,
 		nextTokenType,
 	} = reading;
@@ -102,7 +102,7 @@ export const recordRefresh = async (
 	};
 
 	// The adapter answered something this route cannot read as a token.
-	if (accessToken === undefined || lifetimeIsBroken || tokenTypeIsBroken) {
+	if (accessToken === undefined || !lifetime.accepted || tokenTypeIsBroken) {
 		const dropped = await keepRotatedRefreshToken();
 		if (dropped !== undefined) return answerDiscardedRefresh(ctx, caller, dropped);
 		emitAuditEvent(opts.auditSink, {
@@ -111,15 +111,20 @@ export const recordRefresh = async (
 			subject: sub ?? undefined,
 			ip: req.ip,
 			userAgent: req.get("user-agent"),
-			details: {
-				federation,
-				reason: lifetimeIsBroken
-					? "invalid_expiry"
-					: accessToken === undefined
-						? "no_access_token"
-						: "invalid_token_type",
-			},
+			// The lifetime's verdict tells an upstream's garbage from a getter that threw.
+			details: !lifetime.accepted
+				? { federation, reason: "invalid_expiry", verdict: lifetime.verdict }
+				: {
+						federation,
+						reason: accessToken === undefined ? "no_access_token" : "invalid_token_type",
+					},
 		});
+		if (!lifetime.accepted && currentTokens.expiresAt === null) {
+			if (!isDisclosable(currentTokens)) {
+				return refuseUndisclosableTokenType(ctx, caller, currentTokens.tokenType);
+			}
+			return answerToken(ctx, caller, currentTokens, false);
+		}
 		return res.status(500).json({
 			error: "refresh_failed",
 			error_description: "federation token refresh failed",
@@ -128,17 +133,16 @@ export const recordRefresh = async (
 
 	// 11f: the refreshed record, falling back to the post-lock
 	// snapshot for fields the IdP did not rotate. The expiry comes only
-	// from this answer (`derivedExpiry`): the stored one belongs to the
-	// expired token, and copying it forward would refresh on every
-	// request. `null` omits `expires_in` (optional in RFC 6749 §5.1).
-	const nextExpiresAt = derivedExpiry;
+	// from this answer (`lifetime`, always a finite end): the stored one
+	// belongs to the expired token, and copying it forward would refresh on
+	// every request.
 	const updatedTokens = {
 		accessToken,
 		refreshToken: rotatedRefreshToken ?? currentTokens.refreshToken,
 		// IdPs like Google/GitHub typically return no new id_token on refresh;
 		// keep the stored one, which logout sends as `id_token_hint`.
 		idToken: rotatedIdToken ?? currentTokens.idToken,
-		expiresAt: nextExpiresAt,
+		expiresAt: lifetime.expiresAt,
 		// What the upstream last named, else what the record carried; judged
 		// below, before the write, so the write and the response agree.
 		tokenType: nextTokenType,
@@ -152,8 +156,8 @@ export const recordRefresh = async (
 		// this route does not own.
 		grantedScope: canonicalScope(currentTokens.grantedScope),
 		// From this answer alone, like the expiry: the stored one dates the
-		// token being replaced. `undefined` with no finite expiry.
-		obtainedAt,
+		// token being replaced. `undefined` for an end stated only as an instant.
+		obtainedAt: lifetime.obtainedAt,
 	};
 
 	// The refresh worked but its token may not be handed on. Keep the

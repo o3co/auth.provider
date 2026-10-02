@@ -1376,7 +1376,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect((stored.expiresAt as Date).getTime()).toBeGreaterThan(Date.now());
 		});
 
-		it("stores no expiry and omits expires_in when the provider names neither", async () => {
+		it("stores an end for a refresh answer that names neither, and answers expires_in", async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{ accessToken: string }>;
@@ -1397,11 +1397,11 @@ describe("POST /oauth/federation/:name/token", () => {
 			const res = await postFedToken(app, "google", token);
 
 			expect(res.status).toBe(200);
-			expect("expires_in" in res.body).toBe(false);
+			expect(res.body.expires_in).toBeGreaterThan(86_000);
 			const stored = (fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3] as {
 				expiresAt: Date | null;
 			};
-			expect(stored.expiresAt).toBeNull();
+			expect(stored.expiresAt).toBeInstanceOf(Date);
 		});
 
 		// -------------------------------------------------------------------------
@@ -1607,6 +1607,70 @@ describe("POST /oauth/federation/:name/token", () => {
 
 					expectInvalidExpiry(res, fedTokenStore, auditSink);
 				});
+
+				it.each([
+					["malformed", () => ({ expiresIn: Number.NaN })],
+					["contradictory", () => ({ expiresIn: 3600, expiresAt: null })],
+					["spent", () => ({ expiresAt: new Date(Date.now() - 60_000) })],
+					[
+						"unreadable",
+						() =>
+							Object.defineProperty({}, "expiresIn", {
+								enumerable: true,
+								get: () => {
+									throw new Error("getter");
+								},
+							}),
+					],
+				])(
+					"refuses a %s lifetime, audits that verdict, and keeps only the rotated refresh token",
+					async (verdict, lifetime) => {
+						const obtainedAt = new Date(Date.now() - 3_600_000);
+						const expiresAt = new Date(Date.now() - 1000);
+						const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
+						const fedTokenStore = makeFedTokenStore({
+							get: vi.fn().mockResolvedValue({ ...baseFedTokens, obtainedAt, expiresAt }),
+						});
+						const answer = Object.assign(lifetime(), {
+							accessToken: "new-at",
+							refreshToken: "rotated-rt",
+						});
+						const refreshProvider = {
+							...federationBase("google"),
+							refreshToken: vi.fn().mockResolvedValue(answer),
+						} as unknown as FederationProvider;
+						const app = buildApp({
+							fedTokenStore,
+							auditSink,
+							getFederationProviders: () =>
+								new Map<string, FederationProvider>([["google", refreshProvider]]),
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(500);
+						expect(res.body).toEqual({
+							error: "refresh_failed",
+							error_description: "federation token refresh failed",
+						});
+						expect(auditSink.record).toHaveBeenCalledTimes(1);
+						const event = (auditSink.record as ReturnType<typeof vi.fn>).mock.calls[0][0];
+						expect(event).toMatchObject({
+							type: "federation.token.refresh_failed",
+							details: { federation: "google", reason: "invalid_expiry", verdict },
+						});
+						for (const secret of ["new-at", "rotated-rt", "upstream-at-xyz", "upstream-rt"]) {
+							expect(JSON.stringify(res.body)).not.toContain(secret);
+							expect(JSON.stringify(event)).not.toContain(secret);
+						}
+						expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+						expect((fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3]).toEqual({
+							...baseFedTokens,
+							obtainedAt,
+							expiresAt,
+							refreshToken: "rotated-rt",
+						});
+					},
+				);
 
 				it("refuses an expiresAt equal to now", async () => {
 					await withFrozenDate(async () => {
@@ -1882,6 +1946,39 @@ describe("POST /oauth/federation/:name/token", () => {
 					});
 				});
 
+				it.each([
+					["names neither field", {}],
+					["names `null` alone as expiresAt", { expiresAt: null }],
+					["names `null` alone as expiresIn", { expiresIn: null }],
+					["names `null` on both fields", { expiresIn: null, expiresAt: null }],
+				])(
+					"stores an answer that %s with the maximum as its end, obtained when the call began",
+					async (_label, lifetime) => {
+						await withFrozenDate(async () => {
+							const CALL_MS = 5000;
+							const calledAt = Date.now();
+							const { app, fedTokenStore } = cappedApp(() => {
+								vi.setSystemTime(Date.now() + CALL_MS);
+								return { accessToken: "new-at", refreshToken: "rotated-rt", ...lifetime };
+							});
+							const res = await postFedToken(app, "google", await mintAccessToken());
+
+							expect(res.status).toBe(200);
+							expect(res.body.expires_in).toBe(DAY_MS / 1000);
+							expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+							expect(
+								(fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3],
+							).toEqual({
+								...baseFedTokens,
+								accessToken: "new-at",
+								refreshToken: "rotated-rt",
+								expiresAt: new Date(calledAt + CALL_MS + DAY_MS),
+								obtainedAt: new Date(calledAt),
+							});
+						});
+					},
+				);
+
 				it("caps an absurd expiresIn at 24 hours by default", async () => {
 					await withFrozenDate(async () => {
 						const { app, fedTokenStore } = cappedApp({ accessToken: "new-at", expiresIn: 1e12 });
@@ -2108,22 +2205,6 @@ describe("POST /oauth/federation/:name/token", () => {
 					expect(res.body.error).toBe("refresh_failed");
 				},
 			);
-
-			it("keeps `null` meaning the upstream named no lifetime", async () => {
-				// `null` is a statement and `undefined` is silence. Stated alone it
-				// is believed, and the token is stored with no finite expiry. Paired
-				// with a finite `expiresIn` it would be a contradiction, which is
-				// refused instead - see the cases above.
-				const { app, fedTokenStore } = refreshingApp({
-					accessToken: "new-at",
-					expiresAt: null,
-				});
-				const res = await postFedToken(app, "google", await mintAccessToken());
-
-				expect(res.status).toBe(200);
-				expect("expires_in" in res.body).toBe(false);
-				expect(storedExpiry(fedTokenStore)).toBeNull();
-			});
 
 			it("treats an empty access token as no access token", async () => {
 				// `access_token: ""` is not a credential, and answering 200 with one
@@ -4653,21 +4734,153 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 		});
 	});
 
-	it("records no obtainedAt for a token with no finite expiry, and drops the replaced token's", async () => {
+	it("refreshes a record with no finite expiry that holds a refresh token (linked, or stored by an earlier refresh) on first use, and stores it capped", async () => {
+		await withFrozenDate(async () => {
+			const calledAt = Date.now();
+			const store = await seeded({
+				...baseFedTokens,
+				expiresAt: null,
+				obtainedAt: undefined,
+				refreshToken: "link-rt",
+			});
+			const DAY_MS = 86_400_000;
+			const CALL_MS = 5000;
+			const { app, provider } = appWith(store, async () => {
+				vi.setSystemTime(Date.now() + CALL_MS);
+				return { accessToken: "refreshed-at", expiresIn: (10 * DAY_MS) / 1000 };
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+
+			expect(provider.refreshToken).toHaveBeenCalledTimes(1);
+			expect(provider.refreshToken).toHaveBeenCalledWith("link-rt");
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("refreshed-at");
+			expect(res.body.expires_in).toBe(DAY_MS / 1000);
+			expect(stored?.expiresAt).toEqual(new Date(calledAt + CALL_MS + DAY_MS));
+			expect(stored?.obtainedAt).toEqual(new Date(calledAt));
+		});
+	});
+
+	it.each([
+		["malformed", { expiresIn: Number.NaN }],
+		["contradictory", { expiresIn: 3600, expiresAt: null }],
+	])(
+		"keeps a link-time record with no finite expiry serving its stored token when the refresh answers a %s lifetime, with the rotated refresh token",
+		async (verdict, lifetime) => {
+			const store = await seeded({
+				...baseFedTokens,
+				expiresAt: null,
+				obtainedAt: undefined,
+				refreshToken: "link-rt",
+			});
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
+			const provider = {
+				...federationBase("google"),
+				refreshToken: vi.fn(async () => ({
+					accessToken: "new-at",
+					refreshToken: "rotated-rt",
+					...lifetime,
+				})),
+			} as unknown as FederationProvider;
+			const app = buildApp({
+				fedTokenStore: store,
+				auditSink,
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("upstream-at-xyz");
+			expect("expires_in" in res.body).toBe(false);
+			expect(stored).toEqual({
+				...baseFedTokens,
+				expiresAt: null,
+				obtainedAt: undefined,
+				refreshToken: "rotated-rt",
+			});
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.token.refresh_failed",
+					details: { federation: "google", reason: "invalid_expiry", verdict },
+				}),
+			);
+		},
+	);
+
+	it("refuses a record with no finite expiry whose stored type may not be handed on, when the refresh answers a refused lifetime, and keeps the rotated refresh token", async () => {
 		const store = await seeded({
 			...baseFedTokens,
-			obtainedAt: new Date(Date.now() - 3_600_000),
-			expiresAt: new Date(Date.now() - 1000),
+			expiresAt: null,
+			obtainedAt: undefined,
+			refreshToken: "link-rt",
+			tokenType: "DPoP",
 		});
-		const { app } = appWith(store, async () => ({ accessToken: "new-at" }));
+		const { app } = appWith(store, async () => ({
+			accessToken: "new-at",
+			refreshToken: "rotated-rt",
+			expiresIn: Number.NaN,
+		}));
 
 		const res = await postFedToken(app, "google", await mintAccessToken());
 		const stored = await store.get("sid-1", "google");
 
+		expect(res.status).toBe(502);
+		expect(res.body.error).toBe("upstream_token_ineligible");
+		expect(res.body.access_token).toBeUndefined();
+		expect(stored?.refreshToken).toBe("rotated-rt");
+		expect(stored?.accessToken).toBe("upstream-at-xyz");
+	});
+
+	it("serves a link-time record with no finite expiry and no refresh token as stored, without refreshing", async () => {
+		const store = await seeded({
+			...baseFedTokens,
+			expiresAt: null,
+			obtainedAt: undefined,
+			refreshToken: undefined,
+		});
+		const { app, provider } = appWith(store, async () => ({ accessToken: "never" }));
+
+		const res = await postFedToken(app, "google", await mintAccessToken());
+
+		expect(provider.refreshToken).not.toHaveBeenCalled();
 		expect(res.status).toBe(200);
-		expect(stored?.expiresAt).toBeNull();
-		expect(stored !== null && Object.hasOwn(stored, "obtainedAt")).toBe(true);
-		expect(stored?.obtainedAt).toBeUndefined();
+		expect(res.body.access_token).toBe("upstream-at-xyz");
+		expect("expires_in" in res.body).toBe(false);
+	});
+
+	it("serves a refreshed token that named no lifetime until the buffer before its capped end, then refreshes it", async () => {
+		await withFrozenDate(async () => {
+			const DAY_MS = 86_400_000;
+			const BUFFER_MS = 30_000;
+			const calledAt = Date.now();
+			const store = await seeded({
+				...baseFedTokens,
+				obtainedAt: new Date(calledAt - 3_600_000),
+				expiresAt: new Date(calledAt - 1000),
+			});
+			let issued = 0;
+			const { app, provider } = appWith(store, async () => {
+				issued += 1;
+				return { accessToken: `silent-at-${issued}` };
+			});
+
+			await postFedToken(app, "google", await mintAccessToken());
+			const stored = await store.get("sid-1", "google");
+			vi.setSystemTime(calledAt + DAY_MS - BUFFER_MS - 1);
+			const beforeBuffer = await postFedToken(app, "google", await mintAccessToken());
+			vi.setSystemTime(calledAt + DAY_MS - BUFFER_MS + 1);
+			const withinBuffer = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(stored?.expiresAt).toEqual(new Date(calledAt + DAY_MS));
+			expect(stored?.obtainedAt).toEqual(new Date(calledAt));
+			expect(beforeBuffer.body.access_token).toBe("silent-at-1");
+			expect(withinBuffer.body.access_token).toBe("silent-at-2");
+			expect(provider.refreshToken).toHaveBeenCalledTimes(2);
+		});
 	});
 
 	it.each([
