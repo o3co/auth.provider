@@ -71,12 +71,22 @@ const otherGrants: PublicClient = {
 /** The same kind of client, registered with no `allowedGrantTypes` at all. */
 const { allowedGrantTypes: _omitted, ...noGrants } = { ...gateway, clientId: "client-c" };
 
+/**
+ * The same kind of client, whose record changes between client
+ * authentication and the exchange's own lookup: from its second lookup by
+ * id, the repository answers a `clientUri` the registration schema refuses.
+ */
+const changed: PublicClient = { ...gateway, clientId: "client-d" };
+const changedOnLookup = { ...changed, clientUri: "javascript:alert(1)" } as PublicClient;
+let lookupsOfChanged = 0;
+
 const clients = new Map<string, PublicClient>(
-	[gateway, otherGrants, noGrants].map((client) => [client.clientId, client]),
+	[gateway, otherGrants, noGrants, changed].map((client) => [client.clientId, client]),
 );
 
 const clientRepository: ClientRepository = {
-	findById: async (id) => clients.get(id) ?? null,
+	findById: async (id) =>
+		id === changed.clientId && ++lookupsOfChanged > 1 ? changedOnLookup : (clients.get(id) ?? null),
 	authenticate: async (id, secret) => (secret === SECRET ? (clients.get(id) ?? null) : null),
 };
 
@@ -228,6 +238,28 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 		expect(res.body).toEqual({
 			error: "invalid_request",
 			error_description: "subject_token_type 'urn:example:?quoted?' is not supported",
+		});
+	});
+
+	// The slot holds core's client-record boundary, so the exchange's own
+	// lookup reads through it too: a record it refuses rejects the lookup,
+	// answered as the repository's outage. Client authentication's lookup,
+	// the first, read the registration.
+	it("answers 503 when the exchange's own lookup reads a record core's boundary refuses", async () => {
+		const app = await boot();
+		lookupsOfChanged = 0;
+		const subjectToken = await signSelfIssuedAccessToken({ scope: "read", aud: "billing" });
+
+		const res = await exchange(app, changed.clientId, {
+			subject_token: subjectToken,
+			subject_token_type: ACCESS_TOKEN_TYPE,
+			audience: "billing",
+		});
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "client repository unavailable",
 		});
 	});
 

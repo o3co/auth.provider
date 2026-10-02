@@ -317,6 +317,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 	async function boot(
 		modules: readonly Module[],
 		revocation: RevocationDeclaration = { accessToken: "unsupported", subject: "unsupported" },
+		repository: ClientRepository = confidentialClientRepository,
 	) {
 		const base = makeValidAppConfig();
 		handle = await createApp({
@@ -325,7 +326,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				...modules,
 				defineModule({
 					name: "test:client-repository",
-					provides: { clientRepository: () => confidentialClientRepository },
+					provides: { clientRepository: () => repository },
 				}),
 				defineModule({ name: "test:key-store", provides: { keyStore: () => keyStore } }),
 			],
@@ -377,6 +378,40 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		if (!revocation) throw new Error("the boot did not provide refreshTokenFamilyRevocation");
 		await revocation.revokeFamily(familyId);
 	}
+
+	// The slot holds core's client-record boundary, so the standalone wiring's
+	// own client authentication reads through it: a record it refuses rejects
+	// the lookup, answered as the repository's outage.
+	it("answers 503 when the standalone client authentication reads a record core's boundary refuses", async () => {
+		const refused = {
+			...client,
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientUri: "javascript:alert(1)",
+		} as PublicClient;
+		const { grant } = await boot([], undefined, {
+			findById: async () => null,
+			authenticate: async (id) => (id === client.clientId ? refused : null),
+		});
+
+		const answered = await grant.handle({
+			body: {
+				client_id: client.clientId,
+				client_secret: "secret",
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			},
+			session: {},
+			issuer: ISSUER,
+			metadata: {},
+			authenticatedClient: null,
+		});
+
+		expect(answered.result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "client repository unavailable",
+		});
+	});
 
 	it("answers invalid_request / family_revoked for a subject_token whose family was revoked", async () => {
 		const { grant, components } = await boot([
