@@ -48,7 +48,11 @@ new core, and its `createAppLogger` throws at run time.
 
 Take the new template's `src/` whole, `src/__tests__/` included, and its
 `config/` (`reference.conf`, `application.conf`, `development.conf`), then
-re-apply your own edits. Then:
+re-apply your own edits. The new `src/` imports packages a v0.16.0 scaffold
+does not list, whatever `MFA_MODE` says: `@o3co/auth-provider-mfa`,
+`@o3co/auth-provider-standard` and `zod`. Merge the template's dependency
+changes into your scaffold's `package.json`, at their published versions
+rather than `workspace:*`, and refresh the lockfile. Then:
 
 - `HTTP_PORT` set to the empty string, or to anything but decimal digits,
   refuses the boot; it used to boot on a random port (#948).
@@ -499,8 +503,14 @@ foundation's README,
 the rules every store with conditional writes keeps are
 [adapter-surface.md, Conditional writes](adapter-surface.md#conditional-writes).
 Do every item before `MFA_MODE` (template) / `mfa.mode` `optional` if you
-can, and before `required` at the latest; under `optional` a Store that
-misses one lets a password-only login through where a factor was lost.
+can, and before `required` at the latest. What a missed item opens depends
+on the witness. Where the witness still says the user enrolled and no
+counting factor remains, the login is refused `503` under either mode
+([operator runbook §3](operator-runbook.md#3-what-fail-closed-looks-like-on-each-path)).
+Where a lost enrollment is not reliably witnessed — the Store answers no
+witness, or one it cannot keep — a user whose factors were lost reads as
+never enrolled: under `optional` a password-only login goes through, and
+under `required` whoever holds the password binds a first factor.
 
 **The enrollment witness.**
 
