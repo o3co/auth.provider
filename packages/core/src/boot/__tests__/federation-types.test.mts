@@ -647,6 +647,46 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 		await handle.dispose();
 	});
 
+	it.each(["federations", "federationRedirectPolicies"] as const)(
+		"refuses an entry dispatched by its type whose name the host's %s collector already holds",
+		async (kind) => {
+			const { module, factory } = acmePackage();
+			const kinds = mergeWithBuiltins(undefined);
+			const seeded = {
+				federations: kinds.federations,
+				federationRedirectPolicies: kinds.federationRedirectPolicies,
+			};
+			if (kind === "federations") seeded.federations?.register("corp", providerNamed("corp"));
+			else seeded.federationRedirectPolicies?.register("corp", policyFor("corp"));
+
+			const err = await refusal(
+				createApp({
+					modules: [federationStores, module],
+					bootstrapComponents: federationsConfig({
+						corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
+					}),
+					contributionKinds: seeded,
+				}),
+			);
+
+			expect(err.reason).toBe("duplicate-contribute");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.details).toEqual({
+				reason: "duplicate-contribute",
+				kind,
+				identity: "corp",
+				identityKind: "name",
+				modules: ["federation-acme", `contributionKinds.${kind}`],
+			});
+			expect(err.message).toContain(`contributionKinds.${kind}`);
+			expect(factory).not.toHaveBeenCalled();
+			// Nothing of the pair was registered beside what the host seeded.
+			expect([...(seeded.federations?.entries() ?? [])].map(([name]) => name)).toEqual(
+				kind === "federations" ? ["corp"] : [],
+			);
+		},
+	);
+
 	it("writes a name that is not a bare key quoted in the refusals of the row, so a newline does not split them", async () => {
 		const unhandled = await refusal(
 			createApp({
@@ -819,11 +859,45 @@ describe("core.federations — the dispatched entries are read once they registe
 				kind: "grants",
 				name: "urn:test:early",
 			});
-			expect(err.message).toContain(
-				`${key} was read while the name-keyed contribution factories run`,
-			);
+			expect(err.message).toContain(`${key} was read before every federation was registered`);
 		},
 	);
+
+	it("refuses a type's factory that reads the providers while the dispatched entries register", async () => {
+		const reading = defineModule({
+			name: "federation-acme",
+			requires: ["federationProviders"] as never,
+			contributes: {
+				federationTypes: {
+					acme: {
+						entrySchema: AcmeEntry,
+						factory: ((
+							deps: Record<string, ReadonlyMap<string, unknown>>,
+							instance: { name: string },
+						) => {
+							deps.federationProviders?.get("partner");
+							return providerNamed(instance.name);
+						}) as never,
+						redirectPolicy: (() => policyFor("corp")) as never,
+					},
+				},
+			},
+		});
+
+		const err = await refusal(
+			createApp({ modules: [federationStores, reading], bootstrapComponents: corp }),
+		);
+
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			module: "federation-acme",
+			kind: "federations",
+			name: "corp",
+		});
+		expect(err.message).toContain(
+			"federationProviders was read before every federation was registered",
+		);
+	});
 
 	it("hands a routes factory both projections with every dispatched entry registered", async () => {
 		const seen: unknown[] = [];

@@ -283,10 +283,10 @@ type ReadableFrom = "contributions" | "dispatched federations";
 /** Why a read of a projection is refused now, or `undefined` when it may be read. */
 function closedWhile(gate: ProjectionGate, from: ReadableFrom): string | undefined {
 	if (!gate.open) {
-		return "the provides factories run: it fills as the contributions register, so read it at request time";
+		return "while the provides factories run: it fills as the contributions register, so read it at request time";
 	}
 	if (from === "dispatched federations" && !gate.federationsOpen) {
-		return "the name-keyed contribution factories run: the federations core.federations dispatches by type register after them, so read it in a routes factory or at request time";
+		return "before every federation was registered (during the name-keyed contribution factories or the federation dispatch): read it in a routes factory or at request time";
 	}
 	return undefined;
 }
@@ -296,8 +296,9 @@ function closedWhile(gate: ProjectionGate, from: ReadableFrom): string | undefin
  * During stage 3 it would be empty (its contributions register in stage 4),
  * and a provider that computed from it would keep an empty answer; the read
  * throws instead and the boot is refused (`provides-factory-failed`). A
- * federation projection read by a name-keyed contribution factory would miss
- * the entries step 2a registers after that pass, so that read throws too
+ * federation projection read before step 2a has finished — by a name-keyed
+ * contribution factory, or by a type's factory during step 2a — would miss
+ * entries step 2a registers, so that read throws too
  * (`contribute-factory-failed`). Only the view's own members (`get`,
  * `entries`, a map view's `size` and iterator) are guarded. `then` answers
  * `undefined`, so the view is not thenable, and `Symbol.toStringTag`,
@@ -315,7 +316,7 @@ function readableFromStage4<T extends object>(
 			if (property === "then") return undefined;
 			const closed = Object.hasOwn(target, property) ? closedWhile(gate, from) : undefined;
 			if (closed !== undefined) {
-				throw new Error(`${key} was read while ${closed}`);
+				throw new Error(`${key} was read ${closed}`);
 			}
 			return Reflect.get(target, property, receiver);
 		},
@@ -1150,8 +1151,9 @@ function warnOnTokenBindingSurfaceOverlap(
  *      policy, which register under the entry's name together — after every
  *      name-keyed contribution, so the types are registered, and before any
  *      list-shaped factory reads `federationProviders`. The two federation
- *      projections open for reading here: a name-keyed factory that reads
- *      one throws (`readableFromStage4`).
+ *      projections open for reading once this step ends: a name-keyed
+ *      factory or a type's factory that reads one throws
+ *      (`readableFromStage4`).
  *   2b. `checkSessionRequirements`, before a list-shaped factory reads a
  *      requirement's reach; then the rate-limit budgets' and the admission
  *      actions' boot lines.

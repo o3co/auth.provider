@@ -139,15 +139,21 @@ function directFederations(modules: readonly NormalisedModule[]): ReadonlyMap<st
 }
 
 /**
- * Whether the host's `federations` collector already holds `name`. A host
- * may pre-load a name-keyed collector — the `override-targets` row takes such
- * an entry as a target — and a provider it pre-loaded serves its federation.
+ * The host collector — `federations`, then `federationRedirectPolicies` —
+ * that already holds `name`, or `undefined`. A host may pre-load a name-keyed
+ * collector (the `override-targets` row takes such an entry as a target): a
+ * provider it pre-loaded serves its federation, and either half of a pair it
+ * pre-loaded leaves no room for a dispatched entry's pair.
  */
-function seededFederation(
+function seededBy(
 	contributionKinds: ContributionKindMap | undefined,
 	name: string,
-): boolean {
-	return contributionKinds?.federations?.get(name) !== undefined;
+): "federations" | "federationRedirectPolicies" | undefined {
+	if (contributionKinds?.federations?.get(name) !== undefined) return "federations";
+	if (contributionKinds?.federationRedirectPolicies?.get(name) !== undefined) {
+		return "federationRedirectPolicies";
+	}
+	return undefined;
 }
 
 /** The `type` an entry names, when it names one. */
@@ -177,8 +183,10 @@ const entryAt = (name: string): string =>
  * contributes or overrides `federations.<name>` directly — or a host whose
  * `federations` collector already holds the name. An enabled entry neither
  * handles is `federation-type-unhandled`, every such entry listed at once
- * with its type, and the types handled; one both handle is
- * `duplicate-contribute`. The message names each entry and its type, and
+ * with its type, and the types handled. One dispatched by its type and also
+ * contributed by name, or already held by either host collector
+ * (`federations`, `federationRedirectPolicies`), is `duplicate-contribute`,
+ * refused here rather than when stage 4 registers half of its pair. The message names each entry and its type, and
  * quotes nothing else of it. A disabled entry is not read.
  * @internal
  */
@@ -190,18 +198,32 @@ export function checkFederationEntriesHandled(
 	const types = declaredTypes(modules);
 	const direct = directFederations(modules);
 	const unhandled: { readonly federationName: string; readonly type?: string }[] = [];
-	const both: { readonly name: string; readonly modules: readonly [string, string] }[] = [];
+	const both: {
+		readonly name: string;
+		readonly kind: "federations" | "federationRedirectPolicies";
+		readonly modules: readonly [string, string];
+		readonly byHost: boolean;
+	}[] = [];
 	for (const [name, entry] of enabledFederationsOf(config)) {
 		const type = typeOf(entry);
 		const declared = type === undefined ? undefined : types.get(type);
 		const contributor = direct.get(name);
+		const seeded = seededBy(contributionKinds, name);
 		if (declared !== undefined && contributor !== undefined) {
-			both.push({ name, modules: [declared.module, contributor] });
-		} else if (
-			declared === undefined &&
-			contributor === undefined &&
-			!seededFederation(contributionKinds, name)
-		) {
+			both.push({
+				name,
+				kind: "federations",
+				modules: [declared.module, contributor],
+				byHost: false,
+			});
+		} else if (declared !== undefined && seeded !== undefined) {
+			both.push({
+				name,
+				kind: seeded,
+				modules: [declared.module, `contributionKinds.${seeded}`],
+				byHost: true,
+			});
+		} else if (declared === undefined && contributor === undefined && seeded !== "federations") {
 			unhandled.push(
 				type === undefined ? { federationName: name } : { federationName: name, type },
 			);
@@ -232,15 +254,18 @@ export function checkFederationEntriesHandled(
 	const [first] = both;
 	if (first !== undefined) {
 		throw new BootError({
-			message:
-				`${entryAt(first.name)} is dispatched by its type to module "${first.modules[0]}" ` +
-				`and contributed by name by module "${first.modules[1]}": one federation has one handler, so remove its ` +
-				`type or remove the module that contributes federations[${JSON.stringify(first.name)}].`,
+			message: first.byHost
+				? `${entryAt(first.name)} is dispatched by its type to module "${first.modules[0]}" ` +
+					`and its name is already held by the host's ${first.modules[1]} collector: one federation has one handler, ` +
+					`so remove its type or remove ${JSON.stringify(first.name)} from that collector.`
+				: `${entryAt(first.name)} is dispatched by its type to module "${first.modules[0]}" ` +
+					`and contributed by name by module "${first.modules[1]}": one federation has one handler, so remove its ` +
+					`type or remove the module that contributes federations[${JSON.stringify(first.name)}].`,
 			reason: "duplicate-contribute",
 			stage: "validateManifests",
 			details: {
 				reason: "duplicate-contribute",
-				kind: "federations",
+				kind: first.kind,
 				identity: first.name,
 				identityKind: "name",
 				modules: first.modules,
