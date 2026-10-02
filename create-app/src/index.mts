@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { applyMfaVariant } from "./internal/mfa-variant.mjs";
 import { shouldCopyTemplateEntry } from "./internal/template-filter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -88,11 +89,26 @@ export const isValidDirName = (name: string): boolean => {
 	return UNSCOPED_NAME_RE.test(name);
 };
 
+/** The MFA package, which a scaffold without MFA does not depend on. */
+const MFA_PACKAGE = "@o3co/auth-provider-mfa";
+
+export interface ScaffoldOptions {
+	/**
+	 * Whether the scaffold carries MFA (default `true`). Without it, the
+	 * template's MFA files and blocks are left out, its twins put in their
+	 * place (`internal/mfa-variant.mts`), and the MFA package is not a
+	 * dependency.
+	 */
+	readonly mfa?: boolean;
+}
+
 export const scaffold = (
 	targetDir: string,
 	projectName: string,
 	template: string = DEFAULT_TEMPLATE,
+	options: ScaffoldOptions = {},
 ): void => {
+	const mfa = options.mfa ?? true;
 	const refusal = templateRefusal(template, availableTemplates());
 	if (refusal !== undefined) throw new Error(refusal);
 	const templateDir = resolve(TEMPLATES_ROOT, template);
@@ -112,10 +128,17 @@ export const scaffold = (
 		renameSync(stagedGitignore, resolve(targetDir, ".gitignore"));
 	}
 
+	applyMfaVariant(targetDir, mfa);
+
 	// Rewrite package.json
 	const pkgPath = resolve(targetDir, "package.json");
 	const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 	pkg.name = projectName;
+	if (!mfa) {
+		for (const section of ["dependencies", "devDependencies", "peerDependencies"] as const) {
+			if (pkg[section]) delete pkg[section][MFA_PACKAGE];
+		}
+	}
 	// `"private": true` is deliberately kept: the scaffold is an identity
 	// provider (keys, config, policy), so an accidental `npm publish` must fail
 	// by default. An operator who means to publish removes the field.
@@ -224,6 +247,7 @@ interface ParsedArgs {
 	dir: string | undefined;
 	template: string | undefined;
 	lockfile: boolean;
+	mfa: boolean;
 }
 
 /** The flags that take a value, as `--flag <value>` or `--flag=<value>`. */
@@ -234,6 +258,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
 	const positionals: string[] = [];
 	const values = new Map<ValueFlag, string>();
 	let lockfile = true;
+	let mfa = true;
 
 	const setValue = (flag: ValueFlag, value: string): void => {
 		if (values.has(flag)) throw new Error(`${flag} specified more than once`);
@@ -253,6 +278,8 @@ const parseArgs = (args: string[]): ParsedArgs => {
 			setValue(joined, a.slice(`${joined}=`.length));
 		} else if (a === "--no-lockfile") {
 			lockfile = false;
+		} else if (a === "--no-mfa") {
+			mfa = false;
 		} else if (a.startsWith("-")) {
 			// Treats `--` and any --unknown as an unknown flag.
 			throw new Error(`unknown flag: ${a}`);
@@ -269,6 +296,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
 		dir: values.get("--dir"),
 		template: values.get("--template"),
 		lockfile,
+		mfa,
 	};
 };
 
@@ -297,7 +325,7 @@ export const main = (): void => {
 	} catch (e) {
 		console.error(`Error: ${(e as Error).message}`);
 		console.error(
-			"Usage: @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]",
+			"Usage: @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile] [--no-mfa]",
 		);
 		console.error(
 			"<project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped).",
@@ -305,10 +333,11 @@ export const main = (): void => {
 		console.error(
 			`--template names the template to copy (default: ${DEFAULT_TEMPLATE}); available: ${availableTemplates().join(", ")}.`,
 		);
+		console.error("--no-mfa scaffolds a project without the MFA package.");
 		process.exit(1);
 	}
 
-	const { projectName, dir, lockfile } = parsed;
+	const { projectName, dir, lockfile, mfa } = parsed;
 	const template = parsed.template ?? DEFAULT_TEMPLATE;
 
 	if (!isValidProjectName(projectName)) {
@@ -339,8 +368,10 @@ export const main = (): void => {
 		process.exit(1);
 	}
 
-	console.log(`Creating ${projectName} from the ${template} template...`);
-	scaffold(targetDir, projectName, template);
+	console.log(
+		`Creating ${projectName} from the ${template} template${mfa ? "" : ", without MFA"}...`,
+	);
+	scaffold(targetDir, projectName, template, { mfa });
 
 	let lockfileGenerated = false;
 	if (lockfile) {

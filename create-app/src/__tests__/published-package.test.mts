@@ -106,6 +106,25 @@ describe("published-package install context (e2e)", () => {
 		expect(files).toEqual(filesUnder(join(named, "my-test-project")));
 	}, 30_000);
 
+	it("scaffolds without MFA from what the package ships: its twins in place, no MFA package", () => {
+		const cli = join(installRoot, "dist", "cli.mjs");
+		const projectCwd = join(workspace, "scaffold-cwd-no-mfa");
+		mkdirSync(projectCwd);
+		execFileSync("node", [cli, "my-test-project", "--no-lockfile", "--no-mfa"], {
+			cwd: projectCwd,
+		});
+
+		const targetDir = join(projectCwd, "my-test-project");
+		const files = filesUnder(targetDir);
+		expect(files).toContain("src/mfaSwitch.mts");
+		expect(files.filter((file) => file.includes(".no-mfa"))).toEqual([]);
+		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
+		expect(pkg.dependencies).not.toHaveProperty(["@o3co/auth-provider-mfa"]);
+		expect(readFileSync(join(targetDir, "src", "mfaSwitch.mts"), "utf-8")).not.toContain(
+			"@o3co/auth-provider-mfa",
+		);
+	}, 30_000);
+
 	it.each(REPOSITORY_TEMPLATES)(
 		"scaffolds the %s template when installed under a path containing 'node_modules'",
 		(template) => {

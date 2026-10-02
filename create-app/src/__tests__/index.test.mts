@@ -1,6 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, posix, win32 } from "node:path";
+import { basename, join, posix, relative, win32 } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { shouldCopyTemplateEntry } from "../internal/template-filter.mjs";
 
@@ -300,6 +308,92 @@ describe("scaffold — choosing a template", () => {
 	});
 });
 
+describe("scaffold — with and without MFA", () => {
+	const MFA_PACKAGE = "@o3co/auth-provider-mfa";
+	const TEMPLATE_DIR = join("templates", DEFAULT_TEMPLATE);
+	let tempDir: string;
+
+	/** Every file under `dir`, relative to it, sorted. */
+	const filesUnder = (dir: string): string[] =>
+		readdirSync(dir, { recursive: true, withFileTypes: true })
+			.filter((entry) => entry.isFile())
+			.map((entry) => relative(dir, join(entry.parentPath, entry.name)))
+			.sort();
+	const textOf = (dir: string, file: string): string => readFileSync(join(dir, file), "utf-8");
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "create-auth-provider-mfa-"));
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("reads a template that has a twin and markers (the cases below are not vacuous)", () => {
+		const files = filesUnder(TEMPLATE_DIR);
+		expect(files).toContain(join("src", "mfaSwitch.no-mfa.mts"));
+		expect(files.some((file) => textOf(TEMPLATE_DIR, file).includes("no-mfa:omit-begin"))).toBe(
+			true,
+		);
+	});
+
+	it("by default keeps the MFA package and every MFA file, with no twin and no marker left", () => {
+		const targetDir = join(tempDir, "with-mfa");
+		scaffold(targetDir, "with-mfa");
+
+		const pkg = JSON.parse(textOf(targetDir, "package.json"));
+		expect(pkg.dependencies[MFA_PACKAGE]).toMatch(/^\^/);
+		expect(textOf(targetDir, join("src", "mfaSwitch.mts"))).toBe(
+			textOf(TEMPLATE_DIR, join("src", "mfaSwitch.mts")),
+		);
+		const files = filesUnder(targetDir);
+		expect(files.filter((file) => file.includes(".no-mfa"))).toEqual([]);
+		expect(files.filter((file) => textOf(targetDir, file).includes("no-mfa:omit"))).toEqual([]);
+		// Every template file but the twins, so nothing MFA needs is left out
+		// (the staged `gitignore` is restored as `.gitignore`).
+		expect(files).toEqual(
+			expect.arrayContaining(
+				filesUnder(TEMPLATE_DIR)
+					.filter((file) => !file.includes(".no-mfa"))
+					.map((file) => (file === "gitignore" ? ".gitignore" : file)),
+			),
+		);
+	});
+
+	it("with mfa: false drops the MFA package, puts the twins in place, and names the MFA package nowhere", () => {
+		const targetDir = join(tempDir, "without-mfa");
+		scaffold(targetDir, "without-mfa", DEFAULT_TEMPLATE, { mfa: false });
+
+		const pkg = JSON.parse(textOf(targetDir, "package.json"));
+		expect(pkg.dependencies).not.toHaveProperty([MFA_PACKAGE]);
+		expect(pkg.dependencies["@o3co/auth-provider-core"]).toMatch(/^\^/);
+		expect(textOf(targetDir, join("src", "mfaSwitch.mts"))).toBe(
+			textOf(TEMPLATE_DIR, join("src", "mfaSwitch.no-mfa.mts")),
+		);
+		const files = filesUnder(targetDir);
+		expect(files.filter((file) => file.includes(".no-mfa"))).toEqual([]);
+		expect(files.filter((file) => textOf(targetDir, file).includes("no-mfa:omit"))).toEqual([]);
+		expect(files.filter((file) => textOf(targetDir, file).includes(MFA_PACKAGE))).toEqual([]);
+	});
+
+	it("with mfa: false names no file the scaffold leaves out", () => {
+		const withMfa = join(tempDir, "with-mfa");
+		const withoutMfa = join(tempDir, "without-mfa");
+		scaffold(withMfa, "with-mfa");
+		scaffold(withoutMfa, "without-mfa", DEFAULT_TEMPLATE, { mfa: false });
+
+		const kept = filesUnder(withoutMfa);
+		const omitted = filesUnder(withMfa).filter((file) => !kept.includes(file));
+		expect(omitted.length).toBeGreaterThan(0);
+		const dangling = kept.flatMap((file) =>
+			omitted
+				.filter((gone) => textOf(withoutMfa, file).includes(basename(gone)))
+				.map((gone) => `${file} names ${gone}`),
+		);
+		expect(dangling).toEqual([]);
+	});
+});
+
 describe("isValidProjectName", () => {
 	it.each([
 		["my-auth"],
@@ -554,6 +648,22 @@ describe("main (argv parsing and directory derivation)", () => {
 		const r = runMain(["my-auth", "--no-lockfile"]);
 		expect(r.exitCode).toBe(0);
 		expect(spawnSyncMock).not.toHaveBeenCalled();
+	});
+
+	it("--no-mfa scaffolds without the MFA package; without it the MFA package is kept", () => {
+		expect(runMain(["no-mfa", "--no-mfa"]).exitCode).toBe(0);
+		expect(runMain(["with-mfa"]).exitCode).toBe(0);
+		const deps = (dir: string): Record<string, string> =>
+			JSON.parse(readFileSync(join(workdir, dir, "package.json"), "utf-8")).dependencies;
+		expect(deps("no-mfa")).not.toHaveProperty(["@o3co/auth-provider-mfa"]);
+		expect(deps("with-mfa")).toHaveProperty(["@o3co/auth-provider-mfa"]);
+	});
+
+	it("--no-mfa=<value> is refused as an unknown flag", () => {
+		const r = runMain(["my-auth", "--no-mfa=true"]);
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr).toMatch(/unknown flag: --no-mfa=true/);
+		expect(r.stderr).toMatch(/\[--no-mfa\]/);
 	});
 
 	// Positive: --template names the template, in both forms

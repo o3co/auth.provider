@@ -1,6 +1,6 @@
 # @o3co/create-auth-provider
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03
 
 CLI scaffolder for auth.provider. Generates a new server project from one of the built-in templates.
 
@@ -12,13 +12,15 @@ independent project. It runs once, on the operator's machine; nothing in the gen
 project imports it, and it imports none of the `packages/*` libraries.
 
 **Owns.** Project-name, directory and template validation, copying the
-chosen template, rewriting the generated `package.json` (name, `workspace:*`
-→ published versions), writing the project's `pnpm-workspace.yaml`, and the
-one-time `pnpm-lock.yaml` resolution.
+chosen template, making the copy the one with MFA or without it by what the
+template marks ([With or without MFA](#with-or-without-mfa)), rewriting the
+generated `package.json` (name, `workspace:*` → published versions, the MFA
+package dropped without MFA), writing the project's `pnpm-workspace.yaml`,
+and the one-time `pnpm-lock.yaml` resolution.
 
 **Does not own.** The content of the generated project — source, config,
 Dockerfile, tests — which is the template's (edit `templates/<name>`, not
-this package); and which templates there are, and what each is for — the
+this package), what of it is MFA's included; and which templates there are, and what each is for — the
 [composition templates ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md).
 Runtime behaviour belongs to `@o3co/auth-provider-core` and the libraries the
 template depends on.
@@ -31,7 +33,7 @@ of the library versions they pin ([How the templates are bundled](#how-the-templ
 ## Usage
 
 ```bash
-npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]
+npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile] [--no-mfa]
 ```
 
 `--template` names the template to copy, `standalone` by default. The
@@ -73,6 +75,19 @@ cd provider
 
 `--no-lockfile` skips the lockfile step (step 7 below).
 
+`--no-mfa` scaffolds a project without MFA: `@o3co/auth-provider-mfa` is not a
+dependency, nothing in the project imports it, and the MFA configuration, the
+development MFA key, the Mailpit overlay and the tests that need MFA are left
+out ([With or without MFA](#with-or-without-mfa)). Its MFA switch is fixed
+off: `MFA_MODE` or a file's `mfaMode` other than `off`, and an `mfa.mode` the
+configuration writes other than `off`, are refused before boot, so the
+project never runs while its configuration asks for a second factor. To add
+MFA later, compare with a scaffold made without the flag.
+
+```bash
+npx @o3co/create-auth-provider my-auth-server --no-mfa
+```
+
 The generated project is a pnpm project: its `Dockerfile` installs with
 `pnpm install --frozen-lockfile`, and its build allowlist lives in
 `pnpm-workspace.yaml`.
@@ -91,10 +106,11 @@ template's README, which the project carries, gives the commands under
 1. Validates `<project-name>` (see [Validation Rules](#validation-rules)).
 2. Derives the target directory name: `--dir <value>` if given, else the unscoped part of a scoped name, else the name itself.
 3. Checks that `--template` (default `standalone`) names a bundled template, and resolves the target directory as `<cwd>/<dir-name>`, erroring if it already exists.
-4. Copies the named template to the target directory, excluding `node_modules/` and `dist/`, and restores its `.gitignore` (the tarball carries it as `gitignore`, because npm drops a file named `.gitignore` from a published package).
+4. Copies the named template to the target directory, excluding `node_modules/` and `dist/`, restores its `.gitignore` (the tarball carries it as `gitignore`, because npm drops a file named `.gitignore` from a published package), and makes the copy the one with MFA, or without it under `--no-mfa` ([With or without MFA](#with-or-without-mfa)).
 5. Rewrites `package.json` in the generated directory:
    - Sets `name` to `<project-name>` verbatim (scope-preserving).
    - Keeps `"private": true` on purpose: a scaffolded identity provider should not be publishable by accident. Remove the field yourself if you really intend to publish.
+   - Without MFA, removes `@o3co/auth-provider-mfa` from `dependencies`, `devDependencies` and `peerDependencies`.
    - Replaces each `workspace:*` version in `dependencies`, `devDependencies` and `peerDependencies` with `^<version>` from the bundled `versions.json`.
 6. Writes `pnpm-workspace.yaml` with the `onlyBuiltDependencies` allowlist for `bcrypt` — pnpm 10.29 and later read that allowlist only from this file, in a single-package project too.
 7. Resolves the dependency set into `pnpm-lock.yaml` (`pnpm install --lockfile-only --ignore-workspace`, through `corepack pnpm` when `pnpm` is not on `PATH`), unless `--no-lockfile` was passed. This needs a reachable registry; a failure prints a warning and the scaffold still completes.
@@ -136,6 +152,34 @@ which fails when a published package under `packages/` is missing from
 exists — a scaffold would otherwise fail to resolve that package's
 `workspace:*` version.
 
+## With or without MFA
+
+A template is written with MFA, and says what of it is MFA's; the scaffolder
+applies what it says ([`src/internal/mfa-variant.mts`](src/internal/mfa-variant.mts)):
+
+- `<name>.no-mfa.<ext>` is the twin of `<name>.<ext>` beside it: without MFA
+  it takes that file's place; with MFA it is dropped. The standalone
+  template's twin of its MFA switch, `src/mfaSwitch.no-mfa.mts`, is the one
+  file that differs; `src/__tests__/mfa-switch.test.no-mfa.mts` is that
+  switch's tests.
+- A line holding `no-mfa:omit-file`, in any comment syntax, leaves its file
+  out without MFA.
+- The lines from one holding `no-mfa:omit-begin` to one holding
+  `no-mfa:omit-end` are left out without MFA. Blocks do not nest.
+
+The marker lines are dropped either way, so a scaffold with MFA is the
+template as written. A twin with no target, an unbalanced block, or a
+`no-mfa:omit-*` token it does not know refuses the scaffold, naming the file,
+before any file changes.
+
+[`scaffold-runs.test.mts`](src/__tests__/scaffold-runs.test.mts) scaffolds
+the default template with MFA and without it, links each to the workspace's
+packages (the MFA package left out without MFA), and typechecks it and runs
+its own suite, which boots its composition; `index.test.mts` holds the
+scaffold without MFA to naming the MFA package nowhere and no file it leaves
+out. An MFA test or reference added to the template without a marker fails
+there.
+
 ## Validation Rules
 
 `<project-name>` must match one of:
@@ -170,7 +214,7 @@ the composition, which is the host process, and what the scaffold owns.
 The module exports the functions the CLI is built from; their signatures are
 in [`src/index.mts`](src/index.mts).
 
-- `scaffold(targetDir, projectName, template?)` — steps 4–6, from `template` (default `DEFAULT_TEMPLATE`, `"standalone"`). Throws, before writing anything, with `templateRefusal`'s message; and throws if a `workspace:*` dependency has no entry in `versions.json`.
+- `scaffold(targetDir, projectName, template?, options?)` — steps 4–6, from `template` (default `DEFAULT_TEMPLATE`, `"standalone"`); `options.mfa: false` scaffolds without MFA (default `true`). Throws, before writing anything, with `templateRefusal`'s message; and throws if a `workspace:*` dependency has no entry in `versions.json`.
 - `availableTemplates(templatesRoot?)` — the bundled templates' names, sorted.
 - `templateRefusal(template, templates)` — why `template` cannot be scaffolded (none bundled, or not one of them), or `undefined`.
 - `generateLockfile(targetDir)` — step 7. Returns `{ ok: true, command }` or `{ ok: false, reason }` rather than throwing.

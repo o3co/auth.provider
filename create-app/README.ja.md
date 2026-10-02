@@ -1,6 +1,6 @@
 # @o3co/create-auth-provider
 
-最終更新: 2026-10-01
+最終更新: 2026-10-03
 
 auth.provider 用の CLI スキャフォルダーです。内包するテンプレートの 1 つから新しいサーバープロジェクトを生成します。
 
@@ -12,12 +12,14 @@ auth.provider 用の CLI スキャフォルダーです。内包するテンプ�
 プロジェクトはこのパッケージを import せず、このパッケージも `packages/*` の
 ライブラリを一切 import しません。
 
-**担うもの。** プロジェクト名・ディレクトリ名・テンプレート名の検証、選んだテンプレートのコピー、生成された
-`package.json` の書き換え（名前、`workspace:*` → 公開バージョン）、プロジェクトの
+**担うもの。** プロジェクト名・ディレクトリ名・テンプレート名の検証、選んだテンプレートのコピー、
+テンプレートの印に従ってそのコピーを MFA ありのもの・なしのものにすること
+（[MFA ありとなし](#mfa-ありとなし)）、生成された `package.json` の書き換え（名前、
+`workspace:*` → 公開バージョン、MFA なしでは MFA パッケージを外す）、プロジェクトの
 `pnpm-workspace.yaml` の書き出し、そして一度きりの `pnpm-lock.yaml` の解決。
 
 **担わないもの。** 生成されるプロジェクトの中身 — ソース、設定、Dockerfile、
-テスト — はテンプレートのものです（このパッケージではなく `templates/<name>` を
+テスト — は、そのどこが MFA のものかも含めてテンプレートのものです（このパッケージではなく `templates/<name>` を
 編集してください）。どのテンプレートがあり、それぞれ何のためにあるかは
 [コンポジションテンプレートの ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md)
 のものです。実行時の振る舞いは `@o3co/auth-provider-core` と、テンプレートが
@@ -31,7 +33,7 @@ auth.provider 用の CLI スキャフォルダーです。内包するテンプ�
 ## 使い方
 
 ```bash
-npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]
+npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile] [--no-mfa]
 ```
 
 `--template` はコピーするテンプレートを指定します（デフォルトは `standalone`）。
@@ -73,6 +75,19 @@ cd provider
 
 `--no-lockfile` を付けると lockfile の生成（下記の手順 7）を省略します。
 
+`--no-mfa` を付けると MFA なしのプロジェクトを生成します: `@o3co/auth-provider-mfa`
+は依存に入らず、プロジェクトのどこもそれを import せず、MFA の設定、開発用の MFA
+の鍵、Mailpit のオーバーレイ、MFA を要するテストは含まれません
+（[MFA ありとなし](#mfa-ありとなし)）。MFA のスイッチは off に固定されます:
+`MFA_MODE` やファイルの `mfaMode` が `off` 以外のとき、また設定が `off` 以外の
+`mfa.mode` を書くときは、boot の前に拒否されます。設定が第二要素を求めているのに
+プロジェクトがそのまま動くことはありません。後から MFA を加えるときは、このフラグなしで
+生成したものと比べてください。
+
+```bash
+npx @o3co/create-auth-provider my-auth-server --no-mfa
+```
+
 生成されるプロジェクトは pnpm のプロジェクトです。`Dockerfile` は
 `pnpm install --frozen-lockfile` でインストールし、ビルドの許可リストは
 `pnpm-workspace.yaml` にあります。
@@ -90,10 +105,11 @@ CLI は最後のメッセージで次に `pnpm run debug` を実行するよう�
 1. `<project-name>` を検証する（[バリデーションルール](#バリデーションルール) 参照）。
 2. 生成先ディレクトリ名を決定する: `--dir <value>` が指定されていればその値、そうでなければスコープ付き名のパッケージ部分、最終的には入力値そのもの。
 3. `--template`（デフォルト `standalone`）が内包するテンプレートの名前であることを確かめ、生成先ディレクトリを `<cwd>/<dir-name>` として解決し、すでに存在する場合はエラーで終了する。
-4. 指定したテンプレートを生成先ディレクトリにコピーし（`node_modules/` と `dist/` は除外）、`.gitignore` を復元する（npm は公開パッケージから `.gitignore` という名前のファイルを落とすため、tarball には `gitignore` として入っている）。
+4. 指定したテンプレートを生成先ディレクトリにコピーし（`node_modules/` と `dist/` は除外）、`.gitignore` を復元し（npm は公開パッケージから `.gitignore` という名前のファイルを落とすため、tarball には `gitignore` として入っている）、コピーを MFA ありのもの、`--no-mfa` ならなしのものにする（[MFA ありとなし](#mfa-ありとなし)）。
 5. 生成されたディレクトリの `package.json` を書き換える:
    - `name` を `<project-name>` そのままに設定する（スコープを保持）。
    - `"private": true` は意図的に残す: スキャフォールドされた ID プロバイダーが誤って公開できてはならないため。本当に公開するつもりなら自分でこのフィールドを削除する。
+   - MFA なしなら、`dependencies`・`devDependencies`・`peerDependencies` から `@o3co/auth-provider-mfa` を外す。
    - `dependencies`・`devDependencies`・`peerDependencies` の各 `workspace:*` を、内包する `versions.json` の `^<version>` に置き換える。
 6. `bcrypt` 用の `onlyBuiltDependencies` 許可リストを書いた `pnpm-workspace.yaml` を生成する — pnpm 10.29 以降はこの許可リストを、単一パッケージのプロジェクトであってもこのファイルからしか読まない。
 7. `--no-lockfile` が指定されていなければ、依存関係を `pnpm-lock.yaml` に解決する（`pnpm install --lockfile-only --ignore-workspace`。`pnpm` が `PATH` にない場合は `corepack pnpm` 経由）。到達可能なレジストリが必要で、失敗しても警告を出すだけでスキャフォールドは完了する。
@@ -136,6 +152,32 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 失敗します — そうでなければスキャフォールドがそのパッケージの `workspace:*` の
 バージョンを解決できずに失敗するためです。
 
+## MFA ありとなし
+
+テンプレートは MFA ありで書かれ、そのどこが MFA のものかを自分で示します。
+スキャフォルダーはその示すとおりに適用します（[`src/internal/mfa-variant.mts`](src/internal/mfa-variant.mts)）:
+
+- `<name>.no-mfa.<ext>` は隣の `<name>.<ext>` の双子です: MFA なしではその
+  ファイルに置き換わり、MFA ありでは捨てられます。standalone テンプレートで
+  中身が違うファイルは、MFA のスイッチの双子 `src/mfaSwitch.no-mfa.mts` だけです。
+  `src/__tests__/mfa-switch.test.no-mfa.mts` はそのスイッチのテストです。
+- `no-mfa:omit-file` を含む行（コメントの書式は問わない）があるファイルは、MFA
+  なしでは含まれません。
+- `no-mfa:omit-begin` を含む行から `no-mfa:omit-end` を含む行までは、MFA なしでは
+  含まれません。ブロックは入れ子にできません。
+
+印の行はどちらでも取り除くので、MFA ありのスキャフォールドは書かれたとおりの
+テンプレートです。対象のない双子、閉じていないブロック、知らない `no-mfa:omit-*`
+の印は、どのファイルも変える前に、ファイルを名指してスキャフォールドを拒否します。
+
+[`scaffold-runs.test.mts`](src/__tests__/scaffold-runs.test.mts) は、デフォルトの
+テンプレートを MFA ありとなしでスキャフォールドし、それぞれをワークスペースの
+パッケージにリンクし（MFA なしでは MFA パッケージを除く）、型検査をして、
+合成を起動するそのプロジェクト自身のテストを実行します。`index.test.mts` は、MFA
+なしのスキャフォールドがどこにも MFA パッケージを名指さず、含めなかったファイルを
+名指さないことを確かめます。印を付けずにテンプレートに足した MFA のテストや参照は、
+そこで失敗します。
+
 ## バリデーションルール
 
 `<project-name>` は以下のいずれかに一致する必要があります:
@@ -170,7 +212,7 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 モジュールは CLI を構成する関数を export しています。シグネチャは
 [`src/index.mts`](src/index.mts) にあります。
 
-- `scaffold(targetDir, projectName, template?)` — 手順 4〜6。`template`（デフォルトは `DEFAULT_TEMPLATE` = `"standalone"`）からコピーする。コピーできないときは何も書かずに `templateRefusal` のメッセージで例外を投げる。`workspace:*` 依存が `versions.json` に見つからない場合も例外を投げる。
+- `scaffold(targetDir, projectName, template?, options?)` — 手順 4〜6。`template`（デフォルトは `DEFAULT_TEMPLATE` = `"standalone"`）からコピーする。`options.mfa: false` なら MFA なしで生成する（デフォルトは `true`）。コピーできないときは何も書かずに `templateRefusal` のメッセージで例外を投げる。`workspace:*` 依存が `versions.json` に見つからない場合も例外を投げる。
 - `availableTemplates(templatesRoot?)` — 内包するテンプレートの名前（ソート済み）。
 - `templateRefusal(template, templates)` — `template` からスキャフォールドできない理由（1 つも内包されていない、またはそのどれでもない）。できるときは `undefined`。
 - `generateLockfile(targetDir)` — 手順 7。例外を投げず、`{ ok: true, command }` か `{ ok: false, reason }` を返す。
