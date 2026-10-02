@@ -291,6 +291,26 @@ export interface FederationGrantStore {
 	}): Promise<FederationGrantWrite>;
 
 	/**
+	 * Gives back a rotation `takeRotation` took, for an attempt the upstream
+	 * definitely did not perform. The grant must be `active`, at the caller's
+	 * `version` (the one the take was made at), with `now` before `expiresAt`,
+	 * and `rotations.since` must be `since`, the window the take counted into,
+	 * with a `count` of at least one. Then, in one atomic step, `count - 1` and
+	 * `version` bumped; nothing else touched. The bump makes it once per
+	 * attempt: a second give-back at the same version is refused. A `now` or a
+	 * `since` that is not a date is a `RangeError`.
+	 *
+	 * Optional for now, as `takeRotation` is, and the two become required
+	 * together: a store without it keeps every rotation taken.
+	 */
+	refundRotation?(input: {
+		readonly grantId: string;
+		readonly expectedVersion: number;
+		readonly since: Date;
+		readonly now: Date;
+	}): Promise<FederationGrantWrite>;
+
+	/**
 	 * Sets `lastUsedAt` on an `active` grant, never moving it back (retrievals
 	 * may report out of order). No `version` bump; nothing for another state or
 	 * an `at` that is not a date. Best effort: a store may reject when

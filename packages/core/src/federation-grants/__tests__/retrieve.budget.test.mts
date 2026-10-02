@@ -443,6 +443,85 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		});
 	});
 
+	describe("an attempt the upstream definitely did not perform", () => {
+		const rotationsOf = async () =>
+			((await h.store.find("g-1", now())) as { rotations?: unknown } | null)?.rotations;
+
+		it("gives its rotation back: a sustained outage over a whole window, under the defaults, leaves the budget whole, and the first request after it refreshes", async () => {
+			await seedEndingAt(10 * MIN);
+			h.refresh.mockRejectedValue(Object.assign(new Error("service unavailable"), { status: 503 }));
+			const start = 20 * MIN;
+			for (let elapsed = start; elapsed < start + HOUR; elapsed += 10_000) {
+				setNow(at(elapsed));
+				expect(await retrieve()).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			}
+			// More attempts than the whole budget, under the failure backoff.
+			expect(h.refresh.mock.calls.length).toBeGreaterThan(24);
+			expect(await rotationsOf()).toMatchObject({ count: 0 });
+
+			h.refresh.mockReset();
+			h.refresh.mockImplementation(async () => refreshed("back", now()));
+			setNow(at(start + HOUR + MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-back", refreshed: true });
+		});
+
+		it("gives back a rate limit's and a refusal's too: the upstream answered", async () => {
+			await seedEndingAt(10 * MIN);
+			setNow(at(20 * MIN));
+			h.refresh.mockRejectedValueOnce(
+				Object.assign(new Error("slow down"), { status: 429, error: "too_many_requests" }),
+			);
+			expect(await retrieve()).toMatchObject({
+				ok: false,
+				code: "rate_limited",
+				reason: "upstream",
+			});
+			expect(await rotationsOf()).toMatchObject({ count: 0 });
+		});
+
+		it("keeps the rotation spent when the outcome is unknown: a request given up on may have rotated", async () => {
+			await seedEndingAt(10 * MIN);
+			setNow(at(20 * MIN));
+			h.refresh.mockRejectedValueOnce(
+				Object.assign(new Error("timed out"), { name: "TimeoutError" }),
+			);
+			expect(await retrieve()).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			expect(await rotationsOf()).toMatchObject({ count: 1 });
+		});
+
+		it.each([
+			["refused", async () => ({ ok: false as const })],
+			[
+				"throws",
+				async (): Promise<never> => {
+					throw new Error("store down");
+				},
+			],
+		])(
+			"keeps it spent when the give-back is %s, reports it, and answers the same",
+			async (_, refund) => {
+				await seedEndingAt(10 * MIN);
+				h.deps.store = { ...h.store, refundRotation: refund };
+				const reported: string[] = [];
+				h.deps.report = (failure) => reported.push(failure.during);
+				setNow(at(20 * MIN));
+				h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "upstream",
+				});
+				expect(await rotationsOf()).toMatchObject({ count: 1 });
+				expect(reported).toContain("rotation");
+				// The lock is let go of: nothing is in flight.
+				await Promise.all(h.background);
+				expect(
+					(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).acquired,
+				).toBe(true);
+			},
+		);
+	});
+
 	describe("a refresh whose answer carries less of what was asked than the token held", () => {
 		/** The stored token carries a consented scope beyond the grant's, as a broadening IdP leaves it. */
 		const seedBroad = () =>
@@ -522,6 +601,19 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			// At 30, 35, 40 and 45 minutes: one per `ineligibleRetryAfter`.
 			expect(limits.ineligibleRetryAfterMs).toBe(5 * MIN);
 			expect(h.refresh).toHaveBeenCalledTimes(4);
+		});
+
+		it("does not keep the marker from a refresh once the held token has died: the next request refreshes", async () => {
+			await seedBroad();
+			h.refresh.mockImplementation(async () =>
+				refreshed(`n${h.refresh.mock.calls.length}`, now(), { scope: SCOPES.join(" ") }),
+			);
+			setNow(at(HOUR - 20_000));
+			expect(await retrieve({ scope: ["calendar.write"] })).toMatchObject({ accessToken: "at-0" });
+			// The marker stands, and the held token is gone.
+			setNow(at(HOUR + 1_000));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-n2", refreshed: true });
+			expect(h.refresh).toHaveBeenCalledTimes(2);
 		});
 
 		it("replaces it where the request asked for nothing the new token lacks", async () => {

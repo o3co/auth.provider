@@ -634,6 +634,30 @@ export function createMemoryFederationGrantStore(
 			return written(entry, { ...grant, rotations });
 		},
 
+		async refundRotation(input) {
+			const nowMs = instant(input.now, "now");
+			const sinceMs = instant(input.since, "since");
+			const entry = visible(input.grantId, nowMs);
+			if (entry === undefined) return failed();
+			const grant = entry.grant;
+			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
+			if (!(nowMs < grant.expiresAt.getTime())) return failed();
+			const previous = grant.rotations;
+			if (
+				previous === undefined ||
+				previous.since.getTime() !== sinceMs ||
+				!(previous.count >= 1)
+			) {
+				return failed();
+			}
+			// The bump is what makes it once per attempt.
+			return written(entry, {
+				...grant,
+				version: grant.version + 1,
+				rotations: { since: new Date(sinceMs), count: previous.count - 1 },
+			});
+		},
+
 		async touch(grantId, at) {
 			const atMs = at.getTime();
 			if (Number.isNaN(atMs)) return;

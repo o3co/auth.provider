@@ -551,7 +551,9 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 					});
 					expect(await h.store.find("g-1", DUE)).toMatchObject({
 						status: "active",
-						version: grant.version,
+						// Bumped by the rotation given back: the upstream answered.
+						version: grant.version + 1,
+						rotations: { count: 0 },
 						refreshFailure: { kind: "rejected", upstreamCode: code, count: 1 },
 					});
 					expect(h.store.holdsCredential("g-1")).toBe(true);
@@ -908,16 +910,24 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				h.refresh.mockRejectedValueOnce(error);
 				expect(await retrieve()).toStrictEqual({ ok: false, ...denial });
 				const after = await h.store.open("g-1", GONE);
+				// A rotation given back, for an attempt the upstream answered, bumps
+				// the version; one whose outcome is unknown stays taken.
+				const given =
+					(after?.grant as { rotations?: { count: number } } | undefined)?.rotations?.count === 0;
 				expect(after).toMatchObject({
-					grant: { status: "active", version: grant.version },
+					grant: { status: "active", version: grant.version + (given ? 1 : 0) },
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
-				// Nothing but the failure stamp and the rotation taken for the
-				// attempt: the credentials whole, and the grant whole apart from
-				// them — key for key.
+				// Nothing but the failure stamp and the rotation: the credentials
+				// whole, and the grant whole apart from them — key for key.
 				expect(after?.credentials).toStrictEqual(before?.credentials);
-				const { refreshFailure: _after, rotations: _taken, ...afterRest } = after?.grant ?? {};
-				const { refreshFailure: _before, ...beforeRest } = before?.grant ?? {};
+				const {
+					refreshFailure: _after,
+					rotations: _taken,
+					version: _bumped,
+					...afterRest
+				} = after?.grant ?? {};
+				const { refreshFailure: _before, version: _version, ...beforeRest } = before?.grant ?? {};
 				expect(afterRest).toStrictEqual(beforeRest);
 				expect(
 					(await types()).filter((entry) => entry.startsWith("federation.grant.refresh_failed ")),

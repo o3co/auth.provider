@@ -25,6 +25,7 @@
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
+	isDefiniteFederationUpstreamFailure,
 	isFederationUpstreamOutage,
 	readFederationUpstreamOutage,
 } from "#/federation-tokens/upstreamOutage.mjs";
@@ -369,5 +370,82 @@ describe("readFederationUpstreamOutage — the walk, saying when a field it read
 		expect(isFederationUpstreamOutage(raisedOver(throwingOn(new Error("x"), "status")))).toBe(
 			false,
 		);
+	});
+});
+
+describe("isDefiniteFederationUpstreamFailure — whether what the upstream did is known: nothing", () => {
+	it("is an answer with an HTTP error status, on the error, its cause or the Response it was raised over", () => {
+		for (const status of [400, 401, 429, 500, 503]) {
+			expect(isDefiniteFederationUpstreamFailure(Object.assign(new Error("e"), { status }))).toBe(
+				true,
+			);
+			expect(
+				isDefiniteFederationUpstreamFailure(new Error("e", { cause: new ForeignResponse(status) })),
+			).toBe(true);
+		}
+		// openid-client's shape: the IdP's code on the error, the status beside it.
+		expect(
+			isDefiniteFederationUpstreamFailure(
+				Object.assign(new Error("server responded with an error"), {
+					error: "invalid_grant",
+					status: 400,
+				}),
+			),
+		).toBe(true);
+		// An adapter's own object carrying the IdP's code.
+		expect(isDefiniteFederationUpstreamFailure({ error: "temporarily_unavailable" })).toBe(true);
+	});
+
+	it("is a request that never left: refused, unresolvable, unreachable, or a certificate not verified", () => {
+		for (const code of [
+			"ECONNREFUSED",
+			"ENOTFOUND",
+			"EAI_AGAIN",
+			"EHOSTUNREACH",
+			"ENETUNREACH",
+			"CERT_HAS_EXPIRED",
+			"ERR_TLS_CERT_ALTNAME_INVALID",
+			"ERR_INVALID_URL",
+			"UND_ERR_CONNECT_TIMEOUT",
+		]) {
+			expect(
+				isDefiniteFederationUpstreamFailure(new TypeError("fetch failed", { cause: coded(code) })),
+				code,
+			).toBe(true);
+		}
+	});
+
+	it("is not a request given up on, or a connection lost once the request may have been sent: the upstream may have rotated", () => {
+		for (const name of ["AbortError", "TimeoutError"]) {
+			expect(
+				isDefiniteFederationUpstreamFailure(Object.assign(new Error("t"), { name })),
+				name,
+			).toBe(false);
+		}
+		for (const code of [
+			"ECONNRESET",
+			"ETIMEDOUT",
+			"EPIPE",
+			"UND_ERR_SOCKET",
+			"HPE_INVALID_CONSTANT",
+		]) {
+			expect(
+				isDefiniteFederationUpstreamFailure(new TypeError("fetch failed", { cause: coded(code) })),
+				code,
+			).toBe(false);
+		}
+		expect(isDefiniteFederationUpstreamFailure(new Error("something"))).toBe(false);
+		expect(isDefiniteFederationUpstreamFailure("thrown string")).toBe(false);
+		expect(isDefiniteFederationUpstreamFailure(undefined)).toBe(false);
+	});
+
+	it("is not what a field it cannot read might have said", () => {
+		const hostile = new Proxy(new Error("x"), {
+			get: (target, key) => {
+				if (key === "status") throw new Error("trap");
+				return Reflect.get(target, key);
+			},
+		});
+		expect(isDefiniteFederationUpstreamFailure(hostile)).toBe(false);
 	});
 });

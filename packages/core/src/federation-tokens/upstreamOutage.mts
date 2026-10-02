@@ -206,3 +206,74 @@ export function readFederationUpstreamOutage(error: unknown): FederationUpstream
 export function isFederationUpstreamOutage(error: unknown): boolean {
 	return readFederationUpstreamOutage(error) === "outage";
 }
+
+/** The connection codes of a request that never left: no connection was made. */
+const NOT_SENT: ReadonlySet<string> = new Set([
+	"ECONNREFUSED",
+	"ENOTFOUND",
+	"EAI_AGAIN",
+	"EHOSTUNREACH",
+	"EHOSTDOWN",
+	"ENETUNREACH",
+	"ENETDOWN",
+	"UND_ERR_CONNECT_TIMEOUT",
+	"ERR_INVALID_URL",
+]);
+
+const HTTP_ERROR = (status: unknown): boolean =>
+	typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599;
+
+/**
+ * Whether what a failed upstream call did is known, and it issued nothing:
+ * the upstream answered with an HTTP error status (on the error, an Error
+ * cause, or the `Response` it was raised over), the thrown value carries the
+ * upstream's own error code (`.error`), or the request never left — refused,
+ * unresolvable, unreachable, a connection that timed out before it was made,
+ * a certificate or TLS handshake that failed. A request given up on
+ * (`AbortError`, `TimeoutError`), a connection lost once the request may have
+ * been sent, anything else, and a field that cannot be read are not: the
+ * upstream may have acted on it. Read by the rule
+ * {@link readFederationUpstreamOutage} reads by. Never throws.
+ */
+export function isDefiniteFederationUpstreamFailure(error: unknown): boolean {
+	let unreadable = false;
+	const field = (value: unknown, key: string): unknown => {
+		const read = guardedRead(value as object, key);
+		if (read === null) unreadable = true;
+		return read?.value;
+	};
+	if (typeof error !== "object" || error === null) return false;
+	// The thrown value, whatever it is, may carry the upstream's answer.
+	if (!isResponse(error)) {
+		const status = field(error, "status");
+		const code = field(error, "error");
+		if (unreadable) return false;
+		if (HTTP_ERROR(status) || typeof code === "string") return true;
+	}
+	let current: unknown = isError(error) || isResponse(error) ? error : field(error, "cause");
+	for (let depth = 0; depth < MAX_CAUSE_DEPTH && !unreadable; depth++) {
+		if (isResponse(current)) {
+			const status = field(current, "status");
+			return !unreadable && HTTP_ERROR(status);
+		}
+		if (!isError(current)) return false;
+		const name = field(current, "name");
+		const code = field(current, "code");
+		const status = field(current, "status");
+		if (unreadable) return false;
+		if (typeof name === "string" && ABANDONED.has(name)) return false;
+		if (HTTP_ERROR(status)) return true;
+		if (typeof code === "string") {
+			if (
+				NOT_SENT.has(code) ||
+				X509_VERIFICATION.has(code) ||
+				/^ERR_TLS_[A-Z_]{1,64}$/.test(code)
+			) {
+				return true;
+			}
+			if (isTransportCode(code)) return false;
+		}
+		current = field(current, "cause");
+	}
+	return false;
+}
