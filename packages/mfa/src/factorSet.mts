@@ -57,9 +57,11 @@
  *   removal — then the records read again (or, unreadable, those read before
  *   less the removed one) and, when none may count (`mayCount`), the witness
  *   cleared.
- * - `bind`, an enrollment's completion: the caller's writes run whole under
- *   the lease, through the factor store and the witness this file hands it,
- *   each held to the lease's time as above.
+ * - `bind`, an enrollment's completion or a regeneration of recovery codes:
+ *   the caller's writes run whole under the lease, through the factor store,
+ *   the witness and the subject's recovery-set floor this file hands it, each
+ *   held to the lease's time as above; the floor is raised with the lease
+ *   this file holds, never handed out.
  * - `recover`, the subject's own authorized recovery: the records read under
  *   the lease, the caller's reading of them handed to the store's apply with
  *   the lease. It needs no start of the caller's: the store judges the apply
@@ -92,6 +94,7 @@ import {
 	type MfaFactorStore,
 	type MfaSubjectRecoveryAnswer,
 	type MfaTransactionStore,
+	readMfaRecoverySetFloorAnswer,
 	readMfaSubjectCount,
 	readMfaSubjectLeaseAnswer,
 	readMfaSubjectRecoveryAnswer,
@@ -108,15 +111,21 @@ const LEASE_WAITS_MS = [25, 50, 100, 200, 400] as const;
  * the lease is sized from, and `factorSetBudget.test.mts` holds every writer
  * to: a first binding by the account-email proof over two standing
  * recovery-code sets (a binding by password keeps the one that stood) makes
- * ten (the first-binding note, the consume, the factor, the records read
- * again, D25's flag, the sets read, the new set, each old set's removal, the
- * witness); the operator reset eight (the read, D25's flag, its
- * authorization, the lock state's reset, the removal, the read again, the
- * witness, D25's flag again); a removal five; a mark four; a release two. More standing sets
- * than two each add a removal, which the lease's time cuts off when it runs
- * short: the set left is reported unreplaced.
+ * fourteen (the first-binding note, the consume, the factor, the records read
+ * again, D25's flag, the sets read, the recovery-set floor read, the new set,
+ * the floor raised, each old set's removal, the records read again, the set
+ * marked shown, the witness); a regeneration of recovery codes six and one
+ * per standing set (the records read, the floor read, the new set, the floor
+ * raised, the removals, the records read again, the set marked shown); the
+ * operator reset eight (the read, D25's flag, its authorization, the lock
+ * state's reset, the removal, the read again, the witness, D25's flag again);
+ * a removal five; a mark four; a release two. More standing sets — past two at
+ * a binding, past eight at a regeneration — each add a removal, which the
+ * lease's time cuts off when it runs short: every set that stood is already
+ * retired by the raised floor, the new set is left unshown, and the writer
+ * answers an outage, to be run again.
  */
-export const FACTOR_SET_STORE_CALLS = 10;
+export const FACTOR_SET_STORE_CALLS = 14;
 
 /** How many Store calls' time a lease stands: the writer's calls, the acquire, and one to spare. */
 const LEASE_STORE_TIMEOUTS = FACTOR_SET_STORE_CALLS + 2;
@@ -205,14 +214,28 @@ export type MfaFactorRemoval<Refusal> = (
 };
 
 /**
+ * The subject's recovery-set floor as a bind reads and raises it under the
+ * lease (`MfaTransactionStore.recoverySetFloor`, `raiseRecoverySetFloor`):
+ * each call bounded by one Store timeout, and throwing for a store that
+ * cannot answer, answers outside its port, or does not find the lease held.
+ */
+export interface MfaRecoverySetFloor {
+	/** The subject's floor, 0 when none was raised. */
+	read(subject: string): Promise<number>;
+	/** The subject's floor raised to `setGeneration`, a set's generation from 1; never lowered. */
+	raise(subject: string, setGeneration: number): Promise<void>;
+}
+
+/**
  * What a bind's writes go through, each held to the lease's time: the factor
- * store, the witness, and `run` for any other write it makes (the
- * transaction store's). Every write a bind makes goes through one of them, so
- * a bind answered `busy` wrote nothing.
+ * store, the witness, the subject's recovery-set floor, and `run` for any
+ * other write it makes (the transaction store's). Every write a bind makes
+ * goes through one of them, so a bind answered `busy` wrote nothing.
  */
 export interface MfaFactorSetWrites {
 	readonly factorStore: MfaFactorStore;
 	readonly witness: MfaEnrollmentWitness;
+	readonly recoverySetFloor: MfaRecoverySetFloor;
 	/**
 	 * `write`, started only while the lease's time allows a write, and bounded
 	 * by one Store timeout: `refused(cause)` when it was not started, or not
@@ -323,7 +346,12 @@ interface LeaseTime {
 /** The leases' port as this file uses it. */
 type Leases = Pick<
 	MfaTransactionStore,
-	"subjectGeneration" | "acquireSubjectLease" | "releaseSubjectLease" | "applySubjectRecovery"
+	| "subjectGeneration"
+	| "acquireSubjectLease"
+	| "releaseSubjectLease"
+	| "applySubjectRecovery"
+	| "recoverySetFloor"
+	| "raiseRecoverySetFloor"
 >;
 
 /** A transaction-store outage at `step`. */
@@ -636,12 +664,13 @@ export function createMfaFactorSet(options: {
 	});
 
 	/**
-	 * The factor store, the witness and any other write as a bind's writes go
-	 * through them: each held to `time`, a refusal never thrown as this file's
-	 * own error — a store call refused rejects as a store's failure would, a
-	 * witness write is unwritten, and another write is answered `refused`.
+	 * The factor store, the witness, the recovery-set floor and any other
+	 * write as a bind's writes go through them: each held to `time`, a refusal
+	 * never thrown as this file's own error — a store call refused rejects as a
+	 * store's failure would, a witness write is unwritten, and another write
+	 * is answered `refused`. The floor is raised with `token`, the lease held.
 	 */
-	const writesUnder = (time: LeaseTime): MfaFactorSetWrites => {
+	const writesUnder = (time: LeaseTime, token: string): MfaFactorSetWrites => {
 		/** `time`'s check, as a store's failure: this file's error stays here. */
 		const started = <T,>(check: () => void, call: () => Promise<T>): Promise<T> => {
 			try {
@@ -679,6 +708,38 @@ export function createMfaFactorSet(options: {
 				writable: witness.writable,
 				mark: (subject) => witnessWrite(() => witness.mark(subject)),
 				clear: (subject) => witnessWrite(() => witness.clear(subject)),
+			},
+			recoverySetFloor: {
+				read: (subject) =>
+					read(async () => {
+						const floor = readMfaSubjectCount(
+							await within(
+								() => leases.recoverySetFloor(subject),
+								storeTimeoutMs,
+								"recoverySetFloor",
+							),
+						);
+						if (floor === undefined) throw OUTSIDE_CONTRACT;
+						return floor;
+					}),
+				raise: (subject, setGeneration) =>
+					write(async () => {
+						const answer = readMfaRecoverySetFloorAnswer(
+							await within(
+								() => leases.raiseRecoverySetFloor(subject, { setGeneration, leaseToken: token }),
+								storeTimeoutMs,
+								"raiseRecoverySetFloor",
+							),
+						);
+						if (answer === undefined) throw OUTSIDE_CONTRACT;
+						if (answer.outcome === "refused") {
+							throw new Error(
+								"the subject's lease was not held: the recovery-set floor was not raised",
+							);
+						}
+						// A floor the store answers below the raise is outside its port.
+						if (answer.floor < setGeneration) throw OUTSIDE_CONTRACT;
+					}),
 			},
 			run: async (call, refused) => {
 				try {
@@ -850,7 +911,9 @@ export function createMfaFactorSet(options: {
 		},
 
 		async bind(start, subject, write) {
-			const held = await underLease(start, subject, (time) => write(writesUnder(time)));
+			const held = await underLease(start, subject, (time, token) =>
+				write(writesUnder(time, token)),
+			);
 			if (held.outcome === "ran_out") {
 				// The writes ran out of time after one was written, and did not answer what they came to.
 				return {

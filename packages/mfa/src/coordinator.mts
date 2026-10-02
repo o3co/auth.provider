@@ -114,6 +114,7 @@ import {
 	type MfaTransactionStore,
 	type MfaVerification,
 	readMfaAttemptReservation,
+	readMfaSubjectCount,
 	readSessionEmailProof,
 	type SubjectRevocation,
 } from "@o3co/auth-provider-core";
@@ -150,7 +151,7 @@ import {
 import { exemptKindsHeld, type MfaSubjectLock } from "./lock.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
-import { recoveryCodesLeft } from "./recovery/factor.mjs";
+import { isRecoveryCodeFactor, recoveryCodesLeft, recoverySetRefusal } from "./recovery/factor.mjs";
 import { createLoginReopen } from "./reopen.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
@@ -380,15 +381,38 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	): boolean => holdsUsableRecord({ factors, sealing }, subject, records, options);
 
 	/**
+	 * `subject`'s recovery-set floor, for a verification of `factor` that is a
+	 * recovery-code factor; `undefined` for any other, which reads none.
+	 */
+	const recoverySetFloorFor = async (
+		subject: string,
+		factor: MfaFactor,
+	): Promise<number | undefined | MfaStoreOutage> => {
+		if (!isRecoveryCodeFactor(factor)) return undefined;
+		let floor: number | undefined;
+		try {
+			floor = readMfaSubjectCount(await transactions.recoverySetFloor(subject));
+		} catch (cause) {
+			return outage("mfa_transaction", "recoverySetFloor", cause);
+		}
+		return floor ?? outage("mfa_transaction", "recoverySetFloor", OUTSIDE_CONTRACT);
+	};
+
+	/**
 	 * The named record and every record of its kind, opened for `subject`: the
-	 * named one must open; another that does not is left out.
+	 * named one must open, and pass the recovery-code rule (`recoverySetRefusal`)
+	 * under `floor`, the subject's recovery-set floor when one was read — a
+	 * set below it is `retired`, a digest whose key left the ring unreadable
+	 * naming that key; another that does not open is left out.
 	 */
 	const openKind = (
 		subject: string,
 		record: MfaFactorRecord,
 		records: readonly MfaFactorRecord[],
+		floor: number | undefined = undefined,
 	):
 		| { readonly named: MfaEnrolledFactor; readonly all: readonly MfaEnrolledFactor[] }
+		| { readonly outcome: "retired" }
 		| MfaFactorUnreadable => {
 		const open = (candidate: MfaFactorRecord) =>
 			sealing.openFactorData({ subject, id: candidate.id, kind: candidate.kind }, candidate.data);
@@ -407,6 +431,21 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				factorId: record.id,
 				state: opened.state,
 				...(opened.state === "key_unavailable" ? { keyId: opened.keyId } : {}),
+			};
+		}
+		const factor = factors.get(record.kind);
+		const refusal =
+			factor === undefined || floor === undefined
+				? undefined
+				: recoverySetRefusal(factor, opened.value, { floor, holdsKey: sealing.holdsKey });
+		if (refusal?.reason === "retired") return { outcome: "retired" };
+		if (refusal?.reason === "key_unavailable") {
+			return {
+				outcome: "unreadable",
+				kind: record.kind,
+				factorId: record.id,
+				state: "key_unavailable",
+				keyId: refusal.keyId,
 			};
 		}
 		const self = enrolled(record, opened.value);
@@ -781,7 +820,8 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			const { record, factor } = found;
 			if (factor.challenge === undefined) return { outcome: "none" };
 			const opened = openKind(tx.subject, record, records);
-			if ("outcome" in opened) return opened;
+			// No floor is read here: no set is retired.
+			if ("outcome" in opened) return opened.outcome === "retired" ? UNKNOWN_FACTOR : opened;
 			const failed = (cause: unknown): MfaChallengeOutcome => ({
 				outcome: "challenge_failed",
 				kind: record.kind,
@@ -943,10 +983,15 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				cause,
 			});
 
-			// The factor must open before an attempt is spent on it: an outage
-			// spends nothing.
-			let opened = openKind(tx.subject, record, records);
-			if ("outcome" in opened) return opened;
+			// The factor must open, and a recovery-code set pass its rule under the
+			// subject's recovery-set floor, before an attempt is spent on it: an
+			// outage spends nothing, and a retired set is refused unchecked.
+			const floor = await recoverySetFloorFor(tx.subject, factor);
+			if (typeof floor === "object") return floor;
+			const retired = () =>
+				refused("invalid", Math.max(0, maxAttemptsPerTransaction - tx.attempts));
+			let opened = openKind(tx.subject, record, records, floor);
+			if ("outcome" in opened) return opened.outcome === "retired" ? retired() : opened;
 
 			/**
 			 * F3: under `required`, a login's factor that does not count completes
@@ -1012,7 +1057,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					| ({ readonly reason: MfaRefusalReason } & RefusalConcerns)
 					| MfaFactorUnreadable
 				> => {
-					if ("outcome" in opened) return opened;
+					if ("outcome" in opened) {
+						return opened.outcome === "retired" ? { reason: "invalid" } : opened;
+					}
 					const { named: self, all } = opened;
 					let result: MfaVerification;
 					try {
@@ -1126,8 +1173,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					const again = records.find((candidate) => candidate.id === record.id);
 					if (again === undefined) return refused("invalid", 0);
 					record = again;
-					opened = openKind(tx.subject, record, records);
-					if ("outcome" in opened) return opened;
+					opened = openKind(tx.subject, record, records, floor);
+					// A set retired since is refused as the proof would be: the transaction is spent.
+					if ("outcome" in opened) {
+						return opened.outcome === "retired" ? refused("invalid", 0) : opened;
+					}
 					checked = await check();
 					if ("outcome" in checked) return checked;
 					if ("reason" in checked) {
@@ -1138,6 +1188,24 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					reopening = await planOver(records);
 					if (reopening !== undefined && "outcome" in reopening) {
 						return reopening.outcome === "unavailable" ? reopening : { ...reopening, ...about };
+					}
+				}
+
+				// The floor read again once the spend is written: a regeneration that
+				// raised it meanwhile has retired this set, and its answer may be out.
+				if (floor !== undefined) {
+					const again = await recoverySetFloorFor(tx.subject, factor);
+					if (typeof again === "object") {
+						settled = "void";
+						return again;
+					}
+					const retiredSince = recoverySetRefusal(factor, checked.next, {
+						floor: again ?? floor,
+						holdsKey: sealing.holdsKey,
+					});
+					if (retiredSince?.reason === "retired") {
+						settled = "void";
+						return refused("invalid", 0);
 					}
 				}
 

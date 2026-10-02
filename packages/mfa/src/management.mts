@@ -22,7 +22,8 @@
  *
  * - `GET /factors`, admitted as `mfa.view`: every record of the subject, oldest
  *   first, with its state as `factorState.mts` reads it for the session's login
- *   address, and a recovery set's codes left; never a record's data. A record
+ *   address, and a recovery set's codes left and whether they were ever
+ *   answered (`recovery_codes_shown`); never a record's data. A record
  *   whose data or digest needs a key the ring no longer holds is said at error
  *   with that key's id.
  * - `POST /factors/rename {factor_id, label}`, admitted as `mfa.manage`: the
@@ -62,7 +63,7 @@ import type { MfaAdmissionAction } from "./admissionActions.mjs";
 import { type MfaCeremonySession, OUTSIDE_CONTRACT } from "./ceremony.mjs";
 import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
 import { type MfaRecordReading, readFactorRecordAt } from "./factorState.mjs";
-import { recoveryCodesLeft } from "./recovery/factor.mjs";
+import { recoveryCodesLeft, recoverySetShown } from "./recovery/factor.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 
@@ -196,10 +197,9 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 							"mfa_factor_unreadable",
 						);
 					}
-					const codesLeft =
-						read.state === "usable" || read.state === "exhausted"
-							? recoveryCodesLeft(read.factor, read.data)
-							: undefined;
+					const opened = read.state === "usable" || read.state === "exhausted";
+					const codesLeft = opened ? recoveryCodesLeft(read.factor, read.data) : undefined;
+					const shown = opened ? recoverySetShown(read.factor, read.data) : undefined;
 					const createdAt = isoOf(record.createdAt);
 					const lastUsedAt = isoOf(record.lastUsedAt);
 					return {
@@ -211,6 +211,7 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 						...(record.binding === undefined ? {} : { binding: record.binding }),
 						state: read.state,
 						...(codesLeft === undefined ? {} : { recovery_codes_remaining: codesLeft }),
+						...(shown === undefined ? {} : { recovery_codes_shown: shown }),
 					};
 				}),
 			});
