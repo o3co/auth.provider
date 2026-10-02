@@ -27,7 +27,9 @@
  * a subject's records are one set at a store generation, kept as core's
  * conditional-write convention for a set says (docs/adapter-surface.md,
  * "Conditional writes"): every membership write mints a fresh one, an update
- * keeps it, a conditional write checks it, an emptied set stays as its
+ * keeps it, a create and a removal of one record are conditional writes that
+ * check it — one without `expectedGeneration` is refused `400`, the reset
+ * alone going without one — an emptied set stays as its
  * tombstone until the write-lifetime bound has passed on its clock, and a set
  * held without one is given one by its first list; a conditional write whose
  * `deadlineMs` is at or before its request clock is answered `408` and not
@@ -315,14 +317,11 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 			case "create": {
 				const factor = readMfaStoreFactor(body.factor);
 				if (factor === undefined) return empty(400);
+				// Absent and `null` differ: `null` is "only while the set is absent".
+				if (!Object.hasOwn(body, "expectedGeneration")) return empty(400);
 				const set = setOf(factor.subject);
 				const records = set?.records ?? [];
 				const held = records.some((record) => heldId(record) === factor.id);
-				if (!Object.hasOwn(body, "expectedGeneration")) {
-					if (held) return empty(409);
-					written(factor.subject, [...records, factor]);
-					return empty(204);
-				}
 				const { expectedGeneration: expected, deadlineMs } = body;
 				if (expected !== null && !isStoreGeneration(expected)) return empty(400);
 				if (!isDeadline(deadlineMs)) return empty(400);
@@ -371,13 +370,8 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 					written(subject, []);
 					return empty(records.length > 0 ? 204 : 404);
 				}
-				if (typeof id !== "string" || all !== undefined) return empty(400);
+				if (typeof id !== "string" || all !== undefined || !conditional) return empty(400);
 				const kept = records.filter((record) => heldId(record) !== id);
-				if (!conditional) {
-					if (kept.length === records.length) return empty(404);
-					written(subject, kept);
-					return empty(204);
-				}
 				const { expectedGeneration: expected, deadlineMs } = body;
 				if (!isStoreGeneration(expected)) return empty(400);
 				if (!isDeadline(deadlineMs)) return empty(400);

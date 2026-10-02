@@ -99,6 +99,30 @@ async function post(url: string, body: unknown, headers: Record<string, string> 
 	return { status: response.status, headers: response.headers, body: json, text };
 }
 
+/** A deadline well ahead of the request clock. */
+const later = (): number => Date.now() + 60_000;
+
+/** A create of `factor` while the set is at `expected`, as the provider sends one. */
+const createIf = (
+	fake: FakeStore,
+	factor: MfaStoreFactor,
+	expected: string | null,
+	deadlineMs: unknown = later(),
+) => post(fake.urls.createUrl, { factor, expectedGeneration: expected, deadlineMs });
+
+/** A removal of one record while the set is at `expected`, as the provider sends one. */
+const removeIf = (
+	fake: FakeStore,
+	subject: string,
+	id: string,
+	expected: unknown,
+	deadlineMs: unknown = later(),
+) => post(fake.urls.deleteUrl, { subject, id, expectedGeneration: expected, deadlineMs });
+
+/** The set's generation a write answered. */
+const generationAnswered = (answer: { body: unknown }): string =>
+	(answer.body as { generation: string }).generation;
+
 describe("the fake Store's URLs", () => {
 	it("are loopback http URLs, one per endpoint", async () => {
 		const { urls } = await start();
@@ -126,12 +150,13 @@ describe("the fake Store's URLs", () => {
 
 describe("list", () => {
 	it("answers 200 with every record held for the subject, and an empty list for a subject with none", async () => {
-		const { urls } = await start();
+		const fake = await start();
+		const { urls } = fake;
 		expect(await post(urls.listUrl, { subject: "user-1" })).toMatchObject({
 			status: 200,
 			body: { factors: [] },
 		});
-		await post(urls.createUrl, { factor: WIRE });
+		await createIf(fake, WIRE, null);
 		expect(await post(urls.listUrl, { subject: "user-1" })).toMatchObject({
 			status: 200,
 			body: { factors: [WIRE] },
@@ -163,7 +188,7 @@ describe("list", () => {
 });
 
 describe("create", () => {
-	it("answers 204 and holds the record as sent: data byte for byte, an absent field absent", async () => {
+	it("answers 200 created and holds the record as sent: data byte for byte, an absent field absent", async () => {
 		const fake = await start();
 		const bare = toMfaStoreFactor({
 			...RECORD,
@@ -173,32 +198,55 @@ describe("create", () => {
 			lastUsedAt: undefined,
 			data: '{"a":[],"b":{}} ü∆ 漢字 🙂',
 		});
-		expect((await post(fake.urls.createUrl, { factor: bare })).status).toBe(204);
+		expect(await createIf(fake, bare, null)).toMatchObject({
+			status: 200,
+			body: { outcome: "created" },
+		});
 		expect(fake.factors("user-1")).toStrictEqual([bare]);
 		const listed = await post(fake.urls.listUrl, { subject: "user-1" });
 		expect(listed.text).not.toContain("null");
 	});
 
-	it("answers 409 to a duplicate (subject, id), keeping the record held", async () => {
+	it("answers 409 conflict to a duplicate (subject, id), keeping the record held", async () => {
 		const fake = await start();
-		await post(fake.urls.createUrl, { factor: WIRE });
-		expect(
-			(await post(fake.urls.createUrl, { factor: { ...WIRE, data: "v2.other" } })).status,
-		).toBe(409);
-		expect(
-			(await post(fake.urls.createUrl, { factor: { ...WIRE, subject: "user-2" } })).status,
-		).toBe(204);
+		const g1 = generationAnswered(await createIf(fake, WIRE, null));
+		expect((await createIf(fake, { ...WIRE, data: "v2.other" }, g1)).status).toBe(409);
+		expect((await createIf(fake, { ...WIRE, subject: "user-2" }, null)).status).toBe(200);
 		expect(fake.factors("user-1")).toStrictEqual([WIRE]);
 	});
 
 	it("answers 400 to a record that is not one, null for an optional field included, and holds nothing", async () => {
 		const fake = await start();
 		for (const factor of [{ ...WIRE, label: null }, { ...WIRE, createdAtMs: "x" }, {}, null]) {
-			expect((await post(fake.urls.createUrl, { factor })).status, JSON.stringify(factor)).toBe(
-				400,
-			);
+			expect(
+				(await createIf(fake, factor as MfaStoreFactor, null)).status,
+				JSON.stringify(factor),
+			).toBe(400);
 		}
 		expect(fake.factors("user-1")).toEqual([]);
+	});
+
+	it("answers 400 to a create without expectedGeneration, to an absent set or a present one, holding nothing; one at null on an absent set creates", async () => {
+		const fake = await start();
+		for (const body of [{ factor: WIRE }, { factor: WIRE, deadlineMs: later() }]) {
+			expect((await post(fake.urls.createUrl, body)).status, Object.keys(body).join()).toBe(400);
+		}
+		expect(fake.factors("user-1")).toEqual([]);
+		expect((await post(fake.urls.listUrl, { subject: "user-1" })).body).toStrictEqual({
+			factors: [],
+			generation: null,
+		});
+		const created = await createIf(fake, WIRE, null);
+		expect(created).toMatchObject({ status: 200, body: { outcome: "created" } });
+		const g1 = generationAnswered(created);
+		const another = { ...WIRE, id: ID_2 };
+		for (const body of [{ factor: another }, { factor: another, deadlineMs: later() }]) {
+			expect((await post(fake.urls.createUrl, body)).status, Object.keys(body).join()).toBe(400);
+		}
+		expect((await post(fake.urls.listUrl, { subject: "user-1" })).body).toStrictEqual({
+			factors: [WIRE],
+			generation: g1,
+		});
 	});
 });
 
@@ -292,18 +340,38 @@ describe("update", () => {
 });
 
 describe("delete", () => {
-	it("answers 204 for one record or every record of a subject, and 404 when it held none", async () => {
+	it("answers the reset of every record of a subject 204, and 404 when it held none, leaving other subjects' records", async () => {
 		const fake = await start();
 		fake.holdFactor("user-1", WIRE);
 		fake.holdFactor("user-1", { ...WIRE, id: ID_2 });
 		fake.holdFactor("user-2", WIRE);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: ID_1 })).status).toBe(204);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: ID_1 })).status).toBe(404);
-		expect(fake.factors("user-1")).toStrictEqual([{ ...WIRE, id: ID_2 }]);
 		expect((await post(fake.urls.deleteUrl, { subject: "user-1", all: true })).status).toBe(204);
 		expect((await post(fake.urls.deleteUrl, { subject: "user-1", all: true })).status).toBe(404);
 		expect(fake.factors("user-1")).toEqual([]);
 		expect(fake.factors("user-2")).toStrictEqual([WIRE]);
+	});
+
+	it("answers 400 to the removal of one record without expectedGeneration, removing nothing; the reset still empties the set", async () => {
+		const fake = await start();
+		const g1 = generationAnswered(await createIf(fake, WIRE, null));
+		for (const body of [
+			{ subject: "user-1", id: ID_1 },
+			{ subject: "user-1", id: ID_1, deadlineMs: later() },
+			{ subject: "user-1", id: ID_GONE },
+			{ subject: "user-2", id: ID_1 },
+		]) {
+			expect((await post(fake.urls.deleteUrl, body)).status, JSON.stringify(body)).toBe(400);
+		}
+		expect((await post(fake.urls.listUrl, { subject: "user-1" })).body).toStrictEqual({
+			factors: [WIRE],
+			generation: g1,
+		});
+		expect((await post(fake.urls.listUrl, { subject: "user-2" })).body).toStrictEqual({
+			factors: [],
+			generation: null,
+		});
+		expect((await post(fake.urls.deleteUrl, { subject: "user-1", all: true })).status).toBe(204);
+		expect(fake.factors("user-1")).toEqual([]);
 	});
 
 	it("answers 400 to a body that names neither one record nor all", async () => {
@@ -331,28 +399,10 @@ describe("the factor set's generation", () => {
 		return generation as string;
 	}
 
-	/** A deadline well ahead of the request clock. */
-	const later = (): number => Date.now() + 60_000;
-
-	const createIf = (
-		fake: FakeStore,
-		factor: MfaStoreFactor,
-		expected: string | null,
-		deadlineMs: unknown = later(),
-	) => post(fake.urls.createUrl, { factor, expectedGeneration: expected, deadlineMs });
-
-	const removeIf = (
-		fake: FakeStore,
-		subject: string,
-		id: string,
-		expected: unknown,
-		deadlineMs: unknown = later(),
-	) => post(fake.urls.deleteUrl, { subject, id, expectedGeneration: expected, deadlineMs });
-
 	it("lists a set never written as no records and a null generation, and a written one with its generation, which a read leaves", async () => {
 		const fake = await start();
 		expect(await listed(fake)).toStrictEqual({ factors: [], generation: null });
-		await post(fake.urls.createUrl, { factor: WIRE });
+		await createIf(fake, WIRE, null);
 		const generation = await generationOf(fake);
 		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation });
 	});
@@ -421,7 +471,7 @@ describe("the factor set's generation", () => {
 		expect(await listed(fake)).toStrictEqual({ factors: [], generation: g2 });
 		expect((await createIf(fake, WIRE, null)).status).toBe(409);
 
-		await post(fake.urls.createUrl, { factor: { ...WIRE, subject: "user-2" } });
+		await createIf(fake, { ...WIRE, subject: "user-2" }, null);
 		const before = await generationOf(fake, "user-2");
 		expect((await post(fake.urls.deleteUrl, { subject: "user-2", all: true })).status).toBe(204);
 		const reset = await generationOf(fake, "user-2");
@@ -436,10 +486,9 @@ describe("the factor set's generation", () => {
 		expect((await createIf(fake, { ...WIRE, subject: "nobody" }, null)).status).toBe(409);
 	});
 
-	it("keeps the generation through an update; moves it on a legacy create and on a legacy removal that removed; a legacy removal of nothing leaves no set", async () => {
+	it("keeps the generation through an update", async () => {
 		const fake = await start();
-		await post(fake.urls.createUrl, { factor: WIRE });
-		const g1 = await generationOf(fake);
+		const g1 = generationAnswered(await createIf(fake, WIRE, null));
 		const update = toMfaStoreUpdateRequest("user-1", ID_1, 1, {
 			data: "v2.re-sealed",
 			label: undefined,
@@ -447,15 +496,6 @@ describe("the factor set's generation", () => {
 		});
 		expect((await post(fake.urls.updateUrl, update)).status).toBe(200);
 		expect(await generationOf(fake)).toBe(g1);
-		await post(fake.urls.createUrl, { factor: RECORD_2 });
-		const g2 = await generationOf(fake);
-		expect(g2).not.toBe(g1);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: ID_GONE })).status).toBe(404);
-		expect(await generationOf(fake)).toBe(g2);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-1", id: ID_2 })).status).toBe(204);
-		expect(await generationOf(fake)).not.toBe(g2);
-		expect((await post(fake.urls.deleteUrl, { subject: "user-2", id: ID_1 })).status).toBe(404);
-		expect(await listed(fake, "user-2")).toStrictEqual({ factors: [], generation: null });
 	});
 
 	it("reads a tombstone as absent once the write-lifetime bound has passed on its clock since the set's last membership write, and never a set holding a record", async () => {
