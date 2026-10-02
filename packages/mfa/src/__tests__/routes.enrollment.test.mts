@@ -28,6 +28,7 @@ import {
 	createInMemoryUserSessionStore,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
+	federatedSessionAuthentication,
 	type MfaFactor,
 	type MfaFactorRecord,
 	type MfaFactorStore,
@@ -35,6 +36,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createTestMfaFactor } from "@o3co/auth-provider-core/testing";
+import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readLongCode } from "#/codes.mjs";
 import { mfaRecoveryCodeFactorConfigForTests } from "#/testing/index.mjs";
@@ -55,6 +57,7 @@ import {
 	beginLogin,
 	completeEnrollment,
 	contributing,
+	cookieSessionTap,
 	EXTRA_INTERRUPTION,
 	extraRequirement,
 	freezeClock,
@@ -271,6 +274,69 @@ describe("the first login of a subject with no factor", () => {
 		expect(done.status).toBe(200);
 		expect(done.body.factor).toEqual({ id: expect.any(String), kind: "totp", label: "My phone" });
 		expect((await recordsOf(factorStore)).totp?.label).toBe("My phone");
+	});
+});
+
+describe("a login's first binding in a browser that also holds a federated session", () => {
+	it("is bound by password: the login's primary is the sign-in it rests on, never the session the browser holds beside it", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const audit = recordingAuditSink();
+		const tap = cookieSessionTap();
+		const { app, userSessionStore } = await boot({
+			config: configFor("required"),
+			factorStore,
+			auditSink: audit,
+			extraModules: [tap.module],
+		});
+		const { agent, transaction, boundTo } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+
+		// The same cookie session, the login's binding, now also signed in through a federation.
+		await (userSessionStore as UserSessionStore).create({
+			sid: "federated-sid",
+			sub: ALICE.id,
+			authTime: new Date(T0),
+			expiresAt: new Date(T0 + 3_600_000),
+			claims: {},
+			...federatedSessionAuthentication({ federation: "google", upstreamAmr: [], trusted: false }),
+			enrollmentFacts: { witness: "not_enrolled", mailAddress: "address" },
+		});
+		await request(app).get("/test-tap");
+		const cookies = tap.tapped.store as unknown as {
+			get(sid: string, done: (err: unknown, session?: Record<string, unknown>) => void): void;
+			set(sid: string, session: unknown, done: (err?: unknown) => void): void;
+		};
+		const loaded = await new Promise<Record<string, unknown>>((resolve, reject) =>
+			cookies.get(boundTo, (err, session) =>
+				err === undefined || err === null ? resolve(session ?? {}) : reject(err),
+			),
+		);
+		await new Promise<void>((resolve, reject) =>
+			cookies.set(
+				boundTo,
+				{
+					...loaded,
+					isAuthenticated: true,
+					user: { id: ALICE.id, username: ALICE.username, email: ALICE.email },
+					sid: "federated-sid",
+				},
+				(err) => (err === undefined || err === null ? resolve() : reject(err)),
+			),
+		);
+
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		const records = await factorStore.list(ALICE.id);
+		expect(records.map((record) => [record.kind, record.binding]).sort()).toEqual([
+			["recovery_code", "password"],
+			["totp", "password"],
+		]);
+		expect(audit.of("mfa.factor.enrolled")[0]?.details).toMatchObject({
+			purpose: "login",
+			binding: "password",
+		});
 	});
 });
 
