@@ -112,8 +112,10 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-federation-oidc": "oidcFederationModule, one per `oidc` section",
 	"@o3co/auth-provider-foundation":
 		"the HTTP user repository adapter; foundationMfaFactorStoreModule under MFA_MODE with adapters.mfaFactorStore = store (tools/composition boots it)",
+	// no-mfa:omit-begin
 	"@o3co/auth-provider-mfa":
 		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule) and mfaResetModule, under MFA_MODE (mfa-switch.test.mts)",
+	// no-mfa:omit-end
 	"@o3co/auth-provider-oauth":
 		"oauthModule, oauthSessionModule, oauthAuthorizationModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",

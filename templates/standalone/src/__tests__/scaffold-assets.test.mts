@@ -226,7 +226,9 @@ describe("what .gitignore keeps out of git stays out of the image, and productio
 		"config/application.conf",
 		"config/development.conf",
 		"config/production.conf",
+		// no-mfa:omit-begin
 		"config/mailpit.conf",
+		// no-mfa:omit-end
 		"config/clients.yaml.example",
 	] as const;
 
@@ -429,7 +431,9 @@ describe("the shipped suite carries what it needs to run outside this repository
 		"README.ja.md",
 		"docker-compose.yml",
 		"docker-compose.production.yml",
+		// no-mfa:omit-begin
 		"docker-compose.mailpit.yml",
+		// no-mfa:omit-end
 	] as const;
 
 	it("reads only files the template actually ships", () => {

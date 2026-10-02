@@ -41,16 +41,32 @@ import {
 	readEnvironmentName,
 } from "@o3co/auth-provider-core";
 import { foundationMfaFactorStoreModule } from "@o3co/auth-provider-foundation";
-import { MFA_DEVELOPMENT_SAMPLE_KEY, mfaModules, mfaResetModule } from "@o3co/auth-provider-mfa";
+import {
+	MFA_DEVELOPMENT_SAMPLE_KEY,
+	mfaConfigSchema,
+	mfaModules,
+	mfaResetModule,
+} from "@o3co/auth-provider-mfa";
 import {
 	redisMfaFactorStoreModule,
 	redisMfaTransactionStoreModule,
 } from "@o3co/auth-provider-redis";
 import { loginCompletionModule } from "@o3co/auth-provider-session";
-import { type Adapters, isPlainSection, type MfaSwitch, mfaSwitchSchema } from "./sections.mjs";
+import type { z } from "zod";
+import { type Adapters, isPlainSection } from "./sections.mjs";
 
 /** The composition root's MFA switch, a key of its own. No module may be named after it. */
 export const MFA_SWITCH = "mfaMode";
+
+/**
+ * `mfaMode`, read with the MFA package's schema for `mfa.mode`: `off`
+ * installs nothing of MFA; `optional` and `required` install it and are
+ * written to `mfa.mode`.
+ */
+const mfaSwitchSchema = mfaConfigSchema.shape.mode;
+
+/** The composition root's MFA switch, as the MFA package reads `mfa.mode`. */
+export type MfaSwitch = z.output<typeof mfaSwitchSchema>;
 
 /** The MFA module's section, which the switch decides. */
 const MFA_SECTION = "mfa";

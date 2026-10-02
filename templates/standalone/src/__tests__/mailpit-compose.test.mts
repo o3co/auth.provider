@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+// no-mfa:omit-file
+
 /**
  * The Mailpit overlay, `docker-compose.mailpit.yml`: a development run with
  * MFA on whose mail goes through the SMTP sender to Mailpit. It is an overlay

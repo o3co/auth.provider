@@ -43,7 +43,7 @@ import {
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 import { ADAPTERS_SECTION, readAdapters } from "../adapters.mjs";
-import { MFA_SWITCH, readMfaSwitch } from "../mfaSwitch.mjs";
+import { MFA_SWITCH, type MfaSwitch, readMfaSwitch } from "../mfaSwitch.mjs";
 import {
 	httpModule,
 	inMemoryCodeRepositoryModule,
@@ -53,7 +53,7 @@ import {
 	standaloneRedisClientsModule,
 	templateReference,
 } from "../modules.mjs";
-import type { Adapters, MfaSwitch } from "../sections.mjs";
+import type { Adapters } from "../sections.mjs";
 
 /** The oauth package's modules, whose manifests read nothing of the configuration they are handed but the grant switches. */
 const OAUTH_MODULES = [

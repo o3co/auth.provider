@@ -6,8 +6,12 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 
 ## 責務と役割
 
-**役割。** composition root であり、デプロイの出発点である。ライブラリではない: これを import するものは何も無い。`@o3co/create-auth-provider` がこれを新しいプロジェクトにコピーし、以後はオペレーターがそのコピーを所有・編集する。パッケージ群の上に位置し、`@o3co/auth-provider-core` の上に `@o3co/auth-provider-oauth`、`-session`、Google と汎用 OpenID Connect のフェデレーションアダプター、`-federation-grants`、`-mfa`、`-redis`、`-foundation`、`-standard` のメール送信者を合成する。
+**役割。** composition root であり、デプロイの出発点である。ライブラリではない: これを import するものは何も無い。`@o3co/create-auth-provider` がこれを新しいプロジェクトにコピーし、以後はオペレーターがそのコピーを所有・編集する。パッケージ群の上に位置し、`@o3co/auth-provider-core` の上に `@o3co/auth-provider-oauth`、`-session`、Google と汎用 OpenID Connect のフェデレーションアダプター、`-federation-grants`、`-redis`、`-foundation`、`-standard` のメール送信者を合成する。
 
+<!-- no-mfa:omit-begin -->
+MFA のスイッチが組み込む `-mfa` も合成する。
+
+<!-- no-mfa:omit-end -->
 **所有する**のは、1 つのデプロイに固有の選択である:
 
 - どのモジュールをどの順序で合成し、各ストアスロットをどのアダプターで埋めるか — [`src/buildModules.mts`](src/buildModules.mts)（[モジュール合成順序](#モジュール合成順序) を参照）。その選択は自身のキー、`adapters` セクション（[`src/adapters.mts`](src/adapters.mts)）と MFA のスイッチ `mfaMode`（[`src/mfaSwitch.mts`](src/mfaSwitch.mts)）から読む
@@ -199,12 +203,16 @@ pnpm run start
 
 1. **`config/{ENV}.conf`** — 現在の環境の overlay。`ENV = CONFIG_ENV || NODE_ENV || "development"` で決まる。
 2. **`config/application.conf`** — このデプロイの設定。
-3. **読み込むモジュールの各パッケージの `reference.conf`**、その次に **`@o3co/auth-provider-core` のもの** — デフォルト。インストール済みパッケージから解決される: 各モジュールが自分のパッケージのファイルを宣言し、core の `moduleReferences(modules)` がそれを core のものを最後にして列挙する。テンプレート自身のモジュールは `config/reference.conf` を宣言し、そこには自身が所有するセクション — `logging`、`http`（その CORS のリスト `http.cors` を含む）、`key-store`、共有 Redis 接続の `redis-clients`、`repositories`、in-process のコードリポジトリの `standalone-in-memory-code-repository`、`audit-sink` — と、composition root 自身の `adapters` と `mfaMode`（下記）のデフォルトがある。デプロイ固有の値はそこではなく上の 2 ファイルに書く。`config/reference.conf` はこれらのキーの変数をデフォルトの横で束縛するので、上の 2 ファイルのどちらかが設定する値は変数に勝つ。ただし `HTTP_PORT`、`HTTP_TRUST_PROXY`、`HTTP_CORS_ALLOWED_ORIGINS`、`REDIS_CLIENTS_URL` / `REDIS_CLIENTS_PASSWORD` は `application.conf` が末尾の行でもう一度束縛するので、それぞれ、そのファイルがそれより上で設定する値に勝つ。上の 2 ファイルのどちらも設定していないキーは、ここから値を得る。
+3. **読み込むモジュールの各パッケージの `reference.conf`**、その次に **`@o3co/auth-provider-core` のもの** — デフォルト。インストール済みパッケージから解決される: 各モジュールが自分のパッケージのファイルを宣言し、core の `moduleReferences(modules)` がそれを core のものを最後にして列挙する。テンプレート自身のモジュールは `config/reference.conf` を宣言し、そこには自身が所有するセクション — `logging`、`http`（その CORS のリスト `http.cors` を含む）、`key-store`、共有 Redis 接続の `redis-clients`、`repositories`、in-process のコードリポジトリの `standalone-in-memory-code-repository`、`audit-sink` — と、composition root 自身のキー（下記）のデフォルトがある。デプロイ固有の値はそこではなく上の 2 ファイルに書く。`config/reference.conf` はこれらのキーの変数をデフォルトの横で束縛するので、上の 2 ファイルのどちらかが設定する値は変数に勝つ。ただし `HTTP_PORT`、`HTTP_TRUST_PROXY`、`HTTP_CORS_ALLOWED_ORIGINS`、`REDIS_CLIENTS_URL` / `REDIS_CLIENTS_PASSWORD` は `application.conf` が末尾の行でもう一度束縛するので、それぞれ、そのファイルがそれより上で設定する値に勝つ。上の 2 ファイルのどちらも設定していないキーは、ここから値を得る。
 
-上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — フェデレーション、機能 — と、期待するセッション要件を導く元の `sessionRequirements` を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。`adapters` — 各スロットをどのアダプターで埋めるか、composition root 自身のセクション — は、上の 2 ファイルをテンプレートの `config/reference.conf` の上に重ね、テンプレート自身のスキーマで読む（`readAdapters`）: 移動する前のパスにまだ書かれた選択や、それとともに改名された変数は、どのモジュールを選ぶよりも前にここで拒否され、新しいパスと変数を名指しする。composition root 自身のキーである MFA のスイッチ `mfaMode`（`MFA_MODE`）も同じように、テンプレート自身のスキーマで読み（`readMfaSwitch`）、それと並んで、Store を使う MFA 要素ストアの元になるユーザーリポジトリの HTTP 設定をパースせずに読む。boot には `adapters` も `mfaMode` も渡さない。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。ログレベルも boot の前に読むが、それは `logging` モジュールのセクションとして、そのモジュールのスキーマで、テンプレートの `reference.conf` の上に読む（`readLogging`）: テンプレートは設定を読みモジュールを選ぶ間もログを出すので、logger は boot の前に存在する。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込み、`mfa` セクションは MFA のスイッチが決めるとおりにして（[多要素認証](#多要素認証) を参照）、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースする。boot の後にテンプレートが読むもの — 信頼するホップ、ポート、readiness の期限 — は、`http` モジュールから読む: core の `httpSettings` スロットと、テンプレートの `httpHostSettings` である。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
+上の 2 ファイルは、環境変数の一つのスナップショットのもとで一度だけ読み（`readOwnLayers`）、その一度の読み込みから二つの段階を組み立てる — 起動中にファイルが置き換えられても、変数が変わっても、boot がモジュールを選んだものと違うものをパースすることはない。読み込みは二段階で行う（[#728](https://github.com/o3co/auth.provider/issues/728)、[`src/configPath.mts`](src/configPath.mts)）。まず、モジュールを知る前に、`buildModules` がモジュールを選ぶスイッチ — フェデレーション、機能 — と、期待するセッション要件を導く元の `sessionRequirements` を、上の 2 ファイルを core の `reference.conf` だけの上に重ねて読む（`readSwitches`、core の transitional reader で読む）。パースするのはそれらのパス（`SWITCHES`）だけである。`adapters` — 各スロットをどのアダプターで埋めるか、composition root 自身のセクション — は、上の 2 ファイルをテンプレートの `config/reference.conf` の上に重ね、テンプレート自身のスキーマで読む（`readAdapters`）: 移動する前のパスにまだ書かれた選択や、それとともに改名された変数は、どのモジュールを選ぶよりも前にここで拒否され、新しいパスと変数を名指しする。composition root 自身のキーである MFA のスイッチ `mfaMode`（`MFA_MODE`）も同じように、テンプレート自身のスキーマで読み（`readMfaSwitch`）、それと並んで、Store を使う MFA 要素ストアの元になるユーザーリポジトリの HTTP 設定をパースせずに読む。boot には `adapters` も `mfaMode` も渡さない。パッケージの `reference.conf` だけが設定するものはこの段階では見えない — まだどれも重ねていない — ので、組み立て時に設定を読むモジュールを `buildModules` に加えるなら、そのモジュールが読むパスを `SWITCHES` に加える。ログレベルも boot の前に読むが、それは `logging` モジュールのセクションとして、そのモジュールのスキーマで、テンプレートの `reference.conf` の上に読む（`readLogging`）: テンプレートは設定を読みモジュールを選ぶ間もログを出すので、logger は boot の前に存在する。次に、読み込むすべてのモジュールの `reference.conf` の上に解決した設定を、第一段階で導いたセッション要件を書き込み、`mfa` セクションは MFA のスイッチ（[`src/mfaSwitch.mts`](src/mfaSwitch.mts)）が決めるとおりにして、パースせずに `createApp` に渡す（`resolveForBoot`）: boot はそれを、読み込まれたすべてのモジュールのスキーマで一度だけパースする。boot の後にテンプレートが読むもの — 信頼するホップ、ポート、readiness の期限 — は、`http` モジュールから読む: core の `httpSettings` スロットと、テンプレートの `httpHostSettings` である。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、boot 時に `config_sections_ignored` として一度だけログに出る: セクション名の綴り間違いはここに現れる。
 
-overlay の値は `application.conf` より優先される。scaffold には `development.conf` と `production.conf`、そして `mailpit.conf` が同梱されている。`mailpit.conf` は、[Docker](#docker) の Mailpit オーバーレイが選ぶ名前のもとでの development の overlay である。別の環境（例: `staging`）を追加するときは `config/staging.conf` を作成し、`CONFIG_ENV=staging` を設定する。`{ENV}.conf` が存在しない場合は起動時エラーになる — タイポは黙ってデフォルトにフォールバックせず、fail-fast する。
+overlay の値は `application.conf` より優先される。scaffold には `development.conf` と `production.conf` が同梱されている。別の環境（例: `staging`）を追加するときは `config/staging.conf` を作成し、`CONFIG_ENV=staging` を設定する。`{ENV}.conf` が存在しない場合は起動時エラーになる — タイポは黙ってデフォルトにフォールバックせず、fail-fast する。
 
+<!-- no-mfa:omit-begin -->
+`mailpit.conf` も同梱されている。これは [SMTP 送信者のための Mailpit](#smtp-送信者のための-mailpit開発専用) のオーバーレイが選ぶ名前のもとでの development の overlay である。
+
+<!-- no-mfa:omit-end -->
 ### アダプター
 
 各スロットをどのアダプターで埋めるかは composition root 自身の選択で、自身のセクション `adapters` にあり、どのモジュールを選ぶよりも前に読む（上記）。各キーに変数がある。テンプレートが知らない値や、宣言していないキーは、それを名指しして boot の前に失敗する。
@@ -219,7 +227,7 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `ADAPTERS_FEDERATION_TOKEN_STORE` | `memory` | `adapters.federationTokenStore`: `memory` または `redis`。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照 |
 | `ADAPTERS_FEDERATION_GRANT_STORE` | `none` | `adapters.federationGrantStore`: `none`、`memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
 | `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `none` | `adapters.federationGrantIntentStore`: `none`、`memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
-| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`（development と test のみ）、`redis` または `store`（Store のエンドポイント）。`MFA_MODE` が MFA を組み込む間に読む。[多要素認証](#多要素認証) を参照 |
+| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`（development と test のみ）、`redis` または `store`（Store のエンドポイント）。`MFA_MODE` が MFA を組み込む間に読む |
 | `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory`（development と test のみ）または `redis`。`MFA_MODE` が MFA を組み込む間に読む |
 | `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: 認可コードリポジトリ、`memory` または `redis`。[コードリポジトリ](#コードリポジトリ) を参照 |
 | `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`、または `static`（core の `yaml` の別名）。[クライアントリポジトリ](#クライアントリポジトリ) を参照 |
@@ -472,6 +480,7 @@ core.federations {
 |---|---|---|
 | `ADAPTERS_CONSENT_STORE` | `none` | ファーストパーティでないクライアントのための同意ストア（#527）: `none`（そのようなクライアントは拒否される）、`memory`（単一レプリカ）、または `redis`（共有、#561） |
 
+<!-- no-mfa:omit-begin -->
 ### 多要素認証
 
 パスワードログインの後の第二要素と、relying party が `/authorize` で求めたときのステップアップ — [MFA パッケージ](../../packages/mfa/README.md)。`MFA_MODE` はテンプレート自身のスイッチ `mfaMode`（[`config/reference.conf`](config/reference.conf)）である: デフォルトの `off` は MFA を何も組み込まない。`optional`（要素を持つユーザーには求め、誰にも強制しない）と `required`（すべてのパスワードログインに第二要素がある）は、MFA モジュール、TOTP・リカバリーコード・メールの各要素（メールは `MFA_EMAIL_FACTOR_ENABLED` が無ければ off）、オペレーターによるリセット（`handle.components.mfaReset`）、session パッケージのログイン完了、`adapters` が選ぶ 2 つの MFA ストアを組み込む。そのときテンプレートは `core.sessionRequirements.expected` に `mfa` を加え、それを `core.sessionRequirements.secondFactorAuthority` に書き、`mfa.mode` をスイッチから書く。したがって、第二要素を求めながらそれを強制できない合成は、パスワードだけでサインインさせるのではなく boot で拒否される。3 つのどれでもない値は、`mfaMode` と `MFA_MODE` を名指して boot の前に拒否される。
@@ -497,6 +506,7 @@ core.federations {
 - **development でのメール。** `CONFIG_ENV=development` では、テンプレートの送信者は各コードをログに出す（`mail_code_issued`）だけで何も送らない。SMTP 送信者を動かし、送ったものを読むには、[Docker](#docker) の Mailpit オーバーレイを使う。
 - **スイッチは一つ。** `MFA_MODE` が別の値に設定されているのにファイルが `mfaMode` を書くこと、また設定がスイッチと違う `mfa.mode` を書くことは、キーを名指して boot の前に拒否される。MFA が off の間、設定が `mfa` の下に書くものは何も boot に渡されない。
 
+<!-- no-mfa:omit-end -->
 ### フェデレーショングラント
 
 上流 IdP のトークンのオフライン委譲（#593）: ユーザーは、あるクライアント — バックエンドやエージェント — が 1 つの上流 connection についてユーザーに代わってアクセストークンを取得してよいことに一度だけ同意し、クライアントは後から、ユーザー不在のまま HTTP でそれを取得する。グラントは**ログアウトを越えて残り**、資格情報の変更が subject-revocation service を通じてそれを終わらせる。デフォルトはオフで、オフなら何もインストールされない。ルートと各応答の意味は [パッケージの README](../../packages/federation-grants/README.md) に、各 IdP がリフレッシュトークンを発行する前に必要とするものは [`docs/offline-access.md`](../../packages/federation-grants/docs/offline-access.md) にある。
@@ -677,6 +687,7 @@ docker run -e HTTP_PORT=8080 -p 8080:8080 my-auth-provider
 
 `EXPOSE` はイメージのメタデータであり、それだけではポートを公開しないため、明示的な `-p` マッピングが引き続き必要である。
 
+<!-- no-mfa:omit-begin -->
 ### SMTP 送信者のための Mailpit（開発専用）
 
 [`docker-compose.mailpit.yml`](docker-compose.mailpit.yml) は `docker-compose.yml` に重ねるオーバーレイで、メールを受け止める [Mailpit](https://mailpit.axllent.org/) を加える。これにより、MFA を有効にした開発時の実行は、そのメール — アカウントのメールの証明、メール要素のコード — を、各コードをログに出すだけの開発用送信者ではなく SMTP 送信者で送る:
@@ -696,6 +707,7 @@ docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
 
 compose の profile ではなくオーバーレイにしているのは、profile はサービスを足すことしかできず、app サービスの環境変数やポートを変えられないからである。
 
+<!-- no-mfa:omit-end -->
 ### ヘルスエンドポイント
 
 2 つのルートが、それぞれ異なる問いに答える。どちらも auth ルーターより前にホストアプリへマウントされるため、auth パイプラインが劣化している間も応答し続ける。

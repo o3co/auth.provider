@@ -44,7 +44,13 @@ import {
 } from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 import { ADAPTERS_SECTION, readAdapters } from "./adapters.mjs";
-import { MFA_SWITCH, mfaSectionForBoot, oauthForBoot, readMfaSwitch } from "./mfaSwitch.mjs";
+import {
+	MFA_SWITCH,
+	type MfaSwitch,
+	mfaSectionForBoot,
+	oauthForBoot,
+	readMfaSwitch,
+} from "./mfaSwitch.mjs";
 import { loggingModule, templateReference } from "./modules.mjs";
 import { refuseRenamedVariables, SHIPPED_FEDERATION_RENAMES } from "./rootRenames.mjs";
 import {
@@ -52,7 +58,6 @@ import {
 	isPlainSection,
 	type LoggingSettings,
 	loggingSectionSchema,
-	type MfaSwitch,
 } from "./sections.mjs";
 
 export interface ResolvedConfigPaths {

@@ -75,7 +75,7 @@ const REQUIRED_ENV = {
 /** The environments the template ships for: none but the secrets, and the Redis-backed production one. */
 const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 	"the secrets alone": REQUIRED_ENV,
-	"every adapter on Redis, MFA optional": {
+	"every adapter on Redis": {
 		...REQUIRED_ENV,
 		CORE_DEPLOYMENT_MODE: "multi",
 		SESSION_STORE_STORAGE_TYPE: "redis",
@@ -87,9 +87,11 @@ const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 		HTTP_PORT: "8080",
 		HTTP_TRUST_PROXY: "loopback",
 		SESSION_STORE_SECURE: "false",
+		// no-mfa:omit-begin
 		MFA_MODE: "optional",
 		ADAPTERS_MFA_FACTOR_STORE: "redis",
 		ADAPTERS_MFA_TRANSACTION_STORE: "redis",
+		// no-mfa:omit-end
 	},
 };
 
@@ -171,9 +173,7 @@ describe("phase one reads each switch as the template's AppConfigSchema pre-pars
 });
 
 describe("phase one reads its switches and nothing else", () => {
-	const env = ENVIRONMENTS["every adapter on Redis, MFA optional"] as Readonly<
-		Record<string, string>
-	>;
+	const env = ENVIRONMENTS["every adapter on Redis"] as Readonly<Record<string, string>>;
 
 	it("accepts a section a package's reference completes, which only phase two layers", () => {
 		// The device grant's and WebAuthn's references ship `windowSeconds`;
@@ -256,6 +256,7 @@ describe("phase two: what createApp is handed", () => {
 		expect(resolved).not.toHaveProperty("widget");
 	});
 
+	// no-mfa:omit-begin
 	it("hands the configuration over as resolved and unparsed, with what phase one says the composition expects: mfa beside the configuration's list under MFA_MODE=optional", () => {
 		const optionalOwn = readOwnLayers(ownFiles("development"), {
 			env: { ...env, MFA_MODE: "optional", HTTP_PORT: "8080" },
@@ -273,6 +274,7 @@ describe("phase two: what createApp is handed", () => {
 			secondFactorAuthority: "mfa",
 		});
 	});
+	// no-mfa:omit-end
 });
 
 describe("phase two refuses the Redis grant store's key prefix moved while the intent store's is left at its default", () => {
