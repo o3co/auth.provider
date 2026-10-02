@@ -160,7 +160,7 @@ overlay() {
 # Written by tools/live-check at start and removed at stop (git-ignored as
 # config/*.local.conf). The one key a live check needs that has no environment
 # form: where the browser lands after the callback — the live-check page.
-federations { $1 { clientUrl = "http://localhost:$PORT/" } }
+core { federations { $1 { clientUrl = "http://localhost:$PORT/" } } }
 EOF
 }
 
