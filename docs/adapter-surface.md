@@ -486,6 +486,13 @@ write-lifetime bound. These are the rules every store with conditional members k
    (v1, time-based), nor a counter, even one kept in the same store: a
    failover or a restore that loses the latest writes rolls it back to a
    value already issued.
+   - **A rollback must not bring a generation back either.** A failover or
+     restore that returns state from before a write the store acknowledged
+     would serve that state's old generation again, which a caller may still
+     hold. A store that can lose acknowledged writes re-mints the generation
+     of everything it restores before serving it, or runs so that
+     acknowledged state never rolls back (synchronous replication, say), and
+     its documentation says which.
    - **State with no generation** (written before the store had conditional
      members, or by an older writer) is given a fresh one, atomically, by its
      first versioned read, which keeps its retention. A conditional write
@@ -504,8 +511,9 @@ write-lifetime bound. These are the rules every store with conditional members k
 - Each conditional member is one atomic step (rule 1), the versioned read is
   one snapshot (rule 2), and the check includes the retention (rule 3).
 - Every write of what a generation guards issues a new, random one, never
-  re-issued (rules 2, 5 and 8). An older writer that leaves the generation in
-  place is kept away, or covered by the store (rule 8).
+  re-issued, a rollback included (rules 2, 5 and 8). An older writer that
+  leaves the generation in place is kept away, or covered by the store
+  (rule 8).
 - An outage rejects, and `missing` and `conflict` write nothing (rule 4).
 - A set keeps its tombstone, and reads absent only once the bound has passed
   since its last membership write (rule 6).
@@ -558,7 +566,9 @@ retention.
   - `createIf`: `{ "outcome": "created", "generation": "<g>" }`;
   - a set's `removeIf`: `{ "outcome": "removed", "generation": "<g>" }`.
 - A versioned read of something absent is a `200` stating its absence, never
-  a `404`.
+  a `404`. The adapter answers a record's absence envelope, both fields
+  `null`, as `null` from its versioned read; one field `null` without the
+  other is malformed, and the adapter throws.
 
 | Status | Meaning |
 | --- | --- |
