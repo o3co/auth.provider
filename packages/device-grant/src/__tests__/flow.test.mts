@@ -1338,6 +1338,8 @@ describe("a record the store answers that cannot be read", () => {
 		["userCode", "throws"],
 		["expiresAtMs", { value: Number.NaN }],
 		["intervalSeconds", "throws"],
+		["requestedScope", { value: ["openid admin"] }],
+		["requestedScope", { value: [""] }],
 	];
 
 	it.each(BROKEN)(
@@ -1357,6 +1359,13 @@ describe("a record the store answers that cannot be read", () => {
 				{ clientId: CLIENT_ID, refused: "malformed", field },
 				"device_code_grant_record_unreadable",
 			);
+			// The refused poll consumed the approval: the code is gone.
+			const again = await poll(started.body.device_code as string);
+			expect(again.result).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "unknown or already-used device_code",
+			});
 		},
 	);
 
@@ -1939,6 +1948,51 @@ describe("a subject revocation between the approval and the poll", () => {
 			errorDescription:
 				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
 		});
+	});
+
+	it.each([
+		["with a boundary in force", true],
+		["with no boundary", false],
+	])(
+		"refuses an approval recorded further ahead of the poll's clock than the skew, %s",
+		async (_label, withBoundary) => {
+			// A far-future instant would postdate any boundary.
+			const subjectRevocation = boundariesAsSet();
+			const logger = makeLogger();
+			const harness = makeHarness({
+				subjectRevocation,
+				logger,
+				store: answeringBroken("poll", "approvedAtMs", {
+					value: APPROVAL + 10_000 + DEFAULT_CLOCK_SKEW_MS + 1_000,
+				}),
+			});
+			const deviceCode = await approvedDevice(harness);
+			if (withBoundary) {
+				await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
+			}
+			const { result } = await harness.poll(deviceCode);
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					"the approval's time is ahead of this server's clock; start a new device authorization request",
+			});
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, aheadMs: DEFAULT_CLOCK_SKEW_MS + 1_000 },
+				"device_approval_ahead_of_clock",
+			);
+		},
+	);
+
+	it("honours an approval recorded within the skew ahead of the poll's clock", async () => {
+		const harness = makeHarness({
+			subjectRevocation: boundariesAsSet(),
+			store: answeringBroken("poll", "approvedAtMs", {
+				value: APPROVAL + 10_000 + DEFAULT_CLOCK_SKEW_MS,
+			}),
+		});
+		const deviceCode = await approvedDevice(harness);
+		expect((await harness.poll(deviceCode)).result.status).toBe(200);
 	});
 
 	it("honours an approval given after the boundary", async () => {

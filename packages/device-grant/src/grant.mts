@@ -53,6 +53,9 @@
  *   throws or that is not what `DeviceAuthorization` declares, an
  *   `authTimeMs` that is not whole epoch milliseconds included — is
  *   `invalid_grant`, logged at error: the approval is already spent.
+ * - An `approvedAtMs` further ahead of the minting clock than
+ *   `DEFAULT_CLOCK_SKEW_MS` is `invalid_grant`, warned: an approval from the
+ *   future would postdate any sessions boundary.
  * - The token carries the approval's recorded `amr` and its `authTimeMs` as
  *   `auth_time`, read against the minting clock with `authTimeAt`; the same
  *   instant is its `iat`. Neither recorded, neither is stamped. An
@@ -81,6 +84,7 @@ import {
 	authTimeAt,
 	boundPolicyAudience,
 	coveredByRevocationBoundary,
+	DEFAULT_CLOCK_SKEW_MS,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	evaluateGrantPolicy,
 	generateToken,
@@ -333,6 +337,18 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			// One minting instant: `auth_time` is read against it and stamped as
 			// `iat`, so `auth_time` is never after `iat` — see the file header.
 			const mintingNow = now();
+			const { approvedAtMs } = authorization;
+			if (approvedAtMs !== undefined && approvedAtMs > mintingNow + DEFAULT_CLOCK_SKEW_MS) {
+				options.logger?.warn(
+					{ clientId: client.clientId, aheadMs: approvedAtMs - mintingNow },
+					"device_approval_ahead_of_clock",
+				);
+				return error(
+					400,
+					"invalid_grant",
+					"the approval's time is ahead of this server's clock; start a new device authorization request",
+				);
+			}
 			const { authTimeMs } = authorization;
 			const authTime =
 				authTimeMs === undefined ? undefined : authTimeAt(new Date(authTimeMs), mintingNow);
