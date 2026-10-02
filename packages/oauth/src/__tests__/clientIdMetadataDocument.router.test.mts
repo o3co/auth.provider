@@ -153,7 +153,11 @@ describe("the router's one document fallback reads every registered client throu
 	it("serves the record as handed with documents off, until the router itself reads through the boundary", async () => {
 		const { app, logger } = await buildRouter(answering(refusedRecord), { documents: false });
 		const res = await authorize(app);
-		expect(res.body.error).not.toBe("invalid_client");
+		// The first-party client gets its code at the registered redirect URI.
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location as string);
+		expect(`${location.origin}${location.pathname}`).toBe(REDIRECT_URI);
+		expect(location.searchParams.get("code")).toBeTruthy();
 		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "client_record_refused");
 	});
 });
