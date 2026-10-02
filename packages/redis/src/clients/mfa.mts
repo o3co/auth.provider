@@ -128,12 +128,12 @@ export interface MfaFactorSetRemoveIfInput extends MfaFactorSetEmptyingWriteInpu
  * `{}`), so none does. Every operation touches the one key it is handed, so
  * this client needs no hash tag to run on Cluster.
  *
- * Every membership write — `createIf`, `removeIf`, `create`, `remove` and
- * `removeAll` — is one indivisible step that first answers a copy of a write
+ * Every membership write — `createIf`, `removeIf` and `removeAll` — is one
+ * indivisible step that first answers a copy of a write
  * already applied with that write's answer (its `replayKey`), then refuses a
  * write at or past its deadline (`late`), then checks, then writes the fields and
  * `~g` = `next`, and keeps its answer under `replayKey` until `clockSkewMs`
- * past its deadline. The removals, the reset and `listVersioned` run on a
+ * past its deadline. `removeIf`, the reset and `listVersioned` run on a
  * full server (`allow-oom`): they write only `~g`, the replay key and an
  * expiry, and a factor must stay removable when nothing can be enrolled.
  * A write that leaves the hash holding `~g` alone (an emptied set, its
@@ -172,13 +172,6 @@ export interface MfaFactorStoreClient {
 		field: string,
 		input: MfaFactorSetRemoveIfInput,
 	): Promise<"removed" | "missing" | "conflict" | "late">;
-	/** Write `value` under `field` only while the field is absent, whatever the generation. */
-	create(
-		key: string,
-		field: string,
-		value: string,
-		input: MfaFactorSetWriteInput,
-	): Promise<"created" | "conflict" | "late">;
 	/**
 	 * Atomically: while the value under `field` is at `input.expectedVersion`,
 	 * replace its version and mutable part, keep its fixed part, and resolve
@@ -186,12 +179,6 @@ export interface MfaFactorStoreClient {
 	 * version, or not three lines. Keeps `~g` and the key's expiry.
 	 */
 	update(key: string, field: string, input: MfaFactorRecordUpdateInput): Promise<string | null>;
-	/** Remove `field`, whatever the generation; `missing`, writing nothing, when there is none. */
-	remove(
-		key: string,
-		field: string,
-		input: MfaFactorSetEmptyingWriteInput,
-	): Promise<"removed" | "missing" | "late">;
 	/** Remove every field, and leave the set's tombstone at `input.next`, the key made when absent. */
 	removeAll(key: string, input: MfaFactorSetEmptyingWriteInput): Promise<"removed" | "late">;
 	/**

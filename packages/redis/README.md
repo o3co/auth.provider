@@ -869,7 +869,7 @@ byte for byte — it never decodes the JSON, since `cjson` writes an empty
 array back as `{}` — and answers `null` to a value that is not exactly three
 lines, never cutting one it did not write down to a record it did. A stored
 record the adapter cannot read back refuses the subject's whole list: never
-"no factor", which would open a first binding. So `create`, `createIf` and
+"no factor", which would open a first binding. So `createIf` and
 `update` refuse with a `RangeError`, before anything is written, whatever a read would
 refuse — a binding outside D24's three, a field that is not the type the
 record declares, a date that is not a whole instant within the Date range
@@ -896,8 +896,7 @@ of core's conditional-write convention
   generation before the factor. `removeAllForSubject`, the operator reset and
   account deletion, is one script serialised with them: it deletes the
   factors and leaves `~g` at a new generation, making the key when there was
-  none. The unconditional `create` and `remove` move `~g` too; `update`
-  keeps it.
+  none. `update` keeps `~g`.
 - **The primary, never a replica** (rule 2). `listVersioned` and every
   membership write are scripts that start with `#!lua` and no `no-writes`
   flag, which Redis 7.0 and later refuses on a read-only replica (`READONLY`).
@@ -944,12 +943,12 @@ of core's conditional-write convention
   `volatile-*` policy may evict a replay key
   early; the module's warning names it.
 - **A full server.** Under `noeviction`, Redis refuses a script that does
-  not declare `allow-oom` once `maxmemory` is reached. The removals
-  (`removeIf`, `remove`), the reset (`removeAllForSubject`) and
+  not declare `allow-oom` once `maxmemory` is reached. The removal
+  (`removeIf`), the reset (`removeAllForSubject`) and
   `listVersioned` declare it: each writes only `~g`, the replay key and an
   expiry, so a factor stays removable, an attacker's among them, and the
-  operator reset still runs on a full server. The creates (`createIf`,
-  `create`) declare no flag and are refused there (`OOM`), an outage.
+  operator reset still runs on a full server. The create (`createIf`)
+  declares no flag and is refused there (`OOM`), an outage.
 - **The write lifetime W** (rule 6). W is 2 000 ms
   (`REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS`): the write timeout, 1 000 ms,
   the same as the `commandTimeout` this README asks of the connection and the
