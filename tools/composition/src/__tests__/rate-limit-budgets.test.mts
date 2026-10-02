@@ -33,8 +33,8 @@
  *   the MFA package not installed. The session module is the template's and
  *   always installed, and its reference ships `session.rateLimit.login`;
  * - off, keys set: the same, with each owner's key set. A key whose owner is
- *   not installed sets no budget; the disabled device grant is installed, and
- *   its key does.
+ *   not installed, or installed and switched off (the device grant), sets no
+ *   budget.
  *
  * `token` has no owner: the limiter's `defaultLimit`, or its own `limits`
  * entry.
@@ -87,9 +87,9 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		shipped: spec(5, 300),
 		configured: spec(3, 120),
 		declared: spec(2, 90),
-		// Disabled, the grant still carries its default budget; nothing keys the prefix.
-		off: spec(5, 300),
-		offConfigured: spec(3, 120),
+		// Disabled, the grant registers nothing: the limiter's default applies.
+		off: spec(60, 60),
+		offConfigured: spec(60, 60),
 	},
 	"webauthn-authentication-options": {
 		shipped: spec(30, 60),

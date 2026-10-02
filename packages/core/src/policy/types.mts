@@ -76,8 +76,10 @@ export interface GrantPolicyHook {
 export type GrantPolicyHookFactory = AdapterFactory<GrantPolicyHook>;
 
 // ---------------------------------------------------------------------------
-// ComponentMap slot: `grantPolicy`, the optional gate oauthModule's
-// POST /oauth/token calls. Absent, grant authorization allows all.
+// ComponentMap slot: `grantPolicy`, the optional gate every bundled
+// token-minting path consults when it is wired. A grant handler a deployment
+// contributes must call `evaluateGrantPolicy` itself. Absent, grant
+// authorization allows all.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

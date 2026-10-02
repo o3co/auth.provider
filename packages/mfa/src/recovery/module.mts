@@ -19,8 +19,8 @@
  * ADR's D1, D25), named after its section, `mfa-recovery-code-factor`, which
  * boot parses with the module's schema before any factory runs. It
  * contributes the factor as `mfaFactors.recovery_code`, issuing sets of
- * `count` codes, and `null` while `enabled` is false, which leaves the kind
- * claimed and absent from the resolver. Stateless.
+ * `count` codes. `enabled` is the module's switch (`section.isEnabled`):
+ * false, and the module registers nothing. Stateless.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
@@ -33,11 +33,12 @@ export const mfaRecoveryCodeFactorModule = defineModule({
 	section: {
 		schema: mfaRecoveryCodeFactorConfigSchema,
 		reference: new URL("../../config/reference.conf", import.meta.url),
+		isEnabled: (section) => section.enabled,
 	},
 	contributes: {
 		mfaFactors: {
 			[RECOVERY_CODE_FACTOR_KIND]: ({ section }) =>
-				section.enabled ? createRecoveryCodeFactor({ count: section.count }) : null,
+				createRecoveryCodeFactor({ count: section.count }),
 		},
 	},
 });

@@ -123,7 +123,8 @@ describe("mtls reaches the module through the documented config path", () => {
 		expect(refused).toMatch(/trustedProxies allowlist/);
 	});
 
-	it("still contributes nothing when the operator leaves mTLS off", async () => {
-		expect(contributeMechanism(await booted(undefined))).toBeNull();
+	it("is still switched off when the operator leaves mTLS off", async () => {
+		const section = ((await booted(undefined)) as { mtls?: unknown }).mtls;
+		expect(mtlsModule.section?.isEnabled?.(section as never)).toBe(false);
 	});
 });
