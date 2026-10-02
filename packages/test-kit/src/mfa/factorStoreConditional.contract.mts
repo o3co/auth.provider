@@ -49,10 +49,10 @@
  * The tombstone cases run under `forceExpire`; no case can prove the bound
  * itself, which the Store's configuration and the writer's lease keep.
  *
- * STAND-IN: the first group is the set variant of the generic
+ * STAND-IN: the first group, and the expired-tombstone and the
+ * set-holding-a-record cases, are the set variant of the generic
  * conditional-write suite, which has not landed. When it does, the binding
- * hands the members to it and drops that group; the second group is the
- * factor set's own.
+ * hands the members to it and drops them; the rest are the factor set's own.
  */
 
 import assert from "node:assert/strict";
@@ -242,8 +242,9 @@ export function mfaFactorStoreConditionalContract(
 			assert.deepStrictEqual(await one.read("user-1"), tombstone);
 		}),
 
-		// STAND-IN until the generic suite's set variant runs its own expiry case
-		// under forceExpire; then this one is dropped.
+		// STAND-IN until the generic suite's set variant runs its own expiry
+		// case, and its case that a re-create after a purge answers a fresh
+		// generation never seen before; then this one is dropped.
 		test("an expired tombstone reads as absent, and a generation seen before it is never issued again", async ({
 			one,
 			two,
@@ -283,6 +284,9 @@ export function mfaFactorStoreConditionalContract(
 			assert.deepStrictEqual(await two.read("nobody"), { generation: null, items: [] });
 		}),
 
+		// STAND-IN until the generic suite's set variant runs its own case that
+		// a set that still holds a record never expires; then this one is
+		// dropped.
 		test("a set holding a record has no expiry: one written after a reset outlives the tombstone", async ({
 			one,
 			two,

@@ -121,7 +121,7 @@ same backend — another connection, pool or adapter — which the concurrent
 cases split their writers across (absent, `store` again, which proves no
 fence across processes); `unreachable`, optional, a store over the same
 backend that cannot reach it; `forceExpire`, optional, which makes a
-subject's emptied set's tombstone expire now on the backend's clock (only the
+subject's tombstone — that of a set emptied by any membership write (its last removal or a reset) — expire now on the backend's clock (only the
 factor set's binding below uses it); and `close`, called when the case ends.
 `supports: { unreachable: true, forceExpire: true }` declares the hooks up
 front, so the case list is fixed when the suite is built: a declared hook's
@@ -241,9 +241,11 @@ SQL, a request deadline never retried once it has passed over HTTP. No case
 can prove the bound; the Store's configuration and the writer's lease do.
 Core's in-process store and the Redis store add none.
 
-The first group of cases, and the expired-tombstone case, stand in for the
-set variant of the generic conditional-write suite until it lands; the
-binding then hands the members to it and drops them.
+The first group of cases, the expired-tombstone case (a re-create after a
+purge answering a fresh generation never seen before among it) and the case
+that a set still holding a record never expires stand in for the set variant
+of the generic conditional-write suite until it lands; the binding then hands
+the members to it and drops them.
 
 ## The WebAuthn credential store's contract suite
 

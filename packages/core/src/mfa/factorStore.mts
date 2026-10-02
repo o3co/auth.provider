@@ -168,9 +168,10 @@ export function isMfaFactorUpdateWritten(
  *   update of that record. That holds only while every factor's next data
  *   keeps the three things `MfaVerification.next` names.
  * - A set never written has no generation (`null`). A set's generation
- *   outlives its members: the last removal and a reset — account deletion
- *   included — leave the set empty at a new generation, its tombstone,
- *   which a late write read before them meets as a `conflict`. Past the
+ *   outlives its members: a set emptied by any membership write (its last
+ *   removal or a reset) — account deletion included — is left empty at a
+ *   new generation, its tombstone, which a late write read before it meets
+ *   as a `conflict`. Past the
  *   bound below the tombstone may be purged, and the set then reads as
  *   never written. A set that holds a record is never purged.
  * - A write conditional on a read is valid only within the store's
@@ -268,7 +269,7 @@ export interface MfaFactorStore {
 		expectedVersion: number,
 		next: MfaFactorRecordUpdate,
 	): Promise<MfaFactorRecord | null>;
-	/** Remove one record, unconditionally. Idempotent. A new generation when it removed one; an emptied set stays as its tombstone. */
+	/** Remove one record, unconditionally. Idempotent. A new generation when it removed one; a set it empties stays as its tombstone. */
 	remove(subject: string, id: string): Promise<void>;
 	/**
 	 * Remove every record of `subject` — account deletion, the operator reset —

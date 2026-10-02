@@ -26,8 +26,8 @@
  *
  * A subject's set is an entry holding its records and its store generation,
  * a random UUID made fresh at every membership write. The first membership
- * write makes it. A write that leaves it empty — the last removal, a reset —
- * leaves it as the set's tombstone, which expires on the store's clock
+ * write makes it. A set emptied by any membership write (its last removal or a reset) is
+ * left as the set's tombstone, which expires on the store's clock
  * `BUNDLED_STORE_WRITE_LIFETIME_MS` after that write; a write that leaves it
  * holding a record takes the expiry off. An expired tombstone reads as never
  * written, and is deleted when next read or written, or by the sweep, paced

@@ -59,7 +59,7 @@ export interface MfaFactorStoreHarness {
 	/** A store over the same backend that cannot reach it. Needs `supports.unreachable`. */
 	readonly unreachable?: () => MfaFactorStore;
 	/**
-	 * Makes `subject`'s set, when it is an emptied set's tombstone, expire
+	 * Makes `subject`'s set, when it is the tombstone of a set emptied by any membership write (its last removal or a reset), expire
 	 * now, by the backend's own clock; a set holding a record has no expiry.
 	 * Needs `supports.forceExpire`; only the factor set's binding uses it.
 	 */
