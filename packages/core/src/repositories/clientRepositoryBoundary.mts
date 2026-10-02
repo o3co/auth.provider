@@ -26,8 +26,9 @@
  *   ORM entity, an Array subclass, a Proxy); never `clientSecret`, and
  *   nothing else of the record. Only its `then` is read before the
  *   boundary, by the `await` on the repository's answer, as every async
- *   port does; a throw there is the repository's own rejection. The field list is checked against
- *   `PublicClient` and against the schema, both ways, at compile time.
+ *   port does; a throw there is the repository's own rejection. The field
+ *   list is checked against `PublicClient` and against the schema, both
+ *   ways, at compile time.
  * - **What is held.** The registration's fields and rules with the id in
  *   place of the secret, the defaults filled. The record's `clientId` must be
  *   the id looked up, exactly, and one no request could name
