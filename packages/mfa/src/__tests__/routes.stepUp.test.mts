@@ -639,11 +639,27 @@ describe("the step-up of a subject holding a counting factor", () => {
 			reading(userSessionStore, unrecordable);
 			const create = vi.spyOn(transactionStore, "create");
 
+			// Recent MFA meets mfa.manage, so the step-up's own check refuses it, before anything is opened.
 			const res = await stepUp(agent);
 
 			expect(res.status, JSON.stringify(res.body)).toBe(401);
 			expect(res.body).toEqual(LOGIN_REQUIRED);
 			expect(create).not.toHaveBeenCalled();
+		});
+
+		it("answers 401 login_required to the session's own step_up transaction named again, once its record is one no second factor can be recorded on", async () => {
+			const { app, factorStore, userSessionStore } = await composed();
+			const seeded = await seedTotp(factorStore);
+			const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+			const opened = await stepUp(agent);
+			expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+			reading(userSessionStore, unrecordable);
+
+			// Recent MFA meets mfa.manage, so the step-up's own check refuses it, before the transaction is answered again.
+			const again = await stepUp(agent, opened.body.transaction as string);
+
+			expect(again.status, JSON.stringify(again.body)).toBe(401);
+			expect(again.body).toEqual(LOGIN_REQUIRED);
 		});
 
 		for (const mode of ["optional", "required"] as const) {
@@ -664,6 +680,7 @@ describe("the step-up of a subject holding a counting factor", () => {
 				);
 				const create = vi.spyOn(transactionStore, "create");
 
+				// No recent MFA: the requirement, asked as mfa.manage, answers a new login before the step-up's own check.
 				const res = await stepUp(agent);
 
 				expect(res.status, JSON.stringify(res.body)).toBe(401);

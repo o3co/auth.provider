@@ -1212,7 +1212,7 @@ describe("admit — through admission, over a store that records a step-up, a re
 		}
 	}
 
-	it("steps up the same sessions whose record a second factor can be recorded on, as before", async () => {
+	it("steps up the same sessions whose record a second factor can be recorded on", async () => {
 		const factorStore = factorStoreHolding(...HOLDING_TOTP);
 		const stepUp = { outcome: "step_up", requirement: "mfa", whenStillUnmet: "reauthenticate" };
 		expect(

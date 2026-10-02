@@ -140,7 +140,7 @@ export interface MfaCeremonySession {
 	/**
 	 * Whether a second factor can be recorded on the session, as admission's
 	 * view holds it (`secondFactorRecordable`); `false` without a view. A
-	 * step-up is opened only then.
+	 * step-up is opened only when it is `true`.
 	 */
 	readonly secondFactorRecordable: boolean;
 	/** Where a write to the subject's factor set begins, taken before the session was admitted for one (`factorSet.mts`); none for an action that writes none. */
