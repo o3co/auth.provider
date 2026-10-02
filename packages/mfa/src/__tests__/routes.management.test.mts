@@ -35,6 +35,7 @@ import {
 import { createRecordingMailSender } from "@o3co/auth-provider-core/testing";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FACTOR_SET_STORE_CALLS } from "#/factorSet.mjs";
 import { mfaEmailFactorConfigForTests } from "#/testing/index.mjs";
 import {
 	ALICE,
@@ -750,6 +751,13 @@ async function moveGeneration(store: MfaTransactionStore, subject: string): Prom
 	await store.releaseSubjectLease(subject, lease.token);
 }
 
+/**
+ * How far a slow Store call moves the clock to leave less than one Store
+ * timeout (the default 5000 ms) of a lease of `FACTOR_SET_STORE_CALLS + 2`
+ * of them.
+ */
+const FILLS_THE_LEASE = (FACTOR_SET_STORE_CALLS + 1) * 5_000 + 1_000;
+
 /** A monotonic clock a test moves ahead: `performance.now`, as the factor set reads it, `advance`d by what the test says. */
 function monotonicClock() {
 	const real = performance.now.bind(performance);
@@ -937,14 +945,16 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		expect(await built.factorStore.list(ALICE.id)).toHaveLength(1);
 	});
 
-	it("takes a lease of six Store timeouts: one more than the most Store calls a write makes", async () => {
+	it("takes a lease of FACTOR_SET_STORE_CALLS + 2 Store timeouts: the most Store calls a writer makes, the acquire and one to spare", async () => {
 		const built = await composed("optional", { storeTimeoutMs: 2_000 });
 		const { agent, totp } = await signedIn(built);
 		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
 
 		expect((await remove(agent, totp.record.id)).status).toBe(200);
 
-		expect(acquire.mock.calls.map(([, request]) => request.ttlMs)).toEqual([12_000]);
+		expect(acquire.mock.calls.map(([, request]) => request.ttlMs)).toEqual([
+			(FACTOR_SET_STORE_CALLS + 2) * 2_000,
+		]);
 	});
 
 	it("gives up before writing when a slow Store left less than one Store timeout of the lease: 409 mfa_factors_busy, nothing removed", async () => {
@@ -955,7 +965,7 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
 		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
 			// Slow once the lease is held: the read under it leaves less than one Store timeout.
-			if (acquire.mock.calls.length > 0) clock.advance(26_000);
+			if (acquire.mock.calls.length > 0) clock.advance(FILLS_THE_LEASE);
 			return read(subject);
 		});
 		const removed = vi.spyOn(built.factorStore, "remove");
@@ -975,7 +985,7 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 			const read = built.factorStore.list.bind(built.factorStore);
 			const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
 			vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
-				if (acquire.mock.calls.length > 0) clock.advance(26_000);
+				if (acquire.mock.calls.length > 0) clock.advance(FILLS_THE_LEASE);
 				return read(subject);
 			});
 			const releasing = vi.spyOn(built.transactionStore, "releaseSubjectLease");
@@ -1004,7 +1014,7 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		const read = built.factorStore.list.bind(built.factorStore);
 		const acquire = vi.spyOn(built.transactionStore, "acquireSubjectLease");
 		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
-			if (acquire.mock.calls.length > 0) clock.advance(26_000);
+			if (acquire.mock.calls.length > 0) clock.advance(FILLS_THE_LEASE);
 			return read(subject);
 		});
 		vi.spyOn(built.transactionStore, "releaseSubjectLease").mockResolvedValue(false);
@@ -1024,7 +1034,7 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		const removeFor = built.factorStore.remove.bind(built.factorStore);
 		vi.spyOn(built.factorStore, "remove").mockImplementation(async (subject, id) => {
 			await removeFor(subject, id);
-			clock.advance(26_000);
+			clock.advance(FILLS_THE_LEASE);
 		});
 		const marked = vi.spyOn(built.users, "markMfaEnrolled");
 
@@ -1046,7 +1056,7 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 		const { agent, totp } = await signedIn(built);
 		const clock = monotonicClock();
 		vi.spyOn(built.factorStore, "remove").mockImplementation(async () => {
-			clock.advance(26_000);
+			clock.advance(FILLS_THE_LEASE);
 			throw new Error("timed out");
 		});
 
@@ -1074,7 +1084,7 @@ describe("a factor-set write held to the generation it began at, the lease it ho
 			});
 		vi.spyOn(built.factorStore, "list").mockImplementation(async (subject) => {
 			// The read after the mark: slow enough to leave no time for the clear.
-			if (marked.mock.calls.length > 0) clock.advance(26_000);
+			if (marked.mock.calls.length > 0) clock.advance(FILLS_THE_LEASE);
 			return read(subject);
 		});
 

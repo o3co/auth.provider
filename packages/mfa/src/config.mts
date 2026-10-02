@@ -39,6 +39,7 @@ import {
 	type DeploymentMode,
 	decodeSealingKey,
 	hasControlCharacter,
+	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	type MfaLockoutPolicy,
 	SEALING_KEY_BYTES,
 	type SealingKeyRing,
@@ -192,8 +193,16 @@ const mfaPageSchema = z.object(
 	{ error: sectionError },
 );
 
-/** The least and the most time a second factor verified in a session stays recent, in seconds. */
-export const MFA_RECENT_WINDOW_SECONDS = { min: 60, max: 3600 } as const;
+/**
+ * The least and the most time a second factor verified in a session stays
+ * recent, in seconds. The most is core's `MFA_RECOVERY_AUTHORIZATION_MAX_MS`:
+ * an authorized recovery minted at an exempt verification lasts this long
+ * (`lockRecovery.mts`), and the store refuses one that lasts longer.
+ */
+export const MFA_RECENT_WINDOW_SECONDS = {
+	min: 60,
+	max: MFA_RECOVERY_AUTHORIZATION_MAX_MS / 1000,
+} as const;
 
 /**
  * `mfa.manage`: `maxAgeSeconds`, how long a second factor verified in a

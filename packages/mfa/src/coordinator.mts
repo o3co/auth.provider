@@ -228,7 +228,7 @@ export interface MfaCoordinatorOptions {
 	readonly mailSender?: MailSender;
 	/** The enrollment witness a verified counting factor reconciles. */
 	readonly witness: MfaEnrollmentWitness;
-	/** The subject's records as read, and the witness's reconciliation mark (`factorSet.mts`). */
+	/** The subject's records as read, the witness's reconciliation mark, and an enrollment's writes under the subject's lease (`factorSet.mts`). */
 	readonly factorSet: MfaFactorSet;
 	/** `mfa.transactionTtlSeconds`: how long an `enroll` transaction lives. */
 	readonly transactionTtlSeconds: number;
@@ -565,6 +565,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		sealing,
 		mailSender,
 		witness,
+		factorSet,
 		now,
 		maxFactorsPerSubject,
 		requireEmailProof,
