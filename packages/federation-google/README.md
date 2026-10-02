@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-google
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03
 
 Google federation provider for `auth.provider`: sign-in with a Google account
 through Google's OpenID Connect endpoints, with token refresh, upstream logout
@@ -9,16 +9,21 @@ and claim mapping.
 ## Responsibility
 
 **Role.** An adapter: it implements core's federation contract
-([`core/src/federations`](../core/src/federations/README.md)) for Google, and
-`googleFederationModule` contributes it to the session router as the federation
-`google`, with its redirect policy.
+([`core/src/federations`](../core/src/federations/README.md)) for Google. It
+contributes the federation type `google`: core hands it each enabled
+`core.federations` entry of that type, and it builds one federation per entry,
+under the entry's name, registered for the session router with its redirect
+policy.
 
 **Owns:** Google's endpoints and issuer (written into the adapter, not
 discovered), how the id_token and UserInfo are verified, which parameters the
-authorization request carries, and what a Google login profile, a refresh and a
-logout URL contain.
+authorization request carries, what a Google login profile, a refresh and a
+logout URL contain, and the schema of a `google` entry's own keys
+([`src/entry.mts`](src/entry.mts)).
 
-**Does not own:** the contract (core); the routes, `state` / PKCE verifier /
+**Does not own:** the contract (core); the `core.federations` map, the keys
+core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
+`callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier /
 `nonce` generation, the redirect-allowlist rules and claim precedence
 ([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
 Store); the refresh and logout routes that call this adapter
@@ -55,12 +60,94 @@ npm install @o3co/auth-provider-federation-google @o3co/auth-provider-core @o3co
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. The package depends on `openid-client`.
+`@o3co/auth-provider-session`. The package depends on `openid-client` and
+`zod`.
 
 ## Usage
 
-Add `googleFederationModule` to the manifest list passed to `createApp`. A small
-config-bootstrap module supplies the typed `googleFederationConfig` slot:
+One module, `googleFederationTypeModule()`
+([`src/type-module.mts`](src/type-module.mts)), handles every enabled
+`core.federations` entry whose `type` is `google`. It contributes
+`federationTypes.google`; core parses each such entry with the type's schema
+at boot and calls the module's factories with the entry's name, its
+`callbackURL` and its parsed keys, so the composition root fills no slot. The
+module requires no dependency.
+
+```ts
+import { createApp } from "@o3co/auth-provider-core";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
+import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+
+const handle = await createApp({
+  modules: [
+    sessionStoreModuleFor(config),
+    sessionModule,
+    googleFederationTypeModule(),
+    // ... composition-root modules supplying userRepository and the session stores
+  ],
+  bootstrapComponents: { config, pathResolver },
+});
+```
+
+`googleFederationTypeModule({ fetch })` sends every request to Google of every
+`google` entry — token, UserInfo, JWKS — through that fetch: a proxy, or a
+test double. Without it the global `fetch` is used. Its module name is
+`federation-google-type`.
+
+### Configuration
+
+```hocon
+core.federations {
+  google {
+    enabled = true
+    type = "google"
+    clientId = ${?CORE_FEDERATIONS_GOOGLE_CLIENT_ID}
+    clientSecret = ${?CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
+    clientUrl = "https://app.example.com/"
+  }
+}
+```
+
+The entry's name is the federation's: the `:name` segment of
+`/session/oauth/federation/:name`, the key its upstream tokens are stored
+under, and the prefix of the identity handed to the Store (`<name>:<sub>`).
+Two entries of type `google` — two Google clients, say one per OAuth consent
+screen — are two federations side by side, each under its own name.
+
+An entry is flat, and its schema is strict: the keys core owns (`enabled`,
+`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+The schema is `googleEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
+does not name — a typo, or a nested `google { ... }` section — refuses boot with `config-validation-failed` at `core.federations.<name>`,
+naming the key; a missing or malformed key is refused at
+`core.federations.<name>.<field>`. No refusal quotes the value it refuses, so a
+misplaced `clientSecret` does not reach the log. A key written `null` counts as
+absent. An absent key means what the table says, read by the provider and the
+redirect policy; the schema fills in no default.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `clientId` | yes | The OAuth client ID Google issued. |
+| `clientSecret` | yes | Its client secret, sent in the token request's body (`client_secret_post`). |
+| `callbackURL` | yes | Where Google sends the browser back. A key core owns: boot requires it of every entry it dispatches, and the session routes read it from the same entry. |
+| `clientUrl` | in practice | Where the browser lands after a login whose start carried no `redirect_to`. Without it such a login ends in `500 misconfiguration` after the session has been saved — so it is needed unless every start carries a `redirect_to` and `authCallbackUrl` is set. |
+| `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package README](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
+| `accessType` | no | `"offline"` (absent means this) or `"online"`: whether sign-in asks Google for a refresh token — [below](#refresh-tokens-and-the-consent-screen). |
+| `requireAuthorizationResponseIss` | no | Absent means `true`: a callback without the RFC 9207 `iss` is refused — [below](#the-callbacks-iss-rfc-9207). Also takes `"true"`, `"false"`, `"1"` and `"0"` (trimmed, any case), as an environment variable writes them; an empty string is refused. |
+| `endSessionEndpoint` | no | An upstream end-session URL for logout; Google publishes none — [below](#refresh-and-logout). |
+
+`fetch` is not an entry key: it is the type module's option (above), and a
+`GoogleProviderConfig` field for `createGoogleProvider` and the deprecated
+slot. Nor is `jwksUri`: where Google's signing keys are fetched from is not the
+configuration's to move. It stays a `GoogleProviderConfig` field.
+
+### Deprecated: the fixed-name module
+
+`googleFederationModule` and the `googleFederationConfig` slot it requires
+are deprecated in favour of `googleFederationTypeModule()`. They still work:
+the module contributes `federations.google` and
+`federationRedirectPolicies.google` from the slot, which a small
+config-bootstrap module in the composition root fills:
 
 ```ts
 import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
@@ -108,8 +195,8 @@ const handle = await createApp({
 });
 ```
 
-Single-tenant: `provider.name` is fixed at `"google"`, so the federation is
-`core.federations.google` and a deployment has one Google client. The config fields
+This module is single-tenant: `provider.name` is fixed at `"google"`, so the
+federation is `core.federations.google` and a deployment has one Google client. The config fields
 are [`GoogleProviderConfig`](src/google.mts). The four redirect fields
 (`redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl`) follow the
 [session package's redirect rules](../session/README.md#redirect-allowlists),
@@ -128,6 +215,12 @@ checks each field's type, as the template's Google bridge
 [`templates/standalone/src/modules.mts`](../../templates/standalone/src/modules.mts)) does.
 `clientSecret` is a string. `createGoogleProvider` throws at boot when
 `clientId`, `clientSecret` or `callbackURL` is missing.
+
+Both modules build the same provider and redirect policy for one entry.
+Composing `googleFederationTypeModule()` and `googleFederationModule` for the
+entry `google` refuses boot (`duplicate-contribute`): one federation has one
+handler. The standalone template still composes the deprecated module and its
+bridge.
 
 ## What a login does
 
@@ -162,9 +255,9 @@ What `exchangeCode` returns:
 `mapClaims` maps `email`, `emailVerified`, `name`, `picture` and `hd`; the session
 package promotes only `email`, `name` and `picture`, and only where the local
 record is silent. **`hd` is not enforced:** nothing here refuses an account from
-another domain, and the claim lands only in `claims.federated.google`. A
+another domain, and the claim lands only in `claims.federated.<name>`. A
 Workspace-domain restriction belongs in the Store, which decides who
-`google:<sub>` is.
+`<name>:<sub>` is.
 
 ### Refresh tokens and the consent screen
 
@@ -187,12 +280,13 @@ sign-in sends `access_type=offline` **and** `prompt=consent`:
 first sign-in, and no refresh token at all — for a deployment that uses Google
 to sign in and never refreshes Google's access token through the federation
 token route (it answers `410 refresh_token_absent` once that token expires).
-Only an omitted field means the default: any other value, `null` included,
-is refused at construction. An environment override arrives as a string, so
-coerce it in the bridge. The standalone template's bridge
-forwards it from `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`.
+In code, only an omitted field means the default: any other value, `null`
+included, is refused at construction (an entry's `null` reads as absent
+first). Under the deprecated module, an environment override arrives as a
+string, so coerce it in the bridge; the standalone template's bridge forwards
+it from `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`.
 
-Keeping an earlier session's refresh token for the same `google:<sub>` is not
+Keeping an earlier session's refresh token for the same `<name>:<sub>` is not
 done: it would need a credential store that outlives sessions.
 
 ### The callback's `iss` (RFC 9207)
@@ -209,12 +303,13 @@ The server metadata here is written by hand, not discovered, so a deployment
 could not otherwise react if Google ever stopped sending the parameter.
 `requireAuthorizationResponseIss: false` in `GoogleProviderConfig` is the way
 out: it permits a missing `iss` and nothing else. One that is sent and is not
-Google's is refused either way. The bridge above does not forward it; forward
-it too if the deployment should be able to set it, as the standalone
-template's bridge does. **It must be a boolean.** An environment override
-arrives as the string `"false"`, which is truthy, so `createGoogleProvider`
-refuses anything that is not a boolean instead of quietly keeping the
-requirement on; coerce the string in the bridge.
+Google's is refused either way. An entry's schema reads the string spellings
+of an environment variable (above). In code **it must be a boolean**: an
+environment override arrives as the string `"false"`, which is truthy, so
+`createGoogleProvider` refuses anything that is not a boolean instead of
+quietly keeping the requirement on. Under the deprecated module, the bridge
+above does not forward it; forward and coerce it there, as the standalone
+template's bridge does.
 
 If every Google login starts answering `502 exchange_failed` with the log cause
 `response parameter "iss" (issuer) missing`, either Google stopped sending the
@@ -244,15 +339,22 @@ a query-parameter allowlist, or a front end that relays only `code` and
 
 ## Public API
 
-Defined in [`src/google.mts`](src/google.mts), exported from
-[`src/index.mts`](src/index.mts):
+Exported from [`src/index.mts`](src/index.mts):
 
-- `googleFederationModule` — const Module contributing `federations.google` and
-  `federationRedirectPolicies.google`; requires `googleFederationConfig`.
-- `createGoogleProvider(config)` — the provider.
-- `GoogleProviderConfig`, `GoogleProvider` — types.
-- `googleFederationConfig` — the `ComponentMap` slot the module requires,
-  declared by module augmentation (not an export).
+- `googleFederationTypeModule` ([`src/type-module.mts`](src/type-module.mts)) —
+  the Module contributing `federationTypes.google`, with its options
+  `GoogleFederationTypeModuleOptions`.
+- `GOOGLE_FEDERATION_TYPE` (`"google"`, [`src/type-module.mts`](src/type-module.mts)).
+- `createGoogleProvider(config)` ([`src/google.mts`](src/google.mts)) — the
+  provider, named `google`.
+- Deprecated, for `googleFederationTypeModule`: `googleFederationModule`
+  ([`src/google.mts`](src/google.mts)), the const Module contributing
+  `federations.google` and `federationRedirectPolicies.google`, and the
+  `googleFederationConfig` `ComponentMap` slot it requires, declared there by
+  module augmentation (not an export).
+- Types: `GoogleEntry` ([`src/entry.mts`](src/entry.mts)), an entry's own keys
+  as the schema answers them; [`GoogleProviderConfig`](src/google.mts),
+  `GoogleProvider`.
 
 ## Tests
 
@@ -264,4 +366,5 @@ Defined in [`src/google.mts`](src/google.mts), exported from
 | [`google.signature.test.mts`](src/__tests__/google.signature.test.mts) | that the id_token's signature is verified against the JWKS |
 | [`google.token-snapshot.test.mts`](src/__tests__/google.token-snapshot.test.mts) | the lifetime, `expiresIn` and `tokenType` a login and a refresh report, with and without `expires_in`, and that a non-string `scope` is refused by the library |
 | [`google.issuer-parameter.test.mts`](src/__tests__/google.issuer-parameter.test.mts) | the RFC 9207 `iss` check and `requireAuthorizationResponseIss` |
-| [`google-module.test.mts`](src/__tests__/google-module.test.mts), [`google-module-boot.test.mts`](src/__tests__/google-module-boot.test.mts) | the module's contributions and boot with the session module |
+| [`google-type-module.test.mts`](src/__tests__/google-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes, the strict, flat schema, refusals that quote no secret, the `fetch` option, parity with the deprecated module, and the refusal of both for one entry |
+| [`google-module.test.mts`](src/__tests__/google-module.test.mts), [`google-module-boot.test.mts`](src/__tests__/google-module-boot.test.mts) | the deprecated module's contributions and boot with the session module |
