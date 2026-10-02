@@ -157,6 +157,14 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   the requirement it names is expected, registered and declares the
   second-factor authority (#1249).
 
+- **An enabled federation nothing handles.** An enabled
+  `core.federations.<name>` that no installed module handles — no module
+  registers its `type` under `federationTypes`, and none contributes
+  `federations.<name>` — refuses the boot (`federation-type-unhandled`),
+  naming every such entry (#1273). It used to boot, and the federation's
+  routes answered `404`. Install the module that handles it, correct its
+  `type`, or set `enabled = false`.
+
 The boot refusals you can meet, with their messages, are in
 [operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).
 

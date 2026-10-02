@@ -52,10 +52,6 @@ import {
 	isAbsenceDeclared,
 } from "../modules/manifest/absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
-import type {
-	FederationInstance,
-	FederationTypeContribution,
-} from "../modules/manifest/contributes-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
@@ -69,6 +65,14 @@ import {
 } from "../token-settings/check.mjs";
 import { contributesAuditHooks } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
+import {
+	checkFederationEntriesHandled,
+	type FederationTypeSnapshot,
+	federationTypeRegistration,
+	federationTypeSnapshot,
+	parseFederationEntries,
+} from "./federation-entries.mjs";
+import { frozenSection, parseSection } from "./parsed-values.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
 	BootstrapMap,
@@ -76,7 +80,6 @@ import type {
 	ContributionKind,
 	ContributionKindMap,
 	NormalisedModule,
-	RegisteredFederationType,
 	ValidatedManifests,
 	ValidatedModule,
 } from "./types.mjs";
@@ -106,18 +109,6 @@ export interface ValidateManifestsInput {
 // ---------------------------------------------------------------------------
 
 /**
- * What each `federationTypes` declaration was read as, once, at stage 1 — its
- * `entrySchema` and `factory` — keyed by the registration factory
- * `nameKeyedFactory` answered for it. The shape check reads these, and the
- * registration closes over the same values, so what is checked is what
- * registers, and a declaration changed afterwards changes neither.
- */
-const federationTypeSnapshots = new WeakMap<
-	object,
-	{ readonly entrySchema: unknown; readonly factory: unknown }
->();
-
-/**
  * What each `admissionActions` declaration was read as, once, at stage 1 —
  * its grade — keyed by the registration factory `nameKeyedFactory` answered
  * for it, so what is checked is what registers.
@@ -126,10 +117,10 @@ const admissionActionSnapshots = new WeakMap<object, { readonly grade: unknown }
 
 /**
  * The factory a name-keyed entry registers through. A `federationTypes` entry
- * is a declaration, `{ entrySchema, factory }`, not a factory: its schema and
- * factory are read once, here, and what registers is a
- * `RegisteredFederationType` whose `create` binds that factory to the deps
- * stage 4 hands every factory. An `admissionActions` entry is a declaration,
+ * is a declaration, `{ entrySchema, factory, redirectPolicy }`, not a
+ * factory: its members are read once, here, and what registers is a
+ * `RegisteredFederationType` whose factories are bound to the deps stage 4
+ * hands every factory (`federationTypeRegistration`). An `admissionActions` entry is a declaration,
  * `{ grade }`: its grade is read once, here, and what registers is the
  * action `name` with that grade. `checkContributionShapes` holds each
  * snapshot's shape; a declaration that is not an object is left for it to
@@ -145,23 +136,7 @@ function nameKeyedFactory(kind: string, name: string, value: unknown): unknown {
 		return register;
 	}
 	if (kind !== "federationTypes") return value;
-	const { entrySchema, factory } = value as {
-		readonly entrySchema?: unknown;
-		readonly factory?: unknown;
-	};
-	const register = (deps: Record<string, unknown>): RegisteredFederationType =>
-		Object.freeze({
-			entrySchema: entrySchema as z.ZodType,
-			// Called as the method it was declared as, on the declaration.
-			create: (instance: FederationInstance<unknown>) =>
-				(factory as FederationTypeContribution<Record<string, unknown>>["factory"]).call(
-					value,
-					deps,
-					instance,
-				),
-		});
-	federationTypeSnapshots.set(register, { entrySchema, factory });
-	return register;
+	return federationTypeRegistration(value);
 }
 
 /**
@@ -706,7 +681,7 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
  * The kinds whose collector is the planner's alone: a host collector
  * for `rateLimitBudgets` could answer a looser budget than the owning module
  * contributed — on RFC 8628 §5.1's device-verification prefix, say —
- * `federationTypes` is what the dispatch of configured federations will read,
+ * `federationTypes` is what the dispatch of configured federations reads,
  * `admissionActions` is where admission reads the grade it hands the
  * requirements, and `auditHooks` is what the audit fan-out in the `auditSink`
  * slot reads at each event, the slot stage 1 counts as filled once a hook is
@@ -808,10 +783,10 @@ const containerShape = (container: unknown): string =>
  *   before its first `:`, whatever the budget's factory answers;
  * - a prefix names no `Object.prototype` member (`constructor`, `__proto__`),
  *   which a limiter looking budgets up on a plain object finds in its place;
- * - a declaration, as normalisation read it (`federationTypeSnapshots`), is
- *   an object with a Zod `entrySchema` and a `factory` function, so one
- *   written in JavaScript is refused as itself, not as a `TypeError` at
- *   registration;
+ * - a declaration, as normalisation read it (`federationTypeSnapshot`), is
+ *   an object with a Zod `entrySchema` and `factory` and `redirectPolicy`
+ *   functions, so one written in JavaScript is refused as itself, not as a
+ *   `TypeError` at registration;
  * - an action's name and declaration, as normalisation read it
  *   (`admissionActionSnapshots`), are what registration admits
  *   (`admissionActionProblem`); an action is registered by the module that
@@ -911,25 +886,25 @@ function checkContributionShapes(
 			}
 			for (const entry of entries ?? []) {
 				if (entry.kind !== "federationTypes" || typeof entry.key !== "string") continue;
-				const snapshot = federationTypeSnapshots.get(entry.factory as object);
+				const snapshot = federationTypeSnapshot(entry.factory);
 				if (snapshot === undefined) {
 					refuse(
 						m,
 						"federationTypes",
 						entry.key,
 						channel,
-						"a declaration is an object with an entrySchema and a factory",
+						"a declaration is an object with an entrySchema, a factory and a redirectPolicy",
 					);
 				}
-				const { entrySchema, factory } = snapshot as {
-					readonly entrySchema: unknown;
-					readonly factory: unknown;
-				};
+				const { entrySchema, factory, redirectPolicy } = snapshot as FederationTypeSnapshot;
 				if (typeof (entrySchema as { safeParse?: unknown } | null)?.safeParse !== "function") {
 					refuse(m, "federationTypes", entry.key, channel, "its entrySchema is not a Zod schema");
 				}
 				if (typeof factory !== "function") {
 					refuse(m, "federationTypes", entry.key, channel, "its factory is not a function");
+				}
+				if (typeof redirectPolicy !== "function") {
+					refuse(m, "federationTypes", entry.key, channel, "its redirectPolicy is not a function");
 				}
 			}
 		}
@@ -1967,72 +1942,6 @@ function sectionPathOf(m: Module): string {
 /** The keys of a dot-separated section path; a module's own name is one key. */
 function sectionSegmentsOf(m: Module): readonly string[] {
 	return m.section?.at === undefined ? [m.name] : m.section.at.split(".");
-}
-
-/**
- * A parsed section as every factory of its module receives it: plain data —
- * arrays, and objects whose prototype is `Object.prototype` or `null` —
- * copied and frozen all the way down, so no factory can change what another
- * reads, and a subtree the schema passed through (`z.unknown()`) is not the
- * `config` slot's own object. Anything else — a `URL`, a `Buffer`, a class
- * instance a transform built — is handed over as the schema made it: freezing
- * a typed array throws, and copying an instance would lose what it is.
- */
-function frozenSection(value: unknown, copies = new Map<object, unknown>()): unknown {
-	if (value === null || typeof value !== "object") return value;
-	const known = copies.get(value);
-	if (known !== undefined) return known;
-	if (Array.isArray(value)) {
-		const copy: unknown[] = [];
-		copies.set(value, copy);
-		for (const item of value) copy.push(frozenSection(item, copies));
-		return Object.freeze(copy);
-	}
-	const prototype: unknown = Object.getPrototypeOf(value);
-	if (prototype !== Object.prototype && prototype !== null) return value;
-	// The same prototype as the original: `Object.prototype`, or none.
-	const copy: object = prototype === null ? Object.setPrototypeOf({}, null) : {};
-	copies.set(value, copy);
-	for (const key of Reflect.ownKeys(value)) {
-		if (!Object.prototype.propertyIsEnumerable.call(value, key)) continue;
-		// Defined, not assigned: a key named `__proto__` stays a key.
-		Object.defineProperty(copy, key, {
-			value: frozenSection((value as Record<PropertyKey, unknown>)[key], copies),
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
-	}
-	return Object.freeze(copy);
-}
-
-/**
- * Parse `value` with one schema of the composed parse — core's base, a
- * module's `configSchema` or a module's section — synchronously. A schema
- * that throws instead of answering — an async refinement (Zod cannot finish
- * it synchronously), or a transform or a getter that throws — is one more
- * issue at the root of what it parsed, naming `subject`, so it refuses boot
- * the way a refused value does rather than escaping stage 1 as a bare error.
- */
-function parseSection(
-	schema: z.ZodType,
-	value: unknown,
-	subject = "the section's schema",
-): { readonly data: unknown } | { readonly issues: readonly z.ZodIssue[] } {
-	try {
-		const result = schema.safeParse(value);
-		return result.success ? { data: result.data } : { issues: result.error.issues };
-	} catch (thrown) {
-		return {
-			issues: [
-				{
-					code: "custom",
-					path: [],
-					message: `${subject} threw instead of answering, so it could not be parsed synchronously: ${failureSummary(thrown)}`,
-				} as z.ZodIssue,
-			],
-		};
-	}
 }
 
 /** What `writeConfigPath` writes to remove the key at the path. */
@@ -3191,6 +3100,11 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		run: (ctx) => checkFederationStoresWiring(ctx.parsedConfig as AppConfig, ctx.plannedKeys),
 	},
 	{
+		id: "federation-entries-handled",
+		spec: "issue #728 (an enabled core.federations entry is handled by its type, or by a module contributing its name)",
+		run: (ctx) => checkFederationEntriesHandled(ctx.modules, ctx.parsedConfig),
+	},
+	{
 		id: "declared-absence",
 		spec: "issue #363 (step 13.10)",
 		run: (ctx) =>
@@ -3244,7 +3158,8 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * parsed config), then reads each module's switch (`section.isEnabled`), then
  * runs {@link STAGE_ONE_POST_CONFIG_CHECKS} over the modules switched on: a
  * module switched off is, from there on, its name and its section alone, so
- * it registers nothing. Returns `ValidatedManifests`, or throws a `BootError`
+ * it registers nothing. Last, it parses each enabled `core.federations` entry
+ * of a registered type with that type's schema (`parseFederationEntries`). Returns `ValidatedManifests`, or throws a `BootError`
  * for the first violation in input order.
  *
  * Deterministic: the same inputs give the same output or error. Its only side
@@ -3328,6 +3243,12 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		check.run(postConfigContext);
 	}
 
+	// Step 15, like step 13, is not a registry row: it produces the enabled
+	// `core.federations` entries dispatched to a registered type, each parsed
+	// by its type's schema, which stage 4 builds providers from. It reads the
+	// declarations the rows above held, over the modules switched on.
+	const dispatchedFederations = parseFederationEntries(switchedOnNormalised, parsedConfig);
+
 	// Build output indices
 	const validatedModules: ValidatedModule[] = switchedOnNormalised.map((normalised, i) => {
 		const section = sections.get(normalised.name);
@@ -3363,5 +3284,6 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		providers,
 		usedKinds: usedKindsSet,
 		bootstrapComponents: substitutedBootstrap,
+		dispatchedFederations,
 	};
 }

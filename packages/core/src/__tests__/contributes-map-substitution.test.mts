@@ -176,6 +176,11 @@ describe("rate-limit budgets and declared federation contributions", () => {
 							expectTypeOf(entry.issuer).toEqualTypeOf<string>();
 							return { ...provider, name };
 						},
+						redirectPolicy: (deps, { callbackURL }: FederationInstance<AcmeEntry>) => {
+							expectTypeOf(deps.config).not.toBeUnknown();
+							expectTypeOf(callbackURL).toEqualTypeOf<string>();
+							return { callbackURL };
+						},
 					},
 				},
 			},
@@ -187,6 +192,11 @@ describe("rate-limit budgets and declared federation contributions", () => {
 				expectTypeOf(deps.tag).toEqualTypeOf<string>();
 				expectTypeOf(entry).toEqualTypeOf<AcmeEntry>();
 				return provider;
+			},
+			redirectPolicy: (deps, { name, entry }) => {
+				expectTypeOf(deps.tag).toEqualTypeOf<string>();
+				expectTypeOf(entry).toEqualTypeOf<AcmeEntry>();
+				return { name };
 			},
 		};
 		expect(declared.entrySchema).toBe(AcmeEntry);
@@ -201,6 +211,7 @@ describe("rate-limit budgets and declared federation contributions", () => {
 						entrySchema: AcmeEntry,
 						// @ts-expect-error — no `buildAuthorizationUrl`, no `exchangeCode`
 						factory: () => ({ name: "corp", scope: [] }),
+						redirectPolicy: () => ({}),
 					},
 				},
 			},
@@ -209,8 +220,15 @@ describe("rate-limit budgets and declared federation contributions", () => {
 			// @ts-expect-error — this schema's output is not an AcmeEntry
 			entrySchema: z.object({ issuer: z.number() }),
 			factory: () => provider,
+			redirectPolicy: () => ({}),
+		};
+		// @ts-expect-error — a declaration without its redirect policy: an entry is dispatched to both
+		const unpaired: FederationTypeContribution<unknown, AcmeEntry> = {
+			entrySchema: AcmeEntry,
+			factory: () => provider,
 		};
 		expect(mismatched).toBeDefined();
+		expect(unpaired).toBeDefined();
 	});
 
 	it("a federations entry is a bare factory again: a declaration there does not compile", () => {
@@ -235,6 +253,11 @@ describe("rate-limit budgets and declared federation contributions", () => {
 				expectTypeOf(entry).toEqualTypeOf<AcmeEntry>();
 				return { ...provider, name: `${name}:${entry.issuer}` };
 			},
+			redirectPolicy: (deps, { callbackURL, entry }) => {
+				expectTypeOf(deps).toEqualTypeOf<AcmeDeps>();
+				expectTypeOf(entry).toEqualTypeOf<AcmeEntry>();
+				return { callbackURL };
+			},
 		});
 		expectTypeOf(declared).toEqualTypeOf<FederationTypeContribution<AcmeDeps, AcmeEntry>>();
 		// The helper answers the declaration it was given, which the kind accepts.
@@ -246,6 +269,7 @@ describe("rate-limit budgets and declared federation contributions", () => {
 					acme: defineFederationType<{ readonly config: unknown }>()({
 						entrySchema: AcmeEntry,
 						factory: (_deps, { name }) => ({ ...provider, name }),
+						redirectPolicy: () => ({}),
 					}),
 				},
 			},
@@ -258,6 +282,13 @@ describe("rate-limit budgets and declared federation contributions", () => {
 			entrySchema: AcmeEntry,
 			// @ts-expect-error — the schema produces no `tenant`
 			factory: (_deps, { entry }) => ({ ...provider, name: entry.tenant }),
+			redirectPolicy: () => ({}),
+		});
+		defineFederationType<unknown>()({
+			entrySchema: AcmeEntry,
+			factory: () => provider,
+			// @ts-expect-error — the schema produces no `tenant`
+			redirectPolicy: (_deps, { entry }) => ({ tenant: entry.tenant }),
 		});
 		defineFederationType<unknown>()({
 			// @ts-expect-error — the entry is annotated as another type, so this schema does not pair with it
@@ -266,6 +297,7 @@ describe("rate-limit budgets and declared federation contributions", () => {
 				...provider,
 				name: entry.tenant,
 			}),
+			redirectPolicy: () => ({}),
 		});
 		// Inline in a module, without the helper, `E` is `unknown`: nothing ties an
 		// annotated entry to the schema — the limitation the helper exists for.
@@ -279,6 +311,7 @@ describe("rate-limit budgets and declared federation contributions", () => {
 							...provider,
 							name,
 						}),
+						redirectPolicy: () => ({}),
 					},
 				},
 			},

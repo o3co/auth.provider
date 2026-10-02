@@ -34,6 +34,7 @@ import type {
 	DuplicateSecondFactorAuthorityDetails,
 	FederationRedirectPolicyUnpairedDetails,
 	FederationStoresIncompleteDetails,
+	FederationTypeUnhandledDetails,
 	GrantPolicyWithoutIssuerDetails,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
@@ -73,7 +74,7 @@ describe("BootStage", () => {
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 40 reason literals", () => {
+	it("contains exactly the 41 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -98,6 +99,7 @@ describe("BootErrorReason", () => {
 			| "federation-redirect-policy-unpaired"
 			| "grant-policy-without-issuer"
 			| "federation-stores-incomplete"
+			| "federation-type-unhandled"
 			| "discovery-document-invalid"
 			| "replica-unsafe-adapter"
 			| "component-absence-undeclared"
@@ -242,6 +244,16 @@ describe("per-reason *Details discriminators", () => {
 		expectTypeOf<
 			GrantPolicyWithoutIssuerDetails["reason"]
 		>().toEqualTypeOf<"grant-policy-without-issuer">();
+	});
+
+	it("FederationTypeUnhandledDetails lists each unhandled entry, its type when it names one, and the types handled", () => {
+		expectTypeOf<
+			FederationTypeUnhandledDetails["reason"]
+		>().toEqualTypeOf<"federation-type-unhandled">();
+		expectTypeOf<FederationTypeUnhandledDetails["unhandled"]>().toEqualTypeOf<
+			readonly { readonly federationName: string; readonly type?: string }[]
+		>();
+		expectTypeOf<FederationTypeUnhandledDetails["handled"]>().toEqualTypeOf<readonly string[]>();
 	});
 
 	it("FederationStoresIncompleteDetails.reason", () => {

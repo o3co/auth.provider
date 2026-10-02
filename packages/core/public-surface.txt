@@ -248,6 +248,7 @@
 . FederationInstance type
 . FederationProfile type
 . FederationProvider type
+. FederationRedirectPolicyContribution type
 . FederationRedirectPolicyUnpairedDetails type
 . FederationRefreshErrorClassification type
 . FederationRefreshErrorReason type
@@ -1090,6 +1091,7 @@
 ./modules/manifest FederationFactory type
 ./modules/manifest FederationInstance type
 ./modules/manifest FederationProvider type
+./modules/manifest FederationRedirectPolicyContribution type
 ./modules/manifest FederationTypeContribution type
 ./modules/manifest FederationTypeDeclaration type
 ./modules/manifest GrantFactory type

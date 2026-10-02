@@ -48,6 +48,7 @@ import {
 } from "../session-admission/requirement.mjs";
 import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
+import { buildDispatchedFederation } from "./federation-entries.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
 	CleanupRecord,
@@ -1104,6 +1105,12 @@ function warnOnTokenBindingSurfaceOverlap(
  *      factories runs, so a failing module leaves no side effect; factories
  *      then feed `collector.register` (contributes) or `collector.replace`
  *      (overrides).
+ *   2a. Each `core.federations` entry stage 1 dispatched to its type
+ *      (`ValidatedManifests.dispatchedFederations`), in the order written:
+ *      the type's factories build its provider and redirect policy, which
+ *      register under the entry's name together — after every name-keyed
+ *      contribution, so the types are registered, and before any list-shaped
+ *      factory reads `federationProviders`.
  *   2b. `checkSessionRequirements`, before a list-shaped factory reads a
  *      requirement's reach; then the rate-limit budgets' and the admission
  *      actions' boot lines.
@@ -1290,6 +1297,40 @@ export async function applyContributions(
 			}
 
 			collector.replace(name, value);
+		}
+	}
+
+	// ---------------------------------------------------------------------------
+	// Step 2a: each entry stage 1 dispatched by type, once every type has
+	// registered and before any list-shaped factory reads the providers.
+	// ---------------------------------------------------------------------------
+
+	for (const federation of material.plan.validated.dispatchedFederations) {
+		const { name } = federation.instance;
+		try {
+			const pair = await buildDispatchedFederation(federation, contributionKinds.federationTypes);
+			// Both, under the entry's name, or neither: the pair is made here.
+			(contributionKinds.federations as NameKeyedCollector<unknown>).register(name, pair.provider);
+			(contributionKinds.federationRedirectPolicies as NameKeyedCollector<unknown>).register(
+				name,
+				pair.redirectPolicy,
+			);
+		} catch (thrownValue) {
+			const cleanupErrors = await runCleanupsReverse(material.cleanups);
+			throw new BootError({
+				message: `Module "${federation.module}" contribution factory for kind "federations" name "${name}" (type "${federation.type}") failed: ${failureSummary(thrownValue)}`,
+				reason: "contribute-factory-failed",
+				stage: "applyContributions",
+				details: {
+					reason: "contribute-factory-failed",
+					module: federation.module,
+					kind: "federations",
+					name,
+					originalError: thrownValue,
+					...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+				},
+				cause: thrownValue,
+			});
 		}
 	}
 
