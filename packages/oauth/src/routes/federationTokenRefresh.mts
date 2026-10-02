@@ -130,15 +130,18 @@ export const refreshStoredTokens = async (
 
 		// 11e: refresh with the freshest snapshot. The lock is held across the
 		// IdP call; its TTL should cover the IdP timeout, else a second waiter
-		// also calls the IdP. Only one of their writes lands: each lands only
-		// on the record it refreshed from.
+		// also calls the IdP. Each write lands only on the record it refreshed
+		// from, so at most one of theirs lands. One that the upstream refuses
+		// `invalid_grant` (the refresh token the other spent) still ends the
+		// record under the lapsed lock, and the other's refresh is then
+		// dropped as removed: the user reconnects.
 		let refreshed: Awaited<ReturnType<typeof provider.refreshToken>>;
 		const calledAt = Date.now();
 		try {
 			refreshed = await provider.refreshToken(current.value.refreshToken);
 		} catch (error) {
 			// Awaited inside the `try`, so the lock is released after the answer.
-			return await answerRefreshFailure(ctx, caller, current, error);
+			return await answerRefreshFailure(ctx, caller, current, release !== undefined, error);
 		}
 
 		// Awaited inside the `try`, so the lock is released after the answer.

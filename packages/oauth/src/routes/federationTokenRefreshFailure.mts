@@ -37,14 +37,19 @@ import {
 
 /**
  * The answer when the provider's refresh of `current` threw. On
- * `invalid_grant` that record is removed, best effort, before the `410`; the
- * session's index is left as it is. A record rewritten since (a relink, or
- * another refresh) is not this refresh's to end: it is answered as it stands.
+ * `invalid_grant` under the refresh lock (`holdsLock`), that record is
+ * removed, best effort, before the `410`; the session's index is left as it
+ * is. A record removed or rewritten since (a logout, a relink, or another
+ * refresh) is not this refresh's to end, and is answered as a refresh that
+ * could not write is. Without the lock the record is kept: a sibling refresh
+ * may have spent the refresh token this one presented, and its rotation is
+ * still to land on the record.
  */
 export const answerRefreshFailure = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
 	current: StoredRecord,
+	holdsLock: boolean,
 	error: unknown,
 ): Promise<Response> => {
 	const { opts, req, res, federation, logger } = ctx;
@@ -73,20 +78,24 @@ export const answerRefreshFailure = async (
 
 	if (reason === "invalid_grant") {
 		let outcome: Awaited<ReturnType<typeof removeRecord>> | undefined;
-		try {
-			outcome = await removeRecord(ctx, caller, current);
-		} catch (cleanupErr) {
-			logger.warn(
-				{
-					federation,
-					store: "federation_token",
-					step: "remove_if",
-					err: loggableError(cleanupErr),
-				},
-				"federation_token_cleanup_failed",
-			);
+		if (holdsLock) {
+			try {
+				outcome = await removeRecord(ctx, caller, current);
+			} catch (cleanupErr) {
+				logger.warn(
+					{
+						federation,
+						store: "federation_token",
+						step: "remove_if",
+						err: loggableError(cleanupErr),
+					},
+					"federation_token_cleanup_failed",
+				);
+			}
 		}
-		if (outcome === "conflict") return answerDiscardedRefresh(ctx, caller, outcome);
+		if (outcome === "missing" || outcome === "conflict") {
+			return answerDiscardedRefresh(ctx, caller, outcome);
+		}
 		emitAuditEvent(opts.auditSink, {
 			timestamp: new Date(),
 			type: "federation.token.reauthentication_required",

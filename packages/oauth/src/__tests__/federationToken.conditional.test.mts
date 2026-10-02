@@ -311,7 +311,7 @@ describe("federation token route — a refresh never overwrites a relink that la
 		expect(r.index.removeFederation).not.toHaveBeenCalled();
 	});
 
-	it("keeps a relink that lands during a refused refresh, and does not keep the rotated token on it", async () => {
+	it("keeps a relink that lands during a refused refresh, does not keep the rotated token on it, and answers the relink", async () => {
 		const b = linkB();
 		const r = await route({
 			seed: linkA(),
@@ -324,15 +324,38 @@ describe("federation token route — a refresh never overwrites a relink that la
 
 		const res = await r.post();
 
-		expect(res.status).toBe(500);
-		expect(res.body.error).toBe("refresh_failed");
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("b-at");
 		expect(await r.store.get(SID, NAME)).toEqual(b);
+		expect(audited(r, "federation.token.refresh_failed")).toEqual([]);
 		expectBestEffortWarn(
 			r.logger,
 			"federation_token_keep_rotated_skipped",
 			{ federation: NAME, reason: "replaced_concurrently" },
 			null,
 		);
+		expectBestEffortWarn(
+			r.logger,
+			"federation_token_refresh_discarded",
+			{ federation: NAME, reason: "record_replaced" },
+			null,
+		);
+	});
+
+	it("answers 404 when a logout lands during a refused refresh, keeping nothing", async () => {
+		const r = await route({
+			seed: linkA(),
+			refresh: async (store) => {
+				await store.delete(SID, NAME);
+				return { refreshToken: "rotated-rt" };
+			},
+		});
+
+		const res = await r.post();
+
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("federation_not_linked");
+		expect(await r.store.get(SID, NAME)).toBeNull();
 	});
 
 	it("keeps a relink that reuses the refresh token the refresh was made from, with its own id_token", async () => {
@@ -348,7 +371,8 @@ describe("federation token route — a refresh never overwrites a relink that la
 
 		const res = await r.post();
 
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("b-at");
 		expect(await r.store.get(SID, NAME)).toEqual(b);
 	});
 
@@ -398,7 +422,7 @@ describe("federation token route — it never removes a link from the session's 
 		expect(audited(r, "federation.token.reauthentication_required")).toHaveLength(1);
 	});
 
-	it("still answers 410 when the record is gone before the clean-up", async () => {
+	it("answers 404 when the record is gone before the clean-up, as a refresh that could write would", async () => {
 		const r = await route({
 			seed: linkA(),
 			refresh: async (store) => {
@@ -409,8 +433,55 @@ describe("federation token route — it never removes a link from the session's 
 
 		const res = await r.post();
 
-		expect(res.status).toBe(410);
-		expect(audited(r, "federation.token.reauthentication_required")).toHaveLength(1);
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("federation_not_linked");
+		expect(audited(r, "federation.token.reauthentication_required")).toEqual([]);
+		expectBestEffortWarn(
+			r.logger,
+			"federation_token_refresh_discarded",
+			{ federation: NAME, reason: "record_gone" },
+			null,
+		);
+	});
+
+	it("does not end the record on invalid_grant without the refresh lock, so a sibling refresh's rotation still lands", async () => {
+		// Two refreshes of one record, with no lock to order them: A rotates
+		// the refresh token while B, presenting the one A spent, is refused.
+		const { acquireLock: _unused, ...unlocked } = memoryStore();
+		let releaseA = () => {};
+		const aHeld = new Promise<void>((resolve) => {
+			releaseA = resolve;
+		});
+		let aCalled = () => {};
+		const aStarted = new Promise<void>((resolve) => {
+			aCalled = resolve;
+		});
+		let calls = 0;
+		const r = await route({
+			seed: linkA(),
+			store: unlocked as Store,
+			refresh: async () => {
+				calls += 1;
+				if (calls === 1) {
+					aCalled();
+					await aHeld;
+					return { accessToken: "a-new-at", expiresIn: 3600, refreshToken: "a-rotated-rt" };
+				}
+				throw invalidGrant();
+			},
+		});
+
+		const a = r.post();
+		await aStarted;
+		const b = await r.post();
+		releaseA();
+		const resA = await a;
+
+		expect(b.status).toBe(410);
+		expect(b.body.error).toBe("re_authentication_required");
+		expect(resA.status).toBe(200);
+		expect(resA.body.access_token).toBe("a-new-at");
+		expect((await r.store.get(SID, NAME))?.refreshToken).toBe("a-rotated-rt");
 	});
 
 	it("still answers 410 when the clean-up cannot reach the store, logging it", async () => {
@@ -448,7 +519,12 @@ describe("federation token route — a stored record holding no usable access to
 		expect(res.body.error).toBe("federation_not_linked");
 		expect(await r.store.get(SID, NAME)).toBeNull();
 		expect(r.index.removeFederation).not.toHaveBeenCalled();
-		expectBestEffortWarn(r.logger, "federation_token_record_unusable", { federation: NAME }, null);
+		expectBestEffortWarn(
+			r.logger,
+			"federation_token_record_unusable",
+			{ federation: NAME, removal: "removed" },
+			null,
+		);
 	});
 
 	it("is removed only as it was read: a relink landing before the removal is kept", async () => {
@@ -464,6 +540,12 @@ describe("federation token route — a stored record holding no usable access to
 
 		expect(res.status).toBe(404);
 		expect(await r.store.get(SID, NAME)).toEqual(b);
+		expectBestEffortWarn(
+			r.logger,
+			"federation_token_record_unusable",
+			{ federation: NAME, removal: "conflict" },
+			null,
+		);
 	});
 
 	it("is still refreshed from its refresh token when it is due", async () => {

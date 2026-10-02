@@ -67,9 +67,10 @@ export const recordRefresh = async (
 	 * the route still answers its refusal, not a 503. Kept only on the record
 	 * the refresh was made from: a record removed since (a logout) or
 	 * rewritten since (a relink, or another refresh) is left as it is, since
-	 * an equal refresh token does not make it the same connection.
+	 * an equal refresh token does not make it the same connection, and that
+	 * outcome is returned so the refusal is answered as a dropped refresh.
 	 */
-	const keepRotatedRefreshToken = async (): Promise<void> => {
+	const keepRotatedRefreshToken = async (): Promise<"missing" | "conflict" | undefined> => {
 		if (rotatedRefreshToken !== undefined && rotatedRefreshToken !== currentTokens.refreshToken) {
 			try {
 				const outcome = await replaceRecord(ctx, caller, current, {
@@ -88,6 +89,7 @@ export const recordRefresh = async (
 						},
 						"federation_token_keep_rotated_skipped",
 					);
+					return outcome;
 				}
 			} catch (error) {
 				logger.warn(
@@ -96,11 +98,13 @@ export const recordRefresh = async (
 				);
 			}
 		}
+		return undefined;
 	};
 
 	// The adapter answered something this route cannot read as a token.
 	if (accessToken === undefined || lifetimeIsBroken || tokenTypeIsBroken) {
-		await keepRotatedRefreshToken();
+		const dropped = await keepRotatedRefreshToken();
+		if (dropped !== undefined) return answerDiscardedRefresh(ctx, caller, dropped);
 		emitAuditEvent(opts.auditSink, {
 			timestamp: new Date(),
 			type: "federation.token.refresh_failed",
@@ -155,7 +159,8 @@ export const recordRefresh = async (
 	// The refresh worked but its token may not be handed on. Keep the
 	// rotated refresh token so fixing the upstream needs no re-consent.
 	if (!isDisclosable(updatedTokens)) {
-		await keepRotatedRefreshToken();
+		const dropped = await keepRotatedRefreshToken();
+		if (dropped !== undefined) return answerDiscardedRefresh(ctx, caller, dropped);
 		return refuseUndisclosableTokenType(ctx, caller, nextTokenType);
 	}
 

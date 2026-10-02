@@ -85,16 +85,18 @@ export const serveStored = async (
 	const { federation, logger } = ctx;
 	const tokens = read.value;
 	if (!isUsableToken(tokens.accessToken)) {
-		// The federation alone, never what the record holds.
-		logger.warn({ federation }, "federation_token_record_unusable");
+		let removal: Awaited<ReturnType<typeof removeRecord>> | "failed";
 		try {
-			await removeRecord(ctx, caller, read);
+			removal = await removeRecord(ctx, caller, read);
 		} catch (error) {
+			removal = "failed";
 			logger.warn(
 				{ federation, store: "federation_token", step: "remove_if", err: loggableError(error) },
 				"federation_token_cleanup_failed",
 			);
 		}
+		// The federation and what the removal found, never what the record holds.
+		logger.warn({ federation, removal }, "federation_token_record_unusable");
 		return answerUnlinkedRecord(ctx);
 	}
 	// The type is judged before the token is read and before the success is

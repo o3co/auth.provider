@@ -176,6 +176,17 @@ function makeFedTokenStore(override?: Partial<FederationTokenStore>): Federation
 	return store;
 }
 
+/** `store` with a refresh lock this request always acquires: the record is then this refresh's to end. */
+function withLock(store: FederationTokenStore): FederationTokenStore & SupportsLock {
+	return {
+		...store,
+		acquireLock: vi.fn().mockResolvedValue({
+			acquired: true,
+			release: vi.fn().mockResolvedValue(undefined),
+		}),
+	};
+}
+
 function makeClientRepo(override?: Partial<ClientRepository>): ClientRepository {
 	return {
 		findById: vi.fn().mockResolvedValue(allowedClient),
@@ -665,7 +676,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			await postFedToken(app, "google", await mintAccessToken());
 
 			expect(logger.warn).toHaveBeenCalledWith(
-				{ federation: "google" },
+				{ federation: "google", removal: "removed" },
 				"federation_token_record_unusable",
 			);
 			expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(baseFedTokens.refreshToken);
@@ -823,9 +834,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				listFederations: vi.fn(async () => ["google"]),
 				removeFederation: removeFederationSpy,
 			});
-			const fedTokenStore = makeFedTokenStore({
-				get: vi.fn().mockResolvedValue(expiredTokens),
-			});
+			const fedTokenStore = withLock(
+				makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expiredTokens),
+				}),
+			);
 			const failingProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<never>;
 			} = {
@@ -1911,7 +1924,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
-				expect(res.status).toBe(500);
+				expect(res.status).toBe(404);
 				expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
 				expect(fedTokenStore.attach).not.toHaveBeenCalled();
 				expect(fedTokenStore.update).not.toHaveBeenCalled();
@@ -1971,7 +1984,9 @@ describe("POST /oauth/federation/:name/token", () => {
 
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
-				expect(res.status).toBe(500);
+				// Answered from the record that won, as stored: it is not due.
+				expect(res.status).toBe(200);
+				expect(res.body.access_token).toBe("concurrent-at");
 				expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
 				expect(fedTokenStore.attach).not.toHaveBeenCalled();
 				expect(fedTokenStore.update).not.toHaveBeenCalled();
@@ -3293,10 +3308,12 @@ describe("POST /oauth/federation/:name/token", () => {
 
 		it("the clean-up after invalid_grant", async () => {
 			const logger = createMockLogger();
-			const fedTokenStore = makeFedTokenStore({
-				get: vi.fn().mockResolvedValue(expired()),
-				removeIf: vi.fn().mockRejectedValue(storeReplyError()),
-			});
+			const fedTokenStore = withLock(
+				makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expired()),
+					removeIf: vi.fn().mockRejectedValue(storeReplyError()),
+				}),
+			);
 			const res = await postFedToken(
 				buildApp({
 					fedTokenStore,
@@ -3746,12 +3763,14 @@ describe("POST /oauth/federation/:name/token", () => {
 		 * refresh rejects with `error`, plus the stores to look at afterwards.
 		 */
 		function refreshRejectingWith(error: unknown, logger?: Logger) {
-			const fedTokenStore = makeFedTokenStore({
-				get: vi.fn().mockResolvedValue({
-					...baseFedTokens,
-					expiresAt: new Date(Date.now() - 1000),
+			const fedTokenStore = withLock(
+				makeFedTokenStore({
+					get: vi.fn().mockResolvedValue({
+						...baseFedTokens,
+						expiresAt: new Date(Date.now() - 1000),
+					}),
 				}),
-			});
+			);
 			const sessionFederationIndex = makeSessionFederationIndex();
 			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
 			const provider = {
@@ -4322,7 +4341,8 @@ describe("POST /oauth/federation/:name/token — keeping a rotated refresh token
 			...federationBase("google"),
 			refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
 		}) as unknown as FederationProvider;
-	const run = async (store: Partial<FederationTokenStore>) => {
+	/** `status`: the refusal's `500`, unless the record changed and the refresh was dropped. */
+	const run = async (store: Partial<FederationTokenStore>, status = 500) => {
 		const logger = createMockLogger();
 		const fedTokenStore = makeFedTokenStore(store);
 		const app = buildApp({
@@ -4332,8 +4352,8 @@ describe("POST /oauth/federation/:name/token — keeping a rotated refresh token
 			logger,
 		});
 		const res = await postFedToken(app, "google", await mintAccessToken());
-		expect(res.status).toBe(500);
-		expect(res.body.error).toBe("refresh_failed");
+		expect(res.status).toBe(status);
+		if (status === 500) expect(res.body.error).toBe("refresh_failed");
 		return { logger, fedTokenStore };
 	};
 
@@ -4373,10 +4393,14 @@ describe("POST /oauth/federation/:name/token — keeping a rotated refresh token
 	});
 
 	it("says why it kept nothing when a concurrent logout removed the record", async () => {
-		const { logger } = await run({
-			get: vi.fn().mockResolvedValue(expiredTokens()),
-			replaceIf: vi.fn().mockResolvedValue({ outcome: "missing" }),
-		});
+		// Answered as any refresh whose record is gone: 404.
+		const { logger } = await run(
+			{
+				get: vi.fn().mockResolvedValue(expiredTokens()),
+				replaceIf: vi.fn().mockResolvedValue({ outcome: "missing" }),
+			},
+			404,
+		);
 		expectBestEffortWarn(
 			logger,
 			"federation_token_keep_rotated_skipped",
@@ -4386,10 +4410,14 @@ describe("POST /oauth/federation/:name/token — keeping a rotated refresh token
 	});
 
 	it("says why it kept nothing when the record was rewritten since it was read", async () => {
-		const { logger } = await run({
-			get: vi.fn().mockResolvedValue(expiredTokens()),
-			replaceIf: vi.fn().mockResolvedValue({ outcome: "conflict" }),
-		});
+		// Answered from the record that won, which here is itself due: 503.
+		const { logger } = await run(
+			{
+				get: vi.fn().mockResolvedValue(expiredTokens()),
+				replaceIf: vi.fn().mockResolvedValue({ outcome: "conflict" }),
+			},
+			503,
+		);
 		expectBestEffortWarn(
 			logger,
 			"federation_token_keep_rotated_skipped",
