@@ -79,7 +79,6 @@ import {
 	emitAuditEvent,
 	FEDERATED_AMR,
 	type Logger,
-	loggableError,
 	type MailAddressFact,
 	MFA_AMR,
 	type MfaFactorRecord,
@@ -574,8 +573,7 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 			const { context, records } = await readSubjectRecords({ factors, sealing }, primary.subject, {
 				list: listRecords,
 				recoverySetFloor: options.recoverySetFloor,
-				floorUnread: (subject, cause) =>
-					logger.warn({ sub: subject, err: loggableError(cause) }, "mfa_recovery_set_floor_unread"),
+				logger,
 			});
 			if (!records.some((record) => mayCount(factors, record))) checkWitness(primary);
 			if (records.some((record) => asksForSecondFactor(context, primary.subject, record))) {

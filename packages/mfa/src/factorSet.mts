@@ -94,7 +94,6 @@
 import {
 	consoleLogger,
 	type Logger,
-	loggableError,
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
 	type MfaFactorRecord,
@@ -148,7 +147,7 @@ const RESET_WAIT_LEASES = 2;
 const RESET_PAUSE_MS = 250;
 
 /** The lease a write takes when one Store call may take `storeTimeoutMs`, at least core's shortest. */
-const leaseMsFor = (storeTimeoutMs: number): number =>
+export const leaseMsFor = (storeTimeoutMs: number): number =>
 	Math.max(LEASE_STORE_TIMEOUTS * storeTimeoutMs, MFA_SUBJECT_LEASE_MIN_MS);
 
 /**
@@ -830,8 +829,7 @@ export function createMfaFactorSet(options: {
 			readSubjectRecords({ factors, sealing }, subject, {
 				list,
 				recoverySetFloor: floorOf,
-				floorUnread: (held, cause) =>
-					logger.warn({ sub: held, err: loggableError(cause) }, "mfa_recovery_set_floor_unread"),
+				logger,
 			}),
 
 		async markEnrolled(start, subject) {

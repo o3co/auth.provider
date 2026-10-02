@@ -113,6 +113,7 @@ import {
 	boundedRecoverySetFloor,
 	createMfaFactorSet,
 	createMfaSubjectLeases,
+	leaseMsFor,
 	type MfaSubjectLeases,
 } from "./factorSet.mjs";
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
@@ -621,6 +622,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
 									transactionTtlSeconds: settings.transactionTtlSeconds,
 								}),
+								leaseMs: leaseMsFor(settings.storeTimeoutMs),
 							},
 						}),
 					};

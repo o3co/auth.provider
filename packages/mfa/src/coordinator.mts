@@ -146,6 +146,7 @@ import {
 import { createMfaEnrollment } from "./enrollment.mjs";
 import type { MfaFactorSet } from "./factorSet.mjs";
 import {
+	holdsCountingFactor,
 	holdsUsableIn,
 	isOffered,
 	type MfaSubjectRecords,
@@ -383,8 +384,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 	};
 
 	/** Whether the subject `read` holds a usable record (`factorState.mts`) — one that counts, when `options.counting` asks it. */
-	const holdsUsable = (read: MfaSubjectRecords, options: { readonly counting: boolean }): boolean =>
-		holdsUsableIn(read, options);
+	const holdsUsable = (read: MfaSubjectRecords): boolean => holdsUsableIn(read);
 
 	/** `subject`'s records read for a judgment over them (`factorSet.readSubject`); an outage is never "none". */
 	const readSubject = async (subject: string): Promise<MfaSubjectRecords | MfaStoreOutage> => {
@@ -781,12 +781,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			if ("outcome" in tx) return tx;
 			// An enroll transaction verifies the account-email proof alone: it lists no factor.
 			// A retired recovery set is not offered (`readSubjectRecords`).
-			const reading =
-				tx.purpose === "enroll"
-					? { subject: tx.subject, context: { factors, sealing }, records: [] }
-					: await readSubject(tx.subject);
-			if ("outcome" in reading) return reading;
-			const listed = reading.records.flatMap((record) => {
+			const reading = tx.purpose === "enroll" ? undefined : await readSubject(tx.subject);
+			if (reading !== undefined && "outcome" in reading) return reading;
+			const listed = (reading?.records ?? []).flatMap((record) => {
+				if (reading === undefined) return [];
 				const read = readFactorRecord(reading.context, tx.subject, record);
 				if (!isOffered(read)) return [];
 				let hint: unknown;
@@ -1022,10 +1020,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				mode === "required" &&
 				tx.purpose === "login" &&
 				!factor.counting &&
-				!holdsUsable(
-					{ subject: tx.subject, context: { factors, sealing }, records: current },
-					{ counting: true },
-				)
+				!holdsCountingFactor({ factors, sealing }, tx.subject, current)
 					? reopen.plan(tx, current)
 					: undefined;
 			let reopening = await planOver(records);

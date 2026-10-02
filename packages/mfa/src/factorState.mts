@@ -54,11 +54,13 @@
  *   reads no data.
  */
 
-import type {
-	MfaFactor,
-	MfaFactorData,
-	MfaFactorRecord,
-	MfaFactorResolver,
+import {
+	type Logger,
+	loggableError,
+	type MfaFactor,
+	type MfaFactorData,
+	type MfaFactorRecord,
+	type MfaFactorResolver,
 } from "@o3co/auth-provider-core";
 import { enrolledAddressDigest } from "./email/factor.mjs";
 import { matchesRecordedAddress } from "./mail.mjs";
@@ -156,6 +158,8 @@ export interface MfaSubjectRecords {
 	readonly subject: string;
 	readonly context: MfaRecordContext;
 	readonly records: readonly MfaFactorRecord[];
+	/** Made by `readSubjectRecords` alone. */
+	readonly __mfaSubjectRecords: never;
 }
 
 /** What `readSubjectRecords` reads through. */
@@ -164,8 +168,8 @@ export interface MfaSubjectRecordsReaders {
 	readonly list: (subject: string) => Promise<readonly MfaFactorRecord[]>;
 	/** The subject's recovery-set floor, bounded; throws for one that cannot be read. */
 	readonly recoverySetFloor: (subject: string) => Promise<number>;
-	/** Told of a floor that could not be read: said at warn. */
-	readonly floorUnread: (subject: string, cause: unknown) => void;
+	/** Where a floor that could not be read is said, at warn (`mfa_recovery_set_floor_unread`). */
+	readonly logger: Logger;
 }
 
 /**
@@ -176,9 +180,11 @@ export interface MfaSubjectRecordsReaders {
  * above it, the records are listed again — a floor read after a listing may
  * postdate a regeneration whose new set the listing missed, but a
  * regeneration writes its set before it raises the floor, so the listing
- * after the floor holds it. At most two listings and one floor read. A floor that cannot be
- * read is told to `floorUnread` and reads every set as without one, so no
- * outage hides a way in. A listing that fails throws.
+ * after the floor holds it. A floor that cannot be read is said at warn
+ * (`mfa_recovery_set_floor_unread`), the records are listed again — the read
+ * may have hung while a set was written — and every set reads as without
+ * one: an outage offers a set rather than hide one. At most two listings and
+ * one floor read. A listing that fails throws.
  */
 export async function readSubjectRecords(
 	context: MfaRecordContext,
@@ -192,14 +198,17 @@ export async function readSubjectRecords(
 		!isRecoveryCodeFactor(factor) ||
 		!records.some((record) => record.kind === RECOVERY_CODE_FACTOR_KIND)
 	) {
-		return { subject, context, records };
+		return reading(subject, context, records);
 	}
 	let floor: number;
 	try {
 		floor = await readers.recoverySetFloor(subject);
 	} catch (cause) {
-		readers.floorUnread(subject, cause);
-		return { subject, context, records };
+		readers.logger.warn(
+			{ sub: subject, err: loggableError(cause) },
+			"mfa_recovery_set_floor_unread",
+		);
+		return reading(subject, context, await readers.list(subject));
 	}
 	const floored: MfaRecordContext = { ...context, recoverySetFloor: floor };
 	// A set at or above the floor the listing holds: one it can read the generation of.
@@ -213,18 +222,32 @@ export async function readSubjectRecords(
 			opened.state === "ok" ? recoverySetGeneration(factor, opened.value) : undefined;
 		return generation !== undefined && generation >= floor;
 	});
-	return {
-		subject,
-		context: floored,
-		records: current ? records : await readers.list(subject),
-	};
+	return reading(subject, floored, current ? records : await readers.list(subject));
 }
 
-/** Whether the subject `read` holds a usable record (`holdsUsableRecord`, over its context). */
-export const holdsUsableIn = (
-	read: MfaSubjectRecords,
-	options: { readonly counting: boolean },
-): boolean => holdsUsableRecord(read.context, read.subject, read.records, options);
+/** A reading as `readSubjectRecords` makes it, and nothing else does. */
+const reading = (
+	subject: string,
+	context: MfaRecordContext,
+	records: readonly MfaFactorRecord[],
+): MfaSubjectRecords => ({ subject, context, records }) as MfaSubjectRecords;
+
+/** Whether the subject `read` holds a usable record of any kind (`holdsUsableRecord`, over its context): a step-up's `no_qualifying_factor`. */
+export const holdsUsableIn = (read: MfaSubjectRecords): boolean =>
+	holdsUsableRecord(read.context, read.subject, read.records, { counting: false });
+
+/**
+ * Whether `subject` holds a usable record that counts among `records`: no
+ * floor is read for it, since a recovery-code set never counts.
+ */
+export const holdsCountingFactor = (
+	context: Pick<MfaRecordContext, "factors" | "sealing">,
+	subject: string,
+	records: readonly ReadRecord[],
+): boolean =>
+	holdsUsableRecord({ factors: context.factors, sealing: context.sealing }, subject, records, {
+		counting: true,
+	});
 
 /** Whether a password login asks for a second factor over `record`: every state but `exhausted` and `retired`. */
 export const asksForSecondFactor = (

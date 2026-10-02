@@ -69,7 +69,7 @@ export function createMfaStepUp(kit: MfaCeremonyKit): {
 			if ("outcome" in reading) return reading;
 			if (reading.records.some((record) => mayCount(kit.factors, record))) {
 				if (!kit.stepUpRecordable) return { outcome: "step_up_unrecordable" };
-				if (!kit.holdsUsable(reading, { counting: false })) {
+				if (!kit.holdsUsable(reading)) {
 					return { outcome: "no_qualifying_factor" };
 				}
 				if (call.transactionId !== undefined) {

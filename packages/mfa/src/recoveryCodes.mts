@@ -36,9 +36,18 @@
  *   sign-in — one made before a first binding, which admission may have taken
  *   on a recent primary while no factor stood; said at info
  *   (`mfa_first_binding_distrusted`). A mark that cannot be read is `503`.
- * - `409 mfa_factors_changed` as well for a request that reached the lease
- *   longer after it began than a first-binding mark stands, less the skew:
- *   a mark noted meanwhile may have lapsed.
+ *   Every mark distrusts, so it also refuses, until the sign-in is later than
+ *   the mark plus `DEFAULT_CLOCK_SKEW_MS`: the session that bound the first
+ *   factor (it got codes then), one whose login reconciled the witness, one
+ *   signed in before a binding and stepped up after it, and a fresh MFA login
+ *   on another device within the skew; a step-up in a session whose witness
+ *   is not `enrolled` notes the mark again, and so arms it again. The mark is
+ *   used because admission's verdicts cannot say "met only on recent MFA,
+ *   else enrollment required" for one action, and the route may not read the
+ *   session record's `mfaAt` beside admission's view.
+ * - `409 mfa_request_stale`: the request reached its lease longer after it
+ *   began than a mark can be relied on — its lifetime less the skew and a
+ *   lease — so a mark noted meanwhile may have lapsed; nothing written.
  * - `409 mfa_factor_limit`: the set would take the subject past
  *   `mfa.maxFactorsPerSubject` (`recordsAfterRecoveryCodes`: replacing a set
  *   at the limit stays allowed); nothing written.
@@ -78,6 +87,10 @@ import type { MfaSealing } from "./sealing.mjs";
 const MFA_UNAVAILABLE = errorEnvelope("temporarily_unavailable", "MFA temporarily unavailable");
 const NOT_ISSUED = errorEnvelope("invalid_request", "Recovery codes are not issued here");
 const LOGIN_REQUIRED = errorEnvelope("login_required", "Log in again");
+const REQUEST_STALE = errorEnvelope(
+	"mfa_request_stale",
+	"The request took too long to be checked safely: try again",
+);
 const FACTOR_LIMIT = errorEnvelope(
 	"mfa_factor_limit",
 	"The subject holds as many second factors as it may",
@@ -117,6 +130,8 @@ export interface MfaRecoveryCodesOptions {
 	readonly firstBindingAt: (subject: string, nowMs: number) => Promise<unknown>;
 	/** How long a first-binding mark stands, in milliseconds (`firstBindingMarkLifetimeMs`). */
 	readonly firstBindingMarkMs: number;
+	/** How long a factor-set write's lease stands, in milliseconds (`leaseMsFor`). */
+	readonly leaseMs: number;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -144,7 +159,7 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 	};
 
 	router.post("/recovery-codes", async (req: Request, res: Response) => {
-		// Before the admission: a mark noted after it stands at least this long.
+		// Taken before the admission: what the lease's mark read is measured against.
 		const startedAtMs = now();
 		const session = await admit(req, res);
 		if (session === undefined) return;
@@ -185,8 +200,13 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 				if (distrustedByFirstBinding(session.authTimeMs, mark) && mark !== null) {
 					return { outcome: "distrusted", retryAfterMs: firstBindingRetryAfterMs(mark, nowMs) };
 				}
-				// A mark noted after the admission may have lapsed by now: no answer from it holds.
-				if (now() - startedAtMs > options.firstBindingMarkMs - DEFAULT_CLOCK_SKEW_MS) {
+				// Two legs: admission's own mark read covers a mark noted before this request
+				// began; this read covers one noted since, while it stands — the mark's
+				// lifetime, less the skew and the binding's lease it may be noted ahead of.
+				if (
+					now() - startedAtMs >
+					options.firstBindingMarkMs - DEFAULT_CLOCK_SKEW_MS - options.leaseMs
+				) {
 					return { outcome: "stale" };
 				}
 				if (recordsAfterRecoveryCodes(factors, records, "mfa") > maxFactorsPerSubject) {
@@ -244,7 +264,7 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 			return;
 		}
 		if (done.outcome === "stale") {
-			res.status(409).json(FACTORS_CHANGED);
+			res.status(409).json(REQUEST_STALE);
 			return;
 		}
 		if (done.outcome === "factor_limit") {
