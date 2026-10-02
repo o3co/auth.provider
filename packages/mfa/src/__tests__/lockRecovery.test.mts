@@ -278,6 +278,35 @@ describe("a release", () => {
 		expect(await recovery.release(SUBJECT, SID)).toEqual({
 			outcome: "refused",
 			reason: "no_revocation_boundary",
+			rebindAfter: null,
+		});
+	});
+
+	it("with no sessions boundary wired, refused no_revocation_boundary while the hard hold stands says from when a rebind counts", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await addRecord(factorStore, recordOf("totp-old", "totp", T - 1_000));
+		const { store, recovery } = setup({ factorStore });
+		await latch(store);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+
+		expect(await recovery.release(SUBJECT, SID)).toEqual({
+			outcome: "refused",
+			reason: "no_revocation_boundary",
+			rebindAfter: REBIND_AFTER,
+		});
+	});
+
+	it("refused exempt_proof_required while the hard hold stands says nothing of when a rebind counts", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await addRecord(factorStore, recordOf("totp-old", "totp", T - 1_000));
+		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
+		await latch(store);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+
+		expect(await recovery.release(SUBJECT, SID)).toEqual({
+			outcome: "refused",
+			reason: "exempt_proof_required",
 		});
 	});
 

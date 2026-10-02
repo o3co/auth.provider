@@ -52,6 +52,7 @@ import {
 	totpCode,
 	totpProofOf,
 	verify,
+	wrongCode,
 	wrongCodesToTheHardLimit,
 } from "./routesHarness.mjs";
 
@@ -360,7 +361,14 @@ describe("the release's answers", () => {
 
 	it("is 409 no_revocation_boundary where no sessions boundary is wired, said once at boot", async () => {
 		const setup = await composed({ withoutBoundary: true });
-		await hardHeld(setup, setup.totp);
+		const { agent: attacker, transaction } = await beginLogin(setup.app);
+		const failed = await verify(
+			attacker,
+			transaction,
+			setup.totp.record.id,
+			wrongCode(setup.totp.secret),
+		);
+		expect(failed.status, JSON.stringify(failed.body)).toBe(401);
 		const agent = await signInWithCode(setup, 0);
 
 		const refused = await release(agent);
@@ -375,6 +383,42 @@ describe("the release's answers", () => {
 		expect(
 			events(setup.logger, "warn").filter((event) => event === "mfa_lock_release_unavailable"),
 		).toHaveLength(1);
+	});
+
+	it("is 409 no_revocation_boundary with rebind_after while the hard hold stands where no sessions boundary is wired: a rebind is the way out", async () => {
+		const setup = await composed({ withoutBoundary: true });
+		const rebindAfter = await hardHeld(setup, setup.totp);
+		const agent = await signInWithCode(setup, 0);
+
+		const refused = await release(agent);
+
+		expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+		expect(refused.body).toEqual({
+			error: "mfa_lock_release_refused",
+			error_description:
+				"Guessable second factors stay held until each is replaced after rebind_after: replace them, then release, or ask for a reset",
+			reason: "no_revocation_boundary",
+			rebind_after: rebindAfter,
+		});
+	});
+
+	it("is 403 mfa_exempt_proof_required without rebind_after while the hard hold stands", async () => {
+		const setup = await composed();
+		await hardHeld(setup, setup.totp);
+		vi.spyOn(setup.transactionStore, "authorizeSubjectRecovery").mockRejectedValue(
+			new Error("store down"),
+		);
+		const agent = await signInWithCode(setup, 0);
+		const apply = vi.spyOn(setup.transactionStore, "applySubjectRecovery");
+
+		const refused = await release(agent);
+
+		expect(await apply.mock.results[0]?.value).toMatchObject({
+			outcome: "refused",
+			hard: true,
+		});
+		expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+		expect(refused.body).toEqual(EXEMPT_PROOF_REQUIRED);
 	});
 
 	it("lifts the hard hold on a rebind alone where no sessions boundary is wired", async () => {
@@ -439,6 +483,10 @@ describe("the release's answers", () => {
 		);
 		expect(logged).not.toContain(rebindAfter);
 		expect(logged).not.toContain(String(Date.parse(rebindAfter)));
+		const audited = JSON.stringify(setup.audit.events);
+		expect(setup.audit.of("mfa.lock.recovered")).toHaveLength(1);
+		expect(audited).not.toContain(rebindAfter);
+		expect(audited).not.toContain(String(Date.parse(rebindAfter)));
 	});
 
 	it("answers 503, logged once at error without the instant, when the store's rebind bound is past what a date holds", async () => {

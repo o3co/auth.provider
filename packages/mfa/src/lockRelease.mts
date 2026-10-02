@@ -32,8 +32,10 @@
  *   session — a recovery code or a passkey verifies one.
  * - `409 mfa_lock_release_refused` with `reason`: `not_revoked_since`, no
  *   revocation of the subject's sessions since the attack began — the page
- *   asks for a password change — with `rebind_after` while the hard hold
- *   stands; `no_revocation_boundary`, none can be read here.
+ *   asks for a password change; `no_revocation_boundary`, none can be read
+ *   here — while the hard hold stands, a rebind alone lifts it, and the
+ *   description says so. Either carries `rebind_after` while the hard hold
+ *   stands.
  * - `rebind_after` is from when a rebind counts, in ISO 8601 as
  *   `created_at` is in `GET /factors`: shown to the account holder, never
  *   logged.
@@ -80,6 +82,14 @@ const REFUSED = {
 		),
 		reason: "no_revocation_boundary",
 	},
+} as const;
+/** `no_revocation_boundary` while the hard hold stands: a rebind alone lifts it, no boundary asked. */
+const NO_BOUNDARY_HARD_HOLD = {
+	...errorEnvelope(
+		"mfa_lock_release_refused",
+		"Guessable second factors stay held until each is replaced after rebind_after: replace them, then release, or ask for a reset",
+	),
+	reason: "no_revocation_boundary",
 } as const;
 const RELEASED = { lock: "released" } as const;
 const HELD = {
@@ -148,14 +158,16 @@ export function createMfaLockReleaseRouter(options: MfaLockReleaseOptions): Rout
 					res.status(403).json(EXEMPT_PROOF_REQUIRED);
 					return;
 				}
-				if (released.reason === "not_revoked_since" && released.rebindAfter !== null) {
-					res.status(409).json({
-						...REFUSED.not_revoked_since,
-						rebind_after: released.rebindAfter.toISOString(),
-					});
+				if (released.rebindAfter === null) {
+					res.status(409).json(REFUSED[released.reason]);
 					return;
 				}
-				res.status(409).json(REFUSED[released.reason]);
+				res.status(409).json({
+					...(released.reason === "no_revocation_boundary"
+						? NO_BOUNDARY_HARD_HOLD
+						: REFUSED.not_revoked_since),
+					rebind_after: released.rebindAfter.toISOString(),
+				});
 				return;
 			case "busy":
 				res.set("Retry-After", String(Math.max(1, released.retryAfterSeconds)));

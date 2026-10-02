@@ -41,8 +41,8 @@
  *   than the attack (`not_revoked_since`), or none wired to be later
  *   (`no_revocation_boundary`); `busy`; or an outage. An authorization
  *   already applied answers what it came to, applying nothing more.
- * - `held`, and `not_revoked_since` while the hard hold stands, carry from
- *   when a rebind counts (`rebindAfter`), the store's own bound as a date;
+ * - `held`, and `not_revoked_since` or `no_revocation_boundary` while the
+ *   hard hold stands, carry from when a rebind counts (`rebindAfter`), the store's own bound as a date;
  *   one no date can hold is the store's outage, whatever the outcome.
  * - The operator reset mints its own authorization here
  *   (`mintSubjectRecovery`) and applies it under the lease it holds across
@@ -94,14 +94,11 @@ export type MfaLockRelease =
 	  } & Applied)
 	| {
 			readonly outcome: "refused";
-			readonly reason: "not_revoked_since";
+			readonly reason: "not_revoked_since" | "no_revocation_boundary";
 			/** From when a rebind counts while the hard hold stands, as `held` says it; `null` when it does not. */
 			readonly rebindAfter: Date | null;
 	  }
-	| {
-			readonly outcome: "refused";
-			readonly reason: "exempt_proof_required" | "no_revocation_boundary";
-	  }
+	| { readonly outcome: "refused"; readonly reason: "exempt_proof_required" }
 	| { readonly outcome: "busy"; readonly retryAfterSeconds: number }
 	| {
 			readonly outcome: "unavailable";
@@ -244,13 +241,12 @@ export function createMfaLockRecovery(options: MfaLockRecoveryOptions): MfaLockR
 					case "expired":
 						return { outcome: "refused", reason: "exempt_proof_required" };
 					case "not_revoked_since":
-						return subjectRevocation === undefined
-							? { outcome: "refused", reason: "no_revocation_boundary" }
-							: {
-									outcome: "refused",
-									reason: "not_revoked_since",
-									rebindAfter: hard?.rebindAfter ?? null,
-								};
+						return {
+							outcome: "refused",
+							reason:
+								subjectRevocation === undefined ? "no_revocation_boundary" : "not_revoked_since",
+							rebindAfter: hard?.rebindAfter ?? null,
+						};
 					default:
 						// A boundary ahead of the clock, or a lease the store did not find held: neither is the user's to mend.
 						return {
