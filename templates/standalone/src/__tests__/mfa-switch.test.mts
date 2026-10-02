@@ -726,6 +726,8 @@ describe("the shipped configuration with nothing set about MFA", () => {
 		]) {
 			expect(message).toContain(named);
 		}
+		// A deployment may pass its own sender in place of the SMTP relay.
+		expect(message).toContain("or your own mail sender");
 	});
 
 	it("boots in production under MFA_MODE=off", async () => {

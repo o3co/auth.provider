@@ -77,8 +77,9 @@ The scaffold requires a second factor at every password login: the
 template's MFA switch, `mfaMode` (`MFA_MODE`), defaults to `required`. In
 development that needs nothing more; outside it, the project's boot is
 refused until it sets what MFA needs (its two stores on Redis, a key, an SMTP
-relay, its MFA page) or turns MFA off with `MFA_MODE=off`. What the switch
-installs and needs is in the template's README.
+relay) or turns MFA off with `MFA_MODE=off`. The MFA page defaults to `/mfa`,
+which the project must serve, or every password login stops there. What the
+switch installs and needs is in the template's README.
 
 `--no-mfa` writes the switch off in the scaffold instead:
 it appends `mfaMode = "off"` and then `mfaMode = ${?MFA_MODE}` to

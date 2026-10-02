@@ -787,14 +787,13 @@ MFA. A value that is none of the three is refused before boot, naming
 sample key in `config/development.conf`, the sender that logs each code, and
 `docker-compose.yml`'s Redis for the two stores. Outside development a
 deployment either sets what MFA needs — the two stores on `redis` (or the
-factors in the `store`), `MFA_ENCRYPTION_KEY`, the SMTP relay
+factors in the `store`), `MFA_ENCRYPTION_KEY` and the SMTP relay
 (`STANDARD_SMTP_MAIL_SENDER_HOST` and `_FROM`, or a sender of its own through
-`buildModules`' `mailSenderModules`) and its MFA page at `MFA_PAGE_URL` — or
-sets `MFA_MODE=off`. Until it decides, the boot is refused before any module
-is built: the stores' refusal comes first, naming each of those and
-`MFA_MODE=off`. The page is the deployment's to serve in development too:
-without it a password login answers that a second factor is needed and goes
-no further.
+`buildModules`' `mailSenderModules`) — or sets `MFA_MODE=off`. Until it
+decides, the boot is refused before the app is created: the stores' refusal
+comes first, naming each of those and `MFA_MODE=off`. The MFA page is never
+refused: `MFA_PAGE_URL` defaults to `/mfa`, which the deployment must serve,
+in development too, or every password login stops there.
 
 | Variable | Default | Description |
 |---|---|---|

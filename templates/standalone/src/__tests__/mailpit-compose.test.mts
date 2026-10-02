@@ -296,7 +296,7 @@ describe("the process each development run describes", () => {
 		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
 		const own = readOwnLayers([envConfPath, applicationConfPath], { env });
 		const switches = readSwitches(own);
-		expect(switches.mfaMode).not.toBe("off");
+		expect(switches.mfaMode).toBe("required");
 
 		const modules = buildModules(switches, {
 			environment: configEnv,

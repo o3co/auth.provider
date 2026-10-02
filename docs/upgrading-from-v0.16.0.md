@@ -641,8 +641,8 @@ Turning it on — or leaving the default on — needs:
   `ADAPTERS_USER_REPOSITORY=http`.
 
 Outside development, a deployment that sets none of these is refused before
-any module is built, by the first of them, the stores: the refusal names each
-store, `MFA_ENCRYPTION_KEY`, the SMTP relay, `MFA_PAGE_URL` and `MFA_MODE=off`.
+boot, by the first of them, the stores: the refusal names each store,
+`MFA_ENCRYPTION_KEY`, the SMTP relay, `MFA_PAGE_URL` and `MFA_MODE=off`.
 In development (`make dev`) the default needs nothing more: the sample key in
 `config/development.conf`, the sender that logs each code, and
 `docker-compose.yml`'s Redis for the two stores; your MFA page is still yours

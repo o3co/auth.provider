@@ -145,7 +145,7 @@ export function mfaModulesFor(options: {
 	const reasons = inMemory.length === 0 ? [] : memoryRefusals(environment);
 	if (reasons.length > 0) {
 		throw new RangeError(
-			`MFA is on (${MFA_SWITCH}, MFA_MODE, which installs it unless set to off) and ${inMemory.join(" and ")} ${inMemory.length === 1 ? "is" : "are"} "memory", refused because ${reasons.join(" and ")}: a store in memory loses every factor, lock and recorded email proof at a restart, after which whoever holds a password can bind a factor of their own. Select "redis" (or, for the factors, "store"); memory is for development and test alone. Outside development MFA also needs MFA_ENCRYPTION_KEY, an SMTP relay (STANDARD_SMTP_MAIL_SENDER_HOST and STANDARD_SMTP_MAIL_SENDER_FROM) and the deployment's MFA page at MFA_PAGE_URL. A deployment that wants no MFA sets MFA_MODE=off`,
+			`MFA is on (${MFA_SWITCH}, MFA_MODE, which installs it unless set to off) and ${inMemory.join(" and ")} ${inMemory.length === 1 ? "is" : "are"} "memory", refused because ${reasons.join(" and ")}: a store in memory loses every factor, lock and recorded email proof at a restart, after which whoever holds a password can bind a factor of their own. Select "redis" (or, for the factors, "store"); memory is for development and test alone. Outside development MFA also needs MFA_ENCRYPTION_KEY, the SMTP relay (STANDARD_SMTP_MAIL_SENDER_HOST and STANDARD_SMTP_MAIL_SENDER_FROM) or your own mail sender, and an MFA page served at MFA_PAGE_URL. A deployment that wants no MFA sets MFA_MODE=off`,
 		);
 	}
 	return [

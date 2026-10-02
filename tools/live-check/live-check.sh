@@ -218,8 +218,10 @@ start() {
 
 	# The template's default configuration plus what a plain-http local run
 	# needs: the session cookie without Secure and without the __Host- prefix,
-	# the key pair, the issuer, the Redis URLs, and the Store above. The
-	# profile — the client id and secret — is read here and nowhere else.
+	# the key pair, the issuer, the Redis URLs, and the Store above. MFA is
+	# off: the check is about federation, and the template's MFA default
+	# refuses this run's memory MFA stores. The profile — the client id and
+	# secret — is read here and nowhere else.
 	(
 		cd "$TEMPLATE"
 		set -a
@@ -228,7 +230,7 @@ start() {
 		set +a
 		export "CORE_FEDERATIONS_${FED}_ENABLED=true"
 		export "CORE_FEDERATIONS_${FED}_CALLBACK_URL=http://localhost:$PORT/session/oauth/federation/$fed/callback"
-		export CONFIG_ENV="$OVERLAY_ENV" HTTP_PORT="$PROVIDER_PORT"
+		export CONFIG_ENV="$OVERLAY_ENV" HTTP_PORT="$PROVIDER_PORT" MFA_MODE=off
 		export OAUTH_JWT_ISSUER="http://localhost:$PROVIDER_PORT"
 		export KEY_STORE_LOCAL_PRIVATE_KEY_PATH="$STATE/keys/jwt-private.pem"
 		export KEY_STORE_LOCAL_PUBLIC_KEY_PATH="$STATE/keys/jwt-public.pem"

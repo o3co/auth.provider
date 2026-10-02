@@ -40,8 +40,10 @@ services:
       ADAPTERS_USER_SESSION_STORES: redis
       # MFA is on by default (MFA_MODE). Its two stores ship in memory, which
       # this run would empty on every save: every enrolled factor gone while
-      # the sessions above survive, so each login after a save binds a factor
-      # anew. On the Redis above they last as the sessions do. The key ring is
+      # the sessions above survive, so each password login after a save binds
+      # a factor anew. On the Redis above they last as the sessions do. These
+      # lines, like ADAPTERS_USER_SESSION_STORES above, override `.env`:
+      # compose's `environment:` wins over `env_file`. The key ring is
       # config/development.conf's sample key and the mail sender logs each
       # code; MFA_MODE=off in .env runs without MFA.
       ADAPTERS_MFA_FACTOR_STORE: redis
