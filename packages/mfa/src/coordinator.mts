@@ -53,6 +53,11 @@
  *   that completed nothing, and a failure otherwise — a refusal, an outage
  *   or a factor that throws before a verdict. An exempt proof records its
  *   success once the factor was written.
+ * - A recovery code's verification reads the subject's recovery-set floor
+ *   before its attempt is reserved, and again once the code is spent: a set
+ *   the recovery-code rule refuses (`recoverySetRefusal`) — below the floor —
+ *   is an invalid code, refused unchecked before, its transaction spent
+ *   after; a digest whose key left the ring is unreadable, naming the key.
  * - A store that cannot answer, a factor whose data does not open, and a
  *   factor that throws are outages: never a wrong code, never "no factor".
  * - `factor_id: "account-email"` names the account-email proof (`proof.mts`)
