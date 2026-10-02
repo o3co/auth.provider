@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-最終更新: 2026-10-02
+最終更新: 2026-10-03
 
 auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答え、MFA の登録の証人を書く。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。このパッケージはまた、Store の MFA エンドポイント — Store が主体の第二要素と登録の証人を保持する場所 — の契約を、それを名指す設定セクションと、その失敗が投げるものとともに定める。`HttpMfaFactorStore` は要素のエンドポイントの上に core の `MfaFactorStore` を実装し、`foundationMfaFactorStoreModule` がそれを組み込む。
 
@@ -135,10 +135,9 @@ Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を
 | --- | --- | --- |
 | list（`listUrl`） | `{ subject }` | `200 { factors: [record…], generation }`: 主体について保持するすべてのレコードと集合の世代を、一つのスナップショットから。集合が無ければ `{ factors: [], generation: null }`。他のステータスは throw。 |
 | create（`createUrl`）、条件付き | `{ factor: record, expectedGeneration, deadlineMs }` | `200 { outcome: "created", generation }`: 作成し、集合は新しい世代になった。`409 { outcome: "conflict" }`: 何も書いていない。他のステータスは `404` も含めて throw。 |
-| create、無条件 | `{ factor: record }` | `2xx`（`204`）: 作成。`409`: その `(subject, id)` は保持済みで、そのまま残る。他のステータスは throw。 |
 | update（`updateUrl`） | `{ subject, id, expectedVersion, changes: { data, label?, lastUsedAtMs? } }` | `200 { factor: record }`、`expectedVersion + 1` で書かれたレコード。`409`: バージョンが動いた。`404`: レコードが無い — どちらもポートの `null`。他のステータスは throw。 |
 | delete（`deleteUrl`）、条件付き | `{ subject, id, expectedGeneration, deadlineMs }` | `200 { outcome: "removed", generation }`: 削除し、集合は新しい世代になった。`404 { outcome: "missing" }` と `409 { outcome: "conflict" }`: 何も書いていない。他のステータスは throw。 |
-| delete、無条件 | `{ subject, id }` または `{ subject, all: true }` | `2xx`（`204`）、または何も無かったときの `404`: どちらも完了。他のステータスは throw。 |
+| delete、集合のリセット | `{ subject, all: true }` | `2xx`（`204`）、または何も無かったときの `404`: どちらも完了。他のステータスは throw。 |
 | markMfaEnrolled（`markMfaEnrolledUrl`） | `{ subject, enrolled }` | `204`（すでにその値を保持しているときも）。`404`: Store にその主体が無い — エラー（主体は認証したばかりである）。他のステータスは throw。 |
 
 - **更新は変更だけを書く。** 更新はレコードを `subject` と `id` で名指し、期待するバージョンと、変更として `data`・`label`・`lastUsedAtMs` だけを運ぶ。省いたものは消える。`id`・`subject`・`kind`・`binding`・`createdAtMs` は変更として送られず、Store はそれらを変えてはならない。他のフィールドを持つ変更は拒否する（`400`）。Store は `expectedVersion` で原子的に比較して書き、`version` を一つ上げる: 同じバージョンへの二つの更新が両方とも成功することは無い。
@@ -150,9 +149,9 @@ Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を
 **要素の集合の世代。** 主体のレコードは一つの集合で、Store はその構成に一つの世代を保つ。これは core の条件付き書き込みの規約の集合版（[`docs/adapter-surface.md` の「Conditional writes」](../../docs/adapter-surface.md#conditional-writes)）に従い、表はその HTTP ワイヤに従う。両側で core の変換がそれを運ぶ（`readMfaStoreVersionedListAnswer`、`toMfaStoreCreateIfRequest`、`readMfaStoreCreateIfAnswer`、`toMfaStoreRemoveIfRequest`、`readMfaStoreRemoveIfAnswer`）。
 
 - **世代** は 1〜128 文字の表示可能な ASCII で `"` を含まず（core の `isStoreGeneration`）、全体としてだけ比べる。Store はそれを乱数で作り — たとえば v4 UUID — その主体について二度と発行しない: 集合が空になってから再び書かれても、バイト単位で同じ書き直しでも、墓標が期限切れになっても、書き込みを失う復元やフェイルオーバーのあとでも。ダイジェスト、タイムスタンプ、カウンターは世代にならない。
-- **構成を変える書き込みのたびに新しい世代を作る**: 作成、実際に削除した削除、リセット — 無条件のものも含む。更新は世代を保つ。
-- **条件付き書き込みは、確認と書き込みで一つの原子的な手順。** SQL なら、集合の行を先に、次にそのレコードの行をロックする一つのトランザクション。プロセス内のロックは数えない。無条件の書き込みも一つの原子的な手順で、条件付きのものと直列化される。
-- **`expectedGeneration` が無いことと `null` は違う。** 無ければ、そのリクエストは無条件の書き込みである。`null` は作成にだけ使え、「集合が無いあいだだけ」を意味する。世代でない値と、削除での `null` は `400`。`expectedGeneration` の無いリクエストが従来の無条件の書き込みであるのは、ポートが無条件の `create` と `remove` を持つあいだだけである。これは規約（そこでは `400`）と違い、それらを取り除いたときにここでも `400` になる。
+- **構成を変える書き込みのたびに新しい世代を作る**: 作成、実際に削除した削除、リセット。更新は世代を保つ。
+- **条件付き書き込みは、確認と書き込みで一つの原子的な手順。** SQL なら、集合の行を先に、次にそのレコードの行をロックする一つのトランザクション。プロセス内のロックは数えない。リセットも一つの原子的な手順で、条件付きの書き込みと直列化される。
+- **作成と一件の削除は、必ず `expectedGeneration` を持つ。** プロバイダーはどちらもそれ無しには送らず、Store はそれの無いものを、規約と同じく `400` で拒否してよい。`null` は作成にだけ使え、「集合が無いあいだだけ」を意味する。世代でない値と、削除での `null` は `400`。
 - **`conflict` と `missing` は何も書かない。** 作成は、集合が別の世代にあるとき、`expectedGeneration` が世代を名指すのに集合が無いとき、`null` なのに集合があるとき、その `(subject, id)` をすでに持つときに `conflict` を返し、`missing` は決して返さない。削除は、集合が無ければ `missing`。集合があれば先に世代を確かめて別の世代なら `conflict`、次にレコードを確かめて無ければ `missing`。
 - **空になった集合は墓標として残る。** 最後のレコードの削除やリセットは、集合を空のまま新しい世代で残し、リセットは一度も書かれていない主体にも集合を作る。墓標が無いと読まれるのは、集合の最後の構成の書き込みから `BUNDLED_STORE_WRITE_LIFETIME_MS`（24 時間）が過ぎてからだけで、集合を空にする書き込みのたびに — 空の集合のリセットも含め — 数え直す。レコードを持つ集合は期限切れにならない。アカウントの削除も同じリセットである。
 - **世代を持たずに保持された集合** — Store が世代を保つ前に書かれたもの — は、最初の list でレコードを保ったまま原子的に新しい世代を与えられる。それに対する条件付き書き込みは `conflict` を返し、世代を作らない。
@@ -188,16 +187,15 @@ const modules = [
 - `storeTransport` は必須である: Store の資格情報・期限・レスポンス上限はユーザーリポジトリのものなので、組み立て側がユーザーリポジトリの HTTP 設定（`repositories.user.http`）を渡す。その `bearerToken`・`timeout`・`maxResponseBytes` を `"http"` ビルダーと同じように（文字列は数値として）読むので、一つのトークンが Store のすべてのエンドポイントに送られる。`{}` は設定が無いことを示す: 資格情報は送らず、期限と上限は 5000 ms と 1 MiB。設定が渡されないとき、またはキーのセクションでないときは、資格情報を送らずに済ませるのではなく起動を拒否する。通信が拒否する設定 — [コンストラクタでの検証](#コンストラクタでの検証)の規則 — も、`HttpMfaFactorStore` を名指して起動を拒否する（`provides-factory-failed`）。
 - レプリカで分岐する状態は宣言しない: 要素は Store のものである。
 
-ポートには[契約](#store-の-mfa-エンドポイント)が各応答に与える意味で答え、それ以外はすべて throw する:
+ポートの任意の無条件のメンバー `create` と `remove` は持たない: 要素の集合の構成は `createIf` と `removeIf` だけで書く。ポートには[契約](#store-の-mfa-エンドポイント)が各応答に与える意味で答え、それ以外はすべて throw する:
 
 | 操作 | Store の応答 | ポートが受け取るもの |
 | --- | --- | --- |
 | `list` | `200 { factors }` | すべてのレコードを丸ごと読んだもの。読めないレコード、別の主体のレコード、同じ ID の二つ目のレコードは `unreadable_record` を throw。 |
 | `list` | 他のすべてのステータス（リダイレクトも） | `unexpected_status` を throw。決して「要素なし」ではない。 |
-| `create` | `2xx` / `409` / その他 | 完了 / 重複を拒否して throw / `unexpected_status` を throw。 |
 | `update` | `200 { factor }` | 名指したレコードで、送った変更を持ち、`expectedVersion + 1` であればそのレコード。そうでなければ `malformed_answer` か `version_skipped` を throw。その `kind`・`binding`・`createdAtMs` は Store の言うとおりである: ポートは比べる元のレコードをアダプターに渡さない。`kind` は封印に結び付いているので、別の種類として返されたデータは開かない。 |
 | `update` | `409` または `404` / その他 | `null` / `unexpected_status` を throw。 |
-| `remove`・`removeAllForSubject` | `2xx` または `404` / その他 | 完了 / `unexpected_status` を throw。 |
+| `removeAllForSubject` | `2xx` または `404` / その他 | 完了 / `unexpected_status` を throw。 |
 | `listVersioned` | `200 { factors, generation }` | レコードと集合の世代を `readMfaStoreVersionedListAnswer` で丸ごと読んだもの。集合が無ければ `{ items: [], generation: null }`。変換が拒否する応答 — 世代を持つ前の Store が返すような `generation` の無いもの、形の外の世代、読めないレコード、別の主体のレコード、同じ ID の二つ目 — は `malformed_answer` を throw。 |
 | `listVersioned` | 他のすべてのステータス | `unexpected_status` を throw。 |
 | `createIf` | 結果のボディ付きの `200` / `409` | 集合の新しい世代付きの `created` / `conflict`。ボディが無いか、別のステータスの結果なら `malformed_answer` を throw。 |
@@ -292,7 +290,7 @@ URL が無ければ何も書かれず、プロバイダーは Store が返す `m
 | [`section.test.mts`](src/mfa/__tests__/section.test.mts) | `foundation-mfa-factor-store` セクション: スキーマ、読み取り、パッケージのモジュールで `createApp` を通した欠落・不正・未知のキーでの起動拒否（モジュールだけを入れた構成も） |
 | [`module.test.mts`](src/mfa/__tests__/module.test.mts) | `createApp` を通した `foundationMfaFactorStoreModule`: 他に何も入れずにセクションの URL の上に Store を使うストアを提供すること。Store の通信設定が必須であること、そこから読むユーザーリポジトリのベアラートークン・期限・上限（文字列は数値として読む）、設定が無いかキーのセクションでないとき、およびユーザーリポジトリも拒否する値のときの起動拒否 |
 | [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | テストキットの `MfaFactorStore` スイートと要素の集合の条件付き書き込みのスイートを、偽の Store の上の `HttpMfaFactorStore` に対して、同じ Store の上の二つ目のアダプター、Store が閉じたアダプター、書き込み寿命の上限を越えて進めた Store の墓標の時計とともに走らせる |
-| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | 送るもの — 設定どおりの各 URL、ベアラートークン、バイト単位でそのままの封印されたデータと、その封印元を何も送らないこと、変換が拒否するものを送らないこと。各操作の応答と、契約を破る Store: `404`、`5xx`、リダイレクト、壊れた応答、読めないレコード、別の主体、重複した ID、飛んだバージョン、変更を書かなかった応答。集合のメンバー: 送るもの、結果のボディ付きの各ステータス、ボディの無い `404` や `409` は壊れた応答、他のステータスは想定外、世代の無い一覧は壊れた応答、期限で諦める条件付き書き込み、送った時刻に期限を足した `deadlineMs`、`408` で拒否され適用されない遅れた書き込み、期限内に適用される書き込み。Store が送ったものが投げるものに何も現れないこと。拒否された資格情報（このストアを名指す）、ヘッドまたはボディでの期限切れ、上限、届かない Store。構築と、ストアを検査したときにトークンもエンドポイントも見えないこと |
+| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | 送るもの — 設定どおりの各 URL、ベアラートークン、バイト単位でそのままの封印されたデータと、その封印元を何も送らないこと、変換が拒否するものを送らないこと。各操作の応答と、契約を破る Store: `404`、`5xx`、リダイレクト、壊れた応答、読めないレコード、別の主体、重複した ID、飛んだバージョン、変更を書かなかった応答。集合のメンバー: 送るもの、結果のボディ付きの各ステータス、ボディの無い `404` や `409` は壊れた応答、他のステータスは想定外、世代の無い一覧は壊れた応答、期限で諦める条件付き書き込み、送った時刻に期限を足した `deadlineMs`、`408` で拒否され適用されない遅れた書き込み、期限内に適用される書き込み。Store が送ったものが投げるものに何も現れないこと。拒否された資格情報（このストアを名指す）、ヘッドまたはボディでの期限切れ、上限、届かない Store。構築、無条件の `create` も `remove` も持たないこと、ストアを検査したときにトークンもエンドポイントも見えないこと |
 | [`foundationMfaFactorStoreConfig.test.mts`](src/testing/__tests__/foundationMfaFactorStoreConfig.test.mts) | testing 入口のセクションのビルダー |
 | [`foundationUserRepositoryHttpConfig.test.mts`](src/testing/__tests__/foundationUserRepositoryHttpConfig.test.mts) | testing 入口のユーザーリポジトリの `http` ブロックのビルダーと、`"http"` ビルダーがそれを受け取ること |
 | [`storeRequestMessages.test.mts`](src/mfa/__tests__/storeRequestMessages.test.mts) | MFA エンドポイントでの通信の失敗が、どのクライアントから送っても同じ文言になること |
