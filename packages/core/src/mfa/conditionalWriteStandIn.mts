@@ -16,110 +16,128 @@
 
 /**
  * STAND-IN, NOT A CONVENTION. Core's conditional-write convention (the
- * store generation, the conditional answers and their readers, at
- * `adapters/conditionalWrite.mts`) has not landed. This file holds only the
- * part of it the factor set's members are typed by, under the names the
- * convention plans, so `MfaFactorStore` can be built and proven against it
- * meanwhile. Nothing outside core's mfa module and its contract binding
- * imports it.
+ * store generation, versioned reads, the conditional answers and their
+ * readers, at `adapters/conditionalWrite.mts`) has not landed. This file
+ * holds only the set-scoped part of it the factor set's members are typed
+ * by, under the convention's names and shapes, so `MfaFactorStore` can be
+ * built and proven against it meanwhile. Nothing outside core's mfa module
+ * and its contract binding uses it.
  *
  * When the convention lands, this file and its test are deleted, the
  * imports point at the convention, and core's root drops the stand-in block
- * that re-exports it. The convention decides every name and shape here;
- * `ConditionalSetRemoveAnswer` above all, whose name it has not given.
+ * that re-exports it. The convention decides every name and shape here.
  */
+
+import { randomUUID } from "node:crypto";
+
+declare const storeGenerationBrand: unique symbol;
 
 /**
- * A store-owned generation: opaque, compared only with `===`. The store
- * issues a fresh one at every write of what it guards, and it never repeats
- * for one key: not after a delete and a re-create, and not when the new value
- * is byte-identical to an old one. So a per-key counter that restarts, a
- * digest of the value and a timestamp are none. The caller never computes or
- * orders one.
+ * The generation a store issued for one set's membership: opaque, compared
+ * only with `===`. Fresh on every write of what it guards. Never issued
+ * twice for one key: not after a delete and a re-create, and not for a
+ * byte-identical value. So it is never a counter, a digest or a timestamp.
+ * Only the store makes one; a caller only hands back one it was given.
  */
-export type StoreGeneration = string & { readonly __brand: "StoreGeneration" };
+export type StoreGeneration = string & { readonly [storeGenerationBrand]: true };
 
-const GENERATION = /^[\x21-\x7e]{1,128}$/;
+/** Whether `value` is a generation a store may answer: 1 to 128 visible ASCII characters (0x21–0x7e). Never throws. */
+export function isStoreGeneration(value: unknown): value is StoreGeneration {
+	return typeof value === "string" && /^[\x21-\x7e]{1,128}$/.test(value);
+}
 
-/** Whether `value` is a generation as a store may answer one: 1 to 128 visible ASCII characters. */
-export const isStoreGeneration = (value: unknown): value is StoreGeneration =>
-	typeof value === "string" && GENERATION.test(value);
-
-/** A set's members and its generation, read as one snapshot. `generation` is `null` only for a set never written. */
-export interface VersionedSet<T> {
-	readonly generation: StoreGeneration | null;
-	readonly items: readonly T[];
+/** A fresh generation: a random UUID. One way for a store that makes its own. */
+export function newStoreGeneration(): StoreGeneration {
+	return randomUUID() as StoreGeneration;
 }
 
 /**
- * What a conditional create answers: `created`, with the set's new
- * generation; or `conflict`, with nothing written.
+ * A set's members and the set's generation, from one snapshot. `generation`
+ * is `null` only for a set never written. A set, once written, keeps a
+ * generation for good: emptied, reset or deleted, it is never purged.
+ */
+export interface VersionedSet<T> {
+	readonly items: readonly T[];
+	readonly generation: StoreGeneration | null;
+}
+
+/**
+ * Adding one member to a set, only while the set is at the expected
+ * generation (`null`: only while it was never written). Never `missing`.
+ * `conflict` covers a set at another generation, a set absent where
+ * `expected` names one, a set present where `expected` is `null`, and a
+ * member id already held. Nothing is written on `conflict`.
  */
 export type ConditionalCreateAnswer =
 	| { readonly outcome: "created"; readonly generation: StoreGeneration }
 	| { readonly outcome: "conflict" };
 
 /**
- * What a conditional remove of a set's member answers: `removed`, with the
- * set's new generation, so a writer can chain its next write without a read;
- * `missing` or `conflict`, with nothing written.
+ * Removing one member of a set, only while the set is at the expected
+ * generation. `removed` carries the set's new generation: the set stays,
+ * even when it is now empty. `missing`: no set, or no such member at
+ * `expected`, with nothing written and the generation unchanged.
+ * `conflict`: the set is at another generation. The generation is checked
+ * before the member.
  */
 export type ConditionalSetRemoveAnswer =
 	| { readonly outcome: "removed"; readonly generation: StoreGeneration }
 	| { readonly outcome: "missing" }
 	| { readonly outcome: "conflict" };
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
+/** `answer[key]`, read once; a `TypeError` naming `what` for a non-object or a read that throws. */
+const field = (answer: unknown, key: string, what: string): unknown => {
+	if (typeof answer !== "object" || answer === null) throw new TypeError(`${what}: not an object`);
+	try {
+		return (answer as Record<string, unknown>)[key];
+	} catch {
+		throw new TypeError(`${what}: ${key} could not be read`);
+	}
+};
 
 /**
- * `read(answer)`, any throw of it a `RangeError` carrying the throw as its
- * cause: an answer that cannot be read is the store's outage.
+ * Core's readers of what a store answered. Each property is read once, and
+ * a fresh frozen object is returned. Anything outside the type (another
+ * outcome, a malformed generation, a property read that throws, `undefined`
+ * where `null` is meant) is a `TypeError` naming the field, never a value.
+ * The caller treats that as the store's outage: never as a write that
+ * happened, and never as one that did not. A `RangeError` stays reserved for
+ * a caller's own input.
  */
-function readAnswer<T>(what: string, answer: unknown, read: (answer: unknown) => T): T {
-	try {
-		return read(answer);
-	} catch (cause) {
-		if (cause instanceof RangeError) throw cause;
-		throw new RangeError(`${what}: the answer could not be read`, { cause });
+export function readVersionedSet<T>(answer: VersionedSet<T>): VersionedSet<T> {
+	const what = "versioned set";
+	if (Array.isArray(answer)) throw new TypeError(`${what}: not an object`);
+	const generation = field(answer, "generation", what);
+	if (generation !== null && !isStoreGeneration(generation)) {
+		throw new TypeError(`${what}: malformed generation`);
 	}
+	const items = field(answer, "items", what);
+	if (!Array.isArray(items)) throw new TypeError(`${what}: items is not a list`);
+	return Object.freeze({ items: Object.freeze([...(items as T[])]), generation });
 }
 
-/**
- * A conditional create's answer as {@link ConditionalCreateAnswer} promises
- * it, as a fresh object. Throws a `RangeError` for anything else, which the
- * caller answers as the store's outage: never a write that happened, and
- * never one that did not.
- */
+/** A conditional create's answer as {@link ConditionalCreateAnswer} promises it; a `TypeError` for anything else. */
 export function readConditionalCreateAnswer(answer: unknown): ConditionalCreateAnswer {
-	return readAnswer("a conditional create", answer, (value) => {
-		if (isRecord(value)) {
-			const { outcome } = value;
-			if (outcome === "conflict") return { outcome };
-			if (outcome === "created") {
-				const { generation } = value;
-				if (isStoreGeneration(generation)) return { outcome, generation };
-			}
-		}
-		throw new RangeError("a conditional create answered outside its promise");
-	});
+	const what = "conditional create answer";
+	const outcome = field(answer, "outcome", what);
+	if (outcome === "conflict") return Object.freeze({ outcome });
+	if (outcome !== "created") throw new TypeError(`${what}: unknown outcome`);
+	const generation = field(answer, "generation", what);
+	if (!isStoreGeneration(generation)) throw new TypeError(`${what}: malformed generation`);
+	return Object.freeze({ outcome, generation });
 }
 
 /**
  * A set's conditional remove's answer as {@link ConditionalSetRemoveAnswer}
- * promises it, as a fresh object. Throws a `RangeError` for anything else,
- * as {@link readConditionalCreateAnswer} does.
+ * promises it; a `TypeError` for anything else, a `removed` without the
+ * set's new generation among it.
  */
 export function readConditionalSetRemoveAnswer(answer: unknown): ConditionalSetRemoveAnswer {
-	return readAnswer("a conditional remove", answer, (value) => {
-		if (isRecord(value)) {
-			const { outcome } = value;
-			if (outcome === "missing" || outcome === "conflict") return { outcome };
-			if (outcome === "removed") {
-				const { generation } = value;
-				if (isStoreGeneration(generation)) return { outcome, generation };
-			}
-		}
-		throw new RangeError("a conditional remove answered outside its promise");
-	});
+	const what = "conditional set remove answer";
+	const outcome = field(answer, "outcome", what);
+	if (outcome === "missing" || outcome === "conflict") return Object.freeze({ outcome });
+	if (outcome !== "removed") throw new TypeError(`${what}: unknown outcome`);
+	const generation = field(answer, "generation", what);
+	if (!isStoreGeneration(generation)) throw new TypeError(`${what}: malformed generation`);
+	return Object.freeze({ outcome, generation });
 }

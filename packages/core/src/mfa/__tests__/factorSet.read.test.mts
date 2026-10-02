@@ -16,7 +16,7 @@
 
 /**
  * `readMfaFactorSet`: what `MfaFactorStore.listVersioned` answered, read as
- * the port promises it, or a `RangeError` the caller answers as the store's
+ * the port promises it, or a `TypeError` the caller answers as the store's
  * outage — never as a set with nothing in it.
  */
 
@@ -47,13 +47,14 @@ describe("readMfaFactorSet", () => {
 		const read = readMfaFactorSet({ generation: G, items, extra: true }, "user-1");
 		expect(read).toStrictEqual({ generation: G, items });
 		expect(read.items).not.toBe(items);
+		expect(Object.isFrozen(read)).toBe(true);
 		expect(readMfaFactorSet({ generation: G, items: [] }, "user-1")).toStrictEqual({
 			generation: G,
 			items: [],
 		});
 	});
 
-	it("throws a RangeError for an answer outside the promise", () => {
+	it("throws a TypeError for an answer outside the promise", () => {
 		for (const answer of [
 			undefined,
 			null,
@@ -72,20 +73,24 @@ describe("readMfaFactorSet", () => {
 			{ generation: G, items: [null] },
 			{ generation: G, items: [{ ...record("a"), id: 7 }] },
 		]) {
-			expect(() => readMfaFactorSet(answer, "user-1"), JSON.stringify(answer)).toThrow(RangeError);
+			expect(() => readMfaFactorSet(answer, "user-1"), JSON.stringify(answer)).toThrow(TypeError);
 		}
 	});
 
-	it("throws a RangeError, carrying the cause, for an answer whose read throws", () => {
-		const cause = new Error("getter");
+	it("throws a TypeError for an answer whose read throws, a record's included", () => {
 		const answer = {
 			get generation(): string {
-				throw cause;
+				throw new RangeError("getter");
 			},
 			items: [],
 		};
-		expect(() => readMfaFactorSet(answer, "user-1")).toThrow(
-			expect.objectContaining({ name: "RangeError", cause }),
-		);
+		expect(() => readMfaFactorSet(answer, "user-1")).toThrow(TypeError);
+		const item = {
+			...record("a"),
+			get subject(): string {
+				throw new RangeError("getter");
+			},
+		};
+		expect(() => readMfaFactorSet({ generation: G, items: [item] }, "user-1")).toThrow(TypeError);
 	});
 });

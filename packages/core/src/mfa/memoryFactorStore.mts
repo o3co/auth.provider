@@ -26,16 +26,18 @@
  * A subject's set is an entry holding its records and its store generation,
  * a random UUID made fresh at every membership write. The entry is made by
  * the first membership write and never deleted: removing the last record,
- * or a reset, leaves it empty at a new generation. One process is one
- * instance, so a second instance on the same backend is this one.
+ * or a reset, leaves it empty at a new generation. Every entry holds a
+ * generation from the write that made it, so no set here is ever without
+ * one and `listVersioned` has nothing to mint. One process is one instance,
+ * so a second instance on the same backend is this one.
  */
 
-import { randomUUID } from "node:crypto";
-import type {
-	ConditionalCreateAnswer,
-	ConditionalSetRemoveAnswer,
-	StoreGeneration,
-	VersionedSet,
+import {
+	type ConditionalCreateAnswer,
+	type ConditionalSetRemoveAnswer,
+	newStoreGeneration,
+	type StoreGeneration,
+	type VersionedSet,
 } from "./conditionalWriteStandIn.mjs";
 import type { MfaFactorRecord, MfaFactorRecordUpdate, MfaFactorStore } from "./factorStore.mjs";
 import { checkMfaVersionAdvances } from "./version.mjs";
@@ -59,8 +61,6 @@ interface FactorSet {
 	generation: StoreGeneration;
 }
 
-const newGeneration = (): StoreGeneration => randomUUID() as StoreGeneration;
-
 export function createMemoryMfaFactorStore(): MfaFactorStore {
 	const bySubject = new Map<string, FactorSet>();
 
@@ -68,10 +68,10 @@ export function createMemoryMfaFactorStore(): MfaFactorStore {
 	const moved = (subject: string): FactorSet => {
 		const set = bySubject.get(subject);
 		if (set !== undefined) {
-			set.generation = newGeneration();
+			set.generation = newStoreGeneration();
 			return set;
 		}
-		const made: FactorSet = { records: new Map(), generation: newGeneration() };
+		const made: FactorSet = { records: new Map(), generation: newStoreGeneration() };
 		bySubject.set(subject, made);
 		return made;
 	};

@@ -30,7 +30,7 @@
  *
  * They prove the cases catch each class for the schedule forced. They do not
  * prove a database's isolation: that is the Store's own run of the binding,
- * on its backend, with `makeSecond` a second instance.
+ * on its backend, with `second` a second instance.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -46,35 +46,21 @@ import {
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	type ContractCase,
-	type MfaFactorStoreConditionalContractInput,
+	type MfaFactorStoreContractInput,
 	mfaFactorStoreConditionalContract,
 } from "#/index.mjs";
 
-/** An input whose `makeSecond` answers the store `make` last made: one process is one instance. */
-function sameInstance(
-	name: string,
-	build: () => MfaFactorStore,
-): MfaFactorStoreConditionalContractInput {
-	let current: MfaFactorStore | undefined;
-	return {
-		name,
-		make: async () => {
-			current = build();
-			return current;
-		},
-		makeSecond: async () => {
-			if (current === undefined) throw new Error("makeSecond before make");
-			return current;
-		},
-	};
-}
+/** An input over one store per case, no second instance and no outage: one process is one instance. */
+const over = (build: () => MfaFactorStore): MfaFactorStoreContractInput => ({
+	build: async () => ({ store: build() }),
+});
+
+const UNREACHABLE_NOT_RUN = "not run: the outage case (unreachable not declared)";
 
 describe("mfaFactorStoreConditionalContract over core's in-process store", () => {
-	// makeSecond is the same instance: the memory store is one process by
-	// contract, so this run proves no fence across processes.
-	for (const contractCase of mfaFactorStoreConditionalContract(
-		sameInstance("memory", createMemoryMfaFactorStore),
-	)) {
+	// No second: the memory store is one process by contract, so this run
+	// proves no fence across processes. No unreachable: it has no backend.
+	for (const contractCase of mfaFactorStoreConditionalContract(over(createMemoryMfaFactorStore))) {
 		it(contractCase.name, contractCase.run);
 	}
 });
@@ -87,7 +73,8 @@ type Fault =
 	| "update-moves-generation"
 	| "torn-list-records-first"
 	| "torn-list-generation-first"
-	| "missing-moves-generation";
+	| "missing-moves-generation"
+	| "create-upserts-held-id";
 
 const copyOf = (record: MfaFactorRecord): MfaFactorRecord => ({
 	...record,
@@ -190,9 +177,8 @@ function modelStore(fault: Fault): MfaFactorStore {
 				() => {
 					const set = sets.get(record.subject);
 					const atExpected = expected === null ? set === undefined : set?.generation === expected;
-					return atExpected && set?.records.has(record.id) !== true
-						? undefined
-						: ({ outcome: "conflict" } as const);
+					const held = set?.records.has(record.id) === true && fault !== "create-upserts-held-id";
+					return atExpected && !held ? undefined : ({ outcome: "conflict" } as const);
 				},
 				() => ({
 					outcome: "created" as const,
@@ -252,10 +238,47 @@ function modelStore(fault: Fault): MfaFactorStore {
 	};
 }
 
-/** The names of the cases that refuse the store `build` makes. */
-async function refusedBy(build: () => MfaFactorStore): Promise<string[]> {
+/** A store over the same backend that cannot reach it: every member rejects, or, `answers`, answers as if empty. */
+function unreachableStore(answers = false): MfaFactorStore {
+	const down = async (): Promise<never> => {
+		throw new Error("ECONNREFUSED");
+	};
+	if (!answers) {
+		return {
+			kind: "unreachable",
+			list: down,
+			listVersioned: down,
+			createIf: down,
+			removeIf: down,
+			create: down,
+			update: down,
+			remove: down,
+			removeAllForSubject: down,
+		};
+	}
+	return {
+		kind: "unreachable-answering",
+		list: async () => [],
+		listVersioned: async () => ({ generation: null, items: [] }),
+		createIf: async () => ({ outcome: "conflict" }),
+		removeIf: async () => ({ outcome: "missing" }),
+		create: down,
+		update: async () => null,
+		remove: async () => {},
+		removeAllForSubject: down,
+	};
+}
+
+/** The names of the cases that refuse the store `build` makes, beside an unreachable one that rejects. */
+async function refusedBy(
+	build: () => MfaFactorStore,
+	unreachable: () => MfaFactorStore = () => unreachableStore(),
+): Promise<string[]> {
 	const refused: string[] = [];
-	for (const contractCase of mfaFactorStoreConditionalContract(sameInstance("probe", build))) {
+	for (const contractCase of mfaFactorStoreConditionalContract({
+		build: async () => ({ store: build(), unreachable }),
+		supports: { unreachable: true },
+	})) {
 		try {
 			await contractCase.run();
 		} catch {
@@ -268,6 +291,10 @@ async function refusedBy(build: () => MfaFactorStore): Promise<string[]> {
 const CASE = {
 	firstBindings:
 		"lets exactly one of two concurrent first bindings through, one from each instance",
+	heldId:
+		"a create of an id the set holds, at the current generation, is a conflict that changes nothing",
+	outage:
+		"rejects every set member when it cannot reach its backend, and answers none as an empty set, missing or conflict",
 	reset: "a reset leaves the set at a new generation, so a first binding after it is a conflict",
 	update: "an update keeps the set's generation, and a write at it still lands",
 	twoRemovals:
@@ -288,6 +315,7 @@ const CASE = {
 describe("the binding refuses a store that breaks the factor set's fence", () => {
 	it("passes the model store with no fault, and a store without the set's members fails every case", async () => {
 		expect(await refusedBy(() => modelStore("none"))).toEqual([]);
+		expect(await refusedBy(createMemoryMfaFactorStore)).toEqual([]);
 		const plain = createMemoryMfaFactorStore();
 		const withoutMembers: MfaFactorStore = {
 			kind: plain.kind,
@@ -297,7 +325,10 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 			remove: (subject, id) => plain.remove(subject, id),
 			removeAllForSubject: (subject) => plain.removeAllForSubject(subject),
 		};
-		const cases = mfaFactorStoreConditionalContract(sameInstance("probe", () => withoutMembers));
+		const cases = mfaFactorStoreConditionalContract({
+			build: async () => ({ store: withoutMembers }),
+			supports: { unreachable: true },
+		});
 		expect(await refusedBy(() => withoutMembers)).toEqual(
 			cases.map((contractCase) => contractCase.name),
 		);
@@ -338,6 +369,19 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 		);
 	});
 
+	it("one whose create of a held id, at the current generation, overwrites it", async () => {
+		expect(await refusedBy(() => modelStore("create-upserts-held-id"))).toContain(CASE.heldId);
+	});
+
+	it("one that answers, out of reach, as if the set were empty", async () => {
+		expect(
+			await refusedBy(
+				() => modelStore("none"),
+				() => unreachableStore(true),
+			),
+		).toEqual([CASE.outage]);
+	});
+
 	it("(f) one whose removal of a record not there moves the generation", async () => {
 		expect(await refusedBy(() => modelStore("missing-moves-generation"))).toContain(CASE.missing);
 	});
@@ -356,7 +400,7 @@ describe("the binding's records", () => {
 				},
 			};
 		};
-		for (const contractCase of mfaFactorStoreConditionalContract(sameInstance("ids", watched))) {
+		for (const contractCase of mfaFactorStoreConditionalContract(over(watched))) {
 			await contractCase.run();
 		}
 		expect(seen.length).toBeGreaterThan(0);
@@ -364,51 +408,78 @@ describe("the binding's records", () => {
 	});
 
 	it("are typed as core's ContractCase, which the kit re-exports", () => {
-		expectTypeOf(
-			mfaFactorStoreConditionalContract(sameInstance("memory", createMemoryMfaFactorStore)),
-		).toEqualTypeOf<readonly ContractCase[]>();
+		expectTypeOf(mfaFactorStoreConditionalContract(over(createMemoryMfaFactorStore))).toEqualTypeOf<
+			readonly ContractCase[]
+		>();
 	});
 });
 
 describe("each case", () => {
-	it("makes a store, makes the second, and cleans up once, whether it passes or fails", async () => {
-		let made = 0;
-		let second = 0;
-		let cleaned = 0;
-		let current = createMemoryMfaFactorStore();
-		const cases = mfaFactorStoreConditionalContract({
-			name: "counted",
-			make: async () => {
-				made += 1;
-				current = createMemoryMfaFactorStore();
-				return current;
-			},
-			makeSecond: async () => {
-				second += 1;
-				return current;
-			},
-			cleanup: async () => {
-				cleaned += 1;
+	it("builds a harness of its own and closes it, whether it passes or fails", async () => {
+		let built = 0;
+		let closed = 0;
+		const counting = (store: () => MfaFactorStore): MfaFactorStoreContractInput => ({
+			build: async () => {
+				built += 1;
+				return {
+					store: store(),
+					close: async () => {
+						closed += 1;
+					},
+				};
 			},
 		});
+		const cases = mfaFactorStoreConditionalContract(counting(createMemoryMfaFactorStore));
 		for (const contractCase of cases) await contractCase.run();
-		const failing = mfaFactorStoreConditionalContract({
-			name: "failing",
-			make: async () => {
-				made += 1;
-				return { ...createMemoryMfaFactorStore(), listVersioned: undefined };
-			},
-			makeSecond: async () => {
-				second += 1;
-				return createMemoryMfaFactorStore();
-			},
-			cleanup: async () => {
-				cleaned += 1;
+		const failing = mfaFactorStoreConditionalContract(
+			counting(() => ({ ...createMemoryMfaFactorStore(), listVersioned: undefined })),
+		);
+		for (const contractCase of failing) await contractCase.run().catch(() => {});
+		const building = (list: readonly ContractCase[]): number =>
+			list.filter((contractCase) => contractCase.name !== UNREACHABLE_NOT_RUN).length;
+		expect(built).toBe(building(cases) + building(failing));
+		expect(closed).toBe(built);
+	});
+
+	it("names the outage case as not run, and runs none, when unreachable is not declared", async () => {
+		const names = mfaFactorStoreConditionalContract(over(createMemoryMfaFactorStore)).map(
+			(contractCase) => contractCase.name,
+		);
+		expect(names).toContain(UNREACHABLE_NOT_RUN);
+		expect(names).not.toContain(CASE.outage);
+		const declared = mfaFactorStoreConditionalContract({
+			build: async () => ({
+				store: createMemoryMfaFactorStore(),
+				unreachable: () => unreachableStore(),
+			}),
+			supports: { unreachable: true },
+		}).map((contractCase) => contractCase.name);
+		expect(declared).toContain(CASE.outage);
+		expect(declared).not.toContain(UNREACHABLE_NOT_RUN);
+	});
+
+	it("fails the outage case of a harness that declares unreachable and does not give it", async () => {
+		const outage = mfaFactorStoreConditionalContract({
+			build: async () => ({ store: createMemoryMfaFactorStore() }),
+			supports: { unreachable: true },
+		}).find((contractCase) => contractCase.name === CASE.outage);
+		await expect(outage?.run()).rejects.toThrow(/unreachable/);
+	});
+
+	it("splits a race across the store and the second instance the harness gives", async () => {
+		const store = createMemoryMfaFactorStore();
+		const used = new Set<string>();
+		const tagged = (tag: string): MfaFactorStore => ({
+			...store,
+			removeIf: (subject, id, expected) => {
+				used.add(tag);
+				return store.removeIf?.(subject, id, expected) ?? Promise.reject(new Error("none"));
 			},
 		});
-		for (const contractCase of failing) await contractCase.run().catch(() => {});
-		expect(made).toBe(cases.length + failing.length);
-		expect(second).toBe(cases.length + failing.length);
-		expect(cleaned).toBe(cases.length + failing.length);
+		const race = mfaFactorStoreConditionalContract({
+			build: async () => ({ store: tagged("store"), second: tagged("second") }),
+		}).find((contractCase) => contractCase.name === CASE.twoRemovals);
+		await race?.run();
+		expect([...used].sort()).toEqual(["second", "store"]);
 	});
 });

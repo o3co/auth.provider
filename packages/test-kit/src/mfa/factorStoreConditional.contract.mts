@@ -21,17 +21,22 @@
  * whose fence leaks lets two removals both pass the last-factor check, two
  * first bindings both land, or a write read before a reset land after it.
  *
- * Each case makes a store with `make`, a second instance on the same backend
- * with `makeSecond`, and cleans up after itself. The concurrent cases split
- * their writers across the two, so a Store run on its own backend proves the
- * fence across processes, never by an in-process lock. FACTOR_A store with one
- * instance per process answers the same one from `makeSecond`, which proves
- * no fence across processes.
+ * It takes the harness `mfaFactorStoreContract` takes: one `build` serves
+ * both. Each case builds its own and closes it. The concurrent cases split
+ * their writers across `store` and `second`, a second instance on the same
+ * backend, so a Store run on its own backend proves the fence across
+ * processes, never by an in-process lock. A store with one instance per
+ * process gives no `second`, and proves no fence across processes. The
+ * outage case runs only with `supports.unreachable`; without it, one passing
+ * case names it as not run.
  *
  * The cases talk only to the port and read every answer with core's
  * readers, so a SQL-backed, a REST-backed and a bundled store run them
  * unchanged. Repetitions catch a race a real backend leaves open only
- * sometimes; they do not prove its isolation.
+ * sometimes; they do not prove its isolation. No case can reach a set that
+ * exists without a generation — only a writer from before the set members
+ * leaves one — so the rule that a conditional write against it answers
+ * `conflict` and mints nothing is the Store's own tests' to prove.
  *
  * STAND-IN: the first group is the set variant of the generic
  * conditional-write suite, which has not landed. When it does, the binding
@@ -54,21 +59,13 @@ import {
 	type VersionedSet,
 } from "@o3co/auth-provider-core";
 import type { ContractCase } from "@o3co/auth-provider-core/testing";
-
-export interface MfaFactorStoreConditionalContractInput {
-	/** The store's name, in every failure the cases report. */
-	readonly name: string;
-	/** FACTOR_A fresh store, holding nothing, on a clean namespace. */
-	readonly make: () => Promise<MfaFactorStore>;
-	/**
-	 * FACTOR_A second instance on the same backend as the store `make` last made: a
-	 * second connection or pool, a second adapter on the same service. FACTOR_A store
-	 * with one instance per process answers that store.
-	 */
-	readonly makeSecond: () => Promise<MfaFactorStore>;
-	/** Releases what the case's stores run on, once the case ends. */
-	readonly cleanup?: () => Promise<void>;
-}
+import {
+	MFA_FACTOR_STORE_UNREACHABLE_NOT_RUN,
+	type MfaFactorStoreContractInput,
+	type MfaFactorStoreHarness,
+	rejects,
+	unreachableOf,
+} from "./factorStore.contract.mjs";
 
 /** How many times a race between two writers is run. */
 const ROUNDS = 20;
@@ -76,7 +73,7 @@ const ROUNDS = 20;
 /** How many writers race in one batch of creates. */
 const WRITERS = 10;
 
-/** FACTOR_A factor id as the provider makes one: `name` padded to 22 base64url characters. */
+/** A factor id as the provider makes one: `name` padded to 22 base64url characters. */
 const factorId = (name: string): string => name.padEnd(22, "A");
 
 const FACTOR_A = factorId("set-a");
@@ -104,7 +101,7 @@ const RECORD = (
 const byId = (records: readonly MfaFactorRecord[]): MfaFactorRecord[] =>
 	[...records].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
-/** FACTOR_A store's set members, every answer read by core's readers; the store itself for the rest. */
+/** A store's set members, every answer read by core's readers; the store itself for the rest. */
 interface SetView {
 	readonly store: MfaFactorStore;
 	read(subject: string): Promise<VersionedSet<MfaFactorRecord>>;
@@ -119,9 +116,9 @@ interface SetView {
 	): Promise<ConditionalSetRemoveAnswer>;
 }
 
-function viewOf(store: MfaFactorStore, name: string): SetView {
+function viewOf(store: MfaFactorStore): SetView {
 	for (const member of ["listVersioned", "createIf", "removeIf"] as const) {
-		assert.equal(typeof store[member], "function", `${name}: the store has no ${member}`);
+		assert.equal(typeof store[member], "function", `the store has no ${member}`);
 	}
 	return {
 		store,
@@ -133,26 +130,24 @@ function viewOf(store: MfaFactorStore, name: string): SetView {
 	};
 }
 
-/** The case's two instances: `one` from `make`, `two` from `makeSecond`. */
+/** The case's two instances: `one` the harness's store, `two` its second (the store again without one). */
 interface Instances {
 	readonly one: SetView;
 	readonly two: SetView;
 	/** `one` for an even `i`, `two` for an odd one. */
 	at(i: number): SetView;
-	/** `message`, naming the store. */
-	say(message: string): string;
+	readonly harness: MfaFactorStoreHarness;
 }
 
 /** The generation of a write that had to land. */
 function landed(
 	answer: { readonly outcome: string; readonly generation?: StoreGeneration },
-	say: (message: string) => string,
 	what: string,
 ): StoreGeneration {
 	assert.ok(
 		(answer.outcome === "created" || answer.outcome === "removed") &&
 			answer.generation !== undefined,
-		say(`${what} answered ${answer.outcome}`),
+		`${what} answered ${answer.outcome}`,
 	);
 	return answer.generation;
 }
@@ -166,37 +161,29 @@ async function seed(
 	view: SetView,
 	subject: string,
 	records: readonly MfaFactorRecord[],
-	say: (message: string) => string,
 ): Promise<StoreGeneration> {
 	let generation = (await view.read(subject)).generation;
 	for (const record of records) {
-		generation = landed(await view.createIf(record, generation), say, "a seeding create");
+		generation = landed(await view.createIf(record, generation), "a seeding create");
 	}
-	assert.ok(generation !== null, say("seeding wrote nothing"));
+	assert.ok(generation !== null, "seeding wrote nothing");
 	return generation;
 }
 
-/** The cases of the factor set's conditional writes over the stores `input` makes. */
+/** The cases of the factor set's conditional writes over the harnesses `input` builds. */
 export function mfaFactorStoreConditionalContract(
-	input: MfaFactorStoreConditionalContractInput,
+	input: MfaFactorStoreContractInput,
 ): readonly ContractCase[] {
-	const say = (message: string): string => `${input.name}: ${message}`;
 	const test = (name: string, body: (instances: Instances) => Promise<void>): ContractCase => ({
 		name,
 		run: async () => {
+			const harness = await input.build();
 			try {
-				const first = await input.make();
-				const second = await input.makeSecond();
-				const one = viewOf(first, input.name);
-				const two = viewOf(second, input.name);
-				await body({
-					one,
-					two,
-					at: (i) => (i % 2 === 0 ? one : two),
-					say,
-				});
+				const one = viewOf(harness.store);
+				const two = harness.second === undefined ? one : viewOf(harness.second);
+				await body({ one, two, at: (i) => (i % 2 === 0 ? one : two), harness });
 			} finally {
-				await input.cleanup?.();
+				await harness.close?.();
 			}
 		},
 	});
@@ -211,7 +198,6 @@ export function mfaFactorStoreConditionalContract(
 		test("lets exactly one of two concurrent first bindings through, one from each instance", async ({
 			one,
 			two,
-			say,
 		}) => {
 			const records = [RECORD(FACTOR_A, "user-1"), RECORD(FACTOR_B, "user-1")] as const;
 			const answers = await Promise.all([
@@ -221,7 +207,7 @@ export function mfaFactorStoreConditionalContract(
 			const won = answers.flatMap((answer, i) =>
 				answer.outcome === "created" ? [{ answer, record: records[i] }] : [],
 			);
-			assert.equal(won.length, 1, say(`${won.length} first bindings landed`));
+			assert.equal(won.length, 1, `${won.length} first bindings landed`);
 			assert.deepStrictEqual(await one.read("user-1"), {
 				generation: won[0]?.answer.generation,
 				items: [won[0]?.record],
@@ -231,14 +217,13 @@ export function mfaFactorStoreConditionalContract(
 		test("a reset leaves the set at a new generation, so a first binding after it is a conflict", async ({
 			one,
 			two,
-			say,
 		}) => {
-			const before = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")], say);
+			const before = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
 			await one.store.removeAllForSubject("user-1");
 			const after = await two.read("user-1");
-			assert.deepStrictEqual(after.items, [], say("the reset left records"));
-			assert.ok(after.generation !== null, say("the reset left no generation"));
-			assert.notEqual(after.generation, before, say("the reset kept the generation"));
+			assert.deepStrictEqual(after.items, [], "the reset left records");
+			assert.ok(after.generation !== null, "the reset left no generation");
+			assert.notEqual(after.generation, before, "the reset kept the generation");
 			assert.deepStrictEqual(await two.createIf(RECORD(FACTOR_B, "user-1"), null), {
 				outcome: "conflict",
 			});
@@ -248,30 +233,24 @@ export function mfaFactorStoreConditionalContract(
 		test("an update keeps the set's generation, and a write at it still lands", async ({
 			one,
 			two,
-			say,
 		}) => {
-			const generation = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")], say);
+			const generation = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
 			const updated = await one.store.update("user-1", FACTOR_A, 1, {
 				data: "v2.next",
 				label: undefined,
 				lastUsedAt: new Date("2026-09-03T00:00:00.000Z"),
 			});
-			assert.equal(updated?.version, 2, say("the update did not land"));
-			assert.equal((await two.read("user-1")).generation, generation, say("the update moved it"));
+			assert.equal(updated?.version, 2, "the update did not land");
+			assert.equal((await two.read("user-1")).generation, generation, "the update moved it");
 			landed(
 				await two.createIf(RECORD(FACTOR_B, "user-1"), generation),
-				say,
 				"a create after the update",
 			);
 		}),
 
-		test("a create at a generation that moved writes no record", async ({ one, two, say }) => {
-			const first = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")], say);
-			landed(
-				await two.createIf(RECORD(FACTOR_B, "user-1"), first),
-				say,
-				"a create at the current one",
-			);
+		test("a create at a generation that moved writes no record", async ({ one, two }) => {
+			const first = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
+			landed(await two.createIf(RECORD(FACTOR_B, "user-1"), first), "a create at the current one");
 			assert.deepStrictEqual(await one.createIf(RECORD(FACTOR_X, "user-1"), first), {
 				outcome: "conflict",
 			});
@@ -281,14 +260,23 @@ export function mfaFactorStoreConditionalContract(
 			]);
 		}),
 
-		test("removing the last record keeps the set at a new generation", async ({
+		test("a create of an id the set holds, at the current generation, is a conflict that changes nothing", async ({
 			one,
 			two,
-			say,
 		}) => {
-			const first = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")], say);
-			const next = landed(await two.removeIf("user-1", FACTOR_A, first), say, "the removal");
-			assert.notEqual(next, first, say("the removal kept the generation"));
+			const generation = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
+			const again = RECORD(FACTOR_A, "user-1", { data: "v2.other", label: "Other" });
+			assert.deepStrictEqual(await two.createIf(again, generation), { outcome: "conflict" });
+			assert.deepStrictEqual(await one.read("user-1"), {
+				generation,
+				items: [RECORD(FACTOR_A, "user-1")],
+			});
+		}),
+
+		test("removing the last record keeps the set at a new generation", async ({ one, two }) => {
+			const first = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
+			const next = landed(await two.removeIf("user-1", FACTOR_A, first), "the removal");
+			assert.notEqual(next, first, "the removal kept the generation");
 			assert.deepStrictEqual(await one.read("user-1"), { generation: next, items: [] });
 			assert.deepStrictEqual(await one.createIf(RECORD(FACTOR_B, "user-1"), null), {
 				outcome: "conflict",
@@ -299,28 +287,26 @@ export function mfaFactorStoreConditionalContract(
 
 		test("two removals of different records at one generation, one from each instance: one removed, the other a conflict that keeps its record", async ({
 			at,
-			say,
 		}) => {
 			for (let i = 0; i < ROUNDS; i += 1) {
 				const subject = `round-${i}`;
 				const records = [RECORD(FACTOR_A, subject), RECORD(FACTOR_B, subject)] as const;
-				const generation = await seed(at(0), subject, records, say);
+				const generation = await seed(at(0), subject, records);
 				const answers = await Promise.all([
 					at(i).removeIf(subject, FACTOR_A, generation),
 					at(i + 1).removeIf(subject, FACTOR_B, generation),
 				]);
 				const outcomes = answers.map((answer) => answer.outcome).sort();
-				assert.deepStrictEqual(outcomes, ["conflict", "removed"], say(`round ${i}: ${outcomes}`));
+				assert.deepStrictEqual(outcomes, ["conflict", "removed"], `round ${i}: ${outcomes}`);
 				const kept = answers[0]?.outcome === "removed" ? records[1] : records[0];
-				assert.deepStrictEqual((await at(i).read(subject)).items, [kept], say(`round ${i}`));
+				assert.deepStrictEqual((await at(i).read(subject)).items, [kept], `round ${i}`);
 			}
 		}),
 
 		test("concurrent creates of different records at one generation: exactly one created, the set one larger", async ({
 			at,
-			say,
 		}) => {
-			const generation = await seed(at(0), "user-1", [RECORD(FACTOR_A, "user-1")], say);
+			const generation = await seed(at(0), "user-1", [RECORD(FACTOR_A, "user-1")]);
 			const records = Array.from({ length: WRITERS }, (_, i) =>
 				RECORD(factorId(`writer-${i}`), "user-1"),
 			);
@@ -330,7 +316,7 @@ export function mfaFactorStoreConditionalContract(
 			const won = answers.flatMap((answer, i) =>
 				answer.outcome === "created" ? [{ answer, record: records[i] }] : [],
 			);
-			assert.equal(won.length, 1, say(`${won.length} creates landed`));
+			assert.equal(won.length, 1, `${won.length} creates landed`);
 			assert.deepStrictEqual(await at(1).read("user-1"), {
 				generation: won[0]?.answer.generation,
 				items: byId([RECORD(FACTOR_A, "user-1"), won[0]?.record as MfaFactorRecord]),
@@ -339,11 +325,10 @@ export function mfaFactorStoreConditionalContract(
 
 		test("a removal racing a create at one generation: exactly one wins, and the set is the winner's", async ({
 			at,
-			say,
 		}) => {
 			for (let i = 0; i < ROUNDS; i += 1) {
 				const subject = `round-${i}`;
-				const generation = await seed(at(0), subject, [RECORD(FACTOR_A, subject)], say);
+				const generation = await seed(at(0), subject, [RECORD(FACTOR_A, subject)]);
 				const removal = () => at(i).removeIf(subject, FACTOR_A, generation);
 				const create = () => at(i + 1).createIf(RECORD(FACTOR_B, subject), generation);
 				const [removed, created] =
@@ -354,34 +339,28 @@ export function mfaFactorStoreConditionalContract(
 				assert.equal(
 					wins.filter(Boolean).length,
 					1,
-					say(`round ${i}: ${removed.outcome}, ${created.outcome}`),
+					`round ${i}: ${removed.outcome}, ${created.outcome}`,
 				);
 				const expected = wins[0] ? [] : [RECORD(FACTOR_A, subject), RECORD(FACTOR_B, subject)];
-				assert.deepStrictEqual(
-					byId((await at(i).read(subject)).items),
-					expected,
-					say(`round ${i}`),
-				);
+				assert.deepStrictEqual(byId((await at(i).read(subject)).items), expected, `round ${i}`);
 			}
 		}),
 
 		test("a set taken back to the same records answers conflict at the generation read before it, and no generation repeats", async ({
 			one,
 			two,
-			say,
 		}) => {
-			const read = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")], say);
-			const removed = landed(await two.removeIf("user-1", FACTOR_A, read), say, "the removal");
+			const read = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
+			const removed = landed(await two.removeIf("user-1", FACTOR_A, read), "the removal");
 			const again = landed(
 				await one.createIf(RECORD(FACTOR_A, "user-1"), removed),
-				say,
 				"the re-create",
 			);
 			assert.deepStrictEqual(await two.read("user-1"), {
 				generation: again,
 				items: [RECORD(FACTOR_A, "user-1")],
 			});
-			assert.equal(new Set([read, removed, again]).size, 3, say("a generation repeated"));
+			assert.equal(new Set([read, removed, again]).size, 3, "a generation repeated");
 			assert.deepStrictEqual(await two.createIf(RECORD(FACTOR_B, "user-1"), read), {
 				outcome: "conflict",
 			});
@@ -392,9 +371,8 @@ export function mfaFactorStoreConditionalContract(
 		test("a reset fences every write read before it, and leaves a set never written at a generation", async ({
 			one,
 			two,
-			say,
 		}) => {
-			const read = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")], say);
+			const read = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
 			await two.store.removeAllForSubject("user-1");
 			assert.deepStrictEqual(await one.createIf(RECORD(FACTOR_B, "user-1"), read), {
 				outcome: "conflict",
@@ -405,7 +383,7 @@ export function mfaFactorStoreConditionalContract(
 			await one.store.removeAllForSubject("nobody");
 			const tombstone = await two.read("nobody");
 			assert.deepStrictEqual(tombstone.items, []);
-			assert.ok(tombstone.generation !== null, say("a reset of a set never written left none"));
+			assert.ok(tombstone.generation !== null, "a reset of a set never written left none");
 			assert.deepStrictEqual(await two.createIf(RECORD(FACTOR_A, "nobody"), null), {
 				outcome: "conflict",
 			});
@@ -414,18 +392,13 @@ export function mfaFactorStoreConditionalContract(
 		test("missing writes nothing: the generation stays and a write at it lands; an absent set answers missing to a removal and conflict to a create", async ({
 			one,
 			two,
-			say,
 		}) => {
-			const generation = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")], say);
+			const generation = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
 			assert.deepStrictEqual(await two.removeIf("user-1", FACTOR_X, generation), {
 				outcome: "missing",
 			});
-			assert.equal((await one.read("user-1")).generation, generation, say("missing moved it"));
-			landed(
-				await one.createIf(RECORD(FACTOR_B, "user-1"), generation),
-				say,
-				"a create after missing",
-			);
+			assert.equal((await one.read("user-1")).generation, generation, "missing moved it");
+			landed(await one.createIf(RECORD(FACTOR_B, "user-1"), generation), "a create after missing");
 
 			assert.deepStrictEqual(await two.removeIf("nobody", FACTOR_A, generation), {
 				outcome: "missing",
@@ -438,11 +411,10 @@ export function mfaFactorStoreConditionalContract(
 
 		test("a snapshot read beside a create is one snapshot: without the record its generation is fenced, with it the create's generation", async ({
 			at,
-			say,
 		}) => {
 			for (let i = 0; i < ROUNDS; i += 1) {
 				const subject = `round-${i}`;
-				const generation = await seed(at(0), subject, [RECORD(FACTOR_A, subject)], say);
+				const generation = await seed(at(0), subject, [RECORD(FACTOR_A, subject)]);
 				const read = () => at(i).read(subject);
 				const create = () => at(i + 1).createIf(RECORD(FACTOR_X, subject), generation);
 				// Both awaited: the create has committed before anything below writes.
@@ -450,20 +422,20 @@ export function mfaFactorStoreConditionalContract(
 					i % 2 === 0
 						? await Promise.all([read(), create()])
 						: await Promise.all([create(), read()]).then(([c, s]) => [s, c] as const);
-				const createdAt = landed(created, say, `round ${i}: the create`);
+				const createdAt = landed(created, `round ${i}: the create`);
 				if (snapshot.items.some((record) => record.id === FACTOR_X)) {
 					assert.equal(
 						snapshot.generation,
 						createdAt,
-						say(`round ${i}: the record at another generation`),
+						`round ${i}: the record at another generation`,
 					);
 				} else {
-					assert.deepStrictEqual(snapshot.items, [RECORD(FACTOR_A, subject)], say(`round ${i}`));
-					assert.ok(snapshot.generation !== null, say(`round ${i}: no generation`));
+					assert.deepStrictEqual(snapshot.items, [RECORD(FACTOR_A, subject)], `round ${i}`);
+					assert.ok(snapshot.generation !== null, `round ${i}: no generation`);
 					assert.deepStrictEqual(
 						await at(i).createIf(RECORD(FACTOR_Y, subject), snapshot.generation),
 						{ outcome: "conflict" },
-						say(`round ${i}: a write at the snapshot without the record landed`),
+						`round ${i}: a write at the snapshot without the record landed`,
 					);
 				}
 			}
@@ -472,43 +444,41 @@ export function mfaFactorStoreConditionalContract(
 		test("list and listVersioned answer the same records, and nothing else as a record", async ({
 			one,
 			two,
-			say,
 		}) => {
 			const records = [
 				RECORD(FACTOR_A, "user-1"),
 				RECORD(FACTOR_B, "user-1", { label: undefined, binding: undefined, lastUsedAt: undefined }),
 			];
-			await seed(one, "user-1", records, say);
+			await seed(one, "user-1", records);
 			const versioned = await two.read("user-1");
 			assert.deepStrictEqual(byId(versioned.items), records);
 			assert.deepStrictEqual(byId(await two.store.list("user-1")), records);
 			for (const item of versioned.items) {
-				assert.ok(isMfaFactorId(item.id), say(`${item.id} is no factor id`));
+				assert.ok(isMfaFactorId(item.id), `${item.id} is no factor id`);
 			}
 		}),
 
 		test("each unconditional write, create and remove, moves the generation", async ({
 			one,
 			two,
-			say,
 		}) => {
 			await createUnconditionally(one, RECORD(FACTOR_A, "user-1"));
 			const created = (await two.read("user-1")).generation;
-			assert.ok(created !== null, say("a create left no generation"));
+			assert.ok(created !== null, "a create left no generation");
 			assert.deepStrictEqual(await two.createIf(RECORD(FACTOR_X, "user-1"), null), {
 				outcome: "conflict",
 			});
 
 			await createUnconditionally(two, RECORD(FACTOR_B, "user-1"));
 			const again = (await one.read("user-1")).generation;
-			assert.ok(again !== null && again !== created, say("a create kept the generation"));
+			assert.ok(again !== null && again !== created, "a create kept the generation");
 			assert.deepStrictEqual(await one.createIf(RECORD(FACTOR_X, "user-1"), created), {
 				outcome: "conflict",
 			});
 
 			await one.store.remove("user-1", FACTOR_A);
 			const removed = (await two.read("user-1")).generation;
-			assert.ok(removed !== null && removed !== again, say("a remove kept the generation"));
+			assert.ok(removed !== null && removed !== again, "a remove kept the generation");
 			assert.deepStrictEqual(await two.removeIf("user-1", FACTOR_B, again), {
 				outcome: "conflict",
 			});
@@ -518,13 +488,12 @@ export function mfaFactorStoreConditionalContract(
 			assert.deepStrictEqual(emptied.items, []);
 			assert.ok(
 				emptied.generation !== null && emptied.generation !== removed,
-				say("the last remove kept it"),
+				"the last remove kept it",
 			);
 		}),
 
 		test("every answer is one core's readers read, and every generation a store generation", async ({
 			one,
-			say,
 		}) => {
 			const { store } = one;
 			const raw: unknown[] = [];
@@ -537,7 +506,7 @@ export function mfaFactorStoreConditionalContract(
 			const created = readConditionalCreateAnswer(
 				keep(await store.createIf?.(RECORD(FACTOR_A, "user-1"), null)),
 			);
-			const generation = landed(created, say, "the create");
+			const generation = landed(created, "the create");
 			readConditionalCreateAnswer(keep(await store.createIf?.(RECORD(FACTOR_A, "user-1"), null)));
 			readConditionalSetRemoveAnswer(keep(await store.removeIf?.("user-1", FACTOR_X, generation)));
 			const removed = readConditionalSetRemoveAnswer(
@@ -545,10 +514,29 @@ export function mfaFactorStoreConditionalContract(
 			);
 			readConditionalSetRemoveAnswer(keep(await store.removeIf?.("user-1", FACTOR_A, generation)));
 			const listed = readMfaFactorSet(keep(await store.listVersioned?.("user-1")), "user-1");
-			for (const seen of [generation, landed(removed, say, "the removal"), listed.generation]) {
-				assert.ok(isStoreGeneration(seen), say(`${String(seen)} is no store generation`));
+			for (const seen of [generation, landed(removed, "the removal"), listed.generation]) {
+				assert.ok(isStoreGeneration(seen), `${String(seen)} is no store generation`);
 			}
 			assert.equal(raw.length, 7);
 		}),
+
+		input.supports?.unreachable === true
+			? test("rejects every set member when it cannot reach its backend, and answers none as an empty set, missing or conflict", async ({
+					harness,
+				}) => {
+					const down = unreachableOf(harness)();
+					const generation = "unreachable-g" as StoreGeneration;
+					await rejects(async () => down.listVersioned?.("user-1"), "listVersioned");
+					await rejects(
+						async () => down.createIf?.(RECORD(FACTOR_A, "user-1"), null),
+						"createIf at null",
+					);
+					await rejects(
+						async () => down.createIf?.(RECORD(FACTOR_A, "user-1"), generation),
+						"createIf",
+					);
+					await rejects(async () => down.removeIf?.("user-1", FACTOR_A, generation), "removeIf");
+				})
+			: { name: MFA_FACTOR_STORE_UNREACHABLE_NOT_RUN, run: async () => {} },
 	];
 }
