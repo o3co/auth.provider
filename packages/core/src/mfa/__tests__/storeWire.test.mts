@@ -35,6 +35,7 @@ import type { MfaFactorRecord, MfaFactorRecordUpdate } from "#/mfa/factorStore.m
 import {
 	fromMfaStoreFactor,
 	type MfaStoreCreateIfRequest,
+	type MfaStoreDeleteRequest,
 	type MfaStoreFactor,
 	type MfaStoreFactorBinding,
 	type MfaStoreFactorChanges,
@@ -696,6 +697,11 @@ describe("a conditional remove on the wire", () => {
 			"subject" | "id" | "expectedGeneration" | "deadlineMs"
 		>();
 		expectTypeOf<MfaStoreRemoveIfRequest["deadlineMs"]>().toEqualTypeOf<number>();
+	});
+
+	it("names only the reset as the delete request without a generation", () => {
+		expectTypeOf<keyof MfaStoreDeleteRequest>().toEqualTypeOf<"subject" | "all">();
+		expectTypeOf<MfaStoreDeleteRequest["all"]>().toEqualTypeOf<true>();
 	});
 
 	it("takes the deadline as a required parameter: no caller can leave it out", () => {
