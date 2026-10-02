@@ -38,16 +38,11 @@
  * leaves one — so the rule that a conditional write against it answers
  * `conflict` and mints nothing is the Store's own tests' to prove.
  *
- * A write conditional on a read is valid only within the store's
- * write-lifetime bound of that read: the bound runs from the versioned read
- * that produced the write's expected generation to the write's commit or
- * failure, transport and queues included. The port's owning module keeps it;
- * callers outside it never hold a generation. An emptied set's tombstone is
- * kept for at least that bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h, for
- * the bundled stores). For MFA, the factor-set writer keeps the bound under
- * its lease (at most 16 × `mfa.storeTimeoutMs`).
+ * The rules are core's conditional-write convention for a set
+ * (docs/adapter-surface.md, "Conditional writes"); `MfaFactorStore` says what
+ * they mean for the factor set, the write-lifetime bound among them.
  * The tombstone cases run under `forceExpire`; no case can prove the bound
- * itself, which the Store's configuration and the writer's lease keep.
+ * itself, which the adapter's write lifetime and the writer's lease keep.
  *
  * STAND-IN: the first group, and the expired-tombstone and the
  * set-holding-a-record cases, are the set variant of the generic

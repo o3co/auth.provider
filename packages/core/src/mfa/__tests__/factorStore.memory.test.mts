@@ -15,9 +15,9 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { BUNDLED_STORE_WRITE_LIFETIME_MS } from "#/adapters/conditionalWrite.mjs";
 import { createApp, defineModule } from "#/index.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
-import { BUNDLED_STORE_WRITE_LIFETIME_MS } from "#/mfa/conditionalWriteStandIn.mjs";
 import type { MfaFactorRecord, MfaFactorStore } from "#/mfa/factorStore.mjs";
 import { createMfaFactorStoreFactory, registerBuiltinMfaFactorStores } from "#/mfa/factory.mjs";
 import { createMemoryMfaFactorStore } from "#/mfa/memoryFactorStore.mjs";

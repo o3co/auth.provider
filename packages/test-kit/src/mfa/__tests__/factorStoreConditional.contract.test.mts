@@ -166,7 +166,7 @@ function modelStore(fault: Fault): Model {
 	): StoreGeneration => {
 		const set = sets.get(subject) ?? {
 			records: new Map<string, MfaFactorRecord>(),
-			generation: "" as StoreGeneration,
+			generation: randomUUID() as StoreGeneration,
 			writes: 0,
 			expiring: false,
 		};
@@ -456,7 +456,7 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 		).toEqual([CASE.outage]);
 	});
 
-	it("one whose generation is a counter, which restarts once its tombstone is purged", async () => {
+	it("one whose generation is a counter, which repeats once its tombstone is purged", async () => {
 		expect(await refusedBy(() => modelStore("counter-generation"))).toContain(CASE.expired);
 	});
 

@@ -39,17 +39,15 @@
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
-import { lineSafeText } from "../logging/loggableError.mjs";
-import { isHintToken } from "../session-admission/requirement.mjs";
-// Stand-in for core's conditional-write convention until it lands; then these
-// come from "../adapters/conditionalWrite.mjs".
 import {
 	type ConditionalCreateAnswer,
 	type ConditionalSetRemoveAnswer,
 	readVersionedSet,
 	type StoreGeneration,
 	type VersionedSet,
-} from "./conditionalWriteStandIn.mjs";
+} from "../adapters/conditionalWrite.mjs";
+import { lineSafeText } from "../logging/loggableError.mjs";
+import { isHintToken } from "../session-admission/requirement.mjs";
 
 /** One second factor bound to one subject. Every field is a required key: a store that drops one does not compile. */
 export interface MfaFactorRecord {
@@ -152,59 +150,41 @@ export function isMfaFactorUpdateWritten(
  * write may have committed.
  *
  * **The factor set's store generation.** A subject's records are one set,
- * and the store keeps one generation for it, which lets a writer fence its
- * write against the set it read:
+ * and the store keeps one generation for its membership, which lets a writer
+ * fence its write against the set it read. The set follows core's
+ * conditional-write convention for a set (docs/adapter-surface.md,
+ * "Conditional writes"); what follows is only what it means here.
  *
- * - Every membership write — `createIf`, `removeIf`, `create`, `remove`,
- *   `removeAllForSubject` — issues a fresh generation in the same atomic step
- *   as its write. A generation never repeats for a subject: not after a
- *   removal and a re-create, not when the set returns to the same records,
- *   and not after its tombstone has passed. An application-made random UUID
- *   is one; a counter that restarts, a digest of the set and a timestamp are
- *   none.
- * - `update` keeps the generation: it changes a record, not the set's
- *   membership, and its own fence is the record's `version`. A membership
- *   decision that read a record's data is therefore not fenced against an
- *   update of that record. That holds only while every factor's next data
- *   keeps the three things `MfaVerification.next` names.
- * - A set never written has no generation (`null`). A set's generation
- *   outlives its members: a set emptied by any membership write (its last
- *   removal or a reset) — account deletion included — is left empty at a
- *   new generation, its tombstone, which a late write read before it meets
- *   as a `conflict`. Past the
- *   bound below the tombstone may be purged, and the set then reads as
- *   never written. A set that holds a record is never purged.
- * - A write conditional on a read is valid only within the store's
- *   write-lifetime bound of that read: the bound runs from the versioned read
- *   that produced the write's expected generation to the write's commit or
- *   failure, transport and queues included. The port's owning module keeps it;
- *   callers outside it never hold a generation. An emptied set's tombstone is
- *   kept for at least that bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h, for
- *   the bundled stores). For MFA, the factor-set writer keeps the bound under
- *   its lease (at most 16 × `mfa.storeTimeoutMs`).
- *   A store adds no delay past the bound: in SQL a statement or
- *   transaction timeout, over HTTP a request deadline never retried once
- *   passed; the bundled memory store (one synchronous step) and Redis
- *   store (one script) add none.
- * - The check and the write are one atomic step in the store, across every
- *   instance on the same backend: a transaction, a script, one synchronous
- *   block. An in-process lock counts only for an in-process store.
- * - A generation is minted, never derived. A set that exists with none — one
- *   only a writer from before these members existed can leave — is given a
- *   fresh one atomically by its first `listVersioned`, and by nothing else: a
- *   conditional write against it answers `conflict` and mints nothing. That
- *   reading is safe only in a fleet with no such writer left: one that
- *   changes the membership without moving the generation would go unfenced.
- *   So a fleet never mixes a build from before the set members with one that
- *   has them.
+ * - The membership writes are `createIf`, `removeIf`, `create`, `remove` and
+ *   `removeAllForSubject`: each issues a fresh generation. `update` is a
+ *   member's own update, fenced by the record's `version`, and keeps it. A
+ *   membership decision that read a record's data is therefore not fenced
+ *   against an update of that record, which holds only while every factor's
+ *   next data keeps the three things `MfaVerification.next` names.
+ * - `removeAllForSubject` (account deletion, the operator reset) is
+ *   unconditional and always wins, yet it is one atomic step serialised with
+ *   `createIf` and `removeIf`, so neither interleaves with it (rule 1). It
+ *   leaves the set as its tombstone, as does a removal of its last record
+ *   (rule 6).
+ * - Generations are never re-issued (rule 8): a store mints each one at
+ *   random, as `newStoreGeneration` does.
+ * - The write-lifetime bound (rule 6). The port's owning module is the MFA
+ *   package's factor-set writer. It reads with `listVersioned` under the
+ *   subject's lease, and issues a conditional write only inside that lease's
+ *   window: 16 × `mfa.storeTimeoutMs` (or core's shortest lease, if longer)
+ *   from the acquire, enforced on a local monotonic deadline. `mfa.storeTimeoutMs` is at most 37 500 ms, so the
+ *   window is at most 600 000 ms, which is at most the bound
+ *   (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h) less W for every bundled
+ *   adapter. The memory store's W is 0, because its check and write happen in
+ *   one synchronous block. The one assumption: the process or the store does
+ *   not stall for the whole bound between a `null` read and its commit.
+ * - A writer that changes the set's membership but leaves the generation in
+ *   place, such as a build from before these members, must not run beside
+ *   conditional callers, unless the store moves the generation for it
+ *   (rule 8).
  *
- * In SQL, keep the set as a row of its own beside the factor rows, and have
- * every membership write take that row first, in one transaction — an
- * upsert of it for `removeAllForSubject` — so the writes lock in one order.
- * `update` takes only the factor's row. `listVersioned` reads the set row
- * and the factor rows in one statement or one snapshot. A set row whose set
- * is empty may be removed once the write-lifetime bound has passed since it
- * was emptied, never before.
+ * In SQL, the set's row is the subject's (docs/adapter-surface.md, "A SQL
+ * store"), and `update` takes only its factor's row.
  *
  * `listVersioned`, `createIf` and `removeIf` are optional while the bundled
  * adapters gain them, and become required; `create` and `remove` then leave
@@ -216,33 +196,27 @@ export interface MfaFactorStore {
 	list(subject: string): Promise<readonly MfaFactorRecord[]>;
 	/**
 	 * Every record of `subject`, in no particular order, and the set's
-	 * generation, from one snapshot. `generation` is `null` only for a set
-	 * never written, or whose tombstone has passed; a set whose records all
-	 * went, or that a reset left empty, answers its generation and no records
-	 * while its tombstone stands. Read it with {@link readMfaFactorSet}.
+	 * generation, from one snapshot. `generation` is `null` only for an
+	 * absent set: never written, or its tombstone expired; a set whose
+	 * records all went, or that a reset left empty, answers its generation
+	 * and no records while its tombstone stands. Read it with
+	 * {@link readMfaFactorSet}.
 	 */
 	listVersioned?(subject: string): Promise<VersionedSet<MfaFactorRecord>>;
 	/**
 	 * Insert `record` only while its subject's set is at `expected`; `null`:
-	 * only while the set was never written, which makes a first binding
-	 * atomic against a concurrent one. Answers `created` with the set's new
-	 * generation, or `conflict` with nothing written: the set at another
-	 * generation, absent where `expected` names one, present where `expected`
-	 * is `null`, or a `(subject, id)` already held — never overwritten. Never
-	 * `missing`. Read it with `readConditionalCreateAnswer`.
+	 * only while the set is absent, which makes a first binding atomic against
+	 * a concurrent one. A `(subject, id)` already held is a `conflict`, never
+	 * overwritten. Read the answer with `readConditionalCreateAnswer`.
 	 */
 	createIf?(
 		record: MfaFactorRecord,
 		expected: StoreGeneration | null,
 	): Promise<ConditionalCreateAnswer>;
 	/**
-	 * Remove `(subject, id)` only while the set is at `expected`. Answers
-	 * `removed` with the set's new generation (the set stays, empty when that
-	 * was its last record); `missing` for no set, or no such record at
-	 * `expected`; `conflict` for the set at another generation, checked
-	 * before the record. `missing` and `conflict` write nothing, the
-	 * generation included. A `removed` without the new generation is no
-	 * answer: `readConditionalSetRemoveAnswer` refuses it.
+	 * Remove `(subject, id)` only while the set is at `expected`. The set
+	 * stays, empty when that was its last record. Read the answer with
+	 * `readConditionalSetRemoveAnswer`.
 	 */
 	removeIf?(
 		subject: string,
@@ -273,11 +247,12 @@ export interface MfaFactorStore {
 	remove(subject: string, id: string): Promise<void>;
 	/**
 	 * Remove every record of `subject` — account deletion, the operator reset —
-	 * unconditionally: it always wins. Leaves the set's tombstone, empty at a
-	 * new generation, creating it for a subject never written, so a
-	 * conditional write read before it answers `conflict` while the
-	 * tombstone stands. Idempotent in what it leaves listed; every call moves
-	 * the generation and starts the tombstone's bound again.
+	 * unconditionally: it always wins, as one atomic step serialised with the
+	 * conditional writes. Leaves the set's tombstone, empty at a new
+	 * generation, creating it for a subject never written, so a conditional
+	 * write read before it answers `conflict` while the tombstone stands.
+	 * Idempotent in what it leaves listed; every call moves the generation and
+	 * starts the tombstone's bound again.
 	 */
 	removeAllForSubject(subject: string): Promise<void>;
 }
@@ -321,8 +296,8 @@ function recordOf(item: unknown, subject: string): MfaFactorRecord | undefined {
 /**
  * What `listVersioned` answered for `subject`, read as the port promises it:
  * a versioned set (`readVersionedSet`) whose items are whole records, every
- * field of its type, each naming `subject`, no id twice, and none for a set
- * never written. A fresh frozen answer; the records are the ones answered.
+ * field of its type, each naming `subject`, no id twice, and none for an
+ * absent set. A fresh frozen answer; the records are the ones answered.
  * Throws a `TypeError` for anything else, a read that throws included — the
  * store's fault, which the caller answers as the store's outage, never as a
  * set with nothing in it.
@@ -331,9 +306,6 @@ export function readMfaFactorSet(answer: unknown, subject: string): VersionedSet
 	const read = readVersionedSet<unknown>(answer as VersionedSet<unknown>);
 	const refuse = (what: string): TypeError =>
 		new TypeError(`MfaFactorStore.listVersioned: ${what}`);
-	if (read.generation === null && read.items.length > 0) {
-		throw refuse("a set never written holds records");
-	}
 	const ids = new Set<string>();
 	for (const item of read.items) {
 		let record: MfaFactorRecord | undefined;

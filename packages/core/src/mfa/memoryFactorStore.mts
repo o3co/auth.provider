@@ -20,24 +20,25 @@
  * reads as having nothing enrolled; the enrollment witness catches that loss.
  *
  * Each operation is one synchronous `Map` step, so atomic: no `await` falls
- * between a check and its write, and so no write outlives the
- * write-lifetime bound. Records are copied in and out: changing a returned
- * or written record changes nothing kept here.
+ * between a check and its write, and the unconditional writes are serialised
+ * with the conditional ones. So its write lifetime W (docs/adapter-surface.md,
+ * "Conditional writes", rule 6) is 0. Records are copied in and out: changing
+ * a returned or written record changes nothing kept here.
  *
  * A subject's set is an entry holding its records and its store generation,
- * a random UUID made fresh at every membership write. The first membership
- * write makes it. A set emptied by any membership write (its last removal or a reset) is
- * left as the set's tombstone, which expires on the store's clock
- * `BUNDLED_STORE_WRITE_LIFETIME_MS` after that write; a write that leaves it
- * holding a record takes the expiry off. An expired tombstone reads as never
- * written, and is deleted when next read or written, or by the sweep, paced
- * as the replay seen-set's (`single-use/sweep.mts`) on membership writes.
- * Every entry holds a generation from the write that made it, so no set here
- * is ever without one and `listVersioned` has nothing to mint. One process
- * is one instance, so a second instance on the same backend is this one.
+ * minted with `newStoreGeneration` at every membership write. The first
+ * membership write makes it. A set emptied by any membership write (its last
+ * removal or a reset) is left as the set's tombstone, which expires on the
+ * store's clock `BUNDLED_STORE_WRITE_LIFETIME_MS` after that write; a write
+ * that leaves it holding a record takes the expiry off. An expired tombstone
+ * reads as absent, and is deleted when next read or written, or by the sweep,
+ * paced as the replay seen-set's (`single-use/sweep.mts`) on membership
+ * writes. Every entry holds a generation from the write that made it, so no
+ * set here is ever without one and `listVersioned` has nothing to mint. One
+ * process is one instance, so a second instance on the same backend is this
+ * one.
  */
 
-import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import {
 	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	type ConditionalCreateAnswer,
@@ -45,7 +46,8 @@ import {
 	newStoreGeneration,
 	type StoreGeneration,
 	type VersionedSet,
-} from "./conditionalWriteStandIn.mjs";
+} from "../adapters/conditionalWrite.mjs";
+import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import type { MfaFactorRecord, MfaFactorRecordUpdate, MfaFactorStore } from "./factorStore.mjs";
 import { checkMfaVersionAdvances } from "./version.mjs";
 
