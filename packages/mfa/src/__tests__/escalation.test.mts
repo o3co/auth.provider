@@ -345,10 +345,15 @@ describe("createSessionEscalation", () => {
 			expect(run.answered.json).toHaveBeenCalledWith(SESSION_STORE_UNAVAILABLE);
 		});
 
-		it("a record that is not this session's is an outage outside the contract", async () => {
-			const run = await escalate({
-				record: async (nonce) => ({ ...recordOf(nonce), sid: "sid-mallory" }),
-			});
+		it.each<[string, (nonce: string) => unknown]>([
+			["another session's", (nonce) => ({ ...recordOf(nonce), sid: "sid-mallory" })],
+			["another subject's", (nonce) => ({ ...recordOf(nonce), sub: "u-mallory" })],
+			["not an object", (nonce) => nonce],
+			["an array", (nonce) => [recordOf(nonce)]],
+			["without authTime", (nonce) => ({ ...recordOf(nonce), authTime: undefined })],
+			["with an expiresAt that is no Date", (nonce) => ({ ...recordOf(nonce), expiresAt: 0 })],
+		])("a record that is %s is an outage outside the contract", async (_, answer) => {
+			const run = await escalate({ record: async (nonce) => answer(nonce) });
 			expect(run.outcome).toBe<Escalation>("unavailable");
 			expect(run.storeUnavailable).toHaveBeenCalledWith(
 				"step-up",
@@ -358,7 +363,82 @@ describe("createSessionEscalation", () => {
 				{ sid: SESSION.sid },
 			);
 			expect(run.deleted).toEqual([]);
+			expect(run.issued).toEqual([]);
 		});
+	});
+
+	it("reads the requirement's reach at each escalation, never at construction", async () => {
+		const reaches: (ReadonlySet<string> | undefined)[] = [undefined, REACH];
+		const reach = vi.fn(() => reaches.shift());
+		const options = {
+			loginCompletion: recordingLoginCompletion(async () => ({
+				outcome: "renewed",
+				renewalNonce: newRenewalNonce(),
+			})).completion,
+			reach,
+			csrfGuard: { issue: () => {} } as unknown as CsrfGuard,
+			logger: spyLogger(),
+			storeUnavailable: vi.fn(),
+		};
+		const unrecordable = createSessionEscalation({ ...options, secondFactorStore: undefined });
+		const escalation = createSessionEscalation({
+			...options,
+			secondFactorStore: storeDouble(async () => recordOf(undefined)).store,
+		});
+		expect(reach).not.toHaveBeenCalled();
+		const call = (over: typeof escalation) =>
+			over.escalate(
+				"verify",
+				{} as Request,
+				responseDouble() as unknown as Response,
+				SESSION,
+				EXPECTED,
+				ADDS,
+			);
+		expect(await call(unrecordable)).toBe<Escalation>("unrecordable_store");
+		expect(reach).not.toHaveBeenCalled();
+		expect(await call(escalation)).toBe<Escalation>("invalid");
+		// The reach registered since is the one the next escalation holds to.
+		expect(await call(escalation)).not.toBe<Escalation>("invalid");
+		expect(reach).toHaveBeenCalledTimes(2);
+	});
+
+	it("records only once renewed, and issues the CSRF token only once recorded", async () => {
+		const renewalNonce = newRenewalNonce();
+		let renew: (result: SessionRenewalResult) => void = () => {};
+		let record: (answer: unknown) => void = () => {};
+		const { completion } = recordingLoginCompletion(
+			() =>
+				new Promise<SessionRenewalResult>((resolve) => {
+					renew = resolve;
+				}),
+		);
+		const double = storeDouble(
+			() =>
+				new Promise<unknown>((resolve) => {
+					record = resolve;
+				}),
+		);
+		const issued: unknown[] = [];
+		const escalation = createSessionEscalation({
+			secondFactorStore: double.store,
+			loginCompletion: completion,
+			reach: () => REACH,
+			csrfGuard: { issue: (res: Response) => issued.push(res) } as unknown as CsrfGuard,
+			logger: spyLogger(),
+			storeUnavailable: vi.fn(),
+		});
+		const res = responseDouble() as unknown as Response;
+		const outcome = escalation.escalate("step-up", {} as Request, res, SESSION, EXPECTED, ADDS);
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(double.recordSecondFactor).not.toHaveBeenCalled();
+		renew({ outcome: "renewed", renewalNonce });
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(double.recordSecondFactor).toHaveBeenCalledTimes(1);
+		expect(issued).toEqual([]);
+		record(recordOf(renewalNonce));
+		expect(await outcome).toBe<Escalation>("escalated");
+		expect(issued).toEqual([res]);
 	});
 
 	it("ESCALATION_REFUSALS answers every outcome but escalated", () => {
