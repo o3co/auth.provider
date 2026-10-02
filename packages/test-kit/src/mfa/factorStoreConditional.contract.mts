@@ -331,13 +331,13 @@ export function mfaFactorStoreConditionalContract(
 		}),
 
 		test("where the store still provides create and remove: create refuses a held id and keeps the record and the generation; remove is idempotent and moves the generation only when it removes", async (one, two) => {
-			const create = one.store.create?.bind(one.store);
-			const remove = two.store.remove?.bind(two.store);
-			if (create === undefined || remove === undefined) return;
+			const legacyCreate = one.store.create?.bind(one.store);
+			const legacyRemove = two.store.remove?.bind(two.store);
+			if (legacyCreate === undefined || legacyRemove === undefined) return;
 			const held = RECORD(FACTOR_A, "user-1");
 			const generation = await seed(one, "user-1", [held]);
 			await assert.rejects(
-				create(RECORD(FACTOR_A, "user-1", { label: "Another" })),
+				legacyCreate(RECORD(FACTOR_A, "user-1", { label: "Another" })),
 				"create took an id the set already holds",
 			);
 			assert.deepStrictEqual(
@@ -345,17 +345,17 @@ export function mfaFactorStoreConditionalContract(
 				{ generation, items: [held] },
 				"a refused create changed the set",
 			);
-			await remove("user-1", FACTOR_B);
+			await legacyRemove("user-1", FACTOR_B);
 			assert.equal(
 				(await one.read("user-1")).generation,
 				generation,
 				"removing an id never held moved the generation",
 			);
-			await remove("user-1", FACTOR_A);
+			await legacyRemove("user-1", FACTOR_A);
 			const after = await two.read("user-1");
 			assert.deepStrictEqual(after.items, [], "remove left the record");
 			assert.notEqual(after.generation, generation, "a removal that removed kept the generation");
-			await remove("user-1", FACTOR_A);
+			await legacyRemove("user-1", FACTOR_A);
 			assert.deepStrictEqual(await one.read("user-1"), after, "a repeated remove changed the set");
 		}),
 
