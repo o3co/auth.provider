@@ -665,7 +665,7 @@ describe("the binding's records", () => {
 				...store,
 				createIf: (record, expected) => {
 					seen.push(record);
-					return store.createIf?.(record, expected) ?? Promise.reject(new Error("no createIf"));
+					return store.createIf(record, expected);
 				},
 			};
 		};
@@ -768,7 +768,7 @@ describe("each case", () => {
 			...store,
 			removeIf: (subject, id, expected) => {
 				used.add(tag);
-				return store.removeIf?.(subject, id, expected) ?? Promise.reject(new Error("none"));
+				return store.removeIf(subject, id, expected);
 			},
 		});
 		const race = mfaFactorStoreConditionalContract({
