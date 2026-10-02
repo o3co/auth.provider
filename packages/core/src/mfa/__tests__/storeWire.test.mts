@@ -88,6 +88,25 @@ const FULL_WIRE: MfaStoreFactor = {
 	data: "v2.opaque-sealed-data",
 };
 
+/** A conditional write's deadline: the send time plus the adapter's request timeout, on the provider's clock. */
+const DEADLINE_MS = Date.parse("2026-09-03T00:00:05.000Z");
+
+/** Deadlines no conditional write may carry: each is not a finite safe integer above 0. */
+const NOT_DEADLINES: readonly unknown[] = [
+	0,
+	-1,
+	1.5,
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	Number.MAX_SAFE_INTEGER + 1,
+	String(DEADLINE_MS),
+	BigInt(DEADLINE_MS),
+	new Date(DEADLINE_MS),
+	null,
+	undefined,
+];
+
 /** `value` as it arrives after a trip through JSON. */
 const overJson = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
 
@@ -535,33 +554,64 @@ describe("a versioned list answer", () => {
 });
 
 describe("a conditional create on the wire", () => {
-	it("carries the factor and the generation the writer read as expectedGeneration", () => {
-		expect(toMfaStoreCreateIfRequest(FULL, GENERATION)).toStrictEqual({
+	it("carries the factor, the generation the writer read as expectedGeneration, and the deadline as deadlineMs", () => {
+		expect(toMfaStoreCreateIfRequest(FULL, GENERATION, DEADLINE_MS)).toStrictEqual({
 			factor: FULL_WIRE,
 			expectedGeneration: GENERATION,
+			deadlineMs: DEADLINE_MS,
 		});
-		expectTypeOf<keyof MfaStoreCreateIfRequest>().toEqualTypeOf<"factor" | "expectedGeneration">();
+		expectTypeOf<keyof MfaStoreCreateIfRequest>().toEqualTypeOf<
+			"factor" | "expectedGeneration" | "deadlineMs"
+		>();
+		expectTypeOf<MfaStoreCreateIfRequest["deadlineMs"]>().toEqualTypeOf<number>();
 	});
 
 	it("carries null, present and never left out, for a set the writer read as absent", () => {
-		const request = toMfaStoreCreateIfRequest(BARE, null);
-		expect(request).toStrictEqual({ factor: toMfaStoreFactor(BARE), expectedGeneration: null });
+		const request = toMfaStoreCreateIfRequest(BARE, null, DEADLINE_MS);
+		expect(request).toStrictEqual({
+			factor: toMfaStoreFactor(BARE),
+			expectedGeneration: null,
+			deadlineMs: DEADLINE_MS,
+		});
 		expect(overJson(request)).toHaveProperty("expectedGeneration", null);
+		expect(overJson(request)).toHaveProperty("deadlineMs", DEADLINE_MS);
+	});
+
+	it("takes the deadline as a required parameter: no caller can leave it out", () => {
+		expectTypeOf(toMfaStoreCreateIfRequest).parameters.toEqualTypeOf<
+			[MfaFactorRecord, StoreGeneration | null, number]
+		>();
+		// @ts-expect-error -- a conditional create always carries a deadline.
+		expect(() => toMfaStoreCreateIfRequest(FULL, GENERATION)).toThrow(RangeError);
+	});
+
+	it("refuses, with a RangeError, a deadline that is not a finite safe integer above 0", () => {
+		for (const deadline of NOT_DEADLINES) {
+			expect(
+				() => toMfaStoreCreateIfRequest(FULL, GENERATION, deadline as number),
+				String(deadline),
+			).toThrow(RangeError);
+		}
+		expect(toMfaStoreCreateIfRequest(FULL, GENERATION, 1)).toHaveProperty("deadlineMs", 1);
+		expect(toMfaStoreCreateIfRequest(FULL, GENERATION, Number.MAX_SAFE_INTEGER)).toHaveProperty(
+			"deadlineMs",
+			Number.MAX_SAFE_INTEGER,
+		);
 	});
 
 	it("refuses, with a RangeError, an expected generation that is no store generation, or none", () => {
 		for (const expected of [...NOT_GENERATIONS, undefined]) {
 			expect(
-				() => toMfaStoreCreateIfRequest(FULL, expected as StoreGeneration),
+				() => toMfaStoreCreateIfRequest(FULL, expected as StoreGeneration, DEADLINE_MS),
 				String(expected),
 			).toThrow(RangeError);
 		}
 	});
 
 	it("refuses, with a RangeError, a record the factor reader would not read back", () => {
-		expect(() => toMfaStoreCreateIfRequest({ ...FULL, id: "short" }, GENERATION)).toThrow(
-			RangeError,
-		);
+		expect(() =>
+			toMfaStoreCreateIfRequest({ ...FULL, id: "short" }, GENERATION, DEADLINE_MS),
+		).toThrow(RangeError);
 	});
 
 	it("reads a 200 as created, with the set's new generation, and a 409 as a conflict", () => {
@@ -603,6 +653,17 @@ describe("a conditional create on the wire", () => {
 		}
 	});
 
+	it("throws a TypeError for a 408, whatever its body: a Store that read the request past its deadline wrote nothing, and that is no outcome", () => {
+		for (const body of [
+			undefined,
+			{},
+			{ outcome: "created", generation: NEXT_GENERATION },
+			{ outcome: "conflict" },
+		]) {
+			expect(() => readMfaStoreCreateIfAnswer(408, body), JSON.stringify(body)).toThrow(TypeError);
+		}
+	});
+
 	it("throws a TypeError for any other status, a 404 included: a create is never missing", () => {
 		for (const [status, body] of [
 			[404, { outcome: "missing" }],
@@ -619,31 +680,58 @@ describe("a conditional create on the wire", () => {
 });
 
 describe("a conditional remove on the wire", () => {
-	it("names the record by subject and id, and carries the generation the writer read as expectedGeneration", () => {
-		expect(toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION)).toStrictEqual({
+	it("names the record by subject and id, and carries the generation the writer read as expectedGeneration and the deadline as deadlineMs", () => {
+		const request = toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION, DEADLINE_MS);
+		expect(request).toStrictEqual({
 			subject: "user-1",
 			id: ID_1,
 			expectedGeneration: GENERATION,
+			deadlineMs: DEADLINE_MS,
 		});
+		expect(overJson(request)).toHaveProperty("deadlineMs", DEADLINE_MS);
 		expectTypeOf<keyof MfaStoreRemoveIfRequest>().toEqualTypeOf<
-			"subject" | "id" | "expectedGeneration"
+			"subject" | "id" | "expectedGeneration" | "deadlineMs"
 		>();
+		expectTypeOf<MfaStoreRemoveIfRequest["deadlineMs"]>().toEqualTypeOf<number>();
+	});
+
+	it("takes the deadline as a required parameter: no caller can leave it out", () => {
+		expectTypeOf(toMfaStoreRemoveIfRequest).parameters.toEqualTypeOf<
+			[string, string, StoreGeneration, number]
+		>();
+		// @ts-expect-error -- a conditional remove always carries a deadline.
+		expect(() => toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION)).toThrow(RangeError);
+	});
+
+	it("refuses, with a RangeError, a deadline that is not a finite safe integer above 0", () => {
+		for (const deadline of NOT_DEADLINES) {
+			expect(
+				() => toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION, deadline as number),
+				String(deadline),
+			).toThrow(RangeError);
+		}
+		expect(toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION, 1)).toHaveProperty(
+			"deadlineMs",
+			1,
+		);
 	});
 
 	it("refuses, with a RangeError, an expected generation that is no store generation, null included", () => {
 		for (const expected of [...NOT_GENERATIONS, null, undefined]) {
 			expect(
-				() => toMfaStoreRemoveIfRequest("user-1", ID_1, expected as StoreGeneration),
+				() => toMfaStoreRemoveIfRequest("user-1", ID_1, expected as StoreGeneration, DEADLINE_MS),
 				String(expected),
 			).toThrow(RangeError);
 		}
 	});
 
 	it("refuses, with a RangeError, an id no record can have, or a subject that is no string", () => {
-		expect(() => toMfaStoreRemoveIfRequest("user-1", "short", GENERATION)).toThrow(RangeError);
-		expect(() => toMfaStoreRemoveIfRequest(7 as unknown as string, ID_1, GENERATION)).toThrow(
+		expect(() => toMfaStoreRemoveIfRequest("user-1", "short", GENERATION, DEADLINE_MS)).toThrow(
 			RangeError,
 		);
+		expect(() =>
+			toMfaStoreRemoveIfRequest(7 as unknown as string, ID_1, GENERATION, DEADLINE_MS),
+		).toThrow(RangeError);
 	});
 
 	it("reads a 200 as removed, with the set's new generation, a 404 as missing, and a 409 as a conflict", () => {
@@ -687,6 +775,18 @@ describe("a conditional remove on the wire", () => {
 				() => readMfaStoreRemoveIfAnswer(200, { outcome: "removed", generation }),
 				String(generation),
 			).toThrow(TypeError);
+		}
+	});
+
+	it("throws a TypeError for a 408, whatever its body: a Store that read the request past its deadline wrote nothing, and that is no outcome", () => {
+		for (const body of [
+			undefined,
+			{},
+			{ outcome: "removed", generation: NEXT_GENERATION },
+			{ outcome: "missing" },
+			{ outcome: "conflict" },
+		]) {
+			expect(() => readMfaStoreRemoveIfAnswer(408, body), JSON.stringify(body)).toThrow(TypeError);
 		}
 	});
 

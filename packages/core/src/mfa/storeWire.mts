@@ -36,10 +36,13 @@
  * the versioned list answers `factors` with the set's `generation`, `null`
  * only for an absent set; a conditional create or remove carries
  * `expectedGeneration` (`null`, for a create only: the set was read as
- * absent), and is answered `200`, `404` or `409` with an outcome body. This
- * codec is the only place those field names and statuses meet the port's
- * words: its readers answer the port's types, and throw a `TypeError` for any
- * other answer, a bare `404` or `409` included.
+ * absent) and `deadlineMs`, and is answered `200`, `404` or `409` with an
+ * outcome body. `deadlineMs` is an instant on the provider's clock, the send
+ * time plus the adapter's request timeout; a Store that reads the request at
+ * or after it on its own clock writes nothing and answers `408`. This codec is
+ * the only place those field names and statuses meet the port's words: its
+ * readers answer the port's types, and throw a `TypeError` for any other
+ * answer, a bare `404` or `409` and a `408` included.
  */
 
 import {
@@ -123,6 +126,12 @@ export interface MfaStoreVersionedListAnswer {
 export interface MfaStoreCreateIfRequest {
 	readonly factor: MfaStoreFactor;
 	readonly expectedGeneration: string | null;
+	/**
+	 * Epoch milliseconds on the provider's clock: the send time plus the
+	 * adapter's request timeout. A Store that reads the request at or after
+	 * it, on its own clock, writes nothing and answers `408`.
+	 */
+	readonly deadlineMs: number;
 }
 
 /**
@@ -141,6 +150,12 @@ export interface MfaStoreRemoveIfRequest {
 	readonly subject: string;
 	readonly id: string;
 	readonly expectedGeneration: string;
+	/**
+	 * Epoch milliseconds on the provider's clock: the send time plus the
+	 * adapter's request timeout. A Store that reads the request at or after
+	 * it, on its own clock, writes nothing and answers `408`.
+	 */
+	readonly deadlineMs: number;
 }
 
 /**
@@ -407,6 +422,14 @@ function checkGeneration(expected: unknown): StoreGeneration {
 	return expected;
 }
 
+/** `deadlineMs` as the wire carries it; a `RangeError` for one that is not a safe integer above 0. */
+function checkDeadline(deadlineMs: unknown): number {
+	if (typeof deadlineMs !== "number" || !Number.isSafeInteger(deadlineMs) || deadlineMs <= 0) {
+		throw refuse("deadlineMs must be a safe integer above 0");
+	}
+	return deadlineMs;
+}
+
 /** `value[key]` when it is the answer's own; a `TypeError` naming `what` when it cannot be read. */
 function answerField(value: unknown, key: string, what: string): unknown {
 	if (typeof value !== "object" || value === null) throw new TypeError(`${what}: not an object`);
@@ -456,35 +479,43 @@ export function readMfaStoreVersionedListAnswer(
 
 /**
  * The body of a create of `record` while its subject's set is at `expected`;
- * `null`: while the set is absent. A `RangeError` for an `expected` that is
- * neither a store generation nor `null`, and for a record
- * {@link toMfaStoreFactor} refuses.
+ * `null`: while the set is absent. `deadlineMs` is the send time plus the
+ * adapter's request timeout, in epoch milliseconds. A `RangeError` for an
+ * `expected` that is neither a store generation nor `null`, a `deadlineMs`
+ * that is not a safe integer above 0, and a record {@link toMfaStoreFactor}
+ * refuses.
  */
 export function toMfaStoreCreateIfRequest(
 	record: MfaFactorRecord,
 	expected: StoreGeneration | null,
+	deadlineMs: number,
 ): MfaStoreCreateIfRequest {
 	return {
 		factor: toMfaStoreFactor(record),
 		expectedGeneration: expected === null ? null : checkGeneration(expected),
+		deadlineMs: checkDeadline(deadlineMs),
 	};
 }
 
 /**
- * The body of a removal of `(subject, id)` while the set is at `expected`. A
- * `RangeError` for an `expected` that is no store generation (`null`
- * included: a removal never targets an absent set), an id no record can have,
- * and a `subject` that is no string.
+ * The body of a removal of `(subject, id)` while the set is at `expected`.
+ * `deadlineMs` is the send time plus the adapter's request timeout, in epoch
+ * milliseconds. A `RangeError` for an `expected` that is no store generation
+ * (`null` included: a removal never targets an absent set), a `deadlineMs`
+ * that is not a safe integer above 0, an id no record can have, and a
+ * `subject` that is no string.
  */
 export function toMfaStoreRemoveIfRequest(
 	subject: string,
 	id: string,
 	expected: StoreGeneration,
+	deadlineMs: number,
 ): MfaStoreRemoveIfRequest {
 	return {
 		subject: checkString(subject, "subject"),
 		id: checkId(id),
 		expectedGeneration: checkGeneration(expected),
+		deadlineMs: checkDeadline(deadlineMs),
 	};
 }
 
@@ -526,8 +557,9 @@ const REMOVE_IF_OUTCOMES: ReadonlyMap<number, ConditionalSetRemoveAnswer["outcom
  * A conditional create's answer, its `status` and its parsed `body`, as the
  * port's answer (`readConditionalCreateAnswer`): `200` `created` with the
  * set's new generation, `409` `conflict`. A `TypeError` for anything else: a
- * `404` (a create is never `missing`), another status, a `409` or `200`
- * without its body, or a body naming another status's outcome.
+ * `404` (a create is never `missing`), a `408` (read past its deadline, it
+ * wrote nothing), another status, a `409` or `200` without its body, or a
+ * body naming another status's outcome.
  */
 export function readMfaStoreCreateIfAnswer(status: number, body: unknown): ConditionalCreateAnswer {
 	return readStatusAnswer(
@@ -543,8 +575,9 @@ export function readMfaStoreCreateIfAnswer(status: number, body: unknown): Condi
  * A conditional remove's answer, its `status` and its parsed `body`, as the
  * port's answer (`readConditionalSetRemoveAnswer`): `200` `removed` with the
  * set's new generation, `404` `missing`, `409` `conflict`. A `TypeError` for
- * anything else: another status, one of the three without its body, or a
- * body naming another status's outcome.
+ * anything else: a `408` (read past its deadline, it wrote nothing), another
+ * status, one of the three without its body, or a body naming another
+ * status's outcome.
  */
 export function readMfaStoreRemoveIfAnswer(
 	status: number,
