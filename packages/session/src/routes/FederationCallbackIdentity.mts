@@ -51,11 +51,12 @@ export interface FederatedIdentity {
 
 /**
  * The lifetime a code exchange's answer gives the record, through core's
- * reading. `obtainedAt` is set only for an end counted from this server's
- * call (`expiresIn` stated): an end stated only as an instant is on the
- * upstream's clock and is never aged. Otherwise the adapter's `expiresAt` is
- * kept as stated, `null` included (no finite expiry: do not refresh), and the
- * record has no `obtainedAt`, which fails closed.
+ * reading with a floor of 0 and no cap. Finite with `expiresIn` stated: the
+ * reading's end, and `obtainedAt` = `calledAt`. Any other reading (an end
+ * stated only as an instant, which is on the upstream's clock; none;
+ * malformed; contradictory; spent): the adapter's `expiresAt` as stated,
+ * `null` included, and no `obtainedAt`, which fails closed. Throws only
+ * where reading the answer's fields throws.
  */
 const readLinkedLifetime = (
 	profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>,
@@ -120,6 +121,7 @@ export const identifyFederatedUser = async (
 	const { code: _code, state: _state, ...adapterCallbackParams } = params;
 
 	let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
+	let lifetime: LinkedTokenLifetime;
 	// An `expiresIn` counts from before the exchange: time the upstream took is not life left.
 	const calledAt = Date.now();
 	try {
@@ -136,10 +138,12 @@ export const identifyFederatedUser = async (
 			// what it may affect) or RFC 9207's `iss`.
 			callbackParams: adapterCallbackParams,
 		});
+		// An answer whose lifetime cannot be read is a failed exchange.
+		lifetime = readLinkedLifetime(profile, calledAt);
 	} catch (err) {
-		// The upstream's verdict or outage, not this server's: a warn. The
-		// error's cause chain can hold the refused token response, so only its
-		// projection is logged.
+		// The upstream's verdict or outage, or an answer that cannot be read,
+		// not this server's: a warn. The error's cause chain can hold the
+		// refused token response, so only its projection is logged.
 		log.warn({ err: loggableError(err) }, "federation_callback_exchange_failed");
 		res.status(502).json({
 			error: "exchange_failed",
@@ -172,5 +176,5 @@ export const identifyFederatedUser = async (
 		return null;
 	}
 
-	return { profile, identityToken, user, lifetime: readLinkedLifetime(profile, calledAt) };
+	return { profile, identityToken, user, lifetime };
 };

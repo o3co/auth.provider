@@ -1426,33 +1426,81 @@ describe("account linking across federations", () => {
 			});
 			return { provider, entered: () => entered };
 		};
-		const attachedOn = async (
+		const runCallback = async (
 			path: "login" | "link",
 			provider: FederationProvider,
-		): Promise<Record<string, unknown>> => {
+			logger?: Logger,
+		) => {
 			const fts = makeFederationTokenStore();
+			const repo = linkableRepo({ current: null });
 			const { app } =
 				path === "link"
 					? buildCallbackApp({
 							providers: new Map([["test", provider]]),
 							federation: linkEnvelope,
 							sessionSeed: seed,
-							userRepository: linkableRepo({ current: null }),
+							userRepository: repo,
 							userSessionStore: liveStore(),
 							sessionFederationIndex: makeSessionFederationIndex(),
 							federationTokenStore: fts,
 							auditSink: recorder().sink,
+							...(logger ? { logger } : {}),
 						})
 					: buildCallbackApp({
 							providers: new Map([["test", provider]]),
 							federation: { name: "test", state: "s1", codeVerifier: "v1" },
 							federationTokenStore: fts,
+							...(logger ? { logger } : {}),
 						});
 			const agent = await plantAndGetAgent(app);
-			expect((await callback(agent)).status).toBe(302);
+			return { res: await callback(agent), fts, repo };
+		};
+		const attachedOn = async (
+			path: "login" | "link",
+			provider: FederationProvider,
+		): Promise<Record<string, unknown>> => {
+			const { res, fts } = await runCallback(path, provider);
+			expect(res.status).toBe(302);
 			expect(fts.attach).toHaveBeenCalledOnce();
 			return fts.attach.mock.calls[0]?.[2] as Record<string, unknown>;
 		};
+
+		describe.each(["login", "link"] as const)("on the %s path", (path) => {
+			it.each(["expiresIn", "expiresAt"])(
+				"an answer whose %s cannot be read is refused as a failed exchange, and nothing is linked",
+				async (field) => {
+					// An in-process adapter may be buggy: a field that throws when read
+					// is a broken answer, not an outage of this server.
+					const answer = {
+						issuer: "https://idp.example.com",
+						sub: "external-42",
+						accessToken: "at",
+						expiresIn: 3600,
+						expiresAt: new Date(Date.now() + 3_600_000),
+					};
+					Object.defineProperty(answer, field, {
+						enumerable: true,
+						get: () => {
+							throw new Error(`${field} unreadable`);
+						},
+					});
+					const provider = makeFakeProvider({
+						exchangeCode: vi.fn(async () => answer as unknown as FederationProfile),
+					});
+					const logger = spyLogger();
+					const { res, fts, repo } = await runCallback(path, provider, logger as unknown as Logger);
+
+					expect(res.status).toBe(502);
+					expect(res.body.error).toBe("exchange_failed");
+					expect(fts.attach).not.toHaveBeenCalled();
+					expect(repo.authenticateByToken).not.toHaveBeenCalled();
+					expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+					const warned = logger.warn.mock.calls.map((call) => call[1]);
+					expect(warned).toEqual(["federation_callback_exchange_failed"]);
+					expect(logger.error).not.toHaveBeenCalled();
+				},
+			);
+		});
 
 		it.each(["login", "link"] as const)(
 			"on the %s path, an expires_in lifetime is counted from the instant before the exchange",
