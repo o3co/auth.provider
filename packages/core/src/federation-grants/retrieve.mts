@@ -524,7 +524,8 @@ const UPSTREAM_OUTAGE_CODES: ReadonlySet<string> = new Set([
  * What `count` the store will give a failure at `at`: one more than a stamp no
  * older than `rowMs`, else one — and `undefined` for one dated before the
  * stamp on the record, which the store refuses: a caller must not be
- * told a wait the record will not carry.
+ * told a wait the record will not carry. A stamp whose date holds no instant
+ * starts no row.
  */
 const rowCount = (
 	grant: AuthorizedFederationGrant,
@@ -533,7 +534,7 @@ const rowCount = (
 ): number | undefined => {
 	const previous = grant.refreshFailure;
 	if (previous === undefined) return 1;
-	const sinceMs = at.getTime() - previous.at.getTime();
+	const sinceMs = at.getTime() - (instantOf(previous.at) ?? Number.NaN);
 	if (sinceMs < 0) return undefined;
 	return sinceMs <= rowMs ? previous.count + 1 : 1;
 };
@@ -1081,6 +1082,34 @@ function readResponse(
 	};
 }
 
+/** A marker's date, `undefined` for none, and NaN, equal to nothing, for a date that holds no instant. */
+const markerInstant = (
+	marker: FederationGrantIneligibilityMarker | undefined,
+): number | undefined => (marker === undefined ? undefined : (instantOf(marker.at) ?? Number.NaN));
+
+/**
+ * Tells the logger, once per call and by the field's name alone, of a stored
+ * marker or failed-refresh stamp whose date holds no instant. Each reads as a
+ * retry that is due, so a store that answers them so would have every request
+ * ask the upstream with nothing else to say why.
+ */
+function reportUndatedStamps(
+	deps: RetrieveFederationGrantTokenDeps,
+	request: RetrieveFederationGrantTokenRequest,
+	grant: FederationGrant | undefined,
+): void {
+	if (grant === undefined || !hasFederationGrantAuthorization(grant)) return;
+	const stamps = [
+		["ineligible.at", grant.ineligible],
+		["refreshFailure.at", grant.refreshFailure],
+	] as const;
+	for (const [field, stamp] of stamps) {
+		if (stamp !== undefined && instantOf(stamp.at) === undefined) {
+			report(deps, request, "open", new TypeError(`the stored ${field} holds no instant`));
+		}
+	}
+}
+
 /**
  * Whether the record holds what this call tried to store: the credentials,
  * and the marker beside them. Two replicas can come to store the very same
@@ -1108,7 +1137,7 @@ async function isStored(
 		held.state === "ok" &&
 		held.value.refreshToken === credentials.refreshToken &&
 		held.value.accessToken?.value === credentials.accessToken?.value &&
-		marker?.at.getTime() === ineligible?.at.getTime()
+		markerInstant(marker) === markerInstant(ineligible ?? undefined)
 	);
 }
 
@@ -1768,6 +1797,7 @@ export async function retrieveFederationGrantToken(
 	request: RetrieveFederationGrantTokenRequest,
 ): Promise<FederationGrantTokenResult> {
 	const first = await evaluate(deps, request);
+	reportUndatedStamps(deps, request, first.grant);
 	if (first.kind !== "refresh") {
 		return conclude(deps, request, first, false, unavailable("upstream"));
 	}

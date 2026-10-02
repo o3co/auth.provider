@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { instantOf } from "../federations/token-lifetime.mjs";
 import type { FederationGrantExpiredReason } from "./types.mjs";
 
 /**
@@ -58,18 +59,19 @@ export function resolveFederationGrantLifetimeMs(limits: {
  * A grant's expiry counts from the consent, not from the callback that
  * follows it by up to ten minutes. The guarantee that no grant outlives its
  * revocation boundary rests on `expiresAt − consent.at` being within the
- * ceiling, so both are measured from the same instant.
+ * ceiling, so both are measured from the same instant. A consent that holds
+ * no instant gives an Invalid Date.
  */
 export function federationGrantExpiresAt(consentAt: Date, lifetimeMs: number): Date {
-	return new Date(consentAt.getTime() + lifetimeMs);
+	return new Date((instantOf(consentAt) ?? Number.NaN) + lifetimeMs);
 }
 
 /**
  * The guard `activate` applies to the fields it is about to write. A date
- * that is not a date fails it: `NaN > 0` is false.
+ * that holds no instant, or is no Date at all, fails it: `NaN > 0` is false.
  */
 export function withinFederationGrantLifetimeCeiling(consentAt: Date, expiresAt: Date): boolean {
-	const lifetime = expiresAt.getTime() - consentAt.getTime();
+	const lifetime = (instantOf(expiresAt) ?? Number.NaN) - (instantOf(consentAt) ?? Number.NaN);
 	return lifetime > 0 && lifetime <= FEDERATION_GRANT_LIFETIME_CEILING_MS;
 }
 
@@ -86,9 +88,13 @@ interface ExpiryFields {
  * Nothing that is persisted — a key's TTL, the revocation boundary — may be
  * computed from this. A maximum that can be raised again cannot be the basis
  * of a guarantee; persisted horizons use the stored `expiresAt` or the ceiling.
+ * A stored date that holds no instant gives an Invalid Date, which every
+ * "still before it?" test reads as passed.
  */
 export function federationGrantEffectiveExpiry(grant: ExpiryFields, maxMs: number): Date {
-	return new Date(Math.min(grant.expiresAt.getTime(), grant.consent.at.getTime() + maxMs));
+	const expiresAtMs = instantOf(grant.expiresAt) ?? Number.NaN;
+	const consentAtMs = instantOf(grant.consent.at) ?? Number.NaN;
+	return new Date(Math.min(expiresAtMs, consentAtMs + maxMs));
 }
 
 /**
@@ -97,15 +103,18 @@ export function federationGrantEffectiveExpiry(grant: ExpiryFields, maxMs: numbe
  * the grant, within the consent). When both have passed, the terminal
  * reason is reported.
  *
- * Each test is "still before the bound?" negated, so a NaN date or maximum
- * reads as expired rather than live for ever.
+ * Each test is "still before the bound?" negated, so a stored date that holds
+ * no instant (a store's string or `null` included), or a NaN maximum, reads as
+ * expired rather than live for ever.
  */
 export function federationGrantExpiryState(
 	grant: ExpiryFields,
 	now: Date,
 	maxMs: number,
 ): "live" | FederationGrantExpiredReason {
-	if (!(now.getTime() < grant.expiresAt.getTime())) return "consented_lifetime";
-	if (!(now.getTime() < grant.consent.at.getTime() + maxMs)) return "operator_maximum";
+	const expiresAtMs = instantOf(grant.expiresAt) ?? Number.NaN;
+	const consentAtMs = instantOf(grant.consent.at) ?? Number.NaN;
+	if (!(now.getTime() < expiresAtMs)) return "consented_lifetime";
+	if (!(now.getTime() < consentAtMs + maxMs)) return "operator_maximum";
 	return "live";
 }
