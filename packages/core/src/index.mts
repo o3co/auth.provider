@@ -246,6 +246,9 @@ export {
 	// decimal digits a variable carries, for the packages outside core that
 	// declare a section's schema.
 	wholeNumberFromEnv,
+	// The same reader held to a range, refusing with one message that names
+	// the range and the form.
+	wholeNumberInRangeFromEnv,
 } from "./config/application.schema.mjs";
 // Transitional: the switches that choose a composition root's modules, read
 // before it knows them. `createApp` takes the resolved configuration itself,

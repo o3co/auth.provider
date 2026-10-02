@@ -146,7 +146,8 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  * - `WWW-Authenticate: Basic` is sent only when the failed attempt was Basic
  *   or no credentials were sent, never to steer other callers to Basic.
  * - Clients are read through core's client-record boundary over
- *   `clientRepository` (a boundary or a document fallback is read as it is):
+ *   `clientRepository` (a boundary, or the router's document fallback, is read
+ *   as it is):
  *   a record the boundary refuses rejects the lookup, answered as below.
  * - A repository lookup that rejects is an outage, `503
  *   temporarily_unavailable`, not `invalid_client` (which a client reads as

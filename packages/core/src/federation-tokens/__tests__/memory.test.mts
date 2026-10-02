@@ -4,6 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { isStoreGeneration } from "../../adapters/conditionalWrite.mjs";
 import { createInMemoryFederationTokenStore } from "../adapters/memory.mjs";
 import {
 	type FederationTokenStore,
@@ -188,5 +189,79 @@ describe("in-memory FederationTokenStore", () => {
 		});
 		expect(r.acquired).toBe(true);
 		if (r.acquired) await r.release();
+	});
+
+	describe("conditional members", () => {
+		const live = async (sid: string, name: string) => {
+			const read = await store.getVersioned(sid, name);
+			if (read === null) throw new Error(`${sid}/${name} is not live`);
+			return read;
+		};
+
+		it("getVersioned answers null for an absent record, and a copy at a generation for a live one", async () => {
+			expect(await store.getVersioned("sid-1", "google")).toBeNull();
+			await store.attach("sid-1", "google", tokens);
+			const read = await live("sid-1", "google");
+			expect(read.value).toStrictEqual(tokens);
+			expect(isStoreGeneration(read.generation)).toBe(true);
+			// A copy: changing it changes nothing stored.
+			(read.value as { accessToken: string }).accessToken = "changed";
+			expect((await store.get("sid-1", "google"))?.accessToken).toBe("at");
+		});
+
+		it("every write moves the generation, a byte-identical one included", async () => {
+			await store.attach("sid-1", "google", tokens);
+			const first = (await live("sid-1", "google")).generation;
+			await store.update("sid-1", "google", tokens);
+			const second = (await live("sid-1", "google")).generation;
+			await store.attach("sid-1", "google", tokens);
+			const third = (await live("sid-1", "google")).generation;
+			expect(new Set([first, second, third]).size).toBe(3);
+		});
+
+		it("replaceIf answers missing for an absent record, conflict at another generation, and updated at the current one", async () => {
+			await store.attach("sid-1", "google", tokens);
+			const read = await live("sid-1", "google");
+			expect(await store.replaceIf("sid-1", "okta", read.generation, tokens)).toEqual({
+				outcome: "missing",
+			});
+			expect(await store.getVersioned("sid-1", "okta")).toBeNull();
+
+			const next = { ...tokens, accessToken: "at-2" };
+			const replaced = await store.replaceIf("sid-1", "google", read.generation, next);
+			if (replaced.outcome !== "updated") throw new Error(replaced.outcome);
+			expect(replaced.generation).not.toBe(read.generation);
+			expect(await live("sid-1", "google")).toStrictEqual({
+				value: next,
+				generation: replaced.generation,
+			});
+
+			expect(await store.replaceIf("sid-1", "google", read.generation, tokens)).toEqual({
+				outcome: "conflict",
+			});
+			expect((await store.get("sid-1", "google"))?.accessToken).toBe("at-2");
+		});
+
+		it("removeIf answers missing for an absent record, conflict at another generation, and removed at the current one", async () => {
+			await store.attach("sid-1", "google", tokens);
+			const read = await live("sid-1", "google");
+			expect(await store.removeIf("sid-1", "okta", read.generation)).toEqual({
+				outcome: "missing",
+			});
+			await store.update("sid-1", "google", tokens);
+			expect(await store.removeIf("sid-1", "google", read.generation)).toEqual({
+				outcome: "conflict",
+			});
+			expect(await store.get("sid-1", "google")).not.toBeNull();
+
+			const current = await live("sid-1", "google");
+			expect(await store.removeIf("sid-1", "google", current.generation)).toEqual({
+				outcome: "removed",
+			});
+			expect(await store.get("sid-1", "google")).toBeNull();
+			expect(await store.removeIf("sid-1", "google", current.generation)).toEqual({
+				outcome: "missing",
+			});
+		});
 	});
 });

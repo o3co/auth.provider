@@ -19,6 +19,7 @@ import {
 	type BuilderContext,
 	createAdapterFactory,
 } from "../adapters/AdapterFactory.mjs";
+import { wholeNumberInRangeFromEnv } from "../config/application.schema.mjs";
 import type { ClientRepository } from "./ClientRepository.mjs";
 import type { CodeRepository } from "./CodeRepository.mjs";
 import { ClientEntrySchema, InMemoryClientRepository } from "./InMemoryClientRepository.mjs";
@@ -26,6 +27,9 @@ import { InMemoryCodeRepository } from "./InMemoryCodeRepository.mjs";
 import { InMemoryUserRepository, UserEntrySchema } from "./InMemoryUserRepository.mjs";
 import { loadYamlMap } from "./loadYamlMap.mjs";
 import type { UserRepository } from "./UserRepository.mjs";
+
+/** The memory code repository's `defaultExpiresIn`: a positive whole number of seconds. */
+const positiveWholeNumber = wholeNumberInRangeFromEnv(1);
 
 /**
  * Construct the three default repository factories with the built-in
@@ -66,16 +70,18 @@ export const createRepositoryFactories = (
 
 	const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository", ctx ?? {});
 	codeFactory.register("memory", (config, builderCtx) => {
-		const defaultExpiresIn =
-			config.defaultExpiresIn != null ? Number(config.defaultExpiresIn) : undefined;
-		// Whole seconds, as the Redis repository's module schema requires. A
-		// RangeError, as the repository's own constructor refuses the same.
-		if (
-			defaultExpiresIn !== undefined &&
-			(!Number.isInteger(defaultExpiresIn) || defaultExpiresIn <= 0)
-		) {
-			throw new RangeError('"defaultExpiresIn" must be a positive whole number of seconds');
+		// Whole seconds in decimal digits, as the Redis repository's module schema
+		// requires. A RangeError, as the repository's own constructor refuses the same.
+		const read =
+			config.defaultExpiresIn !== undefined
+				? positiveWholeNumber.safeParse(config.defaultExpiresIn)
+				: undefined;
+		if (read !== undefined && !read.success) {
+			throw new RangeError(
+				'"defaultExpiresIn" must be a positive whole number of seconds, in decimal digits',
+			);
 		}
+		const defaultExpiresIn = read?.data;
 		const repo = new InMemoryCodeRepository({ defaultExpiresIn });
 		// Register the periodic-GC interval for disposal so it doesn't keep the
 		// event loop alive past `AppHandle.dispose()`.

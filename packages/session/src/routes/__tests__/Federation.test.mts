@@ -230,6 +230,9 @@ function makeFederationTokenStore(): FederationTokenStore & {
 		kind: "memory",
 		attach: vi.fn(async () => {}),
 		get: vi.fn(async () => null),
+		getVersioned: vi.fn(async () => null),
+		replaceIf: vi.fn(async () => ({ outcome: "missing" as const })),
+		removeIf: vi.fn(async () => ({ outcome: "missing" as const })),
 		update: vi.fn(async () => {}),
 		removeBySid: vi.fn(async () => {}),
 		delete: vi.fn(async () => {}),
@@ -1390,6 +1393,185 @@ describe("account linking across federations", () => {
 			expect(res.status).toBe(401);
 			expect(res.body.error).toBe("unknown_user");
 			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+		});
+	});
+
+	// Both link-time writers, the login callback's and the link callback's,
+	// record when the upstream token was obtained as core's lifetime reading
+	// dates it: the instant before the code exchange began.
+	describe("a link-time record says when its upstream token was obtained", () => {
+		const EXCHANGE_MS = 25;
+		/**
+		 * A provider whose exchange takes `EXCHANGE_MS` and answers the lifetime
+		 * fields `lifetime` gives, from the instant it answers. `entered` is
+		 * when the exchange was called.
+		 */
+		const timedProvider = (
+			lifetime: (answeredAt: number) => Record<string, unknown>,
+		): { provider: FederationProvider; entered: () => number } => {
+			let entered = Number.NaN;
+			const provider = makeFakeProvider({
+				exchangeCode: vi.fn(async () => {
+					entered = Date.now();
+					await new Promise((resolve) => setTimeout(resolve, EXCHANGE_MS));
+					return {
+						issuer: "https://idp.example.com",
+						sub: "external-42",
+						accessToken: "at",
+						refreshToken: "rt",
+						scope: "openid email",
+						...lifetime(Date.now()),
+					} as unknown as FederationProfile;
+				}),
+			});
+			return { provider, entered: () => entered };
+		};
+		const runCallback = async (
+			path: "login" | "link",
+			provider: FederationProvider,
+			logger?: Logger,
+		) => {
+			const fts = makeFederationTokenStore();
+			const repo = linkableRepo({ current: null });
+			const { app } =
+				path === "link"
+					? buildCallbackApp({
+							providers: new Map([["test", provider]]),
+							federation: linkEnvelope,
+							sessionSeed: seed,
+							userRepository: repo,
+							userSessionStore: liveStore(),
+							sessionFederationIndex: makeSessionFederationIndex(),
+							federationTokenStore: fts,
+							auditSink: recorder().sink,
+							...(logger ? { logger } : {}),
+						})
+					: buildCallbackApp({
+							providers: new Map([["test", provider]]),
+							federation: { name: "test", state: "s1", codeVerifier: "v1" },
+							federationTokenStore: fts,
+							...(logger ? { logger } : {}),
+						});
+			const agent = await plantAndGetAgent(app);
+			return { res: await callback(agent), fts, repo };
+		};
+		const attachedOn = async (
+			path: "login" | "link",
+			provider: FederationProvider,
+		): Promise<Record<string, unknown>> => {
+			const { res, fts } = await runCallback(path, provider);
+			expect(res.status).toBe(302);
+			expect(fts.attach).toHaveBeenCalledOnce();
+			return fts.attach.mock.calls[0]?.[2] as Record<string, unknown>;
+		};
+
+		describe.each(["login", "link"] as const)("on the %s path", (path) => {
+			it.each(["expiresIn", "expiresAt"])(
+				"an answer whose %s cannot be read is refused as a failed exchange, and nothing is linked",
+				async (field) => {
+					// An in-process adapter may be buggy: a field that throws when read
+					// is a broken answer, not an outage of this server.
+					const answer = {
+						issuer: "https://idp.example.com",
+						sub: "external-42",
+						accessToken: "at",
+						expiresIn: 3600,
+						expiresAt: new Date(Date.now() + 3_600_000),
+					};
+					Object.defineProperty(answer, field, {
+						enumerable: true,
+						get: () => {
+							throw new Error(`${field} unreadable`);
+						},
+					});
+					const provider = makeFakeProvider({
+						exchangeCode: vi.fn(async () => answer as unknown as FederationProfile),
+					});
+					const logger = spyLogger();
+					const { res, fts, repo } = await runCallback(path, provider, logger as unknown as Logger);
+
+					expect(res.status).toBe(502);
+					expect(res.body.error).toBe("exchange_failed");
+					expect(fts.attach).not.toHaveBeenCalled();
+					expect(repo.authenticateByToken).not.toHaveBeenCalled();
+					expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+					const warned = logger.warn.mock.calls.map((call) => call[1]);
+					expect(warned).toEqual(["federation_callback_exchange_failed"]);
+					expect(logger.error).not.toHaveBeenCalled();
+				},
+			);
+		});
+
+		it.each(["login", "link"] as const)(
+			"on the %s path, an expires_in lifetime is counted from the instant before the exchange",
+			async (path) => {
+				const started = Date.now();
+				const { provider, entered } = timedProvider((answeredAt) => ({
+					expiresIn: 3600,
+					expiresAt: new Date(answeredAt + 3_600_000),
+				}));
+				const attached = await attachedOn(path, provider);
+
+				expect(attached.obtainedAt).toBeInstanceOf(Date);
+				const obtainedAt = (attached.obtainedAt as Date).getTime();
+				expect(obtainedAt).toBeGreaterThanOrEqual(started);
+				expect(obtainedAt).toBeLessThanOrEqual(entered());
+				// The earlier end: `expires_in` counted from that instant, not the
+				// adapter's own `now + expires_in` taken after the answer arrived.
+				expect((attached.expiresAt as Date).getTime()).toBe(obtainedAt + 3_600_000);
+			},
+		);
+
+		it.each(["login", "link"] as const)(
+			"on the %s path, an end stated only as an instant is kept as stated and never aged",
+			async (path) => {
+				// An absolute end is on the upstream's clock: no `obtainedAt`, so
+				// the token route keeps its refresh buffer for this record.
+				const end = Date.now() + 3_600_000;
+				const { provider } = timedProvider(() => ({ expiresAt: new Date(end) }));
+				const attached = await attachedOn(path, provider);
+
+				expect(attached).not.toHaveProperty("obtainedAt");
+				expect((attached.expiresAt as Date).getTime()).toBe(end);
+			},
+		);
+
+		const unusable: ReadonlyArray<
+			[string, (answeredAt: number) => Record<string, unknown>, "null" | "as stated"]
+		> = [
+			["no finite lifetime", () => ({ expiresIn: null, expiresAt: null }), "null"],
+			["no lifetime field at all", () => ({ expiresAt: null }), "null"],
+			[
+				"a malformed expires_in",
+				(answeredAt) => ({ expiresIn: "3600", expiresAt: new Date(answeredAt + 3_600_000) }),
+				"as stated",
+			],
+			["a contradictory pair", () => ({ expiresIn: 3600, expiresAt: null }), "null"],
+			[
+				"a lifetime already spent",
+				(answeredAt) => ({ expiresIn: 3600, expiresAt: new Date(answeredAt - 1_000) }),
+				"as stated",
+			],
+		];
+		describe.each(["login", "link"] as const)("on the %s path", (path) => {
+			it.each(unusable)(
+				"%s records no obtainedAt and the end the adapter stated",
+				async (_label, lifetime, end) => {
+					// A record without `obtainedAt` fails closed: a token of unknown
+					// age is refreshed sooner, never kept longer.
+					let stated: unknown;
+					const { provider } = timedProvider((answeredAt) => {
+						const fields = lifetime(answeredAt);
+						stated = fields.expiresAt;
+						return fields;
+					});
+					const attached = await attachedOn(path, provider);
+
+					expect(attached).not.toHaveProperty("obtainedAt");
+					if (end === "null") expect(attached.expiresAt).toBeNull();
+					else expect(attached.expiresAt).toBe(stated);
+				},
+			);
 		});
 	});
 

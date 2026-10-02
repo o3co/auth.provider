@@ -22,8 +22,8 @@
  * replaced by a document. With documents off the router reads the
  * repository through the boundary itself, with the same answer. An id no
  * client is registered under still resolves its document, and consent names
- * the document's host. A router built over a repository that already is a
- * document fallback is refused, when it would stack its own.
+ * the document's host. The fallback is the router's own: the package entry
+ * exports neither it nor its resolver.
  */
 
 import crypto from "node:crypto";
@@ -40,7 +40,6 @@ import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { withClientIdMetadataDocuments } from "#/clients/clientIdMetadataDocument.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
@@ -116,9 +115,8 @@ const buildRouter = async (
 	clientRepository: ClientRepository,
 	{
 		documents = true,
-		consent = true,
 		fetchImpl = vi.fn(async () => new Response("{}", { status: 404 })) as unknown as typeof fetch,
-	}: { documents?: boolean; consent?: boolean; fetchImpl?: typeof fetch } = {},
+	}: { documents?: boolean; fetchImpl?: typeof fetch } = {},
 ) => {
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
@@ -129,12 +127,8 @@ const buildRouter = async (
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
-		...(consent
-			? {
-					consentStore: createMemoryConsentStore(),
-					pendingConsentStore: createMemoryPendingConsentStore(),
-				}
-			: {}),
+		consentStore: createMemoryConsentStore(),
+		pendingConsentStore: createMemoryPendingConsentStore(),
 		clientIdMetadataDocuments: { fetch: fetchImpl, lookup: async () => ["93.184.216.34"] },
 		logger,
 	});
@@ -248,17 +242,29 @@ describe("a refused registration under a URL-shaped id, with documents on", () =
 	});
 });
 
-describe("one document fallback per router", () => {
-	const fallback = () =>
-		withClientIdMetadataDocuments(answering(null), { allowedScopes: [], allowedAudiences: [] });
-
-	it("refuses to build over a fallback when documents are on, with a consent store and /authorize", async () => {
-		await expect(buildRouter(fallback())).rejects.toThrow(TypeError);
-		await expect(buildRouter(fallback())).rejects.toThrow(/Client ID Metadata Document/);
+describe("only the router installs the document fallback", () => {
+	it("leaves the fallback and its resolver out of the package entry", async () => {
+		const entry: Record<string, unknown> = await import("#/index.mjs");
+		expect(entry).not.toHaveProperty("withClientIdMetadataDocuments");
+		expect(entry).not.toHaveProperty("createClientIdMetadataDocumentResolver");
 	});
 
-	it("builds over one when it stacks none of its own: documents off, or no consent store", async () => {
-		await expect(buildRouter(fallback(), { documents: false })).resolves.toBeDefined();
-		await expect(buildRouter(fallback(), { consent: false })).resolves.toBeDefined();
+	it("leaves the fallback's option and resolver types out of the package entry", () => {
+		// Both names are type-only, so a runtime check passes whether or not
+		// they are exported. vitest's typecheck mode compiles this file, so each
+		// `@ts-expect-error` fails the run the moment its name comes back.
+		if (false as boolean) {
+			// @ts-expect-error — the fallback's options are the router's, not exported
+			type _O = import("#/index.mjs").ClientIdMetadataDocumentOptions;
+			// @ts-expect-error — the resolver is the router's, not exported
+			type _R = import("#/index.mjs").ClientIdMetadataDocumentResolver;
+		}
+		expect(true).toBe(true);
+	});
+
+	it("still exports the predicates on a client id and on a resolved client", async () => {
+		const entry: Record<string, unknown> = await import("#/index.mjs");
+		expect(entry.isClientIdMetadataDocumentUrl).toBeTypeOf("function");
+		expect(entry.isClientIdMetadataDocumentClient).toBeTypeOf("function");
 	});
 });

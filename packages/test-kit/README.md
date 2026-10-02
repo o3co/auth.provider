@@ -43,14 +43,17 @@ devDependencies.
 - `conditionalRecordContract` and `conditionalSetContract`, the generic suites
   of core's conditional-write convention, which a port's binding runs over its
   conditional members, in
-  [`src/conditionalWrite/conditionalWrite.contract.mts`](src/conditionalWrite/conditionalWrite.contract.mts).
+  [`src/conditionalWrite/conditionalWrite.contract.mts`](src/conditionalWrite/conditionalWrite.contract.mts);
+- `federationTokenStoreConditionalContract`, `FederationTokenStore`'s binding
+  of the record suite, in
+  [`src/federationTokens/federationTokenStoreConditional.contract.mts`](src/federationTokens/federationTokenStoreConditional.contract.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
 [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts)) and what each answer
 means ([`@o3co/auth-provider-foundation`](../foundation/README.md#the-stores-mfa-endpoints));
 any adapter, core's in-process ones included (the kit's own tests run
-`mfaFactorStoreContract`, `mfaFactorStoreConditionalContract` and `webAuthnCredentialStoreContract` over core's); the doubles a factor's tests use — `createTestMfaFactor`,
+`mfaFactorStoreContract`, `mfaFactorStoreConditionalContract`, `federationTokenStoreConditionalContract` and `webAuthnCredentialStoreContract` over core's); the doubles a factor's tests use — `createTestMfaFactor`,
 `testMfaFactorProofs` and `createTestMfaDigests` — which stay on
 `@o3co/auth-provider-core/testing`, since core's own tests use them and core
 cannot depend on this package. The other ports' suites are core's, on
@@ -490,6 +493,30 @@ What the suites cannot see, and a store's own tests must:
   undeclared, the outage (rule 4): the suite then names those cases as not
   run.
 
+## The federation token store's conditional writes
+
+`federationTokenStoreConditionalContract({ build, supports })` binds a
+`FederationTokenStore` to `conditionalRecordContract`: one
+`(sid, federationName)` record, a case's key as its sid, `attach` as the
+create path, and `attach`, `update`, `delete` and `removeBySid` as the
+unconditional writes, the last two removals. `values()` are two complete
+records, every key named; `mutate` moves their `Date`s in place.
+
+`build()` answers a fresh `FederationTokenStoreConditionalHarness`: `store`;
+`second`, the same backend through another instance, which the races run
+across; `forceExpire(sid, federationName)`, which moves the backend's clock
+past that record's retention deadline; `unreachable()`, a store over the
+backend that cannot reach it; and `close`. `supports` declares `forceExpire`
+and `unreachable` as the record suite's does; the unconditional writes are
+always run.
+
+Beside the record suite's cases it holds the store to: `get` and
+`getVersioned` answering the same record; a replace or a removal of one
+record leaving the session's other federations and other sessions' records
+at their generations; `removeBySid` ending every federation of the session
+and no other session's record; and a replace at a generation read before a
+`removeBySid` answering `missing` and restoring nothing.
+
 ## The fake Store
 
 `startFakeStore({ users, bearerToken, now, requestNow })` starts an in-memory HTTP server on
@@ -555,6 +582,9 @@ Exported from [`src/index.mts`](src/index.mts):
   `ConditionalRecordHarness` and `ConditionalRecordTarget`;
 - `conditionalSetContract`, with `ConditionalSetContractInput`,
   `ConditionalSetHarness` and `ConditionalSetTarget`;
+- `federationTokenStoreConditionalContract`, with
+  `FederationTokenStoreConditionalContractInput` and
+  `FederationTokenStoreConditionalHarness`;
 - `mailSenderContract`, with `MailSenderContractInput`, `MAIL_RELAY_REFUSALS`,
   `MailRelayRefusal` and `RelayedMail`;
 - `mfaFactorStoreContract`, with `MfaFactorStoreContractInput` (`build` and
@@ -581,6 +611,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges, an identity two authenticators share — read from the record already held, or the latest enrollment's answered for every record — one keyed per factor instance, or one that answers none for the second — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
 | [`conditionalWrite.contract.test.mts`](src/conditionalWrite/__tests__/conditionalWrite.contract.test.mts) | both suites over a reference record store, whose writes take a lock per key, and a reference set store, each serving two instances over one backend and keeping retention deadlines on a clock of its own, which `forceExpire` moves; every case refuses a store broken one way (a write that skips the lock, an unconditional delete among them, a counter or a digest as the generation, a torn versioned read, a write on `conflict`, a create that upserts a held id, a reset or a last removal that leaves no tombstone, a reset in two steps, a store that ignores its own deadline, a set revived from its tombstone that keeps the tombstone's deadline, a re-create after expiry at a generation seen before, an outage answered as absent, writes that skip the expiry check, a second instance reading from a cache, a member update that changes nothing, a value or a member shared with the caller, among them); stores answering frozen values, listing members in another order, or labelling a losing write from a read taken before their lock pass; an undeclared hook's or member's cases left out and named; a declared one missing fails its case; items of another scope fail the case |
+| [`federationTokenStoreConditional.contract.test.mts`](src/federationTokens/__tests__/federationTokenStoreConditional.contract.test.mts) | the federation token store's binding over core's in-process store; a store without the conditional members refused by every case; a `get` that answers another record than `getVersioned`, a replace that moves a sibling federation's generation, a `removeBySid` that leaves a federation of the session or reaches another session's, and a replace that restores a record a logout removed, each refused by the case that names it; the outage and expiry cases named as not run when undeclared |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, a record held into a set dropping its generation, `400` for an expected generation or a `deadlineMs` that is none, a late conditional write answered `408` and not applied while one before its deadline is, a deadline checked on the request clock and never the tombstones', and one winner among concurrent conditional writes |
 
 ## See also
