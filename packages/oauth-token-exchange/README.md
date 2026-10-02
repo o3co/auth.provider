@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth-token-exchange
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03
 
 RFC 8693 Token Exchange grant for [auth.provider](https://github.com/o3co/auth.provider).
 Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
@@ -167,7 +167,7 @@ const handle = await createApp({
 
 Two modules contributing a validator for the same token type is refused at boot.
 
-**`familyId` is how a validator tells the handler about a refresh-token family.** A validator that accepts this provider's own family-bearing tokens — under any token type — must fill `ValidatedToken.familyId` from the token's `family_id`: the handler checks it against this provider's family store, refuses the token when none is wired, and copies it into the issued token so a later family revocation reaches that token too (Security notes 1 and 10). A family left only in `claims` is neither checked nor inherited. A validator of foreign tokens, whose families this provider's store does not hold, leaves `familyId` unset. An empty string counts as unset.
+**`familyId` is how a validator tells the handler about a refresh-token family.** A validator that accepts this provider's own family-bearing tokens — under any token type — must fill `ValidatedToken.familyId` from the token's `family_id`: the handler checks it against this provider's family store, refuses the token when none is wired, and copies it into the issued token so a later family revocation reaches that token too (Security notes 1 and 10). A family left only in `claims` is neither checked nor inherited. A validator of foreign tokens, whose families this provider's store does not hold, leaves `familyId` unset. An empty string counts as unset. A `familyId` or `sid` that is present but not a string is no answer: the token is refused as a failed validation (`invalid_request`, `subject_token validation failed` or `actor_token validation failed`).
 
 **`sid` is how a validator tells the handler about a browser session.** The same contract for the `UserSession` a token was minted under: a validator that accepts this provider's own session-bound tokens fills `ValidatedToken.sid` from the token's `sid`, or from the `liveness_sid` of a token that was itself exchanged (core's `livenessSidOf`), and the handler checks it and carries it as `liveness_sid` (note 21). A session left only in `claims` is neither; a validator of foreign tokens leaves `sid` unset, since another issuer's `sid` names no session this provider's store holds.
 
