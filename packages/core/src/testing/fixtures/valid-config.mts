@@ -56,6 +56,8 @@ type FullSectionsConfig = z.infer<typeof fullSectionsSchema>;
 export interface CoreConfigForTestsOptions {
 	/** The session requirements the composition expects; none by default. */
 	readonly expected?: readonly string[];
+	/** The expected requirement held to declaring the second-factor authority; none by default. */
+	readonly secondFactorAuthority?: string;
 	/** The deployment mode; left unstated by default, which core reads as `unset`. */
 	readonly deploymentMode?: "single" | "multi";
 	/** The federations, keyed by name (`core.federations`); left unstated by default. */
@@ -67,13 +69,19 @@ export interface CoreConfigForTestsOptions {
 /**
  * Core's own section, `core`, as a configuration fragment to lay over a
  * configuration: the session requirements the composition expects, and the
- * deployment mode, the federations and the slots declared absent when given.
+ * second-factor authority, the deployment mode, the federations and the slots
+ * declared absent when given.
  * A fresh object each call.
  */
 export function coreConfigForTests(options: CoreConfigForTestsOptions = {}) {
 	return {
 		core: {
-			sessionRequirements: { expected: [...(options.expected ?? [])] },
+			sessionRequirements: {
+				expected: [...(options.expected ?? [])],
+				...(options.secondFactorAuthority === undefined
+					? {}
+					: { secondFactorAuthority: options.secondFactorAuthority }),
+			},
 			...(options.deploymentMode === undefined
 				? {}
 				: { deployment: { mode: options.deploymentMode } }),
