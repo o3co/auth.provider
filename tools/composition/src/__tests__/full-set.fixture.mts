@@ -226,7 +226,8 @@ export async function seedTotp(
 /**
  * Writes `record` into its subject's factor set at the generation the set
  * stands at, as the MFA package's writer does: the store's conditional
- * create, never an unconditional one. Throws when the set moved in between.
+ * create, never an unconditional one. Throws on a conflict: the set moved in
+ * between, or the id is already stored.
  */
 export async function addFactorRecord(
 	factorStore: MfaFactorStore,
