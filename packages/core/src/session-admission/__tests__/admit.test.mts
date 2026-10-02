@@ -1591,6 +1591,40 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 		expect(seen).toBe("use");
 	});
 
+	it("the stores: deps.userSessionStore and deps.subjectRevocation are read once each, the record, the boundary and the step-up capability all off that one read", async () => {
+		let storeReads = 0;
+		let revocationReads = 0;
+		let boundaryAsked = 0;
+		let seen: RequirementInput | undefined;
+		const store = Object.assign(holding(session()), { recordSecondFactor: async () => null });
+		const revocation = revocationOf(async () => {
+			boundaryAsked++;
+			return null;
+		});
+		const watching = met("watch", {
+			admit: async (input) => {
+				seen = input;
+				return { outcome: "met" };
+			},
+		});
+		const counting = {
+			...deps({ requirements: resolverForTests([watching], { actions: TEST_ACTIONS }) }),
+			get userSessionStore(): UserSessionStore {
+				storeReads++;
+				return store;
+			},
+			get subjectRevocation(): SubjectRevocation {
+				revocationReads++;
+				return revocation;
+			},
+		};
+		expect(await admitSession(counting, request())).toMatchObject({ outcome: "admitted" });
+		expect(boundaryAsked).toBe(1);
+		expect(seen?.session?.secondFactorRecordable).toBe(true);
+		expect(storeReads).toBe(1);
+		expect(revocationReads).toBe(1);
+	});
+
 	it("a verdict: outcome and whenStillUnmet are copied before they are checked, so a getter cannot pass the check as unmet and read as met", async () => {
 		let reads = 0;
 		let secondAsked = false;
