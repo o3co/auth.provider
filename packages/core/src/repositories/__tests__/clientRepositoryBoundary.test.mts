@@ -879,4 +879,12 @@ describe("validatedClientRepository — it answers through the port alone", () =
 		}
 		expect(true).toBe(true);
 	});
+
+	it("carries the port's two lookups and its dispose, and nothing else", () => {
+		expect(Reflect.ownKeys(validatedClientRepository(repositoryAnswering(null)))).toEqual([
+			"findById",
+			"authenticate",
+			Symbol.asyncDispose,
+		]);
+	});
 });

@@ -211,7 +211,7 @@ export function validatedClientRepository(
 ): ClientRepository {
 	if (boundaries.has(inner)) return inner;
 	const logger = options.logger ?? consoleLogger;
-	const answer = (
+	const admit = (
 		step: ClientRepositoryOutage["step"],
 		clientId: string,
 		record: PublicClient | null | undefined,
@@ -236,9 +236,9 @@ export function validatedClientRepository(
 		throw new ClientRecordRefusedError();
 	};
 	const boundary: ClientRepository & AsyncDisposable = {
-		findById: async (clientId) => answer("find", clientId, await inner.findById(clientId)),
+		findById: async (clientId) => admit("find", clientId, await inner.findById(clientId)),
 		authenticate: async (clientId, secret) =>
-			answer("authenticate", clientId, await inner.authenticate(clientId, secret)),
+			admit("authenticate", clientId, await inner.authenticate(clientId, secret)),
 		[Symbol.asyncDispose]: async () => {
 			const dispose = (inner as { [Symbol.asyncDispose]?: unknown })[Symbol.asyncDispose];
 			if (typeof dispose === "function") await dispose.call(inner);
