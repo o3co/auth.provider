@@ -54,6 +54,7 @@ import {
 import {
 	addRecord,
 	beginLogin,
+	dropRecord,
 	freezeClock,
 	loggedText,
 	mfaPost,
@@ -930,7 +931,7 @@ describe("routing over a retired set: one reading of usable, the floor's", () =>
 			options.signIn === false
 				? undefined
 				: (await signInWithTotp(built.app, built.userSessionStore, totp)).agent;
-		await built.factorStore.remove(ALICE.id, totp.record.id);
+		await dropRecord(built.factorStore, ALICE.id, totp.record.id);
 		return { built, agent, retired, set };
 	}
 

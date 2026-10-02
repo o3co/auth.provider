@@ -373,25 +373,6 @@ export type MfaEnrollmentCompleteOutcome = (
 	 * the transaction stands; answered as `first_binding_closed`, and audited.
 	 */
 	| ({ readonly outcome: "first_binding_conflict" } & MfaCeremonySubject)
-	/**
-	 * A first binding that could not read the records again to tell
-	 * (`first_binding_unchecked`), or another factor found past the limit once
-	 * written (`factor_standing`). No binding answers either: a binding's
-	 * writes are fenced on the records read under the subject's lease
-	 * (`factorSet.mts`), so none is checked after its write.
-	 */
-	| ({
-			readonly outcome: "factor_standing";
-			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
-			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
-			readonly listing: MfaStoreOutage | undefined;
-			readonly standing: { readonly cause: unknown };
-	  } & MfaCeremonySubject)
-	| ({
-			readonly outcome: "first_binding_unchecked";
-			readonly listing: MfaStoreOutage;
-			readonly standing: { readonly cause: unknown } | undefined;
-	  } & MfaCeremonySubject)
 	| ({
 			readonly outcome: "enrolled";
 			/** What the login persisted, as the store answered it at consumption. */

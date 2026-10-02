@@ -69,9 +69,6 @@
  *   otherwise — another requirement's interruption, `401`, `503` — leaves
  *   the set unshown, and a mark that fails answers `recovery_codes_issued:
  *   false`.
- * - A factor bound beside another that cannot stand — past the limit, or
- *   its records unreadable — and cannot be removed stands: it is audited as
- *   enrolled and said once at error before the `503`.
  * - A factor's own failure is logged by its name and code, never its text.
  * - Each outage is answered `503` and logged once, at error. A mail the
  *   sender refused at its limit is `429`; a factor whose recorded address no
@@ -530,15 +527,6 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			);
 		}
 		res.status(503).json(MFA_UNAVAILABLE);
-	};
-
-	/**
-	 * A first binding that could not stand and whose factor could not be
-	 * removed: the factor may be a password holder's, so it is said at error
-	 * — the subject and the kind, never the factor's data.
-	 */
-	const factorStanding = (sub: string, kind: string, cause: unknown): void => {
-		logger.error({ sub, kind, err: loggableError(cause) }, "mfa_first_binding_factor_standing");
 	};
 
 	/** A witness mark that failed: once at warn; what it followed stands, and the next login heals it. */
@@ -1247,46 +1235,6 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						details: { kind: outcome.kind },
 					});
 					answerClosed(res, outcome.purpose);
-					return;
-				case "factor_standing":
-					// The factor stands and is usable: audited as bound, and said, so the
-					// account holder's notice is not missed.
-					emitAuditEvent(auditSink, {
-						timestamp: new Date(),
-						type: "mfa.factor.enrolled",
-						subject: outcome.subject,
-						ip: call.request.ip,
-						userAgent: call.request.userAgent,
-						details: {
-							kind: outcome.kind,
-							purpose: outcome.purpose,
-							binding: outcome.binding,
-							by: "user",
-						},
-					});
-					if (outcome.listing !== undefined) {
-						storeUnavailable(
-							"enrollment",
-							outcome.listing.store,
-							outcome.listing.step,
-							outcome.listing.cause,
-						);
-					}
-					logger.error(
-						{
-							sub: outcome.subject,
-							kind: outcome.kind,
-							err: loggableError(outcome.standing.cause),
-						},
-						"mfa_enrollment_factor_standing",
-					);
-					res.status(503).json(MFA_UNAVAILABLE);
-					return;
-				case "first_binding_unchecked":
-					answerOutage("enrollment", res, outcome.listing);
-					if (outcome.standing !== undefined) {
-						factorStanding(outcome.subject, outcome.kind, outcome.standing.cause);
-					}
 					return;
 				case "unavailable":
 				case "unreadable":
