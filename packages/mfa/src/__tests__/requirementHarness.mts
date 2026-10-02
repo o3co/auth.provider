@@ -119,6 +119,15 @@ export const unreachableFactorStore = (): MfaFactorStore => ({
 	list: async () => {
 		throw new Error("factor store unreachable");
 	},
+	listVersioned: async () => {
+		throw new Error("factor store unreachable");
+	},
+	createIf: async () => {
+		throw new Error("factor store unreachable");
+	},
+	removeIf: async () => {
+		throw new Error("factor store unreachable");
+	},
 	create: async () => {
 		throw new Error("factor store unreachable");
 	},

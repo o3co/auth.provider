@@ -679,7 +679,7 @@ describe("recovery codes alone (required: a first binding)", () => {
 
 		expect(done.status).toBe(401);
 		expect(done.body).toEqual(LOGIN_REQUIRED);
-		expect(await kindsOf({ list } as MfaFactorStore)).toEqual(["recovery_code"]);
+		expect(await kindsOf({ ...factorStore, list })).toEqual(["recovery_code"]);
 		expect(audit.of("mfa.first_binding_conflict")).toHaveLength(1);
 	});
 });

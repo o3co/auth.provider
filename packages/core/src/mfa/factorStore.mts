@@ -184,10 +184,6 @@ export function isMfaFactorUpdateWritten(
  *
  * In SQL, the set's row is the subject's (docs/adapter-surface.md, "A SQL
  * store"), and `update` takes only its factor's row.
- *
- * `listVersioned`, `createIf` and `removeIf` are optional while the bundled
- * adapters gain them, and become required; `create` and `remove` then leave
- * the port.
  */
 export interface MfaFactorStore {
 	readonly kind: string;
@@ -201,14 +197,14 @@ export interface MfaFactorStore {
 	 * and no records while its tombstone stands. Read it with
 	 * {@link readMfaFactorSet}.
 	 */
-	listVersioned?(subject: string): Promise<VersionedSet<MfaFactorRecord>>;
+	listVersioned(subject: string): Promise<VersionedSet<MfaFactorRecord>>;
 	/**
 	 * Insert `record` only while its subject's set is at `expected`; `null`:
 	 * only while the set is absent, which makes a first binding atomic against
 	 * a concurrent one. A `(subject, id)` already held is a `conflict`, never
 	 * overwritten. Read the answer with `readConditionalCreateAnswer`.
 	 */
-	createIf?(
+	createIf(
 		record: MfaFactorRecord,
 		expected: StoreGeneration | null,
 	): Promise<ConditionalCreateAnswer>;
@@ -217,7 +213,7 @@ export interface MfaFactorStore {
 	 * stays, empty when that was its last record. Read the answer with
 	 * `readConditionalSetRemoveAnswer`.
 	 */
-	removeIf?(
+	removeIf(
 		subject: string,
 		id: string,
 		expected: StoreGeneration,

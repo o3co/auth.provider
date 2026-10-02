@@ -749,6 +749,10 @@ export function createMfaFactorSet(options: {
 			factorStore: {
 				kind: factorStore.kind,
 				list: (subject) => read(() => factorStore.list(subject)),
+				listVersioned: (subject) => read(() => factorStore.listVersioned(subject)),
+				createIf: (record, expected) => write(() => factorStore.createIf(record, expected)),
+				removeIf: (subject, id, expected) =>
+					write(() => factorStore.removeIf(subject, id, expected)),
 				create: (record) => write(() => factorStore.create(record)),
 				update: (subject, id, expectedVersion, next) =>
 					write(() => factorStore.update(subject, id, expectedVersion, next)),
