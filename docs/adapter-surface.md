@@ -430,9 +430,11 @@ write-lifetime bound. These are the rules every store with conditional members k
    answers the value (or the members) and the generation from one snapshot.
    Every write that changes what the generation guards issues a new one,
    legacy and unconditional writes included.
-3. **Expiry is the store's retention.** A record or set past it answers
-   `missing` (or `null` from the read), and the conditional check includes the
-   expiry predicate. The retention is the store's own (a Redis `PX`, a SQL
+3. **Expiry is the store's retention.** A record past it reads as `null`
+   and answers `missing` to a replace or a removal; a set past it (its
+   tombstone expired) reads as `{ items: [], generation: null }` and answers
+   as an absent set does (rule 4). The conditional check includes the expiry
+   predicate. The retention is the store's own (a Redis `PX`, a SQL
    `expires_at` set from the store's TTL), never a domain field such as an
    access token's `expiresAt`.
 4. **Outcomes.** An outage rejects; it is never `missing` or `null`. A
@@ -452,13 +454,18 @@ write-lifetime bound. These are the rules every store with conditional members k
    last member keeps the set, at a new generation. The unconditional reset
    upserts the set at a new generation, creating it when absent, so a
    `createIf(…, null)` sent before it answers `conflict`. A set's generation
-   outlives its members, and an emptied set's tombstone is kept for at least
+   outlives its members: a set emptied by any membership write, its last
+   removal or a reset, keeps its tombstone for at least
    the store's write-lifetime bound (24 h for the bundled stores,
-   `BUNDLED_STORE_WRITE_LIFETIME_MS`); once it
-   expires, the set reads as absent (`generation: null`). So a membership
-   write must commit or fail, server-side, within a bound the store sets,
-   well under 24 h: a write sent before a reset then never lands after the
-   reset's tombstone expired.
+   `BUNDLED_STORE_WRITE_LIFETIME_MS`); once it expires, the set reads as
+   absent (`generation: null`). So a membership write must commit or fail
+   within a bound the store sets, well under that, counted from the
+   versioned read that produced the write's expected generation to the
+   write's commit or failure in the store, transport and queues included:
+   a write conditional on a read from before a reset then never lands after
+   the reset's tombstone expired. The port's owning module keeps that bound
+   (for example, a writer under a lease shorter than the bound); callers
+   outside it never hold a generation.
 7. **A generation fences only its own store's records.** It does not fence a
    write to another port, unless both are in the same atomic step.
 8. **Generations are minted, never derived.** A generation is never issued
@@ -516,6 +523,9 @@ different requests. The answer carries `generation` where its type has one.
 | Anything else, `412` included | The adapter throws |
 
 A REST layer that offers ETags exposes the store's generation itself, the
-never-repeating value the store issued, as a strong ETag of the whole record
-or set, never a digest of its content: content returns to earlier bytes, so a
-digest repeats.
+never-repeating value the store issued, as a strong ETag of exactly what the
+generation guards — a whole record, or a set's membership — never a digest
+of its content: content returns to earlier bytes, so a digest repeats. A
+set's generation is not the ETag of a representation that also carries its
+members' own data, which a member's update changes at the same set
+generation.

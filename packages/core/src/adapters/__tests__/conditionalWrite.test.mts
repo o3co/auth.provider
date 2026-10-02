@@ -133,6 +133,16 @@ describe("readVersioned", () => {
 		});
 	});
 
+	it("refuses an answer that leaves the value out, and reads one that names it as undefined", () => {
+		expect(() => readVersioned({ generation: G } as unknown as Versioned<unknown>)).toThrow(
+			TypeError,
+		);
+		expect(readVersioned({ value: undefined, generation: G })).toStrictEqual({
+			value: undefined,
+			generation: G,
+		});
+	});
+
 	it("reads each property once", () => {
 		let reads = 0;
 		const answer = {
@@ -185,6 +195,26 @@ describe("readVersionedSet", () => {
 			items: [],
 			generation: null,
 		});
+	});
+
+	it("copies the items with one read of their length and one read of each index, never through an iterator", () => {
+		let lengthReads = 0;
+		const items = new Proxy(["a", "b"], {
+			get(target, key, receiver) {
+				if (key === "length") {
+					lengthReads += 1;
+					return lengthReads === 1 ? 2 : 1;
+				}
+				if (key === Symbol.iterator) throw new Error("iterated");
+				return Reflect.get(target, key, receiver);
+			},
+		});
+		expect(readVersionedSet({ items, generation: G }).items).toEqual(["a", "b"]);
+		expect(lengthReads).toBe(1);
+	});
+
+	it("refuses members with a null generation: null is only an absent set's", () => {
+		expect(() => readVersionedSet({ items: [{ id: "x" }], generation: null })).toThrow(TypeError);
 	});
 
 	it("refuses undefined where null is meant, a malformed generation, items that are no array, and a throwing read", () => {

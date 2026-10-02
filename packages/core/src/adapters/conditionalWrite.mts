@@ -48,9 +48,12 @@ export function newStoreGeneration(): StoreGeneration {
 }
 
 /**
- * The bundled stores' write-lifetime bound: a membership write commits or
- * fails, server-side, well within it, and an emptied set's tombstone is kept
- * for at least this long. 24 hours.
+ * The bundled stores' write-lifetime bound, 24 hours: a set emptied by any
+ * membership write (its last removal or a reset) keeps its tombstone for at
+ * least this long, and a membership write commits
+ * or fails well within it, counted from the versioned read that produced its
+ * expected generation, transport and queues included. The port's owning
+ * module keeps that; callers outside it never hold a generation.
  */
 export const BUNDLED_STORE_WRITE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -63,8 +66,9 @@ export interface Versioned<T> {
 /**
  * A set's members and the set's generation, from one snapshot. `generation`
  * is `null` only for an absent set: never written, or its tombstone expired.
- * A set's generation outlives its members, and an emptied set's tombstone is
- * kept for at least the store's write-lifetime bound
+ * A set's generation outlives its members: a set emptied by any membership
+ * write (its last removal or a reset) keeps its tombstone for at least the
+ * store's write-lifetime bound
  * ({@link BUNDLED_STORE_WRITE_LIFETIME_MS} for the bundled stores).
  */
 export interface VersionedSet<T> {
@@ -153,28 +157,57 @@ const outcomeOf = <O extends string>(answer: unknown, outcomes: readonly O[], wh
 	return outcome as O;
 };
 
+/** Whether `answer` names `key`, its prototype chain included; a TypeError when that cannot be told. */
+const names = (answer: object, key: string, what: string): boolean => {
+	try {
+		return key in answer;
+	} catch {
+		throw new TypeError(`${what}: ${key} could not be read`);
+	}
+};
+
 /** A versioned read: `null` when the store holds no live record, else the value and its generation. */
 export function readVersioned<T>(answer: Versioned<T> | null): Versioned<T> | null {
 	if (answer === null) return null;
 	const what = "versioned read";
 	const value = field(answer, "value", what) as T;
+	if (value === undefined && !names(answer, "value", what)) {
+		throw new TypeError(`${what}: value is absent`);
+	}
 	const generation = generationOf(answer, what);
 	return Object.freeze({ value, generation });
 }
 
-/** A versioned set read: the items copied into a new frozen array, each item the port's to judge. */
+/**
+ * `items` copied by one read of its length and one read of each index, so
+ * neither an iterator nor a changing length decides what is copied.
+ */
+const copyItems = <T,>(items: readonly T[], what: string): T[] => {
+	try {
+		const length = items.length;
+		if (!Number.isSafeInteger(length) || length < 0) throw new TypeError("length");
+		const copy: T[] = [];
+		for (let i = 0; i < length; i += 1) copy.push(items[i] as T);
+		return copy;
+	} catch {
+		throw new TypeError(`${what}: items could not be read`);
+	}
+};
+
+/**
+ * A versioned set read: the items copied into a new frozen array, each item
+ * the port's to judge. A `null` generation is an absent set's, so it holds
+ * no items.
+ */
 export function readVersionedSet<T>(answer: VersionedSet<T>): VersionedSet<T> {
 	const what = "versioned set read";
 	const items = field(answer, "items", what);
 	if (!Array.isArray(items)) throw new TypeError(`${what}: items is not an array`);
-	let copy: T[];
-	try {
-		copy = Array.from(items as readonly T[]);
-	} catch {
-		throw new TypeError(`${what}: items could not be read`);
-	}
+	const copy = copyItems(items as readonly T[], what);
 	const generation = field(answer, "generation", what);
-	if (generation !== null && !isStoreGeneration(generation)) {
+	if (generation === null) {
+		if (copy.length > 0) throw new TypeError(`${what}: items held by an absent set`);
+	} else if (!isStoreGeneration(generation)) {
 		throw new TypeError(`${what}: generation is malformed`);
 	}
 	return Object.freeze({ items: Object.freeze(copy), generation });
