@@ -17,6 +17,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApp, defineModule } from "#/index.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
+import { BUNDLED_STORE_WRITE_LIFETIME_MS } from "#/mfa/conditionalWriteStandIn.mjs";
 import type { MfaFactorRecord, MfaFactorStore } from "#/mfa/factorStore.mjs";
 import { createMfaFactorStoreFactory, registerBuiltinMfaFactorStores } from "#/mfa/factory.mjs";
 import { createMemoryMfaFactorStore } from "#/mfa/memoryFactorStore.mjs";
@@ -115,6 +116,64 @@ describe("the in-process store's factor set generation", () => {
 		expect(after?.generation).not.toBeNull();
 		await store.removeAllForSubject("nobody");
 		expect((await store.listVersioned?.("nobody"))?.generation).not.toBeNull();
+	});
+});
+
+describe("the in-process store's tombstone", () => {
+	const DAY = 24 * 60 * 60 * 1000;
+	const clocked = () => {
+		let nowMs = Date.parse("2026-10-02T00:00:00.000Z");
+		const store = createMemoryMfaFactorStore({ now: () => nowMs });
+		return {
+			store,
+			advance: (ms: number) => {
+				nowMs += ms;
+			},
+		};
+	};
+
+	it("keeps the write-lifetime bound a bundled store keeps a tombstone for: 24 hours", () => {
+		expect(BUNDLED_STORE_WRITE_LIFETIME_MS).toBe(DAY);
+	});
+
+	it("keeps a reset's tombstone until the bound has passed on its clock, then reads it as never written", async () => {
+		const { store, advance } = clocked();
+		await store.create(RECORD);
+		await store.removeAllForSubject("user-1");
+		const tombstone = await store.listVersioned?.("user-1");
+		advance(BUNDLED_STORE_WRITE_LIFETIME_MS - 1);
+		expect(await store.listVersioned?.("user-1")).toStrictEqual(tombstone);
+		expect(await store.createIf?.(RECORD, null)).toStrictEqual({ outcome: "conflict" });
+		advance(1);
+		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
+	});
+
+	it("expires a set its last removal emptied the same way, and a reset of a subject never written", async () => {
+		const { store, advance } = clocked();
+		const first = await store.createIf?.(RECORD, null);
+		if (first?.outcome !== "created") throw new Error("the first binding was refused");
+		await store.removeIf?.("user-1", RECORD.id, first.generation);
+		await store.removeAllForSubject("nobody");
+		advance(BUNDLED_STORE_WRITE_LIFETIME_MS);
+		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
+		expect(await store.listVersioned?.("nobody")).toStrictEqual({ generation: null, items: [] });
+	});
+
+	it("holds no expiry on a set written to after it was emptied, and counts the bound again from a later reset", async () => {
+		const { store, advance } = clocked();
+		await store.removeAllForSubject("user-1");
+		const tombstone = await store.listVersioned?.("user-1");
+		const bound = await store.createIf?.(RECORD, tombstone?.generation ?? null);
+		if (bound?.outcome !== "created") throw new Error("the binding on the tombstone was refused");
+		advance(2 * BUNDLED_STORE_WRITE_LIFETIME_MS);
+		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+			generation: bound.generation,
+			items: [RECORD],
+		});
+		advance(BUNDLED_STORE_WRITE_LIFETIME_MS / 2);
+		await store.removeAllForSubject("user-1");
+		advance(BUNDLED_STORE_WRITE_LIFETIME_MS - 1);
+		expect((await store.listVersioned?.("user-1"))?.generation).not.toBeNull();
 	});
 });
 

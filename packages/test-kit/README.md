@@ -120,11 +120,14 @@ under test, holding nothing; `second`, optional, a second instance on the
 same backend — another connection, pool or adapter — which the concurrent
 cases split their writers across (absent, `store` again, which proves no
 fence across processes); `unreachable`, optional, a store over the same
-backend that cannot reach it; and `close`, called when the case ends.
-`supports: { unreachable: true }` declares the hook up front, so the case
-list is fixed when the suite is built: the outage case then runs, and fails
-for a harness that lacks the hook. Undeclared, one passing case names it as
-not run. One `build` serves this suite and the factor set's binding below.
+backend that cannot reach it; `forceExpire`, optional, which makes a
+subject's emptied set's tombstone expire now on the backend's clock (only the
+factor set's binding below uses it); and `close`, called when the case ends.
+`supports: { unreachable: true, forceExpire: true }` declares the hooks up
+front, so the case list is fixed when the suite is built: a declared hook's
+cases run, and fail for a harness that lacks it. A hook not declared leaves
+its cases out, and one passing case, `not run: …`, names them. One `build`
+serves this suite and the factor set's binding below.
 
 ```typescript
 import { mfaFactorStoreContract } from "@o3co/auth-provider-test-kit";
@@ -178,9 +181,10 @@ const input = {
     store: createMyStore(firstPool),
     second: createMyStore(secondPool),
     unreachable: () => createMyStore(refusedPool),
+    forceExpire: (subject) => expireTombstoneNow(firstPool, subject),
     close: () => truncate(firstPool),
   }),
-  supports: { unreachable: true },
+  supports: { unreachable: true, forceExpire: true },
 };
 
 describe("my store keeps the MfaFactorStore contract", () => {
@@ -210,7 +214,11 @@ in; `list` and `listVersioned` answering the same records; each
 unconditional `create` and `remove` moving the generation; every answer read
 by core's readers, every generation a store generation; and, with
 `unreachable`, every set member rejecting rather than answering an empty set,
-`missing` or `conflict`. Races run
+`missing` or `conflict`; and, with `forceExpire`, a tombstone standing within
+the write-lifetime bound — a late first binding and a late write at a
+generation read before the reset refused, nothing written — an expired
+tombstone reading as never written, no generation seen before it issued
+again, and a set holding a record never expiring. Races run
 twenty times; that catches a race a backend leaves open only sometimes, and
 proves nothing of its isolation, which a run on the backend itself does.
 
@@ -219,9 +227,17 @@ members leaves one — is out of every case's reach: that a conditional write
 against it answers `conflict` and mints nothing, and that only
 `listVersioned` mints one, is the Store's own tests' to prove.
 
-The first group of cases stands in for the set variant of the generic
-conditional-write suite until it lands; the binding then hands the members
-to it.
+An emptied set's tombstone is kept for at least the store's write-lifetime
+bound (24 h for the bundled stores), and may be purged after it. That holds
+only while every membership write commits or fails on the store's side
+within a bound the store sets, well under 24 h — a statement or transaction
+timeout in SQL, a request deadline never retried once it has passed over
+HTTP. No case can prove that bound; the Store's configuration does. Core's
+in-process store and the Redis store meet it by construction.
+
+The first group of cases, and the expired-tombstone case, stand in for the
+set variant of the generic conditional-write suite until it lands; the
+binding then hands the members to it and drops them.
 
 ## The WebAuthn credential store's contract suite
 
@@ -436,7 +452,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | --- | --- |
 | [`enrollmentWitness.contract.test.mts`](src/mfa/__tests__/enrollmentWitness.contract.test.mts) | the witness's suite over an in-process repository and over the fake Store; each broken repository — one that erases or sets every witness when it refuses a subject, or whose `authenticateByToken` answers no witness, answers it as text, resolves no token or answers another user, among them — refused by the case that names what it breaks; the outage case present only with `withOutage`; the kit's `ContractCase` core's |
 | [`factorStore.contract.test.mts`](src/mfa/__tests__/factorStore.contract.test.mts) | the factor store's suite over core's in-process store; each broken store — one that drops an undefined field, rewrites data, overwrites a duplicate, lets every writer win, changes a field an update does not carry, reaches another subject's record, removes every subject's records, writes the same id under another subject or the subject's other factors on a successful update, or answers an update at `Number.MAX_SAFE_INTEGER` with `null` rather than a `RangeError` — refused by the case that names what it breaks; an unreachable store that answers as if empty refused by the outage case, which runs only when declared and is otherwise named as not run; the concurrent creates split across the store and the second; every record id in the provider's shape; a harness built and closed per case |
-| [`factorStoreConditional.contract.test.mts`](src/mfa/__tests__/factorStoreConditional.contract.test.mts) | the factor set's binding over core's in-process store; a model store with no fault passed, and a store without the set's members refused by every case; the model store with one fault each — checking then writing after an await, a generation that is a digest of the set, a reset that deletes the set, an update that moves the generation, a snapshot torn records first or generation first, a removal of a record not there that moves the generation, a create that overwrites a held id at the current generation — refused by the case that names what it breaks, the concurrent ones forced by explicit barriers; an unreachable store that answers as if empty refused by the outage case, which runs only when declared, fails when declared and not given, and is otherwise named as not run; a race split across the store and the second; every record id in the provider's shape; a harness built and closed per case |
+| [`factorStoreConditional.contract.test.mts`](src/mfa/__tests__/factorStoreConditional.contract.test.mts) | the factor set's binding over core's in-process store; a model store with no fault passed, and a store without the set's members refused by every case; the model store with one fault each — checking then writing after an await, a generation that is a digest of the set, a reset that deletes the set, an update that moves the generation, a snapshot torn records first or generation first, a removal of a record not there that moves the generation, a create that overwrites a held id at the current generation, a counter generation that restarts once its tombstone is purged, a reset of an emptied set that keeps its generation, a removal that answers another generation than it wrote, a tombstone that never expires, an expiry kept on a set written to after its reset — refused by the case that names what it breaks, the concurrent ones forced by explicit barriers; an unreachable store that answers as if empty refused by the outage case; the outage and tombstone cases run only when their hook is declared, fail when it is declared and not given, and are otherwise named in one passing case; the in-process store run on its own clock, with `forceExpire`; a race split across the store and the second; every record id in the provider's shape; a harness built and closed per case |
 | [`credentialStore.contract.test.mts`](src/webauthn/__tests__/credentialStore.contract.test.mts) | the WebAuthn credential store's suite over core's in-process store; each broken store — one that lets a registration take a credential id another user holds, overwrites a held credential's record and then throws `duplicate-credential`, refuses a held id with another error, lists a credential under the user it refused, lets a user register a held id again over its record, checks for a held id and inserts in two steps, finds a credential with a sign count of 0, lists every credential whoever's, updates a sign count whatever the count it expects, leaves a removed credential, keeps the `lastUsedAt` it held, answers `true` to a sign count update of an id it does not hold, throws on or empties itself at a removal of an id it does not hold, keeps a removed credential in its user's list, removes every credential of the user, or drops a credential's transports, backup state or nickname — refused by the case that names what it breaks; a store that answers transports in another order accepted; a harness built and closed per case |
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges, an identity two authenticators share — read from the record already held, or the latest enrollment's answered for every record — one keyed per factor instance, or one that answers none for the second — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |

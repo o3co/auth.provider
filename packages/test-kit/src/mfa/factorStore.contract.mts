@@ -58,6 +58,12 @@ export interface MfaFactorStoreHarness {
 	readonly second?: MfaFactorStore;
 	/** A store over the same backend that cannot reach it. Needs `supports.unreachable`. */
 	readonly unreachable?: () => MfaFactorStore;
+	/**
+	 * Makes `subject`'s set, when it is an emptied set's tombstone, expire
+	 * now, by the backend's own clock; a set holding a record has no expiry.
+	 * Needs `supports.forceExpire`; only the factor set's binding uses it.
+	 */
+	readonly forceExpire?: (subject: string) => Promise<void>;
 	/** Releases what the store runs on once the case ends. */
 	readonly close?: () => Promise<void>;
 }
@@ -71,12 +77,13 @@ export interface MfaFactorStoreContractInput {
 	 * fails its case; an undeclared one runs no case, and one passing case
 	 * names what did not run.
 	 */
-	readonly supports?: { readonly unreachable?: boolean };
+	readonly supports?: { readonly unreachable?: boolean; readonly forceExpire?: boolean };
 }
 
-/** The name of the case that stands in for the outage case when `unreachable` is not declared. */
-export const MFA_FACTOR_STORE_UNREACHABLE_NOT_RUN =
-	"not run: the outage case (unreachable not declared)";
+/** One passing case that names what did not run, or none when everything ran. */
+export function notRunCase(left: readonly string[]): ContractCase[] {
+	return left.length === 0 ? [] : [{ name: `not run: ${left.join("; ")}`, run: async () => {} }];
+}
 
 /** `harness.unreachable`, or the case's failure when a harness that declared it lacks it. */
 export function unreachableOf(harness: MfaFactorStoreHarness): () => MfaFactorStore {
@@ -86,6 +93,16 @@ export function unreachableOf(harness: MfaFactorStoreHarness): () => MfaFactorSt
 		"supports.unreachable is declared, and the harness gives no unreachable",
 	);
 	return harness.unreachable as () => MfaFactorStore;
+}
+
+/** `harness.forceExpire`, or the case's failure when a harness that declared it lacks it. */
+export function forceExpireOf(harness: MfaFactorStoreHarness): (subject: string) => Promise<void> {
+	assert.equal(
+		typeof harness.forceExpire,
+		"function",
+		"supports.forceExpire is declared, and the harness gives no forceExpire",
+	);
+	return harness.forceExpire as (subject: string) => Promise<void>;
 }
 
 /** Whether `run` rejects; `what` names it in the failure. */
@@ -352,23 +369,25 @@ export function mfaFactorStoreContract(
 			assert.deepStrictEqual(await store.list("user-1"), [RECORD({ data: "v2.again" })]);
 		}),
 
-		input.supports?.unreachable === true
-			? test("rejects every member when it cannot reach its backend, and answers none as no factors, null or done", async (_store, harness) => {
-					const down = unreachableOf(harness)();
-					await rejects(() => down.list("user-1"), "list");
-					await rejects(() => down.create(RECORD()), "create");
-					await rejects(
-						() =>
-							down.update("user-1", FACTOR_1, 1, {
-								data: "v2.x",
-								label: undefined,
-								lastUsedAt: undefined,
-							}),
-						"update",
-					);
-					await rejects(() => down.remove("user-1", FACTOR_1), "remove");
-					await rejects(() => down.removeAllForSubject("user-1"), "removeAllForSubject");
-				})
-			: { name: MFA_FACTOR_STORE_UNREACHABLE_NOT_RUN, run: async () => {} },
+		...(input.supports?.unreachable === true
+			? [
+					test("rejects every member when it cannot reach its backend, and answers none as no factors, null or done", async (_store, harness) => {
+						const down = unreachableOf(harness)();
+						await rejects(() => down.list("user-1"), "list");
+						await rejects(() => down.create(RECORD()), "create");
+						await rejects(
+							() =>
+								down.update("user-1", FACTOR_1, 1, {
+									data: "v2.x",
+									label: undefined,
+									lastUsedAt: undefined,
+								}),
+							"update",
+						);
+						await rejects(() => down.remove("user-1", FACTOR_1), "remove");
+						await rejects(() => down.removeAllForSubject("user-1"), "removeAllForSubject");
+					}),
+				]
+			: notRunCase(["the outage case (unreachable not declared)"])),
 	];
 }

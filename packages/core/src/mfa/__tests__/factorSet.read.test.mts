@@ -43,7 +43,15 @@ describe("readMfaFactorSet", () => {
 			generation: null,
 			items: [],
 		});
-		const items = [record("a"), record("b")];
+		const items = [
+			record("a"),
+			{
+				...record("b"),
+				label: "Phone",
+				binding: "mfa" as const,
+				lastUsedAt: new Date("2026-09-02T00:00:00.000Z"),
+			},
+		];
 		const read = readMfaFactorSet({ generation: G, items, extra: true }, "user-1");
 		expect(read).toStrictEqual({ generation: G, items });
 		expect(read.items).not.toBe(items);
@@ -72,6 +80,17 @@ describe("readMfaFactorSet", () => {
 			{ generation: G, items: [record("a"), record("a")] },
 			{ generation: G, items: [null] },
 			{ generation: G, items: [{ ...record("a"), id: 7 }] },
+			// A record whole, every field of its type.
+			{ generation: G, items: [{ id: "a", subject: "user-1" }] },
+			{ generation: G, items: [{ ...record("a"), kind: 1 }] },
+			{ generation: G, items: [{ ...record("a"), label: null }] },
+			{ generation: G, items: [{ ...record("a"), binding: "other" }] },
+			{ generation: G, items: [{ ...record("a"), createdAt: "2026-09-01" }] },
+			{ generation: G, items: [{ ...record("a"), createdAt: new Date(Number.NaN) }] },
+			{ generation: G, items: [{ ...record("a"), lastUsedAt: 0 }] },
+			{ generation: G, items: [{ ...record("a"), version: -1 }] },
+			{ generation: G, items: [{ ...record("a"), version: 1.5 }] },
+			{ generation: G, items: [{ ...record("a"), data: undefined }] },
 		]) {
 			expect(() => readMfaFactorSet(answer, "user-1"), JSON.stringify(answer)).toThrow(TypeError);
 		}

@@ -589,6 +589,7 @@ export {
 // set-scoped part of it MfaFactorStore's set members are typed by, under its
 // names. The convention's own export replaces this block.
 export {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	type ConditionalCreateAnswer,
 	type ConditionalSetRemoveAnswer,
 	isStoreGeneration,
@@ -640,7 +641,10 @@ export {
 	registerBuiltinMfaFactorStores,
 	registerBuiltinMfaTransactionStores,
 } from "./mfa/factory.mjs";
-export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
+export {
+	createMemoryMfaFactorStore,
+	type MemoryMfaFactorStoreOptions,
+} from "./mfa/memoryFactorStore.mjs";
 export {
 	createMemoryMfaTransactionStore,
 	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,

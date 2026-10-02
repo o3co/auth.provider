@@ -35,6 +35,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	type ConditionalCreateAnswer,
 	type ConditionalSetRemoveAnswer,
 	createMemoryMfaFactorStore,
@@ -47,20 +48,35 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
 	type ContractCase,
 	type MfaFactorStoreContractInput,
+	type MfaFactorStoreHarness,
 	mfaFactorStoreConditionalContract,
 } from "#/index.mjs";
 
-/** An input over one store per case, no second instance and no outage: one process is one instance. */
+/** An input over one store per case, no second instance, no outage and no expiry. */
 const over = (build: () => MfaFactorStore): MfaFactorStoreContractInput => ({
 	build: async () => ({ store: build() }),
 });
 
-const UNREACHABLE_NOT_RUN = "not run: the outage case (unreachable not declared)";
+/** Core's in-process store on a clock of its own, which `forceExpire` moves on by the write-lifetime bound. */
+const memoryOnItsClock = (): MfaFactorStoreHarness => {
+	let nowMs = Date.parse("2026-10-02T00:00:00.000Z");
+	return {
+		store: createMemoryMfaFactorStore({ now: () => nowMs }),
+		forceExpire: async () => {
+			nowMs += BUNDLED_STORE_WRITE_LIFETIME_MS;
+		},
+	};
+};
+
+const isNotRun = (contractCase: ContractCase): boolean => contractCase.name.startsWith("not run:");
 
 describe("mfaFactorStoreConditionalContract over core's in-process store", () => {
 	// No second: the memory store is one process by contract, so this run
 	// proves no fence across processes. No unreachable: it has no backend.
-	for (const contractCase of mfaFactorStoreConditionalContract(over(createMemoryMfaFactorStore))) {
+	for (const contractCase of mfaFactorStoreConditionalContract({
+		build: async () => memoryOnItsClock(),
+		supports: { forceExpire: true },
+	})) {
 		it(contractCase.name, contractCase.run);
 	}
 });
@@ -74,7 +90,18 @@ type Fault =
 	| "torn-list-records-first"
 	| "torn-list-generation-first"
 	| "missing-moves-generation"
-	| "create-upserts-held-id";
+	| "create-upserts-held-id"
+	| "counter-generation"
+	| "reset-of-empty-keeps-generation"
+	| "removed-answers-another-generation"
+	| "tombstone-never-expires"
+	| "expiry-kept-after-write";
+
+/** A model store and its `forceExpire`. */
+interface Model {
+	readonly store: MfaFactorStore;
+	readonly forceExpire: (subject: string) => Promise<void>;
+}
 
 const copyOf = (record: MfaFactorRecord): MfaFactorRecord => ({
 	...record,
@@ -86,11 +113,16 @@ const copyOf = (record: MfaFactorRecord): MfaFactorRecord => ({
 const batchStarted = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 /** A store of factor sets, correct with `none`, and with any other fault broken in that one way. */
-function modelStore(fault: Fault): MfaFactorStore {
-	const sets = new Map<
-		string,
-		{ readonly records: Map<string, MfaFactorRecord>; generation: StoreGeneration }
-	>();
+function modelStore(fault: Fault): Model {
+	interface FactorSet {
+		readonly records: Map<string, MfaFactorRecord>;
+		generation: StoreGeneration;
+		/** Writes since the set was made: a counter's generation. */
+		writes: number;
+		/** Whether it is a tombstone that expires. */
+		expiring: boolean;
+	}
+	const sets = new Map<string, FactorSet>();
 
 	// The torn snapshot's barrier: a read's second half waits for the commit
 	// of a write started beside it, or, with none, for its batch to run.
@@ -113,12 +145,17 @@ function modelStore(fault: Fault): MfaFactorStore {
 		return Promise.resolve();
 	};
 
-	const fresh = (records: Map<string, MfaFactorRecord>): StoreGeneration =>
-		(fault === "digest-generation"
-			? createHash("sha256")
-					.update(JSON.stringify([...records.values()].map((r) => [r.id, r.data]).sort()))
-					.digest("base64url")
-			: randomUUID()) as StoreGeneration;
+	const fresh = (set: FactorSet): StoreGeneration => {
+		set.writes += 1;
+		if (fault === "counter-generation") return String(set.writes) as StoreGeneration;
+		return (
+			fault === "digest-generation"
+				? createHash("sha256")
+						.update(JSON.stringify([...set.records.values()].map((r) => [r.id, r.data]).sort()))
+						.digest("base64url")
+				: randomUUID()
+		) as StoreGeneration;
+	};
 
 	/** One membership write: `change`, then a new generation, then the commit is told. */
 	const write = (
@@ -128,9 +165,12 @@ function modelStore(fault: Fault): MfaFactorStore {
 		const set = sets.get(subject) ?? {
 			records: new Map<string, MfaFactorRecord>(),
 			generation: "" as StoreGeneration,
+			writes: 0,
+			expiring: false,
 		};
 		change(set.records);
-		set.generation = fresh(set.records);
+		set.generation = fresh(set);
+		set.expiring = set.records.size === 0 || (fault === "expiry-kept-after-write" && set.expiring);
 		sets.set(subject, set);
 		for (const waiter of commitWaiters.splice(0)) waiter();
 		return set.generation;
@@ -156,7 +196,7 @@ function modelStore(fault: Fault): MfaFactorStore {
 	const generationOf = (subject: string): StoreGeneration | null =>
 		sets.get(subject)?.generation ?? null;
 
-	return {
+	const store: MfaFactorStore = {
 		kind: `model:${fault}`,
 		list: async (subject) => itemsOf(subject),
 		listVersioned: async (subject) => {
@@ -195,10 +235,16 @@ function modelStore(fault: Fault): MfaFactorStore {
 					if (fault === "missing-moves-generation") write(subject, () => {});
 					return { outcome: "missing" } as const;
 				},
-				() => ({
-					outcome: "removed" as const,
-					generation: write(subject, (records) => records.delete(id)),
-				}),
+				() => {
+					const generation = write(subject, (records) => records.delete(id));
+					return {
+						outcome: "removed" as const,
+						generation:
+							fault === "removed-answers-another-generation"
+								? (randomUUID() as StoreGeneration)
+								: generation,
+					};
+				},
 			),
 		create: async (record) => {
 			if (sets.get(record.subject)?.records.has(record.id) === true) {
@@ -220,7 +266,7 @@ function modelStore(fault: Fault): MfaFactorStore {
 				version: current.version + 1,
 			};
 			set.records.set(id, written);
-			if (fault === "update-moves-generation") set.generation = fresh(set.records);
+			if (fault === "update-moves-generation") set.generation = fresh(set);
 			return copyOf(written);
 		},
 		remove: async (subject, id) => {
@@ -233,7 +279,18 @@ function modelStore(fault: Fault): MfaFactorStore {
 				sets.delete(subject);
 				return;
 			}
+			if (fault === "reset-of-empty-keeps-generation" && sets.get(subject)?.records.size === 0) {
+				return;
+			}
 			write(subject, (records) => records.clear());
+		},
+	};
+	return {
+		store,
+		forceExpire: async (subject) => {
+			if (fault !== "tombstone-never-expires" && sets.get(subject)?.expiring === true) {
+				sets.delete(subject);
+			}
 		},
 	};
 }
@@ -269,15 +326,15 @@ function unreachableStore(answers = false): MfaFactorStore {
 	};
 }
 
-/** The names of the cases that refuse the store `build` makes, beside an unreachable one that rejects. */
+/** The names of the cases that refuse the harness `build` makes, beside an unreachable store that rejects. */
 async function refusedBy(
-	build: () => MfaFactorStore,
+	build: () => Omit<MfaFactorStoreHarness, "unreachable">,
 	unreachable: () => MfaFactorStore = () => unreachableStore(),
 ): Promise<string[]> {
 	const refused: string[] = [];
 	for (const contractCase of mfaFactorStoreConditionalContract({
-		build: async () => ({ store: build(), unreachable }),
-		supports: { unreachable: true },
+		build: async () => ({ ...build(), unreachable }),
+		supports: { unreachable: true, forceExpire: true },
 	})) {
 		try {
 			await contractCase.run();
@@ -310,12 +367,18 @@ const CASE = {
 		"missing writes nothing: the generation stays and a write at it lands; an absent set answers missing to a removal and conflict to a create",
 	snapshot:
 		"a snapshot read beside a create is one snapshot: without the record its generation is fenced, with it the create's generation",
+	withinBound:
+		"a tombstone stands within the write-lifetime bound: a late first binding and a late write at a generation read before it are refused, and write nothing",
+	expired:
+		"an expired tombstone reads as absent, and a generation seen before it is never issued again",
+	heldSetKept:
+		"a set holding a record has no expiry: one written after a reset outlives the tombstone",
 } as const;
 
 describe("the binding refuses a store that breaks the factor set's fence", () => {
 	it("passes the model store with no fault, and a store without the set's members fails every case", async () => {
 		expect(await refusedBy(() => modelStore("none"))).toEqual([]);
-		expect(await refusedBy(createMemoryMfaFactorStore)).toEqual([]);
+		expect(await refusedBy(memoryOnItsClock)).toEqual([]);
 		const plain = createMemoryMfaFactorStore();
 		const withoutMembers: MfaFactorStore = {
 			kind: plain.kind,
@@ -327,9 +390,9 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 		};
 		const cases = mfaFactorStoreConditionalContract({
 			build: async () => ({ store: withoutMembers }),
-			supports: { unreachable: true },
+			supports: { unreachable: true, forceExpire: true },
 		});
-		expect(await refusedBy(() => withoutMembers)).toEqual(
+		expect(await refusedBy(() => ({ store: withoutMembers, forceExpire: async () => {} }))).toEqual(
 			cases.map((contractCase) => contractCase.name),
 		);
 	});
@@ -380,6 +443,35 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 				() => unreachableStore(true),
 			),
 		).toEqual([CASE.outage]);
+	});
+
+	it("one whose generation is a counter, which restarts once its tombstone is purged", async () => {
+		expect(await refusedBy(() => modelStore("counter-generation"))).toContain(CASE.expired);
+	});
+
+	it("one whose reset of an emptied set keeps its generation", async () => {
+		expect(await refusedBy(() => modelStore("reset-of-empty-keeps-generation"))).toContain(
+			CASE.resetFences,
+		);
+	});
+
+	it("one whose removal answers a generation other than the one it wrote", async () => {
+		const refused = await refusedBy(() => modelStore("removed-answers-another-generation"));
+		expect(refused).toEqual(expect.arrayContaining([CASE.twoRemovals, CASE.removalRacingCreate]));
+	});
+
+	it("one whose tombstone never expires", async () => {
+		expect(await refusedBy(() => modelStore("tombstone-never-expires"))).toContain(CASE.expired);
+	});
+
+	it("one that keeps a tombstone's expiry on a set written to after it", async () => {
+		expect(await refusedBy(() => modelStore("expiry-kept-after-write"))).toContain(
+			CASE.heldSetKept,
+		);
+	});
+
+	it("one whose reset deletes the set fails the cases within the bound too", async () => {
+		expect(await refusedBy(() => modelStore("reset-deletes-set"))).toContain(CASE.withinBound);
 	});
 
 	it("(f) one whose removal of a record not there moves the generation", async () => {
@@ -436,26 +528,41 @@ describe("each case", () => {
 		);
 		for (const contractCase of failing) await contractCase.run().catch(() => {});
 		const building = (list: readonly ContractCase[]): number =>
-			list.filter((contractCase) => contractCase.name !== UNREACHABLE_NOT_RUN).length;
+			list.filter((contractCase) => !isNotRun(contractCase)).length;
 		expect(built).toBe(building(cases) + building(failing));
 		expect(closed).toBe(built);
 	});
 
-	it("names the outage case as not run, and runs none, when unreachable is not declared", async () => {
-		const names = mfaFactorStoreConditionalContract(over(createMemoryMfaFactorStore)).map(
-			(contractCase) => contractCase.name,
+	it("names in one passing case the cases a hook not declared leaves out, and runs none of them", async () => {
+		const names = (supports?: MfaFactorStoreContractInput["supports"]) =>
+			mfaFactorStoreConditionalContract({
+				build: async () => ({ store: createMemoryMfaFactorStore() }),
+				...(supports === undefined ? {} : { supports }),
+			}).map((contractCase) => contractCase.name);
+		const hooked = [CASE.outage, CASE.withinBound, CASE.expired, CASE.heldSetKept];
+		const none = names();
+		expect(none.filter((name) => name.startsWith("not run:"))).toEqual([
+			"not run: the outage case (unreachable not declared); the tombstone cases (forceExpire not declared)",
+		]);
+		for (const name of hooked) expect(none).not.toContain(name);
+		expect(names({ forceExpire: true }).filter((name) => name.startsWith("not run:"))).toEqual([
+			"not run: the outage case (unreachable not declared)",
+		]);
+		const both = names({ unreachable: true, forceExpire: true });
+		expect(both.filter((name) => name.startsWith("not run:"))).toEqual([]);
+		for (const name of hooked) expect(both).toContain(name);
+		const marker = mfaFactorStoreConditionalContract(over(createMemoryMfaFactorStore)).find(
+			isNotRun,
 		);
-		expect(names).toContain(UNREACHABLE_NOT_RUN);
-		expect(names).not.toContain(CASE.outage);
-		const declared = mfaFactorStoreConditionalContract({
-			build: async () => ({
-				store: createMemoryMfaFactorStore(),
-				unreachable: () => unreachableStore(),
-			}),
-			supports: { unreachable: true },
-		}).map((contractCase) => contractCase.name);
-		expect(declared).toContain(CASE.outage);
-		expect(declared).not.toContain(UNREACHABLE_NOT_RUN);
+		await expect(marker?.run()).resolves.toBeUndefined();
+	});
+
+	it("fails a tombstone case of a harness that declares forceExpire and does not give it", async () => {
+		const expired = mfaFactorStoreConditionalContract({
+			build: async () => ({ store: createMemoryMfaFactorStore() }),
+			supports: { forceExpire: true },
+		}).find((contractCase) => contractCase.name === CASE.expired);
+		await expect(expired?.run()).rejects.toThrow(/forceExpire/);
 	});
 
 	it("fails the outage case of a harness that declares unreachable and does not give it", async () => {

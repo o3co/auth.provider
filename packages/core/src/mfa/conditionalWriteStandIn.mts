@@ -52,9 +52,19 @@ export function newStoreGeneration(): StoreGeneration {
 }
 
 /**
+ * The write-lifetime bound of the bundled stores: every write they take
+ * commits or fails within it, and an emptied set's tombstone is kept for at
+ * least this long. 24 hours. STAND-IN: the convention owns this constant and
+ * its name; this one is dropped when it lands.
+ */
+export const BUNDLED_STORE_WRITE_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+/**
  * A set's members and the set's generation, from one snapshot. `generation`
- * is `null` only for a set never written. A set, once written, keeps a
- * generation for good: emptied, reset or deleted, it is never purged.
+ * is `null` only for a set never written, or whose tombstone has passed.
+ * A set's generation outlives its members, and an emptied set's tombstone
+ * is kept for at least the store's write-lifetime bound (24 h for the
+ * bundled stores).
  */
 export interface VersionedSet<T> {
 	readonly items: readonly T[];

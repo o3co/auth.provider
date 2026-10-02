@@ -60,9 +60,10 @@ import {
 } from "@o3co/auth-provider-core";
 import type { ContractCase } from "@o3co/auth-provider-core/testing";
 import {
-	MFA_FACTOR_STORE_UNREACHABLE_NOT_RUN,
+	forceExpireOf,
 	type MfaFactorStoreContractInput,
 	type MfaFactorStoreHarness,
+	notRunCase,
 	rejects,
 	unreachableOf,
 } from "./factorStore.contract.mjs";
@@ -188,6 +189,105 @@ export function mfaFactorStoreConditionalContract(
 		},
 	});
 
+	const outageCase =
+		test("rejects every set member when it cannot reach its backend, and answers none as an empty set, missing or conflict", async ({
+			harness,
+		}) => {
+			const down = unreachableOf(harness)();
+			const generation = "unreachable-g" as StoreGeneration;
+			await rejects(async () => down.listVersioned?.("user-1"), "listVersioned");
+			await rejects(
+				async () => down.createIf?.(RECORD(FACTOR_A, "user-1"), null),
+				"createIf at null",
+			);
+			await rejects(
+				async () => down.createIf?.(RECORD(FACTOR_A, "user-1"), generation),
+				"createIf",
+			);
+			await rejects(async () => down.removeIf?.("user-1", FACTOR_A, generation), "removeIf");
+		});
+
+	const tombstoneCases: readonly ContractCase[] = [
+		// The factor set's own: what a late writer meets within the bound.
+		test("a tombstone stands within the write-lifetime bound: a late first binding and a late write at a generation read before it are refused, and write nothing", async ({
+			one,
+			two,
+			harness,
+		}) => {
+			forceExpireOf(harness);
+			const read = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
+			await two.store.removeAllForSubject("user-1");
+			const tombstone = await one.read("user-1");
+			assert.ok(tombstone.generation !== null, "the reset left no tombstone");
+			assert.deepStrictEqual(await two.createIf(RECORD(FACTOR_B, "user-1"), null), {
+				outcome: "conflict",
+			});
+			assert.deepStrictEqual(await one.createIf(RECORD(FACTOR_B, "user-1"), read), {
+				outcome: "conflict",
+			});
+			assert.deepStrictEqual(await two.removeIf("user-1", FACTOR_A, read), {
+				outcome: "conflict",
+			});
+			assert.deepStrictEqual(await one.read("user-1"), tombstone);
+		}),
+
+		// STAND-IN until the generic suite's set variant runs its own expiry case
+		// under forceExpire; then this one is dropped.
+		test("an expired tombstone reads as absent, and a generation seen before it is never issued again", async ({
+			one,
+			two,
+			harness,
+		}) => {
+			const forceExpire = forceExpireOf(harness);
+			const seen = new Set<StoreGeneration>();
+			const note = (generation: StoreGeneration | null): void => {
+				if (generation !== null) seen.add(generation);
+			};
+			let generation: StoreGeneration | null = null;
+			for (const id of [FACTOR_A, FACTOR_B]) {
+				generation = landed(await one.createIf(RECORD(id, "user-1"), generation), "a create");
+				note(generation);
+			}
+			await two.store.removeAllForSubject("user-1");
+			note((await one.read("user-1")).generation);
+			await forceExpire("user-1");
+			assert.deepStrictEqual(await two.read("user-1"), { generation: null, items: [] });
+			const again = landed(await one.createIf(RECORD(FACTOR_X, "user-1"), null), "the re-create");
+			assert.ok(
+				!seen.has(again),
+				"a generation seen before the tombstone expired was issued again",
+			);
+
+			const last = await seed(one, "user-2", [RECORD(FACTOR_A, "user-2")]);
+			landed(await two.removeIf("user-2", FACTOR_A, last), "the last removal");
+			await forceExpire("user-2");
+			assert.deepStrictEqual(await one.read("user-2"), { generation: null, items: [] });
+
+			await one.store.removeAllForSubject("nobody");
+			await forceExpire("nobody");
+			assert.deepStrictEqual(await two.read("nobody"), { generation: null, items: [] });
+		}),
+
+		test("a set holding a record has no expiry: one written after a reset outlives the tombstone", async ({
+			one,
+			two,
+			harness,
+		}) => {
+			const forceExpire = forceExpireOf(harness);
+			await one.store.removeAllForSubject("user-1");
+			const tombstone = (await two.read("user-1")).generation;
+			const bound = landed(
+				await two.createIf(RECORD(FACTOR_A, "user-1"), tombstone),
+				"a binding on the tombstone",
+			);
+			await forceExpire("user-1");
+			assert.deepStrictEqual(await one.read("user-1"), {
+				generation: bound,
+				items: [RECORD(FACTOR_A, "user-1")],
+			});
+		}),
+	];
+
 	return [
 		// --- STAND-IN: the generic suite's set variant ---------------------
 
@@ -298,8 +398,13 @@ export function mfaFactorStoreConditionalContract(
 				]);
 				const outcomes = answers.map((answer) => answer.outcome).sort();
 				assert.deepStrictEqual(outcomes, ["conflict", "removed"], `round ${i}: ${outcomes}`);
+				const won = answers.find((answer) => answer.outcome === "removed");
 				const kept = answers[0]?.outcome === "removed" ? records[1] : records[0];
-				assert.deepStrictEqual((await at(i).read(subject)).items, [kept], `round ${i}`);
+				assert.deepStrictEqual(
+					await at(i).read(subject),
+					{ generation: won?.outcome === "removed" ? won.generation : null, items: [kept] },
+					`round ${i}: the set, at the generation the removal answered`,
+				);
 			}
 		}),
 
@@ -342,7 +447,14 @@ export function mfaFactorStoreConditionalContract(
 					`round ${i}: ${removed.outcome}, ${created.outcome}`,
 				);
 				const expected = wins[0] ? [] : [RECORD(FACTOR_A, subject), RECORD(FACTOR_B, subject)];
-				assert.deepStrictEqual(byId((await at(i).read(subject)).items), expected, `round ${i}`);
+				const winner = removed.outcome === "removed" ? removed : created;
+				const after = await at(i).read(subject);
+				assert.deepStrictEqual(byId(after.items), expected, `round ${i}`);
+				assert.equal(
+					after.generation,
+					"generation" in winner ? winner.generation : undefined,
+					`round ${i}: the set at another generation than the winner answered`,
+				);
 			}
 		}),
 
@@ -378,7 +490,31 @@ export function mfaFactorStoreConditionalContract(
 				outcome: "conflict",
 			});
 			assert.deepStrictEqual(await one.removeIf("user-1", FACTOR_A, read), { outcome: "conflict" });
-			assert.deepStrictEqual((await two.read("user-1")).items, []);
+			const reset = await two.read("user-1");
+			assert.deepStrictEqual(reset.items, []);
+
+			// A reset of a set already empty — reset before, or emptied by its last
+			// removal — moves the generation all the same.
+			await one.store.removeAllForSubject("user-1");
+			const again = (await two.read("user-1")).generation;
+			assert.ok(again !== null && again !== reset.generation, "a second reset kept the generation");
+			const emptied = landed(
+				await two.removeIf(
+					"user-2",
+					FACTOR_A,
+					await seed(one, "user-2", [RECORD(FACTOR_A, "user-2")]),
+				),
+				"the last removal",
+			);
+			await one.store.removeAllForSubject("user-2");
+			const resetEmptied = (await two.read("user-2")).generation;
+			assert.ok(
+				resetEmptied !== null && resetEmptied !== emptied,
+				"a reset of an emptied set kept the generation",
+			);
+			assert.deepStrictEqual(await two.createIf(RECORD(FACTOR_B, "user-2"), emptied), {
+				outcome: "conflict",
+			});
 
 			await one.store.removeAllForSubject("nobody");
 			const tombstone = await two.read("nobody");
@@ -520,23 +656,15 @@ export function mfaFactorStoreConditionalContract(
 			assert.equal(raw.length, 7);
 		}),
 
-		input.supports?.unreachable === true
-			? test("rejects every set member when it cannot reach its backend, and answers none as an empty set, missing or conflict", async ({
-					harness,
-				}) => {
-					const down = unreachableOf(harness)();
-					const generation = "unreachable-g" as StoreGeneration;
-					await rejects(async () => down.listVersioned?.("user-1"), "listVersioned");
-					await rejects(
-						async () => down.createIf?.(RECORD(FACTOR_A, "user-1"), null),
-						"createIf at null",
-					);
-					await rejects(
-						async () => down.createIf?.(RECORD(FACTOR_A, "user-1"), generation),
-						"createIf",
-					);
-					await rejects(async () => down.removeIf?.("user-1", FACTOR_A, generation), "removeIf");
-				})
-			: { name: MFA_FACTOR_STORE_UNREACHABLE_NOT_RUN, run: async () => {} },
+		...(input.supports?.unreachable === true ? [outageCase] : []),
+		...(input.supports?.forceExpire === true ? tombstoneCases : []),
+		...notRunCase([
+			...(input.supports?.unreachable === true
+				? []
+				: ["the outage case (unreachable not declared)"]),
+			...(input.supports?.forceExpire === true
+				? []
+				: ["the tombstone cases (forceExpire not declared)"]),
+		]),
 	];
 }

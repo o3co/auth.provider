@@ -158,18 +158,31 @@ export function isMfaFactorUpdateWritten(
  * - Every membership write — `createIf`, `removeIf`, `create`, `remove`,
  *   `removeAllForSubject` — issues a fresh generation in the same atomic step
  *   as its write. A generation never repeats for a subject: not after a
- *   removal and a re-create, and not when the set returns to the same
- *   records. An application-made random UUID is one; a counter that restarts,
- *   a digest of the set and a timestamp are none.
+ *   removal and a re-create, not when the set returns to the same records,
+ *   and not after its tombstone has passed. An application-made random UUID
+ *   is one; a counter that restarts, a digest of the set and a timestamp are
+ *   none.
  * - `update` keeps the generation: it changes a record, not the set's
  *   membership, and its own fence is the record's `version`. A membership
  *   decision that read a record's data is therefore not fenced against an
  *   update of that record. That holds only while every factor's next data
  *   keeps the three things `MfaVerification.next` names.
- * - A set never written has no generation (`null`). Once written, the set
- *   stays, empty when its last record goes, and is never purged — account
- *   deletion included, since a first binding sent before it could otherwise
- *   land after it.
+ * - A set never written has no generation (`null`). A set's generation
+ *   outlives its members, and an emptied set's tombstone is kept for at
+ *   least the store's write-lifetime bound (24 h for the bundled stores,
+ *   `BUNDLED_STORE_WRITE_LIFETIME_MS`): the last removal and a reset —
+ *   account deletion included — leave the set empty at a new generation,
+ *   which a late write read before them meets as a `conflict`. Past the
+ *   bound the tombstone may be purged, and the set then reads as never
+ *   written. A set that holds a record is never purged.
+ * - The tombstone holds only because no membership write outlives it: every
+ *   one commits or fails on the store's side within a write-lifetime bound
+ *   the store sets, well under 24 h. In SQL that is a statement or
+ *   transaction timeout; over HTTP, a request deadline, and a request never
+ *   retried once its deadline has passed. The bundled memory store (one
+ *   synchronous step) and Redis store (one script) meet it by construction.
+ *   A write that could land past the tombstone could land a first binding
+ *   for a subject reset or deleted before it.
  * - The check and the write are one atomic step in the store, across every
  *   instance on the same backend: a transaction, a script, one synchronous
  *   block. An in-process lock counts only for an in-process store.
@@ -186,7 +199,9 @@ export function isMfaFactorUpdateWritten(
  * every membership write take that row first, in one transaction — an
  * upsert of it for `removeAllForSubject` — so the writes lock in one order.
  * `update` takes only the factor's row. `listVersioned` reads the set row
- * and the factor rows in one statement or one snapshot.
+ * and the factor rows in one statement or one snapshot. A set row whose set
+ * is empty may be removed once the write-lifetime bound has passed since it
+ * was emptied, never before.
  *
  * `listVersioned`, `createIf` and `removeIf` are optional while the bundled
  * adapters gain them, and become required; `create` and `remove` then leave
@@ -199,9 +214,9 @@ export interface MfaFactorStore {
 	/**
 	 * Every record of `subject`, in no particular order, and the set's
 	 * generation, from one snapshot. `generation` is `null` only for a set
-	 * never written; a set whose records all went, or that a reset left
-	 * empty, answers its generation and no records. Read it with
-	 * {@link readMfaFactorSet}.
+	 * never written, or whose tombstone has passed; a set whose records all
+	 * went, or that a reset left empty, answers its generation and no records
+	 * while its tombstone stands. Read it with {@link readMfaFactorSet}.
 	 */
 	listVersioned?(subject: string): Promise<VersionedSet<MfaFactorRecord>>;
 	/**
@@ -251,25 +266,63 @@ export interface MfaFactorStore {
 		expectedVersion: number,
 		next: MfaFactorRecordUpdate,
 	): Promise<MfaFactorRecord | null>;
-	/** Remove one record, unconditionally. Idempotent. A new generation when it removed one; the set stays. */
+	/** Remove one record, unconditionally. Idempotent. A new generation when it removed one; an emptied set stays as its tombstone. */
 	remove(subject: string, id: string): Promise<void>;
 	/**
 	 * Remove every record of `subject` — account deletion, the operator reset —
-	 * unconditionally: it always wins. Leaves the set present and empty at a
+	 * unconditionally: it always wins. Leaves the set's tombstone, empty at a
 	 * new generation, creating it for a subject never written, so a
-	 * conditional write read before it answers `conflict`. Idempotent in what
-	 * it leaves listed.
+	 * conditional write read before it answers `conflict` while the
+	 * tombstone stands. Idempotent in what it leaves listed; every call moves
+	 * the generation and starts the tombstone's bound again.
 	 */
 	removeAllForSubject(subject: string): Promise<void>;
 }
 
+const RECORD_BINDINGS: ReadonlySet<unknown> = new Set([
+	"password",
+	"email_proof",
+	"federated",
+	"mfa",
+] satisfies NonNullable<MfaFactorRecord["binding"]>[]);
+
+const isInstant = (value: unknown): value is Date =>
+	value instanceof Date && Number.isFinite(value.getTime());
+
+/** `item` as a record of `subject`, its fields each read once; `undefined` for anything else. */
+function recordOf(item: unknown, subject: string): MfaFactorRecord | undefined {
+	if (typeof item !== "object" || item === null) return undefined;
+	const {
+		id,
+		subject: owner,
+		kind,
+		label,
+		binding,
+		createdAt,
+		lastUsedAt,
+		version,
+		data,
+	} = item as Readonly<Record<string, unknown>>;
+	if (typeof id !== "string" || owner !== subject || typeof kind !== "string") return undefined;
+	if (label !== undefined && typeof label !== "string") return undefined;
+	if (binding !== undefined && !RECORD_BINDINGS.has(binding)) return undefined;
+	if (!isInstant(createdAt) || (lastUsedAt !== undefined && !isInstant(lastUsedAt))) {
+		return undefined;
+	}
+	if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 0) {
+		return undefined;
+	}
+	return typeof data === "string" ? (item as MfaFactorRecord) : undefined;
+}
+
 /**
  * What `listVersioned` answered for `subject`, read as the port promises it:
- * a versioned set (`readVersionedSet`) whose items are records each naming
- * `subject`, no id twice, and none for a set never written. A fresh frozen
- * answer; the records are the ones answered. Throws a `TypeError` for
- * anything else, a read that throws included — the store's fault, which the
- * caller answers as the store's outage, never as a set with nothing in it.
+ * a versioned set (`readVersionedSet`) whose items are whole records, every
+ * field of its type, each naming `subject`, no id twice, and none for a set
+ * never written. A fresh frozen answer; the records are the ones answered.
+ * Throws a `TypeError` for anything else, a read that throws included — the
+ * store's fault, which the caller answers as the store's outage, never as a
+ * set with nothing in it.
  */
 export function readMfaFactorSet(answer: unknown, subject: string): VersionedSet<MfaFactorRecord> {
 	const read = readVersionedSet<unknown>(answer as VersionedSet<unknown>);
@@ -280,18 +333,15 @@ export function readMfaFactorSet(answer: unknown, subject: string): VersionedSet
 	}
 	const ids = new Set<string>();
 	for (const item of read.items) {
-		if (typeof item !== "object" || item === null) throw refuse("an item is not a record");
-		let id: unknown;
-		let owner: unknown;
+		let record: MfaFactorRecord | undefined;
 		try {
-			({ id, subject: owner } = item as Readonly<Record<string, unknown>>);
+			record = recordOf(item, subject);
 		} catch {
 			throw refuse("a record could not be read");
 		}
-		if (typeof id !== "string" || owner !== subject || ids.has(id)) {
-			throw refuse("a record is another subject's, has no id, or repeats one");
-		}
-		ids.add(id);
+		if (record === undefined) throw refuse("an item is not a whole record of the subject");
+		if (ids.has(record.id)) throw refuse("a record id repeats");
+		ids.add(record.id);
 	}
 	return read as VersionedSet<MfaFactorRecord>;
 }
