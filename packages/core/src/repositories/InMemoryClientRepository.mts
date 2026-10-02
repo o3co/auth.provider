@@ -19,7 +19,12 @@ import bcrypt from "bcrypt";
 import { z } from "zod";
 import { federationGrantRedirectUriReservedParameter } from "../federation-grants/lodge.mjs";
 import { isLoopbackHostname } from "../net/loopback.mjs";
-import { checkRedirectUri, describeRedirectUriRejection } from "../net/redirect-uri.mjs";
+import {
+	checkRedirectUri,
+	describeRedirectUriRejection,
+	redirectUriQueryCarries,
+	redirectUriQueryNamesWellFormed,
+} from "../net/redirect-uri.mjs";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 import {
 	assertRegistrableClientIds,
@@ -51,6 +56,39 @@ const httpUrlSchema = z
 		},
 		{ message: "URL must use http: or https: scheme" },
 	);
+
+/**
+ * The parameters front-channel logout sets on the registered URI's query
+ * (OIDC Front-Channel Logout 1.0 §4). A registered one would be replaced, or,
+ * when no `sid` is sent, read by the client as this server's own.
+ */
+const FRONTCHANNEL_LOGOUT_PARAMETERS = ["iss", "sid"] as const;
+
+/**
+ * `httpUrlSchema`, with a query whose names pass the redirect-URI grammar and
+ * carry no {@link FRONTCHANNEL_LOGOUT_PARAMETERS} name, compared as
+ * `checkRedirectUri` compares names. A refusal names the parameter, never the URI.
+ */
+const frontchannelLogoutUriSchema = httpUrlSchema.superRefine((uri, ctx) => {
+	// An unparsable value is refused above; its query has no names to judge.
+	if (!URL.canParse(uri)) return;
+	if (!redirectUriQueryNamesWellFormed(uri)) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message: "frontchannelLogoutUri: query-name-invalid",
+		});
+		return;
+	}
+	const carried = redirectUriQueryCarries(uri, FRONTCHANNEL_LOGOUT_PARAMETERS);
+	if (carried !== undefined) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message:
+				`frontchannelLogoutUri: already carries "${carried}" (compared ignoring case, "_" ` +
+				'and "-"), which front-channel logout sets',
+		});
+	}
+});
 
 /**
  * The members a public JWK never carries (RFC 7518 §6.2.2, §6.3.2, §6.4):
@@ -180,7 +218,7 @@ const registrationFields = z.object({
 	// fragment (RFC 6749 §3.1.2), userinfo, control characters and `http:` off
 	// a loopback host are refused.
 	postLogoutRedirectUris: redirectUriListSchema("postLogoutRedirectUris").optional(),
-	// The other two logout fields stay on `httpUrlSchema` deliberately: neither
+	// The other two logout fields stay on http/https deliberately: neither
 	// is a redirect target. `backchannelLogoutUri` is POSTed by this server and
 	// `frontchannelLogoutUri` is rendered as an iframe `src`; a custom scheme is
 	// meaningless to the first and dangerous in the second, where the browser
@@ -193,7 +231,7 @@ const registrationFields = z.object({
 	// `backchannel_logout_session_supported` and
 	// `frontchannel_logout_session_supported` as `true`.
 	backchannelLogoutSessionRequired: z.boolean().optional().default(true),
-	frontchannelLogoutUri: httpUrlSchema.optional(),
+	frontchannelLogoutUri: frontchannelLogoutUriSchema.optional(),
 	frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
 	// Federation-token access opt-in; deny by default.
 	allowedAzpForFederationToken: z.boolean().optional().default(false),

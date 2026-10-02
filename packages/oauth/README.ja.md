@@ -126,7 +126,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `consentStore` が `pendingConsentStore` 無しで配線されたとき（またはその逆）、および `oauth.revocation.accessToken = "denylist"` を宣言して `accessTokenDenylist` が無いとき、ルーターは構築を拒否する — `createApp` 経由では boot の失敗になる。
 
-**ディスカバリー。** `oauthModule` は自分のエンドポイントとメタデータを core の `/.well-known/openid-configuration` に提供し、core は issuer が設定されているときだけそれを提供する。各機能は守れる場合にだけ広告される: `revocation_endpoint` はエンドポイントが何かを失効できるとき、`private_key_jwt` は `replaySeenSet` が配線されているとき、`client_id_metadata_document_supported` は機能が有効で同意ストアが配線され、`authorization_code` グラントが登録されているとき、ログアウトのフィールドは上の 6 スロットのチェックに従う。`grant_types_supported` は `/oauth/token` が振り分けに使う resolver から読み、authorization endpoint の有無も同じ resolver から読む: `authorization_code` グラントがあれば、ドキュメントはそれを示し、`response_types_supported: ["code"]`、`code_challenge_methods_supported: ["S256"]`、`request_uri_parameter_supported`、`authorization_response_iss_parameter_supported: true` と acr の表を広告する。無ければ `response_types_supported: []` で、残りはどれも出さない。規則はそれを計算している [`module.mts`](./src/module.mts) に書かれており、[`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts) で固定されている。
+**ディスカバリー。** `oauthModule` は自分のエンドポイントとメタデータを core の `/.well-known/openid-configuration` に提供し、core は issuer が設定されているときだけそれを提供する。各機能は守れる場合にだけ広告される: `revocation_endpoint` はエンドポイントが何かを失効できるとき、`private_key_jwt` は `replaySeenSet` が配線されているとき、`client_id_metadata_document_supported` は機能が有効で同意ストアが配線され、`authorization_code` グラントが登録されているとき、ログアウトのフィールドは上の 6 スロットのチェックに従う。`grant_types_supported` は `/oauth/token` が振り分けに使う resolver から読み、authorization endpoint の有無も同じ resolver から読む: `authorization_code` グラントがあれば、ドキュメントはそれを示し、`response_types_supported: ["code"]`、`response_modes_supported: ["query"]`、`code_challenge_methods_supported: ["S256"]`、`request_uri_parameter_supported`、`authorization_response_iss_parameter_supported: true` と acr の表を広告する。無ければ `response_types_supported: []` で、残りはどれも出さない。規則はそれを計算している [`module.mts`](./src/module.mts) に書かれており、[`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts) で固定されている。
 
 ## パブリック API
 
@@ -264,7 +264,9 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **`acr` を名指す `claims` パラメーターは拒否する**（`invalid_request`、`request acr through acr_values`）— essential かどうか、id_token 向けか userinfo 向けかを問わない（OIDC Core §5.5.1.1）。JSON オブジェクトでない `claims` や繰り返された `claims` も、`acr` を名指していないと判断できないので拒否する。空の `claims=` は省略されたものとして扱う（RFC 6749 §3.1）。このサーバーは `acr` を `acr_values` とその表を通してのみ保証する。リクエストを無視すれば、RP はそれが尊重されたと読むトークンを受け取ることになる。この拒否は `prompt=login` や `max_age` がブラウザーをログインへ送るより先に行う。`claims` のそれ以外の使い方は無視する。
 
-**未実装:** その拒否を除く `claims` パラメーターと、既定以外の `response_mode`。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
+**`response_mode` は無視する**: 何を指定しても、`/authorize` はクエリでのリダイレクトで答える。ディスカバリーは `response_modes_supported: ["query"]` と言う。RFC 8414 は省略時の既定を `["query", "fragment"]` としているので、省略するとこのサーバーが提供しないモードを主張することになる。
+
+**未実装:** その拒否を除く `claims` パラメーター。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
 
 **`/authorize` はコードを発行する前にアドミッションを通してセッションを読む** — [セッションアドミッション](#セッションアドミッション) を参照: 死んだ・期限切れの・失効した・サブジェクトの無いセッションは、先に Cookie セッションを再生成してからログインへ送られ、答えられないストアはログインページではなく `redirect_uri` で `temporarily_unavailable` になる。
 
@@ -611,7 +613,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 
 - `postLogoutRedirectUris` — `post_logout_redirect_uri` のアローリスト。**`allowedRedirectUris` と同じ文法**で検証される（#498）: `https:`、ループバックホストの `http:`、または RFC 8252 §7.1 の逆ドメイン形式のカスタムスキーム（`com.example.app:/signout`）で、フラグメント・userinfo・実行可能スキームは決して許さない。クエリにも同じ規則がかかる: 名前は `[A-Za-z0-9_-]` だけ、どのパラメーターにも名前があり、`;` を含まず、認可レスポンスの名前（`code`、`state`、`iss`、`error`、`error_description`。大文字小文字と `_`・`-` を無視する）を使わない — ログアウトは自分で `state` を付け加える。カスタムスキームを登録できることが、ネイティブアプリをログアウト後に JSON ボディに着地させずにアプリ自身へ戻せる条件になる。
 - `backchannelLogoutUri` — `logout_token` の POST を受け取る。**`http`/`https` のみ** — このサーバー自身が POST するので、カスタムスキームには届けられない。
-- `frontchannelLogoutUri` — iframe の src。**`http`/`https` のみ** — ブラウザーはこの値をドキュメントのコンテキストで解決し、そこではカスタムスキームはよくて無効、悪ければ RP が頼んでもいないハンドラーの起動になる。カスタムの `ClientRepository` は `ClientEntrySchema` を通らないため、同じ規則（パースしたプロトコルが `http:` か `https:`。ホストは問わない）を、値が使われる場所でも適用する。ログアウト用に RP を登録するコード交換、ログアウトのルート、フロントチャネルのページの 3 か所である。規則に合わない値、文字列でない値、読み取りが失敗する値は使わない。RP はその URI なしで登録されて iframe も出ず、残る RP がなければ、ログアウトはフロントチャネルログアウトがないときと同じ応答を返す。それぞれ `logout_frontchannel_uri_refused` として warn で 1 回、`site`・`clientId`・`reason` とともに記録する（URI は記録しない）。トークン交換もログアウトもこれでは失敗しない。フロントチャネルログアウトはベストエフォートである。
+- `frontchannelLogoutUri` — iframe の src。**`http`/`https` のみ** — ブラウザーはこの値をドキュメントのコンテキストで解決し、そこではカスタムスキームはよくて無効、悪ければ RP が頼んでもいないハンドラーの起動になる。クエリには、フロントチャネルログアウトが付ける名前 `iss`・`sid`（大文字小文字と `_`・`-` を無視して比べる）も、`[A-Za-z0-9_-]` 以外の文字を使う名前や `;` も使えない。core はそうした URI を登録時に拒否し、カスタム `ClientRepository` のレコードでは core のクライアントリポジトリ境界で拒否する。カスタムの `ClientRepository` は `ClientEntrySchema` を通らないため、同じ規則（パースしたプロトコルが `http:` か `https:`。ホストは問わない）を、値が使われる場所でも適用する。ログアウト用に RP を登録するコード交換、ログアウトのルート、フロントチャネルのページの 3 か所である。規則に合わない値、文字列でない値、読み取りが失敗する値は使わない。RP はその URI なしで登録されて iframe も出ず、残る RP がなければ、ログアウトはフロントチャネルログアウトがないときと同じ応答を返す。それぞれ `logout_frontchannel_uri_refused` として warn で 1 回、`site`・`clientId`・`reason` とともに記録する（URI は記録しない）。トークン交換もログアウトもこれでは失敗しない。フロントチャネルログアウトはベストエフォートである。
 - `backchannelLogoutSessionRequired` / `frontchannelLogoutSessionRequired` — 既定 `true`。`false` にすると `logout_token` / iframe URL から `sid` を除く。
 
 ## フェデレーショントークンエンドポイント

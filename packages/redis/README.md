@@ -113,6 +113,9 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   before it. Redis's asynchronous replication does not hold that across a
   failover, where a promoted replica may lack a write the old primary
   acknowledged, and a read answered by a replica does not either.
+  The RP registry rests on the same assumption (core's `SessionRPRegistry`):
+  a `registerRP` a promoted replica lost, or a `listRPs` a replica answered,
+  leaves that RP out of the logout fan-out.
 - **For the MFA stores, a server that keeps what it is written** (the MFA
   ADR's D12). An enrolled second factor lost to an eviction or a restart
   reads as "never enrolled", and whoever holds the password can then bind
@@ -487,7 +490,7 @@ give the same answers:
 | `CodeRepository.createCode` | an `expiresIn` that is not a positive number of seconds ending within the Date range; a default that is not whole seconds (at construction) | `PX` = `expiresIn` × 1000, rounded up |
 | `FederationTokenStore` | a `ttl` that is not a positive number of seconds ending within the Date range (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
 | The federation-token lock (`acquireLock`) and the federation-grant refresh lock | a TTL that is not a positive lifetime, or a wait that is not a non-negative one, ending within the Date range | `PX` = the TTL, rounded up |
-| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` or `authentication.mfaAt` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range); `recordSecondFactor` keeps it (`KEEPTTL`) |
+| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` or `authentication.mfaAt` that is an Invalid Date or before the epoch (the stored envelope reads back neither), or further ahead of the host's clock than `DEFAULT_CLOCK_SKEW_MS` (one a little ahead is recorded as the host's now) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range); `recordSecondFactor` keeps it (`KEEPTTL`) |
 | `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `addFamilyIdUnlessEnded`, `endSession`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt`; the family index's "ended" mark `PXAT` = that plus `DEFAULT_CLOCK_SKEW_MS` |
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is not a `Date` with a finite time (core's `checkSubjectRevocationInstant`) | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor (the boundary as recorded, clamped, plus the retention) for a full revocation — never lowered |
