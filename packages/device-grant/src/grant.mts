@@ -41,7 +41,9 @@
  *   victim's credential change. An unreadable boundary is 503
  *   `temporarily_unavailable`.
  * - A throwing `poll` is a store outage, answered 503
- *   `temporarily_unavailable` — none of the four codes is true of it.
+ *   `temporarily_unavailable` — none of the four codes is true of it. So is
+ *   an answer `readPollOutcome` refuses (not an object, an unknown status, a
+ *   `slow_down` interval that is not a number of seconds), logged at error.
  * - A wired `grantPolicy` is consulted on the approval once its client is
  *   checked, before the revocation read and the minting instant, through
  *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error, a
@@ -93,6 +95,7 @@ import {
 	ownedConfirmation,
 	readDeviceAuthorization,
 } from "@o3co/auth-provider-core";
+import { readPollOutcome } from "./storeAnswer.mjs";
 import {
 	DEVICE_CODE_STORE_UNAVAILABLE,
 	reportDeviceCodeStoreOutage,
@@ -175,9 +178,9 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 				return error(400, "invalid_request", "device_code is required");
 			}
 
-			let outcome: Awaited<ReturnType<DeviceCodeStore["poll"]>>;
+			let answered: unknown;
 			try {
-				outcome = await options.store.poll(deviceCode, now());
+				answered = await options.store.poll(deviceCode, now());
 			} catch (err) {
 				reportDeviceCodeStoreOutage(options.logger, "device_code_grant_store_unavailable", err, {
 					clientId: client.clientId,
@@ -188,6 +191,23 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					DEVICE_CODE_STORE_UNAVAILABLE.description,
 				);
 			}
+
+			// See the file header: an answer that cannot be read is an outage.
+			const read = readPollOutcome(answered);
+			if (!read.ok) {
+				reportUnreadableDeviceAuthorization(
+					options.logger,
+					"device_code_grant_record_unreadable",
+					read,
+					{ clientId: client.clientId },
+				);
+				return error(
+					503,
+					DEVICE_CODE_STORE_UNAVAILABLE.error,
+					DEVICE_CODE_STORE_UNAVAILABLE.description,
+				);
+			}
+			const outcome = read.answer;
 
 			switch (outcome.status) {
 				case "not_found":

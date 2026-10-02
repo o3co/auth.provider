@@ -26,10 +26,9 @@
  *   attacker burns their own account's budget; that is why this runs
  *   `checkWithFailMode` itself instead of the IP-keyed guard middleware.
  * - Order: JSON media type (415), the body's `action` (400), session
- *   admission, the email gate (`approve` only), the budget, the code's shape
- *   (a malformed code is 404), then what an approval records (401, below),
- *   then the store's answers: a well-formed unknown code from a session the
- *   approval cannot record is 401, not 404. Refusals before the budget spend
+ *   admission, what an approval records (401, below; `approve` only), the
+ *   email gate (`approve` only), the budget, the code's shape (a malformed
+ *   code is 404), then the store's answers. Refusals before the budget spend
  *   no attempt and read no code.
  * - Admission (`admitSession`; see the session-admission ADR) reads the live
  *   `UserSession` behind the cookie's `sid`, not the cookie's claim: the
@@ -39,14 +38,15 @@
  *   which the device token carries. One the store would refuse to record
  *   (core's `recordableDeviceApproval`: an `authTime` further ahead of the
  *   approval's clock than the skew, or before the epoch) is refused
- *   `401 login_required` before the store is asked, so a store error stays an
- *   outage.
+ *   `401 login_required` before the email gate, the budget and the store are
+ *   asked: no attempt is spent on it, and a store error stays an outage.
  * - Outages fail closed as 503 (a limiter outage follows the limiter's own
  *   `failMode`), never as `login_required`.
  * - A record the store answers is read through core's
- *   `readDeviceAuthorization` before any of it is used. One it refuses is
- *   answered as an outage (503), logged at error; on a decision the store has
- *   already applied, it is audited as an unknown outcome, as a lost reply is.
+ *   `readDeviceAuthorization` before any of it is used, and the decision's
+ *   answer around it through `readDecisionOutcome`. One either refuses is
+ *   answered as an outage (503), logged at error; on a decision, it is
+ *   audited as an unknown outcome, as a lost reply is.
  * - Decisions and budget exhaustion are audit events; none carries the user
  *   code (the brute-force target) or the device code (a bearer credential).
  * - JSON only, checked here whatever parsed the body: a form POST is a CORS
@@ -87,6 +87,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import type { DeviceGrantAdmissionAction } from "./admissionActions.mjs";
+import { readDecisionOutcome, type StoreAnswerRefusal } from "./storeAnswer.mjs";
 import {
 	DEVICE_CODE_STORE_UNAVAILABLE,
 	type DeviceAuthorizationRefusal,
@@ -341,6 +342,27 @@ export const createDeviceVerificationHandler = (
 			return;
 		}
 		const subject = session.sub;
+		const nowMs = now();
+
+		// What an approval records, held to the store's own rule on the clock the
+		// store is handed, before the email gate, the budget and the code — see
+		// the file header.
+		const amr = wellFormedAmr(vouchedAmr(session));
+		const authTime = session.authTime;
+		if (action === "approve") {
+			const recorded = { nowMs, amr, authTime };
+			try {
+				recordableDeviceApproval(recorded, recorded.nowMs);
+			} catch {
+				(options.logger ?? consoleLogger).warn(
+					{ sid: session.sid, aheadMs: authTime.getTime() - nowMs },
+					"auth_time_ahead_of_clock",
+				);
+				const refusal = loginRequired(SIGN_IN_AGAIN);
+				respond(res, refusal.status, refusal.body);
+				return;
+			}
+		}
 
 		// Before the budget and the code — see the file header.
 		if (
@@ -407,8 +429,6 @@ export const createDeviceVerificationHandler = (
 			return;
 		}
 
-		const nowMs = now();
-
 		/**
 		 * The store could not answer: an outage, not a verdict on the code.
 		 * The line names the action and not the subject, as the route's
@@ -424,8 +444,8 @@ export const createDeviceVerificationHandler = (
 			});
 		};
 
-		/** The store answered a record nothing can be read of: answered as an outage. */
-		const recordUnreadable = (refusal: DeviceAuthorizationRefusal): void => {
+		/** The store answered a record, or a wrapper around it, nothing can be read of: answered as an outage. */
+		const recordUnreadable = (refusal: DeviceAuthorizationRefusal | StoreAnswerRefusal): void => {
 			reportUnreadableDeviceAuthorization(
 				options.logger,
 				"device_verification_record_unreadable",
@@ -493,36 +513,12 @@ export const createDeviceVerificationHandler = (
 		// client's allowlist when the device asked. Re-reading it here to pass
 		// it back would open a window between the lookup that showed the user
 		// a scope and the write that grants one.
-		const authTime = session.authTime;
 		const approval: ApproveDeviceAuthorizationInput | undefined =
-			action === "approve"
-				? {
-						userCode,
-						subject,
-						nowMs,
-						amr: wellFormedAmr(vouchedAmr(session)),
-						authTime,
-					}
-				: undefined;
-		if (approval !== undefined) {
-			// The store's own rule, on the input and clock it is handed — see
-			// the file header.
-			try {
-				recordableDeviceApproval(approval, approval.nowMs);
-			} catch {
-				(options.logger ?? consoleLogger).warn(
-					{ sid: session.sid, aheadMs: authTime.getTime() - nowMs },
-					"auth_time_ahead_of_clock",
-				);
-				const refusal = loginRequired(SIGN_IN_AGAIN);
-				respond(res, refusal.status, refusal.body);
-				return;
-			}
-		}
+			action === "approve" ? { userCode, subject, nowMs, amr, authTime } : undefined;
 
-		let outcome: Awaited<ReturnType<typeof options.store.approve>>;
+		let answered: unknown;
 		try {
-			outcome =
+			answered =
 				approval !== undefined
 					? await options.store.approve(approval)
 					: await options.store.deny(userCode, nowMs);
@@ -532,6 +528,14 @@ export const createDeviceVerificationHandler = (
 			storeUnavailable(err);
 			return;
 		}
+		// An answer that cannot be read says nothing of whether the decision landed.
+		const read = readDecisionOutcome(answered);
+		if (!read.ok) {
+			auditUnknownOutcome();
+			recordUnreadable(read);
+			return;
+		}
+		const outcome = read.answer;
 
 		switch (outcome.status) {
 			case "ok": {

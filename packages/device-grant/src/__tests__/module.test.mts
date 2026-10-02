@@ -55,7 +55,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
 import { deviceGrantConfigSchema, deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
-import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
+import { LIVE_AUTH_TIME_MS, liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -750,60 +750,76 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		}
 	});
 
-	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides, over the configuration's", async () => {
-		// The configuration leaves it off; the slot turns it on, and the
-		// signed-in user-1 has no verified email.
-		const app = mountVerificationRoute({
-			...enabledDeps(),
-			oauthTokenSettings: createTestOAuthTokenSettings({
-				...WITHIN_CONFIGURATION,
-				requireEmailVerified: true,
-			}),
-		});
-		const res = await request(app)
-			.post("/oauth/device/verification")
-			.set("Host", "as.example.test")
-			.set("Origin", "http://as.example.test")
-			.send({ action: "approve", user_code: "BCDF-GHJK" });
-		expect(res.status).toBe(403);
-		expect(res.body).toEqual({
-			error: "access_denied",
-			error_description: "email address is not verified",
-		});
-	});
+	/**
+	 * The mounted route reads the wall clock, and an approval from a session
+	 * that authenticated ahead of it is refused before the email gate: held at
+	 * the fixed sessions' authentication instant while `run` runs.
+	 */
+	const atLiveAuthTime = async (run: () => Promise<void>): Promise<void> => {
+		vi.useFakeTimers({ toFake: ["Date"], now: LIVE_AUTH_TIME_MS });
+		try {
+			await run();
+		} finally {
+			vi.useRealTimers();
+		}
+	};
 
-	it("reads requireEmailVerified off the oauthTokenSettings a module provides when the configuration turns it on", async () => {
-		// The other way round: the slot says false, and a reader that took
-		// `false` for "unset" would fall through to the configuration's `true`.
-		const approve = (deps: TestDeps) =>
-			request(mountVerificationRoute(deps))
+	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides, over the configuration's", () =>
+		atLiveAuthTime(async () => {
+			// The configuration leaves it off; the slot turns it on, and the
+			// signed-in user-1 has no verified email.
+			const app = mountVerificationRoute({
+				...enabledDeps(),
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					...WITHIN_CONFIGURATION,
+					requireEmailVerified: true,
+				}),
+			});
+			const res = await request(app)
 				.post("/oauth/device/verification")
 				.set("Host", "as.example.test")
 				.set("Origin", "http://as.example.test")
 				.send({ action: "approve", user_code: "BCDF-GHJK" });
-		const configOn = (): TestDeps => {
-			const base = enabledDeps();
-			return {
-				...base,
-				config: { ...base.config, oauth: { ...base.config.oauth, requireEmailVerified: true } },
+			expect(res.status).toBe(403);
+			expect(res.body).toEqual({
+				error: "access_denied",
+				error_description: "email address is not verified",
+			});
+		}));
+
+	it("reads requireEmailVerified off the oauthTokenSettings a module provides when the configuration turns it on", () =>
+		atLiveAuthTime(async () => {
+			// The other way round: the slot says false, and a reader that took
+			// `false` for "unset" would fall through to the configuration's `true`.
+			const approve = (deps: TestDeps) =>
+				request(mountVerificationRoute(deps))
+					.post("/oauth/device/verification")
+					.set("Host", "as.example.test")
+					.set("Origin", "http://as.example.test")
+					.send({ action: "approve", user_code: "BCDF-GHJK" });
+			const configOn = (): TestDeps => {
+				const base = enabledDeps();
+				return {
+					...base,
+					config: { ...base.config, oauth: { ...base.config.oauth, requireEmailVerified: true } },
+				};
 			};
-		};
-		// The configuration alone holds the approval.
-		expect((await approve(configOn())).status).toBe(403);
-		// The slot's false is read, and the approval goes on to the code as it
-		// does with the setting off.
-		const res = await approve({
-			...configOn(),
-			oauthTokenSettings: createTestOAuthTokenSettings({
-				...WITHIN_CONFIGURATION,
-				requireEmailVerified: false,
-			}),
-		});
-		const off = await approve(enabledDeps());
-		expect(res.status).not.toBe(403);
-		expect(res.status).toBe(off.status);
-		expect(res.body).toEqual(off.body);
-	});
+			// The configuration alone holds the approval.
+			expect((await approve(configOn())).status).toBe(403);
+			// The slot's false is read, and the approval goes on to the code as it
+			// does with the setting off.
+			const res = await approve({
+				...configOn(),
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					...WITHIN_CONFIGURATION,
+					requireEmailVerified: false,
+				}),
+			});
+			const off = await approve(enabledDeps());
+			expect(res.status).not.toBe(403);
+			expect(res.status).toBe(off.status);
+			expect(res.body).toEqual(off.body);
+		}));
 
 	/** A limiter whose backend is down: every check rejects, as a Redis client would. */
 	const brokenLimiter: RateLimiter = {
@@ -986,16 +1002,36 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs a projection of it", async () => {
-		// A store that answers, but with no decision outcome at all, is a
-		// failure of the host's code, not an outage and not the caller's mistake.
+		// A logger that throws on the decision's line is a failure of the
+		// host's code, not an outage and not the caller's mistake.
 		const deps = enabledDeps();
 		const { logger } = serialisingLogger();
 		const app = mountVerificationRoute({
 			...deps,
-			logger,
+			logger: {
+				...logger,
+				info: () => {
+					throw new TypeError("the info channel is broken");
+				},
+			},
 			deviceCodeStore: {
 				...deps.deviceCodeStore,
-				deny: async () => null as never,
+				deny: async () => ({
+					status: "ok" as const,
+					authorization: {
+						userCode: "BCDFGHJK",
+						clientId: "tv-app",
+						requestedScope: undefined,
+						expiresAtMs: Date.now() + 600_000,
+						intervalSeconds: 5,
+						status: "denied" as const,
+						subject: undefined,
+						grantedScope: undefined,
+						approvedAtMs: undefined,
+						amr: undefined,
+						authTimeMs: undefined,
+					},
+				}),
 			},
 		});
 
