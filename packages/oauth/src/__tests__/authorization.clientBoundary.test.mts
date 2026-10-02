@@ -109,10 +109,12 @@ const exchangeSetup = async (findById: ClientRepository["findById"]) => {
 		accessTokenHorizonMs: 3_600_000,
 	});
 	const register = vi.fn(rotation.register);
+	const keyStore = createSymmetricKeyStore("test-secret");
+	const signed = vi.spyOn(keyStore, "sign");
 	const handler = createAuthorizationGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config,
-		keyStore: createSymmetricKeyStore("test-secret"),
+		keyStore,
 		codeRepository,
 		clientRepository: { findById, authenticate: vi.fn().mockResolvedValue(null) },
 		userSessionStore,
@@ -136,7 +138,7 @@ const exchangeSetup = async (findById: ClientRepository["findById"]) => {
 		});
 		return result;
 	};
-	return { exchange, consumeByCode, register, sessionRPRegistry, logger };
+	return { exchange, consumeByCode, register, signed, sessionRPRegistry, logger };
 };
 
 /**
@@ -253,9 +255,9 @@ describe("createAuthorizationGrant — the client is looked up before the code i
 		["a record the boundary refuses", refusedRecord],
 		["a repository that throws", outage],
 	])(
-		"leaves the code unspent and registers no refresh-token family for %s",
+		"leaves the code unspent, signs nothing and registers no refresh-token family for %s",
 		async (_label, findById) => {
-			const { exchange, consumeByCode, register } = await exchangeSetup(findById);
+			const { exchange, consumeByCode, register, signed } = await exchangeSetup(findById);
 
 			const result = await exchange();
 
@@ -265,6 +267,7 @@ describe("createAuthorizationGrant — the client is looked up before the code i
 				errorDescription: "session linking unavailable",
 			});
 			expect(consumeByCode).not.toHaveBeenCalled();
+			expect(signed).not.toHaveBeenCalled();
 			expect(register).not.toHaveBeenCalled();
 		},
 	);

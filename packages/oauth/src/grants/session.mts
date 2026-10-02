@@ -49,9 +49,9 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  * The client is `ctx.authenticatedClient` (RFC 6749 §2.3 authentication via
  * `clientAuthMw`), never a body `client_id`: no identity decision reads the
  * raw body. Its `allowedScopes` bound the request; `aud` is a wired
- * `grantPolicy`'s `grantedAudience` within its `allowedAudiences` or its client
- * id, else its first `allowedAudiences` entry, else its client id; `azp` is
- * its client id.
+ * `grantPolicy`'s `grantedAudience` within its `allowedAudiences` (its client
+ * id when it lists none), else its first `allowedAudiences` entry, else its
+ * client id; `azp` is its client id.
  */
 /**
  * What the session grant reads. The requirement resolver, `subjectRevocation`
@@ -246,12 +246,13 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;
-				// The ceiling is every audience this grant mints for on its own:
-				// `allowedAudiences` and the client id it falls back to.
-				const bounded = boundPolicyAudience(policy.decision, [
-					...(client.allowedAudiences ?? []),
-					client.clientId,
-				]);
+				// The ceiling is exactly what this grant mints for on its own:
+				// `allowedAudiences` when it lists any, else the client id.
+				const allowedAudiences = client.allowedAudiences ?? [];
+				const bounded = boundPolicyAudience(
+					policy.decision,
+					allowedAudiences.length > 0 ? allowedAudiences : [client.clientId],
+				);
 				if (!bounded.ok) return { result: bounded.result };
 				policyAudience = bounded.audience;
 			}

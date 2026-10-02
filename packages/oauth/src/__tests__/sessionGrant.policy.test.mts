@@ -125,6 +125,14 @@ describe("session grant — grantPolicy refusals", () => {
 		expect(result).toMatchObject({ status: 500, error: "server_error" });
 	});
 
+	it("answers the client id 500 when allowedAudiences is listed without it: the grant never mints for it", async () => {
+		const { result } = await grantWith(async () => ({
+			outcome: "allow",
+			grantedAudience: ["app"],
+		})).handle(ctx());
+		expect(result).toMatchObject({ status: 500, error: "server_error" });
+	});
+
 	it("is not consulted when admission refuses", async () => {
 		const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({ outcome: "allow" }));
 		const { result } = await grantWith(evaluate).handle(
@@ -183,14 +191,16 @@ describe("session grant — grantPolicy narrows what is minted", () => {
 	it.each([
 		["no allowedAudiences", { allowedAudiences: undefined }],
 		["empty allowedAudiences", { allowedAudiences: [] }],
-		["allowedAudiences that do not list it", {}],
-	])("mints for the client id the policy chooses, with %s", async (_label, change) => {
-		const { result } = await grantWith(async () => ({
-			outcome: "allow",
-			grantedAudience: ["app"],
-		})).handle(ctx(undefined, { authenticatedClient: { ...CLIENT, ...change } }));
-		expect(minted(result).aud).toBe("app");
-	});
+	])(
+		"mints for the client id the policy chooses, with %s: the grant's own audience",
+		async (_label, change) => {
+			const { result } = await grantWith(async () => ({
+				outcome: "allow",
+				grantedAudience: ["app"],
+			})).handle(ctx(undefined, { authenticatedClient: { ...CLIENT, ...change } }));
+			expect(minted(result).aud).toBe("app");
+		},
+	);
 
 	it("keeps the grant's own audience when the policy names none", async () => {
 		const { result } = await grantWith(async () => ({ outcome: "allow" })).handle(ctx());
