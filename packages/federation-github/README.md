@@ -97,9 +97,9 @@ federations, and one GitHub user signs in to them as two identities.
 An entry is flat, and its schema is strict: the keys core owns (`enabled`,
 `type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
 The schema is `githubEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
-does not name — a typo, or a nested `github { ... }` section — refuses boot
-with `config-validation-failed`, naming `core.federations.<name>.<field>`; so
-does a missing or malformed key. A refusal names the key, never its value. A
+does not name — a typo, or a nested `github { ... }` section — refuses boot with `config-validation-failed` at `core.federations.<name>`,
+naming the key; a missing or malformed key is refused at
+`core.federations.<name>.<field>`. A refusal names the key, never its value. A
 key written `null` counts as absent. An absent key means what the table says,
 read by the provider and the redirect policy; the schema fills in no default.
 
