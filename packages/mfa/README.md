@@ -28,7 +28,7 @@ Multi-factor authentication for [`auth.provider`](../../README.md): a second fac
 
 - the `MfaFactor` contract, the `MfaFactorStore` and `MfaTransactionStore` ports and their adapters, the `mfaFactors` kind and `mfaFactorResolver` — core's (`packages/core/src/mfa/`), with Redis adapters in `@o3co/auth-provider-redis`;
 - the WebAuthn factor — `@o3co/auth-provider-webauthn`'s `webauthnMfaFactorModule`, contributed as `mfaFactors.webauthn` and verified through these routes like any factor (the ADR's D4, F7);
-- the pages: the login page's second step, the MFA page and the account page are the deployment's (D6).
+- the pages: the login page's second step, the MFA page and the account page are the deployment's (D6), and keep [The MFA page's contract](#the-mfa-pages-contract).
 
 **Why a separate package.** Core mounts no route but discovery and imports no sibling, and the MFA routes are browser routes that need the session package's CSRF guard and its login tail. A package also lets a deployment that opts out install none of it, and lets the factor code move on its own review cadence (D1).
 
@@ -39,7 +39,7 @@ Four sections, each its module's and named after it: `mfa`, the MFA module's; `m
 | Key | Env | Default | Meaning |
 | --- | --- | --- | --- |
 | `mfa.mode` | `MFA_MODE` | `off` | `required` or `optional`, the two the module honours; `off`, or unset, with the module installed is refused. Any other value is refused before any factory runs, naming `mfa.mode` |
-| `mfa.page.url` | `MFA_PAGE_URL` | `/mfa` | The deployment's MFA page, where a step-up starts: the requirement registers it as its step-up page (D6) |
+| `mfa.page.url` | `MFA_PAGE_URL` | `/mfa` | The deployment's MFA page, where a step-up starts: the requirement registers it as its step-up page (D6), on the issuer's origin. What the page keeps is [The MFA page's contract](#the-mfa-pages-contract) |
 | `mfa.encryptionKeys` | `MFA_ENCRYPTION_KEY` feeds the first entry | none | The key ring, `[{ id?, key }]`: each key canonical base64 of 32 bytes (`openssl rand -base64 32`); the first seals, every key opens (D11). An entry without an `id` is named by its key's fingerprint |
 | `mfa-totp-factor.enabled` | `MFA_TOTP_FACTOR_ENABLED` | `true` | Whether the TOTP factor is offered |
 | `mfa-totp-factor.algorithm` | `MFA_TOTP_FACTOR_ALGORITHM` | `SHA1` | `SHA1`, `SHA256` or `SHA512`, for new enrollments |
@@ -210,7 +210,7 @@ Mounted at `/session/mfa` ([`src/routes.mts`](src/routes.mts), over the coordina
 
 **The step-up of a first binding** (the MFA ADR's F2 first-binding branch, D24). `POST /session/mfa/step-up` admits the session through the requirement's `mfa.step_up` remediation, then asks the requirement, as `mfa.manage`, what a first binding in it is answered: a witness that says the subject enrolled with no counting record, or a store's outage, is `503`; a sign-in older than `mfa.manage.maxAgeSeconds`, or a session that recorded no facts, `401 login_required`. A subject who holds a record that may count gets the step-up of a second factor (below); another requirement's step-up is answered as that requirement's `403 step_up_required`; under `required`, a password session whose subject holds no counting factor never gets here — it is sent to log in again. Otherwise it answers an `enroll` transaction owing the account-email proof: the one `transaction_id` names, when it is the session's own first binding's and its proof is not met, or a new one. The proof is given on it through `POST /session/mfa/challenge` and `/verify` with `factor_id: "account-email"` (below), mailed to the address the session's login `User` carried; a verified proof is recorded for that session alone (`MfaTransactionStore.recordSessionEmailProof`), standing `mfa.manage.maxAgeSeconds`, and every first binding in the session is admitted on it while it stands. A proof lost with the store is given again. An `enroll` transaction takes the account-email proof alone: any other `factor_id` is `400 … "Unknown second factor"`.
 
-**The page's contract.** A first binding's `403 step_up_required` — from the link start, WebAuthn registration or `POST /session/mfa/enrollment` — carries `"requirement":"mfa"` and `page`, the MFA page's URL. The page calls `POST /session/mfa/step-up`; with the transaction it answers, `POST /session/mfa/challenge` and `/verify` with `factor_id: "account-email"`; then returns to the page it came from, which starts the binding again. `"email_proof":false` there means the subject holds a counting factor: the page lists its factors (`GET /session/mfa/transaction`), challenges and verifies one on the transaction, and returns once answered `{"step_up":"verified"}`; `403 mfa_no_qualifying_factor` means none of them can be used, and an operator resets the account (`resetMfaForSubject`, below). A proof nobody can give is refused at the challenge, `403 {"error":"mfa_email_proof_unavailable"}`: the account's address must be fixed in the Store.
+What the page does with a first binding's `403 step_up_required` — from the link start, WebAuthn registration or `POST /session/mfa/enrollment` — and with the step-up's answers is [The MFA page's contract](#the-mfa-pages-contract)'s.
 
 **The gate** ([`src/firstBinding.mts`](src/firstBinding.mts)) is one function for every first binding — a first factor at a login, and, in a session, a first factor, passkey or linked identity — over what each caller hands it: `mfa.enrollment.requireEmailProof`, whether a `mailSender` is wired, the account's address as the session's enrollment facts say it (core's one reading: `none`, `address`, or `unreadable` — present, and not one address `normaliseMailAddress` reads), and D25's flag. `when-mail` asks for the proof when a sender is wired and the account has an address, or one it cannot read; `always` always; `never` never, whatever the address; the flag always. A proof asked for that nobody can give — no sender, no address, an address no proof can be sent to — is asked for and refused (`403`), never skipped, and said at warn at each login or admission that asks it (`mfa_email_proof_unprovable`, with the reason, never the address). At a login the proof is kept on the login's transaction; in a session, for that session alone, `mfa.manage.maxAgeSeconds`.
 
@@ -250,7 +250,7 @@ Mounted at `/session/mfa` ([`src/routes.mts`](src/routes.mts), over the coordina
 
 - **The authorization** is minted when such a factor verifies, for the session it verified in: at a login once its session is established, and at a step-up once its session is escalated — so a user who signs in with a recovery code spends that one code. It lasts `mfa.manage.maxAgeSeconds` from the verification (its longest, 3600 s, is core's `MFA_RECOVERY_AUTHORIZATION_MAX_MS`), and a newer one in the session replaces it. A guessable factor (TOTP, the email factor), or a kind not installed, mints nothing. One the store cannot record is said at warn (`mfa_lock_recovery_unauthorized`), the answer standing.
 - **The release**, `POST /session/mfa/lock/release`, is admitted as `mfa.manage`. It reads the subjects' sessions boundary (`revokedBefore`), then, under the subject's lease, reads the subject's records and hands the store the earliest creation time of those of any kind but an installed exempt one — a record whose data does not open included, and one of a kind not installed, which may be installed again (remove it from the account page) — and the store judges the rest in one step: the authorization standing in this session; for the week and the backoff, a boundary later than the attack's first counted failure by more than five minutes (`DEFAULT_CLOCK_SKEW_MS`); for the hard hold, every guessable record bound after the answer's `rebind_after` — the hold's time plus `DEFAULT_CLOCK_SKEW_MS`, as the store judges it. Applied, it is audited `mfa.lock.recovered` (`operation: "recover"`, the `generation`, what it `cleared`) and said at info (`mfa_lock_released`, or `mfa_lock_release_held` while the hard hold stands); a refusal is said at info (`mfa_lock_release_refused`, `reason`). `rebind_after` is in no log line: it shows roughly when the latest failed attempt was, which is the account holder's to see. A bound the store answers that no date can hold is `503`, never an answer without it; the release may already have applied by then, so a retry answers `already_applied` — what it came to. An authorization already applied answers what it came to, applying nothing more.
-- **The page's contract.** The order is: change the password — for a federated account, secure the upstream account at its identity provider, and revoke the subject's sessions, which the release asks for; sign in with a recovery code or a passkey; where the hard hold stands, replace every guessable factor — enroll the new one, then remove the old — after the answer's `rebind_after`; then release. Each answer is the page's to show: `{"lock":"released"}`; `{"lock":"held","hold":"hard","rebind_after":…}` — the week may be given back, but guessable factors stay held, and the user must replace them and verify a recovery code or a passkey again before another release, so the page states the order up front to spend one code; `403 mfa_exempt_proof_required` — verify a recovery code or a passkey; `409` `not_revoked_since` — the page asks for a password change (any revocation of the subject's sessions meets the condition, so the release does not prove one was made); `409` `no_revocation_boundary` — this deployment cannot give the week back early; while the hard hold stands it carries `rebind_after`, and a rebind alone lifts the hold there: replace every guessable factor after it, then release, or ask for a reset. Wherever an answer carries `rebind_after`, the page shows it and tells the user that a factor whose `created_at` (`GET /factors`) is not after it does not count: replace it again after that instant. A factor listed without `created_at` does not count either: remove it. Under the hard hold, a login's `429 mfa_locked` and the release's `403 mfa_exempt_proof_required` carry no time: their pages say to make an exempt proof (a recovery code or a passkey), rebind, then release. `rebind_after` is disclosed only after an exempt proof, on the release's `held` and `409` answers. The page computes nothing; the server is the only source of the instant.
+- **The order the page states**, and what it shows of each answer and of `rebind_after`, are [The MFA page's contract](#the-mfa-pages-contract)'s.
 - **Sign-out-everywhere.** A host that lets a session that has not passed its second factor sign out everywhere hands whoever holds only the password the boundary the release asks for: the victim's next release then gives the week back with the password unchanged. Such a host asks the second factor for it.
 - **What does not hold the lease.** A login that has not passed its second factor takes no lease of the subject's: its codes reserve attempts and nothing more, and a first binding at a login is open only where no record may count. So a password holder cannot keep the victim's release, or the reset, waiting.
 
@@ -268,6 +268,217 @@ Mounted at `/session/mfa` ([`src/routes.mts`](src/routes.mts), over the coordina
 **Logs** never carry the transaction id, a proof, a code, an address, a secret or a factor's data: `mfa_store_unavailable` (error: `route` — `step-up`, `factors` and `recovery-codes` among them — `sid` at a session's escalation, `store` — `mfa_transaction`, `mfa_factor`, `revocation_boundary` (`step: "revokedBefore"`, a login's transaction held to its subject's sessions boundary), `user_session`, `cookie_session` or an interrupting requirement's name — `step`, the error's projection; a session's proof's read and write are `sessionEmailProofAt` and `recordSessionEmailProof`, the first-binding mark's `firstBindingAt` and `noteFirstBinding`, a session's escalation's `cookie_session` `regenerate`, `save` and `renewSession` (a renewal answered without a nonce) and `user_session` `recordSecondFactor` and `delete`), `mfa_escalation_unbound` (error: `route`, `sub` — a store that dropped the renewal nonce; the session is ended), `mfa_escalation_invalid` (error: `route`, `sub`, and the error's projection for a store's `RangeError` — what a verification adds outside the requirement's reach, or an event the store refused), `mfa_escalation_not_recorded` (info: `route`, `sub`), `mfa_factor_unreadable` (error: `route` — `factors` for a listed record whose key left the ring — `kind`, `factorId`, `state` — `unreadable`, `key_unavailable` with the `keyId` to put back, `verification`, `challenge` when a pending challenge's kept state does not open, with the `keyId` when that key is the one missing, or `enrollment` when a first binding's pending enrollment does not open or its factor threw completing it), `mfa_factor_challenge_unavailable` (error: `kind`, `factorId`), `mfa_factor_enrollment_unavailable` (error: `kind`; `route: "verify"` when a factor's `enrollable` threw while a login was being reopened for a binding, `route: "enrollment"` when it threw at an enrollment's start or completion), `mfa_factor_identity_unavailable` (warn: `kind` — a factor's `identity` threw; the record is judged a duplicate of none) — a factor's own failure, here and in `mfa_factor_unreadable`'s `verification` and `enrollment`, by its `name` and `code` alone, never its text, `mfa_mail_unavailable` (error: `route`, `purpose`, `kind`, `reason` — `outage` or `no_sender` — `cleared`, and the sender's failure by its `name`, `code` and `status` alone, never its text), `mfa_mail_refused_at_limit` (warn: `route`, `purpose`, `kind`, `cleared`), `mfa_email_proof_unprovable` (warn: `sub`, `reason` — `no_sender`, `no_address` or `unreadable_address`; at each login, first-binding admission or reopened login that asks the proof), `mfa_recovery_codes_unwritten` (error: `sub`, the error's projection — a binding's or a regeneration's set not written, or not marked shown: no codes answered), `mfa_recovery_codes_unreplaced` (error: `sub`, the error's projection — a set a new one replaces could not be listed or removed, and is still stored beside it, retired; a set kept on purpose is not logged), `mfa_recovery_codes_conflict` (warn: `sub` — a regeneration's set, or the set a binding writes beside its factor, not written because another write of the subject's factors landed after it read them: no codes answered), `mfa_enrollment_state_inconsistent` (error: `route`, `sub`, `witness` — a verification that would reopen a login for a first binding), `mfa_enrollment_witness_unwritten` (warn: `sub`), `mfa_enrollment_witness_uncleared` (warn: `sub`, the error's projection — a removal that left no record that may count could not clear the witness; the removal stands), `mfa_factor_removal_unread` (warn: `sub`, the error's projection — the records could not be read again after a removal; those read before, less the removed one, decided the witness), `mfa_subject_lease_overrun` (error: `route` — `factors` or `enrollment` — `sub` — a removal or a binding outran the subject's lease: what it wrote stands, and a recovery or a reset may have run beside it; the reset's own, with `sub` alone), `mfa_lock_released` and `mfa_lock_release_held` (info: `sub`, `generation`, `applied`, and `hold` for the second — a release that leaves the hard hold standing), `mfa_lock_release_refused` (info: `sub`, `reason`), `mfa_lock_recovery_unauthorized` (warn: `route`, `sub`, the error's projection — an exempt verification whose authorization could not be recorded; the answer stands), `mfa_reset` (info: `sub`, `generation`) and `mfa_reset_incomplete` (warn: `sub`, `stoppedAt`, the error's projection), `mfa_first_binding_unnoted` (warn: `sub`, `store`, `step`, the error's projection — a verification could not note the first-binding mark, so it left the witness unmarked; the next login heals both), `mfa_login_revoked` (info: `sub`, `route` — a login's transaction past its subject's sessions boundary, answered `401`), `mfa_first_binding_distrusted` (info: `sub`, and `route` — or `action`, from a session's admission — a first binding the first-binding mark refused, answered `401`), `mfa_subject_lock_unsettled` (warn: `sub`, `kind`, `step` — `settleSubjectAttempt` or `noteExemptSuccess` — `outcome`, the error's projection; the answer stands), `mfa_email_proof_flag_uncleared` (warn: `sub`), `mfa_login_not_resumed` (warn), `mfa_refusal_factor_id_dropped` (warn: `kind` — a factor refused naming, as the factor it concerns, an id that is none of the subject's factors of that kind; the refusal is audited without `factorId`, and the value is never logged), `mfa_login_cleanup_failed` (warn), `subject_session_index_write_failed` (error), at boot `mfa_rate_limiter_not_shared`, `mfa_enrollment_witness_unwritable`, `mfa_first_binding_without_email_proof` and `mfa_lock_release_unavailable` (warn), and the sealing's `mfa_factor_sealed_with_retired_key` and `mfa_digest_made_with_retired_key` (info, once per key id: a key still needed, by sealed data or by a stored digest).
 
 The suites that pin these: `src/__tests__/routes.*.test.mts` (`routes.selfService.test.mts` and `routes.stepUp.test.mts` for a signed-in session, `routes.management.test.mts` for the account page's list, rename and removal, `routes.lockRelease.test.mts` for the release, `routes.loginAsk.test.mts` for what a login asks for), `requirement.firstBinding.test.mts`, `mail.test.mts`, `codes.test.mts`, `firstBinding.test.mts`, `firstBindingMark.test.mts`, `recoveryCodeFactor.test.mts`, `emailFactor.test.mts`, `lock.test.mts`, `lockRecovery.test.mts` and `reset.test.mts`.
+
+## The MFA page's contract
+
+The Provider renders no page (the MFA ADR's D6 and O11): it answers JSON under `/session/mfa`, and sends a browser to the deployment's MFA page, `mfa.page.url`, when a step-up is asked. The login page's second step, the MFA page and the account page are the deployment's — one page or several — and each keeps the rules below, every one with the route or answer it relies on. What each route answers in full is [The routes](#the-routes)'s; this is what a page does with it.
+
+**Where the page is served.** The page runs on the Provider's origin, within the session cookie's reach: script that runs there acts as the signed-in user, so a cross-site scripting hole in it is an account takeover.
+
+- **On the Provider's origin.** The session cookie is host-only (`__Host-auth.session` by default, `session-store.name`), and every transaction is bound to the browser session that opened it, so only a page on the Provider's origin speaks for that session. Core holds `mfa.page.url` to the issuer's origin at boot (`checkStepUpPage`, [`packages/core/src/session-admission/requirement.mts`](../core/src/session-admission/requirement.mts)), and `/authorize` sends a browser to no step-up page off it.
+- **Its own headers.** `Content-Security-Policy` with `frame-ancestors 'none'`, so no other site frames it over a code, a TOTP secret or recovery codes, and a strict `script-src 'self'`: no third-party script — analytics, session replay, error reporting that captures request bodies or URLs — runs beside them. `Cache-Control: no-store`, as every `/session/mfa` answer carries ([`src/routes.mts`](src/routes.mts)), so no cache keeps what it shows. `Referrer-Policy: no-referrer` (or `same-origin`): its URL carries `redirect_to`, the `/authorize` request with its `reauth_ask` id.
+- **Server strings as text, never HTML.** A factor's `label` — up to 64 characters that may hold `<` and `>`, set by whoever binds the factor, a password holder included where a first binding by password is open — its `hint`, and `sent_to` are rendered as text.
+- **The TOTP QR code drawn in the page.** `otpauth_uri` holds the secret: the page draws its QR code itself and never sends the URI to an image or QR service.
+- **Nothing in browser storage.** A code, a secret, a transaction id or a recovery code lives in the page's memory alone, never in `localStorage` or `sessionStorage`.
+
+**Every POST** passes the deployment's CSRF guard (`csrfGuard`, [`packages/session/src/csrf.mts`](../session/src/csrf.mts)) before anything is read, by either arm:
+
+- **The origin arm.** A browser sends `Origin` on a POST, so a `fetch` from the page on the Provider's origin passes on it alone — the arm that usually applies. A foreign `Origin` is refused, token or not.
+- **The double-submit arm**, for a request without a same-origin `Origin` or `Referer`. `GET /session/csrf` sets the token's cookie and answers `{"csrf_token","cookie_name","header_name","body_field","expires_in"}`; the page sends the cookie's current value — the cookie `cookie_name` names, readable by script — in the header `header_name` names (`x-csrf-token`) or the form field `body_field` names (`csrf_token`). An answer that sets a new token replaces the cookie, and a value that no longer matches it is refused, so the page reads the cookie again after each such answer rather than keeping a value: the login's `403`, a `200` that completes a login, `{"step_up":"verified"}`, and a session's `POST /session/mfa/enrollment/complete` `200` whose escalation renewed the session ([`src/escalation.mts`](src/escalation.mts)).
+- A refusal is `403 access_denied`, nothing read. Bodies are JSON or a form. Past `mfa.rateLimit.routes`, `429 {"error":"rate_limited"}`, with `Retry-After` when the limiter says when.
+
+**The transaction.** The page keeps the id a `403` or the step-up answered in memory, and sends it in the body's `transaction_id` or the `MFA-Transaction` header — the header alone on `GET /session/mfa/transaction` — never in a URL, which no route reads. It is not a bearer: it works only in the browser session it is bound to, so the page keeps the cookie the answer set. `400 invalid_request` has several causes, which the page tells apart by `error_description`:
+
+- `"Unknown or expired MFA transaction"` — missing, malformed, spent, expired, another browser's, or two that disagree: the user starts again — from the password at a login, from `POST /session/mfa/step-up` in a session.
+- `"Unknown second factor"` — a `factor_id` that is none of the subject's that an installed factor verifies, or any factor on a transaction that verifies none (an `enroll` one, a login reopened for a binding): nothing spent; the page reads the transaction again and offers what it lists.
+- The enrollment's own, below.
+
+`401 {"error":"login_required"}` sends the user to the login page.
+
+**Where the page goes next: `redirect_to`.**
+
+- The page has a `redirect_to` only on its own URL: no `/session/mfa` answer carries one. `/authorize` sets it when it sends a browser to step up — the authorization request on the Provider's origin, built on the configured issuer and never on the request's host, carrying its `reauth_ask`, with `acr_values` beside it on the page's URL when the request asked an acr (`stepUpTrip`, [`packages/oauth/src/routes/authorizeAsk.mts`](../oauth/src/routes/authorizeAsk.mts)); the federation-grants connect flow sets it to its connect URL, marked as stepped up. Core reserves the name: `mfa.page.url` may not carry it.
+- **The page follows `redirect_to` only when it is on the Provider's origin** — parsed as a URL, its origin the Provider's — and lands on a page of its own otherwise.
+- The login page continues where the login was going: `POST /session/login` held its `redirect_to` to `session.redirectAllowlist`, by exact match, and once the second factor is answered `200 {"message":"Logged in successfully"}` the page navigates there.
+- **A step-up another page is asked for.** A route called from a signed-in session — `POST /session/mfa/enrollment`, `/recovery-codes`, `/factors/rename`, `/factors/remove`, `/lock/release`, the link start, WebAuthn registration, device verification — may answer `403 {"error":"step_up_required","error_description":…,"requirement":"<name>","page":"<href>"}`. `requirement` names the requirement that asks, and `page` is that requirement's registered page (its `page.href`): `mfa` and the MFA page, or another installed requirement and its own page — so the page reads `requirement` rather than assuming the MFA page. `page` carries no return parameter, since the page that was answered knows where it returns to: it sends the browser to `page`, naming itself in `redirect_to`, and starts its action again on the way back.
+
+**Codes.**
+
+- **A TOTP code and an email factor's login code:** `autocomplete="one-time-code"` and `inputmode="numeric"`. A TOTP code is sent as its digits alone — 6 to 8, as the factor was enrolled with (`mfa-totp-factor.digits`) — with no space in or around it, which the factor does not read ([`src/totp/factor.mts`](src/totp/factor.mts)); an email login code is six digits, whitespace around it read ([`src/codes.mts`](src/codes.mts)).
+- **A long code** — a recovery code, the account-email proof's code, an email factor's enrollment code — is 16 Crockford base32 characters, shown `XXXX-XXXX-XXXX-XXXX`, and meant to be pasted: `autocomplete="one-time-code"`, in a text input, since it holds letters. The page takes it pasted with or without hyphens or spaces, and sends it with the spaces inside it removed: the verifier reads either case, hyphens anywhere, whitespace around it, and `O`, `I`, `L` as `0`, `1`, `1` — not whitespace inside it ([`src/codes.mts`](src/codes.mts)).
+- **A mailed code** — an email factor's login code at its challenge, its enrollment code at the enrollment's start, the account-email proof's at its challenge — is answered `sent_to`, the address masked (`a***@example.com`; absent when the address does not mask), and `expires_in`, the code's life in seconds — at an enrollment's start, the time left to complete it. A code sent again replaces the earlier one. The mail's refusals: `403 {"error":"mfa_factor_refused"}` at a challenge — the email factor's recorded address is not the account's, or the account has none: the page offers another factor; `429 {"error":"rate_limited","error_description":"Too many codes sent: try again later"}` — the mail sender's limit, the flood guard's code, told apart by its description and carrying no `Retry-After`; `503` — the mail could not be sent. Either of the last two clears the code; the transaction stands.
+- A proof refused is `401 {"error":"mfa_invalid","error_description":"Second factor not accepted","attempts_remaining":<n>}`: the page shows the attempts left; at `0` the transaction is over, and the user starts again.
+
+**The lock.** A guessable proof — a TOTP code, an email login code — that the subject lock holds is answered by `POST /session/mfa/verify` `429 {"error":"mfa_locked","error_description":…,"hold":"backoff"|"weekly"|"hard","usable_kinds":[…],"attempts_remaining":<n>}`, unchecked; it still spends one of the transaction's attempts ([`src/lock.mts`](src/lock.mts)).
+
+- **The page shows the factors that still work.** `usable_kinds` names every installed kind whose factor is not guessable (`guessable: false`) that the subject holds, each once: with the bundled factors `recovery_code` and `webauthn`, and any such factor a deployment contributes. It names them and judges none (a spent set is named), so the page offers the factors of those kinds that `GET /session/mfa/transaction` lists, and their verification says whether one works.
+- **`backoff` and `weekly`** carry `Retry-After`, in whole seconds: the page shows when a code may be tried again, beside the other factors.
+- **`hard`** carries no `Retry-After` and no time: no wait lifts it. The page shows no time, and says: make an exempt proof — with the bundled factors, a recovery code or a passkey — rebind, then release (below).
+
+**Releasing the lock** (`POST /session/mfa/lock/release`, [`src/lockRelease.mts`](src/lockRelease.mts)). A proof of an exempt factor — any installed kind whose factor declares `guessable: false`; with the bundled factors, a recovery code or a passkey — verified in a session, at its login or at a step-up, authorizes a release in that session for `mfa.manage.maxAgeSeconds`; a guessable one (TOTP, an email code) authorizes none ([`src/lockRecovery.mts`](src/lockRecovery.mts)). The page states the order up front, so one code is spent. Steps 1 and 3 count only from five minutes (`DEFAULT_CLOCK_SKEW_MS`) after the lock began, and the page has no instant to show before the release answers one, so it says so:
+
+1. Change the password, and revoke the subject's sessions, which the release asks for. For a password account, the Store's password change does both: it calls `revokeAllForSubject`. For a federated account, the user secures the upstream account at its identity provider — which revokes nothing here — and signs out everywhere, through the host's sign-out-everywhere, which must itself ask the second factor (the lock's release, "Sign-out-everywhere", under [The routes](#the-routes)). The revocation counts only when it is more than five minutes after the attack's first counted failure: made more than five minutes after the first `429 mfa_locked`, it does.
+2. Sign in with an exempt factor.
+3. While the hard hold stands, rebind: replace every record that is not of an installed exempt kind — a TOTP or an email factor, one whose data does not open, and one of a kind no longer installed, a passkey's included where the WebAuthn factor no longer is — by enrolling the new one (`POST /session/mfa/enrollment`), then removing the old (`POST /session/mfa/factors/remove`). A factor counts only when it is created more than five minutes after the hard hold began: made more than five minutes after the first `429` that said `hard`, it does.
+4. Release.
+
+While the hard hold stands, rebind first, then release: a release before the rebind answers `held` and spends the session's authorization, so another exempt proof is made before the next release. Each answer is the page's to show:
+
+- `200 {"lock":"released"}`: the hard hold, if one stood, is lifted. The week and the backoff are given back only where a revocation counted, so they may still stand: the page still handles a later `429 mfa_locked`.
+- `200 {"lock":"held","hold":"hard","description":…,"rebind_after":"<ISO 8601>"}` — never "released": the week may be given back, but guessable factors stay held. The page tells the user to replace them after `rebind_after`, make an exempt proof again (`POST /session/mfa/step-up`), then release.
+- `403 {"error":"mfa_exempt_proof_required"}`: no authorization stands in this session — make an exempt proof, then release.
+- `409 {"error":"mfa_lock_release_refused","reason":"not_revoked_since"}`: no revocation counted — none since the attack began, or one too close to it. The page asks the user to change the password again (or sign out everywhere again), sign in with an exempt factor, then release. Any revocation of the subject's sessions meets it, so the release does not prove a password was changed.
+- `409 {"error":"mfa_lock_release_refused","reason":"no_revocation_boundary"}`: this deployment cannot give the week back early. While the hard hold stands it carries `rebind_after`, and a rebind alone lifts the hold: rebind after it, then release — or ask for a reset.
+- `409 {"error":"mfa_factors_busy"}` with `Retry-After`: try again then. `403 step_up_required`: recent MFA has lapsed — step up first. `401 login_required`: the session is gone — a revocation ends it — so the user signs in again. `503`: an outage; a retry is safe, and answers what the release came to.
+
+**`rebind_after`** is the one instant the page shows, and it has it only from the release's `held` and `409` answers, after an exempt proof: a login's `429 mfa_locked` and the release's `403 mfa_exempt_proof_required` carry none. Wherever an answer carries it, the page shows it and says that a factor whose `created_at` (`GET /session/mfa/factors`) is not after it does not count — replace it again after that instant — and that a factor listed without `created_at` does not count either: remove it. A factor bound within five minutes of the hard hold is one of those. The page computes nothing: the server is the only source of the instant.
+
+**Enrolling** ([`src/enrollment.mts`](src/enrollment.mts)).
+
+- **At a login,** `403 {"error":"mfa_enrollment_required","transaction":"<id>","expires_in":<s>,"hints":{"enrollable":[…],"email_proof":<bool>}}` asks the page to bind a factor of a kind `hints.enrollable` lists. It comes from `POST /session/login`, or from `POST /session/mfa/verify` when a recovery code reopens the login for a binding — naming a new transaction, which the page switches to, and setting no new CSRF token. With `hints.email_proof` the account-email proof comes first — `POST /session/mfa/challenge` and `/verify` with `factor_id: "account-email"`, answered `200 {"email_proof":"verified"}` — and until it is given an enrollment is `403 {"error":"mfa_email_proof_required"}`. Then `POST /session/mfa/enrollment {transaction_id, kind}` and `POST /session/mfa/enrollment/complete {transaction_id, proof, label?}`. One from `/verify` that names no transaction is a binding nobody could complete: the page has nothing to bind on, and the code was not spent.
+- **From the account page,** `POST /session/mfa/enrollment {kind}` opens a transaction of its own and answers it, `"transaction"` and `"expires_in"`, beside the factor's answer.
+- **TOTP's answer** is `{secret, otpauth_uri, algorithm, digits, period}`: the page draws `otpauth_uri` as a QR code itself — the Provider renders no image — shows `secret` for manual entry, and offers the URI as a link for an authenticator on the same device.
+- **What else the page handles:**
+  - `400 invalid_request`, by `error_description`: `"Unknown second factor kind"` — a kind not on offer: the page offers what `hints.enrollable` lists; `"No enrollment is open in this MFA transaction"` — the transaction asks for a second factor, not a binding: the page reads it again; `"No enrollment is pending in this MFA transaction"` — none was begun, or it expired: the page begins again; `"Invalid label"` — 1 to 64 characters, none that breaks or reorders a line. Each spends nothing.
+  - `409 {"error":"mfa_factor_duplicate"}`: the subject holds this factor already — at the start nothing was opened or sent; at the completion the attempt is spent and nothing written. The page shows the factor list.
+  - `409 {"error":"mfa_factor_limit"}`: the subject holds `mfa.maxFactorsPerSubject` records; the page sends the user to remove one.
+  - `409 {"error":"mfa_enrollment_conflict"}`, from the account page: the subject's factors changed while it enrolled, and the session stands — the page starts the enrollment again.
+  - `401 {"error":"login_required"}` at a login: the records no longer allow the binding — another sign-in bound a factor, or a recovery or a reset ran — so the user signs in again.
+  - `401 {"error":"login_required"}` with `Retry-After`, at a login or in a session: the subject's first-binding mark distrusts this sign-in — the user signs in again once that time has passed.
+  - `409 {"error":"mfa_factors_busy"}` with `Retry-After`: another change holds the subject's factors, the transaction standing — complete it again then.
+  - `403 step_up_required`, from the account page: the subject holds a counting factor and has no recent MFA — step up first.
+  - `503`: an outage; at the completion the transaction may be spent, and the user begins again.
+- **Recovery codes are shown once.** A first counting factor's completion answers `recovery_codes` (`["XXXX-XXXX-XXXX-XXXX", …]`), as `POST /session/mfa/recovery-codes` does; no route answers them again. The page shows them once, asks the user to keep them, and keeps none itself. `"recovery_codes_issued": false` in their place, or `recovery_codes_shown: false` on a set in the factor list, is a set never answered: the page points to regenerating them.
+- **Regenerating recovery codes** (`POST /session/mfa/recovery-codes {}`) retires every set that stood: the page warns first that the codes the user holds stop working. `200 {"recovery_codes":[…]}`, shown once; `403 step_up_required` — step up first; `409 {"error":"mfa_enrollment_required"}` — no factor that may count stands, so codes are not issued alone: bind one first; `401 login_required` with `Retry-After`, as above; `409 {"error":"mfa_factor_limit"}`; `409 {"error":"mfa_request_stale"}` and `409 {"error":"mfa_recovery_codes_conflict"}` — nothing written: try again; `409 mfa_factors_busy` with `Retry-After`, and `409 mfa_factors_changed`; `400 … "Recovery codes are not issued here"` while the recovery-code factor is off; `503` — no codes answered, and the sets that stood may already be retired: regenerate again.
+
+**The step-up** ([`src/stepUp.mts`](src/stepUp.mts)). The MFA page calls `POST /session/mfa/step-up` — with `{"acr_values": …}` as its URL carries them, a hint the step-up records and chooses no factor by:
+
+- `200 {"transaction":"<id>","expires_in":<s>,"email_proof":false}`: the subject holds a factor that may count. The page lists its factors (`GET /session/mfa/transaction`), challenges and verifies one on the transaction, and on `200 {"step_up":"verified"}` — with a fresh CSRF token — follows `redirect_to`.
+- `200 {…,"email_proof":true}`: a first binding owes the account-email proof. The page gives it on the transaction (`factor_id: "account-email"`), then returns to the page that asked, which starts the binding again. A proof nobody can give is refused at the challenge, `403 {"error":"mfa_email_proof_unavailable"}`: the account's address must be fixed in the Store.
+- `403 {"error":"mfa_no_qualifying_factor"}`: none of the subject's factors can be used; an operator resets the account (`resetMfaForSubject`).
+- `401 login_required`: no second factor can be recorded on this session; the user signs in again.
+- The verification is a login's — the transaction's attempts, the lock and its `429` — and the finish's own answers are in [The routes](#the-routes) ("The step-up of a second factor").
+
+### A worked example
+
+As `src/__tests__/routes.verify.test.mts` and `routes.lockRelease.test.mts` drive the routes. `>` is what the page sends, `<` what it is answered. The first POST shows the double-submit arm, sending the token cookie's value; the POSTs after it leave the CSRF arm out — a page's `fetch` passes on its same-origin `Origin`, and on the double-submit arm sends the cookie's current value, which the answers marked "a fresh CSRF token" replace. Every `/session/mfa` answer carries `Cache-Control: no-store`.
+
+**(a) A login that asks for a TOTP code.**
+
+```text
+> GET /session/csrf
+< 200                                   sets the token's cookie
+< {"csrf_token":"<token>","cookie_name":"__Host-auth.session.csrf","header_name":"x-csrf-token","body_field":"csrf_token","expires_in":7200}
+
+> POST /session/login
+> x-csrf-token: <the cookie's value>
+> {"username":"alice","password":"<password>"}
+< 403                                   the session id regenerated; a fresh CSRF token
+< {"error":"mfa_required","transaction":"<tx>","expires_in":600}
+
+> GET /session/mfa/transaction
+> MFA-Transaction: <tx>
+< 200
+< {"purpose":"login","factors":[{"id":"<totp>","kind":"totp","label":"Phone"}],"enrollment":"none","email_proof":false,"expires_in":600,"attempts_remaining":5}
+
+> POST /session/mfa/challenge
+> {"transaction_id":"<tx>","factor_id":"<totp>"}
+< 200                                   TOTP has no challenge
+< {}
+
+> POST /session/mfa/verify
+> {"transaction_id":"<tx>","factor_id":"<totp>","proof":"<a wrong code>"}
+< 401
+< {"error":"mfa_invalid","error_description":"Second factor not accepted","attempts_remaining":4}
+
+> POST /session/mfa/verify
+> {"transaction_id":"<tx>","factor_id":"<totp>","proof":"<the code>"}
+< 200                                   the session established on a regenerated id; a fresh CSRF token
+< {"message":"Logged in successfully"}
+```
+
+The login page then navigates to the `redirect_to` the login accepted.
+
+**(b) Out of the hard hold.** Alice's TOTP factor is under the hard hold; she holds a set of recovery codes.
+
+```text
+> POST /session/mfa/verify
+> {"transaction_id":"<tx>","factor_id":"<totp>","proof":"<the right code>"}
+< 429                                   no Retry-After
+< {"error":"mfa_locked","error_description":"Too many failed attempts: use another second factor","hold":"hard","usable_kinds":["recovery_code"],"attempts_remaining":<n>}
+```
+
+The page shows no time, and states the order. More than five minutes after this `429` — as the test's `hardHeld` moves its clock past `DEFAULT_CLOCK_SKEW_MS` — Alice changes her password, which revokes her sessions, then signs in with a recovery code:
+
+```text
+> POST /session/login
+> {"username":"alice","password":"<the new password>"}
+< 403                                   the session id regenerated; a fresh CSRF token
+< {"error":"mfa_required","transaction":"<tx2>","expires_in":600}
+
+> GET /session/mfa/transaction
+> MFA-Transaction: <tx2>
+< 200
+< {"purpose":"login","factors":[{"id":"<totp>","kind":"totp"},{"id":"<codes>","kind":"recovery_code"}],"enrollment":"none","email_proof":false,"expires_in":600,"attempts_remaining":5}
+
+> POST /session/mfa/verify
+> {"transaction_id":"<tx2>","factor_id":"<codes>","proof":"ABCD-EFGH-JKMN-PQRS"}
+< 200                                   the session established on a regenerated id; a fresh CSRF token
+< {"message":"Logged in successfully","recovery_codes_remaining":4}
+```
+
+She rebinds — a new TOTP factor, then the old one removed — and releases:
+
+```text
+> POST /session/mfa/enrollment
+> {"kind":"totp"}
+< 200
+< {"secret":"<base32>","otpauth_uri":"otpauth://totp/<issuer>:alice?…","algorithm":"SHA1","digits":6,"period":30,"transaction":"<tx3>","expires_in":600}
+
+> POST /session/mfa/enrollment/complete
+> {"transaction_id":"<tx3>","proof":"<a code of the new secret>"}
+< 200                                   the session escalated on a renewed id; a fresh CSRF token
+< {"factor":{"id":"<new totp>","kind":"totp"}}
+
+> POST /session/mfa/factors/remove
+> {"factor_id":"<totp>"}
+< 200
+< {}
+
+> POST /session/mfa/lock/release
+> {}
+< 200
+< {"lock":"released"}
+```
+
+Had she released before the password change, or before the rebind, the release would have answered, each after her exempt proof:
+
+```text
+< 409
+< {"error":"mfa_lock_release_refused","error_description":"Change the account's password, sign in again, then release","reason":"not_revoked_since","rebind_after":"<ISO 8601>"}
+
+< 200
+< {"lock":"held","hold":"hard","description":"Guessable second factors stay held until each is replaced: replace them, verify a recovery code or a passkey again, then release","rebind_after":"<ISO 8601>"}
+```
+
+After `held` she rebinds after `rebind_after`, then makes another exempt proof on a step-up before releasing again:
+
+```text
+> POST /session/mfa/step-up
+> {}
+< 200
+< {"transaction":"<tx4>","expires_in":600,"email_proof":false}
+
+> POST /session/mfa/verify
+> {"transaction_id":"<tx4>","factor_id":"<codes>","proof":"<another code>"}
+< 200                                   the session escalated on a renewed id; a fresh CSRF token
+< {"step_up":"verified","recovery_codes_remaining":3}
+
+> POST /session/mfa/lock/release
+> {}
+< 200
+< {"lock":"released"}
+```
 
 ## The TOTP factor
 
