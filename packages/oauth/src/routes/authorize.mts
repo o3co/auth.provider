@@ -55,6 +55,7 @@ import {
 	checkNonce,
 	checkPkce,
 	checkRequestObjectUnsupported,
+	checkResponseMode,
 	checkResponseTypeIsCode,
 	checkSingleValuedParams,
 	resolveScopes,
@@ -241,8 +242,9 @@ const applyGrantPolicy = async (
  * 2. identify the client and validate `redirect_uri`: the registered list,
  *    then core's `checkRedirectUri` (400 JSON — no trusted redirect target
  *    yet; after step 1, so an unauthenticated browser meets it after login);
- * 3. read the request's shape: request objects refused, then `prompt`, the
- *    single-valued parameters, `claims`, `max_age` and `acr_values`;
+ * 3. read the request's shape: request objects and any `response_mode` but
+ *    `query` refused, then `prompt`, the single-valued parameters, `claims`,
+ *    `max_age` and `acr_values`;
  * 4. admit the session once (`admitSession`): freshness first, then the
  *    verdict — a new login, a step-up trip, a refusal, or on;
  * 5. validate `response_type`, registered grant types, first-party or
@@ -304,6 +306,9 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// Request objects are refused before anything interprets the query
 		// parameters: those are not the parameters the RP signed.
 		if (!checkRequestObjectUnsupported(ctx)) return;
+		// Every later answer goes in the query, so a request for another mode
+		// is refused before any of them, a re-authentication trip included.
+		if (!checkResponseMode(ctx)) return;
 		const prompt = resolvePrompt(ctx);
 		if (prompt === null) return;
 		if (!checkPromptNoneHasSession(ctx, prompt, claim)) return;
