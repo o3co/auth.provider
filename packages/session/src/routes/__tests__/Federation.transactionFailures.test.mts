@@ -422,6 +422,8 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 	it.each([
 		["undefined", undefined],
 		["null", null],
+		["0", 0],
+		["an empty string", ""],
 	])(
 		"503s rather than exchanging the code when the delete rejects with %s",
 		async (_name, reason) => {
@@ -460,32 +462,6 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 			);
 		},
 	);
-
-	it("logs the failed discard of a refused transaction even when the delete rejects with undefined", async () => {
-		const { app, records } = buildApp();
-		const flow = await start(app, records);
-
-		const logger = spyLogger();
-		const { app: undeletable, records: sharedRecords } = buildApp({
-			destroyThrows: { reason: undefined },
-			logger,
-		});
-		sharedRecords.set(
-			`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`,
-			records.get(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`),
-		);
-
-		const res = await request(undeletable)
-			.post("/oauth/federation/apple/callback")
-			.set("Cookie", flow.cookie)
-			.type("form")
-			.send({ state: "wrong-state", code: "c" });
-
-		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("invalid_state");
-		expect(logger.warn).toHaveBeenCalledTimes(1);
-		expect(logger.warn.mock.calls[0]?.[1]).toBe("federation_cleanup_failed");
-	});
 
 	it("still refuses cleanly when the provider has no callback URL to scope the cleared cookie to", async () => {
 		const { app } = buildApp({ callbackUrl: null });

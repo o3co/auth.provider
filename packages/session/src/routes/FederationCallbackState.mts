@@ -71,11 +71,11 @@ export const consumeCallbackState = async (
 	 * Consume the transaction (cookie and record). Answers a failed delete as
 	 * `ok: false` rather than throwing, so a refusal path can clean up best
 	 * effort while irreversible work fails closed. The outcome is carried by
-	 * `ok`, never by the error: a store may reject with any value, `undefined`
+	 * `ok`, never by the cause: a store may reject with any value, `undefined`
 	 * included. A no-op for a `"query"` federation.
 	 */
 	const consumeTransaction = async (): Promise<
-		{ readonly ok: true } | { readonly ok: false; readonly error: unknown }
+		{ readonly ok: true } | { readonly ok: false; readonly cause: unknown }
 	> => {
 		if (!transactions || transactionId === undefined) return { ok: true };
 		clearTransactionCookie(provider, res);
@@ -84,8 +84,8 @@ export const consumeCallbackState = async (
 		try {
 			await transactions.delete(id);
 			return { ok: true };
-		} catch (error) {
-			return { ok: false, error };
+		} catch (cause) {
+			return { ok: false, cause };
 		}
 	};
 
@@ -98,7 +98,7 @@ export const consumeCallbackState = async (
 	const discardTransaction = async (): Promise<void> => {
 		const discarded = await consumeTransaction();
 		if (!discarded.ok) {
-			logCleanupFailed(log, "federation_transaction", "delete", discarded.error);
+			logCleanupFailed(log, "federation_transaction", "delete", discarded.cause);
 			abandonCookieSession(req);
 		}
 	};
@@ -202,7 +202,7 @@ export const consumeCallbackState = async (
 	if (responseMode === "form_post") {
 		const consumed = await consumeTransaction();
 		if (!consumed.ok) {
-			await refuseCookieStoreOutage("federation_transaction", "delete", consumed.error);
+			await refuseCookieStoreOutage("federation_transaction", "delete", consumed.cause);
 			return null;
 		}
 	} else {
