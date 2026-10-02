@@ -43,6 +43,10 @@ const tokenClient = {
 	sScanIterator: async function* () {},
 	scanIterator: async function* () {},
 	compareAndDelete: async () => false,
+	readVersioned: async () => null,
+	replaceIfGeneration: async () => "missing" as const,
+	removeIfGeneration: async () => "missing" as const,
+	pExpireGT: async () => {},
 } as unknown as FederationTokenStoreClient;
 
 const grantClient = {} as FederationGrantStoreClient;

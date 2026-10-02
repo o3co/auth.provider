@@ -2444,14 +2444,7 @@ before you flip — and a relying party holding the secret can also mint.
      consent request parked for such a client before the upgrade is
      answered `503` and kept until it expires or the record is fixed. With
      Client ID Metadata Documents on, the same, and the document at a
-     URL-shaped id is never fetched in its place. Keep one document
-     fallback per composition, and never put one in the `clientRepository`
-     slot: the slot's boundary wraps it like any repository, so its
-     document clients lose `client_id_host` at consent, as one wrapped by a
-     second fallback does; and a second fallback over the first, behind a
-     forwarder or a Proxy, resolves a document the first one refused again
-     under its own `allowedHosts`, `deniedHosts`, `allowedScopes` and
-     `allowedAudiences`.
+     URL-shaped id is never fetched in its place.
 
    Rename or remove such parameters, and carry the client's context in
    `state` or in the path. The rule covers names as written and the common

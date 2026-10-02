@@ -9,6 +9,12 @@
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
+import type {
+	ConditionalRemoveAnswer,
+	ConditionalReplaceAnswer,
+	StoreGeneration,
+	Versioned,
+} from "../adapters/conditionalWrite.mjs";
 
 /**
  * One upstream connection's tokens, as a `FederationTokenStore` holds them.
@@ -106,12 +112,21 @@ export interface FederationTokens {
 
 /**
  * Adapter primitive for federation token storage.
+ *
+ * The record of one `(sid, federationName)` carries a store generation, under
+ * the record rules of docs/adapter-surface.md, "Conditional writes": every
+ * write of the record issues a new one (`attach`, `update`, `replaceIf`), and
+ * `delete`, `removeIf` and `removeBySid` end it. "Live" means within the
+ * store's own retention, never judged by `tokens.expiresAt`: a record whose
+ * access token has expired is live, and is refreshed. A store that cannot
+ * answer rejects; it never answers `null` or `missing` for an outage.
  */
 export interface FederationTokenStore {
 	readonly kind: string;
 
 	/**
-	 * Persist tokens for a session + federation. Production implementations
+	 * Persist tokens for a session + federation: the create path, writing the
+	 * record whether or not one is live, at a new generation. Production implementations
 	 * MUST encrypt refreshToken at rest. Plaintext persistence is supported
 	 * only as an explicit opt-in — the built-in redis adapter exposes this via
 	 * `encryption.mode = "allow-plaintext"` (with a startup warning), and the
@@ -121,15 +136,41 @@ export interface FederationTokenStore {
 	 */
 	attach(sid: string, federationName: string, tokens: FederationTokens): Promise<void>;
 
+	/** The live record, or `null` when there is none. */
 	get(sid: string, federationName: string): Promise<FederationTokens | null>;
 
-	/** Atomic replace. Called after a successful federation refresh. */
+	/** The live record and its generation, from one snapshot; `null` when there is none. */
+	getVersioned(sid: string, federationName: string): Promise<Versioned<FederationTokens> | null>;
+
+	/**
+	 * Replaces the record only while it is live at `expected`, as one atomic
+	 * step in the store, at a new generation. Never creates a record (only
+	 * `attach` does). On `missing` or `conflict` it adds
+	 * `(sid, federationName)` to no listing the store keeps; after `updated`
+	 * an adapter may add it to its listings again, so a listing that lapsed
+	 * still names the record.
+	 */
+	replaceIf(
+		sid: string,
+		federationName: string,
+		expected: StoreGeneration,
+		tokens: FederationTokens,
+	): Promise<ConditionalReplaceAnswer>;
+
+	/** Deletes the record only while it is live at `expected`, as one atomic step in the store. */
+	removeIf(
+		sid: string,
+		federationName: string,
+		expected: StoreGeneration,
+	): Promise<ConditionalRemoveAnswer>;
+
+	/** Unconditional replace, as one atomic step, at a new generation. */
 	update(sid: string, federationName: string, tokens: FederationTokens): Promise<void>;
 
-	/** Remove all federation entries for a session. Idempotent. */
+	/** Remove all federation entries for a session. Idempotent; always wins. */
 	removeBySid(sid: string): Promise<void>;
 
-	/** Delete a specific (sid, federationName) entry. Idempotent. */
+	/** Delete a specific (sid, federationName) entry. Idempotent; always wins. */
 	delete(sid: string, federationName: string): Promise<void>;
 }
 

@@ -91,6 +91,11 @@ function createFakeRedis() {
 			}
 			return false;
 		}),
+		// The conditional members' primitives; these tests write unconditionally.
+		readVersioned: vi.fn(async (_k: string, _candidate: string) => null),
+		replaceIfGeneration: vi.fn(async () => "missing" as const),
+		removeIfGeneration: vi.fn(async () => "missing" as const),
+		pExpireGT: vi.fn(async (_key: string, _ttlMs: number) => {}),
 	} satisfies FederationTokenStoreClient & {
 		data: Map<string, string>;
 		sets: Map<string, Set<string>>;
@@ -174,7 +179,7 @@ describe("per-session federation key index", () => {
 		expect(indexMembers(redis, "sid-1")).toEqual(["github"]);
 	});
 
-	it("get() drops the name from the index when it self-heals a corrupt envelope", async () => {
+	it("get() keeps the name in the index when it self-heals a corrupt envelope: a concurrent attach may have just added it", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
 			deploymentMode: "unset",
@@ -184,7 +189,8 @@ describe("per-session federation key index", () => {
 		await store.attach("sid-1", "google", tokens);
 		redis.data.set("ft:sid-1:google", "{not-json");
 		expect(await store.get("sid-1", "google")).toBeNull();
-		expect(indexMembers(redis, "sid-1")).toEqual([]);
+		expect(indexMembers(redis, "sid-1")).toEqual(["google"]);
+		expect(redis.sRem).not.toHaveBeenCalled();
 	});
 });
 

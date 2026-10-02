@@ -19,13 +19,11 @@
 export { OAUTH_ROUTER_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 // Client ID Metadata Documents — a client whose client_id is the https
 // URL of its own registration (draft-ietf-oauth-client-id-metadata-document).
+// The fallback that resolves them is the router's own, installed from
+// `oauth.clientIdMetadataDocuments`; only the predicates are exported.
 export {
-	type ClientIdMetadataDocumentOptions,
-	type ClientIdMetadataDocumentResolver,
-	createClientIdMetadataDocumentResolver,
 	isClientIdMetadataDocumentClient,
 	isClientIdMetadataDocumentUrl,
-	withClientIdMetadataDocuments,
 } from "./clients/clientIdMetadataDocument.mjs";
 export {
 	type BroadcastBackchannelLogoutOptions,

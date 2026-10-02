@@ -28,6 +28,9 @@ describe("supportsLock type guard", () => {
 		const store = {
 			kind: "test",
 			get: async () => null,
+			getVersioned: async () => null,
+			replaceIf: async () => ({ outcome: "missing" as const }),
+			removeIf: async () => ({ outcome: "missing" as const }),
 			attach: async () => {},
 			delete: async () => {},
 			update: async () => {},
@@ -40,6 +43,9 @@ describe("supportsLock type guard", () => {
 		const store = {
 			kind: "test",
 			get: async () => null,
+			getVersioned: async () => null,
+			replaceIf: async () => ({ outcome: "missing" as const }),
+			removeIf: async () => ({ outcome: "missing" as const }),
 			attach: async () => {},
 			delete: async () => {},
 			update: async () => {},
