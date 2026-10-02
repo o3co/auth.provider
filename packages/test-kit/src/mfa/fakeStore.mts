@@ -24,8 +24,14 @@
  * Guarantees: every record held is answered back as held, one the provider
  * cannot read included; an update is a compare-and-set that writes the
  * changes and nothing else of the record, at the expected version plus one;
- * each request is answered by the contract from state it reads and writes
- * without yielding, so concurrent requests are atomic; a request with an
+ * a subject's records are one set at a store generation, kept as core's
+ * conditional-write convention for a set says (docs/adapter-surface.md,
+ * "Conditional writes"): every membership write mints a fresh one, an update
+ * keeps it, a conditional write checks it, an emptied set stays as its
+ * tombstone until the write-lifetime bound has passed on its clock, and a set
+ * held without one is given one by its first list; each request is answered
+ * by the contract from state it reads and writes without yielding, so
+ * concurrent requests are atomic; a request with an
  * absolute or odd target, naming a host other than its own address, with a
  * body over {@link FAKE_STORE_MAX_BODY_BYTES} or not declared JSON is refused
  * and not recorded. `answer` makes an endpoint break the contract on purpose
@@ -37,9 +43,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	isStoreGeneration,
+	type MfaStoreCreateIfAnswer,
 	type MfaStoreFactor,
+	type MfaStoreRemoveIfAnswer,
+	type MfaStoreVersionedListAnswer,
+	newStoreGeneration,
 	readMfaStoreFactor,
 	readMfaStoreFactorChanges,
+	type StoreGeneration,
 } from "@o3co/auth-provider-core";
 
 /** A user the fake Store authenticates. */
@@ -62,6 +75,11 @@ export interface FakeStoreOptions {
 	 * error="invalid_token"`.
 	 */
 	readonly bearerToken?: string;
+	/**
+	 * The Store's clock, in epoch milliseconds, by which an emptied set's
+	 * tombstone expires. Default `Date.now`.
+	 */
+	readonly now?: () => number;
 }
 
 /** The fake Store's endpoints. */
@@ -120,7 +138,11 @@ export interface FakeStore {
 	factors(subject: string): readonly unknown[];
 	/** The witness held for `subject`; `undefined` when never marked. */
 	enrolled(subject: string): boolean | undefined;
-	/** Holds `record` for `subject` as it is, readable or not. */
+	/**
+	 * Holds `record` for `subject` as it is, readable or not, leaving the
+	 * set's generation as it is: a set this makes holds none until its first
+	 * list, as one an older writer left.
+	 */
 	holdFactor(subject: string, record: unknown): void;
 	/** Answers `endpoint` with `answerer` first while set; `undefined` restores the contract. */
 	answer(endpoint: FakeStoreEndpoint, answerer: FakeStoreAnswerer | undefined): void;
@@ -161,6 +183,20 @@ const json = (status: number, value: unknown): FakeStoreAnswer => ({
 
 const empty = (status: number): FakeStoreAnswer => ({ status });
 
+const CONFLICT = json(409, { outcome: "conflict" } satisfies MfaStoreCreateIfAnswer);
+const MISSING = json(404, { outcome: "missing" } satisfies MfaStoreRemoveIfAnswer);
+
+/**
+ * A subject's set: its records, the generation of its membership — absent
+ * for a set held without one — and, while it is an emptied set's tombstone,
+ * when that expires on the Store's clock.
+ */
+interface HeldSet {
+	readonly records: readonly unknown[];
+	readonly generation: StoreGeneration | undefined;
+	readonly expiresAtMs: number | undefined;
+}
+
 /** The request's body as text, or `undefined` once it passes the cap: the rest is read and dropped. */
 function readBody(request: IncomingMessage): Promise<string | undefined> {
 	return new Promise((resolve, reject) => {
@@ -191,11 +227,31 @@ function send(response: ServerResponse, answer: FakeStoreAnswer): void {
 /** Starts a fake Store on `127.0.0.1`, on a port of its own. */
 export async function startFakeStore(options: FakeStoreOptions = {}): Promise<FakeStore> {
 	const users = options.users ?? [];
-	const held = new Map<string, unknown[]>();
+	const now = options.now ?? Date.now;
+	const sets = new Map<string, HeldSet>();
 	const witness = new Map<string, boolean>();
 	const answerers = new Map<FakeStoreEndpoint, FakeStoreAnswerer>();
 	const requests: FakeStoreRequest[] = [];
-	const holds = (subject: string): unknown[] => held.get(subject) ?? [];
+
+	/** `subject`'s set, unless it has none or holds a tombstone past its expiry, which it drops. */
+	const setOf = (subject: string): HeldSet | undefined => {
+		const set = sets.get(subject);
+		if (set?.expiresAtMs === undefined || set.expiresAtMs > now()) return set;
+		sets.delete(subject);
+		return undefined;
+	};
+	const holds = (subject: string): readonly unknown[] => setOf(subject)?.records ?? [];
+
+	/**
+	 * A membership write: `records` as `subject`'s set at a fresh generation,
+	 * a tombstone's expiry when it is left empty, none when it holds a record.
+	 */
+	const written = (subject: string, records: readonly unknown[]): StoreGeneration => {
+		const generation = newStoreGeneration();
+		const expiresAtMs = records.length === 0 ? now() + BUNDLED_STORE_WRITE_LIFETIME_MS : undefined;
+		sets.set(subject, { records, generation, expiresAtMs });
+		return generation;
+	};
 
 	const user = (answer: FakeStoreUser): Record<string, unknown> => ({
 		...(answer.claims ?? {}),
@@ -219,16 +275,40 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 				return found === undefined ? empty(401) : json(200, user(found));
 			}
 			case "list": {
-				if (typeof body.subject !== "string") return empty(400);
-				return json(200, { factors: holds(body.subject) });
+				const { subject } = body;
+				if (typeof subject !== "string") return empty(400);
+				const set = setOf(subject);
+				if (set === undefined) {
+					return json(200, {
+						factors: [],
+						generation: null,
+					} satisfies MfaStoreVersionedListAnswer);
+				}
+				const generation = set.generation ?? newStoreGeneration();
+				sets.set(subject, { ...set, generation });
+				return json(200, {
+					factors: set.records,
+					generation,
+				} satisfies MfaStoreVersionedListAnswer);
 			}
 			case "create": {
 				const factor = readMfaStoreFactor(body.factor);
 				if (factor === undefined) return empty(400);
-				const records = holds(factor.subject);
-				if (records.some((record) => heldId(record) === factor.id)) return empty(409);
-				held.set(factor.subject, [...records, factor]);
-				return empty(204);
+				const set = setOf(factor.subject);
+				const records = set?.records ?? [];
+				const held = records.some((record) => heldId(record) === factor.id);
+				if (!Object.hasOwn(body, "expectedGeneration")) {
+					if (held) return empty(409);
+					written(factor.subject, [...records, factor]);
+					return empty(204);
+				}
+				const expected = body.expectedGeneration;
+				if (expected !== null && !isStoreGeneration(expected)) return empty(400);
+				// An absent set is at `null`; one held without a generation matches nothing.
+				const at = set === undefined ? null : set.generation;
+				if (at !== expected || held) return CONFLICT;
+				const generation = written(factor.subject, [...records, factor]);
+				return json(200, { outcome: "created", generation } satisfies MfaStoreCreateIfAnswer);
 			}
 			case "update": {
 				const { subject, id, expectedVersion } = body;
@@ -242,31 +322,46 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 				) {
 					return empty(400);
 				}
-				const records = holds(subject);
+				const set = setOf(subject);
+				const records = set?.records ?? [];
 				const index = records.findIndex((record) => heldId(record) === id);
-				if (index === -1) return empty(404);
+				if (set === undefined || index === -1) return empty(404);
 				const current = readMfaStoreFactor(records[index]);
 				if (current?.version !== expectedVersion) return empty(409);
 				const { label: _label, lastUsedAtMs: _lastUsedAtMs, ...fixed } = current;
-				const written: MfaStoreFactor = { ...fixed, ...changes, version: expectedVersion + 1 };
-				held.set(
-					subject,
-					records.map((record, i) => (i === index ? written : record)),
-				);
-				return json(200, { factor: written });
+				const next: MfaStoreFactor = { ...fixed, ...changes, version: expectedVersion + 1 };
+				// A member's own update: the set's generation stays.
+				sets.set(subject, {
+					...set,
+					records: records.map((record, i) => (i === index ? next : record)),
+				});
+				return json(200, { factor: next });
 			}
 			case "delete": {
 				const { subject, id, all } = body;
 				if (typeof subject !== "string") return empty(400);
-				const records = holds(subject);
-				if (all === true && id === undefined) {
-					held.delete(subject);
+				const conditional = Object.hasOwn(body, "expectedGeneration");
+				const set = setOf(subject);
+				const records = set?.records ?? [];
+				if (all === true && id === undefined && !conditional) {
+					// The reset always wins: the set stays, empty, at a fresh generation.
+					written(subject, []);
 					return empty(records.length > 0 ? 204 : 404);
 				}
 				if (typeof id !== "string" || all !== undefined) return empty(400);
 				const kept = records.filter((record) => heldId(record) !== id);
-				held.set(subject, kept);
-				return empty(kept.length < records.length ? 204 : 404);
+				if (!conditional) {
+					if (kept.length === records.length) return empty(404);
+					written(subject, kept);
+					return empty(204);
+				}
+				const expected = body.expectedGeneration;
+				if (!isStoreGeneration(expected)) return empty(400);
+				if (set === undefined) return MISSING;
+				if (set.generation !== expected) return CONFLICT;
+				if (kept.length === records.length) return MISSING;
+				const generation = written(subject, kept);
+				return json(200, { outcome: "removed", generation } satisfies MfaStoreRemoveIfAnswer);
 			}
 			case "markMfaEnrolled": {
 				const { subject, enrolled } = body;
@@ -343,7 +438,12 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 		factors: (subject) => [...holds(subject)],
 		enrolled: (subject) => witness.get(subject),
 		holdFactor: (subject, record) => {
-			held.set(subject, [...holds(subject), record]);
+			const set = setOf(subject);
+			sets.set(subject, {
+				records: [...(set?.records ?? []), record],
+				generation: set?.generation,
+				expiresAtMs: undefined,
+			});
 		},
 		answer: (endpoint, answerer) => {
 			if (answerer === undefined) answerers.delete(endpoint);

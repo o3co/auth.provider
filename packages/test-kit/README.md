@@ -386,7 +386,7 @@ the projection, and an encoding of the mail other than base64.
 
 ## The fake Store
 
-`startFakeStore({ users, bearerToken })` starts an in-memory HTTP server on
+`startFakeStore({ users, bearerToken, now })` starts an in-memory HTTP server on
 `127.0.0.1`, on a port of its own, answering each endpoint as
 [the contract](../foundation/README.md#the-stores-mfa-endpoints) says, with
 the bodies of core's `mfa/storeWire.mts`:
@@ -404,6 +404,15 @@ the bodies of core's `mfa/storeWire.mts`:
   read included; an update writes its changes and nothing else at the
   expected version plus one; each request is answered from state it reads
   and writes without yielding, so concurrent updates are a compare-and-set;
+- a subject's records are one set at a store generation, as the contract's
+  table says: a list answers it with the records, `null` for an absent set;
+  every membership write mints a fresh one and an update keeps it; a
+  conditional create or removal checks it and answers `200`, `404` or `409`
+  with its outcome body, and concurrent ones are atomic too; an emptied set
+  stays as its tombstone until `BUNDLED_STORE_WRITE_LIFETIME_MS` has passed
+  since its last membership write on the Store's clock, `now` (default
+  `Date.now`); and a set held without a generation is given one by its first
+  list, a conditional write against it answering `conflict`;
 - a body the contract does not give an endpoint is `400`, a method but `POST`
   `405`, an unknown path `404`; with `bearerToken`, a request without
   `Authorization: Bearer <token>` is `401` with
@@ -418,7 +427,9 @@ To test how an adapter reads a Store that breaks the contract:
 (`{ status, headers?, body? }`), or by the contract when it returns
 `undefined` — at once, or through a promise that settles later or never, for
 a slow or hung Store — until released with `answer(endpoint, undefined)`; and
-`holdFactor(subject, record)` holds a record as it is, readable or not. What
+`holdFactor(subject, record)` holds a record as it is, readable or not,
+leaving the set's generation as it is, so a set it makes has none until its
+first list. What
 it received is `requests` (the endpoint, the headers, the body as parsed);
 what it holds is `factors(subject)` and `enrolled(subject)`. `close()` stops
 it. It keeps every request it records, headers included — the bearer token
@@ -454,7 +465,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`credentialStore.contract.test.mts`](src/webauthn/__tests__/credentialStore.contract.test.mts) | the WebAuthn credential store's suite over core's in-process store; each broken store — one that lets a registration take a credential id another user holds, overwrites a held credential's record and then throws `duplicate-credential`, refuses a held id with another error, lists a credential under the user it refused, lets a user register a held id again over its record, checks for a held id and inserts in two steps, finds a credential with a sign count of 0, lists every credential whoever's, updates a sign count whatever the count it expects, leaves a removed credential, keeps the `lastUsedAt` it held, answers `true` to a sign count update of an id it does not hold, throws on or empties itself at a removal of an id it does not hold, keeps a removed credential in its user's list, removes every credential of the user, or drops a credential's transports, backup state or nickname — refused by the case that names what it breaks; a store that answers transports in another order accepted; a harness built and closed per case |
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges, an identity two authenticators share — read from the record already held, or the latest enrollment's answered for every record — one keyed per factor instance, or one that answers none for the second — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
-| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
+| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, `400` for an expected generation that is none, and one winner among concurrent conditional writes |
 
 ## See also
 
