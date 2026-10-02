@@ -1376,7 +1376,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect((stored.expiresAt as Date).getTime()).toBeGreaterThan(Date.now());
 		});
 
-		it("stores no expiry and omits expires_in when the provider names neither", async () => {
+		it("refuses a refresh answer that names neither, and stores nothing", async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{ accessToken: string }>;
@@ -1396,12 +1396,9 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			const res = await postFedToken(app, "google", token);
 
-			expect(res.status).toBe(200);
-			expect("expires_in" in res.body).toBe(false);
-			const stored = (fedTokenStore.replaceIf as ReturnType<typeof vi.fn>).mock.calls[0][3] as {
-				expiresAt: Date | null;
-			};
-			expect(stored.expiresAt).toBeNull();
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 		});
 
 		// -------------------------------------------------------------------------
@@ -1607,6 +1604,43 @@ describe("POST /oauth/federation/:name/token", () => {
 
 					expectInvalidExpiry(res, fedTokenStore, auditSink);
 				});
+
+				it.each([
+					["names neither field", {}],
+					["names `null` alone", { expiresAt: null }],
+					["names `null` on both fields", { expiresIn: null, expiresAt: null }],
+				])(
+					"refuses an answer that %s, and still keeps the rotated refresh token",
+					async (_label, lifetime) => {
+						// No finite expiry is never refreshed and never capped at the
+						// maximum: a refresh answer must state when its token ends.
+						const { app, fedTokenStore, auditSink } = auditedApp({
+							accessToken: "new-at",
+							refreshToken: "rotated-rt",
+							...lifetime,
+						});
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(res.status).toBe(500);
+						expect(res.body.error).toBe("refresh_failed");
+						expect(auditSink.record).toHaveBeenCalledWith(
+							expect.objectContaining({
+								type: "federation.token.refresh_failed",
+								details: expect.objectContaining({ reason: "invalid_expiry" }),
+							}),
+						);
+						expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+						expect(fedTokenStore.replaceIf).toHaveBeenCalledWith(
+							expect.any(String),
+							"google",
+							READ_GENERATION,
+							expect.objectContaining({
+								accessToken: "upstream-at-xyz",
+								refreshToken: "rotated-rt",
+							}),
+						);
+					},
+				);
 
 				it("refuses an expiresAt equal to now", async () => {
 					await withFrozenDate(async () => {
@@ -2072,20 +2106,18 @@ describe("POST /oauth/federation/:name/token", () => {
 				},
 			);
 
-			it("keeps `null` meaning the upstream named no lifetime", async () => {
-				// `null` is a statement and `undefined` is silence. Stated alone it
-				// is believed, and the token is stored with no finite expiry. Paired
-				// with a finite `expiresIn` it would be a contradiction, which is
-				// refused instead - see the cases above.
+			it("refuses `null` stated alone, as it refuses silence", async () => {
+				// A refreshed token always has a refresh token beside it: an answer
+				// that names no finite lifetime would be served, uncapped, forever.
 				const { app, fedTokenStore } = refreshingApp({
 					accessToken: "new-at",
 					expiresAt: null,
 				});
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
-				expect(res.status).toBe(200);
-				expect("expires_in" in res.body).toBe(false);
-				expect(storedExpiry(fedTokenStore)).toBeNull();
+				expect(res.status).toBe(500);
+				expect(res.body.error).toBe("refresh_failed");
+				expect(fedTokenStore.replaceIf).not.toHaveBeenCalled();
 			});
 
 			it("treats an empty access token as no access token", async () => {
@@ -4616,21 +4648,19 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 		});
 	});
 
-	it("records no obtainedAt for a token with no finite expiry, and drops the replaced token's", async () => {
-		const store = await seeded({
-			...baseFedTokens,
-			obtainedAt: new Date(Date.now() - 3_600_000),
-			expiresAt: new Date(Date.now() - 1000),
-		});
+	it("refuses a refreshed token with no finite expiry, and leaves the record's instants as they were", async () => {
+		const obtainedAt = new Date(Date.now() - 3_600_000);
+		const expiresAt = new Date(Date.now() - 1000);
+		const store = await seeded({ ...baseFedTokens, obtainedAt, expiresAt });
 		const { app } = appWith(store, async () => ({ accessToken: "new-at" }));
 
 		const res = await postFedToken(app, "google", await mintAccessToken());
 		const stored = await store.get("sid-1", "google");
 
-		expect(res.status).toBe(200);
-		expect(stored?.expiresAt).toBeNull();
-		expect(stored !== null && Object.hasOwn(stored, "obtainedAt")).toBe(true);
-		expect(stored?.obtainedAt).toBeUndefined();
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("refresh_failed");
+		expect(stored?.expiresAt).toEqual(expiresAt);
+		expect(stored?.obtainedAt).toEqual(obtainedAt);
 	});
 
 	it.each([

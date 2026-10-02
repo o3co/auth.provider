@@ -130,7 +130,7 @@ export const recordRefresh = async (
 	// snapshot for fields the IdP did not rotate. The expiry comes only
 	// from this answer (`derivedExpiry`): the stored one belongs to the
 	// expired token, and copying it forward would refresh on every
-	// request. `null` omits `expires_in` (optional in RFC 6749 §5.1).
+	// request.
 	const nextExpiresAt = derivedExpiry;
 	const updatedTokens = {
 		accessToken,
@@ -152,7 +152,7 @@ export const recordRefresh = async (
 		// this route does not own.
 		grantedScope: canonicalScope(currentTokens.grantedScope),
 		// From this answer alone, like the expiry: the stored one dates the
-		// token being replaced. `undefined` with no finite expiry.
+		// token being replaced. `undefined` for an end stated only as an instant.
 		obtainedAt,
 	};
 

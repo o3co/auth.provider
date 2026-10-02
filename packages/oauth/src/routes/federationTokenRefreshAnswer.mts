@@ -43,9 +43,8 @@ export const REFRESH_FLOOR_MS = 1000;
 /**
  * One field of an adapter's answer, or `undefined` if its getter throws: an
  * exception would escape the structured refusal and lose the rotated refresh
- * token. `unreadable` records which, because for a lifetime field "absent"
- * means no finite expiry (never refresh), and a throwing getter must not
- * collapse into that.
+ * token. `unreadable` records which: a throwing getter is never read as an
+ * absent field.
  */
 const readField = <T,>(source: object, key: string, unreadable: Set<string>): T | undefined => {
 	try {
@@ -138,11 +137,11 @@ export interface RefreshReading {
 	readonly rotatedRefreshToken: string | undefined;
 	/** The answered id token when it is usable. */
 	readonly rotatedIdToken: string | undefined;
-	/** When the record's token ends next: the derived end, capped at the maximum; `null` is no finite expiry. */
+	/** When the record's token ends next: the derived end, capped at the maximum; `null` only with a broken lifetime. */
 	readonly derivedExpiry: Date | null;
 	/**
 	 * When the token's lifetime counts from: the start of the refresh call.
-	 * `undefined` with no finite expiry, a broken lifetime, or an end the
+	 * `undefined` with a broken lifetime, or an end the
 	 * upstream stated only as an instant, which is on its own clock and so is
 	 * never aged. With the cap, `derivedExpiry − obtainedAt` may exceed the
 	 * maximum by the call's duration.
@@ -166,23 +165,24 @@ export interface RefreshLifetimePolicy {
 
 /** The lifetime a refresh answer gives the record. */
 interface RefreshedLifetime {
-	readonly expiresAt: Date | null;
+	readonly expiresAt: Date;
 	readonly obtainedAt: Date | undefined;
 }
 
 /**
- * The lifetime a refresh answer's fields give the record: `expiresAt: null`
- * when neither names a lifetime (never refresh), `undefined` when they name
- * none that can be used. A finite end is capped at `now + maxTokenLifetimeMs`,
- * never refused over it, and is obtained at core's reading's `obtainedAt`.
+ * The lifetime a refresh answer's fields give the record, or `undefined` when
+ * they name no finite one that can be used. A refreshed token has a refresh
+ * token beside it, so one with no finite expiry (`unstated`) is refused: it
+ * would never be refreshed or capped. A finite end is capped at
+ * `now + maxTokenLifetimeMs`, never refused over it, and is obtained at core's
+ * reading's `obtainedAt`.
  */
 const readRefreshedLifetime = (
 	answer: Partial<RefreshedTokens>,
 	unreadable: ReadonlySet<string>,
 	policy: RefreshLifetimePolicy,
 ): RefreshedLifetime | undefined => {
-	// A lifetime field that would not be read is broken, not absent: absent
-	// is the never-refresh sentinel.
+	// A lifetime field that would not be read is broken.
 	if (unreadable.has("expiresIn") || unreadable.has("expiresAt")) return undefined;
 	const now = Date.now();
 	const lifetime = readUpstreamTokenLifetime(
@@ -191,7 +191,6 @@ const readRefreshedLifetime = (
 	);
 	switch (lifetime.verdict) {
 		case "unstated":
-			return { expiresAt: null, obtainedAt: undefined };
 		case "malformed":
 		case "contradictory":
 		case "spent":
@@ -239,9 +238,8 @@ export const readRefreshAnswer = (
 				}
 			: {};
 
-	// A lifetime stated wrongly is not one never stated: `null` is stored as
-	// "no finite expiry" (never refresh), so a broken lifetime must not fall
-	// through to it.
+	// `null` is stored as "no finite expiry" (never refresh), so no refresh
+	// answer, broken or silent, falls through to it.
 	const lifetime = readRefreshedLifetime(answer, unreadable, policy);
 
 	// The refreshed token's type: unreadable or not a type name is broken
