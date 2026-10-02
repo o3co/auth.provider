@@ -319,6 +319,9 @@ describe("mergeAdmission — the rows are the declared authority's", () => {
 		);
 		if (row?.session == null)
 			throw new Error("the merge rows hold no met row over a recording store");
+		expect(
+			mergeAdmission(row.expected, row.session, undefined, mergeSessionStore(row)),
+		).toMatchObject({ outcome: "admitted", view: { secondFactorRecordable: true } });
 		expect(mergeAdmission(row.expected, row.session, undefined, undefined)).toMatchObject({
 			outcome: "admitted",
 			view: { secondFactorRecordable: false },

@@ -577,8 +577,8 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
  * (`"acr"` → `"unmet"`, `"baseline"` → `"reauthenticate"`) with its
  * registered page. The view is admission's over `store`, the store the
  * admission ran over (`mergeSessionStore(row)`, or the test's own), or
- * `undefined` for a composition without one, its `secondFactorRecordable`
- * included. Throws for an `authority` that is not a registered requirement
+ * `undefined` for a row with no session, or a composition without a store,
+ * its `secondFactorRecordable` included. Throws for an `authority` that is not a registered requirement
  * declaring it, and for a row that names it when none is given.
  */
 export function mergeAdmission(
