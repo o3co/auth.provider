@@ -76,7 +76,7 @@ const approvedWith = async (
 		grantPolicy: { kind: "stub", evaluate },
 		...(subjectRevocation === undefined ? {} : { subjectRevocation }),
 	});
-	const poll = () =>
+	const poll = (authenticatedClient: AuthenticatedClient = client) =>
 		grant.handle({
 			body: { device_code: "device-code-1" },
 			session: {},
@@ -84,7 +84,7 @@ const approvedWith = async (
 			issuer: ISSUER,
 			ip: "203.0.113.9",
 			userAgent: "tv-agent",
-			authenticatedClient: client,
+			authenticatedClient,
 		} as GrantContext);
 	return { poll };
 };
@@ -113,6 +113,21 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 			throw new Error("decision service down");
 		});
 		expect((await poll()).result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+	});
+
+	it("answers a policy that throws synchronously 503", async () => {
+		const { poll } = await approvedWith(() => {
+			throw new Error("decision service down");
+		});
+		expect((await poll()).result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+	});
+
+	it("answers a grantedScope on an approval of no scope 500, not a widened token", async () => {
+		const { poll } = await approvedWith(
+			async () => ({ outcome: "allow", grantedScope: ["openid"] }),
+			[],
+		);
+		expect((await poll()).result).toMatchObject({ status: 500, error: "server_error" });
 	});
 
 	it("answers a grantedScope past the approved scope 500", async () => {
@@ -209,6 +224,47 @@ describe("device-code grant — what the policy is asked", () => {
 			authenticatedClient: client,
 		} as GrantContext);
 		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(evaluate).not.toHaveBeenCalled();
+	});
+
+	it("is not consulted for an approval issued to another client", async () => {
+		const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({ outcome: "allow" }));
+		const { poll } = await approvedWith(evaluate);
+		const other = { ...client, clientId: "other-app" } as AuthenticatedClient;
+		expect((await poll(other)).result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(evaluate).not.toHaveBeenCalled();
+	});
+
+	it("is not consulted for a pending code, at authorization_pending or slow_down", async () => {
+		const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({ outcome: "allow" }));
+		const store = createMemoryDeviceCodeStore();
+		await store.create({
+			deviceCode: "device-code-1",
+			userCode: "BCDFGHJK",
+			clientId: client.clientId,
+			requestedScope: ["openid"],
+			expiresAtMs: NOW + 600_000,
+			intervalSeconds: 5,
+		});
+		const grant = createDeviceCodeGrant({
+			store,
+			keyStore: createSymmetricKeyStore("device-policy-test-secret-32-bytes!"),
+			accessTokenExpiresIn: 300,
+			now: () => NOW + 10_000,
+			grantPolicy: { kind: "stub", evaluate },
+		});
+		const poll = async () =>
+			(
+				await grant.handle({
+					body: { device_code: "device-code-1" },
+					session: {},
+					metadata: {},
+					issuer: ISSUER,
+					authenticatedClient: client,
+				} as GrantContext)
+			).result;
+		expect(await poll()).toMatchObject({ status: 400, error: "authorization_pending" });
+		expect(await poll()).toMatchObject({ status: 400, error: "slow_down" });
 		expect(evaluate).not.toHaveBeenCalled();
 	});
 
