@@ -44,6 +44,7 @@ import {
 	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createDPoPNonceIssuer } from "./nonce.mjs";
@@ -63,11 +64,11 @@ export const dpopConfigSchema = z
 		/** The module's switch: false (default), and the module registers nothing. */
 		enabled: coerceBooleanFromEnv.default(false),
 		/** Acceptance window for the iat claim in seconds. Default: 60. */
-		iatWindowSeconds: z.coerce.number().int().positive().default(60),
+		iatWindowSeconds: wholeNumberInRangeFromEnv(1).default(60),
 		/** JOSE algorithm allowlist. Default: ES256, ES384, EdDSA, RS256. */
 		algWhitelist: z.array(z.string()).default(["ES256", "ES384", "EdDSA", "RS256"]),
 		/** How long a proof's replay record is kept, in seconds. Default: 300. */
-		replayStoreTtlSeconds: z.coerce.number().int().positive().default(300),
+		replayStoreTtlSeconds: wholeNumberInRangeFromEnv(1).default(300),
 		// Server-provided nonce (RFC 9449 §8 / §9). "never" (the default) asks
 		// for none; "as" asks at the token endpoint; "as+rs" also at protected
 		// resources. The nonce is an HMAC under `secret`, which every replica
@@ -76,7 +77,7 @@ export const dpopConfigSchema = z
 		nonce: z
 			.object({
 				required: z.enum(["never", "as", "as+rs"]).default("never"),
-				ttlSeconds: z.coerce.number().int().positive().default(300),
+				ttlSeconds: wholeNumberInRangeFromEnv(1).default(300),
 				secret: z.string().optional(),
 			})
 			.strict()
