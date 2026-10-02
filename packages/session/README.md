@@ -404,7 +404,7 @@ The manifest ([`src/module.mts`](src/module.mts)):
 - Once the Store verified the user, and before anything is written, the route
   asks core's [session admission](../core/src/session-admission/README.md)
   (`admitPrimary`) about the primary core builds from the login
-  (`passwordPrimary`: the subject, the `User`, the claims the record will hold,
+  (`passwordPrimary`: the subject, the `User`'s snapshot, the claims the record will hold,
   `authTime`, the allowlisted `redirect_to`, the client's address and user
   agent — `amr` and `authentication` are core's, never the route's). With no
   requirement registered every login is answered `establish`. A requirement's
@@ -412,9 +412,11 @@ The manifest ([`src/module.mts`](src/module.mts)):
   (core's `describeAdmissionOutage`) with nothing written, logged once by
   admission as `session_admission_unavailable` (`store` the requirement's
   name, `phase: "establishment"`). A requirement's interruption is
-  [below](#when-a-requirement-interrupts-the-login). A `User` whose
-  declared field holds what is not plain data (a `Date` witness, a function)
-  is refused before anything is written, as the route's error (`500`).
+  [below](#when-a-requirement-interrupts-the-login). The route reads the
+  `User` once, with core's `readUserSnapshot`, and takes the subject and the
+  claims from that snapshot. A `User` the snapshot refuses (a declared field
+  holding what is not plain data, such as a `Date` witness or a function) is
+  refused before anything is written, as the route's error (`500`).
 - On success — every requirement answered `establish` — it creates a
   `UserSession` (`amr: ["pwd"]`, `authentication` primary `pwd`, lifetime
   `session-store.maxAge`), records it in `subjectSessionIndex` when that is wired,
@@ -502,14 +504,17 @@ from the `User` (the MFA enrollment witness and what its address is — none,
 one the provider reads, or one it cannot — never the address), and the `redirectTo`; nothing a caller passes
 beside it. Anything that is not an `Establishment` core built —
 an object shaped like one, a copy of one — is a `RangeError` before anything
-is written. On both paths core reads the `User` into the primary as a plain snapshot —
-exactly the fields `User` declares, each by name, once, however the object
-holds it, so a class instance with getters or an ORM entity logs in — and
+is written. On both paths the login route reads the `User` once, with core's
+`readUserSnapshot`, into a plain snapshot — exactly the fields `User`
+declares, each by name, once, however the object holds it, so a class
+instance with getters or an ORM entity logs in — and hands that snapshot,
+never the `User`, to the builders (`passwordPrimary`, `establishWithoutAsking`);
+the subject, the claims and the route's log lines are read from it too.
 `req.session.user` holds that snapshot: the declared fields alone, nothing
-else the Store answered, and no Store's `toJSON` applied. Core refuses a
-`User` whose `id` is not a non-empty string or not the subject, or whose
-declared field holds what is not plain data; the login then answers `500`
-with nothing written. It runs, in order: the
+else the Store answered, and no Store's `toJSON` applied. A `User` whose `id`
+is not a non-empty string, or whose declared field holds what is not plain
+data, is refused by the snapshot; the login then answers `500` with nothing
+written. It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session-store.maxAge` after
 `authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the
@@ -1356,7 +1361,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | the link start and callback on session admission: each outcome's answer, the subject recorded beside the `sid`, what a requirement is asked, the pre-upgrade transaction |
-| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | the callback's login established without asking: a requirement that would interrupt a password login does not interrupt it, the record is what core composes, and a user core cannot copy is refused with nothing written |
+| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | the callback's login established without asking: a requirement that would interrupt a password login does not interrupt it, the record is what core composes, the `User` is read once, and a user the snapshot refuses is refused with nothing written |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts), [`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts), [`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts), [`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response modes, the transaction cookie, the untouched session cookie, the transaction's failure paths and what single use guarantees |
 | [`src/federations/__tests__/`](src/federations/__tests__/) | the toolkit and the router's federation parts; the request helpers are pinned in core ([`core/src/federations/__tests__/`](../core/src/federations/__tests__/)) |
 

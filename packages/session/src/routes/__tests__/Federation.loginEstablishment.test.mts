@@ -143,9 +143,9 @@ describe("the federation callback's login — a user whose field the login needs
 		const harness = buildFederationApp({
 			providers: new Map([["test", provider]]),
 			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
-			// `establishWithoutAsking` reads the user into a plain snapshot: a
+			// The callback reads the user once with core's `readUserSnapshot`: a
 			// field the login needs that is not plain data — a witness that is a
-			// Date — is a RangeError there.
+			// Date — is refused there.
 			userRepository: makeUserRepository({
 				id: "user-1",
 				username: "alice",

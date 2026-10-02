@@ -429,9 +429,9 @@ describe("POST /session/login — every requirement answers establish", () => {
 
 describe("POST /session/login — a user whose field the login needs is not plain data", () => {
 	it("is refused before any requirement is asked and before anything is written: the route's error, answered 500", async () => {
-		// `passwordPrimary` reads the user into a plain snapshot: a field the
-		// login needs that is not plain data — a witness that is a Date — is a
-		// RangeError there, since the snapshot would read it as not enrolled.
+		// The route reads the user once with core's `readUserSnapshot`: a
+		// field the login needs that is not plain data — a witness that is a
+		// Date — is refused there, since left out it would read as not enrolled.
 		const { requirement, asked } = fixture(() => "establish");
 		const { app, userSessionStore, trace } = setup({
 			requirements: [requirement],
