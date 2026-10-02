@@ -1662,6 +1662,43 @@ describe("POST /oauth/federation/:name/token", () => {
 					});
 				});
 
+				it("never answers expires_in 0: a token that loses its last second before the answer is 503, and audits no success", async () => {
+					// Accepted with exactly the floor left when the answer is read;
+					// the store write then takes a millisecond.
+					await withFrozenDate(async () => {
+						const auditSink: AuditSink = { kind: "mock", record: vi.fn() };
+						const fedTokenStore = makeFedTokenStore({
+							get: vi.fn().mockResolvedValue({
+								...baseFedTokens,
+								expiresAt: new Date(Date.now() - 1000),
+							}),
+							replaceIf: vi.fn(async () => {
+								vi.setSystemTime(Date.now() + 1);
+								return { outcome: "updated" as const, generation: "g-written" as StoreGeneration };
+							}),
+						});
+						const refreshProvider = {
+							...federationBase("google"),
+							refreshToken: vi.fn(async () => ({ accessToken: "new-at", expiresIn: 1 })),
+						} as unknown as FederationProvider;
+						const app = buildApp({
+							fedTokenStore,
+							auditSink,
+							getFederationProviders: () =>
+								new Map<string, FederationProvider>([["google", refreshProvider]]),
+						});
+
+						const res = await postFedToken(app, "google", await mintAccessToken());
+
+						expect(fedTokenStore.replaceIf).toHaveBeenCalledTimes(1);
+						expect(res.status).toBe(503);
+						expect(res.body.error).toBe("temporarily_unavailable");
+						expect(auditSink.record).not.toHaveBeenCalledWith(
+							expect.objectContaining({ type: "federation.token.success" }),
+						);
+					});
+				});
+
 				it("refuses a fractional expiresIn below one second", async () => {
 					const { app, fedTokenStore, auditSink } = auditedApp({
 						accessToken: "new-at",
