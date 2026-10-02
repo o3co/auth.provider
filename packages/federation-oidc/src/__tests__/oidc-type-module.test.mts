@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { generateKeyPairSync } from "node:crypto";
 import {
 	type AppConfig,
 	type AppHandle,
@@ -39,6 +40,7 @@ import {
 	sessionStoreModuleFor,
 } from "@o3co/auth-provider-session";
 import express from "express";
+import { decodeProtectedHeader, jwtVerify } from "jose";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -79,6 +81,16 @@ const entryB = {
 	clientSecret: "secret-b",
 	callbackURL: CALLBACK_B,
 	clientUrl: "https://app-b.test/",
+};
+
+/** A client key for `private_key_jwt`, and the public half the assertion verifies under. */
+const clientKey = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const PEM = clientKey.privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+
+/** An entry of `entryA`'s keys that authenticates with `private_key_jwt` instead of a secret. */
+const withPrivateKey = (privateKey: unknown) => {
+	const { clientSecret: _secret, ...entry } = entryA;
+	return { ...entry, privateKey };
 };
 
 /** One fetch in front of several fake IdPs, each answering the URLs under its issuer. */
@@ -347,6 +359,56 @@ describe("oidcFederationTypeModule through createApp", () => {
 		expect(issuePaths(err)).toContain(path);
 	});
 
+	it.each([
+		["kid", { pem: PEM, kid: 1 }, "core.federations.idp-a.privateKey.kid"],
+		["alg", { pem: PEM, alg: ["RS256"] }, "core.federations.idp-a.privateKey.alg"],
+		["pem", { kid: "rp-key-1" }, "core.federations.idp-a.privateKey.pem"],
+		["an unknown key", { pem: PEM, kdi: "rp-key-1" }, "core.federations.idp-a.privateKey"],
+		["a number for the key", 42, "core.federations.idp-a.privateKey"],
+	])(
+		"refuses a privateKey with %s wrong, at the key's own path",
+		async (_what, privateKey, path) => {
+			const err = await refusal(boot({ "idp-a": withPrivateKey(privateKey) }));
+			expect(err.reason).toBe("config-validation-failed");
+			expect(issuePaths(err)).toEqual([path]);
+		},
+	);
+
+	describe("a refusal never quotes a credential", () => {
+		const SECRET = "s3cret-that-must-not-be-echoed";
+		const cases: readonly (readonly [string, Record<string, unknown>])[] = [
+			["a clientSecret of the wrong type", { ...entryA, clientSecret: [SECRET] }],
+			["both credentials", { ...entryA, clientSecret: SECRET, privateKey: PEM }],
+			["a privateKey.kid of the wrong type", withPrivateKey({ pem: PEM, kid: 1 })],
+			["an unknown key inside privateKey", withPrivateKey({ pem: PEM, pme: PEM })],
+		];
+		/** The secret, the PEM, and the PEM's base64 body without its armour. */
+		const credentials = [SECRET, PEM, PEM.split("\n")[1] ?? PEM];
+
+		it.each(cases)("at boot: %s", async (_what, entry) => {
+			const err = await refusal(boot({ "idp-a": entry }));
+			expect(err.reason).toBe("config-validation-failed");
+			const details = JSON.stringify(err.details);
+			for (const credential of credentials) {
+				expect(err.message).not.toContain(credential);
+				expect(details).not.toContain(credential);
+			}
+		});
+
+		it.each(cases)("in the deprecated reader: %s", (_what, entry) => {
+			let thrown: unknown;
+			try {
+				readOidcFederationConfigs({ "idp-a": entry });
+			} catch (err) {
+				thrown = err;
+			}
+			expect(thrown).toBeInstanceOf(Error);
+			for (const credential of credentials) {
+				expect((thrown as Error).message).not.toContain(credential);
+			}
+		});
+	});
+
 	it("refuses the per-instance module beside it for the same entry: one federation has one handler", async () => {
 		const idpA = await createFakeIdp({ issuer: ISSUER_A, clientId: "client-a" });
 		const configs = defineModule({
@@ -376,8 +438,7 @@ describe("oidcFederationTypeModule through createApp", () => {
 });
 
 describe("oidcFederationTypeModule — parity with the per-instance module", () => {
-	const entry = {
-		...entryA,
+	const options = {
 		scopes: ["openid", "email", "groups"],
 		endpoints: { authorizationEndpoint: `${ISSUER_A}/oauth2/v1/authorize` },
 		userInfo: false,
@@ -385,9 +446,16 @@ describe("oidcFederationTypeModule — parity with the per-instance module", () 
 		redirectAllowlist: ["https://app-a.test/welcome"],
 		authCallbackUrl: "https://app-a.test/auth/callback",
 	};
+	const entries: readonly (readonly [string, Record<string, unknown>])[] = [
+		["client_secret_basic", { ...entryA, ...options }],
+		[
+			"private_key_jwt",
+			{ ...withPrivateKey({ pem: PEM, kid: "rp-key-1", alg: "PS256" }), ...options },
+		],
+	];
 
-	/** The provider and the policy one path builds for `idp-a`, from a fresh fake IdP. */
-	async function built(path: "per-instance" | "type") {
+	/** The provider and the policy one path builds for `idp-a` from `entry`, against a fresh fake IdP. */
+	async function built(path: "per-instance" | "type", entry: Record<string, unknown>) {
 		const idp = await createFakeIdp({ issuer: ISSUER_A, clientId: "client-a", sub: "sub-a-1" });
 		const configs = defineModule({
 			name: "test:oidc-configs",
@@ -416,7 +484,7 @@ describe("oidcFederationTypeModule — parity with the per-instance module", () 
 		return { idp, provider, policy };
 	}
 
-	it("reads every key of an entry as the deprecated reader does", () => {
+	it("the deprecated reader hands on the schema's reading of an entry, with its callbackURL beside it", () => {
 		const declaration = (
 			oidcFederationTypeModule().contributes as {
 				federationTypes: Record<string, { entrySchema: { parse(value: unknown): unknown } }>;
@@ -456,49 +524,82 @@ describe("oidcFederationTypeModule — parity with the per-instance module", () 
 		}
 	});
 
-	it("builds the same provider and the same redirect policy from one entry", async () => {
-		const perInstance = await built("per-instance");
-		const type = await built("type");
+	it.each(entries)(
+		"builds the same provider and the same redirect policy from one entry (%s)",
+		async (auth, entry) => {
+			const perInstance = await built("per-instance", entry);
+			const type = await built("type", entry);
 
-		expect(type.provider.name).toBe(perInstance.provider.name);
-		expect(type.provider.scope).toEqual(perInstance.provider.scope);
-		expect(Object.keys(type.provider).sort()).toEqual(Object.keys(perInstance.provider).sort());
+			expect(type.provider.name).toBe(perInstance.provider.name);
+			expect(type.provider.scope).toEqual(perInstance.provider.scope);
+			expect(Object.keys(type.provider).sort()).toEqual(Object.keys(perInstance.provider).sort());
 
-		const authorize = (provider: FederationProvider) =>
-			provider.buildAuthorizationUrl({
-				redirectUri: CALLBACK_A,
-				state: "state-1",
-				codeVerifier: "v".repeat(43),
-				nonce: "nonce-1",
-			}).href;
-		expect(authorize(type.provider)).toBe(authorize(perInstance.provider));
+			const authorize = (provider: FederationProvider) =>
+				provider.buildAuthorizationUrl({
+					redirectUri: CALLBACK_A,
+					state: "state-1",
+					codeVerifier: "v".repeat(43),
+					nonce: "nonce-1",
+				}).href;
+			expect(authorize(type.provider)).toBe(authorize(perInstance.provider));
 
-		const exchange = async ({ idp, provider }: Awaited<ReturnType<typeof built>>) => {
-			idp.nonce = "nonce-1";
-			const profile = await provider.exchangeCode({
-				code: "code-1",
-				codeVerifier: "v".repeat(43),
-				redirectUri: CALLBACK_A,
-				nonce: "nonce-1",
-			});
-			const token = idp.lastTokenRequest();
-			return {
-				issuer: profile.issuer,
-				sub: profile.sub,
-				userinfoCalls: idp.requestsTo("/userinfo").length,
-				authorization: token?.headers.get("authorization"),
-				body: Object.fromEntries(token?.body ?? []),
+			const exchange = async ({ idp, provider }: Awaited<ReturnType<typeof built>>) => {
+				idp.nonce = "nonce-1";
+				const profile = await provider.exchangeCode({
+					code: "code-1",
+					codeVerifier: "v".repeat(43),
+					redirectUri: CALLBACK_A,
+					nonce: "nonce-1",
+				});
+				const token = idp.lastTokenRequest();
+				// A client assertion is minted per request (its jti, iat and exp
+				// differ): compared by its header and the claims that name the
+				// client and the audience, after it verifies under the client key.
+				const { client_assertion: assertion, ...body } = Object.fromEntries(token?.body ?? []);
+				const signed =
+					assertion === undefined
+						? undefined
+						: {
+								header: decodeProtectedHeader(assertion),
+								claims: await jwtVerify(assertion, clientKey.publicKey).then(({ payload }) => ({
+									iss: payload.iss,
+									sub: payload.sub,
+									aud: payload.aud,
+								})),
+							};
+				return {
+					issuer: profile.issuer,
+					sub: profile.sub,
+					userinfoCalls: idp.requestsTo("/userinfo").length,
+					authorization: token?.headers.get("authorization"),
+					body,
+					signed,
+				};
 			};
-		};
-		expect(await exchange(type)).toEqual(await exchange(perInstance));
+			const exchanged = await exchange(type);
+			expect(exchanged).toEqual(await exchange(perInstance));
+			if (auth === "private_key_jwt") {
+				expect(exchanged.authorization).toBeNull();
+				expect(exchanged.body.client_assertion_type).toBe(
+					"urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+				);
+				expect(exchanged.signed).toEqual({
+					header: expect.objectContaining({ alg: "PS256", kid: "rp-key-1" }),
+					claims: { iss: "client-a", sub: "client-a", aud: ISSUER_A },
+				});
+			} else {
+				expect(exchanged.authorization).toMatch(/^Basic /);
+				expect(exchanged.signed).toBeUndefined();
+			}
 
-		for (const url of ["https://app-a.test/welcome", "https://elsewhere.test/"]) {
-			expect(type.policy.validateRedirect(url)).toEqual(perInstance.policy.validateRedirect(url));
-		}
-		for (const session of [{}, { redirectTo: "https://app-a.test/welcome" }]) {
-			expect(type.policy.resolveCallbackRedirect(session)).toEqual(
-				perInstance.policy.resolveCallbackRedirect(session),
-			);
-		}
-	});
+			for (const url of ["https://app-a.test/welcome", "https://elsewhere.test/"]) {
+				expect(type.policy.validateRedirect(url)).toEqual(perInstance.policy.validateRedirect(url));
+			}
+			for (const session of [{}, { redirectTo: "https://app-a.test/welcome" }]) {
+				expect(type.policy.resolveCallbackRedirect(session)).toEqual(
+					perInstance.policy.resolveCallbackRedirect(session),
+				);
+			}
+		},
+	);
 });

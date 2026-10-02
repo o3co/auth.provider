@@ -48,17 +48,23 @@ const flag = z.preprocess(
 );
 const strings = z.array(text, { error: "must be a list of strings" });
 
-const privateKey = z.union(
-	[
-		z.string().min(1),
-		z.strictObject({
-			pem: z.string().min(1),
-			kid: z.string().optional(),
-			alg: z.string().optional(),
-		}),
-	],
-	{ error: "must be a PEM string or { pem, kid?, alg? }" },
+const PRIVATE_KEY = "must be a PEM string or { pem, kid?, alg? }";
+const pemString = z.string().min(1, { error: PRIVATE_KEY });
+const pemObject = z.strictObject(
+	{ pem: required, kid: text.optional(), alg: text.optional() },
+	{ error: (issue) => (issue.code === "invalid_type" ? PRIVATE_KEY : undefined) },
 );
+/**
+ * A PEM string, or `{ pem, kid?, alg? }`: a string is read as the one, and
+ * anything else as the other, so a refusal inside the object names its key
+ * (`privateKey.kid`) rather than the key as a whole.
+ */
+const privateKey = z.unknown().transform((value, ctx) => {
+	const result = (typeof value === "string" ? pemString : pemObject).safeParse(value);
+	if (result.success) return result.data;
+	for (const issue of result.error.issues) ctx.addIssue({ ...issue });
+	return z.NEVER;
+});
 
 const endpoints = z.strictObject(
 	{
