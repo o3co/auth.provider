@@ -427,6 +427,24 @@ describe("a release", () => {
 		expect(store.acquireSubjectLease).toHaveBeenCalledTimes(2);
 	});
 
+	it("judges the release at a time taken after the sessions boundary was read: a slow read of a boundary set meanwhile is no boundary ahead", async () => {
+		const { store, recovery } = setup({
+			boundary: async () => {
+				// The read takes ten minutes; the boundary it answers was set during it.
+				clock += 10 * 60_000;
+				return new Date(clock - 1_000);
+			},
+		});
+		await failAt(store, T);
+		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
+		await recovery.authorize(SUBJECT, SID, "key", clock);
+
+		expect(await recovery.release(SUBJECT, SID)).toMatchObject({
+			outcome: "released",
+			applied: true,
+		});
+	});
+
 	it("hands null as the guessable records' earliest time when only exempt records remain", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await factorStore.create(recordOf("exempt", "key", T - 8_000));
