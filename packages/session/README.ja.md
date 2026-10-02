@@ -432,8 +432,8 @@ core.federations {
 
 - 有効なセクションはすべて `callbackURL` を持たなければならず、無ければ `sessionModule` が起動に失敗する。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
 - `trustUpstreamAmr` はどの形でもセクションの最上位、`enabled` の横に置く。無ければ `false` で、（スキーマの変換のあと）真偽値でないものは起動に失敗する。ネストした形のサブセクションの中（`core.federations.okta.oidc.trustUpstreamAmr`）に書いても起動に失敗し、`enabled` の横に置くよう告げる — さもなければ無視されてしまう。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
-- すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。
-- `sessionModule` は設定と contribution を突き合わせない。設定で有効だがどのモジュールも contribute していないフェデレーションは起動し、そのルートは `404` を返す。有効なセクションなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。どちらかで起動を失敗させたい組み立ては自分で検査を加える。
+- すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。`type` で扱われるフェデレーション（`federationTypes`）は、core から両方を対で受け取る。
+- `sessionModule` は設定と contribution を突き合わせない。一方向は core の起動が検査する: 設定で有効だがどのモジュールも扱わないフェデレーションは起動を拒否される（`federation-type-unhandled`）。逆方向は検査されない: 有効なセクションなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。これで起動を失敗させたい組み立ては自分で検査を加える。
 
 ### リダイレクト許可リスト
 

@@ -1196,12 +1196,14 @@ Boot rules:
   [above](#what-a-session-records-about-the-authentication).
 - Every `federations.<name>` contribution must be paired with a
   `federationRedirectPolicies.<name>` one and vice versa, or boot fails with
-  `federation-redirect-policy-unpaired`.
-- `sessionModule` does not cross-check config against contributions. A
-  federation enabled in config that no module contributes boots, and its routes
-  answer `404`; a federation contributed without an enabled section has no
+  `federation-redirect-policy-unpaired`. A federation a module handles by its
+  `type` (`federationTypes`) gets both from core, together.
+- `sessionModule` does not cross-check config against contributions; core's
+  boot does one direction: a federation enabled in config that no module
+  handles refuses boot (`federation-type-unhandled`). The other direction is
+  not checked: a federation contributed without an enabled section has no
   callback URL, and its start answers `500 misconfiguration`. A composition that
-  wants either to fail boot adds the check itself.
+  wants that to fail boot adds the check itself.
 
 ### Redirect allowlists
 
