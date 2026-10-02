@@ -740,10 +740,15 @@ return {1, stamp}
  * token, the sessions boundary or empty, the earliest guessable record's time or `none` when no
  * guessable record remains (empty for a reset), and the clock skew (`DEFAULT_CLOCK_SKEW_MS`).
  * The recovery hash, and for a recover the lock state, are read and validated whole before the
- * first write. Refuses, in the port's order, with `{'refused', reason, hard}`; answers
- * `{'already', recoveryId, generation, hard}` for an authorization applied, and
- * `{'applied', recoveryId, generation, week, run, liftedHard, hard}` once it applies, each flag
- * `1` or `0`, `hard` read after the apply.
+ * first write. Refuses, in the port's order, with `{'refused', reason, hard, rebindAfter}`;
+ * answers `{'already', recoveryId, generation, hard, rebindAfter}` for an authorization applied,
+ * and `{'applied', recoveryId, generation, week, run, liftedHard, hard, rebindAfter}` once it
+ * applies, each flag `1` or `0`. `hard` and `rebindAfter` are the hard hold read after the call:
+ * while it stands, from when a rebind counts — the hold's time plus the skew, floored to whole
+ * milliseconds, as decimal text, the bound a recover lifts by — and empty while none does. A
+ * reset reads the hold only to answer a refusal or an authorization already applied. A hold it
+ * cannot read, or whose bound is not a safe whole number from 0, is an error, raised before the
+ * first write.
  */
 const LUA_MFA_SUBJECT_RECOVERY_APPLY = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
 local operation, field, token = ARGV[1], ARGV[2], ARGV[4]
@@ -759,25 +764,37 @@ end
 local g, floor, slots = recovery_load(KEYS[3])
 local next_generation = (g or 0) + 1
 if next_generation > MAX_COUNT then corrupt() end
-local run, pending, week, held_hard = nil, nil, nil, nil
-if operation == 'recover' then run, pending, week, held_hard = load() end
-
-local function hard_flag()
-  if redis.call('HEXISTS', KEYS[1], 'hard') == 1 then return '1' end
-  return '0'
+-- From when a rebind counts against the hard hold's time: a guessable record created after it.
+-- A bound an answer cannot carry (not a safe whole number from 0) is a state this store did not write.
+local function rebind_after(at)
+  local after = math.floor(at + clock_skew)
+  if after < 0 or after > MAX_COUNT then corrupt() end
+  return after
 end
-local function refused(reason) return {'refused', reason, hard_flag()} end
+local run, pending, week, held_hard = nil, nil, nil, nil
+if operation == 'recover' then
+  run, pending, week, held_hard = load()
+  if held_hard ~= nil then rebind_after(held_hard) end
+end
+-- The hard hold as it stands now: '1' and from when a rebind counts, or '0' and empty.
+local function hold()
+  local at = redis.call('HGET', KEYS[1], 'hard')
+  if not at then return '0', '' end
+  return '1', string.format('%.0f', rebind_after(num(at)))
+end
+local function refused(reason) return {'refused', reason, hold()} end
 
 if not lease_held(KEYS[4], token) then return refused('lease_not_held') end
 local slot = slots[field]
 if slot == nil then return refused('unauthorized') end
 if slot.ends <= server_ms() then
+  local hard, after = hold()
   redis.call('HDEL', KEYS[3], field)
   slots[field] = nil
   recovery_keep(KEYS[3], g ~= nil or floor ~= nil, slots)
-  return refused('unauthorized')
+  return {'refused', 'unauthorized', hard, after}
 end
-if slot.applied ~= nil then return {'already', slot.id, slot.applied, hard_flag()} end
+if slot.applied ~= nil then return {'already', slot.id, slot.applied, hold()} end
 if slot.ends <= now then return refused('expired') end
 
 -- Applied: the slot is marked at the generation this moves to.
@@ -785,7 +802,7 @@ local function applied(ended_week, ended_run, lifted)
   local gen = string.format('%.0f', next_generation)
   redis.call('HSET', KEYS[3], 'g', gen, field, 'a|' .. gen .. '|' .. string.format('%.0f', slot.ends) .. '|' .. slot.id)
   redis.call('PERSIST', KEYS[3])
-  return {'applied', slot.id, gen, ended_week, ended_run, lifted, hard_flag()}
+  return {'applied', slot.id, gen, ended_week, ended_run, lifted, hold()}
 end
 
 if operation == 'reset' then
@@ -806,7 +823,7 @@ for _, a in ipairs(week) do
 end
 local revoked = earliest == nil or (boundary ~= nil and boundary > earliest + clock_skew)
 -- The hard hold lifts on a rebind alone: no guessable record from before it, by more than the skew.
-local rebound = held_hard ~= nil and (since == nil or since > held_hard + clock_skew)
+local rebound = held_hard ~= nil and (since == nil or since > rebind_after(held_hard))
 if not revoked and not rebound then return refused('not_revoked_since') end
 
 local ended_week, ended_run, lifted = '0', '0', '0'

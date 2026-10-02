@@ -1063,37 +1063,48 @@ export type MfaSubjectRecoveryRefusal =
 	| "lease_not_held";
 
 /**
- * What `applySubjectRecovery` answers. `hard` is whether the hard hold
- * stands after the call, read in the same step, on every outcome: an answer
- * never reads as released while it stands.
+ * The hard hold after an apply, read in the same step. While it stands,
+ * `rebindAfterMs` is from when a rebind counts: the hold's time plus
+ * `DEFAULT_CLOCK_SKEW_MS`, in whole epoch milliseconds, an exclusive bound —
+ * a guessable record created after it is a rebind, one created at or before
+ * it is not. It is the bound the apply judges a rebind by.
  */
-export type MfaSubjectRecoveryAnswer =
-	| {
-			readonly outcome: "applied";
-			readonly recoveryId: string;
-			/** The subject's generation this apply moved it to. */
-			readonly generation: number;
-			/**
-			 * What this apply gave back, each possibly empty: the week's failures,
-			 * the run's (and its backoff), the hard hold. A recover with nothing to
-			 * give back still applies, using up its authorization and moving the
-			 * generation.
-			 */
-			readonly cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean };
-			readonly hard: boolean;
-	  }
-	| {
-			readonly outcome: "already_applied";
-			readonly recoveryId: string;
-			/** The generation it was applied at. */
-			readonly generation: number;
-			readonly hard: boolean;
-	  }
-	| {
-			readonly outcome: "refused";
-			readonly reason: MfaSubjectRecoveryRefusal;
-			readonly hard: boolean;
-	  };
+type MfaSubjectRecoveryHold =
+	| { readonly hard: true; readonly rebindAfterMs: number }
+	| { readonly hard: false; readonly rebindAfterMs: null };
+
+/**
+ * What `applySubjectRecovery` answers. `hard` is whether the hard hold
+ * stands after the call, read in the same step, on every outcome, with from
+ * when a rebind counts while it does (`rebindAfterMs`, `null` otherwise): an
+ * answer never reads as released while it stands.
+ */
+export type MfaSubjectRecoveryAnswer = MfaSubjectRecoveryHold &
+	(
+		| {
+				readonly outcome: "applied";
+				readonly recoveryId: string;
+				/** The subject's generation this apply moved it to. */
+				readonly generation: number;
+				/**
+				 * What this apply gave back, each possibly empty: the week's failures,
+				 * the run's (and its backoff), the hard hold. A recover with nothing to
+				 * give back still applies, using up its authorization and moving the
+				 * generation.
+				 */
+				readonly cleared: { readonly week: boolean; readonly run: boolean; readonly hard: boolean };
+		  }
+		| {
+				readonly outcome: "already_applied";
+				readonly recoveryId: string;
+				/** The generation it was applied at. */
+				readonly generation: number;
+		  }
+		| {
+				readonly outcome: "refused";
+				readonly reason: MfaSubjectRecoveryRefusal;
+		  }
+	);
 
 const RECOVERY_REFUSALS: ReadonlySet<unknown> = new Set<MfaSubjectRecoveryRefusal>([
 	"unauthorized",
@@ -1231,31 +1242,45 @@ const isAppliedState = (
 	hard: boolean,
 ): boolean => (cleared.hard ? cleared.run && !hard : cleared.week && cleared.run === !hard);
 
+/** The hold an answer carries: `rebindAfterMs` whole epoch milliseconds exactly while `hard`, else `null`. */
+const recoveryHoldOf = (
+	hard: unknown,
+	rebindAfterMs: unknown,
+): MfaSubjectRecoveryHold | undefined =>
+	hard === true && isEpochMs(rebindAfterMs)
+		? { hard, rebindAfterMs }
+		: hard === false && rebindAfterMs === null
+			? { hard, rebindAfterMs }
+			: undefined;
+
 /**
  * `answer`, what `applySubjectRecovery` answered, as the port promises it,
  * copied to its outcome's fields, each read once: a non-empty `recoveryId`,
- * a generation from 1, booleans, a refusal the port names, and an applied
- * answer whose `cleared` and `hard` one apply can give — never one that has
- * lifted the hard hold while it still stands. `undefined` for anything else,
- * which the caller answers as the store's outage: never released.
+ * a generation from 1, booleans, a refusal the port names, `rebindAfterMs`
+ * whole epoch milliseconds while `hard` and `null` otherwise, never absent,
+ * and an applied answer whose `cleared` and `hard` one apply can give —
+ * never one that has lifted the hard hold while it still stands. `undefined`
+ * for anything else, which the caller answers as the store's outage: never
+ * released.
  */
 export function readMfaSubjectRecoveryAnswer(
 	answer: unknown,
 ): MfaSubjectRecoveryAnswer | undefined {
 	try {
 		if (!isRecord(answer)) return undefined;
-		const { outcome, hard } = answer;
-		if (typeof hard !== "boolean") return undefined;
+		const { outcome, hard, rebindAfterMs } = answer;
+		const hold = recoveryHoldOf(hard, rebindAfterMs);
+		if (hold === undefined) return undefined;
 		if (outcome === "refused") {
 			const { reason } = answer;
 			return RECOVERY_REFUSALS.has(reason)
-				? { outcome, reason: reason as MfaSubjectRecoveryRefusal, hard }
+				? { outcome, reason: reason as MfaSubjectRecoveryRefusal, ...hold }
 				: undefined;
 		}
 		if (outcome !== "applied" && outcome !== "already_applied") return undefined;
 		const { recoveryId, generation } = answer;
 		if (!isSubject(recoveryId) || !isCount(generation) || generation < 1) return undefined;
-		if (outcome === "already_applied") return { outcome, recoveryId, generation, hard };
+		if (outcome === "already_applied") return { outcome, recoveryId, generation, ...hold };
 		const { cleared } = answer;
 		if (!isRecord(cleared)) return undefined;
 		const { week, run, hard: lifted } = cleared;
@@ -1263,8 +1288,8 @@ export function readMfaSubjectRecoveryAnswer(
 			return undefined;
 		}
 		const parts = { week, run, hard: lifted };
-		return isAppliedState(parts, hard)
-			? { outcome, recoveryId, generation, cleared: parts, hard }
+		return isAppliedState(parts, hold.hard)
+			? { outcome, recoveryId, generation, cleared: parts, ...hold }
 			: undefined;
 	} catch {
 		return undefined;
@@ -1520,6 +1545,8 @@ export interface MfaTransactionStore {
 	 *
 	 * A `recover` lifts the hard hold on a rebind: `guessableBoundSinceMs` is
 	 * `null` or later than the hold's time by more than `DEFAULT_CLOCK_SKEW_MS`.
+	 * Every answer, a refusal's included, carries that bound while the hold
+	 * stands after the call (`rebindAfterMs`).
 	 * No sessions boundary is asked for, and the run the hold counted ends
 	 * with it, its backoff included: every attempt in it was against the
 	 * replaced authenticators. The week stands unless the boundary gives it
