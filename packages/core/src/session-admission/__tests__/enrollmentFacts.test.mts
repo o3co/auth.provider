@@ -367,8 +367,10 @@ describe("a user is read by name — each field the login needs, once, into a pl
 			const primary = build();
 			expect([...reads.values()].every((count) => count === 1)).toBe(true);
 			expect([...reads.keys()]).toEqual(
-				expect.arrayContaining(["id", "username", "email", "mfaEnrolled", "groups", "department"]),
+				expect.arrayContaining(["id", "username", "email", "mfaEnrolled", "groups"]),
 			);
+			// A field `User` does not declare is not read at all.
+			expect(reads.has("department")).toBe(false);
 			// After the build, everything is read from the snapshot.
 			reads.clear();
 			expect(primary.enrollmentFacts).toEqual({ witness: "enrolled", mailAddress: "address" });
@@ -378,14 +380,13 @@ describe("a user is read by name — each field the login needs, once, into a pl
 				email: "alice@example.com",
 				mfaEnrolled: true,
 				groups: ["staff"],
-				department: "sales",
 			});
 			expect(JSON.parse(JSON.stringify(primary))).toBeDefined();
 			expect(reads.size).toBe(0);
 		}
 	});
 
-	it("leaves out a field the login does not need that is not plain data — a Date, a Map, a function, an instance", () => {
+	it("carries none of a plain user's other fields — plain data or not", () => {
 		const user = {
 			id: "user-1",
 			mfaEnrolled: true,
@@ -405,7 +406,34 @@ describe("a user is read by name — each field the login needs, once, into a pl
 				id: "user-1",
 				mfaEnrolled: true,
 				email: "alice@example.com",
-				department: "sales",
+			});
+		}
+	});
+
+	it("stores exactly the declared fields of a plain user with fields of its own", () => {
+		const user = {
+			id: "user-1",
+			username: "alice",
+			email: "alice@example.com",
+			emailVerified: true,
+			name: "Alice",
+			picture: "https://example.com/alice.png",
+			groups: ["staff"],
+			mfaEnrolled: false,
+			locale: "en",
+			passwordHash: "not-for-the-session",
+			profile: { nickname: "ally" },
+		};
+		for (const build of bothLogins(user)) {
+			expect(build().user).toStrictEqual({
+				id: "user-1",
+				username: "alice",
+				email: "alice@example.com",
+				emailVerified: true,
+				name: "Alice",
+				picture: "https://example.com/alice.png",
+				groups: ["staff"],
+				mfaEnrolled: false,
 			});
 		}
 	});
@@ -430,7 +458,7 @@ describe("a user is read by name — each field the login needs, once, into a pl
 		}
 	});
 
-	it("reads an object two fields share once, and leaves out a field that refers back to the user, reading it once", () => {
+	it("reads an object two fields share once, and does not read a field User does not declare", () => {
 		const reads = new Map<string, number>();
 		const counting = <T extends object>(target: T): T =>
 			new Proxy(target, {
@@ -442,29 +470,35 @@ describe("a user is read by name — each field the login needs, once, into a pl
 		const shared = counting({ team: "red" });
 		const target: Record<string, unknown> = {
 			id: "user-1",
-			profile: shared,
-			squad: { of: shared },
+			email: shared,
+			name: { of: shared },
 		};
 		const user = counting(target);
 		target.self = user;
 		const primary = passwordPrimary({ ...passwordFacts({}), user } as never);
 		expect(primary.user).not.toHaveProperty("self");
-		expect(primary.user.profile).toBe((primary.user.squad as Record<string, unknown>).of);
-		expect(primary.user.profile).toStrictEqual({ team: "red" });
+		expect(primary.user.email).toBe((primary.user.name as Record<string, unknown>).of);
+		expect(primary.user.email).toStrictEqual({ team: "red" });
+		expect(primary.enrollmentFacts.mailAddress).toBe("unreadable");
 		expect(reads.get("id")).toBe(1);
 		expect(reads.get("team")).toBe(1);
+		expect(reads.has("self")).toBe(false);
 		expect([...reads.values()].every((count) => count === 1)).toBe(true);
 	});
 
-	it("copies the arrays and plain objects a field holds by name, getters on them included", () => {
+	it("copies the arrays and plain objects a declared field holds by name, getters on them included", () => {
+		// What an untyped Store's JSON may put in a declared field, read as its own verdict.
 		const user = {
 			id: "user-1",
-			groups: ["staff", "admin"],
-			profile: {
-				get nickname() {
+			groups: Object.defineProperty(["", "admin"], "0", {
+				get: () => "staff",
+				enumerable: true,
+			}),
+			email: {
+				get local() {
 					return "ally";
 				},
-				address: { city: "Tokyo" },
+				domain: { name: "example.com" },
 			},
 		};
 		for (const build of bothLogins(user)) {
@@ -472,11 +506,12 @@ describe("a user is read by name — each field the login needs, once, into a pl
 			expect(primary.user).toStrictEqual({
 				id: "user-1",
 				groups: ["staff", "admin"],
-				profile: { nickname: "ally", address: { city: "Tokyo" } },
+				email: { local: "ally", domain: { name: "example.com" } },
 			});
+			expect(primary.enrollmentFacts.mailAddress).toBe("unreadable");
 			expect(Object.isFrozen(primary.user.groups)).toBe(true);
-			expect(Object.isFrozen(primary.user.profile)).toBe(true);
-			expect(Object.isFrozen((primary.user.profile as Record<string, unknown>).address)).toBe(true);
+			expect(Object.isFrozen(primary.user.email)).toBe(true);
+			expect(Object.isFrozen((primary.user.email as Record<string, unknown>).domain)).toBe(true);
 			expect(primary.user.groups).not.toBe(user.groups);
 		}
 	});
@@ -504,21 +539,18 @@ describe("a user is read by name — each field the login needs, once, into a pl
 			id: "user-1",
 			mfaEnrolled: true,
 			email: "alice@example.com",
-			groups: ["staff", { team: "red" }],
-			profile: { nickname: null, age: 30, admin: false },
+			groups: ["staff", { team: "red", lead: null, size: 3, open: false }],
 		});
 		const primary = passwordPrimary({ ...passwordFacts({}), user } as never);
 		expect(primary.enrollmentFacts).toEqual({ witness: "enrolled", mailAddress: "address" });
-		expect(primary.user).toEqual({
+		expect(primary.user).toStrictEqual({
 			id: "user-1",
 			mfaEnrolled: true,
 			email: "alice@example.com",
-			groups: ["staff", { team: "red" }],
-			profile: { nickname: null, age: 30, admin: false },
+			groups: ["staff", { team: "red", lead: null, size: 3, open: false }],
 		});
 		expect(Object.isFrozen(primary.user.groups)).toBe(true);
 		expect(Object.isFrozen((primary.user.groups as unknown[])[1])).toBe(true);
-		expect(Object.isFrozen(primary.user.profile)).toBe(true);
 	});
 });
 
@@ -548,7 +580,7 @@ const NOT_JSON: ReadonlyArray<readonly [string, () => unknown]> = [
 
 describe("a value JSON does not hold — a session store would change or refuse it", () => {
 	it.each(NOT_JSON)(
-		"leaves out a field the login does not need holding %s",
+		"carries no field User does not declare, one holding %s included",
 		(_label, makeValue) => {
 			for (const build of bothLogins({ id: "user-1", extra: makeValue() })) {
 				expect(build().user).toStrictEqual({ id: "user-1" });
@@ -564,11 +596,11 @@ describe("a value JSON does not hold — a session store would change or refuse 
 
 	it("keeps an object two fields share, which JSON writes twice", () => {
 		const shared = { team: "red" };
-		for (const build of bothLogins({ id: "user-1", groups: [shared], profile: shared })) {
+		for (const build of bothLogins({ id: "user-1", groups: [shared], email: shared })) {
 			expect(JSON.parse(JSON.stringify(build().user))).toStrictEqual({
 				id: "user-1",
 				groups: [{ team: "red" }],
-				profile: { team: "red" },
+				email: { team: "red" },
 			});
 		}
 	});
