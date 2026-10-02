@@ -19,9 +19,9 @@
  * claim one of the builders branded here (a module-private `WeakSet`), the
  * action by its registration or its issued identity, and well-formed asks.
  * A caller's fault is a `RangeError`; every input is read once and copied,
- * except the session store and the revocation boundary, which
- * `readLiveSession` reads off `deps` once each, where a read that throws is
- * that store's outage.
+ * except the session store, the revocation boundary and the audit sink,
+ * which `readLiveSession` reads off `deps` once each in the step that uses
+ * it: a store's read that throws is its outage, the sink's a failed audit.
  */
 
 import type { AuditSink } from "../audit/types.mjs";
@@ -61,9 +61,10 @@ const isStringList = (value: unknown): value is readonly string[] =>
  * each other dependency off `deps`) read once and copied, so a getter
  * answering one thing to the check and another to the steps changes
  * nothing, and a requirement cannot reach the caller's objects. The session
- * store and the revocation boundary are not read here: `readLiveSession`
- * calls each reader once, in the guarded step that uses the store, so a
- * read that throws is `unavailable` and never escapes admission.
+ * store, the revocation boundary and the audit sink are not read here:
+ * `readLiveSession` calls each reader once, in the guarded step that uses
+ * it, so a read that throws never escapes admission — a store's is
+ * `unavailable`, the sink's fails as the audit it was read for.
  */
 export interface CheckedRequest {
 	readonly claim: SessionClaim;
@@ -74,7 +75,7 @@ export interface CheckedRequest {
 	readonly readSubjectRevocation: () => SubjectRevocation | undefined;
 	readonly acrTable: AcrTable;
 	readonly logger: Logger | undefined;
-	readonly auditSink: AuditSink | undefined;
+	readonly readAuditSink: () => AuditSink | undefined;
 	readonly now: Date;
 }
 
@@ -101,14 +102,13 @@ function checkedAction(asked: unknown, requirements: SessionRequirementResolver)
 	);
 }
 
-/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once, and the readers of the two stores. */
+/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once, and the readers of the two stores and the audit sink. */
 export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
 	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
 	const requirements = checkResolver(deps.requirements);
 	const acrTable = deps.acrTable;
 	if (!isObject(acrTable)) throw new RangeError("admitSession: acrTable must be an object");
 	const logger = deps.logger;
-	const auditSink = deps.auditSink;
 	const clock = deps.now;
 	const now = clock === undefined ? new Date() : clock();
 	if (!isObject(request)) throw new RangeError("admitSession: the request must be an object");
@@ -154,7 +154,7 @@ export function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): Ch
 		readSubjectRevocation: () => deps.subjectRevocation,
 		acrTable,
 		logger,
-		auditSink,
+		readAuditSink: () => deps.auditSink,
 		now,
 	};
 }

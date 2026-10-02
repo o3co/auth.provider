@@ -383,13 +383,13 @@ export async function admitSession(
 			});
 			let answer: unknown;
 			try {
-				answer = await requirement.admit(input);
+				// Copied before it is checked, in the guarded step: a getter cannot
+				// answer one outcome to the check and another to the merge, and one
+				// that throws is the requirement's outage.
+				answer = copyVerdict(await requirement.admit(input));
 			} catch (err) {
 				return unavailable(name, err);
 			}
-			// Copied before it is checked: a getter cannot answer one outcome
-			// to the check and another to the merge.
-			answer = copyVerdict(answer);
 			if (!isVerdict(answer)) {
 				return unavailable(
 					name,

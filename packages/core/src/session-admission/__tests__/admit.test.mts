@@ -825,6 +825,31 @@ describe("step 3 — the subject", () => {
 			await admitSession(deps(), request({ claim: cookie({ user: { id: "user-2" } }) })),
 		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
 	});
+
+	it("reads deps.auditSink only to audit a mismatch: a getter that throws fails as a sink that throws — the answer stands, never a rejection", async () => {
+		let reads = 0;
+		const { logger, lines } = recordingLogger();
+		const throwing = {
+			...deps({ logger }),
+			get auditSink(): AuditSink {
+				reads++;
+				throw new Error("sink unreadable");
+			},
+		};
+		expect(await admitSession(throwing, request())).toMatchObject({ outcome: "admitted" });
+		expect(reads).toBe(0);
+		expect(
+			await admitSession(throwing, request({ claim: cookie({ user: { id: "user-2" } }) })),
+		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
+		expect(reads).toBe(1);
+		expect(lines).toEqual([
+			{
+				level: "warn",
+				message: "session_admission_subject_mismatch",
+				fields: { action: "test.use" },
+			},
+		]);
+	});
 });
 
 describe("step 4 — the revocation boundary", () => {
@@ -1486,7 +1511,51 @@ describe("step 5 — what a requirement answers is validated at the boundary", (
 		}
 	});
 
-	it("hands the requirement the subject: the record's sub when one was read, else the claim's — undefined only on the code record's first read", async () => {
+	it("answers unavailable (the requirement's name), logged once at error, for an answer whose outcome or whenStillUnmet getter throws — never a rejection", async () => {
+		const throwing = (field: "outcome" | "whenStillUnmet") =>
+			field === "outcome"
+				? {
+						get outcome(): string {
+							throw new Error("outcome unreadable");
+						},
+					}
+				: {
+						outcome: "step_up",
+						get whenStillUnmet(): string {
+							throw new Error("whenStillUnmet unreadable");
+						},
+					};
+		for (const field of ["outcome", "whenStillUnmet"] as const) {
+			const { logger, lines } = recordingLogger();
+			let askedOther = 0;
+			const odd = met("odd", { admit: async () => throwing(field) as never });
+			const other = met("other", {
+				admit: async () => {
+					askedOther++;
+					return { outcome: "met" };
+				},
+			});
+			expect(
+				await admitSession(
+					deps({
+						requirements: resolverForTests([odd, other], { actions: TEST_ACTIONS }),
+						logger,
+					}),
+					request(),
+				),
+				field,
+			).toEqual({ outcome: "unavailable", store: "odd" });
+			expect(askedOther, field).toBe(0);
+			expect(lines, field).toHaveLength(1);
+			expect(lines[0], field).toMatchObject({
+				level: "error",
+				message: "session_admission_unavailable",
+				fields: { store: "odd", action: "test.use" },
+			});
+		}
+	});
+
+	it("hands the requirement the subject:the record's sub when one was read, else the claim's — undefined only on the code record's first read", async () => {
 		const seen: (string | undefined)[] = [];
 		const watching = met("watch", {
 			admit: async ({ subject }) => {

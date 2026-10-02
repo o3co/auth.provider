@@ -17,14 +17,17 @@
 /**
  * Steps 1 to 4 of `admitSession`, each failing closed: the claim, the live
  * read, the subject, the renewal nonce and the revocation boundary, then the
- * store's step-up capability over the live record. The session store and the
- * boundary are read here and nowhere else in admission, each off `deps`
- * once; an outage, a read of either off `deps` that throws, or a store that
- * throws when its capability is read, is answered through admission's
- * `unavailable`, which logs it.
+ * store's step-up capability over the live record. The session store, the
+ * boundary and the audit sink are read here and nowhere else in admission,
+ * each off `deps` once; an outage, a read of either store off `deps` that
+ * throws, or a store that throws when its capability is read, is answered
+ * through admission's `unavailable`, which logs it. The sink is read only
+ * to audit a subject mismatch, and a read of it that throws fails as that
+ * audit: the answer stands.
  */
 
 import { emitAuditEvent } from "../audit/factory.mjs";
+import type { AuditSink } from "../audit/types.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
@@ -117,7 +120,15 @@ export async function readLiveSession(
 	// Step 3: the subject.
 	if (session !== null && presented.subject !== undefined && presented.subject !== session.sub) {
 		logger?.warn({ action: label }, "session_admission_subject_mismatch");
-		void emitAuditEvent(checked.auditSink, {
+		// The sink is read off `deps` here alone, as part of the audit: a read
+		// that throws fails as a sink that throws does, and the answer stands.
+		let auditSink: AuditSink | undefined;
+		try {
+			auditSink = checked.readAuditSink();
+		} catch {
+			auditSink = undefined;
+		}
+		void emitAuditEvent(auditSink, {
 			timestamp: now,
 			type: "session.admission.subject_mismatch",
 			subject: session.sub,
