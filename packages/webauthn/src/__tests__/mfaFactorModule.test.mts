@@ -256,7 +256,9 @@ describe("webauthn-mfa-factor.enabled as the module's switch", () => {
 			},
 		});
 		const { resolver } = await boot(configWith({ ...ON, enabled: false }), [throwing]);
+		expect(resolver).toBeDefined();
 		expect(resolver?.get("webauthn")).toBeUndefined();
+		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 });
 

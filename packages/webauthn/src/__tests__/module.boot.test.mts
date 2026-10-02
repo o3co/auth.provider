@@ -532,7 +532,7 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 		throw new Error("expected the boot to be refused");
 	}
 
-	it.each([true, false, "true", "false", ""])(
+	it.each([true, false, "true", "false", "", { nested: true }])(
 		"refuses a configuration setting it to %j, naming the key",
 		async (value) => {
 			const refused = await refusedWith({
@@ -540,7 +540,9 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 				webauthn: { allowCredentialsForKnownUser: value },
 			});
 			expect(refused).toMatchObject({ name: "BootError", reason: "config-path-relocated" });
-			expect(refused.message).toContain("webauthn.allowCredentialsForKnownUser was removed");
+			expect(refused.message).toMatch(
+				/webauthn\.allowCredentialsForKnownUser(\.nested)? was removed/,
+			);
 		},
 	);
 
