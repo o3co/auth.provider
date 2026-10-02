@@ -186,7 +186,9 @@ async function removeAtCurrent(
 	id: string,
 ): Promise<ConditionalSetRemoveAnswer> {
 	const generation = await generationOf(store, subject);
-	if (generation === null) return { outcome: "missing" };
+	if (generation === null) {
+		assert.fail(`${subject}'s set is absent: no removal to ask the store for`);
+	}
 	return readConditionalSetRemoveAnswer(await store.removeIf(subject, id, generation));
 }
 

@@ -519,6 +519,12 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 			return { ...harness, store: { ...harness.store, create } };
 		};
 		expect(await refusedBy(createRefusing)).toContain(CASE.unconditional);
+		const removeIgnoring = (): MfaFactorStoreHarness => {
+			const harness = memoryOnItsClock();
+			const remove = async (): Promise<void> => {};
+			return { ...harness, store: { ...harness.store, remove } };
+		};
+		expect(await refusedBy(removeIgnoring)).toContain(CASE.unconditional);
 	});
 
 	const faults: ReadonlyArray<readonly [string, Fault, readonly string[]]> = [
