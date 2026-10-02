@@ -364,8 +364,10 @@ describe("createWebAuthnGrant — an assertion without a user handle", () => {
 			const store = createMemoryWebAuthnCredentialStore();
 			await store.registerCredential(makeCredential());
 			mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+			const find = vi.spyOn(store, "findByCredentialId");
+			const deps = makeBaseDeps(store);
 
-			const { result } = await createWebAuthnGrant(makeBaseDeps(store)).handle(
+			const { result } = await createWebAuthnGrant(deps).handle(
 				makeCtx({ assertion: withoutUserHandle(userHandle) }),
 			);
 
@@ -374,6 +376,9 @@ describe("createWebAuthnGrant — an assertion without a user handle", () => {
 				error: "invalid_grant",
 				errorDescription: "user_handle_missing",
 			});
+			// Refused before any store is read: no lookup, and the challenge is not spent.
+			expect(find).not.toHaveBeenCalled();
+			expect(deps.challengeCeremony.consume).not.toHaveBeenCalled();
 			expect(mockVerifyAssertion).not.toHaveBeenCalled();
 		},
 	);
