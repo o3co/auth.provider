@@ -196,9 +196,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			const { assertion, challengeValue } = parseResult;
 			const clientId = ctx.authenticatedClient?.clientId;
 			// No ceremony identifies the user before it, so the handle is what names the account
-			// (WebAuthn §7.2 step 6).
-			const userHandle = assertion.response.userHandle;
-			if (userHandle === undefined || userHandle === null) {
+			// (WebAuthn §7.2 step 6); a zero-length or non-string one names none.
+			const userHandle: unknown = assertion.response.userHandle;
+			if (typeof userHandle !== "string" || userHandle.length === 0) {
 				return {
 					result: { status: 400, error: "invalid_grant", errorDescription: "user_handle_missing" },
 				};
