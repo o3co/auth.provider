@@ -196,6 +196,8 @@ function world(options: WorldOptions = {}) {
 		},
 		/** Whether the exchange adds an `expiresAt` from a numeric `expiresIn` when the answer names none. */
 		exchangeFillsExpiresAt: true,
+		/** When set, the token answer the exchange returns as it is, uncopied: getters and proxies reach the callback. */
+		exchangeTokens: undefined as (() => object) | undefined,
 		exchangeThrows: undefined as Error | undefined,
 		exchanged: [] as Record<string, unknown>[],
 		/**
@@ -327,7 +329,10 @@ function world(options: WorldOptions = {}) {
 								) {
 									tokens.expiresAt = new Date(state.now.getTime() + tokens.expiresIn * 1000);
 								}
-								return { upstream: { ...state.exchange.upstream }, tokens } as never;
+								return {
+									upstream: { ...state.exchange.upstream },
+									tokens: state.exchangeTokens === undefined ? tokens : state.exchangeTokens(),
+								} as never;
 							},
 						}
 					: undefined,
@@ -1334,6 +1339,8 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 			[{ tokenType: "dpop" }, "upstream_token_ineligible"],
 			[{ expiresIn: undefined }, "upstream_token_ineligible"],
 			[{ accessToken: undefined }, "upstream_token_ineligible"],
+			// RFC 6749 §5.1: `token_type` is REQUIRED; an answer without one is not taken for Bearer.
+			[{ tokenType: undefined }, "upstream_token_ineligible"],
 			[{ scope: "openid offline_access calendar.read admin" }, "scope_exceeded"],
 			[{ scope: "" }, "upstream_token_ineligible"],
 			// Named, but naming no scope-token: not an answer, and not "as
@@ -1351,6 +1358,65 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 			expect((await w.grants.find(a.grantId, w.state.now))?.status, JSON.stringify(over)).toBe(
 				"pending",
 			);
+		}
+	});
+
+	it("reads the exchange's token answer once, each field on its own", async () => {
+		const w = world();
+		const a = await approved(w);
+		const reads = new Map<PropertyKey, number>();
+		w.state.exchangeTokens = () =>
+			new Proxy(
+				{
+					...w.state.exchange.tokens,
+					expiresAt: new Date(w.state.now.getTime() + 3_600_000),
+				},
+				{
+					get(target, key, receiver) {
+						reads.set(key, (reads.get(key) ?? 0) + 1);
+						return Reflect.get(target, key, receiver);
+					},
+				},
+			);
+		const back = returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+		expect(back.has("error")).toBe(false);
+		expect(Object.fromEntries(reads)).toStrictEqual({
+			refreshToken: 1,
+			accessToken: 1,
+			tokenType: 1,
+			expiresIn: 1,
+			expiresAt: 1,
+			scope: 1,
+		});
+	});
+
+	it("refuses an answer whose field throws when it is read as the answer it is, never as an outage, and activates nothing", async () => {
+		const cases: [string, string][] = [
+			["refreshToken", "refresh_token_absent"],
+			["accessToken", "upstream_token_ineligible"],
+			["tokenType", "upstream_token_ineligible"],
+			["expiresIn", "upstream_token_ineligible"],
+			["expiresAt", "upstream_token_ineligible"],
+			["scope", "upstream_token_ineligible"],
+		];
+		for (const [field, code] of cases) {
+			const w = world();
+			const a = await approved(w);
+			w.state.exchangeTokens = () => {
+				const tokens = {
+					...w.state.exchange.tokens,
+					expiresAt: new Date(w.state.now.getTime() + 3_600_000),
+				};
+				Object.defineProperty(tokens, field, {
+					get() {
+						throw new Error("a getter that throws");
+					},
+				});
+				return tokens;
+			};
+			const back = returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+			expect(back.get("error"), field).toBe(code);
+			expect((await w.grants.find(a.grantId, w.state.now))?.status, field).toBe("pending");
 		}
 	});
 

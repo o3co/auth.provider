@@ -29,12 +29,9 @@ import {
 	type FederationGrantConnectTransaction,
 	type FederationGrantIntent,
 	type FederationGrantStore,
-	federationGrantAccessToken,
 	federationGrantAuditMetadata,
 	isFederationUpstreamOutage,
-	judgeUpstreamAccessToken,
-	parseScopeTokens,
-	readUpstreamTokenLifetime,
+	readFederationGrantUpstreamAnswer,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
 import { accountHolds } from "./browserAccountBinding.mjs";
@@ -255,65 +252,34 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 				return;
 			}
 
-			// 6. Eligibility: a refresh token, and an access token this provider may
-			// disclose, judged on lifetime and type here and on scope in step 7, so each
-			// failure names its own check.
-			const tokens = exchanged.tokens;
-			const refreshToken =
-				typeof tokens.refreshToken === "string" && tokens.refreshToken.length > 0
-					? tokens.refreshToken
-					: undefined;
+			// 6. Eligibility, by core's one rule for an upstream token answer: a
+			// refresh token, and an access token this provider may disclose. An
+			// omitted scope means as requested (RFC 6749 §5.1), i.e. what the user
+			// was shown. Each failure names its own check.
+			const answered = readFederationGrantUpstreamAnswer(exchanged.tokens, {
+				calledAt,
+				receivedAt,
+				requestedScopes: transaction.consent.scopes,
+				consentedScopes: transaction.consent.scopes,
+				maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+			});
+			const { refreshToken } = answered;
 			if (refreshToken === undefined) {
 				await fail("refresh_token_absent");
 				return;
 			}
-			// Parsed by RFC 6749 §3.3's grammar (`parseScopeTokens`): a tab separates two
-			// scopes rather than forming one the user was never shown. Omitted means as
-			// requested; named but empty is judged in step 7.
-			const scopeText = tokens.scope;
-			const granted =
-				scopeText === undefined
-					? [...transaction.consent.scopes]
-					: [...parseScopeTokens(scopeText)];
-			// A lifetime both fields state, with life left when the answer is read;
-			// anything else is no finite lifetime, and refused.
-			const reading = readUpstreamTokenLifetime(
-				{ expiresIn: tokens.expiresIn, expiresAt: tokens.expiresAt },
-				{ calledAt, now: receivedAt, floorMs: 0 },
-			);
-			const lifetime =
-				reading.verdict === "finite" && reading.stated === "both" ? reading : undefined;
-			if (typeof tokens.accessToken !== "string" || tokens.accessToken.length === 0) {
-				await fail("upstream_token_ineligible");
+			// 7. Scope containment is the rule's: an upstream that granted more than
+			// the user was shown is refused, because a token cannot be narrowed
+			// after the fact.
+			if (!answered.accessToken.eligible) {
+				await fail(
+					answered.accessToken.reason === "scope_exceeded"
+						? "scope_exceeded"
+						: "upstream_token_ineligible",
+				);
 				return;
 			}
-			// The scope is judged in step 7 and given here as consented, so this
-			// can only refuse for the lifetime or the token type.
-			const judgement = judgeUpstreamAccessToken({
-				issuedLifetime: lifetime?.issuedLifetime ?? null,
-				scopes: granted,
-				consentedScopes: granted,
-				maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
-				tokenType: typeof tokens.tokenType === "string" ? tokens.tokenType : "",
-			});
-			if (!judgement.eligible || lifetime === undefined) {
-				await fail("upstream_token_ineligible");
-				return;
-			}
-
-			// 7. Scope containment: an upstream that granted more than the user
-			// was shown is refused, because a token cannot be narrowed after
-			// the fact. Omitted means as requested (RFC 6749 §5.1); present and
-			// empty is not an answer.
-			if (scopeText !== undefined && granted.length === 0) {
-				await fail("upstream_token_ineligible");
-				return;
-			}
-			const shown = new Set(transaction.consent.scopes);
-			if (!granted.every((scope) => shown.has(scope))) {
-				await fail("scope_exceeded");
-				return;
-			}
+			const accessToken = answered.accessToken.token;
 
 			// The mandatory re-read, immediately before the write: a subject-wide revocation
 			// may have landed during the upstream work. This narrows an attacker-controlled
@@ -352,7 +318,7 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 						authorizationRevision: intent.authorizationRevision,
 						upstream: { issuer: exchanged.upstream.issuer, subject: exchanged.upstream.subject },
 						resource: intent.resource,
-						scopes: granted,
+						scopes: [...accessToken.scopes],
 						consent: {
 							at: transaction.consent.at,
 							sid: transaction.consent.sid,
@@ -361,13 +327,7 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 						authorizedAt: now(),
 						expiresAt: transaction.grantExpiresAt,
 					},
-					credentials: {
-						refreshToken,
-						accessToken: federationGrantAccessToken(
-							{ value: tokens.accessToken, tokenType: tokens.tokenType as string, scopes: granted },
-							lifetime,
-						),
-					},
+					credentials: { refreshToken, accessToken },
 					now: now(),
 				});
 			} catch (error) {
