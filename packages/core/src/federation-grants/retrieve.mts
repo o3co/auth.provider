@@ -478,6 +478,8 @@ type Evaluation =
 	| {
 			readonly kind: "refresh";
 			readonly grant: AuthorizedFederationGrant;
+			/** What every write of the refresh is guarded by, read before the upstream is asked. */
+			readonly guard: WriteGuard;
 			readonly connection: FederationGrantConnection;
 			readonly refreshToken: string;
 			/**
@@ -533,6 +535,28 @@ const rowCount = (
 	if (sinceMs < 0) return undefined;
 	return sinceMs <= rowMs ? previous.count + 1 : 1;
 };
+
+/** The grant's id and version, as a guarded write names them. */
+interface WriteGuard {
+	readonly grantId: string;
+	readonly expectedVersion: number;
+}
+
+/**
+ * The guard for the writes of a refresh of `grant`, read once. Throws when
+ * the store's answer cannot guard one: an id other than the one the lock is
+ * taken for, or a version that is not a safe integer, which no store's guard
+ * matches. No refresh starts then: its rotated refresh token would be lost.
+ */
+function writeGuard(grant: AuthorizedFederationGrant, grantId: string): WriteGuard {
+	const id: unknown = grant.id;
+	const version: unknown = grant.version;
+	if (id !== grantId) throw new TypeError("the store answered a grant under another id");
+	if (typeof version !== "number" || !Number.isSafeInteger(version)) {
+		throw new TypeError("the store answered a grant version that is not a safe integer");
+	}
+	return { grantId, expectedVersion: version };
+}
 
 const NOT_PERMITTED: FederationGrantDenial = {
 	code: "access_denied",
@@ -822,9 +846,20 @@ async function evaluate(
 		}
 	}
 	if (notAsked !== undefined) return { kind: "deny", denial: notAsked, grant };
+	let guard: WriteGuard;
+	try {
+		guard = writeGuard(grant, request.grantId);
+	} catch (error) {
+		return {
+			kind: "deny",
+			denial: unavailable("storage", report(deps, request, "open", error)),
+			grant,
+		};
+	}
 	return {
 		kind: "refresh",
 		grant,
+		guard,
 		connection,
 		refreshToken: credentials.refreshToken,
 		...(keep !== undefined ? { keep } : {}),
@@ -997,13 +1032,13 @@ function reportUndatedStamps(
  */
 async function isStored(
 	deps: RetrieveFederationGrantTokenDeps,
-	grant: AuthorizedFederationGrant,
+	grantId: string,
 	credentials: FederationGrantCredentials,
 	ineligible: FederationGrantIneligibilityMarker | null,
 	budgetMs: number,
 ): Promise<boolean> {
 	const read = await within(
-		settle(() => deps.store.open(grant.id, deps.now())),
+		settle(() => deps.store.open(grantId, deps.now())),
 		budgetMs,
 	);
 	if (read === "elapsed" || !read.ok || read.value === null) return false;
@@ -1024,7 +1059,7 @@ async function refreshUnderLock(
 	refresher: FederationGrantRefresher,
 	hardDeadline: number,
 ): Promise<RefreshOutcome> {
-	const { grant, connection } = held;
+	const { grant, guard, connection } = held;
 	const { limits } = deps;
 	const failed = (
 		during: FederationGrantRetrievalFailure["during"],
@@ -1086,8 +1121,7 @@ async function refreshUnderLock(
 			const marked = await within(
 				settle(() =>
 					deps.store.requireReauthorization({
-						grantId: grant.id,
-						expectedVersion: grant.version,
+						...guard,
 						now: deps.now(),
 					}),
 				),
@@ -1126,7 +1160,7 @@ async function refreshUnderLock(
 			const noted = await stamp(
 				deps,
 				request,
-				grant,
+				guard,
 				{ at: deps.now(), kind: "rejected", upstreamCode: classified.upstreamCode },
 				limits.persistRetryBudgetMs,
 			);
@@ -1221,7 +1255,7 @@ async function refreshUnderLock(
 				failureOf(denial),
 			);
 		}
-		await stamp(deps, request, grant, failure, limits.persistRetryBudgetMs);
+		await stamp(deps, request, guard, failure, limits.persistRetryBudgetMs);
 		// The lock is let go of, whatever the failure was. A failure that ARRIVED
 		// leaves nothing of this call's in flight, which is what keeping the lock
 		// is for. If the IdP rotated before its answer was lost, the old refresh
@@ -1300,8 +1334,7 @@ async function refreshUnderLock(
 		const result = await within(
 			settle(() =>
 				deps.store.replaceCredentials({
-					grantId: grant.id,
-					expectedVersion: grant.version,
+					...guard,
 					credentials,
 					ineligible,
 					// Sampled at the write: a refresh that straddles the expiry must fail.
@@ -1337,7 +1370,7 @@ async function refreshUnderLock(
 				// One look, still under the lock, tells the two apart: it is this
 				// call's write exactly when what is stored is what it tried to store.
 				const left = persistDeadline - deps.now().getTime();
-				if (threwBefore && (await isStored(deps, grant, credentials, ineligible, left))) {
+				if (threwBefore && (await isStored(deps, guard.grantId, credentials, ineligible, left))) {
 					return {
 						kind: "written",
 						...(fetched !== undefined ? { fetched } : {}),
@@ -1365,7 +1398,7 @@ async function refreshUnderLock(
 	// — and not a millisecond past it: the lock is sized for the budget, and a
 	// stamp written past the lease could land under the next holder.
 	const left = persistDeadline - deps.now().getTime();
-	if (left > 0) await stamp(deps, request, grant, { at: deps.now(), kind: "unavailable" }, left);
+	if (left > 0) await stamp(deps, request, guard, { at: deps.now(), kind: "unavailable" }, left);
 	return {
 		kind: "denied",
 		denial: unavailable("storage", writeFailure),
@@ -1384,7 +1417,7 @@ async function refreshUnderLock(
 async function stamp(
 	deps: RetrieveFederationGrantTokenDeps,
 	request: RetrieveFederationGrantTokenRequest,
-	grant: AuthorizedFederationGrant,
+	guard: WriteGuard,
 	failure: FederationGrantRefreshFailureInput,
 	budgetMs: number,
 ): Promise<
@@ -1394,8 +1427,7 @@ async function stamp(
 	const noted = await within(
 		settle(() =>
 			deps.store.noteRefreshFailure({
-				grantId: grant.id,
-				expectedVersion: grant.version,
+				...guard,
 				failure,
 				rowMs: deps.limits.ineligibleRetryAfterMs,
 				now: deps.now(),
