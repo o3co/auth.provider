@@ -2588,11 +2588,12 @@ describe("/authorize — every authorization response names its issuer (RFC 9207
 });
 
 // The harness's repository is a custom `ClientRepository`: it hands back the
-// record as written, with no `ClientEntrySchema` in between. A registered entry
-// that core's `checkRedirectUri` refuses is answered as an unregistered one:
-// 400 JSON, and no redirect to it.
+// record as written. The router reads it through core's client-record
+// boundary, which holds it to the registration schema: a registered entry
+// that core's `checkRedirectUri` refuses makes the whole record refused, and
+// the client is answered as unknown: 400 JSON, and no redirect to it.
 describe("/authorize — a registered redirect_uri that checkRedirectUri refuses", () => {
-	const NOT_ALLOWED = { error: "invalid_request", error_description: "redirect_uri not allowed" };
+	const UNKNOWN_CLIENT = { error: "invalid_client", error_description: "client not found" };
 
 	/** An app whose client registers `entry`, and the logger it writes to. */
 	const registering = async (entry: string, extra: Parameters<typeof makeApp>[0] = {}) => {
@@ -2601,18 +2602,28 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		return { ...harness, logger };
 	};
 
+	/** The refusal of the client whose one registered entry is `entry`, which `checkRedirectUri` refuses for `reason`. */
 	const expectRefused = (
 		res: request.Response,
 		logger: ReturnType<typeof createMockLogger>,
+		entry: string,
 		reason: string,
 	) => {
+		const rejection = checkRedirectUri(entry);
+		expect(rejection?.reason).toBe(reason);
 		expect(res.status).toBe(400);
-		expect(res.body).toEqual(NOT_ALLOWED);
+		expect(res.body).toEqual(UNKNOWN_CLIENT);
 		expect(res.headers.location).toBeUndefined();
-		expect(logger.warn).toHaveBeenCalledWith(
-			{ site: "authorize", clientId: CLIENT_ID, reason },
-			"authorize_registered_redirect_uri_refused",
+		const refusals = logger.warn.mock.calls.filter(
+			([, message]) => message === "client_record_refused",
 		);
+		expect(refusals).toHaveLength(1);
+		expect(refusals[0]?.[0]).toMatchObject({ step: "find", clientId: CLIENT_ID });
+		// One reason, naming the entry by its position, never quoting it.
+		expect(refusals[0]?.[0].reasons).toEqual([
+			expect.stringMatching(/^allowedRedirectUris\.0: allowedRedirectUris\[0\]: /),
+		]);
+		expect(JSON.stringify(refusals[0]?.[0])).not.toContain(entry);
 	};
 
 	const refusedQueries = [
@@ -2629,7 +2640,12 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		"answers GET 400 with no redirect for a registered query that carries %s",
 		async (_label, entry, reason) => {
 			const { app, logger, createCode } = await registering(entry);
-			expectRefused(await authorize(app, { ...baseQuery, redirect_uri: entry }), logger, reason);
+			expectRefused(
+				await authorize(app, { ...baseQuery, redirect_uri: entry }),
+				logger,
+				entry,
+				reason,
+			);
 			expect(createCode).not.toHaveBeenCalled();
 		},
 	);
@@ -2641,6 +2657,7 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 			expectRefused(
 				await authorizePost(app, { ...baseQuery, redirect_uri: entry }),
 				logger,
+				entry,
 				reason,
 			);
 			expect(createCode).not.toHaveBeenCalled();
@@ -2653,6 +2670,7 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		expectRefused(
 			await authorize(app, { ...baseQuery, redirect_uri: entry, prompt: "none" }),
 			logger,
+			entry,
 			"reserved-parameter",
 		);
 	});
@@ -2672,6 +2690,7 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		expectRefused(
 			await authorize(app, { ...baseQuery, redirect_uri: "http://127.0.0.1:49152/cb?state=x" }),
 			logger,
+			entry,
 			"reserved-parameter",
 		);
 	});
@@ -2681,7 +2700,12 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		["with a fragment", `${REDIRECT_URI}#top`, "fragment"],
 	] as const)("answers 400 for an entry %s", async (_label, entry, reason) => {
 		const { app, logger } = await registering(entry);
-		expectRefused(await authorize(app, { ...baseQuery, redirect_uri: entry }), logger, reason);
+		expectRefused(
+			await authorize(app, { ...baseQuery, redirect_uri: entry }),
+			logger,
+			entry,
+			reason,
+		);
 	});
 
 	it("redirects to a registered query the rule accepts, keeping it beside one code, state and iss", async () => {

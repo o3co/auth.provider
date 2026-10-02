@@ -1041,19 +1041,22 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it("answers an unexpected failure on the mounted device_authorization route with JSON 500, and logs a projection of it", async () => {
-		// A client repository that hands back a malformed registration —
-		// `defaultScopes` a string rather than a list — is a failure of the
-		// host's data, not of the request.
+		// A rate limiter that answers a decision whose `resetAt` is not a
+		// `Date` is a failure of the host's adapter, not of the request: the
+		// throttle in front of the route fails on it. A client registration
+		// cannot provoke this: the client authentication reads registrations
+		// through core's client-record boundary, which refuses a malformed one.
 		const { lines, logger } = serialisingLogger();
-		const malformed = { ...confidentialClient, defaultScopes: "openid" };
 		const app = mountContributedRoute(0, {
 			...enabledDeps(),
 			logger,
-			clientRepository: {
-				findById: async (id: string) => (id === CONFIDENTIAL_ID ? (malformed as never) : null),
-				authenticate: async (id: string, secret: string) =>
-					id === CONFIDENTIAL_ID && secret === CONFIDENTIAL_SECRET ? (malformed as never) : null,
-			} satisfies ClientRepository,
+			rateLimiter: {
+				kind: "buggy",
+				check: async () =>
+					({ allowed: true, resetAt: "soon" }) as unknown as Awaited<
+						ReturnType<RateLimiter["check"]>
+					>,
+			} satisfies RateLimiter,
 		});
 
 		const res = await request(app)
@@ -1065,9 +1068,8 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.headers["content-type"]).toMatch(/^application\/json/);
 		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
-		// This package's own code failed on the data: the frames are what an
-		// operator finds it by — and the header line, which repeats the
-		// message, is not among them.
+		// The frames are what an operator finds the failing code by — and the
+		// header line, which repeats the message, is not among them.
 		expect(logger.error).toHaveBeenCalledWith(
 			{
 				err: {
