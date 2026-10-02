@@ -166,6 +166,22 @@ describe("the paths core's settings moved from", () => {
 		expect(err.message).not.toMatch(/\(environment variable [A-Z0-9_]+\)/);
 	});
 
+	it("refuses sessionRequirements.secondFactorAuthority, naming core.sessionRequirements.secondFactorAuthority and no variable", async () => {
+		const err = await refusal(boot({}, 'sessionRequirements.secondFactorAuthority = "mfa"\n'));
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "core",
+					from: "sessionRequirements.secondFactorAuthority",
+					to: "core.sessionRequirements.secondFactorAuthority",
+				},
+			],
+		});
+		expect(err.message).not.toMatch(/\(environment variable [A-Z0-9_]+\)/);
+	});
+
 	it.each([
 		['deployment = "old-value-5e2d"', "deployment", "core.deployment"],
 		["deployment.other = 1", "deployment.other", "core.deployment.other"],

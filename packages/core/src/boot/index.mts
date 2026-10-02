@@ -81,6 +81,7 @@ export type {
 	RouteCollector,
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
+	SecondFactorAuthorityNotDeclaredDetails,
 	SyntheticKeyCollisionDetails,
 	TokenSettingsLifetimeExceedsConfigurationDetails,
 	UnknownContributionKindDetails,

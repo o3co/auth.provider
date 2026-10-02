@@ -44,6 +44,8 @@ import type {
 	ProvidesFactoryFailedDetails,
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
+	SecondFactorAuthorityNotDeclaredDetails,
+	SessionRequirementMissingDetails,
 	SyntheticKeyCollisionDetails,
 	UnknownContributionKindDetails,
 } from "../types.mjs";
@@ -71,7 +73,7 @@ describe("BootStage", () => {
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 39 reason literals", () => {
+	it("contains exactly the 40 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -103,6 +105,7 @@ describe("BootErrorReason", () => {
 			| "session-requirements-undeclared"
 			| "session-requirement-missing"
 			| "duplicate-second-factor-authority"
+			| "second-factor-authority-not-declared"
 			| "reserved-component-key"
 			| "module-section-path-invalid"
 			| "contribution-kind-guarded"
@@ -253,6 +256,28 @@ describe("per-reason *Details discriminators", () => {
 		>().toEqualTypeOf<"duplicate-second-factor-authority">();
 		expectTypeOf<DuplicateSecondFactorAuthorityDetails["requirements"]>().toEqualTypeOf<
 			readonly { readonly name: string; readonly module: string }[]
+		>();
+	});
+
+	it("SecondFactorAuthorityNotDeclaredDetails names the key, the requirement, its module when registered, and what is unmet", () => {
+		expectTypeOf<
+			SecondFactorAuthorityNotDeclaredDetails["reason"]
+		>().toEqualTypeOf<"second-factor-authority-not-declared">();
+		expectTypeOf<
+			SecondFactorAuthorityNotDeclaredDetails["configKey"]
+		>().toEqualTypeOf<"core.sessionRequirements.secondFactorAuthority">();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["name"]>().toEqualTypeOf<string>();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["module"]>().toEqualTypeOf<
+			string | undefined
+		>();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["unmet"]>().toEqualTypeOf<
+			readonly ("not-expected" | "not-registered" | "not-declared")[]
+		>();
+	});
+
+	it("SessionRequirementMissingDetails names the second-factor authority when it is among the missing", () => {
+		expectTypeOf<SessionRequirementMissingDetails["secondFactorAuthority"]>().toEqualTypeOf<
+			string | undefined
 		>();
 	});
 });
