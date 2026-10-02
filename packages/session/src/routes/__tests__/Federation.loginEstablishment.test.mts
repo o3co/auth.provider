@@ -19,13 +19,15 @@
  * 2026-09-28-session-admission, D5): core builds its `Establishment` from the
  * federation's own facts (`establishWithoutAsking`), no requirement's
  * `admitPrimary` is consulted, and the record is what
- * `federatedSessionAuthentication` composes. The rest of the callback's login
- * is pinned by `Federation.test.mts`.
+ * `federatedSessionAuthentication` composes. A custom claim whose JSON form
+ * cannot be taken is dropped by core and warned on the callback's own logger.
+ * The rest of the callback's login is pinned by `Federation.test.mts`.
  */
 
 import {
 	codeChallenge,
 	type FederationProvider,
+	type Logger,
 	type PrimaryAuthentication,
 	type SessionRequirement,
 } from "@o3co/auth-provider-core";
@@ -166,4 +168,89 @@ describe("the federation callback's login — a user whose field the login needs
 			expect(session, field).not.toHaveProperty(field);
 		}
 	});
+});
+
+/** A logger that records each line with the bindings of the child that wrote it. */
+function recordingLogger(): {
+	logger: Logger;
+	lines: { level: string; bindings: Record<string, unknown>; args: unknown[] }[];
+} {
+	const lines: { level: string; bindings: Record<string, unknown>; args: unknown[] }[] = [];
+	const make = (bindings: Record<string, unknown>): Logger => {
+		const record =
+			(level: string) =>
+			(...args: unknown[]): void => {
+				lines.push({ level, bindings, args });
+			};
+		return {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: (more: Record<string, unknown>) => make({ ...bindings, ...more }),
+		};
+	};
+	return { logger: make({}), lines };
+}
+
+describe("the federation callback's login — a mapped custom claim whose JSON form cannot be taken", () => {
+	const cycle = (): Record<string, unknown> => {
+		const node: Record<string, unknown> = {};
+		node.self = node;
+		return node;
+	};
+
+	it.each([
+		["a bigint", () => ({ tenant: 1n })],
+		["a cycle", () => ({ tenant: cycle() })],
+	])(
+		"holding %s: the session is established without it, and the callback's logger is told once, by key",
+		async (_, mapped) => {
+			const { logger, lines } = recordingLogger();
+			const harness = buildFederationApp({
+				providers: new Map<string, FederationProvider>([
+					["test", { ...provider, mapClaims: mapped } as FederationProvider],
+				]),
+				providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
+				userRepository: makeUserRepository({
+					id: "user-1",
+					username: "alice",
+					email: "alice@example.com",
+				}),
+				logger,
+			});
+			harness.store.set("browser", {
+				data: { federation: { name: "test", state: "st-1", codeVerifier: "cv-1" } },
+				cookie: { sameSite: "lax", secure: false, httpOnly: true },
+			});
+
+			const res = await request(harness.app)
+				.get("/oauth/federation/test/callback?state=st-1&code=c-1")
+				.set("Cookie", "sid=browser");
+
+			expect(res.status).toBe(302);
+			expect(harness.userSessionStore.create).toHaveBeenCalledTimes(1);
+			const created = harness.userSessionStore.create.mock.calls[0]?.[0] as Record<string, unknown>;
+			// The mapped claims are recorded under `federated`; that custom claim
+			// is the one whose JSON form could not be taken, so it is the one left out.
+			expect(created.claims).toEqual({ email: "alice@example.com" });
+			expect(harness.store.get("browser")?.data).toMatchObject({
+				isAuthenticated: true,
+				sid: created.sid,
+			});
+
+			const dropped = lines.filter((line) => line.args[1] === "login_claim_dropped");
+			expect(dropped).toEqual([
+				{
+					level: "warn",
+					// The callback's per-provider logger, not the router's root one.
+					bindings: { provider: "test" },
+					// The key and the reason, nothing of the value.
+					args: [{ claim: "federated", reason: "unserialisable" }, "login_claim_dropped"],
+				},
+			]);
+		},
+	);
 });
