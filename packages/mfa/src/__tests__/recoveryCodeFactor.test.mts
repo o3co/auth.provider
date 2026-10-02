@@ -725,7 +725,7 @@ describe("issueRecoveryCodes, replacing the sets that stood", () => {
 		},
 	);
 
-	it("stands over a later set at its generation, which loses in its own write", async () => {
+	it("yields to a set at its generation dated after its own: whichever writer reads the other after its write loses, so two never both stand", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const create = factorStore.create.bind(factorStore);
 		vi.spyOn(factorStore, "create").mockImplementation(async (record) => {
@@ -735,7 +735,23 @@ describe("issueRecoveryCodes, replacing the sets that stood", () => {
 			);
 		});
 
-		expect(await issue(factorStore, "mfa", floorAt())).toMatchObject({ issued: true });
+		expect(await issue(factorStore, "mfa", floorAt())).toMatchObject({
+			issued: false,
+			conflict: true,
+		});
+		expect((await factorStore.list("u-alice")).map((record) => record.id)).toEqual(["later-set"]);
+	});
+
+	it("stands beside a set below its generation another writer left, and a set it cannot read", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const create = factorStore.create.bind(factorStore);
+		vi.spyOn(factorStore, "create").mockImplementation(async (record) => {
+			await create(record);
+			await create(recordOf("older-set", { data: setAt(1) }));
+			await create(recordOf("unreadable-set"));
+		});
+
+		expect(await issue(factorStore, "mfa", floorAt(1))).toMatchObject({ issued: true });
 	});
 
 	it("shows nothing when the records cannot be read again after its write", async () => {
