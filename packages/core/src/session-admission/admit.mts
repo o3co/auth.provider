@@ -28,6 +28,7 @@ import {
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
+import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
 import {
 	canRecordSecondFactor,
 	copySessionAuthentication,
@@ -47,7 +48,6 @@ import {
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
-	frozenUserCopy,
 	primaryFromDto,
 } from "./primary.mjs";
 import { brandClaim, checkRequest } from "./request-check.mjs";
@@ -118,11 +118,12 @@ export function cookieClaim(req: CookieCarrier): SessionClaim {
 }
 
 /**
- * The `User` the cookie session holds — its login's — copied as plain data,
- * frozen at every depth and sharing nothing with it (`frozenUserCopy`), when
- * the session is authenticated (`isAuthenticated === true`, as `cookieClaim`
- * reads it) and the copy's `id` is `subject`; else `undefined`, a user that
- * is not plain data included. For a route that admitted `subject` over the
+ * The `User` the cookie session holds — its login's snapshot — read back as
+ * a login reads one (`readUserSnapshot`: the fields `User` declares, each by
+ * name once, frozen at every depth and sharing nothing with it), when the
+ * session is authenticated (`isAuthenticated === true`, as `cookieClaim`
+ * reads it) and the copy's `id` is `subject`; else `undefined`, a user the
+ * snapshot refuses included. For a route that admitted `subject` over the
  * cookie's claim. A request that is not an object, or a `subject` that is
  * not a non-empty string, is a `RangeError`.
  */
@@ -137,8 +138,8 @@ export function cookieSessionUser(
 	const session = isObject(req.session) ? req.session : undefined;
 	if (session?.isAuthenticated !== true) return undefined;
 	// Judged on the copy it answers: the session's user is read once.
-	const user = frozenUserCopy(session.user);
-	return user?.id === subject ? user : undefined;
+	const reading = readUserSnapshot(session.user);
+	return reading.ok && reading.snapshot.id === subject ? reading.snapshot : undefined;
 }
 
 /** What a code claim is built from: the code record, which carries a `sid` when a session minted it. */

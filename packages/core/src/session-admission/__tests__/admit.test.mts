@@ -34,6 +34,7 @@ import {
 	cookieClaim,
 	cookieSessionUser,
 	linkClaim,
+	passwordPrimary,
 	tokenClaim,
 	viewOf,
 } from "#/session-admission/admit.mjs";
@@ -314,27 +315,69 @@ describe("cookieSessionUser — the cookie session's user, for a route that admi
 		["a user whose id is not a string", carrying({ user: { id: 1 } })],
 		["a user that is a list", carrying({ user: [{ id: "user-1" }] })],
 		["a user that is a string", carrying({ user: "user-1" })],
-		["a user that cannot be copied", carrying({ user: { id: "user-1", greet: () => "hi" } })],
-		["a user holding a Date", carrying({ user: { id: "user-1", joined: new Date(0) } })],
-		["a user holding a Map", carrying({ user: { id: "user-1", roles: new Map() } })],
+		["a user whose email is a function", carrying({ user: { id: "user-1", email: () => "hi" } })],
 		[
-			"a user holding a shared buffer",
-			carrying({ user: { id: "user-1", buffer: new SharedArrayBuffer(8) } }),
+			"a user whose witness is a Date",
+			carrying({ user: { id: "user-1", mfaEnrolled: new Date(0) } }),
 		],
+		["a user whose groups hold a Map", carrying({ user: { id: "user-1", groups: [new Map()] } })],
 		[
-			"a user that is a class instance",
-			carrying({
-				user: new (class Account {
-					id = "user-1";
-				})(),
-			}),
-		],
-		[
-			"a user whose id it does not enumerate",
-			carrying({ user: Object.defineProperty({}, "id", { value: "user-1" }) }),
+			"a user whose email is a shared buffer",
+			carrying({ user: { id: "user-1", email: new SharedArrayBuffer(8) } }),
 		],
 	])("answers nothing for %s", (_label, req) => {
 		expect(cookieSessionUser(req as never, "user-1")).toBeUndefined();
+	});
+
+	it("answers the fields User declares alone, read by name: nothing else the session's user holds", () => {
+		const held = {
+			id: "user-1",
+			email: "alice@example.com",
+			joined: new Date(0),
+			roles: new Map(),
+			greet: () => "hi",
+			passwordHash: "not-for-a-route",
+		};
+		expect(cookieSessionUser(carrying({ user: held }), "user-1")).toStrictEqual({
+			id: "user-1",
+			email: "alice@example.com",
+		});
+		const instance = new (class Account {
+			id = "user-1";
+			internals = { pool: "db" };
+		})();
+		expect(cookieSessionUser(carrying({ user: instance }), "user-1")).toStrictEqual({
+			id: "user-1",
+		});
+		const hiddenId = Object.defineProperty({}, "id", { value: "user-1" });
+		expect(cookieSessionUser(carrying({ user: hiddenId }), "user-1")).toStrictEqual({
+			id: "user-1",
+		});
+	});
+
+	it("round-trips the snapshot a login stored, as it is and through a session store's JSON", () => {
+		const stored = passwordPrimary({
+			subject: "user-1",
+			user: {
+				id: "user-1",
+				username: "alice",
+				email: "alice@example.com",
+				emailVerified: true,
+				name: "Alice",
+				picture: "https://example.com/alice.png",
+				groups: ["staff"],
+				mfaEnrolled: true,
+				locale: "en",
+			},
+			claims: {},
+			authTime: new Date(0),
+			redirectTo: undefined,
+			request: {},
+		}).user;
+		expect(stored).not.toHaveProperty("locale");
+		expect(cookieSessionUser(carrying({ user: stored }), "user-1")).toStrictEqual(stored);
+		const throughJson = JSON.parse(JSON.stringify(stored));
+		expect(cookieSessionUser(carrying({ user: throughJson }), "user-1")).toStrictEqual(stored);
 	});
 
 	it("never answers a user whose id is not the subject, even one whose id answers differently to each read", () => {
