@@ -29,9 +29,12 @@
  *   a new one otherwise, recording the `acr_values` hinted, which choose
  *   nothing here. Every factor the subject can use is offered, one that does
  *   not count included; none usable (`factorState.mts`: of an installed kind,
- *   its data opening, a recovery set with a code left) is
- *   `no_qualifying_factor`. A session store that cannot record the step-up
- *   opens none, whatever the session already holds.
+ *   its data opening, a recovery set with a code left at or above the
+ *   subject's recovery-set floor, the records read as the offers read them,
+ *   `readSubjectRecords`) is `no_qualifying_factor`. A session no second
+ *   factor can be recorded on, as admission's view held it
+ *   (`MfaCeremonySession.secondFactorRecordable`: the store's capability and
+ *   the record's shape), opens none, whatever the session already holds.
  */
 
 import type { MfaTransaction } from "@o3co/auth-provider-core";
@@ -63,11 +66,12 @@ export function createMfaStepUp(kit: MfaCeremonyKit): {
 		async open(call) {
 			const session = call.session;
 			if (session === undefined) return UNKNOWN_TRANSACTION;
-			const records = await kit.recordsOf(session.subject);
-			if ("outcome" in records) return records;
-			if (records.some((record) => mayCount(kit.factors, record))) {
-				if (!kit.stepUpRecordable) return { outcome: "step_up_unrecordable" };
-				if (!kit.holdsUsable(session.subject, records, { counting: false })) {
+			// Read as the offers read it: a retired set is not usable.
+			const reading = await kit.readSubject(session.subject);
+			if ("outcome" in reading) return reading;
+			if (reading.records.some((record) => mayCount(kit.factors, record))) {
+				if (!session.secondFactorRecordable) return { outcome: "step_up_unrecordable" };
+				if (!kit.holdsUsable(reading)) {
 					return { outcome: "no_qualifying_factor" };
 				}
 				if (call.transactionId !== undefined) {

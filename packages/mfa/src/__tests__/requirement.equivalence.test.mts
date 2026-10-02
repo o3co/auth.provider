@@ -17,8 +17,9 @@
 /**
  * The `mfa` requirement over every action a bundled consumer admits, as its
  * package registers it, under both modes and each setup — the factors
- * installed, whether a step-up can be recorded, and the factor records the
- * subject holds — answers the verdict table in `bundled-actions.fixture.mts`.
+ * installed, whether admission's view says a second factor can be recorded
+ * on the session, and the factor records the subject holds — answers the
+ * verdict table in `bundled-actions.fixture.mts`.
  */
 
 import {
@@ -116,8 +117,12 @@ const letter = (verdict: RequirementVerdict): string =>
 	CODE[verdict.outcome] +
 	(verdict.outcome === "step_up" && verdict.whenStillUnmet !== "reauthenticate" ? "?" : "");
 
-/** What admission hands the requirement for the action, in each situation of its carrier. */
-function inputsFor(name: string): RequirementInput[] {
+/**
+ * What admission hands the requirement for the action, in each situation of
+ * its carrier, the view saying whether a second factor can be recorded on
+ * the session as `secondFactorRecordable`.
+ */
+function inputsFor(name: string, secondFactorRecordable: boolean): RequirementInput[] {
 	const { grade, carrier } = BUNDLED_ACTIONS[name] as (typeof BUNDLED_ACTIONS)[string];
 	const action = { name, grade };
 	const at = { asks: undefined, now: new Date(NOW), subject: "u-alice", action, carrier };
@@ -141,6 +146,7 @@ function inputsFor(name: string): RequirementInput[] {
 							authTime: session.authTime,
 							expiresAt: session.expiresAt,
 							enrollmentFacts: NOT_ENROLLED_FACTS,
+							secondFactorRecordable,
 						},
 			authentication: requirementSession(session),
 		};
@@ -149,11 +155,13 @@ function inputsFor(name: string): RequirementInput[] {
 
 describe("the mfa requirement over every bundled action, by the grade its package registers", () => {
 	for (const mode of ["optional", "required"] as const) {
-		for (const [setup, { factors, stepUpRecordable, holds }] of Object.entries(SETUPS)) {
+		for (const [setup, { factors, secondFactorRecordable, holds }] of Object.entries(SETUPS)) {
 			const table = VERDICTS[`${mode} · ${setup}`] as Readonly<Record<string, string>>;
 
 			it(`answers the table's verdicts — ${mode}, ${setup}`, async () => {
 				const requirement = createMfaRequirement({
+					// No recovery set below a floor in these suites: a floor of 0.
+					recoverySetFloor: async () => 0,
 					mode,
 					factors: resolverOver(factors.map(() => FACTORS.totp())),
 					factorStore: factorStoreHolding(
@@ -165,7 +173,6 @@ describe("the mfa requirement over every bundled action, by the grade its packag
 						now: () => NOW,
 					}),
 					stepUpPage: { url: "/mfa", params: {} },
-					stepUpRecordable,
 					recentMfaMaxAgeSeconds: 300,
 					logger: silent(),
 					...WITHOUT_MAIL,
@@ -175,7 +182,8 @@ describe("the mfa requirement over every bundled action, by the grade its packag
 				const answered: Record<string, string> = {};
 				for (const name of Object.keys(BUNDLED_ACTIONS)) {
 					let letters = "";
-					for (const input of inputsFor(name)) letters += letter(await requirement.admit(input));
+					for (const input of inputsFor(name, secondFactorRecordable))
+						letters += letter(await requirement.admit(input));
 					answered[name] = letters;
 				}
 				expect(answered).toEqual(table);

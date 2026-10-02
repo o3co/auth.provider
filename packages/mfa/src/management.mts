@@ -22,7 +22,11 @@
  *
  * - `GET /factors`, admitted as `mfa.view`: every record of the subject, oldest
  *   first, with its state as `factorState.mts` reads it for the session's login
- *   address, and a recovery set's codes left; never a record's data. A record
+ *   address, the records read as every judgment over them reads them
+ *   (`readSubjectRecords`: a recovery set below the subject's recovery-set
+ *   floor `retired`) — and a usable or exhausted recovery set's codes left and
+ *   whether they were ever answered (`recovery_codes_shown`); never a
+ *   record's data. A record
  *   whose data or digest needs a key the ring no longer holds is said at error
  *   with that key's id.
  * - `POST /factors/rename {factor_id, label}`, admitted as `mfa.manage`: the
@@ -61,8 +65,12 @@ import express, { type Request, type Response, type Router } from "express";
 import type { MfaAdmissionAction } from "./admissionActions.mjs";
 import { type MfaCeremonySession, OUTSIDE_CONTRACT } from "./ceremony.mjs";
 import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
-import { type MfaRecordReading, readFactorRecordAt } from "./factorState.mjs";
-import { recoveryCodesLeft } from "./recovery/factor.mjs";
+import {
+	type MfaRecordReading,
+	type MfaSubjectRecords,
+	readFactorRecordAt,
+} from "./factorState.mjs";
+import { recoveryCodesLeft, recoverySetShown } from "./recovery/factor.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 
@@ -179,11 +187,22 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 		.get("/factors", async (req: Request, res: Response) => {
 			const session = await admit(req, res, "mfa.view");
 			if (session === undefined) return;
-			const records = await recordsOf(res, session.subject);
-			if (records === undefined) return;
+			// A retired recovery set is listed so (`readSubjectRecords`).
+			let reading: MfaSubjectRecords;
+			try {
+				reading = await factorSet.readSubject(session.subject);
+			} catch (cause) {
+				unavailable(res, "list", cause);
+				return;
+			}
 			res.status(200).json({
-				factors: records.map((record) => {
-					const read = readFor(session, record);
+				factors: reading.records.map((record) => {
+					const read = readFactorRecordAt(
+						reading.context,
+						session.subject,
+						record,
+						session.user.email,
+					);
 					if (read.state === "unreadable" && read.keyId !== undefined) {
 						logger.error(
 							{
@@ -196,10 +215,9 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 							"mfa_factor_unreadable",
 						);
 					}
-					const codesLeft =
-						read.state === "usable" || read.state === "exhausted"
-							? recoveryCodesLeft(read.factor, read.data)
-							: undefined;
+					const opened = read.state === "usable" || read.state === "exhausted";
+					const codesLeft = opened ? recoveryCodesLeft(read.factor, read.data) : undefined;
+					const shown = opened ? recoverySetShown(read.factor, read.data) : undefined;
 					const createdAt = isoOf(record.createdAt);
 					const lastUsedAt = isoOf(record.lastUsedAt);
 					return {
@@ -211,6 +229,7 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 						...(record.binding === undefined ? {} : { binding: record.binding }),
 						state: read.state,
 						...(codesLeft === undefined ? {} : { recovery_codes_remaining: codesLeft }),
+						...(shown === undefined ? {} : { recovery_codes_shown: shown }),
 					};
 				}),
 			});
