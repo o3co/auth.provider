@@ -21,6 +21,7 @@ import {
 	measureSecretEntropyBytes,
 	type ReplicaSafetyDeclaration,
 	type SessionCookiePolicy,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import session from "express-session";
 import { z } from "zod";
@@ -60,9 +61,9 @@ export const sessionStoreConfigSchema = z
 			})
 			.optional(),
 		name: z.string(),
-		// Positive and bounded: 0 (an exported-but-empty variable) makes
-		// express-session emit an already-expired cookie.
-		maxAge: z.coerce.number().int().positive().max(MAX_DURATION_MS),
+		// Positive and bounded: 0 makes express-session emit an
+		// already-expired cookie.
+		maxAge: wholeNumberInRangeFromEnv(1, MAX_DURATION_MS),
 		secure: coerceBooleanFromEnv,
 		sameSite: z.enum(["lax", "none", "strict"]),
 		domain: z.string().nullable(),
