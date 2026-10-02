@@ -137,10 +137,11 @@ schema fills in no default.
 | `clientUrl` | in practice | Where the browser lands after a login whose start carried no `redirect_to`. Without it such a login ends in `500 misconfiguration` after the session has been saved — so it is needed unless every start carries a `redirect_to` and `authCallbackUrl` is set. |
 | `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package's redirect rules](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
 | `endSessionEndpoint` | no | An upstream logout endpoint ([Refresh and logout](#refresh-and-logout)). Apple publishes none. |
-| `jwksUri` | no | Overrides Apple's JWKS URI, `https://appleid.apple.com/auth/keys`. For tests; a production entry leaves it absent. |
 
-`fetch` is not an entry key: it is the type module's option (above), and an
-`AppleProviderConfig` field for `createAppleProvider` and the deprecated slot.
+`fetch` and `jwksUri` are not entry keys: they are test seams of
+`AppleProviderConfig`, for `createAppleProvider` and the deprecated slot, and
+the type module's seam is its `fetch` option (above), which reaches Apple's
+JWKS as well.
 Neither is a resolver for `clientSecret`, nor a `privateKey` read anew at every
 token exchange: a configuration holds strings, read at boot. Those two are
 code-only, through `createAppleProvider`.

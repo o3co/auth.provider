@@ -354,6 +354,15 @@ describe("appleFederationTypeModule through createApp", () => {
 		expect(err.message).toMatch(/core\.federations\.apple-web: .*"clientSecrte"/);
 	});
 
+	it("refuses jwksUri: a test seam of the provider, not an entry key — the fetch option is the type's", async () => {
+		const err = await refusal(
+			boot({ "apple-web": { ...entryWeb, jwksUri: "https://keys.example/jwks" } }),
+		);
+		expect(err.reason).toBe("config-validation-failed");
+		expect(issuePaths(err)).toContain("core.federations.apple-web");
+		expect(err.message).toMatch(/core\.federations\.apple-web: .*"jwksUri"/);
+	});
+
 	it("refuses the nested apple { … } shape: an entry is flat", async () => {
 		const { clientId, clientSecret, callbackURL, ...outer } = entryWeb;
 		const err = await refusal(
@@ -408,7 +417,6 @@ describe("appleFederationTypeModule through createApp", () => {
 		["authCallbackUrl", false, "core.federations.apple-web.authCallbackUrl"],
 		["clientUrl", {}, "core.federations.apple-web.clientUrl"],
 		["endSessionEndpoint", 1, "core.federations.apple-web.endSessionEndpoint"],
-		["jwksUri", ["https://x"], "core.federations.apple-web.jwksUri"],
 	])("refuses %s of the wrong shape (%j), at its path", async (key, value, path) => {
 		const err = await refusal(boot({ "apple-web": { ...entryWeb, [key]: value } }));
 		expect(err.reason).toBe("config-validation-failed");
@@ -418,7 +426,15 @@ describe("appleFederationTypeModule through createApp", () => {
 	it("reads a key written null as absent", async () => {
 		const fake = await fakeApple(entryWeb.clientId);
 		const { handle } = await boot(
-			{ "apple-web": { ...entryWeb, teamId: null, keyId: null, privateKey: null, jwksUri: null } },
+			{
+				"apple-web": {
+					...entryWeb,
+					teamId: null,
+					keyId: null,
+					privateKey: null,
+					endSessionEndpoint: null,
+				},
+			},
 			{ fetch: fake.fetch },
 		);
 		expect(providersOf(handle).get("apple-web")?.name).toBe("apple-web");
