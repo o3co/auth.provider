@@ -499,6 +499,19 @@ describe("boot, over a configuration that captures the modules' renamed variable
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toContain('"allowdHosts"');
 	});
+
+	it("refuses a key named __proto__ in oauth.clientIdMetadataDocuments, naming its path", async () => {
+		const err = await refusal((config) =>
+			oauthWith(config, {
+				clientIdMetadataDocuments: JSON.parse(
+					'{"enabled": false, "allowedHosts": ["a.example"], "__proto__": {"allowedHosts": ["b.example"]}}',
+				),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("oauth.clientIdMetadataDocuments.__proto__");
+	});
 });
 
 describe("the switches the modules were built with, held to the ones boot parses", () => {

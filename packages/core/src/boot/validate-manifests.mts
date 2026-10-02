@@ -1744,6 +1744,60 @@ function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
 		.join("; ");
 }
 
+/** The names of `Object.prototype`'s members: reserved, with `prototype`, as configuration keys. */
+const OBJECT_PROTOTYPE_MEMBERS: ReadonlySet<string> = new Set(
+	Object.getOwnPropertyNames(Object.prototype),
+);
+
+/** Why `key` is reserved as a configuration key, or `undefined` when it is not. */
+function reservedKeyReason(key: string): string | undefined {
+	if (OBJECT_PROTOTYPE_MEMBERS.has(key)) return "is named after an Object.prototype member";
+	if (key === "prototype") return 'is "prototype"';
+	return undefined;
+}
+
+/**
+ * One issue per reserved key of the configuration as written — one named
+ * after an `Object.prototype` member, or `prototype` — at the key's full
+ * path. A schema drops a `__proto__` key unvalidated, and code reading any
+ * such key may meet an inherited member instead. The walk covers the own data properties of
+ * plain objects and lists, which is everything a parsed HOCON file holds;
+ * a getter is read by the parse that follows, not by this walk, and
+ * anything else is a value. An object reached by several paths is named
+ * under each; only its ancestors stop a cycle.
+ */
+function reservedKeyIssues(
+	value: unknown,
+	path: readonly PropertyKey[] = [],
+	ancestors = new Set<object>(),
+): z.core.$ZodIssue[] {
+	if (!Array.isArray(value) && !isPlainConfigObject(value)) return [];
+	if (ancestors.has(value)) return [];
+	ancestors.add(value);
+	const issues = Object.keys(value).flatMap((key) => {
+		const at = [...path, Array.isArray(value) ? Number(key) : key];
+		const below = Object.getOwnPropertyDescriptor(value, key);
+		const reason = reservedKeyReason(key);
+		return [
+			...(reason !== undefined
+				? [
+						{
+							code: "custom",
+							path: at,
+							message: `the key "${key}" ${reason}, which configuration cannot carry`,
+							input: undefined,
+						} as z.core.$ZodIssue,
+					]
+				: []),
+			...(below !== undefined && "value" in below
+				? reservedKeyIssues(below.value, at, ancestors)
+				: []),
+		];
+	});
+	ancestors.delete(value);
+	return issues;
+}
+
 /**
  * Step 13: parses the configuration the composition root handed over
  * (`bootstrapComponents.config`) once, with every schema that reads it:
@@ -1760,9 +1814,11 @@ function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
  *
  * Returns the composed configuration, which becomes the `config` slot once
  * `parseModuleSections` writes each section back. Refused values make one
- * `config-validation-failed` naming each operator path: the base's alone
- * when the base refuses (the module schemas have no output to read), else
- * every module schema's.
+ * `config-validation-failed` naming each operator path: every reserved key
+ * (`reservedKeyIssues`: an `Object.prototype` member's name, or
+ * `prototype`), then the
+ * base's issues alone when the base refuses (the module schemas have no
+ * output to read), else every module schema's.
  * @internal
  */
 function validateAndComposeConfig(modules: readonly Module[], bootstrap: BootstrapMap): unknown {
@@ -1772,6 +1828,7 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 
 	for (const m of modules) if (m.configSchema) participants.push({ module: m.name });
 
+	issues.push(...reservedKeyIssues(raw));
 	// Each parse through `parseSection`: a schema that throws instead of
 	// answering — an async refinement, a transform or a getter that throws —
 	// is one more issue naming whose schema it was, not an error escaping
