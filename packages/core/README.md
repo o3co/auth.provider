@@ -248,6 +248,8 @@ The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientR
 
 `createAdapterFactory<T>(kind, ctx?)`, `AdapterFactory<T>`, `AdapterBuilder<T>` (a function of the config section and a read-only `BuilderContext`, whose fields are all optional and only ever added to), `LifecycleRegistrar` (with `LifecycleCleanupOptions`, a cleanup's `tailMs`) and `AdapterFactoryError` are defined in [`src/adapters/AdapterFactory.mts`](src/adapters/AdapterFactory.mts). `createRepositoryFactories(ctx?)` in [`src/repositories/RepositoryFactory.mts`](src/repositories/RepositoryFactory.mts) returns the client, user and code factories.
 
+The conditional-write convention a store's conditional members follow is in [`src/adapters/conditionalWrite.mts`](src/adapters/conditionalWrite.mts): `StoreGeneration` (opaque, issued by the store on every write of what it guards, never re-issued for its key), `isStoreGeneration`, `newStoreGeneration`, `BUNDLED_STORE_WRITE_LIFETIME_MS` (the bundled stores' write-lifetime bound, 24 h: an emptied set reads absent only once it has passed), `Versioned<T>` and `VersionedSet<T>` (a versioned read's answer), the answers `ConditionalReplaceAnswer`, `ConditionalRemoveAnswer`, `ConditionalCreateAnswer` and `ConditionalSetRemoveAnswer`, and core's readers of each (`readVersioned`, `readVersionedSet`, `readConditionalReplaceAnswer`, `readConditionalRemoveAnswer`, `readConditionalCreateAnswer`, `readConditionalSetRemoveAnswer`), which refuse anything outside the type with a `TypeError`. The rules every store keeps, for SQL and HTTP stores too, are in [docs/adapter-surface.md](../../docs/adapter-surface.md#conditional-writes).
+
 Key contract properties:
 
 - `create()` always returns `Promise<T>`, even for synchronous builders.
