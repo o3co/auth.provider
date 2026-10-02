@@ -753,7 +753,7 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 | Key | Type | Holds |
 | --- | --- | --- |
 | `mfaf:{<subject>}` | hash | one field per enrolled factor (its id): `<version>\n<fixed JSON>\n<mutable JSON>`; and `~g`, the set's generation. No TTL while it holds a factor; holding `~g` alone, it is the emptied set's tombstone, expiring 24 hours after its last membership write |
-| `mfaf:{<subject>}:w:<generation>` | string | one membership write's answer, kept until a millisecond past the write's deadline (at most about a second) |
+| `mfaf:{<subject>}:w:<generation>` | string | one membership write's answer, kept until the declared clock skew (1 second) past the write's deadline (about two seconds in all) |
 | `mfat:tx:{<id>}` | hash | one MFA transaction, expiring at its `expiresAtMs` |
 | `mfat:binding:{<digest>}` | sorted set | one binding's transactions, at most `MFA_MAX_TRANSACTIONS_PER_BINDING` (5): one member `<incarnation>:<id>` each, scored by its `expiresAtMs`, the key expiring at the latest; `<digest>` is the SHA-256 of the binding, so no key holds the express session id |
 | `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, and whether a hold's first refusal was answered (`held`) |
@@ -809,10 +809,11 @@ of core's conditional-write convention
 - **The primary, never a replica** (rule 2). `listVersioned` and every
   membership write are scripts that start with `#!lua` and no `no-writes`
   flag, which Redis 7.0 and later refuses on a read-only replica (`READONLY`).
-  The versioned read therefore always reflects every write acknowledged
-  before it began. `list`, the plain read, stays a plain `HGETALL` and
-  carries no such guarantee: a write decided on what it answered is not
-  fenced by the set's generation.
+  That holds for a replica with `replica-read-only yes`, Redis's default; a
+  replica configured writable would run them. The versioned read therefore
+  always reflects every write acknowledged before it began. `list`, the plain
+  read, stays a plain `HGETALL` and carries no such guarantee: a write decided
+  on what it answered is not fenced by the set's generation.
 - **The tombstone** (rule 6). A write that leaves the hash holding `~g`
   alone — the last factor's removal, or a reset, of an already empty set
   too — sets the key to expire `BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 hours,
@@ -838,12 +839,21 @@ of core's conditional-write convention
 - **A copy sent again.** ioredis sends again a command whose reply a dropped
   connection lost, and the first copy may have run. Each membership write
   therefore keeps its answer under a replay key of its own
-  (`<key>:w:<generation>`, on the subject's hash tag) until a millisecond
-  past its deadline: a copy that reaches the server before then answers what
-  the first copy answered and writes nothing, so it neither writes a
-  generation back over a later one nor answers `conflict` for a write that
-  landed; one that reaches it later is `late`. A `volatile-*` policy may
-  evict a replay key early; the module's warning names it.
+  (`<key>:w:<generation>`, on the subject's hash tag) until the declared
+  clock skew past its deadline: a copy that reaches the server before then
+  answers what the first copy answered and writes nothing, so it neither
+  writes a generation back over a later one nor answers `conflict` for a
+  write that landed, even when another server, whose clock may lag by the
+  skew, judges the copy after a failover or a slot migration; one that
+  reaches it later is `late`. A `volatile-*` policy may evict a replay key
+  early; the module's warning names it.
+- **A full server.** Under `noeviction`, Redis refuses a script that does
+  not declare `allow-oom` once `maxmemory` is reached. The removals
+  (`removeIf`, `remove`), the reset (`removeAllForSubject`) and
+  `listVersioned` declare it: each writes only `~g`, the replay key and an
+  expiry, so a factor stays removable, an attacker's among them, and the
+  operator reset still runs on a full server. The creates (`createIf`,
+  `create`) declare no flag and are refused there (`OOM`), an outage.
 - **The write lifetime W** (rule 6). W is 2 000 ms
   (`REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS`): the write timeout, 1 000 ms,
   the same as the `commandTimeout` this README asks of the connection and the

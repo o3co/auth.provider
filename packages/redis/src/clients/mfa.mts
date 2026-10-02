@@ -76,11 +76,19 @@ export interface MfaFactorSetWriteInput {
 	readonly deadlineMs: number;
 	/**
 	 * A key of its own for this write, on the set's hash tag, that keeps the
-	 * write's answer until its deadline. A copy of the write sent again (the
-	 * driver resends a command whose reply a dropped connection lost) finds
-	 * it, answers what the first copy answered, and writes nothing.
+	 * write's answer until `clockSkewMs` past its deadline. A copy of the
+	 * write sent again (the driver resends a command whose reply a dropped
+	 * connection lost) finds it, answers what the first copy answered, and
+	 * writes nothing.
 	 */
 	readonly replayKey: string;
+	/**
+	 * The clock skew the adapter allows between servers' clocks: the replay
+	 * key outlives the deadline by it, so a copy that a server whose clock
+	 * lags the one that kept the key (after a failover or a slot migration)
+	 * still finds it before it would judge the copy on time.
+	 */
+	readonly clockSkewMs: number;
 }
 
 /** A membership write that may leave the set empty: how long its tombstone is kept. */
@@ -120,7 +128,10 @@ export interface MfaFactorSetRemoveIfInput extends MfaFactorSetEmptyingWriteInpu
  * `removeAll` — is one indivisible step that first answers a copy of a write
  * already applied with that write's answer (its `replayKey`), then refuses a
  * write past its deadline (`late`), then checks, then writes the fields and
- * `~g` = `next`, and keeps its answer under `replayKey` until its deadline.
+ * `~g` = `next`, and keeps its answer under `replayKey` until `clockSkewMs`
+ * past its deadline. The removals, the reset and `listVersioned` run on a
+ * full server (`allow-oom`): they write only `~g`, the replay key and an
+ * expiry, and a factor must stay removable when nothing can be enrolled.
  * A write that leaves the hash holding `~g` alone (an emptied set, its
  * tombstone) sets the key to expire `tombstoneMs` later; one that leaves it
  * holding a factor takes the expiry off. A key without `~g` that holds

@@ -99,7 +99,14 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 				io,
 				MFA_FACTOR_CREATE_IF,
 				[key, input.replayKey],
-				[input.next, String(input.deadlineMs), input.expected ?? "", field, value],
+				[
+					input.next,
+					String(input.deadlineMs),
+					String(input.clockSkewMs),
+					input.expected ?? "",
+					field,
+					value,
+				],
 			);
 			return outcomeOf(reply, ["created", "conflict", "late"], "createIf");
 		},
@@ -108,7 +115,14 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 				io,
 				MFA_FACTOR_REMOVE_IF,
 				[key, input.replayKey],
-				[input.next, String(input.deadlineMs), String(input.tombstoneMs), input.expected, field],
+				[
+					input.next,
+					String(input.deadlineMs),
+					String(input.clockSkewMs),
+					String(input.tombstoneMs),
+					input.expected,
+					field,
+				],
 			);
 			return outcomeOf(reply, ["removed", "missing", "conflict", "late"], "removeIf");
 		},
@@ -117,7 +131,7 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 				io,
 				MFA_FACTOR_CREATE,
 				[key, input.replayKey],
-				[input.next, String(input.deadlineMs), field, value],
+				[input.next, String(input.deadlineMs), String(input.clockSkewMs), field, value],
 			);
 			return outcomeOf(reply, ["created", "conflict", "late"], "create");
 		},
@@ -135,7 +149,13 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 				io,
 				MFA_FACTOR_REMOVE,
 				[key, input.replayKey],
-				[input.next, String(input.deadlineMs), String(input.tombstoneMs), field],
+				[
+					input.next,
+					String(input.deadlineMs),
+					String(input.clockSkewMs),
+					String(input.tombstoneMs),
+					field,
+				],
 			);
 			return outcomeOf(reply, ["removed", "missing", "late"], "remove");
 		},
@@ -144,7 +164,12 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 				io,
 				MFA_FACTOR_REMOVE_ALL,
 				[key, input.replayKey],
-				[input.next, String(input.deadlineMs), String(input.tombstoneMs)],
+				[
+					input.next,
+					String(input.deadlineMs),
+					String(input.clockSkewMs),
+					String(input.tombstoneMs),
+				],
 			);
 			return outcomeOf(reply, ["removed", "late"], "removeAll");
 		},

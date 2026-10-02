@@ -48,15 +48,18 @@
  *
  * - Each generation is minted here with `newStoreGeneration` and handed to
  *   the script that writes it. Each membership write keeps its answer under
- *   a replay key of its own (`<key>:w:<generation>`) until its deadline, so a
- *   copy the driver sends again answers the first copy's answer and writes
- *   nothing: no generation is issued twice (rule 8), and no write that landed
- *   answers `conflict` (rule 4).
+ *   a replay key of its own (`<key>:w:<generation>`) until the declared clock
+ *   skew past its deadline, so a copy the driver sends again answers the
+ *   first copy's answer and writes nothing: no generation is issued twice
+ *   (rule 8), and no write that landed answers `conflict` (rule 4).
  *   `listVersioned`, `createIf`, `removeIf`, `create`, `remove` and
  *   `removeAllForSubject` are one script each (rules 1 and 2); `update`
  *   keeps `~g`.
- * - Every one of those scripts may write, so a read-only replica refuses it:
- *   the versioned read is answered by the primary, never a replica (rule 2).
+ * - Every one of those scripts may write, so a read-only replica
+ *   (`replica-read-only yes`, Redis's default) refuses it: the versioned read
+ *   is answered by the primary, never such a replica (rule 2). The removals,
+ *   the reset and `listVersioned` declare `allow-oom`, so a full
+ *   `noeviction` server still runs them; the creates are refused there.
  * - A write that leaves the hash holding `~g` alone keeps it as the set's
  *   tombstone for `BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 hours, from that
  *   write, a reset of an already empty set included; a write that leaves a
@@ -352,7 +355,7 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 	 */
 	const writeOf = (key: string, deadlineMs: number) => {
 		const next = newStoreGeneration();
-		return { next, deadlineMs, replayKey: `${key}:w:${next}` };
+		return { next, deadlineMs, replayKey: `${key}:w:${next}`, clockSkewMs: CLOCK_SKEW_MS };
 	};
 
 	return {

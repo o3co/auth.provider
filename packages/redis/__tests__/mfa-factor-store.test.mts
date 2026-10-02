@@ -47,6 +47,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	MFA_FACTOR_CREATE,
 	MFA_FACTOR_CREATE_IF,
+	MFA_FACTOR_LIST_VERSIONED,
 	MFA_FACTOR_REMOVE,
 	MFA_FACTOR_REMOVE_ALL,
 	MFA_FACTOR_REMOVE_IF,
@@ -415,6 +416,9 @@ describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 	});
 });
 
+/** The clock skew the adapter declares between the app's and Redis's clocks. */
+const SKEW_MS = 1_000;
+
 /** A generation as a store answers one, for a probe that hands one in. */
 const generation = (value: string): StoreGeneration => value as StoreGeneration;
 
@@ -579,7 +583,7 @@ const topLevel = (source: string): string[] =>
 		.filter(
 			(line) =>
 				line !== "" &&
-				line !== "#!lua" &&
+				!line.startsWith("#!lua") &&
 				line !== "end" &&
 				!line.startsWith("local function ") &&
 				!/^\s/.test(line),
@@ -597,17 +601,34 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 	it.each(Object.entries(SCRIPTS))(
 		"%s's script answers a copy with the first answer, then refuses a write past its deadline, before it reads or writes the set",
 		(_, script) => {
-			expect(script.source.startsWith("#!lua\n")).toBe(true);
 			expect(topLevel(script.source)).toStrictEqual([
 				"local applied = redis.call('GET', KEYS[2])",
 				"if applied then return applied end",
 				"if mfa_factor_late() then return 'late' end",
 				"local outcome = apply()",
-				"redis.call('SET', KEYS[2], outcome, 'PXAT', tonumber(ARGV[2]) + 1)",
+				"redis.call('SET', KEYS[2], outcome, 'PXAT', tonumber(ARGV[2]) + tonumber(ARGV[3]) + 1)",
 				"return outcome",
 			]);
 		},
 	);
+
+	it("lets the removals and the versioned read run on a full server, and keeps the creates refused there", () => {
+		// Under `noeviction` a full Redis refuses a `#!lua` script without
+		// `allow-oom`. A removal, the reset and the read a removal starts from
+		// write only `~g`, the replay key and an expiry; an attacker's factor
+		// must still be removable, and the reset must still run.
+		for (const script of [
+			MFA_FACTOR_REMOVE_IF,
+			MFA_FACTOR_REMOVE,
+			MFA_FACTOR_REMOVE_ALL,
+			MFA_FACTOR_LIST_VERSIONED,
+		]) {
+			expect(script.source.split("\n")[0]).toBe("#!lua flags=allow-oom");
+		}
+		for (const script of [MFA_FACTOR_CREATE_IF, MFA_FACTOR_CREATE]) {
+			expect(script.source.split("\n")[0]).toBe("#!lua");
+		}
+	});
 
 	it("declares its write lifetime as the write timeout plus the clock skew, well under the bound", () => {
 		expect(REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS).toBe(2_000);
@@ -634,6 +655,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.createIf(key, fieldB, value, {
 				next: "n1",
 				replayKey: `${key}:w:n1`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 				expected: at,
 			}),
@@ -642,6 +664,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.removeIf(key, fieldA, {
 				next: "n2",
 				replayKey: `${key}:w:n2`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 				tombstoneMs,
 				expected: at,
@@ -651,6 +674,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.create(key, fieldB, value, {
 				next: "n3",
 				replayKey: `${key}:w:n3`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 			}),
 		).toBe("late");
@@ -658,6 +682,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.remove(key, fieldA, {
 				next: "n4",
 				replayKey: `${key}:w:n4`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 				tombstoneMs,
 			}),
@@ -666,6 +691,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.removeAll(key, {
 				next: "n5",
 				replayKey: `${key}:w:n5`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 				tombstoneMs,
 			}),
@@ -674,6 +700,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.removeAll(keyAt(prefix, "nobody"), {
 				next: "n6",
 				replayKey: `${key}:w:n6`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 				tombstoneMs,
 			}),
@@ -688,6 +715,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.createIf(key, fieldB, value, {
 				next: "n7",
 				replayKey: `${key}:w:n7`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: future,
 				expected: at,
 			}),
@@ -696,6 +724,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.removeIf(key, fieldB, {
 				next: "n8",
 				replayKey: `${key}:w:n8`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: future,
 				tombstoneMs,
 				expected: generation("n7"),
@@ -705,6 +734,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.create(key, fieldB, value, {
 				next: "n9",
 				replayKey: `${key}:w:n9`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: future,
 			}),
 		).toBe("created");
@@ -712,6 +742,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.remove(key, fieldB, {
 				next: "n10",
 				replayKey: `${key}:w:n10`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: future,
 				tombstoneMs,
 			}),
@@ -720,6 +751,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			await client.removeAll(key, {
 				next: "n11",
 				replayKey: `${key}:w:n11`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: future,
 				tombstoneMs,
 			}),
@@ -743,8 +775,15 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 		const deadlineMs = (await serverClock(first)()) + 60_000;
 		const tombstoneMs = BUNDLED_STORE_WRITE_LIFETIME_MS;
 		const replayKey = (next: string): string => `${key}:w:${next}`;
+		const clockSkewMs = SKEW_MS;
 
-		const reset = { next: "reset-g", deadlineMs, tombstoneMs, replayKey: replayKey("reset-g") };
+		const reset = {
+			next: "reset-g",
+			deadlineMs,
+			tombstoneMs,
+			replayKey: replayKey("reset-g"),
+			clockSkewMs,
+		};
 		expect(await client.removeAll(key, reset)).toBe("removed");
 		const later = landed(await store.createIf?.(RECORD({ id: FACTOR_A }), generation("reset-g")));
 		expect(await client.removeAll(key, reset)).toBe("removed");
@@ -756,6 +795,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			deadlineMs,
 			expected: later,
 			replayKey: replayKey("create-g"),
+			clockSkewMs,
 		};
 		expect(await client.createIf(key, fieldB, value, create)).toBe("created");
 		expect(await client.createIf(key, fieldB, value, create)).toBe("created");
@@ -765,10 +805,16 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 			tombstoneMs,
 			expected: generation("create-g"),
 			replayKey: replayKey("remove-g"),
+			clockSkewMs,
 		};
 		expect(await client.removeIf(key, fieldB, removal)).toBe("removed");
 		expect(await client.removeIf(key, fieldB, removal)).toBe("removed");
-		const unconditional = { next: "legacy-g", deadlineMs, replayKey: replayKey("legacy-g") };
+		const unconditional = {
+			next: "legacy-g",
+			deadlineMs,
+			replayKey: replayKey("legacy-g"),
+			clockSkewMs,
+		};
 		expect(await client.create(key, fieldB, value, unconditional)).toBe("created");
 		await store.remove("user-1", FACTOR_B);
 		const moved = await first().hget(key, "~g");
@@ -776,9 +822,15 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 		expect(await first().hget(key, "~g")).toBe(moved);
 		expect(await first().hexists(key, fieldB)).toBe(0);
 
-		// A copy's answer is kept only until its deadline: past it, the copy is late.
+		// A copy's answer is kept until the declared clock skew past its
+		// deadline, so a copy that a server whose clock lags the one that
+		// judged the deadline (after a failover or a slot migration) still finds
+		// it; past that, the copy is late.
 		const pttl = await first().pttl(replayKey("reset-g"));
-		expect(pttl > 0 && pttl <= 60_001).toBe(true);
+		const now = await serverClock(first)();
+		expect(pttl).toBeGreaterThan(deadlineMs + SKEW_MS - now - 5_000);
+		expect(pttl).toBeLessThanOrEqual(deadlineMs + SKEW_MS + 1 - now + 5_000);
+		expect(await first().pexpiretime(replayKey("reset-g"))).toBe(deadlineMs + SKEW_MS + 1);
 	});
 
 	it("rejects, as an outage, a membership write its client answers late", async () => {
@@ -854,6 +906,30 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 		await expect(store.removeAllForSubject("user-1")).rejects.toThrow(/READONLY/);
 	});
 
+	it("removes a factor, resets the set and reads it on a full noeviction server, where a create is refused", async () => {
+		const admin = open(paused);
+		const prefix = freshPrefix();
+		const store = storeAt(prefix, admin);
+		await store.create(RECORD({ id: FACTOR_A }));
+		await store.create(RECORD({ id: FACTOR_B }));
+		const at = (await store.listVersioned?.("user-1"))?.generation as StoreGeneration;
+		await admin.config("SET", "maxmemory-policy", "noeviction");
+		await admin.config("SET", "maxmemory", "1");
+		try {
+			await expect(store.createIf?.(RECORD({ id: factorId("c") }), at)).rejects.toThrow(/OOM/);
+			const read = await store.listVersioned?.("user-1");
+			expect(read?.generation).toBe(at);
+			const removed = landed(await store.removeIf?.("user-1", FACTOR_A, at));
+			await store.remove("user-1", FACTOR_B);
+			await store.removeAllForSubject("user-1");
+			const reset = await store.listVersioned?.("user-1");
+			expect(reset?.items).toStrictEqual([]);
+			expect(reset?.generation).not.toBe(removed);
+		} finally {
+			await admin.config("SET", "maxmemory", "0");
+		}
+	});
+
 	it("ends the wait at the write timeout for a write a stalled server holds, and the write, taken past its deadline, writes nothing", async () => {
 		const admin = open(paused);
 		const io = open(paused);
@@ -903,6 +979,7 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 			const reply = client.createIf(key, field, value, {
 				next,
 				replayKey: `${key}:w:${next}`,
+				clockSkewMs: SKEW_MS,
 				deadlineMs: now + deadlineAfterMs,
 				expected: at,
 			});
