@@ -30,6 +30,10 @@ const fakeClient = () => ({
 	sScanIterator: () => [],
 	scanIterator: () => [],
 	compareAndDelete: async () => false,
+	readVersioned: async () => null,
+	replaceIfGeneration: async () => "missing" as const,
+	removeIfGeneration: async () => "missing" as const,
+	pExpireGT: async () => {},
 });
 
 /** Runs a module's `federationTokenStore` provider against a plaintext config, with the mode core fills. */
@@ -151,6 +155,10 @@ describe("redisFederationTokenStoreBuilder", () => {
 			sScanIterator: () => [],
 			scanIterator: () => [],
 			compareAndDelete: async () => false,
+			readVersioned: async () => null,
+			replaceIfGeneration: async () => "missing" as const,
+			removeIfGeneration: async () => "missing" as const,
+			pExpireGT: async () => {},
 		};
 		expect(() =>
 			redisFederationTokenStoreBuilder(
@@ -175,6 +183,10 @@ describe("redisFederationTokenStoreBuilder", () => {
 			sScanIterator: () => [],
 			scanIterator: () => [],
 			compareAndDelete: async () => false,
+			readVersioned: async () => null,
+			replaceIfGeneration: async () => "missing" as const,
+			removeIfGeneration: async () => "missing" as const,
+			pExpireGT: async () => {},
 		};
 		// No throw expected
 		const store = redisFederationTokenStoreBuilder(

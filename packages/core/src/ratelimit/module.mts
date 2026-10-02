@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { wholeNumberInRangeFromEnv } from "../config/application.schema.mjs";
 import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import { coreReference } from "../config/references.mjs";
 import { defineModule } from "../modules/index.mjs";
@@ -12,8 +13,8 @@ import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from
 /** A budget as the section writes it; each number read from the string a variable carries. */
 const rateLimitSpecSchema = z
 	.object({
-		limit: z.coerce.number().int().positive(),
-		windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+		limit: wholeNumberInRangeFromEnv(1),
+		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
 	})
 	.strict();
 
@@ -26,7 +27,7 @@ export const memoryRateLimiterSectionSchema = z
 	.object({
 		limits: z.record(z.string(), rateLimitSpecSchema).default({}),
 		defaultLimit: rateLimitSpecSchema.default({ limit: 60, windowSeconds: 60 }),
-		maxBuckets: z.coerce.number().int().positive().default(DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS),
+		maxBuckets: wholeNumberInRangeFromEnv(1).default(DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS),
 	})
 	.strict()
 	.default(() => ({
