@@ -371,7 +371,12 @@ and foundation's over `HttpMfaFactorStore` and the fake Store; so is a
 second factor's, `mfaFactorContract`, which the MFA package's TOTP factor
 and the webauthn package's WebAuthn factor run, and which the kit's own tests
 run over core's doubles; and so is a mail sender's, `mailSenderContract`,
-which the standard package runs over its SMTP sender. A new port
+which the standard package runs over its SMTP sender; and so are the generic
+suites of the conditional-write convention, `conditionalRecordContract` and
+`conditionalSetContract`
+(`packages/test-kit/src/conditionalWrite/conditionalWrite.contract.mts`),
+which a port's binding runs over its conditional members, and which the kit's
+own tests run over reference stores and stores broken one rule at a time. A new port
 should gain a suite: "typed and swappable" means an implementer can prove they
 got it right, not only that they read the interface carefully.
 
@@ -401,7 +406,9 @@ while what they guard is still at the generation the caller read. The types,
 `isStoreGeneration`, `newStoreGeneration` and core's readers of every answer
 are in `packages/core/src/adapters/conditionalWrite.mts`, on core's root
 entry, with `BUNDLED_STORE_WRITE_LIFETIME_MS`, the bundled stores'
-write-lifetime bound. These are the rules every store with conditional members keeps.
+write-lifetime bound. `@o3co/auth-provider-test-kit`'s
+`conditionalRecordContract` and `conditionalSetContract` hold a store to
+these rules. These are the rules every store with conditional members keeps.
 
 **Scopes.** A generation guards one of two things:
 
