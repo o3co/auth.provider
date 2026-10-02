@@ -642,6 +642,13 @@ retention.
 - The adapter's write lifetime W is its request timeout plus the clock skew
   assumed between the provider and the Store. The provider's and the
   Store's clocks agree within that skew.
+- A `deadlineMs` absent or not a whole instant above 0 within the `Date`
+  range is `400`.
+- **No retry.** The adapter never retries a conditional write; it gives up
+  at its deadline, and a timeout or an unexpected status leaves the outcome
+  unknown. The Store, and anything in front of it, answers `421` only for a
+  request it did not apply, because the HTTP client may send it again:
+  Node's `fetch` sends a `POST` once more on a `421`.
 - `200` answers the operation's answer as its type states it:
   - a record's versioned read: `{ "value": <record>, "generation": "<g>" }`,
     or, for an absent record, `{ "value": null, "generation": null }`;
