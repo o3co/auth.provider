@@ -56,6 +56,7 @@ import {
 	loggedText,
 	mfaPost,
 	newFactorId,
+	readTransaction,
 	recordingAuditSink,
 	recoverySet,
 	STEP_UP_REQUIRED,
@@ -547,6 +548,90 @@ describe("a regeneration past the lease's call budget", () => {
 		expect(again.status, JSON.stringify(again.body)).toBe(200);
 		expect((await setsOf(built.factorStore)).map((set) => set.data.generation)).toEqual([2]);
 		expect((await loginWithCode(built, old.record, old.codes[0])).status).toBe(400);
+	});
+});
+
+describe("a retired set left stored", () => {
+	/** Alice after a regeneration whose sweep failed: the set that stood is still stored, below the floor. */
+	async function leftStored(built: Awaited<ReturnType<typeof composed>>) {
+		const signed = await signedIn(built);
+		vi.spyOn(built.factorStore, "remove").mockRejectedValueOnce(new Error("remove failed"));
+		const res = await regenerate(signed.agent);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		vi.restoreAllMocks();
+		const [fresh] = (await setsOf(built.factorStore)).filter((set) => set.data.generation === 1);
+		if (fresh === undefined) throw new Error("no new set");
+		return { ...signed, fresh };
+	}
+
+	/** The recovery sets a login's transaction offers. */
+	async function offered(built: Awaited<ReturnType<typeof composed>>) {
+		const { agent, transaction } = await beginLogin(built.app);
+		const res = await readTransaction(agent, transaction);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		return (res.body.factors as { id: string; kind: string }[])
+			.filter((factor) => factor.kind === "recovery_code")
+			.map((factor) => factor.id);
+	}
+
+	it("is not offered at the next login; the new set is", async () => {
+		const built = await composed();
+		const { old, fresh } = await leftStored(built);
+
+		expect(await offered(built)).toEqual([fresh.record.id]);
+		expect((await setsOf(built.factorStore)).map((set) => set.record.id)).toContain(old.record.id);
+	});
+
+	it("is listed retired, with neither its codes left nor whether they were shown; the new set usable", async () => {
+		const built = await composed();
+		const { agent, old, fresh } = await leftStored(built);
+
+		const res = await agent.get("/session/mfa/factors");
+
+		const sets = (res.body.factors as Record<string, unknown>[]).filter(
+			(factor) => factor.kind === "recovery_code",
+		);
+		expect(sets).toEqual([
+			expect.objectContaining({ id: old.record.id, state: "retired" }),
+			expect.objectContaining({
+				id: fresh.record.id,
+				state: "usable",
+				recovery_codes_remaining: 10,
+				recovery_codes_shown: true,
+			}),
+		]);
+		expect(sets[0]).not.toHaveProperty("recovery_codes_remaining");
+		expect(sets[0]).not.toHaveProperty("recovery_codes_shown");
+	});
+
+	it("is still offered and listed as read when the floor cannot be read — locking nobody out — and its codes are still refused", async () => {
+		const built = await composed();
+		const { agent, old, fresh } = await leftStored(built);
+		vi.spyOn(built.transactionStore, "recoverySetFloor").mockRejectedValue(new Error("down"));
+
+		expect((await offered(built)).sort()).toEqual([old.record.id, fresh.record.id].sort());
+		const listed = await agent.get("/session/mfa/factors");
+		expect(listed.status).toBe(200);
+		expect(
+			(listed.body.factors as { id: string; state: string }[]).find(
+				(factor) => factor.id === old.record.id,
+			)?.state,
+		).toBe("usable");
+		expect((await loginWithCode(built, old.record, old.codes[0])).status).toBe(503);
+		vi.restoreAllMocks();
+		expect((await loginWithCode(built, old.record, old.codes[0])).status).toBe(401);
+	});
+
+	it("reads no floor for a subject holding no recovery set", async () => {
+		const built = await composed();
+		const totp = await seedTotp(built.factorStore);
+		const { agent } = await signInWithTotp(built.app, built.userSessionStore, totp);
+		const floor = vi.spyOn(built.transactionStore, "recoverySetFloor");
+
+		await offered(built);
+		await agent.get("/session/mfa/factors");
+
+		expect(floor).not.toHaveBeenCalled();
 	});
 });
 
