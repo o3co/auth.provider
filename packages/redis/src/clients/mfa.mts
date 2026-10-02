@@ -72,8 +72,9 @@ export interface MfaFactorSetWriteInput {
 	 * millisecond, is at or past this answers `late` and writes nothing, however it got there late: queued
 	 * while the connection was down, sent again after a reconnect, or held by
 	 * a stalled server. `late` says only that this copy wrote nothing: another
-	 * copy may have committed, or may still commit within W on a server whose
-	 * clock lags by the skew, so the adapter rejects it with the outcome
+	 * copy may have committed, or may still commit within W (the write
+	 * timeout plus {@link MfaFactorSetWriteInput.clockSkewMs}) on a server whose
+	 * clock lags by that skew, so the adapter rejects it with the outcome
 	 * unknown.
 	 */
 	readonly deadlineMs: number;
