@@ -1820,6 +1820,15 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `mfat:first-binding:{<subject>}` | string, JSON `{atMs, untilMs}` — the subject's first-binding mark (D12): when a first counting factor was last bound for the subject, or its witness marked. A session or a login continuation authenticated no later than it may hold a stale enrollment witness; the mark does not stand in for the witness, and covers only the window in which one can be stale | its `untilMs` on the server's clock (`SET … PXAT`), which alone judges the mark: one script keeps the later time and the later end of the mark held and the one noted, so a note never moves it back or shortens it. A mark the store cannot read back is an outage, never absent — `DEL` the key, as for the lock keys, and the next first binding notes it again. Losing it together with the subject's `mfaf:` records — one Redis flushed inside its lifetime — reopens that window, so it is kept as `mfat:proof:` is, under the same boot check; it always carries a TTL, so a `volatile-*` policy may evict it, and an evicted mark fails open — the module warns (`mfa_transaction_store_lock_evictable`). At `maxmemory`, `volatile-lru` and `volatile-random` were seen to evict nearly every mark, while `volatile-lfu` and `volatile-ttl` spared them in the same probe; run `noeviction` | same (`LUA_MFA_FIRST_BINDING_*`) |
 
 **When the factor store loses writes.** If your factor store can lose acknowledged writes on failover, a failover may restore a factor that was removed or undo a reset; after such a failover, re-run any operator reset performed in the lost window, and have affected users review their factors.
+Such a failover can also undo an acknowledged update, which brings back a
+spent recovery code or a TOTP step already used, and lose a new enrollment,
+which leaves the account's `mfaEnrolled` true beside no factor. So keep
+authentication paused until it is dealt with, and apply the procedure for
+factors kept in the Store
+([§3](#keeping-mfa-factors-in-the-store), "Failover and restore"): expire
+the MFA state written in the lost window, or have the affected users enroll
+again.
+
 A factor store lost whole — `mfaf:` emptied by a flush or by a restart
 without persistence — is not read as "no factor": a login whose `User`
 says it enrolled is answered `503` ([§3](#3-what-fail-closed-looks-like-on-each-path),
@@ -1834,9 +1843,7 @@ reset the affected subjects — `resetMfaForSubject` with
 `requireEmailProof: true`
 ([§3](#multi-factor-authentication-the-lock-mail-and-notices), "The operator
 reset"), in bulk from the Store's list of users marked enrolled — and tell
-them they will enroll again. Factors kept in the Store
-(`foundationMfaFactorStoreModule`) follow the Store's own procedure:
-[§3](#keeping-mfa-factors-in-the-store), "Failover and restore".
+them they will enroll again.
 
 The MFA transaction store judges when a subject's lock state stops counting
 on the time each caller passes, but what it reclaims — the TTL on
@@ -2229,11 +2236,14 @@ restart.
 
 What a key holds once it no longer seals:
 
-- **A factor's data**, until the factor's next use: every use re-seals it
-  under the first key (`packages/mfa/src/coordinator.mts`), and a factor
-  nobody uses stays where it is. A record's `data` is `v2.<key id>.…`, the
-  key id in base64url (`packages/core/src/sealing/envelope.mts`), so the
-  Store or the `mfaf:` hash shows which key sealed each one.
+- **A factor's data**, until that factor's next successful verification:
+  only that re-seals it under the first key
+  (`packages/mfa/src/coordinator.mts`). Listing the factors, renaming one,
+  or verifying another factor opens its data without rewriting it, so
+  ordinary activity does not move a record, and a factor nobody verifies
+  stays where it is. A record's `data` is `v2.<key id>.…`, the key id in
+  base64url (`packages/core/src/sealing/envelope.mts`), so the Store or the
+  `mfaf:` hash shows which key sealed each one.
 - **Digests**, which sit inside the sealed data and name a key of their own,
   so the data's key id does not show them. A recovery-code set's digests are
   made once, with the key of the day it was made, and never again: the set
@@ -2246,8 +2256,8 @@ What a key holds once it no longer seals:
 1. **Add the new key at the end** of the ring on every replica, and deploy.
    Every replica can now open what the new key seals; none seals with it yet.
 2. **Move it to the first position** on every replica, and deploy. New
-   writes seal under it, and every use moves a factor's data to it. Keep the
-   old key listed.
+   writes seal under it, and each successful verification of a factor moves
+   that factor's data to it. Keep the old key listed.
 3. **Record when the last replica that sealed with the old key stopped**,
    and prevent a rollback to a ring that has the old key first.
 4. **Keep the old key listed until nothing under it is left**: no record's
@@ -2260,7 +2270,7 @@ What a key holds once it no longer seals:
    `mfa_factor_sealed_with_retired_key` (data opened under it) and
    `mfa_digest_made_with_retired_key` (a digest matched under it), each info
    with the `keyId`, once per key id per process. Neither line proves the
-   key unused: a factor nobody uses is never opened.
+   key unused: a factor nobody lists or verifies is never opened.
 5. **Remove it from every replica together**, with the rollback
    configuration. Never reuse an id with different material.
 
