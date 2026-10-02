@@ -1563,6 +1563,7 @@ export {
 	type FederationGrantRefreshFailureKind,
 	type FederationGrantRevocation,
 	type FederationGrantRevokedBy,
+	type FederationGrantRotations,
 	type FederationGrantTokenResult,
 	type FederationGrantUnavailableReason,
 	type FederationGrantUsage,

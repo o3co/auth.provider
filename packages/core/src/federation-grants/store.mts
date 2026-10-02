@@ -162,7 +162,7 @@ export interface FederationGrantStore {
 	 *   stored: a renewal never re-points a grant to another upstream account.
 	 *
 	 * Effects: `active`; authorization fields and credentials replaced whole;
-	 * the ineligibility marker cleared; the intent retired (no double
+	 * the ineligibility marker and `rotations` cleared; the intent retired (no double
 	 * activation); `version` bumped; `lastUsedAt` kept. A refused activation
 	 * changes nothing.
 	 */
@@ -181,7 +181,8 @@ export interface FederationGrantStore {
 	 * access token is never written); the marker is set, or cleared with `null`,
 	 * in the same write; `version` is bumped; the current intent is left alone,
 	 * so a background refresh cannot cost the user a reauthorization in
-	 * progress. Refused: an invalid date, a non-integer version, a non-finite
+	 * progress; `rotations` is kept, since the rotation it counts is the one
+	 * this write records. Refused: an invalid date, a non-integer version, a non-finite
 	 * issued lifetime or `judgedAgainst`, and a credential the store's own clock
 	 * already reclaimed (else the write would land beside a record the caller
 	 * next reads as `absent`).
@@ -246,6 +247,30 @@ export interface FederationGrantStore {
 		 * rounded into a match.
 		 */
 		readonly rowMs: number;
+		readonly now: Date;
+	}): Promise<FederationGrantWrite>;
+
+	/**
+	 * Takes one upstream refresh-token rotation from the grant's rotation
+	 * budget, before the upstream is asked. The grant must be `active`, at the
+	 * caller's `version`, with `now` before `expiresAt`. Then, in one atomic
+	 * step against `rotations`:
+	 *
+	 * - none, or `now` at or after `since + windowMs`: a new window,
+	 *   `{ since: now, count: 1 }`;
+	 * - else, `count` below `limit`: `count + 1`;
+	 * - else the budget is spent, and the write is refused.
+	 *
+	 * No `version` bump, nothing else touched. Kept by `replaceCredentials`,
+	 * reset by `activate`. `limit` and `windowMs` are compared as given.
+	 *
+	 * Optional: a store without it keeps no rotation budget.
+	 */
+	takeRotation?(input: {
+		readonly grantId: string;
+		readonly expectedVersion: number;
+		readonly limit: number;
+		readonly windowMs: number;
 		readonly now: Date;
 	}): Promise<FederationGrantWrite>;
 

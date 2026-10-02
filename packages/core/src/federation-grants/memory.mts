@@ -34,6 +34,7 @@ import {
 	type FederationGrantAuthorization,
 	type FederationGrantCredentials,
 	type FederationGrantIneligibilityMarker,
+	type FederationGrantRotations,
 	hasFederationGrantAuthorization,
 	type PendingFederationGrant,
 } from "./types.mjs";
@@ -485,7 +486,8 @@ export function createMemoryFederationGrantStore(
 				...copyAuthorization(authorization),
 				lastUsedAt: grant.lastUsedAt,
 				// The authorization is replaced, so what was judged against the
-				// old one goes with it.
+				// old one goes with it, and the rotation budget starts afresh
+				// (`rotations` left out).
 				ineligible: undefined,
 				refreshFailure: undefined,
 			};
@@ -602,6 +604,27 @@ export function createMemoryFederationGrantStore(
 				),
 			};
 			return written(entry, next);
+		},
+
+		async takeRotation(input) {
+			const nowMs = instant(input.now, "now");
+			const entry = visible(input.grantId, nowMs);
+			if (entry === undefined) return failed();
+			const grant = entry.grant;
+			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
+			if (!(nowMs < grant.expiresAt.getTime())) return failed();
+			// Checked and counted with no await in between, so takes at once are
+			// each counted. A window bound that is not a number never reopens one.
+			const previous = grant.rotations;
+			let rotations: FederationGrantRotations;
+			if (previous === undefined || nowMs >= previous.since.getTime() + input.windowMs) {
+				rotations = { since: new Date(nowMs), count: 1 };
+			} else if (previous.count < input.limit) {
+				rotations = { since: new Date(previous.since), count: previous.count + 1 };
+			} else {
+				return failed();
+			}
+			return written(entry, { ...grant, rotations });
 		},
 
 		async touch(grantId, at) {
