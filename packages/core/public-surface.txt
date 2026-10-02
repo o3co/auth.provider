@@ -637,6 +637,7 @@
 . TokenBindingSettings type
 . TokenCarrier type
 . TokenEndpointAuthMethod type
+. TokenEndpointRefusalCode type
 . TokenExchangeValidatorResolver type
 . TokenResponse type
 . TokenSettingsLifetimeExceedsConfigurationDetails type
@@ -952,6 +953,7 @@
 . parseScopeTokens value
 . passwordPrimary value
 . passwordSessionAuthentication value
+. policyDenied value
 . policyOutOfBounds value
 . policyUnavailable value
 . producibleAmr value

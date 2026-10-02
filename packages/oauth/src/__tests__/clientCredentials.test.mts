@@ -613,6 +613,14 @@ describe("createClientCredentialsGrant — a wired grant policy is consulted wha
 		});
 	});
 
+	it("answers a deny with the RFC 8628 code slow_down 400 invalid_grant", async () => {
+		const handler = createClientCredentialsGrant(
+			withPolicy(async () => ({ outcome: "deny", error: "slow_down" })),
+		);
+		const { result } = await handler.handle(makeCtx(makeClient()));
+		expect(result).toEqual({ status: 400, error: "invalid_grant" });
+	});
+
 	it("answers a policy that throws 503, the flag off", async () => {
 		const handler = createClientCredentialsGrant(
 			withPolicy(async () => {

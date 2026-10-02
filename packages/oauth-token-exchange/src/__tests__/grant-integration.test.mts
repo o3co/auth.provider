@@ -1295,11 +1295,10 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 	});
 
-	// A policy deny is `400` with the policy's own `error`, as on every grant
-	// (RFC 6749 §5.2). §5.2 makes `error` 1*NQSCHAR (printable ASCII without
-	// `"` and `\`), so a code outside that set — or none — is answered
-	// `invalid_request`, §2.2.2's code for a request refused by policy, and the
-	// policy's code is logged, sanitised, for the operator who wrote it.
+	// A policy deny is `400` with the policy's own `error` when RFC 6749 §5.2
+	// defines it for the token endpoint. Any other code — or none — is answered
+	// `invalid_request`, RFC 8693 §2.2.2's code for a request refused by policy,
+	// and the policy's code is logged, sanitised, for the operator who wrote it.
 	describe("a policy deny", () => {
 		const denyingPolicy = (
 			error: string,
@@ -1353,8 +1352,16 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					error: "invalid_request",
 					errorDescription: "denied by the test policy",
 				});
-				expect(log.of("token_exchange_policy_deny_error_malformed")).toEqual([
-					[{ error: logged }, "token_exchange_policy_deny_error_malformed"],
+				expect(log.of("grant_policy_refusal_rewritten")).toEqual([
+					[
+						{
+							grantType: TOKEN_EXCHANGE_GRANT_TYPE,
+							policy: "test",
+							error: logged,
+							answered: "invalid_request",
+						},
+						"grant_policy_refusal_rewritten",
+					],
 				]);
 			},
 		);
@@ -1363,17 +1370,29 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			const log = warnings();
 			const { grant } = await boot([denying(`"${"x".repeat(300)}`), log.module]);
 			await exchange(grant, await body());
-			expect(log.of("token_exchange_policy_deny_error_malformed")).toEqual([
-				[{ error: `?${"x".repeat(196)}...` }, "token_exchange_policy_deny_error_malformed"],
+			expect(log.of("grant_policy_refusal_rewritten")).toEqual([
+				[
+					{
+						grantType: TOKEN_EXCHANGE_GRANT_TYPE,
+						policy: "test",
+						error: `?${"x".repeat(196)}...`,
+						answered: "invalid_request",
+					},
+					"grant_policy_refusal_rewritten",
+				],
 			]);
 		});
 
 		// A JavaScript policy can return anything as its description; one that
 		// is not a non-empty string is not sent, and nothing is sent in its place.
 		it.each([
-			["a number", { outcome: "deny", error: "access_denied", errorDescription: 42 }],
-			["the empty string", { outcome: "deny", error: "access_denied", errorDescription: "" }],
-			["absent", { outcome: "deny", error: "access_denied" }],
+			["a number", { outcome: "deny", error: "invalid_scope", errorDescription: 42 }],
+			["the empty string", { outcome: "deny", error: "invalid_scope", errorDescription: "" }],
+			["absent", { outcome: "deny", error: "invalid_scope" }],
+			[
+				"outside RFC 6749 §5.2's characters",
+				{ outcome: "deny", error: "invalid_scope", errorDescription: 'say "no"' },
+			],
 		])("answers a deny whose description is %s with no description", async (_label, decision) => {
 			const { grant } = await boot([
 				defineModule({
@@ -1387,11 +1406,26 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				}),
 			]);
 			const { result } = await exchange(grant, await body());
-			expect(result).toStrictEqual({ status: 400, error: "access_denied" });
+			expect(result).toStrictEqual({ status: 400, error: "invalid_scope" });
 		});
 
+		it.each(["access_denied", "authorization_pending", "slow_down"])(
+			"answers a deny carrying %s, a code RFC 6749 §5.2 does not define for the token endpoint, invalid_request",
+			async (code) => {
+				const log = warnings();
+				const { grant } = await boot([denying(code), log.module]);
+				const { result } = await exchange(grant, await body());
+				expect(result).toEqual({
+					status: 400,
+					error: "invalid_request",
+					errorDescription: "denied by the test policy",
+				});
+				expect(log.of("grant_policy_refusal_rewritten")).toHaveLength(1);
+			},
+		);
+
 		// The other grants answer a deny through core's `evaluateGrantPolicy`.
-		it.each(["access_denied", "invalid_request", "invalid_scope"])(
+		it.each(["invalid_request", "invalid_scope", "unauthorized_client"])(
 			"answers a deny carrying %s as core's policy evaluation does: 400, the policy's code and description",
 			async (code) => {
 				const { grant } = await boot([denying(code)]);

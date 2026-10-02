@@ -1528,7 +1528,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(observedUa).toBe("test-agent/1.0");
 		});
 
-		it("denies with policy-provided error", async () => {
+		it("answers a policy's access_denied deny invalid_grant, the token endpoint's code", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			const policy = createStubPolicy(async () => ({
 				outcome: "deny",
@@ -1549,7 +1549,7 @@ describe("createRefreshTokenGrant", () => {
 
 			expect(result.status).toBe(400);
 			if ("error" in result) {
-				expect(result.error).toBe("access_denied");
+				expect(result.error).toBe("invalid_grant");
 				expect(result.errorDescription).toBe("policy");
 			} else {
 				expect.fail("Expected error in result");

@@ -169,7 +169,7 @@ describe("oauthSessionModule", () => {
 			});
 			expect(result).toEqual({
 				status: 400,
-				error: "access_denied",
+				error: "invalid_grant",
 				errorDescription: "browser tokens are closed",
 			});
 			expect(evaluate).toHaveBeenCalledTimes(1);

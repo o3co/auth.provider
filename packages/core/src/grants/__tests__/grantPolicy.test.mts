@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	boundPolicyAudience,
 	evaluateGrantPolicy,
+	policyDenied,
 	policyOutOfBounds,
 	policyUnavailable,
 	readGrantPolicyDecision,
@@ -205,7 +206,28 @@ describe("evaluateGrantPolicy", () => {
 		}
 	});
 
-	it("passes a deny through as 400 with the policy's own error", async () => {
+	it("passes a deny with an RFC 6749 §5.2 code through as 400 with the policy's own error", async () => {
+		const logger = { error: vi.fn(), warn: vi.fn() };
+		const outcome = await evaluateGrantPolicy(
+			hook(async () => ({
+				outcome: "deny",
+				error: "invalid_scope",
+				errorDescription: "not today",
+			})),
+			request,
+			context,
+			["read"],
+			{ logger },
+		);
+		expect(outcome).toEqual({
+			ok: false,
+			result: { status: 400, error: "invalid_scope", errorDescription: "not today" },
+		});
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("answers a deny whose code the token endpoint does not define invalid_grant, logged once at warn", async () => {
+		const logger = { error: vi.fn(), warn: vi.fn() };
 		const outcome = await evaluateGrantPolicy(
 			hook(async () => ({
 				outcome: "deny",
@@ -215,12 +237,41 @@ describe("evaluateGrantPolicy", () => {
 			request,
 			context,
 			["read"],
-			{ logger: undefined },
+			{ logger },
 		);
 		expect(outcome).toEqual({
 			ok: false,
-			result: { status: 400, error: "access_denied", errorDescription: "not today" },
+			result: { status: 400, error: "invalid_grant", errorDescription: "not today" },
 		});
+		expect(logger.warn.mock.calls).toEqual([
+			[
+				{
+					grantType: request.grantType,
+					policy: "stub",
+					error: "access_denied",
+					answered: "invalid_grant",
+				},
+				"grant_policy_refusal_rewritten",
+			],
+		]);
+	});
+
+	it("writes the rewrite line to core's console logger when the caller's logger has no warn", async () => {
+		const spy = vi.spyOn(consoleLogger, "warn").mockImplementation(() => {});
+		try {
+			const outcome = await evaluateGrantPolicy(
+				hook(async () => ({ outcome: "deny", error: "slow_down" })),
+				request,
+				context,
+				["read"],
+				{ logger: { error: vi.fn() } },
+			);
+			expect(outcome).toEqual({ ok: false, result: { status: 400, error: "invalid_grant" } });
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy.mock.calls[0]?.[1]).toBe("grant_policy_refusal_rewritten");
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
 	it("leaves the effective scope alone when the policy says nothing about it", async () => {
@@ -598,5 +649,149 @@ describe("boundPolicyAudience", () => {
 				errorDescription: "policy returned a non-array grantedAudience",
 			},
 		});
+	});
+});
+
+describe("policyDenied", () => {
+	const site = { grantType: "test", policy: "stub" };
+	const deny = (error: unknown, errorDescription?: unknown) =>
+		({
+			outcome: "deny",
+			error,
+			...(errorDescription !== undefined ? { errorDescription } : {}),
+		}) as Extract<GrantPolicyDecision, { outcome: "deny" }>;
+
+	it.each([
+		"invalid_request",
+		"invalid_client",
+		"invalid_grant",
+		"unauthorized_client",
+		"unsupported_grant_type",
+		"invalid_scope",
+	])("answers the RFC 6749 §5.2 code %s as itself, logging nothing", (code) => {
+		const logger = { warn: vi.fn() };
+		expect(policyDenied(deny(code, "no"), logger, site)).toEqual({
+			status: 400,
+			error: code,
+			errorDescription: "no",
+		});
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["access_denied", "access_denied"],
+		["the RFC 8628 polling code authorization_pending", "authorization_pending"],
+		["the RFC 8628 polling code slow_down", "slow_down"],
+		["the RFC 8628 polling code expired_token", "expired_token"],
+		["another extension code", "invalid_target"],
+		["a code that differs only in case", "Invalid_Grant"],
+	])("answers %s invalid_grant, logging the policy's code", (_label, code) => {
+		const logger = { warn: vi.fn() };
+		expect(policyDenied(deny(code), logger, site)).toEqual({ status: 400, error: "invalid_grant" });
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ ...site, error: code, answered: "invalid_grant" },
+			"grant_policy_refusal_rewritten",
+		);
+	});
+
+	it("answers a malformed code invalid_grant, logging it sanitised and never verbatim", () => {
+		const logger = { warn: vi.fn() };
+		const code = `bad"code\n${"x".repeat(300)}`;
+		expect(policyDenied(deny(code), logger, site)).toEqual({ status: 400, error: "invalid_grant" });
+		const [fields] = logger.warn.mock.calls[0] as [Record<string, unknown>];
+		expect(fields.error).not.toContain('"');
+		expect(fields.error).not.toContain("\\");
+		expect((fields.error as string).length).toBeLessThanOrEqual(200);
+	});
+
+	it.each([
+		["a number", 42, "(number)"],
+		["no code", undefined, "(undefined)"],
+		["the empty string", "", ""],
+	])("answers %s as the code invalid_grant, logging its type", (_label, code, logged) => {
+		const logger = { warn: vi.fn() };
+		expect(policyDenied(deny(code), logger, site)).toEqual({ status: 400, error: "invalid_grant" });
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ ...site, error: logged, answered: "invalid_grant" },
+			"grant_policy_refusal_rewritten",
+		);
+	});
+
+	it("answers the caller's own fallback for a code outside the set", () => {
+		const logger = { warn: vi.fn() };
+		expect(policyDenied(deny("access_denied"), logger, site, "invalid_request")).toEqual({
+			status: 400,
+			error: "invalid_request",
+		});
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ ...site, error: "access_denied", answered: "invalid_request" },
+			"grant_policy_refusal_rewritten",
+		);
+	});
+
+	it.each([
+		["a double quote", 'say "no"'],
+		["a backslash", "C:\\path"],
+		["a line break", "line\nbreak"],
+		["a non-ASCII character", "refusé"],
+		["a control character", "bell\u0007"],
+	])("drops a description carrying %s, logging that it did and not the text", (_label, text) => {
+		const logger = { warn: vi.fn() };
+		expect(policyDenied(deny("invalid_scope", text), logger, site)).toEqual({
+			status: 400,
+			error: "invalid_scope",
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ ...site, error: "invalid_scope", answered: "invalid_scope", descriptionDropped: true },
+			"grant_policy_refusal_rewritten",
+		);
+	});
+
+	it("writes one line when it rewrites both the code and the description", () => {
+		const logger = { warn: vi.fn() };
+		expect(policyDenied(deny("access_denied", "nö"), logger, site)).toEqual({
+			status: 400,
+			error: "invalid_grant",
+		});
+		expect(logger.warn.mock.calls).toEqual([
+			[
+				{ ...site, error: "access_denied", answered: "invalid_grant", descriptionDropped: true },
+				"grant_policy_refusal_rewritten",
+			],
+		]);
+	});
+
+	it.each([
+		["the empty string", ""],
+		["a number", 42],
+	])("sends no description for %s, as one that is absent, logging nothing", (_label, text) => {
+		const logger = { warn: vi.fn() };
+		expect(policyDenied(deny("invalid_scope", text), logger, site)).toEqual({
+			status: 400,
+			error: "invalid_scope",
+		});
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("keeps every character RFC 6749 §5.2 allows in a description", () => {
+		const allowed = Array.from({ length: 0x7f - 0x20 }, (_, i) => String.fromCharCode(0x20 + i))
+			.filter((c) => c !== '"' && c !== "\\")
+			.join("");
+		expect(policyDenied(deny("invalid_scope", allowed), { warn: vi.fn() }, site)).toEqual({
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: allowed,
+		});
+	});
+
+	it("names the caller's site on the line when it has one", () => {
+		const logger = { warn: vi.fn() };
+		policyDenied(deny("access_denied"), logger, { ...site, site: "elsewhere" });
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ site: "elsewhere", ...site, error: "access_denied", answered: "invalid_grant" },
+			"grant_policy_refusal_rewritten",
+		);
 	});
 });

@@ -1525,7 +1525,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 });
 
 describe("createTokenExchangeGrant — policy hook", () => {
-	it("answers a policy's access_denied deny 400 access_denied", async () => {
+	it("answers a policy's access_denied deny 400 invalid_request, RFC 8693 §2.2.2's code for a request refused by policy", async () => {
 		const g = buildGrant({ grantPolicy: denyPolicy });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(
@@ -1536,7 +1536,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "access_denied" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
 	it("applies policy hook grantedScope / grantedAudience overrides", async () => {

@@ -17,7 +17,8 @@
 /**
  * The device-code grant consults a wired `grantPolicy` at the poll, after the
  * approval is read and checked, before minting, with core's fail-closed rules:
- * deny is 400 with the policy's error, a throw is 503, a scope or audience past
+ * deny is 400 with the policy's error when RFC 6749 §5.2 defines it for the
+ * token endpoint (`invalid_grant` otherwise), a throw is 503, a scope or audience past
  * the ceiling is 500. `poll` has consumed the approval by then, so each of
  * those spends it.
  */
@@ -31,7 +32,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { createMemoryDeviceCodeStore, createSymmetricKeyStore } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 
@@ -51,6 +52,7 @@ const approvedWith = async (
 	evaluate: GrantPolicyHook["evaluate"],
 	grantedScope: readonly string[] | undefined = ["openid", "profile"],
 	subjectRevocation?: SubjectRevocation,
+	logger?: { warn: Mock<(obj: Record<string, unknown>, msg: string) => void>; error: Mock },
 ) => {
 	const store = createMemoryDeviceCodeStore();
 	await store.create({
@@ -75,6 +77,7 @@ const approvedWith = async (
 		now: () => NOW + 10_000,
 		grantPolicy: { kind: "stub", evaluate },
 		...(subjectRevocation === undefined ? {} : { subjectRevocation }),
+		...(logger === undefined ? {} : { logger }),
 	});
 	const poll = (authenticatedClient: AuthenticatedClient = client) =>
 		grant.handle({
@@ -98,14 +101,45 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 	it("answers a deny 400 with the policy's own error", async () => {
 		const { poll } = await approvedWith(async () => ({
 			outcome: "deny",
-			error: "access_denied",
+			error: "invalid_scope",
 			errorDescription: "devices are closed",
 		}));
 		expect((await poll()).result).toEqual({
 			status: 400,
-			error: "access_denied",
+			error: "invalid_scope",
 			errorDescription: "devices are closed",
 		});
+	});
+
+	it.each(["authorization_pending", "slow_down", "expired_token", "access_denied"])(
+		"answers a deny with the RFC 8628 polling code %s invalid_grant, so the device stops polling a spent approval",
+		async (code) => {
+			const logger = { warn: vi.fn(), error: vi.fn() };
+			const { poll } = await approvedWith(
+				async () => ({ outcome: "deny", error: code, errorDescription: "devices are closed" }),
+				undefined,
+				undefined,
+				logger,
+			);
+			expect((await poll()).result).toEqual({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "devices are closed",
+			});
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.objectContaining({ error: code, answered: "invalid_grant" }),
+				"grant_policy_refusal_rewritten",
+			);
+		},
+	);
+
+	it("drops a deny's description outside RFC 6749 §5.2's characters", async () => {
+		const { poll } = await approvedWith(async () => ({
+			outcome: "deny",
+			error: "invalid_scope",
+			errorDescription: 'devices are "closed"',
+		}));
+		expect((await poll()).result).toEqual({ status: 400, error: "invalid_scope" });
 	});
 
 	it("answers a policy that throws 503", async () => {
@@ -147,8 +181,8 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 	});
 
 	it("has spent the approval after a deny: a re-poll is invalid_grant", async () => {
-		const { poll } = await approvedWith(async () => ({ outcome: "deny", error: "access_denied" }));
-		expect((await poll()).result).toMatchObject({ status: 400, error: "access_denied" });
+		const { poll } = await approvedWith(async () => ({ outcome: "deny", error: "invalid_scope" }));
+		expect((await poll()).result).toMatchObject({ status: 400, error: "invalid_scope" });
 		expect((await poll()).result).toMatchObject({ status: 400, error: "invalid_grant" });
 	});
 

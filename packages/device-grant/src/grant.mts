@@ -44,7 +44,9 @@
  *   `temporarily_unavailable` — none of the four codes is true of it.
  * - A wired `grantPolicy` is consulted on the approval once its client is
  *   checked, before the revocation read and the minting instant, through
- *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error, a
+ *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error when
+ *   RFC 6749 §5.2 defines it for the token endpoint, `invalid_grant`
+ *   otherwise (never an RFC 8628 polling code: the approval is spent), a
  *   throw is 503, a scope or audience past the approval or `allowedAudiences`
  *   is 500. It may only narrow; its audience, within `allowedAudiences`, is
  *   `aud`.
@@ -71,18 +73,19 @@
 
 import type {
 	DeviceCodeStore,
+	EvaluateGrantPolicyOptions,
 	GrantContext,
 	GrantError,
 	GrantHandler,
 	GrantHandlerResult,
 	GrantPolicyHook,
 	KeyStore,
-	Logger,
 	SubjectRevocation,
 } from "@o3co/auth-provider-core";
 import {
 	authTimeAt,
 	boundPolicyAudience,
+	consoleLogger,
 	coveredByRevocationBoundary,
 	DEFAULT_CLOCK_SKEW_MS,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
@@ -127,16 +130,22 @@ const error = (status: number, code: string, description: string): GrantHandlerR
 });
 
 /**
- * Where core writes a policy's outage and invalid-decision lines, object-first
- * at error; a logger with no error channel leaves them to core's console logger.
+ * Where core writes a policy's lines, object-first: its outage and
+ * invalid-decision lines at error, a deny it rewrites at warn. A logger with
+ * no error channel leaves the error lines to core's console logger.
  */
 const policyLoggerOf = (
 	logger: DeviceCodeGrantOptions["logger"],
-): Pick<Logger, "error"> | undefined => {
-	if (typeof logger?.error !== "function") return undefined;
-	const write = logger.error.bind(logger);
+): EvaluateGrantPolicyOptions["logger"] => {
+	if (logger === undefined) return undefined;
+	const writeWarn = logger.warn.bind(logger);
+	const writeError =
+		typeof logger.error === "function"
+			? logger.error.bind(logger)
+			: consoleLogger.error.bind(consoleLogger);
 	return {
-		error: (obj: unknown, msg?: unknown) => write(obj as Record<string, unknown>, String(msg)),
+		error: (obj: unknown, msg?: unknown) => writeError(obj as Record<string, unknown>, String(msg)),
+		warn: (obj: unknown, msg?: unknown) => writeWarn(obj as Record<string, unknown>, String(msg)),
 	};
 };
 
