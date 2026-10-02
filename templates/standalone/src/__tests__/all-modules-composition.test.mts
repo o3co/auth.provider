@@ -111,7 +111,9 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-federation-grants": "federationGrantsModules",
 	"@o3co/auth-provider-federation-oidc": "oidcFederationModule, one per `oidc` section",
 	"@o3co/auth-provider-foundation":
-		"the HTTP user repository adapter (its MFA factor store module is composed by tools/composition)",
+		"the HTTP user repository adapter; foundationMfaFactorStoreModule under MFA_MODE with adapters.mfaFactorStore = store (tools/composition boots it)",
+	"@o3co/auth-provider-mfa":
+		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule) and mfaResetModule, under MFA_MODE (mfa-switch.test.mts)",
 	"@o3co/auth-provider-oauth":
 		"oauthModule, oauthSessionModule, oauthAuthorizationModule, subjectRevocationServiceModule",
 	"@o3co/auth-provider-redis": "the Redis stores (all-modules-composition.multi.test.mts)",
@@ -133,8 +135,6 @@ const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-dpop": "dpopModule",
 	"@o3co/auth-provider-federation-apple": "appleFederationModule",
 	"@o3co/auth-provider-federation-github": "githubFederationModule",
-	"@o3co/auth-provider-mfa":
-		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule); not in the template until the MFA ADR's build-order step 20",
 	"@o3co/auth-provider-mtls": "mtlsModule",
 	"@o3co/auth-provider-oauth-token-exchange": "tokenExchangeModule",
 	"@o3co/auth-provider-test-kit": "no module: contract suites and fakes, for tests",

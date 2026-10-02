@@ -68,9 +68,7 @@ import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import {
-	expectedSessionRequirements,
 	type OwnLayers,
-	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -78,7 +76,6 @@ import {
 	type Switches,
 } from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
-import { requireMfaSecondFactorAuthority } from "#/secondFactorAuthority.mjs";
 
 export const ISSUER = "https://auth.test";
 const OIDC_ISSUER = "https://idp.test";
@@ -213,8 +210,8 @@ export function ownFiles(): string[] {
  * the modules by — and `reads`, what a module added to the composition reads
  * when it is built — from the composition's own files under `env` over core's
  * `reference.conf`. What the composition expects of session admission is
- * derived from it (`expectedSessionRequirements`), after `config` adjusts it
- * as an operator's layer would.
+ * derived from it (`resolveForBoot`), after `config` adjusts it as an
+ * operator's layer would.
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
@@ -610,6 +607,11 @@ export interface ComposeOptions {
 	 * handed, as resolved.
 	 */
 	readonly config?: (config: Switches) => Switches;
+	/**
+	 * Adjust phase one's switches alone, after `config`: what only phase one
+	 * reads, such as the Store transport settings a hand-built root passes.
+	 */
+	readonly switches?: (switches: Switches) => Switches;
 	readonly order?: ModuleOrder;
 	readonly outage?: { readonly slot: string; readonly outage: Outage };
 	/** Keep the shipped Redis refresh-token family store (the `multi` boot). */
@@ -674,15 +676,13 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 		{ env },
 	);
 	const switches = resolveConfig(env, options.reads, own);
-	const config = adjust(switches);
-	// `mfa.mode`, read once, as `app.mts` reads it.
-	const mfaMode = readMfaMode(config);
+	const config = options.switches ? options.switches(adjust(switches)) : adjust(switches);
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
 	// reference.conf, which createApp parses once.
-	const resolved = adjust(resolveForBoot(own, modules, expectedSessionRequirements(config)));
+	const resolved = adjust(resolveForBoot(own, modules, config));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
@@ -695,8 +695,6 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 			...options.extraOverrides?.(config),
 		} as never,
 	});
-	// As app.mts does, before anything listens.
-	await requireMfaSecondFactorAuthority(mfaMode, handle);
 	const parsed = handle.components.config;
 	if (parsed === undefined) throw new Error("createApp booted without the parsed configuration");
 	const httpSettings = handle.components.httpSettings;

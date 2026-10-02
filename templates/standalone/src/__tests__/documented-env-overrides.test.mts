@@ -20,7 +20,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
-	BootError,
 	createApp,
 	type Module,
 	moduleReferences,
@@ -32,7 +31,6 @@ import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import {
 	expectedSessionRequirements,
-	readMfaMode,
 	readOwnLayers,
 	readSwitches,
 	resolveConfigPaths,
@@ -210,10 +208,40 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX: "fg:",
 
 	// --- multi-factor authentication ----------------------------------
-	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
-	// module reads and the template declares `mfa` from (ADR
-	// 2026-09-28-session-admission).
+	// The template's switch, `mfaMode`: off here, so the parse below
+	// layers nothing of MFA. The rest is what the switch installs — the MFA
+	// package's settings, foundation's Store-backed factor store's — and is
+	// covered by the substitutions it brings (`liveSubstitutions`).
 	MFA_MODE: "off",
+	MFA_ENCRYPTION_KEY: "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+	MFA_PAGE_URL: "/mfa",
+	MFA_STORE_TIMEOUT_MS: "5000",
+	MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF: "when-mail",
+	MFA_TOTP_FACTOR_ENABLED: "true",
+	MFA_TOTP_FACTOR_ALGORITHM: "SHA1",
+	MFA_TOTP_FACTOR_DIGITS: "6",
+	MFA_TOTP_FACTOR_PERIOD: "30",
+	MFA_TOTP_FACTOR_WINDOW: "1",
+	MFA_TOTP_FACTOR_ISSUER: "auth.test",
+	MFA_RECOVERY_CODE_FACTOR_ENABLED: "true",
+	MFA_RECOVERY_CODE_FACTOR_COUNT: "10",
+	MFA_EMAIL_FACTOR_ENABLED: "false",
+	MFA_EMAIL_FACTOR_ADDS_MFA: "false",
+	MFA_EMAIL_FACTOR_CODE_TTL_SECONDS: "600",
+	FOUNDATION_MFA_FACTOR_STORE_LIST_URL: "https://users.example.com/mfa/factors/list",
+	FOUNDATION_MFA_FACTOR_STORE_CREATE_URL: "https://users.example.com/mfa/factors/create",
+	FOUNDATION_MFA_FACTOR_STORE_UPDATE_URL: "https://users.example.com/mfa/factors/update",
+	FOUNDATION_MFA_FACTOR_STORE_DELETE_URL: "https://users.example.com/mfa/factors/delete",
+
+	// --- mail ---------------------------------------------------------
+	// The SMTP sender's section, which the template installs outside
+	// development and builds only where something sends.
+	STANDARD_SMTP_MAIL_SENDER_HOST: "smtp.example.com",
+	STANDARD_SMTP_MAIL_SENDER_PORT: "587",
+	STANDARD_SMTP_MAIL_SENDER_SECURE: "starttls",
+	STANDARD_SMTP_MAIL_SENDER_USER: "mailer",
+	STANDARD_SMTP_MAIL_SENDER_PASSWORD: "mailer-password",
+	STANDARD_SMTP_MAIL_SENDER_FROM: "auth@example.com",
 	// …and the Redis stores' key namespaces, which the Redis package's two MFA
 	// modules read.
 	REDIS_MFA_FACTOR_STORE_KEY_PREFIX: "tenant-a:mfaf:",
@@ -401,6 +429,12 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
 		"removed: the Redis code repository uses the shared redis-clients connection; only captured — set at all, it fails boot",
 	CLIENT_CODE_PASSWORD:
 		"removed: the Redis code repository uses the shared redis-clients connection; only captured — set at all, it fails boot",
+	ENDPOINTS_MFA_URL:
+		"renamed MFA_PAGE_URL, and only captured — set alone, or to another value, it fails boot where MFA is installed",
+	MFA_TOTP_ENABLED:
+		"renamed MFA_TOTP_FACTOR_ENABLED, and only captured — set alone, or to another value, it fails boot where MFA is installed",
+	MFA_TOTP_ISSUER:
+		"renamed MFA_TOTP_FACTOR_ISSUER, and only captured — set alone, or to another value, it fails boot where MFA is installed",
 };
 
 /**
@@ -501,11 +535,7 @@ async function bootParsed(
 	const handle = await createApp({
 		modules: [...modules],
 		bootstrapComponents: {
-			config: resolveForBoot(
-				own,
-				buildModules(switches, { environment: configEnv }),
-				expectedSessionRequirements(switches),
-			),
+			config: resolveForBoot(own, buildModules(switches, { environment: configEnv }), switches),
 			pathResolver: (s: string) => s,
 			...FEDERATION_STORES,
 		} as never,
@@ -586,11 +616,18 @@ function documentedInReadme(path: string = readmePath): Set<string> {
 /**
  * The substitutions of the template's own layers, and of the `reference.conf`
  * of every package the template loads a module from under the documented
- * environment (core's among them).
+ * environment in production (core's among them) — and under it with MFA
+ * installed, its factors in the Store, which brings the MFA package's and
+ * foundation's.
  */
 function liveSubstitutions(): Set<string> {
 	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
-	const references = moduleReferences(buildModules(readShippedSwitches(DOCUMENTED_ENV)));
+	const references = [
+		DOCUMENTED_ENV,
+		{ ...DOCUMENTED_ENV, MFA_MODE: "required", ADAPTERS_MFA_FACTOR_STORE: "store" },
+	].flatMap((env) =>
+		moduleReferences(buildModules(readShippedSwitches(env), { environment: "production" })),
+	);
 	return new Set([
 		...references.flatMap((reference) => [...substitutionsIn(fileURLToPath(reference))]),
 		...substitutionsIn(fileURLToPath(templateReference())),
@@ -658,9 +695,9 @@ describe("the shipped config boots with every documented override supplied as a 
 			maxConcurrentFetches: 4,
 			cacheMaxAgeMs: 60000,
 		});
-		// ADR 2026-09-25-multi-factor-authentication. The mode is read before
-		// boot, by the template, and handed to no module here.
-		expect(readMfaMode(readShippedSwitches(DOCUMENTED_ENV))).toBe("off");
+		// The MFA switch is read before boot, by the template; off, it hands
+		// boot no `mfa` section.
+		expect(readShippedSwitches(DOCUMENTED_ENV).mfaMode).toBe("off");
 		expect(config).not.toHaveProperty("mfa");
 		expect(config).not.toHaveProperty("endpoints.mfa");
 		expect(readShippedSwitches(DOCUMENTED_ENV).adapters).toMatchObject({
@@ -782,7 +819,7 @@ describe("the shipped config boots with every documented override supplied as a 
 	});
 
 	it("reads MFA_MODE=off before boot, where the shipped configuration expects no session requirement", async () => {
-		expect(readMfaMode(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }))).toBe("off");
+		expect(readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "off" }).mfaMode).toBe("off");
 		const parsed = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: "off" });
 		expect(parsed.core?.sessionRequirements).toEqual({ expected: [] });
 	});
@@ -907,25 +944,19 @@ describe("the shipped config boots with every documented override supplied as a 
 			});
 		}
 
-		it("refuses MFA_MODE that is none of the three before boot, naming mfa.mode", async () => {
+		it("refuses MFA_MODE that is none of the three before boot, naming mfaMode", async () => {
 			const env = { ...DOCUMENTED_ENV, MFA_MODE: "on" };
-			expect(() => expectedSessionRequirements(readShippedSwitches(env))).toThrow(
-				new RangeError('mfa.mode must be "off", "optional" or "required"'),
-			);
-			await expect(bootParsed(env)).rejects.toThrow(/mfa\.mode/);
+			expect(() => readShippedSwitches(env)).toThrow(RangeError);
+			await expect(bootParsed(env)).rejects.toThrow(/mfaMode/);
 		});
 
 		for (const mode of ["optional", "required"] as const) {
-			it(`refuses MFA_MODE=${mode} at boot, the template installing no MFA module: session-requirement-missing, naming mfa`, async () => {
-				const err = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: mode }).then(
-					() => undefined,
-					(caught: unknown) => caught,
-				);
-				expect(err).toBeInstanceOf(BootError);
-				expect((err as BootError).reason).toBe("session-requirement-missing");
-				expect((err as BootError).details).toMatchObject({
-					configKey: "core.sessionRequirements.expected",
-					missing: ["mfa"],
+			it(`reads MFA_MODE=${mode} as the switch that installs MFA, expecting mfa`, () => {
+				const switches = readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: mode });
+				expect(switches.mfaMode).toBe(mode);
+				expect(expectedSessionRequirements(switches)).toEqual({
+					expected: ["mfa"],
+					secondFactorAuthority: "mfa",
 				});
 			});
 		}

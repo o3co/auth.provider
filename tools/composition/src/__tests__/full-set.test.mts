@@ -31,11 +31,10 @@
  * request must receive. `full-set.redis.test.mts` boots the same set on real
  * Redis under `core.deployment.mode = "multi"`.
  *
- * The MFA package is installed as a deployment installs it (`mfaModules` over
- * the MFA stores, `mfa.mode = "optional"`, a key of the deployment's own), so
- * the `mfa` requirement registers beside the fixture's two (ADR
- * 2026-09-28-session-admission). The step-up flows they could start are the
- * consumers' and the MFA package's suites, not this one.
+ * MFA is switched on as a deployment switches it on, through the template's
+ * `MFA_MODE` (`optional`, a key of the deployment's own), so the `mfa`
+ * requirement registers beside the fixture's two. The step-up flows they
+ * could start are the consumers' and the MFA package's suites, not this one.
  *
  * `it.fails` marks a contract the full set breaks today; its entry names the
  * defect, and the fix that mends it turns the case red. An outage case pins
@@ -67,7 +66,6 @@ import {
 	ACCESS_TOKEN_TYPE,
 	TOKEN_EXCHANGE_GRANT_TYPE,
 } from "@o3co/auth-provider-oauth-token-exchange";
-import { loginCompletionModule } from "@o3co/auth-provider-session";
 import {
 	ALICE,
 	AS_LISTED,
@@ -172,15 +170,6 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-dpop": ["dpop"],
 	"@o3co/auth-provider-federation-apple": ["federation-apple"],
 	"@o3co/auth-provider-federation-github": ["federation-github"],
-	// mfaModules, over core's memory MFA stores.
-	"@o3co/auth-provider-mfa": [
-		"mfa-totp-factor",
-		"mfa-recovery-code-factor",
-		"mfa-email-factor",
-		"mfa",
-		"core-mfa-factor-store-memory",
-		"core-mfa-transaction-store-memory",
-	],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
 	// No module: contract suites and fakes, for tests.
@@ -194,13 +183,6 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 		"core-default-challenge-ceremony",
 	],
 };
-
-/**
- * The modules a composition loads from a package the template composes but
- * does not load: the session package's login completion, which the MFA
- * module requires to finish a login.
- */
-const FROM_TEMPLATE_PACKAGES = [loginCompletionModule.name];
 
 /** The modules a deployment writes itself, beside the packages' (see the fixture). */
 const DEPLOYMENT_MODULES = [
@@ -243,11 +225,7 @@ describe("what the full set covers", () => {
 	it("adds every package the template does not compose, and nothing the template already does", async () => {
 		const { modules } = await boot();
 		const names = modules.map((m) => m.name);
-		const added = [
-			...Object.values(ADDED).flat(),
-			...FROM_TEMPLATE_PACKAGES,
-			...DEPLOYMENT_MODULES,
-		];
+		const added = [...Object.values(ADDED).flat(), ...DEPLOYMENT_MODULES];
 		for (const name of added) expect(names, name).toContain(name);
 		expect(new Set(names).size, "a module listed twice").toBe(names.length);
 		// The template's list, then the added modules: nothing between.
@@ -391,7 +369,6 @@ describe("the full set boots together", () => {
 			[
 				"device-grant",
 				"dpop",
-				"mfa",
 				"mtls",
 				"oauth-token-exchange",
 				"webauthn",
@@ -759,17 +736,10 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		});
 	});
 
-	it("refuse the boot under mfa.mode = required without the MFA package: the template declares mfa from the mode, and nothing registers it", async () => {
-		const err = await refused({
-			features: { mfa: false },
-			adjust: (config) => ({ ...config, mfa: { ...mfaOf(config), mode: "required" } }),
-		});
-		expect(err.reason).toBe("session-requirement-missing");
-		expect(err.details).toMatchObject({
-			configKey: "core.sessionRequirements.expected",
-			missing: ["mfa"],
-			registered: [...FIXTURE_REQUIREMENTS],
-		});
+	it("refuse, before boot, an mfa.mode = required the configuration writes while MFA_MODE leaves MFA off: the template installs MFA from its switch alone", async () => {
+		await expect(
+			composeFullSet({ features: { mfa: false }, operatorHocon: 'mfa.mode = "required"\n' }),
+		).rejects.toThrow(/mfaMode/);
 	});
 });
 
@@ -1243,8 +1213,8 @@ describe("discovery with every package on", () => {
 		],
 		["apple", { route: ["get", "/session/oauth/federation/apple"] }],
 		["github", { route: ["get", "/session/oauth/federation/github"] }],
-		// MFA contributes nothing to discovery: its reach meets no acr entry the template ships.
-		["mfa", {}],
+		// The template's urn:o3co:acr:mfa entry, which only MFA's reach meets.
+		["mfa", { fields: ["acr_values_supported"] }],
 	];
 
 	it.each(TOGGLES)(

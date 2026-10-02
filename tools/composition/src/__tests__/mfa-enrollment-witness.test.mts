@@ -34,7 +34,7 @@ import type {
 	SupportsMfaEnrollmentWitness,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { type MfaReset, mfaResetModule } from "@o3co/auth-provider-mfa";
+import type { MfaReset } from "@o3co/auth-provider-mfa";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import type { Express } from "express";
@@ -348,8 +348,9 @@ describe.each(["store", "memory"] as const)(
 	"the witness at the operator reset, the factors kept in %s",
 	(factors) => {
 		it("sends {enrolled: false} to the Store last, after every record was removed", async () => {
-			// The full set installs core's subject revocation service: the reset ends the sessions through it.
-			const set = await boot(factors, { modules: [mfaResetModule] });
+			// The template installs the operator reset with MFA, and the subject
+			// revocation service it ends the sessions through.
+			const set = await boot(factors);
 			const { done } = await firstBinding(set.app);
 			expect(done.status, JSON.stringify(done.body)).toBe(200);
 			expect(store.enrolled(ALICE.id)).toBe(true);
