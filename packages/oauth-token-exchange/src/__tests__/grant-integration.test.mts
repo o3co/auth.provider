@@ -716,6 +716,55 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				},
 			);
 
+			it.each(["subject", "actor"] as const)(
+				"reads the %s's familyId and sid once each, for the check and the issued token alike",
+				async (role) => {
+					const reads = { familyId: 0, sid: 0 };
+					const answer = { sub: "user-1", claims: { sub: "user-1" } };
+					for (const field of ["familyId", "sid"] as const) {
+						Object.defineProperty(answer, field, {
+							enumerable: true,
+							get: () => {
+								reads[field] += 1;
+								return field === "familyId" ? "fam-1" : "sid-1";
+							},
+						});
+					}
+					const counting = defineModule({
+						name: "test:counting-validator",
+						contributes: {
+							tokenExchangeValidators: {
+								[REPORTING_TOKEN_TYPE]: () => ({ validate: async () => answer as never }),
+							},
+						},
+					});
+					const { grant, components } = await boot([
+						memoryRefreshTokenFamilyStoreModule,
+						defaultRefreshTokenFamilyRevocationModule,
+						counting,
+					]);
+					await liveFamily(components, "fam-1");
+					const { result } = await exchange(
+						grant,
+						role === "subject"
+							? { subject_token: "opaque-subject-token", subject_token_type: REPORTING_TOKEN_TYPE }
+							: {
+									subject_token: await signSelfIssuedAccessToken({}),
+									subject_token_type: ACCESS_TOKEN_TYPE,
+									actor_token: "opaque-actor-token",
+									actor_token_type: REPORTING_TOKEN_TYPE,
+								},
+					);
+					expect(result.status).toBe(200);
+					expect(reads).toEqual({ familyId: 1, sid: 1 });
+					if (role === "subject" && "tokens" in result) {
+						const claims = decodeJwt(result.tokens.access_token);
+						expect(claims.family_id).toBe("fam-1");
+						expect(claims.liveness_sid).toBe("sid-1");
+					}
+				},
+			);
+
 			it("still reads an empty string as unset, and a non-empty one as the value", async () => {
 				const { grant } = await boot([reporting({ familyId: "", sid: "" })]);
 				const { result } = await exchange(grant, {

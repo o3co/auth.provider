@@ -94,6 +94,7 @@ export async function validateSubject(
 ): Promise<
 	| {
 			readonly subjectValidated: ValidatedToken;
+			readonly subjectBindings: ReportedBindings;
 			readonly issuedConfirmation: Confirmation | undefined;
 	  }
 	| GrantHandlerResult
@@ -117,9 +118,9 @@ export async function validateSubject(
 			},
 		};
 	}
-	if (!subjectValidated || !namesBindingsAsStrings(subjectValidated)) {
-		return invalidRequest("subject_token validation failed");
-	}
+	if (!subjectValidated) return invalidRequest("subject_token validation failed");
+	const subjectBindings = readBindings(subjectValidated);
+	if (subjectBindings === undefined) return invalidRequest("subject_token validation failed");
 
 	// Sender constraint (RFC 9449 §5, RFC 8705 §4) through core's
 	// `matchConfirmation`, as the refresh grant does. Without it a stolen DPoP- or
@@ -164,7 +165,7 @@ export async function validateSubject(
 	// yields a bound token, which cannot help an attacker already holding a bearer
 	// token.
 	const issuedConfirmation = ownedConfirmation(ctx.tokenBinding);
-	return { subjectValidated, issuedConfirmation };
+	return { subjectValidated, subjectBindings, issuedConfirmation };
 }
 
 /** The actor token, when one was sent, validated and held to the sender constraint; else `null`. */
@@ -173,8 +174,16 @@ export async function validateActor(
 	ctx: GrantContext,
 	{ actorToken }: Pick<TokenRequest, "actorToken">,
 	actorValidator: ExchangeTokenValidator | null | undefined,
-): Promise<{ readonly actorValidated: ValidatedToken | null } | GrantHandlerResult> {
+): Promise<
+	| {
+			readonly actorValidated: ValidatedToken | null;
+			/** The actor's bindings; `null` with no actor. */
+			readonly actorBindings: ReportedBindings | null;
+	  }
+	| GrantHandlerResult
+> {
 	let actorValidated: ValidatedToken | null = null;
+	let actorBindings: ReportedBindings | null = null;
 	if (actorToken !== null && actorValidator) {
 		try {
 			actorValidated = await actorValidator.validate(actorToken, { role: "actor" });
@@ -191,9 +200,10 @@ export async function validateActor(
 				},
 			};
 		}
-		if (!actorValidated || !namesBindingsAsStrings(actorValidated)) {
-			return invalidRequest("actor_token validation failed");
-		}
+		if (!actorValidated) return invalidRequest("actor_token validation failed");
+		const read = readBindings(actorValidated);
+		if (read === undefined) return invalidRequest("actor_token validation failed");
+		actorBindings = read;
 	}
 
 	// The actor is held to the same sender-constraint rule: `buildActClaim` records
@@ -225,29 +235,30 @@ export async function validateActor(
 			);
 		}
 	}
-	return { actorValidated };
+	return { actorValidated, actorBindings };
 }
 
 /**
- * Whether a validator's answer names its family and its session as the
- * contract has them: each absent or a string. Any other value is no answer:
- * the stores key families and sessions by string, and introspection and the
- * session rule read any other claim as none, so the check and the minted
- * token would both miss it.
+ * The family and the session a validator reports, each read once off its
+ * answer: a non-empty string, or `undefined` for unset (an empty string
+ * included, so no token inherits a `family_id: ""` that no revocation could
+ * reach). The family rule, the session rule and issuance read these, never
+ * the answer again.
  */
-function namesBindingsAsStrings(validated: ValidatedToken): boolean {
+export interface ReportedBindings {
+	readonly familyId: string | undefined;
+	readonly sid: string | undefined;
+}
+
+/**
+ * The answer's bindings, or `undefined` when either is present but not a
+ * string. That is no answer: the stores key families and sessions by string,
+ * and introspection and the session rule read any other claim as none, so the
+ * check and the minted token would both miss it.
+ */
+function readBindings(validated: ValidatedToken): ReportedBindings | undefined {
 	const { familyId, sid } = validated;
-	return (
-		(familyId === undefined || typeof familyId === "string") &&
-		(sid === undefined || typeof sid === "string")
-	);
-}
-
-/**
- * The family a validator reports, or `undefined`. An empty `familyId` is absent
- * for the family rule and issuance alike, so no token inherits a `family_id: ""`
- * that no revocation could reach.
- */
-export function reportedFamily(validated: ValidatedToken): string | undefined {
-	return validated.familyId ? validated.familyId : undefined;
+	if (familyId !== undefined && typeof familyId !== "string") return undefined;
+	if (sid !== undefined && typeof sid !== "string") return undefined;
+	return { familyId: familyId || undefined, sid: sid || undefined };
 }
