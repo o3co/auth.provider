@@ -543,15 +543,13 @@ interface WriteGuard {
 }
 
 /**
- * The guard for the writes of a refresh of `grant`, read once. Throws when
- * the store's answer cannot guard one: an id other than the one the lock is
- * taken for, or a version that is not a safe integer, which no store's guard
- * matches. No refresh starts then: its rotated refresh token would be lost.
+ * The guard for the writes of a refresh of `grant`, whose id is `grantId`:
+ * its version, read once. Throws when that cannot guard a write: a version
+ * that is not a safe integer, which no store's guard matches. No refresh
+ * starts then: its rotated refresh token would be lost.
  */
 function writeGuard(grant: AuthorizedFederationGrant, grantId: string): WriteGuard {
-	const id: unknown = grant.id;
 	const version: unknown = grant.version;
-	if (id !== grantId) throw new TypeError("the store answered a grant under another id");
 	if (typeof version !== "number" || !Number.isSafeInteger(version)) {
 		throw new TypeError("the store answered a grant version that is not a safe integer");
 	}
@@ -599,6 +597,15 @@ async function evaluate(
 	) {
 		return { kind: "deny", denial: { code: "grant_not_found" } };
 	}
+	// The record answered is the one asked for, or nothing of it is used: no
+	// token is served, and nothing written, from another grant's record.
+	try {
+		if (opened.grant.id !== request.grantId) {
+			throw new TypeError("the store answered a grant under another id");
+		}
+	} catch (error) {
+		return { kind: "deny", denial: unavailable("storage", report(deps, request, "open", error)) };
+	}
 	const grant = opened.grant;
 
 	// What is stored as over is reported before anything that could be an outage.
@@ -638,7 +645,7 @@ async function evaluate(
 		// Made durable on the first touch. A write that FAILS is a revocation
 		// outage and surfaces as one; one that changes nothing means somebody
 		// else got there, and the answer stands.
-		const revoked = await settle(() => deps.store.revoke(grant.id, "backstop", now));
+		const revoked = await settle(() => deps.store.revoke(request.grantId, "backstop", now));
 		if (!revoked.ok) {
 			return {
 				kind: "deny",
@@ -927,7 +934,7 @@ function conclude(
 			deps,
 			request,
 			within(
-				settle(() => deps.store.touch(evaluation.grant.id, deps.now())),
+				settle(() => deps.store.touch(request.grantId, deps.now())),
 				SIDE_EFFECT_WAIT_MS,
 			).then((touched) => {
 				if (touched === "elapsed") report(deps, request, "touch", NOT_ANSWERED);

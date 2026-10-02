@@ -1429,6 +1429,29 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			expect(await retrieve()).toMatchObject({ ok: true, refreshed: false });
 			expect(h.refresh).not.toHaveBeenCalled();
 		});
+
+		const idCases: Array<[string, (grant: AuthorizedFederationGrant) => object]> = [
+			["an id that is not the one asked for", (grant) => ({ ...grant, id: "g-2" })],
+			["an id whose read throws", throwing("id")],
+		];
+		for (const [what, edit] of idCases) {
+			it(`serves no stored token for ${what}, and records no use of either grant`, async () => {
+				await h.seed();
+				const touch = vi.spyOn(h.store, "touch");
+				const reported: string[] = [];
+				h.deps.report = (failure) => reported.push(failure.during);
+				answeredWith(edit);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				await Promise.all(h.background);
+				expect(touch).not.toHaveBeenCalled();
+				expect(h.refresh).not.toHaveBeenCalled();
+				expect(reported).toContain("open");
+			});
+		}
 	});
 
 	it("never repeats a secret the upstream echoes as its error code: only codes this provider knows are repeated", async () => {
