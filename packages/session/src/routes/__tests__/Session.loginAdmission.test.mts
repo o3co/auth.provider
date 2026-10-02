@@ -449,6 +449,63 @@ describe("POST /session/login — a user whose field the login needs is not plai
 });
 
 // ---------------------------------------------------------------------------
+// The User is read once
+// ---------------------------------------------------------------------------
+
+/** `fields` as a class instance's prototype getters, each counting its reads by name. */
+function countingUser(fields: Record<string, unknown>): {
+	user: Record<string, unknown>;
+	reads: Map<string, number>;
+} {
+	const reads = new Map<string, number>();
+	class Entity {}
+	for (const [name, value] of Object.entries(fields)) {
+		Object.defineProperty(Entity.prototype, name, {
+			get() {
+				reads.set(name, (reads.get(name) ?? 0) + 1);
+				return value;
+			},
+			configurable: true,
+		});
+	}
+	return { user: new Entity() as Record<string, unknown>, reads };
+}
+
+describe("POST /session/login — the User the Store answers is read once", () => {
+	it("runs each of a getter-backed User's getters exactly once, and the session's subject and claims are the snapshot's", async () => {
+		const { requirement, asked } = fixture(() => "establish");
+		const { user, reads } = countingUser({ ...ALICE, emailVerified: true, mfaEnrolled: false });
+		const { app, userSessionStore } = setup({ requirements: [requirement], user });
+
+		const res = await login(app);
+
+		expect(res.status).toBe(200);
+		for (const field of [
+			"id",
+			"username",
+			"email",
+			"emailVerified",
+			"name",
+			"groups",
+			"mfaEnrolled",
+		]) {
+			expect(reads.get(field), field).toBe(1);
+		}
+		expect(reads.has("locale")).toBe(false);
+		expect(asked[0]).toMatchObject({
+			subject: "u-1",
+			claims: {
+				email: "alice@example.com",
+				emailVerified: true,
+				name: "Alice",
+				groups: ["staff"],
+			},
+		});
+		expect(userSessionStore.create).toHaveBeenCalledTimes(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // unavailable
 // ---------------------------------------------------------------------------
 
