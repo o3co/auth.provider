@@ -33,18 +33,37 @@
  * version; a successful update reaching no other record — the same id under
  * another subject, the subject's other factors; removal of one record and of
  * a subject's records, idempotent and no further; and a removed record taken
- * again. Every record id is 22 base64url characters, as the provider makes
- * one. Each case builds a fresh harness and closes it.
+ * again; and, with `unreachable`, every member rejecting out of reach. Every
+ * record id is 22 base64url characters, as the provider makes one. Each case
+ * builds a fresh harness and closes it; the concurrent ones split their
+ * writers across `store` and `second`.
+ *
+ * The harness is the factor set's binding's too
+ * (`mfaFactorStoreConditionalContract`): one `build` serves both suites.
  */
 
 import assert from "node:assert/strict";
 import type { MfaFactorRecord, MfaFactorStore } from "@o3co/auth-provider-core";
 import type { ContractCase } from "@o3co/auth-provider-core/testing";
 
-/** What one case runs over: a fresh, empty store. */
+/** What one case runs over: a fresh, empty store, and what else the backend gives. */
 export interface MfaFactorStoreHarness {
 	/** The store under test, holding nothing. */
 	readonly store: MfaFactorStore;
+	/**
+	 * The same backend through a second instance: another connection, pool or
+	 * adapter. Absent: `store` again, which is right for an in-process store
+	 * and gives no cross-process proof.
+	 */
+	readonly second?: MfaFactorStore;
+	/** A store over the same backend that cannot reach it. Needs `supports.unreachable`. */
+	readonly unreachable?: () => MfaFactorStore;
+	/**
+	 * Makes `subject`'s set, when it is the tombstone of a set emptied by any membership write (its last removal or a reset), expire
+	 * now, by the backend's own clock; a set holding a record has no expiry.
+	 * Needs `supports.forceExpire`; only the factor set's binding uses it.
+	 */
+	readonly forceExpire?: (subject: string) => Promise<void>;
 	/** Releases what the store runs on once the case ends. */
 	readonly close?: () => Promise<void>;
 }
@@ -52,6 +71,49 @@ export interface MfaFactorStoreHarness {
 export interface MfaFactorStoreContractInput {
 	/** Builds a fresh harness for each case. */
 	readonly build: () => Promise<MfaFactorStoreHarness>;
+	/**
+	 * The hooks every harness `build` answers, declared up front so the case
+	 * list is fixed when the suite is built. A declared hook a harness lacks
+	 * fails its case; an undeclared one runs no case, and one passing case
+	 * names what did not run.
+	 */
+	readonly supports?: { readonly unreachable?: boolean; readonly forceExpire?: boolean };
+}
+
+/** One passing case that names what did not run, or none when everything ran. */
+export function notRunCase(left: readonly string[]): ContractCase[] {
+	return left.length === 0 ? [] : [{ name: `not run: ${left.join("; ")}`, run: async () => {} }];
+}
+
+/** `harness.unreachable`, or the case's failure when a harness that declared it lacks it. */
+export function unreachableOf(harness: MfaFactorStoreHarness): () => MfaFactorStore {
+	assert.equal(
+		typeof harness.unreachable,
+		"function",
+		"supports.unreachable is declared, and the harness gives no unreachable",
+	);
+	return harness.unreachable as () => MfaFactorStore;
+}
+
+/** `harness.forceExpire`, or the case's failure when a harness that declared it lacks it. */
+export function forceExpireOf(harness: MfaFactorStoreHarness): (subject: string) => Promise<void> {
+	assert.equal(
+		typeof harness.forceExpire,
+		"function",
+		"supports.forceExpire is declared, and the harness gives no forceExpire",
+	);
+	return harness.forceExpire as (subject: string) => Promise<void>;
+}
+
+/** Whether `run` rejects; `what` names it in the failure. */
+export async function rejects(run: () => Promise<unknown>, what: string): Promise<void> {
+	let answered: unknown;
+	try {
+		answered = await run();
+	} catch {
+		return;
+	}
+	assert.fail(`${what} answered ${JSON.stringify(answered)} out of reach, rather than rejecting`);
 }
 
 /** A factor id as the provider makes one: `name` padded to 22 base64url characters. */
@@ -88,14 +150,14 @@ const byId = (records: readonly MfaFactorRecord[]): MfaFactorRecord[] =>
 function contractCase(
 	input: MfaFactorStoreContractInput,
 	name: string,
-	body: (store: MfaFactorStore) => Promise<void>,
+	body: (store: MfaFactorStore, harness: MfaFactorStoreHarness) => Promise<void>,
 ): ContractCase {
 	return {
 		name,
 		run: async () => {
 			const harness = await input.build();
 			try {
-				await body(harness.store);
+				await body(harness.store, harness);
 			} finally {
 				await harness.close?.();
 			}
@@ -103,12 +165,18 @@ function contractCase(
 	};
 }
 
+/** `store` for an even `i`, the harness's second instance for an odd one. */
+const nth = (harness: MfaFactorStoreHarness, i: number): MfaFactorStore =>
+	i % 2 === 0 ? harness.store : (harness.second ?? harness.store);
+
 /** The cases of the factor store's contract over the harnesses `input` builds. */
 export function mfaFactorStoreContract(
 	input: MfaFactorStoreContractInput,
 ): readonly ContractCase[] {
-	const test = (name: string, body: (store: MfaFactorStore) => Promise<void>) =>
-		contractCase(input, name, body);
+	const test = (
+		name: string,
+		body: (store: MfaFactorStore, harness: MfaFactorStoreHarness) => Promise<void>,
+	) => contractCase(input, name, body);
 	return [
 		test("lists nothing for a subject with no factor", async (store) => {
 			assert.deepStrictEqual(await store.list("nobody"), []);
@@ -158,9 +226,9 @@ export function mfaFactorStoreContract(
 			assert.deepStrictEqual(await store.list("user-1"), [RECORD()]);
 		}),
 
-		test("lets one of N concurrent creates of one (subject, id) through", async (store) => {
+		test("lets one of N concurrent creates of one (subject, id) through", async (store, harness) => {
 			const results = await Promise.allSettled(
-				Array.from({ length: 10 }, (_, i) => store.create(RECORD({ data: `v2.${i}` }))),
+				Array.from({ length: 10 }, (_, i) => nth(harness, i).create(RECORD({ data: `v2.${i}` }))),
 			);
 			assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
 			assert.equal((await store.list("user-1")).length, 1);
@@ -229,11 +297,11 @@ export function mfaFactorStoreContract(
 			await assert.rejects(store.update("user-1", factorId("gone"), max, next), RangeError);
 		}),
 
-		test("lets exactly one of N concurrent updates at one version win", async (store) => {
+		test("lets exactly one of N concurrent updates at one version win", async (store, harness) => {
 			await store.create(RECORD());
 			const results = await Promise.all(
 				Array.from({ length: 10 }, (_, i) =>
-					store.update("user-1", FACTOR_1, 1, {
+					nth(harness, i).update("user-1", FACTOR_1, 1, {
 						data: `v2.writer-${i}`,
 						label: `Writer ${i}`,
 						lastUsedAt: undefined,
@@ -300,5 +368,26 @@ export function mfaFactorStoreContract(
 			await store.create(RECORD({ data: "v2.again" }));
 			assert.deepStrictEqual(await store.list("user-1"), [RECORD({ data: "v2.again" })]);
 		}),
+
+		...(input.supports?.unreachable === true
+			? [
+					test("rejects every member when it cannot reach its backend, and answers none as no factors, null or done", async (_store, harness) => {
+						const down = unreachableOf(harness)();
+						await rejects(() => down.list("user-1"), "list");
+						await rejects(() => down.create(RECORD()), "create");
+						await rejects(
+							() =>
+								down.update("user-1", FACTOR_1, 1, {
+									data: "v2.x",
+									label: undefined,
+									lastUsedAt: undefined,
+								}),
+							"update",
+						);
+						await rejects(() => down.remove("user-1", FACTOR_1), "remove");
+						await rejects(() => down.removeAllForSubject("user-1"), "removeAllForSubject");
+					}),
+				]
+			: notRunCase(["the outage case (unreachable not declared)"])),
 	];
 }
