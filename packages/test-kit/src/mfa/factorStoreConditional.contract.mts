@@ -38,6 +38,17 @@
  * leaves one — so the rule that a conditional write against it answers
  * `conflict` and mints nothing is the Store's own tests' to prove.
  *
+ * A write conditional on a read is valid only within the store's
+ * write-lifetime bound of that read: the bound runs from the versioned read
+ * that produced the write's expected generation to the write's commit or
+ * failure, transport and queues included. The port's owning module keeps it;
+ * callers outside it never hold a generation. An emptied set's tombstone is
+ * kept for at least that bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h, for
+ * the bundled stores). For MFA, the factor-set writer keeps the bound under
+ * its lease (at most 16 × `mfa.storeTimeoutMs`).
+ * The tombstone cases run under `forceExpire`; no case can prove the bound
+ * itself, which the Store's configuration and the writer's lease keep.
+ *
  * STAND-IN: the first group is the set variant of the generic
  * conditional-write suite, which has not landed. When it does, the binding
  * hands the members to it and drops that group; the second group is the

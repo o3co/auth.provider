@@ -168,21 +168,23 @@ export function isMfaFactorUpdateWritten(
  *   update of that record. That holds only while every factor's next data
  *   keeps the three things `MfaVerification.next` names.
  * - A set never written has no generation (`null`). A set's generation
- *   outlives its members, and an emptied set's tombstone is kept for at
- *   least the store's write-lifetime bound (24 h for the bundled stores,
- *   `BUNDLED_STORE_WRITE_LIFETIME_MS`): the last removal and a reset —
- *   account deletion included — leave the set empty at a new generation,
+ *   outlives its members: the last removal and a reset — account deletion
+ *   included — leave the set empty at a new generation, its tombstone,
  *   which a late write read before them meets as a `conflict`. Past the
- *   bound the tombstone may be purged, and the set then reads as never
- *   written. A set that holds a record is never purged.
- * - The tombstone holds only because no membership write outlives it: every
- *   one commits or fails on the store's side within a write-lifetime bound
- *   the store sets, well under 24 h. In SQL that is a statement or
- *   transaction timeout; over HTTP, a request deadline, and a request never
- *   retried once its deadline has passed. The bundled memory store (one
- *   synchronous step) and Redis store (one script) meet it by construction.
- *   A write that could land past the tombstone could land a first binding
- *   for a subject reset or deleted before it.
+ *   bound below the tombstone may be purged, and the set then reads as
+ *   never written. A set that holds a record is never purged.
+ * - A write conditional on a read is valid only within the store's
+ *   write-lifetime bound of that read: the bound runs from the versioned read
+ *   that produced the write's expected generation to the write's commit or
+ *   failure, transport and queues included. The port's owning module keeps it;
+ *   callers outside it never hold a generation. An emptied set's tombstone is
+ *   kept for at least that bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h, for
+ *   the bundled stores). For MFA, the factor-set writer keeps the bound under
+ *   its lease (at most 16 × `mfa.storeTimeoutMs`).
+ *   A store adds no delay past the bound: in SQL a statement or
+ *   transaction timeout, over HTTP a request deadline never retried once
+ *   passed; the bundled memory store (one synchronous step) and Redis
+ *   store (one script) add none.
  * - The check and the write are one atomic step in the store, across every
  *   instance on the same backend: a transaction, a script, one synchronous
  *   block. An in-process lock counts only for an in-process store.

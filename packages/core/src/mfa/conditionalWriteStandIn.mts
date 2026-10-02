@@ -52,10 +52,9 @@ export function newStoreGeneration(): StoreGeneration {
 }
 
 /**
- * The write-lifetime bound of the bundled stores: every write they take
- * commits or fails within it, and an emptied set's tombstone is kept for at
- * least this long. 24 hours. STAND-IN: the convention owns this constant and
- * its name; this one is dropped when it lands.
+ * The write-lifetime bound of the bundled stores, 24 hours: an emptied set's
+ * tombstone is kept for at least this long. STAND-IN: the convention owns
+ * this constant, under this name; this one is dropped when it lands.
  */
 export const BUNDLED_STORE_WRITE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 

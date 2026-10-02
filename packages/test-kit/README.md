@@ -227,13 +227,19 @@ members leaves one — is out of every case's reach: that a conditional write
 against it answers `conflict` and mints nothing, and that only
 `listVersioned` mints one, is the Store's own tests' to prove.
 
-An emptied set's tombstone is kept for at least the store's write-lifetime
-bound (24 h for the bundled stores), and may be purged after it. That holds
-only while every membership write commits or fails on the store's side
-within a bound the store sets, well under 24 h — a statement or transaction
-timeout in SQL, a request deadline never retried once it has passed over
-HTTP. No case can prove that bound; the Store's configuration does. Core's
-in-process store and the Redis store meet it by construction.
+A write conditional on a read is valid only within the store's write-lifetime
+bound of that read: the bound runs from the versioned read that produced the
+write's expected generation to the write's commit or failure, transport and
+queues included. The port's owning module keeps it; callers outside it never
+hold a generation. An emptied set's tombstone is kept for at least that bound
+(`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h, for the bundled stores). For MFA,
+the factor-set writer keeps the bound under its lease (at most 16 ×
+`mfa.storeTimeoutMs`).
+
+A Store adds no delay past the bound — a statement or transaction timeout in
+SQL, a request deadline never retried once it has passed over HTTP. No case
+can prove the bound; the Store's configuration and the writer's lease do.
+Core's in-process store and the Redis store add none.
 
 The first group of cases, and the expired-tombstone case, stand in for the
 set variant of the generic conditional-write suite until it lands; the
