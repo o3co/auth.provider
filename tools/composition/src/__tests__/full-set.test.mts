@@ -168,8 +168,8 @@ const manifest = JSON.parse(
 const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-device-grant": ["device-grant", "core-device-code-store-memory"],
 	"@o3co/auth-provider-dpop": ["dpop"],
-	"@o3co/auth-provider-federation-apple": ["federation-apple"],
-	"@o3co/auth-provider-federation-github": ["federation-github"],
+	"@o3co/auth-provider-federation-apple": ["federation-apple-type"],
+	"@o3co/auth-provider-federation-github": ["federation-github-type"],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
 	// No module: contract suites and fakes, for tests.
@@ -188,8 +188,6 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 const DEPLOYMENT_MODULES = [
 	"deployment:webauthn-config",
 	"deployment:grant-policy",
-	"deployment:apple-federation-config",
-	"deployment:github-federation-config",
 	"deployment:requirement-page",
 	"deployment:requirement-bare",
 ];
