@@ -78,8 +78,13 @@ const VALUES = (): readonly [Value, Value] => [
 	{ name: "second", at: new Date("2026-10-02T00:00:00.000Z") },
 ];
 
+/** Changes each mutable part on its own, leaving a part that is frozen. */
 const MUTATE = (value: Value): void => {
-	value.name = "mutated";
+	try {
+		value.name = "mutated";
+	} catch {
+		// A frozen copy.
+	}
 	value.at.setTime(0);
 };
 
@@ -109,8 +114,14 @@ interface RecordFaults {
 	readonly writesIgnoreExpiry?: boolean;
 	/** The second instance answers a versioned read from its own cache. */
 	readonly secondCaches?: boolean;
-	/** Not a fault: every value read is frozen. */
+	/** Not a fault: every value read is frozen, and its own copy. */
 	readonly frozen?: boolean;
+	/** A value read is frozen, and shares its date with what is stored. */
+	readonly frozenSharesDate?: boolean;
+	/** An unconditional write keeps the generation when the value changes. */
+	readonly legacyKeepsGenerationOnChange?: boolean;
+	/** The unreachable target names no unconditional write. */
+	readonly unreachableDropsWrites?: boolean;
 	/** An unconditional write keeps the generation. */
 	readonly legacyKeepsGeneration?: boolean;
 	/** A versioned read takes the value and the generation apart, with an `await` between. */
@@ -178,7 +189,11 @@ function recordBackend(faults: RecordFaults = {}) {
 		return undefined;
 	};
 	const out = (value: Value): Value =>
-		faults.frozen === true ? Object.freeze(copy(value)) : copy(value);
+		faults.frozenSharesDate === true
+			? Object.freeze({ ...value })
+			: faults.frozen === true
+				? Object.freeze(copy(value))
+				: copy(value);
 
 	const target = (instance: number): ConditionalRecordTarget<Value> => {
 		const cache = new Map<string, Versioned<Value>>();
@@ -257,7 +272,12 @@ function recordBackend(faults: RecordFaults = {}) {
 			unconditional: {
 				async put(key, value) {
 					const held = live(key, true);
-					if (faults.legacyKeepsGeneration === true && held !== undefined) {
+					const keeps =
+						faults.legacyKeepsGeneration === true ||
+						(faults.legacyKeepsGenerationOnChange === true &&
+							held !== undefined &&
+							held.value.name !== value.name);
+					if (keeps && held !== undefined) {
 						entries.set(key, { value: copy(value), generation: held.generation });
 						return;
 					}
@@ -284,7 +304,8 @@ function recordBackend(faults: RecordFaults = {}) {
 					getVersioned: outage,
 					replaceIf: outage,
 					removeIf: outage,
-					unconditional: { put: outage, delete: outage },
+					unconditional:
+						faults.unreachableDropsWrites === true ? {} : { put: outage, delete: outage },
 				};
 
 	return {
@@ -396,6 +417,17 @@ describe("conditionalRecordContract refuses a record store that breaks a rule", 
 		["an answer outside the type", { malformedMissing: true }, RECORD.readers],
 		["a value shared with the caller", { alias: true }, RECORD.alias],
 		[
+			"a frozen value that shares its date with the store",
+			{ frozenSharesDate: true },
+			RECORD.alias,
+		],
+		[
+			"an unconditional write that keeps the generation when the value changes",
+			{ legacyKeepsGenerationOnChange: true },
+			RECORD.unconditional,
+		],
+		["an unreachable target that names no write", { unreachableDropsWrites: true }, RECORD.outage],
+		[
 			"a create in place that keeps the generation",
 			{ createKeepsGeneration: true },
 			RECORD.overwrite,
@@ -494,6 +526,10 @@ interface SetFaults {
 	readonly resetEmptyNoop?: boolean;
 	/** Reads drop an expired set, and writes do not check expiry. */
 	readonly writesIgnoreExpiry?: boolean;
+	/** A removal does not check expiry. */
+	readonly removeIgnoresExpiry?: boolean;
+	/** The unreachable target names no unconditional write. */
+	readonly unreachableDropsWrites?: boolean;
 	/** The second instance answers a versioned read from its own cache. */
 	readonly secondCaches?: boolean;
 	/** The plain listing leaves a member out. */
@@ -648,7 +684,7 @@ function setBackend(faults: SetFaults = {}) {
 				return { outcome: "created", generation: add(item) };
 			},
 			async removeIf(scope, id, expected): Promise<ConditionalSetRemoveAnswer> {
-				const entry = live(scope, true);
+				const entry = faults.removeIgnoresExpiry === true ? sets.get(scope) : live(scope, true);
 				if (entry === undefined) return { outcome: "missing" };
 				if (entry.generation !== expected) return { outcome: "conflict" };
 				if (!entry.members.has(id)) {
@@ -722,7 +758,8 @@ function setBackend(faults: SetFaults = {}) {
 					removeIf: outage,
 					reset: outage,
 					updateMember: outage,
-					unconditional: { create: outage, remove: outage },
+					unconditional:
+						faults.unreachableDropsWrites === true ? {} : { create: outage, remove: outage },
 				};
 
 	return {
@@ -844,6 +881,8 @@ describe("conditionalSetContract refuses a set store that breaks a rule", () => 
 		],
 		["a reset of an empty set that changes nothing", { resetEmptyNoop: true }, SET.resetEmpty],
 		["writes that do not check expiry", { writesIgnoreExpiry: true }, SET.tombstone],
+		["a removal that does not check expiry", { removeIgnoresExpiry: true }, SET.tombstone],
+		["an unreachable target that names no write", { unreachableDropsWrites: true }, SET.outage],
 		["a second instance that reads from a cache", { secondCaches: true }, SET.crossInstance],
 		["a plain listing that leaves a member out", { listDisagrees: true }, SET.agree],
 		["a digest of the members", { digest: true }, SET.aba],

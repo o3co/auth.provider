@@ -104,7 +104,11 @@ export interface ConditionalRecordContractInput<V> {
 	readonly build: () => Promise<ConditionalRecordHarness<V>>;
 	/** Two distinct values, built fresh and equal on every call. */
 	readonly values: () => readonly [V, V];
-	/** Mutates a value in place: proves the store keeps its own copy. Absent for an immutable value. */
+	/**
+	 * Mutates a value in place, each mutable part on its own, leaving a part
+	 * that is frozen without throwing: proves the store keeps its own copy.
+	 * Absent for an immutable value.
+	 */
 	readonly mutate?: (value: V) => void;
 	/**
 	 * The hooks every harness `build` answers, declared up front, so the case
@@ -579,11 +583,18 @@ export function conditionalRecordContract<V>(
 						writes.length > 0,
 						"supports.unconditional is declared, and the target names no write",
 					);
-					for (const [name, write] of writes) {
+					for (const [[name, write], same] of writes.flatMap((entry) => [
+						[entry, true] as const,
+						[entry, false] as const,
+					])) {
 						const { key, read } = await seeded(raw, `legacy-${name}`);
-						await write(key, input.values()[0]);
+						await write(key, input.values()[same ? 0 : 1]);
 						const left = await store.get(key);
-						assert.notEqual(left?.generation, read.generation, `${name} kept the generation`);
+						assert.notEqual(
+							left?.generation,
+							read.generation,
+							`${name} kept the generation, given ${same ? "the same value" : "another value"}`,
+						);
 						const replaced = await store.replace(key, read.generation, input.values()[1]);
 						assert.ok(
 							isConflictOrMissing(replaced.outcome),
@@ -615,11 +626,7 @@ export function conditionalRecordContract<V>(
 					mutate(written);
 					const read = await store.live(key);
 					assert.deepStrictEqual(read.value, input.values()[0], "the value handed to create");
-					try {
-						mutate(read.value);
-					} catch {
-						// A frozen copy refuses the change, which is what this asks.
-					}
+					mutate(read.value);
 					assert.deepStrictEqual(
 						(await store.live(key)).value,
 						input.values()[0],
@@ -687,6 +694,11 @@ export function conditionalRecordContract<V>(
 					);
 					await assert.rejects(unreachable.removeIf(key, read.generation), "removeIf");
 					if (input.supports?.unconditional === true) {
+						assert.deepStrictEqual(
+							Object.keys(unreachable.unconditional).sort(),
+							Object.keys(raw.unconditional).sort(),
+							"the unreachable target names the same unconditional writes",
+						);
 						for (const [name, write] of Object.entries(unreachable.unconditional)) {
 							await assert.rejects(write(key, input.values()[1]), name);
 						}
@@ -1134,6 +1146,16 @@ export function conditionalSetContract<T>(
 					assert.ok(emptied.outcome === "removed");
 					await expire(read.scope);
 					assert.deepStrictEqual(await store.list(read.scope), { items: [], generation: null });
+					const removal = await seeded(raw, "tombstone-remove", 1);
+					const [w] = removal.items as [T];
+					const gone = await store.remove(removal.scope, idOf(w), removal.generation);
+					assert.ok(gone.outcome === "removed");
+					await expire(removal.scope);
+					assert.equal(
+						(await store.remove(removal.scope, idOf(w), removal.generation)).outcome,
+						"missing",
+						"a removal against an expired set",
+					);
 				})
 			: notRun("the tombstone expiry case", "forceExpire"),
 	);
@@ -1212,6 +1234,11 @@ export function conditionalSetContract<T>(
 						await assert.rejects(updateMember(scope, idOf(x)), "updateMember");
 					}
 					if (input.supports?.unconditional === true) {
+						assert.deepStrictEqual(
+							Object.keys(unreachable.unconditional ?? {}).sort(),
+							Object.keys(raw.unconditional ?? {}).sort(),
+							"the unreachable target names the same unconditional writes",
+						);
 						for (const [name, write] of Object.entries(unreachable.unconditional ?? {})) {
 							await assert.rejects(write(y), name);
 						}

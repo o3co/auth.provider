@@ -308,8 +308,9 @@ an answer outside its type fails the case.
   record. The target (`ConditionalRecordTarget`) is the port's create path,
   `getVersioned`, `replaceIf`, `removeIf`, and its unconditional writes of a
   key by name. `values()` answers two distinct values, equal on every call;
-  `mutate`, when given, changes a value in place, to prove the store keeps
-  its own copy.
+  `mutate`, when given, changes a value in place, each mutable part on its
+  own and leaving a frozen part without throwing, to prove the store keeps its
+  own copy.
 - `conditionalSetContract(input)`, for a generation that guards a set's
   membership. The target (`ConditionalSetTarget`) is `listVersioned`,
   `createIf`, `removeIf`, `reset`, and, when the port has them, `list`,
