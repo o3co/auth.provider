@@ -166,7 +166,7 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * the module is always on. An answer that is not a boolean, or a throw,
 	 * refuses boot (`config-validation-failed`, naming the section's path).
 	 */
-	isEnabled?(section: z.output<S>): boolean;
+	readonly isEnabled?: (section: z.output<S>) => boolean;
 }
 
 /**
