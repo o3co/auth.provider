@@ -287,7 +287,7 @@ const RESERVED_RESULT_PARAMETERS = ["grant_id", "state", "error"] as const;
  *
  * Exported so that where the URI is REGISTERED can refuse it too — at boot, for
  * a deployment whose clients are configured — and lodging keeps refusing it as
- * the belt for a repository that validates nothing.
+ * the belt for a record its caller hands it directly.
  */
 export function federationGrantRedirectUriReservedParameter(uri: string): string | undefined {
 	return redirectUriQueryCarries(uri, RESERVED_RESULT_PARAMETERS);
@@ -337,8 +337,9 @@ function checkRequest(
 	request: CommonRequest,
 	connection: FederationGrantAcquisitionConnection,
 ): RequestCheck {
-	// Read as a list or as nothing (`federationGrantAllowlist`): a repository
-	// answering a string would otherwise match by substring.
+	// Read as a list or as nothing (`federationGrantAllowlist`): lodging is
+	// exported and takes the record from its caller, which need not have read
+	// it through the client-record boundary; a string would match by substring.
 	const registered = federationGrantAllowlist(request.client.federationGrantRedirectUris);
 	// Exact membership, and nothing else: no prefix, no normalization, no
 	// fallback to the client's ordinary redirect URIs.
@@ -346,9 +347,9 @@ function checkRequest(
 		return { ok: false, reason: "redirect_uri_not_registered" };
 	}
 	// Registered, and still held to what registration would have refused: a
-	// repository that validates nothing could hand back a URI that does not
-	// parse, and the flow would fail only at its end — after activating the
-	// grant — when the browser has to be sent there.
+	// record handed to lodging directly could carry a URI that does not parse,
+	// and the flow would fail only at its end — after activating the grant —
+	// when the browser has to be sent there.
 	if (checkRedirectUri(request.redirectUri) !== null) {
 		return { ok: false, reason: "redirect_uri_invalid" };
 	}
@@ -385,6 +386,10 @@ function checkRequest(
 	return { ok: true, scopes: scopes.scopes, lifetimeMs };
 }
 
+/**
+ * The connection allowlist of the record lodging was handed, read as
+ * `checkRequest` reads its redirect URIs.
+ */
 const permits = (client: FederationGrantLodgingClient, connection: string): boolean =>
 	federationGrantAllowlist(client.allowedFederationGrantConnections).includes(connection);
 
