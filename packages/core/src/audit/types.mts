@@ -72,12 +72,14 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"logout.cascade_failed",
 	"logout.family_revoked",
 	"logout.success",
-	// Multi-factor authentication (the MFA ADR's D28), the MFA package's
-	// routes'; each carries `subject`, `ip` and `userAgent`, and the
-	// ceremonies' events `kind` and `purpose` in their details. The MFA package is private until the template
-	// wires it, so no released composition emits them; the inventory's drift
-	// test names the step that emits each. A deployment notifies the account
-	// holder from seven of them, each carrying, beside those, in its details:
+	// Multi-factor authentication (the MFA ADR's D28), the MFA package's;
+	// each carries `subject`, and the ceremonies' events `kind` and
+	// `purpose` in their details. Those of its routes carry `ip` and
+	// `userAgent`; the operator reset's `mfa.reset`, a library call with no
+	// request behind it, carries neither. The MFA package is private until
+	// the template wires it, so no released composition emits them. A
+	// deployment notifies the account holder from seven of them, each
+	// carrying, beside those, in its details:
 	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`,
 	// `federated` or `mfa`) and `by: "user"`; `mfa.factor.removed`, a removal
 	// from the account page, its `kind`, `factorId`, `binding` and `by: "user"`; `mfa.recovery_codes.generated` its `binding`,
@@ -86,8 +88,12 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// `unreplaced: true` — with `kept: "password_binding"` when it was kept
 	// on purpose; `mfa.locked.first`, the refusal that begins an episode (the
 	// store's `first`), its `hold` and the refused attempt's factor `binding`;
-	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` it
-	// removed, `requireEmailProof` and `revokeSessions`;
+	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` and
+	// `count` of the records it removed (none when they could not be read, or
+	// the removal did not succeed),
+	// `requireEmailProof`, `sessions` and `sessionsAgain` (every session
+	// ended, before the removal and again after it), `complete` and,
+	// when the operator named one, `requestedBy`;
 	// `mfa.lock.recovered`, an authorized recovery applied to the subject's
 	// lock state, its `operation`, the `generation` it moved to and what it
 	// `cleared`; and

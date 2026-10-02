@@ -40,5 +40,16 @@ export {
 } from "./module.mjs";
 // The recovery-code factor's module (the MFA ADR's D25), with its section.
 export { mfaRecoveryCodeFactorModule } from "./recovery/module.mjs";
+// The operator reset, `resetMfaForSubject`, and the module that provides it
+// as the `mfaReset` component (the MFA ADR's D25).
+export {
+	createMfaReset,
+	type MfaReset,
+	type MfaResetOptions,
+	type MfaResetReport,
+	type MfaResetRequest,
+	type MfaResetStop,
+} from "./reset.mjs";
+export { mfaResetModule } from "./resetModule.mjs";
 // The TOTP factor, contributed as `mfaFactors.totp` (the MFA ADR's F6).
 export { mfaTotpFactorModule } from "./totp/module.mjs";

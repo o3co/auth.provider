@@ -51,7 +51,13 @@
  *   `/factors`, is `management.mts`'s, mounted here behind the same guards
  *   and admitted through `sessionFor`, which takes a session admitted as
  *   `mfa.manage` with where its factor-set write begins (`factorSet.mts`),
- *   read before the admission.
+ *   read before the admission. The subject's own release of its lock,
+ *   `POST /lock/release`, is `lockRelease.mts`'s, mounted and admitted the
+ *   same way.
+ * - A factor that is not guessable verified at a login once its session is
+ *   established, or at a step-up once its session is escalated, mints the
+ *   authorization that release takes (`lockRecovery.mts`), for that session;
+ *   one that cannot be minted is said at warn, the answer standing.
  * - A session is escalated (`escalateSession`) behind its admission, by the
  *   renewal nonce of the claim admission compared: the express id renewed,
  *   then the second factor recorded on its `UserSession` once, never
@@ -122,6 +128,8 @@ import {
 	type Revoked,
 } from "./ceremony.mjs";
 import type { MfaCoordinator } from "./coordinator.mjs";
+import type { MfaLockRecovery } from "./lockRecovery.mjs";
+import { createMfaLockReleaseRouter } from "./lockRelease.mjs";
 import { type MfaMailRefusal, mailFailureOf } from "./mail.mjs";
 import { createMfaManagementRouter, type MfaManagementOptions } from "./management.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
@@ -177,6 +185,10 @@ const FACTOR_LIMIT = errorEnvelope(
 const NO_QUALIFYING_FACTOR = errorEnvelope(
 	"mfa_no_qualifying_factor",
 	"No second factor of this account can be used for a step-up",
+);
+const FACTORS_BUSY = errorEnvelope(
+	"mfa_factors_busy",
+	"The account's second factors are being changed: try again",
 );
 const ENROLLMENT_CONFLICT = errorEnvelope(
 	"mfa_enrollment_conflict",
@@ -263,6 +275,8 @@ export interface MfaRoutesOptions {
 	readonly auditSink: AuditSink | undefined;
 	/** What the account page's management of the subject's factors reads and writes (`management.mts`). */
 	readonly management: Omit<MfaManagementOptions, "admit" | "logger" | "auditSink">;
+	/** The authorized-recovery entry: minted at an exempt verification, applied by the subject's release. */
+	readonly lockRecovery: MfaLockRecovery;
 }
 
 /** The express session id the request presents; empty when it presents none, which no binding matches. */
@@ -367,6 +381,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		logger,
 		auditSink,
 		management,
+		lockRecovery,
 	} = options;
 	const router = express.Router();
 
@@ -627,6 +642,8 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		res: Response,
 		verified: Pick<Extract<MfaVerifyOutcome, { outcome: "verified" }>, "continuation" | "adds">,
 		answer: Readonly<Record<string, unknown>> = {},
+		/** Run once the session is established, before the answer: what follows from the login's sid. */
+		onEstablished?: (sid: string) => Promise<void>,
 	): Promise<void> => {
 		let resumed: PrimaryAdmission;
 		try {
@@ -690,6 +707,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			res.status(503).json(SESSION_STORE_UNAVAILABLE);
 			return;
 		}
+		if (established.sid !== undefined) await onEstablished?.(established.sid);
 		csrfGuard.issue(res);
 		res.status(200).json({ message: "Logged in successfully", ...answer });
 	};
@@ -790,6 +808,27 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		return "escalated";
 	};
 
+	/**
+	 * The authorization a factor of `kind` verified at `atMs` in session `sid`
+	 * mints (`lockRecovery.mts`): none for a guessable one; one that cannot be
+	 * recorded said once at warn, the answer standing.
+	 */
+	const mintRecovery = async (
+		route: RouteName,
+		subject: string,
+		sid: string,
+		kind: string,
+		atMs: number,
+	): Promise<void> => {
+		const minted = await lockRecovery.authorize(subject, sid, kind, atMs);
+		if (minted.outcome === "unavailable") {
+			logger.warn(
+				{ route, sub: subject, err: loggableError(minted.cause) },
+				"mfa_lock_recovery_unauthorized",
+			);
+		}
+	};
+
 	/** A step-up's answer for how its escalation ended (`escalateSession`): `answer` once escalated. */
 	const answerEscalation = (res: Response, escalation: Escalation, answer: object): void => {
 		if (escalation === "escalated") {
@@ -812,6 +851,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				"/factors",
 				"/factors/rename",
 				"/factors/remove",
+				"/lock/release",
 			],
 			noStore,
 		)
@@ -826,6 +866,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				"/step-up",
 				"/factors/rename",
 				"/factors/remove",
+				"/lock/release",
 			],
 			express.json(),
 			express.urlencoded({ extended: false }),
@@ -837,6 +878,14 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				...management,
 				admit: (async (req: Request, res: Response, action: MfaAdmissionAction) =>
 					(await sessionFor(req, res, action))?.session) as MfaManagementOptions["admit"],
+				logger,
+				auditSink,
+			}),
+		)
+		.use(
+			createMfaLockReleaseRouter({
+				lockRecovery,
+				admit: async (req, res) => (await sessionFor(req, res, MFA_MANAGE))?.session,
 				logger,
 				auditSink,
 			}),
@@ -1119,6 +1168,15 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						expectedRenewalNonce,
 						outcome.adds,
 					);
+					if (escalation === "escalated") {
+						await mintRecovery(
+							"verify",
+							outcome.subject,
+							outcome.sid,
+							outcome.kind,
+							outcome.adds.mfaAt.getTime(),
+						);
+					}
 					answerEscalation(res, escalation, {
 						step_up: "verified",
 						...(outcome.recoveryCodesRemaining === undefined
@@ -1139,6 +1197,14 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 						outcome.recoveryCodesRemaining === undefined
 							? {}
 							: { recovery_codes_remaining: outcome.recoveryCodesRemaining },
+						(sid) =>
+							mintRecovery(
+								"verify",
+								outcome.subject,
+								sid,
+								outcome.kind,
+								outcome.adds.mfaAt.getTime(),
+							),
 					);
 					return;
 			}
@@ -1234,6 +1300,13 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				proof: body?.proof,
 				label: body?.label,
 			});
+			if (outcome.overran === true) {
+				// What the binding wrote stands; a reset or a recovery may have run beside it.
+				logger.error(
+					{ route: "enrollment", ...("subject" in outcome ? { sub: outcome.subject } : {}) },
+					"mfa_subject_lease_overrun",
+				);
+			}
 			switch (outcome.outcome) {
 				case "unknown_transaction":
 				case "spent":
@@ -1253,6 +1326,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 					return;
 				case "no_pending_enrollment":
 					res.status(400).json(NO_PENDING);
+					return;
+				case "factors_busy":
+					res.set("Retry-After", String(Math.max(1, outcome.retryAfterSeconds)));
+					res.status(409).json(FACTORS_BUSY);
 					return;
 				case "unknown_kind":
 					res.status(400).json(UNKNOWN_KIND);
