@@ -86,3 +86,35 @@ describe("core.sessionRequirements.expected", () => {
 		expect(makeValidAppConfig().core.sessionRequirements).toEqual({ expected: [] });
 	});
 });
+
+describe("core.sessionRequirements.secondFactorAuthority", () => {
+	it("is optional, with no default: reference.conf carries none", () => {
+		const fromReference = validate(parseFile(REFERENCE_CONF, { env: ENV }), AppConfigSchema);
+		expect(fromReference.core?.sessionRequirements?.secondFactorAuthority).toBeUndefined();
+		expect(
+			CoreConfigSchema.parse(makeValidCoreConfig()).core?.sessionRequirements,
+		).not.toHaveProperty("secondFactorAuthority");
+	});
+
+	it("reads a requirement name, beside the list", () => {
+		const parsed = CoreConfigSchema.parse({
+			...makeValidCoreConfig(),
+			core: { sessionRequirements: { expected: ["mfa"], secondFactorAuthority: "mfa" } },
+		});
+		expect(parsed.core?.sessionRequirements?.secondFactorAuthority).toBe("mfa");
+	});
+
+	it("refuses what is not a non-empty string, naming the key", () => {
+		for (const secondFactorAuthority of ["", 7, ["mfa"], null]) {
+			expect(
+				issuesAt(
+					CoreConfigSchema.safeParse({
+						...makeValidCoreConfig(),
+						core: { sessionRequirements: { expected: [], secondFactorAuthority } },
+					}),
+				),
+				JSON.stringify(secondFactorAuthority),
+			).toContain("core.sessionRequirements.secondFactorAuthority");
+		}
+	});
+});

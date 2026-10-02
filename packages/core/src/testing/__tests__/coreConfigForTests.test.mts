@@ -66,6 +66,20 @@ describe("coreConfigForTests", () => {
 		expect(coreConfigForTests().core).not.toHaveProperty("declaredAbsent");
 	});
 
+	it("declares the second-factor authority it is given beside the list, as core reads it, and none by default", () => {
+		const config = {
+			...makeValidCoreConfig(),
+			...coreConfigForTests({ expected: ["mfa"], secondFactorAuthority: "mfa" }),
+		};
+		expect(CoreConfigSchema.parse(config).core?.sessionRequirements).toEqual({
+			expected: ["mfa"],
+			secondFactorAuthority: "mfa",
+		});
+		expect(coreConfigForTests().core.sessionRequirements).not.toHaveProperty(
+			"secondFactorAuthority",
+		);
+	});
+
 	it("is what the valid fixture declares", () => {
 		expect(makeValidCoreConfig().core).toEqual(coreConfigForTests().core);
 	});

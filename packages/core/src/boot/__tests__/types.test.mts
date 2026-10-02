@@ -38,13 +38,13 @@ import type {
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
 	ListShapedOverrideDetails,
-	MfaRequirementNotSecondFactorAuthorityDetails,
 	MissingRequiredComponentDetails,
 	ModuleFactoryNotCalledDetails,
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
+	SecondFactorAuthorityNotDeclaredDetails,
 	SyntheticKeyCollisionDetails,
 	UnknownContributionKindDetails,
 } from "../types.mjs";
@@ -104,7 +104,7 @@ describe("BootErrorReason", () => {
 			| "session-requirements-undeclared"
 			| "session-requirement-missing"
 			| "duplicate-second-factor-authority"
-			| "mfa-requirement-not-second-factor-authority"
+			| "second-factor-authority-not-declared"
 			| "reserved-component-key"
 			| "module-section-path-invalid"
 			| "contribution-kind-guarded"
@@ -258,14 +258,20 @@ describe("per-reason *Details discriminators", () => {
 		>();
 	});
 
-	it("MfaRequirementNotSecondFactorAuthorityDetails names the requirement registered as mfa, with its module", () => {
+	it("SecondFactorAuthorityNotDeclaredDetails names the key, the requirement, its module when registered, and what is unmet", () => {
 		expectTypeOf<
-			MfaRequirementNotSecondFactorAuthorityDetails["reason"]
-		>().toEqualTypeOf<"mfa-requirement-not-second-factor-authority">();
-		expectTypeOf<MfaRequirementNotSecondFactorAuthorityDetails["requirement"]>().toEqualTypeOf<{
-			readonly name: string;
-			readonly module: string;
-		}>();
+			SecondFactorAuthorityNotDeclaredDetails["reason"]
+		>().toEqualTypeOf<"second-factor-authority-not-declared">();
+		expectTypeOf<
+			SecondFactorAuthorityNotDeclaredDetails["configKey"]
+		>().toEqualTypeOf<"core.sessionRequirements.secondFactorAuthority">();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["name"]>().toEqualTypeOf<string>();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["module"]>().toEqualTypeOf<
+			string | undefined
+		>();
+		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["unmet"]>().toEqualTypeOf<
+			"not-expected" | "not-declared"
+		>();
 	});
 });
 

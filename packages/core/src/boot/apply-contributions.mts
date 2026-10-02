@@ -701,20 +701,6 @@ function reachOfFactors(resolver: MfaFactorResolver): ReadonlySet<string> {
 	return reach;
 }
 
-/** The name a composition expects the MFA package's requirement under while `mfa.mode` asks for a second factor. */
-const MFA_REQUIREMENT = "mfa";
-
-/**
- * Whether `mfa.mode` asks for a second factor: written and not `off`. Read as
- * the configuration holds it — the MFA module's schema holds it to its values
- * when that module is loaded — so a value nothing knows asks for one rather
- * than reading as `off`.
- */
-function secondFactorAskedFor(config: unknown): boolean {
-	const mode = (config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode;
-	return mode !== undefined && mode !== "off";
-}
-
 /** Names as a list of JSON strings, so a name with a space or a quote in it reads as written. */
 const quotedNames = (names: readonly string[]): string =>
 	`[${names.map((name) => JSON.stringify(name)).join(", ")}]`;
@@ -745,10 +731,11 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *   a name in it that no module registers is `session-requirement-missing`
  *   (the composition would believe a requirement is in force that is not),
  *   checked first so a composition is told to install the module rather than
- *   to fix the list; then, when it names `mfa` and `mfa.mode` is written and
- *   not `off`, the requirement registered as `mfa` must declare the
- *   second-factor authority (`mfa-requirement-not-second-factor-authority`,
- *   naming its module); a registered name it leaves out is
+ *   to fix the list; then, once
+ *   `core.sessionRequirements.secondFactorAuthority` is written, the
+ *   requirement it names must be expected and declare the second-factor
+ *   authority (`second-factor-authority-not-declared`, naming its module when
+ *   one registered it); a registered name the list leaves out is
  *   `session-requirements-undeclared`;
  * - when a module requires or reads `sessionRequirementResolver`, require the
  *   key written (`session-requirements-undeclared`). With no such module and
@@ -878,9 +865,16 @@ async function checkSessionRequirements(
 			...(normalised.optional as readonly string[]),
 		].includes("sessionRequirementResolver");
 	});
-	const expected = (
-		components.config as { core?: { sessionRequirements?: { expected?: unknown } } } | undefined
-	)?.core?.sessionRequirements?.expected;
+	const sessionRequirements = (
+		components.config as
+			| {
+					core?: {
+						sessionRequirements?: { expected?: unknown; secondFactorAuthority?: unknown };
+					};
+			  }
+			| undefined
+	)?.core?.sessionRequirements;
+	const expected = sessionRequirements?.expected;
 	const declared =
 		Array.isArray(expected) && expected.every((name) => typeof name === "string")
 			? (expected as readonly string[])
@@ -905,24 +899,34 @@ async function checkSessionRequirements(
 			},
 		});
 	}
-	if (declared?.includes(MFA_REQUIREMENT) === true && secondFactorAskedFor(components.config)) {
-		// biome-ignore lint/style/noNonNullAssertion: an expected name nothing registers was refused above
-		const registration = registrations.find(({ name }) => name === MFA_REQUIREMENT)!;
-		if (!registration.requirement.secondFactorAuthority) {
+	const authority = sessionRequirements?.secondFactorAuthority;
+	if (typeof authority === "string") {
+		const registration = registrations.find(({ name }) => name === authority);
+		const unmet =
+			declared?.includes(authority) !== true
+				? "not-expected"
+				: registration?.requirement.secondFactorAuthority !== true
+					? "not-declared"
+					: undefined;
+		if (unmet !== undefined) {
 			const cleanupErrors = await runCleanupsReverse(material.cleanups);
+			const named = `core.sessionRequirements.secondFactorAuthority names ${JSON.stringify(authority)}`;
 			throw new BootError({
 				message:
-					`Session requirement ${JSON.stringify(MFA_REQUIREMENT)} (module ${JSON.stringify(registration.module)}) ` +
-					"does not declare the second-factor authority, while mfa.mode asks for a second factor and " +
-					`core.sessionRequirements.expected names ${JSON.stringify(MFA_REQUIREMENT)}, so the requirement ` +
-					"this composition expects for MFA enforces none: install the MFA package's module, which " +
-					`registers ${JSON.stringify(MFA_REQUIREMENT)} as the second-factor authority, or set mfa.mode = "off", ` +
-					`or remove ${JSON.stringify(MFA_REQUIREMENT)} from core.sessionRequirements.expected.`,
-				reason: "mfa-requirement-not-second-factor-authority",
+					unmet === "not-expected"
+						? `${named}, which core.sessionRequirements.expected does not: add it to the list, ` +
+							"or name the expected requirement this composition holds to the second-factor authority."
+						: `${named}, registered by module ${JSON.stringify(registration?.module ?? "")}, which does not declare ` +
+							"the second-factor authority, so the requirement this composition holds to it enforces no second factor: " +
+							"install the module whose requirement declares it, or name that requirement here.",
+				reason: "second-factor-authority-not-declared",
 				stage: "applyContributions",
 				details: {
-					reason: "mfa-requirement-not-second-factor-authority",
-					requirement: { name: MFA_REQUIREMENT, module: registration.module },
+					reason: "second-factor-authority-not-declared",
+					configKey: "core.sessionRequirements.secondFactorAuthority",
+					name: authority,
+					...(registration === undefined ? {} : { module: registration.module }),
+					unmet,
 					...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
 				},
 			});

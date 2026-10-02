@@ -657,7 +657,7 @@ export type BootErrorReason =
 	| "session-requirements-undeclared"
 	| "session-requirement-missing"
 	| "duplicate-second-factor-authority"
-	| "mfa-requirement-not-second-factor-authority"
+	| "second-factor-authority-not-declared"
 	| "reserved-component-key"
 	| "module-section-path-invalid"
 	| "contribution-kind-guarded"
@@ -1287,15 +1287,20 @@ export interface DuplicateSecondFactorAuthorityDetails {
 }
 
 /**
- * While `mfa.mode` asks for a second factor, `core.sessionRequirements.expected`
- * names `mfa` and the requirement registered under that name does not declare
- * the second-factor authority: refused, rather than left believing the
- * requirement the composition expects for MFA enforces the second factor.
- * `requirement` names it, with the module that contributed it.
+ * `core.sessionRequirements.secondFactorAuthority` names a requirement that
+ * `core.sessionRequirements.expected` does not (`not-expected`), or one that
+ * registered without declaring the second-factor authority
+ * (`not-declared`): refused, rather than left believing the requirement the
+ * composition holds to the authority enforces a second factor. `module` is
+ * the module that registered it, when one did.
  */
-export interface MfaRequirementNotSecondFactorAuthorityDetails {
-	readonly reason: "mfa-requirement-not-second-factor-authority";
-	readonly requirement: { readonly name: string; readonly module: string };
+export interface SecondFactorAuthorityNotDeclaredDetails {
+	readonly reason: "second-factor-authority-not-declared";
+	readonly configKey: "core.sessionRequirements.secondFactorAuthority";
+	/** The requirement the key names. */
+	readonly name: string;
+	readonly module?: string;
+	readonly unmet: "not-expected" | "not-declared";
 	readonly cleanupErrors?: readonly {
 		readonly module: string;
 		readonly componentKey: ComponentKey;
@@ -1338,7 +1343,7 @@ export type BootErrorDetails =
 	| SessionRequirementsUndeclaredDetails
 	| SessionRequirementMissingDetails
 	| DuplicateSecondFactorAuthorityDetails
-	| MfaRequirementNotSecondFactorAuthorityDetails
+	| SecondFactorAuthorityNotDeclaredDetails
 	| ReservedComponentKeyDetails
 	| ModuleSectionPathInvalidDetails
 	| ContributionKindGuardedDetails

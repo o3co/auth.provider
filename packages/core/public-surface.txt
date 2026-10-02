@@ -410,7 +410,6 @@
 . MfaLoginCodeMail type
 . MfaRecoverySetFloorAnswer type
 . MfaRecoverySetFloorRaise type
-. MfaRequirementNotSecondFactorAuthorityDetails type
 . MfaSessionBinding type
 . MfaStoreCreateIfAnswer type
 . MfaStoreCreateIfRequest type
@@ -577,6 +576,7 @@
 . SealBinding type
 . SealingKey type
 . SealingKeyRing type
+. SecondFactorAuthorityNotDeclaredDetails type
 . SecondFactorEvent type
 . SecretEntropyRequirement type
 . SectionDeps type
