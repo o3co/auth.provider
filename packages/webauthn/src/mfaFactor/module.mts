@@ -29,6 +29,11 @@
  * refuses: a second factor's credential that returns no user handle could
  * then sign its owner in, through the grant, as another account that
  * registered it. Stateless: nothing forks per replica.
+ *
+ * This module declares no module switch (`isEnabled`), on purpose:
+ * `webauthn-mfa-factor.enabled` decides only whether the factor is offered,
+ * and the refusal above runs whether it is on or off, because second-factor
+ * credentials registered while it was on outlive switching it off.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
