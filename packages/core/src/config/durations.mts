@@ -16,9 +16,8 @@
 
 /**
  * Sanity ceiling for a duration in whole seconds: one year. A typo guard, not
- * a policy. The pairing with `.positive()` matters more: HOCON substitutes an
- * exported-but-empty environment variable as `""`, `z.coerce.number()` turns
- * that into `0`, and a zero token lifetime mints tokens already expired.
+ * a policy. The minimum of 1 matters more: a zero token lifetime mints tokens
+ * already expired.
  *
  * Exported so a package's own config schema holds its durations to the same
  * ceiling (a rate-limit window, a federation grant's tombstone retention or

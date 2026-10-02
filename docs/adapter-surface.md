@@ -202,7 +202,7 @@ wired limiter, never from the key.
 | `deviceCodeStore` | `DeviceCodeStore` | optional | `core/device-authorization/types.mts` | Pending RFC 8628 device authorizations. Written as atomic operations rather than read-then-write pairs: `poll` reads the status *and* consumes an approval in one step, because two concurrent polls that both observe `approved` mint two tokens from one human approval. Absence must be declared (#298). |
 | `federationProviders` | `ReadonlyMap<string, FederationProvider>` | optional | `core/modules/manifest/synthetic-keys.mts` | Upstream IdP protocol adapters, contributed per federation module. The value type is the adapter port in `core/src/federations/types.mts`; it read `unknown` until that contract moved into core (#626 P1). |
 | `federationRedirectPolicies` | `{ readonly [name: string]: FederationRedire…` | optional | `session/federations/contributes.mts` | Per-federation `redirect_to` allowlist factories. Paired with the provider at boot; an unpaired one refuses. |
-| `federationTokenStore` | `FederationTokenStore` | optional | `core/federation-tokens/types.mts` | Upstream tokens held on behalf of a session. Encrypted at rest by the bundled adapter. |
+| `federationTokenStore` | `FederationTokenStore` | optional | `core/federation-tokens/types.mts` | Upstream tokens held on behalf of a session. Encrypted at rest by the bundled adapter. One record per `(sid, federationName)` with a store generation, under the record rules of [Conditional writes](#conditional-writes): `getVersioned` answers the record and its generation from one snapshot, `replaceIf` and `removeIf` write only at the generation the caller read, and every write (`attach`, `update`, `replaceIf`) issues a fresh one; `delete` and `removeBySid` stay unconditional and always win. Live means within the store's retention, never `tokens.expiresAt`. The three conditional members are required. Bundled adapters: memory (core) and Redis (the generation in the record's wrapper, minted into a record written without one by its first versioned read; one script per conditional member, each conditional write refused at or after its deadline and keeping its answer for a resent copy under a replay key until the declared clock skew past it, so its write lifetime W is 2 s; a `late` answer rejects as an unknown outcome; it assumes acknowledged writes are not rolled back; the redis README, "Conditional writes", states each). Suite `federationTokenStoreConditionalContract` (`@o3co/auth-provider-test-kit`). |
 | `federationGrantBackground` | `FederationGrantBackground` | optional | `federation-grants/background.mts` | Not an adapter seam but lifecycle infrastructure, for work the provider itself starts and deliberately does not make a caller wait for (#593, D12): letting go of a refresh lock, telling the sink, recording a use, and a refresh that outlived the soft deadline and is still holding its lock until the rotated credential is written down. One per application. Its cleanup drains, and its dependency edges on `federationGrantStore`, `subjectRevocation` and `auditSink` are what put that drain ahead of their cleanups — an adapter that closed first would fail the write being waited for. Filled by `federationGrantBackgroundModule`; an enabled deployment registers the drain's tail with `lifecycleRegistrar`, sized by its refresh budgets and at least 45 seconds, which `AppHandle.cleanupAllowanceMs` reports — a host's default cleanup budget, ten seconds in the standalone, is shorter. |
 | `federationGrantIntentStore` | `FederationGrantIntentStore` | optional | `core/federation-grants/intentStore.mts` | Acquisition's records (#593, D16, slice 6), the second port of federation grants: the intent a confidential client lodged, the consent challenge the deployment's page answers, the connect transaction the upstream callback consumes, and the bound on live first-time intents per `(client, subject)` — the only admission control in front of `createPending`, which is why it refuses at capacity instead of evicting. Its keys share a tag of their own and no operation spans this port and the grant store: supersession is settled by the grant's current-intent pointer, and core orders the two writes once. One deadline governs a whole acquisition — the intent's — and the consent and the transaction carry it rather than one of their own, because nothing extends a `pending` grant's pointer. Every operation takes the time from its caller and reclaims on the adapter's own clock; a record it cannot read is refused rather than healed. Bundled adapters: memory (`memoryFederationGrantIntentStoreModule`, single replica) and Redis (`redisFederationGrantIntentStoreModule`). Its consumer is the acquisition routes of #593 slice 6. |
 | `federationGrantStore` | `FederationGrantStore` | optional | `core/federation-grants/store.mts` | Federation grants (#593): one user's consent that one client may obtain upstream access tokens through one connection, which outlives the session — the records, the upstream credentials kept beside each (sealed at rest by an adapter that persists them; the bundled one holds them in memory, unsealed), and the lock a refresh holds. Every transition is a guarded write inside the store. Every operation on a record takes the time from its caller, and what a caller is told is judged on that time alone; what an adapter reclaims is judged on its own clock. Its consumer is the federation grant routes of #593. Bundled adapters: memory (single replica) and Redis (`redisFederationGrantStoreModule`, #593 slice 4 — configured by its own section, `redis-federation-grant-store`: its layout, its retention and its key ring). |
@@ -243,7 +243,7 @@ wired limiter, never from the key.
 | `deviceCodeStoreClient` | `DeviceCodeStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. Semantic operations (`create` / `findPending` / `decide` / `poll` / `remove`) rather than commands, because each must be indivisible (#433). |
 | `federationGrantIntentStoreClient` | `FederationGrantIntentStoreClient` | optional | `redis/clients.mts` | Vendor-facing half of acquisition's records (#593, D16, slice 6). Five of its seven operations are single scripts — admission against the bound, parking a challenge, answering it, consuming a transaction, finishing a flow — because each reads, decides and writes across keys, which Redis makes one step only with a script or with WATCH/MULTI on a connection of its own (the cost #449 is removing elsewhere). The two reads are plain commands: whatever they conclude, the write that follows checks again. Every key shares the `{intents}` tag, so a script routed by one key may derive the others. It may be the grant store's own connection. |
 | `federationGrantStoreClient` | `FederationGrantStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. Semantic operations rather than commands, because each write is one guarded script; the subject index is reserved and pruned separately, since it is a key of its own and no script may touch it together with a record on a Cluster (#593, D16). |
-| `federationTokenStoreClient` | `FederationTokenStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
+| `federationTokenStoreClient` | `FederationTokenStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. Each conditional member is one atomic step on the record's key: `readVersioned` answers the value and its generation, giving a value without one the generation it is handed, its TTL kept; `replaceIfGeneration` and `removeIfGeneration` refuse a write at or after the deadline they are handed (`late`), answer a resent copy from the replay key they are handed, kept until the clock skew they are handed past the deadline, then check the generation, then write. `pExpireGT` raises the index's TTL without adding a member or making the key. |
 | `mfaFactorStoreClient` | `MfaFactorStoreClient` | optional | `redis/clients.mts` | Vendor-facing half of the enrolled-factor store (the MFA ADR's D7): one hash per subject, a field per factor, and the set's generation under `~g`. Each membership write (`createIf`, `removeIf`, `create`, `remove`, `removeAll`) is one step that answers a copy of a write already applied from its replay key, refuses a write past the deadline it is handed (`late`), checks, and writes the fields, the generation it is handed and the key's expiry: the tombstone's when the hash holds `~g` alone, none otherwise. `listVersioned` answers every field from one snapshot, giving a hash without `~g` the generation it is handed, and is refused by a read-only replica. `update` is one step that compares a record's version as text and keeps its fixed part byte for byte — no JSON is decoded, since `cjson` writes an empty array back as `{}` — and keeps `~g`. |
 | `mfaTransactionStoreClient` | `MfaTransactionStoreClient` | optional | `redis/clients.mts` | Vendor-facing half of the MFA transaction store (the MFA ADR's D8, D21, D25). Semantic operations, one script each, because every one the port calls atomic reads, decides and writes: insert-only `create`, the version compare-and-set, `reserveAttempt`, `takeChallenge`, `consume`, and D21's three subject-lock operations over the lock hash and the week's sorted set, which share the subject's tag. The email-proof requirement is one command each way, in a key with no TTL; a session's account-email proof is one command each way too (`SET … PX`, `GET`). |
 | `pendingConsentStoreClient` | `PendingConsentStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. Semantic operations (`set` / `get` / `consume` / `discard`): `consume` reads and removes a parked request with its per-session index entry in one step, and `discard` reclaims one the adapter found corrupt only while it is still the value read (#561). |
@@ -381,7 +381,11 @@ suites of the conditional-write convention, `conditionalRecordContract` and
 `conditionalSetContract`
 (`packages/test-kit/src/conditionalWrite/conditionalWrite.contract.mts`),
 which a port's binding runs over its conditional members, and which the kit's
-own tests run over reference stores and stores broken one rule at a time. A new port
+own tests run over reference stores and stores broken one rule at a time; and
+so is `FederationTokenStore`'s binding of the record suite,
+`federationTokenStoreConditionalContract`, which the kit's own tests run over
+core's in-process store and the Redis package's over its store on two
+connections. A new port
 should gain a suite: "typed and swappable" means an implementer can prove they
 got it right, not only that they read the interface carefully.
 
@@ -391,9 +395,11 @@ What the suites hold an adapter to:
   records whose fields are all required keys (#626) has a suite that compares
   whole records with `toStrictEqual`. A field with no value must come back
   named, as `undefined`, not left out. An extra key, or a class instance in
-  place of a plain object, also fails. `CodeRepository`, `FederationTokenStore`
-  and `AssertionIssuerRegistry` return such records but ship no suite yet; the
-  bundled adapters' own tests hold them to the same rule. The exception is
+  place of a plain object, also fails. `CodeRepository` and
+  `AssertionIssuerRegistry` return such records but ship no suite yet; the
+  bundled adapters' own tests hold them to the same rule.
+  `FederationTokenStore`'s conditional-write binding compares its records
+  whole. The exception is
   `FederationTokens.obtainedAt`, the one optional key, which is left out when
   unset.
 - **Only the inputs the port's types allow.** How an adapter treats a value
@@ -569,6 +575,18 @@ see, and a store's own tests must:
 - The adapter states its write lifetime W, well under the bound: an issued
   conditional write commits or fails within W. Its documentation says how,
   and states the operational assumption that rests on (rule 6).
+- A Redis adapter stamps each conditional write with its deadline, the issue
+  time plus its command timeout on the app's clock, in `ARGV`. Each
+  conditional script compares the deadline with `redis.call('TIME')` before
+  it reads or writes anything, and at or after it writes nothing. W is the
+  command timeout plus the declared clock skew, on the assumption that the
+  app's and Redis's clocks agree within that skew. A late command, whether
+  resent, queued or stalled, writes nothing. Each conditional write keeps its
+  answer under a replay key of its own, on its key's Cluster slot, until the
+  declared clock skew past its deadline, so a copy resent before then answers
+  as the first did and writes nothing, even when a server whose clock lags by
+  the skew judges it after a failover. A `late` answer is an unknown outcome:
+  another copy may have committed, or may still commit within W.
 - The port's owning module states its issue window, the longest from a
   versioned read to issuing a write conditional on it, and that the window
   is at most the bound less the adapter's W (rule 6).
@@ -615,6 +633,23 @@ retention.
 - A conditional write's request carries `expectedGeneration`: a generation,
   or, for a set's `createIf` only, `null` for a set the caller read as
   absent. A request without `expectedGeneration` is `400`.
+- A conditional create or delete carries `deadlineMs`: the instant, in
+  epoch milliseconds on the provider's clock, after which it must not be
+  applied. The adapter sets it to the moment it sends plus its request
+  timeout, and gives up at that moment itself. The Store checks
+  `deadlineMs` against its own clock in the same atomic step as the
+  conditional write; at or after it, the write is not applied and the
+  answer is `408`.
+- The adapter's write lifetime W is its request timeout plus the clock skew
+  assumed between the provider and the Store. The provider's and the
+  Store's clocks agree within that skew.
+- A `deadlineMs` absent or not a whole instant above 0 within the `Date`
+  range is `400`.
+- **No retry.** The adapter never retries a conditional write; it gives up
+  at its deadline, and a timeout or an unexpected status leaves the outcome
+  unknown. The Store, and anything in front of it, answers `421` only for a
+  request it did not apply, because the HTTP client may send it again:
+  Node's `fetch` sends a `POST` once more on a `421`.
 - `200` answers the operation's answer as its type states it:
   - a record's versioned read: `{ "value": <record>, "generation": "<g>" }`,
     or, for an absent record, `{ "value": null, "generation": null }`;

@@ -55,7 +55,11 @@ import type {
 	FederationGrantIntentAdmission,
 	FederationGrantIntentStoreClient,
 } from "./clients/federation-grant-intent.mjs";
-import type { FederationTokenStoreClient } from "./clients/federation-tokens.mjs";
+import type {
+	FederationTokenRemoveIfInput,
+	FederationTokenReplaceIfInput,
+	FederationTokenStoreClient,
+} from "./clients/federation-tokens.mjs";
 import type {
 	AcquireMfaSubjectLeaseInput,
 	AcquireMfaSubjectLeaseReply,
@@ -135,6 +139,8 @@ export type {
 	FederationGrantIntentStoreClient,
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
+	FederationTokenRemoveIfInput,
+	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
 	GrantConsentInput,
 	MfaFactorRecordUpdateInput,

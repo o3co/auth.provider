@@ -15,9 +15,9 @@
  */
 /**
  * Schema-level hardening of the token lifetimes an operator supplies: each is
- * positive and bounded, so an empty environment variable (which HOCON
- * substitutes as `""` and `z.coerce.number()` turns into 0) fails boot
- * instead of minting a token that expires at issue.
+ * a positive whole number and bounded, so an empty environment variable
+ * (which HOCON substitutes as `""`) fails boot instead of minting a token that
+ * expires at issue.
  */
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema } from "#/config/application.schema.mjs";

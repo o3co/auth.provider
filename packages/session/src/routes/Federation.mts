@@ -272,7 +272,7 @@ export const createRouter = (
 			log,
 		);
 		if (identity === null) return;
-		const { profile, identityToken, user } = identity;
+		const { profile, identityToken, user, lifetime } = identity;
 
 		// An explicit link request completes or is refused here; it never falls
 		// through to the login path below: a link is not a login.
@@ -281,6 +281,7 @@ export const createRouter = (
 				ctx,
 				provider,
 				profile,
+				lifetime,
 				identityToken,
 				user,
 				redirectTo,
@@ -324,16 +325,16 @@ export const createRouter = (
 							store: "federation_token",
 							step: "attach",
 							run: ({ sid }) => {
-								// `profile.expiresAt` is `Date | null` (required on
-								// FederationProfile). `null` propagates to the store and
-								// signals "do not refresh; reuse" — the route layer never
-								// invents a fallback expiry.
 								const consented = consentedScope(profile.scope, provider.scope);
 								return federationTokenStore.attach(sid, provider.name, {
 									accessToken,
 									refreshToken: profile.refreshToken,
 									idToken: profile.idToken,
-									expiresAt: profile.expiresAt,
+									// The end as core's reading dates it, and when the token was
+									// obtained if that end counts from this server's call. A
+									// `null` end means "do not refresh; reuse": the route layer
+									// never invents a fallback expiry.
+									...lifetime,
 									// As above: the consented scope, and the ceiling it sets.
 									scope: consented,
 									grantedScope: consented,
