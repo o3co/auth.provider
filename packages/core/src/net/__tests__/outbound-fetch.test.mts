@@ -21,8 +21,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { outboundLimitsOf as publicOutboundLimitsOf } from "#/index.mjs";
 import { loggableError } from "#/logging/loggableError.mjs";
-import { createOutboundFetch, isOutboundRefusal } from "#/net/outbound-fetch.mjs";
+import { createOutboundFetch, isOutboundRefusal, outboundLimitsOf } from "#/net/outbound-fetch.mjs";
 import type { OutboundExchange, OutboundTransport } from "#/net/outbound-transport.mjs";
 import {
 	createOutboundFetchForTesting,
@@ -848,5 +849,41 @@ describe("what a refusal carries", () => {
 		expect(isOutboundRefusal(new TypeError("x"))).toBe(false);
 		expect(isOutboundRefusal(undefined)).toBe(false);
 		expect(isOutboundRefusal({ reason: "host_not_allowed" })).toBe(false);
+	});
+});
+
+describe("the effective limits", () => {
+	it("are the defaults for an absent section or no configuration", () => {
+		const defaults = { timeoutMs: 5000, maxResponseBytes: 65536 };
+		expect(outboundLimitsOf(undefined)).toEqual(defaults);
+		expect(outboundLimitsOf({ core: {} })).toEqual(defaults);
+	});
+
+	it("are the section's own values, as configured or as an environment variable carries them", () => {
+		expect(outboundLimitsOf(withOutbound({}, { timeoutMs: 1500, maxResponseBytes: 2048 }))).toEqual(
+			{ timeoutMs: 1500, maxResponseBytes: 2048 },
+		);
+		expect(
+			outboundLimitsOf(withOutbound({}, { timeoutMs: "2500", maxResponseBytes: "4096" })),
+		).toEqual({ timeoutMs: 2500, maxResponseBytes: 4096 });
+		expect(outboundLimitsOf(withOutbound({}, { timeoutMs: 1500 }))).toEqual({
+			timeoutMs: 1500,
+			maxResponseBytes: 65536,
+		});
+	});
+
+	it("refuse a malformed section, naming the key, as building the fetch does", () => {
+		expect(() => outboundLimitsOf({ core: { outbound: { maxResponseBytes: 0 } } })).toThrow(
+			/core\.outbound\.maxResponseBytes/,
+		);
+		expect(() => outboundLimitsOf({ core: { outbound: { timeout: 5 } } })).toThrow(
+			/core\.outbound.*timeout/,
+		);
+		expect(() => outboundLimitsOf({ core: { outbound: null } })).toThrow(/core\.outbound/);
+	});
+
+	it("are read through core's public entry", () => {
+		expect(typeof publicOutboundLimitsOf).toBe("function");
+		expect(publicOutboundLimitsOf).toBe(outboundLimitsOf);
 	});
 });

@@ -110,7 +110,12 @@ function assertion(challenge = CHALLENGE): AuthenticationResponseJSON {
 	return {
 		id: CREDENTIAL_ID,
 		rawId: CREDENTIAL_ID,
-		response: { clientDataJSON, authenticatorData: "stub", signature: "stub" },
+		response: {
+			clientDataJSON,
+			authenticatorData: "stub",
+			signature: "stub",
+			userHandle: Buffer.from(USER_ID, "utf8").toString("base64url"),
+		},
 		clientExtensionResults: {},
 		type: "public-key",
 	};

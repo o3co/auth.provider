@@ -363,6 +363,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+recordableSessionAuthentication\b/,
 	},
 	{
+		concept: "the authTime a session store may record",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+recordableAuthTime\b/,
+	},
+	{
 		concept: "secret entropy floor — measuring a secret (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
 		definition: /(?:function|const)\s+measureSecretEntropyBytes\b/,

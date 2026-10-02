@@ -56,6 +56,7 @@ export {
 	type MfaFactorStoreHarness,
 	mfaFactorStoreContract,
 } from "./mfa/factorStore.contract.mjs";
+export { mfaFactorStoreConditionalContract } from "./mfa/factorStoreConditional.contract.mjs";
 export {
 	FAKE_STORE_MAX_BODY_BYTES,
 	type FakeStore,

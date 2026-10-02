@@ -638,6 +638,7 @@ export {
 	type MfaFactorStore,
 	type MfaFactorStoreFactory,
 	type MfaFactorUpdateRequest,
+	readMfaFactorSet,
 } from "./mfa/factorStore.mjs";
 export {
 	createMfaFactorStoreFactory,
@@ -645,7 +646,10 @@ export {
 	registerBuiltinMfaFactorStores,
 	registerBuiltinMfaTransactionStores,
 } from "./mfa/factory.mjs";
-export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
+export {
+	createMemoryMfaFactorStore,
+	type MemoryMfaFactorStoreOptions,
+} from "./mfa/memoryFactorStore.mjs";
 export {
 	createMemoryMfaTransactionStore,
 	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,
@@ -866,12 +870,14 @@ export {
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
 // The one fetch for a URL a client registration or a request supplies,
-// under `core.outbound`'s destination policy.
+// under `core.outbound`'s destination policy, and the limits that section sets.
 export {
 	createOutboundFetch,
 	isOutboundRefusal,
 	type OutboundFetchOptions,
+	type OutboundLimits,
 	type OutboundUrlSource,
+	outboundLimitsOf,
 } from "./net/outbound-fetch.mjs";
 // The host-list grammar's public readers, for a list of the same form kept elsewhere.
 export { type HostPattern, matchesHostList, readHostEntry } from "./net/outbound-policy.mjs";
@@ -1167,6 +1173,7 @@ export {
 	type RecordedAuthentication,
 	type RenewalNonces,
 	readRenewalNonces,
+	recordableAuthTime,
 	recordableSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,

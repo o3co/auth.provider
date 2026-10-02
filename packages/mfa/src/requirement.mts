@@ -409,8 +409,8 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 	/**
 	 * Where a second factor would meet the rule over `session`: a step-up;
 	 * `unmet` when no factor could finish one; a new login when admission
-	 * found none could be recorded on it (`secondFactorRecordable`, absent
-	 * read as `false`).
+	 * found none could be recorded on it (`secondFactorRecordable`; anything
+	 * but `true` is read as `false`, failing closed).
 	 */
 	const stepUp = (session: SessionView): RequirementVerdict => {
 		if (reach().size === 0) return UNMET;
