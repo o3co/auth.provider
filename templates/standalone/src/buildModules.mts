@@ -74,10 +74,10 @@ import {
 } from "./modules.mjs";
 
 /**
- * Overrides for the composition. All but `environment` and `logger` are
- * test-only: they let the smoke test substitute in-memory implementations of
- * the file-system-backed modules, and production callers should not pass them
- * — the defaults match the standalone scaffold.
+ * Overrides for the composition. All but `environment`, `logger` and
+ * `mailSenderModules` are test-only: they let the smoke test substitute
+ * in-memory implementations of the file-system-backed modules, and production
+ * callers should not pass them — the defaults match the standalone scaffold.
  */
 export interface BuildModulesOverrides {
 	/**
@@ -86,9 +86,9 @@ export interface BuildModulesOverrides {
 	 * store's `allow-plaintext` guard reads the environment the config came
 	 * from, not `NODE_ENV` alone. Omitted, the guard falls back to `NODE_ENV`
 	 * (and the `deploymentMode` slot core fills from `core.deployment.mode`, which it
-	 * reads either way). It also chooses the mail sender: `development`
-	 * installs the one that logs each code, any other name the SMTP one, and
-	 * none is installed when it is omitted.
+	 * reads either way). Unless `mailSenderModules` is given, it also chooses
+	 * the mail sender: `development` installs the one that logs each code, any
+	 * other name the SMTP one, and none is installed when it is omitted.
 	 */
 	readonly environment?: string;
 	/**
@@ -114,6 +114,13 @@ export interface BuildModulesOverrides {
 	 * collision. There is no way to pass "no audit sink": pass one that discards.
 	 */
 	readonly auditSinkModule?: Module;
+	/**
+	 * The deployment's own modules behind core's `mailSender` slot. Given, they
+	 * are installed under every environment name in place of the bundled
+	 * sender, which is never installed beside them (a second provider would be
+	 * a boot-time slot collision); an empty list installs no sender.
+	 */
+	readonly mailSenderModules?: readonly Module[];
 }
 
 /**
@@ -306,15 +313,17 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 				? [memoryFederationGrantIntentStoreModule]
 				: [];
 
-	// The mail sender behind core's `mailSender` slot. The development one logs
-	// each code and refuses the boot where the configuration or NODE_ENV is
-	// production or staging, or the deployment multi-replica.
-	const mailSenderModules: Module[] =
-		overrides.environment === undefined
+	// The mail sender behind core's `mailSender` slot: the deployment's own when
+	// given, otherwise the bundled one for the environment. The development one
+	// logs each code and refuses the boot where the configuration or NODE_ENV
+	// is production or staging, or the deployment multi-replica.
+	const mailSenderModules: readonly Module[] =
+		overrides.mailSenderModules ??
+		(overrides.environment === undefined
 			? []
 			: overrides.environment === "development"
 				? [standardDevelopmentMailSenderModule({ environment: overrides.environment })]
-				: [standardSmtpMailSenderModule];
+				: [standardSmtpMailSenderModule]);
 
 	return [
 		// MUST stay first: it declares no `before`/`after`, so this position is

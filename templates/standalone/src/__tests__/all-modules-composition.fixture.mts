@@ -594,6 +594,8 @@ export interface ComposeOptions {
 	 * `extraModules` adds reads when it is built (`readSwitches`'s `reads`).
 	 */
 	readonly reads?: readonly string[];
+	/** The deployment's own mail sender modules, handed to `buildModules` as `mailSenderModules`. */
+	readonly mailSenderModules?: readonly Module[];
 	/** Modules added after the template's own, before the order and the outage apply. */
 	readonly extraModules?: (config: Switches) => readonly Module[];
 	/** Components laid over the boot's, beside the federation config slots. */
@@ -627,6 +629,9 @@ export function composedModules(config: Switches, options: ComposeOptions = {}):
 		...buildModules(config, {
 			environment: options.environment ?? "production",
 			repositoriesModule: testRepositoriesModule(options.extraClients, options.extraUsers),
+			...(options.mailSenderModules === undefined
+				? {}
+				: { mailSenderModules: options.mailSenderModules }),
 			...(options.shippedRefreshTokenFamilyStore
 				? {}
 				: { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),

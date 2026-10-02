@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-10-02
+最終更新: 2026-10-03
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -580,7 +580,7 @@ worker:
 4. **共有 Redis 接続は、最初の Redis バックエンドのモジュールとともに加わる。** `standaloneRedisClientsModule` は、ここにあるすべての Redis アダプターが使う 1 本の ioredis 接続を自身のセクション（`redis-clients`）から開き、合成されたモジュールがそれを必要とするときには必ず追加される。同梱の合成では refresh token family ストアが Redis 上にあるため、デプロイには常にこれがある。in-memory の family ストアはテスト用の override（`overrides.refreshTokenFamilyModules`）である。
 5. **テンプレート自身の設定モジュールは常に合成される。** `loggingModule` と `httpModule` は `logging {}` と `http {}` を所有し、CORS のリストは `http` のキーの一つ（`http.cors.allowedOrigins`）である。`httpModule` は core の `httpSettings` を提供する。これは authoritative なので、モジュールが読み込まれている間は `overrideComponents` のエントリで置き換えられない。`httpModule` はさらに、`app.mts` が boot の後にポートと readiness の期限を読むテンプレートの `httpHostSettings` を提供する。logger はモジュールではなく、boot の前に `logging` セクションから作られ（`readLogging`）、`logger` コンポーネントとして boot に渡される。
 6. **フェデレーションアダプターは、その config bridge とともに加わる。** `googleFederationModule` には `googleFederationConfigModule` が伴い — これは有効化され、かつ `type` が `google` である `core.federations.google` エントリに対してのみで、そのため `google` という名前の `type = "oidc"` セクションが二重に合成されることはない — 有効化された `type = "oidc"` のセクションごとに 1 つずつの `oidcFederationModule(name)` には、それらが共有する 1 つの `oidcFederationConfigModule` が伴う。bridge の provider は対応するセクションが無いと throw するため、この組は内部でゲートされるのではなく、合成時に含めるかどうかが決まる。
-7. **メール送信者は環境に従う。** 設定が `development` として選ばれたところでは `@o3co/auth-provider-standard` の開発用送信者で、これは各コードをログに書く。そのモジュールは、その名前と、設定されていれば `CONFIG_ENV` と `NODE_ENV` のそれぞれが `development` か `test` であるところでだけ入り、それ以外のところ、または `core.deployment.mode` が `multi` のところでは起動を拒否する。それ以外の名前では SMTP 送信者のモジュールで、そのセクションは `standard-smtp-mail-sender`（[パッケージの README](../../packages/standard/README.md)）。その送信者は `mailSender` スロットを何かが読むところでだけ作られ、そこでは起動に `STANDARD_SMTP_MAIL_SENDER_HOST` と `STANDARD_SMTP_MAIL_SENDER_FROM` が要る。このテンプレートが合成するものでメールを送るものは無い: `mailSender` スロットを読むのは MFA パッケージで、テンプレートはそれを入れていないので、それらが無くても起動する。
+7. **メール送信者は環境に従う。** 設定が `development` として選ばれたところでは `@o3co/auth-provider-standard` の開発用送信者で、これは各コードをログに書く。そのモジュールは、その名前と、設定されていれば `CONFIG_ENV` と `NODE_ENV` のそれぞれが `development` か `test` であるところでだけ入り、それ以外のところ、または `core.deployment.mode` が `multi` のところでは起動を拒否する。それ以外の名前では SMTP 送信者のモジュールで、そのセクションは `standard-smtp-mail-sender`（[パッケージの README](../../packages/standard/README.md)）。その送信者は `mailSender` スロットを何かが読むところでだけ作られ、そこでは起動に `STANDARD_SMTP_MAIL_SENDER_HOST` と `STANDARD_SMTP_MAIL_SENDER_FROM` が要る。このテンプレートが合成するものでメールを送るものは無い: `mailSender` スロットを読むのは MFA パッケージで、テンプレートはそれを入れていないので、それらが無くても起動する。独自の送信者はこの選択を置き換える: [`src/app.mts`](src/app.mts) が `buildModules` を呼ぶところで、そのモジュールを `buildModules(switches, { environment: env, logger, mailSenderModules: [mySenderModule] })` のように渡す。`mailSenderModules` を渡すと、どの環境名でもそれが入り、同梱の送信者は入らないので、両方がスロットを提供することは無い。空のリストを渡すと送信者は入らない。
 
 `jwksModule`（core 由来）は常に合成される: トークンに署名するプロバイダーは、issuer が設定されているかどうかにかかわらず検証鍵を公開する。各ルートモジュールが何をマウントするかは、それぞれのパッケージの README にある。合成時に知っておくべき振る舞いが 1 つある: `sessionModule` の `POST /session/logout` は `UserSession` レコード（これにより `/oauth/introspect` と `/oauth/userinfo` はそのセッションから発行されたトークンを受け付けなくなる）、subject インデックス、フェデレーションのエントリを削除する — しかし refresh token family は失効させ**ない**。完全なカスケードを実行するエンドポイントは `POST /oauth/logout` である。[どのログアウトエンドポイントが何を無効化するか](../../docs/operator-runbook.md#which-logout-endpoint-invalidates-what) を参照。
 
@@ -710,7 +710,7 @@ probe は接続を開いた builder が登録するため、リストはこの�
  	];
 ```
 
-そこにある他のルールも守ること: セッションストアモジュールは先頭のままにし、ストアスロットを埋めるモジュールは、そのスロットのアダプタースイッチの横に追加するのではなく、スイッチを置き換える。[`src/app.mts`](src/app.mts) は変更不要である: `buildModules(config, …)` を `createApp` に渡し、`createApp` が返すルーターをマウントし、サーバーのライフタイムを配線している — `installGracefulShutdown`（下記）がサーバーを drain し、`handle.dispose()` を呼ぶ。
+そこにある他のルールも守ること: セッションストアモジュールは先頭のままにし、ストアスロットを埋めるモジュールは、そのスロットのアダプタースイッチの横に追加するのではなく、スイッチを置き換える。[`src/app.mts`](src/app.mts) は変更不要である: `buildModules(config, …)` を `createApp` に渡し、`createApp` が返すルーターをマウントし、サーバーのライフタイムを配線している — `installGracefulShutdown`（下記）がサーバーを drain し、`handle.dispose()` を呼ぶ。例外は独自のメール送信者で、これはリストに足すのではなく、その呼び出しの `mailSenderModules` override から入れる（ルール 7）。リストに足すと、同梱の送信者と `mailSender` スロットで衝突する。
 
 セッション要件を寄与するモジュール — MFA パッケージの `mfa`、あるいは自前のもの — は「ログイン済み」の意味を変えるので、その名前を `core.sessionRequirements.expected` に書く。`config/application.conf` はこれを `[]` として出荷する: テンプレートは何も組み込まない。boot はこのリストをモジュールが登録したものと比較する。リストにあって何も登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件をリストが書き漏らしても拒否する（`session-requirements-undeclared`）。`mfa.mode`（`MFA_MODE`）が `off` でないとき、テンプレートはリストに `mfa` を加える（`expectedSessionRequirements`、[`src/configPath.mts`](src/configPath.mts)）。書いた名前はそのまま残る。テンプレートは MFA モジュールを組み込まないので、そのようなモードはパスワードだけでログインを通すのではなく、ブートを拒否する（`session-requirement-missing`）。3 つのどれでもないモードは、ブートの前に `mfa.mode` を名指して拒否する。テンプレートは MFA モジュールを組み込むまで（MFA ADR のビルド順のステップ 20）、モジュールを選ぶ前にこのモードを自ら読む。追加したモジュールが `mfa` を登録しても、その要件が MFA パッケージのもののように第二要素の権限（second-factor authority）を宣言していなければ宣言を満たさず、テンプレートは listen の前にブートを拒否する（`MfaRequirementNotAuthorityError`、[`src/secondFactorAuthority.mts`](src/secondFactorAuthority.mts)）。
 
