@@ -103,6 +103,27 @@ export function runSessionRPRegistryContract(
 			expect((await reg.listRPs("sid-rt"))[0]).toStrictEqual(rp);
 		});
 
+		it("a registerRP that has resolved is in every listRPs that starts after it", async () => {
+			// A logout lists the RPs after it ends the session; one the list
+			// missed would never hear of the logout.
+			const reg = await factory();
+			await reg.registerRP("sid-vis", RP({ clientId: "c1" }), FUTURE());
+			// Started after the first resolved, beside a write still under way.
+			const pending = reg.registerRP("sid-vis", RP({ clientId: "c2" }), FUTURE());
+			const lists = await Promise.all([reg.listRPs("sid-vis"), reg.listRPs("sid-vis")]);
+			await pending;
+			for (const list of lists) expect(list.map((rp) => rp.clientId)).toContain("c1");
+			// An upsert that has resolved is what the next list reads.
+			await reg.registerRP(
+				"sid-vis",
+				RP({ clientId: "c1", backchannelLogoutUri: "https://v2" }),
+				FUTURE(),
+			);
+			const after = await reg.listRPs("sid-vis");
+			expect(after.map((rp) => rp.clientId).sort()).toEqual(["c1", "c2"]);
+			expect(after.find((rp) => rp.clientId === "c1")?.backchannelLogoutUri).toBe("https://v2");
+		});
+
 		it("same clientId upserts — replaces earlier registration", async () => {
 			const reg = await factory();
 			await reg.registerRP("sid-1", RP({ backchannelLogoutUri: "https://v1" }), FUTURE());
