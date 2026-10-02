@@ -4697,7 +4697,7 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 		});
 	});
 
-	it("refreshes a link-time record with no finite expiry that holds a refresh token on first use, and stores it capped", async () => {
+	it("refreshes a record with no finite expiry that holds a refresh token (linked, or stored by an earlier refresh) on first use, and stores it capped", async () => {
 		await withFrozenDate(async () => {
 			const calledAt = Date.now();
 			const store = await seeded({
@@ -4773,6 +4773,30 @@ describe("POST /oauth/federation/:name/token — a token is never refreshed befo
 			);
 		},
 	);
+
+	it("refuses a record with no finite expiry whose stored type may not be handed on, when the refresh answers a refused lifetime, and keeps the rotated refresh token", async () => {
+		const store = await seeded({
+			...baseFedTokens,
+			expiresAt: null,
+			obtainedAt: undefined,
+			refreshToken: "link-rt",
+			tokenType: "DPoP",
+		});
+		const { app } = appWith(store, async () => ({
+			accessToken: "new-at",
+			refreshToken: "rotated-rt",
+			expiresIn: Number.NaN,
+		}));
+
+		const res = await postFedToken(app, "google", await mintAccessToken());
+		const stored = await store.get("sid-1", "google");
+
+		expect(res.status).toBe(502);
+		expect(res.body.error).toBe("upstream_token_ineligible");
+		expect(res.body.access_token).toBeUndefined();
+		expect(stored?.refreshToken).toBe("rotated-rt");
+		expect(stored?.accessToken).toBe("upstream-at-xyz");
+	});
 
 	it("serves a link-time record with no finite expiry and no refresh token as stored, without refreshing", async () => {
 		const store = await seeded({
