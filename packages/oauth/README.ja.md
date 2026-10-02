@@ -639,7 +639,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 6. そうでなければリフレッシュする:
    - 同時リフレッシュのファンアウトを防ぐため advisory lock を取得する（`FederationTokenStore` が `SupportsLock` を実装している場合）。
    - ロック取得後に再読み込みする — 待機中に別のウェイターがリフレッシュしたか、ログアウトやリンク解除がレコードを消したかもしれない。その時点で消えていたレコードは、最初の読み込みと同じく `404 federation_not_linked` と答え、上流を呼ばず、レコードは書き戻さない。
-   - `provider.refreshToken(refreshToken)` を呼び、結果を、リフレッシュの元にしたレコードにだけ永続化する（下記）。その有効期間は core の `readUpstreamTokenLifetime` で読む。述べた有効期間が不正な応答、もう一方のフィールドと矛盾する応答、残りが 1 秒未満の応答は `500 refresh_failed`（`invalid_expiry`）となる。有限の有効期間を述べない応答（両フィールドとも無いか `null`）も同じく `invalid_expiry` となる。リフレッシュしたトークンには必ずリフレッシュトークンがあり、有限の有効期限なしとして保存すると、リフレッシュも上限の切り詰めも受けなくなるため。有限の有効期限を持たないレコードは、リンク時に書かれたものだけである。有限の期限は応答を読んだ時点から `maxTokenLifetimeMs`（既定 24 時間）で切り詰める。それより長い有効期間は短くするだけで拒否はしないので、そのようなトークンはその期間内にリフレッシュの対象になる。リフレッシュ自体は、対象になった後の次のリクエストで行われる。
+   - `provider.refreshToken(refreshToken)` を呼び、結果を、リフレッシュの元にしたレコードにだけ永続化する（下記）。その有効期間は core の `readUpstreamTokenLifetime` で読む。述べた有効期間が不正な応答、もう一方のフィールドと矛盾する応答、残りが 1 秒未満の応答は `500 refresh_failed`（`invalid_expiry`）となる。有効期間を述べない応答（両フィールドとも無いか `null`。RFC 6749 §5.1 は `expires_in` を推奨するだけである）は、下の上限を期限とし、呼び出しを始めた時点に取得したものとして保存する: リフレッシュしたトークンを有限の有効期限なしで保存することはない。期限はすべて応答を読んだ時点から `maxTokenLifetimeMs`（既定 24 時間）で切り詰める。それより長い有効期間は短くするだけで拒否はしないので、そのようなトークンはその期間内にリフレッシュの対象になる。リフレッシュ自体は、対象になった後の次のリクエストで行われる。
    - ロックを解放する。
 
 **書き込みは、読んだレコードにだけ届く。** ルートはレコードをストアの世代（generation）付きで読み、その世代のときだけ書く（`replaceIf` / `removeIf`。core の [条件付き書き込みの規約](../../docs/adapter-surface.md#conditional-writes)）。そのため、リフレッシュの途中に入ったログアウト、リンク解除、再リンクを取り消したり上書きしたりしない:
@@ -757,7 +757,7 @@ clients:
 - `federation.token.success` — トークン発行時（詳細の `refreshed: boolean` で保存済みトークンかリフレッシュ経路かを区別する）
 - `federation.token.forbidden` — 403 のとき（クライアントがオプトインしていない）
 - `federation.token.family_revoked` — ファミリー失効による 401 のとき
-- `federation.token.refresh_failed` — 500 `refresh_failed` のとき。ケースは 2 つ。`provider.refreshToken` がリフレッシュエラーの分類器で分類できないエラーを投げた場合: `details.reason` は `"unknown"`。または応答は返ったがこのルートが使えない場合: `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"`。このイベントが持つ値はこの 4 つですべてで、SIEM のルールはこれでグループ化すること。分類器の残りの結果はこのイベントに**ならない**: `invalid_grant` は `federation.token.reauthentication_required`（410）、`rate_limited`（429）と `network`（503）は監査イベントを出さない。
+- `federation.token.refresh_failed` — 500 `refresh_failed` のとき。ケースは 2 つ。`provider.refreshToken` がリフレッシュエラーの分類器で分類できないエラーを投げた場合: `details.reason` は `"unknown"`。または応答は返ったがこのルートが使えない場合: `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"`。このイベントが持つ値はこの 4 つですべてで、SIEM のルールはこれでグループ化すること。`"invalid_expiry"` では `details.verdict` が理由を示す: `"malformed"`、`"contradictory"`、`"spent"`（残り 1 秒未満）、`"unreadable"`（getter が例外を投げたフィールド）、`"unrecognised"`（新しい core が加えた判定）。分類器の残りの結果はこのイベントに**ならない**: `invalid_grant` は `federation.token.reauthentication_required`（410）、`rate_limited`（429）と `network`（503）は監査イベントを出さない。
 - `federation.token.reauthentication_required` — IdP の構造化された `invalid_grant` または `invalid_token` を受け取ったとき（上の 410）
 - `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま、ただしサニタイズして 200 文字で切り詰める（core の `auditErrorText`）— トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federation-grants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
 

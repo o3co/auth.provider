@@ -137,17 +137,8 @@ export interface RefreshReading {
 	readonly rotatedRefreshToken: string | undefined;
 	/** The answered id token when it is usable. */
 	readonly rotatedIdToken: string | undefined;
-	/** When the record's token ends next: the derived end, capped at the maximum; `null` only with a broken lifetime. */
-	readonly derivedExpiry: Date | null;
-	/**
-	 * When the token's lifetime counts from: the start of the refresh call.
-	 * `undefined` with a broken lifetime, or an end the
-	 * upstream stated only as an instant, which is on its own clock and so is
-	 * never aged. With the cap, `derivedExpiry − obtainedAt` may exceed the
-	 * maximum by the call's duration.
-	 */
-	readonly obtainedAt: Date | undefined;
-	readonly lifetimeIsBroken: boolean;
+	/** The lifetime the record carries next, or the verdict that refused it. */
+	readonly lifetime: RefreshedLifetime;
 	readonly tokenTypeIsBroken: boolean;
 	/** The type the record carries next. */
 	readonly nextTokenType: string | undefined;
@@ -163,50 +154,73 @@ export interface RefreshLifetimePolicy {
 	readonly maxTokenLifetimeMs: number;
 }
 
-/** The lifetime a refresh answer gives the record. */
-interface RefreshedLifetime {
-	readonly expiresAt: Date;
-	readonly obtainedAt: Date | undefined;
-}
+/**
+ * The lifetime a refresh answer gives the record: always a finite end, or the
+ * verdict that refused the answer. Nothing accepted is stored without an end.
+ */
+export type RefreshedLifetime =
+	| {
+			readonly accepted: true;
+			/** The derived end, capped at the maximum. */
+			readonly expiresAt: Date;
+			/**
+			 * The start of the refresh call; `undefined` for an end the upstream
+			 * stated only as an instant, which is on its own clock and so is never
+			 * aged. With the cap, `expiresAt − obtainedAt` may exceed the maximum
+			 * by the call's duration.
+			 */
+			readonly obtainedAt: Date | undefined;
+	  }
+	| {
+			readonly accepted: false;
+			/** Core's verdict, `unreadable` for a field whose getter threw, `unrecognised` for one this route does not know. */
+			readonly verdict: "unreadable" | "malformed" | "contradictory" | "spent" | "unrecognised";
+	  };
 
 /**
- * The lifetime a refresh answer's fields give the record, or `undefined` when
- * they name no finite one that can be used. A refreshed token has a refresh
- * token beside it, so one with no finite expiry (`unstated`) is refused: it
- * would never be refreshed or capped. A finite end is capped at
- * `now + maxTokenLifetimeMs`, never refused over it, and is obtained at core's
- * reading's `obtainedAt`.
+ * Reads a refresh answer's lifetime fields. Every accepted end is capped at
+ * `now + maxTokenLifetimeMs`, never refused over it. An answer that names no
+ * lifetime (`unstated`; RFC 6749 §5.1 only recommends `expires_in`) is given
+ * the maximum, obtained when the call began: a refreshed token is never
+ * stored with no finite expiry, which would never be refreshed or capped.
  */
 const readRefreshedLifetime = (
 	answer: Partial<RefreshedTokens>,
 	unreadable: ReadonlySet<string>,
 	policy: RefreshLifetimePolicy,
-): RefreshedLifetime | undefined => {
-	// A lifetime field that would not be read is broken.
-	if (unreadable.has("expiresIn") || unreadable.has("expiresAt")) return undefined;
+): RefreshedLifetime => {
+	if (unreadable.has("expiresIn") || unreadable.has("expiresAt")) {
+		return { accepted: false, verdict: "unreadable" };
+	}
 	const now = Date.now();
+	const capped = (endMs: number): Date =>
+		new Date(Math.min(endMs, now + policy.maxTokenLifetimeMs));
 	const lifetime = readUpstreamTokenLifetime(
 		{ expiresIn: answer.expiresIn, expiresAt: answer.expiresAt },
 		{ calledAt: policy.calledAt, now, floorMs: REFRESH_FLOOR_MS },
 	);
 	switch (lifetime.verdict) {
 		case "unstated":
+			return {
+				accepted: true,
+				expiresAt: capped(Number.POSITIVE_INFINITY),
+				obtainedAt: new Date(policy.calledAt),
+			};
 		case "malformed":
 		case "contradictory":
 		case "spent":
-			return undefined;
+			return { accepted: false, verdict: lifetime.verdict };
 		case "finite":
 			return {
-				expiresAt: new Date(
-					Math.min(lifetime.expiresAt.getTime(), now + policy.maxTokenLifetimeMs),
-				),
+				accepted: true,
+				expiresAt: capped(lifetime.expiresAt.getTime()),
 				obtainedAt: lifetime.stated === "expiresAt" ? undefined : lifetime.obtainedAt,
 			};
 		default: {
 			// A verdict a newer core adds is not one this route can store.
 			const unknownVerdict: never = lifetime;
 			void unknownVerdict;
-			return undefined;
+			return { accepted: false, verdict: "unrecognised" };
 		}
 	}
 };
@@ -238,8 +252,6 @@ export const readRefreshAnswer = (
 				}
 			: {};
 
-	// `null` is stored as "no finite expiry" (never refresh), so no refresh
-	// answer, broken or silent, falls through to it.
 	const lifetime = readRefreshedLifetime(answer, unreadable, policy);
 
 	// The refreshed token's type: unreadable or not a type name is broken
@@ -264,9 +276,7 @@ export const readRefreshAnswer = (
 		// overwriting a usable stored token strands the connection.
 		rotatedRefreshToken: usable(answer.refreshToken),
 		rotatedIdToken: usable(answer.idToken),
-		derivedExpiry: lifetime?.expiresAt ?? null,
-		obtainedAt: lifetime?.obtainedAt,
-		lifetimeIsBroken: lifetime === undefined,
+		lifetime,
 		tokenTypeIsBroken,
 		nextTokenType,
 		answeredScope: classifyAnsweredScope(answer, unreadable),
