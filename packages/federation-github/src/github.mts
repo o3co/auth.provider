@@ -35,6 +35,11 @@ import * as oidc from "openid-client";
 // app config.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
+		/**
+		 * @deprecated Read only by the deprecated `githubFederationModule`.
+		 * `githubFederationTypeModule()` takes each entry from `core.federations`
+		 * itself, through core's dispatch by type.
+		 */
 		readonly githubFederationConfig?: GithubProviderConfig;
 	}
 }
@@ -118,6 +123,7 @@ const isJsonObject = (value: unknown): value is Record<string, unknown> =>
  * asked only to carry the request; reading the answer is this adapter's job.
  */
 const getGithubJson = async (
+	federation: string,
 	oidcConfig: oidc.Configuration,
 	accessToken: string,
 	url: string,
@@ -134,12 +140,12 @@ const getGithubJson = async (
 		// Released, not left for the connection to wait on. A failure to cancel
 		// must not replace the error that says what GitHub answered.
 		await res.body?.cancel().catch(() => undefined);
-		throw new Error(`GitHub federation "github": GET ${url} answered HTTP ${res.status}`);
+		throw new Error(`GitHub federation ${federation}: GET ${url} answered HTTP ${res.status}`);
 	}
 	try {
 		return await res.json();
 	} catch {
-		throw new Error(`GitHub federation "github": GET ${url} answered a body that is not JSON`);
+		throw new Error(`GitHub federation ${federation}: GET ${url} answered a body that is not JSON`);
 	}
 };
 
@@ -152,7 +158,7 @@ const DECIMAL_ID = /^[1-9][0-9]*$/;
  * string, or a string of decimal digits (no sign, no leading zero) as it is.
  * `undefined` when neither is usable.
  *
- * GitHub types `id` as int64, and the Store identity is `github:<id>`. After
+ * GitHub types `id` as int64, and the Store identity is `<name>:<id>`. After
  * `JSON.parse`, a number outside the safe-integer range no longer names one
  * id (at 2^53 or above two ids parse as the same number; `1e400` is
  * `Infinity`), so two GitHub users could sign in as one account. The string
@@ -167,9 +173,29 @@ const githubSub = (user: Record<string, unknown>): string | undefined => {
 	return undefined;
 };
 
+/**
+ * The provider for the federation `github`: its name is the `:name` route
+ * segment and the prefix of the identity handed to the Store (`github:<id>`).
+ */
 export function createGithubProvider(config: GithubProviderConfig): GithubProvider {
+	return createNamedGithubProvider("github", config);
+}
+
+/**
+ * The provider for the federation `name`, which is its `:name` route segment
+ * and the prefix of the identity handed to the Store (`<name>:<id>`). Every
+ * message it throws names the federation.
+ */
+export function createNamedGithubProvider(
+	name: string,
+	config: GithubProviderConfig,
+): GithubProvider {
+	// Quoted as JSON, so a name cannot misread or split a log line.
+	const federation = JSON.stringify(name);
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
-		throw new Error(`GitHub federation "github" requires clientId, clientSecret, and callbackURL`);
+		throw new Error(
+			`GitHub federation ${federation} requires clientId, clientSecret, and callbackURL`,
+		);
 	}
 
 	// GitHub does not expose an OIDC discovery document, so we construct ServerMetadata manually.
@@ -188,7 +214,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 	if (config.fetch) oidcConfig[oidc.customFetch] = config.fetch as unknown as oidc.CustomFetch;
 
 	return {
-		name: "github",
+		name,
 		scope: SCOPES,
 
 		buildAuthorizationUrl(params: {
@@ -237,7 +263,12 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			// GitHub OAuth Apps issue no id_token, so there is no id_token `sub` to
 			// bind the user to (OIDC §5.3.2): do NOT mirror Google's UserInfo /
 			// id_token `sub` binding here.
-			const body = await getGithubJson(oidcConfig, tokens.access_token, GITHUB_USER_URL);
+			const body = await getGithubJson(
+				federation,
+				oidcConfig,
+				tokens.access_token,
+				GITHUB_USER_URL,
+			);
 			// A body that is not a JSON object is treated as a user with no id or
 			// sub, and so is a user whose id githubSub refuses: either fails the
 			// exchange below.
@@ -245,7 +276,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			const sub = githubSub(user);
 			if (sub === undefined) {
 				throw new Error(
-					`GitHub federation "github" received a /user without id/sub (an id must be a positive safe integer, or a string of decimal digits with no sign or leading zero)`,
+					`GitHub federation ${federation} received a /user without id/sub (an id must be a positive safe integer, or a string of decimal digits with no sign or leading zero)`,
 				);
 			}
 
@@ -254,7 +285,12 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			let email: string | undefined;
 			let emailVerified: boolean | undefined;
 			try {
-				const rows = await getGithubJson(oidcConfig, tokens.access_token, GITHUB_EMAILS_URL);
+				const rows = await getGithubJson(
+					federation,
+					oidcConfig,
+					tokens.access_token,
+					GITHUB_EMAILS_URL,
+				);
 				if (Array.isArray(rows)) {
 					// A row that is not an object is skipped: it must not take the
 					// valid addresses beside it down with it.
@@ -321,7 +357,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 					url = new URL(config.endSessionEndpoint);
 				} catch {
 					throw new Error(
-						`GitHub federation "github" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
+						`GitHub federation ${federation} has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
 					);
 				}
 				if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
@@ -339,7 +375,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				// `detail`, and the value is not this adapter's text. (The fallback
 				// above is always a URL, so only a handed value lands here.)
 				throw new Error(
-					'GitHub federation "github" received an invalid postLogoutRedirectUri: not a URL',
+					`GitHub federation ${federation} received an invalid postLogoutRedirectUri: not a URL`,
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);
@@ -363,6 +399,11 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
  * Contributes `federations.github` (the upstream OAuth 2 provider) and
  * `federationRedirectPolicies.github` (the consumer redirect URL policy).
  * Config is supplied via the `githubFederationConfig` ComponentMap slot.
+ *
+ * @deprecated Use `githubFederationTypeModule()`: one module handles every
+ * `core.federations` entry of type `github`, under the entry's name, read
+ * from the configuration by core, with no `githubFederationConfig` slot to
+ * fill. Composing both for one entry refuses boot.
  */
 export const githubFederationModule = defineModule({
 	name: "federation-github",
