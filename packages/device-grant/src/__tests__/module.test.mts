@@ -1043,9 +1043,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	it("answers an unexpected failure on the mounted device_authorization route with JSON 500, and logs a projection of it", async () => {
 		// A rate limiter that answers a decision whose `resetAt` is not a
 		// `Date` is a failure of the host's adapter, not of the request: the
-		// throttle in front of the route fails on it. A client registration
-		// cannot provoke this: the client authentication reads registrations
-		// through core's client-record boundary, which refuses a malformed one.
+		// throttle in front of the route fails on it.
+		// Chosen because no fault this package owns escapes the handler: its
+		// store errors are answered, and a malformed registration is refused
+		// before it (see the test below).
 		const { lines, logger } = serialisingLogger();
 		const app = mountContributedRoute(0, {
 			...enabledDeps(),
@@ -1084,6 +1085,37 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			expect(line).not.toContain(CONFIDENTIAL_SECRET);
 			expect(line).not.toContain("TypeError:");
 		}
+	});
+
+	it("answers a client whose registration the boundary refuses 401 invalid_client on the mounted device_authorization route", async () => {
+		// `defaultScopes` a string rather than a list: the client authentication
+		// reads registrations through core's client-record boundary, which
+		// refuses the record, so the handler never sees it.
+		const { lines, logger } = serialisingLogger();
+		const malformed = { ...confidentialClient, defaultScopes: "openid" };
+		const app = mountContributedRoute(0, {
+			...enabledDeps(),
+			logger,
+			clientRepository: {
+				findById: async (id: string) => (id === CONFIDENTIAL_ID ? (malformed as never) : null),
+				authenticate: async (id: string, secret: string) =>
+					id === CONFIDENTIAL_ID && secret === CONFIDENTIAL_SECRET ? (malformed as never) : null,
+			} satisfies ClientRepository,
+		});
+
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_client");
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ step: "find", clientId: CONFIDENTIAL_ID }),
+			"client_record_refused",
+		);
+		for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
 	});
 
 	/** The verification route, signed in, with a store whose lookup throws `thrown`. */
