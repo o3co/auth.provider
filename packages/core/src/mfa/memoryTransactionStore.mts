@@ -837,15 +837,23 @@ export function createMemoryMfaTransactionStore(
 		async applySubjectRecovery(subject, application): Promise<MfaSubjectRecoveryAnswer> {
 			const { operation, sid, nowMs, leaseToken, sessionsBoundaryMs, guessableBoundSinceMs } =
 				checkSubjectRecoveryApplication(subject, application);
-			sawCallerTime(nowMs);
-			const storeNowMs = clock();
-			// The hard hold as it stands now, with from when a rebind counts against it.
+			// The hard hold as it stands now, with from when a rebind counts against it. A
+			// hold fixed so early that its bound falls before the epoch is one no answer can
+			// carry: an outage, raised before anything changes.
 			const hold = () => {
 				const hardAtMs = subjects.get(subject)?.hard;
-				return hardAtMs === undefined
-					? { hard: false as const, rebindAfterMs: null }
-					: { hard: true as const, rebindAfterMs: rebindAfter(hardAtMs) };
+				if (hardAtMs === undefined) return { hard: false as const, rebindAfterMs: null };
+				const rebindAfterMs = rebindAfter(hardAtMs);
+				if (!Number.isSafeInteger(rebindAfterMs) || rebindAfterMs < 0) {
+					throw new Error(
+						"MfaTransactionStore: the hard hold's bound is not an instant an answer can carry",
+					);
+				}
+				return { hard: true as const, rebindAfterMs };
 			};
+			if (operation === "recover") hold();
+			sawCallerTime(nowMs);
+			const storeNowMs = clock();
 			const refused = (reason: MfaSubjectRecoveryRefusal): MfaSubjectRecoveryAnswer => ({
 				outcome: "refused",
 				reason,
@@ -857,8 +865,9 @@ export function createMemoryMfaTransactionStore(
 			const slot = slots?.get(key);
 			if (slots === undefined || slot === undefined) return refused("unauthorized");
 			if (slot.expiresAtMs <= storeNowMs) {
+				const answer = refused("unauthorized");
 				dropSlot(subject, slots, key);
-				return refused("unauthorized");
+				return answer;
 			}
 			if (slot.appliedAt !== undefined) {
 				return {

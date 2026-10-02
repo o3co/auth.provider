@@ -746,7 +746,9 @@ return {1, stamp}
  * applies, each flag `1` or `0`. `hard` and `rebindAfter` are the hard hold read after the call:
  * while it stands, from when a rebind counts — the hold's time plus the skew, floored to whole
  * milliseconds, as decimal text, the bound a recover lifts by — and empty while none does. A
- * reset reads the hold only to answer a refusal; a hold it cannot read is an error.
+ * reset reads the hold only to answer a refusal or an authorization already applied. A hold it
+ * cannot read, or whose bound is not a safe whole number from 0, is an error, raised before the
+ * first write.
  */
 const LUA_MFA_SUBJECT_RECOVERY_APPLY = `${LUA_MFA_SUBJECT_PRELUDE}${LUA_MFA_RECOVERY_PRELUDE}
 local operation, field, token = ARGV[1], ARGV[2], ARGV[4]
@@ -762,11 +764,18 @@ end
 local g, floor, slots = recovery_load(KEYS[3])
 local next_generation = (g or 0) + 1
 if next_generation > MAX_COUNT then corrupt() end
+-- From when a rebind counts against the hard hold's time: a guessable record created after it.
+-- A bound an answer cannot carry (not a safe whole number from 0) is a state this store did not write.
+local function rebind_after(at)
+  local after = math.floor(at + clock_skew)
+  if after < 0 or after > MAX_COUNT then corrupt() end
+  return after
+end
 local run, pending, week, held_hard = nil, nil, nil, nil
-if operation == 'recover' then run, pending, week, held_hard = load() end
-
--- From when a rebind counts against a hard hold fixed at at: a guessable record created after it.
-local function rebind_after(at) return math.floor(at + clock_skew) end
+if operation == 'recover' then
+  run, pending, week, held_hard = load()
+  if held_hard ~= nil then rebind_after(held_hard) end
+end
 -- The hard hold as it stands now: '1' and from when a rebind counts, or '0' and empty.
 local function hold()
   local at = redis.call('HGET', KEYS[1], 'hard')
@@ -779,10 +788,11 @@ if not lease_held(KEYS[4], token) then return refused('lease_not_held') end
 local slot = slots[field]
 if slot == nil then return refused('unauthorized') end
 if slot.ends <= server_ms() then
+  local hard, after = hold()
   redis.call('HDEL', KEYS[3], field)
   slots[field] = nil
   recovery_keep(KEYS[3], g ~= nil or floor ~= nil, slots)
-  return refused('unauthorized')
+  return {'refused', 'unauthorized', hard, after}
 end
 if slot.applied ~= nil then return {'already', slot.id, slot.applied, hold()} end
 if slot.ends <= now then return refused('expired') end

@@ -2005,6 +2005,52 @@ describe("createRedisMfaTransactionStore — a subject's lease, recovery and flo
 		expect(await first().exists(keys.lock)).toBe(0);
 	});
 
+	it("answers a reset whose authorization has ended an outage on a hard field it cannot read, leaving the authorization in place", async () => {
+		const prefix = freshPrefix();
+		const { store, token } = await primed(prefix);
+		const keys = keysOf(prefix);
+		const field = "a:reset:-";
+		expect(await first().hget(keys.recovery, field)).not.toBeNull();
+		await first().hset(keys.recovery, field, `p|${Date.now() - MINUTE}|reset-1`);
+		await first().hset(keys.lock, "hard", "garbage");
+		const before = await snapshot([keys.lock, keys.week, keys.recovery]);
+		await expect(applyOf(store, "reset", token)).rejects.toThrow(/subject state/);
+		expect(await snapshot([keys.lock, keys.week, keys.recovery])).toEqual(before);
+	});
+
+	it.each([
+		["past the safe integers", String(2 ** 53 - DEFAULT_CLOCK_SKEW_MS)],
+		["before the epoch", String(-DEFAULT_CLOCK_SKEW_MS - 1)],
+	])(
+		"answers an apply an outage, committing nothing, on a hard hold whose bound falls %s; a reset still ends it",
+		async (_label, written) => {
+			const prefix = freshPrefix();
+			const { store, token } = await primed(prefix);
+			const keys = keysOf(prefix);
+			await first().hset(keys.lock, "hard", written);
+			const before = await snapshot([keys.lock, keys.week, keys.recovery]);
+			// A rebind would lift the hold; an old record leaves it standing while the boundary applies.
+			await expect(applyOf(store, "recover", token)).rejects.toThrow(/subject state/);
+			await expect(
+				store.applySubjectRecovery("user-1", {
+					operation: "recover",
+					sid: "sid-1",
+					nowMs: Date.now(),
+					leaseToken: token,
+					sessionsBoundaryMs: Date.now(),
+					guessableBoundSinceMs: 0,
+				}),
+			).rejects.toThrow(/subject state/);
+			await expect(applyOf(store, "reset", `${token}x`)).rejects.toThrow(/subject state/);
+			expect(await snapshot([keys.lock, keys.week, keys.recovery])).toEqual(before);
+			expect(await applyOf(store, "reset", token)).toMatchObject({
+				outcome: "applied",
+				hard: false,
+				rebindAfterMs: null,
+			});
+		},
+	);
+
 	it.each<[string, readonly string[]]>([
 		["a refusal without its last element", ["refused", "unauthorized", "0"]],
 		["an apply already made without its last element", ["already", "r-1", "1", "1"]],

@@ -2367,6 +2367,57 @@ export function runMfaTransactionStoreContract(
 					}
 				});
 
+				it("answers a hold fixed at a fractional time with its bound floored to whole milliseconds, the bound it lifts by", async () => {
+					const store = await factory();
+					let at = start();
+					for (let i = 0; i < 6; i++) {
+						at += MINUTE;
+						await fail(store, at, { ...SMALL_HARD, hardLimit: 7 });
+					}
+					expect(held(await check(store, at + 30_000.5, SMALL_HARD))).toEqual(HARD);
+					await store.authorizeSubjectRecovery("user-1", authorization());
+					const after = at + 30_000 + SKEW;
+					expect(await recover(store, at + MINUTE, { guessableBoundSinceMs: after })).toEqual({
+						outcome: "refused",
+						reason: "not_revoked_since",
+						hard: true,
+						rebindAfterMs: after,
+					});
+					expect(
+						await recover(store, at + MINUTE, { guessableBoundSinceMs: after + 1 }),
+					).toMatchObject({ outcome: "applied", hard: false, rebindAfterMs: null });
+				});
+
+				it("refuses, as an outage changing nothing, a recover against a hold whose bound falls before the epoch; a reset still ends it", async () => {
+					const store = await factory();
+					let at = -DAY;
+					for (let i = 0; i < 6; i++) {
+						at += MINUTE;
+						await fail(store, at, SMALL_HARD);
+					}
+					await store.authorizeSubjectRecovery("user-1", authorization());
+					const now = start();
+					for (const guessableBoundSinceMs of [null, OLD_RECORD()]) {
+						await expect(
+							recover(store, now, { sessionsBoundaryMs: now, guessableBoundSinceMs }),
+							String(guessableBoundSinceMs),
+						).rejects.toThrow();
+					}
+					expect(await store.subjectGeneration("user-1")).toBe(0);
+					expect(held(await check(store, now, SMALL_HARD))).toEqual(HARD);
+					await store.authorizeSubjectRecovery(
+						"user-1",
+						authorization({ operation: "reset", sid: undefined, recoveryId: "reset-1" }),
+					);
+					expect(
+						await recover(store, now, {
+							operation: "reset",
+							sid: undefined,
+							guessableBoundSinceMs: undefined,
+						}),
+					).toMatchObject({ outcome: "applied", hard: false, rebindAfterMs: null });
+				});
+
 				it("answers, for an apply already made, the hold that stands now: one fixed again after the lift", async () => {
 					const store = await factory();
 					const last = await latched(store);

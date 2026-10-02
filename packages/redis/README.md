@@ -1073,8 +1073,10 @@ so it ends a lock state the other scripts cannot read. Every reply of the apply
 script ends with the hard hold as it stands after the call: `1` and from when a
 rebind counts — the `hard` field's time plus the skew, floored to whole
 milliseconds, as decimal text, the same bound the script lifts the hold by — or
-`0` and an empty string. A `hard` field the script cannot read is an outage, a
-refused reset's answer included; an applied reset still deletes it unread. A
+`0` and an empty string. A `hard` field the script cannot read, or whose bound
+is not a safe whole number from 0, is an outage raised before the script's first
+write, a refused reset's answer included; an applied reset still deletes it
+unread. A
 `MfaTransactionStoreClient` of your own whose `applySubjectRecovery` answers
 the shorter reply, without that last element, is refused as an outage: answer
 as `ApplyMfaSubjectRecoveryReply` says. The acquire script
