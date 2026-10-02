@@ -32,6 +32,26 @@ export {
 	type LifecycleCleanupOptions,
 	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
+// The conditional-write convention every store's conditional members follow
+// (docs/adapter-surface.md, "Conditional writes").
+export {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	type ConditionalCreateAnswer,
+	type ConditionalRemoveAnswer,
+	type ConditionalReplaceAnswer,
+	type ConditionalSetRemoveAnswer,
+	isStoreGeneration,
+	newStoreGeneration,
+	readConditionalCreateAnswer,
+	readConditionalRemoveAnswer,
+	readConditionalReplaceAnswer,
+	readConditionalSetRemoveAnswer,
+	readVersioned,
+	readVersionedSet,
+	type StoreGeneration,
+	type Versioned,
+	type VersionedSet,
+} from "./adapters/conditionalWrite.mjs";
 export {
 	isStorableExpiry,
 	isStorableLifetime,
@@ -864,6 +884,16 @@ export {
 	normalizeAllowedOrigins,
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
+// The one fetch for a URL a client registration or a request supplies,
+// under `core.outbound`'s destination policy.
+export {
+	createOutboundFetch,
+	isOutboundRefusal,
+	type OutboundFetchOptions,
+	type OutboundUrlSource,
+} from "./net/outbound-fetch.mjs";
+// The host-list grammar's public readers, for a list of the same form kept elsewhere.
+export { type HostPattern, matchesHostList, readHostEntry } from "./net/outbound-policy.mjs";
 // The registered-redirect-URI shape vocabulary, the query's parameter names
 // included — enforced by ClientEntrySchema at boot; exported so a custom
 // ClientRepository, which bypasses that schema by design, can hold its
@@ -974,6 +1004,17 @@ export {
 	isWellFormedClientId,
 	MAX_CLIENT_ID_LENGTH,
 } from "./repositories/clientId.mjs";
+// Core's boundary over a ClientRepository: each record answered is read by
+// name once and held to the registration schema, and `lookupClient` tells a
+// refused record from an absent one, so a caller reading the outermost
+// boundary's `lookupClient` falls back to another source of clients only on
+// `absent`.
+export {
+	type ClientLookup,
+	type ClientRepositoryBoundaryOptions,
+	type ValidatedClientRepository,
+	validatedClientRepository,
+} from "./repositories/clientRepositoryBoundary.mjs";
 export {
 	type ClientRepositoryOutage,
 	logClientRepositoryUnavailable,

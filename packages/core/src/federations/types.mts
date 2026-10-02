@@ -206,6 +206,17 @@ export function supportsLogout(
 	return typeof (provider as { endSession?: unknown }).endSession === "function";
 }
 
+/**
+ * What an adapter's `mapClaims` answers of an upstream profile. The session
+ * package's claim precedence promotes a string `email`, `name` or `picture`
+ * the local `User` leaves absent, and records the whole map under the
+ * session's `claims.federated[<provider>]`, a custom claim. That is stored
+ * as its JSON form (`PasswordLoginFacts.claims`), so every value should be
+ * JSON data — a string, a finite number, a boolean, `null`, or a list or
+ * plain object of those: a `Date` is stored as its ISO string, and a map
+ * holding what JSON cannot take (a bigint, a cycle) drops the whole
+ * `federated` claim. A declared claim of another type is not promoted.
+ */
 export interface MappedClaims {
 	readonly email?: string;
 	readonly emailVerified?: boolean;

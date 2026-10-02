@@ -122,6 +122,12 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_CONCURRENT_FETCHES: "4",
 	CORE_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
 	CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
+	CORE_OUTBOUND_ALLOWED_HOSTS: "rp.example, .partner.example",
+	CORE_OUTBOUND_DENIED_HOSTS: "blocked.example",
+	CORE_OUTBOUND_INTERNAL_HOSTS: ".corp.internal",
+	CORE_OUTBOUND_TIMEOUT_MS: "3000",
+	CORE_OUTBOUND_MAX_RESPONSE_BYTES: "32768",
+	CORE_OUTBOUND_EGRESS: "direct",
 
 	// --- the grant switches ------------------------------------------
 	OAUTH_SESSION_ENABLED: "false",

@@ -225,7 +225,7 @@ wired limiter, never from the key.
 | `subjectRevocation` | `SubjectRevocation` | optional | `core/user-sessions/types.mts` | Per-subject not-before watermark: what a credential change stamps so tokens minted before it stop verifying. Absence must be declared (#406). Session admission reads it for a live record, so every module that admits a browser session reads it — the MFA module's routes among them, for an enrollment from a signed-in session and its step-up. |
 | `subjectRevocationService` | `SubjectRevocationService` | optional | `core/user-sessions/subjectRevocationService.mts` | Not an adapter seam: the composed operation a Store calls to end everything one subject holds (#593, D13) — the boundary, their sessions, and their federation grants. It is a component rather than the free `revokeAllForSubject` because building it needs every session store plus the cascade, and because the one decision it carries — whether a caller MAY ask for the subject's established grants to be kept — belongs to the operator (`federation-grants.allowKeepOnSubjectRevocation`) and not to the caller. Filled by an explicitly installed module in `@o3co/auth-provider-oauth`, where `cascadeLogout` lives. |
 | `mfaReset` | `MfaReset` | optional | `mfa/reset.mts` | Not an adapter seam: the operator reset a Store calls for a subject who lost their second factors (the MFA ADR's D25), `resetMfaForSubject(subject, { requireEmailProof?, federationGrants?, requestedBy? })` — every session and token ended through `subjectRevocationService`, then, under the subject's lease in the MFA transaction store, the lock state reset, every factor record removed and the enrollment witness cleared. A component because it composes those three. Filled by `mfaResetModule` in `@o3co/auth-provider-mfa`, declared by that package's `ComponentMap` augmentation; it requires `mfaSubjectLeases`, so the reset is available only where `mfaModule` is installed (not under `mfa.mode = "off"`). |
-| `mfaSubjectLeases` | `MfaSubjectLeases` | optional | `mfa/factorSet.mts` | Not an adapter seam: the subject's lease owner, built by `mfaModule` from the `mfaTransactionStore` slot and `mfa.storeTimeoutMs`: every writer of a subject's factor set — the MFA routes' and the operator reset — holds a lease of the same rules (twelve of the timeout: the most Store calls one writer makes, the acquire and one to spare; the per-call bound; the wait rules). An opaque handle; only the MFA package reads it. Filled by `mfaModule`, which declares it authoritative (no `overrideComponents` entry while `mfaModule` is loaded), declared by `@o3co/auth-provider-mfa`'s `ComponentMap` augmentation, and required by `mfaResetModule`. |
+| `mfaSubjectLeases` | `MfaSubjectLeases` | optional | `mfa/factorSet.mts` | Not an adapter seam: the subject's lease owner, built by `mfaModule` from the `mfaTransactionStore` slot and `mfa.storeTimeoutMs`: every writer of a subject's factor set — the MFA routes' and the operator reset — holds a lease of the same rules (sixteen of the timeout: the most Store calls one writer makes, the acquire and one to spare; the per-call bound; the wait rules). An opaque handle; only the MFA package reads it. Filled by `mfaModule`, which declares it authoritative (no `overrideComponents` entry while `mfaModule` is loaded), declared by `@o3co/auth-provider-mfa`'s `ComponentMap` augmentation, and required by `mfaResetModule`. |
 | `subjectSessionIndex` | `SubjectSessionIndex` | optional | `core/user-sessions/types.mts` | Subject → live sessions, so a credential change can enumerate what to cascade over. Absence must be declared (#406). |
 | `userRepository` | `UserRepository` | required | `core/repositories/UserRepository.mts` | **The verify seam.** `authenticate` / `authenticateByToken`, plus the optional `linkFederatedIdentity` a `?link=1` flow relays to the Store, which decides, and the optional `markMfaEnrolled`, the MFA enrollment witness the provider writes and the Store answers back as `User.mfaEnrolled` — see the boundary section; over HTTP it is `markMfaEnrolledUrl` (`{ subject, enrolled }`, `204`, `404` for a subject the Store does not hold), in foundation's README, and its suite is `@o3co/auth-provider-test-kit`'s. `HttpUserRepository` has no `markMfaEnrolled`: foundation runs the suite with a stand-in for the write, reading the witness back through `authenticate`. `mfaModule` reads the slot optionally, for `markMfaEnrolled` alone: it marks the witness after a first counting factor is written and when a login's verification finds it missing, and says once at boot when the directory cannot. The optional pair `supportsFederatedIdentityLookup` / `findSubjectByFederatedIdentity` is what a federation-grant callback asks (D7 check 5, #611): whether the Store covers a registration with the claims its connection names — asked at boot — and who holds an identity from it, given the registration, the `sub` and those verified claims (Entra's `tid`/`oid` for a directory Store), as `linked` / `unlinked` / `indeterminate`. The bundled `InMemoryUserRepository` covers none. |
 | `userSessionStore` | `UserSessionStore` | optional | `core/user-sessions/types.mts` | The session records themselves, keyed by `sid`. A record round-trips `authentication` (how the session was established, the MFA ADR's D9) and, when the session recorded them, `enrollmentFacts` (what the login's `User` said for a first binding: the enrollment witness and what its address is — none, one the provider reads, or one it cannot (`mailAddress`: `none`, `address`, `unreadable`), the MFA ADR's D12 and D24) — an optional key a store of your own must round-trip, recording what `recordableEnrollmentFacts` answers. A session without it recorded nothing, and a reader decides what that means: the MFA ADR's D12 has the `mfa` requirement send it to log in before a first binding. The step-up capability `SupportsSecondFactorUpdate` (`recordSecondFactor`, detected by `supportsSecondFactorUpdate`) is optional; without it a step-up asks for a re-authentication. A store that has it records the event's `renewalNonce` in the escalation's write and round-trips it as `UserSession.renewalNonce` — an optional key, and admission refuses every cookie session but the one holding it (the MFA ADR's D27) — and records only while the session's nonce is the event's `expectedRenewalNonce` (absent matching absent: core's `readRenewalNonces` reads the event's two nonces once, and `expectsRenewalNonce` compares), in the same atomic step, answering `null` otherwise; both bundled stores do. A store of your own that drops it leaves an escalated session unbound, and an old express id a request in flight saved back after the renewal gains the escalation. |
@@ -395,3 +395,218 @@ What the suites hold an adapter to:
   adapter, and its own tests cover it. For example, the bundled device-code
   stores' tests cover a falsy `requestedScope`, which the device-code suite
   does not.
+
+## Conditional writes
+
+A port whose callers must not overwrite or restore what another writer
+changed since they read it has **conditional members**: a versioned read that
+answers what is stored with its **store generation**, and writes applied only
+while what they guard is still at the generation the caller read. The types,
+`isStoreGeneration`, `newStoreGeneration` and core's readers of every answer
+are in `packages/core/src/adapters/conditionalWrite.mts`, on core's root
+entry, with `BUNDLED_STORE_WRITE_LIFETIME_MS`, the bundled stores'
+write-lifetime bound. These are the rules every store with conditional members keeps.
+
+**Scopes.** A generation guards one of two things:
+
+- **A record** (record-scoped): every write of the record issues a new
+  generation. `replaceIf` answers `ConditionalReplaceAnswer` (`updated` with
+  the new generation, `missing` or `conflict`), `removeIf` answers
+  `ConditionalRemoveAnswer` (`removed`, which carries no generation since the
+  record is gone, `missing` or `conflict`), and the versioned read answers
+  `Versioned<T>` or `null`.
+- **A set's membership** (set-scoped): every membership write issues a new
+  generation, and a member's own update, fenced by the member's own version,
+  keeps it. The versioned read answers `VersionedSet<T>`, whose `generation`
+  is `null` only for an absent set: never written, or its tombstone expired.
+  `createIf` answers
+  `ConditionalCreateAnswer` (`created` with the new generation, or
+  `conflict`; never `missing`), and `removeIf` answers
+  `ConditionalSetRemoveAnswer` (`removed`, always with the set's new
+  generation, `missing` or `conflict`).
+
+**The rules.**
+
+1. **Atomic.** The check and the write are one atomic step in the store: a
+   transaction, a compare-and-set or a script. An in-process lock counts only
+   for an in-process store. An unconditional write (a reset, a logout-style
+   delete, a create such as `attach`) is one atomic step too, serialised with
+   the conditional ones, so a conditional write never interleaves with it.
+2. **One snapshot, and every write moves the generation.** A versioned read
+   answers the value (or the members) and the generation from one snapshot,
+   which reflects every write acknowledged before the read began: never a
+   cache or a lagging replica.
+   Every write that changes what the generation guards issues a new one,
+   legacy and unconditional writes included.
+3. **Expiry is the store's retention.** A record past it reads as `null`
+   and answers `missing` to a replace or a removal; a set past it (its
+   tombstone expired) reads as `{ items: [], generation: null }` and answers
+   as an absent set does (rule 4). The conditional check includes the expiry
+   predicate. The retention is the store's own (a Redis `PX`, a SQL
+   `expires_at` set from the store's TTL), never a domain field such as an
+   access token's `expiresAt`.
+4. **Outcomes.** An outage rejects; it is never `missing` or `null`. A
+   rejection after the request was sent means "unknown", never "not
+   written". `missing` and `conflict` each write nothing. A set's
+   `createIf` with the set absent and an `expected` generation, with the set
+   present and `expected` `null`, or with a member id already held answers
+   `conflict`. A set's `removeIf` against an absent set answers `missing`;
+   against a present one it checks the generation before the member, so a
+   moved set answers `conflict` and an absent member at `expected` answers
+   `missing`. Core's readers refuse any answer outside its type with a
+   `TypeError` (a `RangeError` stays a caller's own input), which the caller
+   treats as the store's outage.
+5. **Unconditional writes that must win stay**: a logout, a removal of
+   everything a session or subject holds, an operator reset. An
+   unconditional removal removes; an unconditional write issues a new
+   generation.
+6. **Sets.** The generation belongs to the set's membership. Removing the
+   last member keeps the set, at a new generation; the unconditional reset
+   upserts the set at a new generation, creating it when absent. A set
+   emptied by any membership write (its last removal or a reset, of an
+   already empty set too) keeps its tombstone:
+   - **A set reads absent only once the bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`
+     for the bundled stores) has passed since its last membership write. A
+     `createIf(…, null)` commits or fails within the bound of the read that
+     answered `null`.**
+   - Only that write needs the bound. A stale non-null generation always
+     meets `conflict` or `missing`, because a generation is never re-issued
+     (rule 8); a stale `null` would otherwise find a set that had come and
+     gone, its tombstone expired.
+   - The bound is allocated between two parties, each keeping its own
+     share without the other's deadline:
+     - **The adapter declares its write lifetime W**: the longest an issued
+       conditional write may take to commit or fail, under its documented
+       operational assumption (for example, a Redis command timeout cannot
+       withdraw a command already written to the socket). W is well under
+       the bound.
+     - **The port's owning module issues a conditional write only within
+       (bound − W) of the read** that produced its expected generation (for
+       example, under a lease far shorter than that). Callers outside that
+       module never hold a generation.
+     - Together, read to commit is at most (bound − W) + W = the bound. No
+       deadline crosses the port: the adapter never needs the read's.
+   - What remains is a named assumption: the process or the store does not
+     stall for the whole bound between a `null` read and its commit.
+7. **A generation fences only its own store's records.** It does not fence a
+   write to another port, unless both are in the same atomic step.
+8. **Never re-issued: minted, never derived.** A generation is never issued
+   again for its key: not after a delete and a re-create, a byte-identical
+   rewrite, a tombstone's expiry, or a failover or restore that loses
+   writes. So it is random, never derived from state. A random (v4) UUID is
+   one: `newStoreGeneration`, Postgres `gen_random_uuid()`, or MySQL
+   `LOWER(HEX(RANDOM_BYTES(16)))`. A digest is not (it repeats with the
+   content), nor a timestamp (it repeats with the clock), nor MySQL `UUID()`
+   (v1, time-based), nor a counter, even one kept in the same store: a
+   failover or a restore that loses the latest writes rolls it back to a
+   value already issued.
+   - **A rollback must not bring a generation back either.** A failover or
+     restore that returns state from before a write the store acknowledged
+     would serve that state's old generation again, which a caller may still
+     hold. A store that can lose acknowledged writes re-mints the generation
+     of everything it restores before serving it, or runs so that
+     acknowledged state never rolls back (persistence, and a failover setup
+     that keeps acknowledged writes), and its documentation says which: an
+     assumption of the second kind is stated as one (the checklist below).
+   - **State with no generation** (written before the store had conditional
+     members, or by an older writer) is given a fresh one, atomically, by its
+     first versioned read, which keeps its retention. A conditional write
+     against it answers `conflict` and does not mint: a caller holds a
+     generation only from a read that minted it, so a state without one was
+     rewritten after that read.
+   - **That protects only against an older writer that drops the
+     generation**, by rewriting the whole value. A writer that changes what
+     the generation guards but leaves the generation in place (a SQL `UPDATE`
+     of the body with no trigger, a Redis `HSET` beside the generation's
+     field) must not run beside conditional callers, unless the store moves
+     the generation for it, as the SQL `BEFORE UPDATE` trigger below does.
+
+**A store implementer's checklist.**
+
+- Each conditional member is one atomic step (rule 1), the versioned read is
+  one snapshot (rule 2), and the check includes the retention (rule 3).
+- Every write of what a generation guards issues a new, random one, never
+  re-issued, a rollback included (rules 2, 5 and 8). An older writer that
+  leaves the generation in place is kept away, or covered by the store
+  (rule 8).
+- An outage rejects, and `missing` and `conflict` write nothing (rule 4).
+- A set keeps its tombstone, and reads absent only once the bound has passed
+  since its last membership write (rule 6).
+- The adapter states its write lifetime W, well under the bound: an issued
+  conditional write commits or fails within W. Its documentation says how,
+  and states the operational assumption that rests on (rule 6).
+- The port's owning module states its issue window, the longest from a
+  versioned read to issuing a write conditional on it, and that the window
+  is at most the bound less the adapter's W (rule 6).
+- An adapter whose store can lose acknowledged writes (asynchronous
+  replication on failover, say) states it: the store assumes acknowledged
+  writes are not rolled back (persistence, plus a failover setup that keeps
+  acknowledged writes). A deployment that accepts losing acknowledged writes
+  on failover also accepts that a conditional write may then meet a restored,
+  older generation (rule 8).
+- The port's conformance suite passes, where it has one.
+
+**A SQL store.** One row per record, `(key…, body, generation, expires_at)`;
+`generation` is `NOT NULL`, a `uuid` (Postgres) or a `VARCHAR(64)` (MySQL),
+made by the application with `randomUUID()`, and `expires_at` is the
+retention.
+
+- `replaceIf`: `UPDATE … SET body = :body, generation = :new WHERE <key> AND
+  generation = :expected AND (expires_at IS NULL OR expires_at > <db now>)`.
+  One row is `updated`. Zero rows: a `SELECT 1` of a live row with that key
+  tells `conflict` (a row) from `missing` (none). A write that lands between
+  the two can decide that label, so under a race the loser answers `missing`
+  or `conflict`; either way it wrote nothing. Postgres can do both in one
+  statement with a CTE, MySQL in one short `SELECT … FOR UPDATE` transaction.
+  `removeIf` is the same with `DELETE`.
+- **Adding the column to an existing table.** Backfill every existing row
+  with its own random value, never a constant. For the whole time an older
+  writer may run, keep a column default or a `BEFORE INSERT` trigger, so an
+  `INSERT` that leaves the column out still gets a fresh value (Postgres
+  `DEFAULT gen_random_uuid()`; MySQL 8.0.13 or later
+  `DEFAULT (LOWER(HEX(RANDOM_BYTES(16))))`), and a `BEFORE UPDATE` trigger
+  that renews a generation the statement left unchanged, so an older
+  writer's `UPDATE` still moves it. Postgres: `IF NEW.generation IS NOT
+  DISTINCT FROM OLD.generation THEN NEW.generation := gen_random_uuid(); END
+  IF`. MySQL: `IF NEW.generation <=> OLD.generation THEN SET NEW.generation =
+  LOWER(HEX(RANDOM_BYTES(16))); END IF`. Without that trigger, no older writer
+  may run once a conditional caller does (rule 8).
+- **Sets.** Every membership write is one transaction that locks the set's
+  row first, then its members' rows, so there is one lock order. The reset
+  upserts the set's row first, then deletes the members. The versioned read
+  is one statement, or one snapshot, never a cache or a lagging replica.
+
+**Over HTTP.** One `POST` per operation, with a JSON body each way.
+
+- A conditional write's request carries `expectedGeneration`: a generation,
+  or, for a set's `createIf` only, `null` for a set the caller read as
+  absent. A request without `expectedGeneration` is `400`.
+- `200` answers the operation's answer as its type states it:
+  - a record's versioned read: `{ "value": <record>, "generation": "<g>" }`,
+    or, for an absent record, `{ "value": null, "generation": null }`;
+  - a set's versioned read: `{ "items": [<member>, …], "generation": "<g>" }`,
+    or, for an absent set, `{ "items": [], "generation": null }`;
+  - `replaceIf`: `{ "outcome": "updated", "generation": "<g>" }`;
+  - a record's `removeIf`: `{ "outcome": "removed" }`;
+  - `createIf`: `{ "outcome": "created", "generation": "<g>" }`;
+  - a set's `removeIf`: `{ "outcome": "removed", "generation": "<g>" }`.
+- A versioned read of something absent is a `200` stating its absence, never
+  a `404`. The adapter answers a record's absence envelope, both fields
+  `null`, as `null` from its versioned read; one field `null` without the
+  other is malformed, and the adapter throws.
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Done, with the body above |
+| `404` | `missing`, with the body `{ "outcome": "missing" }` (a record's write, and a set's `removeIf`) |
+| `409` | `conflict`, with the body `{ "outcome": "conflict" }` |
+| Anything else, `400` and `412` included, or a `404` or `409` without its body | The adapter throws: a bare status may be a misrouted request or an older Store |
+
+A REST layer that offers ETags exposes the store's generation itself, the
+never-repeating value the store issued, quoted as the strong ETag
+`"<generation>"` (a generation holds no `"`), of exactly what the generation
+guards — a whole record, or a set's membership — never a digest of its
+content: content returns to earlier bytes, so a digest repeats. A set's
+generation is not the ETag of a representation that also carries its
+members' own data, which a member's update changes at the same set
+generation.

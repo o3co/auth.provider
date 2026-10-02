@@ -405,6 +405,98 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isSpecialUseAddress\b/,
 	},
 	{
+		concept: "outbound destination policy — the fetch",
+		home: "packages/core/src/net/outbound-fetch.mts",
+		definition: /(?:function|const)\s+createOutboundFetch\b/,
+	},
+	{
+		concept: "outbound destination policy — the host-list grammar",
+		home: "packages/core/src/net/outbound-policy.mts",
+		definition: /(?:function|const)\s+readHostEntry\b/,
+	},
+	{
+		concept: "conditional write — the store generation's type",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\btype\s+StoreGeneration\s*[=<]|\binterface\s+StoreGeneration\b/,
+	},
+	{
+		concept:
+			"conditional write — the bundled stores' write-lifetime bound and set-tombstone lifetime",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+BUNDLED_STORE_WRITE_LIFETIME_MS\b/,
+	},
+	{
+		concept: "conditional write — a versioned read's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+Versioned\b|\btype\s+Versioned\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a versioned set read's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+VersionedSet\b|\btype\s+VersionedSet\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a conditional replace's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalReplaceAnswer\b|\btype\s+ConditionalReplaceAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a record-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalRemoveAnswer\b|\btype\s+ConditionalRemoveAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a conditional create's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalCreateAnswer\b|\btype\s+ConditionalCreateAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a set-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition:
+			/\binterface\s+ConditionalSetRemoveAnswer\b|\btype\s+ConditionalSetRemoveAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — what a store generation may be",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+isStoreGeneration\b/,
+	},
+	{
+		concept: "conditional write — a fresh store generation",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+newStoreGeneration\b/,
+	},
+	{
+		concept: "conditional write — reading a versioned read",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readVersioned\b/,
+	},
+	{
+		concept: "conditional write — reading a versioned set read",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readVersionedSet\b/,
+	},
+	{
+		concept: "conditional write — reading a conditional replace's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readConditionalReplaceAnswer\b/,
+	},
+	{
+		concept: "conditional write — reading a record-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readConditionalRemoveAnswer\b/,
+	},
+	{
+		concept: "conditional write — reading a conditional create's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readConditionalCreateAnswer\b/,
+	},
+	{
+		concept: "conditional write — reading a set-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readConditionalSetRemoveAnswer\b/,
+	},
+	{
 		concept: "RFC 8707 resource indicator — reading `resource` (#172, #173)",
 		home: "packages/core/src/grants/resourceIndicator.mts",
 		definition: /(?:function|const)\s+extractResourceParam\b/,
@@ -705,11 +797,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept:
-			"what a factor record can do — usable, unreadable, not installed, a known exhausted recovery set, an email factor whose address changed — what a transaction offers, and whether a password login asks for a second factor over it (the MFA ADR's F3, F4)",
+			"what a factor record can do — usable, unreadable, not installed, a known exhausted recovery set, a recovery set retired below the floor, an email factor whose address changed — the one reading of a subject's records every judgment goes through, what a transaction offers, and whether a password login asks for a second factor over it (the MFA ADR's F3, F4)",
 		home: "packages/mfa/src/factorState.mts",
 		definition:
-			/(?:function|const)\s+(?:readFactorRecord|readFactorRecordAt|isOffered|asksForSecondFactor|holdsUsableRecord)\b/,
-		homeMatches: 5,
+			/(?:function|const)\s+(?:readFactorRecord|readFactorRecordAt|isOffered|asksForSecondFactor|holdsUsableRecord|readSubjectRecords|holdsUsableIn|holdsCountingFactor)\b/,
+		homeMatches: 8,
 	},
 ];
 
@@ -1093,12 +1185,12 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: "admitPrimary's check that the primary a login route built is a password login, the only one the baseline applies after (the MFA ADR's D13) — a primary, never a session record",
 	},
-	// The MFA routes: a session's escalation.
+	// The MFA escalation: a session's escalation.
 	{
-		file: "packages/mfa/src/routes.mts",
+		file: "packages/mfa/src/escalation.mts",
 		read: "{amr}=adds",
 		count: 1,
-		why: "the step-up write D28 names: escalateSession holds what a verified second factor adds, as the ceremony built it — the factor's declared values and mfa — to the mfa requirement's sealed reach, then hands it to recordSecondFactor; never a session record",
+		why: "the step-up write D28 names: createSessionEscalation's escalate holds what a verified second factor adds, as the ceremony built it — the factor's declared values and mfa — to the mfa requirement's sealed reach, then hands it to recordSecondFactor; never a session record",
 	},
 	// Reads of a field of that name that is not a session's.
 	{

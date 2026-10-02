@@ -82,11 +82,13 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// carrying, beside those, in its details:
 	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`,
 	// `federated` or `mfa`) and `by: "user"`; `mfa.factor.removed`, a removal
-	// from the account page, its `kind`, `factorId`, `binding` and `by: "user"`; `mfa.recovery_codes.generated` its `binding`,
+	// from the account page, its `kind`, `factorId`, `binding` and `by: "user"`; `mfa.recovery_codes.generated` its `binding`
+	// (`mfa` for a regeneration from the account page),
 	// `by: "user"`, `regenerated` (true when a set stood, or may have)
-	// and, when an older set may still stand beside the new one,
+	// and, when an older set is still stored beside the new one,
 	// `unreplaced: true` — with `kept: "password_binding"` when it was kept
-	// on purpose; `mfa.locked.first`, the refusal that begins an episode (the
+	// on purpose and still verifies; without it, a retired set left stored,
+	// whose codes verify nothing; `mfa.locked.first`, the refusal that begins an episode (the
 	// store's `first`), its `hold` and the refused attempt's factor `binding`;
 	// `mfa.reset`, the operator reset, `by: "operator"`, the `kinds` and
 	// `count` of the records it removed (none when they could not be read, or

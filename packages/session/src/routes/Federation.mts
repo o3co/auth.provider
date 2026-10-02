@@ -355,17 +355,20 @@ export const createRouter = (
 		// is core's (`fed`, with a trusted IdP's `amr` beside it or an untrusted
 		// one's kept apart), keyed by `fed.name`. No `redirectTo`: the callback
 		// redirects by its policy below.
-		const establishment = establishWithoutAsking({
-			subject: user.id,
-			user,
-			claims,
-			federation: fed.name,
-			upstreamAmr: upstreamAmrOf(profile),
-			trusted: trustsUpstreamAmr.get(fed.name) === true,
-			authTime: new Date(),
-			redirectTo: undefined,
-			request: loginRequestFacts(req),
-		});
+		const establishment = establishWithoutAsking(
+			{
+				subject: user.id,
+				user,
+				claims,
+				federation: fed.name,
+				upstreamAmr: upstreamAmrOf(profile),
+				trusted: trustsUpstreamAmr.get(fed.name) === true,
+				authTime: new Date(),
+				redirectTo: undefined,
+				request: loginRequestFacts(req),
+			},
+			{ logger: log },
+		);
 		const established = await establishSession<FederationStore, FederationStoreStep>(
 			establishment,
 			{

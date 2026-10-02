@@ -387,7 +387,7 @@ describe("recovery codes alone (required: a first binding)", () => {
 		expect(res.body).toEqual({ message: "Logged in successfully", recovery_codes_remaining: 1 });
 	});
 
-	it("says when the set it replaces could not be removed: unreplaced in the audit, one mfa_recovery_codes_unreplaced line, the old set standing", async () => {
+	it("says when the set it replaces could not be removed: unreplaced in the audit, one mfa_recovery_codes_unreplaced line, the old set stored but retired — its codes refused", async () => {
 		const { app, factorStore, set, audit, sender, logger } = await composed({ sender: true });
 		const { agent, transaction } = await beginLogin(app);
 		const reopened = (await verify(agent, transaction, set.record.id, set.codes[0])).body
@@ -413,6 +413,69 @@ describe("recovery codes alone (required: a first binding)", () => {
 		expect((await factorStore.list(ALICE.id)).some((record) => record.id === set.record.id)).toBe(
 			true,
 		);
+		vi.restoreAllMocks();
+		const next = await beginLogin(app);
+		const refused = await verify(next.agent, next.transaction, set.record.id, set.codes[1]);
+		expect(refused.status, JSON.stringify(refused.body)).toBe(401);
+		expect(refused.body).toMatchObject({ error: "mfa_invalid" });
+	});
+
+	it("answers the codes it marked shown even when the logger throws saying a set it replaces was not removed: 200 with the codes, the set shown", async () => {
+		const { app, factorStore, set, sender, logger } = await composed({ sender: true });
+		const { agent, transaction } = await beginLogin(app);
+		const reopened = (await verify(agent, transaction, set.record.id, set.codes[0])).body
+			.transaction as string;
+		if (sender === undefined) throw new Error("no sender");
+		await giveEmailProof(agent, reopened, sender);
+		const begun = await beginEnrollment(agent, reopened, "totp");
+		vi.spyOn(factorStore, "remove").mockRejectedValue(new Error("remove failed"));
+		logger.error.mockImplementation((_fields: unknown, event: unknown) => {
+			if (event === "mfa_recovery_codes_unreplaced") throw new Error("logger failed");
+		});
+
+		const done = await completeEnrollment(agent, reopened, totpProofOf(begun.body.secret));
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body.recovery_codes).toEqual(expect.arrayContaining([expect.any(String)]));
+		vi.restoreAllMocks();
+		const fresh = (await factorStore.list(ALICE.id)).filter(
+			(record) => record.kind === "recovery_code" && record.id !== set.record.id,
+		);
+		expect(fresh).toHaveLength(1);
+		const [shown] = fresh;
+		if (shown === undefined) throw new Error("no set");
+		expect((await storedData(factorStore, shown)).data).toMatchObject({ shown: true });
+	});
+
+	it("answers no codes when the new set cannot be marked shown: the binding stands, recovery_codes_issued false, said once, the set left unshown", async () => {
+		const { app, factorStore, set, sender, logger, audit } = await composed({ sender: true });
+		const { agent, transaction } = await beginLogin(app);
+		const reopened = (await verify(agent, transaction, set.record.id, set.codes[0])).body
+			.transaction as string;
+		if (sender === undefined) throw new Error("no sender");
+		await giveEmailProof(agent, reopened, sender);
+		const begun = await beginEnrollment(agent, reopened, "totp");
+		const update = factorStore.update.bind(factorStore);
+		vi.spyOn(factorStore, "update").mockImplementation(async (subject, id, version, next) => {
+			const record = (await factorStore.list(subject)).find((one) => one.id === id);
+			if (record?.kind === "recovery_code") throw new Error("update failed");
+			return update(subject, id, version, next);
+		});
+
+		const done = await completeEnrollment(agent, reopened, totpProofOf(begun.body.secret));
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body).not.toHaveProperty("recovery_codes");
+		expect(done.body.recovery_codes_issued).toBe(false);
+		expect(events(logger, "error")).toEqual(["mfa_recovery_codes_unwritten"]);
+		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
+		const sets = (await factorStore.list(ALICE.id)).filter(
+			(record) => record.kind === "recovery_code",
+		);
+		expect(sets).toHaveLength(1);
+		const [only] = sets;
+		if (only === undefined) throw new Error("no set");
+		expect((await storedData(factorStore, only)).data).toMatchObject({ shown: false });
 	});
 
 	it.each([

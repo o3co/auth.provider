@@ -27,6 +27,7 @@ import {
 	PASSWORD_AMR,
 	wellFormedAmr,
 } from "../grants/authenticationClaims.mjs";
+import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
 import {
@@ -43,6 +44,7 @@ import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import { askEvery, establish } from "./establishment.mjs";
 import { isObject, nonEmptyString } from "./input-values.mjs";
 import { readLiveSession, readRecord, renewedAway } from "./live-session.mjs";
+import { warnDroppedClaims } from "./login-claims.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -265,9 +267,11 @@ export const viewOf = (session: UserSession, storeRecords: boolean): SessionView
  * session: it carries a renewal nonce the cookie session does not hold, or
  * one that is not a nonce (the record's nonce read once). `false` for a
  * claim that is not a cookie's, one without a `sid`, and a record that is
- * gone or bound to none. Rejects with the store's own error. For a route
- * that acts on the record without admitting the session — a logout — so a
- * copy the record was renewed away from cannot end it.
+ * gone or bound to none. For a route that acts on the record without
+ * admitting the session — a logout — so a copy the record was renewed away
+ * from cannot end it. Rejects with the store's own error, never answering
+ * `unavailable`: the one exception to admission's promise that a store that
+ * throws is `unavailable`, and its caller handles the rejection.
  */
 export async function cookieRenewedAway(
 	store: UserSessionStore,
@@ -448,7 +452,30 @@ const knownPrimaries = new WeakSet<object>();
 export interface PasswordLoginFacts {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
-	/** The route's `extractUserClaims(user)`: what the session record's `claims` will hold. */
+	/**
+	 * The route's `extractUserClaims(user)`: what the session record's `claims` will hold.
+	 *
+	 * Core reads it by name, each claim once, into a plain frozen copy. It
+	 * must be an object; a class instance is read by the declared claims'
+	 * names and its own enumerable keys, nothing else of it. A claim
+	 * `UserSessionClaims` declares must, when present, be of its declared
+	 * type: `email`, `name` and `picture` a string, `emailVerified` a
+	 * boolean, `groups` a list of strings (an ORM's list or an Array
+	 * subclass is copied by index into a plain array). `null`, or any other
+	 * value, is refused with a `RangeError`. A claim read as `undefined` is
+	 * left out.
+	 *
+	 * A custom claim is stored as its JSON form — `JSON.stringify`, parsed
+	 * back — so it should be JSON data: a string, a finite number, a
+	 * boolean, `null`, or a list or plain object of those. Anything else is
+	 * stored as JSON stores it, as a Redis-backed session store already read
+	 * it back: a `Date` as its ISO string, an object with `toJSON` as what it
+	 * answers, NaN or Infinity as `null`, and one whose JSON form is nothing
+	 * (`undefined`, a function, a symbol) left out. One whose JSON form
+	 * cannot be taken — a bigint, a cycle, a `toJSON` or a getter that
+	 * throws — is dropped, and the login goes on; `admitPrimary` logs
+	 * `login_claim_dropped` (warn) with its key, never its value.
+	 */
 	readonly claims: UserSessionClaims;
 	readonly authTime: Date;
 	readonly redirectTo: string | undefined;
@@ -495,6 +522,8 @@ export async function admitPrimary(
 			"admitPrimary: the primary must be one passwordPrimary or establishWithoutAsking built",
 		);
 	}
+	// A custom claim the builder dropped is said here, where the logger is.
+	warnDroppedClaims(deps.logger, primary.claims);
 	return askEvery(deps, requirements, primary, primary, []);
 }
 
@@ -585,6 +614,9 @@ export async function resumePrimary(
 		throw new RangeError(`resumePrimary: "${completed.requirement}" already completed`);
 	}
 	const adds = checkPrimaryAdditions(completing, completed.adds);
+	// A custom claim the continuation's check dropped — one a store answered
+	// that JSON cannot hold — is said once the resumption is admissible.
+	warnDroppedClaims(deps.logger, read.primary.claims);
 	// Rehydrated: the continuation carries epoch milliseconds; `recorded` is
 	// the password kind's, not the DTO's.
 	const primary: PrimaryAuthentication = Object.freeze({
@@ -621,7 +653,14 @@ export async function resumePrimary(
 export interface FederatedLogin {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
-	/** The merged claims envelope the callback composed: what the session record's `claims` will hold. */
+	/**
+	 * The merged claims envelope the callback composed: what the session
+	 * record's `claims` will hold. Read as {@link PasswordLoginFacts.claims}
+	 * is: declared claims of their declared types, `null` refused; custom
+	 * claims stored as their JSON form, one that cannot be taken dropped —
+	 * said as `login_claim_dropped` only when `establishWithoutAsking` is
+	 * handed a logger.
+	 */
 	readonly claims: UserSessionClaims;
 	/** The federation's name (`core.federations.<name>`). */
 	readonly federation: string;
@@ -644,8 +683,14 @@ export interface FederatedLogin {
  * A federated login asks no requirement's `admitPrimary`: the requirements
  * judge the resulting session only through `admit`, when a consumer admits it
  * (ADR 2026-09-28-session-admission, D5).
+ *
+ * `options.logger`, when given, is told of each custom claim the envelope
+ * dropped (`login_claim_dropped`); without one, a dropped claim is silent.
  */
-export function establishWithoutAsking(login: FederatedLogin): Establishment {
+export function establishWithoutAsking(
+	login: FederatedLogin,
+	options: { readonly logger?: Logger } = {},
+): Establishment {
 	if (!isObject(login)) throw new RangeError("establishWithoutAsking: the login must be an object");
 	if (nonEmptyString(login.federation) === undefined) {
 		throw new RangeError(
@@ -673,5 +718,6 @@ export function establishWithoutAsking(login: FederatedLogin): Establishment {
 		request: login.request,
 	});
 	knownPrimaries.add(primary);
+	warnDroppedClaims(options.logger, primary.claims);
 	return establish(primary);
 }

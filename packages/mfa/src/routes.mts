@@ -46,25 +46,29 @@
  *   `step_up` transaction, with the `acr_values` the body hints read
  *   strictly — at most 16 values of at most 256 characters, else none — as a
  *   hint only; `403 mfa_no_qualifying_factor` when no factor can be used, and
- *   `401` where the session store cannot record a step-up.
+ *   `401` where admission's view says no second factor can be recorded on
+ *   the session (`secondFactorRecordable`), before anything is opened.
  * - The account page's management of the subject's factors, under
  *   `/factors`, is `management.mts`'s, mounted here behind the same guards
  *   and admitted through `sessionFor`, which takes a session admitted as
  *   `mfa.manage` with where its factor-set write begins (`factorSet.mts`),
  *   read before the admission. The subject's own release of its lock,
- *   `POST /lock/release`, is `lockRelease.mts`'s, mounted and admitted the
- *   same way.
+ *   `POST /lock/release`, is `lockRelease.mts`'s, and the regeneration of its
+ *   recovery codes, `POST /recovery-codes`, `recoveryCodes.mts`'s, each
+ *   mounted and admitted the same way.
  * - A factor that is not guessable verified at a login once its session is
  *   established, or at a step-up once its session is escalated, mints the
  *   authorization that release takes (`lockRecovery.mts`), for that session;
  *   one that cannot be minted is said at warn, the answer standing.
- * - A session is escalated (`escalateSession`) behind its admission, by the
- *   renewal nonce of the claim admission compared: the express id renewed,
- *   then the second factor recorded on its `UserSession` once, never
- *   retried. A step-up answers `200` only once recorded with that renewal's
- *   nonce, and each failure as its own (`ESCALATION_REFUSALS`); a binding in
- *   a session answers its factor and codes, shown once, whatever the
- *   escalation came to. Neither reaches a login's completion.
+ * - A step-up's verification and a binding in a session escalate that
+ *   session (`escalation.mts`). A step-up answers as the escalation came to;
+ *   a binding answers its factor and codes, shown once, whatever it came to.
+ *   Neither reaches a login's completion.
+ * - A login's binding marks its recovery codes shown just before the answer
+ *   that carries them, once nothing else can answer the login: one answered
+ *   otherwise — another requirement's interruption, `401`, `503` — leaves
+ *   the set unshown, and a mark that fails answers `recovery_codes_issued:
+ *   false`.
  * - A factor bound beside another that cannot stand — past the limit, or
  *   its records unreadable — and cannot be removed stands: it is audited as
  *   enrolled and said once at error before the `503`.
@@ -103,7 +107,6 @@ import {
 	errorEnvelope,
 	type IssuedRemediationAction,
 	isMfaFactorId,
-	isRenewalNonce,
 	type Logger,
 	type LoginCompletion,
 	loggableError,
@@ -117,22 +120,28 @@ import {
 } from "@o3co/auth-provider-core";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import type { MfaAdmissionAction } from "./admissionActions.mjs";
-import {
-	type MfaCeremonyCall,
-	type MfaCeremonySession,
-	type MfaFactorUnreadable,
-	type MfaFirstBindingDistrusted,
-	type MfaStoreOutage,
-	type MfaVerifyOutcome,
-	OUTSIDE_CONTRACT,
-	type Revoked,
+import type {
+	MfaCeremonyCall,
+	MfaCeremonySession,
+	MfaFactorUnreadable,
+	MfaFirstBindingDistrusted,
+	MfaStoreOutage,
+	MfaVerifyOutcome,
+	Revoked,
 } from "./ceremony.mjs";
 import type { MfaCoordinator } from "./coordinator.mjs";
+import { createSessionEscalation } from "./escalation.mjs";
 import type { MfaLockRecovery } from "./lockRecovery.mjs";
 import { createMfaLockReleaseRouter } from "./lockRelease.mjs";
 import { type MfaMailRefusal, mailFailureOf } from "./mail.mjs";
-import { createMfaManagementRouter, type MfaManagementOptions } from "./management.mjs";
+import {
+	createMfaManagementRouter,
+	type MfaManagementOptions,
+	type MfaManagingSession,
+} from "./management.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
+import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
+import { createMfaRecoveryCodesRouter, type MfaRecoveryCodesOptions } from "./recoveryCodes.mjs";
 import { MFA_REQUIREMENT_NAME } from "./requirement.mjs";
 import type { MfaWitnessMark } from "./witness.mjs";
 
@@ -147,12 +156,6 @@ const SESSION_STORE_UNAVAILABLE = errorEnvelope(
 	"Session store unavailable",
 );
 const LOGIN_REQUIRED = errorEnvelope("login_required", "Log in again");
-const STEP_UP_UNRECORDED = errorEnvelope("server_error", "The step-up could not be recorded");
-/** A step-up recorded on a session the store left unbound: the session was ended. */
-const SESSION_NOT_SECURED = errorEnvelope(
-	"server_error",
-	"The session could not be secured: sign in again",
-);
 /** A proof that would reopen a login for a binding nobody could complete: refused, nothing spent. */
 const ENROLLMENT_REQUIRED = errorEnvelope(
 	"mfa_enrollment_required",
@@ -229,28 +232,6 @@ interface SignedInSession {
 	readonly expectedRenewalNonce: string | undefined;
 }
 
-/** How a session's escalation ended (`escalateSession`). */
-type Escalation =
-	| "escalated"
-	| "unrecordable_store"
-	| "not_renewed"
-	| "not_recorded"
-	| "unbound"
-	| "invalid"
-	| "unavailable";
-
-/** What a step-up answers an escalation that did not land: a new login, an outage, or one nobody can retry. */
-const ESCALATION_REFUSALS: Readonly<
-	Record<Exclude<Escalation, "escalated">, readonly [status: number, body: object]>
-> = {
-	unrecordable_store: [401, LOGIN_REQUIRED],
-	not_recorded: [401, LOGIN_REQUIRED],
-	not_renewed: [503, SESSION_STORE_UNAVAILABLE],
-	unavailable: [503, SESSION_STORE_UNAVAILABLE],
-	unbound: [500, SESSION_NOT_SECURED],
-	invalid: [500, STEP_UP_UNRECORDED],
-};
-
 /** Which route a line is logged by: the enrollment's two share one name. */
 type RouteName = "transaction" | "challenge" | "verify" | "enrollment" | "step-up";
 
@@ -277,6 +258,11 @@ export interface MfaRoutesOptions {
 	readonly management: Omit<MfaManagementOptions, "admit" | "logger" | "auditSink">;
 	/** The authorized-recovery entry: minted at an exempt verification, applied by the subject's release. */
 	readonly lockRecovery: MfaLockRecovery;
+	/** What the regeneration of recovery codes reads beside the management's (`recoveryCodes.mts`). */
+	readonly recoveryCodes: Pick<
+		MfaRecoveryCodesOptions,
+		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMarkMs" | "leaseMs"
+	>;
 }
 
 /** The express session id the request presents; empty when it presents none, which no binding matches. */
@@ -324,25 +310,6 @@ const postedAcrValues = (req: Request): readonly string[] | undefined => {
 		: undefined;
 };
 
-/**
- * Whether `value`, what `recordSecondFactor` answered other than `null`, is
- * the record of `session`: an object holding its `sid` and subject and the
- * record's dates. Anything else is outside the port's contract.
- */
-const isSessionRecord = (
-	value: unknown,
-	session: { readonly sid: string; readonly sub: string },
-): value is { readonly renewalNonce?: unknown } => {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-	const { sid, sub, authTime, expiresAt } = value as Readonly<Record<string, unknown>>;
-	return (
-		sid === session.sid &&
-		sub === session.sub &&
-		authTime instanceof Date &&
-		expiresAt instanceof Date
-	);
-};
-
 /** The transaction id a POST names; two that disagree name none, which no transaction matches. */
 const postedTransactionId = (req: Request): string | undefined => {
 	const posted = postedTransaction(req);
@@ -382,6 +349,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		auditSink,
 		management,
 		lockRecovery,
+		recoveryCodes,
 	} = options;
 	const router = express.Router();
 
@@ -470,10 +438,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		}
 		let authTimeMs: number | undefined;
 		let witness: MfaCeremonySession["witness"];
+		let secondFactorRecordable = false;
 		if (admitted.outcome === "admitted" && admitted.view !== null) {
 			const view: SessionView = admitted.view;
 			authTimeMs = view.authTime.getTime();
 			witness = view.enrollmentFacts?.witness;
+			secondFactorRecordable = view.secondFactorRecordable === true;
 		}
 		return {
 			session: {
@@ -482,6 +452,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				user,
 				authTimeMs,
 				witness,
+				secondFactorRecordable,
 				...(factorSetStart === undefined ? {} : { factorSetStart }),
 			},
 			expectedRenewalNonce,
@@ -641,7 +612,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		req: Request,
 		res: Response,
 		verified: Pick<Extract<MfaVerifyOutcome, { outcome: "verified" }>, "continuation" | "adds">,
-		answer: Readonly<Record<string, unknown>> = {},
+		/** What the login's answer carries: made last, after the session and the CSRF token; must not throw. */
+		answer:
+			| Readonly<Record<string, unknown>>
+			| (() => Promise<Readonly<Record<string, unknown>>>) = {},
 		/** Run once the session is established, before the answer: what follows from the login's sid. */
 		onEstablished?: (sid: string) => Promise<void>,
 	): Promise<void> => {
@@ -709,104 +683,18 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		}
 		if (established.sid !== undefined) await onEstablished?.(established.sid);
 		csrfGuard.issue(res);
-		res.status(200).json({ message: "Logged in successfully", ...answer });
+		const carried = typeof answer === "function" ? await answer() : answer;
+		res.status(200).json({ message: "Logged in successfully", ...carried });
 	};
 
-	/**
-	 * The signed-in session `session` escalated by `adds`: its express id
-	 * renewed, then the second factor recorded on its `UserSession` with the
-	 * renewal nonce, expecting the one admission compared — called once, never
-	 * again, since a retry after a write that landed would expect the old
-	 * nonce and undo it. A fresh CSRF token on the response once recorded.
-	 * Each failure is logged here, once; the caller chooses the answer.
-	 *
-	 * - No step-up capability: `unrecordable_store`, nothing renewed.
-	 * - `adds` names a value outside the mfa requirement's sealed reach:
-	 *   `invalid`, nothing renewed.
-	 * - The renewal fails, or answers no renewal nonce: `not_renewed`, nothing
-	 *   recorded.
-	 * - The record answers `null` — the session is gone, another completion
-	 *   from the same cookie session was recorded first, or it predates how a
-	 *   session was established: `not_recorded`. The renewed cookie session is
-	 *   left as it is: at its next admission each cause is `not_live` or
-	 *   below the level the step-up was for.
-	 * - A session without the renewal nonce: `unbound`. The escalation would
-	 *   stand bound to no cookie session, so the session is ended.
-	 * - A `RangeError`: `invalid`. Any other rejection, or an answer that is
-	 *   not this session: `unavailable`.
-	 *
-	 * After a renewal, no failure but `unbound` ends the renewed cookie session.
-	 */
-	const escalateSession = async (
-		route: RouteName,
-		req: Request,
-		res: Response,
-		session: { readonly sid: string; readonly sub: string },
-		expected: string | undefined,
-		adds: { readonly amr: readonly string[]; readonly mfaAt: Date },
-	): Promise<Escalation> => {
-		if (secondFactorStore === undefined) return "unrecordable_store";
-		const { amr, mfaAt } = adds;
-		const reach = admission.requirements.get(MFA_REQUIREMENT_NAME)?.reach;
-		if (reach === undefined || !amr.every((value) => reach.has(value))) {
-			logger.error({ route, sub: session.sub }, "mfa_escalation_invalid");
-			return "invalid";
-		}
-		const renewed = await loginCompletion.renewSession({
-			req,
-			reporter: {
-				storeUnavailable: (store, step, cause) =>
-					storeUnavailable(route, store, step, cause, { sid: session.sid }),
-			},
-		});
-		if (renewed.outcome !== "renewed") return "not_renewed";
-		if (!isRenewalNonce(renewed.renewalNonce)) {
-			storeUnavailable(route, "cookie_session", "renewSession", OUTSIDE_CONTRACT, {
-				sid: session.sid,
-			});
-			return "not_renewed";
-		}
-		let recorded: unknown;
-		try {
-			recorded = await secondFactorStore.recordSecondFactor(session.sid, {
-				amr,
-				at: mfaAt,
-				renewalNonce: renewed.renewalNonce,
-				expectedRenewalNonce: expected,
-			});
-		} catch (cause) {
-			if (cause instanceof RangeError) {
-				logger.error(
-					{ route, sub: session.sub, err: loggableError(cause) },
-					"mfa_escalation_invalid",
-				);
-				return "invalid";
-			}
-			storeUnavailable(route, "user_session", "recordSecondFactor", cause, { sid: session.sid });
-			return "unavailable";
-		}
-		if (recorded === null) {
-			logger.info({ route, sub: session.sub }, "mfa_escalation_not_recorded");
-			return "not_recorded";
-		}
-		if (!isSessionRecord(recorded, session)) {
-			storeUnavailable(route, "user_session", "recordSecondFactor", OUTSIDE_CONTRACT, {
-				sid: session.sid,
-			});
-			return "unavailable";
-		}
-		if (recorded.renewalNonce !== renewed.renewalNonce) {
-			logger.error({ route, sub: session.sub }, "mfa_escalation_unbound");
-			try {
-				await secondFactorStore.delete(session.sid);
-			} catch (cause) {
-				storeUnavailable(route, "user_session", "delete", cause, { sid: session.sid });
-			}
-			return "unbound";
-		}
-		csrfGuard.issue(res);
-		return "escalated";
-	};
+	const { escalate: escalateSession, answer: answerEscalation } = createSessionEscalation({
+		secondFactorStore,
+		loginCompletion,
+		reach: () => admission.requirements.get(MFA_REQUIREMENT_NAME)?.reach,
+		csrfGuard,
+		logger,
+		storeUnavailable,
+	});
 
 	/**
 	 * The authorization a factor of `kind` verified at `atMs` in session `sid`
@@ -829,16 +717,6 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		}
 	};
 
-	/** A step-up's answer for how its escalation ended (`escalateSession`): `answer` once escalated. */
-	const answerEscalation = (res: Response, escalation: Escalation, answer: object): void => {
-		if (escalation === "escalated") {
-			res.status(200).json(answer);
-			return;
-		}
-		const [status, body] = ESCALATION_REFUSALS[escalation];
-		res.status(status).json(body);
-	};
-
 	router
 		.all(
 			[
@@ -852,6 +730,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				"/factors/rename",
 				"/factors/remove",
 				"/lock/release",
+				"/recovery-codes",
 			],
 			noStore,
 		)
@@ -867,6 +746,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				"/factors/rename",
 				"/factors/remove",
 				"/lock/release",
+				"/recovery-codes",
 			],
 			express.json(),
 			express.urlencoded({ extended: false }),
@@ -886,6 +766,18 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			createMfaLockReleaseRouter({
 				lockRecovery,
 				admit: async (req, res) => (await sessionFor(req, res, MFA_MANAGE))?.session,
+				logger,
+				auditSink,
+			}),
+		)
+		.use(
+			createMfaRecoveryCodesRouter({
+				factors: management.factors,
+				factorSet: management.factorSet,
+				sealing: management.sealing,
+				...recoveryCodes,
+				admit: async (req, res) =>
+					(await sessionFor(req, res, MFA_MANAGE))?.session as MfaManagingSession | undefined,
 				logger,
 				auditSink,
 			}),
@@ -1425,36 +1317,76 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 							by: "user",
 						},
 					});
-					const codes = outcome.recoveryCodes;
-					if (codes?.issued === true) {
-						emitAuditEvent(auditSink, {
-							...audited,
-							type: "mfa.recovery_codes.generated",
-							details: {
-								kind: RECOVERY_CODE_FACTOR_KIND,
-								purpose: outcome.purpose,
-								binding: outcome.binding,
-								by: "user",
-								regenerated: codes.regenerated,
-								// A set that stood may still stand beside the new one: kept, or not removed.
-								...(codes.unreplaced === undefined ? {} : { unreplaced: true }),
-								...(codes.unreplaced !== undefined && "kept" in codes.unreplaced
-									? { kept: codes.unreplaced.kept }
-									: {}),
-							},
-						});
-						if (codes.unreplaced !== undefined && "cause" in codes.unreplaced) {
+					/** What the binding's codes came to, audited and said once: a failed write before the answer, the mark's outcome once it is sent. */
+					const codesSaid = (codes: MfaIssuedRecoveryCodes) => {
+						if (codes?.issued === true) {
+							emitAuditEvent(auditSink, {
+								...audited,
+								type: "mfa.recovery_codes.generated",
+								details: {
+									kind: RECOVERY_CODE_FACTOR_KIND,
+									purpose: outcome.purpose,
+									binding: outcome.binding,
+									by: "user",
+									regenerated: codes.regenerated,
+									// A set that stood may still stand beside the new one: kept, or not removed.
+									...(codes.unreplaced === undefined ? {} : { unreplaced: true }),
+									...(codes.unreplaced !== undefined && "kept" in codes.unreplaced
+										? { kept: codes.unreplaced.kept }
+										: {}),
+								},
+							});
+							if (codes.unreplaced !== undefined && "cause" in codes.unreplaced) {
+								logger.error(
+									{ sub: outcome.subject, err: loggableError(codes.unreplaced.cause) },
+									"mfa_recovery_codes_unreplaced",
+								);
+							}
+						} else if (codes?.issued === false) {
 							logger.error(
-								{ sub: outcome.subject, err: loggableError(codes.unreplaced.cause) },
-								"mfa_recovery_codes_unreplaced",
+								{ sub: outcome.subject, err: loggableError(codes.cause) },
+								"mfa_recovery_codes_unwritten",
 							);
 						}
-					} else if (codes?.issued === false) {
-						logger.error(
-							{ sub: outcome.subject, err: loggableError(codes.cause) },
-							"mfa_recovery_codes_unwritten",
-						);
+					};
+					const written = outcome.recoveryCodes;
+					// A set that could not be written is said now, whatever the answer comes to.
+					if (written !== undefined && !("written" in written) && !written.issued) {
+						codesSaid(written);
 					}
+					/** The codes a sent answer carried, or said it could not carry: `undefined` until it is made. */
+					let answered: { readonly codes: MfaIssuedRecoveryCodes } | undefined;
+					/** The binding's answer, made just before it is sent: a set written unshown is shown there, nothing else done. */
+					const answer = async () => {
+						let codes: MfaIssuedRecoveryCodes;
+						if (written !== undefined && "written" in written) {
+							codes = await written.show();
+							answered = { codes };
+						} else {
+							codes = written;
+							if (written?.issued === true) answered = { codes };
+						}
+						// A page that got none points to their regeneration.
+						return {
+							factor: outcome.factor,
+							...(codes === undefined
+								? {}
+								: codes.issued
+									? { recovery_codes: codes.codes }
+									: { recovery_codes_issued: false }),
+						};
+					};
+					/**
+					 * Once the answer is sent: what the codes it carried came to. A logger
+					 * that throws here no longer changes the answer, and is not let past it.
+					 */
+					const answerSaid = () => {
+						try {
+							if (answered !== undefined) codesSaid(answered.codes);
+						} catch {
+							// The answer stands; there is nowhere left to say it.
+						}
+					};
 					witnessUnwritten(outcome.subject, outcome.witness);
 					if (outcome.flagUncleared !== undefined) {
 						logger.warn(
@@ -1462,15 +1394,6 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 							"mfa_email_proof_flag_uncleared",
 						);
 					}
-					// The codes are answered here, once; a page that got none points to their regeneration.
-					const answer = {
-						factor: outcome.factor,
-						...(codes === undefined
-							? {}
-							: codes.issued
-								? { recovery_codes: codes.codes }
-								: { recovery_codes_issued: false }),
-					};
 					if (outcome.purpose === "enroll") {
 						// The binding escalates its session. The codes are shown this once, so
 						// the binding is answered whether or not the escalation lands; each
@@ -1485,10 +1408,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 								outcome.adds,
 							);
 						}
-						res.status(200).json(answer);
+						res.status(200).json(await answer());
+						answerSaid();
 						return;
 					}
 					await completeLogin("enrollment", req, res, outcome, answer);
+					answerSaid();
 					return;
 				}
 			}

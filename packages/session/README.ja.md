@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-10-01
+最終更新: 2026-10-02
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージがプロバイダーと並べて contribute するリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -367,7 +367,7 @@ cookie を厳密に一つのホストに固定するのは `__Host-` であり�
 
 - **ローカルのレコードが正。** `User` から読んだクレーム（`email`、`emailVerified`、`name`、`picture`、`groups`）はそのまま残り、federated な値がそれを置き換えることはない。
 - **隙間を埋めてよいのは三つのクレームだけ** — `email`、`name`、`picture`（`PROMOTABLE_FEDERATED_CLAIMS`）— で、ローカルのレコードがそのフィールドを欠いていて、かつ federated な値が文字列のときに限る。
-- **それ以外はすべて** `claims.federated[<providerName>]` **の下に名前空間化される**。昇格した値やローカルのクレームに負けた値も含め、そのまま完全に。
+- **それ以外はすべて** `claims.federated[<providerName>]` **の下に名前空間化される**。昇格した値やローカルのクレームに負けた値も含め、JSON の形で完全に。コアは `federated` を一つの custom claim として保存する: JSON が保持できない値（bigint、循環）がマップされていると `federated` クレーム全体が落とされ、コールバックのロガーに `login_claim_dropped` として一度だけ警告され、ログインは続く。
 
 したがって IdP は `groups`（アダプターが作り出した `roles` / `scope` / `permissions` も）を持ち込めない: それらは `claims.federated[<providerName>]` に届くだけである。`filterClaimsByScope` はプロバイダー固有のクレームを出力しないので、名前空間の下のものが id_token や `/userinfo` の応答に偶然現れることはない。
 

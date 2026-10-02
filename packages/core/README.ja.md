@@ -78,6 +78,7 @@ const config = handle.components.config; // boot がパースしたもの
 | `core.sessionRequirements.expected` | この構成が期待するセッション要件 — 「ログイン済み」の意味を変える拡張で、MFA はその一つ — で、ブート時にインストールされたモジュールが登録したものと比較される（[セッション許可](#セッション許可) を参照）。書かれていれば、セッション許可に問い合わせるモジュールの有無にかかわらず両方向で比較する: インストールされたどのモジュールも登録しない名前はブートを拒否し（`session-requirement-missing`）、登録された要件を書き漏らしても拒否する（`session-requirements-undeclared`）。セッション許可に問い合わせるモジュールがインストールされているときは必須（`oauthModule` はその一つ）で、書かれていなければ拒否する（`session-requirements-undeclared`）。`[]` は「なし」。既定値は無く、構成は自らの姿勢を述べる。`sessionRequirements.expected` はこのパスを示して拒否される |
 | `core.tokenBinding` | すべての機構が共有するトークンバインディングの設定: 機構のあいだを調停する `dispatchPolicy`（`CORE_TOKEN_BINDING_DISPATCH_POLICY`。[トークンバインディング機構](#トークンバインディング機構) を参照）と `bindConfidentialClientRefreshTokens`（`CORE_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS`）で、`resolveTokenBindingSettings` が読む。`oauth.tokenBinding` はこれらのパスを示して拒否される |
 | `core.federations` | フェデレーション。各フェデレーションに到達する名前をキーとする `{ enabled, type?, trustUpstreamAmr?, … }` で、名前がすべての type にわたって一意になるよう 1 つのマップにしている。`federationsOf(config)` で読む: core が読むのは `enabled`（boot 時のフェデレーションストア配線チェック）と `trustUpstreamAmr`（`federationTrustsUpstreamAmr`）で、`type` とエントリの残りはそれを読むアダプターパッケージのもの — アダプターパッケージは[ルート README](../../README.ja.md) に列挙している。エントリのキーはそのパスから名付けた変数 `CORE_FEDERATIONS_<NAME>_<KEY>` に束縛される。トップレベルの `federations` はこれを名指しして拒否される。core の `reference.conf` は空のマップを出荷する |
+| `core.outbound` | `createOutboundFetch` の宛先ポリシー: `allowedHosts`（`CORE_OUTBOUND_ALLOWED_HOSTS`）、`deniedHosts`（`CORE_OUTBOUND_DENIED_HOSTS`）、`internalHosts`（`CORE_OUTBOUND_INTERNAL_HOSTS`）はそれぞれホストまたは `.suffix` のリスト、またはカンマ区切りの文字列。`timeoutMs`（`CORE_OUTBOUND_TIMEOUT_MS`、5000）と `maxResponseBytes`（`CORE_OUTBOUND_MAX_RESPONSE_BYTES`、65536）。`egress`（`CORE_OUTBOUND_EGRESS`）は `"direct"` だけを取る。読むのは `outboundPolicyOf` だけで、解析できないセクションはキーを名指しして boot を拒否する。[外向きの fetch](#外向きの-fetch) を参照 |
 | `core.declaredAbsent` | この構成が意図して埋めないスロットを、そのキーで並べる（`["auditSink"]`）: そのようなスロットのモジュールの absence policy は、ここに挙げた名前で満たされる（`isAbsenceDeclared`、`describeAbsenceDeclaration`）。デフォルトも変数もない |
 
 ### グラントシステム
@@ -99,6 +100,21 @@ const config = handle.components.config; // boot がパースしたもの
 `resource` を扱うグラントは、`extractResourceParam` でそれを読み、それが名指す audience を `deriveAudienceFromResources` で導き、発行する `aud` がそれを表さなければ `unrepresentedResources` で拒否します — [`src/grants/resourceIndicator.mts`](src/grants/resourceIndicator.mts)。各値は分割せずにそのまま扱い（URI はカンマを含みうる）、繰り返されたパラメーターの空のエントリーは捨て、すべて空なら要求されなかったものとして扱います。oauth のグラント、`/authorize`、WebAuthn グラントはすべてここで読むので、同じことをするカスタムグラントも同じ答えになります。
 
 その下にあるのが `readTargetParameter` で、ターゲットパラメーター — `resource`、または RFC 8693 の `audience` — をフォームや JSON ボディから厳密に読みます。名指す値（何もなければ `[]`）を返し、文字列でも文字列の配列でもない不正な値には `null` を返します。不正な値を文字列に変換することはありません（`String([["https://x"]])` は `https://x` を名指してしまうため）。`extractResourceParam` は不正な `resource` を要求されなかったものとして読みます。トークン交換グラントは `resource` と `audience` を `readTargetParameter` で読み、不正なものを `invalid_target` で拒否します。これは RFC 8707 §2 が、サーバーが「解析できない」`resource` に与える答えで、`audience` にも対称性から同じ答えを返します。
+
+### 外向きの fetch
+
+`createOutboundFetch({ config, source })` は、クライアント登録（`source: "registration"`）またはリクエスト（`source: "request"`）が与える URL のための `fetch` を `core.outbound` のもとで返す — [`src/net/outbound-fetch.mts`](src/net/outbound-fetch.mts):
+
+- `https` のみ。平文の `http` は、`internalHosts` が列挙するループバックホストに対して、登録の URL で、解決したアドレスがすべてループバックのときだけ認める。
+- 資格情報を含む URL は拒否し、Fetch 標準の bad port も拒否する。
+- `deniedHosts` は他のリストにかかわらずホストを拒否し、空でない `allowedHosts` は列挙しないホストを拒否する。空でない `allowedHosts` は `internalHosts` も絞る: 内部ホストは両方に列挙する必要がある。エントリはホスト名（IDNA 後に英数字とハイフンのみ、ワイルドカード不可）または IP アドレス（完全一致）、または `.suffix`（そのドメインとすべてのサブドメイン）で、エントリも URL のホストも URL パーサーがホストを読むように読む: 大文字小文字、IDNA、末尾のドット、IP の表記は一致を変えず、IPv4 アドレスとその IPv4-mapped IPv6 リテラルは互いに一致する。
+- ホストは一度だけ解決し、すべてのアドレスが special-use の範囲（`isSpecialUseAddress`）の外でなければならない。special-use のアドレスを 1 つでも含む応答は拒否する。`internalHosts` は列挙したホストについて、登録の URL に限りこれを外す。リクエストの URL には決して適用しない。
+- 接続は確認したアドレスにだけ行い、TLS のサーバー名と証明書の識別は URL のホストのままにする。
+- リダイレクトは追わない: `304` 以外の `3xx` は拒否する。`2xx` 以外のステータスと `204`・`205`・`304` は null の body で返す。`2xx` の body は全体を読む: identity エンコーディングのみ（リクエストでそれを求める）、`maxResponseBytes` まで。
+- 1 つの期限 `timeoutMs` が解決・接続・TLS・ヘッダー・body をまとめて覆う。`core.outbound` の `timeoutMs` と `maxResponseBytes` は上限で、呼び出し側の値（`createOutboundFetch` のオプション）はそれより小さいときだけ効く。呼び出し側の `signal` も効き、その中断は呼び出し側自身の理由で reject する。
+- 文字列または `URL`、`GET` または `POST`、文字列・`URLSearchParams`・`Uint8Array` の body を取る。
+
+`matchesHostList` と `readHostEntry`（[`src/net/outbound-policy.mts`](src/net/outbound-policy.mts)）はホストリスト文法の公開リーダーで、同じ形のリストを別の場所で持つときに使う。`matchesHostList` は入力をエントリと同じように読み（どの URL の `hostname` でもよく、大文字小文字・末尾のドット・IP の表記を問わない）、読めないホスト（空のラベルを含むものなど）には `TypeError` を投げる（呼び出し側がその URL を拒否する）。`isOutboundRefusal(err)` はポリシーによる拒否と交換の失敗（解決、ネットワーク、期限）を区別する。理由はコードで、`loggableError` が `reason` として保つ。コードで設定されたプロキシや dispatcher は参照しない: 外向きのクライアントメタデータ fetch は直接接続する。`HTTPS_PROXY` または `HTTP_PROXY` が設定されている間は、`core.outbound.egress` が `"direct"` でない限り fetch の構築を拒否する。NAT64（`64:ff9b::/96`）で IPv4 に到達する IPv6 のみのネットワークは対象外: それらのアドレスは special-use であるため。テストは `@o3co/auth-provider-core/testing` の `createOutboundFetchForTesting` と `withOutbound` を使い、ポリシーの下に自前の resolver と transport を置く。
 
 ### エラーのテキスト（RFC 6749）
 
@@ -231,6 +247,8 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 #### アダプタファクトリーのプリミティブ
 
 `createAdapterFactory<T>(kind, ctx?)`、`AdapterFactory<T>`、`AdapterBuilder<T>`（設定セクションと読み取り専用の `BuilderContext` を受け取る関数。`BuilderContext` のフィールドはすべて任意で、追加されるだけ）、`LifecycleRegistrar`（cleanup の `tailMs` を持つ `LifecycleCleanupOptions` とともに）、`AdapterFactoryError` は [`src/adapters/AdapterFactory.mts`](src/adapters/AdapterFactory.mts) に定義されています。[`src/repositories/RepositoryFactory.mts`](src/repositories/RepositoryFactory.mts) の `createRepositoryFactories(ctx?)` は client、user、code のファクトリーを返します。
+
+ストアの条件付きメンバーが従う条件付き書き込みの規約は [`src/adapters/conditionalWrite.mts`](src/adapters/conditionalWrite.mts) にあります: `StoreGeneration`（不透明な値で、ストアが守る対象を書くたびに発行し、1 つのキーに同じ値を再び発行しない）、`isStoreGeneration`、`newStoreGeneration`、`BUNDLED_STORE_WRITE_LIFETIME_MS`（同梱ストアの書き込み寿命の上限で 24 時間。空になった集合は、これが過ぎて初めて「存在しない」と読まれる）、`Versioned<T>` と `VersionedSet<T>`（世代付きの読み取りの応答）、応答 `ConditionalReplaceAnswer`、`ConditionalRemoveAnswer`、`ConditionalCreateAnswer`、`ConditionalSetRemoveAnswer`、そしてそれぞれを読む core の読み取り関数（`readVersioned`、`readVersionedSet`、`readConditionalReplaceAnswer`、`readConditionalRemoveAnswer`、`readConditionalCreateAnswer`、`readConditionalSetRemoveAnswer`）。読み取り関数は型の外の応答を `TypeError` で拒否します。すべてのストアが守る規則は、SQL と HTTP のストアも含めて [docs/adapter-surface.md](../../docs/adapter-surface.md#conditional-writes) にあります。
 
 契約の主要な性質:
 

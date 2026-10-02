@@ -24,6 +24,7 @@
 import { z } from "zod";
 
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
+import { OutboundSectionSchema } from "../net/outbound-policy.mjs";
 import { MAX_DURATION_SECONDS } from "./durations.mjs";
 import { type RemovedKey, unreadSection, withRemovedKeys } from "./removed-keys.mjs";
 import { environmentCoercer } from "./schema-path.mjs";
@@ -644,6 +645,10 @@ export const CoreConfigSchema = z.object({
 			// reached at (`/session/oauth/federation/<name>`): one map, so a name
 			// is unique across every type. Read through `federationsOf`.
 			federations: z.record(z.string(), federationEntrySchema).optional(),
+			// The destination policy of every fetch of a URL a client
+			// registration or a request supplies; its shape is the policy's own
+			// (`net/outbound-policy.mts`).
+			outbound: OutboundSectionSchema.optional(),
 			tokenBinding: z
 				.object({
 					// How `tokenBindingMw` arbitrates when several mechanisms succeed
