@@ -18,9 +18,9 @@
  * The router with Client ID Metadata Documents on: its one document
  * fallback reads every registered client through core's boundary, so a
  * registration the boundary refuses, of any id shape, is an unknown client.
- * With documents off the router reads the repository as it is handed. A
- * router built over a repository that already is a document fallback is
- * refused, when it would stack its own.
+ * With documents off the router reads the repository through the boundary
+ * itself, with the same answer. A router built over a repository that
+ * already is a document fallback is refused, when it would stack its own.
  */
 
 import crypto from "node:crypto";
@@ -150,15 +150,19 @@ describe("the router's one document fallback reads every registered client throu
 		);
 	});
 
-	it("serves the record as handed with documents off, until the router itself reads through the boundary", async () => {
-		const { app, logger } = await buildRouter(answering(refusedRecord), { documents: false });
+	it("answers the same refused registration as an unknown client with documents off", async () => {
+		const { app, fetchImpl, logger } = await buildRouter(answering(refusedRecord), {
+			documents: false,
+		});
 		const res = await authorize(app);
-		// The first-party client gets its code at the registered redirect URI.
-		expect(res.status).toBe(302);
-		const location = new URL(res.headers.location as string);
-		expect(`${location.origin}${location.pathname}`).toBe(REDIRECT_URI);
-		expect(location.searchParams.get("code")).toBeTruthy();
-		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "client_record_refused");
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_client");
+		expect(res.headers.location).toBeUndefined();
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ clientId: CLIENT_ID }),
+			"client_record_refused",
+		);
 	});
 });
 

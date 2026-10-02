@@ -120,6 +120,23 @@ function queryRejection(url: URL): RedirectUriRejection | null {
 }
 
 /**
+ * Whether every query name of a URI passes {@link checkRedirectUri}'s grammar
+ * (each parameter named, `[A-Za-z0-9_-]`, no `;`); `false` for an unparsable
+ * URI. For a URI held to its own scheme rules that reserves names with
+ * {@link redirectUriQueryCarries}, which never matches a name this refuses.
+ */
+export function redirectUriQueryNamesWellFormed(uri: string): boolean {
+	let url: URL;
+	try {
+		url = new URL(uri);
+	} catch {
+		return false;
+	}
+	if (url.search.includes(";")) return false;
+	return queryNames(url).every((name) => QUERY_NAME.test(name));
+}
+
+/**
  * Which of `names` a URI's query carries (first match, as given in `names`),
  * compared as {@link checkRedirectUri} compares names; `undefined` for none or
  * an unparsable URI. For a module that reserves names of its own. A name the

@@ -299,11 +299,10 @@ export interface SessionView {
 	 * when it reads the record into this view, and sets it on every view it
 	 * builds, so a requirement can choose `step_up` or `reauthenticate` on it,
 	 * and a route can refuse to open a step-up it is `false` for, without
-	 * either reading the store or the record's shape. Optional only so a view built
-	 * by hand still type-checks: absent reads as `false`. It becomes required
-	 * once every view built by hand sets it.
+	 * either reading the store or the record's shape. A view built by hand
+	 * sets it too.
 	 */
-	readonly secondFactorRecordable?: boolean;
+	readonly secondFactorRecordable: boolean;
 }
 
 /**
