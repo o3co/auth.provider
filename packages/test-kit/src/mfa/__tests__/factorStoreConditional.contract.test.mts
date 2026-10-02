@@ -113,6 +113,7 @@ type Fault =
 	| "create-upserts-held-id"
 	| "counter-generation"
 	| "reset-of-empty-keeps-generation"
+	| "reset-keeps-generation"
 	| "removed-answers-another-generation"
 	| "tombstone-never-expires"
 	| "reset-tombstone-never-expires"
@@ -349,6 +350,11 @@ function modelStore(fault: Fault): Model {
 			if (fault === "reset-of-empty-keeps-generation" && live(subject)?.records.size === 0) {
 				return;
 			}
+			const held = live(subject);
+			if (fault === "reset-keeps-generation" && held !== undefined) {
+				held.records.clear();
+				return;
+			}
 			write(subject, (records) => records.clear());
 			const reset = sets.get(subject);
 			if (fault === "reset-tombstone-never-expires" && reset !== undefined) {
@@ -523,6 +529,11 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 			"one whose reset of an emptied set keeps its generation",
 			"reset-of-empty-keeps-generation",
 			[CASE.resetEmpty],
+		],
+		[
+			"one whose reset of a set that holds members keeps its generation",
+			"reset-keeps-generation",
+			[CASE.resetAfterRead, CASE.unconditional],
 		],
 		[
 			"one whose removal answers a generation other than the one it wrote",

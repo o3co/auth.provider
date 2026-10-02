@@ -156,8 +156,8 @@ export function isMfaFactorUpdateWritten(
  * "Conditional writes"); what follows is only what it means here.
  *
  * - The membership writes are `createIf`, `removeIf` and
- *   `removeAllForSubject`: each issues a fresh generation. `update` is a member's own update, fenced by the
- *   record's `version`, and keeps it. A membership decision that read a
+ *   `removeAllForSubject`: each issues a fresh generation. `update` is a
+ *   member's own update, fenced by the record's `version`, and keeps it. A membership decision that read a
  *   record's data is therefore not fenced against an update of that record,
  *   which holds only while every factor's next data keeps the three things
  *   `MfaVerification.next` names.
