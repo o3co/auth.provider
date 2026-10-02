@@ -135,6 +135,12 @@ describe("matchesHostList", () => {
 		);
 	});
 
+	it("matches no entry for a hostname with an empty label", () => {
+		const host = new URL("https://foo..corp.example/").hostname;
+		expect(matchesHostList(list(".corp.example"), host)).toBe(false);
+		expect(matchesHostList(list("foo..corp.example".replace("..", ".")), host)).toBe(false);
+	});
+
 	it("matches nothing when the list is empty", () => {
 		expect(matchesHostList([], "rp.example")).toBe(false);
 	});

@@ -137,6 +137,13 @@ export function createNodeTransport(tls: { readonly ca?: string } = {}): Outboun
 				close();
 				reject(err);
 			});
+			// A 101 answer takes the upgrade path, never `response`: no protocol
+			// switch is asked for, so it ends the exchange as a failure at once.
+			req.on("upgrade", (_res, socket) => {
+				socket.destroy();
+				close();
+				reject(Object.assign(new Error("unexpected protocol upgrade"), { code: "ERR_UPGRADE" }));
+			});
 			exchange.signal.addEventListener("abort", onAbort, { once: true });
 			req.on("response", (incoming) => {
 				res = incoming;

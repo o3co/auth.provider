@@ -25,7 +25,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import type { AddressInfo, Socket } from "node:net";
+import { type AddressInfo, createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TLSSocket } from "node:tls";
@@ -249,6 +249,31 @@ describe("plain http to a listed loopback host", () => {
 			setTimeout(() => res.socket?.destroy(), 10);
 		});
 		expect(await reason(localFetch()(`http://localhost:${chunked.port}/`))).toBe("network_error");
+	});
+
+	it("reports a 101 answer as a network failure at once, not at the deadline", async () => {
+		const raw = createNetServer((socket) => {
+			socket.on("error", () => undefined);
+			socket.once("data", () =>
+				socket.write(
+					"HTTP/1.1 101 Switching Protocols\r\nUpgrade: other\r\nConnection: Upgrade\r\n\r\n",
+				),
+			);
+		});
+		await new Promise<void>((resolve) => raw.listen(0, "127.0.0.1", resolve));
+		try {
+			const started = Date.now();
+			expect(
+				await reason(
+					localFetch({ timeoutMs: 5_000 })(
+						`http://localhost:${(raw.address() as AddressInfo).port}/`,
+					),
+				),
+			).toBe("network_error");
+			expect(Date.now() - started).toBeLessThan(2_000);
+		} finally {
+			await new Promise<void>((resolve) => raw.close(() => resolve()));
+		}
 	});
 
 	it("refuses an encoded body", async () => {
