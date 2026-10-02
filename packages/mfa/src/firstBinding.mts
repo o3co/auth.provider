@@ -38,7 +38,12 @@
  * binding a login reopens after a non-counting proof (`reopenedEnrollment`).
  */
 
-import type { MailAddressFact, MfaFactorRecord, MfaFactorResolver } from "@o3co/auth-provider-core";
+import type {
+	MailAddressFact,
+	MfaFactor,
+	MfaFactorRecord,
+	MfaFactorResolver,
+} from "@o3co/auth-provider-core";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
 import { replacesStandingSets } from "./recovery/issue.mjs";
 
@@ -116,25 +121,34 @@ export const countingKinds = (factors: MfaFactorResolver): string[] =>
 	[...factors.entries()].filter(([, factor]) => factor.counting).map(([kind]) => kind);
 
 /**
+ * Whether `user` may enroll `factor`, contributed as `kind`. A factor whose
+ * `enrollable` throws cannot answer — an outage, never "not offered" — so
+ * the throw goes through, as an {@link MfaEnrollableError} naming its kind.
+ */
+export const mayEnroll = (
+	kind: string,
+	factor: MfaFactor,
+	user: Readonly<Record<string, unknown>>,
+): boolean => {
+	try {
+		return Boolean(factor.enrollable?.(user) ?? true);
+	} catch (cause) {
+		throw new MfaEnrollableError(kind, cause);
+	}
+};
+
+/**
  * The counting factors `user` may enroll, in registration order: what a
- * first binding offers. A factor whose `enrollable` throws cannot answer —
- * an outage, never "not offered" — so the throw goes through, as an
- * {@link MfaEnrollableError} naming its kind.
+ * first binding offers. A factor whose `enrollable` throws is an outage
+ * ({@link mayEnroll}).
  */
 export const enrollableKinds = (
 	factors: MfaFactorResolver,
 	user: Readonly<Record<string, unknown>>,
 ): string[] =>
-	[...factors.entries()].flatMap(([kind, factor]) => {
-		if (!factor.counting) return [];
-		let offered: boolean;
-		try {
-			offered = factor.enrollable?.(user) ?? true;
-		} catch (cause) {
-			throw new MfaEnrollableError(kind, cause);
-		}
-		return offered ? [kind] : [];
-	});
+	[...factors.entries()].flatMap(([kind, factor]) =>
+		factor.counting && mayEnroll(kind, factor, user) ? [kind] : [],
+	);
 
 /** `mfa.enrollment.requireEmailProof`. */
 export const REQUIRE_EMAIL_PROOF = ["when-mail", "always", "never"] as const;
