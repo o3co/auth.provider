@@ -37,6 +37,13 @@
  * Scopes are intersected with `allowedScopes`; audiences are the operator's
  * alone — a document says who the client is, never what it may reach. A
  * pre-registered client with the same id wins.
+ *
+ * The registered clients are read through core's client-record boundary, and
+ * a document is resolved only when it answers that no client is registered
+ * under the id (`absent`). A registration the boundary refuses is an unknown
+ * client, never replaced by a document; a repository that cannot answer is an
+ * outage, never answered from the document cache. A document client never
+ * crosses the boundary: it is this module's own, built and validated here.
  */
 
 import { promises as dns } from "node:dns";
@@ -52,6 +59,7 @@ import {
 	loggableError,
 	type PublicClient,
 	parseScopeTokens,
+	validatedClientRepository,
 } from "@o3co/auth-provider-core";
 
 export interface ClientIdMetadataDocumentOptions {
@@ -550,22 +558,71 @@ export function createClientIdMetadataDocumentResolver(
 	};
 }
 
+/** The repositories {@link withClientIdMetadataDocuments} built: each the one document fallback of its composition. */
+const documentFallbacks = new WeakSet<ClientRepository>();
+
+/**
+ * Whether `repository` is a document fallback {@link withClientIdMetadataDocuments}
+ * built. Such a repository already reads its registered clients through core's
+ * boundary, and answers its document clients as this module built them.
+ */
+export function isClientIdMetadataDocumentRepository(repository: ClientRepository): boolean {
+	return documentFallbacks.has(repository);
+}
+
 /**
  * A {@link ClientRepository} that answers pre-registered clients from `inner`
- * first and Client ID Metadata Documents second. `authenticate` is `inner`'s
- * alone: a document never carries a secret.
+ * first and Client ID Metadata Documents second.
+ *
+ * `inner` is read through core's client-record boundary
+ * (`validatedClientRepository`, a no-op when it already is one), which says
+ * per id whether a client is registered (`found`), registered but refused
+ * (`refused`) or not registered (`absent`). That answer comes first, on every
+ * lookup, before the document cache or the refusal memo is consulted:
+ *
+ * - `found`: the registered client, validated.
+ * - `refused`: no client. The document is never resolved in its place, so a
+ *   malformed registration cannot be replaced by whatever the URL serves.
+ * - `absent`: the document, resolved as {@link createClientIdMetadataDocumentResolver} does.
+ * - A throw is the repository's outage and is let through, never answered
+ *   from the document cache or its stale window.
+ *
+ * `authenticate` is `inner`'s alone, through the boundary: a document never
+ * carries a secret.
+ *
+ * One fallback per composition: `inner` that is already such a repository is
+ * refused with a `TypeError`. Its own lookup answers a refusal `null`, so a
+ * second fallback over it would read the refusal as an absence.
  */
 export function withClientIdMetadataDocuments(
 	inner: ClientRepository,
 	opts: ClientIdMetadataDocumentOptions,
 ): ClientRepository {
+	if (documentFallbacks.has(inner)) {
+		throw new TypeError(
+			"withClientIdMetadataDocuments: the repository already resolves Client ID Metadata Documents; " +
+				"a composition has one such fallback, over its registered clients",
+		);
+	}
+	const registered = validatedClientRepository(
+		inner,
+		opts.logger === undefined ? {} : { logger: opts.logger },
+	);
 	const resolver = createClientIdMetadataDocumentResolver(opts);
-	return {
+	const fallback: ClientRepository = {
 		async findById(clientId) {
-			const registered = await inner.findById(clientId);
-			if (registered !== null) return registered;
-			return resolver.resolve(clientId);
+			const lookup = await registered.lookupClient(clientId);
+			switch (lookup.outcome) {
+				case "found":
+					return lookup.client;
+				case "refused":
+					return null;
+				case "absent":
+					return resolver.resolve(clientId);
+			}
 		},
-		authenticate: (clientId, secret) => inner.authenticate(clientId, secret),
+		authenticate: (clientId, secret) => registered.authenticate(clientId, secret),
 	};
+	documentFallbacks.add(fallback);
+	return fallback;
 }

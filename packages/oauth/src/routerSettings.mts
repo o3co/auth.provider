@@ -34,6 +34,7 @@ import {
 	stepUpReach,
 } from "@o3co/auth-provider-core";
 import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
+import { behindClientBoundary } from "./clients/clientBoundary.mjs";
 import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
@@ -114,9 +115,13 @@ export const resolveRouterSettings = ({
 	}
 	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
 	const canonicalIssuer = options.issuer as string;
+	// Every endpoint reads clients through core's client-record boundary,
+	// outermost over the repository it was handed (`behindClientBoundary`).
+	//
 	// Client ID Metadata Documents. Pre-registered clients answer first; a
 	// client_id that is an https URL is then resolved from the document it
-	// names, under the operator's ceilings. One repository for every endpoint
+	// names, under the operator's ceilings, only when no client is registered
+	// under it (`withClientIdMetadataDocuments`, over the boundary itself). One repository for every endpoint
 	// the router mounts — /authorize, /token, /revoke — so a document client is
 	// the same client everywhere.
 	//
@@ -146,7 +151,7 @@ export const resolveRouterSettings = ({
 					logger,
 					...clientIdMetadataDocumentSeams,
 				})
-			: registeredClients;
+			: behindClientBoundary(registeredClients, logger);
 	return {
 		options,
 		acrTable,
