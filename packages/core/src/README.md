@@ -111,7 +111,7 @@ Except where a bullet names its test, none of these is enforced; each is recorde
 
 ## Boot
 
-[`boot/`](./boot/README.md) is the six-stage planner behind `createApp`. `app.mts` re-exports it for import-path stability; `index.mts` is the public barrel. `package.json` exports `.`, `./modules/manifest`, `./testing`, `./middleware/express.mjs` and `./reference.conf`.
+[`boot/`](./boot/README.md) is the six-stage planner behind `createApp`. `app.mts` re-exports it for import-path stability; `index.mts` is the public barrel. `package.json` exports `.`, `./modules/manifest`, `./testing`, `./middleware/express.mjs` and `./reference.conf`. Those keys, and every name each code entry exports as a value or a type, are pinned in [`public-surface.txt`](../public-surface.txt) by [`__tests__/publicSurface.drift.test.mts`](./__tests__/publicSurface.drift.test.mts), which also refuses `export *` in an entry. A change to the surface is rewritten there with that test file run under vitest's `-u`, in the same PR; a removed or renamed name is breaking and gets a CHANGELOG line at the release cut.
 
 ## Config
 

@@ -220,6 +220,26 @@ describe("the email factor's verification", () => {
 		});
 	});
 
+	it("answers its recorded digest as its identity: one string for one digest under one key, another under another key or for another address, none for data holding no digest", () => {
+		const factor = createEmailFactor(SETTINGS);
+		const identity = factor.identity?.({ addressDigest: addressDigest(USER.email) });
+		expect(identity).toEqual(expect.any(String));
+		expect(identity).not.toContain(USER.email);
+		expect(factor.identity?.({ addressDigest: addressDigest(USER.email) })).toBe(identity);
+		expect(
+			createEmailFactor(SETTINGS).identity?.({ addressDigest: addressDigest(USER.email) }),
+		).toBe(identity);
+		expect(factor.identity?.({ addressDigest: addressDigest(USER.email, rotated) })).not.toBe(
+			identity,
+		);
+		expect(factor.identity?.({ addressDigest: addressDigest("bob@example.com") })).not.toBe(
+			identity,
+		);
+		for (const data of [{}, { addressDigest: null }, { addressDigest: { keyId: "k" } }]) {
+			expect(factor.identity?.(data), JSON.stringify(data)).toBeUndefined();
+		}
+	});
+
 	it("throws, an outage, when the kept code's key has left the ring, or the state is not a kept code", async () => {
 		const factor = createEmailFactor(SETTINGS);
 		const named = enrolled({ addressDigest: addressDigest(USER.email) });
