@@ -69,7 +69,7 @@
  *   `listVersioned` gives it one (rule 8).
  * - Each membership write carries a deadline set at issue, `Date.now()` plus
  *   {@link WRITE_TIMEOUT_MS}, which its script compares with the server's
- *   clock before it reads or writes anything: past it, that copy writes
+ *   clock before it reads or writes anything: at or past it, that copy writes
  *   nothing and the write rejects with its outcome unknown, since an earlier
  *   copy may have committed. The wait ends at the same timeout. So the write
  *   lifetime W is {@link REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS} (rule 6).
@@ -174,26 +174,26 @@ function checkMutable(next: MfaFactorRecordUpdate): void {
  * write of one would make every factor of the subject unreadable. The dates
  * are checked where they are written.
  */
-function checkRecord(record: MfaFactorRecord): void {
-	if (typeof record.id !== "string") throw RANGE("id must be a string");
-	if (typeof record.subject !== "string") throw RANGE("subject must be a string");
-	if (typeof record.kind !== "string") throw RANGE("kind must be a string");
-	if (record.binding !== undefined && !BINDINGS.has(record.binding)) {
+function checkRecord(factor: MfaFactorRecord): void {
+	if (typeof factor.id !== "string") throw RANGE("id must be a string");
+	if (typeof factor.subject !== "string") throw RANGE("subject must be a string");
+	if (typeof factor.kind !== "string") throw RANGE("kind must be a string");
+	if (factor.binding !== undefined && !BINDINGS.has(factor.binding)) {
 		throw RANGE('binding must be "password", "email_proof", "federated", "mfa" or absent');
 	}
-	if (!isWholeVersion(record.version)) {
+	if (!isWholeVersion(factor.version)) {
 		throw RANGE("version must be a safe non-negative integer");
 	}
-	checkMutable(record);
+	checkMutable(factor);
 }
 
-const fixedPart = (record: MfaFactorRecord): string =>
+const fixedPart = (factor: MfaFactorRecord): string =>
 	JSON.stringify({
-		id: record.id,
-		subject: record.subject,
-		kind: record.kind,
-		binding: record.binding ?? null,
-		createdAt: instantOf(record.createdAt, "createdAt"),
+		id: factor.id,
+		subject: factor.subject,
+		kind: factor.kind,
+		binding: factor.binding ?? null,
+		createdAt: instantOf(factor.createdAt, "createdAt"),
 	});
 
 const mutablePart = (next: MfaFactorRecordUpdate): string =>
@@ -349,9 +349,9 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 		);
 
 	/** A record's stored value, or a `RangeError` for one a read would refuse. */
-	const storedValueOf = (record: MfaFactorRecord): string => {
-		checkRecord(record);
-		return `${record.version}\n${fixedPart(record)}\n${mutablePart(record)}`;
+	const storedValueOf = (factor: MfaFactorRecord): string => {
+		checkRecord(factor);
+		return `${factor.version}\n${fixedPart(factor)}\n${mutablePart(factor)}`;
 	};
 
 	/**
@@ -379,16 +379,16 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 			return { items: recordsOf(fields, subject), generation };
 		},
 
-		async createIf(record, expected) {
+		async createIf(factor, expected) {
 			if (expected !== null) checkExpected(expected, "createIf");
 			// Refused before anything is written: whatever a read would refuse.
-			const value = storedValueOf(record);
-			const key = keyOf(record.subject);
+			const value = storedValueOf(factor);
+			const key = keyOf(factor.subject);
 			let next: StoreGeneration | undefined;
 			const outcome = await withDeadline("createIf", (deadlineMs) => {
 				const write = writeOf(key, deadlineMs);
 				next = write.next;
-				return client.createIf(key, mfaKeyPart(record.id), value, { ...write, expected });
+				return client.createIf(key, mfaKeyPart(factor.id), value, { ...write, expected });
 			});
 			if (outcome === "late") throw late("createIf");
 			return outcome === "created" ? { outcome, generation: next as StoreGeneration } : { outcome };
@@ -411,11 +411,11 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 			return outcome === "removed" ? { outcome, generation: next as StoreGeneration } : { outcome };
 		},
 
-		async create(record) {
-			const value = storedValueOf(record);
-			const key = keyOf(record.subject);
+		async create(factor) {
+			const value = storedValueOf(factor);
+			const key = keyOf(factor.subject);
 			const outcome = await withDeadline("create", (deadlineMs) =>
-				client.create(key, mfaKeyPart(record.id), value, writeOf(key, deadlineMs)),
+				client.create(key, mfaKeyPart(factor.id), value, writeOf(key, deadlineMs)),
 			);
 			if (outcome === "late") throw late("create");
 			if (outcome === "conflict") {
