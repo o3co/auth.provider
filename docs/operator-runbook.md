@@ -801,8 +801,7 @@ upstream `amr` (`profile.amr`); a custom adapter may.
 ### Multi-factor authentication: the lock, mail and notices
 
 What a composition that installs the MFA package owns beside it (the MFA
-ADR's D5, D21, D24). The package is private until the standalone template
-wires it.
+ADR's D5, D21, D24).
 
 - **The lock on guessable proofs.** Five attempts per transaction. From the
   fifth consecutive failure a lock of 15 minutes, doubling to 24 hours. Ten
@@ -1679,8 +1678,7 @@ check this page, so when the two disagree, the constant is right:
 `token.issued`, `token.issued.failure`.
 
 The `mfa.*` events are the multi-factor authentication package's (the MFA
-ADR's D28). The MFA package is private until the standalone template wires
-it, so no released composition emits them. Its routes emit
+ADR's D28), emitted by a composition that installs it. Its routes emit
 `mfa.challenge.sent`, `mfa.verified` and `mfa.verify.failure` (`reason`:
 `invalid`, `expired`, `replayed`, `malformed`, `sign_count_regression`, or
 `exhausted` for a verification that arrives after the transaction's attempts
