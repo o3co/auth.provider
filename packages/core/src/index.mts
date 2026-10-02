@@ -965,6 +965,16 @@ export {
 	isWellFormedClientId,
 	MAX_CLIENT_ID_LENGTH,
 } from "./repositories/clientId.mjs";
+// Core's boundary over a ClientRepository: each record answered is read by
+// name once and held to the registration schema, and `lookupClient` tells a
+// refused record from an absent one, so a fallback to another source of
+// clients never stands in for a refused registration.
+export {
+	type ClientLookup,
+	type ClientRepositoryBoundaryOptions,
+	type ValidatedClientRepository,
+	validatedClientRepository,
+} from "./repositories/clientRepositoryBoundary.mjs";
 export {
 	type ClientRepositoryOutage,
 	logClientRepositoryUnavailable,
