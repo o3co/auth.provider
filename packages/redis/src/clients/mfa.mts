@@ -60,9 +60,51 @@ export interface MfaFactorRecordUpdateInput {
 }
 
 /**
+ * What every membership write of a factor set carries: the generation it
+ * leaves the set at, and the deadline past which it writes nothing.
+ */
+export interface MfaFactorSetWriteInput {
+	/** The set's new generation, minted by the adapter: written as the `~g` field. */
+	readonly next: string;
+	/**
+	 * Epoch milliseconds, on the app's clock at issue plus the adapter's write
+	 * timeout. A write that reaches the server when its clock (`TIME`) is past
+	 * this answers `late` and writes nothing, however it got there late: queued
+	 * while the connection was down, sent again after a reconnect, or held by
+	 * a stalled server.
+	 */
+	readonly deadlineMs: number;
+	/**
+	 * A key of its own for this write, on the set's hash tag, that keeps the
+	 * write's answer until its deadline. A copy of the write sent again (the
+	 * driver resends a command whose reply a dropped connection lost) finds
+	 * it, answers what the first copy answered, and writes nothing.
+	 */
+	readonly replayKey: string;
+}
+
+/** A membership write that may leave the set empty: how long its tombstone is kept. */
+export interface MfaFactorSetEmptyingWriteInput extends MfaFactorSetWriteInput {
+	/** Milliseconds a set this write leaves empty is kept as its tombstone (`PEXPIRE`). */
+	readonly tombstoneMs: number;
+}
+
+/** A conditional create: the generation the set must still be at, `null` for an absent set. */
+export interface MfaFactorSetCreateIfInput extends MfaFactorSetWriteInput {
+	readonly expected: string | null;
+}
+
+/** A conditional removal: the generation the set must still be at. */
+export interface MfaFactorSetRemoveIfInput extends MfaFactorSetEmptyingWriteInput {
+	readonly expected: string;
+}
+
+/**
  * Backing client for the `MfaFactorStore` adapter (ADR
  * 2026-09-25-multi-factor-authentication): one hash per subject, a field
- * per factor.
+ * per factor, and the set's generation under the reserved field `~g`, which
+ * no factor's field can be (a factor's field is base64url, which has no
+ * `~`).
  *
  * A factor's value is three lines — `<version>\n<fixed>\n<mutable>` — where
  * `<version>` is decimal text and `<fixed>` and `<mutable>` are one line of
@@ -73,23 +115,70 @@ export interface MfaFactorRecordUpdateInput {
  * re-encoded the record would change it (`cjson` writes an empty array as
  * `{}`), so none does. Every operation touches the one key it is handed, so
  * this client needs no hash tag to run on Cluster.
+ *
+ * Every membership write — `createIf`, `removeIf`, `create`, `remove` and
+ * `removeAll` — is one indivisible step that first answers a copy of a write
+ * already applied with that write's answer (its `replayKey`), then refuses a
+ * write past its deadline (`late`), then checks, then writes the fields and
+ * `~g` = `next`, and keeps its answer under `replayKey` until its deadline.
+ * A write that leaves the hash holding `~g` alone (an emptied set, its
+ * tombstone) sets the key to expire `tombstoneMs` later; one that leaves it
+ * holding a factor takes the expiry off. A key without `~g` that holds
+ * factors was written before the set had a generation: a conditional write
+ * against it answers `conflict`, and `listVersioned` gives it one.
  */
 export interface MfaFactorStoreClient {
 	/** Every field of the hash at `key` and its value (`HGETALL`); `{}` when there is none. */
 	list(key: string): Promise<Readonly<Record<string, string>>>;
-	/** Write `value` under `field` only while the field is absent (`HSETNX`). Resolves whether it wrote. */
-	create(key: string, field: string, value: string): Promise<boolean>;
+	/**
+	 * Every field of the hash at `key` and its value, `~g` among them, from one
+	 * snapshot; `{}` when there is none. A hash without `~g` is given `mint` as
+	 * its generation in the same step, its expiry kept. Read on the primary: a
+	 * read-only replica refuses it.
+	 */
+	listVersioned(key: string, mint: string): Promise<Readonly<Record<string, string>>>;
+	/**
+	 * Write `value` under `field` only while the set is at `input.expected`
+	 * (`null`: while there is no key) and does not hold `field`.
+	 */
+	createIf(
+		key: string,
+		field: string,
+		value: string,
+		input: MfaFactorSetCreateIfInput,
+	): Promise<"created" | "conflict" | "late">;
+	/**
+	 * Remove `field` only while the set is at `input.expected`: `missing` for
+	 * no key, or no such field at `expected`; `conflict` for another
+	 * generation, or none. The generation is checked before the field.
+	 */
+	removeIf(
+		key: string,
+		field: string,
+		input: MfaFactorSetRemoveIfInput,
+	): Promise<"removed" | "missing" | "conflict" | "late">;
+	/** Write `value` under `field` only while the field is absent, whatever the generation. */
+	create(
+		key: string,
+		field: string,
+		value: string,
+		input: MfaFactorSetWriteInput,
+	): Promise<"created" | "conflict" | "late">;
 	/**
 	 * Atomically: while the value under `field` is at `input.expectedVersion`,
 	 * replace its version and mutable part, keep its fixed part, and resolve
 	 * the value as written; `null` when the field is absent, at another
-	 * version, or not three lines.
+	 * version, or not three lines. Keeps `~g` and the key's expiry.
 	 */
 	update(key: string, field: string, input: MfaFactorRecordUpdateInput): Promise<string | null>;
-	/** Remove `field` (`HDEL`). Idempotent. */
-	remove(key: string, field: string): Promise<void>;
-	/** Remove the whole hash (`DEL`). Idempotent. */
-	removeAll(key: string): Promise<void>;
+	/** Remove `field`, whatever the generation; `missing`, writing nothing, when there is none. */
+	remove(
+		key: string,
+		field: string,
+		input: MfaFactorSetEmptyingWriteInput,
+	): Promise<"removed" | "missing" | "late">;
+	/** Remove every field, and leave the set's tombstone at `input.next`, the key made when absent. */
+	removeAll(key: string, input: MfaFactorSetEmptyingWriteInput): Promise<"removed" | "late">;
 	/**
 	 * What the server says about keeping what it is written. A reply
 	 * that refuses a question leaves that part unread; any other reply error,

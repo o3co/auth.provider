@@ -23,9 +23,11 @@
  * `maxmemory-policy` and persistence: an `allkeys-*` policy refuses the boot;
  * RDB snapshots without AOF, and no persistence at all, are each one warning;
  * a server that refuses `CONFIG` is one warning that the check could not run.
- * The transaction store also warns on a `volatile-*` policy: its lock and
- * week keys carry a TTL once no run is counted, and an evicted one lifts a
- * hold early. The factor store's keys carry none.
+ * Each store also warns on a `volatile-*` policy, naming the key families
+ * that carry a TTL and fail open when evicted: the factor store's emptied
+ * sets' tombstones, which an eviction ends before the write lifetime has
+ * passed, and its writes' replay keys; the transaction store's lock and week keys, which carry one once
+ * no run is counted, and an evicted one lifts a hold early.
  *
  * The policy is read from `INFO memory`, and from `CONFIG GET
  * maxmemory-policy` only where INFO does not say, so a server that blocks
@@ -112,10 +114,10 @@ interface Case {
 	readonly lossy: string;
 	readonly volatile: string;
 	readonly unchecked: string;
-	/** The notice a `volatile-*` policy is given, for the store whose keys carry a TTL. */
-	readonly lockEvictable: string | undefined;
+	/** The notice a `volatile-*` policy is given: some of the store's keys carry a TTL. */
+	readonly volatileEvictable: string;
 	/** The key families that notice names: each one's loss fails open. */
-	readonly evictableFamilies: readonly string[] | undefined;
+	readonly evictableFamilies: readonly string[];
 	readonly memoryModule: Module;
 	readonly client: (io: Redis) => { durability(): Promise<RedisDurability> };
 }
@@ -131,8 +133,8 @@ const CASES: readonly Case[] = [
 		lossy: "mfa_factor_store_lossy",
 		volatile: "mfa_factor_store_volatile",
 		unchecked: "mfa_factor_store_durability_unchecked",
-		lockEvictable: undefined,
-		evictableFamilies: undefined,
+		volatileEvictable: "mfa_factor_store_tombstone_evictable",
+		evictableFamilies: ["tombstone", "replay"],
 		memoryModule: memoryMfaFactorStoreModule,
 		client: makeIoredisMfaFactorStoreClient,
 	},
@@ -146,7 +148,7 @@ const CASES: readonly Case[] = [
 		lossy: "mfa_transaction_store_lossy",
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
-		lockEvictable: "mfa_transaction_store_lock_evictable",
+		volatileEvictable: "mfa_transaction_store_lock_evictable",
 		evictableFamilies: ["lock", "week", "first-binding", "lease"],
 		memoryModule: memoryMfaTransactionStoreModule,
 		client: makeIoredisMfaTransactionStoreClient,
@@ -237,31 +239,28 @@ describe.each(CASES)("$module.name", (c) => {
 	});
 
 	it.each(["volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl"])(
-		"boots on %s with AOF, and warns once only where an evicted key would lift a subject's hold",
+		"boots on %s with AOF, and warns once, naming the key families an eviction fails open on",
 		async (policy) => {
-			// The factor store's keys carry no TTL, so a volatile-* policy never
-			// picks them. The transaction store's lock and week keys carry one
-			// once no run is counted: evicted, a weekly hold ends early.
+			// The factor store's tombstones carry a TTL: evicted, an emptied set
+			// reads as never written before the write lifetime has passed. The
+			// transaction store's lock and week keys carry one once no run is
+			// counted: evicted, a weekly hold ends early.
 			const { logger, calls } = recordingLogger();
 			expect((await boot({ ...DURABLE, maxmemoryPolicy: policy }, logger)).kind).toBe("redis");
-			expect(calls).toEqual(
-				c.lockEvictable === undefined
-					? []
-					: [
-							{
-								level: "warn",
-								args: [
-									{
-										store: c.slot,
-										adapter: "redis",
-										maxmemoryPolicy: policy,
-										evictableFamilies: c.evictableFamilies,
-									},
-									c.lockEvictable,
-								],
-							},
-						],
-			);
+			expect(calls).toEqual([
+				{
+					level: "warn",
+					args: [
+						{
+							store: c.slot,
+							adapter: "redis",
+							maxmemoryPolicy: policy,
+							evictableFamilies: c.evictableFamilies,
+						},
+						c.volatileEvictable,
+					],
+				},
+			]);
 		},
 	);
 
@@ -271,9 +270,7 @@ describe.each(CASES)("$module.name", (c) => {
 			{ ...DURABLE, maxmemoryPolicy: "volatile-lru", appendOnly: false, snapshots: true },
 			logger,
 		);
-		expect(calls.map((call) => call.args[1])).toEqual(
-			c.lockEvictable === undefined ? [c.lossy] : [c.lockEvictable, c.lossy],
-		);
+		expect(calls.map((call) => call.args[1])).toEqual([c.volatileEvictable, c.lossy]);
 	});
 
 	it("warns once when RDB snapshots are the only persistence: the last interval is lost on a crash", async () => {
