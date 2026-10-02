@@ -68,20 +68,24 @@ export const consumeCallbackState = async (
 	let transactionId: string | undefined;
 
 	/**
-	 * Consume the transaction (cookie and record). Returns the store's error
-	 * rather than throwing, so a refusal path can clean up best effort while
-	 * irreversible work fails closed. A no-op for a `"query"` federation.
+	 * Consume the transaction (cookie and record). Answers a failed delete as
+	 * `ok: false` rather than throwing, so a refusal path can clean up best
+	 * effort while irreversible work fails closed. The outcome is carried by
+	 * `ok`, never by the error: a store may reject with any value, `undefined`
+	 * included. A no-op for a `"query"` federation.
 	 */
-	const consumeTransaction = async (): Promise<unknown> => {
-		if (!transactions || transactionId === undefined) return null;
+	const consumeTransaction = async (): Promise<
+		{ readonly ok: true } | { readonly ok: false; readonly error: unknown }
+	> => {
+		if (!transactions || transactionId === undefined) return { ok: true };
 		clearTransactionCookie(provider, res);
 		const id = transactionId;
 		transactionId = undefined;
 		try {
 			await transactions.delete(id);
-			return null;
-		} catch (err) {
-			return err;
+			return { ok: true };
+		} catch (error) {
+			return { ok: false, error };
 		}
 	};
 
@@ -92,9 +96,9 @@ export const consumeCallbackState = async (
 	 * store again.
 	 */
 	const discardTransaction = async (): Promise<void> => {
-		const discardErr = await consumeTransaction();
-		if (discardErr) {
-			logCleanupFailed(log, "federation_transaction", "delete", discardErr);
+		const discarded = await consumeTransaction();
+		if (!discarded.ok) {
+			logCleanupFailed(log, "federation_transaction", "delete", discarded.error);
 			abandonCookieSession(req);
 		}
 	};
@@ -196,9 +200,9 @@ export const consumeCallbackState = async (
 	// provides. If the state cannot be retired at all, fail closed (503): a
 	// forced delete failure plus a replay would otherwise face no reuse check.
 	if (responseMode === "form_post") {
-		const consumeErr = await consumeTransaction();
-		if (consumeErr) {
-			await refuseCookieStoreOutage("federation_transaction", "delete", consumeErr);
+		const consumed = await consumeTransaction();
+		if (!consumed.ok) {
+			await refuseCookieStoreOutage("federation_transaction", "delete", consumed.error);
 			return null;
 		}
 	} else {
