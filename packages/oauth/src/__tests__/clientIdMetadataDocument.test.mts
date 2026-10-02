@@ -1112,6 +1112,16 @@ describe("the document is fetched through core's outbound policy", () => {
 				{ allowedScopes: [], allowedAudiences: [] },
 			),
 		).toThrow(/config/);
+		// A fetch substitute does not lift the requirement.
+		expect(() =>
+			createClientIdMetadataDocumentResolver({
+				allowedScopes: [],
+				allowedAudiences: [],
+				// @ts-expect-error `config` is the composition's configuration object.
+				config: undefined,
+				fetch: fakeFetch([() => json(document())]).fetch,
+			}),
+		).toThrow(/config/);
 	});
 
 	it("builds its fetch from core.outbound when it is built, and refuses a malformed section then", () => {
