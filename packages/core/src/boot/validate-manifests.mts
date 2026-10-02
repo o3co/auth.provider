@@ -2123,6 +2123,60 @@ function parseModuleSections(
 	return { config, sections };
 }
 
+/**
+ * The names of the modules their own section switches off: `section.isEnabled`
+ * answers `false` for the section the module is handed. A switch that throws
+ * or answers anything but a boolean is one more issue at its section's path,
+ * all of them refused together as `config-validation-failed`.
+ * @internal
+ */
+function switchedOffModules(
+	modules: readonly Module[],
+	sections: ReadonlyMap<string, { readonly value: unknown }>,
+): ReadonlySet<string> {
+	const off = new Set<string>();
+	const issues: z.ZodIssue[] = [];
+	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
+	for (const m of modules) {
+		const isEnabled: unknown = m.section?.isEnabled;
+		if (isEnabled === undefined) continue;
+		let problem: string;
+		if (typeof isEnabled !== "function") {
+			problem = "it is not a function";
+		} else {
+			try {
+				const answer: unknown = isEnabled.call(m.section, sections.get(m.name)?.value);
+				if (answer === false) off.add(m.name);
+				if (typeof answer === "boolean") continue;
+				problem = `it answered ${kindOf(answer)}`;
+			} catch (thrown) {
+				problem = `it threw: ${failureSummary(thrown)}`;
+			}
+		}
+		issues.push({
+			code: "custom",
+			path: [...sectionSegmentsOf(m)],
+			message: `module "${m.name}"'s isEnabled did not answer whether its section switches it on: ${problem}`,
+		} as z.ZodIssue);
+		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
+	}
+	if (issues.length > 0) {
+		throw new BootError({
+			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`).join("; ")}.`,
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+			details: { reason: "config-validation-failed", issues, modules: refused },
+		});
+	}
+	return off;
+}
+
+/**
+ * What a switched-off module is to every stage after the parse: its name and
+ * its section, nothing it would register.
+ */
+const switchedOff = (m: Module): Module => ({ name: m.name, section: m.section }) as Module;
+
 // ---------------------------------------------------------------------------
 // Step 14 — Route-order edge sanity
 // ---------------------------------------------------------------------------
@@ -2852,6 +2906,8 @@ interface StageOneContext {
 	 */
 	readonly relocating: readonly Module[];
 	readonly parsedConfig: unknown;
+	/** The modules their section switches off; empty before the parse. */
+	readonly switchedOff: ReadonlySet<string>;
 	/**
 	 * Provides ∪ bootstrapComponents ∪ overrideComponents, the three component
 	 * sources, and `auditSink` when a module contributes `auditHooks` (core
@@ -2922,9 +2978,11 @@ const freezeChecks = (checks: readonly StageOneCheck[]): readonly StageOneCheck[
 	Object.freeze(checks.map((check) => Object.freeze(check)));
 
 /**
- * The checks that run before the config parse (steps 1–12), in order. The
- * registry order is the execution order, so the first violation is the first
- * failing row; each row's `spec` names its step.
+ * The checks that run before the config parse, in order: what the parse
+ * itself relies on — manifests, unique names, section paths — and the
+ * refusal of old paths and renamed variables. The registry order is the
+ * execution order, so the first violation is the first failing row; each
+ * row's `spec` names its step.
  */
 export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
 	{
@@ -2937,6 +2995,32 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		spec: "A2-β §5.1 step 1",
 		run: (ctx) => checkUniqueModuleNames(ctx.rawModules),
 	},
+	{
+		id: "module-section-paths",
+		spec: "issue #728 (a section's transitional path, the paths it moved from, the variables renamed with them, and its one owner)",
+		run: (ctx) => checkModuleSectionPaths(ctx.rawModules, ctx.relocating),
+	},
+	{
+		id: "relocated-config-paths",
+		spec: "issue #728 (B10: a relocated path refuses boot)",
+		run: (ctx) => checkRelocatedConfigPaths(ctx.relocating, ctx.bootstrapComponents),
+	},
+	{
+		id: "renamed-environment-variables",
+		spec: "issue #728 (a variable renamed with a move refuses boot unless its new name carries the same value)",
+		run: (ctx) => checkRenamedEnvironmentVariables(ctx.relocating, ctx.bootstrapComponents),
+	},
+]);
+
+/**
+ * The checks that run after the config parse (step 13, a distinct stage in
+ * `validateManifests` because it produces the parsed config and the sections
+ * that say which modules are switched on), in order, over the modules switched
+ * on alone: the manifest rows of steps 2–12, the wiring guards, then the
+ * step-14 route-order check. A new wiring guard is a row appended before
+ * `route-order-edges`.
+ */
+export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
 	{
 		id: "provides-closure",
 		spec: "A2-β §5.1 step 2",
@@ -3033,30 +3117,6 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		run: (ctx) => checkLifecycleClosure(ctx.modules),
 	},
 	{
-		id: "module-section-paths",
-		spec: "issue #728 (a section's transitional path, the paths it moved from, the variables renamed with them, and its one owner)",
-		run: (ctx) => checkModuleSectionPaths(ctx.rawModules, ctx.relocating),
-	},
-	{
-		id: "relocated-config-paths",
-		spec: "issue #728 (B10: a relocated path refuses boot)",
-		run: (ctx) => checkRelocatedConfigPaths(ctx.relocating, ctx.bootstrapComponents),
-	},
-	{
-		id: "renamed-environment-variables",
-		spec: "issue #728 (a variable renamed with a move refuses boot unless its new name carries the same value)",
-		run: (ctx) => checkRenamedEnvironmentVariables(ctx.relocating, ctx.bootstrapComponents),
-	},
-]);
-
-/**
- * The checks that run after the config parse (step 13, a distinct stage in
- * `validateManifests` because it produces the parsed config these rows
- * read), in order: the wiring guards, then the step-14 route-order check. A
- * new wiring guard is a row appended before `route-order-edges`.
- */
-export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
-	{
 		id: "grant-policy-issuer",
 		spec: "CP-20 (restored v0.4.x guard; step 13.5)",
 		run: (ctx) =>
@@ -3088,10 +3148,11 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		//
 		// `rawModules`, not the normalised view: the guard reads each manifest's
 		// own `replicaSafety` declaration, which normalisation does not carry.
+		// A switched-off module holds no state, whatever its name.
 		run: (ctx) => {
 			const bootLogger = warningLogger(ctx.bootstrapComponents);
 			checkReplicaSafety({
-				modules: ctx.rawModules,
+				modules: ctx.rawModules.filter((m) => !ctx.switchedOff.has(m.name)),
 				config: ctx.parsedConfig,
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});
@@ -3122,9 +3183,11 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * Stage 1 of the boot planner: runs {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then
  * step 13 (`validateAndComposeConfig`, the one composed parse, and
  * `parseModuleSections`, which writes each module's section back into the
- * parsed config), then {@link STAGE_ONE_POST_CONFIG_CHECKS}. Returns
- * `ValidatedManifests`, or throws a `BootError` for the first violation in
- * input order.
+ * parsed config), then reads each module's switch (`section.isEnabled`), then
+ * runs {@link STAGE_ONE_POST_CONFIG_CHECKS} over the modules switched on: a
+ * module switched off is, from there on, its name and its section alone, so
+ * it registers nothing. Returns `ValidatedManifests`, or throws a `BootError`
+ * for the first violation in input order.
  *
  * Deterministic: the same inputs give the same output or error. Its only side
  * effects are boot notices to the wired logger: the top-level sections
@@ -3136,6 +3199,14 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);
 
+	const plannedKeysOf = (normalised: readonly NormalisedModule[]): ReadonlySet<string> =>
+		new Set<string>([
+			...normalised.flatMap((m) => m.providesKeys as string[]),
+			...Object.keys(bootstrapComponents),
+			...Object.keys(overrideComponents ?? {}),
+			...(contributesAuditHooks(normalised) ? ["auditSink"] : []),
+		]);
+
 	const baseContext: StageOneContext = {
 		rawModules: modules,
 		modules: normalisedModules,
@@ -3144,12 +3215,8 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		contributionKinds,
 		relocating: withCoreRelocations(modules, input.core ?? CORE_RELOCATIONS),
 		parsedConfig: undefined,
-		plannedKeys: new Set<string>([
-			...normalisedModules.flatMap((m) => m.providesKeys as string[]),
-			...Object.keys(bootstrapComponents),
-			...Object.keys(overrideComponents ?? {}),
-			...(contributesAuditHooks(normalisedModules) ? ["auditSink"] : []),
-		]),
+		switchedOff: new Set<string>(),
+		plannedKeys: plannedKeysOf(normalisedModules),
 	};
 
 	for (const check of STAGE_ONE_PRE_CONFIG_CHECKS) {
@@ -3183,16 +3250,31 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		warningLogger(bootstrapComponents)?.warn({ sections: [...ignored] }, "config_sections_ignored");
 	}
 
-	const postConfigContext: StageOneContext = { ...baseContext, parsedConfig };
+	// A module its section switches off stays its name and its section: what
+	// it would register is out of every row below and every later stage.
+	const off = switchedOffModules(modules, sections);
+	const switchedOn = modules.map((m) => (off.has(m.name) ? switchedOff(m) : m));
+	const switchedOnNormalised = normalisedModules.map((normalised, i) =>
+		off.has(normalised.name) ? normaliseModule(switchedOn[i] as Module) : normalised,
+	);
+
+	const postConfigContext: StageOneContext = {
+		...baseContext,
+		rawModules: switchedOn,
+		modules: switchedOnNormalised,
+		parsedConfig,
+		switchedOff: off,
+		plannedKeys: plannedKeysOf(switchedOnNormalised),
+	};
 	for (const check of STAGE_ONE_POST_CONFIG_CHECKS) {
 		check.run(postConfigContext);
 	}
 
 	// Build output indices
-	const validatedModules: ValidatedModule[] = normalisedModules.map((normalised, i) => {
+	const validatedModules: ValidatedModule[] = switchedOnNormalised.map((normalised, i) => {
 		const section = sections.get(normalised.name);
 		return {
-			manifest: modules[i],
+			manifest: switchedOn[i] as Module,
 			normalised,
 			...(section === undefined ? {} : { section }),
 		};
