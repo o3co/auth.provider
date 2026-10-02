@@ -31,8 +31,9 @@
  * - `409 mfa_enrollment_required`: no record that may count stands, so
  *   admission took the session on a recent primary; codes are issued beside a
  *   counting factor only.
- * - `409 mfa_recovery_codes_conflict`: another set won at the same
- *   generation; this one was removed, its codes never answered (warn).
+ * - `409 mfa_recovery_codes_conflict`: another writer's set at the same
+ *   generation or a later one was read after the write; this one was
+ *   removed, its codes never answered (warn).
  * - `409 mfa_factors_busy` with `Retry-After`; `409 mfa_factors_changed` for a
  *   recovery or a reset since the request was admitted, nothing written.
  * - `400` while the recovery-code factor is off, before any lease; `503` for

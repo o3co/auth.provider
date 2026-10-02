@@ -33,10 +33,11 @@
  *   set written after the listing (another binding's) never is. One that
  *   cannot be removed, or a listing that failed, leaves a retired set
  *   stored, answered with why (`unreplaced`); it never undoes the new set.
- * - The records are read again after: a set of another writer at the new
- *   set's generation and written first, or at a later one, wins — the new
- *   set is removed and answered as the loser (`conflict`), shown to nobody.
- *   Records that cannot be read again show nothing.
+ * - The records are read again after: a readable set of another writer at
+ *   the new set's generation or a later one wins — the new set is removed and
+ *   answered as the loser (`conflict`), shown to nobody. Whichever of two
+ *   writers reads the other after its own write yields, so two never both
+ *   stand; both may yield. Records that cannot be read again show nothing.
  * - Last, the set is marked shown by compare-and-set; only once it is are its
  *   codes answered, so codes are never answered while the set says it was
  *   not shown. A mark that fails shows nothing, and leaves the set unshown.
@@ -104,13 +105,6 @@ export interface IssueRecoveryCodesOptions {
 export const replacesStandingSets = (binding: NonNullable<MfaFactorRecord["binding"]>): boolean =>
 	binding !== "password";
 
-/** Two records in the order they were written: `createdAt`, then id. */
-const byAge = (
-	a: Pick<MfaFactorRecord, "createdAt" | "id">,
-	b: Pick<MfaFactorRecord, "createdAt" | "id">,
-): number =>
-	a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-
 /** Thrown inside issuing when another writer's set won. */
 class LostToAnotherSet extends Error {}
 
@@ -142,14 +136,13 @@ export async function issueRecoveryCodes(
 		const shown = shownRecoverySet(set.data);
 		if (shown === undefined) throw new TypeError("the factor issued data that is not a set");
 		const sealedShown = sealing.sealFactorData(binding, shown);
-		const createdAt = new Date(options.nowMs);
 		await factorStore.create({
 			id,
 			subject,
 			kind: RECOVERY_CODE_FACTOR_KIND,
 			label: undefined,
 			binding: options.binding,
-			createdAt,
+			createdAt: new Date(options.nowMs),
 			lastUsedAt: undefined,
 			version: 0,
 			data: sealing.sealFactorData(binding, set.data),
@@ -179,12 +172,9 @@ export async function issueRecoveryCodes(
 			}
 			const after = await setsOf(factorStore, subject);
 			if ("cause" in after) throw after.cause;
-			const mine = { id, createdAt };
-			const winner = after.records.find((record) => {
-				if (record.id === id) return false;
-				const other = generationOf(record);
-				return other > generation || (other === generation && byAge(record, mine) < 0);
-			});
+			const winner = after.records.find(
+				(record) => record.id !== id && generationOf(record) >= generation,
+			);
 			if (winner !== undefined) throw new LostToAnotherSet("another set of the subject's won");
 		}
 
