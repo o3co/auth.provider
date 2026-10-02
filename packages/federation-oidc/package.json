@@ -37,7 +37,8 @@
 	},
 	"dependencies": {
 		"jose": "^6.2.12",
-		"openid-client": "^6.8.8"
+		"openid-client": "^6.8.8",
+		"zod": "^4.6.5"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^",

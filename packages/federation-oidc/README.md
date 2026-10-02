@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-oidc
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03
 
 Generic OpenID Connect federation provider for `auth.provider`: any
 OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
@@ -12,8 +12,10 @@ deployment has issuers.
 **Role.** An adapter: it implements core's federation contract
 ([`core/src/federations`](../core/src/federations/README.md)) for any OpenID
 Connect IdP — configured from its discovery document, or by hand with
-`discovery = false` — so adding an IdP is a config section, not a package. Each `type = "oidc"` section of `federations` becomes one
-federation, contributed to the session router with its redirect policy. It is
+`discovery = false` — so adding an IdP is a config section, not a package. It
+contributes the federation type `oidc`: core hands it each enabled
+`core.federations` entry of that type, and it builds one federation per entry,
+registered for the session router with its redirect policy. It is
 also the only bundled adapter with `SupportsDelegatedAuthorization`, the
 capability `@o3co/auth-provider-federation-grants` delegates through.
 
@@ -21,10 +23,12 @@ capability `@o3co/auth-provider-federation-grants` delegates through.
 authentication (`client_secret_basic` or `private_key_jwt`,
 [`src/client-auth.mts`](src/client-auth.mts)); id_token verification, including
 `at_hash` ([`src/at-hash.mts`](src/at-hash.mts)); the UserInfo binding; what a
-profile, a refresh and a delegated exchange contain; and reading `type = "oidc"`
-sections into provider configs ([`src/module.mts`](src/module.mts)).
+profile, a refresh and a delegated exchange contain; and the schema of an
+`oidc` entry's own keys ([`src/entry.mts`](src/entry.mts)).
 
-**Does not own:** the contract (core); the routes, `state` / PKCE verifier /
+**Does not own:** the contract (core); the `core.federations` map, the keys
+core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
+`callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier /
 `nonce` generation, the redirect-allowlist rules and claim precedence
 ([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
 Store); the refresh and logout routes that call this adapter
@@ -48,48 +52,57 @@ npm install @o3co/auth-provider-federation-oidc @o3co/auth-provider-core @o3co/a
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. The package depends on `jose` and
-`openid-client`.
+`@o3co/auth-provider-session`. The package depends on `jose`,
+`openid-client` and `zod`.
 
 ## Usage
 
-Each instance is one module, made by `oidcFederationModule(<name>)`. Every
-instance reads its config from the shared `oidcFederationConfigs` slot, which
-the composition root fills — normally straight from the `federations` config
-section with `readOidcFederationConfigs`:
+One module, `oidcFederationTypeModule()`
+([`src/type-module.mts`](src/type-module.mts)), handles every enabled
+`core.federations` entry whose `type` is `oidc`. It contributes
+`federationTypes.oidc`; core parses each such entry with the type's schema at
+boot and calls the module's factories with the entry's name, its
+`callbackURL` and its parsed keys, so the composition root lists no instances
+and fills no slot. The module requires no dependency.
 
 ```ts
-import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
-import {
-  oidcFederationModule,
-  oidcFederationNames,
-  readOidcFederationConfigs,
-} from "@o3co/auth-provider-federation-oidc";
+import { createApp } from "@o3co/auth-provider-core";
+import { oidcFederationTypeModule } from "@o3co/auth-provider-federation-oidc";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
-
-const oidcConfigBridgeModule = defineModule({
-  name: "oidc-federation-config",
-  requires: ["config"] as const,
-  provides: {
-    oidcFederationConfigs: ({ config }) => readOidcFederationConfigs(federationsOf(config)),
-  },
-});
 
 const handle = await createApp({
   modules: [
     sessionStoreModuleFor(config),
     sessionModule,
-    oidcConfigBridgeModule,
-    ...oidcFederationNames(federationsOf(config)).map((name) => oidcFederationModule(name)),
+    oidcFederationTypeModule(),
     // ... composition-root modules supplying userRepository + the session stores
   ],
   bootstrapComponents: { config, pathResolver },
 });
 ```
 
-The scaffold (`@o3co/create-auth-provider`) does exactly this in
-`src/buildModules.mts`, so a scaffolded deployment adds an IdP by editing
-`config/application.conf` alone.
+`oidcFederationTypeModule({ fetch })` sends every upstream request of every
+`oidc` entry — discovery, token, UserInfo, JWKS — through that fetch: a proxy,
+or a test double. Without it the global `fetch` is used.
+
+### Deprecated: one module per instance
+
+`oidcFederationModule(<name>)`, `oidcFederationNames` and
+`readOidcFederationConfigs` ([`src/module.mts`](src/module.mts)), and the
+`oidcFederationConfigs` slot they share, are deprecated in favour of
+`oidcFederationTypeModule()`. They still work: each
+`oidcFederationModule(<name>)` contributes `federations.<name>` and
+`federationRedirectPolicies.<name>` from its entry in the
+`oidcFederationConfigs` slot, which the composition root fills with
+`readOidcFederationConfigs(federationsOf(config))`; a `fetch` goes in that
+slot's entry. `readOidcFederationConfigs` reads an entry with the same schema
+as the type module, ignoring keys it does not name, and also accepts the
+nested shape (`okta { type = "oidc", oidc { ... } }`). Both paths build the
+same provider and redirect policy for one entry. Composing the type module and
+`oidcFederationModule(<name>)` for the same entry refuses boot
+(`duplicate-contribute`): one federation has one handler. The scaffold
+(`@o3co/create-auth-provider`) still composes the deprecated modules in
+`src/buildModules.mts`.
 
 ### Configuration
 
@@ -126,8 +139,17 @@ core.federations {
 ```
 
 Two issuers, two sections, two callbacks — that is the whole of multi-IdP
-support. The nested shape (`okta { type = "oidc", oidc { ... } }`) that
-`extractFederationSection` accepts works too.
+support.
+
+An entry is flat, and its schema is strict: the keys core owns (`enabled`,
+`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+The schema is `oidcEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
+does not name — a typo, or a nested `oidc { ... }` section — refuses boot with
+`config-validation-failed`, naming `core.federations.<name>.<field>`; so does a
+missing or malformed key. A key written `null` counts as absent. A boolean
+key also takes the strings `"true"` and `"false"`, as an environment variable
+writes them. An absent key means what the table says, read by the provider;
+the schema fills in no default.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -135,7 +157,7 @@ support. The nested shape (`okta { type = "oidc", oidc { ... } }`) that
 | `clientId` | yes | Client identifier registered at the IdP. |
 | `clientSecret` | one of | `client_secret_basic` (RFC 6749 §2.3.1). In code the value may be a resolver (`() => Promise<string>`), consulted on every token request, for secrets that rotate. |
 | `privateKey` | one of | `private_key_jwt` (RFC 7523 / OIDC Core §9). A PEM-encoded PKCS#8 key, or `{ pem, kid?, alg? }`. The JWS algorithm is inferred from the key (RSA → RS256, P-256 → ES256, P-384 → ES384, P-521 → ES512, Ed25519 → EdDSA) unless `alg` says otherwise; `kid` goes in the assertion header. |
-| `callbackURL` | yes | Where the IdP sends the browser back. The session routes read it from the same section. |
+| `callbackURL` | yes | Where the IdP sends the browser back. A key core owns: boot requires it of every entry it dispatches, and the session routes read it from the same entry. |
 | `scopes` | no | Default `["openid", "profile", "email"]`. `openid` is mandatory — without it there is no id_token — and its absence refuses boot. |
 | `discovery` | no | Default `true`. See below. |
 | `endpoints` | no | `authorizationEndpoint`, `tokenEndpoint`, `jwksUri`, `userinfoEndpoint`, `endSessionEndpoint`. Applied over the discovered metadata; the first three are mandatory when `discovery = false`. |
@@ -145,12 +167,12 @@ support. The nested shape (`okta { type = "oidc", oidc { ... } }`) that
 | `clientUrl` | in practice | Where the browser lands after a login whose start carried no `redirect_to`. Without it such a login ends in `500 misconfiguration` after the session has been saved — so it is needed unless every start carries a `redirect_to` and `authCallbackUrl` is set. |
 | `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package README](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
 
-`fetch` (code only) replaces the fetch every upstream request goes through —
-for a proxy, or a test double.
+`fetch` is not an entry key: it is the type module's option (above), and an
+`OidcProviderConfig` field for `createOidcProvider` and the deprecated slot.
 
 ### What happens at boot
 
-Discovery. Each instance fetches `<issuer>/.well-known/openid-configuration`
+Discovery. Each entry's provider fetches `<issuer>/.well-known/openid-configuration`
 when the app boots, checks the document's `issuer` against the configured one,
 and keeps the whole document, with any `endpoints` applied over it. **A failure is fatal**: an
 unreachable issuer, a document naming another issuer, or one without a
@@ -282,19 +304,17 @@ linked:
 
 - `createOidcProvider` ([`src/oidc.mts`](src/oidc.mts)) — the provider;
   asynchronous, because discovery happens here.
-- `oidcFederationModule` ([`src/module.mts`](src/module.mts)) — one Module per
-  instance, requiring `oidcFederationConfigs` and contributing
-  `federations.<name>` and `federationRedirectPolicies.<name>`.
-- `readOidcFederationConfigs` ([`src/module.mts`](src/module.mts)) — fills that
-  slot from the `core.federations` map (`federationsOf(config)`), refusing a malformed field by
-  `core.federations.<name>.<field>`.
-- `oidcFederationNames` ([`src/module.mts`](src/module.mts)) — the names of every
-  enabled section of type `oidc`, sorted.
-- `OIDC_FEDERATION_TYPE` (`"oidc"`), `DEFAULT_OIDC_SCOPES`.
-- `oidcFederationConfigs` — the `ComponentMap` slot every instance requires,
-  declared by module augmentation in [`src/module.mts`](src/module.mts) (not an
-  export).
-- Types: [`OidcProviderConfig`](src/oidc.mts) (the config fields above),
+- `oidcFederationTypeModule` ([`src/type-module.mts`](src/type-module.mts)) —
+  the Module contributing `federationTypes.oidc`, with its options
+  `OidcFederationTypeModuleOptions`.
+- `OIDC_FEDERATION_TYPE` (`"oidc"`, [`src/type-module.mts`](src/type-module.mts)),
+  `DEFAULT_OIDC_SCOPES`.
+- Deprecated, for `oidcFederationTypeModule`: `oidcFederationModule`,
+  `readOidcFederationConfigs` and `oidcFederationNames`
+  ([`src/module.mts`](src/module.mts)), and the `oidcFederationConfigs`
+  `ComponentMap` slot, declared there by module augmentation (not an export).
+- Types: `OidcEntry` ([`src/entry.mts`](src/entry.mts)), an entry's own keys as
+  the schema answers them; [`OidcProviderConfig`](src/oidc.mts),
   `OidcEndpointOverrides`, `OidcProvider` ([`src/oidc.mts`](src/oidc.mts));
   `OidcPrivateKey` ([`src/client-auth.mts`](src/client-auth.mts)).
 
@@ -312,5 +332,6 @@ publishes, and records every request.
 | [`at-hash.test.mts`](src/__tests__/at-hash.test.mts) | the `at_hash` check |
 | [`library-errors.test.mts`](src/__tests__/library-errors.test.mts) | what core's `loggableError` keeps of the errors `openid-client` throws for a token answer, and that a construction failure keeps the library's text off its message and on its `cause` |
 | [`delegated.test.mts`](src/__tests__/delegated.test.mts) | `SupportsDelegatedAuthorization` |
-| [`oidc-module.test.mts`](src/__tests__/oidc-module.test.mts), [`oidc-module-boot.test.mts`](src/__tests__/oidc-module-boot.test.mts) | reading `type = "oidc"` sections, the module per instance, and boot |
+| [`oidc-type-module.test.mts`](src/__tests__/oidc-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, the strict, flat schema, the `fetch` option, parity with the deprecated module per instance, and the refusal of both for one entry |
+| [`oidc-module.test.mts`](src/__tests__/oidc-module.test.mts), [`oidc-module-boot.test.mts`](src/__tests__/oidc-module-boot.test.mts) | the deprecated reader and module per instance, and their boot |
 | [`session-routes.e2e.test.mts`](src/__tests__/session-routes.e2e.test.mts) | a login through the session routes, end to end, and that a failed exchange is logged without the token response the library carries on the error |
