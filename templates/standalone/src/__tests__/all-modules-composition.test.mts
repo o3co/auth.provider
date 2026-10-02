@@ -134,7 +134,7 @@ const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-federation-apple": "appleFederationModule",
 	"@o3co/auth-provider-federation-github": "githubFederationModule",
 	"@o3co/auth-provider-mfa":
-		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule); private until the MFA ADR's build-order step 20 wires it",
+		"mfaModules (mfaTotpFactorModule, mfaRecoveryCodeFactorModule, mfaEmailFactorModule, mfaModule); not in the template until the MFA ADR's build-order step 20",
 	"@o3co/auth-provider-mtls": "mtlsModule",
 	"@o3co/auth-provider-oauth-token-exchange": "tokenExchangeModule",
 	"@o3co/auth-provider-test-kit": "no module: contract suites and fakes, for tests",

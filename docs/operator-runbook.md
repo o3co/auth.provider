@@ -356,8 +356,8 @@ Module-level messages that arrive wrapped in a factory failure:
   left out or are anything else, and a `bearerToken`, `timeout` or
   `maxResponseBytes` the user repository would refuse is refused the same
   way, the message leading with `HttpMfaFactorStore`.
-- The MFA module (`mfaModule`, `packages/mfa/src/module.mts` — private
-  until the template wires it): `mfa.mode is "off" (or unset) while the MFA
+- The MFA module (`mfaModule`, `packages/mfa/src/module.mts`):
+  `mfa.mode is "off" (or unset) while the MFA
   module is installed: remove the MFA module, or set mfa.mode to "required"
   or "optional"` — installed is on, so an MFA-off deployment does not install
   it; the package's settings, each a `RangeError` `cause` naming its key — the
