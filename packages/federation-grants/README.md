@@ -140,6 +140,10 @@ say what each one means and what to do.
   time is `err` "not answered in time; no longer waited for"; a credential
   write retried within the persist budget is one line, with `attempts`. A
   lodging's `connection_not_configured` names the `connection` it asked for.
+  A grant the status route reads whose stored date holds no instant is the
+  grant store's outage too (`store: "federation_grant"`, `step: "inspect"`,
+  `err` a `TypeError` naming the date's field on the wire, never its value),
+  as retrieval answers it.
 - **The browser's session that cannot be judged** — the session store, the
   subject's sessions boundary, or a session requirement that throws — is the
   same `503` or redirect, and its one line is session admission's:

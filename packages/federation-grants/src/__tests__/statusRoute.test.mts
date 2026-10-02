@@ -561,6 +561,67 @@ describe("the status route — the boundary and the backstop", () => {
 	});
 });
 
+describe("the status route — a stored date that holds no instant", () => {
+	/** The harness's store, its `inspect` answering the grant with `field` set to `value`. */
+	const storingDate = async (h: ReturnType<typeof harness>, field: string, value: unknown) => {
+		const inspect = h.store.inspect.bind(h.store);
+		vi.spyOn(h.store, "inspect").mockImplementation(async (...args) => {
+			const inspection = await inspect(...args);
+			return inspection === null
+				? null
+				: ({ ...inspection, grant: { ...inspection.grant, [field]: value } } as typeof inspection);
+		});
+	};
+
+	it.each([
+		["createdAt", "2026-01-01T00:00:00.000Z"],
+		["createdAt", new Date(Number.NaN)],
+		["authorizedAt", null],
+		["expiresAt", "never"],
+		["lastUsedAt", "yesterday"],
+	])(
+		"answers a grant whose stored %s is %o 503 storage, as retrieval does",
+		async (field, value) => {
+			const h = harness();
+			await h.seed();
+			await storingDate(h, field, value);
+
+			const response = await ask(h);
+
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "storage",
+			});
+		},
+	);
+
+	it("answers a revoked grant whose stored creation date holds no instant 503 storage too", async () => {
+		const h = harness();
+		await h.seed();
+		await h.store.revoke(GRANT_ID, "subject", h.world.now);
+		await storingDate(h, "createdAt", 0);
+
+		const response = await ask(h);
+
+		expect(response.status).toBe(503);
+		expect(response.body.error_description).toBe("storage");
+	});
+
+	it("reads a stored date through the Date intrinsic, not a method the value overrides", async () => {
+		const h = harness();
+		await h.seed();
+		const createdAt = new Date(h.world.now.getTime());
+		Object.defineProperty(createdAt, "toISOString", { value: () => "not-a-date" });
+		await storingDate(h, "createdAt", createdAt);
+
+		const response = await ask(h);
+
+		expect(response.status).toBe(200);
+		expect(response.body.created_at).toBe(h.world.now.toISOString());
+	});
+});
+
 describe("the status route — a key that is not in the ring", () => {
 	it("answers 503 rather than sending the user to consent again", async () => {
 		// A missing key is an outage an operator fixes by restoring it. Saying

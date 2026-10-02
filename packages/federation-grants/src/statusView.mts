@@ -23,7 +23,8 @@
  * last failed refresh stamp) is no caller's business, and a spread would
  * disclose any field added later. A field a record does not have is
  * **omitted**, not reported empty: `"expires_at": null` would invite a client
- * to compare it with something.
+ * to compare it with something. A stored date that holds no instant is not
+ * described at all: the view is refused, naming the field.
  */
 
 import {
@@ -33,8 +34,35 @@ import {
 	hasFederationGrantAuthorization,
 } from "@o3co/auth-provider-core";
 
-/** UTC, to the millisecond, as every other instant this product puts on the wire. */
-const instant = (value: Date): string => value.toISOString();
+/** A field the view could not date, by its name on the wire. */
+export type FederationGrantStatusDateField =
+	| "created_at"
+	| "authorized_at"
+	| "expires_at"
+	| "last_used_at";
+
+/** The view, or the first date it could not put on the wire. */
+export type FederationGrantStatusViewResult =
+	| { readonly ok: true; readonly view: Readonly<Record<string, unknown>> }
+	| { readonly ok: false; readonly field: FederationGrantStatusDateField };
+
+/**
+ * UTC, to the millisecond, as every other instant this product puts on the
+ * wire, through the `Date` intrinsic rather than a method the value may
+ * override; `undefined` for a value that holds no instant.
+ */
+const instant = (value: unknown): string | undefined => {
+	try {
+		return Date.prototype.toISOString.call(value);
+	} catch {
+		return undefined;
+	}
+};
+
+const undated = (field: FederationGrantStatusDateField): FederationGrantStatusViewResult => ({
+	ok: false,
+	field,
+});
 
 export function federationGrantStatusView(
 	grant: FederationGrant,
@@ -49,37 +77,54 @@ export function federationGrantStatusView(
 	 * removing it changes the payload and not only the status code.
 	 */
 	permitted: boolean,
-): Readonly<Record<string, unknown>> {
+): FederationGrantStatusViewResult {
 	const reason = (status as { reason?: unknown }).reason;
-	const authorized = hasFederationGrantAuthorization(grant) && permitted;
+	const createdAt = instant(grant.createdAt);
+	if (createdAt === undefined) return undated("created_at");
+
+	let authorization: Readonly<Record<string, unknown>> = {};
+	if (hasFederationGrantAuthorization(grant) && permitted) {
+		const authorizedAt = instant(grant.authorizedAt);
+		if (authorizedAt === undefined) return undated("authorized_at");
+		// Effective, not stored: computed from `maxExpiresIn` as it is
+		// configured NOW, so lowering the maximum moves this earlier for grants
+		// that already exist — possibly into the past — and raising it brings
+		// it back, never beyond the stored expiry.
+		const expiresAt = instant(federationGrantEffectiveExpiry(grant, maxExpiresInMs));
+		if (expiresAt === undefined) return undated("expires_at");
+		authorization = {
+			upstream: { issuer: grant.upstream.issuer, subject: grant.upstream.subject },
+			// The authorization's scopes: what the user consented the client to,
+			// not what one cached token happens to carry. The two differ as soon
+			// as an upstream answers a refresh with fewer.
+			scope: grant.scopes.join(" "),
+			...(grant.resource === undefined ? {} : { resource: grant.resource }),
+			authorized_at: authorizedAt,
+			expires_at: expiresAt,
+		};
+	}
+
+	let lastUse: Readonly<Record<string, unknown>> = {};
+	if (grant.lastUsedAt !== undefined && permitted) {
+		const lastUsedAt = instant(grant.lastUsedAt);
+		if (lastUsedAt === undefined) return undated("last_used_at");
+		lastUse = { last_used_at: lastUsedAt };
+	}
+
 	return {
-		grant_id: grant.id,
-		status: status.status,
-		// Omitted for the statuses that have none — `active`, `pending` and
-		// `connection_not_configured` — rather than carried as an empty string.
-		...(typeof reason === "string" ? { reason } : {}),
-		sub: grant.subject,
-		client_id: grant.clientId,
-		connection: grant.connection,
-		created_at: instant(grant.createdAt),
-		...(authorized
-			? {
-					upstream: { issuer: grant.upstream.issuer, subject: grant.upstream.subject },
-					// The authorization's scopes: what the user consented the client
-					// to, not what one cached token happens to carry. The two differ
-					// as soon as an upstream answers a refresh with fewer.
-					scope: grant.scopes.join(" "),
-					...(grant.resource === undefined ? {} : { resource: grant.resource }),
-					authorized_at: instant(grant.authorizedAt),
-					// Effective, not stored: computed from `maxExpiresIn` as it
-					// is configured NOW, so lowering the maximum moves this earlier
-					// for grants that already exist — possibly into the past — and
-					// raising it brings it back, never beyond the stored expiry.
-					expires_at: instant(federationGrantEffectiveExpiry(grant, maxExpiresInMs)),
-				}
-			: {}),
-		...(grant.lastUsedAt === undefined || !permitted
-			? {}
-			: { last_used_at: instant(grant.lastUsedAt) }),
+		ok: true,
+		view: {
+			grant_id: grant.id,
+			status: status.status,
+			// Omitted for the statuses that have none — `active`, `pending` and
+			// `connection_not_configured` — rather than carried as an empty string.
+			...(typeof reason === "string" ? { reason } : {}),
+			sub: grant.subject,
+			client_id: grant.clientId,
+			connection: grant.connection,
+			created_at: createdAt,
+			...authorization,
+			...lastUse,
+		},
 	};
 }
