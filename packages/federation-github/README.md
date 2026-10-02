@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-github
 
-Last updated: 2026-10-01
+Last updated: 2026-10-03
 
 GitHub federation provider for `auth.provider`: sign-in with a GitHub account
 through a GitHub OAuth App, with upstream logout and claim mapping.
@@ -8,14 +8,19 @@ through a GitHub OAuth App, with upstream logout and claim mapping.
 ## Responsibility
 
 **Role.** An adapter: it implements core's federation contract
-([`core/src/federations`](../core/src/federations/README.md)) for GitHub, and
-`githubFederationModule` contributes it to the session router as the federation
-`github`, with its redirect policy.
+([`core/src/federations`](../core/src/federations/README.md)) for GitHub. It
+contributes the federation type `github`: core hands it each enabled
+`core.federations` entry of that type, and it builds one federation per entry,
+under the entry's name, registered for the session router with its redirect
+policy.
 
 **Owns:** GitHub's endpoints, how a GitHub user becomes a profile (the `sub`, the
-e-mail choice, the scope translation), and the logout URL.
+e-mail choice, the scope translation), the logout URL, and the schema of a
+`github` entry's own keys ([`src/entry.mts`](src/entry.mts)).
 
-**Does not own:** the contract (core); the routes, `state` / PKCE verifier
+**Does not own:** the contract (core); the `core.federations` map, the keys
+core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
+`callbackURL`) and the dispatch of an entry by its type (core's boot); the routes, `state` / PKCE verifier
 generation, the redirect-allowlist rules and claim precedence
 ([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
 Store); the logout routes that call this adapter
@@ -35,81 +40,97 @@ npm install @o3co/auth-provider-federation-github @o3co/auth-provider-core @o3co
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. The package depends on `openid-client`.
+`@o3co/auth-provider-session`. The package depends on `openid-client` and
+`zod`.
 
 ## Usage
 
-Add `githubFederationModule` to the manifest list passed to `createApp`. A small
-config-bootstrap module supplies the typed `githubFederationConfig` slot:
+One module, `githubFederationTypeModule()`
+([`src/type-module.mts`](src/type-module.mts)), handles every enabled
+`core.federations` entry whose `type` is `github`. It contributes
+`federationTypes.github`; core parses each such entry with the type's schema at
+boot and calls the module's factories with the entry's name, its
+`callbackURL` and its parsed keys, so the composition root fills no slot and
+writes no bridge. The module requires no dependency.
 
 ```ts
-import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
-import {
-  extractFederationSection,
-  sessionModule,
-  sessionStoreModuleFor,
-} from "@o3co/auth-provider-session";
-import {
-  githubFederationModule,
-  type GithubProviderConfig,
-} from "@o3co/auth-provider-federation-github";
-
-const githubConfigBridgeModule = defineModule({
-  name: "github-federation-config",
-  requires: ["config"] as const,
-  provides: {
-    githubFederationConfig: (deps): GithubProviderConfig => {
-      const slice = extractFederationSection(federationsOf(deps.config), "github");
-      if (slice?.type !== "github") throw new Error("core.federations.github must be enabled, with type github");
-      return {
-        clientId: slice.clientId as string,
-        clientSecret: slice.clientSecret as string,
-        callbackURL: slice.callbackURL as string,
-        // The redirect policy is built from this same object: a redirect
-        // field left out here is one the policy never sees.
-        redirectAllowlist: slice.redirectAllowlist as readonly string[] | undefined,
-        sessionDomain: slice.sessionDomain as string | undefined,
-        authCallbackUrl: slice.authCallbackUrl as string | undefined,
-        clientUrl: slice.clientUrl as string | undefined,
-      };
-    },
-  },
-});
+import { createApp } from "@o3co/auth-provider-core";
+import { githubFederationTypeModule } from "@o3co/auth-provider-federation-github";
+import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
     sessionStoreModuleFor(config),
     sessionModule,
-    githubFederationModule,
-    githubConfigBridgeModule,
+    githubFederationTypeModule(),
     // ... composition-root modules supplying userRepository and the session stores
   ],
   bootstrapComponents: { config, pathResolver },
 });
 ```
 
-Single-tenant: `provider.name` is fixed at `"github"`, so the federation is
-`core.federations.github`, the identity handed to the Store is `github:<id>`, and a
-deployment has one GitHub client. The config fields are
-[`GithubProviderConfig`](src/github.mts). The four redirect fields
-(`redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl`) follow the
-[session package's redirect rules](../session/README.md#redirect-allowlists),
-and they reach the redirect policy only through this slot. **Set `clientUrl`:**
-a login whose start carried no `redirect_to` lands there, and without it the
-callback answers `500 misconfiguration` after the session has been saved; a
-start that carries `redirect_to` needs an allowlist entry for it and
-`authCallbackUrl` as well. A bridge that forwards the credentials alone
-therefore ends every such login on a `500` instead of in the app. The bridge above does not forward the other
-optional fields (`endSessionEndpoint`, `fetch`); forward them if the deployment sets them. `fetch` is the one
-every request to GitHub goes through — the token exchange, `/user` and
-`/user/emails` — for a deployment that reaches GitHub through a proxy; it
-defaults to the global `fetch`. It
-reads the section only when its `type` is `github` (the default for a section
-named `github`), as the standalone template does for Google (in `buildModules.mts`), so a `type = "oidc"` section
-under that name is not read as this adapter's. It casts; a production bridge
-checks each field's type, as the template's Google bridge
-(`googleFederationConfigModule` in
-[`templates/standalone/src/modules.mts`](../../templates/standalone/src/modules.mts)) does.
+`githubFederationTypeModule({ fetch })` sends every request to GitHub of every
+`github` entry — the token exchange, `/user` and `/user/emails` — through that
+fetch: a proxy, or a test double. Without it the global `fetch` is used.
+
+### Configuration
+
+```hocon
+core.federations {
+  github {
+    enabled = true
+    type = "github"
+    clientId = ${GITHUB_CLIENT_ID}
+    clientSecret = ${GITHUB_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/github/callback"
+    clientUrl = "https://app.example.com/"
+  }
+}
+```
+
+The entry's name is the federation's: the `:name` segment of its routes and
+the prefix of the identity handed to the Store (`<name>:<id>`). Each entry is
+its own GitHub client, so two entries of type `github` — say `github-work` and
+`github-oss`, each with its own OAuth App and `callbackURL` — are two
+federations, and one GitHub user signs in to them as two identities.
+
+An entry is flat, and its schema is strict: the keys core owns (`enabled`,
+`type`, `trustUpstreamAmr`, `callbackURL`) and the keys below, nothing else.
+The schema is `githubEntrySchema` in [`src/entry.mts`](src/entry.mts). A key it
+does not name — a typo, or a nested `github { ... }` section — refuses boot with `config-validation-failed` at `core.federations.<name>`,
+naming the key; a missing or malformed key is refused at
+`core.federations.<name>.<field>`. A refusal names the key, never its value. A
+key written `null` counts as absent. An absent key means what the table says,
+read by the provider and the redirect policy; the schema fills in no default.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `clientId` | yes | The OAuth App's client ID. |
+| `clientSecret` | yes | The OAuth App's client secret, sent in the token request body (`client_secret_post`). |
+| `callbackURL` | yes | Where GitHub sends the browser back; the OAuth App's callback URL. A key core owns: boot requires it of every entry it dispatches, and the session routes read it from the same entry. |
+| `clientUrl` | in practice | Where the browser lands after a login whose start carried no `redirect_to`. Without it such a login ends in `500 misconfiguration` after the session has been saved — so it is needed unless every start carries a `redirect_to` and `authCallbackUrl` is set. |
+| `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package's redirect rules](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
+| `endSessionEndpoint` | no | Replaces GitHub's logout — see [Refresh and logout](#refresh-and-logout). |
+
+`fetch` is not an entry key: it is the type module's option (above), and a
+`GithubProviderConfig` field for `createGithubProvider` and the deprecated
+slot.
+
+### Deprecated: the fixed-name module
+
+`githubFederationModule` and the `githubFederationConfig` slot it requires
+([`src/github.mts`](src/github.mts)) are deprecated in favour of
+`githubFederationTypeModule()`. They still work: the module contributes
+`federations.github` and `federationRedirectPolicies.github` — the name is
+fixed at `github` — from the [`GithubProviderConfig`](src/github.mts) a
+composition root's bridge module puts in the slot, and a `fetch` goes in that
+object. The bridge reads no schema of this package, so it accepts whatever it
+forwards; the four redirect fields reach the redirect policy only through it.
+Both paths build the same provider and redirect policy for one entry.
+Composing the type module (module name `federation-github-type`) and
+`githubFederationModule` (`federation-github`) for the same entry refuses boot
+(`duplicate-contribute`): one federation has one handler.
+
 `createGithubProvider` throws at boot when `clientId`, `clientSecret` or
 `callbackURL` is missing.
 
@@ -151,7 +172,7 @@ What `exchangeCode` returns:
 | Field | Value |
 | --- | --- |
 | `issuer` | `https://github.com` |
-| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a positive safe integer (`Number.isSafeInteger`, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other `id` fails the exchange like a missing one: GitHub sends an int64 integer, and one outside the safe-integer range after `Response.json()`, where a parsed number no longer names one id — above 2^53 − 1, where two ids parse as the same number, or `1e400`, which parses as `Infinity` — would sign two GitHub users in as one `github:<id>` |
+| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a positive safe integer (`Number.isSafeInteger`, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other `id` fails the exchange like a missing one: GitHub sends an int64 integer, and one outside the safe-integer range after `Response.json()`, where a parsed number no longer names one id — above 2^53 − 1, where two ids parse as the same number, or `1e400`, which parses as `Infinity` — would sign two GitHub users in as one `<name>:<id>` |
 | `email`, `emailVerified` | the chosen address and `true`, or both absent |
 | `name` | `/user`'s `name`, when a string |
 | `picture` | `/user`'s `avatar_url`, when a string |
@@ -184,15 +205,20 @@ record is silent.
 
 ## Public API
 
-Defined in [`src/github.mts`](src/github.mts), exported from
-[`src/index.mts`](src/index.mts):
+Exported from [`src/index.mts`](src/index.mts):
 
-- `githubFederationModule` — const Module contributing `federations.github` and
-  `federationRedirectPolicies.github`; requires `githubFederationConfig`.
-- `createGithubProvider(config)` — the provider.
-- `GithubProviderConfig`, `GithubProvider` — types.
-- `githubFederationConfig` — the `ComponentMap` slot the module requires,
-  declared by module augmentation (not an export).
+- `githubFederationTypeModule` ([`src/type-module.mts`](src/type-module.mts)) —
+  the Module contributing `federationTypes.github`, with its options
+  `GithubFederationTypeModuleOptions`.
+- `GITHUB_FEDERATION_TYPE` (`"github"`, [`src/type-module.mts`](src/type-module.mts)).
+- `createGithubProvider(config)` ([`src/github.mts`](src/github.mts)) — the
+  provider for the federation `github`.
+- Deprecated, for `githubFederationTypeModule`: `githubFederationModule`
+  ([`src/github.mts`](src/github.mts)), and the `githubFederationConfig`
+  `ComponentMap` slot, declared there by module augmentation (not an export).
+- Types: `GithubEntry` ([`src/entry.mts`](src/entry.mts)), an entry's own keys
+  as the schema answers them; [`GithubProviderConfig`](src/github.mts),
+  `GithubProvider` ([`src/github.mts`](src/github.mts)).
 
 ## Tests
 
@@ -210,4 +236,5 @@ are pinned by the tests' assertions instead.
 | [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the REST headers, the e-mail choice, malformed rows and a failed `/user/emails`, the scope rules, `expiresAt`, `expiresIn` and `tokenType`, no refresh, `mapClaims`, `endSession`, and that `config.fetch` carries every request |
 | [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and `id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no `id`, or one that is not a positive safe integer or a canonical digit string) |
 | [`fake-github.test.mts`](src/__tests__/fake-github.test.mts) | the fake itself: form-encoded token answers, the `User-Agent` refusal, and that the adapter's requests satisfy both |
-| [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the module's contributions and boot with the session module |
+| [`github-type-module.test.mts`](src/__tests__/github-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes under the entry's name, the strict, flat schema, that a refusal never quotes the client secret, the `fetch` option, parity with the deprecated fixed-name module, and the refusal of both for one entry |
+| [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the deprecated fixed-name module's contributions and boot |
