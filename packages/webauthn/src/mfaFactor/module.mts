@@ -29,6 +29,11 @@
  * refuses: a second factor's credential that returns no user handle could
  * then sign its owner in, through the grant, as another account that
  * registered it. Stateless: nothing forks per replica.
+ *
+ * It deliberately declares no `section.isEnabled`, the exception to "a
+ * disabled module registers nothing": switched off by its section it would
+ * run no check, and the second-factor credentials registered while it was on
+ * outlive the switch, so the refusal must run whether the factor is on or off.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";

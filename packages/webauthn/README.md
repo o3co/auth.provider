@@ -275,7 +275,7 @@ modules: [
 
 | Key | Env | Default | Meaning |
 | --- | --- | --- | --- |
-| `webauthn-mfa-factor.enabled` | `WEBAUTHN_MFA_FACTOR_ENABLED` | `false` | Whether the factor is offered; off, the kind is claimed and no factor is contributed |
+| `webauthn-mfa-factor.enabled` | `WEBAUTHN_MFA_FACTOR_ENABLED` | `false` | Whether the factor is offered; off, the kind is claimed and no factor is contributed. Not a module switch (`section.isEnabled`), on purpose: the `allowCredentialsForKnownUser` refusal runs on or off, since second-factor credentials registered while it was on outlive the switch |
 | `webauthn-mfa-factor.userVerification` | `WEBAUTHN_MFA_FACTOR_USER_VERIFICATION` | `preferred` | What its registrations and assertions ask for (`required`, `preferred`, `discouraged`); `required` also refuses a response without the UV flag |
 
 The defaults are in [`config/reference.conf`](config/reference.conf); a composition that does not layer it is refused at boot, naming the file. An unknown key in the section is refused by its name.

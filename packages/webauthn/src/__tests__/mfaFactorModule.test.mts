@@ -261,6 +261,12 @@ describe("the factor installed beside the grant's allowCredentialsForKnownUser",
 		},
 	);
 
+	it("declares no switch of its own, so the refusal still runs with the factor off", () => {
+		// Second-factor credentials registered while the factor was on outlive
+		// switching it off; a switched-off module would run no check at all.
+		expect(webauthnMfaFactorModule.section?.isEnabled).toBeUndefined();
+	});
+
 	it("boots the grant with the flag on when the factor is not installed", async () => {
 		disposable = await createApp({
 			modules: [relyingPartyWith(true), ...grant],
