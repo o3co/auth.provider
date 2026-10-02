@@ -22,8 +22,10 @@
 
 import {
 	type FederationProvider,
+	type FederationTokens,
 	type Logger,
 	loggableError,
+	readUpstreamTokenLifetime,
 	sanitizeErrorText,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
@@ -32,12 +34,43 @@ import { USER_DIRECTORY_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import { logMisconfigured, logStoreUnavailable } from "./FederationLog.mjs";
 
-/** The upstream's profile, the identity token it names, and the local account it resolves to (`null` for none). */
+/** The lifetime fields a link-time `FederationTokens` record carries. */
+export type LinkedTokenLifetime = Pick<FederationTokens, "expiresAt" | "obtainedAt">;
+
+/**
+ * The upstream's profile, the identity token it names, the local account it
+ * resolves to (`null` for none), and the lifetime its access token is
+ * recorded with.
+ */
 export interface FederatedIdentity {
 	readonly profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
 	readonly identityToken: string;
 	readonly user: Awaited<ReturnType<UserRepository["authenticateByToken"]>>;
+	readonly lifetime: LinkedTokenLifetime;
 }
+
+/**
+ * The lifetime a code exchange's answer gives the record, through core's
+ * reading. `obtainedAt` is set only for an end counted from this server's
+ * call (`expiresIn` stated): an end stated only as an instant is on the
+ * upstream's clock and is never aged. Otherwise the adapter's `expiresAt` is
+ * kept as stated, `null` included (no finite expiry: do not refresh), and the
+ * record has no `obtainedAt`, which fails closed.
+ */
+const readLinkedLifetime = (
+	profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>,
+	calledAt: number,
+): LinkedTokenLifetime => {
+	const { expiresIn, expiresAt } = profile;
+	const reading = readUpstreamTokenLifetime(
+		{ expiresIn, expiresAt },
+		{ calledAt, now: Date.now(), floorMs: 0 },
+	);
+	if (reading.verdict === "finite" && reading.stated !== "expiresAt") {
+		return { expiresAt: reading.expiresAt, obtainedAt: reading.obtainedAt };
+	}
+	return { expiresAt };
+};
 
 /**
  * Exchange the callback's code and resolve the identity. Answers and returns
@@ -87,6 +120,8 @@ export const identifyFederatedUser = async (
 	const { code: _code, state: _state, ...adapterCallbackParams } = params;
 
 	let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
+	// An `expiresIn` counts from before the exchange: time the upstream took is not life left.
+	const calledAt = Date.now();
 	try {
 		profile = await provider.exchangeCode({
 			code: codeParam,
@@ -137,5 +172,5 @@ export const identifyFederatedUser = async (
 		return null;
 	}
 
-	return { profile, identityToken, user };
+	return { profile, identityToken, user, lifetime: readLinkedLifetime(profile, calledAt) };
 };

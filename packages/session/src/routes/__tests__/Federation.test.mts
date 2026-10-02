@@ -1396,6 +1396,137 @@ describe("account linking across federations", () => {
 		});
 	});
 
+	// Both link-time writers, the login callback's and the link callback's,
+	// record when the upstream token was obtained as core's lifetime reading
+	// dates it: the instant before the code exchange began.
+	describe("a link-time record says when its upstream token was obtained", () => {
+		const EXCHANGE_MS = 25;
+		/**
+		 * A provider whose exchange takes `EXCHANGE_MS` and answers the lifetime
+		 * fields `lifetime` gives, from the instant it answers. `entered` is
+		 * when the exchange was called.
+		 */
+		const timedProvider = (
+			lifetime: (answeredAt: number) => Record<string, unknown>,
+		): { provider: FederationProvider; entered: () => number } => {
+			let entered = Number.NaN;
+			const provider = makeFakeProvider({
+				exchangeCode: vi.fn(async () => {
+					entered = Date.now();
+					await new Promise((resolve) => setTimeout(resolve, EXCHANGE_MS));
+					return {
+						issuer: "https://idp.example.com",
+						sub: "external-42",
+						accessToken: "at",
+						refreshToken: "rt",
+						scope: "openid email",
+						...lifetime(Date.now()),
+					} as unknown as FederationProfile;
+				}),
+			});
+			return { provider, entered: () => entered };
+		};
+		const attachedOn = async (
+			path: "login" | "link",
+			provider: FederationProvider,
+		): Promise<Record<string, unknown>> => {
+			const fts = makeFederationTokenStore();
+			const { app } =
+				path === "link"
+					? buildCallbackApp({
+							providers: new Map([["test", provider]]),
+							federation: linkEnvelope,
+							sessionSeed: seed,
+							userRepository: linkableRepo({ current: null }),
+							userSessionStore: liveStore(),
+							sessionFederationIndex: makeSessionFederationIndex(),
+							federationTokenStore: fts,
+							auditSink: recorder().sink,
+						})
+					: buildCallbackApp({
+							providers: new Map([["test", provider]]),
+							federation: { name: "test", state: "s1", codeVerifier: "v1" },
+							federationTokenStore: fts,
+						});
+			const agent = await plantAndGetAgent(app);
+			expect((await callback(agent)).status).toBe(302);
+			expect(fts.attach).toHaveBeenCalledOnce();
+			return fts.attach.mock.calls[0]?.[2] as Record<string, unknown>;
+		};
+
+		it.each(["login", "link"] as const)(
+			"on the %s path, an expires_in lifetime is counted from the instant before the exchange",
+			async (path) => {
+				const started = Date.now();
+				const { provider, entered } = timedProvider((answeredAt) => ({
+					expiresIn: 3600,
+					expiresAt: new Date(answeredAt + 3_600_000),
+				}));
+				const attached = await attachedOn(path, provider);
+
+				expect(attached.obtainedAt).toBeInstanceOf(Date);
+				const obtainedAt = (attached.obtainedAt as Date).getTime();
+				expect(obtainedAt).toBeGreaterThanOrEqual(started);
+				expect(obtainedAt).toBeLessThanOrEqual(entered());
+				// The earlier end: `expires_in` counted from that instant, not the
+				// adapter's own `now + expires_in` taken after the answer arrived.
+				expect((attached.expiresAt as Date).getTime()).toBe(obtainedAt + 3_600_000);
+			},
+		);
+
+		it.each(["login", "link"] as const)(
+			"on the %s path, an end stated only as an instant is kept as stated and never aged",
+			async (path) => {
+				// An absolute end is on the upstream's clock: no `obtainedAt`, so
+				// the token route keeps its refresh buffer for this record.
+				const end = Date.now() + 3_600_000;
+				const { provider } = timedProvider(() => ({ expiresAt: new Date(end) }));
+				const attached = await attachedOn(path, provider);
+
+				expect(attached).not.toHaveProperty("obtainedAt");
+				expect((attached.expiresAt as Date).getTime()).toBe(end);
+			},
+		);
+
+		const unusable: ReadonlyArray<
+			[string, (answeredAt: number) => Record<string, unknown>, "null" | "as stated"]
+		> = [
+			["no finite lifetime", () => ({ expiresIn: null, expiresAt: null }), "null"],
+			["no lifetime field at all", () => ({ expiresAt: null }), "null"],
+			[
+				"a malformed expires_in",
+				(answeredAt) => ({ expiresIn: "3600", expiresAt: new Date(answeredAt + 3_600_000) }),
+				"as stated",
+			],
+			["a contradictory pair", () => ({ expiresIn: 3600, expiresAt: null }), "null"],
+			[
+				"a lifetime already spent",
+				(answeredAt) => ({ expiresIn: 3600, expiresAt: new Date(answeredAt - 1_000) }),
+				"as stated",
+			],
+		];
+		describe.each(["login", "link"] as const)("on the %s path", (path) => {
+			it.each(unusable)(
+				"%s records no obtainedAt and the end the adapter stated",
+				async (_label, lifetime, end) => {
+					// A record without `obtainedAt` fails closed: a token of unknown
+					// age is refreshed sooner, never kept longer.
+					let stated: unknown;
+					const { provider } = timedProvider((answeredAt) => {
+						const fields = lifetime(answeredAt);
+						stated = fields.expiresAt;
+						return fields;
+					});
+					const attached = await attachedOn(path, provider);
+
+					expect(attached).not.toHaveProperty("obtainedAt");
+					if (end === "null") expect(attached.expiresAt).toBeNull();
+					else expect(attached.expiresAt).toBe(stated);
+				},
+			);
+		});
+	});
+
 	// A store the link needs that cannot answer is `503`, logged once at error
 	// level as `federation_link_store_unavailable` with `store`, `step` and the
 	// linking session's `sid` — except the read of the session itself, which is
