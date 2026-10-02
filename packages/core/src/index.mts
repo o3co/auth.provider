@@ -1061,6 +1061,12 @@ export {
 	readMfaEnrollmentWitness,
 	supportsMfaEnrollmentWitness,
 } from "./repositories/UserRepository.mjs";
+// A login's one read of the `User` a repository answers: the subject and the
+// claims are read from its snapshot, never from the `User` again.
+export {
+	readUserSnapshot,
+	type UserSnapshotReading,
+} from "./repositories/userSnapshot.mjs";
 export {
 	createRouter as createHealthcheckRouter,
 	type HealthcheckRouterOptions,
