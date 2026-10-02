@@ -160,7 +160,7 @@ describe("a module its own section switches off", () => {
 		await handle.dispose();
 	});
 
-	it("is booted and checked as written when its section switches it on", async () => {
+	it("is checked as written when its section switches it on", async () => {
 		// The unfilled requirement is what refuses it: the switch is the only difference.
 		const err = await refusal(
 			createApp({

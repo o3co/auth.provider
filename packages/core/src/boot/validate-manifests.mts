@@ -400,8 +400,9 @@ function checkAuthoritativeClosure(modules: readonly NormalisedModule[]): void {
  * from JSON) refuses boot (`reserved-component-key`): set on the component
  * map it would replace the prototype rather than name a component, so every
  * key of its value would read as a component no provider ran for, unseen by
- * the checks that read the map's own keys. Runs before any row reads the host
- * maps.
+ * the checks that read the map's own keys. Runs before any row reads a
+ * component from the host maps (the pre-config rows and the parse read only
+ * `config`).
  * @internal
  */
 function checkReservedHostKeys(
