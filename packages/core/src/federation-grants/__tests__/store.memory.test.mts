@@ -82,6 +82,10 @@ describe("createMemoryFederationGrantStore", () => {
 		vi.useRealTimers();
 	});
 
+	it("keeps a rotation budget: the contract's takeRotation cases run, not skip", () => {
+		expect(typeof createMemoryFederationGrantStore().takeRotation).toBe("function");
+	});
+
 	it("retains a record for thirty days past its expiry by default", () => {
 		expect(DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS).toBe(30 * DAY);
 	});

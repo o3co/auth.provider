@@ -39,7 +39,9 @@
  *   to the ceiling.
  *
  * So every field of the authorization, the usage, the failure stamp and the
- * credentials is a required key, holding `undefined` where there is none.
+ * credentials is a required key, holding `undefined` where there is none,
+ * but the usage's `rotations`, which a store without `takeRotation` never
+ * writes.
  * Asserted with conditional types rather than `@ts-expect-error`; this file
  * proves anything only under the TypeScript checker, so it is on both of
  * core's typecheck lists.
@@ -56,6 +58,7 @@ import type {
 	FederationGrantIneligibilityMarker,
 	FederationGrantRefreshFailure,
 	FederationGrantRefreshFailureInput,
+	FederationGrantRotations,
 	FederationGrantUsage,
 } from "#/federation-grants/types.mjs";
 
@@ -74,8 +77,11 @@ describe("what a grant store answers with", () => {
 		expectTypeOf<FederationGrantAuthorization["resource"]>().toEqualTypeOf<string | undefined>();
 	});
 
-	it("names every usage field", () => {
-		expectTypeOf<OptionalKeys<FederationGrantUsage>>().toEqualTypeOf<never>();
+	it("names every usage field but the rotation budget", () => {
+		// `rotations` is optional on the port, as `takeRotation` is: a store
+		// without the member has no budget to write.
+		expectTypeOf<OptionalKeys<FederationGrantUsage>>().toEqualTypeOf<"rotations">();
+		expectTypeOf<OptionalKeys<FederationGrantRotations>>().toEqualTypeOf<never>();
 		expectTypeOf<IsRequiredKey<FederationGrantUsage, "lastUsedAt">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationGrantUsage, "ineligible">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationGrantUsage, "refreshFailure">>().toEqualTypeOf<true>();
