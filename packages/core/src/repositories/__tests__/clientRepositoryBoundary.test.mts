@@ -26,6 +26,7 @@
  * the refusal.
  */
 
+import { inspect } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import type { ClientRepository, PublicClient } from "#/repositories/ClientRepository.mjs";
 import { isClientRecordRefused } from "#/repositories/clientRecordRefused.mjs";
@@ -72,6 +73,12 @@ const repositoryAnswering = (record: unknown): ClientRepository => ({
 });
 
 const recordingLogger = () => ({ warn: vi.fn() });
+
+/**
+ * Everything `value` holds, Errors expanded (name, message, stack, cause),
+ * for a leak assertion: `JSON.stringify` renders an Error as `{}`.
+ */
+const rendered = (value: unknown): string => inspect(value, { depth: null });
 
 /** What `answer` rejects with; fails when it resolves. */
 const rejectionOf = async (answer: Promise<unknown>): Promise<unknown> => {
@@ -418,12 +425,43 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		}
 	});
 
+	it("refuses a record whose shape cannot be read, as not an object", async () => {
+		// Revoked once `await` has read its `then`: what reaches the boundary
+		// is a Proxy every read of which throws.
+		const revokedOnArrival = () => {
+			const { proxy, revoke } = Proxy.revocable(validRecord(), {
+				get(target, key, receiver) {
+					if (key === "then") {
+						revoke();
+						return undefined;
+					}
+					return Reflect.get(target, key, receiver);
+				},
+			});
+			return proxy;
+		};
+		const logger = recordingLogger();
+		const boundary = validatedClientRepository(
+			{
+				findById: async () => revokedOnArrival() as PublicClient,
+				authenticate: async () => revokedOnArrival() as PublicClient,
+			},
+			{ logger },
+		);
+		expect(await refusedBy(boundary.findById(CLIENT_ID))).toBe(true);
+		expect(await refusedBy(boundary.authenticate(CLIENT_ID, "secret"))).toBe(true);
+		expect(logger.warn.mock.calls.map(([line]) => line)).toEqual([
+			{ step: "find", clientId: CLIENT_ID, reasons: ["not an object"] },
+			{ step: "authenticate", clientId: CLIENT_ID, reasons: ["not an object"] },
+		]);
+	});
+
 	it("logs the client id and the reasons, never the record", async () => {
 		const logger = recordingLogger();
 		const record = { ...validRecord(), clientSecret: "do-not-log-me", firstParty: "true" };
 		const boundary = validatedClientRepository(repositoryAnswering(record), { logger });
 		await rejectionOf(boundary.findById(CLIENT_ID));
-		const line = JSON.stringify(logger.warn.mock.calls);
+		const line = rendered(logger.warn.mock.calls);
 		expect(line).not.toContain("do-not-log-me");
 		expect(line).not.toContain("Relying Party");
 		expect(Object.keys(logger.warn.mock.calls[0]?.[0] ?? {}).sort()).toEqual([
@@ -484,7 +522,7 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		expect(reasons).toContain("allowedRedirectUris[1]: ");
 		expect(reasons).toContain("federationGrantRedirectUris[0]: ");
 		expect(reasons).not.toContain(SECRET);
-		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(SECRET);
+		expect(rendered(logger.warn.mock.calls)).not.toContain(SECRET);
 	});
 
 	it("keeps ten reasons and counts them all when a record breaks more rules", async () => {
@@ -527,7 +565,7 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		const refusal = await rejectionOf(boundary.findById(CLIENT_ID));
 		expect(isClientRecordRefused(refusal)).toBe(true);
 		expect(Object.isFrozen(refusal)).toBe(true);
-		const carried = JSON.stringify({ ...(refusal as object), message: (refusal as Error).message });
+		const carried = rendered(refusal);
 		expect(carried).not.toContain(SECRET);
 		expect(carried).not.toContain(CLIENT_ID);
 		expect(carried).not.toContain("allowedRedirectUris");
@@ -561,7 +599,7 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		expect(logger.warn).toHaveBeenCalledTimes(2);
 		const outage = { error: vi.fn() };
 		logClientRepositoryUnavailable(outage, { step: "find", clientId: CLIENT_ID }, found);
-		expect(JSON.stringify(outage.error.mock.calls)).not.toContain("tok-3f9a");
+		expect(rendered(outage.error.mock.calls)).not.toContain("tok-3f9a");
 		const valid = validatedClientRepository(repositoryAnswering(validRecord()), { logger });
 		expect(await valid.findById(CLIENT_ID)).toEqual(validRecord());
 	});
@@ -646,11 +684,7 @@ describe("validatedClientRepository — a field whose read throws is refused as 
 			expect(outage.error.mock.calls[0]?.[0]).toMatchObject({
 				err: { reason: "client_record_refused" },
 			});
-			const said = JSON.stringify([
-				logger.warn.mock.calls,
-				outage.error.mock.calls,
-				{ ...(found as object), message: (found as Error).message },
-			]);
+			const said = rendered([logger.warn.mock.calls, outage.error.mock.calls, found]);
 			expect(said).not.toContain("tok-3f9a");
 			expect(said).not.toContain("failed to load");
 			expect(said).not.toContain("lazy load");

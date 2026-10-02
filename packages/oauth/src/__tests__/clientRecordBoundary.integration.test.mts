@@ -25,6 +25,7 @@
  * oauth reads: a boundary the host put there is kept, with its own logger.
  */
 
+import { inspect } from "node:util";
 import {
 	type ClientRepository,
 	type CodeRepository,
@@ -207,13 +208,20 @@ describe("oauth endpoints behind core's client-record boundary", () => {
 				.filter(([, message]) => message === "client_repository_unavailable")
 				.map(([line]) => (line as { err?: { reason?: string } }).err?.reason),
 		).toEqual(["client_record_refused", "client_record_refused"]);
-		const said = JSON.stringify([
-			authorized.text,
-			exchanged.text,
-			authorized.headers,
-			exchanged.headers,
-			...Object.values(logger).map((method) => (method as { mock: { calls: unknown } }).mock.calls),
-		]);
+		// Errors expanded (name, message, stack, cause): `JSON.stringify`
+		// renders an Error as `{}`.
+		const said = inspect(
+			[
+				authorized.text,
+				exchanged.text,
+				authorized.headers,
+				exchanged.headers,
+				...Object.values(logger).map(
+					(method) => (method as { mock: { calls: unknown } }).mock.calls,
+				),
+			],
+			{ depth: null },
+		);
 		expect(said).not.toContain(LEAK);
 		expect(said).not.toContain("failed to load");
 		await handle.dispose();

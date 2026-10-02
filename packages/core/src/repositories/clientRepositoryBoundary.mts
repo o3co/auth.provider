@@ -24,7 +24,9 @@
  * - **What is read.** Exactly the fields `PublicClient` declares, each once,
  *   by name, however the record holds it (own data, a prototype getter, an
  *   ORM entity, an Array subclass, a Proxy); never `clientSecret`, and
- *   nothing else of the record. The field list is checked against
+ *   nothing else of the record. Only its `then` is read before the
+ *   boundary, by the `await` on the repository's answer, as every async
+ *   port does; a throw there is the repository's own rejection. The field list is checked against
  *   `PublicClient` and against the schema, both ways, at compile time.
  * - **What is held.** The registration's fields and rules with the id in
  *   place of the secret, the defaults filled. The record's `clientId` must be
@@ -127,6 +129,15 @@ type ClientRecordReading =
 	| { readonly ok: true; readonly client: PublicClient }
 	| { readonly ok: false; readonly reasons: readonly string[] };
 
+/** Whether `record` is a list, or a shape that cannot be read (a revoked Proxy): not a record. */
+function isNotARecord(record: object): boolean {
+	try {
+		return Array.isArray(record);
+	} catch {
+		return true;
+	}
+}
+
 /**
  * `record`'s declared fields as plain data, each read once, by name. A read
  * that throws refuses the record as `<field>: unreadable`: what was thrown
@@ -137,7 +148,7 @@ function readFields(
 ):
 	| { readonly ok: true; readonly copy: Readonly<Record<string, unknown>> }
 	| { readonly ok: false; readonly reasons: readonly string[] } {
-	if (Array.isArray(record)) return { ok: false, reasons: ["not an object"] };
+	if (isNotARecord(record)) return { ok: false, reasons: ["not an object"] };
 	const copy: Record<string, unknown> = {};
 	for (const field of CLIENT_RECORD_FIELDS) {
 		let plain: PlainFieldsReading<ClientRecordField>;
