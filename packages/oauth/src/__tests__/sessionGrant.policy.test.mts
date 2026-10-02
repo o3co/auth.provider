@@ -30,7 +30,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 
@@ -213,5 +213,25 @@ describe("session grant — what the policy is asked", () => {
 			return { outcome: "allow", grantedScope: ["read", "write"] };
 		}).handle(ctx({ scope: "read" }));
 		expect(result).toMatchObject({ status: 500, error: "server_error" });
+	});
+});
+
+describe("session grant — the minting instant", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("is taken after the policy answers, so a slow policy cannot shorten the token's life", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const asked = Date.UTC(2026, 9, 2, 12, 0, 0);
+		const answered = asked + 600_000;
+		vi.setSystemTime(asked);
+		const { result } = await grantWith(async () => {
+			vi.setSystemTime(answered);
+			return { outcome: "allow" };
+		}).handle(ctx());
+		const token = minted(result);
+		expect(token.iat).toBe(answered / 1000);
+		expect(token.exp).toBe(answered / 1000 + 3600);
 	});
 });

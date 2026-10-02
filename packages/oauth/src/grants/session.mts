@@ -165,26 +165,6 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// (as `/authorize` records on the code), never the record's raw `amr`;
 			// an untracked browser session is not a source.
 			const trackedAmr = tracked === null ? undefined : wellFormedAmr(vouchedAmr(tracked));
-			// The primary authentication's time, which a step-up never moves (RFC
-			// 9470 §6.1), read against the minting clock (core's `authTimeAt`):
-			// never later than it. One this clock cannot read — further ahead than
-			// the skew allows — refuses the grant before anything is minted.
-			// One issuance instant: `authTime` is read against it and the access
-			// token carries it as `iat`, so a wall clock moved back before the
-			// signing cannot put `auth_time` after `iat`.
-			const mintingNow = Date.now();
-			const trackedAuthTime =
-				tracked === null ? undefined : authTimeAt(tracked.authTime, mintingNow);
-			if (tracked !== null && trackedAuthTime === undefined) {
-				deps.logger?.warn(
-					{ sid, clientId: client.clientId, aheadMs: tracked.authTime.getTime() - mintingNow },
-					"auth_time_ahead_of_clock",
-				);
-				return {
-					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
-				};
-			}
-
 			// The email gate covers every path that mints for a user.
 			// `invalid_grant`, not `access_denied`: RFC 6749 §5.2 does not define
 			// the latter for the token endpoint.
@@ -267,6 +247,27 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 				const bounded = boundPolicyAudience(policy.decision, client.allowedAudiences ?? []);
 				if (!bounded.ok) return { result: bounded.result };
 				policyAudience = bounded.audience;
+			}
+
+			// The primary authentication's time, which a step-up never moves (RFC
+			// 9470 §6.1), read against the minting clock (core's `authTimeAt`):
+			// never later than it. One this clock cannot read — further ahead than
+			// the skew allows — refuses the grant before anything is minted.
+			// One issuance instant: `authTime` is read against it and the access
+			// token carries it as `iat`, so a wall clock moved back before the
+			// signing cannot put `auth_time` after `iat`. Taken after the policy,
+			// so a slow policy cannot mint a token already expired.
+			const mintingNow = Date.now();
+			const trackedAuthTime =
+				tracked === null ? undefined : authTimeAt(tracked.authTime, mintingNow);
+			if (tracked !== null && trackedAuthTime === undefined) {
+				deps.logger?.warn(
+					{ sid, clientId: client.clientId, aheadMs: tracked.authTime.getTime() - mintingNow },
+					"auth_time_ahead_of_clock",
+				);
+				return {
+					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
+				};
 			}
 
 			// `sid` binds the token to the browser session, so either logout
