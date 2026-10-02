@@ -195,15 +195,14 @@ function readRequest(input: unknown, init: RequestInit | undefined): OutboundReq
 	return { url: typeof input === "string" ? input : input.href, method, headers, body };
 }
 
-/** `promise`, or `signal`'s reason once it aborts, whichever comes first. */
+/**
+ * `promise`, or `signal`'s reason once it aborts, whichever comes first.
+ * `promise` is observed on every path, so its own rejection after an abort
+ * is never left unhandled.
+ */
 const untilAborted = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
 	new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(signal.reason);
-		if (signal.aborted) {
-			onAbort();
-			return;
-		}
-		signal.addEventListener("abort", onAbort, { once: true });
 		promise.then(
 			(value) => {
 				signal.removeEventListener("abort", onAbort);
@@ -214,6 +213,8 @@ const untilAborted = <T,>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 				reject(err);
 			},
 		);
+		if (signal.aborted) onAbort();
+		else signal.addEventListener("abort", onAbort, { once: true });
 	});
 
 /** The answer's body, read whole under `cap`; a refusal past it. */

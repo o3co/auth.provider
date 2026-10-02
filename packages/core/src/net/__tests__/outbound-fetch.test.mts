@@ -626,6 +626,32 @@ describe("the deadline and the caller's signal", () => {
 		expect(err).not.toBeInstanceOf(OutboundFetchError);
 	});
 
+	it("observes every pending read when the caller aborts between the answer and its body", async () => {
+		const controller = new AbortController();
+		const reason = new Error("caller gave up");
+		const transport: OutboundTransport = async () => ({
+			status: 200,
+			statusText: "",
+			// Read just before the body: the caller aborts at exactly that point.
+			get headers() {
+				controller.abort(reason);
+				return [];
+			},
+			body: {
+				[Symbol.asyncIterator]: () => ({
+					next: () => Promise.reject(new Error("body destroyed")),
+				}),
+			},
+			close: () => undefined,
+		});
+		const pending = outboundFetch({ transport })("https://rp.example/", {
+			signal: controller.signal,
+		});
+		expect(await rejection(pending)).toBe(reason);
+		// An unobserved rejection would surface here as an unhandled error.
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	});
+
 	it("does nothing for a signal already aborted", async () => {
 		const lookup = resolver();
 		const reason = new Error("already");
