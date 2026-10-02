@@ -480,6 +480,8 @@ const CASE = {
 		"a set created again after its tombstone expired is at a generation it is then read at, never one seen before",
 	outage: "a store that cannot reach its backend rejects every member",
 	update: "an update keeps the set's generation, and a write at it still lands",
+	legacy:
+		"where the store still provides create and remove: create refuses a held id and keeps the record and the generation; remove is idempotent and moves the generation only when it removes",
 	tombstone:
 		"a tombstone stands: a late first binding and a late write at a generation read before the reset are refused, and write nothing",
 	unconditional:
@@ -525,6 +527,20 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 			return { ...harness, store: { ...harness.store, remove } };
 		};
 		expect(await refusedBy(removeIgnoring)).toContain(CASE.unconditional);
+	});
+
+	it("holds a store's own create and remove to their promises when it still provides them", async () => {
+		const createOverwriting = (): MfaFactorStoreHarness => {
+			const harness = memoryOnItsClock();
+			const { store } = harness;
+			const create = async (record: MfaFactorRecord): Promise<void> => {
+				await store.remove?.(record.subject, record.id);
+				await store.create?.(record);
+			};
+			return { ...harness, store: { ...store, create } };
+		};
+		expect(await refusedBy(createOverwriting)).toContain(CASE.legacy);
+		expect(await refusedBy(memoryOnItsClock)).not.toContain(CASE.legacy);
 	});
 
 	const faults: ReadonlyArray<readonly [string, Fault, readonly string[]]> = [
@@ -653,7 +669,14 @@ describe("the binding", () => {
 			supports: { unreachable: true, forceExpire: true },
 		}).map((contractCase) => contractCase.name);
 		expect(generic.filter((name) => name.startsWith("not run:"))).toEqual([]);
-		expect(names).toEqual([...generic, CASE.update, CASE.tombstone, CASE.race, CASE.resetExpiry]);
+		expect(names).toEqual([
+			...generic,
+			CASE.update,
+			CASE.legacy,
+			CASE.tombstone,
+			CASE.race,
+			CASE.resetExpiry,
+		]);
 	});
 
 	it("calls the harness's hooks on the harness, so one that uses this keeps working", async () => {
