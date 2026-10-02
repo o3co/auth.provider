@@ -427,6 +427,7 @@ describe("appleFederationTypeModule through createApp", () => {
 		["an empty clientSecret", { ...entryWeb, clientSecret: "" }, "clientSecret"],
 		["an empty teamId", withKeyMaterial({ ...KEY_MATERIAL, teamId: "" }), "teamId"],
 		["a keyId that is a number", withKeyMaterial({ ...KEY_MATERIAL, keyId: 42 }), "keyId"],
+		["an empty keyId", withKeyMaterial({ ...KEY_MATERIAL, keyId: "" }), "keyId"],
 		["an empty privateKey", withKeyMaterial({ ...KEY_MATERIAL, privateKey: "" }), "privateKey"],
 	])(
 		"refuses %s as a key that must be a non-empty string, not as a missing one",
