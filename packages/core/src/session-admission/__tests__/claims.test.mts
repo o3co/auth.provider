@@ -529,6 +529,46 @@ describe("a custom claim is stored as its JSON form", () => {
 		});
 	});
 
+	it("stores a number JSON cannot hold as null, even one a toJSON spells out raw", () => {
+		const raw = (JSON as unknown as { rawJSON: (text: string) => unknown }).rawJSON;
+		const source = { huge: { toJSON: () => raw("1e400") }, list: [raw("-1e400"), 1] };
+		for (const build of bothLogins(source)) {
+			expect(build()).toStrictEqual({ huge: null, list: [null, 1] });
+		}
+	});
+
+	it("drops a custom claim that refers back to the claims, reading nothing of them again", async () => {
+		const reads = new Map<string, number>();
+		const target: Record<string, unknown> = {};
+		Object.defineProperty(target, "email", {
+			get() {
+				reads.set("email", (reads.get("email") ?? 0) + 1);
+				return "alice@example.com";
+			},
+			enumerable: true,
+		});
+		target.owner = { of: target };
+		const { logger, warns } = recordingLogger();
+		const admission = await admitPrimary(
+			depsWith(logger),
+			passwordPrimary(passwordFacts(target) as never),
+		);
+		if (admission.outcome !== "establish") throw new Error("expected an establishment");
+		expect(admission.establishment.primary.claims).toStrictEqual({ email: "alice@example.com" });
+		expect(reads.get("email")).toBe(1);
+		expect(warns.map((line) => line.fields)).toStrictEqual([
+			{ claim: "owner", reason: "unserialisable" },
+		]);
+	});
+
+	it("warns of a dropped claim once, however often its primary is admitted", async () => {
+		const { logger, warns } = recordingLogger();
+		const primary = passwordPrimary(passwordFacts({ big: 1n }) as never);
+		await admitPrimary(depsWith(logger), primary);
+		await admitPrimary(depsWith(logger), primary);
+		expect(warns).toHaveLength(1);
+	});
+
 	it("still refuses a declared claim of the wrong type beside custom claims", () => {
 		for (const build of bothLogins({ groups: "staff", joined: new Date(0) })) {
 			expect(build).toThrow(/claims\.groups must be a list of strings/);

@@ -34,8 +34,9 @@
  *   `Date` becomes its ISO string; NaN and the infinities become `null`),
  *   parsed back. One whose JSON form is nothing (`undefined`, a function, a
  *   symbol) is left out, as JSON leaves it out. One whose JSON form cannot
- *   be taken (a bigint, a cycle, a `toJSON` or a getter that throws) is
- *   dropped and the login goes on; whoever holds a logger says so with
+ *   be taken (a bigint, a cycle, a `toJSON` or a getter that throws, a
+ *   value that refers back to the claims themselves) is dropped and the
+ *   login goes on; whoever holds a logger says so with
  *   `warnDroppedClaims`, naming the key and never the value. That is what a
  *   Redis-backed session store already read back of a custom claim.
  *
@@ -118,12 +119,26 @@ type JsonForm =
 	| { readonly kind: "nothing" }
 	| { readonly kind: "unserialisable" };
 
-/** The JSON form of what `read` answers, parsed back and frozen: one read, one `JSON.stringify`. */
-function jsonFormOf(read: () => unknown): JsonForm {
+/** What `jsonFormOf` throws for a value that refers back to the claims it is read from. */
+class RefersToClaims extends Error {}
+
+/** A number JSON holds as it is; NaN, the infinities and a raw spelling past them are `null`. */
+const finiteOrNull = (_key: string, value: unknown): unknown =>
+	typeof value === "number" && !Number.isFinite(value) ? null : value;
+
+/**
+ * The JSON form of what `read` answers, parsed back and frozen: one read,
+ * one `JSON.stringify`. A value that refers back to `claims` is not taken:
+ * serialising it would read the claims again.
+ */
+function jsonFormOf(read: () => unknown, claims: object): JsonForm {
 	try {
-		const text = JSON.stringify(read());
+		const text = JSON.stringify(read(), (_key, value: unknown) => {
+			if (value === claims) throw new RefersToClaims();
+			return value;
+		});
 		if (text === undefined) return { kind: "nothing" };
-		return { kind: "value", value: freezeParsed(JSON.parse(text)) };
+		return { kind: "value", value: freezeParsed(JSON.parse(text, finiteOrNull)) };
 	} catch {
 		return { kind: "unserialisable" };
 	}
@@ -163,7 +178,7 @@ export function readLoginClaims(claims: unknown): LoginClaimsReading {
 	const dropped: DroppedClaim[] = [];
 	for (const key of Object.keys(source)) {
 		if (isDeclaredClaim(key)) continue;
-		const form = jsonFormOf(() => source[key]);
+		const form = jsonFormOf(() => source[key], source);
 		if (form.kind === "value") define(copy, key, form.value);
 		else if (form.kind === "unserialisable") dropped.push({ claim: key, reason: form.kind });
 	}
@@ -179,11 +194,14 @@ export const droppedClaimsOf = (claims: UserSessionClaims): readonly DroppedClai
 /**
  * Logs `login_claim_dropped` at warn once for each custom claim
  * `readLoginClaims` dropped from `claims`: its key and the reason, never
- * its value. Nothing without a logger.
+ * its value. Said once for an envelope, however often it is handed here
+ * with a logger. Nothing without a logger.
  */
 export function warnDroppedClaims(logger: Logger | undefined, claims: UserSessionClaims): void {
 	if (logger === undefined) return;
-	for (const { claim, reason } of droppedClaimsOf(claims)) {
+	const dropped = droppedClaimsOf(claims);
+	droppedFrom.delete(claims);
+	for (const { claim, reason } of dropped) {
 		logger.warn({ claim, reason }, "login_claim_dropped");
 	}
 }
