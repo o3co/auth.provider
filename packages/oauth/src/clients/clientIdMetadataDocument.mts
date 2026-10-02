@@ -585,8 +585,7 @@ export function isClientIdMetadataDocumentFallback(repository: ClientRepository)
  * - A rejection is let through as it is, never answered with a document,
  *   from the cache or its stale window: the repository's outage, or core's
  *   refusal of a registration (`isClientRecordRefused`), whether this
- *   fallback's boundary refused it or one `inner` reads through did. A layer
- *   over this fallback that lets rejections through keeps the refusal.
+ *   fallback's boundary refused it or one `inner` reads through did.
  *
  * `authenticate` is `inner`'s alone, through the boundary: a document never
  * carries a secret.

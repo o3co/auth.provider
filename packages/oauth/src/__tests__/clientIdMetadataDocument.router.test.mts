@@ -115,9 +115,8 @@ const buildRouter = async (
 	clientRepository: ClientRepository,
 	{
 		documents = true,
-		consent = true,
 		fetchImpl = vi.fn(async () => new Response("{}", { status: 404 })) as unknown as typeof fetch,
-	}: { documents?: boolean; consent?: boolean; fetchImpl?: typeof fetch } = {},
+	}: { documents?: boolean; fetchImpl?: typeof fetch } = {},
 ) => {
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
@@ -128,12 +127,8 @@ const buildRouter = async (
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
-		...(consent
-			? {
-					consentStore: createMemoryConsentStore(),
-					pendingConsentStore: createMemoryPendingConsentStore(),
-				}
-			: {}),
+		consentStore: createMemoryConsentStore(),
+		pendingConsentStore: createMemoryPendingConsentStore(),
 		clientIdMetadataDocuments: { fetch: fetchImpl, lookup: async () => ["93.184.216.34"] },
 		logger,
 	});
