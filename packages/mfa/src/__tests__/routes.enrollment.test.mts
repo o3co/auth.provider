@@ -30,6 +30,7 @@ import {
 	createMemoryMfaTransactionStore,
 	type MfaFactor,
 	type MfaFactorRecord,
+	type MfaFactorStore,
 	type MfaTransactionStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -188,7 +189,7 @@ describe("the first login of a subject with no factor", () => {
 		expect(JSON.stringify(audit.events)).not.toContain(ALICE.email);
 	});
 
-	it("writes in this order: the transaction consumed, the factor, the recovery codes, the witness marked, then the session", async () => {
+	it("writes in this order: the transaction consumed, the factor, the recovery codes, the witness marked, the session, then the codes marked shown", async () => {
 		const calls: string[] = [];
 		const transactions = createMemoryMfaTransactionStore();
 		const factors = createMemoryMfaFactorStore();
@@ -214,6 +215,10 @@ describe("the first login of a subject with no factor", () => {
 					calls.push(`create ${record.kind}`);
 					return factors.create(record);
 				},
+				update: async (...args) => {
+					calls.push("update");
+					return factors.update(...args);
+				},
 			},
 			userSessionStore: {
 				...sessions,
@@ -230,7 +235,14 @@ describe("the first login of a subject with no factor", () => {
 		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
 
 		expect(done.status).toBe(200);
-		expect(calls).toEqual(["consume", "create totp", "create recovery_code", "mark", "session"]);
+		expect(calls).toEqual([
+			"consume",
+			"create totp",
+			"create recovery_code",
+			"mark",
+			"session",
+			"update",
+		]);
 		expect(directory.marks).toEqual([{ subject: ALICE.id, enrolled: true }]);
 	});
 
@@ -604,6 +616,182 @@ function leaseAdmittingEveryWriter(store: MfaTransactionStore): void {
 /** How many times `logger` said a write overran the subject's lease. */
 const overruns = (logger: { readonly error: { readonly mock: { readonly calls: unknown[][] } } }) =>
 	logger.error.mock.calls.filter((call) => call[1] === "mfa_subject_lease_overrun").length;
+
+/** Alice's one recovery-code set, opened, as `store` now holds it. */
+async function aliceSet(store: MfaFactorStore) {
+	const set = (await store.list(ALICE.id)).find((record) => record.kind === "recovery_code");
+	if (set === undefined) throw new Error("alice holds no recovery-code set");
+	return storedData(store, set);
+}
+
+describe("a login's first binding marks its recovery codes shown only in the answer that carries them", () => {
+	it("leaves the set unshown when another requirement interrupts the resumed login: its 403 carries no codes, and no codes event", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const audit = recordingAuditSink();
+		const extra = extraRequirement();
+		const { app } = await boot({
+			config: configFor("required", {}, {}, ["mfa", extra.name]),
+			factorStore,
+			auditSink: audit,
+			extraModules: [extra.module],
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(EXTRA_INTERRUPTION.body);
+		const set = await aliceSet(factorStore);
+		expect(set.record.version).toBe(0);
+		expect(set.data).toMatchObject({ shown: false });
+		expect(audit.of("mfa.factor.enrolled")).toHaveLength(1);
+		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
+	});
+
+	it("says a set it could not write once even when another requirement interrupts the resumed login", async () => {
+		const factors = createMemoryMfaFactorStore();
+		const extra = extraRequirement();
+		const { app, logger } = await boot({
+			config: configFor("required", {}, {}, ["mfa", extra.name]),
+			factorStore: {
+				...factors,
+				create: async (record) => {
+					if (record.kind === "recovery_code") throw new Error("factor store unreachable");
+					return factors.create(record);
+				},
+			},
+			extraModules: [extra.module],
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(EXTRA_INTERRUPTION.body);
+		expect(events(logger, "error")).toEqual(["mfa_recovery_codes_unwritten"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ sub: ALICE.id });
+	});
+
+	it("leaves the set unshown when core will not resume the login: 401 login_required", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const store = createMemoryMfaTransactionStore();
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			transactionStore: {
+				...store,
+				// Its continuation waits on a requirement this deployment no longer has.
+				consume: async (...args) => {
+					const consumed = await store.consume(...args);
+					return consumed === null || consumed.continuation === undefined
+						? consumed
+						: { ...consumed, continuation: { ...consumed.continuation, interruptedBy: "gone" } };
+				},
+			},
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "login_required", error_description: "Log in again" });
+		const set = await aliceSet(factorStore);
+		expect(set.record.version).toBe(0);
+		expect(set.data).toMatchObject({ shown: false });
+	});
+
+	it("leaves the set unshown when the session store cannot write the session: 503", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const sessions = createInMemoryUserSessionStore();
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			userSessionStore: {
+				...sessions,
+				create: async () => {
+					throw new Error("session store unreachable");
+				},
+			} as UserSessionStore,
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const res = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(res.status).toBe(503);
+		expect(res.body).not.toHaveProperty("recovery_codes");
+		const set = await aliceSet(factorStore);
+		expect(set.record.version).toBe(0);
+		expect(set.data).toMatchObject({ shown: false });
+	});
+
+	it("answers no codes when the set changed before the answer: the login completes with a fresh CSRF token, recovery_codes_issued false, said once, no codes event", async () => {
+		const factors = createMemoryMfaFactorStore();
+		const sessions = createInMemoryUserSessionStore();
+		const audit = recordingAuditSink();
+		const { app, handle, logger } = await boot({
+			config: configFor("required"),
+			factorStore: factors,
+			auditSink: audit,
+			userSessionStore: {
+				...sessions,
+				// Another writer replaces the set while the session is written.
+				create: async (...args) => {
+					const set = (await factors.list(ALICE.id)).find(
+						(record) => record.kind === "recovery_code",
+					);
+					if (set !== undefined) await factors.remove(ALICE.id, set.id);
+					return sessions.create(...args);
+				},
+			} as UserSessionStore,
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body).toEqual({
+			message: "Logged in successfully",
+			factor: { id: expect.any(String), kind: "totp" },
+			recovery_codes_issued: false,
+		});
+		const guard = handle.components.csrfGuard;
+		if (guard === undefined) throw new Error("the composition holds no CSRF guard");
+		expect(setsCsrfToken(done, guard)).toBe(true);
+		expect(events(logger, "error")).toEqual(["mfa_recovery_codes_unwritten"]);
+		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ sub: ALICE.id });
+		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
+	});
+
+	it("answers no codes when the mark cannot be written: the set left unshown", async () => {
+		const factors = createMemoryMfaFactorStore();
+		const { app, logger } = await boot({
+			config: configFor("required"),
+			factorStore: {
+				...factors,
+				update: async () => {
+					throw new Error("factor store unreachable");
+				},
+			},
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+		const begun = await beginEnrollment(agent, transaction, "totp");
+
+		const done = await completeEnrollment(agent, transaction, totpProofOf(begun.body.secret));
+
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+		expect(done.body).not.toHaveProperty("recovery_codes");
+		expect(done.body.recovery_codes_issued).toBe(false);
+		expect(events(logger, "error")).toEqual(["mfa_recovery_codes_unwritten"]);
+		const set = await aliceSet(factors);
+		expect(set.record.version).toBe(0);
+		expect(set.data).toMatchObject({ shown: false });
+	});
+});
 
 describe("a binding's transaction-store writes under the lease", () => {
 	it("answers 503, nothing bound, when the first-binding note is not answered within a Store call's time", async () => {
