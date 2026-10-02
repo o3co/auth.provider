@@ -31,19 +31,34 @@
  * or a record that is gone, nothing changed; a `RangeError` for an update at
  * `Number.MAX_SAFE_INTEGER`; one winner among N concurrent updates at one
  * version; a successful update reaching no other record — the same id under
- * another subject, the subject's other factors; removal of one record and of
- * a subject's records, idempotent and no further; and a removed record taken
- * again; and, with `unreachable`, every member rejecting out of reach. Every
- * record id is 22 base64url characters, as the provider makes one. Each case
- * builds a fresh harness and closes it; the concurrent ones split their
- * writers across `store` and `second`.
+ * another subject, the subject's other factors; removal of one record, once,
+ * and of a subject's records, idempotently, and no further; and a removed
+ * record taken again; and, with `unreachable`, every member rejecting out of
+ * reach. Every record id is 22 base64url characters, as the provider makes
+ * one. Each case builds a fresh harness and closes it; the concurrent ones
+ * split their writers across `store` and `second`.
+ *
+ * Records are written and removed through the factor set's conditional
+ * members, at the generation the set is at, so the suite runs over a store
+ * with or without the port's optional unconditional `create` and `remove`.
+ * Each answer is read with core's readers.
  *
  * The harness is the factor set's binding's too
  * (`mfaFactorStoreConditionalContract`): one `build` serves both suites.
  */
 
 import assert from "node:assert/strict";
-import type { MfaFactorRecord, MfaFactorStore } from "@o3co/auth-provider-core";
+import {
+	type ConditionalCreateAnswer,
+	type ConditionalSetRemoveAnswer,
+	type MfaFactorRecord,
+	type MfaFactorStore,
+	newStoreGeneration,
+	readConditionalCreateAnswer,
+	readConditionalSetRemoveAnswer,
+	readMfaFactorSet,
+	type StoreGeneration,
+} from "@o3co/auth-provider-core";
 import type { ContractCase } from "@o3co/auth-provider-core/testing";
 
 /** What one case runs over: a fresh, empty store, and what else the backend gives. */
@@ -138,6 +153,45 @@ const BARE = {
 const byId = (records: readonly MfaFactorRecord[]): MfaFactorRecord[] =>
 	[...records].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
+/** The generation `subject`'s set is at: `null` for a set never written. */
+async function generationOf(
+	store: MfaFactorStore,
+	subject: string,
+): Promise<StoreGeneration | null> {
+	return readMfaFactorSet(await store.listVersioned(subject), subject).generation;
+}
+
+/** `record` created in its subject's set at the generation the set is then at, read as core reads it. */
+async function createAtCurrent(
+	store: MfaFactorStore,
+	record: MfaFactorRecord,
+): Promise<ConditionalCreateAnswer> {
+	return readConditionalCreateAnswer(
+		await store.createIf(record, await generationOf(store, record.subject)),
+	);
+}
+
+/** `records` created one after another, each in its subject's set at the generation it is then at. */
+async function seed(store: MfaFactorStore, ...records: readonly MfaFactorRecord[]): Promise<void> {
+	for (const record of records) {
+		const answer = await createAtCurrent(store, record);
+		assert.equal(answer.outcome, "created", `seeding ${record.id} of ${record.subject}`);
+	}
+}
+
+/** `(subject, id)` removed at the generation the set is then at, read as core reads it. */
+async function removeAtCurrent(
+	store: MfaFactorStore,
+	subject: string,
+	id: string,
+): Promise<ConditionalSetRemoveAnswer> {
+	const generation = await generationOf(store, subject);
+	if (generation === null) {
+		assert.fail(`${subject}'s set is absent: no removal to ask the store for`);
+	}
+	return readConditionalSetRemoveAnswer(await store.removeIf(subject, id, generation));
+}
+
 /** A case that builds its harness, runs `body` over its store and closes it. */
 function contractCase(
 	input: MfaFactorStoreContractInput,
@@ -177,15 +231,14 @@ export function mfaFactorStoreContract(
 		test("returns a created record whole, as plain data, its undefined fields named", async (store) => {
 			// Strictly: a key too many, one left out, or a class instance in place
 			// of plain data fails here.
-			await store.create(RECORD());
-			await store.create(RECORD(BARE));
+			await seed(store, RECORD(), RECORD(BARE));
 			assert.deepStrictEqual(byId(await store.list("user-1")), [RECORD(), RECORD(BARE)]);
 		}),
 
 		test("keeps data verbatim: the store never reads it", async (store) => {
 			const samples = ["[]", "{}", '{"a":[],"b":{}}', "ü∆ 漢字 🙂", "x".repeat(4096)];
 			for (const [i, data] of samples.entries()) {
-				await store.create(RECORD({ id: factorId(`factor-${i}`), data }));
+				await seed(store, RECORD({ id: factorId(`factor-${i}`), data }));
 			}
 			const listed = byId(await store.list("user-1"));
 			assert.deepStrictEqual(
@@ -208,34 +261,40 @@ export function mfaFactorStoreContract(
 				RECORD({ id: factorId("d"), kind: "recovery_code", binding: undefined }),
 				RECORD({ id: factorId("e"), kind: "acme-contributed", binding: "mfa" }),
 			]);
-			for (const record of records) await store.create(record);
+			await seed(store, ...records);
 			assert.deepStrictEqual(byId(await store.list("user-1")), records);
 		}),
 
-		test("refuses a duplicate (subject, id), and keeps the record as it was", async (store) => {
-			await store.create(RECORD());
-			await assert.rejects(store.create(RECORD({ data: "v2.other", label: "Other" })));
+		test("refuses a duplicate (subject, id) at the current generation, and keeps the record as it was", async (store) => {
+			await seed(store, RECORD());
+			assert.deepStrictEqual(
+				await createAtCurrent(store, RECORD({ data: "v2.other", label: "Other" })),
+				{ outcome: "conflict" },
+			);
 			assert.deepStrictEqual(await store.list("user-1"), [RECORD()]);
 		}),
 
-		test("lets one of N concurrent creates of one (subject, id) through", async (store, harness) => {
-			const results = await Promise.allSettled(
-				Array.from({ length: 10 }, (_, i) => nth(harness, i).create(RECORD({ data: `v2.${i}` }))),
+		test("lets one of N concurrent creates of one (subject, id) at one generation through", async (store, harness) => {
+			const answers = await Promise.all(
+				Array.from({ length: 10 }, async (_, i) =>
+					readConditionalCreateAnswer(
+						await nth(harness, i).createIf(RECORD({ data: `v2.${i}` }), null),
+					),
+				),
 			);
-			assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+			assert.equal(answers.filter((answer) => answer.outcome === "created").length, 1);
 			assert.equal((await store.list("user-1")).length, 1);
 		}),
 
 		test("keeps subjects apart: the same id under another subject is another record", async (store) => {
 			const theirs = { subject: "user-2", data: "v2.theirs" };
-			await store.create(RECORD());
-			await store.create(RECORD(theirs));
+			await seed(store, RECORD(), RECORD(theirs));
 			assert.deepStrictEqual(await store.list("user-1"), [RECORD()]);
 			assert.deepStrictEqual(await store.list("user-2"), [RECORD(theirs)]);
 		}),
 
 		test("updates at the current version: data, label and lastUsedAt replaced, version + 1, nothing else moved", async (store) => {
-			await store.create(RECORD());
+			await seed(store, RECORD());
 			const next = {
 				data: "v2.re-sealed",
 				label: "Work phone",
@@ -248,7 +307,7 @@ export function mfaFactorStoreContract(
 		}),
 
 		test("clears label and lastUsedAt when the update says undefined", async (store) => {
-			await store.create(RECORD());
+			await seed(store, RECORD());
 			const updated = await store.update("user-1", FACTOR_1, 1, {
 				data: "v2.re-sealed",
 				label: undefined,
@@ -265,7 +324,7 @@ export function mfaFactorStoreContract(
 		}),
 
 		test("answers null for a version that moved, and changes nothing", async (store) => {
-			await store.create(RECORD());
+			await seed(store, RECORD());
 			const next = { data: "v2.late", label: "Late", lastUsedAt: undefined };
 			assert.equal(await store.update("user-1", FACTOR_1, 0, next), null);
 			assert.equal(await store.update("user-1", FACTOR_1, 2, next), null);
@@ -280,7 +339,7 @@ export function mfaFactorStoreContract(
 
 		test("refuses, with a RangeError, an update at Number.MAX_SAFE_INTEGER — the next version would be no safe integer — and changes nothing, whatever the stored version; the update that reaches it passes", async (store) => {
 			const max = Number.MAX_SAFE_INTEGER;
-			await store.create(RECORD({ version: max - 1 }));
+			await seed(store, RECORD({ version: max - 1 }));
 			const next = { data: "v2.re-sealed", label: undefined, lastUsedAt: undefined };
 			const reached = await store.update("user-1", FACTOR_1, max - 1, next);
 			assert.deepStrictEqual(reached, { ...RECORD(), ...next, version: max });
@@ -290,7 +349,7 @@ export function mfaFactorStoreContract(
 		}),
 
 		test("lets exactly one of N concurrent updates at one version win", async (store, harness) => {
-			await store.create(RECORD());
+			await seed(store, RECORD());
 			const results = await Promise.all(
 				Array.from({ length: 10 }, (_, i) =>
 					nth(harness, i).update("user-1", FACTOR_1, 1, {
@@ -309,9 +368,7 @@ export function mfaFactorStoreContract(
 		test("a successful update writes its own record alone: the same id under another subject, and the subject's other factors, stay as they were", async (store) => {
 			const sibling = { id: FACTOR_2, data: "v2.sibling" };
 			const theirs = { subject: "user-2", data: "v2.theirs" };
-			await store.create(RECORD());
-			await store.create(RECORD(sibling));
-			await store.create(RECORD(theirs));
+			await seed(store, RECORD(), RECORD(sibling), RECORD(theirs));
 			const next = { data: "v2.re-sealed", label: "Work phone", lastUsedAt: undefined };
 			const updated = await store.update("user-1", FACTOR_1, 1, next);
 			assert.deepStrictEqual(updated, { ...RECORD(), ...next, version: 2 });
@@ -320,30 +377,33 @@ export function mfaFactorStoreContract(
 		}),
 
 		test("never reaches another subject's record through update", async (store) => {
-			await store.create(RECORD({ subject: "user-2" }));
+			await seed(store, RECORD({ subject: "user-2" }));
 			const next = { data: "v2.forged", label: undefined, lastUsedAt: undefined };
 			assert.equal(await store.update("user-1", FACTOR_1, 1, next), null);
 			assert.deepStrictEqual(await store.list("user-2"), [RECORD({ subject: "user-2" })]);
 			assert.deepStrictEqual(await store.list("user-1"), []);
 		}),
 
-		test("removes one record, idempotently, leaving the subject's others and other subjects'", async (store) => {
+		test("removes one record at the current generation, once — again, or one never held, answers missing — leaving the subject's others and other subjects'", async (store) => {
 			const a = factorId("a");
 			const b = factorId("b");
-			await store.create(RECORD({ id: a }));
-			await store.create(RECORD({ id: b }));
-			await store.create(RECORD({ id: a, subject: "user-2" }));
-			await store.remove("user-1", a);
-			await store.remove("user-1", a);
-			await store.remove("user-1", factorId("never-was"));
+			await seed(store, RECORD({ id: a }), RECORD({ id: b }), RECORD({ id: a, subject: "user-2" }));
+			assert.equal((await removeAtCurrent(store, "user-1", a)).outcome, "removed");
+			assert.deepStrictEqual(await removeAtCurrent(store, "user-1", a), { outcome: "missing" });
+			assert.deepStrictEqual(await removeAtCurrent(store, "user-1", factorId("never-was")), {
+				outcome: "missing",
+			});
 			assert.deepStrictEqual(await store.list("user-1"), [RECORD({ id: b })]);
 			assert.deepStrictEqual(await store.list("user-2"), [RECORD({ id: a, subject: "user-2" })]);
 		}),
 
 		test("removes every record of one subject, idempotently, and no other subject's", async (store) => {
-			await store.create(RECORD({ id: factorId("a") }));
-			await store.create(RECORD({ id: factorId("b") }));
-			await store.create(RECORD({ id: factorId("c"), subject: "user-2" }));
+			await seed(
+				store,
+				RECORD({ id: factorId("a") }),
+				RECORD({ id: factorId("b") }),
+				RECORD({ id: factorId("c"), subject: "user-2" }),
+			);
 			await store.removeAllForSubject("user-1");
 			await store.removeAllForSubject("user-1");
 			await store.removeAllForSubject("nobody");
@@ -355,9 +415,9 @@ export function mfaFactorStoreContract(
 
 		test("takes a record again after it was removed", async (store) => {
 			// A removed factor leaves nothing behind that refuses the next one.
-			await store.create(RECORD());
+			await seed(store, RECORD());
 			await store.removeAllForSubject("user-1");
-			await store.create(RECORD({ data: "v2.again" }));
+			await seed(store, RECORD({ data: "v2.again" }));
 			assert.deepStrictEqual(await store.list("user-1"), [RECORD({ data: "v2.again" })]);
 		}),
 
@@ -366,7 +426,8 @@ export function mfaFactorStoreContract(
 					test("rejects every member when it cannot reach its backend, and answers none as no factors, null or done", async (_store, harness) => {
 						const down = unreachableOf(harness)();
 						await rejects(() => down.list("user-1"), "list");
-						await rejects(() => down.create(RECORD()), "create");
+						await rejects(() => down.listVersioned("user-1"), "listVersioned");
+						await rejects(() => down.createIf(RECORD(), null), "createIf");
 						await rejects(
 							() =>
 								down.update("user-1", FACTOR_1, 1, {
@@ -376,7 +437,10 @@ export function mfaFactorStoreContract(
 								}),
 							"update",
 						);
-						await rejects(() => down.remove("user-1", FACTOR_1), "remove");
+						await rejects(
+							() => down.removeIf("user-1", FACTOR_1, newStoreGeneration()),
+							"removeIf",
+						);
 						await rejects(() => down.removeAllForSubject("user-1"), "removeAllForSubject");
 					}),
 				]

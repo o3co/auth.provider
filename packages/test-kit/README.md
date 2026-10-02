@@ -154,20 +154,24 @@ describe("my store keeps the MfaFactorStore contract", () => {
 It holds the store to: nothing listed for a subject with none; a created
 record listed whole, as plain data, its undefined fields named; `data` kept
 byte for byte; every binding and any kind round-tripped; a duplicate
-`(subject, id)` refused and the record kept, and one of ten concurrent
-creates let through; subjects kept apart; an update at the current version
+`(subject, id)` refused at the current generation and the record kept, and
+one of ten concurrent creates at one generation let through; subjects kept
+apart; an update at the current version
 replacing `data`, `label` and `lastUsedAt` and nothing else, at version + 1,
 and clearing what it says `undefined`; `null` for a version that moved or a
 record that is gone, nothing changed; a `RangeError` for an update at
 `Number.MAX_SAFE_INTEGER`; one winner among ten concurrent updates at one
 version; a successful update reaching no other record — the same id under
-another subject, the subject's other factors; removal of one record and of
-a subject's records, idempotent and no further; a removed record taken
-again; and, with `unreachable`, every member rejecting rather than answering
+another subject, the subject's other factors; removal of one record, once,
+and of a subject's records, idempotently, and no further; a removed record
+taken again; and, with `unreachable`, every member rejecting rather than answering
 "no factors", `null` or done. Every record id is 22
 base64url characters, the shape the provider makes and the Store's wire
 codec requires. Core's in-process store, the Redis store and foundation's
-Store-backed store run it.
+Store-backed store run it. It writes and removes records through the
+factor set's `createIf` and `removeIf`, at the generation the set is at, so it
+runs over a store with or without the port's optional unconditional `create`
+and `remove`.
 
 ## The factor set's conditional writes
 
@@ -210,8 +214,9 @@ It maps the store onto
 [`conditionalSetContract`](#the-conditional-write-suites)'s target and runs
 that suite, so the factor set is held to every rule of a set the suite
 holds: a subject is the scope, a record the item, `removeAllForSubject` the
-reset, `update` the member's own update, and `create`, `remove` and
-`removeAllForSubject` the unconditional membership writes. Every versioned
+reset, `update` the member's own update, and `removeAllForSubject` and,
+when the store provides them, the port's optional `create` and `remove` the
+unconditional membership writes. Every versioned
 listing is read with core's `readMfaFactorSet`, so a record that is not a
 whole record of its subject, or an id listed twice, fails the case that read
 it. The unreachable store is mapped bare: each member is the port's call

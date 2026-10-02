@@ -25,6 +25,7 @@ import {
 	isMfaFactorId,
 	type MfaFactorRecord,
 	type MfaFactorStore,
+	type StoreGeneration,
 } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { type ContractCase, type MfaFactorStoreHarness, mfaFactorStoreContract } from "#/index.mjs";
@@ -32,6 +33,22 @@ import { type ContractCase, type MfaFactorStoreHarness, mfaFactorStoreContract }
 describe("mfaFactorStoreContract over core's in-process store", () => {
 	for (const contractCase of mfaFactorStoreContract({
 		build: async () => ({ store: createMemoryMfaFactorStore() }),
+	})) {
+		it(contractCase.name, contractCase.run);
+	}
+});
+
+/** Core's in-process store without the port's optional unconditional `create` and `remove`. */
+const withoutUnconditional = (): MfaFactorStore =>
+	Object.fromEntries(
+		Object.entries(createMemoryMfaFactorStore()).filter(
+			([name]) => name !== "create" && name !== "remove",
+		),
+	) as unknown as MfaFactorStore;
+
+describe("mfaFactorStoreContract over a store without the unconditional create and remove", () => {
+	for (const contractCase of mfaFactorStoreContract({
+		build: async () => ({ store: withoutUnconditional() }),
 	})) {
 		it(contractCase.name, contractCase.run);
 	}
@@ -53,9 +70,7 @@ function unreachableStore(answers = false): MfaFactorStore {
 				listVersioned: down,
 				createIf: down,
 				removeIf: down,
-				create: down,
 				update: async () => null,
-				remove: async () => {},
 				removeAllForSubject: down,
 			}
 		: {
@@ -64,9 +79,7 @@ function unreachableStore(answers = false): MfaFactorStore {
 				listVersioned: down,
 				createIf: down,
 				removeIf: down,
-				create: down,
 				update: down,
-				remove: down,
 				removeAllForSubject: down,
 			};
 }
@@ -114,7 +127,8 @@ describe("the suite refuses a store that breaks the contract", () => {
 	it("one that rewrites data", async () => {
 		const refused = await refusedBy(() =>
 			broken((store) => ({
-				create: (record) => store.create({ ...record, data: record.data.toUpperCase() }),
+				createIf: (record, expected) =>
+					store.createIf({ ...record, data: record.data.toUpperCase() }, expected),
 			})),
 		);
 		expect(refused).toContain("keeps data verbatim: the store never reads it");
@@ -123,13 +137,19 @@ describe("the suite refuses a store that breaks the contract", () => {
 	it("one that overwrites a duplicate", async () => {
 		const refused = await refusedBy(() =>
 			broken((store) => ({
-				create: async (record) => {
-					await store.remove(record.subject, record.id);
-					await store.create(record);
+				createIf: async (record, expected) => {
+					const held = (await store.list(record.subject)).some(({ id }) => id === record.id);
+					if (held && expected !== null) {
+						const removed = await store.removeIf(record.subject, record.id, expected);
+						if (removed.outcome === "removed") return store.createIf(record, removed.generation);
+					}
+					return store.createIf(record, expected);
 				},
 			})),
 		);
-		expect(refused).toContain("refuses a duplicate (subject, id), and keeps the record as it was");
+		expect(refused).toContain(
+			"refuses a duplicate (subject, id) at the current generation, and keeps the record as it was",
+		);
 	});
 
 	it("one whose compare-and-set lets every writer win", async () => {
@@ -245,9 +265,9 @@ describe("the suite's records", () => {
 			build: async () => ({
 				store: {
 					...store,
-					create: async (record: MfaFactorRecord) => {
+					createIf: async (record: MfaFactorRecord, expected: StoreGeneration | null) => {
 						seen.push(record);
-						await store.create(record);
+						return store.createIf(record, expected);
 					},
 				},
 			}),
@@ -306,16 +326,17 @@ describe("the suite's concurrent cases", () => {
 		const used = new Set<string>();
 		const tagged = (tag: string): MfaFactorStore => ({
 			...store,
-			create: (record) => {
+			createIf: (record, expected) => {
 				used.add(tag);
-				return store.create(record);
+				return store.createIf(record, expected);
 			},
 		});
 		const race = mfaFactorStoreContract({
 			build: async () => ({ store: tagged("store"), second: tagged("second") }),
 		}).find(
 			(contractCase) =>
-				contractCase.name === "lets one of N concurrent creates of one (subject, id) through",
+				contractCase.name ===
+				"lets one of N concurrent creates of one (subject, id) at one generation through",
 		);
 		await race?.run();
 		expect([...used].sort()).toEqual(["second", "store"]);
