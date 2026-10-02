@@ -50,10 +50,11 @@ export function newStoreGeneration(): StoreGeneration {
 /**
  * The bundled stores' write-lifetime bound, 24 hours: a set emptied by any
  * membership write (its last removal or a reset) keeps its tombstone for at
- * least this long, and a membership write commits
+ * least this long from that write, and a membership write commits
  * or fails well within it, counted from the versioned read that produced its
- * expected generation, transport and queues included. The port's owning
- * module keeps that; callers outside it never hold a generation.
+ * expected generation, transport and queues included: a write past that
+ * cannot execute. The port's owning module keeps that; callers outside it
+ * never hold a generation.
  */
 export const BUNDLED_STORE_WRITE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 

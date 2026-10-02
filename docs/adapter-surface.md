@@ -455,17 +455,21 @@ write-lifetime bound. These are the rules every store with conditional members k
    upserts the set at a new generation, creating it when absent, so a
    `createIf(…, null)` sent before it answers `conflict`. A set's generation
    outlives its members: a set emptied by any membership write, its last
-   removal or a reset, keeps its tombstone for at least
-   the store's write-lifetime bound (24 h for the bundled stores,
+   removal or a reset (of an already empty set too), keeps its tombstone for
+   at least the store's write-lifetime bound, counted afresh from each such
+   write (24 h for the bundled stores,
    `BUNDLED_STORE_WRITE_LIFETIME_MS`); once it expires, the set reads as
    absent (`generation: null`). So a membership write must commit or fail
    within a bound the store sets, well under that, counted from the
    versioned read that produced the write's expected generation to the
    write's commit or failure in the store, transport and queues included:
    a write conditional on a read from before a reset then never lands after
-   the reset's tombstone expired. The port's owning module keeps that bound
-   (for example, a writer under a lease shorter than the bound); callers
-   outside it never hold a generation.
+   the reset's tombstone expired. The port's owning module keeps that bound,
+   and callers outside it never hold a generation. A client timeout or a
+   lease's expiry does not keep it on its own: a write past the bound must be
+   unable to execute, because the store refuses it on a deadline checked in
+   the same atomic step as the write, or because the transport ends it within
+   the bound.
 7. **A generation fences only its own store's records.** It does not fence a
    write to another port, unless both are in the same atomic step.
 8. **Generations are minted, never derived.** A generation is never issued
