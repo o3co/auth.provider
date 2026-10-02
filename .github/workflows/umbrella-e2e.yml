@@ -14,17 +14,20 @@ name: umbrella-e2e
 # E2E") says how. Not a required check; AGENTS.md also says what making it
 # one takes.
 
+# Until the v0.17.0 release this runs only by hand: one manual run before the
+# release cut, and the daily local `make test-e2e` in between. Restore the
+# `pull_request` trigger below after the release.
 on:
-  pull_request:
-    branches: [develop]
-    # No Markdown reaches the image the suite builds (it is built from
-    # packages/ and templates/standalone/), so a Markdown-only PR would only
-    # re-test develop, which the umbrella's nightly e2e-develop run does. A
-    # workflow filtered out here never reports: as a REQUIRED check it would
-    # leave such a PR pending forever — see AGENTS.md before requiring it.
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
+  # pull_request:
+  #   branches: [develop]
+  #   # No Markdown reaches the image the suite builds (it is built from
+  #   # packages/ and templates/standalone/), so a Markdown-only PR would only
+  #   # re-test develop, which the umbrella's nightly e2e-develop run does. A
+  #   # workflow filtered out here never reports: as a REQUIRED check it would
+  #   # leave such a PR pending forever — see AGENTS.md before requiring it.
+  #   paths-ignore:
+  #     - '**/*.md'
+  #     - 'docs/**'
   workflow_dispatch:
 
 permissions:
