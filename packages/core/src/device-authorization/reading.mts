@@ -130,6 +130,16 @@ const FIELDS: {
 
 const FIELD_NAMES = Object.keys(FIELDS) as (keyof DeviceAuthorization)[];
 
+/** Whether `value` is an object other than a list; one whose shape cannot be checked (a revoked Proxy) is not. */
+const isRecordShaped = (value: unknown): value is object => {
+	if (typeof value !== "object" || value === null) return false;
+	try {
+		return !Array.isArray(value);
+	} catch {
+		return false;
+	}
+};
+
 /**
  * `record` read into a `DeviceAuthorization`: each declared field read by
  * name, once, however the object holds it — own data, an accessor,
@@ -137,7 +147,8 @@ const FIELD_NAMES = Object.keys(FIELDS) as (keyof DeviceAuthorization)[];
  * key, `undefined` where the record holds none, and is frozen at every depth,
  * sharing nothing with `record`.
  *
- * Refused: a `record` that is not an object (`not_an_object`); a field whose
+ * Refused: a `record` that is not an object, or whose shape cannot be
+ * checked (`not_an_object`); a field whose
  * read throws or whose value is not what the type declares (`malformed`,
  * naming it). A scope is a list of RFC 6749 §3.3 scope-tokens. An expiry is
  * held to `isStorableExpiry`; an approval instant and an authentication time
@@ -147,9 +158,7 @@ const FIELD_NAMES = Object.keys(FIELDS) as (keyof DeviceAuthorization)[];
  * read, is read as none rather than refused.
  */
 export function readDeviceAuthorization(record: unknown): DeviceAuthorizationReading {
-	if (typeof record !== "object" || record === null || Array.isArray(record)) {
-		return { ok: false, refused: "not_an_object" };
-	}
+	if (!isRecordShaped(record)) return { ok: false, refused: "not_an_object" };
 	const source = record as Record<string, unknown>;
 	const copy: Record<string, unknown> = {};
 	for (const field of FIELD_NAMES) {

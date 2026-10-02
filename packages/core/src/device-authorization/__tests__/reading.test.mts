@@ -177,6 +177,12 @@ describe("readDeviceAuthorization", () => {
 		}
 	});
 
+	it("refuses a record whose shape cannot be checked as not an object, never throwing", () => {
+		const { proxy, revoke } = Proxy.revocable({}, {});
+		revoke();
+		expect(readDeviceAuthorization(proxy)).toStrictEqual({ ok: false, refused: "not_an_object" });
+	});
+
 	it("refuses a field that does not hold its declared value, naming it", () => {
 		for (const [field, values] of MALFORMED) {
 			for (const value of values) {
