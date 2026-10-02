@@ -344,22 +344,30 @@ describe("createWebAuthnGrant — assertion verification", () => {
 describe("createWebAuthnGrant — an assertion without a user handle", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	const withoutUserHandle = (userHandle: undefined | null): AuthenticationResponseJSON => {
+	/** The assertion with `userHandle` as given, or without one when `undefined`. */
+	const withoutUserHandle = (userHandle: unknown): AuthenticationResponseJSON => {
 		const assertion = makeAssertionResponse();
 		const { userHandle: _omitted, ...response } = assertion.response;
 		return {
 			...assertion,
-			response: (userHandle === null
-				? { ...response, userHandle: null }
-				: response) as AuthenticationResponseJSON["response"],
+			response: (userHandle === undefined
+				? response
+				: { ...response, userHandle }) as AuthenticationResponseJSON["response"],
 		};
 	};
 
+	// A zero-length handle is no handle (WebAuthn §7.2 step 6), and the body's
+	// shape check leaves `userHandle` to this guard, so any non-string is one too.
 	it.each([
 		["absent", undefined],
 		["null", null],
+		["empty", ""],
+		["a number", 0],
+		["an object", {}],
+		["a list", ["dXNlcg"]],
+		["a boolean", true],
 	] as const)(
-		"is refused as 400 invalid_grant user_handle_missing when it is %s and allowCredentialsForKnownUser is off",
+		"is refused as 400 invalid_grant user_handle_missing when it is %s",
 		async (_what, userHandle) => {
 			const store = createMemoryWebAuthnCredentialStore();
 			await store.registerCredential(makeCredential());
@@ -383,21 +391,26 @@ describe("createWebAuthnGrant — an assertion without a user handle", () => {
 		},
 	);
 
-	it("is verified and answered with tokens when allowCredentialsForKnownUser is on", async () => {
+	it("is refused when the relying party still carries the retired allowCredentialsForKnownUser", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+		const retired: Record<string, unknown> = { allowCredentialsForKnownUser: true };
 		const deps = {
 			...makeBaseDeps(store),
-			webauthnConfig: createTestWebAuthnConfig({ allowCredentialsForKnownUser: true }),
+			webauthnConfig: { ...createTestWebAuthnConfig(), ...retired },
 		};
 
 		const { result } = await createWebAuthnGrant(deps).handle(
 			makeCtx({ assertion: withoutUserHandle(undefined) }),
 		);
 
-		expect(result.status).toBe(200);
-		expect(mockVerifyAssertion).toHaveBeenCalledTimes(1);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "user_handle_missing",
+		});
+		expect(mockVerifyAssertion).not.toHaveBeenCalled();
 	});
 });
 

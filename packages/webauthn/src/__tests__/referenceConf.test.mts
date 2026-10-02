@@ -21,7 +21,9 @@
  * without losing a path —
  * core's `packageReferenceProblems`, the check every package with defaults
  * runs over its own file. The two rate-limit variables are named after the
- * paths they set; their old names are declared renamed and bound nowhere.
+ * paths they set; their old names are declared renamed and bound nowhere. The
+ * removed `allowCredentialsForKnownUser` is declared removed, and its variable
+ * is bound nowhere.
  */
 
 import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
@@ -51,12 +53,23 @@ describe("the package's config/reference.conf", () => {
 		expect(packageReferenceProblems({ reference: REFERENCE, modules, read })).toEqual([]);
 	});
 
-	it("declares the two rate-limit variables renamed to the names their paths derive", () => {
+	it("declares the two rate-limit variables renamed to the names their paths derive, and the removed key's variable", () => {
 		expect(webauthnModule.section?.renamedVariables).toEqual({
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT: "webauthn.rateLimit.authenticationOptions.limit",
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS:
 				"webauthn.rateLimit.authenticationOptions.windowSeconds",
+			WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER: "webauthn.allowCredentialsForKnownUser",
 		});
+	});
+
+	it("declares allowCredentialsForKnownUser removed, and binds its variable nowhere", () => {
+		expect(webauthnModule.section?.relocatedFrom).toEqual({
+			"webauthn.allowCredentialsForKnownUser": null,
+		});
+		const tree = read(new URL(REFERENCE).pathname, {
+			WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER: "true",
+		}) as { webauthn: Record<string, unknown> };
+		expect(tree.webauthn).not.toHaveProperty("allowCredentialsForKnownUser");
 	});
 
 	it.each([
