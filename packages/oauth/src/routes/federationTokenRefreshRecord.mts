@@ -18,7 +18,9 @@
  * What a refresh the upstream answered ends in: an answer that cannot be read
  * as a token, or whose type may not be handed on, is refused, while a rotated
  * refresh token is still kept, best effort; otherwise the refreshed record is
- * written and its token answered. Every write lands only on the record the
+ * written and its token answered. A record with no finite expiry, refreshed
+ * because it holds a refresh token, keeps answering its stored token when the
+ * answer's lifetime is refused, as it did before it was due. Every write lands only on the record the
  * refresh was made from; a refresh whose record was removed or rewritten
  * meanwhile is dropped, never written over what replaced it.
  */
@@ -117,6 +119,12 @@ export const recordRefresh = async (
 						reason: accessToken === undefined ? "no_access_token" : "invalid_token_type",
 					},
 		});
+		if (!lifetime.accepted && currentTokens.expiresAt === null) {
+			if (!isDisclosable(currentTokens)) {
+				return refuseUndisclosableTokenType(ctx, caller, currentTokens.tokenType);
+			}
+			return answerToken(ctx, caller, currentTokens, false);
+		}
 		return res.status(500).json({
 			error: "refresh_failed",
 			error_description: "federation token refresh failed",
