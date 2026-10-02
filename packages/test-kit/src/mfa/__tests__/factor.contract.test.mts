@@ -20,7 +20,7 @@
  * the contract fails the case that names it.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { type MfaFactor, type MfaFactorData, normaliseMailAddress } from "@o3co/auth-provider-core";
 import {
 	createTestMfaDigests,
@@ -68,6 +68,8 @@ const RULES = {
 		"identity, when present, answers the enrolled data a non-empty string, the same at a second reading, through another JSON round trip, and for the next data a verification answers",
 	identityUnreadable:
 		"identity, when present, answers a non-empty string or undefined over data it cannot read, never one string for two of them unless it is the enrolled data's own, and never throws",
+	identityDistinct:
+		"identity, when present and given a second authenticator's enrollment proof, answers the enrolled data of the two authenticators two different non-empty strings, each the same once both are enrolled through the factor that enrolled it or a fresh one, in either order: an absent identity is a duplicate of none, never a distinct authenticator",
 } as const;
 
 const USER = { id: "u-contract", username: "contract", email: "contract@example.com" };
@@ -101,6 +103,12 @@ const identityOf = (data: MfaFactorData): string | undefined => {
 
 /** The double, answering `identity` as {@link identityOf} does. */
 const identified = (factor: MfaFactor): MfaFactor => ({ ...factor, identity: identityOf });
+
+/** `input` given a second authenticator: each enrollment of the double makes a new secret. */
+const withSecond = (input: MfaFactorContractInput): MfaFactorContractInput => ({
+	...input,
+	secondEnrollmentProof: testMfaFactorProofs.enrollmentProof,
+});
 
 /** The names of the cases the factors `input` builds fail. */
 const failing = async (input: MfaFactorContractInput): Promise<string[]> => {
@@ -921,5 +929,128 @@ describe("mfaFactorContract", () => {
 			},
 		});
 		expect(await failing(inputFor({ mail: true }, careless))).toEqual([RULES.identityUnreadable]);
+	});
+
+	it("passes the double with an identity and a second authenticator, with and without a challenge, and one with no identity", async () => {
+		expect(await failing(withSecond(inputFor({}, identified)))).toEqual([]);
+		expect(await failing(withSecond(inputFor({ challenge: true }, identified)))).toEqual([]);
+		expect(await failing(withSecond(inputFor()))).toEqual([]);
+	});
+
+	it("passes a factor whose enrollment derives its material from the transaction: each enrollment has its own", async () => {
+		const perTransaction = (factor: MfaFactor): MfaFactor => ({
+			...identified(factor),
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				const secret = createHash("sha256").update(ctx.transactionId).digest("base64url");
+				return {
+					...start,
+					state: { ...start.state, secret },
+					response: { ...(start.response as object), secret },
+				};
+			},
+		});
+		expect(await failing(withSecond(inputFor({}, perTransaction)))).toEqual([]);
+	});
+
+	it("passes a factor that refuses an enrollment within half a minute of a record the subject holds", async () => {
+		const coolingDown = (factor: MfaFactor): MfaFactor => ({
+			...identified(factor),
+			beginEnrollment: async (ctx) => {
+				if (ctx.factors.some((held) => ctx.nowMs - held.createdAt.getTime() < 30_000)) {
+					throw new Error("enrolled too recently");
+				}
+				return factor.beginEnrollment(ctx);
+			},
+		});
+		expect(await failing(withSecond(inputFor({}, coolingDown)))).toEqual([]);
+	});
+
+	it("fails an identity that answers one string for two authenticators", async () => {
+		const constant = (factor: MfaFactor): MfaFactor => ({ ...factor, identity: () => "one" });
+		expect(await failing(withSecond(inputFor({}, constant)))).toEqual([RULES.identityDistinct]);
+		// Without a second authenticator the suite cannot tell.
+		expect(await failing(inputFor({}, constant))).toEqual([]);
+	});
+
+	it("fails an identity that answers none for the second authenticator: none is no distinct authenticator", async () => {
+		const secondUnnamed = (factor: MfaFactor): MfaFactor => {
+			let completed = 0;
+			return {
+				...factor,
+				completeEnrollment: async (ctx) => {
+					const done = await factor.completeEnrollment(ctx);
+					if (!done.ok) return done;
+					completed += 1;
+					return completed === 2 ? { ...done, data: { ...done.data, unnamed: true } } : done;
+				},
+				identity: (data) => (data.unnamed === true ? undefined : identityOf(data)),
+			};
+		};
+		expect(await failing(withSecond(inputFor({}, secondUnnamed)))).toEqual([
+			RULES.identityDistinct,
+		]);
+	});
+
+	it("fails an identity read from what the subject already holds: the second enrollment is begun and completed beside the first record", async () => {
+		// As a user handle every credential of one account shares.
+		const accountWide = (factor: MfaFactor): MfaFactor => ({
+			...factor,
+			beginEnrollment: async (ctx) => {
+				const start = await factor.beginEnrollment(ctx);
+				const held = ctx.factors[0]?.data.handle;
+				const handle = typeof held === "string" ? held : randomBytes(8).toString("hex");
+				return { ...start, state: { ...start.state, handle } };
+			},
+			completeEnrollment: async (ctx) => {
+				const done = await factor.completeEnrollment(ctx);
+				return done.ok ? { ...done, data: { ...done.data, handle: ctx.state.handle } } : done;
+			},
+			identity: (data) => (typeof data.handle === "string" ? data.handle : undefined),
+		});
+		expect(await failing(withSecond(inputFor({}, accountWide)))).toEqual([RULES.identityDistinct]);
+	});
+
+	it("fails an identity that answers every record the latest enrollment's: both are read once both are enrolled", async () => {
+		const latestOnly = (factor: MfaFactor): MfaFactor => {
+			let latest: string | undefined;
+			return {
+				...factor,
+				completeEnrollment: async (ctx) => {
+					const done = await factor.completeEnrollment(ctx);
+					if (done.ok) latest = identityOf(done.data);
+					return done;
+				},
+				identity: () => latest,
+			};
+		};
+		expect(await failing(withSecond(inputFor({}, latestOnly)))).toEqual([RULES.identityDistinct]);
+	});
+
+	it("fails an identity keyed per factor instance: a fresh factor reads each record another string", async () => {
+		// As an identity under an HMAC key each build makes: stable in one instance, another in the next.
+		const instanceKeyed = (factor: MfaFactor): MfaFactor => {
+			const key = randomBytes(32);
+			return {
+				...factor,
+				identity: (data) => {
+					const own = identityOf(data);
+					return own === undefined
+						? undefined
+						: createHmac("sha256", key).update(own).digest("base64url");
+				},
+			};
+		};
+		expect(await failing(withSecond(inputFor({}, instanceKeyed)))).toEqual([
+			RULES.identityDistinct,
+		]);
+		// One instance alone cannot tell.
+		expect(await failing(inputFor({}, instanceKeyed))).toEqual([]);
+	});
+
+	it("fails a second authenticator's proof that completes no enrollment", async () => {
+		expect(
+			await failing({ ...inputFor({}, identified), secondEnrollmentProof: () => "not-the-secret" }),
+		).toEqual([RULES.identityDistinct]);
 	});
 });

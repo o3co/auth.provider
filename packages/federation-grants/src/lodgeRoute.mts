@@ -80,11 +80,26 @@ export interface FederationGrantLodgeHandlerOptions {
 	readonly logger?: Logger;
 }
 
-/** Where the browser starts: the connect route, on the issuer, carrying the handle. */
-export function federationGrantConnectUri(issuer: string, handle: string): string {
+/**
+ * The connect route's one-trip marker: connect sets it on the link a step-up
+ * trip returns to, and a marked connect is never sent on another trip. It only
+ * narrows what connect does, so a forged one costs its sender a refusal.
+ */
+export const STEPPED_UP_PARAMETER = "stepped_up";
+
+/**
+ * Where the browser starts: the connect route, on the issuer, carrying the
+ * handle — and the one-trip marker when it is a step-up trip's return.
+ */
+export function federationGrantConnectUri(
+	issuer: string,
+	handle: string,
+	{ steppedUp = false }: { readonly steppedUp?: boolean } = {},
+): string {
 	const base = issuer.endsWith("/") ? issuer : `${issuer}/`;
 	const url = new URL("session/federation-grants/connect", base);
 	url.searchParams.set("request", handle);
+	if (steppedUp) url.searchParams.set(STEPPED_UP_PARAMETER, "1");
 	return url.href;
 }
 
