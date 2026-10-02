@@ -28,10 +28,8 @@ import { redisDurability } from "../durability.mjs";
 import {
 	MFA_BINDING_INDEX,
 	MFA_BINDING_UNINDEX,
-	MFA_FACTOR_CREATE,
 	MFA_FACTOR_CREATE_IF,
 	MFA_FACTOR_LIST_VERSIONED,
-	MFA_FACTOR_REMOVE,
 	MFA_FACTOR_REMOVE_ALL,
 	MFA_FACTOR_REMOVE_IF,
 	MFA_FACTOR_UPDATE,
@@ -126,15 +124,6 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 			);
 			return outcomeOf(reply, ["removed", "missing", "conflict", "late"], "removeIf");
 		},
-		async create(key, field, value, input) {
-			const reply = await runScript(
-				io,
-				MFA_FACTOR_CREATE,
-				[key, input.replayKey],
-				[input.next, String(input.deadlineMs), String(input.clockSkewMs), field, value],
-			);
-			return outcomeOf(reply, ["created", "conflict", "late"], "create");
-		},
 		async update(key, field, input) {
 			const reply = await runScript(
 				io,
@@ -143,21 +132,6 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 				[field, input.expectedVersion, input.nextVersion, input.mutable],
 			);
 			return typeof reply === "string" ? reply : null;
-		},
-		async remove(key, field, input) {
-			const reply = await runScript(
-				io,
-				MFA_FACTOR_REMOVE,
-				[key, input.replayKey],
-				[
-					input.next,
-					String(input.deadlineMs),
-					String(input.clockSkewMs),
-					String(input.tombstoneMs),
-					field,
-				],
-			);
-			return outcomeOf(reply, ["removed", "missing", "late"], "remove");
 		},
 		async removeAll(key, input) {
 			const reply = await runScript(

@@ -59,10 +59,10 @@ export const MFA_FACTOR_UPDATE = defineScript(LUA_MFA_FACTOR_UPDATE);
 // slot migration) still finds it. A key holding factors but no `~g` was written before the set
 // had a generation: a conditional write against it is a `conflict`.
 //
-// The removals, the reset and the versioned read declare `allow-oom`: under `noeviction` a full
+// The removal, the reset and the versioned read declare `allow-oom`: under `noeviction` a full
 // server still runs them, since they write only `~g`, the replay key and an expiry, and a factor
-// must stay removable, and the reset must run, when nothing more can be enrolled. The creates
-// declare no flag, so a full server refuses them (`OOM`).
+// must stay removable, and the reset must run, when nothing more can be enrolled. The create
+// declares no flag, so a full server refuses it (`OOM`).
 //
 // Membership writes: `KEYS[1]` = the subject's hash, `KEYS[2]` = the write's replay key (same
 // hash tag); `ARGV[1]` = the next generation, `ARGV[2]` = the deadline (epoch ms), `ARGV[3]` =
@@ -102,10 +102,10 @@ redis.call('SET', KEYS[2], outcome, 'PXAT', tonumber(ARGV[2]) + tonumber(ARGV[3]
 return outcome
 `;
 
-/** The first line of a script that runs on a full server: a removal, the reset, the versioned read. */
+/** The first line of a script that runs on a full server: the removal, the reset, the versioned read. */
 const ALLOW_OOM = "#!lua flags=allow-oom";
 
-/** The first line of a script a full server refuses: a create. */
+/** The first line of a script a full server refuses: the create. */
 const REFUSED_WHEN_FULL = "#!lua";
 
 /** A membership script: its first line, the prelude, its `apply`, and the shared step. */
@@ -161,35 +161,6 @@ const LUA_MFA_FACTOR_REMOVE_IF = membershipScript(
 );
 
 /**
- * `MfaFactorStoreClient.create`, unconditional on the generation. `ARGV[4]` = the factor's
- * field, `ARGV[5]` = its value. Answers `created`, `conflict` (the field is held) or `late`.
- */
-const LUA_MFA_FACTOR_CREATE = membershipScript(
-	REFUSED_WHEN_FULL,
-	`
-  if redis.call('HEXISTS', KEYS[1], ARGV[4]) == 1 then return 'conflict' end
-  redis.call('HSET', KEYS[1], ARGV[4], ARGV[5], '~g', ARGV[1])
-  redis.call('PERSIST', KEYS[1])
-  return 'created'
-`,
-);
-
-/**
- * `MfaFactorStoreClient.remove`, unconditional on the generation. `ARGV[4]` = the tombstone's
- * lifetime (ms), `ARGV[5]` = the factor's field. Answers `removed`, `missing` (nothing written)
- * or `late`.
- */
-const LUA_MFA_FACTOR_REMOVE = membershipScript(
-	ALLOW_OOM,
-	`
-  if redis.call('HDEL', KEYS[1], ARGV[5]) == 0 then return 'missing' end
-  redis.call('HSET', KEYS[1], '~g', ARGV[1])
-  mfa_factor_settle(ARGV[4])
-  return 'removed'
-`,
-);
-
-/**
  * `MfaFactorStoreClient.removeAll`: the reset, unconditional, serialised with the writes above
  * as one script. `ARGV[4]` = the tombstone's lifetime (ms). Answers `removed` or `late`. The
  * tombstone is made when there was no key, and its expiry starts again when there was one.
@@ -207,8 +178,6 @@ const LUA_MFA_FACTOR_REMOVE_ALL = membershipScript(
 export const MFA_FACTOR_LIST_VERSIONED = defineScript(LUA_MFA_FACTOR_LIST_VERSIONED);
 export const MFA_FACTOR_CREATE_IF = defineScript(LUA_MFA_FACTOR_CREATE_IF);
 export const MFA_FACTOR_REMOVE_IF = defineScript(LUA_MFA_FACTOR_REMOVE_IF);
-export const MFA_FACTOR_CREATE = defineScript(LUA_MFA_FACTOR_CREATE);
-export const MFA_FACTOR_REMOVE = defineScript(LUA_MFA_FACTOR_REMOVE);
 export const MFA_FACTOR_REMOVE_ALL = defineScript(LUA_MFA_FACTOR_REMOVE_ALL);
 
 // A transaction is one hash. Its deadline is set once, by `create`, and nothing moves it: an
