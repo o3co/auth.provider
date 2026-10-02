@@ -15,8 +15,8 @@
  */
 
 /**
- * Every module with an `enabled` key of its own, switched off by it,
- * registers nothing: it is switched off by its section (`section.isEnabled`,
+ * Every module that has its own `enabled` key registers nothing when that key
+ * switches it off: either its section switches it off (`section.isEnabled`,
  * which core reads to register nothing of it), or it is built from a
  * configuration that switches it off and declares nothing but its section.
  * Booted alone, each boots with none of what it would require, and contributes
@@ -104,7 +104,7 @@ const configWith = (section: Record<string, unknown>) => ({ ...makeValidCoreConf
 const declaredBeyondSection = (module: Module): string[] =>
 	Object.keys(module).filter((key) => key !== "name" && key !== "section");
 
-describe("a module its own enabled key switches off", () => {
+describe("a module switched off by its own enabled key", () => {
 	it.each(CASES)("%s registers nothing", (name, section, build) => {
 		const written = section();
 		const module = build(configWith(written));

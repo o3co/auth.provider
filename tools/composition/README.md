@@ -82,7 +82,7 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   one: with the shipped configuration, with each owner's own key set, with the
   limiter's own `limits` declaring every prefix (which wins), and with the
   owners switched off.
-- **A module its own `enabled` key switches off registers nothing.** Each
+- **A module switched off by its own `enabled` key registers nothing.** Each
   such module — DPoP, mTLS, the device grant, the session grant, federation
   grants and the MFA package's factors — at its package's own off section
   is switched off by it or declares nothing but its section, and booted
