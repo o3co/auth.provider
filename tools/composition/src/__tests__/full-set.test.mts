@@ -1165,7 +1165,10 @@ describe("a passkey sign-in under mfa.mode = required", () => {
 			.set("Authorization", basic(PASSKEY_APP))
 			.send({
 				grant_type: WEBAUTHN_GRANT_TYPE,
-				assertion: passkey.assert(options.body.challenge as string),
+				// A discoverable passkey answers its user handle: the UTF-8 bytes of the userId.
+				assertion: passkey.assert(options.body.challenge as string, {
+					userHandle: Buffer.from(ALICE.sub, "utf8").toString("base64url"),
+				}),
 			});
 		expect(signedIn.status, JSON.stringify(signedIn.body)).toBe(200);
 		expect(typeof signedIn.body.refresh_token).toBe("string");

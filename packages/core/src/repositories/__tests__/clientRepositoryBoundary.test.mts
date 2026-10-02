@@ -273,6 +273,21 @@ describe("validatedClientRepository — a malformed record is answered as no cli
 			"frontchannelLogoutUri",
 		],
 		[
+			"a front-channel logout URI whose query carries sid",
+			{ frontchannelLogoutUri: "https://rp.example/frontchannel?sid=1" },
+			"frontchannelLogoutUri",
+		],
+		[
+			"a front-channel logout URI whose query carries iss in another case",
+			{ frontchannelLogoutUri: "https://rp.example/frontchannel?ISS=1" },
+			"frontchannelLogoutUri",
+		],
+		[
+			"a front-channel logout URI whose query name is percent-encoded",
+			{ frontchannelLogoutUri: "https://rp.example/frontchannel?%73id=1" },
+			"frontchannelLogoutUri",
+		],
+		[
 			"a back-channel logout URI that is not http(s)",
 			{ backchannelLogoutUri: "ftp://rp.example/bc" },
 			"backchannelLogoutUri",
@@ -348,6 +363,25 @@ describe("validatedClientRepository — a malformed record is answered as no cli
 			).toBe(true);
 		});
 	}
+
+	it("names the parameter a refused front-channel logout URI carries, never the URI", async () => {
+		const logger = recordingLogger();
+		const boundary = validatedClientRepository(
+			repositoryAnswering({
+				...validRecord(),
+				frontchannelLogoutUri: "https://rp.example/frontchannel?sid=leak",
+			}),
+			{ logger },
+		);
+		expect(await boundary.findById(CLIENT_ID)).toBeNull();
+		const [[line]] = logger.warn.mock.calls as [[Record<string, unknown>, string]];
+		const reasons = line.reasons as string[];
+		expect(
+			reasons.some((reason) => /^frontchannelLogoutUri: .*already carries .sid./.test(reason)),
+			reasons.join("; "),
+		).toBe(true);
+		expect(reasons.join("; ")).not.toContain("leak");
+	});
 
 	it("refuses an answer that is not an object", async () => {
 		for (const answer of ["client-1", 42, true, [validRecord()]]) {

@@ -99,6 +99,7 @@ function makeAssertionResponse(challenge = "test-challenge-value"): Authenticati
 			clientDataJSON,
 			authenticatorData: "stub-authdata",
 			signature: "stub-signature",
+			userHandle: Buffer.from(USER_ID, "utf8").toString("base64url"),
 		},
 		clientExtensionResults: {},
 		type: "public-key",
