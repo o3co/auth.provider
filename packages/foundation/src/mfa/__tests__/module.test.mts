@@ -134,7 +134,7 @@ describe("foundationMfaFactorStoreModule", () => {
 		const store = await provided({ bearerToken: TOKEN });
 		expect(store).toBeInstanceOf(HttpMfaFactorStore);
 		expect(store.kind).toBe("store");
-		await store.create(RECORD);
+		expect((await store.createIf(RECORD, null)).outcome).toBe("created");
 		expect(await store.list("user-1")).toStrictEqual([RECORD]);
 		expect(fake.requests.map((request) => request.endpoint)).toEqual(["create", "list"]);
 	});
