@@ -315,4 +315,34 @@ describe("a recovery code of a retired set", () => {
 		expect(totpLogin.status, JSON.stringify(totpLogin.body)).toBe(200);
 		expect(floor).not.toHaveBeenCalled();
 	});
+
+	it.each([
+		["before the attempt is spent", 0, 0],
+		["after the code is spent", 1, "spent"],
+	] as const)(
+		"is 503 within one mfa.storeTimeoutMs when the floor read never answers, %s",
+		async (_, answered, left) => {
+			const factorStore = createMemoryMfaFactorStore();
+			await seedTotp(factorStore);
+			const set = await seedRecoveryCodes(factorStore);
+			const { app, transactionStore, userSessionStore } = await boot({
+				config: configFor("required", { storeTimeoutMs: 1_000 }),
+				factorStore,
+			});
+			const floor = transactionStore.recoverySetFloor.bind(transactionStore);
+			let calls = 0;
+			vi.spyOn(transactionStore, "recoverySetFloor").mockImplementation((subject) =>
+				calls++ < answered ? floor(subject) : new Promise<number>(() => undefined),
+			);
+			const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+			const { agent, transaction } = await beginLogin(app);
+
+			const res = await verify(agent, transaction, set.record.id, set.codes[0]);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(503);
+			expect(create).not.toHaveBeenCalled();
+			const after = await transactionStore.get(transaction);
+			expect(after === null ? "spent" : after.attempts).toBe(left);
+		},
+	);
 });
