@@ -145,8 +145,10 @@ export interface FederationTokenStore {
 	/**
 	 * Replaces the record only while it is live at `expected`, as one atomic
 	 * step in the store, at a new generation. Never creates a record (only
-	 * `attach` does), and never adds `(sid, federationName)` to any listing the
-	 * store keeps.
+	 * `attach` does). On `missing` or `conflict` it adds
+	 * `(sid, federationName)` to no listing the store keeps; after `updated`
+	 * an adapter may add it to its listings again, so a listing that lapsed
+	 * still names the record.
 	 */
 	replaceIf(
 		sid: string,
