@@ -48,8 +48,9 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  *
  * The client is `ctx.authenticatedClient` (RFC 6749 §2.3 authentication via
  * `clientAuthMw`), never a body `client_id`: no identity decision reads the
- * raw body. Its `allowedScopes` bound the request; `aud` is its first
- * `allowedAudiences` entry, else its client id; `azp` is its client id.
+ * raw body. Its `allowedScopes` bound the request; `aud` is a wired
+ * `grantPolicy`'s `grantedAudience` within its `allowedAudiences`, else its
+ * first `allowedAudiences` entry, else its client id; `azp` is its client id.
  */
 /**
  * What the session grant reads. The requirement resolver, `subjectRevocation`
