@@ -66,6 +66,7 @@ export type {
 	LifecycleWithoutProvidesDetails,
 	ListCollector,
 	ListShapedOverrideDetails,
+	MfaRequirementNotSecondFactorAuthorityDetails,
 	MissingRequiredComponentDetails,
 	ModuleFactoryNotCalledDetails,
 	ModuleSectionPathInvalidDetails,

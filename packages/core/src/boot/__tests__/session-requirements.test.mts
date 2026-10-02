@@ -47,7 +47,7 @@ import {
 	type SessionRequirement,
 	type SessionRequirementResolver,
 } from "#/session-admission/requirement.mjs";
-import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { coreConfigForTests, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { createTestOAuthTokenSettings } from "#/testing/slots/oauthTokenSettings.mjs";
 
 const config = (over: Record<string, unknown> = {}) => ({
@@ -1086,7 +1086,7 @@ describe("the declaration: core.sessionRequirements.expected", () => {
 	});
 });
 
-describe("boot's checks do not act on mfa.mode", () => {
+describe("mfa.mode alone refuses nothing: a composition that does not expect mfa boots under any mode", () => {
 	it.each(["required", "optional"] as const)(
 		"boots under mfa.mode = %s with no requirement named mfa and no declaration, when nothing consults admission",
 		async (mode) => {
@@ -1106,11 +1106,125 @@ describe("boot's checks do not act on mfa.mode", () => {
 		async (mode) => {
 			const handle = await boot([consumer({})], {
 				mfa: { mode },
-				core: { sessionRequirements: { expected: [] } },
+				...coreConfigForTests(),
 			});
 			await handle.dispose();
 		},
 	);
+});
+
+describe("while mfa.mode is not off, the requirement expected as mfa must be the second-factor authority", () => {
+	const totp = factor("totp", ["otp"], true);
+	const factors = defineModule({
+		name: "test:factors",
+		contributes: { mfaFactors: { totp: () => totp } },
+	});
+	/** Registered as `mfa`, admitting every session: no second factor is ever asked. */
+	const namedMfa = (moduleName = "test:named-mfa") =>
+		contributing(moduleName, {
+			mfa: () => requirement("mfa", { secondFactorAuthority: false, remediations: [] }),
+		});
+	const expectingMfa = (mode: unknown) => ({
+		...coreConfigForTests({ expected: ["mfa"] }),
+		mfa: { mode },
+	});
+
+	it.each(["required", "optional"] as const)(
+		"refuses, under mfa.mode = %s, a requirement registered as mfa that does not declare the authority — mfa-requirement-not-second-factor-authority, naming the requirement and its module and the fix",
+		async (mode) => {
+			const err = await refusal(boot([namedMfa(), consumer({})], expectingMfa(mode)));
+			expect(err.reason).toBe("mfa-requirement-not-second-factor-authority");
+			expect(err.stage).toBe("applyContributions");
+			expect(err.details).toEqual({
+				reason: "mfa-requirement-not-second-factor-authority",
+				requirement: { name: "mfa", module: "test:named-mfa" },
+			});
+			expect(err.message).toContain('module "test:named-mfa"');
+			expect(err.message).toContain("does not declare the second-factor authority");
+			expect(err.message).toContain("install the MFA package's module");
+			expect(err.message).toContain('set mfa.mode = "off"');
+			expect(err.message).toContain('remove "mfa" from core.sessionRequirements.expected');
+			expect(err.message).not.toContain(mode);
+		},
+	);
+
+	it("reads any mode other than off as asking for a second factor, and quotes none", async () => {
+		const err = await refusal(boot([namedMfa()], expectingMfa("s3cret-mode")));
+		expect(err.reason).toBe("mfa-requirement-not-second-factor-authority");
+		expect(err.message).not.toContain("s3cret-mode");
+	});
+
+	it("runs the cleanups first, and carries what a cleanup threw", async () => {
+		const closing = defineModule({
+			name: "test:closing",
+			provides: { closingSlot: () => 1 },
+			lifecycle: {
+				closingSlot: {
+					eager: true,
+					cleanup: () => {
+						throw new Error("closing failed");
+					},
+				},
+			},
+		} as never);
+		const err = await refusal(boot([closing, namedMfa()], expectingMfa("required")));
+		expect(err.reason).toBe("mfa-requirement-not-second-factor-authority");
+		expect(err.details).toMatchObject({
+			cleanupErrors: [{ module: "test:closing", componentKey: "closingSlot" }],
+		});
+	});
+
+	it("boots under mfa.mode = required when the requirement registered as mfa declares the authority", async () => {
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot(
+			[factors, ...stores, authorityModule({}, undefined, "mfa", "test:mfa"), consumer(seen)],
+			expectingMfa("required"),
+		);
+		try {
+			expect(seen.resolver?.get("mfa")?.secondFactorAuthority).toBe(true);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it.each([
+		["off", { mfa: { mode: "off" } }],
+		["absent", {}],
+	] as const)(
+		"asks nothing of a requirement registered as mfa while mfa.mode is %s",
+		async (_mode, mfa) => {
+			const seen: { resolver?: SessionRequirementResolver } = {};
+			const handle = await boot([namedMfa(), consumer(seen)], {
+				...coreConfigForTests({ expected: ["mfa"] }),
+				...mfa,
+			});
+			try {
+				expect(seen.resolver?.get("mfa")?.secondFactorAuthority).toBe(false);
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+
+	it("asks nothing of the authority's name when mfa is not expected: the authority under another name boots under mfa.mode = required", async () => {
+		const handle = await boot([factors, ...stores, authorityModule()], {
+			...coreConfigForTests({ expected: ["verifier"] }),
+			mfa: { mode: "required" },
+		});
+		await handle.dispose();
+	});
+
+	it("leaves a requirement registered as mfa and not expected to session-requirements-undeclared", async () => {
+		const err = await refusal(
+			boot([namedMfa()], { ...coreConfigForTests(), mfa: { mode: "required" } }),
+		);
+		expect(err.reason).toBe("session-requirements-undeclared");
+	});
+
+	it("leaves an expected mfa nothing registers to session-requirement-missing", async () => {
+		const err = await refusal(boot([], expectingMfa("required")));
+		expect(err.reason).toBe("session-requirement-missing");
+	});
 });
 
 describe("the second-factor authority is declared, and bound to core's MFA ports, whatever its name", () => {

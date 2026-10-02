@@ -657,6 +657,7 @@ export type BootErrorReason =
 	| "session-requirements-undeclared"
 	| "session-requirement-missing"
 	| "duplicate-second-factor-authority"
+	| "mfa-requirement-not-second-factor-authority"
 	| "reserved-component-key"
 	| "module-section-path-invalid"
 	| "contribution-kind-guarded"
@@ -1286,8 +1287,25 @@ export interface DuplicateSecondFactorAuthorityDetails {
 }
 
 /**
+ * While `mfa.mode` asks for a second factor, `core.sessionRequirements.expected`
+ * names `mfa` and the requirement registered under that name does not declare
+ * the second-factor authority: refused, rather than left believing the
+ * requirement the composition expects for MFA enforces the second factor.
+ * `requirement` names it, with the module that contributed it.
+ */
+export interface MfaRequirementNotSecondFactorAuthorityDetails {
+	readonly reason: "mfa-requirement-not-second-factor-authority";
+	readonly requirement: { readonly name: string; readonly module: string };
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
+}
+
+/**
  * Discriminated union (on `reason`) of the per-reason details: one member
- * per `BootErrorReason`, 39 in all.
+ * per `BootErrorReason`, 40 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1320,6 +1338,7 @@ export type BootErrorDetails =
 	| SessionRequirementsUndeclaredDetails
 	| SessionRequirementMissingDetails
 	| DuplicateSecondFactorAuthorityDetails
+	| MfaRequirementNotSecondFactorAuthorityDetails
 	| ReservedComponentKeyDetails
 	| ModuleSectionPathInvalidDetails
 	| ContributionKindGuardedDetails

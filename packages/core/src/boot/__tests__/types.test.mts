@@ -38,6 +38,7 @@ import type {
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
 	ListShapedOverrideDetails,
+	MfaRequirementNotSecondFactorAuthorityDetails,
 	MissingRequiredComponentDetails,
 	ModuleFactoryNotCalledDetails,
 	OverrideTargetMissingDetails,
@@ -71,7 +72,7 @@ describe("BootStage", () => {
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 39 reason literals", () => {
+	it("contains exactly the 40 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -103,6 +104,7 @@ describe("BootErrorReason", () => {
 			| "session-requirements-undeclared"
 			| "session-requirement-missing"
 			| "duplicate-second-factor-authority"
+			| "mfa-requirement-not-second-factor-authority"
 			| "reserved-component-key"
 			| "module-section-path-invalid"
 			| "contribution-kind-guarded"
@@ -254,6 +256,16 @@ describe("per-reason *Details discriminators", () => {
 		expectTypeOf<DuplicateSecondFactorAuthorityDetails["requirements"]>().toEqualTypeOf<
 			readonly { readonly name: string; readonly module: string }[]
 		>();
+	});
+
+	it("MfaRequirementNotSecondFactorAuthorityDetails names the requirement registered as mfa, with its module", () => {
+		expectTypeOf<
+			MfaRequirementNotSecondFactorAuthorityDetails["reason"]
+		>().toEqualTypeOf<"mfa-requirement-not-second-factor-authority">();
+		expectTypeOf<MfaRequirementNotSecondFactorAuthorityDetails["requirement"]>().toEqualTypeOf<{
+			readonly name: string;
+			readonly module: string;
+		}>();
 	});
 });
 
