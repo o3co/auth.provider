@@ -318,21 +318,42 @@ an answer outside its type fails the case.
   `scopeOf` read an item.
 
 `build()` answers a fresh harness for each case (`ConditionalRecordHarness`,
-`ConditionalSetHarness`): `store`; `second`, the same backend through a
-second instance (another connection, pool or client), which the races run
-across, `store` again when absent, with no cross-process proof; `forceExpire`,
-which makes a key's record, or an emptied set's tombstone, expire now by the
-backend's own clock; `unreachable`, a target over the backend that cannot
-reach it; and `close`. `supports: { forceExpire, unreachable }` declares
-which hooks every harness has, so the case list is fixed when the suite is
-built: an undeclared hook's cases are left out, and one passing case named
-`not run: …` says so in the runner's output; a hook declared and missing
-fails its case.
+`ConditionalSetHarness`):
 
-What they cannot see, and a store's own tests must: the isolation a real
-engine gives under schedules the races do not force, and anything a store
-keeps outside its members (an index, a listing), which a port's binding
-cases cover.
+- `store`;
+- `second`, the same backend through a second instance (another connection,
+  pool or client). The races and the cross-instance case run across the two;
+  absent, `store` is used again, with no cross-process proof;
+- `forceExpire`, which makes a key or a scope expire now as the store's own
+  retention would, by the backend's clock: a record expires; an emptied set's
+  tombstone expires; a set that holds a member never does, and is left as it
+  was;
+- `unreachable`, a target over the backend that cannot reach it;
+- `close`.
+
+`supports` declares, when the suite is built, what every harness and target
+has, so the case list is fixed at registration:
+
+| Key | Suite | Declared | Undeclared |
+| --- | --- | --- | --- |
+| `forceExpire` | both | the expiry cases run | `not run: …` |
+| `unreachable` | both | the outage case runs | `not run: …` |
+| `unconditional` | both | the unconditional-write case runs, over every write the target's `unconditional` names (an empty map fails it) | `not run: …` |
+| `updateMember` | set | the member-update case runs | `not run: …` |
+| `list` | set | the plain-listing case runs | `not run: …` |
+
+A key declared and missing from the harness or the target fails its case. The
+record suite's aliasing case runs only with `mutate`, and says so otherwise.
+A binding declares every hook and member its port and backend have.
+
+What the suites cannot see, and a store's own tests must:
+
+- the isolation a real engine gives under schedules the races do not force;
+- anything a store keeps outside its members (an index, a listing);
+- minting a generation into state written without one, and how a store keeps
+  generations from coming back after a failover or a restore (rule 8);
+- the retention's length, and the write-lifetime bound (rule 6): the suites
+  only force an expiry.
 
 ## The fake Store
 
@@ -406,7 +427,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`credentialStore.contract.test.mts`](src/webauthn/__tests__/credentialStore.contract.test.mts) | the WebAuthn credential store's suite over core's in-process store; each broken store — one that lets a registration take a credential id another user holds, overwrites a held credential's record and then throws `duplicate-credential`, refuses a held id with another error, lists a credential under the user it refused, lets a user register a held id again over its record, checks for a held id and inserts in two steps, finds a credential with a sign count of 0, lists every credential whoever's, updates a sign count whatever the count it expects, leaves a removed credential, keeps the `lastUsedAt` it held, answers `true` to a sign count update of an id it does not hold, throws on or empties itself at a removal of an id it does not hold, keeps a removed credential in its user's list, removes every credential of the user, or drops a credential's transports, backup state or nickname — refused by the case that names what it breaks; a store that answers transports in another order accepted; a harness built and closed per case |
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges, an identity two authenticators share — read from the record already held, or the latest enrollment's answered for every record — one keyed per factor instance, or one that answers none for the second — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
-| [`conditionalWrite.contract.test.mts`](src/conditionalWrite/__tests__/conditionalWrite.contract.test.mts) | both suites over a reference record store and a reference set store, each serving two instances over one backend; every case refuses a store broken one way (a check apart from its write, a counter or a digest as the generation, a torn versioned read, a write on `conflict`, a create that upserts a held id, a reset or a last removal that leaves no tombstone, a tombstone that never expires or a held set that does, a re-create after expiry at a generation seen before, an outage answered as absent, among them); an undeclared hook's cases left out and named; a declared hook missing fails its case |
+| [`conditionalWrite.contract.test.mts`](src/conditionalWrite/__tests__/conditionalWrite.contract.test.mts) | both suites over a reference record store and a reference set store, each serving two instances over one backend; every case refuses a store broken one way (a check apart from its write, a counter or a digest as the generation, a torn versioned read, a write on `conflict`, a create that upserts a held id, a reset or a last removal that leaves no tombstone, a tombstone that never expires or a held set that does, a re-create after expiry at a generation seen before, an outage answered as absent, a check apart from its write in only one of two operations, writes that skip the expiry check, a second instance reading from a cache, among them); a store answering frozen values passes; an undeclared hook's or member's cases left out and named; a declared one missing fails its case |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
 
 ## See also

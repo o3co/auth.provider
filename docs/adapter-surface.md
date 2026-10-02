@@ -408,7 +408,10 @@ are in `packages/core/src/adapters/conditionalWrite.mts`, on core's root
 entry, with `BUNDLED_STORE_WRITE_LIFETIME_MS`, the bundled stores'
 write-lifetime bound. `@o3co/auth-provider-test-kit`'s
 `conditionalRecordContract` and `conditionalSetContract` hold a store to
-these rules. These are the rules every store with conditional members keeps.
+the rules they can observe. A store's own tests cover the rest: minting into
+state written without a generation and keeping generations from coming back
+after a rollback (rule 8), and the retention's length and the write-lifetime
+bound (rule 6). These are the rules every store with conditional members keeps.
 
 **Scopes.** A generation guards one of two things:
 

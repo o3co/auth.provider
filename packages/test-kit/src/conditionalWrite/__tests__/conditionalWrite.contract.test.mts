@@ -101,8 +101,16 @@ interface RecordFaults {
 	readonly counter?: boolean;
 	/** The generation is a digest of the value. */
 	readonly digest?: boolean;
-	/** The check and the write of a conditional write are apart, with an `await` between. */
-	readonly checkThenWrite?: boolean;
+	/** A replace's check and its write are apart, with an `await` between. */
+	readonly replaceCheckThenWrite?: boolean;
+	/** A removal's check and its write are apart, with an `await` between. */
+	readonly removeCheckThenWrite?: boolean;
+	/** Reads drop an expired record, and writes do not check expiry. */
+	readonly writesIgnoreExpiry?: boolean;
+	/** The second instance answers a versioned read from its own cache. */
+	readonly secondCaches?: boolean;
+	/** Not a fault: every value read is frozen. */
+	readonly frozen?: boolean;
 	/** An unconditional write keeps the generation. */
 	readonly legacyKeepsGeneration?: boolean;
 	/** A versioned read takes the value and the generation apart, with an `await` between. */
@@ -124,6 +132,8 @@ interface RecordFaults {
 interface RecordEntry {
 	value: Value;
 	generation: StoreGeneration;
+	/** Expired by `forceExpire`: dropped when it is next looked at. */
+	expired?: boolean;
 }
 
 /** A record backend, and a target over it per call to `target`. */
@@ -159,25 +169,28 @@ function recordBackend(faults: RecordFaults = {}) {
 		entries.set(key, { value: copy(value), generation });
 		return generation;
 	};
+	/** The record, unless it expired: a read drops it, and so does a write unless writes ignore expiry. */
+	const live = (key: string, forWrite: boolean): RecordEntry | undefined => {
+		const entry = entries.get(key);
+		if (entry?.expired !== true) return entry;
+		if (forWrite && faults.writesIgnoreExpiry === true) return entry;
+		drop(key);
+		return undefined;
+	};
+	const out = (value: Value): Value =>
+		faults.frozen === true ? Object.freeze(copy(value)) : copy(value);
 
-	const target = (): ConditionalRecordTarget<Value> => ({
-		async create(key, value) {
-			const live = entries.get(key);
-			if (faults.createKeepsGeneration === true && live !== undefined) {
-				entries.set(key, { value: copy(value), generation: live.generation });
-				return;
-			}
-			write(key, value);
-		},
-		async getVersioned(key): Promise<Versioned<Value> | null> {
-			const entry = entries.get(key);
+	const target = (instance: number): ConditionalRecordTarget<Value> => {
+		const cache = new Map<string, Versioned<Value>>();
+		const read = async (key: string): Promise<Versioned<Value> | null> => {
+			const entry = live(key, false);
 			if (entry === undefined) {
 				return faults.absentAnswersValue === true
 					? { value: VALUES()[0], generation: newStoreGeneration() }
 					: null;
 			}
 			if (faults.tornRead === "value-first") {
-				const value = copy(entry.value);
+				const value = out(entry.value);
 				await gap();
 				const now = entries.get(key);
 				return now === undefined ? null : { value, generation: now.generation };
@@ -186,56 +199,76 @@ function recordBackend(faults: RecordFaults = {}) {
 				const generation = entry.generation;
 				await gap();
 				const now = entries.get(key);
-				return now === undefined ? null : { value: copy(now.value), generation };
+				return now === undefined ? null : { value: out(now.value), generation };
 			}
-			return { value: copy(entry.value), generation: entry.generation };
-		},
-		async replaceIf(key, expected, value): Promise<ConditionalReplaceAnswer> {
-			const entry = entries.get(key);
-			if (entry === undefined) {
-				if (faults.createOnMissing === true)
-					return { outcome: "updated", generation: write(key, value) };
-				return { outcome: "missing" };
-			}
-			if (entry.generation !== expected && faults.replaceIgnoresExpected !== true) {
-				if (faults.writeOnConflict === true) write(key, value);
-				return { outcome: "conflict" };
-			}
-			if (faults.checkThenWrite === true) await gap();
-			if (faults.replaceKeepsGeneration === true) {
-				entries.set(key, { value: copy(value), generation: entry.generation });
-				return { outcome: "updated", generation: entry.generation };
-			}
-			return { outcome: "updated", generation: write(key, value) };
-		},
-		async removeIf(key, expected): Promise<ConditionalRemoveAnswer> {
-			const entry = entries.get(key);
-			if (entry === undefined) {
-				return faults.malformedMissing === true
-					? ({ outcome: "absent" } as unknown as ConditionalRemoveAnswer)
-					: { outcome: "missing" };
-			}
-			if (entry.generation !== expected && faults.removeIgnoresExpected !== true) {
-				return { outcome: "conflict" };
-			}
-			if (faults.checkThenWrite === true) await gap();
-			drop(key);
-			return { outcome: "removed" };
-		},
-		unconditional: {
-			async put(key, value) {
-				const live = entries.get(key);
-				if (faults.legacyKeepsGeneration === true && live !== undefined) {
-					entries.set(key, { value: copy(value), generation: live.generation });
+			return { value: out(entry.value), generation: entry.generation };
+		};
+		return {
+			async create(key, value) {
+				const held = live(key, true);
+				if (faults.createKeepsGeneration === true && held !== undefined) {
+					entries.set(key, { value: copy(value), generation: held.generation });
 					return;
 				}
 				write(key, value);
 			},
-			async delete(key) {
-				drop(key);
+			async getVersioned(key) {
+				if (faults.secondCaches === true && instance === 1) {
+					const cached = cache.get(key);
+					if (cached !== undefined) return cached;
+					const fresh = await read(key);
+					if (fresh !== null) cache.set(key, fresh);
+					return fresh;
+				}
+				return read(key);
 			},
-		},
-	});
+			async replaceIf(key, expected, value): Promise<ConditionalReplaceAnswer> {
+				const entry = live(key, true);
+				if (entry === undefined) {
+					if (faults.createOnMissing === true)
+						return { outcome: "updated", generation: write(key, value) };
+					return { outcome: "missing" };
+				}
+				if (entry.generation !== expected && faults.replaceIgnoresExpected !== true) {
+					if (faults.writeOnConflict === true) write(key, value);
+					return { outcome: "conflict" };
+				}
+				if (faults.replaceCheckThenWrite === true) await gap();
+				if (faults.replaceKeepsGeneration === true) {
+					entries.set(key, { value: copy(value), generation: entry.generation });
+					return { outcome: "updated", generation: entry.generation };
+				}
+				return { outcome: "updated", generation: write(key, value) };
+			},
+			async removeIf(key, expected): Promise<ConditionalRemoveAnswer> {
+				const entry = live(key, true);
+				if (entry === undefined) {
+					return faults.malformedMissing === true
+						? ({ outcome: "absent" } as unknown as ConditionalRemoveAnswer)
+						: { outcome: "missing" };
+				}
+				if (entry.generation !== expected && faults.removeIgnoresExpected !== true) {
+					return { outcome: "conflict" };
+				}
+				if (faults.removeCheckThenWrite === true) await gap();
+				drop(key);
+				return { outcome: "removed" };
+			},
+			unconditional: {
+				async put(key, value) {
+					const held = live(key, true);
+					if (faults.legacyKeepsGeneration === true && held !== undefined) {
+						entries.set(key, { value: copy(value), generation: held.generation });
+						return;
+					}
+					write(key, value);
+				},
+				async delete(key) {
+					drop(key);
+				},
+			},
+		};
+	};
 
 	const unreachable = (): ConditionalRecordTarget<Value> =>
 		faults.outageAsMissing === true
@@ -257,7 +290,8 @@ function recordBackend(faults: RecordFaults = {}) {
 	return {
 		target,
 		forceExpire: async (key: string) => {
-			if (faults.expiryIgnored !== true) drop(key);
+			const entry = entries.get(key);
+			if (entry !== undefined && faults.expiryIgnored !== true) entry.expired = true;
 		},
 		unreachable,
 	};
@@ -267,8 +301,8 @@ function recordBackend(faults: RecordFaults = {}) {
 function recordHarness(faults: RecordFaults = {}): ConditionalRecordHarness<Value> {
 	const backend = recordBackend(faults);
 	return {
-		store: backend.target(),
-		second: backend.target(),
+		store: backend.target(0),
+		second: backend.target(1),
 		forceExpire: backend.forceExpire,
 		unreachable: backend.unreachable,
 	};
@@ -278,7 +312,7 @@ const recordInput = (faults: RecordFaults = {}): ConditionalRecordContractInput<
 	build: async () => recordHarness(faults),
 	values: VALUES,
 	mutate: MUTATE,
-	supports: { forceExpire: true, unreachable: true },
+	supports: { forceExpire: true, unreachable: true, unconditional: true },
 });
 
 describe("conditionalRecordContract over the reference record store", () => {
@@ -300,19 +334,24 @@ const RECORD = {
 	aba: "a record removed and created again with the same value is at a new generation, and the old one answers conflict",
 	sameValue: "a replace with the same value still issues a new generation",
 	race: "of concurrent replaces at one generation through two instances, exactly one is updated",
+	removeRace:
+		"of concurrent removals at one generation through two instances, exactly one is removed",
 	mixedRace:
-		"a replace racing a removal at one generation: exactly one wins, and the record is what the winner left",
+		"a replace racing a removal at one generation, either started first: exactly one wins, and the record is what the winner left",
 	unconditional:
-		"every unconditional write moves or ends the generation: the old one then answers conflict or missing",
+		"every unconditional write, a byte-identical rewrite included, moves or ends the generation: the old one then answers conflict or missing",
 	snapshot:
 		"a versioned read is one snapshot: read with a concurrent replace, its value and generation are both before or both after",
 	nothingWritten:
 		"missing and conflict write nothing: the current generation still writes afterwards",
 	readers: "every answer is one core's readers accept",
 	overwrite:
-		"a create over a live record, as a relink does, issues a new generation, and the old one answers conflict",
+		"a create over a live record, as a relink does, issues a new generation, the same value included, and the old one answers conflict",
+	crossInstance:
+		"a write through one instance is read through the other at the generation it answered, and the old generation conflicts there",
 	alias: "the store keeps its own copy: changing a value written or read changes nothing stored",
-	expiry: "an expired record reads as gone: null, and missing to a replace and a removal",
+	expiry:
+		"an expired record reads as gone, and answers missing to a replace and to a removal made with no read after the expiry",
 	outage:
 		"a store that cannot reach its backend rejects every member, never answering null or missing",
 } as const;
@@ -328,8 +367,24 @@ describe("conditionalRecordContract refuses a record store that breaks a rule", 
 		["a counter that restarts at a re-create", { counter: true }, RECORD.aba],
 		["a digest of the value", { digest: true }, RECORD.aba],
 		["a digest of the value, on a same-value replace", { digest: true }, RECORD.sameValue],
-		["a check apart from its write", { checkThenWrite: true }, RECORD.race],
-		["a check apart from its write, against a removal", { checkThenWrite: true }, RECORD.mixedRace],
+		["a replace's check apart from its write", { replaceCheckThenWrite: true }, RECORD.race],
+		[
+			"a replace's check apart from its write, against a removal",
+			{ replaceCheckThenWrite: true },
+			RECORD.mixedRace,
+		],
+		[
+			"a removal's check apart from its write, against a replace",
+			{ removeCheckThenWrite: true },
+			RECORD.mixedRace,
+		],
+		[
+			"a removal's check apart from its write, against a removal",
+			{ removeCheckThenWrite: true },
+			RECORD.removeRace,
+		],
+		["writes that do not check expiry", { writesIgnoreExpiry: true }, RECORD.expiry],
+		["a second instance that reads from a cache", { secondCaches: true }, RECORD.crossInstance],
 		[
 			"an unconditional write that keeps the generation",
 			{ legacyKeepsGeneration: true },
@@ -354,6 +409,10 @@ describe("conditionalRecordContract refuses a record store that breaks a rule", 
 		});
 	}
 
+	it("a store that answers frozen values passes every case", async () => {
+		expect(await refusedBy(conditionalRecordContract(recordInput({ frozen: true })))).toEqual([]);
+	});
+
 	it("every case of the suite refuses one of the broken stores", () => {
 		const named = conditionalRecordContract(recordInput())
 			.map((contractCase) => contractCase.name)
@@ -370,7 +429,7 @@ describe("conditionalRecordContract's declared hooks", () => {
 
 	it("leaves out the cases of an undeclared hook, and names what was not run", async () => {
 		const cases = conditionalRecordContract({
-			build: async () => ({ store: recordBackend().target() }),
+			build: async () => ({ store: recordBackend().target(0) }),
 			values: VALUES,
 		});
 		const listed = cases.map((contractCase) => contractCase.name);
@@ -381,19 +440,32 @@ describe("conditionalRecordContract's declared hooks", () => {
 			expect.arrayContaining([
 				"not run: the expiry case (supports.forceExpire not declared)",
 				"not run: the outage case (supports.unreachable not declared)",
+				"not run: the unconditional-write case (supports.unconditional not declared)",
 				"not run: the aliasing case (no mutate given)",
 			]),
 		);
+		expect(listed).not.toContain(RECORD.unconditional);
 		expect(await refusedBy(cases)).toEqual([]);
 	});
 
 	it("fails the case of a hook declared and missing from the harness", async () => {
 		const cases = conditionalRecordContract({
 			...recordInput(),
-			build: async () => ({ store: recordBackend().target() }),
+			build: async () => ({ store: recordBackend().target(0) }),
 		});
 		expect(await refusedBy(cases)).toEqual([RECORD.expiry, RECORD.outage]);
 		expect(names({ supports: {} })).not.toContain(RECORD.expiry);
+	});
+
+	it("fails the unconditional-write case when it is declared and the target names no write", async () => {
+		const cases = conditionalRecordContract({
+			...recordInput(),
+			build: async () => ({
+				...recordHarness(),
+				store: { ...recordBackend().target(0), unconditional: {} },
+			}),
+		});
+		expect(await refusedBy(cases)).toContain(RECORD.unconditional);
 	});
 });
 
@@ -414,8 +486,20 @@ const ITEMS = (scope: string, n: number): readonly Item[] =>
 interface SetFaults {
 	/** A set never written answers a generation. */
 	readonly absentAnswersGeneration?: boolean;
-	/** The check and the write of a membership write are apart, with an `await` between. */
-	readonly checkThenWrite?: boolean;
+	/** A create's check and its write are apart, with an `await` between. */
+	readonly createCheckThenWrite?: boolean;
+	/** A removal's check and its write are apart, with an `await` between. */
+	readonly removeCheckThenWrite?: boolean;
+	/** A reset of a set already empty changes nothing. */
+	readonly resetEmptyNoop?: boolean;
+	/** Reads drop an expired set, and writes do not check expiry. */
+	readonly writesIgnoreExpiry?: boolean;
+	/** The second instance answers a versioned read from its own cache. */
+	readonly secondCaches?: boolean;
+	/** The plain listing leaves a member out. */
+	readonly listDisagrees?: boolean;
+	/** Not a fault: every member read is frozen. */
+	readonly frozen?: boolean;
 	/** A reset deletes the set, leaving no tombstone. */
 	readonly resetDeletes?: boolean;
 	/** A reset empties the set and keeps its generation. */
@@ -457,6 +541,8 @@ interface SetFaults {
 interface SetEntry {
 	generation: StoreGeneration;
 	readonly members: Map<string, Item>;
+	/** Expired by `forceExpire`: dropped when it is next looked at. */
+	expired?: boolean;
 }
 
 /** A set backend, and a target over it per call to `target`. */
@@ -478,17 +564,31 @@ function setBackend(faults: SetFaults = {}) {
 			: newStoreGeneration();
 	};
 	const add = (item: Item): StoreGeneration => {
-		const entry = sets.get(item.scope) ?? { generation: newStoreGeneration(), members: new Map() };
-		const before = sets.has(item.scope) ? undefined : expired.get(item.scope);
+		const held = live(item.scope, true);
+		const entry = held ?? { generation: newStoreGeneration(), members: new Map() };
+		const before = held !== undefined ? undefined : expired.get(item.scope);
 		entry.members.set(item.id, { ...item });
 		entry.generation = issue(entry.members, item.scope);
 		sets.set(item.scope, entry);
 		return faults.recreateAnswersStale === true && before !== undefined ? before : entry.generation;
 	};
+	/** The set, unless it expired: a read drops it, and so does a write unless writes ignore expiry. */
+	const live = (scope: string, forWrite: boolean): SetEntry | undefined => {
+		const entry = sets.get(scope);
+		if (entry?.expired !== true) return entry;
+		if (forWrite && faults.writesIgnoreExpiry === true) return entry;
+		expired.set(scope, entry.generation);
+		sets.delete(scope);
+		counters.delete(scope);
+		return undefined;
+	};
+	const out = (item: Item): Item =>
+		faults.frozen === true ? Object.freeze({ ...item }) : { ...item };
 
-	const target = (): ConditionalSetTarget<Item> => ({
-		async listVersioned(scope): Promise<VersionedSet<Item>> {
-			const entry = sets.get(scope);
+	const target = (instance: number): ConditionalSetTarget<Item> => {
+		const cache = new Map<string, VersionedSet<Item>>();
+		const read = async (scope: string): Promise<VersionedSet<Item>> => {
+			const entry = live(scope, false);
 			if (entry === undefined) {
 				return {
 					items: [],
@@ -496,7 +596,7 @@ function setBackend(faults: SetFaults = {}) {
 				};
 			}
 			const items = (): Item[] => [
-				...[...(sets.get(scope)?.members.values() ?? [])].map((item) => ({ ...item })),
+				...[...(sets.get(scope)?.members.values() ?? [])].map(out),
 				...(faults.leaksReserved === true ? [{ scope, id: "~g", data: "" }] : []),
 			];
 			if (faults.tornRead === "items-first") {
@@ -510,83 +610,99 @@ function setBackend(faults: SetFaults = {}) {
 				return { items: items(), generation };
 			}
 			return { items: items(), generation: entry.generation };
-		},
-		async list(scope) {
-			return [...(sets.get(scope)?.members.values() ?? [])].map((item) => ({ ...item }));
-		},
-		async createIf(item, expected): Promise<ConditionalCreateAnswer> {
-			const entry = sets.get(item.scope);
-			if (expected === null && entry !== undefined && faults.createIgnoresExpected !== true) {
-				return { outcome: "conflict" };
-			}
-			if (expected !== null) {
-				if (entry === undefined && faults.absentSetCreates !== true) return { outcome: "conflict" };
-				if (
-					entry !== undefined &&
-					entry.generation !== expected &&
-					faults.createIgnoresExpected !== true
-				) {
+		};
+		return {
+			async listVersioned(scope) {
+				if (faults.secondCaches === true && instance === 1) {
+					const cached = cache.get(scope);
+					if (cached !== undefined) return cached;
+					const fresh = await read(scope);
+					cache.set(scope, fresh);
+					return fresh;
+				}
+				return read(scope);
+			},
+			async list(scope) {
+				const members = [...(live(scope, false)?.members.values() ?? [])].map(out);
+				return faults.listDisagrees === true ? members.slice(1) : members;
+			},
+			async createIf(item, expected): Promise<ConditionalCreateAnswer> {
+				const entry = live(item.scope, true);
+				if (expected === null && entry !== undefined && faults.createIgnoresExpected !== true) {
 					return { outcome: "conflict" };
 				}
-			}
-			if (entry?.members.has(item.id) === true && faults.upsertHeld !== true)
-				return { outcome: "conflict" };
-			if (faults.checkThenWrite === true) await gap();
-			return { outcome: "created", generation: add(item) };
-		},
-		async removeIf(scope, id, expected): Promise<ConditionalSetRemoveAnswer> {
-			const entry = sets.get(scope);
-			if (entry === undefined) return { outcome: "missing" };
-			if (entry.generation !== expected) return { outcome: "conflict" };
-			if (!entry.members.has(id)) {
-				if (faults.absentMemberMoves === true) entry.generation = newStoreGeneration();
-				return faults.malformedMissing === true
-					? ({ outcome: "absent" } as unknown as ConditionalSetRemoveAnswer)
-					: { outcome: "missing" };
-			}
-			if (faults.checkThenWrite === true) await gap();
-			entry.members.delete(id);
-			entry.generation = issue(entry.members, scope);
-			if (faults.lastRemovalDeletes === true && entry.members.size === 0) sets.delete(scope);
-			return { outcome: "removed", generation: entry.generation };
-		},
-		async reset(scope) {
-			const entry = sets.get(scope);
-			if (faults.resetDeletes === true) {
-				sets.delete(scope);
-				return;
-			}
-			if (faults.resetKeepsGeneration === true && entry !== undefined) {
-				entry.members.clear();
-				return;
-			}
-			sets.set(scope, { generation: newStoreGeneration(), members: new Map() });
-		},
-		async updateMember(scope, id) {
-			const entry = sets.get(scope);
-			const member = entry?.members.get(id);
-			if (entry === undefined || member === undefined) throw new Error("no such member");
-			entry.members.set(id, { ...member, data: `${member.data}+` });
-			if (faults.updateMoves === true) entry.generation = newStoreGeneration();
-		},
-		unconditional: {
-			async create(item) {
-				const entry = sets.get(item.scope);
-				if (entry?.members.has(item.id) === true) throw new Error("held");
-				if (faults.legacyKeepsGeneration === true && entry !== undefined) {
-					entry.members.set(item.id, { ...item });
+				if (expected !== null) {
+					if (entry === undefined && faults.absentSetCreates !== true)
+						return { outcome: "conflict" };
+					if (
+						entry !== undefined &&
+						entry.generation !== expected &&
+						faults.createIgnoresExpected !== true
+					) {
+						return { outcome: "conflict" };
+					}
+				}
+				if (entry?.members.has(item.id) === true && faults.upsertHeld !== true)
+					return { outcome: "conflict" };
+				if (faults.createCheckThenWrite === true) await gap();
+				return { outcome: "created", generation: add(item) };
+			},
+			async removeIf(scope, id, expected): Promise<ConditionalSetRemoveAnswer> {
+				const entry = live(scope, true);
+				if (entry === undefined) return { outcome: "missing" };
+				if (entry.generation !== expected) return { outcome: "conflict" };
+				if (!entry.members.has(id)) {
+					if (faults.absentMemberMoves === true) entry.generation = newStoreGeneration();
+					return faults.malformedMissing === true
+						? ({ outcome: "absent" } as unknown as ConditionalSetRemoveAnswer)
+						: { outcome: "missing" };
+				}
+				if (faults.removeCheckThenWrite === true) await gap();
+				entry.members.delete(id);
+				entry.generation = issue(entry.members, scope);
+				if (faults.lastRemovalDeletes === true && entry.members.size === 0) sets.delete(scope);
+				return { outcome: "removed", generation: entry.generation };
+			},
+			async reset(scope) {
+				const entry = live(scope, true);
+				if (faults.resetEmptyNoop === true && entry !== undefined && entry.members.size === 0)
+					return;
+				if (faults.resetDeletes === true) {
+					sets.delete(scope);
 					return;
 				}
-				add(item);
+				if (faults.resetKeepsGeneration === true && entry !== undefined) {
+					entry.members.clear();
+					return;
+				}
+				sets.set(scope, { generation: newStoreGeneration(), members: new Map() });
 			},
-			async remove(item) {
-				const entry = sets.get(item.scope);
-				if (entry === undefined || !entry.members.delete(item.id)) return;
-				if (faults.legacyKeepsGeneration !== true)
-					entry.generation = issue(entry.members, item.scope);
+			async updateMember(scope, id) {
+				const entry = live(scope, true);
+				const member = entry?.members.get(id);
+				if (entry === undefined || member === undefined) throw new Error("no such member");
+				entry.members.set(id, { ...member, data: `${member.data}+` });
+				if (faults.updateMoves === true) entry.generation = newStoreGeneration();
 			},
-		},
-	});
+			unconditional: {
+				async create(item) {
+					const entry = live(item.scope, true);
+					if (entry?.members.has(item.id) === true) throw new Error("held");
+					if (faults.legacyKeepsGeneration === true && entry !== undefined) {
+						entry.members.set(item.id, { ...item });
+						return;
+					}
+					add(item);
+				},
+				async remove(item) {
+					const entry = live(item.scope, true);
+					if (entry === undefined || !entry.members.delete(item.id)) return;
+					if (faults.legacyKeepsGeneration !== true)
+						entry.generation = issue(entry.members, item.scope);
+				},
+			},
+		};
+	};
 
 	const unreachable = (): ConditionalSetTarget<Item> =>
 		faults.outageAsMissing === true
@@ -614,11 +730,7 @@ function setBackend(faults: SetFaults = {}) {
 		forceExpire: async (scope: string) => {
 			const entry = sets.get(scope);
 			if (entry === undefined || faults.tombstoneKept === true) return;
-			if (entry.members.size === 0 || faults.expiresHeld === true) {
-				expired.set(scope, entry.generation);
-				sets.delete(scope);
-				counters.delete(scope);
-			}
+			if (entry.members.size === 0 || faults.expiresHeld === true) entry.expired = true;
 		},
 		unreachable,
 	};
@@ -628,8 +740,8 @@ function setBackend(faults: SetFaults = {}) {
 function setHarness(faults: SetFaults = {}): ConditionalSetHarness<Item> {
 	const backend = setBackend(faults);
 	return {
-		store: backend.target(),
-		second: backend.target(),
+		store: backend.target(0),
+		second: backend.target(1),
 		forceExpire: backend.forceExpire,
 		unreachable: backend.unreachable,
 	};
@@ -640,7 +752,13 @@ const setInput = (faults: SetFaults = {}): ConditionalSetContractInput<Item> => 
 	items: ITEMS,
 	idOf: (item) => item.id,
 	scopeOf: (item) => item.scope,
-	supports: { forceExpire: true, unreachable: true },
+	supports: {
+		forceExpire: true,
+		unreachable: true,
+		updateMember: true,
+		list: true,
+		unconditional: true,
+	},
 });
 
 describe("conditionalSetContract over the reference set store", () => {
@@ -654,15 +772,16 @@ const SET = {
 	firstRace: "of two concurrent first creates through two instances, exactly one is created",
 	resetAbsent:
 		"a reset of a set never written leaves it empty at a generation, so a first create then answers conflict",
-	update:
-		"a member's own update keeps the set's generation (a target with no updateMember has none to check)",
+	update: "a member's own update keeps the set's generation",
 	stale: "a create at a stale generation answers conflict and adds nothing",
 	last: "removing the last member keeps the set, empty, at the new generation removed answers",
 	removeRace:
 		"of two concurrent removals of different members at one generation through two instances, exactly one is removed",
 	createRace:
 		"of concurrent creates of different members at one generation, exactly one is created",
-	mixedRace: "a removal racing a create at one generation: exactly one wins",
+	mixedRace: "a removal racing a create at one generation, either started first: exactly one wins",
+	resetEmpty:
+		"a reset of a set already empty moves its generation: the emptying one then answers conflict",
 	aba: "a member removed and created again with the same bytes leaves no generation repeated, and the first answers conflict",
 	reset: "a reset after a read moves the generation: the read one then answers conflict",
 	absentMember:
@@ -671,13 +790,16 @@ const SET = {
 		"against an absent set, a removal with a generation answers missing and a create with one answers conflict",
 	snapshot:
 		"a versioned set read is one snapshot: read with a concurrent create, its members and generation are both before or both after",
-	agree: "the plain listing and the versioned read agree, and list the members alone",
+	membersAlone: "the versioned read lists the members alone",
+	agree: "the plain listing agrees with the versioned read",
+	crossInstance:
+		"a write through one instance is read through the other at the generation it answered, and the old generation conflicts there",
 	unconditional:
 		"every unconditional membership write that changes the members moves the generation: the old one then answers conflict",
 	readers: "every answer is one core's readers accept",
 	held: "a create of a member already held, at the current generation, answers conflict and changes nothing",
 	tombstone:
-		"an emptied set whose tombstone expired reads as absent: a null generation, which a first create then takes",
+		"an emptied set whose tombstone expired reads as absent, and a write with no read after the expiry finds it absent",
 	outage: "a store that cannot reach its backend rejects every member",
 	heldSet: "a set that holds a member does not expire: forcing its expiry leaves it as it was",
 	recreate:
@@ -691,18 +813,39 @@ describe("conditionalSetContract refuses a set store that breaks a rule", () => 
 			{ absentAnswersGeneration: true },
 			SET.absent,
 		],
-		["a check apart from its write, on first creates", { checkThenWrite: true }, SET.firstRace],
+		[
+			"a create's check apart from its write, on first creates",
+			{ createCheckThenWrite: true },
+			SET.firstRace,
+		],
 		["a reset that leaves no tombstone", { resetDeletes: true }, SET.resetAbsent],
 		["a member's update that moves the generation", { updateMoves: true }, SET.update],
 		["a create that ignores the generation", { createIgnoresExpected: true }, SET.stale],
 		["a removal of the last member that deletes the set", { lastRemovalDeletes: true }, SET.last],
-		["a check apart from its write, on removals", { checkThenWrite: true }, SET.removeRace],
-		["a check apart from its write, on creates", { checkThenWrite: true }, SET.createRace],
 		[
-			"a check apart from its write, on a removal and a create",
-			{ checkThenWrite: true },
+			"a removal's check apart from its write, on removals",
+			{ removeCheckThenWrite: true },
+			SET.removeRace,
+		],
+		[
+			"a create's check apart from its write, on creates",
+			{ createCheckThenWrite: true },
+			SET.createRace,
+		],
+		[
+			"a removal's check apart from its write, against a create",
+			{ removeCheckThenWrite: true },
 			SET.mixedRace,
 		],
+		[
+			"a create's check apart from its write, against a removal",
+			{ createCheckThenWrite: true },
+			SET.mixedRace,
+		],
+		["a reset of an empty set that changes nothing", { resetEmptyNoop: true }, SET.resetEmpty],
+		["writes that do not check expiry", { writesIgnoreExpiry: true }, SET.tombstone],
+		["a second instance that reads from a cache", { secondCaches: true }, SET.crossInstance],
+		["a plain listing that leaves a member out", { listDisagrees: true }, SET.agree],
 		["a digest of the members", { digest: true }, SET.aba],
 		["a reset that keeps the generation", { resetKeepsGeneration: true }, SET.reset],
 		[
@@ -717,7 +860,7 @@ describe("conditionalSetContract refuses a set store that breaks a rule", () => 
 		],
 		["a read of the members, then the generation", { tornRead: "items-first" }, SET.snapshot],
 		["a read of the generation, then the members", { tornRead: "generation-first" }, SET.snapshot],
-		["a versioned read that lists a reserved entry", { leaksReserved: true }, SET.agree],
+		["a versioned read that lists a reserved entry", { leaksReserved: true }, SET.membersAlone],
 		[
 			"an unconditional write that keeps the generation",
 			{ legacyKeepsGeneration: true },
@@ -741,6 +884,10 @@ describe("conditionalSetContract refuses a set store that breaks a rule", () => 
 		});
 	}
 
+	it("a store that answers frozen members passes every case", async () => {
+		expect(await refusedBy(conditionalSetContract(setInput({ frozen: true })))).toEqual([]);
+	});
+
 	it("every case of the suite refuses one of the broken stores", () => {
 		const named = conditionalSetContract(setInput())
 			.map((contractCase) => contractCase.name)
@@ -761,16 +908,31 @@ describe("conditionalSetContract's declared hooks", () => {
 				"not run: the held-set expiry case (supports.forceExpire not declared)",
 				"not run: the re-create after expiry case (supports.forceExpire not declared)",
 				"not run: the outage case (supports.unreachable not declared)",
+				"not run: the member-update case (supports.updateMember not declared)",
+				"not run: the plain-listing case (supports.list not declared)",
+				"not run: the unconditional-write case (supports.unconditional not declared)",
 			]),
 		);
+		for (const name of [SET.update, SET.agree, SET.unconditional])
+			expect(listed).not.toContain(name);
 		expect(await refusedBy(cases)).toEqual([]);
 	});
 
 	it("fails the case of a hook declared and missing from the harness", async () => {
 		const cases = conditionalSetContract({
 			...setInput(),
-			build: async () => ({ store: setBackend().target() }),
+			build: async () => ({ store: setBackend().target(0) }),
 		});
 		expect(await refusedBy(cases)).toEqual([SET.tombstone, SET.heldSet, SET.recreate, SET.outage]);
+	});
+
+	it("fails the case of a member declared and missing from the target", async () => {
+		const { updateMember: _update, list: _list, ...rest } = setBackend().target(0);
+		const cases = conditionalSetContract({
+			...setInput(),
+			build: async () => ({ ...setHarness(), store: { ...rest, unconditional: {} } }),
+		});
+		const refused = await refusedBy(cases);
+		for (const name of [SET.update, SET.agree, SET.unconditional]) expect(refused).toContain(name);
 	});
 });
