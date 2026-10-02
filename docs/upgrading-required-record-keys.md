@@ -1,5 +1,7 @@
 # Upgrading: store records name every field (#626)
 
+Upgrading from v0.16.0 as a whole — every other breaking change, and the Store implementer checklist — is [upgrading-from-v0.16.0.md](upgrading-from-v0.16.0.md).
+
 The records a store, registry or repository hands back now name every field as a **required key** whose value may be `undefined`, instead of an optional field that may be left out. A copy of such a record, built as an object literal of its type, fails to compile when it forgets a field. Before, it dropped that field without an error.
 
 That compile error is the whole guarantee. It does not stop:
@@ -114,8 +116,6 @@ Write `undefined` where you have nothing. That makes "no expiry", "no state" or 
 The behaviour of the library itself is otherwise unchanged. For example, a device authorization created by an untyped caller with a `null`, `""`, `false` or `0` `requestedScope` is still a request with no scope, as before.
 
 ## `UserSession.authentication`
-
-Upgrading from v0.16.0 as a whole — every other breaking change, and the Store implementer checklist — is [upgrading-from-v0.16.0.md](upgrading-from-v0.16.0.md).
 
 Since the MFA ADR's build-order step 5, a session says how it was established: `authentication: { primary, federation, upstreamAmr, mfaAt }` — `"pwd"` or `"fed"`, which federation, what an untrusted upstream IdP asserted (kept for the record, never stamped), and when a second factor was last verified. Its `amr` holds only what this provider vouches for.
 

@@ -119,9 +119,15 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   (#1193), the Client ID Metadata Documents (#1194), session and
   session-store (#1195), webauthn (#1196), device-grant (#1197), the Redis
   modules (#1199), the Store transport's `timeout` and `maxResponseBytes`
-  (#1200) and the template (#1201). Every refusal at these keys carries one
-  message, `must be a whole number … in decimal digits`: an alert matching
-  zod's old wording needs the new one. Core's exported `configuredNumber`
+  (#1200) and the template (#1201). Most refusals at these keys carry one
+  message, `must be a whole number … in decimal digits`. The exceptions refuse
+  in words of their own: `http.port` with the template's own text; the Store
+  transport's `timeout` and `maxResponseBytes` with the transport's
+  constructor errors; and the durations read through core's
+  `durationFromEnv` — `jwks.cacheMaxAge`, the federation grant settings'
+  durations such as `tombstoneRetention`, and the Redis grant store's
+  `listingAllowanceMs` and `tombstoneRetention` — with zod's default
+  message. Match an alert on the key the refusal names, not on its message. Core's exported `configuredNumber`
   answers `undefined` for those strings, so a rate-limit budget given as one
   is no budget, or a `RangeError` naming the key (#1208).
 - **An issuer ending in a slash.** `oauth.jwt.issuer` with a trailing slash
@@ -208,12 +214,28 @@ The boot refusals you can meet, with their messages, are in
   `400` rather than `503` (#963). A requirement's step-up at
   `GET /session/federation-grants/connect` is a `303` to the requirement's
   page (#1097). A refresh answer without a `tokenType` is refused as
-  `upstream_token_ineligible` / `malformed_token_response` (#1228). With
+  `upstream_token_ineligible` / `malformed_token_response` (#1228). An
+  upstream answer's `expiresAt` and `expiresIn` are read together, and the
+  earlier one ends the token: an adapter's `expiresAt` earlier than
+  `calledAt + expiresIn` now ends the stored token at that instant, an answer
+  with no life left makes the grant `upstream_token_ineligible` /
+  `no_finite_lifetime` (retried after `ineligibleRetryAfter`) instead of
+  being served, and the `expires_in` hint and the half-spent point come up to
+  one call's duration earlier (#1021). With
   `federation-grants.enabled = false` nothing is mounted under either path,
   so the host's own fallback answers (#1174).
 - **The federation token route** stores a refreshed upstream token for at
-  most 24 hours, so a long-lived one is refreshed upstream at least daily
-  (#1060).
+  most `maxTokenLifetimeMs`, 24 hours by default, so a long-lived one is
+  refreshed upstream at least that often (#1060).
+- **Token binding (#858).** Under `core.tokenBinding.dispatchPolicy =
+  "intent-explicit"`, the v0.16.0 default, two mechanisms that both succeed
+  at the deciding tier make a `/oauth/token` request `400 invalid_request`,
+  bound to none, and log `token_binding_ambiguous` (warn); v0.16.0 bound the
+  token in registration order. An ambient pair (a mechanism installed beside
+  mTLS that fires on the same requests) refuses every such client until the
+  deployment stops presenting both: [operator runbook §4](operator-runbook.md#4-alerts),
+  `token_binding_ambiguous`. A `rateLimitBudgets` prefix named after an
+  `Object.prototype` member refuses the boot (`contribution-malformed`).
 
 ### Passkeys, users and sessions
 
@@ -221,7 +243,8 @@ The boot refusals you can meet, with their messages, are in
   canonical handle is `400 invalid_grant` (`user_handle_mismatch`) (#863); one
   without a handle is refused too (#1153, #1217). Migrated passkeys and
   clients that pad or re-encode the handle are the ones to watch:
-  `token.issued.failure` with `details.reason: "user_handle_mismatch"`.
+  `token.issued.failure` with `details.reason` `"user_handle_mismatch"` or
+  `"user_handle_missing"`.
 - **The Store's users.** A `2xx` user with an empty `id` or `username` is
   refused as malformed, `503` on every login path (#862). A Store sends a
   stable label as `username` for a user without one.
@@ -260,7 +283,8 @@ connect and consent pages — reads each record once, through it:
 
 - **The fields `PublicClient` declares, by name**, held to the rules a `yaml`
   / `static` client meets at boot, defaults filled, never `clientSecret`.
-- **A record it refuses is `503 temporarily_unavailable` everywhere**,
+- **A record it refuses is `503 temporarily_unavailable` everywhere** except
+  logout, which completes without the post-logout redirect,
   warned `client_record_refused` with the client id and the reasons, then
   logged `client_repository_unavailable` with `reason:
   "client_record_refused"`. It is never answered with a Client ID Metadata
@@ -276,8 +300,10 @@ connect and consent pages — reads each record once, through it:
   until a record is fixed, anyone who knows its id gets `503`. A cache or a
   decorator over a `ClientRepository` lets a lookup's rejection through
   unchanged and never caches it. A repository you hand to a component
-  yourself, outside the slot, is read as you hand it: wrap it with
-  `validatedClientRepository`.
+  yourself, outside the slot, is read as you hand it — except by
+  `createOAuthRouter`, the client-authentication middleware and the
+  authorization-code grant, which wrap a repository handed to them directly:
+  wrap it with `validatedClientRepository`.
 - **The Client ID Metadata Document fallback** is installed only by the
   `/oauth` router, from `oauth.clientIdMetadataDocuments` (#1186).
   `withClientIdMetadataDocuments`, `createClientIdMetadataDocumentResolver`
@@ -335,24 +361,34 @@ modules fills them.
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). An override
-  that loosens a budget refuses the boot.
+  that loosens a budget refuses the boot. In code: the `failMode` options are
+  gone from `createDeviceVerificationHandler`, the federation-grants routers,
+  `RateLimitGuardOptions` and `RateLimitPolicyOptions`; `checkWithFailMode`
+  takes a policy from `createRateLimitPolicy` and refuses any other object;
+  `memoryRateLimiterModule`, `redisRateLimiterModule`, `deviceGrantModule`
+  and `webauthnModule` require `rateLimitBudgetResolver`, which a hand-built
+  deps object for their factories carries. `createDeviceVerificationHandler`'s
+  `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
+  `revokedBefore` (#717).
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
-  `@o3co/auth-provider-core/testing` (#796, #803).
+  `@o3co/auth-provider-core/testing` (#786, #796).
 - **Shutdown.** A cleanup registers the allowance it needs; the template's
   `installGracefulShutdown` takes `cleanupAllowanceMs` (#797).
 
 ### Exports removed, and signatures changed
 
 - **Core's public entries no longer export 42 undocumented names** (#1234):
-  tuning defaults (`DEFAULT_MEMORY_*`, `DEFAULT_REMOTE_JWKS_*`,
-  `DEFAULT_JWKS_*`, `LOGGED_STACK_*`), `federationGrantRedirectUriReservedParameter`,
+  tuning defaults (most `DEFAULT_MEMORY_*` sweep and size defaults —
+  `DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES` stays —
+  `DEFAULT_REMOTE_JWKS_*`, `DEFAULT_JWKS_*`, `LOGGED_STACK_*`), `federationGrantRedirectUriReservedParameter`,
   `resolveJwksPath`, `resolveJwksCacheMaxAge`, `readConfiguredRateLimitSpec`,
   `revokedFamilyExpiresAtMs`, and on `./testing` `makeValidFullSections`,
   among others; the pull request lists all 42. Stop importing them; for a
   tuning default, pass the value explicitly. Core's surface is pinned by
   `packages/core/public-surface.txt` (#1225).
+- **`isTrustedProxyEntry`**, exported in v0.16.0, is deleted (#734).
 - **Core's unwired MFA surface** (`createMfaRouter`, `MfaProvider`,
   `createMfaProviderFactory` and their types) is gone, and `BootErrorReason`
   loses `"mfa-partial-wiring"` (#702). MFA is `@o3co/auth-provider-mfa`.
@@ -364,8 +400,10 @@ modules fills them.
   requires a `grantPolicy` key, `undefined` for none (#1169); the federation
   token route's `createRouter` throws when `refreshBufferMs` is 24 hours or
   more without a larger `maxTokenLifetimeMs` (#1060);
-  `resolveRedisFederationGrantStoreOptions` takes `deploymentMode` (#773);
-  `FederationGrantLodgingRefused` takes no parameter (#996).
+  `resolveRedisFederationGrantStoreOptions` takes `deploymentMode` (#773).
+  Compared with v0.16.0, `FederationGrantLodgingRefused` has no `connection`
+  field: read a `connection_not_configured` refusal from
+  `FederationGrantConnectionNotConfigured` (#996).
 - **Unions that grew.** `IssuerRejection` gains `"trailing-slash"` (#1150),
   `RedirectUriRejection` `query-name-invalid` and `reserved-parameter` (#1044);
   `FederationGrantReauthorizationResult` loses `connection_not_configured`
@@ -385,10 +423,11 @@ with what a store of yours records and refuses. Per port:
   vouched for, which `/token` stamps on the code's tokens. Callers of
   `createCode` pass it, `undefined` without a user-session store. A repository
   that drops it yields tokens without `amr`, and their refresh family carries
-  none forward; under `mfa.mode = "required"` such a family is refused at its
-  first refresh.
+  none forward; under `MFA_MODE` (template) / `mfa.mode` `required` such a
+  family is refused at its first refresh.
 - **`UserSessionStore`.**
-  - `authentication` (the MFA ADR's BREAKING item 10): round-trip it and
+  - `authentication`, how the session was established
+    (`UserSession.authentication`): round-trip it and
     record what `recordableSessionAuthentication` answers —
     [`UserSession.authentication`](upgrading-required-record-keys.md#usersessionauthentication).
     Implement `recordSecondFactor` (`supportsSecondFactorUpdate`), or a step-up
@@ -403,8 +442,11 @@ with what a store of yours records and refuses. Per port:
     `null` otherwise. A store that drops it leaves a stepped-up session
     unbound from the cookie session it was renewed into
     ([core's `user-sessions` README](../packages/core/src/user-sessions/README.md)).
-  - Run `runUserSessionStoreContract`, and `runSecondFactorUpdateContract`
-    if your store implements `recordSecondFactor`.
+  - Run the suites in
+    `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts`:
+    `runUserSessionStoreContract`, and `runSecondFactorUpdateContract` if
+    your store implements `recordSecondFactor`. They are not exported: copy
+    the file into your store's tests.
 - **A `loginCompletion` of your own** implements `renewSession` (#923), the
   renewal of a signed-in session's id a step-up finishes with: the
   [session README](../packages/session/README.md#renewing-a-signed-in-sessions-id).
@@ -420,7 +462,9 @@ with what a store of yours records and refuses. Per port:
   readable and get a generation at their first versioned read.
 - **`FederationGrantStore` callers** give an access token's
   `effectiveExpiresAt` on `activate` / `replaceCredentials` (#1078). A
-  **`FederationGrantRefresher`** of your own reports `tokenType` (#1228).
+  **`FederationGrantRefresher`** of your own reports `tokenType` (#1228); its
+  `expiresAt` and `expiresIn` are read together, and the earlier one ends the
+  token (#1021).
 - **`UserRepository`.** A login reads the eight declared `User` fields by
   name, once, so an ORM entity or a getter-backed `User` logs in (#1100,
   #1206). A Store answers `mfaEnrolled` on both reads (#903): the
@@ -428,7 +472,8 @@ with what a store of yours records and refuses. Per port:
 - **`ClientRepository`.** Its records pass core's boundary
   ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
 - **`RateLimiter`.** One that declares no `failMode` fails closed, whatever
-  `rateLimit.failMode` says; a wrapper forwards `failMode` and
+  `redis-rate-limiter.failMode` says (formerly `rateLimit.failMode`, now a
+  retired path that refuses the boot); a wrapper forwards `failMode` and
   `defaultLimit` (#782).
 - **Redis clients of your own.** `SubjectRevocationClient` implements
   `advanceRevocationBoundaries`, and `setRevocationBoundaries` is gone (#993):
@@ -453,7 +498,8 @@ foundation's README,
 [The Store's MFA endpoints](../packages/foundation/README.md#the-stores-mfa-endpoints);
 the rules every store with conditional writes keeps are
 [adapter-surface.md, Conditional writes](adapter-surface.md#conditional-writes).
-Do every item before `mfa.mode = "required"`; under `optional` a Store that
+Do every item before `MFA_MODE` (template) / `mfa.mode` `optional` if you
+can, and before `required` at the latest; under `optional` a Store that
 misses one lets a password-only login through where a factor was lost.
 
 **The enrollment witness.**
@@ -483,38 +529,41 @@ misses one lets a password-only login through where a factor was lost.
    atomic step in your database: applied only while the subject's factor set
    is at that generation, answered `409 { outcome: "conflict" }` otherwise,
    and answered `408` without being applied at or after `deadlineMs` on the
-   Store's own clock. The list answers `generation` from the same snapshot as
+   Store's own clock. `expectedGeneration: null`, on a create only, means
+   "only while the set is absent", and a tombstone counts as present. A
+   removal answers `404 { outcome: "missing" }` for an absent set, or, at
+   the right generation, for a record the set does not hold. The list answers `generation` from the same snapshot as
    `factors`, never from a cache or a lagging replica. Every membership
    write, the reset included, mints a new random generation; an update keeps
    it.
-6. **The Store refuses a factor create or a single removal without
-   `expectedGeneration`**, and may answer it `400`. The provider sends none
+6. **A factor create or a single removal without `expectedGeneration`** is
+   one the Store may refuse with `400`, as the convention does. The provider sends none
    (#1232, #1235); the only unconditional write is the reset,
    `{ subject, all: true }`.
-7. **An emptied set stays as its tombstone** for at least
-   `BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 hours, after its last membership
-   write.
-8. **The write-lifetime bound.** A write conditional on a read is valid only within the store's write-lifetime bound of that read: the bound runs from the versioned read that produced the write's expected generation to the write's commit or failure, transport and queues included. The port's owning module keeps it; callers outside it never hold a generation. An emptied set's tombstone is kept for at least that bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h, for the bundled stores).
+7. **The write-lifetime bound, and the tombstone.** A write conditional on a read is valid only within the store's write-lifetime bound of that read: the bound runs from the versioned read that produced the write's expected generation to the write's commit or failure, transport and queues included. The port's owning module keeps it; callers outside it never hold a generation. An emptied set's tombstone is kept for at least that bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h, for the bundled stores).
    A Store bounds its own write commit server-side (SQL statement/transaction timeout; HTTP deadline never retried after it passes). For MFA the factor-set writer keeps the bound under its lease.
-9. **No rollback.** A generation is never issued again, a failover or a
+8. **No rollback.** A generation is never issued again, a failover or a
    restore included (adapter-surface rule 8). A Store either re-mints the
    generation of everything it restores, or runs so that acknowledged state
    never rolls back, and its documentation says which. Where it is the
    second, the operational assumption to state is: “this store assumes acknowledged writes are not rolled back (persistence plus a failover setup that keeps acked writes); a deployment that accepts acked-write loss on failover also accepts that a conditional write may see a restored older generation”.
    If your factor store can lose acknowledged writes on failover, a failover may restore a factor that was removed or undo a reset; after such a failover, re-run any operator reset performed in the lost window, and have affected users review their factors.
-   The procedure is [operator runbook §3, Keeping MFA factors in the Store](operator-runbook.md#keeping-mfa-factors-in-the-store).
-10. **Run the factor store's suites in the Store's CI**:
+   That line is [operator runbook §5](operator-runbook.md#key-families),
+   "When the factor store loses writes"; the procedure is
+   [operator runbook §3](operator-runbook.md#keeping-mfa-factors-in-the-store),
+   "Failover and restore".
+9. **Run the factor store's suites in the Store's CI**:
     `mfaFactorStoreContract` and `mfaFactorStoreConditionalContract`, against
     `HttpMfaFactorStore` over your Store, with `second` — another adapter on
     the same Store — so the races prove the fence across processes
     ([the factor store's suite](../packages/test-kit/README.md#the-factor-stores-contract-suite),
     [the factor set's conditional writes](../packages/test-kit/README.md#the-factor-sets-conditional-writes)).
-11. **The Store, and anything in front of it, answers `421` only for a
+10. **The Store, and anything in front of it, answers `421` only for a
     request it did not apply**: the HTTP client may send it again.
 
 **Timeouts.**
 
-12. **Raise `mfa.storeTimeoutMs` together with the user repository's HTTP
+11. **Raise `mfa.storeTimeoutMs` together with the user repository's HTTP
     timeout** (`MFA_STORE_TIMEOUT_MS`, `REPOSITORIES_USER_HTTP_TIMEOUT`). The
     template refuses the boot while the first is below the second where the
     Store is called; above 37500 ms it is refused too.
@@ -528,8 +577,9 @@ factors kept in the Store, is for the factor store alone, so the transaction
 store is `redis`. The template's default for both is `memory`, which is
 refused while MFA is on outside development and test: the start is refused,
 naming each store left in `memory` and its variable, unless the
-configuration's name, `CONFIG_ENV` and `NODE_ENV` each say `development` or
-`test`, and core refuses `memory` under `CORE_DEPLOYMENT_MODE=multi` whatever
+configuration's name says `development` or `test`, and so do `CONFIG_ENV` and
+`NODE_ENV` wherever they are set. With no name set at all, `memory` is
+refused too, and core refuses it under `CORE_DEPLOYMENT_MODE=multi` whatever
 the name. A restart of a
 `memory` store loses every factor, every lock and every recorded email proof,
 after which whoever holds a password can bind a factor of their own.
@@ -609,17 +659,22 @@ detail; what a mixed fleet of v0.16.0 and this release does:
 - **Codes cross releases** for at most one code lifetime. A code a v0.16.0
   replica issued, redeemed by this release, yields tokens without `amr`, and
   its refresh family carries none until it ends or the user signs in again;
-  under `mfa.mode = "required"` it is refused at its first refresh. A
-  deployment for which that matters revokes the families issued during the
-  roll, or calls `revokeAllForSubject`, once the fleet is upgraded.
-- **Do not turn `mfa.mode` on until no replica older than the release in
-  which an authorization code carries its own `amr` remains**: an older
+  under `MFA_MODE` (template) / `mfa.mode` `required` it is refused at its
+  first refresh. A deployment for which that matters revokes the families
+  issued during the roll, or calls `revokeAllForSubject`, once the fleet is
+  upgraded. Under `oauth.refreshToken.unknownFamilyPolicy = "accept"` a
+  token with no family record has no such bound.
+- **Do not turn `MFA_MODE` (template) / `mfa.mode` on until no v0.16.0
+  replica remains**: an older
   replica redeeming a code stamps the record's `amr`, a step-up's included,
   and one older than the renewal nonce admits an old cookie put back after a
   step-up.
 - **The re-authentication ask.** A v0.16.0 replica spends the ask when it
   reads it, so consent after a login trip can ask for a second login once
   ([operator runbook §3](operator-runbook.md#multi-factor-authentication-the-lock-mail-and-notices)).
+- **Fix the client records the boundary refuses before the roll.** During
+  it, such a client alternates between `200` from v0.16.0 replicas and `503`
+  from new ones ([above](#client-records-the-boundary-in-the-clientrepository-slot)).
 - **Federated sessions** live at the upgrade stamp `["fed"]` until the user
   logs in again ([operator runbook §7](operator-runbook.md#before-you-upgrade),
   step 3).
