@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-10-02
+最終更新: 2026-10-03
 
 ## 責務と役割
 
@@ -242,7 +242,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 `createCode` は `client_id` と `redirect_uri` を必須とし、`Client.tokenEndpointAuthMethod` も必須です。`Code` のその他のフィールドはすべて必須キーで、記録がなければ `undefined` を保持します。`createCode` は `CreateCodeInput` を受け取り、省略できるのは `expiresIn`（省略時はリポジトリの既定値）だけです。`nonce` と `sid` は OIDC の nonce とセッション ID を `/authorize` から `/token` へ運びます。`grantedScope` / `grantedAudience` は `/authorize` でのグラントポリシーの決定で、`authorization_code` グラントはポリシーを再評価せずにこれを読みます。ディレクトリの責務マップは [`src/repositories/README.md`](src/repositories/README.md) です。
 
-`readUserSnapshot(user)`（[`src/repositories/userSnapshot.mts`](src/repositories/userSnapshot.mts)）は、リポジトリが答えた `User` をログインが一度だけ読むものです。`User` が宣言する各フィールドを、オブジェクトがどう保持していても（getter、ORM エンティティ）名前で一度ずつ読み、すべての深さで凍結したプレーンなスナップショットにします。答えは `{ ok: true, snapshot }`（`id` は空でない文字列）か `{ ok: false, refused }`（`not_an_object`、`id`、または `field` を添えた `not_plain_data`）です。ログインのルートは subject とクレームをスナップショットから読み、`User` を再び読みません。
+`readUserSnapshot(user)` は、リポジトリが答えた `User` をログインが一度だけ読むものです。`User` が宣言する各フィールドを、オブジェクトがどう保持していても（getter、ORM エンティティ）名前で一度ずつ読み、すべての深さで凍結したプレーンなスナップショットにするか、拒否します。ログインのルートは subject とクレームをスナップショットから読み、`User` を再び読みません。答えと拒否の種類は [`src/repositories/userSnapshot.mts`](src/repositories/userSnapshot.mts) の `UserSnapshotReading` が定義します。
 
 #### 組み込み実装
 
