@@ -27,20 +27,27 @@
  * current generation, never creating a record; a new generation on every
  * write, a byte-identical one and a re-create included, and on every
  * unconditional write; one winner among concurrent writes at one generation,
- * through two instances of the store; a versioned read from one snapshot;
- * `missing` and `conflict` writing nothing; an expired record read as gone;
- * an outage rejected, never answered as `missing`; answers core's readers
- * accept; and the store's own copy of a value.
+ * through two instances of the store, and an unconditional write serialised
+ * with a conditional one; a versioned read from one snapshot; `missing` and
+ * `conflict` writing nothing; an expired record read as gone; an outage
+ * rejected, never answered as `missing`; answers core's readers accept; and
+ * the store's own copy of a value.
  *
  * A set store is held to: `null` for a set never written; one winner among
- * concurrent membership writes at one generation; a reset that leaves the
- * set at a new generation, created when absent; a member's own update
- * keeping the set's generation; an emptied set kept, at a new generation,
- * until its tombstone expires, and a set holding a member never expiring; a
- * set created again after that at a generation never seen before; a held id refused as `conflict`; no
- * generation repeated (ABA); a versioned read from one snapshot; `missing`
- * and `conflict` writing nothing; an outage rejected; answers core's
- * readers accept.
+ * concurrent membership writes at one generation, and a reset serialised
+ * with them; a reset that leaves the set at a new generation, created when
+ * absent; a member's own update keeping the set's generation; an emptied set
+ * kept, at a new generation, until its tombstone expires, and a set holding
+ * a member never expiring, one revived from its tombstone included; a set
+ * created again after that at a generation never seen before; a held id
+ * refused as `conflict`; no generation repeated (ABA); a versioned read from
+ * one snapshot; `missing` and `conflict` writing nothing; an outage
+ * rejected; answers core's readers accept; and the store's own copy of a
+ * member.
+ *
+ * `forceExpire` moves the backend's clock past any retention deadline the
+ * store set. It never judges membership or deletes: what then reads as
+ * expired, and what does not, is the store's own doing.
  *
  * A hook a harness may lack is declared in `supports`, so the case list is
  * fixed when the suite is built: an undeclared hook's cases are left out,
@@ -93,7 +100,11 @@ export interface ConditionalRecordHarness<V> {
 	 * and gives no cross-process proof.
 	 */
 	readonly second?: ConditionalRecordTarget<V>;
-	/** Makes `key`'s record expire now, by the backend's own clock. */
+	/**
+	 * Moves the backend's clock past any retention deadline the store set
+	 * (`key` names the record the case expires). It never judges what expires,
+	 * and never deletes.
+	 */
 	readonly forceExpire?: (key: string) => Promise<void>;
 	/** A target over the same backend that cannot reach it. */
 	readonly unreachable?: () => ConditionalRecordTarget<V>;
@@ -152,9 +163,10 @@ export interface ConditionalSetHarness<T> {
 	/** The same backend through a second instance. Absent: `store` again, with no cross-process proof. */
 	readonly second?: ConditionalSetTarget<T>;
 	/**
-	 * Makes `scope` expire now, as the store's own retention would by the
-	 * backend's clock: an emptied set's tombstone expires; a set that holds a
-	 * member never does, and is left as it was.
+	 * Moves the backend's clock past any retention deadline the store set
+	 * (`scope` names the set the case expires). It never judges membership,
+	 * and never deletes: that an emptied set's tombstone expires and a set
+	 * holding a member does not is the store's own doing.
 	 */
 	readonly forceExpire?: (scope: string) => Promise<void>;
 	/** A target over the same backend that cannot reach it. */
@@ -167,7 +179,14 @@ export interface ConditionalSetContractInput<T> {
 	/** `n` distinct items of `scope`, equal on every call with the same arguments. */
 	readonly items: (scope: string, n: number) => readonly T[];
 	readonly idOf: (item: T) => string;
+	/** The scope an item belongs to: every item `items(scope, n)` answers is checked against it. */
 	readonly scopeOf: (item: T) => string;
+	/**
+	 * Mutates an item in place, never its id or scope, each mutable part on its
+	 * own, leaving a part that is frozen without throwing: proves the store
+	 * keeps its own copy. Absent for an immutable item.
+	 */
+	readonly mutate?: (item: T) => void;
 	/**
 	 * The hooks every harness `build` answers, declared up front, so the case
 	 * list is fixed when the suite is built. A declared hook that a harness
@@ -193,19 +212,20 @@ export interface ConditionalSetContractInput<T> {
 const fresh = (label: string): string => `cw-${label}-${randomUUID()}`;
 
 /**
- * Lets `n` microtasks run, or one macrotask for `-1`. A race never awaits a
- * delay of `0`, so its second call starts in the same tick as its first.
+ * A promise whose await resumes the caller exactly `n` microtasks later, or
+ * after one macrotask for `-1`. A race never awaits a delay of `0`, so its
+ * second call starts in the same tick as its first.
  */
-const pause = async (n: number): Promise<void> => {
-	if (n < 0) {
-		await new Promise<void>((resolve) => setImmediate(resolve));
-		return;
-	}
-	for (let i = 0; i < n; i += 1) await Promise.resolve();
+const pause = (n: number): Promise<void> => {
+	if (n < 0) return new Promise<void>((resolve) => setImmediate(resolve));
+	if (n <= 1) return Promise.resolve();
+	return (async () => {
+		for (let i = 1; i < n; i += 1) await null;
+	})();
 };
 
-/** The delays a race is run over: microtask counts, then one macrotask (`-1`). */
-const RACE_DELAYS: readonly number[] = [0, 1, 2, 3, 5, 8, -1];
+/** The delays a race is run over: every microtask count up to 8, then one macrotask (`-1`). */
+const RACE_DELAYS: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, -1];
 
 /** How many rounds a two-writer race runs. */
 const RACE_ROUNDS = 20;
@@ -245,6 +265,16 @@ function harnessCase<H extends { readonly close?: () => Promise<void> }>(
 
 const isConflictOrMissing = (outcome: string): boolean =>
 	outcome === "conflict" || outcome === "missing";
+
+/** Whether `write` resolved. A write that throws has an unknown effect, so a case asserts nothing of it. */
+const resolved = async (write: Promise<unknown>): Promise<boolean> => {
+	try {
+		await write;
+		return true;
+	} catch {
+		return false;
+	}
+};
 
 // ---------------------------------------------------------------------------
 // conditionalRecordContract
@@ -411,10 +441,16 @@ export function conditionalRecordContract<V>(
 				if (delay !== 0) await pause(delay);
 				const second = readRecord(round % 2 === 0 ? b : a).remove(key, read.generation);
 				const answers = await Promise.all([first, second]);
-				assert.deepStrictEqual(
-					answers.map((answer) => answer.outcome).sort(),
-					["missing", "removed"],
-					`round ${round}`,
+				const outcomes = answers.map((answer) => answer.outcome);
+				assert.equal(
+					outcomes.filter((outcome) => outcome === "removed").length,
+					1,
+					`round ${round}: ${outcomes.join(" / ")}`,
+				);
+				// The loser met a record already removed: `missing`, or `conflict` from a label read before.
+				assert.ok(
+					outcomes.every((outcome) => outcome === "removed" || isConflictOrMissing(outcome)),
+					`round ${round}: ${outcomes.join(" / ")}`,
 				);
 				assert.equal(await readRecord(a).get(key), null);
 			}
@@ -444,7 +480,8 @@ export function conditionalRecordContract<V>(
 					assert.equal(after?.generation, replaced.generation, where);
 				} else {
 					assert.equal(removed.outcome, "removed", `${where}: no writer won`);
-					assert.equal(replaced.outcome, "missing", where);
+					// The replace met a record already removed: `missing`, or `conflict` from a label read before.
+					assert.ok(isConflictOrMissing(replaced.outcome), `${where}: ${replaced.outcome}`);
 					assert.equal(after, null, where);
 				}
 			}
@@ -583,12 +620,14 @@ export function conditionalRecordContract<V>(
 						writes.length > 0,
 						"supports.unconditional is declared, and the target names no write",
 					);
+					const ran = new Set<string>();
 					for (const [[name, write], same] of writes.flatMap((entry) => [
 						[entry, true] as const,
 						[entry, false] as const,
 					])) {
 						const { key, read } = await seeded(raw, `legacy-${name}`);
-						await write(key, input.values()[same ? 0 : 1]);
+						if (!(await resolved(write(key, input.values()[same ? 0 : 1])))) continue;
+						ran.add(name);
 						const left = await store.get(key);
 						assert.notEqual(
 							left?.generation,
@@ -611,8 +650,69 @@ export function conditionalRecordContract<V>(
 							`${name}: a refused write changed the record`,
 						);
 					}
+					for (const [name] of writes) {
+						assert.ok(ran.has(name), `${name} threw given the same value and another`);
+					}
 				})
 			: notRun("the unconditional-write case", "unconditional"),
+	);
+
+	cases.push(
+		input.supports?.unconditional === true
+			? test("an unconditional write racing a replace at one generation, either started first, is serialised with it: a removal leaves the record absent, and no replace outlives the write", async (store, harness, raw) => {
+					const [a, b] = both(harness);
+					const writes = Object.keys(raw.unconditional);
+					assert.ok(
+						writes.length > 0,
+						"supports.unconditional is declared, and the target names no write",
+					);
+					for (const name of writes) {
+						const alone = await seeded(raw, `alone-${name}`);
+						const solo = declared(raw.unconditional[name], name);
+						if (!(await resolved(solo(alone.key, input.values()[0])))) continue;
+						const removes = (await store.get(alone.key)) === null;
+						let ran = 0;
+						for (let round = 0; round < RACE_ROUNDS * 2; round += 1) {
+							const { key, read } = await seeded(raw, `race-${name}-${round}`);
+							const [writer, replacer] = round % 2 === 0 ? [a, b] : [b, a];
+							const write = declared(writer.unconditional[name], name);
+							const writeFirst = Math.floor(round / 2) % 2 === 0;
+							const unconditional = () => resolved(write(key, input.values()[0]));
+							const replace = () =>
+								readRecord(replacer).replace(key, read.generation, input.values()[1]);
+							const started = writeFirst ? unconditional() : replace();
+							const delay = RACE_DELAYS[round % RACE_DELAYS.length] ?? 0;
+							if (delay !== 0) await pause(delay);
+							const then = writeFirst ? replace() : unconditional();
+							const [one, other] = await Promise.all([started, then]);
+							const wrote = (writeFirst ? one : other) as boolean;
+							const replaced = (writeFirst ? other : one) as ConditionalReplaceAnswer;
+							if (!wrote) continue;
+							ran += 1;
+							const after = await readRecord(a).get(key);
+							const where = `${name}, round ${round}, ${writeFirst ? "the write" : "the replace"} first`;
+							if (removes) {
+								assert.equal(after, null, `${where}: the record outlived the removal`);
+								continue;
+							}
+							assert.notEqual(after, null, where);
+							assert.notEqual(
+								after?.generation,
+								read.generation,
+								`${where}: the write kept the generation`,
+							);
+							if (replaced.outcome === "updated") {
+								assert.notEqual(
+									after?.generation,
+									replaced.generation,
+									`${where}: the replace outlived the write`,
+								);
+							}
+						}
+						assert.ok(ran > 0, `${name} threw in every round`);
+					}
+				})
+			: notRun("the unconditional-write race case", "unconditional"),
 	);
 
 	const mutate = input.mutate;
@@ -747,11 +847,30 @@ export function conditionalSetContract<T>(
 		[...items].sort((a, b) => (idOf(a) < idOf(b) ? -1 : idOf(a) > idOf(b) ? 1 : 0));
 	const sameItems = (actual: readonly T[], expected: readonly T[], message = "the members"): void =>
 		assert.deepStrictEqual(byId(actual), byId(expected), message);
+	/** Two reads of a set agree: the same generation, and the same members in any order. */
+	const sameSet = (
+		actual: VersionedSet<T>,
+		expected: VersionedSet<T>,
+		message = "the set",
+	): void => {
+		assert.equal(actual.generation, expected.generation, `${message}: the generation`);
+		sameItems(actual.items, expected.items, message);
+	};
+	/** `input.items`, checked: `n` items of distinct ids, each of `scope`. */
+	const itemsOf = (scope: string, n: number): readonly T[] => {
+		const items = input.items(scope, n);
+		assert.equal(items.length, n, `items(…, ${n}) answered ${items.length} items`);
+		assert.equal(new Set(items.map(idOf)).size, n, `items(…, ${n}) answered a repeated id`);
+		for (const item of items) {
+			assert.equal(input.scopeOf(item), scope, `items(…, ${n}) answered an item of another scope`);
+		}
+		return items;
+	};
 
 	/** A new scope holding the first `n` of its items, and its generation. */
 	const seeded = async (raw: ConditionalSetTarget<T>, label: string, n: number, extra = 0) => {
 		const scope = fresh(label);
-		const items = input.items(scope, n + extra);
+		const items = itemsOf(scope, n + extra);
 		const store = readSet(raw);
 		let generation: StoreGeneration | null = null;
 		for (const item of items.slice(0, n)) {
@@ -777,7 +896,7 @@ export function conditionalSetContract<T>(
 			const [a, b] = both(harness);
 			for (let round = 0; round < RACE_ROUNDS; round += 1) {
 				const scope = fresh(`first-${round}`);
-				const [x, y] = input.items(scope, 2) as [T, T];
+				const [x, y] = itemsOf(scope, 2) as [T, T];
 				const first = readSet(round % 2 === 0 ? a : b).create(x, null);
 				const delay = RACE_DELAYS[round % RACE_DELAYS.length] ?? 0;
 				if (delay !== 0) await pause(delay);
@@ -799,9 +918,9 @@ export function conditionalSetContract<T>(
 			const read = await store.list(scope);
 			assert.deepStrictEqual(read.items, []);
 			assert.notEqual(read.generation, null);
-			const [x] = input.items(scope, 1) as [T];
+			const [x] = itemsOf(scope, 1) as [T];
 			assert.equal((await store.create(x, null)).outcome, "conflict");
-			assert.deepStrictEqual(await store.list(scope), read);
+			sameSet(await store.list(scope), read);
 		}),
 
 		test("a create at a stale generation answers conflict and adds nothing", async (store, _h, raw) => {
@@ -894,6 +1013,51 @@ export function conditionalSetContract<T>(
 			}
 		}),
 
+		test("a reset racing a create or a removal at one generation, either started first, is serialised with it: the set ends empty, at a generation neither the read nor the write answered", async (_store, harness, raw) => {
+			const [a, b] = both(harness);
+			let round = 0;
+			for (const write of ["create", "removal"] as const) {
+				for (const resetFirst of [true, false]) {
+					for (const delay of RACE_DELAYS) {
+						const { scope, items, generation } = await seeded(raw, `reset-race-${round}`, 1, 1);
+						const [x, y] = items as [T, T];
+						const [resetter, writer] = round % 2 === 0 ? [a, b] : [b, a];
+						round += 1;
+						const conditional = (): Promise<
+							ConditionalCreateAnswer | ConditionalSetRemoveAnswer
+						> =>
+							write === "create"
+								? readSet(writer).create(y, generation)
+								: readSet(writer).remove(scope, idOf(x), generation);
+						const reset = () => resetter.reset(scope);
+						const started = resetFirst ? reset() : conditional();
+						if (delay !== 0) await pause(delay);
+						const then = resetFirst ? conditional() : reset();
+						const [one, other] = await Promise.all([started, then]);
+						const answer = (resetFirst ? other : one) as
+							| ConditionalCreateAnswer
+							| ConditionalSetRemoveAnswer;
+						const where = `${write}, ${resetFirst ? "the reset" : `the ${write}`} first, delay ${delay}`;
+						const after = await readSet(a).list(scope);
+						assert.deepStrictEqual(after.items, [], `${where}: the reset left a member`);
+						assert.ok(after.generation !== null, where);
+						assert.notEqual(
+							after.generation,
+							generation,
+							`${where}: the reset kept the generation`,
+						);
+						if (answer.outcome === "created" || answer.outcome === "removed") {
+							assert.notEqual(
+								after.generation,
+								answer.generation,
+								`${where}: the ${write} outlived the reset`,
+							);
+						}
+					}
+				}
+			}
+		}),
+
 		test("a reset of a set already empty moves its generation: the emptying one then answers conflict", async (store, _h, raw) => {
 			const { scope, items, generation } = await seeded(raw, "reset-empty", 1, 1);
 			const [x, y] = items as [T, T];
@@ -912,7 +1076,7 @@ export function conditionalSetContract<T>(
 			const one = readSet(a);
 			const other = readSet(b);
 			const scope = fresh("instances");
-			const [x, y, z] = input.items(scope, 3) as [T, T, T];
+			const [x, y, z] = itemsOf(scope, 3) as [T, T, T];
 			const first = await one.create(x, null);
 			assert.ok(first.outcome === "created");
 			const read = await other.list(scope);
@@ -956,7 +1120,7 @@ export function conditionalSetContract<T>(
 			assert.notEqual(read.generation, generation);
 			assert.equal((await store.create(z, generation)).outcome, "conflict");
 			assert.equal((await store.remove(scope, idOf(x), generation)).outcome, "conflict");
-			assert.deepStrictEqual(await store.list(scope), read);
+			sameSet(await store.list(scope), read);
 		}),
 
 		test("removing a member not held answers missing, keeps the generation, and the generation still writes", async (store, _h, raw) => {
@@ -972,7 +1136,7 @@ export function conditionalSetContract<T>(
 		test("against an absent set, a removal with a generation answers missing and a create with one answers conflict", async (store, _h, raw) => {
 			const generation = await foreignGeneration(raw);
 			const scope = fresh("absent-set");
-			const [x] = input.items(scope, 1) as [T];
+			const [x] = itemsOf(scope, 1) as [T];
 			assert.equal((await store.remove(scope, idOf(x), generation)).outcome, "missing");
 			assert.equal((await store.create(x, generation)).outcome, "conflict");
 			assert.deepStrictEqual(await store.list(scope), { items: [], generation: null });
@@ -1027,7 +1191,7 @@ export function conditionalSetContract<T>(
 
 		test("every answer is one core's readers accept", async (_store, _h, raw) => {
 			const scope = fresh("readers");
-			const [x, y] = input.items(scope, 2) as [T, T];
+			const [x, y] = itemsOf(scope, 2) as [T, T];
 			readVersionedSet(await raw.listVersioned(scope));
 			const created = readConditionalCreateAnswer(await raw.createIf(x, null));
 			readConditionalCreateAnswer(await raw.createIf(y, null));
@@ -1047,18 +1211,43 @@ export function conditionalSetContract<T>(
 			const [x] = items as [T];
 			const before = await store.list(scope);
 			assert.equal((await store.create(x, generation)).outcome, "conflict");
-			assert.deepStrictEqual(await store.list(scope), before);
+			sameSet(await store.list(scope), before);
 		}),
 	];
 
+	const mutate = input.mutate;
+	cases.push(
+		mutate === undefined
+			? { name: "not run: the aliasing case (no mutate given)", run: async () => {} }
+			: test("the store keeps its own copy: changing a member written or read changes nothing stored", async (store) => {
+					const scope = fresh("alias");
+					const [x] = itemsOf(scope, 1) as [T];
+					assert.equal((await store.create(x, null)).outcome, "created");
+					mutate(x);
+					const read = await store.list(scope);
+					sameItems(read.items, itemsOf(scope, 1), "the member handed to createIf");
+					for (const item of read.items) mutate(item);
+					sameItems((await store.list(scope)).items, itemsOf(scope, 1), "the members read back");
+				}),
+	);
+
 	cases.push(
 		input.supports?.updateMember === true
-			? test("a member's own update keeps the set's generation", async (store, _h, raw) => {
+			? test("a member's own update changes that member and keeps the set's generation", async (store, _h, raw) => {
 					const updateMember = declared(raw.updateMember?.bind(raw), "updateMember");
 					const { scope, items, generation } = await seeded(raw, "update", 2);
-					const [x] = items as [T];
+					const [x, y] = items as [T, T];
 					await updateMember(scope, idOf(x));
-					assert.equal((await store.list(scope)).generation, generation);
+					const read = await store.list(scope);
+					assert.equal(read.generation, generation);
+					const updated = read.items.find((item) => idOf(item) === idOf(x));
+					assert.ok(updated !== undefined, "the updated member is still listed");
+					assert.ok(!isDeepStrictEqual(updated, x), "the update left the member as it was");
+					sameItems(
+						read.items.filter((item) => idOf(item) !== idOf(x)),
+						[y],
+						"the other members",
+					);
 				})
 			: notRun("the member-update case", "updateMember"),
 	);
@@ -1110,11 +1299,7 @@ export function conditionalSetContract<T>(
 								"conflict",
 								name,
 							);
-							assert.deepStrictEqual(
-								await store.list(scope),
-								after,
-								`${name}: a refused write changed the set`,
-							);
+							sameSet(await store.list(scope), after, `${name}: a refused write changed the set`);
 						}
 						assert.ok(changed > 0, `${name} changed no member, given a new member or a held one`);
 					}
@@ -1162,12 +1347,30 @@ export function conditionalSetContract<T>(
 
 	cases.push(
 		input.supports?.forceExpire === true
-			? test("a set that holds a member does not expire: forcing its expiry leaves it as it was", async (store, harness, raw) => {
+			? test("a set that holds a member does not expire, one revived from its tombstone included: the clock moved past every deadline leaves it as it was", async (store, harness, raw) => {
 					const expire = declared(harness.forceExpire, "forceExpire");
-					const { scope } = await seeded(raw, "held-set", 2);
-					const before = await store.list(scope);
-					await expire(scope);
-					assert.deepStrictEqual(await store.list(scope), before);
+					const held = await seeded(raw, "held-set", 2);
+					const fromRemoval = await seeded(raw, "held-revived", 1, 1);
+					const [x, y] = fromRemoval.items as [T, T];
+					const emptied = await store.remove(fromRemoval.scope, idOf(x), fromRemoval.generation);
+					assert.ok(emptied.outcome === "removed");
+					assert.equal((await store.create(y, emptied.generation)).outcome, "created");
+					const fromReset = fresh("held-reset");
+					await raw.reset(fromReset);
+					const tombstone = await store.list(fromReset);
+					assert.ok(tombstone.generation !== null, "a reset leaves a generation");
+					const [z] = itemsOf(fromReset, 1) as [T];
+					assert.equal((await store.create(z, tombstone.generation)).outcome, "created");
+					const sets = [
+						{ scope: held.scope, what: "a set created" },
+						{ scope: fromRemoval.scope, what: "a set revived from a removal's tombstone" },
+						{ scope: fromReset, what: "a set revived from a reset's tombstone" },
+					];
+					const before = await Promise.all(
+						sets.map(async (set) => ({ ...set, read: await store.list(set.scope) })),
+					);
+					for (const { scope } of sets) await expire(scope);
+					for (const { scope, what, read } of before) sameSet(await store.list(scope), read, what);
 				})
 			: notRun("the held-set expiry case", "forceExpire"),
 	);
@@ -1177,7 +1380,7 @@ export function conditionalSetContract<T>(
 			? test("a set created again after its tombstone expired is at a generation it is then read at, never one seen before", async (store, harness) => {
 					const expire = declared(harness.forceExpire, "forceExpire");
 					const scope = fresh("recreate");
-					const [x, y, z] = input.items(scope, 3) as [T, T, T];
+					const [x, y, z] = itemsOf(scope, 3) as [T, T, T];
 					const seen = new Set<StoreGeneration>();
 					const first = await store.create(x, null);
 					assert.ok(first.outcome === "created");
@@ -1221,7 +1424,7 @@ export function conditionalSetContract<T>(
 					}
 					await assert.rejects(unreachable.createIf(y, generation), "createIf");
 					await assert.rejects(
-						unreachable.createIf(input.items(fresh("outage-new"), 1)[0] as T, null),
+						unreachable.createIf(itemsOf(fresh("outage-new"), 1)[0] as T, null),
 						"createIf of a first member",
 					);
 					await assert.rejects(unreachable.removeIf(scope, idOf(x), generation), "removeIf");

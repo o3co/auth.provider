@@ -406,12 +406,32 @@ while what they guard is still at the generation the caller read. The types,
 `isStoreGeneration`, `newStoreGeneration` and core's readers of every answer
 are in `packages/core/src/adapters/conditionalWrite.mts`, on core's root
 entry, with `BUNDLED_STORE_WRITE_LIFETIME_MS`, the bundled stores'
-write-lifetime bound. `@o3co/auth-provider-test-kit`'s
-`conditionalRecordContract` and `conditionalSetContract` hold a store to
-the rules they can observe. A store's own tests cover the rest: minting into
-state written without a generation and keeping generations from coming back
-after a rollback (rule 8), and the retention's length and the write-lifetime
-bound (rule 6). These are the rules every store with conditional members keeps.
+write-lifetime bound. These are the rules every store with conditional
+members keeps.
+
+`@o3co/auth-provider-test-kit`'s `conditionalRecordContract` and
+`conditionalSetContract` hold a store to the rules they can observe. Their
+`forceExpire` hook moves the backend's clock past any retention deadline the
+store set; it never judges membership or deletes. What the suites cannot
+see, and a store's own tests must:
+
+- the isolation a real engine gives under schedules the races do not force;
+- anything a store keeps outside its members (an index, a listing);
+- minting a generation into state written without one, and that a
+  conditional write against such state answers `conflict` without minting
+  (rule 8);
+- how a store keeps generations from coming back after a failover or a
+  restore (rule 8);
+- the retention's length, the write-lifetime bound, and that a set's
+  retention starts again at each emptying write (rule 6): each needs a clock
+  moved short of a deadline, and `forceExpire` only moves it past every one;
+- that the retention is the store's own, never a domain field such as an
+  access token's `expiresAt` (rule 3);
+- an HTTP adapter's mapping of statuses: a bare `404` or `409`, without its
+  body, throws (the status table below);
+- with `forceExpire` undeclared, expiry (rule 3), and with `unreachable`
+  undeclared, the outage (rule 4): the suite then names those cases as not
+  run.
 
 **Scopes.** A generation guards one of two things:
 

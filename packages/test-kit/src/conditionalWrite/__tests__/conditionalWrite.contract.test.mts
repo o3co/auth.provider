@@ -19,7 +19,9 @@
  * a reference set store, and over each of them broken one way at a time:
  * every rule the suites hold a store to has a broken store the case for that
  * rule refuses, so no case is vacuous. Each reference store serves two
- * instances over one backend, as two connections would.
+ * instances over one backend, as two connections would, keeps retention
+ * deadlines on a clock of its own, which `forceExpire` moves past every
+ * deadline, and judges expiry itself.
  */
 
 import { createHash } from "node:crypto";
@@ -106,16 +108,24 @@ interface RecordFaults {
 	readonly counter?: boolean;
 	/** The generation is a digest of the value. */
 	readonly digest?: boolean;
-	/** A replace's check and its write are apart, with an `await` between. */
-	readonly replaceCheckThenWrite?: boolean;
-	/** A removal's check and its write are apart, with an `await` between. */
-	readonly removeCheckThenWrite?: boolean;
+	/** A replace skips the lock the other writes take: its check and its write are apart. */
+	readonly replaceSkipsLock?: boolean;
+	/** A removal skips the lock the other writes take: its check and its write are apart. */
+	readonly removeSkipsLock?: boolean;
+	/** The unconditional delete skips the lock the other writes take. */
+	readonly deleteSkipsLock?: boolean;
 	/** Reads drop an expired record, and writes do not check expiry. */
 	readonly writesIgnoreExpiry?: boolean;
 	/** The second instance answers a versioned read from its own cache. */
 	readonly secondCaches?: boolean;
 	/** Not a fault: every value read is frozen, and its own copy. */
 	readonly frozen?: boolean;
+	/**
+	 * Not a fault: a write that fails its check labels its answer from a read
+	 * taken before it waited for the lock, as one SQL statement with a CTE
+	 * does: `conflict` if that read saw the record, `missing` if not.
+	 */
+	readonly labelsFromSnapshot?: boolean;
 	/** A value read is frozen, and shares its date with what is stored. */
 	readonly frozenSharesDate?: boolean;
 	/** An unconditional write keeps the generation when the value changes. */
@@ -134,23 +144,52 @@ interface RecordFaults {
 	readonly alias?: boolean;
 	/** A create over a live record keeps its generation. */
 	readonly createKeepsGeneration?: boolean;
-	/** Expiry is not applied. */
-	readonly expiryIgnored?: boolean;
+	/** The store ignores its own deadline. */
+	readonly deadlineIgnored?: boolean;
 	/** An outage is answered as absent. */
 	readonly outageAsMissing?: boolean;
 }
 
+/** A record's retention, on the backend's clock. */
+const RECORD_TTL_MS = 60_000;
+
 interface RecordEntry {
 	value: Value;
 	generation: StoreGeneration;
-	/** Expired by `forceExpire`: dropped when it is next looked at. */
-	expired?: boolean;
+	/** When the record expires, on the backend's clock. */
+	deadline: number;
+}
+
+/** A lock per key, as a row lock would be: `body` runs once every earlier holder of `key` is done. */
+function keyLocks() {
+	const tails = new Map<string, Promise<void>>();
+	return async <R,>(key: string, body: () => Promise<R>): Promise<R> => {
+		const before = tails.get(key) ?? Promise.resolve();
+		let release = (): void => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const tail = before.then(() => held);
+		tails.set(key, tail);
+		await before;
+		try {
+			return await body();
+		} finally {
+			release();
+			if (tails.get(key) === tail) tails.delete(key);
+		}
+	};
 }
 
 /** A record backend, and a target over it per call to `target`. */
 function recordBackend(faults: RecordFaults = {}) {
 	const entries = new Map<string, RecordEntry>();
 	const counters = new Map<string, number>();
+	const locked = keyLocks();
+	let now = 0;
+	/** Runs `body` under `key`'s lock, unless the write skips it. */
+	const serialised = <R,>(key: string, body: () => Promise<R>, skips = false): Promise<R> =>
+		skips ? body() : locked(key, body);
 	const copy = (value: Value): Value =>
 		faults.alias === true
 			? value
@@ -175,18 +214,29 @@ function recordBackend(faults: RecordFaults = {}) {
 		entries.delete(key);
 		counters.delete(key);
 	};
-	const write = (key: string, value: Value): StoreGeneration => {
+	/** Writes `value` at a new generation: a replace keeps the record's deadline, a create starts one. */
+	const write = (key: string, value: Value, creates = false): StoreGeneration => {
 		const generation = issue(key, value);
-		entries.set(key, { value: copy(value), generation });
+		const held = creates ? undefined : entries.get(key)?.deadline;
+		const deadline = held ?? now + RECORD_TTL_MS;
+		entries.set(key, { value: copy(value), generation, deadline });
 		return generation;
 	};
-	/** The record, unless it expired: a read drops it, and so does a write unless writes ignore expiry. */
+	/** The record, unless it is past its deadline: a read drops it, and so does a write unless writes ignore expiry. */
 	const live = (key: string, forWrite: boolean): RecordEntry | undefined => {
 		const entry = entries.get(key);
-		if (entry?.expired !== true) return entry;
+		if (entry === undefined || faults.deadlineIgnored === true || entry.deadline > now)
+			return entry;
 		if (forWrite && faults.writesIgnoreExpiry === true) return entry;
 		drop(key);
 		return undefined;
+	};
+	/** How a write that fails its check answers: by what it found, or by a read taken before the lock. */
+	const refusal = (key: string) => {
+		const seen = faults.labelsFromSnapshot === true ? live(key, false) !== undefined : undefined;
+		return (found: "missing" | "conflict"): { outcome: "missing" | "conflict" } => ({
+			outcome: seen === undefined ? found : seen ? "conflict" : "missing",
+		});
 	};
 	const out = (value: Value): Value =>
 		faults.frozenSharesDate === true
@@ -207,26 +257,27 @@ function recordBackend(faults: RecordFaults = {}) {
 			if (faults.tornRead === "value-first") {
 				const value = out(entry.value);
 				await gap();
-				const now = entries.get(key);
-				return now === undefined ? null : { value, generation: now.generation };
+				const current = entries.get(key);
+				return current === undefined ? null : { value, generation: current.generation };
 			}
 			if (faults.tornRead === "generation-first") {
 				const generation = entry.generation;
 				await gap();
-				const now = entries.get(key);
-				return now === undefined ? null : { value: out(now.value), generation };
+				const current = entries.get(key);
+				return current === undefined ? null : { value: out(current.value), generation };
 			}
 			return { value: out(entry.value), generation: entry.generation };
 		};
 		return {
-			async create(key, value) {
-				const held = live(key, true);
-				if (faults.createKeepsGeneration === true && held !== undefined) {
-					entries.set(key, { value: copy(value), generation: held.generation });
-					return;
-				}
-				write(key, value);
-			},
+			create: (key, value) =>
+				serialised(key, async () => {
+					const held = live(key, true);
+					if (faults.createKeepsGeneration === true && held !== undefined) {
+						entries.set(key, { ...held, value: copy(value) });
+						return;
+					}
+					write(key, value, true);
+				}),
 			async getVersioned(key) {
 				if (faults.secondCaches === true && instance === 1) {
 					const cached = cache.get(key);
@@ -237,55 +288,76 @@ function recordBackend(faults: RecordFaults = {}) {
 				}
 				return read(key);
 			},
-			async replaceIf(key, expected, value): Promise<ConditionalReplaceAnswer> {
-				const entry = live(key, true);
-				if (entry === undefined) {
-					if (faults.createOnMissing === true)
+			replaceIf: (key, expected, value) => {
+				const refused = refusal(key);
+				return serialised(
+					key,
+					async (): Promise<ConditionalReplaceAnswer> => {
+						const entry = live(key, true);
+						if (entry === undefined) {
+							if (faults.createOnMissing === true)
+								return { outcome: "updated", generation: write(key, value) };
+							return refused("missing");
+						}
+						if (entry.generation !== expected && faults.replaceIgnoresExpected !== true) {
+							if (faults.writeOnConflict === true) write(key, value);
+							return refused("conflict");
+						}
+						// A round trip inside the step, as a transaction's would be.
+						await gap();
+						if (faults.replaceKeepsGeneration === true) {
+							entries.set(key, { ...entry, value: copy(value) });
+							return { outcome: "updated", generation: entry.generation };
+						}
 						return { outcome: "updated", generation: write(key, value) };
-					return { outcome: "missing" };
-				}
-				if (entry.generation !== expected && faults.replaceIgnoresExpected !== true) {
-					if (faults.writeOnConflict === true) write(key, value);
-					return { outcome: "conflict" };
-				}
-				if (faults.replaceCheckThenWrite === true) await gap();
-				if (faults.replaceKeepsGeneration === true) {
-					entries.set(key, { value: copy(value), generation: entry.generation });
-					return { outcome: "updated", generation: entry.generation };
-				}
-				return { outcome: "updated", generation: write(key, value) };
+					},
+					faults.replaceSkipsLock,
+				);
 			},
-			async removeIf(key, expected): Promise<ConditionalRemoveAnswer> {
-				const entry = live(key, true);
-				if (entry === undefined) {
-					return faults.malformedMissing === true
-						? ({ outcome: "absent" } as unknown as ConditionalRemoveAnswer)
-						: { outcome: "missing" };
-				}
-				if (entry.generation !== expected && faults.removeIgnoresExpected !== true) {
-					return { outcome: "conflict" };
-				}
-				if (faults.removeCheckThenWrite === true) await gap();
-				drop(key);
-				return { outcome: "removed" };
+			removeIf: (key, expected) => {
+				const refused = refusal(key);
+				return serialised(
+					key,
+					async (): Promise<ConditionalRemoveAnswer> => {
+						const entry = live(key, true);
+						if (entry === undefined) {
+							return faults.malformedMissing === true
+								? ({ outcome: "absent" } as unknown as ConditionalRemoveAnswer)
+								: refused("missing");
+						}
+						if (entry.generation !== expected && faults.removeIgnoresExpected !== true) {
+							return refused("conflict");
+						}
+						await gap();
+						drop(key);
+						return { outcome: "removed" };
+					},
+					faults.removeSkipsLock,
+				);
 			},
 			unconditional: {
-				async put(key, value) {
-					const held = live(key, true);
-					const keeps =
-						faults.legacyKeepsGeneration === true ||
-						(faults.legacyKeepsGenerationOnChange === true &&
-							held !== undefined &&
-							held.value.name !== value.name);
-					if (keeps && held !== undefined) {
-						entries.set(key, { value: copy(value), generation: held.generation });
-						return;
-					}
-					write(key, value);
-				},
-				async delete(key) {
-					drop(key);
-				},
+				put: (key, value) =>
+					serialised(key, async () => {
+						const held = live(key, true);
+						const keeps =
+							faults.legacyKeepsGeneration === true ||
+							(faults.legacyKeepsGenerationOnChange === true &&
+								held !== undefined &&
+								held.value.name !== value.name);
+						if (keeps && held !== undefined) {
+							entries.set(key, { ...held, value: copy(value) });
+							return;
+						}
+						write(key, value, true);
+					}),
+				delete: (key) =>
+					serialised(
+						key,
+						async () => {
+							drop(key);
+						},
+						faults.deleteSkipsLock,
+					),
 			},
 		};
 	};
@@ -310,9 +382,9 @@ function recordBackend(faults: RecordFaults = {}) {
 
 	return {
 		target,
-		forceExpire: async (key: string) => {
-			const entry = entries.get(key);
-			if (entry !== undefined && faults.expiryIgnored !== true) entry.expired = true;
+		/** Moves the clock past every deadline the store set; judges and deletes nothing. */
+		forceExpire: async (_key: string) => {
+			now += RECORD_TTL_MS;
 		},
 		unreachable,
 	};
@@ -361,6 +433,8 @@ const RECORD = {
 		"a replace racing a removal at one generation, either started first: exactly one wins, and the record is what the winner left",
 	unconditional:
 		"every unconditional write, a byte-identical rewrite included, moves or ends the generation: the old one then answers conflict or missing",
+	unconditionalRace:
+		"an unconditional write racing a replace at one generation, either started first, is serialised with it: a removal leaves the record absent, and no replace outlives the write",
 	snapshot:
 		"a versioned read is one snapshot: read with a concurrent replace, its value and generation are both before or both after",
 	nothingWritten:
@@ -388,21 +462,26 @@ describe("conditionalRecordContract refuses a record store that breaks a rule", 
 		["a counter that restarts at a re-create", { counter: true }, RECORD.aba],
 		["a digest of the value", { digest: true }, RECORD.aba],
 		["a digest of the value, on a same-value replace", { digest: true }, RECORD.sameValue],
-		["a replace's check apart from its write", { replaceCheckThenWrite: true }, RECORD.race],
+		["a replace that skips the lock", { replaceSkipsLock: true }, RECORD.race],
 		[
-			"a replace's check apart from its write, against a removal",
-			{ replaceCheckThenWrite: true },
+			"a replace that skips the lock, against a removal",
+			{ replaceSkipsLock: true },
 			RECORD.mixedRace,
 		],
 		[
-			"a removal's check apart from its write, against a replace",
-			{ removeCheckThenWrite: true },
+			"a removal that skips the lock, against a replace",
+			{ removeSkipsLock: true },
 			RECORD.mixedRace,
 		],
 		[
-			"a removal's check apart from its write, against a removal",
-			{ removeCheckThenWrite: true },
+			"a removal that skips the lock, against a removal",
+			{ removeSkipsLock: true },
 			RECORD.removeRace,
+		],
+		[
+			"an unconditional delete that skips the lock, against a replace",
+			{ deleteSkipsLock: true },
+			RECORD.unconditionalRace,
 		],
 		["writes that do not check expiry", { writesIgnoreExpiry: true }, RECORD.expiry],
 		["a second instance that reads from a cache", { secondCaches: true }, RECORD.crossInstance],
@@ -432,7 +511,7 @@ describe("conditionalRecordContract refuses a record store that breaks a rule", 
 			{ createKeepsGeneration: true },
 			RECORD.overwrite,
 		],
-		["a store that does not expire", { expiryIgnored: true }, RECORD.expiry],
+		["a store that ignores its own deadline", { deadlineIgnored: true }, RECORD.expiry],
 		["an outage answered as absent", { outageAsMissing: true }, RECORD.outage],
 	];
 	for (const [what, faults, refusing] of cases) {
@@ -443,6 +522,12 @@ describe("conditionalRecordContract refuses a record store that breaks a rule", 
 
 	it("a store that answers frozen values passes every case", async () => {
 		expect(await refusedBy(conditionalRecordContract(recordInput({ frozen: true })))).toEqual([]);
+	});
+
+	it("a store whose losing write labels its answer from a read taken before its lock passes every case", async () => {
+		expect(
+			await refusedBy(conditionalRecordContract(recordInput({ labelsFromSnapshot: true }))),
+		).toEqual([]);
 	});
 
 	it("every case of the suite refuses one of the broken stores", () => {
@@ -473,10 +558,12 @@ describe("conditionalRecordContract's declared hooks", () => {
 				"not run: the expiry case (supports.forceExpire not declared)",
 				"not run: the outage case (supports.unreachable not declared)",
 				"not run: the unconditional-write case (supports.unconditional not declared)",
+				"not run: the unconditional-write race case (supports.unconditional not declared)",
 				"not run: the aliasing case (no mutate given)",
 			]),
 		);
 		expect(listed).not.toContain(RECORD.unconditional);
+		expect(listed).not.toContain(RECORD.unconditionalRace);
 		expect(await refusedBy(cases)).toEqual([]);
 	});
 
@@ -497,7 +584,9 @@ describe("conditionalRecordContract's declared hooks", () => {
 				store: { ...recordBackend().target(0), unconditional: {} },
 			}),
 		});
-		expect(await refusedBy(cases)).toContain(RECORD.unconditional);
+		const refused = await refusedBy(cases);
+		expect(refused).toContain(RECORD.unconditional);
+		expect(refused).toContain(RECORD.unconditionalRace);
 	});
 });
 
@@ -508,11 +597,20 @@ describe("conditionalRecordContract's declared hooks", () => {
 interface Item {
 	readonly scope: string;
 	readonly id: string;
-	readonly data: string;
+	data: string;
 }
 
 const ITEMS = (scope: string, n: number): readonly Item[] =>
 	Array.from({ length: n }, (_, i) => ({ scope, id: `item-${i}`, data: `data-${i}` }));
+
+/** Changes an item's data, leaving a frozen item. */
+const MUTATE_ITEM = (item: Item): void => {
+	try {
+		item.data = "mutated";
+	} catch {
+		// A frozen copy.
+	}
+};
 
 /** How a set store is broken: each flag breaks one rule. */
 interface SetFaults {
@@ -524,6 +622,12 @@ interface SetFaults {
 	readonly removeCheckThenWrite?: boolean;
 	/** A reset of a set already empty changes nothing. */
 	readonly resetEmptyNoop?: boolean;
+	/** A reset clears the members, then moves the generation, in two steps. */
+	readonly resetTwoSteps?: boolean;
+	/** A member's own update changes nothing. */
+	readonly updateNoop?: boolean;
+	/** A member is stored and answered as the caller's own object. */
+	readonly alias?: boolean;
 	/** Reads drop an expired set, and writes do not check expiry. */
 	readonly writesIgnoreExpiry?: boolean;
 	/** A removal does not check expiry. */
@@ -536,6 +640,8 @@ interface SetFaults {
 	readonly listDisagrees?: boolean;
 	/** Not a fault: every member read is frozen. */
 	readonly frozen?: boolean;
+	/** Not a fault: every other read lists the members in reverse. */
+	readonly reordered?: boolean;
 	/** A reset deletes the set, leaving no tombstone. */
 	readonly resetDeletes?: boolean;
 	/** A reset empties the set and keeps its generation. */
@@ -562,10 +668,10 @@ interface SetFaults {
 	readonly malformedMissing?: boolean;
 	/** A create of a held id overwrites it. */
 	readonly upsertHeld?: boolean;
-	/** A tombstone never expires. */
-	readonly tombstoneKept?: boolean;
-	/** Forcing expiry removes a set that still holds members. */
-	readonly expiresHeld?: boolean;
+	/** The store ignores its own deadline. */
+	readonly deadlineIgnored?: boolean;
+	/** A set revived from its tombstone keeps the tombstone's deadline. */
+	readonly revivedKeepsDeadline?: boolean;
 	/** The generation is a counter per scope that restarts once the set expires. */
 	readonly counterRestarts?: boolean;
 	/** A create after the set expired answers the generation the set had before, not the one it issued. */
@@ -574,11 +680,14 @@ interface SetFaults {
 	readonly outageAsMissing?: boolean;
 }
 
+/** An emptied set's retention, on the backend's clock. */
+const TOMBSTONE_MS = 60_000;
+
 interface SetEntry {
 	generation: StoreGeneration;
 	readonly members: Map<string, Item>;
-	/** Expired by `forceExpire`: dropped when it is next looked at. */
-	expired?: boolean;
+	/** When an emptied set's tombstone expires, on the backend's clock; none while it holds a member. */
+	deadline?: number;
 }
 
 /** A set backend, and a target over it per call to `target`. */
@@ -586,6 +695,7 @@ function setBackend(faults: SetFaults = {}) {
 	const sets = new Map<string, SetEntry>();
 	const counters = new Map<string, number>();
 	const expired = new Map<string, StoreGeneration>();
+	let now = 0;
 	const issue = (members: ReadonlyMap<string, Item>, scope = ""): StoreGeneration => {
 		if (faults.counterRestarts === true) {
 			const next = (counters.get(scope) ?? 0) + 1;
@@ -599,19 +709,33 @@ function setBackend(faults: SetFaults = {}) {
 					.slice(0, 32) as StoreGeneration)
 			: newStoreGeneration();
 	};
+	const keep = (item: Item): Item => (faults.alias === true ? item : { ...item });
+	/** After a membership write: an emptied set starts its tombstone's deadline; one holding a member has none. */
+	const retain = (entry: SetEntry): void => {
+		if (entry.members.size === 0) entry.deadline = now + TOMBSTONE_MS;
+		else if (faults.revivedKeepsDeadline !== true) entry.deadline = undefined;
+	};
 	const add = (item: Item): StoreGeneration => {
 		const held = live(item.scope, true);
 		const entry = held ?? { generation: newStoreGeneration(), members: new Map() };
 		const before = held !== undefined ? undefined : expired.get(item.scope);
-		entry.members.set(item.id, { ...item });
+		entry.members.set(item.id, keep(item));
 		entry.generation = issue(entry.members, item.scope);
+		retain(entry);
 		sets.set(item.scope, entry);
 		return faults.recreateAnswersStale === true && before !== undefined ? before : entry.generation;
 	};
-	/** The set, unless it expired: a read drops it, and so does a write unless writes ignore expiry. */
+	/** The set, unless its tombstone is past its deadline: a read drops it, and so does a write unless writes ignore expiry. */
 	const live = (scope: string, forWrite: boolean): SetEntry | undefined => {
 		const entry = sets.get(scope);
-		if (entry?.expired !== true) return entry;
+		if (
+			entry === undefined ||
+			faults.deadlineIgnored === true ||
+			entry.deadline === undefined ||
+			entry.deadline > now
+		) {
+			return entry;
+		}
 		if (forWrite && faults.writesIgnoreExpiry === true) return entry;
 		expired.set(scope, entry.generation);
 		sets.delete(scope);
@@ -619,10 +743,20 @@ function setBackend(faults: SetFaults = {}) {
 		return undefined;
 	};
 	const out = (item: Item): Item =>
-		faults.frozen === true ? Object.freeze({ ...item }) : { ...item };
+		faults.alias === true
+			? item
+			: faults.frozen === true
+				? Object.freeze({ ...item })
+				: { ...item };
 
 	const target = (instance: number): ConditionalSetTarget<Item> => {
 		const cache = new Map<string, VersionedSet<Item>>();
+		let reads = 0;
+		const ordered = (items: Item[]): Item[] => {
+			if (faults.reordered !== true) return items;
+			reads += 1;
+			return reads % 2 === 0 ? items.reverse() : items;
+		};
 		const read = async (scope: string): Promise<VersionedSet<Item>> => {
 			const entry = live(scope, false);
 			if (entry === undefined) {
@@ -631,10 +765,11 @@ function setBackend(faults: SetFaults = {}) {
 					generation: faults.absentAnswersGeneration === true ? newStoreGeneration() : null,
 				};
 			}
-			const items = (): Item[] => [
-				...[...(sets.get(scope)?.members.values() ?? [])].map(out),
-				...(faults.leaksReserved === true ? [{ scope, id: "~g", data: "" }] : []),
-			];
+			const items = (): Item[] =>
+				ordered([
+					...[...(sets.get(scope)?.members.values() ?? [])].map(out),
+					...(faults.leaksReserved === true ? [{ scope, id: "~g", data: "" }] : []),
+				]);
 			if (faults.tornRead === "items-first") {
 				const listed = items();
 				await gap();
@@ -696,6 +831,7 @@ function setBackend(faults: SetFaults = {}) {
 				if (faults.removeCheckThenWrite === true) await gap();
 				entry.members.delete(id);
 				entry.generation = issue(entry.members, scope);
+				retain(entry);
 				if (faults.lastRemovalDeletes === true && entry.members.size === 0) sets.delete(scope);
 				return { outcome: "removed", generation: entry.generation };
 			},
@@ -709,15 +845,26 @@ function setBackend(faults: SetFaults = {}) {
 				}
 				if (faults.resetKeepsGeneration === true && entry !== undefined) {
 					entry.members.clear();
+					retain(entry);
 					return;
 				}
-				sets.set(scope, { generation: newStoreGeneration(), members: new Map() });
+				if (faults.resetTwoSteps === true && entry !== undefined) {
+					entry.members.clear();
+					await gap();
+					entry.generation = newStoreGeneration();
+					retain(entry);
+					return;
+				}
+				const emptied: SetEntry = { generation: newStoreGeneration(), members: new Map() };
+				retain(emptied);
+				sets.set(scope, emptied);
 			},
 			async updateMember(scope, id) {
 				const entry = live(scope, true);
 				const member = entry?.members.get(id);
 				if (entry === undefined || member === undefined) throw new Error("no such member");
-				entry.members.set(id, { ...member, data: `${member.data}+` });
+				if (faults.updateNoop !== true)
+					entry.members.set(id, { ...member, data: `${member.data}+` });
 				if (faults.updateMoves === true) entry.generation = newStoreGeneration();
 			},
 			unconditional: {
@@ -725,7 +872,8 @@ function setBackend(faults: SetFaults = {}) {
 					const entry = live(item.scope, true);
 					if (entry?.members.has(item.id) === true) throw new Error("held");
 					if (faults.legacyKeepsGeneration === true && entry !== undefined) {
-						entry.members.set(item.id, { ...item });
+						entry.members.set(item.id, keep(item));
+						retain(entry);
 						return;
 					}
 					add(item);
@@ -735,6 +883,7 @@ function setBackend(faults: SetFaults = {}) {
 					if (entry === undefined || !entry.members.delete(item.id)) return;
 					if (faults.legacyKeepsGeneration !== true)
 						entry.generation = issue(entry.members, item.scope);
+					retain(entry);
 				},
 			},
 		};
@@ -764,10 +913,9 @@ function setBackend(faults: SetFaults = {}) {
 
 	return {
 		target,
-		forceExpire: async (scope: string) => {
-			const entry = sets.get(scope);
-			if (entry === undefined || faults.tombstoneKept === true) return;
-			if (entry.members.size === 0 || faults.expiresHeld === true) entry.expired = true;
+		/** Moves the clock past every deadline the store set; judges and deletes nothing. */
+		forceExpire: async (_scope: string) => {
+			now += TOMBSTONE_MS;
 		},
 		unreachable,
 	};
@@ -789,6 +937,7 @@ const setInput = (faults: SetFaults = {}): ConditionalSetContractInput<Item> => 
 	items: ITEMS,
 	idOf: (item) => item.id,
 	scopeOf: (item) => item.scope,
+	mutate: MUTATE_ITEM,
 	supports: {
 		forceExpire: true,
 		unreachable: true,
@@ -809,7 +958,7 @@ const SET = {
 	firstRace: "of two concurrent first creates through two instances, exactly one is created",
 	resetAbsent:
 		"a reset of a set never written leaves it empty at a generation, so a first create then answers conflict",
-	update: "a member's own update keeps the set's generation",
+	update: "a member's own update changes that member and keeps the set's generation",
 	stale: "a create at a stale generation answers conflict and adds nothing",
 	last: "removing the last member keeps the set, empty, at the new generation removed answers",
 	removeRace:
@@ -817,6 +966,8 @@ const SET = {
 	createRace:
 		"of concurrent creates of different members at one generation, exactly one is created",
 	mixedRace: "a removal racing a create at one generation, either started first: exactly one wins",
+	resetRace:
+		"a reset racing a create or a removal at one generation, either started first, is serialised with it: the set ends empty, at a generation neither the read nor the write answered",
 	resetEmpty:
 		"a reset of a set already empty moves its generation: the emptying one then answers conflict",
 	aba: "a member removed and created again with the same bytes leaves no generation repeated, and the first answers conflict",
@@ -838,7 +989,9 @@ const SET = {
 	tombstone:
 		"an emptied set whose tombstone expired reads as absent, and a write with no read after the expiry finds it absent",
 	outage: "a store that cannot reach its backend rejects every member",
-	heldSet: "a set that holds a member does not expire: forcing its expiry leaves it as it was",
+	heldSet:
+		"a set that holds a member does not expire, one revived from its tombstone included: the clock moved past every deadline leaves it as it was",
+	alias: "the store keeps its own copy: changing a member written or read changes nothing stored",
 	recreate:
 		"a set created again after its tombstone expired is at a generation it is then read at, never one seen before",
 } as const;
@@ -857,6 +1010,13 @@ describe("conditionalSetContract refuses a set store that breaks a rule", () => 
 		],
 		["a reset that leaves no tombstone", { resetDeletes: true }, SET.resetAbsent],
 		["a member's update that moves the generation", { updateMoves: true }, SET.update],
+		["a member's update that changes nothing", { updateNoop: true }, SET.update],
+		[
+			"a reset in two steps, clearing the members before it moves the generation",
+			{ resetTwoSteps: true },
+			SET.resetRace,
+		],
+		["a member shared with the caller", { alias: true }, SET.alias],
 		["a create that ignores the generation", { createIgnoresExpected: true }, SET.stale],
 		["a removal of the last member that deletes the set", { lastRemovalDeletes: true }, SET.last],
 		[
@@ -907,9 +1067,13 @@ describe("conditionalSetContract refuses a set store that breaks a rule", () => 
 		],
 		["an answer outside the type", { malformedMissing: true }, SET.readers],
 		["a create that overwrites a held id", { upsertHeld: true }, SET.held],
-		["a tombstone that never expires", { tombstoneKept: true }, SET.tombstone],
+		["a store that ignores its own deadline", { deadlineIgnored: true }, SET.tombstone],
 		["an outage answered as an empty set", { outageAsMissing: true }, SET.outage],
-		["an expiry that removes a set holding members", { expiresHeld: true }, SET.heldSet],
+		[
+			"a set revived from its tombstone that keeps the tombstone's deadline",
+			{ revivedKeepsDeadline: true },
+			SET.heldSet,
+		],
 		["a counter that restarts once the set expires", { counterRestarts: true }, SET.recreate],
 		[
 			"a create after expiry that answers the expired generation",
@@ -925,6 +1089,10 @@ describe("conditionalSetContract refuses a set store that breaks a rule", () => 
 
 	it("a store that answers frozen members passes every case", async () => {
 		expect(await refusedBy(conditionalSetContract(setInput({ frozen: true })))).toEqual([]);
+	});
+
+	it("a store that lists its members in another order on each read passes every case", async () => {
+		expect(await refusedBy(conditionalSetContract(setInput({ reordered: true })))).toEqual([]);
 	});
 
 	it("every case of the suite refuses one of the broken stores", () => {
@@ -955,6 +1123,20 @@ describe("conditionalSetContract's declared hooks", () => {
 		for (const name of [SET.update, SET.agree, SET.unconditional])
 			expect(listed).not.toContain(name);
 		expect(await refusedBy(cases)).toEqual([]);
+		const withoutMutate = conditionalSetContract({ ...setInput(), mutate: undefined }).map(
+			(contractCase) => contractCase.name,
+		);
+		expect(withoutMutate).toContain("not run: the aliasing case (no mutate given)");
+		expect(withoutMutate).not.toContain(SET.alias);
+	});
+
+	it("fails a case whose items answer an item of another scope", async () => {
+		const cases = conditionalSetContract({
+			...setInput(),
+			items: (scope, n) => ITEMS(`${scope}-elsewhere`, n),
+		});
+		const first = cases.find((contractCase) => contractCase.name === SET.firstRace);
+		await expect(first?.run()).rejects.toThrow(/an item of another scope/);
 	});
 
 	it("fails the case of a hook declared and missing from the harness", async () => {
