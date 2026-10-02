@@ -329,13 +329,14 @@ describe("a recovery code of a retired set", () => {
 				config: configFor("required", { storeTimeoutMs: 1_000 }),
 				factorStore,
 			});
+			const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
+			const { agent, transaction } = await beginLogin(app);
+			// The verification's own reads, counted from here: the login's ask read the floor before.
 			const floor = transactionStore.recoverySetFloor.bind(transactionStore);
 			let calls = 0;
 			vi.spyOn(transactionStore, "recoverySetFloor").mockImplementation((subject) =>
 				calls++ < answered ? floor(subject) : new Promise<number>(() => undefined),
 			);
-			const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
-			const { agent, transaction } = await beginLogin(app);
 
 			const res = await verify(agent, transaction, set.record.id, set.codes[0]);
 

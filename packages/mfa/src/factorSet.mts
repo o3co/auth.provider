@@ -162,6 +162,25 @@ export function checkFactorSetStoreTimeout(storeTimeoutMs: number): number {
 	return storeTimeoutMs;
 }
 
+/**
+ * A reader of the subject's recovery-set floor over `store`, bounded by
+ * `storeTimeoutMs`: throws for a store that cannot answer in time, or
+ * answers outside its port. What every reading of a recovery set's
+ * usability reads the floor through.
+ */
+export function boundedRecoverySetFloor(
+	store: Pick<MfaTransactionStore, "recoverySetFloor">,
+	storeTimeoutMs: number,
+): (subject: string) => Promise<number> {
+	return async (subject) => {
+		const floor = readMfaSubjectCount(
+			await within(() => store.recoverySetFloor(subject), storeTimeoutMs, "recoverySetFloor"),
+		);
+		if (floor === undefined) throw OUTSIDE_CONTRACT;
+		return floor;
+	};
+}
+
 /** The subject's records, oldest first: the order a page lists them and a request names them. */
 const byAge = (a: MfaFactorRecord, b: MfaFactorRecord): number =>
 	a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -790,13 +809,7 @@ export function createMfaFactorSet(options: {
 
 		list,
 
-		async recoverySetFloor(subject) {
-			const floor = readMfaSubjectCount(
-				await within(() => leases.recoverySetFloor(subject), storeTimeoutMs, "recoverySetFloor"),
-			);
-			if (floor === undefined) throw OUTSIDE_CONTRACT;
-			return floor;
-		},
+		recoverySetFloor: boundedRecoverySetFloor(leases, storeTimeoutMs),
 
 		async markEnrolled(start, subject) {
 			if (!witness.writable) return witness.mark(subject);

@@ -507,7 +507,15 @@ export interface MfaCeremonyKit {
 		subject: string,
 		records: readonly MfaFactorRecord[],
 		options: { readonly counting: boolean },
+		/** The subject's recovery-set floor, read before `records`: a set below it is not usable. */
+		floor?: number,
 	) => boolean;
+	/**
+	 * The subject's recovery-set floor, to read before its records, bounded by
+	 * one Store timeout; `undefined` while the recovery-code factor is off, or
+	 * when it cannot be read — every set is then read as without one.
+	 */
+	readonly recoverySetFloorFor: (subject: string) => Promise<number | undefined>;
 	/** Whether the session store can record a second factor verified in a session: a step-up is opened only then. */
 	readonly stepUpRecordable: boolean;
 	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */

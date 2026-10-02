@@ -43,9 +43,13 @@
  *   `no_qualifying_factor`, a login reopened under `required`: `usable`
  *   alone (`holdsUsableRecord`);
  * - whether a password login asks for a second factor over a record
- *   (`asksForSecondFactor`): every state but `exhausted`, so one the
- *   provider cannot read — a TOTP whose key is lost among them — or whose
- *   kind it no longer installs fails closed and asks;
+ *   (`asksForSecondFactor`): every state but `exhausted` and `retired`, so
+ *   one the provider cannot read — a TOTP whose key is lost among them — or
+ *   whose kind it no longer installs fails closed and asks;
+ * - every reading that decides on a recovery set — the offers, the list, a
+ *   step-up's `no_qualifying_factor`, a password login's ask — reads the
+ *   floor before the records, through `withRecoverySetFloor`, so all agree
+ *   on what is usable;
  * - whether a first binding may open: `mayCount` (`firstBinding.mts`), which
  *   reads no data.
  */
@@ -167,12 +171,15 @@ export async function withRecoverySetFloor(
 	}
 }
 
-/** Whether a password login asks for a second factor over `record`: every state but `exhausted`. */
+/** Whether a password login asks for a second factor over `record`: every state but `exhausted` and `retired`. */
 export const asksForSecondFactor = (
 	context: MfaRecordContext,
 	subject: string,
 	record: ReadRecord,
-): boolean => readFactorRecord(context, subject, record).state !== "exhausted";
+): boolean => {
+	const { state } = readFactorRecord(context, subject, record);
+	return state !== "exhausted" && state !== "retired";
+};
 
 /** Whether `subject` holds a usable record among `records` — one whose factor counts, when `options.counting` asks it. */
 export const holdsUsableRecord = (

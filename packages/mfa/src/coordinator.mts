@@ -387,7 +387,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		subject: string,
 		records: readonly MfaFactorRecord[],
 		options: { readonly counting: boolean },
-	): boolean => holdsUsableRecord({ factors, sealing }, subject, records, options);
+		floor?: number,
+	): boolean =>
+		holdsUsableRecord(
+			{ factors, sealing, ...(floor === undefined ? {} : { recoverySetFloor: floor }) },
+			subject,
+			records,
+			options,
+		);
 
 	/**
 	 * `subject`'s recovery-set floor, for a verification of `factor` that is a
@@ -647,6 +654,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		},
 		stepUpRecordable,
 		holdsUsable,
+		recoverySetFloorFor: async (subject) =>
+			(await withRecoverySetFloor({ factors, sealing }, subject, factorSet.recoverySetFloor))
+				.recoverySetFloor,
 		openLoginBinding: async (binding, continuation, shape) => {
 			try {
 				return await openLoginBinding(transactions, {

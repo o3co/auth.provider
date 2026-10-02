@@ -109,7 +109,12 @@ import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
-import { createMfaFactorSet, createMfaSubjectLeases, type MfaSubjectLeases } from "./factorSet.mjs";
+import {
+	boundedRecoverySetFloor,
+	createMfaFactorSet,
+	createMfaSubjectLeases,
+	type MfaSubjectLeases,
+} from "./factorSet.mjs";
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { createMfaLockRecovery } from "./lockRecovery.mjs";
@@ -480,6 +485,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 						firstBindingAt: (subject, nowMs) =>
 							deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+						recoverySetFloor: boundedRecoverySetFloor(
+							deps.mfaTransactionStore,
+							settings.storeTimeoutMs,
+						),
 						sealing,
 					});
 					bootStates.set(deps.mfaFactorResolver, {
