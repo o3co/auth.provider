@@ -241,6 +241,8 @@
 . FederationGrantStoreFactory type
 . FederationGrantTokenResult type
 . FederationGrantUnavailableReason type
+. FederationGrantUpstreamAnswer type
+. FederationGrantUpstreamAnswerContext type
 . FederationGrantUsage type
 . FederationGrantWrite type
 . FederationInstance type
@@ -964,6 +966,7 @@
 . readDeviceAuthorization value
 . readEnrollmentFacts value
 . readEnvironmentName value
+. readFederationGrantUpstreamAnswer value
 . readFirstBindingAt value
 . readGrantPolicyDecision value
 . readHostEntry value
