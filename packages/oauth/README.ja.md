@@ -709,7 +709,7 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 - **すべてのフィールドが `attach`、`replaceIf`、`get`、`getVersioned` を通して保たれること。** `tokenType` を失うと**開いたまま**失敗する: レコードが沈黙して返り、沈黙は `Bearer` と読まれ、sender-constrained なトークンが Bearer として渡される。`refreshToken` を失うとコネクションはリフレッシュできなくなり（`410 refresh_token_absent`）、`idToken` を失うとログアウトで上流の `id_token_hint` が落ち、`grantedScope` を失うと現在のスコープがリフレッシュの上限になる（過小に報告する）。
 - **アダプター独自の保存形式もすべてのフィールドを名指すこと。** 必須キーが届くのは `FederationTokens` までで、アダプターがそれを変換する行やドキュメントには届かない: その形式にも同じ必須キーを宣言すること — 同梱の Redis ストアは envelope でそうしている — さもなければ変換がフィールドを落としたままコンパイルが通る。`obtainedAt` もその形式に宣言すること。
 - **`obtainedAt` も `Date` として、またはキーを残した `undefined` として保たれること。** 落とすと閉じた側に失敗する: そのレコードは半分経過による抑制を失い、フィールド以前のレコードと同じくバッファ内でリフレッシュされる。
-- **未設定の値は `undefined` か不在で返し、決して `null` にしないこと。** このルートは保存された `null` を拒否するので、`undefined` を `null` として書くシリアライザー — MongoDB のドライバーは `ignoreUndefined` を設定しない限りそうする — では、型を名乗らないアダプターのコネクションがすべて `502` になる。同梱の Redis コーデックは `null` を含むレコードを拒否する。
+- **未設定の省略可能な文字列フィールド（`refreshToken`、`idToken`、`tokenType`、`scope`、`grantedScope`）は `undefined` か不在で返し、決して `null` にしないこと。`obtainedAt` は常にキーを残し、不明なときは `undefined` で返すこと。** このルートは保存された `null` を拒否するので、`undefined` を `null` として書くシリアライザー — MongoDB のドライバーは `ignoreUndefined` を設定しない限りそうする — では、型を名乗らないアダプターのコネクションがすべて `502` になる。同梱の Redis コーデックは `null` を含むレコードを拒否する。
 
 - **`getVersioned`、`replaceIf`、`removeIf` が [条件付き書き込みの規約](../../docs/adapter-surface.md#conditional-writes) を守ること。** 規約の外の答え（別の outcome、不正な世代）を返すストアは、このルートにとって障害である: `503`、またはログに出す best effort の失敗であり、書けたものとは決して見なさない。
 
