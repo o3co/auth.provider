@@ -359,7 +359,7 @@ describe("createWebAuthnGrant — an assertion without a user handle", () => {
 		["absent", undefined],
 		["null", null],
 	] as const)(
-		"is refused as 400 invalid_grant user_handle_missing when it is %s and allowCredentialsForKnownUser is off",
+		"is refused as 400 invalid_grant user_handle_missing when it is %s",
 		async (_what, userHandle) => {
 			const store = createMemoryWebAuthnCredentialStore();
 			await store.registerCredential(makeCredential());
@@ -383,21 +383,26 @@ describe("createWebAuthnGrant — an assertion without a user handle", () => {
 		},
 	);
 
-	it("is verified and answered with tokens when allowCredentialsForKnownUser is on", async () => {
+	it("is refused when the relying party still carries the retired allowCredentialsForKnownUser", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+		const retired: Record<string, unknown> = { allowCredentialsForKnownUser: true };
 		const deps = {
 			...makeBaseDeps(store),
-			webauthnConfig: createTestWebAuthnConfig({ allowCredentialsForKnownUser: true }),
+			webauthnConfig: { ...createTestWebAuthnConfig(), ...retired },
 		};
 
 		const { result } = await createWebAuthnGrant(deps).handle(
 			makeCtx({ assertion: withoutUserHandle(undefined) }),
 		);
 
-		expect(result.status).toBe(200);
-		expect(mockVerifyAssertion).toHaveBeenCalledTimes(1);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "user_handle_missing",
+		});
+		expect(mockVerifyAssertion).not.toHaveBeenCalled();
 	});
 });
 

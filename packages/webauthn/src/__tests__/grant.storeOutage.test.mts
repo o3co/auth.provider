@@ -197,7 +197,6 @@ async function contributedGrant(stores: Stores, logger: Logger): Promise<GrantHa
 			challengeTtlMs: 120_000,
 			attestationPreference: "none",
 			userVerification: "preferred",
-			allowCredentialsForKnownUser: false,
 			rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 		},
 		grantPolicy: { kind: "test-noop", evaluate: async () => ({ outcome: "allow" }) as const },

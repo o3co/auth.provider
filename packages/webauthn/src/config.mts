@@ -23,14 +23,13 @@
  * (packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md).
  *
  * A HOCON `${?VAR}` substitution is always a string, so every leaf an environment variable can
- * reach is read in that form: numbers through core's `wholeNumberInRangeFromEnv`, booleans
- * through core's `coerceBooleanFromEnv`, origin lists through core's `normalizeAllowedOrigins`.
+ * reach is read in that form: numbers through core's `wholeNumberInRangeFromEnv`, origin lists
+ * through core's `normalizeAllowedOrigins`.
  */
 import {
 	// biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below; biome does not track cross-module-declaration references.
 	type ComponentMap as _ComponentMap,
 	checkSerializedOrigin,
-	coerceBooleanFromEnv,
 	describeSerializedOriginRejection,
 	MAX_DURATION_SECONDS,
 	normalizeAllowedOrigins,
@@ -186,28 +185,6 @@ export const webauthnConfigSchema = z.object({
 	attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]),
 	/** UserVerificationRequirement (W3C WebAuthn §5.8.6). Default "preferred". */
 	userVerification: z.enum(["required", "preferred", "discouraged"]),
-	/**
-	 * Derive `allowCredentials` on `POST /oauth/webauthn/authentication/options` from the request's
-	 * `userId`. Default `false`.
-	 *
-	 * With `false` the endpoint always returns the discoverable-credential shape without reading
-	 * the credential store, so its response cannot tell whether an account exists. Set `true` only
-	 * for authenticators that cannot do discoverable credentials (non-resident keys, typically
-	 * older security keys): it knowingly reopens that enumeration oracle, so pair it with a strict
-	 * `rateLimit.authenticationOptions` and, where possible, an authenticated identifier-first step.
-	 * With it on, a credential that returns no user handle (a non-resident security key, such as a
-	 * WebAuthn second factor's) can be registered by another account through the grant and then
-	 * sign its owner in as that account: keep it off where WebAuthn second factors are enrolled.
-	 * `webauthnMfaFactorModule` refuses the boot while it is on. The same holds for such a
-	 * credential (one that returns no user handle) from any other system on the RP ID, which the
-	 * boot cannot see: "Known limitations" in the package README, path 1. Path 2 there, a
-	 * discoverable credential whose user handle equals another account's `userId`, does not depend
-	 * on this flag.
-	 *
-	 * `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`: "true" / "1" on, "false" / "0" / empty off (case
-	 * and surrounding spaces ignored); any other value fails the parse.
-	 */
-	allowCredentialsForKnownUser: coerceBooleanFromEnv,
 	/** Rate limits for the module's own endpoints, one entry per endpoint. */
 	rateLimit: z.object({
 		/**

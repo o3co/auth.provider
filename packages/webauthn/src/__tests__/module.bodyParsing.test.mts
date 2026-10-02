@@ -54,7 +54,6 @@ const webauthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	allowCredentialsForKnownUser: false,
 	rateLimit: { authenticationOptions: { limit: 100, windowSeconds: 60 } },
 };
 

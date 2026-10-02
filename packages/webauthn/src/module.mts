@@ -103,12 +103,17 @@ export const webauthnModule = defineModule<
 	section: {
 		schema: WEBAUTHN_SECTION_SCHEMA,
 		reference: new URL("../config/reference.conf", import.meta.url),
-		// The two rate-limit variables, named after the paths they set; the
-		// reference captures the old and new names.
+		// Not a setting: authentication/options never lists a user's credentials, so no ceremony
+		// identifies the user and every assertion carries a user handle (WebAuthn §7.2 step 6).
+		// The key at any value, and its variable set at all, refuse boot.
+		relocatedFrom: { "webauthn.allowCredentialsForKnownUser": null },
+		// The two rate-limit variables, named after the paths they set, and the removed key's; the
+		// reference captures every name.
 		renamedVariables: {
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT: "webauthn.rateLimit.authenticationOptions.limit",
 			WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_WINDOW_SECONDS:
 				"webauthn.rateLimit.authenticationOptions.windowSeconds",
+			WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER: "webauthn.allowCredentialsForKnownUser",
 		},
 	},
 	requires: [
@@ -312,7 +317,6 @@ export const webauthnModule = defineModule<
 					createAuthenticationOptionsHandler({
 						config: deps.webauthnConfig,
 						challengeStore: deps.challengeStore,
-						credentialStore: deps.webauthnCredentialStore,
 						logger,
 					}),
 				);
