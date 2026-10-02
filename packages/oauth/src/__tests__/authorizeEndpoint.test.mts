@@ -2708,6 +2708,37 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		);
 	});
 
+	// A registered loopback entry the rule accepts matches a presented URI
+	// that differs from it only in its port, and the port is compared as raw
+	// text: a control character there survives the match. The presented URI
+	// is held to `checkRedirectUri` itself.
+	it.each([
+		["a tab", "\t"],
+		["a line feed", "\n"],
+		["a carriage return", "\r"],
+	] as const)(
+		"answers 400 with no redirect for a valid loopback entry presented with %s in its port",
+		async (_label, control) => {
+			const entry = "http://127.0.0.1/cb";
+			const { app, logger, createCode } = await registering(entry);
+			const res = await authorize(app, {
+				...baseQuery,
+				redirect_uri: `http://127.0.0.1:49${control}152/cb`,
+			});
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_request",
+				error_description: "redirect_uri not allowed",
+			});
+			expect(res.headers.location).toBeUndefined();
+			expect(createCode).not.toHaveBeenCalled();
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ site: "authorize", clientId: CLIENT_ID, reason: "control-characters" },
+				"authorize_registered_redirect_uri_refused",
+			);
+		},
+	);
+
 	it("redirects to a registered query the rule accepts, keeping it beside one code, state and iss", async () => {
 		const entry = `${REDIRECT_URI}?tenant=a&b-c=d`;
 		const { app, logger } = await registering(entry);
