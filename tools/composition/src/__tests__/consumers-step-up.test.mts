@@ -35,7 +35,13 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { UserSessionStore, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
+import {
+	type ApproveDeviceAuthorizationInput,
+	createMemoryDeviceCodeStore,
+	type UserSessionStore,
+	type WebAuthnCredentialStore,
+} from "@o3co/auth-provider-core";
+import { DEVICE_CODE_GRANT_TYPE } from "@o3co/auth-provider-device-grant";
 import {
 	mfaConfigForTests,
 	mfaTotpFactorConfigForTests,
@@ -179,6 +185,13 @@ async function stepUp(app: Express, page: Browser, factor: Factor): Promise<void
 	expect(verified.status, JSON.stringify(verified.body)).toBe(200);
 	expect(verified.body).toEqual({ step_up: "verified" });
 }
+
+/** A JWT's claims, unverified: the replica signed it a line earlier. */
+const claimsOf = (jwt: string): Record<string, unknown> =>
+	JSON.parse(Buffer.from(jwt.split(".")[1] as string, "base64url").toString("utf8"));
+
+/** Waits until the wall clock is into its next second, so two instants a test compares fall in different ones. */
+const nextSecond = () => new Promise((resolve) => setTimeout(resolve, 1005 - (Date.now() % 1000)));
 
 /** The sid of the session record the next login on `set` writes, read as `run` signs in. */
 async function sidOfLogin(set: FullSet, run: () => Promise<void>): Promise<string> {
@@ -619,8 +632,88 @@ describe("a WebAuthn registration under mfa.mode = required", () => {
 // The device token
 // ---------------------------------------------------------------------------
 
-describe("the device token, after an approval by a session that stepped up", () => {
-	it.todo(
-		"carries the approving session's amr and its auth_time, not the approval's instant, under mfa.mode = required",
-	);
+describe("the device token, under mfa.mode = required", () => {
+	/** A device authorization for the device client: its device code and the user's code. */
+	async function deviceAuthorization(app: Express) {
+		const started = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send({ client_id: TV.id });
+		expect(started.status, JSON.stringify(started.body)).toBe(200);
+		return {
+			deviceCode: started.body.device_code as string,
+			userCode: started.body.user_code as string,
+		};
+	}
+
+	/** The device's one poll after the approval, answered with its tokens. */
+	async function poll(app: Express, deviceCode: string): Promise<Record<string, unknown>> {
+		const tokens = await request(app).post("/oauth/token").type("form").send({
+			grant_type: DEVICE_CODE_GRANT_TYPE,
+			client_id: TV.id,
+			device_code: deviceCode,
+		});
+		expect(tokens.status, JSON.stringify(tokens.body)).toBe(200);
+		return claimsOf(tokens.body.access_token as string);
+	}
+
+	it("carries the approving session's vouched amr and its primary authentication time as auth_time — not the approval's instant, never after iat — and no acr", async () => {
+		const user = newUser();
+		const set = await boot([user]);
+		const factor = await seedTotp(set.handle.components, set.config, user.id);
+		const page = browser();
+		const sid = await sidOfLogin(set, () => signInWithFactor(set.app, page, user, factor));
+		const session = await sessionStoreOf(set).get(sid);
+		if (session === null) throw new Error("the session record is gone");
+		// The approval is made in a later second than the login, so auth_time tells them apart.
+		await nextSecond();
+		const { deviceCode, userCode } = await deviceAuthorization(set.app);
+		const approvedAt = Math.floor(Date.now() / 1000);
+
+		const approved = await page.post(set.app, "/oauth/device/verification", {
+			action: "approve",
+			user_code: userCode,
+		});
+		expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+		const claims = await poll(set.app, deviceCode);
+
+		const authTime = Math.floor(session.authTime.getTime() / 1000);
+		expect(claims.amr).toEqual(["pwd", "otp", "mfa"]);
+		expect(claims.auth_time).toBe(authTime);
+		expect(authTime).toBeLessThan(approvedAt);
+		expect(claims.auth_time as number).toBeLessThanOrEqual(claims.iat as number);
+		expect(claims).not.toHaveProperty("acr");
+	});
+
+	it("carries neither amr nor auth_time from an approval recorded without them, as a replica of an earlier release records one", async () => {
+		// The device-code store as such a replica writes to it: an approval names neither field.
+		const deviceCodes = createMemoryDeviceCodeStore();
+		const earlierRelease = new Proxy(deviceCodes, {
+			get(target, property) {
+				if (property === "approve") {
+					return ({ userCode, subject, nowMs }: ApproveDeviceAuthorizationInput) =>
+						target.approve({ userCode, subject, nowMs });
+				}
+				const value: unknown = Reflect.get(target, property, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const user = newUser();
+		const set = await boot([user], { extraOverrides: () => ({ deviceCodeStore: earlierRelease }) });
+		const factor = await seedTotp(set.handle.components, set.config, user.id);
+		const page = browser();
+		await signInWithFactor(set.app, page, user, factor);
+		const { deviceCode, userCode } = await deviceAuthorization(set.app);
+
+		const approved = await page.post(set.app, "/oauth/device/verification", {
+			action: "approve",
+			user_code: userCode,
+		});
+		expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+		const claims = await poll(set.app, deviceCode);
+
+		expect(claims.sub).toBe(user.id);
+		expect(claims).not.toHaveProperty("amr");
+		expect(claims).not.toHaveProperty("auth_time");
+	});
 });
