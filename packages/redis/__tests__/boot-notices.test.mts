@@ -274,22 +274,44 @@ describe("the token store module's eviction-policy notice", () => {
 		expect(calls).toEqual([]);
 	});
 
-	it.each(["volatile-lru", "allkeys-lru", "volatile-ttl"])(
-		"warns once, object-first, on a server whose policy is %s, and boots",
+	it.each([
+		"volatile-lru",
+		"volatile-lfu",
+		"volatile-random",
+		"volatile-ttl",
+		"allkeys-lru",
+		"allkeys-lfu",
+		"allkeys-random",
+	])(
+		"refuses the boot on a server whose policy is %s, naming the policy and the fix",
 		async (policy) => {
-			const { store, calls } = await provideOver(report(policy));
-			expect(store.kind).toBe("redis");
-			expect(calls).toEqual([
-				{
-					level: "warn",
-					args: [
-						{ store: "federation-tokens", adapter: "redis", maxmemoryPolicy: policy },
-						"federation_token_store_evictable",
-					],
-				},
-			]);
+			const refused = provideOver(report(policy));
+			await expect(refused).rejects.toMatchObject({
+				name: "RedisStoreEvictableError",
+				reason: "federation-token-store-evictable",
+				maxmemoryPolicy: policy,
+			});
+			await expect(refused).rejects.toThrow(
+				new RegExp(
+					`federationTokenStore: the Redis server's maxmemory-policy is "${policy}".*set maxmemory-policy to "noeviction", or give federationTokenStore a server of its own`,
+				),
+			);
 		},
 	);
+
+	it("says once, at info, that it cannot judge a policy it does not know, and boots", async () => {
+		const { store, calls } = await provideOver(report("some-future-policy"));
+		expect(store.kind).toBe("redis");
+		expect(calls).toEqual([
+			{
+				level: "info",
+				args: [
+					{ store: "federation-tokens", adapter: "redis", maxmemoryPolicy: "some-future-policy" },
+					"federation_token_store_eviction_unchecked",
+				],
+			},
+		]);
+	});
 
 	it("says once, at info, that it could not read the policy where the server refuses the question, and boots", async () => {
 		const refusal = Object.assign(new Error("ERR unknown command 'CONFIG'"), {

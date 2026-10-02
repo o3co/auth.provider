@@ -55,7 +55,7 @@
  * writes); a deployment that accepts acknowledged-write loss on failover also
  * accepts that a conditional write may see a restored, older generation. It
  * also assumes `noeviction`: an evicted replay key lets a resent `attach`
- * write again, which the module's boot check warns about.
+ * write again, so the module's boot check refuses an eviction policy.
  */
 
 import {
@@ -770,9 +770,10 @@ export interface RedisFederationTokenStoreModuleOptions {
  * optional `logger` slot (`consoleLogger` when empty).
  *
  * Once the store is built, the module reads the server's eviction policy
- * once and writes there too: a warning for any policy but `noeviction`, under
- * which a resent write's replay key may be evicted, or an info line when the
- * policy could not be read. Neither stops the boot.
+ * once: an eviction policy (`volatile-*`, `allkeys-*`), under which a resent
+ * write's replay key may be evicted, refuses the boot with a
+ * `RedisStoreEvictableError`; a policy it could not read or does not know is
+ * an info line there, and the boot goes on.
  */
 export function redisFederationTokenStoreModuleFor(
 	options: RedisFederationTokenStoreModuleOptions = {},

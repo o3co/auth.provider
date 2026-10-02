@@ -52,21 +52,11 @@
 
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
 import type { RedisDurability } from "../clients.mjs";
-
-/** The policies that cannot evict a key without a TTL, which is what each store's durable keys are. */
-const VOLATILE_POLICIES: ReadonlySet<string> = new Set([
-	"volatile-lru",
-	"volatile-lfu",
-	"volatile-random",
-	"volatile-ttl",
-]);
-
-/** The policies that may evict any key. */
-const ALLKEYS_POLICIES: ReadonlySet<string> = new Set([
-	"allkeys-lru",
-	"allkeys-lfu",
-	"allkeys-random",
-]);
+import {
+	ALLKEYS_POLICIES,
+	RedisStoreEvictableError,
+	VOLATILE_POLICIES,
+} from "./eviction-policy.mjs";
 
 /** The two stores the check guards, by their slot. */
 export type RedisMfaStoreSlot = "mfaFactorStore" | "mfaTransactionStore";
@@ -120,18 +110,18 @@ const NAMES: Readonly<
  * the module; `reason` and `maxmemoryPolicy` say what refused it. It quotes
  * the server's policy and nothing else.
  */
-export class RedisMfaStoreEvictableError extends Error {
-	readonly reason: "mfa-factor-store-evictable" | "mfa-transaction-store-evictable";
-	readonly maxmemoryPolicy: string;
-
+export class RedisMfaStoreEvictableError extends RedisStoreEvictableError<
+	"mfa-factor-store-evictable" | "mfa-transaction-store-evictable"
+> {
 	constructor(store: RedisMfaStoreSlot, maxmemoryPolicy: string) {
 		const names = NAMES[store];
-		super(
-			`${store}: the Redis server's maxmemory-policy is "${maxmemoryPolicy}", which may evict any key — ${names.holds}; set maxmemory-policy to ${names.remedy}, or give ${store} a server of its own (${names.evictable})`,
-		);
+		super(store, maxmemoryPolicy, {
+			reason: names.evictable,
+			evicts: "any key",
+			holds: names.holds,
+			remedy: names.remedy,
+		});
 		this.name = "RedisMfaStoreEvictableError";
-		this.reason = names.evictable;
-		this.maxmemoryPolicy = maxmemoryPolicy;
 	}
 }
 

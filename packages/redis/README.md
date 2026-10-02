@@ -130,13 +130,16 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   writes are not rolled back on failover, and that the app's and Redis's
   clocks agree within 1 second (see [MFA stores](#mfa-stores), "The factor
   set's generation").
-- **For the federation token store's conditional writes, a policy that does
-  not evict a replay key before it expires.** Each `replaceIf` and `removeIf`
-  keeps its answer for a few seconds under a replay key with a TTL (see
-  [Conditional writes](#conditional-writes)). A `volatile-*` or `allkeys-*`
-  policy may evict one early; a copy of that write the driver then sends
-  again within its deadline writes nothing, but answers `conflict` or
-  `missing` for a write that landed.
+- **For the federation token store, `noeviction`.** Each `attach`,
+  `replaceIf` and `removeIf` keeps its answer for a few seconds under a
+  replay key with a TTL (see [Conditional writes](#conditional-writes)). A
+  `volatile-*` or `allkeys-*` policy may evict one early. A copy of an
+  `attach` the driver then sends again within its deadline writes again: it
+  overwrites a newer record, or restores a removed one (a logged-out
+  session's upstream refresh token included). A copy of a `replaceIf` or
+  `removeIf` writes nothing, but answers `conflict` or `missing` for a write
+  that landed. The module refuses an eviction policy at boot; give the store
+  a server of its own if the rest of your Redis may not run `noeviction`.
 
 ## Adapters
 
@@ -693,14 +696,16 @@ conditional-write convention for a record
   W then writes again: an `attach` puts an older record back over a later
   write, or a logged-out session's tokens back (`replaceIf` and `removeIf`
   still meet their generation check). The module reads the policy once at
-  boot (`INFO memory`, then `CONFIG GET maxmemory-policy`) and logs
-  `federation_token_store_evictable` (warn, `store`, `adapter`,
-  `maxmemoryPolicy`) for any policy but `noeviction`, or
-  `federation_token_store_eviction_unchecked` (info, `store`, `adapter`,
-  `err` when the server refused the question or could not answer) when it
-  could not read it, as on a managed server that blocks both. Neither stops
-  the boot. A store built with `createRedisFederationTokenStore` or the
-  builder is not checked.
+  boot (`INFO memory`, then `CONFIG GET maxmemory-policy`). A `volatile-*`
+  or `allkeys-*` policy refuses the boot with a `RedisStoreEvictableError`
+  (`reason` `federation-token-store-evictable`, `maxmemoryPolicy`), the
+  `cause` of a `provides-factory-failed` BootError. A policy it could not
+  read (a managed server that blocks both questions, or no answer at boot)
+  or does not know is one info line,
+  `federation_token_store_eviction_unchecked` (`store`, `adapter`;
+  `maxmemoryPolicy` for one it does not know; `err` when the server refused
+  the question or could not answer), and the boot goes on. A store built
+  with `createRedisFederationTokenStore` or the builder is not checked.
 
 A `FederationTokenStoreClient` of your own implements the five primitives
 `attach` and the conditional members use: `attachRecord`, `readVersioned`,
