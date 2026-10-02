@@ -27,8 +27,8 @@ import { defineScript } from "./define.mjs";
  * `ft_generation(raw)`: the generation the stored value carries, or `nil` when
  * it carries none (or is no JSON object). `ft_late(deadline)`: whether the
  * server's clock is past `deadline`, in epoch milliseconds.
- * `ft_keep(replay, answer, until)`: `answer` kept under the replay key until
- * `until` (epoch ms), for a copy of the write that arrives before then.
+ * `ft_keep(replay, answer, untilMs)`: `answer` kept under the replay key
+ * until `untilMs` (epoch ms), for a copy of the write that arrives before then.
  */
 const PRELUDE = `
 local function ft_generation(raw)
@@ -42,8 +42,8 @@ local function ft_late(deadline)
   local t = redis.call('TIME')
   return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) > tonumber(deadline)
 end
-local function ft_keep(replay, answer, until)
-  redis.call('SET', replay, answer, 'PXAT', until)
+local function ft_keep(replay, answer, untilMs)
+  redis.call('SET', replay, answer, 'PXAT', untilMs)
   return answer
 end
 `;
