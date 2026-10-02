@@ -284,7 +284,10 @@ export interface MfaRoutesOptions {
 	/** The authorized-recovery entry: minted at an exempt verification, applied by the subject's release. */
 	readonly lockRecovery: MfaLockRecovery;
 	/** What the regeneration of recovery codes reads beside the management's (`recoveryCodes.mts`). */
-	readonly recoveryCodes: Pick<MfaRecoveryCodesOptions, "maxFactorsPerSubject" | "firstBindingAt">;
+	readonly recoveryCodes: Pick<
+		MfaRecoveryCodesOptions,
+		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMarkMs"
+	>;
 }
 
 /** The express session id the request presents; empty when it presents none, which no binding matches. */

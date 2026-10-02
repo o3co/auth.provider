@@ -67,6 +67,7 @@ import {
 	isRecoveryCodeFactor,
 	isRetiredRecoverySet,
 	RECOVERY_CODE_FACTOR_KIND,
+	recoverySetGeneration,
 	recoverySetKeyIds,
 } from "./recovery/factor.mjs";
 import type { MfaSealing } from "./sealing.mjs";
@@ -171,10 +172,11 @@ export interface MfaSubjectRecordsReaders {
  * `subject`'s records, read for a judgment over them, with the floor its
  * recovery-code sets are held to. The records are listed; holding no set of
  * the installed recovery-code factor, no floor is read. Otherwise the floor
- * is read, and when it retires a set listed, the records are listed again —
- * a floor read after a listing may postdate a regeneration whose new set the
- * listing missed, but a regeneration writes its set before it raises the
- * floor, so the listing after the floor holds it. A floor that cannot be
+ * is read, and when no set listed whose generation can be read stands at or
+ * above it, the records are listed again — a floor read after a listing may
+ * postdate a regeneration whose new set the listing missed, but a
+ * regeneration writes its set before it raises the floor, so the listing
+ * after the floor holds it. At most two listings and one floor read. A floor that cannot be
  * read is told to `floorUnread` and reads every set as without one, so no
  * outage hides a way in. A listing that fails throws.
  */
@@ -200,13 +202,21 @@ export async function readSubjectRecords(
 		return { subject, context, records };
 	}
 	const floored: MfaRecordContext = { ...context, recoverySetFloor: floor };
-	const retires = records.some(
-		(record) => readFactorRecord(floored, subject, record).state === "retired",
-	);
+	// A set at or above the floor the listing holds: one it can read the generation of.
+	const current = records.some((record) => {
+		if (record.kind !== RECOVERY_CODE_FACTOR_KIND) return false;
+		const opened = context.sealing.openFactorData(
+			{ subject, id: record.id, kind: record.kind },
+			record.data,
+		);
+		const generation =
+			opened.state === "ok" ? recoverySetGeneration(factor, opened.value) : undefined;
+		return generation !== undefined && generation >= floor;
+	});
 	return {
 		subject,
 		context: floored,
-		records: retires ? await readers.list(subject) : records,
+		records: current ? records : await readers.list(subject),
 	};
 }
 

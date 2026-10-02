@@ -36,6 +36,9 @@
  *   sign-in — one made before a first binding, which admission may have taken
  *   on a recent primary while no factor stood; said at info
  *   (`mfa_first_binding_distrusted`). A mark that cannot be read is `503`.
+ * - `409 mfa_factors_changed` as well for a request that reached the lease
+ *   longer after it began than a first-binding mark stands, less the skew:
+ *   a mark noted meanwhile may have lapsed.
  * - `409 mfa_factor_limit`: the set would take the subject past
  *   `mfa.maxFactorsPerSubject` (`recordsAfterRecoveryCodes`: replacing a set
  *   at the limit stays allowed); nothing written.
@@ -51,6 +54,7 @@
 
 import {
 	type AuditSink,
+	DEFAULT_CLOCK_SKEW_MS,
 	emitAuditEvent,
 	errorEnvelope,
 	type Logger,
@@ -111,6 +115,8 @@ export interface MfaRecoveryCodesOptions {
 	readonly maxFactorsPerSubject: number;
 	/** The subject's first-binding mark (`MfaTransactionStore.firstBindingAt`), read under the lease. */
 	readonly firstBindingAt: (subject: string, nowMs: number) => Promise<unknown>;
+	/** How long a first-binding mark stands, in milliseconds (`firstBindingMarkLifetimeMs`). */
+	readonly firstBindingMarkMs: number;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -121,6 +127,7 @@ type Regenerated =
 	| { readonly outcome: "no_counting_factor" }
 	| { readonly outcome: "unmarked"; readonly cause: unknown }
 	| { readonly outcome: "distrusted"; readonly retryAfterMs: number }
+	| { readonly outcome: "stale" }
 	| { readonly outcome: "factor_limit" }
 	| { readonly outcome: "issued"; readonly codes: MfaIssuedRecoveryCodes };
 
@@ -137,6 +144,8 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 	};
 
 	router.post("/recovery-codes", async (req: Request, res: Response) => {
+		// Before the admission: a mark noted after it stands at least this long.
+		const startedAtMs = now();
 		const session = await admit(req, res);
 		if (session === undefined) return;
 		if (factors.get(RECOVERY_CODE_FACTOR_KIND) === undefined) {
@@ -175,6 +184,10 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 				}
 				if (distrustedByFirstBinding(session.authTimeMs, mark) && mark !== null) {
 					return { outcome: "distrusted", retryAfterMs: firstBindingRetryAfterMs(mark, nowMs) };
+				}
+				// A mark noted after the admission may have lapsed by now: no answer from it holds.
+				if (now() - startedAtMs > options.firstBindingMarkMs - DEFAULT_CLOCK_SKEW_MS) {
+					return { outcome: "stale" };
 				}
 				if (recordsAfterRecoveryCodes(factors, records, "mfa") > maxFactorsPerSubject) {
 					return { outcome: "factor_limit" };
@@ -228,6 +241,10 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 			logger.info({ route: ROUTE, sub: subject }, "mfa_first_binding_distrusted");
 			res.set("Retry-After", String(Math.max(1, Math.ceil(done.retryAfterMs / 1000))));
 			res.status(401).json(LOGIN_REQUIRED);
+			return;
+		}
+		if (done.outcome === "stale") {
+			res.status(409).json(FACTORS_CHANGED);
 			return;
 		}
 		if (done.outcome === "factor_limit") {

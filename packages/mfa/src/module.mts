@@ -617,6 +617,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								maxFactorsPerSubject: settings.maxFactorsPerSubject,
 								firstBindingAt: (subject, nowMs) =>
 									deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+								firstBindingMarkMs: firstBindingMarkLifetimeMs({
+									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
+									transactionTtlSeconds: settings.transactionTtlSeconds,
+								}),
 							},
 						}),
 					};
