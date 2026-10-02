@@ -96,6 +96,10 @@
  * - A refusal carries the factor id the factor named only when it is one of
  *   the subject's factors of the kind verified: nothing else reaches the audit.
  *   Another is dropped and flagged, never quoted.
+ * - A factor's answer — a challenge's, a verification's — is read once, field
+ *   by field, however the factor holds it (a getter, a class's instance), and
+ *   only what was read is used; the state and data in it are sealed as their
+ *   fields (`sealing.mts`).
  */
 
 import {
@@ -845,9 +849,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				factorId: record.id,
 				cause,
 			});
-			let issued: Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>;
+			type Issued = Awaited<ReturnType<NonNullable<MfaFactor["challenge"]>>>;
+			let issued: {
+				readonly state: Issued["state"] | undefined;
+				readonly response: Issued["response"];
+				readonly mail: Issued["mail"] | undefined;
+			};
 			try {
-				issued = await factor.challenge({
+				const answer = await factor.challenge({
 					subject: tx.subject,
 					transactionId: tx.id,
 					nowMs,
@@ -856,7 +865,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					factor: opened.named,
 					factors: opened.all,
 				});
-				if (!isPlainObject(issued?.response)) {
+				// The factor's answer, each field read once, however it holds them.
+				issued = { state: answer?.state, response: answer?.response, mail: answer?.mail };
+				if (!isPlainObject(issued.response)) {
 					throw new TypeError("the factor's challenge answered a response that is not an object");
 				}
 			} catch (cause) {
@@ -1097,20 +1108,23 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					} catch (cause) {
 						return unreadable(cause);
 					}
+					// The factor's answer, each field read once, however it holds them.
 					if (!result.ok) {
-						if (result.factorId === undefined) return { reason: result.reason };
-						const concerned = all.find((candidate) => candidate.id === result.factorId);
+						const { reason, factorId } = result;
+						if (factorId === undefined) return { reason };
+						const concerned = all.find((candidate) => candidate.id === factorId);
 						return concerned === undefined
-							? { reason: result.reason, factorIdDropped: true }
-							: { reason: result.reason, factorId: concerned.id };
+							? { reason, factorIdDropped: true }
+							: { reason, factorId: concerned.id };
 					}
-					const verified = all.find((candidate) => candidate.id === result.factorId);
+					const { factorId, next: answered } = result;
+					const verified = all.find((candidate) => candidate.id === factorId);
 					if (verified === undefined) {
 						return unreadable(
 							new TypeError("the factor verified a factor id the subject does not hold"),
 						);
 					}
-					const next = result.next ?? verified.data;
+					const next = answered ?? verified.data;
 					let amr: unknown;
 					try {
 						amr = factor.amrFor(next);

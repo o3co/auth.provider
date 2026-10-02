@@ -909,3 +909,80 @@ describe("a first binding whose own factor is gone when it reads the records aga
 		expect(audit.of("mfa.recovery_codes.generated")).toEqual([]);
 	});
 });
+
+describe("a factor's answers, read by name", () => {
+	it("binds a factor whose enrollment answers class instances behind getters, reading each field of each answer once and sealing the state and the data as their fields", async () => {
+		const reads: Record<string, number> = {};
+		const counted =
+			<T,>(name: string, value: T) =>
+			(): T => {
+				reads[name] = (reads[name] ?? 0) + 1;
+				return value;
+			};
+		/** An answer whose every field is a getter on its class, as an ORM entity holds its columns. */
+		const answer = <T extends object>(name: string, fields: Record<string, unknown>): T => {
+			class Answer {}
+			for (const [key, value] of Object.entries(fields)) {
+				Object.defineProperty(Answer.prototype, key, { get: counted(`${name}.${key}`, value) });
+			}
+			return new Answer() as T;
+		};
+		/** A factor's state or data as a class's instance whose field is its own getter. */
+		class Secret {
+			constructor(name: string, secret: string) {
+				Object.defineProperty(this, "secret", {
+					get: counted(`${name}.secret`, secret),
+					enumerable: true,
+				});
+			}
+		}
+		const base = createTestMfaFactor({ kind: "orm" });
+		const factor: MfaFactor = {
+			...base,
+			beginEnrollment: async (ctx) => {
+				const started = await base.beginEnrollment(ctx);
+				const secret = String(started.state.secret);
+				return answer("start", {
+					state: new Secret("state", secret),
+					response: started.response,
+					mail: undefined,
+				});
+			},
+			completeEnrollment: async (ctx) => {
+				const completion = await base.completeEnrollment(ctx);
+				if (!completion.ok) return completion;
+				return answer("completion", {
+					ok: true,
+					data: new Secret("data", String(completion.data.secret)),
+					label: undefined,
+				});
+			},
+		};
+		const factorStore = createMemoryMfaFactorStore();
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			extraModules: [contributing(factor)],
+		});
+		const { agent, transaction } = await beginFirstBinding(app);
+
+		const begun = await beginEnrollment(agent, transaction, "orm");
+		expect(begun.status, JSON.stringify(begun.body)).toBe(200);
+		const done = await completeEnrollment(agent, transaction, begun.body.secret);
+		expect(done.status, JSON.stringify(done.body)).toBe(200);
+
+		expect(reads).toEqual({
+			"start.state": 1,
+			"start.response": 1,
+			"start.mail": 1,
+			"state.secret": 1,
+			"completion.ok": 1,
+			"completion.data": 1,
+			"completion.label": 1,
+			"data.secret": 1,
+		});
+		const [bound] = (await factorStore.list(ALICE.id)).filter((record) => record.kind === "orm");
+		if (bound === undefined) throw new Error("no factor was bound");
+		expect((await storedData(factorStore, bound)).data).toEqual({ secret: begun.body.secret });
+	});
+});

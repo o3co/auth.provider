@@ -75,6 +75,10 @@
  *   escalates the session the binding was made in by what it adds.
  * - A codes write or a witness mark that fails never undoes the factor:
  *   the outcome says so, and the binding stands.
+ * - The factor's answers — its enrollment's start and end — are read once,
+ *   field by field, however the factor holds them (a getter, a class's
+ *   instance); the state and data in them are sealed as their fields
+ *   (`sealing.mts`), so a state may be any object but a list.
  */
 
 import { randomBytes } from "node:crypto";
@@ -445,9 +449,13 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				kind: factor.kind,
 				cause,
 			});
-			let started: MfaEnrollmentStart;
+			let started: {
+				readonly state: MfaEnrollmentStart["state"];
+				readonly response: MfaEnrollmentStart["response"];
+				readonly mail: MfaEnrollmentStart["mail"] | undefined;
+			};
 			try {
-				started = await factor.beginEnrollment({
+				const answer = await factor.beginEnrollment({
 					subject: tx.subject,
 					transactionId: tx.id,
 					nowMs,
@@ -456,7 +464,17 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					user,
 					factors: isFirstBinding(tx) ? [] : enrolledOfKind(tx.subject, factor.kind, records),
 				});
-				if (!kit.answerable(started?.response) || !kit.answerable(started.state)) {
+				// The factor's answer, each field read once, however it holds them. The
+				// response is answered as the factor built it; the state is sealed as its
+				// fields, so any object but a list (`sealing.mts`).
+				started = { state: answer?.state, response: answer?.response, mail: answer?.mail };
+				const { state } = started;
+				if (
+					!kit.answerable(started.response) ||
+					typeof state !== "object" ||
+					state === null ||
+					Array.isArray(state)
+				) {
 					throw new TypeError(
 						"the factor's enrollment answered a response or a state that is not an object",
 					);
@@ -622,7 +640,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			let completion: MfaEnrollmentCompletion;
 			let amr: readonly string[] | undefined;
 			try {
-				completion = await factor.completeEnrollment({
+				const answer = await factor.completeEnrollment({
 					subject: tx.subject,
 					transactionId: tx.id,
 					nowMs,
@@ -634,6 +652,10 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),
 					proof: call.proof,
 				});
+				// The factor's answer, each field read once, however it holds them.
+				completion = answer.ok
+					? { ok: true, data: answer.data, label: answer.label }
+					: { ok: false, reason: answer.reason };
 				if (completion.ok) amr = kit.declaredAmr(factor, completion.data);
 			} catch (cause) {
 				return unreadable("enrollment", { cause });
@@ -651,7 +673,8 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					cause: new TypeError("the factor's amrFor answered values it does not declare"),
 				});
 			}
-			const named = label ?? (isMfaFactorLabel(completion.label) ? completion.label : undefined);
+			const answered = completion.label;
+			const named = label ?? (isMfaFactorLabel(answered) ? answered : undefined);
 			const id = randomBytes(16).toString("base64url");
 			let data: string;
 			try {

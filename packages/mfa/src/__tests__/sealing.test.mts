@@ -483,6 +483,14 @@ describe("what is sealed is what opening gives back", () => {
 			readonly secret = SECRET_TEXT;
 			readonly n = 1n;
 		}
+		/** A value type JSON writes as what its `toJSON` answers, never as its fields. */
+		class Amount {
+			readonly digits = [1, 2];
+			readonly exponent = 0;
+			toJSON(): string {
+				return SECRET_TEXT;
+			}
+		}
 		class Listish extends Array<number> {}
 		const holed = Listish.from([1, 2, 3]);
 		delete holed[1];
@@ -490,6 +498,7 @@ describe("what is sealed is what opening gives back", () => {
 			["a Date", new Date(0)],
 			["a toJSON that answers a string", { secret: SECRET_TEXT, toJSON: () => SECRET_TEXT }],
 			["a toJSON that answers an object", { toJSON: () => ({ secret: SECRET_TEXT }) }],
+			["a class's instance JSON writes through its toJSON", { amount: new Amount() }],
 			["a Map", new Map([["secret", SECRET_TEXT]])],
 			["a BigInt inside", { secret: SECRET_TEXT, n: 1n }],
 			["a cycle", cycle],

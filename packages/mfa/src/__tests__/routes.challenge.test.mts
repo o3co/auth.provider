@@ -43,6 +43,7 @@ import {
 	recordingAuditSink,
 	seedFactor,
 	seedTotp,
+	storedData,
 	thawClock,
 	verify,
 } from "./routesHarness.mjs";
@@ -422,5 +423,142 @@ describe("a verification against a challenge", () => {
 		const res = await verify(agent, transaction, other.id, `0ther:${issued.body.nonce as string}`);
 
 		expect(res.status).toBe(401);
+	});
+});
+
+describe("a factor's challenge, read by name", () => {
+	it("keeps a challenge a class's instance answers behind getters, reading each field once and sealing the state as its fields", async () => {
+		const reads: Record<string, number> = {};
+		const counted =
+			<T,>(name: string, value: T) =>
+			(): T => {
+				reads[name] = (reads[name] ?? 0) + 1;
+				return value;
+			};
+		class Nonce {
+			constructor(nonce: string) {
+				Object.defineProperty(this, "nonce", {
+					get: counted("state.nonce", nonce),
+					enumerable: true,
+				});
+			}
+		}
+		/** The challenge's answer, its every field a getter on its class. */
+		class Issued {
+			readonly #nonce: string;
+			constructor(nonce: string) {
+				this.#nonce = nonce;
+			}
+			get state(): Nonce {
+				return counted("issued.state", new Nonce(this.#nonce))();
+			}
+			get response(): { readonly nonce: string } {
+				return counted("issued.response", { nonce: this.#nonce })();
+			}
+			get mail(): undefined {
+				return counted("issued.mail", undefined)();
+			}
+		}
+		const { app, record } = await withChallengedFactor(
+			challenged({
+				// A class's instance has no index signature; a factor may answer one all the same.
+				challenge: async () => new Issued(randomBytes(8).toString("hex")) as never,
+			}),
+		);
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(reads).toEqual({
+			"issued.state": 1,
+			"issued.response": 1,
+			"issued.mail": 1,
+			"state.nonce": 1,
+		});
+
+		const verified = await verify(
+			agent,
+			transaction,
+			record.id,
+			`s3cret:${res.body.nonce as string}`,
+		);
+		expect(verified.status).toBe(200);
+	});
+
+	it("reads a verification's answer once, by name — a refusal's and a success's, a class's instance behind getters — and re-seals the data it answers as its fields", async () => {
+		const reads: Record<string, number> = {};
+		const counted =
+			<T,>(name: string, value: T) =>
+			(): T => {
+				reads[name] = (reads[name] ?? 0) + 1;
+				return value;
+			};
+		/** An answer whose every field is a getter on its class, as an ORM entity holds its columns. */
+		const answer = (name: string, fields: Record<string, unknown>): never => {
+			class Answer {}
+			for (const [key, value] of Object.entries(fields)) {
+				Object.defineProperty(Answer.prototype, key, { get: counted(`${name}.${key}`, value) });
+			}
+			return new Answer() as never;
+		};
+		class Data {
+			constructor(secret: string) {
+				Object.defineProperty(this, "secret", {
+					get: counted("next.secret", secret),
+					enumerable: true,
+				});
+			}
+		}
+		const base = challenged();
+		const factorStore = createMemoryMfaFactorStore();
+		// Another factor of the kind ahead of it: finding the one verified walks past it.
+		await seedFactor(factorStore, "test", { secret: "0ther" });
+		const record = await seedFactor(factorStore, "test", { secret: "s3cret" });
+		const { app } = await boot({
+			config: configFor("required"),
+			factorStore,
+			extraModules: [
+				contributing({
+					...base,
+					verify: async (ctx) => {
+						const result = await base.verify(ctx);
+						return result.ok
+							? answer("verified", {
+									ok: true,
+									factorId: result.factorId,
+									next: new Data("s3cret"),
+								})
+							: answer("refused", { ok: false, reason: result.reason, factorId: record.id });
+					},
+				}),
+			],
+		});
+		const { agent, transaction } = await beginLogin(app);
+		const challenge = () =>
+			mfaPost(agent, "/challenge", { transaction_id: transaction, factor_id: record.id });
+
+		await challenge();
+		expect((await verify(agent, transaction, record.id, "wrong:proof")).status).toBe(401);
+		const res = await verify(
+			agent,
+			transaction,
+			record.id,
+			`s3cret:${(await challenge()).body.nonce as string}`,
+		);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(reads).toEqual({
+			"refused.ok": 1,
+			"refused.reason": 1,
+			"refused.factorId": 1,
+			"verified.ok": 1,
+			"verified.factorId": 1,
+			"verified.next": 1,
+			"next.secret": 1,
+		});
+		expect((await storedData(factorStore, record)).data).toEqual({ secret: "s3cret" });
 	});
 });

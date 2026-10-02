@@ -28,8 +28,8 @@
  * - What is sealed is a copy: each field of the value read by name, once,
  *   however it is held (a getter, a class's instance, an Array subclass), into
  *   plain JSON data that is then checked and serialised. A value JSON does not
- *   hold as it is (a Date, a Map, a function, BigInt, NaN, a cycle, a hole) is
- *   refused, and so is a read that throws, quoting nothing.
+ *   hold as it is (a Date, a Map, a `toJSON`, a function, BigInt, NaN, a
+ *   cycle, a hole) is refused, and so is a read that throws, quoting nothing.
  * - Opening never throws: `unreadable` for anything no key would cure, and
  *   `key_unavailable` (naming the key) when the sealing key has left the ring.
  *   Callers answer both with a `503`, never "no factor" or a wrong code.
@@ -175,10 +175,11 @@ const writtenAsFields = (value: object): boolean =>
  * - an object JSON writes as its fields ({@link writtenAsFields}): each own
  *   enumerable string key read once, one read as `undefined` left out as JSON
  *   leaves it out, into an object without a prototype. What its prototype
- *   holds is not a field, as JSON says, and a `toJSON` is not asked.
+ *   holds is not a field, as JSON says.
  *
  * Anything else is not JSON data: a bigint, NaN, an infinity, a symbol, a
- * function, `undefined`, a Date, a Map, and a cycle. `copies` keeps one copy
+ * function, `undefined`, a Date, a Map, an object with a `toJSON` (JSON
+ * writes what that answers, not its fields), and a cycle. `copies` keeps one copy
  * of an object two fields share, so it is read once. A read that throws is
  * let through as it was thrown.
  */
@@ -212,9 +213,13 @@ function copyList(list: readonly unknown[], copies: Map<object, unknown>): unkno
 function copyFields(value: object, copies: Map<object, unknown>): unknown {
 	if (!writtenAsFields(value)) return NOT_JSON;
 	const source = value as Readonly<Record<string, unknown>>;
+	// JSON writes an object with a `toJSON` as what that answers, not as its
+	// fields. Read once, and kept: an own `toJSON` is one of the fields.
+	const toJSON = source.toJSON;
+	if (typeof toJSON === "function") return NOT_JSON;
 	const copy: Record<string, unknown> = Object.create(null);
 	for (const key of Object.keys(source)) {
-		const field = source[key];
+		const field = key === "toJSON" ? toJSON : source[key];
 		if (field === undefined) continue;
 		const copied = copyByName(field, copies);
 		if (copied === NOT_JSON) return NOT_JSON;
