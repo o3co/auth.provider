@@ -97,7 +97,7 @@ import {
 	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
-import { asksForSecondFactor } from "./factorState.mjs";
+import { asksForSecondFactor, readSubjectRecords } from "./factorState.mjs";
 import {
 	countingKinds,
 	enrollableKinds,
@@ -150,6 +150,12 @@ export interface MfaRequirementOptions {
 	};
 	/** D25's flag for `subject` (`MfaTransactionStore.emailProofRequiredAtNextBinding`); rejects on an outage. */
 	readonly emailProofRequiredAtNextBinding: (subject: string) => Promise<boolean>;
+	/**
+	 * The subject's recovery-set floor, bounded by one Store timeout: a
+	 * password login asks for no second factor over a set below it; one that
+	 * cannot be read is said at warn and reads every set as without it.
+	 */
+	readonly recoverySetFloor: (subject: string) => Promise<number>;
 	/**
 	 * When the account-email proof was given in the session `sid` of
 	 * `subject`, while it stands at `nowMs` (`MfaTransactionStore.sessionEmailProofAt`);
@@ -563,11 +569,14 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		},
 		admitPrimary: async (primary) => {
 			if (primary.recorded.authentication.primary !== PASSWORD_AMR) return "establish";
-			const records = await listRecords(primary.subject);
+			// Read as every judgment over the records reads them: a retired set asks for nothing.
+			const { context, records } = await readSubjectRecords({ factors, sealing }, primary.subject, {
+				list: listRecords,
+				recoverySetFloor: options.recoverySetFloor,
+				logger,
+			});
 			if (!records.some((record) => mayCount(factors, record))) checkWitness(primary);
-			if (
-				records.some((record) => asksForSecondFactor({ factors, sealing }, primary.subject, record))
-			) {
+			if (records.some((record) => asksForSecondFactor(context, primary.subject, record))) {
 				return interrupt({ error: "mfa_required" });
 			}
 			if (mode === "optional") return "establish";

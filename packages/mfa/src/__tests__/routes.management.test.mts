@@ -163,7 +163,7 @@ const remove = (agent: ReturnType<typeof request.agent>, factorId: unknown) =>
 const ids = (records: readonly Pick<MfaFactorRecord, "id">[]) => records.map(({ id }) => id).sort();
 
 describe("GET /session/mfa/factors", () => {
-	it("lists every record of the session's subject, oldest first, with its state and what a page may show — never its data", async () => {
+	it("lists every record of the session's subject, oldest first, with its state and what a page may show — a recovery set's codes left, and whether they were shown (a set written before that was kept was) — never its data", async () => {
 		const built = await composed();
 		const { agent, totp } = await signedIn(built);
 		const left = await seedFactor(built.factorStore, "recovery_code", recoverySet(2).data);
@@ -216,6 +216,7 @@ describe("GET /session/mfa/factors", () => {
 						binding: "password",
 						state: "usable",
 						recovery_codes_remaining: 2,
+						recovery_codes_shown: false,
 					},
 					{
 						id: exhausted.id,
@@ -224,6 +225,7 @@ describe("GET /session/mfa/factors", () => {
 						binding: "password",
 						state: "exhausted",
 						recovery_codes_remaining: 0,
+						recovery_codes_shown: true,
 					},
 					{
 						id: retired.id,

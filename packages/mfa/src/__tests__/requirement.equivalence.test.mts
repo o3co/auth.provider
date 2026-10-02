@@ -154,6 +154,8 @@ describe("the mfa requirement over every bundled action, by the grade its packag
 
 			it(`answers the table's verdicts — ${mode}, ${setup}`, async () => {
 				const requirement = createMfaRequirement({
+					// No recovery set below a floor in these suites: a floor of 0.
+					recoverySetFloor: async () => 0,
 					mode,
 					factors: resolverOver(factors.map(() => FACTORS.totp())),
 					factorStore: factorStoreHolding(

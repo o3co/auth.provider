@@ -94,6 +94,8 @@ const realRequirement = (
 	stepUpRecordable: boolean,
 ): SessionRequirement =>
 	createMfaRequirement({
+		// No recovery set below a floor in these suites: a floor of 0.
+		recoverySetFloor: async () => 0,
 		mode,
 		factors: resolverOver(FACTOR_SETS[factors]()),
 		// The rows' subject holds a counting factor: a session without one is sent to log in

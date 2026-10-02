@@ -109,7 +109,13 @@ import { MFA_ADMISSION_ACTIONS } from "./admissionActions.mjs";
 import { type MfaMode, type MfaSettings, mfaSectionSchema, readMfaSettings } from "./config.mjs";
 import { createMfaCoordinator } from "./coordinator.mjs";
 import { mfaEmailFactorModule } from "./email/module.mjs";
-import { createMfaFactorSet, createMfaSubjectLeases, type MfaSubjectLeases } from "./factorSet.mjs";
+import {
+	boundedRecoverySetFloor,
+	createMfaFactorSet,
+	createMfaSubjectLeases,
+	leaseMsFor,
+	type MfaSubjectLeases,
+} from "./factorSet.mjs";
 import { firstBindingMarkLifetimeMs } from "./firstBindingMark.mjs";
 import { createMfaSubjectLock } from "./lock.mjs";
 import { createMfaLockRecovery } from "./lockRecovery.mjs";
@@ -480,6 +486,10 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							deps.mfaTransactionStore.sessionEmailProofAt(subject, sid, nowMs),
 						firstBindingAt: (subject, nowMs) =>
 							deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+						recoverySetFloor: boundedRecoverySetFloor(
+							deps.mfaTransactionStore,
+							settings.storeTimeoutMs,
+						),
 						sealing,
 					});
 					bootStates.set(deps.mfaFactorResolver, {
@@ -504,6 +514,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						factors: deps.mfaFactorResolver,
 						factorStore: deps.mfaFactorStore,
 						witness,
+						sealing,
+						logger,
 						leases: createMfaSubjectLeases({
 							store: deps.mfaTransactionStore,
 							storeTimeoutMs: settings.storeTimeoutMs,
@@ -567,6 +579,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								firstBindingMarkMs: firstBindingMarkLifetimeMs({
 									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
 									transactionTtlSeconds: settings.transactionTtlSeconds,
+									leaseMs: leaseMsFor(settings.storeTimeoutMs),
 								}),
 								...(deps.subjectRevocation === undefined
 									? {}
@@ -602,6 +615,17 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								mode,
 							},
 							lockRecovery,
+							recoveryCodes: {
+								maxFactorsPerSubject: settings.maxFactorsPerSubject,
+								firstBindingAt: (subject, nowMs) =>
+									deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+								firstBindingMarkMs: firstBindingMarkLifetimeMs({
+									manageMaxAgeSeconds: settings.manage.maxAgeSeconds,
+									transactionTtlSeconds: settings.transactionTtlSeconds,
+									leaseMs: leaseMsFor(settings.storeTimeoutMs),
+								}),
+								leaseMs: leaseMsFor(settings.storeTimeoutMs),
+							},
 						}),
 					};
 				},
