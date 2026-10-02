@@ -578,4 +578,40 @@ describe("an approval records the session's authentication", () => {
 			expect((await verify({ action: "deny", user_code: USER_CODE })).status).toBe(200);
 		},
 	);
+
+	/** `user-1`'s session, authenticated further ahead of the handler's clock than the skew. */
+	const aheadOfClock = () =>
+		changedRecord((record) => ({
+			...record,
+			authTime: new Date(NOW + DEFAULT_CLOCK_SKEW_MS + 1_000),
+		}));
+
+	it("refuses an approval it cannot record before the email gate", async () => {
+		// The cookie's user has no verified email, so the gate would refuse it.
+		const { verify } = await harness({
+			requireEmailVerified: true,
+			userSessionStore: aheadOfClock(),
+		});
+		const res = await verify({ action: "approve", user_code: USER_CODE });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
+
+	it("refuses an approval it cannot record before the budget, and spends none of it", async () => {
+		const { verify } = await harness({ limit: 1, userSessionStore: aheadOfClock() });
+		for (let i = 0; i < 3; i++) {
+			const res = await verify({ action: "approve", user_code: USER_CODE });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("login_required");
+		}
+		// The one attempt the budget holds is still there.
+		expect((await verify({ action: "lookup", user_code: USER_CODE })).status).toBe(200);
+	});
+
+	it("refuses an approval it cannot record before the code's shape is read", async () => {
+		const { verify } = await harness({ userSessionStore: aheadOfClock() });
+		const res = await verify({ action: "approve", user_code: "0000-0000" });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
 });
