@@ -37,7 +37,8 @@ describes.
 ## Your scaffold
 
 A scaffold owns its `src/` and `config/`: upgrading the packages never
-changes them, and never turns MFA on. The template's composition root changed
+changes them, and never turns MFA on. Taking the new template's `config/`
+does: its `reference.conf` defaults the MFA switch to `required` (#1264). The template's composition root changed
 throughout this window — its own `logging`, `http`, `cors`, `redis-clients`
 and `key-store` modules (#783), the `adapters {}` selections (#853), the
 federation grant stores' defaults (#1177), the MFA switch (#1245) and a mail
@@ -64,6 +65,16 @@ rather than `workspace:*`, and refresh the lockfile. Then:
   `overrides.mailSenderModules`, never into the module list (#1241).
 - Install MFA only through `MFA_MODE`
   ([Turning MFA on](#turning-mfa-on)).
+- **MFA is on by default** in the new `config/reference.conf`
+  (`mfaMode = "required"`): every password login needs a second factor, and
+  outside development the boot is refused until MFA is configured. To keep
+  v0.16.0's behaviour while you upgrade, set `MFA_MODE=off` in every
+  replica's environment before the new configuration reaches it — or append
+  `mfaMode = "off"`, then `mfaMode = ${?MFA_MODE}`, to the end of your
+  `config/application.conf`, as `create-app --no-mfa` writes it, so that
+  `MFA_MODE` still turns it on later. Keep it off until the whole fleet runs
+  this release ([Rolling out](#rolling-out-across-a-mixed-fleet)), then turn
+  it on as [Turning MFA on](#turning-mfa-on) says.
 
 ## Configuration
 
@@ -594,7 +605,9 @@ the name. A restart of a
 `memory` store loses every factor, every lock and every recorded email proof,
 after which whoever holds a password can bind a factor of their own.
 
-MFA is new since v0.16.0, and off until you turn it on. Roll the whole fleet
+MFA is new since v0.16.0. The standalone template now requires it by
+default; a scaffold upgraded as [Your scaffold](#your-scaffold) says keeps
+`MFA_MODE=off` until it is ready. Roll the whole fleet
 onto this release first ([below](#rolling-out-across-a-mixed-fleet)), work
 through the [Store implementer checklist](#store-implementer-checklist-before-switching-to-required)
 if you run a Store, then go `optional` — users enroll at their own pace — and
@@ -604,14 +617,14 @@ binds their first factor.
 
 ### The standalone template
 
-`MFA_MODE` binds the template's own key, `mfaMode`, default `off` (#1245).
-`off` installs nothing of MFA, and discovery is as it was. `optional` and
-`required` install the MFA package's modules, the operator reset, the session
+`MFA_MODE` binds the template's own key, `mfaMode` (#1245), default
+`required` (#1264). `off` installs nothing of MFA, and discovery is as it
+was. `optional` and `required` install the MFA package's modules, the operator reset, the session
 package's login completion and the two MFA stores `adapters` selects; declare
 `mfa` in `core.sessionRequirements.expected` and name it
 `core.sessionRequirements.secondFactorAuthority`; write `mfa.mode`; and add
 `"urn:o3co:acr:mfa" = ["mfa"]` to the acr table unless yours writes it.
-Turning it on needs:
+Turning it on — or leaving the default on — needs:
 
 - **Durable MFA stores**, [above](#turning-mfa-on).
 - **`MFA_ENCRYPTION_KEY`**, canonical base64 of 32 bytes
@@ -626,6 +639,14 @@ Turning it on needs:
 - **`MFA_STORE_TIMEOUT_MS`** at least `REPOSITORIES_USER_HTTP_TIMEOUT` where
   the Store is called, and `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` with
   `ADAPTERS_USER_REPOSITORY=http`.
+
+Outside development, a deployment that sets none of these is refused before
+any module is built, by the first of them, the stores: the refusal names each
+store, `MFA_ENCRYPTION_KEY`, the SMTP relay, `MFA_PAGE_URL` and `MFA_MODE=off`.
+In development (`make dev`) the default needs nothing more: the sample key in
+`config/development.conf`, the sender that logs each code, and
+`docker-compose.yml`'s Redis for the two stores; your MFA page is still yours
+to serve.
 
 Install MFA only through `MFA_MODE`: do not add its modules to
 `buildModules`, and do not write `mfa.mode`, a contradicting `mfaMode`, or a
@@ -675,7 +696,8 @@ detail; what a mixed fleet of v0.16.0 and this release does:
   upgraded. Under `oauth.refreshToken.unknownFamilyPolicy = "accept"` a
   token with no family record has no such bound.
 - **Do not turn `MFA_MODE` (template) / `mfa.mode` on until no v0.16.0
-  replica remains**: an older
+  replica remains** — with the template's default, keep `MFA_MODE=off` set
+  for the roll ([Your scaffold](#your-scaffold)): an older
   replica redeeming a code stamps the record's `amr`, a step-up's included,
   and one older than the renewal nonce admits an old cookie put back after a
   step-up.

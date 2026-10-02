@@ -1,5 +1,6 @@
 # Mailpit for the SMTP mail sender: a DEVELOPMENT overlay on
-# docker-compose.yml, for a run with MFA on whose mail you can read.
+# docker-compose.yml, for a run with MFA on (the template's default, or
+# MFA_MODE in .env) whose mail you can read.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
 #
@@ -23,7 +24,6 @@ services:
       - "127.0.0.1:8025:8025"
     environment:
       CONFIG_ENV: mailpit
-      MFA_MODE: ${MFA_MODE:-optional}
       ADAPTERS_MFA_FACTOR_STORE: redis
       ADAPTERS_MFA_TRANSACTION_STORE: redis
       STANDARD_SMTP_MAIL_SENDER_HOST: localhost

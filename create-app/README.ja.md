@@ -73,12 +73,18 @@ cd provider
 
 `--no-lockfile` を付けると lockfile の生成（下記の手順 7）を省略します。
 
-`--no-mfa` を付けると、テンプレートの MFA スイッチ `mfaMode` をスキャフォールド上で
-off と書きます。`config/application.conf` の末尾に `mfaMode = "off"` と
+スキャフォールドは、すべてのパスワードログインに第二要素を求めます: テンプレートの
+MFA スイッチ `mfaMode`（`MFA_MODE`）のデフォルトは `required` です。development では
+ほかに何も要りません。それ以外では、MFA に要るもの（2 つのストアを Redis に、鍵、
+SMTP リレー、MFA ページ）を設定するか、`MFA_MODE=off` で MFA を無効にするまで、
+プロジェクトの起動は拒否されます。スイッチが何をインストールし、何を要するかは
+テンプレートの README にあります。
+
+`--no-mfa` を付けると、代わりにスイッチをスキャフォールド上で off と書きます。
+`config/application.conf` の末尾に `mfaMode = "off"` と
 `mfaMode = ${?MFA_MODE}` をこの順に追記するので、後のテンプレートがデフォルトを
 変えてもプロジェクトは off のままで、`MFA_MODE` を設定すれば作り直さずに MFA を
 有効にできます。MFA パッケージは依存に残り、ほかには何も削除・変更しません。
-スイッチが何をインストールするかはテンプレートの README にあります。
 
 生成されるプロジェクトは pnpm のプロジェクトです。`Dockerfile` は
 `pnpm install --frozen-lockfile` でインストールし、ビルドの許可リストは

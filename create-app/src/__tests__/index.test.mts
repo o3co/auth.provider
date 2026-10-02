@@ -444,6 +444,14 @@ describe("scaffold — the MFA switch (--no-mfa)", () => {
 			readFileSync(join(BUNDLED_TEMPLATES, DEFAULT_TEMPLATE, "config", "application.conf")),
 		);
 	});
+
+	it("without the option resolves the switch required with no MFA_MODE, and MFA_MODE=off turns MFA off", () => {
+		const targetDir = join(tempDir, "my-auth");
+		scaffold(targetDir, "my-auth");
+
+		expect(resolvedMfaMode(targetDir, {})).toBe("required");
+		expect(resolvedMfaMode(targetDir, { MFA_MODE: "off" })).toBe("off");
+	});
 });
 
 describe("generateLockfile", () => {

@@ -134,10 +134,11 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 /**
  * The umbrella E2E's shape (`o3co/auth` `tests/docker-compose.yml`), with
- * every shared store on Redis, express-session's own included. Each case
- * below flips one variable off this.
+ * every shared store on Redis, express-session's own included, and MFA off
+ * as the umbrella sets it. Each case below flips one variable off this.
  */
 const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: "replica-safety-test-secret.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",

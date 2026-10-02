@@ -73,12 +73,18 @@ cd provider
 
 `--no-lockfile` skips the lockfile step (step 7 below).
 
-`--no-mfa` writes the template's MFA switch, `mfaMode`, off in the scaffold:
+The scaffold requires a second factor at every password login: the
+template's MFA switch, `mfaMode` (`MFA_MODE`), defaults to `required`. In
+development that needs nothing more; outside it, the project's boot is
+refused until it sets what MFA needs (its two stores on Redis, a key, an SMTP
+relay, its MFA page) or turns MFA off with `MFA_MODE=off`. What the switch
+installs and needs is in the template's README.
+
+`--no-mfa` writes the switch off in the scaffold instead:
 it appends `mfaMode = "off"` and then `mfaMode = ${?MFA_MODE}` to
 `config/application.conf`, so the project stays off whatever default a later
 template ships, and `MFA_MODE` still turns MFA on without re-scaffolding. The
-MFA package stays a dependency; nothing else is removed or changed. What the
-switch installs is in the template's README.
+MFA package stays a dependency; nothing else is removed or changed.
 
 The generated project is a pnpm project: its `Dockerfile` installs with
 `pnpm install --frozen-lockfile`, and its build allowlist lives in

@@ -219,6 +219,11 @@ the `__Host-` prefix (see [Session](#session)). And set
 user-session stores default to memory, and `tsx watch` restarts the process on
 every save — split, a restart leaves the browser's session pointing at a
 `UserSession` that is gone, and `/authorize` loops (see [Docker](#docker)).
+MFA is on by default, and its two stores default to memory too: set
+`ADAPTERS_MFA_FACTOR_STORE=redis` and `ADAPTERS_MFA_TRANSACTION_STORE=redis`
+for the same reason, or every save empties them while the sessions survive —
+or `MFA_MODE=off` to run without MFA (see
+[Multi-factor authentication](#multi-factor-authentication)).
 
 It also reads the client registry, `config/clients.yaml` (`REPOSITORIES_CLIENT_YAML_PATH`). That
 file is per-deployment: the scaffold creates an empty one, and `.gitignore`
@@ -250,6 +255,7 @@ export OAUTH_JWT_ISSUER=http://localhost:3000 \
   SESSION_STORE_SECRET="$(openssl rand -hex 32)" \
   SESSION_STORE_SECURE=false SESSION_STORE_NAME=auth.sid \
   ADAPTERS_USER_SESSION_STORES=redis \
+  ADAPTERS_MFA_FACTOR_STORE=redis ADAPTERS_MFA_TRANSACTION_STORE=redis \
   REPOSITORIES_USER_HTTP_AUTHENTICATE_URL=http://localhost:8080/authenticate \
   REPOSITORIES_USER_HTTP_AUTHENTICATE_BY_TOKEN_URL=http://localhost:8080/authenticate-by-token
 
@@ -763,10 +769,9 @@ socket configured by `REDIS_CLIENTS_URL`.
 A second factor after a password login, and a step-up when a relying party
 asks for one at `/authorize` — the [MFA package](../../packages/mfa/README.md).
 `MFA_MODE` is the template's own switch, `mfaMode`
-([`config/reference.conf`](config/reference.conf)): `off`, the default,
-installs nothing of MFA; `optional` (a user with a factor is challenged,
-nobody is forced) and `required` (every password login has a second factor)
-install the MFA module, the TOTP, recovery-code and email factors (email off
+([`config/reference.conf`](config/reference.conf)): `required`, the default
+(every password login has a second factor), and `optional` (a user with a
+factor is challenged, nobody is forced) install the MFA module, the TOTP, recovery-code and email factors (email off
 unless `MFA_EMAIL_FACTOR_ENABLED`), the operator reset
 (`handle.components.mfaReset`), the session package's login completion and
 the two MFA stores `adapters` selects. The template then adds `mfa` to
@@ -774,12 +779,26 @@ the two MFA stores `adapters` selects. The template then adds `mfa` to
 `core.sessionRequirements.secondFactorAuthority` and writes `mfa.mode` from
 the switch, so
 a composition that asks for a second factor and cannot enforce one is refused
-at boot rather than let a password alone sign in; a value that is none of the
-three is refused before boot, naming `mfaMode` and `MFA_MODE`.
+at boot rather than let a password alone sign in; `off` installs nothing of
+MFA. A value that is none of the three is refused before boot, naming
+`mfaMode` and `MFA_MODE`.
+
+**On by default.** In development (`make dev`) MFA needs nothing more: the
+sample key in `config/development.conf`, the sender that logs each code, and
+`docker-compose.yml`'s Redis for the two stores. Outside development a
+deployment either sets what MFA needs — the two stores on `redis` (or the
+factors in the `store`), `MFA_ENCRYPTION_KEY`, the SMTP relay
+(`STANDARD_SMTP_MAIL_SENDER_HOST` and `_FROM`, or a sender of its own through
+`buildModules`' `mailSenderModules`) and its MFA page at `MFA_PAGE_URL` — or
+sets `MFA_MODE=off`. Until it decides, the boot is refused before any module
+is built: the stores' refusal comes first, naming each of those and
+`MFA_MODE=off`. The page is the deployment's to serve in development too:
+without it a password login answers that a second factor is needed and goes
+no further.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MFA_MODE` | `off` | `mfaMode`: `off`, `optional` or `required` |
+| `MFA_MODE` | `required` | `mfaMode`: `required`, `optional` or `off` |
 | `MFA_ENCRYPTION_KEY` | — | The MFA key ring's first key, which seals every factor's data: canonical base64 of 32 bytes (`openssl rand -base64 32`). Required with MFA on. Under `CONFIG_ENV=development`, `config/development.conf` puts the MFA package's published sample key in its place: write your own key there instead, since this variable set beside that ring refuses the boot. The sample key is refused under `CONFIG_ENV` or `NODE_ENV` `production` or `staging` and under `CORE_DEPLOYMENT_MODE=multi` |
 | `MFA_PAGE_URL` | `/mfa` | The deployment's MFA page, where a login's second factor and a step-up start. The template ships no page: the page contract is the [MFA package's](../../packages/mfa/README.md#the-routes) |
 | `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`, one Store call's time: at least every store's own per-call timeout. Below `REPOSITORIES_USER_HTTP_TIMEOUT` where the Store is called (`ADAPTERS_USER_REPOSITORY=http`, or the factors in the Store) the boot is refused, so raise the two together; above 37500 ms it is refused too |
@@ -1053,6 +1072,8 @@ The `docker-compose.yml` starts the auth server together with a Redis container.
 
 Every store whose records must outlive one process is named in that file's `environment:` block rather than inherited — including `ADAPTERS_USER_SESSION_STORES=redis`, which has to travel with `SESSION_STORE_STORAGE_TYPE=redis`. `CORE_DEPLOYMENT_MODE=single` will not tell you when it does not: the replica guard answers "can these stores be shared", not "do these two stores have the same lifetime". Split them and a restart leaves every browser holding a surviving express-session that still reads `isAuthenticated` with no `UserSession` behind it — `/authorize` bounces to login, the cookie bounces it back, and the loop clears only when the user deletes the cookie.
 
+The two MFA stores are the exception, since MFA is on by default and whether to keep it is the deployment's decision: the production file leaves them at `memory`, which the template refuses in production before boot, naming the stores, `MFA_ENCRYPTION_KEY`, the SMTP relay, `MFA_PAGE_URL` and `MFA_MODE=off`. Set them in `.env` — `ADAPTERS_MFA_FACTOR_STORE=redis` and `ADAPTERS_MFA_TRANSACTION_STORE=redis`, on the file's persistent Redis, with the rest of [Multi-factor authentication](#multi-factor-authentication) — or set `MFA_MODE=off`. `docker-compose.yml` keeps both on its Redis, so that a hot reload does not empty them while the sessions survive.
+
 ```bash
 # The signing keys are a required input: EdDSA is the default and there is no
 # key-material default, so a deployment that generates none fails at boot.
@@ -1131,11 +1152,11 @@ What the overlay sets on the app service:
   rule 7). [`config/mailpit.conf`](config/mailpit.conf) includes
   `development.conf`, so the run is otherwise the development one, the MFA
   sample key included.
-- `MFA_MODE` from your `.env`, or `optional` when it sets none: with MFA off
-  nothing sends mail.
+- Nothing of `MFA_MODE`: MFA is on as the template ships it, or as your
+  `.env` sets it. With MFA off nothing sends mail.
 - `ADAPTERS_MFA_FACTOR_STORE=redis` and `ADAPTERS_MFA_TRANSACTION_STORE=redis`,
-  on the compose Redis: under a name other than `development` or `test` the
-  MFA stores may not be kept in memory.
+  on the compose Redis, as `docker-compose.yml` sets them: under a name other
+  than `development` or `test` the MFA stores may not be kept in memory.
 - `STANDARD_SMTP_MAIL_SENDER_HOST=localhost`,
   `STANDARD_SMTP_MAIL_SENDER_PORT=1025`, `STANDARD_SMTP_MAIL_SENDER_SECURE=none`
   and `STANDARD_SMTP_MAIL_SENDER_FROM=auth@example.com`. The SMTP sender sends

@@ -72,7 +72,7 @@ const MFA_ENV: Readonly<Record<string, string>> = {
 };
 
 describe("what the template expects of session admission", () => {
-	it("is [] in the shipped configuration under the shipped switch, off, and the composition boots with it", async () => {
+	it("is [] in the shipped configuration under MFA_MODE=off, and the composition boots with it", async () => {
 		const own = readOwnLayers(ownFiles(), { env: SINGLE_ENV });
 		expect(resolveLayers(own, []).core).toMatchObject({ sessionRequirements: { expected: [] } });
 		expect(readSwitches(own).mfaMode).toBe("off");
@@ -155,7 +155,8 @@ describe("what the template hands boot of the mfa section", () => {
 	it("hands it, owned by the MFA module the switch installs, with the mode written from the switch over the MFA package's default", () => {
 		for (const mode of ["optional", "required"] as const) {
 			// The switch written in a layer, MFA_MODE unset: the package's reference says off.
-			const own = ownUnder(SINGLE_ENV, `mfaMode = "${mode}"\n`);
+			const { MFA_MODE: _unset, ...env } = SINGLE_ENV;
+			const own = ownUnder(env, `mfaMode = "${mode}"\n`);
 			const switches = readSwitches(own);
 			const modules = buildModules(switches, { environment: "test" });
 			expect(mfaOf(resolveForBoot(own, modules, switches)), mode).toMatchObject({ mode });
