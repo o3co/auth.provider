@@ -390,6 +390,15 @@ modules fills them.
   `core.federations` dispatches by type register after that pass, so it would
   miss them. Read them in a routes factory or at request time, as the bundled
   modules do.
+- **A federation contributed by its key.** A module that contributes or
+  overrides `federations.<key>` directly answers a provider named `<key>`;
+  one named otherwise, one without a name, or one that is not an object
+  refuses the boot (`contribute-factory-failed`, naming the module, kind
+  `federations` and the key, #1283), as a provider built by its `type`
+  already did. It used to boot, and the federation's routes at `<key>` looked
+  up the redirect policy and callback URL by the provider's name: another
+  federation's, or none. Name the provider after the key it is contributed
+  under.
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). An override
   that loosens a budget refuses the boot. In code: the `failMode` options are

@@ -142,9 +142,9 @@ export interface SessionAuthentication {
 	/**
 	 * The federation, for `"fed"`: the name it is installed under — the key
 	 * its callback resolved it by, whose `trustUpstreamAmr` applied. Equal to
-	 * the adapter's `provider.name` in every bundled composition; the
-	 * federation index, logout and the federation-token store use
-	 * `provider.name`.
+	 * the adapter's `provider.name` for every provider a module registers,
+	 * which boot refuses when named otherwise than its key; the federation
+	 * index, logout and the federation-token store use `provider.name`.
 	 */
 	readonly federation: string | undefined;
 	/** What an untrusted upstream IdP asserted: kept for the record, never stamped, never read for `acr`. */
