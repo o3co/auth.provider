@@ -113,6 +113,9 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   before it. Redis's asynchronous replication does not hold that across a
   failover, where a promoted replica may lack a write the old primary
   acknowledged, and a read answered by a replica does not either.
+  The RP registry rests on the same assumption (core's `SessionRPRegistry`):
+  a `registerRP` a promoted replica lost, or a `listRPs` a replica answered,
+  leaves that RP out of the logout fan-out.
 - **For the MFA stores, a server that keeps what it is written** (the MFA
   ADR's D12). An enrolled second factor lost to an eviction or a restart
   reads as "never enrolled", and whoever holds the password can then bind
