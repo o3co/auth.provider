@@ -56,7 +56,6 @@ import {
 	vouchableAcrValues,
 } from "#/acrValues.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
-import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
@@ -2575,16 +2574,6 @@ describe("/authorize — every authorization response names its issuer (RFC 9207
 			expect(res.body).not.toHaveProperty("iss");
 		},
 	);
-
-	it("carries advertisedIssuer of a configured issuer that ends in a slash: the slash removed", async () => {
-		const configured = "https://issuer.example/tenant/";
-		const { app } = await makeApp({
-			oauth: { jwt: oauthConfigForTests({ issuer: configured }).oauth.jwt },
-		});
-		const params = redirectParams(await authorize(app, baseQuery));
-		expect(issOf(params)).toEqual([advertisedIssuer(configured)]);
-		expect(issOf(params)).toEqual(["https://issuer.example/tenant"]);
-	});
 });
 
 // The harness's repository is a custom `ClientRepository`: it hands back the

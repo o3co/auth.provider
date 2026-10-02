@@ -50,6 +50,12 @@ describe("checkCanonicalIssuer", () => {
 		["https://auth.example.com?tenant=a", "has-query"],
 		["https://auth.example.com#a", "has-fragment"],
 		["https://user:pw@auth.example.com", "has-credentials"],
+		// Discovery advertises the issuer without the slash, so tokens stamped
+		// with it would carry an `iss` that differs from the advertised one.
+		["https://auth.example.com/", "trailing-slash"],
+		["https://auth.example.com/tenant-a/", "trailing-slash"],
+		["https://auth.example.com//", "trailing-slash"],
+		["http://localhost:3000/", "trailing-slash"],
 	])("rejects %j as %s", (value, reason) => {
 		expect(checkCanonicalIssuer(value)).toBe(reason);
 		expect(isCanonicalIssuer(value)).toBe(false);
@@ -68,6 +74,7 @@ describe("describeIssuerRejection", () => {
 		"has-query",
 		"has-fragment",
 		"has-credentials",
+		"trailing-slash",
 	];
 
 	it.each(reasons)("explains %s", (reason) => {
