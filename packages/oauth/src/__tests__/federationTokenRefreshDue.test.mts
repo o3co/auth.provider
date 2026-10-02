@@ -19,7 +19,11 @@ import { refreshIsDue } from "#/routes/federationTokenRefreshDue.mjs";
 
 const NOW = Date.UTC(2026, 9, 2, 12, 0, 0);
 const BUFFER_MS = 30_000;
-const at = (ms: number) => ({ expiresAt: new Date(ms), obtainedAt: undefined });
+const at = (ms: number) => ({
+	expiresAt: new Date(ms),
+	obtainedAt: undefined,
+	refreshToken: "rt",
+});
 
 describe("refreshIsDue", () => {
 	beforeEach(() => {
@@ -29,10 +33,26 @@ describe("refreshIsDue", () => {
 		vi.useRealTimers();
 	});
 
-	it("never refreshes a token with no finite expiry", () => {
+	it.each([
+		["no refresh token", undefined],
+		["an empty refresh token", ""],
+	])("never refreshes a token with no finite expiry and %s", (_label, refreshToken) => {
 		expect(
-			refreshIsDue({ refreshBufferMs: BUFFER_MS }, { expiresAt: null, obtainedAt: undefined }),
+			refreshIsDue(
+				{ refreshBufferMs: BUFFER_MS },
+				{ expiresAt: null, obtainedAt: undefined, refreshToken },
+			),
 		).toBe(false);
+	});
+
+	it("refreshes a token with no finite expiry that holds a refresh token", () => {
+		// Refreshed once, its answer is stored with an end, capped at the maximum.
+		expect(
+			refreshIsDue(
+				{ refreshBufferMs: BUFFER_MS },
+				{ expiresAt: null, obtainedAt: undefined, refreshToken: "rt" },
+			),
+		).toBe(true);
 	});
 
 	it("refreshes a token whose remaining life equals the buffer", () => {
@@ -59,7 +79,7 @@ describe("refreshIsDue", () => {
 			expiresAt: new Date(obtainedAt + lifeMs),
 		});
 		const due = (tokens: { obtainedAt: Date | undefined; expiresAt: Date | null }) =>
-			refreshIsDue({ refreshBufferMs: BUFFER_MS }, tokens);
+			refreshIsDue({ refreshBufferMs: BUFFER_MS }, { ...tokens, refreshToken: "rt" });
 
 		it("does not refresh a lifetime shorter than the buffer before its midpoint", () => {
 			expect(due(held(NOW))).toBe(false);
@@ -80,8 +100,12 @@ describe("refreshIsDue", () => {
 			expect(due(held(NOW - 3_600_000, 2 * 3_600_000))).toBe(false);
 		});
 
-		it("never refreshes a token with no finite expiry, whatever its obtainedAt", () => {
-			expect(due({ obtainedAt: new Date(NOW - 3_600_000), expiresAt: null })).toBe(false);
+		it("judges a token with no finite expiry by its refresh token alone, whatever its obtainedAt", () => {
+			const unbounded = { obtainedAt: new Date(NOW - 3_600_000), expiresAt: null };
+			expect(
+				refreshIsDue({ refreshBufferMs: BUFFER_MS }, { ...unbounded, refreshToken: undefined }),
+			).toBe(false);
+			expect(due(unbounded)).toBe(true);
 		});
 
 		it("keeps the buffer rule for a record without obtainedAt", () => {
