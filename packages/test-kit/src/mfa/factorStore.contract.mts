@@ -59,9 +59,11 @@ export interface MfaFactorStoreHarness {
 	/** A store over the same backend that cannot reach it. Needs `supports.unreachable`. */
 	readonly unreachable?: () => MfaFactorStore;
 	/**
-	 * Makes `subject`'s set, when it is the tombstone of a set emptied by any membership write (its last removal or a reset), expire
-	 * now, by the backend's own clock; a set holding a record has no expiry.
-	 * Needs `supports.forceExpire`; only the factor set's binding uses it.
+	 * Moves the backend's clock past any retention deadline the store set
+	 * (`subject` names the set the case expires). It never judges membership,
+	 * and never deletes: that an emptied set's tombstone expires and a set
+	 * holding a record does not is the store's own doing. Needs
+	 * `supports.forceExpire`; only the factor set's binding uses it.
 	 */
 	readonly forceExpire?: (subject: string) => Promise<void>;
 	/** Releases what the store runs on once the case ends. */
@@ -85,24 +87,14 @@ export function notRunCase(left: readonly string[]): ContractCase[] {
 	return left.length === 0 ? [] : [{ name: `not run: ${left.join("; ")}`, run: async () => {} }];
 }
 
-/** `harness.unreachable`, or the case's failure when a harness that declared it lacks it. */
+/** `harness.unreachable`, bound to the harness, or the case's failure when a harness that declared it lacks it. */
 export function unreachableOf(harness: MfaFactorStoreHarness): () => MfaFactorStore {
-	assert.equal(
-		typeof harness.unreachable,
-		"function",
+	const unreachable = harness.unreachable?.bind(harness);
+	assert.ok(
+		unreachable !== undefined,
 		"supports.unreachable is declared, and the harness gives no unreachable",
 	);
-	return harness.unreachable as () => MfaFactorStore;
-}
-
-/** `harness.forceExpire`, or the case's failure when a harness that declared it lacks it. */
-export function forceExpireOf(harness: MfaFactorStoreHarness): (subject: string) => Promise<void> {
-	assert.equal(
-		typeof harness.forceExpire,
-		"function",
-		"supports.forceExpire is declared, and the harness gives no forceExpire",
-	);
-	return harness.forceExpire as (subject: string) => Promise<void>;
+	return unreachable;
 }
 
 /** Whether `run` rejects; `what` names it in the failure. */

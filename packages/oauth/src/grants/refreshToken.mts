@@ -378,6 +378,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// Issue to the authenticated client, which the binding gate above
 			// proved equals the presented token's azp/aud.
 			let finalAudience: string | null = authenticatedClientId;
+			// Whether the policy named the audience, which may be the client id itself.
+			let policyChoseAudience = false;
 
 			// Read under the flag alone: with no policy wired, issuing the client
 			// id in answer to a `resource` request would violate RFC 8707 §2.
@@ -397,7 +399,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						clientId: authenticatedClientId,
 						subject: subjectStr,
 						requestedScope: requested === undefined ? undefined : [...requested],
-						originalScope: scopeStr ? originalScopes : undefined,
+						// A copy: `originalScopes` is the ceiling the answer is held to.
+						originalScope: scopeStr ? [...originalScopes] : undefined,
 						// RFC 8707: only under `oauth.resourceIndicator.enabled`.
 						resource: requestedResource ?? undefined,
 					},
@@ -419,13 +422,16 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 					ctx.authenticatedClient.allowedAudiences ?? [],
 				);
 				if (!policyAudience.ok) return { result: policyAudience.result };
-				if (policyAudience.audience !== null) finalAudience = policyAudience.audience;
+				if (policyAudience.audience !== null) {
+					finalAudience = policyAudience.audience;
+					policyChoseAudience = true;
+				}
 			}
 
 			// RFC 8707 §2: when no policy narrowed the audience, derive it from
 			// the requested resource within `allowedAudiences ∪ {clientId}`. A
 			// policy decision always wins.
-			if (finalAudience === authenticatedClientId && requestedResource) {
+			if (!policyChoseAudience && requestedResource) {
 				const derived = deriveAudienceFromResources(
 					requestedResource,
 					new Set([...(ctx.authenticatedClient.allowedAudiences ?? []), authenticatedClientId]),

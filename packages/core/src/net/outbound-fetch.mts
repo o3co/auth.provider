@@ -22,7 +22,8 @@
  * addresses (`outbound-transport.mts`), refuses redirects and encoded
  * answers, reads a 2xx body under a cap, and holds the whole exchange to one
  * deadline. A caller sees a `fetch`, and tells a refusal from a failure with
- * `isOutboundRefusal` alone.
+ * `isOutboundRefusal` alone. `outboundLimitsOf` answers the deadline and cap
+ * `core.outbound` sets, the ceilings over every use's own.
  */
 
 import { lookup as dnsLookup } from "node:dns/promises";
@@ -111,6 +112,22 @@ export function outboundPolicyOf(config: unknown): OutboundPolicy {
 		maxResponseBytes: parsed.data.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
 		egress: parsed.data.egress,
 	});
+}
+
+/** The deadline and the body cap `core.outbound` sets: the ceilings over every use's own. */
+export interface OutboundLimits {
+	readonly timeoutMs: number;
+	readonly maxResponseBytes: number;
+}
+
+/**
+ * The limits `config` states in `core.outbound`, as the outbound fetch
+ * applies them (the defaults for an absent section). Refuses a malformed
+ * section, naming the key, as building the fetch does.
+ */
+export function outboundLimitsOf(config: unknown): OutboundLimits {
+	const { timeoutMs, maxResponseBytes } = outboundPolicyOf(config);
+	return Object.freeze({ timeoutMs, maxResponseBytes });
 }
 
 const PROXY_VARIABLES = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] as const;
