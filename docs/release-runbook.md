@@ -44,10 +44,12 @@ cp profiles/google.env.example profiles/google.env   # the IdP client; git-ignor
 Run multi-agent review + FCoT on the **full release diff** before tagging:
 
 ```bash
-# From develop at the commit the develop → main pull request will carry.
+# Audit one fixed develop commit: the one the release train will be cut from.
 # Tags are cut from main, so look the last one up there.
+git fetch origin
+RELEASE_SHA=$(git rev-parse origin/develop)
 LAST_TAG=$(git describe --tags --abbrev=0 origin/main)
-git diff "$LAST_TAG"..HEAD --stat
+git diff "$LAST_TAG".."$RELEASE_SHA" --stat
 # Then run /multi-agent-review on the diff range
 ```
 
@@ -127,14 +129,15 @@ Don't open the pull request with `develop` as its head: every merge into
 `develop` moves the head and restarts the required checks, so they never
 settle. Run it from a fixed `release-train/<YYYY-MM-DD>` branch instead.
 
-1. Create the train branch at the chosen `develop` commit:
+1. Create the train branch at `$RELEASE_SHA`, the commit Step 1 audited and
+   the release notes cover (for the daily train with no release, any chosen
+   `develop` commit will do):
 
    ```bash
    DATE=$(date +%F)
-   SHA=$(git rev-parse origin/develop)   # or any chosen develop commit
    gh api repos/o3co/auth.provider/git/refs \
-     -f ref="refs/heads/release-train/$DATE" -f sha="$SHA"
-   # equivalent: git push origin "$SHA:refs/heads/release-train/$DATE"
+     -f ref="refs/heads/release-train/$DATE" -f sha="$RELEASE_SHA"
+   # equivalent: git push origin "$RELEASE_SHA:refs/heads/release-train/$DATE"
    ```
 
 2. Open a pull request from it to `main`:
