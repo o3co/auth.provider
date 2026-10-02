@@ -59,6 +59,8 @@ export interface RevokeRouterOptions {
 	 */
 	readonly replaySeenSet?: ReplaySeenSet;
 	readonly tokenEndpoint?: string;
+	/** The fetch for a `private_key_jwt` client's `jwksUri`; see `createClientAuthMiddleware`. */
+	readonly fetch?: typeof fetch;
 }
 
 /**
@@ -116,6 +118,7 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 		logger: opts.logger,
 		...(opts.replaySeenSet === undefined ? {} : { replaySeenSet: opts.replaySeenSet }),
 		...(opts.tokenEndpoint === undefined ? {} : { tokenEndpoint: opts.tokenEndpoint }),
+		...(opts.fetch === undefined ? {} : { fetch: opts.fetch }),
 		// RFC 7009 §2.1: public clients may revoke their own tokens; ownership
 		// is checked the same way for every client.
 		allowPublicClients: true,

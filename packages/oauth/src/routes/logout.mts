@@ -204,7 +204,7 @@ export interface LogoutRouterOptions {
 	 * configured.
 	 */
 	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
-	/** Override for unit tests. Defaults to the global `fetch`. */
+	/** The fetch for back-channel logout POSTs; see `broadcastBackchannelLogout`. */
 	fetchImpl?: typeof fetch;
 	/** Structured logger shared with broadcastBackchannelLogout and the cascade. */
 	logger?: Logger;

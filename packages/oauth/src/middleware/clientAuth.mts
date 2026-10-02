@@ -75,7 +75,10 @@ export interface ClientAuthMiddlewareOptions {
 	 * alongside `issuer` (RFC 7523 §3). Defaults to `<issuer>/oauth/token`.
 	 */
 	tokenEndpoint?: string;
-	/** The fetch used for a client's `jwksUri`. A proxy, or a test seam. */
+	/**
+	 * The fetch used for a client's `jwksUri`. Absent → core's outbound fetch
+	 * with `core.outbound`'s defaults; see `createClientAssertionVerifier`.
+	 */
 	fetch?: typeof fetch;
 }
 

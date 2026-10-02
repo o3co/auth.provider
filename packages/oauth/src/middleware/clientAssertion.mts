@@ -31,8 +31,10 @@ import {
 	assertionLifetime,
 	auditErrorText,
 	consoleLogger,
+	createOutboundFetch,
 	createRemoteKeySetCache,
 	describeInvalidAssertionClockTolerance,
+	isOutboundRefusal,
 	isRecordableJti,
 	isValidAssertionClockTolerance,
 	isWellFormedClientId,
@@ -105,7 +107,12 @@ export interface ClientAssertionVerifierOptions {
 	 * plus this.
 	 */
 	readonly clockToleranceSeconds?: number;
-	/** The fetch used for `jwksUri`. A proxy, or a test seam. */
+	/**
+	 * The fetch used for `jwksUri`. Absent → core's outbound fetch with
+	 * `core.outbound`'s defaults, built here. A substitute replaces that
+	 * policy; pass `createOutboundFetch({ config, source: "registration" })`
+	 * to apply a deployment's `core.outbound`.
+	 */
 	readonly fetch?: typeof fetch;
 	/** Test seam. */
 	readonly now?: () => number;
@@ -156,7 +163,11 @@ export function createClientAssertionVerifier(
 	);
 	// One remote key set per `jwksUri`, shared across requests (core's
 	// `createRemoteKeySetCache`, which the trust-registry verifier uses too).
-	const remoteKeySets = createRemoteKeySetCache({ fetch: options.fetch });
+	// The default fetch is built with the verifier, so a configuration it
+	// refuses fails construction rather than a request.
+	const remoteKeySets = createRemoteKeySetCache({
+		fetch: options.fetch ?? createOutboundFetch({ source: "registration" }),
+	});
 
 	const keySetFor = (client: PublicClient): JWTVerifyGetKey | undefined => {
 		if (client.jwks !== undefined) {
@@ -350,10 +361,15 @@ export function createClientAssertionVerifier(
 				}));
 			} catch (err) {
 				// A bad signature, a wrong audience, an expired token and an
-				// unreachable jwks_uri all answer the same way to the client —
-				// the reason goes to the log, where an operator can tell them
-				// apart — so a probe learns nothing from the difference.
-				const reason = err instanceof errors.JOSEError ? err.code : "jwks_unavailable";
+				// unreachable or refused jwks_uri all answer the same way to the
+				// client — the reason goes to the log, where an operator can tell
+				// them apart — so a probe learns nothing from the difference.
+				const reason =
+					err instanceof errors.JOSEError
+						? err.code
+						: isOutboundRefusal(err)
+							? "jwks_uri_refused"
+							: "jwks_unavailable";
 				return refuse(401, "invalid_client", "Invalid client assertion", reason, {
 					err,
 					clientId: iss,

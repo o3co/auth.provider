@@ -15,7 +15,9 @@
 
 import {
 	auditErrorText,
+	createOutboundFetch,
 	generateLogoutToken,
+	isOutboundRefusal,
 	type KeyStore,
 	type Logger,
 	loggableError,
@@ -40,7 +42,12 @@ export interface BroadcastBackchannelLogoutOptions {
 	/** Session ID being terminated. Included in each logout_token when the RP requires sid. */
 	readonly sid: string;
 	readonly keyStore: KeyStore;
-	/** Override for unit tests. Defaults to the global `fetch`. */
+	/**
+	 * The fetch every POST goes through. Absent → core's outbound fetch with
+	 * `core.outbound`'s defaults, built once on first use. A substitute
+	 * replaces that policy; pass `createOutboundFetch({ config, source:
+	 * "registration" })` to apply a deployment's `core.outbound`.
+	 */
 	readonly fetchImpl?: typeof fetch;
 	/** Per-request timeout in milliseconds. Defaults to 5000ms. */
 	readonly timeoutMs?: number;
@@ -50,15 +57,21 @@ export interface BroadcastBackchannelLogoutOptions {
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 
+let outboundDefault: typeof fetch | undefined;
+const defaultFetch = (): typeof fetch =>
+	(outboundDefault ??= createOutboundFetch({ source: "registration" }));
+
 /**
  * Best-effort parallel POST of OIDC Back-Channel Logout 1.0 logout_token to each RP's
- * `backchannelLogoutUri`. Never throws; 4xx/5xx/network/timeout failures are logged via
- * `opts.logger ?? console`. RPs without a `backchannelLogoutUri` are skipped.
+ * `backchannelLogoutUri`. 4xx/5xx/network/timeout failures, and a destination the
+ * outbound fetch refuses (`step: "destination"`, the RP treated as unreachable), are
+ * logged via `opts.logger ?? console`. RPs without a `backchannelLogoutUri` are skipped.
+ * Throws only when `fetchImpl` is absent and core's outbound fetch cannot be built.
  */
 export async function broadcastBackchannelLogout(
 	opts: BroadcastBackchannelLogoutOptions,
 ): Promise<void> {
-	const fetchImpl = opts.fetchImpl ?? fetch;
+	const fetchImpl = opts.fetchImpl ?? defaultFetch();
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const logger = opts.logger ?? console;
 
@@ -97,7 +110,11 @@ export async function broadcastBackchannelLogout(
 					}
 				} catch (err) {
 					logger.warn(
-						{ clientId: auditErrorText(rp.clientId), step: "post", err: loggableError(err) },
+						{
+							clientId: auditErrorText(rp.clientId),
+							step: isOutboundRefusal(err) ? "destination" : "post",
+							err: loggableError(err),
+						},
 						"logout_backchannel_failed",
 					);
 				} finally {
