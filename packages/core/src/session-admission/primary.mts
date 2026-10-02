@@ -192,8 +192,8 @@ const NOT_PLAIN: unique symbol = Symbol("not plain data");
 
 /**
  * `value` copied by name as plain data, frozen at every depth and sharing
- * nothing with it: a primitive as it is; an array, each of its own indices
- * read once, and its `length`; an object whose prototype is
+ * nothing with it: a primitive as it is; an array (`Array.isArray`), each of
+ * its own indices read once, and its `length`; an object whose prototype is
  * `Object.prototype` or `null`, each own enumerable string key read once.
  * Every read is an ordinary one, so an accessor runs and a throw is let
  * through as it was thrown. Anything else (a class instance, a `Date`, a
@@ -219,6 +219,8 @@ function copyByName(value: unknown, copies: Map<object, unknown>): unknown {
 	const known = copies.get(source);
 	if (known === NOT_PLAIN) throw new NotPlainData();
 	if (known !== undefined) return known;
+	// An array is read by index whatever its prototype — an ORM's list type
+	// included — and copied as a plain one.
 	const isArray = Array.isArray(source);
 	if (!isArray) {
 		const prototype = Reflect.getPrototypeOf(source);
@@ -263,7 +265,8 @@ function copyByName(value: unknown, copies: Map<object, unknown>): unknown {
  * that is not a non-empty string, and a declared field holding what is not
  * plain data (`copyByName`) — left out, the witness would read as not
  * enrolled. Another field holding what is not plain data (a `Date`, a `Map`,
- * an instance) is left out of the snapshot. A read that throws is let
+ * an instance) is left out of the snapshot. A field that refers back to the
+ * user is not plain data. A read that throws is let
  * through as it was thrown: never read as a witness or an address.
  */
 function userSnapshot(
@@ -272,12 +275,10 @@ function userSnapshot(
 ): Readonly<Record<string, unknown>> {
 	if (!isPlainObject(user)) return refuse("user must be an object");
 	const snapshot: Record<string, unknown> = {};
-	// One map for every field: an object two fields share is read once. A
-	// field that refers back to the user is the snapshot when the user is a
-	// plain object, and not plain data when it is an instance, as any is.
-	const prototype = Reflect.getPrototypeOf(user);
-	const plainUser = prototype === Object.prototype || prototype === null;
-	const copies = new Map<object, unknown>([[user, plainUser ? snapshot : NOT_PLAIN]]);
+	// One map for every field: an object two fields share is read once. The
+	// user is a record, not a value: a field that refers back to it is not
+	// plain data, and the user is not read again.
+	const copies = new Map<object, unknown>([[user, NOT_PLAIN]]);
 	const keep = (key: string, value: unknown): void => {
 		Object.defineProperty(snapshot, key, {
 			value,

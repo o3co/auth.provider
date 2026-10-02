@@ -368,7 +368,17 @@ describe("a user is read by name — each field the login needs, once, into a pl
 		}
 	});
 
-	it("reads an object two fields share once, and the user once where a field refers back to it", () => {
+	it("reads a list of an ORM's own list type by index, as a plain array", () => {
+		class ListColumn<T> extends Array<T> {}
+		const groups = ListColumn.from(["staff", "admin"]);
+		for (const build of bothLogins({ id: "user-1", groups })) {
+			const copied = build().user.groups;
+			expect(copied).toStrictEqual(["staff", "admin"]);
+			expect(Reflect.getPrototypeOf(copied as object)).toBe(Array.prototype);
+		}
+	});
+
+	it("reads an object two fields share once, and leaves out a field that refers back to the user, reading it once", () => {
 		const reads = new Map<string, number>();
 		const counting = <T extends object>(target: T): T =>
 			new Proxy(target, {
@@ -382,7 +392,7 @@ describe("a user is read by name — each field the login needs, once, into a pl
 		const user = counting(target);
 		target.self = user;
 		const primary = passwordPrimary({ ...passwordFacts({}), user } as never);
-		expect(primary.user.self).toBe(primary.user);
+		expect(primary.user).not.toHaveProperty("self");
 		expect(primary.user.profile).toBe((primary.user.team as Record<string, unknown>).of);
 		expect(primary.user.profile).toStrictEqual({ team: "red" });
 		expect(reads.get("id")).toBe(1);
@@ -491,6 +501,15 @@ describe("a malformed user — still refused before anything is derived from it"
 			"an ORM entity whose witness column holds a Date",
 			() => ormEntity({ id: "user-1", mfaEnrolled: new Date(0) }),
 			/user\.mfaEnrolled must be plain data/,
+		],
+		[
+			"an email that is the plain user itself, a Date beside it",
+			() => {
+				const user: Record<string, unknown> = { id: "user-1", joined: new Date(0) };
+				user.email = user;
+				return user;
+			},
+			/user\.email must be plain data/,
 		],
 		[
 			"an email that is the class instance the user is",
