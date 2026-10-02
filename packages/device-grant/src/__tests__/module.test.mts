@@ -986,9 +986,8 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs a projection of it", async () => {
-		// A store that answers, but with a record this package cannot read —
-		// a scope that is not a list — is a failure of the host's data, not an
-		// outage and not the caller's mistake.
+		// A store that answers, but with no decision outcome at all, is a
+		// failure of the host's code, not an outage and not the caller's mistake.
 		const deps = enabledDeps();
 		const { logger } = serialisingLogger();
 		const app = mountVerificationRoute({
@@ -996,17 +995,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			logger,
 			deviceCodeStore: {
 				...deps.deviceCodeStore,
-				findPendingByUserCode: async () =>
-					({
-						userCode: "BCDFGHJK",
-						clientId: "tv-app",
-						requestedScope: "openid",
-						expiresAtMs: Date.now() + 60_000,
-						intervalSeconds: 5,
-						status: "pending",
-						subject: undefined,
-						grantedScope: undefined,
-					}) as never,
+				deny: async () => null as never,
 			},
 		});
 
@@ -1014,7 +1003,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			.post("/oauth/device/verification")
 			.set("Host", "as.example.test")
 			.set("Origin", "http://as.example.test")
-			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+			.send({ action: "deny", user_code: "BCDF-GHJK" });
 
 		expect(res.status).toBe(500);
 		expect(res.headers["content-type"]).toMatch(/^application\/json/);

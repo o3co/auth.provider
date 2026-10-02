@@ -246,6 +246,9 @@ export {
 	// decimal digits a variable carries, for the packages outside core that
 	// declare a section's schema.
 	wholeNumberFromEnv,
+	// The same reader held to a range, refusing with one message that names
+	// the range and the form.
+	wholeNumberInRangeFromEnv,
 } from "./config/application.schema.mjs";
 // Transitional: the switches that choose a composition root's modules, read
 // before it knows them. `createApp` takes the resolved configuration itself,
@@ -1001,8 +1004,9 @@ export {
 	isWellFormedClientId,
 	MAX_CLIENT_ID_LENGTH,
 } from "./repositories/clientId.mjs";
-// Core's boundary over a ClientRepository: each record answered is read by
-// name once and held to the registration schema. A refused record makes
+// Core's boundary over a ClientRepository, which boot installs in the
+// `clientRepository` slot: each record answered is read by name once and held
+// to the registration schema. A refused record makes
 // `findById` and `authenticate` reject with the branded refusal, recognised
 // by `isClientRecordRefused` and never by `instanceof`; `lookupClient` answers
 // it as a verdict, so a caller falls back to another source of clients only
@@ -1668,6 +1672,10 @@ export {
 	type MemoryDeviceCodeStoreOptions,
 } from "./device-authorization/memory.mjs";
 export { memoryDeviceCodeStoreModule } from "./device-authorization/module.mjs";
+export {
+	type DeviceAuthorizationReading,
+	readDeviceAuthorization,
+} from "./device-authorization/reading.mjs";
 export {
 	type ApproveDeviceAuthorizationInput,
 	type CreateDeviceAuthorizationInput,

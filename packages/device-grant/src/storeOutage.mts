@@ -27,7 +27,12 @@
  * answered and with it a user code, a device code or the approving subject.
  * A `DeviceCodeStoreError` is the store's own refusal, not an outage, and is
  * answered where it is caught.
+ *
+ * A record the store answered that core's `readDeviceAuthorization` refuses
+ * is logged the same way, naming the field and never its value; each route
+ * decides what it answers for it.
  */
+import type { DeviceAuthorizationReading } from "@o3co/auth-provider-core";
 import { consoleLogger, loggableError } from "@o3co/auth-provider-core";
 
 /** The body of the `503` a device route answers a store outage with. */
@@ -48,6 +53,28 @@ export const reportDeviceCodeStoreOutage = (
 	fields: Record<string, unknown> = {},
 ): void => {
 	const line = { ...fields, err: loggableError(err) };
+	if (typeof logger?.error === "function") logger.error(line, event);
+	else consoleLogger.error(line, event);
+};
+
+/** A refusal `readDeviceAuthorization` answered. */
+export type DeviceAuthorizationRefusal = Exclude<DeviceAuthorizationReading, { readonly ok: true }>;
+
+/**
+ * Log a record the store answered that `readDeviceAuthorization` refused, as
+ * `event`, at error, with the logger fallback an outage has.
+ */
+export const reportUnreadableDeviceAuthorization = (
+	logger: { error?(obj: Record<string, unknown>, msg: string): void } | undefined,
+	event: string,
+	refusal: DeviceAuthorizationRefusal,
+	fields: Record<string, unknown> = {},
+): void => {
+	const line = {
+		...fields,
+		refused: refusal.refused,
+		...(refusal.refused === "malformed" ? { field: refusal.field } : {}),
+	};
 	if (typeof logger?.error === "function") logger.error(line, event);
 	else consoleLogger.error(line, event);
 };

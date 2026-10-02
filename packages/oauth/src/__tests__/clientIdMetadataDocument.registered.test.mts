@@ -20,7 +20,7 @@
  * under the id. A registration the boundary refuses rejects the lookup with
  * core's refusal and is never replaced by a document, whether the fallback's
  * own boundary refuses it or a boundary behind a layer it reads through
- * does, another fallback included; a repository that cannot answer is an
+ * does; a repository that cannot answer is an
  * outage, never answered from the document cache.
  */
 
@@ -215,27 +215,6 @@ describe("a refused registration never falls through to a document", () => {
 			expect(isClientRecordRefused(rejection)).toBe(true);
 			expect(calls).toHaveLength(1);
 		});
-
-		it("never fetches through a forwarder over another fallback that refused the registration", async () => {
-			// The outer fallback cannot see the inner one behind the forwarder:
-			// only the inner one's rejection keeps the outer one from fetching.
-			const inner = fakeFetch([() => json(document())]);
-			const outer = fakeFetch([() => json(document())]);
-			const logger = recordingLogger();
-			const { repository } = switchable(() => registered({ clientName: "" }));
-			const first = cimd(repository, inner.fetch, { logger });
-			const forwarder: ClientRepository = {
-				findById: async (clientId) => await first.findById(clientId),
-				authenticate: async (clientId, secret) => await first.authenticate(clientId, secret),
-			};
-			const repo = cimd(forwarder, outer.fetch, { logger: recordingLogger() });
-			expect(isClientRecordRefused(await rejectionOf(repo.findById(CLIENT_URL)))).toBe(true);
-			expect(inner.calls).toEqual([]);
-			expect(outer.calls).toEqual([]);
-			expect(
-				logger.warn.mock.calls.filter(([, message]) => message === "client_record_refused"),
-			).toHaveLength(1);
-		});
 	});
 
 	it("answers a lookup that finds the registration refused without joining a document fetch already in flight", async () => {
@@ -366,12 +345,6 @@ describe("a repository that cannot answer is an outage, never a document", () =>
 });
 
 describe("a fallback over one boundary", () => {
-	it("refuses to put a document fallback over another", () => {
-		const { fetch } = fakeFetch([]);
-		const once = cimd(switchable(() => null).repository, fetch);
-		expect(() => cimd(once, fetch)).toThrow(/Client ID Metadata Document/);
-	});
-
 	it("rejects a registration refused through a boundary built before the fallback, and never fetches", async () => {
 		// The composition core's slot wrap will produce: the fallback over a
 		// repository already behind the boundary, read as the same boundary.

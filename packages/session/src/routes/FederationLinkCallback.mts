@@ -39,6 +39,7 @@ import {
 	SESSION_STORE_UNAVAILABLE,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
+import type { LinkedTokenLifetime } from "./FederationCallbackIdentity.mjs";
 import type { FederationRouterContext } from "./FederationContext.mjs";
 import {
 	cleanUp,
@@ -76,6 +77,7 @@ export const completeLink = async (
 	ctx: FederationRouterContext,
 	provider: FederationProvider,
 	profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>,
+	lifetime: LinkedTokenLifetime,
 	identityToken: string,
 	resolved: Awaited<ReturnType<UserRepository["authenticateByToken"]>>,
 	redirectTo: string | undefined,
@@ -221,7 +223,9 @@ export const completeLink = async (
 				accessToken: profile.accessToken,
 				refreshToken: profile.refreshToken,
 				idToken: profile.idToken,
-				expiresAt: profile.expiresAt,
+				// The end, and when the token was obtained if that end counts
+				// from this server's call, as the code exchange was read.
+				...lifetime,
 				// The consented scope: `scope` moves with the token;
 				// `grantedScope` is the ceiling a refresh is bounded by (RFC 6749
 				// §6) and never moves. They start equal.

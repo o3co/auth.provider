@@ -827,8 +827,43 @@ describe("validatedClientRepository — one boundary", () => {
 		expect(dispose.mock.contexts[0]).toBe(inner);
 	});
 
-	it("is not disposable when the repository it holds is not", () => {
-		const boundary = validatedClientRepository(repositoryAnswering(null));
-		expect(Symbol.asyncDispose in boundary).toBe(false);
+	it("disposes nothing when the repository it holds is not disposable", async () => {
+		const boundary = validatedClientRepository(
+			repositoryAnswering(null),
+		) as unknown as AsyncDisposable;
+		await expect(boundary[Symbol.asyncDispose]()).resolves.toBeUndefined();
+	});
+
+	it("reads nothing of the repository it holds when it is built", () => {
+		const reads: (string | symbol)[] = [];
+		const throwing = new Proxy(
+			{},
+			{
+				get(_target, key) {
+					reads.push(key);
+					throw new Error("a read the boundary must not make");
+				},
+			},
+		) as ClientRepository;
+		expect(() => validatedClientRepository(throwing)).not.toThrow();
+		expect(reads).toEqual([]);
+	});
+
+	it("reads the repository's dispose only when it is disposed", async () => {
+		const dispose = vi.fn(async () => {});
+		let reads = 0;
+		const inner = {
+			...repositoryAnswering(null),
+			get [Symbol.asyncDispose]() {
+				reads += 1;
+				return dispose;
+			},
+		};
+		const boundary = validatedClientRepository(inner) as unknown as AsyncDisposable;
+		expect(reads).toBe(0);
+		await boundary[Symbol.asyncDispose]();
+		expect(reads).toBe(1);
+		expect(dispose).toHaveBeenCalledTimes(1);
+		expect(dispose.mock.contexts[0]).toBe(inner);
 	});
 });

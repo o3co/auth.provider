@@ -147,6 +147,35 @@ describe("resolveOAuthOptions — Client ID Metadata Documents", () => {
 		expect(cimd({}).maxBytes).toBeUndefined();
 	});
 
+	describe.each([
+		"maxBytes",
+		"timeoutMs",
+		"cacheMaxAgeMs",
+		"maxCacheEntries",
+		"staleIfErrorMs",
+		"negativeCacheMs",
+		"maxConcurrentFetches",
+	] as const)("%s", (key) => {
+		it.each([
+			["0x10"],
+			["1e3"],
+			["5.0"],
+			["+5"],
+			[true],
+			[""],
+			["  "],
+			["Infinity"],
+			[Number.POSITIVE_INFINITY],
+			[Number.NaN],
+		])("does not read %j as a bound", (value) => {
+			expect(cimd({ [key]: value })[key]).toBeUndefined();
+		});
+
+		it.each([[60], ["60"], [" 60 "]])("reads %j as 60", (value) => {
+			expect(cimd({ [key]: value })[key]).toBe(60);
+		});
+	});
+
 	it("is off unless the flag says exactly true", () => {
 		expect(cimd({}).enabled).toBe(false);
 		expect(cimd({ enabled: "true" }).enabled).toBe(false);

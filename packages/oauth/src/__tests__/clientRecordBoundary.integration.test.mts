@@ -20,7 +20,8 @@
  * repository: a record the registration schema refuses rejects the lookup
  * with the boundary's refusal, answered `503` like the repository's outage
  * and warned once; a record whose field read throws is the repository's
- * outage; and an ORM entity is read by name.
+ * outage; and an ORM entity is read by name. The slot's boundary is the one
+ * oauth reads: a boundary the host put there is kept, with its own logger.
  */
 
 import {
@@ -32,6 +33,7 @@ import {
 	jwksModule,
 	memoryAccessTokenDenylistModule,
 	type PublicClient,
+	validatedClientRepository,
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
@@ -210,6 +212,23 @@ describe("oauth endpoints behind core's client-record boundary", () => {
 		const exchanged = await token(app);
 		expect(exchanged.status).toBe(400);
 		expect(exchanged.body).toEqual({ error: "invalid_grant", error_description: "stand-in" });
+		expect(refusals(logger)).toEqual([]);
+		await handle.dispose();
+	});
+});
+
+describe("the clientRepository slot's boundary, as the oauth endpoints read it", () => {
+	it("keeps a boundary the host put in the slot: one warn per refusal, on that boundary's own logger", async () => {
+		const host = createMockLogger();
+		const boundary = validatedClientRepository(
+			answering(() => ({ ...VALID, allowedRedirectUris: ["javascript:alert(1)"] })),
+			{ logger: host },
+		);
+		const { app, handle, logger } = await boot(boundary);
+		expect(handle.components.clientRepository).toBe(boundary);
+		expect((await authorize(app)).status).toBe(503);
+		expect((await token(app)).status).toBe(503);
+		expect(refusals(host).map(([line]) => line.step)).toEqual(["find", "find"]);
 		expect(refusals(logger)).toEqual([]);
 		await handle.dispose();
 	});

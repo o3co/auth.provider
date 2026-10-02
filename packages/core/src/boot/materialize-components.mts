@@ -26,6 +26,7 @@ import { deploymentModeOf } from "../deployment/mode.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import { prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { auditSlotFor } from "./audit-fan-out.mjs";
+import { clientRecordSlotFor } from "./client-record-slot.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import type {
 	BootPlan,
@@ -118,7 +119,9 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * `contributionKinds` when given (a provider that requires one reads it
  * lazily, filled once stage 4 registers the contributions), then runs each
  * provider factory in `plan.providerActivations` order. The `auditSink`
- * slot is `audit-fan-out.mts`'s to fill (`auditSlotFor`); a cleanup is still
+ * slot is `audit-fan-out.mts`'s to fill (`auditSlotFor`), and the
+ * `clientRepository` slot `client-record-slot.mts`'s (`clientRecordSlotFor`,
+ * core's client-record boundary over whatever fills it); a cleanup is still
  * handed the provider's own value.
  *
  * A factory failure becomes `BootError reason="provides-factory-failed"`, its
@@ -170,6 +173,9 @@ export async function materializeComponents(
 	// The `auditSink` slot's handling, `audit-fan-out.mts`'s alone.
 	const auditSlot = auditSlotFor(plan, contributionKinds, components);
 	auditSlot.beforeProviders();
+	// The `clientRepository` slot's handling, `client-record-slot.mts`'s alone.
+	const clientRecordSlot = clientRecordSlotFor(components);
+	clientRecordSlot.beforeProviders();
 
 	for (const activation of plan.providerActivations) {
 		const { module: moduleName, componentKey } = activation;
@@ -225,7 +231,10 @@ export async function materializeComponents(
 			});
 		}
 
-		components[componentKey as string] = auditSlot.provided(componentKey, value);
+		components[componentKey as string] = clientRecordSlot.provided(
+			componentKey,
+			auditSlot.provided(componentKey, value),
+		);
 
 		const cleanupFn = manifest.lifecycle?.[componentKey]?.cleanup;
 		if (cleanupFn !== undefined) {

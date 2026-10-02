@@ -60,13 +60,6 @@ export const coerceBooleanFromEnv = environmentCoercer(
 	),
 );
 
-const rateLimitSpecSchema = z.object({
-	limit: z.coerce.number().int().positive(),
-	// One year at most, the ceiling of every duration here: a window past the
-	// Date range is one the limiter adapters refuse when they are built.
-	windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
-});
-
 const LEGACY_JWT_FIELDS = [
 	"algorithm",
 	"kid",
@@ -141,6 +134,27 @@ export const wholeNumberFromEnv = (bounds: z.ZodNumber) =>
  * `tombstoneRetention: null` fails boot instead of disabling tombstones.
  */
 export const durationFromEnv = wholeNumberFromEnv;
+
+/**
+ * {@link wholeNumberFromEnv} held to `min`, and to `max` when given, every
+ * refusal carrying one message that names the range and the form. The reader
+ * for a number setting that needs no message of its own.
+ */
+export const wholeNumberInRangeFromEnv = (min: number, max?: number) => {
+	const error =
+		max === undefined
+			? `must be a whole number of at least ${min}, in decimal digits`
+			: `must be a whole number from ${min} to ${max}, in decimal digits`;
+	const bounds = z.number({ error }).int({ error }).min(min, { error });
+	return wholeNumberFromEnv(max === undefined ? bounds : bounds.max(max, { error }));
+};
+
+const rateLimitSpecSchema = z.object({
+	limit: wholeNumberInRangeFromEnv(1),
+	// One year at most, the ceiling of every duration here: a window past the
+	// Date range is one the limiter adapters refuse when they are built.
+	windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
+});
 
 const jwtSchemaBase = z.object({
 	// Required: the issuer belongs to the deployment, never to a request. An
@@ -367,11 +381,8 @@ export function resolveRefreshTokenLifetime(config: RefreshTokenLifetimeSource):
 	return value;
 }
 
-/**
- * A lifetime in whole seconds, positive and bounded, so the exported-but-empty
- * variable that `z.coerce.number()` reads as `0` fails boot.
- */
-const lifetimeSecondsSchema = z.coerce.number().int().positive().max(MAX_DURATION_SECONDS);
+/** A lifetime in whole seconds, positive and bounded. */
+const lifetimeSecondsSchema = wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS);
 
 /**
  * `oauth.accessToken`. Every key is optional so either spelling of the default
@@ -549,7 +560,7 @@ export const CoreConfigSchema = z.object({
 		// per-request memory or bloat the id_token. Default in HOCON.
 		nonce: z
 			.object({
-				maxLength: z.coerce.number().int().positive(),
+				maxLength: wholeNumberInRangeFromEnv(1),
 			})
 			.optional(),
 		// Opt-in RFC 8707 Resource Indicator enforcement; off in reference.conf
@@ -807,7 +818,7 @@ export const fullSectionsSchema = z.object({
 			// The origins this RP may be framed by; the same two spellings as
 			// `origin`, for the same reason.
 			topOrigin: z.union([z.string(), z.array(z.string())]).optional(),
-			challengeTtlMs: z.coerce.number().int().positive().optional(),
+			challengeTtlMs: wholeNumberInRangeFromEnv(1).optional(),
 			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
 			userVerification: z.enum(["required", "preferred", "discouraged"]).optional(),
 			allowCredentialsForKnownUser: coerceBooleanFromEnv.optional(),

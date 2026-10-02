@@ -13,6 +13,7 @@ import {
 	type RateLimitFailMode,
 	type RateLimitSpec,
 	shownConfigValue,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RateLimiterClient } from "./clients.mjs";
@@ -137,9 +138,9 @@ export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ct
 /** A budget as the section writes it; each number read from the string a variable carries. */
 const rateLimitSpecSchema = z
 	.object({
-		limit: z.coerce.number().int().positive(),
+		limit: wholeNumberInRangeFromEnv(1),
 		// One year at most, as core holds every duration an operator writes.
-		windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
 	})
 	.strict();
 

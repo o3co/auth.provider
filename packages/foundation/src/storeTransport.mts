@@ -31,7 +31,9 @@ import {
 	describeWeakSecret,
 	MIN_SECRET_ENTROPY_BYTES,
 	measureSecretEntropyBytes,
+	wholeNumberFromEnv,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import { endpointForMessage } from "./endpointUrl.mjs";
 import {
 	readFailure,
@@ -132,18 +134,20 @@ export function checkStoreResponseCap(maxResponseBytes: unknown, owner: string):
 	return maxResponseBytes;
 }
 
+/** A number, or a string of decimal digits as an environment variable carries one. */
+const numberOrDecimalDigits = wholeNumberFromEnv(z.number());
+
 /**
- * Coerces a numeric config value that may arrive as a string (HOCON
- * environment substitution yields strings). Only an *absent* key takes
- * `fallback`. Anything present but unreadable becomes `NaN` for the
- * constructor to reject, and a **blank** environment variable, which HOCON
- * substitutes as `""`, becomes `0`: a boot failure too, not a silent default.
+ * A numeric config value that may arrive as a string (HOCON environment
+ * substitution yields strings), read as core reads one: a number, or decimal
+ * digits. Only an *absent* key takes `fallback`. Anything else present (a
+ * blank variable, `"0x10"`, `"1e3"`, `"5.0"`, `"+5"`, a boolean) becomes `NaN`
+ * for the constructor to reject: a boot failure, not a silent default.
  */
 const toNumber = (value: unknown, fallback: number): number => {
 	if (value === undefined || value === null) return fallback;
-	if (typeof value === "number") return value;
-	if (typeof value === "string") return Number(value.trim());
-	return Number.NaN;
+	const read = numberOrDecimalDigits.safeParse(value);
+	return read.success ? read.data : Number.NaN;
 };
 
 /**
