@@ -67,7 +67,7 @@ import {
 	TOTP_SECTION,
 } from "./moduleHarness.mjs";
 import { factorRecord, stubFactor } from "./requirementHarness.mjs";
-import { beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
+import { addRecord, beginLogin, seedTotp, verify, wrongCode } from "./routesHarness.mjs";
 
 afterEach(disposeAll);
 
@@ -854,7 +854,7 @@ describe("recent MFA's window", () => {
 
 	it("is the one mfa.manage.maxAgeSeconds sets: a second factor half an hour old is recent under an hour's window, and not under five minutes", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(factorRecord(ALICE.id));
+		await addRecord(factorStore, factorRecord(ALICE.id));
 		const admitted = async (maxAgeSeconds: number) => {
 			// configFor builds the section with mfaConfigForTests, these options laid over it.
 			const { handle } = await boot({

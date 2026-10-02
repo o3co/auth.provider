@@ -42,17 +42,24 @@
  *   and the reserved parameter and JWK member names come from fixed lists.
  *   The record object is never logged.
  *
- * The boundary tells a refused record from an absent one
- * ({@link ValidatedClientRepository.lookupClient}): a caller that falls back
- * to another source of clients when none is registered falls back only on
- * `absent`, never in place of a record it refused. That verdict is the
- * boundary's own, never one a repository claims.
+ * - **What a refused lookup answers.** `findById` and `authenticate` reject
+ *   with a {@link ClientRecordRefusedError}, never `null`: a refusal is the
+ *   rejection itself, recognised by its brand (`isClientRecordRefused`), so
+ *   it survives any layer that lets rejections through — a cache, a
+ *   decorator, a `{ ...boundary }` copy, another boundary — and no fallback
+ *   behind such a layer can read it as an absent client. A caller answers it
+ *   as it answers any rejection of the lookup.
  *
- * The boundary is the outermost layer over a repository. Its `findById`
- * answers a refused record `null`, so a layer in front of it that forwards
- * that answer — a cache, a decorator, a `{ ...boundary }` copy — turns the
- * refusal into an absence, and a fallback behind that layer would serve
- * something in the refused record's place. Wrap the repository last.
+ * Boot installs the boundary in the `clientRepository` slot, over whatever
+ * fills it, so every module that reads the slot reads through it. A record
+ * is validated at each boundary it passes; a boundary this module built is
+ * recognised and reused, never wrapped twice. A boundary over another lets
+ * the inner one's refusal through unchanged, without a second warn.
+ *
+ * The boundary also tells a refused record from an absent one as a verdict
+ * ({@link ValidatedClientRepository.lookupClient}), for a caller that falls
+ * back to another source of clients only on `absent`. That verdict is the
+ * boundary's own, never one a repository claims.
  */
 
 import type { z } from "zod";
@@ -60,6 +67,7 @@ import { auditErrorList, auditErrorText } from "../errors/envelope.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { EventLogger } from "../logging/Logger.mjs";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
+import { ClientRecordRefusedError } from "./clientRecordRefused.mjs";
 import type { ClientRepositoryOutage } from "./clientRepositoryUnavailable.mjs";
 import { PublicClientRecordSchema } from "./InMemoryClientRepository.mjs";
 import { readPlainFields } from "./userSnapshot.mjs";
@@ -179,14 +187,16 @@ export type ClientLookup =
 
 /**
  * A `ClientRepository` behind core's boundary. `findById` and `authenticate`
- * keep the port's meaning (a client, or `null` for an unknown one) and answer
- * only validated records; `lookupClient` says which unknown it is.
+ * keep the port's meaning (a client, or `null` for an unknown one), answer
+ * only validated records, and reject with a {@link ClientRecordRefusedError}
+ * for a record the boundary refuses; `lookupClient` answers that refusal as
+ * a verdict.
  */
 export interface ValidatedClientRepository extends ClientRepository {
 	/**
 	 * The repository's `findById` answer for `clientId`, read and judged once:
 	 * found, refused or absent. A read that throws is let through as it was
-	 * thrown.
+	 * thrown, an inner boundary's refusal included.
 	 */
 	lookupClient(clientId: string): Promise<ClientLookup>;
 }
@@ -208,22 +218,23 @@ const boundaries = new WeakSet<ClientRepository>();
  * answers is read once into a plain copy and held to the registration
  * schema, and the copy is what is answered.
  *
- * - A record that fails is refused: `lookupClient` answers `refused`, and
- *   `findById` and `authenticate` answer `null`, as for an unknown client.
- *   Each refusal writes one `client_record_refused` warn: the `step`
+ * - A record that fails is refused: `findById` and `authenticate` reject
+ *   with a new {@link ClientRecordRefusedError}, and `lookupClient` answers
+ *   `refused`. Each refusal writes one `client_record_refused` warn: the `step`
  *   (`find` or `authenticate`), the client id sanitised and capped, and the
  *   reasons, at most ten, each sanitised and capped (`reasonCount` when
  *   more). The record itself is never logged.
  * - `null` or `undefined` is no record: `absent`, or `null`, silently.
  * - A throw, the repository's or a field read's, is let through as it was
- *   thrown: the store's outage, which each caller answers as one (`503`;
- *   the logout routes go on without the redirect).
+ *   thrown. So is an inner boundary's refusal, which stays a refusal and is
+ *   not warned again; anything else is the store's outage.
  *
- * The boundary must be the outermost layer: anything that forwards its
- * `findById` hides a refusal as an absence (see the file header). A boundary
- * handed to it is answered as it is, never wrapped twice, so it keeps the
- * logger it was first built with; `options` are not read. The boundary is
- * disposable when `inner` is, and disposing it disposes `inner`.
+ * A layer over the boundary keeps a refusal as long as it lets rejections
+ * through unchanged (see the file header). A boundary handed to it is
+ * answered as it is, never wrapped twice, so it keeps the logger it was
+ * first built with; `options` are not read. Building the boundary reads
+ * nothing of `inner`. The boundary is always disposable: disposing it reads
+ * `inner`'s `Symbol.asyncDispose` then, and calls it when it is a function.
  *
  * The reasons a refusal logs name the field and an entry's position, never a
  * URI (see the file header). The record object is never logged.
@@ -258,26 +269,22 @@ export function validatedClientRepository(
 		);
 		return { outcome: "refused", reasons: reading.reasons };
 	};
-	const clientOf = (lookup: ClientLookup): PublicClient | null =>
-		lookup.outcome === "found" ? lookup.client : null;
+	const clientOf = (lookup: ClientLookup): PublicClient | null => {
+		if (lookup.outcome === "refused") throw new ClientRecordRefusedError();
+		return lookup.outcome === "found" ? lookup.client : null;
+	};
 	const lookupClient = async (clientId: string): Promise<ClientLookup> =>
 		judge("find", clientId, await inner.findById(clientId));
-	const boundary: ValidatedClientRepository = {
+	const boundary: ValidatedClientRepository & AsyncDisposable = {
 		lookupClient,
 		findById: async (clientId) => clientOf(await lookupClient(clientId)),
 		authenticate: async (clientId, secret) =>
 			clientOf(judge("authenticate", clientId, await inner.authenticate(clientId, secret))),
+		[Symbol.asyncDispose]: async () => {
+			const dispose = (inner as { [Symbol.asyncDispose]?: unknown })[Symbol.asyncDispose];
+			if (typeof dispose === "function") await dispose.call(inner);
+		},
 	};
-	const dispose = (inner as { [Symbol.asyncDispose]?: unknown })[Symbol.asyncDispose];
-	const answered: ValidatedClientRepository & Partial<AsyncDisposable> =
-		typeof dispose === "function"
-			? {
-					...boundary,
-					[Symbol.asyncDispose]: async () => {
-						await dispose.call(inner);
-					},
-				}
-			: boundary;
-	boundaries.add(answered);
-	return answered;
+	boundaries.add(boundary);
+	return boundary;
 }

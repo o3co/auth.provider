@@ -23,8 +23,9 @@
  * Its copy (`readPlainFields`) is the by-name plain-data copy a login's
  * user and claims go through: session admission reads the claims envelope
  * a login records through it too, and core's client-record boundary
- * (`clientRepositoryBoundary.mts`) each client record. Core-internal: not
- * exported from the package.
+ * (`clientRepositoryBoundary.mts`) each client record. `readUserSnapshot`
+ * is public: a route reads the subject and the claims from its snapshot,
+ * never from the `User` again. `readPlainFields` is core-internal.
  */
 
 import type { User } from "./types.mjs";
@@ -56,7 +57,10 @@ void everyDeclaredFieldRead;
 
 /** What `readUserSnapshot` answers: the snapshot, or why the `User` is refused. */
 export type UserSnapshotReading =
-	| { readonly ok: true; readonly snapshot: Readonly<Record<string, unknown>> }
+	| {
+			readonly ok: true;
+			readonly snapshot: Readonly<Record<string, unknown>> & { readonly id: string };
+	  }
 	| { readonly ok: false; readonly refused: "not_an_object" | "id" }
 	| {
 			readonly ok: false;
@@ -234,5 +238,5 @@ export function readUserSnapshot(user: unknown): UserSnapshotReading {
 	if (typeof snapshot.id !== "string" || snapshot.id.length === 0) {
 		return { ok: false, refused: "id" };
 	}
-	return { ok: true, snapshot };
+	return { ok: true, snapshot: snapshot as typeof snapshot & { readonly id: string } };
 }

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-10-01
+最終更新: 2026-10-02
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -110,7 +110,7 @@ redis-rate-limiter {
 - replay seen-set — `private_key_jwt` クライアント認証（#484）の背後にある、`jti` の一回限り使用の記録 — は `adapters.replaySeenSet`（`ADAPTERS_REPLAY_SEEN_SET`）で切り替わる。テンプレートは共有接続上の `"redis"` を同梱しており、`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。捕獲されたクライアントアサーションが、レプリカごとに 1 回ずつリプレイできてしまうためである。
 - ファーストパーティでないクライアントのための同意ステップ（#527）は `adapters.consentStore`（`ADAPTERS_CONSENT_STORE`）で切り替わる。デフォルトはオフ（`none`）である。`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。あるレプリカで与えた同意が他のすべてのレプリカで再度求められ、同意ページが保留したリクエストを、回答を受け取ったレプリカが知らないという事態になるためである。`redis`（#561）は両方を共有接続上に保持する。[同意ストア](#同意ストア) を参照。
 - フェデレーショントークンストアのデフォルトは memory である。`ADAPTERS_FEDERATION_TOKEN_STORE=redis`（`adapters.federationTokenStore = "redis"`）を設定し、`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 バイト、base64 エンコード（`openssl rand -base64 32`） — を与えること。ストアは保持する上流のリフレッシュトークンを暗号化する。`REDIS_CLIENTS_URL` で設定した ioredis ソケットを共有する。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照。
-- フェデレーショングラント（#593）は、有効にするとさらに 2 つのストアを持つ: グラントそのもの（`ADAPTERS_FEDERATION_GRANT_STORE`）と、取得フローの記録（`ADAPTERS_FEDERATION_GRANT_INTENT_STORE`）。どちらも共有ソケット上の `redis` を同梱している。いずれかを `memory` にすると `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否され、Redis のグラントと memory のユーザーセッションストアの組み合わせはレプリカ数にかかわらず拒否される。グラントが、それを終わらせる境界より長生きしてしまうためである。[フェデレーショングラント](#フェデレーショングラント) を参照。
+- フェデレーショングラント（#593）は、有効にするとさらに 2 つのストアを持つ: グラントそのもの（`ADAPTERS_FEDERATION_GRANT_STORE`）と、取得フローの記録（`ADAPTERS_FEDERATION_GRANT_INTENT_STORE`）。どちらも `none` を同梱しており、機能を有効にするとそのストアを名指しして起動が拒否される。それぞれ `redis`（共有ソケット）か `memory` を選ぶ。いずれかを `memory` にすると `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否され、Redis のグラントと memory のユーザーセッションストアの組み合わせはレプリカ数にかかわらず拒否される。グラントが、それを終わらせる境界より長生きしてしまうためである。[フェデレーショングラント](#フェデレーショングラント) を参照。
 
 ## 使い方
 
@@ -217,8 +217,8 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `ADAPTERS_REPLAY_SEEN_SET` | `redis` | `adapters.replaySeenSet`: `private_key_jwt` の背後の replay seen-set、`memory` または `redis` |
 | `ADAPTERS_CONSENT_STORE` | `none` | `adapters.consentStore`: `none`、`memory` または `redis`。[同意ストア](#同意ストア) を参照 |
 | `ADAPTERS_FEDERATION_TOKEN_STORE` | `memory` | `adapters.federationTokenStore`: `memory` または `redis`。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照 |
-| `ADAPTERS_FEDERATION_GRANT_STORE` | `redis` | `adapters.federationGrantStore`: `memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
-| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `redis` | `adapters.federationGrantIntentStore`: `memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
+| `ADAPTERS_FEDERATION_GRANT_STORE` | `none` | `adapters.federationGrantStore`: `none`、`memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
+| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `none` | `adapters.federationGrantIntentStore`: `none`、`memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
 | `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`、`redis` または `store`。MFA を組み込む合成のためのもので、テンプレートは組み込まない |
 | `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` または `redis`。MFA を組み込む合成のためのもの |
 | `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: 認可コードリポジトリ、`memory` または `redis`。[コードリポジトリ](#コードリポジトリ) を参照 |
@@ -288,7 +288,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` の**非推奨（deprecated）**エイリアス（config キーでは `oauth.accessToken.expiresIn` が `oauth.accessToken.defaultExpiresIn` のエイリアス）。新しい変数が未設定の間だけ読まれる。これがまだデフォルトを決めている間は、起動時に `config_key_deprecated`（warn）がログに出る。値は新しい変数へ移すこと。 |
 | `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | リフレッシュトークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
 
-これらを空文字で export すると、フォールバックではなく起動失敗になる: HOCON は `FOO=` を `""` に解決し、それが `0` に coerce され、有効期間 0 は発行時点で既に期限切れのトークンを発行するため。
+どれも 10 進数字だけを読む。空文字で export すると、フォールバックではなく起動失敗になる（HOCON は `FOO=` を `""` に解決する）。16 進（`0x10`）、指数（`1e3`）、符号（`+5`）、小数（`5.0`）も同じく起動失敗になる。
 
 `expires_in` リクエストパラメータを読むのは token exchange（RFC 8693）だけで、他のグラントはそれを無視してデフォルトを発行する。
 
@@ -314,7 +314,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `SESSION_STORE_SECURE` | `true` | セッション Cookie に `Secure` フラグを設定 |
 | `SESSION_STORE_SAME_SITE` | `lax` | `SameSite` 属性（`lax`、`strict`、`none`）。`none` は `SESSION_STORE_SECURE=true` が**必須** — ブラウザは `Secure` でない `SameSite=None` Cookie を破棄するため、クライアント側で全ログインが黙って失敗するのを放置せず、起動時にこの組み合わせを拒否する。 |
 | `SESSION_STORE_DOMAIN` | — | Cookie ドメイン（デフォルト未設定） |
-| `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒）。1〜86400 の整数で、それ以外なら起動に失敗する（*空文字*は `0` に coerce され、トークン側の判定を黙って無効化してしまうため）。 |
+| `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒）。10 進数字で書いた 1〜86400 の整数で、それ以外なら起動に失敗する（*空文字*や空白だけの値も含む）。 |
 | `SESSION_STORE_STORAGE_TYPE` | `redis` | セッションストアのバックエンド: `redis` または `memory`。`memory` はプロセスごとで、他の in-memory ストアと同様に `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される（#474） |
 | `SESSION_STORE_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
 | `SESSION_STORE_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
@@ -478,11 +478,11 @@ core.federations {
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `FEDERATION_GRANTS_ENABLED` | `false` | ルート、下記 2 つのストア、subject-revocation service をインストールする |
+| `FEDERATION_GRANTS_ENABLED` | `false` | ルート、下記で選んだ 2 つのストア（選ぶまではなし）、subject-revocation service をインストールする |
 | `FEDERATION_GRANTS_CONSENT_URL` | — | グラント用の、デプロイ側の同意ページ: パス、またはプロバイダーの origin 上の絶対 URL。デフォルトは無い — グラントの有効化はページが存在するという表明であり、無ければ起動を拒否する |
 | `FEDERATION_GRANTS_IDENTITY_LOOKUP` | `required` | connect callback が、既に別のローカルユーザーに紐づいた上流アカウントを拒否するかどうか。`required` には、すべての connection の registration を cover するユーザーリポジトリが必要（下記）。`unsupported` はこの検査を行わないことを記録する |
-| `ADAPTERS_FEDERATION_GRANT_STORE` | `redis` | グラントの保存先: `memory`（1 レプリカ。再起動で失われ、全ユーザーが再接続する）または `redis`（共有ソケット） |
-| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `redis` | 取得フローの記録 — バックエンドが登録した intent、同意チャレンジ、connect トランザクション — の保存先: `memory`（1 レプリカ。再起動で失うのは進行中のフローだけ）または `redis` |
+| `ADAPTERS_FEDERATION_GRANT_STORE` | `none` | グラントの保存先: `none`（ストアなし。機能を有効にするとそれを名指しして起動が拒否される）、`memory`（1 レプリカ。再起動で失われ、全ユーザーが再接続する）または `redis`（共有ソケット） |
+| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `none` | 取得フローの記録 — バックエンドが登録した intent、同意チャレンジ、connect トランザクション — の保存先: `none`（ストアなし。機能を有効にするとそれを名指しして起動が拒否される）、`memory`（1 レプリカ。再起動で失うのは進行中のフローだけ）または `redis` |
 | `REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE` | `required` | `required` または `allow-plaintext`。`FEDERATION_TOKENS_ALLOW_INSECURE=1` でない限り、平文は production/staging と `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | subject 全体の失効に、確立済みのグラントを残すよう*求めて*よいかどうか。許可であって指示ではない |
 | `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Redis グラントストアのキー名前空間 |
@@ -798,7 +798,9 @@ audit-sink {
 }
 ```
 
-sink は契約上 fire-and-forget である: core は await せずにディスパッチし、reject を握りつぶすため、遅い sink や失敗する sink が認証フローにレイテンシを加えたり、フローを失敗させたりすることはない。その裏返しとして、配信できない sink はイベントを黙って落とし、その取りこぼしはまだカウントされていない — 下記「メトリクス」の **まだ公開していないもの** を参照。
+設定した送り先と並べて監査の送り先を加えるには、自分のモジュールから `auditHooks` を寄与する。core は `auditSink` と `auditHooks` をまとめてファンアウトする。
+
+sink は契約上 fire-and-forget である: core は await せずにディスパッチし、reject を握りつぶすため、遅い sink や失敗する sink が認証フローにレイテンシを加えたり、フローを失敗させたりすることはない。その裏返しとして、配信できない sink はイベントを落とす。sink が 1 つだけなら、その失敗は黙って握りつぶされる。モジュールが `auditHooks` を寄与していれば、ファンアウトが失敗した呼び出しをそれぞれ、sink の位置とイベントの `type` を添えて `audit_sink_failed` としてエラーレベルでログに出す。取りこぼしはまだカウントされていない — 下記「メトリクス」の **まだ公開していないもの** を参照。
 
 ### メトリクス
 

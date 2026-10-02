@@ -21,6 +21,7 @@ import {
 	type RefreshTokenFamilyStore,
 	type RefreshTokenFamilyUpdateResult,
 	RefreshTokenStorageError,
+	wholeNumberInRangeFromEnv,
 	withReason,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -274,7 +275,7 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
 export const redisRefreshTokenFamilyStoreSectionSchema = z
 	.object({
 		keyPrefix: z.string().default("rtfam:"),
-		casRetryLimit: z.coerce.number().int().min(1).max(10).default(3),
+		casRetryLimit: wholeNumberInRangeFromEnv(1, 10).default(3),
 	})
 	.strict()
 	.default(() => ({ keyPrefix: "rtfam:", casRetryLimit: 3 }));

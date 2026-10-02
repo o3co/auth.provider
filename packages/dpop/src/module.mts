@@ -20,7 +20,8 @@
  * protected-resource check) and `dpop_signing_alg_values_supported` to
  * discovery metadata, both built from its own section, `dpop {}`, parsed
  * with {@link dpopConfigSchema} before any factory runs. DPoP is off unless
- * `dpop.enabled = true`. A key still written at `oauth.dpop`, the section's
+ * `dpop.enabled = true`, the module's switch (`section.isEnabled`): off, the
+ * module registers nothing. A key still written at `oauth.dpop`, the section's
  * old path, refuses boot naming the new one, and so does a nonce variable's
  * old name unless its new name carries the same value.
  *
@@ -31,9 +32,8 @@
  * DI optional:
  *   - `logger` — handed to the mechanism; core's `consoleLogger` when absent.
  *   - `replaySeenSet` — where every accepted proof's `jti` is recorded
- *     (`dpop-proof:<jkt>`). Optional because disabled DPoP records nothing;
- *     with DPoP enabled and the slot empty, boot is refused in every
- *     `core.deployment.mode`.
+ *     (`dpop-proof:<jkt>`). Optional so that the slot's absence is refused
+ *     by the module, in every `core.deployment.mode`, naming why.
  *   - `oauthTokenSettings` — the issuer, provided by the oauth module from
  *     `oauth {}`; the configuration's when absent.
  */
@@ -44,6 +44,7 @@ import {
 	coerceBooleanFromEnv,
 	consoleLogger,
 	defineModule,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createDPoPNonceIssuer } from "./nonce.mjs";
@@ -60,14 +61,14 @@ import { createDPoPMechanism, type DPoPMechanismOptions } from "./verifier.mjs";
  */
 export const dpopConfigSchema = z
 	.object({
-		/** When false (default), the dpop mechanism factory returns null — no DPoP mechanism contributed. */
+		/** The module's switch: false (default), and the module registers nothing. */
 		enabled: coerceBooleanFromEnv.default(false),
 		/** Acceptance window for the iat claim in seconds. Default: 60. */
-		iatWindowSeconds: z.coerce.number().int().positive().default(60),
+		iatWindowSeconds: wholeNumberInRangeFromEnv(1).default(60),
 		/** JOSE algorithm allowlist. Default: ES256, ES384, EdDSA, RS256. */
 		algWhitelist: z.array(z.string()).default(["ES256", "ES384", "EdDSA", "RS256"]),
 		/** How long a proof's replay record is kept, in seconds. Default: 300. */
-		replayStoreTtlSeconds: z.coerce.number().int().positive().default(300),
+		replayStoreTtlSeconds: wholeNumberInRangeFromEnv(1).default(300),
 		// Server-provided nonce (RFC 9449 §8 / §9). "never" (the default) asks
 		// for none; "as" asks at the token endpoint; "as+rs" also at protected
 		// resources. The nonce is an HMAC under `secret`, which every replica
@@ -76,7 +77,7 @@ export const dpopConfigSchema = z
 		nonce: z
 			.object({
 				required: z.enum(["never", "as", "as+rs"]).default("never"),
-				ttlSeconds: z.coerce.number().int().positive().default(300),
+				ttlSeconds: wholeNumberInRangeFromEnv(1).default(300),
 				secret: z.string().optional(),
 			})
 			.strict()
@@ -102,8 +103,7 @@ const configuredIssuer = (config: unknown): unknown =>
 /**
  * Declarative manifest for the DPoP package.
  *
- * With `dpop.enabled` false (the default) the mechanism factory
- * returns `null` and core leaves DPoP out of the composed `tokenBindingMw`.
+ * With `dpop.enabled` false (the default) the module registers nothing.
  * With it true, core composes the mechanism alongside any other binding
  * mechanism (mTLS) under `core.tokenBinding.dispatchPolicy`.
  *
@@ -148,6 +148,7 @@ export const dpopModule = defineModule<
 			OAUTH_DPOP_NONCE_TTL_SECONDS: "oauth.dpop.nonce.ttl-seconds",
 			OAUTH_DPOP_NONCE_SECRET: "oauth.dpop.nonce.secret",
 		},
+		isEnabled: (section) => section.enabled,
 	},
 	requires: ["config"],
 	// `oauthTokenSettings`: the issuer, which the oauth module provides;
@@ -158,22 +159,17 @@ export const dpopModule = defineModule<
 		// cannot discover that DPoP is accepted, or with which algorithms.
 		// The list is the same `algWhitelist` the mechanism is built from
 		// below, so an algorithm picked off discovery is never one the
-		// verifier rejects. Disabled DPoP contributes `{}`, not `null`: the
+		// verifier rejects. An empty list contributes `{}`, not `null`: the
 		// `discoveryMetadata` kind has no null-filtering contract.
 		discoveryMetadata: [
 			({ section }) => {
-				if (!section.enabled || section.algWhitelist.length === 0) return {};
+				if (section.algWhitelist.length === 0) return {};
 				return { metadata: { dpop_signing_alg_values_supported: [...section.algWhitelist] } };
 			},
 		],
 		tokenBindingMechanisms: [
 			(deps) => {
 				const { section } = deps;
-				if (!section.enabled) {
-					// Disabled by config — no mechanism contributed.
-					return null;
-				}
-
 				// Core's `consoleLogger` when no `logger` is wired, so the mechanism's
 				// own warnings (a replay TTL too short for the iat window, an
 				// unreachable seen-set) do not vanish.

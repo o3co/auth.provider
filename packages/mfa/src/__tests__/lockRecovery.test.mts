@@ -38,7 +38,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMfaFactorSet, createMfaSubjectLeases } from "#/factorSet.mjs";
 import { createMfaLockRecovery } from "#/lockRecovery.mjs";
 import { createMfaEnrollmentWitness } from "#/witness.mjs";
-import { suiteSealing } from "./routesHarness.mjs";
+import { addRecord, suiteSealing } from "./routesHarness.mjs";
 
 const SUBJECT = "u-alice";
 const SID = "sid-alice";
@@ -331,7 +331,7 @@ describe("a release", () => {
 
 	it("while the hard hold stands and no guessable factor was bound since, answers it held: the week given back, the hold kept", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("totp-old", "totp", T - 1_000));
+		await addRecord(factorStore, recordOf("totp-old", "totp", T - 1_000));
 		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
 		await latch(store);
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
@@ -354,7 +354,10 @@ describe("a release", () => {
 		const factorStore = createMemoryMfaFactorStore();
 		const { store, recovery } = setup({ factorStore });
 		await latch(store);
-		await factorStore.create(recordOf("totp-new", "totp", T + 10_000 + DEFAULT_CLOCK_SKEW_MS + 1));
+		await addRecord(
+			factorStore,
+			recordOf("totp-new", "totp", T + 10_000 + DEFAULT_CLOCK_SKEW_MS + 1),
+		);
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
 		await recovery.authorize(SUBJECT, SID, "key", clock);
 
@@ -368,10 +371,10 @@ describe("a release", () => {
 
 	it("reads, as the guessable records' earliest time, every record of a kind that is not exempt — one whose data does not open, and one of a kind not installed, included — and leaves out an exempt kind", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("exempt", "key", T - 9_000));
-		await factorStore.create(recordOf("uninstalled", "gone", T - 8_000));
-		await factorStore.create(recordOf("totp-b", "totp", T - 2_000));
-		await factorStore.create(recordOf("totp-a", "totp", T - 3_000));
+		await addRecord(factorStore, recordOf("exempt", "key", T - 9_000));
+		await addRecord(factorStore, recordOf("uninstalled", "gone", T - 8_000));
+		await addRecord(factorStore, recordOf("totp-b", "totp", T - 2_000));
+		await addRecord(factorStore, recordOf("totp-a", "totp", T - 3_000));
 		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
 		const apply = vi.spyOn(store, "applySubjectRecovery");
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
@@ -393,7 +396,7 @@ describe("a release", () => {
 
 	it("keeps the hard hold while a record of a kind not installed stands from before it: an uninstalled kind could be installed again", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("uninstalled", "gone", T - 1_000));
+		await addRecord(factorStore, recordOf("uninstalled", "gone", T - 1_000));
 		const { store, recovery } = setup({ boundary: async () => AFTER_THE_ATTACK, factorStore });
 		await latch(store);
 		clock = T + DEFAULT_CLOCK_SKEW_MS + 120_000;
@@ -454,7 +457,7 @@ describe("a release", () => {
 
 	it("hands null as the guessable records' earliest time when only exempt records remain", async () => {
 		const factorStore = createMemoryMfaFactorStore();
-		await factorStore.create(recordOf("exempt", "key", T - 8_000));
+		await addRecord(factorStore, recordOf("exempt", "key", T - 8_000));
 		const { store, recovery } = setup({ boundary: async () => null, factorStore });
 		const apply = vi.spyOn(store, "applySubjectRecovery");
 		await recovery.authorize(SUBJECT, SID, "key", clock);

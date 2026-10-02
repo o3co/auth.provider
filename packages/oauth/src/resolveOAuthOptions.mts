@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { type AcrTable, readAcrTable } from "@o3co/auth-provider-core";
+import { type AcrTable, readAcrTable, wholeNumberInRangeFromEnv } from "@o3co/auth-provider-core";
 import { type ResolvedPkceOptions, resolvePkceOptions } from "./grants/pkce.mjs";
 
 /**
@@ -143,9 +143,12 @@ const listOf = (value: unknown): readonly string[] => {
 	return parts.map((v) => v.trim()).filter((v) => v.length > 0);
 };
 
+const nonNegativeWholeNumber = wholeNumberInRangeFromEnv(0);
+
+/** A bound in the form the section schema reads: a whole number, or its decimal digits; anything else is absent. */
 const positiveIntOrUndefined = (value: unknown): number | undefined => {
-	const n = typeof value === "string" ? Number(value) : value;
-	return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined;
+	const read = nonNegativeWholeNumber.safeParse(value);
+	return read.success ? read.data : undefined;
 };
 
 /**

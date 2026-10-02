@@ -246,6 +246,9 @@ export {
 	// decimal digits a variable carries, for the packages outside core that
 	// declare a section's schema.
 	wholeNumberFromEnv,
+	// The same reader held to a range, refusing with one message that names
+	// the range and the form.
+	wholeNumberInRangeFromEnv,
 } from "./config/application.schema.mjs";
 // Transitional: the switches that choose a composition root's modules, read
 // before it knows them. `createApp` takes the resolved configuration itself,
@@ -638,6 +641,7 @@ export {
 	type MfaFactorStore,
 	type MfaFactorStoreFactory,
 	type MfaFactorUpdateRequest,
+	readMfaFactorSet,
 } from "./mfa/factorStore.mjs";
 export {
 	createMfaFactorStoreFactory,
@@ -645,7 +649,10 @@ export {
 	registerBuiltinMfaFactorStores,
 	registerBuiltinMfaTransactionStores,
 } from "./mfa/factory.mjs";
-export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
+export {
+	createMemoryMfaFactorStore,
+	type MemoryMfaFactorStoreOptions,
+} from "./mfa/memoryFactorStore.mjs";
 export {
 	createMemoryMfaTransactionStore,
 	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,
@@ -662,6 +669,8 @@ export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./m
 // and a Store's own implementation (or a fake of one)
 export {
 	fromMfaStoreFactor,
+	type MfaStoreCreateIfAnswer,
+	type MfaStoreCreateIfRequest,
 	type MfaStoreCreateRequest,
 	type MfaStoreDeleteRequest,
 	type MfaStoreFactor,
@@ -671,13 +680,21 @@ export {
 	type MfaStoreListReading,
 	type MfaStoreListRequest,
 	type MfaStoreMarkEnrolledRequest,
+	type MfaStoreRemoveIfAnswer,
+	type MfaStoreRemoveIfRequest,
 	type MfaStoreUpdateAnswer,
 	type MfaStoreUpdateRequest,
+	type MfaStoreVersionedListAnswer,
+	readMfaStoreCreateIfAnswer,
 	readMfaStoreFactor,
 	readMfaStoreFactorChanges,
 	readMfaStoreListAnswer,
+	readMfaStoreRemoveIfAnswer,
+	readMfaStoreVersionedListAnswer,
+	toMfaStoreCreateIfRequest,
 	toMfaStoreFactor,
 	toMfaStoreFactorChanges,
+	toMfaStoreRemoveIfRequest,
 	toMfaStoreUpdateRequest,
 } from "./mfa/storeWire.mjs";
 export {
@@ -866,12 +883,14 @@ export {
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
 // The one fetch for a URL a client registration or a request supplies,
-// under `core.outbound`'s destination policy.
+// under `core.outbound`'s destination policy, and the limits that section sets.
 export {
 	createOutboundFetch,
 	isOutboundRefusal,
 	type OutboundFetchOptions,
+	type OutboundLimits,
 	type OutboundUrlSource,
+	outboundLimitsOf,
 } from "./net/outbound-fetch.mjs";
 // The host-list grammar's public readers, for a list of the same form kept elsewhere.
 export { type HostPattern, matchesHostList, readHostEntry } from "./net/outbound-policy.mjs";
@@ -985,11 +1004,17 @@ export {
 	isWellFormedClientId,
 	MAX_CLIENT_ID_LENGTH,
 } from "./repositories/clientId.mjs";
-// Core's boundary over a ClientRepository: each record answered is read by
-// name once and held to the registration schema, and `lookupClient` tells a
-// refused record from an absent one, so a caller reading the outermost
-// boundary's `lookupClient` falls back to another source of clients only on
-// `absent`.
+// Core's boundary over a ClientRepository, which boot installs in the
+// `clientRepository` slot: each record answered is read by name once and held
+// to the registration schema. A refused record makes
+// `findById` and `authenticate` reject with the branded refusal, recognised
+// by `isClientRecordRefused` and never by `instanceof`; `lookupClient` answers
+// it as a verdict, so a caller falls back to another source of clients only
+// on `absent`.
+export {
+	ClientRecordRefusedError,
+	isClientRecordRefused,
+} from "./repositories/clientRecordRefused.mjs";
 export {
 	type ClientLookup,
 	type ClientRepositoryBoundaryOptions,
@@ -1036,6 +1061,12 @@ export {
 	readMfaEnrollmentWitness,
 	supportsMfaEnrollmentWitness,
 } from "./repositories/UserRepository.mjs";
+// A login's one read of the `User` a repository answers: the subject and the
+// claims are read from its snapshot, never from the `User` again.
+export {
+	readUserSnapshot,
+	type UserSnapshotReading,
+} from "./repositories/userSnapshot.mjs";
 export {
 	createRouter as createHealthcheckRouter,
 	type HealthcheckRouterOptions,
@@ -1167,6 +1198,7 @@ export {
 	type RecordedAuthentication,
 	type RenewalNonces,
 	readRenewalNonces,
+	recordableAuthTime,
 	recordableSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,
@@ -1646,6 +1678,10 @@ export {
 	type MemoryDeviceCodeStoreOptions,
 } from "./device-authorization/memory.mjs";
 export { memoryDeviceCodeStoreModule } from "./device-authorization/module.mjs";
+export {
+	type DeviceAuthorizationReading,
+	readDeviceAuthorization,
+} from "./device-authorization/reading.mjs";
 export {
 	type ApproveDeviceAuthorizationInput,
 	type CreateDeviceAuthorizationInput,

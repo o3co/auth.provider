@@ -29,6 +29,7 @@ import {
 	MAX_DURATION_MS,
 	type SessionCookiePolicy,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -75,7 +76,7 @@ export const sessionSectionSchema = z
 		csrf: z
 			.object({
 				trustedOrigins: z.array(z.string()),
-				ttlSeconds: z.coerce.number().int().positive().max(MAX_CSRF_TTL_SECONDS),
+				ttlSeconds: wholeNumberInRangeFromEnv(1, MAX_CSRF_TTL_SECONDS),
 			})
 			.strict()
 			.optional(),
@@ -100,15 +101,15 @@ export const sessionSectionSchema = z
 		 * `POST /session/login`'s brute-force budget, `windowMs` in
 		 * milliseconds, which the module contributes as the `login` budget
 		 * every limiter reads: required (the package's reference ships 20 per
-		 * 15 minutes). Zero (an exported-but-empty variable) would turn the
-		 * guard into a no-op that still looks configured.
+		 * 15 minutes). Zero would turn the guard into a no-op that still looks
+		 * configured.
 		 */
 		rateLimit: z
 			.object({
 				login: z
 					.object({
-						windowMs: z.coerce.number().int().positive().max(MAX_DURATION_MS),
-						limit: z.coerce.number().int().positive(),
+						windowMs: wholeNumberInRangeFromEnv(1, MAX_DURATION_MS),
+						limit: wholeNumberInRangeFromEnv(1),
 					})
 					.strict(),
 			})

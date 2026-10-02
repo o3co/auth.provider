@@ -23,8 +23,8 @@
  * (packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md).
  *
  * A HOCON `${?VAR}` substitution is always a string, so every leaf an environment variable can
- * reach is read in that form: numbers through `z.coerce.number()`, booleans through core's
- * `coerceBooleanFromEnv`, origin lists through core's `normalizeAllowedOrigins`.
+ * reach is read in that form: numbers through core's `wholeNumberInRangeFromEnv`, booleans
+ * through core's `coerceBooleanFromEnv`, origin lists through core's `normalizeAllowedOrigins`.
  */
 import {
 	// biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below; biome does not track cross-module-declaration references.
@@ -34,6 +34,7 @@ import {
 	describeSerializedOriginRejection,
 	MAX_DURATION_SECONDS,
 	normalizeAllowedOrigins,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
@@ -177,7 +178,7 @@ export const webauthnConfigSchema = z.object({
 	 * Challenge time-to-live in milliseconds. Default 120000 (120 s), sized for slow mobile
 	 * networks.
 	 */
-	challengeTtlMs: z.coerce.number().int().positive(),
+	challengeTtlMs: wholeNumberInRangeFromEnv(1),
 	/**
 	 * AttestationConveyancePreference (W3C WebAuthn §5.4.7). Default "none": no attestation chain
 	 * is verified. Set "direct" only with a curated trust-anchor set.
@@ -216,8 +217,8 @@ export const webauthnConfigSchema = z.object({
 		 * most one year, since no limiter can apply a window past the Date range.
 		 */
 		authenticationOptions: z.object({
-			limit: z.coerce.number().int().positive(),
-			windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+			limit: wholeNumberInRangeFromEnv(1),
+			windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
 		}),
 	}),
 });

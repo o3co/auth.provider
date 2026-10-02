@@ -16,14 +16,26 @@
 
 /**
  * The federation token store's client over one ioredis connection. The index's add and its
- * expiry are one MULTI/EXEC whose reply is checked, and the lock is released only by the
- * compare-and-delete script.
+ * expiry are one MULTI/EXEC whose reply is checked, the lock is released only by the
+ * compare-and-delete script, and each conditional member is one script whose reply is held to
+ * its declared answers.
  */
 
 import type { Redis } from "ioredis";
 import type { FederationTokenStoreClient } from "../../clients.mjs";
 import { assertPipelineSucceeded, runScript } from "../commands.mjs";
+import { FT_READ_VERSIONED, FT_REMOVE_IF, FT_REPLACE_IF } from "../scripts/federation-tokens.mjs";
 import { COMPARE_AND_DELETE } from "../scripts/lock.mjs";
+
+/** `reply` when it is one of `answers`; anything else is a script this client did not run. */
+const answerOf = <const A extends string>(
+	reply: unknown,
+	answers: readonly A[],
+	operation: string,
+): A => {
+	if ((answers as readonly unknown[]).includes(reply)) return reply as A;
+	throw new Error(`federationTokenStoreClient.${operation}: unexpected script reply`);
+};
 
 export function makeIoredisFederationTokenStoreClient(io: Redis): FederationTokenStoreClient {
 	const federationTokenStoreClient: FederationTokenStoreClient = {
@@ -67,6 +79,54 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 		// Atomic compare-and-delete (advisory-lock release).
 		compareAndDelete: async (key, expectedValue) =>
 			(await runScript(io, COMPARE_AND_DELETE, [key], [expectedValue])) === 1,
+		readVersioned: async (key, candidate) => {
+			const reply = await runScript(io, FT_READ_VERSIONED, [key], [candidate]);
+			if (reply === null) return null;
+			if (
+				!Array.isArray(reply) ||
+				reply.length !== 2 ||
+				typeof reply[0] !== "string" ||
+				typeof reply[1] !== "string"
+			) {
+				throw new Error("federationTokenStoreClient.readVersioned: unexpected script reply");
+			}
+			return { raw: reply[0], generation: reply[1] };
+		},
+		replaceIfGeneration: async (key, input) =>
+			answerOf(
+				await runScript(
+					io,
+					FT_REPLACE_IF,
+					[key, input.replayKey],
+					[
+						String(input.deadlineMs),
+						String(input.deadlineMs + input.clockSkewMs + 1),
+						input.expected,
+						input.value,
+						String(input.ttlMs),
+					],
+				),
+				["updated", "missing", "conflict", "late"] as const,
+				"replaceIfGeneration",
+			),
+		removeIfGeneration: async (key, input) =>
+			answerOf(
+				await runScript(
+					io,
+					FT_REMOVE_IF,
+					[key, input.replayKey],
+					[
+						String(input.deadlineMs),
+						String(input.deadlineMs + input.clockSkewMs + 1),
+						input.expected,
+					],
+				),
+				["removed", "missing", "conflict", "late"] as const,
+				"removeIfGeneration",
+			),
+		pExpireGT: async (key, ttlMs) => {
+			await io.pexpire(key, ttlMs, "GT");
+		},
 	};
 	return federationTokenStoreClient;
 }

@@ -113,15 +113,30 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   before it. Redis's asynchronous replication does not hold that across a
   failover, where a promoted replica may lack a write the old primary
   acknowledged, and a read answered by a replica does not either.
+  The RP registry rests on the same assumption (core's `SessionRPRegistry`):
+  a `registerRP` a promoted replica lost, or a `listRPs` a replica answered,
+  leaves that RP out of the logout fan-out.
 - **For the MFA stores, a server that keeps what it is written** (the MFA
   ADR's D12). An enrolled second factor lost to an eviction or a restart
   reads as "never enrolled", and whoever holds the password can then bind
   their own; the email proof an operator reset requires is lost the same way.
   Give them `noeviction` and AOF (`appendfsync everysec`), preferably on a
   database or instance of their own. A `volatile-*` policy never picks the
-  factors or the requirement, which carry no TTL, but it may pick a subject's
-  lock state once that carries one, ending a hold on guessable proofs early.
-  Both modules check at boot (see [MFA stores](#mfa-stores)).
+  factors or the requirement, which carry no TTL, but it may pick an emptied
+  factor set's tombstone, which then reads as never written before its 24
+  hours are up, and a subject's lock state once that carries one, ending a
+  hold on guessable proofs early. Both modules check at boot (see
+  [MFA stores](#mfa-stores)). The factor store also assumes acknowledged
+  writes are not rolled back on failover, and that the app's and Redis's
+  clocks agree within 1 second (see [MFA stores](#mfa-stores), "The factor
+  set's generation").
+- **For the federation token store's conditional writes, a policy that does
+  not evict a replay key before it expires.** Each `replaceIf` and `removeIf`
+  keeps its answer for a few seconds under a replay key with a TTL (see
+  [Conditional writes](#conditional-writes)). A `volatile-*` or `allkeys-*`
+  policy may evict one early; a copy of that write the driver then sends
+  again within its deadline writes nothing, but answers `conflict` or
+  `missing` for a write that landed.
 
 ## Adapters
 
@@ -487,7 +502,7 @@ give the same answers:
 | `CodeRepository.createCode` | an `expiresIn` that is not a positive number of seconds ending within the Date range; a default that is not whole seconds (at construction) | `PX` = `expiresIn` × 1000, rounded up |
 | `FederationTokenStore` | a `ttl` that is not a positive number of seconds ending within the Date range (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
 | The federation-token lock (`acquireLock`) and the federation-grant refresh lock | a TTL that is not a positive lifetime, or a wait that is not a non-negative one, ending within the Date range | `PX` = the TTL, rounded up |
-| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` or `authentication.mfaAt` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range); `recordSecondFactor` keeps it (`KEEPTTL`) |
+| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` or `authentication.mfaAt` that is an Invalid Date or before the epoch (the stored envelope reads back neither), or further ahead of the host's clock than `DEFAULT_CLOCK_SKEW_MS` (one a little ahead is recorded as the host's now) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range); `recordSecondFactor` keeps it (`KEEPTTL`) |
 | `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `addFamilyIdUnlessEnded`, `endSession`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt`; the family index's "ended" mark `PXAT` = that plus `DEFAULT_CLOCK_SKEW_MS` |
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is not a `Date` with a finite time (core's `checkSubjectRevocationInstant`) | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor (the boundary as recorded, clamped, plus the retention) for a full revocation — never lowered |
@@ -517,6 +532,7 @@ handful of named keys rather than a search:
 | `${keyPrefix}${sid}:${federationName}` | string | one federation token envelope |
 | `${keyPrefix}idx:${sid}` | **set** | the federation names attached to `${sid}` |
 | `${keyPrefix}lock:${sid}:${federationName}` | string | the advisory lock |
+| `${keyPrefix}w:{${tag}}:${writeId}` | string | one conditional write's answer, until the declared clock skew past its deadline (a few seconds). `${tag}` is the part of the record key Redis hashes (its hash tag, else the whole key), so the answer is on the record's Cluster slot, and outside the `${keyPrefix}${sid}:*` a logout's migration scan sweeps. A record key whose braces leave it no hash tag a replay key can carry (a `}` without a tag, or an empty `{}`) is refused (`RangeError`) before any command, by `replaceIf` and `removeIf` |
 
 The index (`idx:`) is what lets `removeBySid` name the keys it must delete
 instead of hunting for them, at a cost of O(that session's federations).
@@ -559,12 +575,15 @@ removal.
 
 The federation-token store seals the **whole** envelope (#293) — `tokenType`,
 `scope`, `grantedScope` and the access-token expiry included, not just the
-three token fields — as one ciphertext, `{ "v": 2, "c": "…" }`, bound to its
-own Redis key as additional authenticated data (`allow-plaintext`, development
-only, writes `{ "v": 2, "p": { … } }`). A record without that wrapper — the
-per-field shape of earlier releases — is dropped on first read: `get` returns
-`null`, the key and its index member go, and the user re-federates. There is
-no dual-read path by design.
+three token fields — as one ciphertext, `{ "v": 2, "g": "…", "c": "…" }`, bound
+to its own Redis key as additional authenticated data (`allow-plaintext`,
+development only, writes `{ "v": 2, "g": "…", "p": { … } }`). `g` is the
+record's store generation, outside the ciphertext (below). A record without
+that wrapper — the per-field shape of earlier releases — is dropped on first
+read: the read returns `null`, the key goes while it still holds the bytes
+read, and the user re-federates. Its index member stays: a concurrent `attach`
+may have just added it, and a member naming no key is harmless. There is no
+dual-read path by design.
 
 The envelope also carries `obtainedAt`, when the access token's lifetime counts
 from, as `obtainedAtMs`, and only when the record has one. A record without it
@@ -575,6 +594,87 @@ it does not know, so a rolling deploy or a rollback reads records either
 release wrote, and an older replica's write leaves the field out, which costs
 only the refresh damping it feeds. The convention: adding an envelope key keeps
 `v: 2`; changing a present key's type or meaning bumps the version.
+
+### Conditional writes
+
+The store's `getVersioned`, `replaceIf` and `removeIf` follow core's
+conditional-write convention for a record
+([docs/adapter-surface.md, "Conditional writes"](../../docs/adapter-surface.md#conditional-writes)).
+
+- **The generation** is the wrapper's `g`, a random UUID every write sets
+  (`attach`, `update`, `replaceIf`). It sits outside the ciphertext and the
+  wrapper stays `v: 2`, so a replica that does not know `g` reads the record
+  as before, and its own write leaves `g` out. Such a record is given a fresh
+  `g` by its first versioned read, in the same script, its TTL kept; a
+  conditional write against it answers `conflict` and mints nothing. A `g`
+  that is no generation makes the record unreadable, like any other.
+- **One script per conditional member**, on the record's key, and for a
+  write its replay key, on one Cluster slot: the versioned read
+  (`readVersioned`), the replace (`replaceIfGeneration`) and the delete
+  (`removeIfGeneration`). `missing` means no key, so a record past its `PX`
+  is `missing` on Redis's own clock. The delete's script declares
+  `allow-oom` (`#!lua flags=allow-oom`, Redis 7.0+), so a full `noeviction`
+  server still runs it, and a record stays removable when nothing more can
+  be written. Besides the delete, it writes only its answer: one small
+  replay key per call, living about 2 s, and on `missing` or `conflict` that
+  key is all it writes.
+- **A versioned read never removes a record `get` reads.** It mints a
+  generation into a record that decodes to a `v: 2` wrapper with no `g` and
+  whose first byte is `{`, splicing `"g"` in after that byte rather than
+  re-encoding the record. A record `get` reads but that the read can neither
+  find a generation in nor mint one into makes `getVersioned` reject, as an
+  outage would; only a record `get` cannot read either is removed.
+- **The deadline.** Each conditional write carries a deadline the adapter
+  sets at issue, its `Date.now()` plus the 1 s write timeout, in `ARGV`; the
+  script compares it with `redis.call('TIME')` before it reads or writes
+  anything, and at or after it writes nothing (`late`). The adapter stops
+  waiting at the same timeout. Either way it rejects with an unknown
+  outcome, never that nothing was written: a `late` answer says only that
+  the copy that answered wrote nothing, and another copy of the same write
+  may have committed, or may still commit within W. So the write lifetime W
+  is 2 s: the 1 s write timeout plus the 1 s clock skew allowed between the
+  app's and Redis's clocks (NTP; the operator runbook's "Replica clocks").
+  An issued conditional write commits or fails within W. That holds while
+  the two clocks agree within the skew. The skew tolerance is one-sided: a
+  Redis clock δ ahead of the app's shortens the usable window to the write
+  timeout less δ, and at the full declared skew every conditional write is
+  refused, an outage (it fails closed), never a wrong write. A late command
+  — resent by the driver after a reconnect, queued while the connection was
+  down, or held by a stalled server — writes nothing. The check bounds when
+  a script starts, so one assumption stands beside it: the server does not
+  stall inside a running script, between its clock check and its write, for
+  the whole of W.
+- **Replay.** Each conditional write therefore keeps its answer under a
+  replay key of its own (`${keyPrefix}w:{<tag>}:<id>`, in the key table
+  above, on the record's Cluster slot) until the declared clock skew past
+  its deadline: a copy that reaches the server before then answers what the
+  first copy answered and writes nothing, so it does not answer `conflict`
+  or `missing` for a write that landed, even when another server, whose
+  clock may lag by the skew, judges the copy after a failover or a slot
+  migration; one that reaches it later is `late`, though another copy may
+  have committed, or may still commit within W on a server whose clock lags
+  by the skew.
+- **The index.** A conditional write never removes an index member, and
+  `missing` and `conflict` never add one. `replaceIf` raises the index's TTL
+  before its script (`pExpireGT`, which adds no member and makes no key), and
+  after `updated` re-adds the member with `sAddWithTtl`, so the index's
+  deadline is no earlier than the record's and an index that had expired is
+  made again. A member that names a removed record is harmless: `removeBySid`
+  unlinks a missing key.
+- **No rollback.** This store assumes acknowledged writes are not rolled back
+  (persistence, plus a failover setup that keeps acknowledged writes). A
+  deployment that accepts acknowledged-write loss on failover also accepts
+  that a conditional write may see a restored, older generation.
+
+A `FederationTokenStoreClient` of your own implements the four primitives
+the conditional members use: `readVersioned`, `replaceIfGeneration`,
+`removeIfGeneration` (each one atomic step, the last two refusing at or
+after the deadline they are handed and keeping their answer under the replay
+key they are handed until the clock skew they are handed past it) and
+`pExpireGT`. The builder refuses a client
+without them. [`federation-tokens.conditional.test.mts`](__tests__/federation-tokens.conditional.test.mts)
+runs `federationTokenStoreConditionalContract` (`@o3co/auth-provider-test-kit`)
+over the store on two connections.
 
 ## Federation grants
 
@@ -744,7 +844,8 @@ slot and prefix, so a deployment can put the factors on a Redis of their own.
 
 | Key | Type | Holds |
 | --- | --- | --- |
-| `mfaf:{<subject>}` | hash | one field per enrolled factor (its id): `<version>\n<fixed JSON>\n<mutable JSON>` |
+| `mfaf:{<subject>}` | hash | one field per enrolled factor (its id): `<version>\n<fixed JSON>\n<mutable JSON>`; and `~g`, the set's generation. No TTL while it holds a factor; holding `~g` alone, it is the emptied set's tombstone, expiring 24 hours after its last membership write |
+| `mfaf:{<subject>}:w:<generation>` | string | one membership write's answer, kept until the declared clock skew (1 second) past the write's deadline (about two seconds in all) |
 | `mfat:tx:{<id>}` | hash | one MFA transaction, expiring at its `expiresAtMs` |
 | `mfat:binding:{<digest>}` | sorted set | one binding's transactions, at most `MFA_MAX_TRANSACTIONS_PER_BINDING` (5): one member `<incarnation>:<id>` each, scored by its `expiresAtMs`, the key expiring at the latest; `<digest>` is the SHA-256 of the binding, so no key holds the express session id |
 | `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, and whether a hold's first refusal was answered (`held`) |
@@ -762,14 +863,14 @@ subject's lock hash, week, recovery hash and lease share the subject's tag,
 so each of D21's operations, and each recovery and lease operation, is one
 script on one Cluster slot.
 
-**The factors.** `create` is `HSETNX`; `update` is one script that compares
-the version as text and carries the fixed part over byte for byte — it never
-decodes the JSON, since `cjson` writes an empty array back as `{}` — and
-answers `null` to a value that is not exactly three lines, never cutting one
-it did not write down to a record it did. No key carries a TTL. A stored
+**The factors.** Every membership write is one script (below); `update` is
+one script that compares the version as text and carries the fixed part over
+byte for byte — it never decodes the JSON, since `cjson` writes an empty
+array back as `{}` — and answers `null` to a value that is not exactly three
+lines, never cutting one it did not write down to a record it did. A stored
 record the adapter cannot read back refuses the subject's whole list: never
-"no factor", which would open a first binding. So `create` and `update`
-refuse with a `RangeError`, before anything is written, whatever a read would
+"no factor", which would open a first binding. So `create`, `createIf` and
+`update` refuse with a `RangeError`, before anything is written, whatever a read would
 refuse — a binding outside D24's three, a field that is not the type the
 record declares, a date that is not a whole instant within the Date range
 (±8.64e15 ms; a stored one past it would read back as an Invalid Date, a
@@ -777,6 +878,102 @@ fraction as another instant), and, for `update`, a record
 at `Number.MAX_SAFE_INTEGER`, whose next version would be no safe integer
 (core's `checkMfaVersionAdvances`, which the transactions' `update` applies
 too).
+
+**The factor set's generation.** A subject's factors are one set with a store generation, under the set rules
+of core's conditional-write convention
+([docs/adapter-surface.md, "Conditional writes"](../../docs/adapter-surface.md#conditional-writes)).
+
+- **Where it is kept.** The subject's hash holds the set's generation under
+  the reserved field `~g`, beside the factor fields; `~` is not base64url, so
+  no factor's field is `~g`. The adapter mints each generation with core's
+  `newStoreGeneration` and hands it to the script; a copy of the write the
+  driver sends again finds the write's replay key and writes nothing (see
+  "The deadline"), so none is issued twice (rule 8). `list` and
+  `listVersioned` never answer `~g` as a record.
+- **One script per step** (rules 1, 2 and 4). `listVersioned` answers the
+  factors and `~g` from one snapshot, and `null` for no key. `createIf` and
+  `removeIf` compare `~g` and write in the same script; `removeIf` checks the
+  generation before the factor. `removeAllForSubject`, the operator reset and
+  account deletion, is one script serialised with them: it deletes the
+  factors and leaves `~g` at a new generation, making the key when there was
+  none. The unconditional `create` and `remove` move `~g` too; `update`
+  keeps it.
+- **The primary, never a replica** (rule 2). `listVersioned` and every
+  membership write are scripts that start with `#!lua` and no `no-writes`
+  flag, which Redis 7.0 and later refuses on a read-only replica (`READONLY`).
+  That holds for a replica with `replica-read-only yes`, Redis's default; a
+  replica configured writable would run them. The versioned read therefore
+  always reflects every write acknowledged before it began. `list`, the plain
+  read, stays a plain `HGETALL` and carries no such guarantee: a write decided
+  on what it answered is not fenced by the set's generation.
+- **The tombstone** (rule 6). A write that leaves the hash holding `~g`
+  alone — the last factor's removal, or a reset, of an already empty set
+  too — sets the key to expire `BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 hours,
+  later, starting that retention again at each such write; a write that
+  leaves a factor in it takes the expiry off, so a set holding a factor never
+  expires. An emptied set reads as one never written only once 24 hours have
+  passed since its last membership write. A `volatile-*` eviction policy may
+  evict a tombstone sooner: the module warns
+  (`mfa_factor_store_tombstone_evictable`). Run `noeviction`.
+- **A hash with factors and no `~g`** was written by a development build from
+  before the set had a generation (the store was never released, so nothing
+  needs migrating). Every conditional write against it answers `conflict` and
+  mints nothing; its first `listVersioned` gives it a fresh generation in the
+  same step, keeping its expiry (rule 8).
+- **The deadline.** Each membership write carries a deadline the adapter sets
+  at issue, on the app's clock: `Date.now()` plus the write timeout, 1 000 ms.
+  The script compares it with the server's clock (`TIME`) before it reads or
+  writes anything; at or past it, the script writes nothing and answers `late`,
+  which the adapter rejects as an outage. The adapter waits for the answer no
+  longer than the write timeout. Either rejection, `late` or the wait ending,
+  means the outcome is unknown, never that nothing was written: a `late`
+  copy wrote nothing, but another copy may have committed, or may still
+  commit within W (below). The deadline stays inside the
+  adapter: nothing crosses the port.
+- **A copy sent again.** ioredis sends again a command whose reply a dropped
+  connection lost, and the first copy may have run. Each membership write
+  therefore keeps its answer under a replay key of its own
+  (`<key>:w:<generation>`, on the subject's hash tag) until the declared
+  clock skew past its deadline: a copy that reaches the server before then
+  answers what the first copy answered and writes nothing, so it neither
+  writes a generation back over a later one nor answers `conflict` for a
+  write that landed, even when another server, whose clock may lag by the
+  skew, judges the copy after a failover or a slot migration; one that
+  reaches it later is `late`, though another copy may have committed, or may
+  still commit within W on a server whose clock lags by the skew. A
+  `volatile-*` policy may evict a replay key
+  early; the module's warning names it.
+- **A full server.** Under `noeviction`, Redis refuses a script that does
+  not declare `allow-oom` once `maxmemory` is reached. The removals
+  (`removeIf`, `remove`), the reset (`removeAllForSubject`) and
+  `listVersioned` declare it: each writes only `~g`, the replay key and an
+  expiry, so a factor stays removable, an attacker's among them, and the
+  operator reset still runs on a full server. The creates (`createIf`,
+  `create`) declare no flag and are refused there (`OOM`), an outage.
+- **The write lifetime W** (rule 6). W is 2 000 ms
+  (`REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS`): the write timeout, 1 000 ms,
+  the same as the `commandTimeout` this README asks of the connection and the
+  least `mfa.storeTimeoutMs`; plus the clock skew allowed between the app's
+  and Redis's clocks, 1 000 ms, the operator runbook's rule that every
+  replica's and Redis server's clock agrees within 1 second (NTP). An issued
+  membership write commits or fails within W.
+- **The assumption W rests on.** Half 2 of the bound holds while the app's
+  and Redis's clocks agree within the declared skew. A late command, whether
+  resent after a reconnect, queued while the connection was down, or held by
+  a stalled server, writes nothing. The check bounds when a script starts,
+  so one assumption stands beside it: the server does not stall inside a
+  running script, between its clock check and its write, for the whole of
+  W. A Redis clock ahead of the app's shortens the time a write has to reach
+  the server by its lead, and a write that misses it is refused: an outage,
+  never a write past W.
+- **Acknowledged writes** (rule 8). The adapter's assumption: this store
+  assumes acknowledged writes are not rolled back (persistence plus a
+  failover setup that keeps acked writes); a deployment that accepts
+  acked-write loss on failover also accepts that a conditional write may see
+  a restored older generation. What that asks of an MFA deployment:
+  acknowledged factor-set writes are not rolled back (no async-replica
+  failover without `WAIT`, or the operator accepts that a failover may
+  restore removed factors).
 
 **The transactions.** Every operation the port calls atomic is one script:
 insert-only `create`; `update`, a compare-and-set on the version and on the
@@ -938,10 +1135,13 @@ tell RDB snapshots from none. The policy is judged by an allow-list:
 `allkeys-lru`, `-lfu` and `-random` refuse the boot
 (`mfa-factor-store-evictable`, `mfa-transaction-store-evictable`) whatever
 else could not be read; `noeviction` passes; the four `volatile-*` policies
-pass the factor store, whose keys carry no TTL, and are one warning from the
-transaction store (`mfa_transaction_store_lock_evictable`, with
-`evictableFamilies`) — its lock and week keys carry a TTL once no run is
-counted, and an evicted one lifts a D21 hold early; a first-binding mark
+are one warning from each store, with `evictableFamilies`: from the factor
+store (`mfa_factor_store_tombstone_evictable`), whose emptied sets'
+tombstones carry a TTL, and an evicted one reads as a set never written
+before its 24 hours are up, and whose writes' replay keys carry one until
+the write's deadline, and an evicted one lets a resent copy apply again; from the transaction store
+(`mfa_transaction_store_lock_evictable`), whose lock and week keys carry a
+TTL once no run is counted, and an evicted one lifts a D21 hold early; a first-binding mark
 always carries one, and an evicted mark fails open; a lease always carries
 one, and an evicted lease lets a second writer in. RDB snapshots without AOF (`mfa_factor_store_lossy`,
 `mfa_transaction_store_lossy`) and no persistence (`…_volatile`) are each one
@@ -971,8 +1171,11 @@ there are copies of core's; [`contract-copies-parity.test.mts`](__tests__/contra
 and the per-port `*-parity.test.mts` tests fail when a copy differs from its
 core original anywhere below its imports, and when no Redis test runs it.
 `MfaFactorStore`'s suite is not copied: it is the test kit's published
-`mfaFactorStoreContract` (`@o3co/auth-provider-test-kit`, a devDependency),
-which [`mfa-factor-store.test.mts`](__tests__/mfa-factor-store.test.mts) runs.
+`mfaFactorStoreContract` and `mfaFactorStoreConditionalContract`
+(`@o3co/auth-provider-test-kit`, a devDependency; the latter runs the generic
+conditional-set suite and the factor set's own cases), which
+[`mfa-factor-store.test.mts`](__tests__/mfa-factor-store.test.mts) runs over
+two connections, with a tombstone's expiry brought forward by `PEXPIRE`.
 Which ports have a suite, and the one Redis adapter the suites do not run
 against (`AccessTokenDenylist`, whose expiry is Redis's own key TTL and cannot
 follow the suite's fake clock), are in

@@ -111,6 +111,7 @@ function createSoftwareAuthenticator() {
 					clientDataJSON: clientDataJSON.toString("base64url"),
 					authenticatorData: authenticatorData.toString("base64url"),
 					signature: signature.toString("base64url"),
+					userHandle: Buffer.from(USER_ID, "utf8").toString("base64url"),
 				},
 				clientExtensionResults: {},
 			};

@@ -52,6 +52,7 @@ import {
 	WitnessingUserRepository,
 } from "./moduleHarness.mjs";
 import {
+	addRecord,
 	beginLogin,
 	freezeClock,
 	loggedText,
@@ -241,7 +242,7 @@ describe("POST /session/mfa/recovery-codes", () => {
 		const first = await regenerate(agent);
 		const [firstSet] = await setsOf(built.factorStore);
 		if (firstSet === undefined) throw new Error("no set");
-		vi.spyOn(built.factorStore, "remove").mockRejectedValueOnce(new Error("remove failed"));
+		vi.spyOn(built.factorStore, "removeIf").mockRejectedValueOnce(new Error("remove failed"));
 
 		const second = await regenerate(agent);
 
@@ -279,7 +280,7 @@ describe("POST /session/mfa/recovery-codes", () => {
 				recoverySet(2).data,
 			),
 		};
-		await built.factorStore.create(copied);
+		await addRecord(built.factorStore, copied);
 		const lost = generateRecoveryCodes(
 			createRecoveryCodeFactor({ count: 2 }),
 			createMfaSealing({ ring: [{ id: "k-gone", key: randomBytes(32) }] }).digestsFor(
@@ -301,7 +302,7 @@ describe("POST /session/mfa/recovery-codes", () => {
 		const built = await composed();
 		const { agent } = await signedIn(built);
 		vi.setSystemTime(Date.now() + 301_000);
-		const create = vi.spyOn(built.factorStore, "create");
+		const create = vi.spyOn(built.factorStore, "createIf");
 
 		const res = await regenerate(agent);
 
@@ -314,11 +315,13 @@ describe("POST /session/mfa/recovery-codes", () => {
 		const built = await composed();
 		const { agent } = await signedIn(built);
 		const listed = vi.spyOn(built.factorStore, "list");
+		const versioned = vi.spyOn(built.factorStore, "listVersioned");
 
 		const res = await agent.post("/session/mfa/recovery-codes").send({});
 
 		expect(res.status).toBe(403);
 		expect(listed).not.toHaveBeenCalled();
+		expect(versioned).not.toHaveBeenCalled();
 	});
 
 	it("refuses a signed-out browser: 401 login_required", async () => {
@@ -334,7 +337,7 @@ describe("POST /session/mfa/recovery-codes", () => {
 		const record = await seedFactor(built.factorStore, "recovery_code", set.data);
 		const { agent, transaction } = await beginLogin(built.app);
 		expect((await verify(agent, transaction, record.id, set.codes[0])).status).toBe(200);
-		const create = vi.spyOn(built.factorStore, "create");
+		const create = vi.spyOn(built.factorStore, "createIf");
 
 		const res = await regenerate(agent);
 
@@ -460,7 +463,7 @@ describe("a regeneration's own checks under the lease", () => {
 		const built = await composed();
 		const { agent } = await signedIn(built);
 		vi.spyOn(built.transactionStore, "firstBindingAt").mockRejectedValue(new Error("down"));
-		const create = vi.spyOn(built.factorStore, "create");
+		const create = vi.spyOn(built.factorStore, "createIf");
 
 		const res = await regenerate(agent);
 
@@ -473,7 +476,7 @@ describe("a regeneration's own checks under the lease", () => {
 		const totp = await seedTotp(built.factorStore);
 		for (let n = 1; n < 10; n++) await seedTotp(built.factorStore);
 		const { agent } = await signInWithTotp(built.app, built.userSessionStore, totp);
-		const create = vi.spyOn(built.factorStore, "create");
+		const create = vi.spyOn(built.factorStore, "createIf");
 
 		const res = await regenerate(agent);
 
@@ -533,15 +536,14 @@ describe("a regeneration's answer", () => {
 		expect((await loginWithCode(built, old.record, old.codes[0])).status).toBe(200);
 	});
 
-	it("loses to another set written at its generation first: 409 mfa_recovery_codes_conflict, its own set removed, no codes, said at warn", async () => {
+	it("writes no set when another writer's set landed after the lease read the records: 409 mfa_recovery_codes_conflict, nothing removed, the floor untouched, no codes, said at warn", async () => {
 		const memory = createMemoryMfaFactorStore();
 		const built = await composed({ factorStore: memory });
-		const { agent } = await signedIn(built);
-		const create = memory.create.bind(memory);
+		const { agent, old } = await signedIn(built);
+		const createIf = memory.createIf.bind(memory);
 		let other: MfaFactorRecord | undefined;
-		vi.spyOn(memory, "create").mockImplementationOnce(async (record) => {
-			await create(record);
-			// A second writer the lease let in wrote a set of the same generation a moment earlier.
+		vi.spyOn(memory, "createIf").mockImplementationOnce(async (record, expected) => {
+			// A second writer past its lease writes a set of the same generation first.
 			const id = newFactorId();
 			other = {
 				...record,
@@ -552,15 +554,21 @@ describe("a regeneration's answer", () => {
 					{ ...recoverySet(2).data, generation: 1, shown: true },
 				),
 			};
-			await create(other);
+			await addRecord(memory, other);
+			return createIf(record, expected);
 		});
+		const removeIf = vi.spyOn(memory, "removeIf");
 		built.logger.warn.mockClear();
 
 		const res = await regenerate(agent);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(409);
 		expect(res.body).toEqual(CONFLICT);
-		expect((await setsOf(built.factorStore)).map((set) => set.record.id)).toEqual([other?.id]);
+		expect((await setsOf(built.factorStore)).map((set) => set.record.id).sort()).toEqual(
+			[old.record.id, other?.id].sort(),
+		);
+		expect(removeIf).not.toHaveBeenCalled();
+		expect(await built.transactionStore.recoverySetFloor(ALICE.id)).toBe(0);
 		expect(events(built.logger, "warn")).toEqual(["mfa_recovery_codes_conflict"]);
 		expect(built.audit.of("mfa.recovery_codes.generated")).toEqual([]);
 	});
@@ -568,12 +576,9 @@ describe("a regeneration's answer", () => {
 	it("answers 503 when the records cannot be listed under the lease, nothing written", async () => {
 		const built = await composed();
 		const { agent } = await signedIn(built);
-		const list = built.factorStore.list.bind(built.factorStore);
 		// Admission's read answers; the one under the lease does not.
-		vi.spyOn(built.factorStore, "list")
-			.mockImplementationOnce(list)
-			.mockRejectedValueOnce(new Error("list failed"));
-		const create = vi.spyOn(built.factorStore, "create");
+		vi.spyOn(built.factorStore, "listVersioned").mockRejectedValueOnce(new Error("list failed"));
+		const create = vi.spyOn(built.factorStore, "createIf");
 
 		const res = await regenerate(agent);
 
@@ -593,7 +598,7 @@ describe("a regeneration under the subject's lease", () => {
 			generation: await store.subjectGeneration(ALICE.id),
 		});
 		expect(lease.outcome).toBe("acquired");
-		const create = vi.spyOn(built.factorStore, "create");
+		const create = vi.spyOn(built.factorStore, "createIf");
 
 		const res = await regenerate(agent);
 
@@ -612,7 +617,7 @@ describe("a regeneration under the subject's lease", () => {
 			await moveGeneration(store, subject);
 			return acquire(subject, asked);
 		});
-		const create = vi.spyOn(built.factorStore, "create");
+		const create = vi.spyOn(built.factorStore, "createIf");
 
 		const res = await regenerate(agent);
 
@@ -629,9 +634,9 @@ describe("a regeneration under the subject's lease", () => {
 		const acquire = vi.spyOn(store, "acquireSubjectLease");
 		const release = vi.spyOn(store, "releaseSubjectLease");
 		const raise = vi.spyOn(store, "raiseRecoverySetFloor");
-		const create = vi.spyOn(built.factorStore, "create");
+		const create = vi.spyOn(built.factorStore, "createIf");
 		const update = vi.spyOn(built.factorStore, "update");
-		const removed = vi.spyOn(built.factorStore, "remove");
+		const removed = vi.spyOn(built.factorStore, "removeIf");
 
 		expect((await regenerate(agent)).status).toBe(200);
 
@@ -676,8 +681,8 @@ describe("a regeneration past the lease's call budget", () => {
 		const real = performance.now.bind(performance);
 		let ahead = 0;
 		vi.spyOn(performance, "now").mockImplementation(() => real() + ahead);
-		const remove = built.factorStore.remove.bind(built.factorStore);
-		const slow = vi.spyOn(built.factorStore, "remove").mockImplementation(async (...args) => {
+		const remove = built.factorStore.removeIf.bind(built.factorStore);
+		const slow = vi.spyOn(built.factorStore, "removeIf").mockImplementation(async (...args) => {
 			// Each removal takes a whole Store timeout (the default 5000 ms).
 			ahead += 5_000;
 			return remove(...args);
@@ -711,7 +716,7 @@ describe("a retired set left stored", () => {
 	/** Alice after a regeneration whose sweep failed: the set that stood is still stored, below the floor. */
 	async function leftStored(built: Awaited<ReturnType<typeof composed>>) {
 		const signed = await signedIn(built);
-		vi.spyOn(built.factorStore, "remove").mockRejectedValueOnce(new Error("remove failed"));
+		vi.spyOn(built.factorStore, "removeIf").mockRejectedValueOnce(new Error("remove failed"));
 		const res = await regenerate(signed.agent);
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		vi.restoreAllMocks();
@@ -843,7 +848,7 @@ describe("a retired set left stored", () => {
 				recoverySet(2).data,
 			),
 		};
-		await built.factorStore.create(old);
+		await addRecord(built.factorStore, old);
 		const { agent: browser, transaction } = await beginLogin(built.app);
 		let newest: MfaFactorRecord | undefined;
 		const list = built.factorStore.list.bind(built.factorStore);

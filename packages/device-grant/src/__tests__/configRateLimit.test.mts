@@ -82,7 +82,7 @@ describe("device-grant.rateLimit — the documented key resolves", () => {
 	 */
 	const spendSix = async (section: { readonly rateLimit?: unknown }) => {
 		const contribute = deviceGrantModule({
-			config: { "device-grant": section } as unknown as AppConfig,
+			config: { "device-grant": { enabled: true } } as unknown as AppConfig,
 		}).contributes?.rateLimitBudgets?.[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] as (
 			deps: unknown,
 		) => RateLimitSpec | null;

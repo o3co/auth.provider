@@ -27,8 +27,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { inspect } from "node:util";
 import {
 	auditedError,
+	isStoreGeneration,
 	loggableError,
 	type MfaFactorRecord,
+	type StoreGeneration,
 	sealWithKeyRing,
 	toMfaStoreFactor,
 } from "@o3co/auth-provider-core";
@@ -473,6 +475,325 @@ describe("delete", () => {
 				const error = await rejection(call());
 				expect((error as MfaStoreError).reason, String(status)).toBe("unexpected_status");
 				expect((error as MfaStoreError).operation).toBe("delete");
+			}
+		}
+	});
+});
+
+/** A generation as a Store might mint one. */
+const G1 = "4f1c2a3b-5d6e-4f70-8192-a3b4c5d6e7f8" as StoreGeneration;
+const G2 = "0e9d8c7b-6a59-4483-9271-605f4e3d2c1b" as StoreGeneration;
+
+describe("the conditional members: what they send", () => {
+	it("posts a versioned read as a list, a conditional create and removal with expectedGeneration, to the URLs as configured", async () => {
+		const bodies: unknown[] = [];
+		const origin = await serve((request, body, response) => {
+			bodies.push(JSON.parse(body));
+			const answer = request.url?.startsWith("/mfa/list")
+				? { factors: [], generation: null }
+				: request.url === "/mfa/create"
+					? { outcome: "created", generation: G2 }
+					: { outcome: "removed", generation: G2 };
+			response.writeHead(200, { "Content-Type": "application/json" });
+			response.end(JSON.stringify(answer));
+		});
+		const store = storeAt(origin, TOKEN);
+		const before = Date.now();
+		await store.listVersioned("user-1");
+		await store.createIf(RECORD, null);
+		await store.createIf(RECORD, G1);
+		await store.removeIf("user-1", ID, G1);
+		const after = Date.now();
+		const deadline = expect.any(Number);
+		expect(bodies).toEqual([
+			{ subject: "user-1" },
+			{ factor: WIRE, expectedGeneration: null, deadlineMs: deadline },
+			{ factor: WIRE, expectedGeneration: G1, deadlineMs: deadline },
+			{ subject: "user-1", id: ID, expectedGeneration: G1, deadlineMs: deadline },
+		]);
+		// Each states its own send time plus the request timeout (5000 ms).
+		for (const body of bodies.slice(1) as { deadlineMs: number }[]) {
+			expect(body.deadlineMs).toBeGreaterThanOrEqual(before + 5000);
+			expect(body.deadlineMs).toBeLessThanOrEqual(after + 5000);
+		}
+	});
+
+	it("refuses, with a RangeError and sending nothing, a generation or a record the wire cannot carry", async () => {
+		const store = storeOver();
+		for (const expected of ["", 'with"quote', "x".repeat(129), 1, undefined]) {
+			await expect(
+				store.createIf(RECORD, expected as StoreGeneration),
+				JSON.stringify(expected),
+			).rejects.toThrow(RangeError);
+		}
+		for (const expected of [null, "", 'with"quote']) {
+			await expect(
+				store.removeIf("user-1", ID, expected as StoreGeneration),
+				JSON.stringify(expected),
+			).rejects.toThrow(RangeError);
+		}
+		await expect(store.createIf({ ...RECORD, id: "factor-1" }, null)).rejects.toThrow(RangeError);
+		await expect(store.removeIf("user-1", "factor-1", G1)).rejects.toThrow(RangeError);
+		expect(fake.requests).toEqual([]);
+	});
+});
+
+describe("listVersioned", () => {
+	it("answers a set never written as no records and a null generation, and a written one with its records and its generation", async () => {
+		const store = storeOver();
+		expect(await store.listVersioned("user-1")).toStrictEqual({ items: [], generation: null });
+		const created = await store.createIf(RECORD, null);
+		expect(created).toStrictEqual({ outcome: "created", generation: expect.any(String) });
+		expect(await store.listVersioned("user-1")).toStrictEqual({
+			items: [RECORD],
+			generation: (created as { generation: StoreGeneration }).generation,
+		});
+	});
+
+	it("answers an emptied set's tombstone: no records, at a generation", async () => {
+		const store = storeOver();
+		await store.create(RECORD);
+		await store.removeAllForSubject("user-1");
+		const { items, generation } = await store.listVersioned("user-1");
+		expect(items).toEqual([]);
+		expect(isStoreGeneration(generation)).toBe(true);
+	});
+
+	it("throws unexpected_status on any status but 200, a redirect included, and follows no redirect", async () => {
+		for (const status of [404, 409, 500, 503, 301, 307, 201, 204, 400]) {
+			fake.answer("list", () => ({
+				status,
+				headers: { Location: fake.urls.listUrl },
+				body: status === 204 ? undefined : JSON.stringify({ factors: [], generation: null }),
+			}));
+			const before = fake.requests.length;
+			const error = await rejection(storeOver().listVersioned("user-1"));
+			expect(error, String(status)).toBeInstanceOf(MfaStoreError);
+			expect((error as MfaStoreError).reason, String(status)).toBe("unexpected_status");
+			expect((error as MfaStoreError).operation).toBe("list");
+			expect((error as MfaStoreError).storeStatus).toBe(status);
+			expect(fake.requests.length - before, String(status)).toBe(1);
+		}
+	});
+
+	it("throws malformed_answer on a 200 the codec refuses: no generation (an older Store), one out of shape, records an absent set cannot hold, a record it cannot read, of another subject, or twice", async () => {
+		for (const [what, body] of [
+			["not JSON", "not json"],
+			["no generation", JSON.stringify({ factors: [] })],
+			["a generation out of shape", JSON.stringify({ factors: [], generation: 'a"b' })],
+			["a numeric generation", JSON.stringify({ factors: [], generation: 1 })],
+			["records at null", JSON.stringify({ factors: [WIRE], generation: null })],
+			["no factors", JSON.stringify({ generation: G1 })],
+			["an unreadable record", JSON.stringify({ factors: [{ ...WIRE, id: "x" }], generation: G1 })],
+			[
+				"another subject's record",
+				JSON.stringify({ factors: [{ ...WIRE, subject: "user-2" }], generation: G1 }),
+			],
+			["a repeated id", JSON.stringify({ factors: [WIRE, WIRE], generation: G1 })],
+		] as const) {
+			fake.answer("list", () => json(200, body));
+			const error = await rejection(storeOver().listVersioned("user-1"));
+			expect(error, what).toBeInstanceOf(MfaStoreError);
+			expect((error as MfaStoreError).reason, what).toBe("malformed_answer");
+			expect((error as MfaStoreError).operation, what).toBe("list");
+		}
+	});
+});
+
+describe("createIf", () => {
+	it("answers 200 created with the set's new generation, and 409 conflict, each as the port's answer", async () => {
+		const store = storeOver();
+		const created = await store.createIf(RECORD, null);
+		expect(created).toStrictEqual({ outcome: "created", generation: expect.any(String) });
+		expect(await store.createIf({ ...RECORD, id: OTHER_ID }, null)).toStrictEqual({
+			outcome: "conflict",
+		});
+		expect(await store.createIf({ ...RECORD, id: OTHER_ID }, G1)).toStrictEqual({
+			outcome: "conflict",
+		});
+		expect(fake.factors("user-1")).toEqual([WIRE]);
+	});
+
+	it("throws malformed_answer on a 200 or a 409 whose body is not its outcome's: a bare 409 among them", async () => {
+		for (const [status, body] of [
+			[409, undefined],
+			[409, ""],
+			[409, JSON.stringify({})],
+			[409, JSON.stringify({ outcome: "created", generation: G1 })],
+			[200, undefined],
+			[200, JSON.stringify({ outcome: "conflict" })],
+			[200, JSON.stringify({ outcome: "created" })],
+			[200, JSON.stringify({ outcome: "created", generation: 'a"b' })],
+			[200, JSON.stringify({ outcome: "updated", generation: G1 })],
+			[200, "not json"],
+		] as const) {
+			fake.answer("create", () => ({
+				status,
+				headers: { "Content-Type": "application/json" },
+				...(body === undefined ? {} : { body }),
+			}));
+			const error = await rejection(storeOver().createIf(RECORD, null));
+			const what = `${status} ${String(body)}`;
+			expect(error, what).toBeInstanceOf(MfaStoreError);
+			expect((error as MfaStoreError).reason, what).toBe("malformed_answer");
+			expect((error as MfaStoreError).operation, what).toBe("create");
+		}
+	});
+
+	it("throws unexpected_status on any other status — a 404 (a create is never missing), a 204 from an older Store, a 412 — whatever its body", async () => {
+		for (const status of [404, 408, 204, 201, 412, 400, 500, 503, 307]) {
+			fake.answer("create", () => ({
+				status,
+				headers: { "Content-Type": "application/json", Location: fake.urls.createUrl },
+				body: status === 204 ? undefined : JSON.stringify({ outcome: "missing" }),
+			}));
+			const error = await rejection(storeOver().createIf(RECORD, G1));
+			expect((error as MfaStoreError).reason, String(status)).toBe("unexpected_status");
+			expect((error as MfaStoreError).operation).toBe("create");
+			expect((error as MfaStoreError).storeStatus).toBe(status);
+		}
+	});
+});
+
+describe("removeIf", () => {
+	it("answers 200 removed with the set's new generation, 404 missing and 409 conflict, each as the port's answer", async () => {
+		const store = storeOver();
+		expect(await store.removeIf("user-1", ID, G1)).toStrictEqual({ outcome: "missing" });
+		const created = (await store.createIf(RECORD, null)) as { generation: StoreGeneration };
+		expect(await store.removeIf("user-1", ID, G1)).toStrictEqual({ outcome: "conflict" });
+		expect(await store.removeIf("user-1", OTHER_ID, created.generation)).toStrictEqual({
+			outcome: "missing",
+		});
+		const removed = await store.removeIf("user-1", ID, created.generation);
+		expect(removed).toStrictEqual({ outcome: "removed", generation: expect.any(String) });
+		expect(await store.listVersioned("user-1")).toStrictEqual({
+			items: [],
+			generation: (removed as { generation: StoreGeneration }).generation,
+		});
+	});
+
+	it("throws malformed_answer on a 200, 404 or 409 whose body is not its outcome's: a bare 404 or 409 among them", async () => {
+		for (const [status, body] of [
+			[404, undefined],
+			[404, ""],
+			[404, JSON.stringify({ outcome: "conflict" })],
+			[409, undefined],
+			[409, JSON.stringify({ outcome: "missing" })],
+			[200, undefined],
+			[200, JSON.stringify({ outcome: "removed" })],
+			[200, JSON.stringify({ outcome: "removed", generation: null })],
+			[200, JSON.stringify({ outcome: "missing" })],
+			[200, "not json"],
+		] as const) {
+			fake.answer("delete", () => ({
+				status,
+				headers: { "Content-Type": "application/json" },
+				...(body === undefined ? {} : { body }),
+			}));
+			const error = await rejection(storeOver().removeIf("user-1", ID, G1));
+			const what = `${status} ${String(body)}`;
+			expect(error, what).toBeInstanceOf(MfaStoreError);
+			expect((error as MfaStoreError).reason, what).toBe("malformed_answer");
+			expect((error as MfaStoreError).operation, what).toBe("delete");
+		}
+	});
+
+	it("throws unexpected_status on any other status — a 204 from an older Store, a 412 — whatever its body", async () => {
+		for (const status of [408, 204, 201, 412, 400, 500, 503, 307]) {
+			fake.answer("delete", () => ({
+				status,
+				headers: { "Content-Type": "application/json", Location: fake.urls.deleteUrl },
+				body: status === 204 ? undefined : JSON.stringify({ outcome: "removed", generation: G2 }),
+			}));
+			const error = await rejection(storeOver().removeIf("user-1", ID, G1));
+			expect((error as MfaStoreError).reason, String(status)).toBe("unexpected_status");
+			expect((error as MfaStoreError).operation).toBe("delete");
+			expect((error as MfaStoreError).storeStatus).toBe(status);
+		}
+	});
+});
+
+describe("a conditional write at the request deadline", () => {
+	it("is refused 408 and not applied by a Store whose clock reads its deadline as passed: unexpected_status, never conflict or missing", async () => {
+		const ahead = await startFakeStore({
+			bearerToken: TOKEN,
+			requestNow: () => Date.now() + 60 * 60 * 1000,
+		});
+		try {
+			const store = new HttpMfaFactorStore({ ...urlsOf(ahead), bearerToken: TOKEN, timeout: 5000 });
+			const created = await rejection(store.createIf(RECORD, null));
+			expect(created).toBeInstanceOf(MfaStoreError);
+			expect((created as MfaStoreError).reason).toBe("unexpected_status");
+			expect((created as MfaStoreError).storeStatus).toBe(408);
+			expect(ahead.factors("user-1")).toEqual([]);
+			await store.create(RECORD);
+			const { generation } = await store.listVersioned("user-1");
+			const removed = await rejection(store.removeIf("user-1", ID, generation as StoreGeneration));
+			expect((removed as MfaStoreError).reason).toBe("unexpected_status");
+			expect((removed as MfaStoreError).storeStatus).toBe(408);
+			expect(await store.listVersioned("user-1")).toStrictEqual({
+				items: [RECORD],
+				generation,
+			});
+		} finally {
+			await ahead.close();
+		}
+	});
+
+	it("is applied by a Store whose clock reads it within its deadline", async () => {
+		const store = storeOver({ timeout: 60_000 });
+		const created = await store.createIf(RECORD, null);
+		expect(created).toMatchObject({ outcome: "created" });
+		expect(fake.factors("user-1")).toEqual([WIRE]);
+	});
+
+	it("gives up at its deadline, sent and unanswered: a TimeoutError, never conflict or missing", async () => {
+		fake.answer("create", () => new Promise(() => {}));
+		fake.answer("delete", () => new Promise(() => {}));
+		for (const call of [
+			() => storeOver({ timeout: 200 }).createIf(RECORD, null),
+			() => storeOver({ timeout: 200 }).removeIf("user-1", ID, G1),
+		]) {
+			const before = fake.requests.length;
+			const started = Date.now();
+			const error = await rejection(call());
+			expect(error.name).toBe("TimeoutError");
+			expect(Date.now() - started).toBeLessThan(2000);
+			expect(fake.requests.length - before).toBe(1);
+		}
+	});
+});
+
+describe("nothing the Store sends reaches what a conditional member throws", () => {
+	it("whatever the status and the body", async () => {
+		let status = 500;
+		let body = "";
+		const origin = await serve((_request, _body, response) => {
+			response.writeHead(status, MARKER, {
+				"Content-Type": "application/json",
+				"X-Store-Error": MARKER,
+			});
+			response.end(body);
+		});
+		const store = storeAt(origin);
+		for (const answer of [
+			{ status: 500, body: MARKER },
+			{ status: 409, body: `{"outcome":"${MARKER}"}` },
+			{ status: 404, body: `{"outcome":"missing","why":"${MARKER}"` },
+			{ status: 200, body: JSON.stringify({ outcome: "created", generation: `${MARKER}"` }) },
+			{ status: 200, body: JSON.stringify({ factors: [{ ...WIRE, id: MARKER }], generation: G1 }) },
+			{ status: 200, body: JSON.stringify({ factors: [], generation: `"${MARKER}` }) },
+		]) {
+			status = answer.status;
+			body = answer.body;
+			for (const call of [
+				() => store.listVersioned("user-1"),
+				() => store.createIf(RECORD, G1),
+				() => store.removeIf("user-1", ID, G1),
+			]) {
+				const error = await rejection(call());
+				expect(error, `${answer.status} ${answer.body}`).toBeInstanceOf(MfaStoreError);
+				expect(everyForm(error), `${answer.status} ${answer.body}`).not.toContain(MARKER);
 			}
 		}
 	});

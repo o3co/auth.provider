@@ -364,7 +364,9 @@ describe("deviceGrantModule — boot", () => {
 	});
 
 	it("takes csrfGuard as an optional slot, and imports nothing of the session package", () => {
-		const installed = deviceGrantModule({ config: makeBoot({}).config as AppConfig });
+		const installed = deviceGrantModule({
+			config: makeBoot({ deviceGrant: ENABLED }).config as AppConfig,
+		});
 		expect(installed.optional).toContain("csrfGuard");
 		expect(installed.requires).not.toContain("csrfGuard");
 	});
@@ -385,15 +387,11 @@ describe("deviceGrantModule — boot", () => {
 		);
 	});
 
-	it("boots when the operator declares the store absent on purpose and leaves the grant off", async () => {
-		// The absence policy is applied whether or not the feature is on, so
-		// this is the declaration a deployment that installs the package and
-		// never enables the grant has to write.
-		const handle = await boot({
-			deviceGrant: { enabled: false, store: "unsupported" },
-			withStore: false,
-		});
-		await handle.dispose();
+	it("boots with the grant off and no store, with or without the declaration: a switched-off module declares no absence policy", async () => {
+		for (const deviceGrant of [{ enabled: false }, { enabled: false, store: "unsupported" }]) {
+			const handle = await boot({ deviceGrant, withStore: false, withoutAuditDeclaration: true });
+			await handle.dispose();
+		}
 	});
 
 	it("refuses to boot enabled with the store declared absent, naming the component", async () => {
@@ -561,21 +559,13 @@ describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 		});
 	});
 
-	it("advertises nothing when disabled", async () => {
+	it("advertises nothing when disabled: the module built off declares nothing but its section", () => {
 		// The discovery document must not claim a capability the deployment
 		// does not have.
-		const deps = {
-			config: {
-				oauth: {
-					jwt: { issuer: "https://as.example.test" },
-				},
-				"device-grant": { enabled: false },
-			},
-		};
-		const contribution = contributionsFor(deps)?.discoveryMetadata?.[0] as (
-			deps: unknown,
-		) => Record<string, unknown>;
-		expect(contribution(deps)).toEqual({});
+		const built = deviceGrantModule({
+			config: { "device-grant": { enabled: false } } as unknown as AppConfig,
+		});
+		expect(Object.keys(built).sort()).toEqual(["name", "section"]);
 	});
 });
 
@@ -996,9 +986,8 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs a projection of it", async () => {
-		// A store that answers, but with a record this package cannot read —
-		// a scope that is not a list — is a failure of the host's data, not an
-		// outage and not the caller's mistake.
+		// A store that answers, but with no decision outcome at all, is a
+		// failure of the host's code, not an outage and not the caller's mistake.
 		const deps = enabledDeps();
 		const { logger } = serialisingLogger();
 		const app = mountVerificationRoute({
@@ -1006,17 +995,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			logger,
 			deviceCodeStore: {
 				...deps.deviceCodeStore,
-				findPendingByUserCode: async () =>
-					({
-						userCode: "BCDFGHJK",
-						clientId: "tv-app",
-						requestedScope: "openid",
-						expiresAtMs: Date.now() + 60_000,
-						intervalSeconds: 5,
-						status: "pending",
-						subject: undefined,
-						grantedScope: undefined,
-					}) as never,
+				deny: async () => null as never,
 			},
 		});
 
@@ -1024,7 +1003,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			.post("/oauth/device/verification")
 			.set("Host", "as.example.test")
 			.set("Origin", "http://as.example.test")
-			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+			.send({ action: "deny", user_code: "BCDF-GHJK" });
 
 		expect(res.status).toBe(500);
 		expect(res.headers["content-type"]).toMatch(/^application\/json/);
@@ -1041,9 +1020,56 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it("answers an unexpected failure on the mounted device_authorization route with JSON 500, and logs a projection of it", async () => {
-		// A client repository that hands back a malformed registration —
-		// `defaultScopes` a string rather than a list — is a failure of the
-		// host's data, not of the request.
+		// A rate limiter that answers a decision whose `resetAt` is not a
+		// `Date` is a failure of the host's adapter, not of the request: the
+		// throttle in front of the route fails on it.
+		// Chosen because no fault this package owns escapes the handler: its
+		// store errors are answered, and a malformed registration is refused
+		// before it (see the test below).
+		const { lines, logger } = serialisingLogger();
+		const app = mountContributedRoute(0, {
+			...enabledDeps(),
+			logger,
+			rateLimiter: {
+				kind: "buggy",
+				check: async () =>
+					({ allowed: true, resetAt: "soon" }) as unknown as Awaited<
+						ReturnType<RateLimiter["check"]>
+					>,
+			} satisfies RateLimiter,
+		});
+
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		// The frames are what an operator finds the failing code by — and the
+		// header line, which repeats the message, is not among them.
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				err: {
+					name: "TypeError",
+					detail: expect.any(String),
+					stack: FRAMES,
+				},
+			},
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) {
+			expect(line).not.toContain(CONFIDENTIAL_SECRET);
+			expect(line).not.toContain("TypeError:");
+		}
+	});
+
+	it("answers a client whose registration the boundary refuses 503 on the mounted device_authorization route", async () => {
+		// `defaultScopes` a string rather than a list: the client authentication
+		// reads registrations through core's client-record boundary, which
+		// refuses the record, so the lookup rejects and the handler never sees it.
 		const { lines, logger } = serialisingLogger();
 		const malformed = { ...confidentialClient, defaultScopes: "openid" };
 		const app = mountContributedRoute(0, {
@@ -1061,27 +1087,21 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
 			.send({});
 
-		expect(res.status).toBe(500);
-		expect(res.headers["content-type"]).toMatch(/^application\/json/);
-		expect(res.headers["cache-control"]).toBe("no-store");
-		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
-		// This package's own code failed on the data: the frames are what an
-		// operator finds it by — and the header line, which repeats the
-		// message, is not among them.
-		expect(logger.error).toHaveBeenCalledWith(
-			{
-				err: {
-					name: "TypeError",
-					detail: expect.any(String),
-					stack: FRAMES,
-				},
-			},
-			"device_route_unexpected_error",
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ step: "find", clientId: CONFIDENTIAL_ID }),
+			"client_record_refused",
 		);
-		for (const line of lines) {
-			expect(line).not.toContain(CONFIDENTIAL_SECRET);
-			expect(line).not.toContain("TypeError:");
-		}
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				step: "find",
+				err: expect.objectContaining({ reason: "client_record_refused" }),
+			}),
+			"client_repository_unavailable",
+		);
+		for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
 	});
 
 	/** The verification route, signed in, with a store whose lookup throws `thrown`. */
@@ -1607,17 +1627,18 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(() => factory(deps)).not.toThrow();
 	});
 
-	it("answers 404 with no-store when the grant is disabled", async () => {
-		// A 404 carrying no cache directives is the shape an intermediary
-		// heuristically caches, and a cached "no device grant here" would
-		// outlive the operator turning it on.
-		const app = mountContributedRoute(0, {
-			config: { "device-grant": { enabled: false } },
+	it("mounts nothing when the grant is disabled: the host answers its paths", async () => {
+		const handle = await boot({});
+		const app = express();
+		app.use(handle.router);
+		app.use((_req, res) => {
+			res.status(404).json({ answeredBy: "host" });
 		});
-		const res = await request(app).post("/oauth/device_authorization").send({});
-
-		expect(res.status).toBe(404);
-		expect(res.headers["cache-control"]).toContain("no-store");
+		for (const path of ["/oauth/device_authorization", "/oauth/device/verification"]) {
+			const res = await request(app).post(path).send({});
+			expect(res.body, path).toEqual({ answeredBy: "host" });
+		}
+		await handle.dispose();
 	});
 });
 

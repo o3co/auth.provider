@@ -18,9 +18,9 @@
  * `mfaTotpFactorModule` (the MFA ADR's D1, D3, D19): contributes the `totp`
  * factor under core's `mfaFactors` kind, where the coordinator reads it
  * through `mfaFactorResolver`. Built from its own section, `mfa-totp-factor`,
- * alone — a factor never holds a key, so the ring is not read here — and
- * answering `null` when `mfa-totp-factor.enabled` is false, which leaves the
- * kind claimed and absent from the resolver. Boot parses the section with the
+ * alone — a factor never holds a key, so the ring is not read here.
+ * `mfa-totp-factor.enabled` is the module's switch (`section.isEnabled`):
+ * false, and the module registers nothing. Boot parses the section with the
  * module's schema before any factory runs and refuses what it cannot read,
  * naming the key; a configuration still setting the section's old path,
  * `mfa.factors.totp`, is refused naming the new one, and so is an environment
@@ -39,7 +39,7 @@ import { createTotpFactor, TOTP_FACTOR_KIND } from "./factor.mjs";
 const configuredIssuer = (config: unknown): unknown =>
 	(config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt?.issuer;
 
-/** The TOTP factor, contributed as `mfaFactors.totp`; `null` when switched off by its configuration. */
+/** The TOTP factor, contributed as `mfaFactors.totp`; nothing when switched off by its section. */
 export const mfaTotpFactorModule = defineModule({
 	name: "mfa-totp-factor",
 	// The package's `config/reference.conf` holds this section's defaults,
@@ -53,6 +53,7 @@ export const mfaTotpFactorModule = defineModule({
 			MFA_TOTP_ENABLED: "mfa.factors.totp.enabled",
 			MFA_TOTP_ISSUER: "mfa.factors.totp.issuer",
 		},
+		isEnabled: (section) => section.enabled,
 	},
 	requires: ["config"] as const,
 	// The issuer an unset TOTP issuer defaults to the host of, which the

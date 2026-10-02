@@ -21,6 +21,7 @@ import {
 	type Module,
 	type ProviderDeps,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "./grant.mjs";
@@ -52,7 +53,7 @@ const tokenExchangeConfigSchema = z.object({
  */
 const tokenExchangeSectionSchema = z
 	.object({
-		maxActorChainDepth: z.coerce.number().int().positive(),
+		maxActorChainDepth: wholeNumberInRangeFromEnv(1),
 	})
 	.strict()
 	.optional();

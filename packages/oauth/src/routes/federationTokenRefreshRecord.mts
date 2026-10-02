@@ -18,33 +18,36 @@
  * What a refresh the upstream answered ends in: an answer that cannot be read
  * as a token, or whose type may not be handed on, is refused, while a rotated
  * refresh token is still kept, best effort; otherwise the refreshed record is
- * written and its token answered.
+ * written and its token answered. Every write lands only on the record the
+ * refresh was made from; a refresh whose record was removed or rewritten
+ * meanwhile is dropped, never written over what replaced it.
  */
 
-import {
-	canonicalScope,
-	emitAuditEvent,
-	type FederationTokens,
-	loggableError,
-} from "@o3co/auth-provider-core";
+import { canonicalScope, emitAuditEvent, loggableError } from "@o3co/auth-provider-core";
 import type { Response } from "express";
 import type { FederationTokenCaller, FederationTokenContext } from "./federationTokenContext.mjs";
 import { isDisclosable, refuseUndisclosableTokenType } from "./federationTokenDisclosure.mjs";
+import {
+	answerDiscardedRefresh,
+	replaceRecord,
+	type StoredRecord,
+} from "./federationTokenRecord.mjs";
 import { narrowedScope, type RefreshReading } from "./federationTokenRefreshAnswer.mjs";
 import { answerToken } from "./federationTokenSuccess.mjs";
 
 /**
- * The refusals of an answer, then steps 11f and 11h. `currentTokens` is the
- * snapshot the refresh was made from.
+ * The refusals of an answer, then steps 11f and 11h. `current` is the record
+ * the refresh was made from.
  */
 export const recordRefresh = async (
 	ctx: FederationTokenContext,
 	caller: FederationTokenCaller,
-	currentTokens: FederationTokens,
+	current: StoredRecord,
 	reading: RefreshReading,
 ): Promise<Response> => {
-	const { opts, req, res, name, federation, logger, storeUnavailable } = ctx;
-	const { sid, sub } = caller;
+	const { opts, req, res, federation, logger, storeUnavailable } = ctx;
+	const { sub } = caller;
+	const currentTokens = current.value;
 	const {
 		accessToken,
 		rotatedRefreshToken,
@@ -61,52 +64,47 @@ export const recordRefresh = async (
 	 * nothing that can be handed on: the upstream invalidated the old one
 	 * (RFC 6749 §6), so dropping it would strand the connection until
 	 * re-consent. Best effort, logged as `federation_token_keep_rotated_*`;
-	 * the route still answers its refusal, not a 503.
+	 * the route still answers its refusal, not a 503. Kept only on the record
+	 * the refresh was made from: a record removed since (a logout) or
+	 * rewritten since (a relink, or another refresh) is left as it is, since
+	 * an equal refresh token does not make it the same connection, and that
+	 * outcome is returned so the refusal is answered as a dropped refresh.
 	 */
-	const keepRotatedRefreshToken = async (): Promise<void> => {
+	const keepRotatedRefreshToken = async (): Promise<"missing" | "conflict" | undefined> => {
 		if (rotatedRefreshToken !== undefined && rotatedRefreshToken !== currentTokens.refreshToken) {
-			let step: "get" | "update" = "get";
 			try {
-				// `currentTokens` may be stale (the lock TTL can lapse during the
-				// upstream call), so re-read: if the stored refresh token changed,
-				// another request rotated the chain and its record wins;
-				// otherwise merge onto what is stored now.
-				const latest = await opts.federationTokenStore.get(sid, name);
-				if (latest === null) {
-					// A concurrent logout unlinked this federation: writing would
-					// restore credentials the user asked to drop.
+				const outcome = await replaceRecord(ctx, caller, current, {
+					...currentTokens,
+					refreshToken: rotatedRefreshToken,
+					// Rotated alongside it, and worth the same: the stored
+					// `id_token` is what logout sends as `id_token_hint`.
+					idToken: rotatedIdToken ?? currentTokens.idToken,
+				});
+				if (outcome !== "updated") {
 					logger.warn(
-						{ federation, store: "federation_token", reason: "record_gone" },
+						{
+							federation,
+							store: "federation_token",
+							reason: outcome === "missing" ? "record_gone" : "replaced_concurrently",
+						},
 						"federation_token_keep_rotated_skipped",
 					);
-				} else if (latest.refreshToken !== currentTokens.refreshToken) {
-					// Another request rotated the chain: its record is newer.
-					logger.warn(
-						{ federation, store: "federation_token", reason: "rotated_concurrently" },
-						"federation_token_keep_rotated_skipped",
-					);
-				} else {
-					step = "update";
-					await opts.federationTokenStore.update(sid, name, {
-						...latest,
-						refreshToken: rotatedRefreshToken,
-						// Rotated alongside it, and worth the same: the stored
-						// `id_token` is what logout sends as `id_token_hint`.
-						idToken: rotatedIdToken ?? latest.idToken,
-					});
+					return outcome;
 				}
 			} catch (error) {
 				logger.warn(
-					{ federation, store: "federation_token", step, err: loggableError(error) },
+					{ federation, store: "federation_token", step: "replace_if", err: loggableError(error) },
 					"federation_token_keep_rotated_failed",
 				);
 			}
 		}
+		return undefined;
 	};
 
 	// The adapter answered something this route cannot read as a token.
 	if (accessToken === undefined || lifetimeIsBroken || tokenTypeIsBroken) {
-		await keepRotatedRefreshToken();
+		const dropped = await keepRotatedRefreshToken();
+		if (dropped !== undefined) return answerDiscardedRefresh(ctx, caller, dropped);
 		emitAuditEvent(opts.auditSink, {
 			timestamp: new Date(),
 			type: "federation.token.refresh_failed",
@@ -161,19 +159,24 @@ export const recordRefresh = async (
 	// The refresh worked but its token may not be handed on. Keep the
 	// rotated refresh token so fixing the upstream needs no re-consent.
 	if (!isDisclosable(updatedTokens)) {
-		await keepRotatedRefreshToken();
+		const dropped = await keepRotatedRefreshToken();
+		if (dropped !== undefined) return answerDiscardedRefresh(ctx, caller, dropped);
 		return refuseUndisclosableTokenType(ctx, caller, nextTokenType);
 	}
 
+	let outcome: Awaited<ReturnType<typeof replaceRecord>>;
 	try {
-		await opts.federationTokenStore.update(sid, name, updatedTokens);
+		outcome = await replaceRecord(ctx, caller, current, updatedTokens);
 	} catch (error) {
-		storeUnavailable(federation, "federation_token", "update", error);
+		storeUnavailable(federation, "federation_token", "replace_if", error);
 		return res.status(503).json({
 			error: "temporarily_unavailable",
 			error_description: "federation token store unavailable",
 		});
 	}
+	// Removed or rewritten since it was read: this refresh's tokens belong to a
+	// connection that is gone, and are neither stored nor handed on.
+	if (outcome !== "updated") return answerDiscardedRefresh(ctx, caller, outcome);
 
 	// 11h: `updatedTokens`, not the adapter's object: the answer was read
 	// once, and a getter read a second time may answer differently from what

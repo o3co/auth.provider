@@ -770,8 +770,9 @@ describe("createClientAuthMiddleware", () => {
 				.setProtectedHeader({ alg: "ES256", kid: "k1" })
 				.sign(privateKey);
 		};
-		// A method value outside the set, as a later registration source
-		// could supply: the middleware must not pass it through.
+		// A method value outside the set, as a repository could answer: core's
+		// client-record boundary refuses the record, so the lookup rejects,
+		// answered `503` as any rejected lookup, and its method is never quoted.
 		const oddMethod = 'client_secret_"b\\\u00e9' as TokenEndpointAuthMethod;
 		const buildApp = () => {
 			const app = express().use(express.urlencoded({ extended: false }));
@@ -805,14 +806,13 @@ describe("createClientAuthMiddleware", () => {
 				);
 			});
 
-			it("sanitises a configured method outside the set", async () => {
+			it("answers a configured method outside the set 503, never quoting it", async () => {
 				const res = await request(buildApp())
 					.post("/test")
 					.type("form")
 					.send({ client_id: "odd", client_secret: "s3cret" });
-				expect(described(res)).toBe(
-					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_?b??'",
-				);
+				expect(res.status).toBe(503);
+				expect(described(res)).toBe("client repository unavailable");
 			});
 
 			it("names RFC 6749 section 2.3 without a section sign", async () => {
@@ -852,10 +852,10 @@ describe("createClientAuthMiddleware", () => {
 				);
 			});
 
-			it("sanitises a configured method outside the set", async () => {
-				expect(described(await assert({ iss: "odd", sub: "odd" }))).toBe(
-					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_?b??'",
-				);
+			it("answers a configured method outside the set 503, never quoting it", async () => {
+				const res = await assert({ iss: "odd", sub: "odd" });
+				expect(res.status).toBe(503);
+				expect(described(res)).toBe("client repository unavailable");
 			});
 		});
 	});

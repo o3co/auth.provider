@@ -37,6 +37,40 @@ describe("mfaFactorStoreContract over core's in-process store", () => {
 	}
 });
 
+const UNREACHABLE_NOT_RUN = "not run: the outage case (unreachable not declared)";
+const OUTAGE =
+	"rejects every member when it cannot reach its backend, and answers none as no factors, null or done";
+
+/** A store over the same backend that cannot reach it: every member rejects, or, `answers`, the record members answer as if empty. */
+function unreachableStore(answers = false): MfaFactorStore {
+	const down = async (): Promise<never> => {
+		throw new Error("ECONNREFUSED");
+	};
+	return answers
+		? {
+				kind: "unreachable-answering",
+				list: async () => [],
+				listVersioned: down,
+				createIf: down,
+				removeIf: down,
+				create: down,
+				update: async () => null,
+				remove: async () => {},
+				removeAllForSubject: down,
+			}
+		: {
+				kind: "unreachable",
+				list: down,
+				listVersioned: down,
+				createIf: down,
+				removeIf: down,
+				create: down,
+				update: down,
+				remove: down,
+				removeAllForSubject: down,
+			};
+}
+
 const SUCCESSFUL_UPDATE_ALONE =
 	"a successful update writes its own record alone: the same id under another subject, and the subject's other factors, stay as they were";
 
@@ -231,6 +265,63 @@ describe("the suite's records", () => {
 	});
 });
 
+describe("the suite's outage case", () => {
+	it("is named as not run, and runs none, when unreachable is not declared", () => {
+		const names = (supports?: { unreachable?: boolean }) =>
+			mfaFactorStoreContract({
+				build: async () => ({ store: createMemoryMfaFactorStore() }),
+				...(supports === undefined ? {} : { supports }),
+			}).map((contractCase) => contractCase.name);
+		expect(names()).toContain(UNREACHABLE_NOT_RUN);
+		expect(names()).not.toContain(OUTAGE);
+		expect(names({ unreachable: true })).toContain(OUTAGE);
+		expect(names({ unreachable: true })).not.toContain(UNREACHABLE_NOT_RUN);
+	});
+
+	it("passes a store whose every member rejects out of reach, and refuses one that answers as if empty", async () => {
+		const outage = (answers: boolean) =>
+			mfaFactorStoreContract({
+				build: async () => ({
+					store: createMemoryMfaFactorStore(),
+					unreachable: () => unreachableStore(answers),
+				}),
+				supports: { unreachable: true },
+			}).find((contractCase) => contractCase.name === OUTAGE);
+		await expect(outage(false)?.run()).resolves.toBeUndefined();
+		await expect(outage(true)?.run()).rejects.toThrow();
+	});
+
+	it("fails for a harness that declares unreachable and does not give it", async () => {
+		const outage = mfaFactorStoreContract({
+			build: async () => ({ store: createMemoryMfaFactorStore() }),
+			supports: { unreachable: true },
+		}).find((contractCase) => contractCase.name === OUTAGE);
+		await expect(outage?.run()).rejects.toThrow(/unreachable/);
+	});
+});
+
+describe("the suite's concurrent cases", () => {
+	it("split their writers across the store and the second instance the harness gives", async () => {
+		const store = createMemoryMfaFactorStore();
+		const used = new Set<string>();
+		const tagged = (tag: string): MfaFactorStore => ({
+			...store,
+			create: (record) => {
+				used.add(tag);
+				return store.create(record);
+			},
+		});
+		const race = mfaFactorStoreContract({
+			build: async () => ({ store: tagged("store"), second: tagged("second") }),
+		}).find(
+			(contractCase) =>
+				contractCase.name === "lets one of N concurrent creates of one (subject, id) through",
+		);
+		await race?.run();
+		expect([...used].sort()).toEqual(["second", "store"]);
+	});
+});
+
 describe("each case", () => {
 	it("builds a harness of its own and closes it, whether it passes or fails", async () => {
 		let built = 0;
@@ -247,7 +338,8 @@ describe("each case", () => {
 			},
 		});
 		for (const contractCase of cases) await contractCase.run();
-		expect(built).toBe(cases.length);
-		expect(closed).toBe(cases.length);
+		const building = cases.filter((contractCase) => contractCase.name !== UNREACHABLE_NOT_RUN);
+		expect(built).toBe(building.length);
+		expect(closed).toBe(building.length);
 	});
 });

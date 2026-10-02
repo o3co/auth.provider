@@ -17,19 +17,24 @@
 /**
  * mTLS module manifest: contributes the RFC 8705 certificate-binding
  * mechanism to core's `tokenBindingMechanisms` slot, and
- * `tls_client_certificate_bound_access_tokens` to discovery, both only while
- * `mtls.enabled` (off by default in reference.conf), built from its own
- * section, `mtls {}`, parsed with {@link mtlsConfigSchema} before any factory
- * runs. A key still written at `oauth.mtls`, the section's old path, refuses
- * boot naming the new one. The settings under `core.tokenBinding`, the
- * dispatch policy among them, are core's.
+ * `tls_client_certificate_bound_access_tokens` to discovery, both built from
+ * its own section, `mtls {}`, parsed with {@link mtlsConfigSchema} before any
+ * factory runs. `mtls.enabled` (off in reference.conf) is the module's switch
+ * (`section.isEnabled`): off, the module registers nothing. A key still
+ * written at `oauth.mtls`, the section's old path, refuses boot naming the
+ * new one. The settings under `core.tokenBinding`, the dispatch policy among
+ * them, are core's.
  *
  * Secure defaults: the certificate comes from the TLS layer
  * (`source = "tls-layer"`), and the forwarded-header source requires an
  * explicit `trustedProxies` allowlist.
  */
 
-import { coerceBooleanFromEnv, defineModule } from "@o3co/auth-provider-core";
+import {
+	coerceBooleanFromEnv,
+	defineModule,
+	wholeNumberInRangeFromEnv,
+} from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createMtlsMechanism, type MtlsMechanismOptions } from "./extractor.mjs";
 import {
@@ -53,7 +58,7 @@ import {
  */
 export const mtlsConfigSchema = z
 	.object({
-		/** When false (default), mtlsModule contributes null — no mTLS middleware mounted. */
+		/** The module's switch: false (default), and the module registers nothing. */
 		enabled: coerceBooleanFromEnv.default(false),
 		/**
 		 * Where the leaf cert comes from. Defaults to `"tls-layer"`: RFC 8705 §3
@@ -90,19 +95,14 @@ export const mtlsConfigSchema = z
 		fullPki: z
 			.object({
 				/** Maximum certificates in a path, leaf and anchor included. */
-				maxChainDepth: z.coerce
-					.number()
-					.int()
-					.min(2)
-					.max(16)
-					.default(FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH),
+				maxChainDepth: wholeNumberInRangeFromEnv(2, 16).default(FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH),
 				/** Signature algorithms permitted at every hop. */
 				signatureAlgorithms: z
 					.array(z.enum(SIGNATURE_ALGORITHM_NAMES as unknown as [string, ...string[]]))
 					.readonly()
 					.default(DEFAULT_SIGNATURE_ALGORITHMS as unknown as string[]),
 				/** Minimum RSA modulus in bits. Ignored for EC and EdDSA keys. */
-				minRsaKeyBits: z.coerce.number().int().min(1024).default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
+				minRsaKeyBits: wholeNumberInRangeFromEnv(1024).default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
 				revocation: z
 					.object({
 						/**
@@ -117,9 +117,9 @@ export const mtlsConfigSchema = z
 						onUnavailable: z.enum(["reject", "allow"]),
 						/** Hosts revocation material may be fetched from. */
 						allowedHosts: z.array(z.string()).readonly().default([]),
-						fetchTimeoutMs: z.coerce.number().int().min(1).default(3000),
-						cacheTtlSeconds: z.coerce.number().int().min(0).default(3600),
-						maxResponseBytes: z.coerce.number().int().min(1).default(1_048_576),
+						fetchTimeoutMs: wholeNumberInRangeFromEnv(1).default(3000),
+						cacheTtlSeconds: wholeNumberInRangeFromEnv(0).default(3600),
+						maxResponseBytes: wholeNumberInRangeFromEnv(1).default(1_048_576),
 						/**
 						 * Refuse an OCSP response that does not echo the request's nonce
 						 * (RFC 6960 §4.4.1). On by default: without it a captured `good`
@@ -176,8 +176,7 @@ const fullPkiOption = (
 
 /**
  * Declarative manifest for the mTLS package. Disabled (the default), the
- * mechanism factory returns `null` and core leaves it out; enabled, core
- * composes it with any other binding mechanisms under
+ * module registers nothing; enabled, core composes it with any other binding mechanisms under
  * `core.tokenBinding.dispatchPolicy` (see
  * `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`).
  *
@@ -245,28 +244,21 @@ export const mtlsModule = defineModule<never, "logger", typeof mtlsConfigSchema>
 				environmentVariable: null,
 			},
 		},
+		isEnabled: (section) => section.enabled,
 	},
 	optional: ["logger"],
 	contributes: {
 		// RFC 8705 §3.3: a client has no other way to learn that access tokens
 		// are bound to its certificate (`cnf["x5t#S256"]`). Not gated on
-		// `source`: the flag describes the token, not the transport. Omitted
-		// rather than `false` when disabled — omission already means `false`,
-		// and cannot collide in core's aggregator. The only field contributed:
+		// `source`: the flag describes the token, not the transport. Never
+		// `false`: a disabled module registers nothing, and omission already
+		// means `false`. The only field contributed:
 		// this package implements §3 token binding, not §2 client
 		// authentication, so `tls_client_auth` must never be advertised.
-		discoveryMetadata: [
-			({ section }) =>
-				section.enabled ? { metadata: { tls_client_certificate_bound_access_tokens: true } } : {},
-		],
+		discoveryMetadata: [() => ({ metadata: { tls_client_certificate_bound_access_tokens: true } })],
 		tokenBindingMechanisms: [
 			(deps) => {
 				const cfg = deps.section;
-				if (!cfg.enabled) {
-					// Disabled by config — no mechanism contributed.
-					return null;
-				}
-
 				// --- Boot-time fail-loud check 0: header source requires an
 				// explicit trusted-proxy allowlist. ---
 				//

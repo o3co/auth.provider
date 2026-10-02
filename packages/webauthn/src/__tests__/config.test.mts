@@ -16,7 +16,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AppConfigSchema } from "@o3co/auth-provider-core";
+import { AppConfigSchema, MAX_DURATION_SECONDS } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { webauthnConfigSchema } from "../config.mjs";
@@ -575,5 +575,95 @@ describe("core's AppConfigSchema passes through every key webauthnConfigSchema r
 		expect(keyPaths(coreSection).sort()).toEqual(keyPaths(webauthnConfigSchema).sort());
 		// Not vacuous: the walk reached the nested rate-limit spec.
 		expect(keyPaths(webauthnConfigSchema)).toContain("rateLimit.authenticationOptions.limit");
+	});
+});
+
+/**
+ * Every number setting is read as a whole number in decimal digits, held to the
+ * range core's schema holds the same key to: a typo such as `"1e3"` or `"0x10"`,
+ * or an exported-but-empty variable, fails boot naming the key.
+ */
+describe("webauthnConfigSchema reads each number setting in decimal digits", () => {
+	const KEYS: ReadonlyArray<
+		readonly [path: string, set: (value: unknown) => unknown, message: string]
+	> = [
+		[
+			"challengeTtlMs",
+			(value) => ({ ...VALID, challengeTtlMs: value }),
+			"must be a whole number of at least 1, in decimal digits",
+		],
+		[
+			"rateLimit.authenticationOptions.limit",
+			(value) => ({
+				...VALID,
+				rateLimit: { authenticationOptions: { limit: value, windowSeconds: 60 } },
+			}),
+			"must be a whole number of at least 1, in decimal digits",
+		],
+		[
+			"rateLimit.authenticationOptions.windowSeconds",
+			(value) => ({
+				...VALID,
+				rateLimit: { authenticationOptions: { limit: 30, windowSeconds: value } },
+			}),
+			`must be a whole number from 1 to ${MAX_DURATION_SECONDS}, in decimal digits`,
+		],
+	];
+
+	const REFUSED: ReadonlyArray<unknown> = [
+		"0x10",
+		"1e3",
+		"5.0",
+		"+5",
+		true,
+		"",
+		"  ",
+		"Infinity",
+		"NaN",
+		Number.POSITIVE_INFINITY,
+		Number.NaN,
+	];
+
+	const issuesAt = (result: ReturnType<typeof webauthnConfigSchema.safeParse>, path: string) =>
+		(result.error?.issues ?? [])
+			.filter((issue) => issue.path.map(String).join(".") === path)
+			.map((issue) => issue.message);
+
+	const readAt = (section: unknown, path: string): unknown =>
+		path
+			.split(".")
+			.reduce<unknown>(
+				(node, key) => (node as Record<string, unknown> | undefined)?.[key],
+				section,
+			);
+
+	describe.each(KEYS)("%s", (path, set, message) => {
+		it.each(REFUSED.map((value) => [value]))("refuses %j, naming the key", (value) => {
+			const result = webauthnConfigSchema.safeParse(set(value));
+			expect(result.success).toBe(false);
+			expect(issuesAt(result, path)).toEqual([message]);
+		});
+
+		it.each([[0], ["0"]])("refuses %j, below the minimum", (value) => {
+			expect(issuesAt(webauthnConfigSchema.safeParse(set(value)), path)).toEqual([message]);
+		});
+
+		it.each([[60], ["60"], [" 60 "]])("reads %j as 60", (value) => {
+			const result = webauthnConfigSchema.safeParse(set(value));
+			expect(result.error?.issues ?? []).toEqual([]);
+			expect(readAt(result.data, path)).toBe(60);
+		});
+	});
+
+	it("refuses a windowSeconds past one year", () => {
+		const [, set, message] = KEYS[2] ?? [];
+		expect(
+			set === undefined
+				? []
+				: issuesAt(
+						webauthnConfigSchema.safeParse(set(MAX_DURATION_SECONDS + 1)),
+						"rateLimit.authenticationOptions.windowSeconds",
+					),
+		).toEqual([message]);
 	});
 });

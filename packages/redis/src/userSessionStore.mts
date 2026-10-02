@@ -25,6 +25,7 @@ import {
 	loggableError,
 	readEnrollmentFacts,
 	readRenewalNonces,
+	recordableAuthTime,
 	recordableEnrollmentFacts,
 	recordableSessionAuthentication,
 	type SessionAuthentication,
@@ -303,16 +304,10 @@ export function createRedisUserSessionStore(
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError(`UserSession ${input.sid}: expiresAt must be a valid date`);
 			}
-			// `isValidEnvelope` reads back a non-negative timestamp only, so an
-			// Invalid Date (stored as JSON `null`) or a pre-epoch authTime would
-			// be written and then read as corrupt, and the session would vanish on
-			// its first read. Refused before Redis is asked.
-			const authTimeMs = input.authTime.getTime();
-			if (!Number.isFinite(authTimeMs) || authTimeMs < 0) {
-				throw new RangeError(
-					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
-				);
-			}
+			// The login time: what core's `recordableAuthTime` answers, no later
+			// than the host's clock, as the memory store records it. Refused before
+			// Redis is asked: `isValidEnvelope` reads back a non-negative timestamp only.
+			const authTime = recordableAuthTime(input.sid, input.authTime, Date.now());
 			// Likewise how the session was established: only what
 			// `SessionAuthentication` admits, `mfaAt` judged on the host's clock
 			// (the one a write is checked against) — anything else would be
@@ -333,7 +328,10 @@ export function createRedisUserSessionStore(
 			}
 			// `authentication` as checked: a copy, its `mfaAt` no later than the
 			// host's clock; the facts as checked.
-			const envelope = toEnvelope({ ...input, authentication, enrollmentFacts }, Date.now());
+			const envelope = toEnvelope(
+				{ ...input, authTime, authentication, enrollmentFacts },
+				Date.now(),
+			);
 			const result = await opts.client.set(
 				k(input.sid),
 				JSON.stringify(envelope),

@@ -56,27 +56,37 @@
  *   completion's does. Writes that ran out of the
  *   lease, or past it, answer what they wrote, and say so (`overran`).
  * - A completion reserves an attempt before the proof is checked, seals the
- *   factor's data, and then, under the lease, in this order: for a first binding notes the
- *   subject's first-binding mark — a note that fails refuses it, nothing
- *   written — consumes the transaction, writes the factor. Another factor
- *   then reads the subject's records again, and
- *   one past `mfa.maxFactorsPerSubject` — bindings made at once — removes
- *   its own, so the limit holds; one it cannot remove is reported standing,
- *   for the caller to audit as bound. A first binding — `binding` `email_proof` when the proof was
- *   given, on the transaction or in the session, else `password` — then
- *   reads the subject's records again: it stands only when its own is listed
- *   and is the only one that may count; otherwise another transaction bound
- *   one at once, or a reset removed its own, so it removes its own, trying
- *   three times, and the user signs in again; one it cannot remove is
- *   reported standing. It then clears D25's flag where the proof was given,
- *   issues the recovery codes — replacing the sets that stood, unless bound
- *   by `password` (`recovery/issue.mts`); a login's written unshown, for the
- *   answer that carries them to mark shown — and marks the witness. So at
- *   most one first binding stands, and a lost race spends the transaction,
- *   never a factor. The caller resumes a login, or escalates the session the
+ *   factor's data, and then, under the lease, in this order: judges the
+ *   binding again on the subject's records as the lease's read gave them —
+ *   a first one beside a record that may count, another beside none, or one
+ *   past `mfa.maxFactorsPerSubject` is refused, nothing written and the
+ *   transaction standing — a first one refused there beside a record the
+ *   read before the lease did not find is `first_binding_conflict`, which
+ *   the routes audit; for a first binding notes the subject's
+ *   first-binding mark — a note that fails refuses it, nothing written —
+ *   consumes the transaction, writes the factor. Every write of the
+ *   subject's factor set is fenced on that read (`factorSet.mts`): a factor
+ *   whose write finds the set changed since — another write landed, which
+ *   under the lease only a writer past its own lease can make — is not
+ *   written, and the binding is refused as one its records no longer allow,
+ *   the transaction spent. So at most one first binding stands, and one
+ *   binding never passes the limit another made at once. A first binding —
+ *   `binding` `email_proof` when the proof was given, on the transaction or
+ *   in the session, else `password` — then clears D25's flag where the proof
+ *   was given, issues the recovery codes — replacing the sets that stood,
+ *   unless bound by `password` (`recovery/issue.mts`); a login's written
+ *   unshown, for the answer that carries them to mark shown — and marks the
+ *   witness. The caller resumes a login, or escalates the session the
  *   binding was made in by what it adds.
  * - A codes write or a witness mark that fails never undoes the factor:
  *   the outcome says so, and the binding stands.
+ * - The factor's answers — its enrollment's start and end — are read once,
+ *   field by field, however the factor holds them (a getter, a class's
+ *   instance). The state and data in them are taken as their plain copy
+ *   (`copyFactorValue`) where the answer is read, and that one copy is what
+ *   `amrFor` and the seal act on; a state or data that is not plain
+ *   JSON-shaped is the factor's failure (`503`), nothing kept or bound. The
+ *   start's `response` must be a plain object: it is answered as built.
  */
 
 import { randomBytes } from "node:crypto";
@@ -88,7 +98,6 @@ import {
 	type MfaEnrollmentStart,
 	type MfaFactor,
 	type MfaFactorRecord,
-	type MfaFactorStore,
 	type MfaTransaction,
 } from "@o3co/auth-provider-core";
 import {
@@ -99,8 +108,6 @@ import {
 	type MfaEnrollmentCompleteOutcome,
 	type MfaEnrollmentRefusal,
 	type MfaFactorUnreadable,
-	type MfaStoreOutage,
-	OUTSIDE_CONTRACT,
 	outage,
 	UNKNOWN_TRANSACTION,
 } from "./ceremony.mjs";
@@ -108,6 +115,7 @@ import type { MfaFactorSetCarried, MfaFactorSetWrites } from "./factorSet.mjs";
 import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes, writeRecoveryCodes } from "./recovery/issue.mjs";
+import { copyFactorValue } from "./sealing.mjs";
 
 const NOT_OPEN = Object.freeze({ outcome: "enrollment_not_open" as const });
 const PROOF_REQUIRED = Object.freeze({ outcome: "email_proof_required" as const });
@@ -128,8 +136,6 @@ type FirstBindingBy = "password" | "email_proof";
  */
 const UNTIL_COMPLETION: FirstBindingBy = "email_proof";
 
-/** How many times a binding that cannot stand tries to remove its own factor before it says the factor stands. */
-const REMOVAL_TRIES = 3;
 const INVALID_LABEL = Object.freeze({ outcome: "invalid_label" as const });
 
 /** The pending enrollment as sealed: the kept state, and where the binding's writes begin (`factorSet.mts`). */
@@ -168,21 +174,6 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 	): Promise<MfaEnrollmentCompleteOutcome>;
 } {
 	const { factors, sealing, factorSet } = kit;
-
-	/** The subject's records as `store` reads them: what a binding's writes read again under the lease. */
-	const recordsIn = async (
-		store: MfaFactorStore,
-		subject: string,
-	): Promise<readonly MfaFactorRecord[] | MfaStoreOutage> => {
-		try {
-			const listed: unknown = await store.list(subject);
-			return Array.isArray(listed)
-				? (listed as MfaFactorRecord[])
-				: outage("mfa_factor", "list", OUTSIDE_CONTRACT);
-		} catch (cause) {
-			return outage("mfa_factor", "list", cause);
-		}
-	};
 
 	/**
 	 * The transaction `call` names when it opened an enrollment, with its
@@ -340,95 +331,6 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 		return { ...open, factor, records };
 	};
 
-	/**
-	 * After another factor `id` was written beside the subject's: `undefined`
-	 * while the records read again stay within `mfa.maxFactorsPerSubject`.
-	 * Otherwise — past it, as bindings made at once can be, or unreadable —
-	 * its own is removed, and the answer is the limit or the read's outage;
-	 * one it cannot remove is reported standing, with the read's outage.
-	 */
-	const pastLimit = async (
-		store: MfaFactorStore,
-		subject: string,
-		id: string,
-	): Promise<
-		| MfaEnrollmentRefusal
-		| {
-				readonly listing: MfaStoreOutage | undefined;
-				readonly standing: { readonly cause: unknown };
-		  }
-		| undefined
-	> => {
-		const records = await recordsIn(store, subject);
-		if (!("outcome" in records) && records.length <= kit.maxFactorsPerSubject) return undefined;
-		const listing = "outcome" in records ? records : undefined;
-		const standing = await removeOwn(store, subject, id);
-		if (standing !== undefined) return { listing, standing };
-		return listing ?? FACTOR_LIMIT;
-	};
-
-	/** This binding's factor `id` removed, tried {@link REMOVAL_TRIES} times: `undefined` once removed, else the last failure. */
-	const removeOwn = async (
-		store: MfaFactorStore,
-		subject: string,
-		id: string,
-	): Promise<{ readonly cause: unknown } | undefined> => {
-		let standing: { readonly cause: unknown } | undefined;
-		for (let tried = 0; tried < REMOVAL_TRIES; tried++) {
-			try {
-				await store.remove(subject, id);
-				return undefined;
-			} catch (cause) {
-				standing = { cause };
-			}
-		}
-		return standing;
-	};
-
-	/**
-	 * After this binding's factor `id` was written: `undefined` only when the
-	 * records read again list it, and it is the only one that may count.
-	 * Otherwise its own is removed —
-	 * another stands beside it (another transaction bound one at once), its
-	 * own is gone (a reset removed it), or the records cannot be read to tell —
-	 * and a factor that cannot be removed is reported standing.
-	 */
-	const conflict = async (
-		store: MfaFactorStore,
-		about: MfaCeremonySubject,
-		id: string,
-		binding: FirstBindingBy,
-	): Promise<MfaEnrollmentCompleteOutcome | undefined> => {
-		const records = await recordsIn(store, about.subject);
-		const alone =
-			!("outcome" in records) &&
-			records.some((record) => record.id === id) &&
-			records.every((record) => record.id === id || !mayCount(factors, record));
-		if (alone) {
-			const others = records.filter((record) => record.id !== id);
-			if (recordsAfterFirstBinding(factors, others, binding) <= kit.maxFactorsPerSubject) {
-				return undefined;
-			}
-			// Past the limit, as bindings made at once can take it: its own is removed.
-			const standing = await removeOwn(store, about.subject, id);
-			return standing === undefined
-				? FACTOR_LIMIT
-				: {
-						outcome: "factor_standing",
-						factor: { id, kind: about.kind },
-						binding,
-						listing: undefined,
-						standing,
-						...about,
-					};
-		}
-		const standing = await removeOwn(store, about.subject, id);
-		if ("outcome" in records) {
-			return { outcome: "first_binding_unchecked", listing: records, standing, ...about };
-		}
-		return { outcome: "first_binding_conflict", standing, ...about };
-	};
-
 	return {
 		async begin(call) {
 			const nowMs = kit.now();
@@ -447,9 +349,13 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				kind: factor.kind,
 				cause,
 			});
-			let started: MfaEnrollmentStart;
+			let started: {
+				readonly state: MfaEnrollmentStart["state"];
+				readonly response: MfaEnrollmentStart["response"];
+				readonly mail: MfaEnrollmentStart["mail"] | undefined;
+			};
 			try {
-				started = await factor.beginEnrollment({
+				const answer = await factor.beginEnrollment({
 					subject: tx.subject,
 					transactionId: tx.id,
 					nowMs,
@@ -458,9 +364,17 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					user,
 					factors: isFirstBinding(tx) ? [] : enrolledOfKind(tx.subject, factor.kind, records),
 				});
-				if (!kit.answerable(started?.response) || !kit.answerable(started.state)) {
+				// The factor's answer, each field read once, however it holds them; its
+				// state as the plain copy that is sealed (`copyFactorValue`). The response
+				// is answered as the factor built it.
+				started = {
+					state: copyFactorValue(answer?.state),
+					response: answer?.response,
+					mail: answer?.mail,
+				};
+				if (!kit.answerable(started.response)) {
 					throw new TypeError(
-						"the factor's enrollment answered a response or a state that is not an object",
+						"the factor's enrollment answered a response that is not a plain object",
 					);
 				}
 			} catch (cause) {
@@ -624,7 +538,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			let completion: MfaEnrollmentCompletion;
 			let amr: readonly string[] | undefined;
 			try {
-				completion = await factor.completeEnrollment({
+				const answer = await factor.completeEnrollment({
 					subject: tx.subject,
 					transactionId: tx.id,
 					nowMs,
@@ -636,6 +550,12 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),
 					proof: call.proof,
 				});
+				// The factor's answer, each field read once, however it holds them; its
+				// data as the plain copy that is sealed (`copyFactorValue`) and that
+				// `amrFor` is handed.
+				completion = answer.ok
+					? { ok: true, data: copyFactorValue(answer.data), label: answer.label }
+					: { ok: false, reason: answer.reason };
 				if (completion.ok) amr = kit.declaredAmr(factor, completion.data);
 			} catch (cause) {
 				return unreadable("enrollment", { cause });
@@ -669,6 +589,15 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 			const writePhase = async (
 				writes: MfaFactorSetWrites,
 			): Promise<MfaEnrollmentCompleteOutcome> => {
+				// Judged again on the records read under the lease, before anything is
+				// written: every write after is fenced on them.
+				const refusedNow = refusedBy(tx.purpose, first, writes.factors.records, firstBy);
+				// A first binding closed here was let through by the read before the
+				// lease, which found no record that may count: another binding landed.
+				if (first && refusedNow?.outcome === "first_binding_closed") {
+					return { outcome: "first_binding_conflict", ...about };
+				}
+				if (refusedNow !== undefined) return refusedNow;
 				// Noted before the factor is written: a first binding the mark misses
 				// would leave a stale session trusted.
 				if (first) {
@@ -686,8 +615,9 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				);
 				if ("outcome" in consumed) return consumed;
 				const binding: NonNullable<MfaFactorRecord["binding"]> = first ? firstBy : "mfa";
+				let created: "created" | "changed";
 				try {
-					await writes.factorStore.create({
+					created = await writes.factors.create({
 						id,
 						subject: tx.subject,
 						kind: factor.kind,
@@ -701,6 +631,9 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				} catch (cause) {
 					return outage("mfa_factor", "create", cause);
 				}
+				// Another write of the set landed since it was read: the binding was
+				// judged on records that no longer stand. The transaction is spent.
+				if (created === "changed") return closed(tx.purpose);
 				const enrolled = {
 					outcome: "enrolled" as const,
 					continuation: consumed.continuation,
@@ -713,18 +646,6 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					...about,
 				};
 				if (!first) {
-					const over = await pastLimit(writes.factorStore, tx.subject, id);
-					if (over !== undefined && "standing" in over) {
-						return {
-							outcome: "factor_standing",
-							factor: enrolled.factor,
-							binding,
-							listing: over.listing,
-							standing: over.standing,
-							...about,
-						};
-					}
-					if (over !== undefined) return over;
 					return {
 						...enrolled,
 						recoveryCodes: undefined,
@@ -732,10 +653,6 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 						flagUncleared: undefined,
 					};
 				}
-				// Another transaction of the subject's may have bound one at once:
-				// nothing follows the factor until it is known to stand alone.
-				const conflicted = await conflict(writes.factorStore, about, id, firstBy);
-				if (conflicted !== undefined) return conflicted;
 				// D25: the flag an operator reset set is cleared only once the proof was
 				// given and the first counting factor written.
 				const flagCleared =

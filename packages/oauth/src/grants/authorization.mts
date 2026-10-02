@@ -50,6 +50,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
+import { behindClientBoundary } from "../clients/clientBoundary.mjs";
 import { usableFrontchannelLogoutUri } from "../logout/frontchannelLogoutUri.mjs";
 import { joinSession } from "../logout/sessionEnd.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
@@ -111,7 +112,11 @@ const requirementOrOutageRefusal = (
 };
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
-	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
+	const { config, codeRepository, keyStore, logger } = deps;
+	// The client's logout metadata is snapshotted into the session RP
+	// registry, so the record is read through core's client-record boundary:
+	// a record it refuses rejects the lookup, answered as the store's outage.
+	const clientRepository = behindClientBoundary(deps.clientRepository, logger ?? consoleLogger);
 	// No acr table: the acr was chosen at /authorize and travels on the code.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,

@@ -27,6 +27,7 @@ import {
 	readAcrTable,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 	stepUpReach,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -78,14 +79,15 @@ export const oauthSectionSchema = z.object({
 			allowedAudiences: commaList.optional(),
 			allowedHosts: commaList.optional(),
 			deniedHosts: commaList.optional(),
-			maxBytes: z.coerce.number().int().positive().optional(),
-			timeoutMs: z.coerce.number().int().positive().optional(),
-			cacheMaxAgeMs: z.coerce.number().int().nonnegative().optional(),
-			maxCacheEntries: z.coerce.number().int().positive().optional(),
-			staleIfErrorMs: z.coerce.number().int().nonnegative().optional(),
-			negativeCacheMs: z.coerce.number().int().nonnegative().optional(),
-			maxConcurrentFetches: z.coerce.number().int().positive().optional(),
+			maxBytes: wholeNumberInRangeFromEnv(1).optional(),
+			timeoutMs: wholeNumberInRangeFromEnv(1).optional(),
+			cacheMaxAgeMs: wholeNumberInRangeFromEnv(0).optional(),
+			maxCacheEntries: wholeNumberInRangeFromEnv(1).optional(),
+			staleIfErrorMs: wholeNumberInRangeFromEnv(0).optional(),
+			negativeCacheMs: wholeNumberInRangeFromEnv(0).optional(),
+			maxConcurrentFetches: wholeNumberInRangeFromEnv(1).optional(),
 		})
+		.strict()
 		.optional(),
 });
 
@@ -420,6 +422,9 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// RFC 8414 §2 requires the field; with no authorization
 							// endpoint it lists none.
 							response_types_supported: authorizationEndpoint ? ["code"] : [],
+							// RFC 8414 §2 defaults an omitted value to query and fragment;
+							// `/authorize` answers in the query only.
+							...(authorizationEndpoint ? { response_modes_supported: ["query"] } : {}),
 							// OIDC Discovery defaults this to **true** when omitted,
 							// which would claim `request_uri` support `/authorize`
 							// does not have: an RP that believed it had sent a signed

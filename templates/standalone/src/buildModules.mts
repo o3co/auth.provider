@@ -278,13 +278,15 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 			? [redisFederationTokenStoreModuleFor({ environment: overrides.environment })]
 			: [inMemoryFederationTokenStoreModule];
 
-	// One module per store, nothing while the feature is off. The Redis grant
-	// store is built for this composition root so its plaintext guard knows
-	// which environment selected the config, as the federation-token store's
-	// is. Both memory modules declare `replicaSafety`, so `core.deployment.mode =
-	// "multi"` refuses them by name; the routes module itself refuses a Redis
-	// grant store beside memory user-session stores, because the grants would
-	// outlive the boundary that ends them.
+	// One module per store, nothing while the feature is off or the store is
+	// `"none"` (the default), which the routes module refuses at boot naming
+	// the store. The Redis grant store is built for this composition root so
+	// its plaintext guard knows which environment selected the config, as the
+	// federation-token store's is. Both memory modules declare
+	// `replicaSafety`, so `core.deployment.mode = "multi"` refuses them by name;
+	// the routes module itself refuses a Redis grant store beside memory
+	// user-session stores, because the grants would outlive the boundary that
+	// ends them.
 	const federationGrantStoreModules: Module[] = !federationGrantsEnabled
 		? []
 		: adapters.federationGrantStore === "redis"
@@ -293,12 +295,16 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 						? redisFederationGrantStoreModuleFor()
 						: redisFederationGrantStoreModuleFor({ environment: overrides.environment }),
 				]
-			: [memoryFederationGrantStoreModule];
+			: adapters.federationGrantStore === "memory"
+				? [memoryFederationGrantStoreModule]
+				: [];
 	const federationGrantIntentStoreModules: Module[] = !federationGrantsEnabled
 		? []
 		: adapters.federationGrantIntentStore === "redis"
 			? [redisFederationGrantIntentStoreModule]
-			: [memoryFederationGrantIntentStoreModule];
+			: adapters.federationGrantIntentStore === "memory"
+				? [memoryFederationGrantIntentStoreModule]
+				: [];
 
 	// The mail sender behind core's `mailSender` slot. The development one logs
 	// each code and refuses the boot where the configuration or NODE_ENV is

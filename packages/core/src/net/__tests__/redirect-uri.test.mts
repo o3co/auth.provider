@@ -32,6 +32,7 @@ import {
 	describeRedirectUriRejection,
 	matchesRegisteredRedirectUri,
 	redirectUriQueryCarries,
+	redirectUriQueryNamesWellFormed,
 } from "#/net/redirect-uri.mjs";
 
 const reason = (raw: string) => checkRedirectUri(raw)?.reason;
@@ -314,6 +315,29 @@ describe("redirectUriQueryCarries", () => {
 		const uri = "https://app.example/cb?grant_id[]=x";
 		expect(redirectUriQueryCarries(uri, NAMES)).toBeUndefined();
 		expect(reason(uri)).toBe("query-name-invalid");
+	});
+});
+
+describe("redirectUriQueryNamesWellFormed", () => {
+	it("holds every query name to checkRedirectUri's grammar, on any scheme", () => {
+		for (const uri of [
+			"https://app.example/cb",
+			"https://app.example/cb?",
+			"http://rp.example/fc?a=1&B_c-2=x&flag",
+			"https://app.example/cb?state=1",
+		]) {
+			expect(redirectUriQueryNamesWellFormed(uri), uri).toBe(true);
+		}
+		for (const uri of [
+			"https://app.example/cb?%73id=x",
+			"https://app.example/cb?a.b=x",
+			"https://app.example/cb?a=1;b=2",
+			"https://app.example/cb?=x",
+			"https://app.example/cb?a=1&&b=2",
+			"not a url",
+		]) {
+			expect(redirectUriQueryNamesWellFormed(uri), uri).toBe(false);
+		}
 	});
 });
 

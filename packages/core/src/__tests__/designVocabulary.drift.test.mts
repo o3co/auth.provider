@@ -363,6 +363,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+recordableSessionAuthentication\b/,
 	},
 	{
+		concept: "the authTime a session store may record",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+recordableAuthTime\b/,
+	},
+	{
 		concept: "secret entropy floor — measuring a secret (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
 		definition: /(?:function|const)\s+measureSecretEntropyBytes\b/,
@@ -1363,8 +1368,13 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	},
 	{
 		file: "packages/redis/src/mfa-factor-store.mts",
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text the guard matches, not a template
-		read: "value=`${record.version}\\n${fixedPart(record)}\\n${mutablePart(record)}`",
+		read: "value=storedValueOf(factor)",
+		count: 1,
+		why: "the MFA factor store's client create (HSETNX), handed the text of the factor record it was given: a second factor's, no session record",
+	},
+	{
+		file: "packages/redis/src/mfa-factor-store.mts",
+		read: "key=keyOf(factor.subject)",
 		count: 1,
 		why: "the MFA factor store's client create (HSETNX), handed the text of the factor record it was given: a second factor's, no session record",
 	},

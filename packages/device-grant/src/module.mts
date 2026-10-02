@@ -23,11 +23,12 @@
  * actions verification admits (`DEVICE_GRANT_ADMISSION_ACTIONS`).
  *
  * Off by default. The switch, `device-grant.enabled`, is read from the config
- * handed to `deviceGrantModule({ config })`; disabled, no grant or action is
- * registered (so `grant_types_supported` does not name it), no discovery
- * field is added and both routes answer 404. Routes and discovery use the
- * module's own section, `device-grant {}`, as boot parsed it, and boot is
- * refused if the two disagree (`settingsFor`). A key still written at
+ * handed to `deviceGrantModule({ config })`; disabled, the module registers
+ * nothing — no grant (so `grant_types_supported` does not name it), action,
+ * route, discovery field, budget, requirement or absence policy — and its
+ * section alone is declared. Routes and discovery use the module's own
+ * section, `device-grant {}`, as boot parsed it, and boot is refused if the
+ * two disagree, in either direction. A key still written at
  * `oauth.deviceAuthorization`, the section's old path, refuses boot naming
  * the new one.
  *
@@ -54,6 +55,7 @@ import {
 	type Module,
 	type ProviderDeps,
 	resolveAccessTokenLifetime,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express, { type ErrorRequestHandler, type RequestHandler, type Response } from "express";
@@ -74,15 +76,14 @@ import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 /**
  * `device-grant.rateLimit` — the budget RFC 8628 §5.1 sizes the user code
- * against. `.int().positive()` is load-bearing: an empty environment variable
- * coerces to `0`, and a zero budget locks every user out.
+ * against. The floor of 1 is load-bearing: a zero budget locks every user out.
  */
 const rateLimitSpecSchema = z
 	.object({
-		limit: z.coerce.number().int().positive(),
+		limit: wholeNumberInRangeFromEnv(1),
 		// One year at most, as core's schema holds every duration an operator
 		// writes: a window past the Date range is one the limiter refuses anyway.
-		windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+		windowSeconds: wholeNumberInRangeFromEnv(1, MAX_DURATION_SECONDS),
 	})
 	.strict();
 
@@ -99,10 +100,7 @@ const ENABLED = coerceBooleanFromEnv.default(false);
  */
 export const deviceGrantConfigSchema = z
 	.object({
-		/**
-		 * When false (the default), the module contributes no grant and no
-		 * discovery field, and its two routes answer 404.
-		 */
+		/** When false (the default), the module registers nothing. */
 		enabled: ENABLED,
 		/**
 		 * The page where the end user types the code. No default: the page
@@ -121,19 +119,15 @@ export const deviceGrantConfigSchema = z
 		 * §5.4: "long enough lifetime to be useable ... but sufficiently short
 		 * to limit the usability of a code obtained for phishing".
 		 */
-		codeLifetimeSeconds: z.coerce
-			.number()
-			.int()
-			.min(DEVICE_CODE_LIFETIME_SECONDS.min)
-			.max(DEVICE_CODE_LIFETIME_SECONDS.max)
-			.default(600),
+		codeLifetimeSeconds: wholeNumberInRangeFromEnv(
+			DEVICE_CODE_LIFETIME_SECONDS.min,
+			DEVICE_CODE_LIFETIME_SECONDS.max,
+		).default(600),
 		/** Advertised as `interval`; also what the store enforces. */
-		pollingIntervalSeconds: z.coerce
-			.number()
-			.int()
-			.min(DEVICE_POLLING_INTERVAL_SECONDS.min)
-			.max(DEVICE_POLLING_INTERVAL_SECONDS.max)
-			.default(5),
+		pollingIntervalSeconds: wholeNumberInRangeFromEnv(
+			DEVICE_POLLING_INTERVAL_SECONDS.min,
+			DEVICE_POLLING_INTERVAL_SECONDS.max,
+		).default(5),
 		/**
 		 * The verification endpoint's budget per authenticated subject, which
 		 * the module contributes as the `device_verification` budget every
@@ -194,6 +188,8 @@ const OPTIONAL = [
 	// endpoint may dispatch through core's grant registry, and then they are
 	// read from the configuration (`tokenSettings`).
 	"oauthTokenSettings",
+	// Consulted by the grant at the poll, when wired.
+	"grantPolicy",
 ] as const;
 
 /**
@@ -256,29 +252,28 @@ const isEnabled = (config: unknown): boolean => {
 	return read.success && read.data;
 };
 
+/** Why a disagreement between the factory's decision and boot's parse refuses boot. */
+const disagreement = (built: "on" | "off"): string => {
+	const booted = built === "on" ? "off" : "on";
+	return (
+		`deviceGrantModule: built from a configuration with the grant ${built}, but the ` +
+		`configuration createApp parsed has device-grant.enabled ${booted}. ` +
+		"Whether the module registers anything is decided from the first — the configuration " +
+		"read before boot — and its routes and discovery field from the second. " +
+		"Hand deviceGrantModule the configuration read from the same files and " +
+		"environment as the one createApp is handed."
+	);
+};
+
 /**
- * The settings slice from the config `createApp` parsed (`null` when the
- * grant is off there), held to the factory's decision. A disagreement refuses
- * boot; otherwise half a grant would run — advertised with no way to start
- * it, or startable while the token endpoint refuses it.
+ * The settings slice from the config `createApp` parsed, held to the
+ * factory's decision that the grant is on. A disagreement refuses boot;
+ * otherwise half a grant would run — advertised with no way to start it, or
+ * startable while the token endpoint refuses it.
  */
-const settingsFor = (
-	enabled: boolean,
-	deps: DeviceGrantSectionDeps,
-): DeviceAuthorizationConfigSlice | null => {
-	const slice = deps.section.enabled ? deps.section : null;
-	if ((slice !== null) !== enabled) {
-		const [built, booted] = enabled ? ["on", "off"] : ["off", "on"];
-		throw new Error(
-			`deviceGrantModule: built from a configuration with the grant ${built}, but the ` +
-				`configuration createApp parsed has device-grant.enabled ${booted}. ` +
-				"Whether the grant is contributed is decided from the first — the configuration " +
-				"read before boot — and its routes and discovery field from the second. " +
-				"Hand deviceGrantModule the configuration read from the same files and " +
-				"environment as the one createApp is handed.",
-		);
-	}
-	return slice;
+const settingsFor = (deps: DeviceGrantSectionDeps): DeviceAuthorizationConfigSlice => {
+	if (!deps.section.enabled) throw new Error(disagreement("on"));
+	return deps.section;
 };
 
 const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string => {
@@ -396,33 +391,6 @@ const unexpectedErrors =
 	};
 
 /**
- * What a disabled deployment mounts: a 404 whose description names the config
- * key, so an operator can tell a disabled grant from an uninstalled one. It
- * reads nothing else of the config, so a disabled grant's required settings
- * are never checked.
- */
-const disabledRoute = (id: string, mountPath: string) => {
-	const router = express.Router();
-	router.all("/", (_req, res) => {
-		// Same cache directives as the live endpoints. A 404 with no
-		// directives is exactly the shape an intermediary heuristically
-		// caches — and a cached "this deployment has no device grant" would
-		// outlive the operator turning it on.
-		res
-			.status(404)
-			.set("Cache-Control", "no-store")
-			.set("Pragma", "no-cache")
-			.json({
-				error: "not_found",
-				error_description:
-					"the device authorization grant is not enabled on this deployment " +
-					"(device-grant.enabled = false)",
-			});
-	});
-	return { id, mountPath, handler: router };
-};
-
-/**
  * The middleware of the `csrfGuard` slot the session module provides — the
  * guard `/session/login` runs. Required when the grant is on: the
  * verification endpoint authorises on the session cookie and would otherwise
@@ -484,8 +452,8 @@ const requireRateLimiter = (
 
 /**
  * Presence check for the optional `deviceCodeStore` slot, read by the grant
- * and both endpoints. Declaring the store `"unsupported"` is for deployments
- * that leave the grant off; it does not let an enabled grant run without one.
+ * and both endpoints. Declaring the store `"unsupported"` does not let the
+ * grant run without one.
  */
 const requireDeviceCodeStore = (
 	deps: DeviceGrantModuleDeps,
@@ -568,6 +536,45 @@ const requireContributedVerificationBudget = (
 };
 
 /**
+ * The module's section. The package's `config/reference.conf` holds its
+ * defaults. No variable binds a key of it, so the refusal of an old path
+ * names none. Declared whether or not the grant is on, so a setting still
+ * written at the old path refuses boot rather than reading as off.
+ */
+const SECTION = {
+	schema: deviceGrantConfigSchema,
+	reference: new URL("../config/reference.conf", import.meta.url),
+	relocatedFrom: {
+		"oauth.deviceAuthorization": { to: "", environmentVariable: null },
+		"oauth.deviceAuthorization.verification-uri": {
+			to: "verificationUri",
+			environmentVariable: null,
+		},
+		"oauth.deviceAuthorization.verification-uri-complete": {
+			to: "verificationUriComplete",
+			environmentVariable: null,
+		},
+		"oauth.deviceAuthorization.code-lifetime-seconds": {
+			to: "codeLifetimeSeconds",
+			environmentVariable: null,
+		},
+		"oauth.deviceAuthorization.polling-interval-seconds": {
+			to: "pollingIntervalSeconds",
+			environmentVariable: null,
+		},
+	},
+} as const;
+
+/** The section of a module built with the grant off, held to that decision. */
+const sectionHeldOff = {
+	...SECTION,
+	schema: deviceGrantConfigSchema.superRefine((section, ctx) => {
+		if (section.enabled)
+			ctx.addIssue({ code: "custom", path: ["enabled"], message: disagreement("off") });
+	}),
+};
+
+/**
  * The device grant, built for one config — see the file header for what
  * `device-grant.enabled` decides here.
  *
@@ -575,35 +582,12 @@ const requireContributedVerificationBudget = (
  * and `oauthAuthorizationModule({ config })` take theirs.
  */
 export const deviceGrantModule = (params: { config: AppConfig }): Module => {
-	const enabled = isEnabled(params.config);
+	if (!isEnabled(params.config)) {
+		return defineModule({ name: "device-grant", section: sectionHeldOff });
+	}
 	return defineModule<Requires, Optional, typeof deviceGrantConfigSchema>({
 		name: "device-grant",
-		// The package's `config/reference.conf` holds this section's defaults.
-		// No variable binds a key of it, so the refusal of an old path names
-		// none.
-		section: {
-			schema: deviceGrantConfigSchema,
-			reference: new URL("../config/reference.conf", import.meta.url),
-			relocatedFrom: {
-				"oauth.deviceAuthorization": { to: "", environmentVariable: null },
-				"oauth.deviceAuthorization.verification-uri": {
-					to: "verificationUri",
-					environmentVariable: null,
-				},
-				"oauth.deviceAuthorization.verification-uri-complete": {
-					to: "verificationUriComplete",
-					environmentVariable: null,
-				},
-				"oauth.deviceAuthorization.code-lifetime-seconds": {
-					to: "codeLifetimeSeconds",
-					environmentVariable: null,
-				},
-				"oauth.deviceAuthorization.polling-interval-seconds": {
-					to: "pollingIntervalSeconds",
-					environmentVariable: null,
-				},
-			},
-		},
+		section: SECTION,
 		requires: REQUIRES,
 		optional: OPTIONAL,
 		// Optional to wire, not optional to decide. A composition with no
@@ -614,46 +598,39 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},
 		contributes: {
-			// The verification endpoint's budget, for every limiter to read, with
-			// the grant on or off: nothing keys the prefix while it is off.
+			// The verification endpoint's budget, for every limiter to read.
 			rateLimitBudgets: {
 				[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX]: (deps) =>
 					readVerificationRateLimitBudget(deps.section),
 				// Keyed by the device_authorization guard, with no budget of its own.
 				[DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX]: () => null,
 			},
-			// Only when enabled — see the file header. Absent, `/oauth/token`
+			// Absent while the grant is off — see the file header — `/oauth/token`
 			// answers `unsupported_grant_type` for an unregistered grant, and
 			// `grant_types_supported`, read off the same resolver, does not name
 			// it: the document and the endpoint say the same thing.
-			...(enabled
-				? {
-						admissionActions: DEVICE_GRANT_ADMISSION_ACTIONS,
-						grants: {
-							[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantSectionDeps) => {
-								// Name-keyed contributions run before the routes, so the
-								// disagreement check comes first here too — ahead of the
-								// store the booted config may rightly say it lacks.
-								settingsFor(enabled, deps);
-								return createDeviceCodeGrant({
-									store: requireDeviceCodeStore(deps),
-									keyStore: deps.keyStore,
-									accessTokenExpiresIn: tokenSettings(deps).accessTokenDefaultExpiresIn(),
-									logger: deps.logger,
-									// An approval a later sessions boundary covers is refused
-									// at the poll (see grant.mts).
-									...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
-								});
-							},
-						},
-					}
-				: {}),
+			admissionActions: DEVICE_GRANT_ADMISSION_ACTIONS,
+			grants: {
+				[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantSectionDeps) => {
+					// Name-keyed contributions run before the routes, so the
+					// disagreement check comes first here too — ahead of the
+					// store the booted config may rightly say it lacks.
+					settingsFor(deps);
+					return createDeviceCodeGrant({
+						store: requireDeviceCodeStore(deps),
+						keyStore: deps.keyStore,
+						accessTokenExpiresIn: tokenSettings(deps).accessTokenDefaultExpiresIn(),
+						logger: deps.logger,
+						grantPolicy: deps.grantPolicy,
+						// An approval a later sessions boundary covers is refused
+						// at the poll (see grant.mts).
+						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
+					});
+				},
+			},
 			routes: [
 				(deps: DeviceGrantSectionDeps) => {
-					const slice = settingsFor(enabled, deps);
-					if (slice === null) {
-						return disabledRoute("device-authorization", "/oauth/device_authorization");
-					}
+					const slice = settingsFor(deps);
 					const router = express.Router();
 					// Every middleware on both device routes is a route on `/` — the
 					// endpoint's own path — not `router.use`: core mounts this router on
@@ -720,10 +697,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					};
 				},
 				(deps: DeviceGrantSectionDeps) => {
-					const slice = settingsFor(enabled, deps);
-					if (slice === null) {
-						return disabledRoute("device-verification", "/oauth/device/verification");
-					}
+					const slice = settingsFor(deps);
 					const router = express.Router();
 					router.all("/", noStore);
 					// JSON only — see the file header. No form parser is mounted, and
@@ -778,8 +752,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 			],
 			discoveryMetadata: [
 				(deps: DeviceGrantSectionDeps) => {
-					const slice = settingsFor(enabled, deps);
-					if (slice === null) return {};
+					settingsFor(deps);
 					// RFC 8628 §4: a client that cannot discover this endpoint cannot
 					// start the flow. An issuer-relative path under `endpoints`, which
 					// core prefixes and validates (it refuses `*_endpoint` under

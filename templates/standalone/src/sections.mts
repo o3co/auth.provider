@@ -35,6 +35,7 @@ import {
 	MAX_TRUST_PROXY_HOPS,
 	normalizeAllowedOrigins,
 	wholeNumberFromEnv,
+	wholeNumberInRangeFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
@@ -170,7 +171,7 @@ export const httpSectionSchema = z
 	.object({
 		port: portSchema,
 		trustProxy: trustProxySchema,
-		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
+		readinessTimeoutMs: wholeNumberInRangeFromEnv(1, 2_147_483_647),
 		cors: z.object({ allowedOrigins: allowedOriginsSchema }).strict(),
 	})
 	.strict();
@@ -257,8 +258,8 @@ export const adaptersSchema = z
 		replaySeenSet: z.enum(["memory", "redis"]),
 		consentStore: z.enum(["none", "memory", "redis"]),
 		federationTokenStore: z.enum(["memory", "redis"]),
-		federationGrantStore: z.enum(["memory", "redis"]),
-		federationGrantIntentStore: z.enum(["memory", "redis"]),
+		federationGrantStore: z.enum(["none", "memory", "redis"]),
+		federationGrantIntentStore: z.enum(["none", "memory", "redis"]),
 		mfaFactorStore: z.enum(["memory", "redis", "store"]),
 		mfaTransactionStore: z.enum(["memory", "redis"]),
 		codeRepository: z.enum(["memory", "redis"]),
@@ -332,7 +333,7 @@ export function repositoriesSectionSchemaFor(selection: {
 
 /** The in-process code repository's section: the default lifetime, in positive whole seconds. */
 export const inMemoryCodeRepositorySectionSchema = z
-	.object({ defaultExpiresIn: z.coerce.number().int().positive() })
+	.object({ defaultExpiresIn: wholeNumberInRangeFromEnv(1) })
 	.strict();
 
 /**
