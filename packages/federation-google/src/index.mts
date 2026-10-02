@@ -14,5 +14,11 @@
  * limitations under the License.
  */
 
+export type { GoogleEntry } from "./entry.mjs";
 export type { GoogleProvider, GoogleProviderConfig } from "./google.mjs";
 export { createGoogleProvider, googleFederationModule } from "./google.mjs";
+export {
+	GOOGLE_FEDERATION_TYPE,
+	type GoogleFederationTypeModuleOptions,
+	googleFederationTypeModule,
+} from "./type-module.mjs";
