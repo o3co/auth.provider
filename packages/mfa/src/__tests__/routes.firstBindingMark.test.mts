@@ -49,6 +49,7 @@ import {
 	beginFirstBinding,
 	beginLogin,
 	completeEnrollment,
+	dropRecord,
 	enrollFromAccount,
 	freezeClock,
 	readTransaction,
@@ -104,7 +105,7 @@ async function composed(mode: "optional" | "required", enrolled?: true) {
 
 /** The factor store loses every record of alice's. */
 async function loseFactors(store: MfaFactorStore): Promise<void> {
-	for (const record of await store.list(ALICE.id)) await store.remove(ALICE.id, record.id);
+	for (const record of await store.list(ALICE.id)) await dropRecord(store, ALICE.id, record.id);
 }
 
 /** The Store's witness cleared as well: a Store that keeps none says nothing of the binding. */
@@ -175,7 +176,7 @@ describe("a first binding in a session after the subject's first binding elsewhe
 			const records = await list(subject);
 			if (reads++ === 0) {
 				for (const record of records) {
-					if (record.kind === "totp") await factorStore.remove(subject, record.id);
+					if (record.kind === "totp") await dropRecord(factorStore, subject, record.id);
 				}
 			}
 			return records;
@@ -333,7 +334,7 @@ describe("a first binding at a login after the subject's first binding elsewhere
 				).status,
 			).toBe(200);
 			for (const record of await factorStore.list(ALICE.id)) {
-				if (record.kind === "totp") await factorStore.remove(ALICE.id, record.id);
+				if (record.kind === "totp") await dropRecord(factorStore, ALICE.id, record.id);
 			}
 			freezeClock(T0 + 60_000);
 			if (failure) {
@@ -385,7 +386,7 @@ describe("a first binding at a login after the subject's first binding elsewhere
 		expect(bound.status, JSON.stringify(bound.body)).toBe(200);
 		// The counting factor is lost; the recovery sets, which do not count, stay.
 		for (const record of await factorStore.list(ALICE.id)) {
-			if (record.kind === "totp") await factorStore.remove(ALICE.id, record.id);
+			if (record.kind === "totp") await dropRecord(factorStore, ALICE.id, record.id);
 		}
 		freezeClock(T0 + 60_000);
 
