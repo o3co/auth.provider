@@ -647,12 +647,18 @@ describe("a deployment that takes MFA's modules out of buildModules() under MFA_
 				},
 			},
 		} as never);
-		await expect(
-			bootShipped({ ...SHIPPED_ENV, ...MAIL_ENV }, "production", "test", (modules) => [
-				...modules.filter((m) => !MFA_MODULE_NAMES.includes(m.name)),
-				impostor,
-			]),
-		).rejects.toBeInstanceOf(BootError);
+		let err: unknown;
+		await bootShipped({ ...SHIPPED_ENV, ...MAIL_ENV }, "production", "test", (modules) => [
+			...modules.filter((m) => !MFA_MODULE_NAMES.includes(m.name)),
+			impostor,
+		]).catch((caught: unknown) => {
+			err = caught;
+		});
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("second-factor-authority-not-declared");
+		expect((err as BootError).details).toMatchObject({
+			unmet: expect.arrayContaining(["not-declared"]),
+		});
 	});
 });
 

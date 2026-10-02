@@ -254,18 +254,9 @@ export function readLogging(own: OwnLayers): LoggingSettings {
 export function expectedSessionRequirements(
 	switches: Pick<Switches, "core" | "mfaMode">,
 ): SessionRequirements {
-	const written = switches.core?.sessionRequirements as
-		| { readonly expected?: readonly string[]; readonly secondFactorAuthority?: unknown }
-		| undefined;
+	const written = switches.core?.sessionRequirements;
 	if (switches.mfaMode === "off") {
-		return (
-			written === undefined
-				? undefined
-				: {
-						...written,
-						...(written.expected === undefined ? {} : { expected: [...written.expected] }),
-					}
-		) as SessionRequirements;
+		return written === undefined ? undefined : { ...written, expected: [...written.expected] };
 	}
 	const authority = written?.secondFactorAuthority;
 	if (authority !== undefined && authority !== "mfa") {
@@ -275,10 +266,9 @@ export function expectedSessionRequirements(
 	}
 	const declared = [...(written?.expected ?? [])];
 	return {
-		...written,
 		expected: declared.includes("mfa") ? declared : [...declared, "mfa"],
 		secondFactorAuthority: "mfa",
-	} as SessionRequirements;
+	};
 }
 
 /**
