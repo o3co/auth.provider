@@ -138,6 +138,51 @@ describe("oauthSessionModule", () => {
 		}
 	});
 
+	it("refuses a mint the composition's grantPolicy denies", async () => {
+		// Boot hands a module only the slots its manifest names: without the
+		// declaration the grant reads no policy and mints.
+		const config = withGrants(makeValidAppConfig(), { session: true });
+		const evaluate = vi.fn(async () => ({
+			outcome: "deny" as const,
+			error: "access_denied",
+			errorDescription: "browser tokens are closed",
+		}));
+		const handle = await createTestApp({
+			modules: [
+				oauthSessionModule({ config }),
+				keyStoreModule,
+				defineModule({
+					name: "test:grant-policy",
+					provides: { grantPolicy: () => ({ kind: "deny-all", evaluate }) },
+				}),
+			],
+			bootstrapComponents: { config: captured(config), pathResolver: (s) => s },
+		});
+		try {
+			const grant = handle.inspect.grants.get("session") as GrantHandler;
+			const { result } = await grant.handle({
+				body: {},
+				session: { isAuthenticated: true, user: { id: "user" } },
+				issuer: "https://issuer.test",
+				metadata: {},
+				authenticatedClient: { clientId: "app", tokenEndpointAuthMethod: "none" },
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "access_denied",
+				errorDescription: "browser tokens are closed",
+			});
+			expect(evaluate).toHaveBeenCalledTimes(1);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("declares grantPolicy among the slots it reads", () => {
+		const config = withGrants(makeValidAppConfig(), { session: true });
+		expect(oauthSessionModule({ config }).optional).toContain("grantPolicy");
+	});
+
 	it("has name 'oauth-session'", () => {
 		const config = makeValidAppConfig();
 		const module = oauthSessionModule({ config });

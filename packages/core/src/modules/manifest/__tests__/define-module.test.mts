@@ -152,6 +152,38 @@ test("defineModule types deps.section as the section schema's output", () => {
 	expectTypeOf(modules).toEqualTypeOf<readonly Module[]>();
 });
 
+test("section.isEnabled reads the section as its schema's output, answers a boolean, and leaves the manifest a Module", () => {
+	const Switched = z.object({ enabled: z.boolean(), retries: z.number() });
+	const m = defineModule({
+		name: "switched",
+		section: {
+			schema: Switched,
+			isEnabled: (section) => {
+				expectTypeOf(section).toEqualTypeOf<z.output<typeof Switched>>();
+				return section.enabled;
+			},
+		},
+		contributes: {
+			grantMiddleware: [
+				(deps) => {
+					expectTypeOf(deps.section).toEqualTypeOf<z.output<typeof Switched>>();
+					return null;
+				},
+			],
+		},
+	});
+	const modules: readonly Module[] = [m];
+	expectTypeOf(modules).toEqualTypeOf<readonly Module[]>();
+	defineModule({
+		name: "switched-wrong",
+		section: {
+			schema: Switched,
+			// @ts-expect-error — a switch answers a boolean
+			isEnabled: (section) => section.retries,
+		},
+	});
+});
+
 test("every factory position of a sectioned manifest receives the section", () => {
 	type Spec = ModuleSpec<"config", never, typeof RetrySection>;
 	type Expected = z.output<typeof RetrySection>;

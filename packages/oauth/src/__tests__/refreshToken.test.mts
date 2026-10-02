@@ -1600,6 +1600,7 @@ describe("createRefreshTokenGrant", () => {
 			if (!("error" in result)) expect.fail("Expected error in result");
 			expect(result.error).toBe("temporarily_unavailable");
 			expect(result.errorDescription).toContain("policy");
+			expect(result.errorDescription ?? "").not.toContain("policy backend 502");
 		});
 
 		it("omits scope from token response when policy narrows to empty array", async () => {
