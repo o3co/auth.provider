@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	createApp,
+	defineModule,
 	type Module,
 	moduleReferences,
 	resolveAccessTokenLifetime,
@@ -516,14 +517,36 @@ const FEDERATION_STORES = Object.fromEntries(
 );
 
 /**
+ * Contributes the federations the documented environment enables, each with
+ * the redirect policy a federation is paired with, so boot has a module that
+ * handles every enabled federation. What they do is not this suite's question.
+ */
+const DOCUMENTED_FEDERATIONS = ["google", "oidc"];
+const documentedFederationsModule = defineModule({
+	name: "test:documented-federations",
+	contributes: {
+		federations: Object.fromEntries(DOCUMENTED_FEDERATIONS.map((name) => [name, () => ({ name })])),
+		federationRedirectPolicies: Object.fromEntries(
+			DOCUMENTED_FEDERATIONS.map((name) => [
+				name,
+				() => ({
+					validateRedirect: () => ({ ok: true as const, value: undefined }),
+					resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
+				}),
+			]),
+		),
+	} as never,
+});
+
+/**
  * The shipped layers under `env`, as `app.mts` hands them to boot, and the
  * configuration boot parsed: phase one for what the composition expects of
  * session admission, phase two resolved over the reference of every package
  * the template's modules come from (the template's own and core's) and
  * parsed once by `createApp` — no bridge on the way.
- * No module is loaded unless `modules` names one: the parse is what this
- * suite asks about, and each key it reads is one core's schema declares, or
- * the section of a module it loads.
+ * No module is loaded but the federations' stub unless `modules` names one:
+ * the parse is what this suite asks about, and each key it reads is one
+ * core's schema declares, or the section of a module it loads.
  */
 async function bootParsed(
 	env: Record<string, string>,
@@ -534,7 +557,7 @@ async function bootParsed(
 	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
 	const switches = readSwitches(own);
 	const handle = await createApp({
-		modules: [...modules],
+		modules: [documentedFederationsModule, ...modules],
 		bootstrapComponents: {
 			config: resolveForBoot(own, buildModules(switches, { environment: configEnv }), switches),
 			pathResolver: (s: string) => s,
