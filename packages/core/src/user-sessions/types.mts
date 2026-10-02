@@ -221,7 +221,7 @@ export interface UserSessionStore {
 	 * `authTime` and `mfaAt` are each recorded no later than the store's
 	 * clock: a store records what `recordableAuthTime` and
 	 * `recordableSessionAuthentication` answer, never its input, so a session
-	 * is never dated ahead of the clock that reads it.
+	 * is never dated ahead of the clock that recorded it.
 	 */
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;
