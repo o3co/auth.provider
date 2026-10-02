@@ -64,6 +64,10 @@ export type {
 	FederationTokenStoreClient,
 	GrantConsentInput,
 	MfaFactorRecordUpdateInput,
+	MfaFactorSetCreateIfInput,
+	MfaFactorSetEmptyingWriteInput,
+	MfaFactorSetRemoveIfInput,
+	MfaFactorSetWriteInput,
 	MfaFactorStoreClient,
 	MfaFirstBindingRead,
 	MfaRemovedTransaction,
@@ -190,6 +194,7 @@ export {
 export {
 	createRedisMfaFactorStore,
 	DEFAULT_REDIS_MFA_FACTOR_STORE_KEY_PREFIX,
+	REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS,
 	type RedisMfaFactorStoreOptions,
 	redisMfaFactorStoreModule,
 } from "./mfa-factor-store.mjs";

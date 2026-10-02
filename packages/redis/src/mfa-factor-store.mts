@@ -19,13 +19,15 @@
  *
  * ```text
  * <keyPrefix>{<subject>}   HASH   field <factor id> → the record
+ *                                 field ~g          → the set's generation
  * ```
  *
  * `<subject>` and `<factor id>` are base64url of their JSON
- * (`internal/mfa-keys.mts`). Every operation touches the subject's one key, so
- * a Cluster spreads subjects across its slots. No key carries a TTL: an
- * enrolled factor does not expire, and a `volatile-*` eviction policy may drop
- * a key with a TTL.
+ * (`internal/mfa-keys.mts`); `~` is not base64url, so no factor's field is
+ * `~g`. Every operation touches the subject's one key, so a Cluster spreads
+ * subjects across its slots. A hash holding a factor carries no TTL: an
+ * enrolled factor does not expire, and a `volatile-*` eviction policy may
+ * drop a key with a TTL.
  *
  * A record is `<version>\n<fixed>\n<mutable>`: the version as decimal text,
  * one JSON line for what never changes after `create` (id, subject, kind,
@@ -40,16 +42,64 @@
  * opens a first binding, so a record read as absent would downgrade the
  * account.
  * See the MFA ADR (2026-09-25-multi-factor-authentication), D7 and D12.
+ *
+ * The factor set's generation follows core's conditional-write convention
+ * (docs/adapter-surface.md, "Conditional writes"):
+ *
+ * - Each generation is minted here with `newStoreGeneration` and handed to
+ *   the script that writes it. Each membership write keeps its answer under
+ *   a replay key of its own (`<key>:w:<generation>`) until the declared clock
+ *   skew past its deadline, so a copy the driver sends again answers the
+ *   first copy's answer and writes nothing: no generation is issued twice
+ *   (rule 8), and no write that landed answers `conflict` (rule 4).
+ *   `listVersioned`, `createIf`, `removeIf`, `create`, `remove` and
+ *   `removeAllForSubject` are one script each (rules 1 and 2); `update`
+ *   keeps `~g`.
+ * - Every one of those scripts may write, so a read-only replica
+ *   (`replica-read-only yes`, Redis's default) refuses it: the versioned read
+ *   is answered by the primary, never such a replica (rule 2). The removals,
+ *   the reset and `listVersioned` declare `allow-oom`, so a full
+ *   `noeviction` server still runs them; the creates are refused there.
+ * - A write that leaves the hash holding `~g` alone keeps it as the set's
+ *   tombstone for `BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 hours, from that
+ *   write, a reset of an already empty set included; a write that leaves a
+ *   factor in it takes the expiry off (rule 6).
+ * - A hash with factors and no `~g`, from a build before the set had a
+ *   generation, answers `conflict` to every conditional write, and its first
+ *   `listVersioned` gives it one (rule 8).
+ * - Each membership write carries a deadline set at issue, `Date.now()` plus
+ *   {@link WRITE_TIMEOUT_MS}, which its script compares with the server's
+ *   clock before it reads or writes anything: at or past it, that copy writes
+ *   nothing and the write rejects with its outcome unknown, since an earlier
+ *   copy may have committed. The wait ends at the same timeout. So the write
+ *   lifetime W is {@link REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS} (rule 6).
+ *   Half 2 of the bound holds while the app's and Redis's clocks agree within
+ *   the declared skew. A late command, whether resent, queued or stalled,
+ *   writes nothing. The check bounds when a script starts: the server is
+ *   assumed not to stall inside a running script, between its clock check
+ *   and its write, for the whole of W.
+ * - This store assumes acknowledged writes are not rolled back (persistence
+ *   plus a failover setup that keeps acked writes); a deployment that accepts
+ *   acked-write loss on failover also accepts that a conditional write may
+ *   see a restored older generation. For MFA: acknowledged factor-set writes
+ *   are not rolled back (no async-replica failover without `WAIT`, or the
+ *   operator accepts that a failover may restore removed factors).
+ *
+ * The redis README, "MFA stores", states each for an operator.
  */
 
 import {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	checkMfaVersionAdvances,
 	consoleLogger,
 	defineModule,
 	isStorableExpiry,
+	isStoreGeneration,
 	type MfaFactorRecord,
 	type MfaFactorRecordUpdate,
 	type MfaFactorStore,
+	newStoreGeneration,
+	type StoreGeneration,
 } from "@o3co/auth-provider-core";
 import type { MfaFactorStoreClient } from "./clients.mjs";
 import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
@@ -124,26 +174,26 @@ function checkMutable(next: MfaFactorRecordUpdate): void {
  * write of one would make every factor of the subject unreadable. The dates
  * are checked where they are written.
  */
-function checkRecord(record: MfaFactorRecord): void {
-	if (typeof record.id !== "string") throw RANGE("id must be a string");
-	if (typeof record.subject !== "string") throw RANGE("subject must be a string");
-	if (typeof record.kind !== "string") throw RANGE("kind must be a string");
-	if (record.binding !== undefined && !BINDINGS.has(record.binding)) {
+function checkRecord(factor: MfaFactorRecord): void {
+	if (typeof factor.id !== "string") throw RANGE("id must be a string");
+	if (typeof factor.subject !== "string") throw RANGE("subject must be a string");
+	if (typeof factor.kind !== "string") throw RANGE("kind must be a string");
+	if (factor.binding !== undefined && !BINDINGS.has(factor.binding)) {
 		throw RANGE('binding must be "password", "email_proof", "federated", "mfa" or absent');
 	}
-	if (!isWholeVersion(record.version)) {
+	if (!isWholeVersion(factor.version)) {
 		throw RANGE("version must be a safe non-negative integer");
 	}
-	checkMutable(record);
+	checkMutable(factor);
 }
 
-const fixedPart = (record: MfaFactorRecord): string =>
+const fixedPart = (factor: MfaFactorRecord): string =>
 	JSON.stringify({
-		id: record.id,
-		subject: record.subject,
-		kind: record.kind,
-		binding: record.binding ?? null,
-		createdAt: instantOf(record.createdAt, "createdAt"),
+		id: factor.id,
+		subject: factor.subject,
+		kind: factor.kind,
+		binding: factor.binding ?? null,
+		createdAt: instantOf(factor.createdAt, "createdAt"),
 	});
 
 const mutablePart = (next: MfaFactorRecordUpdate): string =>
@@ -205,6 +255,82 @@ function recordOf(value: string, subject: string, field: string): MfaFactorRecor
 	};
 }
 
+/**
+ * How long the adapter waits for a membership write's answer, and how far
+ * past its issue, on the app's clock, the write's deadline lies: the command
+ * timeout part of the write lifetime W. It matches the 1 000 ms
+ * `commandTimeout` the README asks of the connection, and the least
+ * `mfa.storeTimeoutMs`.
+ */
+const WRITE_TIMEOUT_MS = 1_000;
+
+/**
+ * The clock skew the write lifetime allows between the app's clock, which
+ * sets a write's deadline, and the Redis server's, which judges it: the 1 s
+ * the operator runbook asks of every replica's and Redis server's clock
+ * ("Replica clocks").
+ */
+const CLOCK_SKEW_MS = 1_000;
+
+/**
+ * The adapter's write lifetime W (docs/adapter-surface.md, "Conditional
+ * writes", rule 6): a membership write commits or fails within
+ * {@link WRITE_TIMEOUT_MS} + {@link CLOCK_SKEW_MS} of its issue, while the
+ * two clocks agree within the skew.
+ */
+export const REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS = WRITE_TIMEOUT_MS + CLOCK_SKEW_MS;
+
+/** The field of a subject's hash that holds its set's generation; no factor's field is it. */
+const GENERATION_FIELD = "~g";
+
+/**
+ * What a membership write its script answers `late` is answered with: its outcome is unknown,
+ * never that nothing was written. The copy the server judged late wrote nothing, but it may be
+ * a copy the driver sent again after an earlier one committed, once that write's replay key
+ * had gone.
+ */
+const late = (operation: string): Error =>
+	new Error(
+		`MfaFactorStore (redis): ${operation} was answered past its deadline; the outcome is unknown: an earlier copy may have committed`,
+	);
+
+/** What a membership write unanswered within the write timeout is answered with: its outcome is unknown. */
+const unanswered = (operation: string): Error =>
+	new Error(
+		`MfaFactorStore (redis): ${operation} had no answer within ${WRITE_TIMEOUT_MS} ms; it may have committed, and no later than its deadline`,
+	);
+
+/**
+ * `write` run with its deadline, `WRITE_TIMEOUT_MS` from now on the app's
+ * clock, and its answer awaited no longer than that: past it the wait ends
+ * in {@link unanswered}. Whatever reaches the server later, queued, sent
+ * again after a reconnect or held by a stalled server, the script refuses.
+ */
+async function withDeadline<T>(
+	operation: string,
+	write: (deadlineMs: number) => Promise<T>,
+): Promise<T> {
+	const deadlineMs = Date.now() + WRITE_TIMEOUT_MS;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(unanswered(operation)), WRITE_TIMEOUT_MS);
+		timer.unref?.();
+	});
+	try {
+		return await Promise.race([write(deadlineMs), timeout]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/** A generation a caller hands back, or a `RangeError`: only what a store answered is one. */
+function checkExpected(expected: unknown, operation: string): StoreGeneration {
+	if (!isStoreGeneration(expected)) {
+		throw new RangeError(`MfaFactorStore.${operation}: expected is not a store generation`);
+	}
+	return expected;
+}
+
 export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): MfaFactorStore {
 	const { client } = options;
 	const keyPrefix = checkMfaKeyPrefix(
@@ -213,19 +339,86 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 	);
 	const keyOf = (subject: string): string => `${keyPrefix}{${mfaKeyPart(subject)}}`;
 
+	/** The records a hash's fields hold, the generation's field left out. */
+	const recordsOf = (
+		fields: Readonly<Record<string, string>>,
+		subject: string,
+	): MfaFactorRecord[] =>
+		Object.entries(fields).flatMap(([field, value]) =>
+			field === GENERATION_FIELD ? [] : [recordOf(value, subject, field)],
+		);
+
+	/** A record's stored value, or a `RangeError` for one a read would refuse. */
+	const storedValueOf = (factor: MfaFactorRecord): string => {
+		checkRecord(factor);
+		return `${factor.version}\n${fixedPart(factor)}\n${mutablePart(factor)}`;
+	};
+
+	/**
+	 * What every membership write of `key`'s set carries: a fresh generation,
+	 * the deadline, and the key its answer is kept under until then, on the
+	 * set's hash tag.
+	 */
+	const writeOf = (key: string, deadlineMs: number) => {
+		const next = newStoreGeneration();
+		return { next, deadlineMs, replayKey: `${key}:w:${next}`, clockSkewMs: CLOCK_SKEW_MS };
+	};
+
 	return {
 		kind: "redis",
 
 		async list(subject) {
-			const fields = await client.list(keyOf(subject));
-			return Object.entries(fields).map(([field, value]) => recordOf(value, subject, field));
+			return recordsOf(await client.list(keyOf(subject)), subject);
 		},
 
-		async create(record) {
+		async listVersioned(subject) {
+			const fields = await client.listVersioned(keyOf(subject), newStoreGeneration());
+			if (Object.keys(fields).length === 0) return { items: [], generation: null };
+			const generation = fields[GENERATION_FIELD];
+			if (!isStoreGeneration(generation)) throw unreadable();
+			return { items: recordsOf(fields, subject), generation };
+		},
+
+		async createIf(factor, expected) {
+			if (expected !== null) checkExpected(expected, "createIf");
 			// Refused before anything is written: whatever a read would refuse.
-			checkRecord(record);
-			const value = `${record.version}\n${fixedPart(record)}\n${mutablePart(record)}`;
-			if (!(await client.create(keyOf(record.subject), mfaKeyPart(record.id), value))) {
+			const value = storedValueOf(factor);
+			const key = keyOf(factor.subject);
+			let next: StoreGeneration | undefined;
+			const outcome = await withDeadline("createIf", (deadlineMs) => {
+				const write = writeOf(key, deadlineMs);
+				next = write.next;
+				return client.createIf(key, mfaKeyPart(factor.id), value, { ...write, expected });
+			});
+			if (outcome === "late") throw late("createIf");
+			return outcome === "created" ? { outcome, generation: next as StoreGeneration } : { outcome };
+		},
+
+		async removeIf(subject, id, expected) {
+			checkExpected(expected, "removeIf");
+			const key = keyOf(subject);
+			let next: StoreGeneration | undefined;
+			const outcome = await withDeadline("removeIf", (deadlineMs) => {
+				const write = writeOf(key, deadlineMs);
+				next = write.next;
+				return client.removeIf(key, mfaKeyPart(id), {
+					...write,
+					tombstoneMs: BUNDLED_STORE_WRITE_LIFETIME_MS,
+					expected,
+				});
+			});
+			if (outcome === "late") throw late("removeIf");
+			return outcome === "removed" ? { outcome, generation: next as StoreGeneration } : { outcome };
+		},
+
+		async create(factor) {
+			const value = storedValueOf(factor);
+			const key = keyOf(factor.subject);
+			const outcome = await withDeadline("create", (deadlineMs) =>
+				client.create(key, mfaKeyPart(factor.id), value, writeOf(key, deadlineMs)),
+			);
+			if (outcome === "late") throw late("create");
+			if (outcome === "conflict") {
 				throw new Error("an MFA factor record with this id already exists for the subject");
 			}
 		},
@@ -249,11 +442,25 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 		},
 
 		async remove(subject, id) {
-			await client.remove(keyOf(subject), mfaKeyPart(id));
+			const key = keyOf(subject);
+			const outcome = await withDeadline("remove", (deadlineMs) =>
+				client.remove(key, mfaKeyPart(id), {
+					...writeOf(key, deadlineMs),
+					tombstoneMs: BUNDLED_STORE_WRITE_LIFETIME_MS,
+				}),
+			);
+			if (outcome === "late") throw late("remove");
 		},
 
 		async removeAllForSubject(subject) {
-			await client.removeAll(keyOf(subject));
+			const key = keyOf(subject);
+			const outcome = await withDeadline("removeAllForSubject", (deadlineMs) =>
+				client.removeAll(key, {
+					...writeOf(key, deadlineMs),
+					tombstoneMs: BUNDLED_STORE_WRITE_LIFETIME_MS,
+				}),
+			);
+			if (outcome === "late") throw late("removeAllForSubject");
 		},
 	};
 }
