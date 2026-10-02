@@ -25,6 +25,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
 	admitPrimary,
@@ -176,11 +177,15 @@ describe("a login whose User's groups is an ORM's list logs in, its claims' grou
 
 describe("the claims are read by name, each once, into a plain copy", () => {
 	it("reads each declared claim and each custom claim once, and nothing of them after the build", () => {
+		// Each read counted by the object it is made of and the key it names.
 		const reads = new Map<string, number>();
-		const counting = <T extends object>(target: T): T =>
+		const counting = <T extends object>(label: string, target: T): T =>
 			new Proxy(target, {
 				get(of, key, receiver) {
-					if (typeof key === "string") reads.set(key, (reads.get(key) ?? 0) + 1);
+					if (typeof key === "string") {
+						const read = `${label}.${key}`;
+						reads.set(read, (reads.get(read) ?? 0) + 1);
+					}
 					return Reflect.get(of, key, receiver);
 				},
 			});
@@ -189,20 +194,31 @@ describe("the claims are read by name, each once, into a plain copy", () => {
 			emailVerified: true,
 			name: "Alice",
 			picture: "https://example.com/alice.png",
-			groups: counting(["staff", "admin"]),
-			federated: counting({ google: counting({ hd: "example.com" }) }),
+			groups: counting("groups", ["staff", "admin"]),
+			federated: counting("federated", {
+				google: counting("google", { hd: "example.com" }),
+			}),
+			tenant: "acme",
 		};
-		for (const build of bothLogins(counting(source))) {
+		for (const build of bothLogins(counting("claims", source))) {
 			reads.clear();
 			const claims = build();
-			for (const key of ["email", "emailVerified", "name", "picture", "groups", "federated"]) {
-				expect(reads.get(key)).toBe(1);
+			for (const key of [
+				"email",
+				"emailVerified",
+				"name",
+				"picture",
+				"groups",
+				"federated",
+				"tenant",
+			]) {
+				expect(reads.get(`claims.${key}`)).toBe(1);
 			}
 			// Each of the list's elements, by index, and each key of the custom claim, once.
-			expect(reads.get("0")).toBe(1);
-			expect(reads.get("1")).toBe(1);
-			expect(reads.get("google")).toBe(1);
-			expect(reads.get("hd")).toBe(1);
+			expect(reads.get("groups.0")).toBe(1);
+			expect(reads.get("groups.1")).toBe(1);
+			expect(reads.get("federated.google")).toBe(1);
+			expect(reads.get("google.hd")).toBe(1);
 			expect([...reads.values()].every((count) => count === 1)).toBe(true);
 			reads.clear();
 			expect(claims).toStrictEqual({
@@ -212,6 +228,7 @@ describe("the claims are read by name, each once, into a plain copy", () => {
 				picture: "https://example.com/alice.png",
 				groups: ["staff", "admin"],
 				federated: { google: { hd: "example.com" } },
+				tenant: "acme",
 			});
 			expect(reads.size).toBe(0);
 		}
@@ -297,8 +314,6 @@ describe("the claims are read by name, each once, into a plain copy", () => {
 });
 
 describe("malformed claims are refused", () => {
-	const cyclic: Record<string, unknown> = {};
-	cyclic.self = cyclic;
 	it.each([
 		["claims that are not an object", "email", /claims must be an object/],
 		["claims that are a list", ["email"], /claims must be an object/],
@@ -322,16 +337,201 @@ describe("malformed claims are refused", () => {
 		["a name that is not a string", { name: null }, /claims\.name must be a string/],
 		["an email that is null", { email: null }, /claims\.email must be a string/],
 		["a picture that is not a string", { picture: ["x"] }, /claims\.picture must be a string/],
-		["a function", { hook: () => 1 }, /claims hold a value that cannot be copied/],
-		["a Date", { at: new Date(0) }, /claims hold a value that cannot be copied/],
-		["a bigint", { n: 1n }, /claims hold a value that cannot be copied/],
-		["a non-finite number", { n: Number.NaN }, /claims hold a value that cannot be copied/],
-		["a cycle", { cyclic }, /claims hold a value that cannot be copied/],
-		["the claims themselves again", cyclic, /claims hold a value that cannot be copied/],
+		["an email that is a Date", { email: new Date(0) }, /claims\.email must be a string/],
+		["a name that is a function", { name: () => "Alice" }, /claims\.name must be a string/],
+		[
+			"an emailVerified that is a bigint",
+			{ emailVerified: 1n },
+			/claims\.emailVerified must be a boolean/,
+		],
+		[
+			"groups that holds a list with a hole",
+			// biome-ignore lint/suspicious/noSparseArray: the hole is the case
+			{ groups: ["staff", , "admin"] },
+			/claims\.groups must be a list of strings/,
+		],
 	] as const)("refuses %s with a RangeError, on both logins", (_label, claims, message) => {
 		for (const build of bothLogins(claims)) {
 			expect(build).toThrow(RangeError);
 			expect(build).toThrow(message);
+		}
+	});
+});
+
+/** A logger that records each warn it is handed. */
+const recordingLogger = () => {
+	const warns: { readonly fields: Record<string, unknown>; readonly message: unknown }[] = [];
+	const logger = {
+		trace: () => {},
+		debug: () => {},
+		info: () => {},
+		warn: (fields: Record<string, unknown>, message?: unknown) => {
+			warns.push({ fields, message });
+		},
+		error: () => {},
+		fatal: () => {},
+		child: () => logger,
+	} as unknown as Logger;
+	return { logger, warns };
+};
+
+/** Admission over no requirement: a login is established as it is built. */
+const depsWith = (logger: Logger | undefined): AdmissionDeps => ({
+	userSessionStore: undefined,
+	subjectRevocation: undefined,
+	requirements: resolverForTests([], { issuer: "https://auth.test" }),
+	acrTable: readAcrTable({}),
+	logger,
+	auditSink: undefined,
+	now: () => NOW,
+});
+
+describe("a custom claim is stored as its JSON form", () => {
+	it("stores a Date as its ISO string, an object with toJSON as what toJSON answers, and NaN or Infinity as null", () => {
+		const id = { toJSON: () => "65f1c0ffee0000000000beef" };
+		const source = {
+			joined: new Date(0),
+			id,
+			nested: { at: new Date(1000), ids: [id], score: Number.NaN },
+			ratio: Number.POSITIVE_INFINITY,
+		};
+		for (const build of bothLogins(source)) {
+			const claims = build();
+			expect(claims).toStrictEqual({
+				joined: "1970-01-01T00:00:00.000Z",
+				id: "65f1c0ffee0000000000beef",
+				nested: {
+					at: "1970-01-01T00:00:01.000Z",
+					ids: ["65f1c0ffee0000000000beef"],
+					score: null,
+				},
+				ratio: null,
+			});
+			expect(Object.isFrozen((claims as { nested: object }).nested)).toBe(true);
+			expect(Object.isFrozen((claims as { nested: { ids: object } }).nested.ids)).toBe(true);
+		}
+	});
+
+	it("leaves out, as JSON does and with no warn, a custom claim whose JSON form is nothing", async () => {
+		const { logger, warns } = recordingLogger();
+		const source = { hook: () => 1, gone: undefined, tag: Symbol("t"), kept: "yes" };
+		const admission = await admitPrimary(
+			depsWith(logger),
+			passwordPrimary(passwordFacts(source) as never),
+		);
+		if (admission.outcome !== "establish") throw new Error("expected an establishment");
+		expect(admission.establishment.primary.claims).toStrictEqual({ kept: "yes" });
+		expect(warns).toEqual([]);
+	});
+
+	it("takes a custom claim nested deeper than a thousand levels", () => {
+		let deep: Record<string, unknown> = { leaf: true };
+		for (let level = 0; level < 1100; level += 1) deep = { next: deep };
+		for (const build of bothLogins({ deep })) {
+			expect(build()).toStrictEqual({ deep });
+		}
+	});
+
+	describe("drops a custom claim whose JSON form cannot be taken, warning once for each and never quoting it, and the login goes on", () => {
+		const cyclic: Record<string, unknown> = { secret: "do-not-log" };
+		cyclic.self = cyclic;
+		const outage = new Error("the entity's connection is closed");
+		const source = () => ({
+			email: "alice@example.com",
+			big: 12345678901234567890n,
+			loop: cyclic,
+			broken: {
+				toJSON() {
+					throw outage;
+				},
+			},
+			kept: { tier: "gold" },
+		});
+		const dropped = [
+			{ claim: "big", reason: "unserialisable" },
+			{ claim: "loop", reason: "unserialisable" },
+			{ claim: "broken", reason: "unserialisable" },
+		];
+		const expectWarned = (warns: ReturnType<typeof recordingLogger>["warns"]) => {
+			expect(warns.map((line) => line.fields)).toStrictEqual(dropped);
+			expect(warns.every((line) => line.message === "login_claim_dropped")).toBe(true);
+			expect(JSON.stringify(warns)).not.toContain("do-not-log");
+		};
+
+		it("on the password login, through admitPrimary's logger", async () => {
+			const { logger, warns } = recordingLogger();
+			const admission = await admitPrimary(
+				depsWith(logger),
+				passwordPrimary(passwordFacts(source()) as never),
+			);
+			if (admission.outcome !== "establish") throw new Error("expected an establishment");
+			expect(admission.establishment.primary.claims).toStrictEqual({
+				email: "alice@example.com",
+				kept: { tier: "gold" },
+			});
+			expectWarned(warns);
+		});
+
+		it("on the federated login, through the logger it is handed", () => {
+			const { logger, warns } = recordingLogger();
+			const establishment = establishWithoutAsking(federatedLogin(source()) as never, { logger });
+			expect(establishment.primary.claims).toStrictEqual({
+				email: "alice@example.com",
+				kept: { tier: "gold" },
+			});
+			expectWarned(warns);
+		});
+
+		it("on the federated login without a logger, silently", () => {
+			const establishment = establishWithoutAsking(federatedLogin(source()) as never);
+			expect(establishment.primary.claims).toStrictEqual({
+				email: "alice@example.com",
+				kept: { tier: "gold" },
+			});
+		});
+
+		it("on a resumed login, through resumePrimary's logger", async () => {
+			const verifier: SessionRequirement = {
+				name: "verifier",
+				secondFactorAuthority: true,
+				reach: new Set(["otp", "mfa"]),
+				stepUpPage: { url: "/verifier", params: {} },
+				remediations: [],
+				hintKeys: [],
+				admit: async () => ({ outcome: "met" }),
+				admitPrimary: async (primary) =>
+					primary.recorded.authentication.mfaAt === undefined
+						? { open: async () => ({ status: 403, body: { error: "mfa_required" } }) }
+						: "establish",
+			};
+			const { logger, warns } = recordingLogger();
+			const deps = {
+				...depsWith(logger),
+				requirements: resolverForTests([verifier], { issuer: "https://auth.test" }),
+			};
+			const first = await admitPrimary(deps, passwordPrimary(passwordFacts({}) as never));
+			if (first.outcome !== "interrupt") throw new Error("expected an interruption");
+			// A continuation a store answered with what JSON cannot hold.
+			const handedBack = {
+				...first.continuation,
+				primary: { ...first.continuation.primary, claims: source() },
+			};
+			const resumed = await resumePrimary(deps, handedBack, {
+				requirement: "verifier",
+				adds: { amr: ["otp", "mfa"], mfaAt: NOW },
+			});
+			if (resumed.outcome !== "establish") throw new Error("expected an establishment");
+			expect(resumed.establishment.primary.claims).toStrictEqual({
+				email: "alice@example.com",
+				kept: { tier: "gold" },
+			});
+			expectWarned(warns);
+		});
+	});
+
+	it("still refuses a declared claim of the wrong type beside custom claims", () => {
+		for (const build of bothLogins({ groups: "staff", joined: new Date(0) })) {
+			expect(build).toThrow(/claims\.groups must be a list of strings/);
 		}
 	});
 });
