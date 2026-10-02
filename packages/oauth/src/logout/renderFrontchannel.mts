@@ -29,16 +29,21 @@ export interface RenderFrontchannelLogoutHtmlOptions {
 	readonly issuer: string;
 	readonly sid: string;
 	/**
-	 * Where the page sends the browser once the iframes have had their time:
-	 * the validated `post_logout_redirect_uri` with the RP's `state` already
-	 * on it, exactly as the route's own redirect would carry it. Checked here
-	 * with core's `checkRedirectUri`, the rule the route accepts it by, with
-	 * a trailing `state` pair as `URLSearchParams` writes it set aside: a value
-	 * the check refuses, one that is not a string, or a read that throws
-	 * leaves the page without its redirect, logged once at warn as
+	 * Where the page sends the browser once the iframes have had their time,
+	 * as its two parts: `uri`, the registered `post_logout_redirect_uri` the
+	 * caller validated, and the RP's `state` (OIDC RP-Initiated Logout 1.0
+	 * §3), if any. `uri` is checked here with core's `checkRedirectUri`
+	 * exactly as written, the rule the route accepts it by, so one already
+	 * carrying `state` is refused; the page then appends a non-empty `state`
+	 * itself, through `URLSearchParams`, as the route's own redirect does. A
+	 * `uri` the check refuses, a value that is not a string, or a read that
+	 * throws leaves the page without its redirect, logged once at warn as
 	 * `logout_frontchannel_redirect_refused` with the reason, never the URI.
 	 */
-	readonly postLogoutRedirectUri?: string;
+	readonly postLogoutRedirect?: {
+		readonly uri: string;
+		readonly state?: string | undefined;
+	};
 	/** Defaults to 2000ms. */
 	readonly redirectDelayMs?: number;
 	/**
@@ -86,44 +91,22 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
 }
 
 /** Why the page's redirect was dropped. */
-type PostLogoutRedirectRefusal = RedirectUriRejection["reason"] | "not-a-string" | "unreadable";
+type PostLogoutRedirectRefusal =
+	| RedirectUriRejection["reason"]
+	| "not-an-object"
+	| "not-a-string"
+	| "state-not-a-string"
+	| "unreadable";
 
 /**
- * A parsed query that ends in a `state` pair as `URLSearchParams` writes it,
- * the way the logout route appends the RP's `state` to a registered URI:
- * `state=` and only what form encoding emits (letters, digits, `*-._`, `%`
- * escapes and `+`), last, since a registered URI carries no `state` of its
- * own. Group 1 is the query before it, if any.
+ * Where the page's script sends the browser: `opts.postLogoutRedirect.uri`
+ * when core's `checkRedirectUri` accepts it as written, with a non-empty
+ * `state` appended through `URLSearchParams`; otherwise `undefined`. Absent
+ * (no redirect, or an empty `uri`) is silent; a refusal is one warn with the
+ * reason, never the value. Every read and the warn are guarded, so this
+ * never throws.
  */
-const APPENDED_STATE_QUERY = /^\?(?:(.+)&)?state=[A-Za-z0-9*._%+-]*$/;
-
-/**
- * `raw` with the `state` pair the caller appends set aside, when it is
- * exactly that pair; otherwise `raw` itself. The query is located by the URL
- * parser, never by searching the string, and only when `raw` ends in it
- * byte for byte (no fragment, nothing the parser rewrote). The rest is kept
- * as written, another `state` included, for the check to judge.
- */
-function withoutAppendedState(raw: string): string {
-	let search: string;
-	try {
-		search = new URL(raw).search;
-	} catch {
-		return raw;
-	}
-	const appended = APPENDED_STATE_QUERY.exec(search);
-	if (appended === null || !raw.endsWith(search)) return raw;
-	const before = appended[1];
-	return raw.slice(0, raw.length - search.length) + (before === undefined ? "" : `?${before}`);
-}
-
-/**
- * `opts.postLogoutRedirectUri` when core's `checkRedirectUri` accepts it with
- * its appended `state` set aside; otherwise `undefined`. Absent is silent; a
- * refusal is one warn with the reason, never the value. The option's read and
- * the warn are guarded, so this never throws.
- */
-function checkedPostLogoutRedirectUri(
+function postLogoutRedirectTarget(
 	opts: RenderFrontchannelLogoutHtmlOptions,
 	logger: Pick<Logger, "warn">,
 ): string | undefined {
@@ -135,25 +118,36 @@ function checkedPostLogoutRedirectUri(
 		}
 		return undefined;
 	};
-	let value: unknown;
+	let uri: unknown;
+	let state: unknown;
 	try {
-		value = opts.postLogoutRedirectUri;
+		const redirect: unknown = opts.postLogoutRedirect;
+		if (redirect === undefined || redirect === null) return undefined;
+		// A joined URI string from a caller written for the earlier shape.
+		if (typeof redirect !== "object") return refuse("not-an-object");
+		({ uri, state } = redirect as { uri?: unknown; state?: unknown });
 	} catch {
 		// The error is not logged: its message could carry the value.
 		return refuse("unreadable");
 	}
-	if (value === undefined || value === null || value === "") return undefined;
-	if (typeof value !== "string") return refuse("not-a-string");
-	const rejection = checkRedirectUri(withoutAppendedState(value));
-	return rejection === null ? value : refuse(rejection.reason);
+	if (uri === undefined || uri === null || uri === "") return undefined;
+	if (typeof uri !== "string") return refuse("not-a-string");
+	if (state !== undefined && typeof state !== "string") return refuse("state-not-a-string");
+	const rejection = checkRedirectUri(uri);
+	if (rejection !== null) return refuse(rejection.reason);
+	// The base passed, so it parses; `searchParams` changes only the query.
+	const target = new URL(uri);
+	if (state !== undefined && state.length > 0) target.searchParams.set("state", state);
+	return target.toString();
 }
 
 /**
  * Renders an OIDC Front-Channel Logout 1.0 page: one hidden `<iframe>` per RP
  * with an http(s) `frontchannelLogoutUri` (any other is skipped with a warn),
  * its URL carrying `iss` and, unless `frontchannelLogoutSessionRequired` is
- * `false`, `sid`. With a `postLogoutRedirectUri` core's `checkRedirectUri`
- * accepts (any other is dropped with a warn), a `<script>` redirects after
+ * `false`, `sid`. With a `postLogoutRedirect` whose `uri` core's
+ * `checkRedirectUri` accepts (any other is dropped with a warn), a `<script>`
+ * redirects, with the RP's `state`, after
  * `redirectDelayMs` so the iframes can load. Pure; callers MUST send it as
  * `Content-Type: text/html; charset=utf-8`.
  */
@@ -199,7 +193,7 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 		Number.isFinite(requestedDelay) && (requestedDelay as number) >= 0
 			? Math.trunc(requestedDelay as number)
 			: DEFAULT_REDIRECT_DELAY_MS;
-	const redirectTarget = checkedPostLogoutRedirectUri(opts, logger);
+	const redirectTarget = postLogoutRedirectTarget(opts, logger);
 	const redirect =
 		redirectTarget !== undefined
 			? `<script>setTimeout(() => { window.location.href = ${safeJsStringLiteral(redirectTarget)}; }, ${delay});</script>`

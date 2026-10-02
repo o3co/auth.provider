@@ -466,6 +466,11 @@ describe("renderFrontchannelLogoutHtml", () => {
 		);
 
 		it.each([
+			[
+				"a redirect that is a joined string, not its parts",
+				"https://rp.example/out?state=s-1",
+				"not-an-object",
+			],
 			["a base that is not a string", { uri: 42 }, "not-a-string"],
 			[
 				"a state that is not a string",

@@ -869,8 +869,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		});
 
 		// Where the browser goes back to the RP, with its `state` (OIDC
-		// RP-Initiated Logout 1.0 §3): the same URL from the front-channel page
-		// (7a) and the redirect (7c).
+		// RP-Initiated Logout 1.0 §3), for the redirect (7c). The front-channel
+		// page (7a) is handed the parts and composes the same URL.
 		let postLogoutRedirectTarget: string | undefined;
 		if (validatedPostLogoutRedirectUri) {
 			const redirectUrl = new URL(validatedPostLogoutRedirectUri);
@@ -898,8 +898,16 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				rps: frontchannelRps,
 				issuer: opts.issuer,
 				sid,
-				// The allowlist-validated URI, with state — prevents open redirect via HTML branch.
-				postLogoutRedirectUri: postLogoutRedirectTarget,
+				// The allowlist-validated URI and the RP's state, as parts: the
+				// page checks the URI and appends the state itself.
+				...(validatedPostLogoutRedirectUri
+					? {
+							postLogoutRedirect: {
+								uri: validatedPostLogoutRedirectUri,
+								state: typeof state === "string" ? state : undefined,
+							},
+						}
+					: {}),
 				logger: opts.logger,
 			});
 			res.setHeader("Content-Type", "text/html; charset=utf-8");
