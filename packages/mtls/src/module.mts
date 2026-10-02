@@ -30,7 +30,11 @@
  * explicit `trustedProxies` allowlist.
  */
 
-import { coerceBooleanFromEnv, defineModule } from "@o3co/auth-provider-core";
+import {
+	coerceBooleanFromEnv,
+	defineModule,
+	wholeNumberInRangeFromEnv,
+} from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createMtlsMechanism, type MtlsMechanismOptions } from "./extractor.mjs";
 import {
@@ -91,19 +95,14 @@ export const mtlsConfigSchema = z
 		fullPki: z
 			.object({
 				/** Maximum certificates in a path, leaf and anchor included. */
-				maxChainDepth: z.coerce
-					.number()
-					.int()
-					.min(2)
-					.max(16)
-					.default(FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH),
+				maxChainDepth: wholeNumberInRangeFromEnv(2, 16).default(FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH),
 				/** Signature algorithms permitted at every hop. */
 				signatureAlgorithms: z
 					.array(z.enum(SIGNATURE_ALGORITHM_NAMES as unknown as [string, ...string[]]))
 					.readonly()
 					.default(DEFAULT_SIGNATURE_ALGORITHMS as unknown as string[]),
 				/** Minimum RSA modulus in bits. Ignored for EC and EdDSA keys. */
-				minRsaKeyBits: z.coerce.number().int().min(1024).default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
+				minRsaKeyBits: wholeNumberInRangeFromEnv(1024).default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
 				revocation: z
 					.object({
 						/**
@@ -118,9 +117,9 @@ export const mtlsConfigSchema = z
 						onUnavailable: z.enum(["reject", "allow"]),
 						/** Hosts revocation material may be fetched from. */
 						allowedHosts: z.array(z.string()).readonly().default([]),
-						fetchTimeoutMs: z.coerce.number().int().min(1).default(3000),
-						cacheTtlSeconds: z.coerce.number().int().min(0).default(3600),
-						maxResponseBytes: z.coerce.number().int().min(1).default(1_048_576),
+						fetchTimeoutMs: wholeNumberInRangeFromEnv(1).default(3000),
+						cacheTtlSeconds: wholeNumberInRangeFromEnv(0).default(3600),
+						maxResponseBytes: wholeNumberInRangeFromEnv(1).default(1_048_576),
 						/**
 						 * Refuse an OCSP response that does not echo the request's nonce
 						 * (RFC 6960 §4.4.1). On by default: without it a captured `good`
