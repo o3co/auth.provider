@@ -33,6 +33,11 @@ export {
 	conditionalSetContract,
 } from "./conditionalWrite/conditionalWrite.contract.mjs";
 export {
+	type FederationTokenStoreConditionalContractInput,
+	type FederationTokenStoreConditionalHarness,
+	federationTokenStoreConditionalContract,
+} from "./federationTokens/federationTokenStoreConditional.contract.mjs";
+export {
 	MAIL_RELAY_REFUSALS,
 	type MailRelayRefusal,
 	type MailSenderContractInput,

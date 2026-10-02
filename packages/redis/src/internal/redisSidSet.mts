@@ -24,7 +24,7 @@ import { assertPositiveInteger } from "./validate.mjs";
  */
 export type RedisSidSetClient = Pick<
 	FederationTokenStoreClient,
-	"sAddWithTtl" | "sRem" | "sScanIterator" | "unlink"
+	"sAddWithTtl" | "sRem" | "sScanIterator" | "unlink" | "pExpireGT"
 >;
 
 export interface RedisSidSetOptions {
@@ -40,6 +40,8 @@ export interface RedisSidSetOptions {
 
 export interface RedisSidSet {
 	add(sid: string, member: string, ttlMs: number): Promise<void>;
+	/** Raises the sid's TTL to `ttlMs` from now when nearer: never lowers it, adds a member, or makes the key. */
+	extend(sid: string, ttlMs: number): Promise<void>;
 	remove(sid: string, member: string): Promise<void>;
 	/** Cursor-based iteration over the sid's members. May yield duplicates. */
 	members(sid: string): AsyncIterable<string>;
@@ -76,6 +78,9 @@ export function createRedisSidSet(opts: RedisSidSetOptions): RedisSidSet {
 	return {
 		async add(sid, member, ttlMs) {
 			await opts.client.sAddWithTtl(k(sid), member, ttlMs);
+		},
+		async extend(sid, ttlMs) {
+			await opts.client.pExpireGT(k(sid), ttlMs);
 		},
 		async remove(sid, member) {
 			await opts.client.sRem(k(sid), member);

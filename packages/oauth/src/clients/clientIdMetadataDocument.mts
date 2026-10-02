@@ -40,10 +40,11 @@
  *
  * The registered clients are read through core's client-record boundary, and
  * a document is resolved only when it answers that no client is registered
- * under the id (`absent`). A registration the boundary refuses is an unknown
- * client, never replaced by a document; a repository that cannot answer is an
- * outage, never answered from the document cache. A document client never
- * crosses the boundary: it is this module's own, built and validated here.
+ * under the id. A registration the boundary refuses rejects the lookup with
+ * core's refusal, never replaced by a document; a repository that cannot
+ * answer is an outage, never answered from the document cache. A document
+ * client never crosses the boundary: it is this module's own, built and
+ * validated here.
  */
 
 import { promises as dns } from "node:dns";
@@ -558,7 +559,7 @@ export function createClientIdMetadataDocumentResolver(
 	};
 }
 
-/** The repositories {@link withClientIdMetadataDocuments} built: each the one document fallback of its composition. */
+/** The repositories {@link withClientIdMetadataDocuments} built. */
 const documentFallbacks = new WeakSet<ClientRepository>();
 
 /**
@@ -575,45 +576,29 @@ export function isClientIdMetadataDocumentFallback(repository: ClientRepository)
  * first and Client ID Metadata Documents second.
  *
  * `inner` is read through core's client-record boundary
- * (`validatedClientRepository`, a no-op when it already is one), which says
- * per id whether a client is registered (`found`), registered but refused
- * (`refused`) or not registered (`absent`). That answer comes first, on every
+ * (`validatedClientRepository`, a no-op when it already is one), on every
  * lookup, before the document cache or the refusal memo is consulted:
  *
- * - `found`: the registered client, validated.
- * - `refused`: no client. The document is never resolved in its place, so a
- *   malformed registration cannot be replaced by whatever the URL serves.
- * - `absent`: the document, resolved as {@link createClientIdMetadataDocumentResolver} does.
- * - A rejection is let through, never answered from the document cache or
- *   its stale window: the repository's outage, or the refusal of a boundary
- *   `inner` reads through (behind a cache or a forwarder), which stays a
- *   refusal.
+ * - A registered client: the boundary's validated copy.
+ * - No client registered under the id: the document, resolved as
+ *   {@link createClientIdMetadataDocumentResolver} does.
+ * - A rejection is let through as it is, never answered with a document,
+ *   from the cache or its stale window: the repository's outage, or core's
+ *   refusal of a registration (`isClientRecordRefused`), whether this
+ *   fallback's boundary refused it or one `inner` reads through did.
  *
  * `authenticate` is `inner`'s alone, through the boundary: a document never
  * carries a secret.
  *
- * One fallback per composition. Its own `findById` answers a refusal `null`,
- * so anything over it reads the refusal as an absence. A fallback passed in
- * directly as `inner` is refused with a `TypeError`; that check recognises
- * only the object this function returned, not one behind a forwarder or
- * built by another loaded copy of this package.
- *
- * Interim composition rule, until this fallback lets a registration it
- * refuses through as the lookup's rejection: this fallback is the only one
- * and is never wrapped by anything, including core's
- * `validatedClientRepository`. Without a logger, a refused registration is not logged, as a
- * refused document is not.
+ * Built only by the router, once, over the repository it is handed, from
+ * `oauth.clientIdMetadataDocuments`; the package entry does not export it.
+ * Without a logger, a refused registration is not logged, as a refused
+ * document is not.
  */
 export function withClientIdMetadataDocuments(
 	inner: ClientRepository,
 	opts: ClientIdMetadataDocumentOptions,
 ): ClientRepository {
-	if (documentFallbacks.has(inner)) {
-		throw new TypeError(
-			"withClientIdMetadataDocuments: the repository already resolves Client ID Metadata Documents; " +
-				"a composition has one such fallback, over its registered clients",
-		);
-	}
 	// Without a logger the fallback says nothing of a refused registration, as
 	// the resolver says nothing of a refused document; core's own default
 	// would write it to the console.
@@ -622,23 +607,10 @@ export function withClientIdMetadataDocuments(
 	});
 	const resolver = createClientIdMetadataDocumentResolver(opts);
 	const fallback: ClientRepository = {
-		async findById(clientId) {
-			const lookup = await registered.lookupClient(clientId);
-			switch (lookup.outcome) {
-				case "found":
-					return lookup.client;
-				case "refused":
-					return null;
-				case "absent":
-					return resolver.resolve(clientId);
-				default: {
-					// Fail closed: a verdict this code does not know (core newer than
-					// it) is no client, never a document, and never `undefined`.
-					lookup satisfies never;
-					return null;
-				}
-			}
-		},
+		// The boundary rejects a refused registration, so only an absent one
+		// reaches the document.
+		findById: async (clientId) =>
+			(await registered.findById(clientId)) ?? resolver.resolve(clientId),
 		authenticate: (clientId, secret) => registered.authenticate(clientId, secret),
 	};
 	documentFallbacks.add(fallback);

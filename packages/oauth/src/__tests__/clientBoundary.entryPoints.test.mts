@@ -18,8 +18,9 @@
  * oauth's entry points that take a `ClientRepository`, `createOAuthRouter`
  * and `createClientAuthMiddleware`, read registered clients through core's
  * client-record boundary, outermost, with Client ID Metadata Documents off
- * as with them on. A boundary handed in is not wrapped again, and a document
- * fallback handed in is not wrapped at all.
+ * as with them on. A boundary handed in is not wrapped again, and the
+ * router's document fallback, handed to the client authentication, is not
+ * wrapped at all.
  */
 
 import crypto, { randomUUID } from "node:crypto";
@@ -29,8 +30,6 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createMemoryAccessTokenDenylist,
-	createMemoryConsentStore,
-	createMemoryPendingConsentStore,
 	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 	type GrantHandler,
@@ -121,10 +120,7 @@ const capturingGrant = () => {
 	return { registry, seen };
 };
 
-const buildRouter = async (
-	clientRepository: ClientRepository,
-	{ consent = false }: { consent?: boolean } = {},
-) => {
+const buildRouter = async (clientRepository: ClientRepository) => {
 	const logger = createMockLogger();
 	const { registry, seen } = capturingGrant();
 	const { router } = await createOAuthRouter(express, {
@@ -136,12 +132,6 @@ const buildRouter = async (
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		accessTokenDenylist: createMemoryAccessTokenDenylist(),
-		...(consent
-			? {
-					consentStore: createMemoryConsentStore(),
-					pendingConsentStore: createMemoryPendingConsentStore(),
-				}
-			: {}),
 		logger,
 	});
 	const session: Record<string, unknown> = { isAuthenticated: true, user: { id: "user-1" } };
@@ -257,38 +247,6 @@ describe("createOAuthRouter with documents off reads registered clients through 
 		// The grant's client is built from the boundary's answer: the frozen
 		// array is the same one, which a second boundary would have copied.
 		expect(seen[0]?.allowedScopes).toBe(answered.allowedScopes);
-	});
-});
-
-describe("createOAuthRouter handed a document fallback", () => {
-	const DOC_ID = "https://tools.example/oauth/client.json";
-	const fallback = () =>
-		withClientIdMetadataDocuments(answering(null), {
-			allowedScopes: ["openid", "read"],
-			allowedAudiences: [],
-			lookup: async () => ["93.184.216.34"],
-			fetch: (async () =>
-				new Response(
-					JSON.stringify({
-						client_id: DOC_ID,
-						client_name: "Tools",
-						redirect_uris: [REDIRECT_URI],
-						token_endpoint_auth_method: "none",
-					}),
-					{ status: 200, headers: { "content-type": "application/json" } },
-				)) as typeof fetch,
-		});
-
-	it("reads it unwrapped, so consent still names the host of a document client", async () => {
-		const { app } = await buildRouter(fallback(), { consent: true });
-		const res = await authorize(app, DOC_ID);
-		expect(res.status).toBe(302);
-		const location = new URL(res.headers.location as string, ISSUER);
-		expect(location.pathname).toBe("/consent");
-		const challenge = location.searchParams.get("challenge");
-		const page = await request(app).get("/oauth/consent").query({ challenge });
-		expect(page.status).toBe(200);
-		expect(page.body).toMatchObject({ client_id: DOC_ID, client_id_host: "tools.example" });
 	});
 });
 
