@@ -44,10 +44,12 @@ cp profiles/google.env.example profiles/google.env   # the IdP client; git-ignor
 Run multi-agent review + FCoT on the **full release diff** before tagging:
 
 ```bash
-# From develop at the commit the develop → main pull request will carry.
+# Audit one fixed develop commit: the one the release train will be cut from.
 # Tags are cut from main, so look the last one up there.
+git fetch origin
+RELEASE_SHA=$(git rev-parse origin/develop)
 LAST_TAG=$(git describe --tags --abbrev=0 origin/main)
-git diff "$LAST_TAG"..HEAD --stat
+git diff "$LAST_TAG".."$RELEASE_SHA" --stat
 # Then run /multi-agent-review on the diff range
 ```
 
@@ -123,13 +125,54 @@ For each scoped package that returns **404 / E404**: it has never been published
 
 ### Step 4. Merge `develop` → `main`, then tag + push
 
-Open a pull request from `develop` to `main`. Its required checks are
-`build-and-test` and `umbrella-e2e` (the umbrella's suite with the pull
-request's code as `PROVIDER_REV`; see
-[AGENTS.md](../AGENTS.md#umbrella-e2e)). Merge it with a merge commit, not a
-squash or a rebase, so `main` keeps `develop`'s commits and the next cut's
-`git log <lastTag>..HEAD` on `develop` lists only what is new.
-Then tag the commit that merge left on `main`:
+Don't open the pull request with `develop` as its head: every merge into
+`develop` moves the head and restarts the required checks, so they never
+settle. Run it from a fixed `release-train/<YYYY-MM-DD>` branch instead.
+
+1. Create the train branch at `$RELEASE_SHA`, the commit Step 1 audited and
+   the release notes cover (for the daily train with no release, any chosen
+   `develop` commit will do):
+
+   ```bash
+   DATE=$(date +%F)
+   gh api repos/o3co/auth.provider/git/refs \
+     -f ref="refs/heads/release-train/$DATE" -f sha="$RELEASE_SHA"
+   # equivalent: git push origin "$RELEASE_SHA:refs/heads/release-train/$DATE"
+   ```
+
+2. Open a pull request from it to `main`:
+
+   ```bash
+   gh pr create --base main --head "release-train/$DATE" \
+     --title "release-train/$DATE" --body "Release train $DATE."
+   ```
+
+3. Wait until `build-and-test` and `umbrella-e2e` (the umbrella's suite with
+   the pull request's code as `PROVIDER_REV`; see
+   [AGENTS.md](../AGENTS.md#umbrella-e2e)) are green on its head. A failure
+   caused by infrastructure (for example a registry pull reset) is rerun, not
+   treated as a code finding:
+
+   ```bash
+   gh pr checks <n> --watch
+   gh run rerun <run-id> --failed
+   ```
+
+4. Merge it with a merge commit, never a squash or a rebase, so `main` keeps
+   `develop`'s commits and the next cut's `git log <lastTag>..HEAD` on
+   `develop` lists only what is new:
+
+   ```bash
+   gh pr merge <n> --merge
+   ```
+
+5. Delete the train branch:
+
+   ```bash
+   git push origin --delete "release-train/$DATE"
+   ```
+
+For a release, tag the commit that merge left on `main`:
 
 ```bash
 git fetch origin

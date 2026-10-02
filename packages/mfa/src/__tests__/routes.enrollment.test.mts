@@ -954,6 +954,7 @@ describe("two transactions of one subject racing the first binding past a lease 
 	/** Two logins of alice, each with a TOTP enrollment begun, whose completions reach their factors' writes together. */
 	async function racing() {
 		const memory = createMemoryMfaFactorStore();
+		const removeIf = vi.spyOn(memory, "removeIf");
 		const arrive = barrier(2);
 		const audit = recordingAuditSink();
 		const directory = new WitnessingUserRepository();
@@ -972,8 +973,6 @@ describe("two transactions of one subject racing the first binding past a lease 
 		});
 		leaseAdmittingEveryWriter(booted.transactionStore);
 		notingTogether(booted.transactionStore, 2);
-		const removeIf = vi.spyOn(memory, "removeIf");
-		const remove = vi.spyOn(memory, "remove");
 		const create = vi.spyOn(booted.userSessionStore as UserSessionStore, "create");
 		const logins = [await beginFirstBinding(booted.app), await beginFirstBinding(booted.app)];
 		expect(logins[0]?.transaction).not.toBe(logins[1]?.transaction);
@@ -995,7 +994,6 @@ describe("two transactions of one subject racing the first binding past a lease 
 			proofs,
 			answers,
 			removeIf,
-			remove,
 			create,
 		};
 	}
@@ -1020,11 +1018,9 @@ describe("two transactions of one subject racing the first binding past a lease 
 	});
 
 	it("removes nothing to settle the race, and spends the loser's transaction: a second completion of it is 400", async () => {
-		const { answers, removeIf, remove, logins, proofs, logger } = await racing();
+		const { answers, removeIf, logins, proofs } = await racing();
 
 		expect(removeIf).not.toHaveBeenCalled();
-		expect(remove).not.toHaveBeenCalled();
-		expect(events(logger, "error")).not.toContain("mfa_first_binding_factor_standing");
 		const lost = answers.findIndex((res) => res.status === 401);
 		const loser = logins[lost];
 		if (loser === undefined) throw new Error("no completion lost");

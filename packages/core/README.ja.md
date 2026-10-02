@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-10-02
+最終更新: 2026-10-03
 
 ## 責務と役割
 
@@ -31,7 +31,7 @@ composition root は自分の設定を解決します — 自分のファイル�
 2. 書かれたものの上に重ねるので、どのスキーマも宣言していないキーは残ります — トップレベルでも、core が宣言するセクションの下でも;
 3. そのうえで、読み込まれた各モジュールの `configSchema` で base の出力をパースし、各モジュール自身のセクションをそのパスでパースしてそこに書き戻します: 読み込まれたモジュールのセクションが取り除かれることはありません。
 
-どれかが拒否する値は、オペレーターが書いた各パスを示して boot を拒否します（`config-validation-failed`）。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、設定と並べて bootstrap したロガーに一度だけ名前が出ます — `config_sections_ignored`（`warn`、名前つき）。セクション名の綴り間違いはここに現れます。何も設定しないセクション — 空のもの、または空のセクションだけを持つもの — は名前が出ません。`JWKS_PATH` と `JWKS_CACHE_MAX_AGE` が未設定のとき core 自身の `reference.conf` が残す `jwks` がそれに当たります。core のスキーマが他パッケージのセクションをまだミラーしている間（下記）、それらはどれも名前が出ません: ミラーされたセクションは、モジュールが読み込まれているかどうかにかかわらず所有されているものとして数えます。boot がパースしたものは `config` スロットにあります。ハンドルから読んでください。
+どれかが拒否する値は、オペレーターが書いた各パスを示して boot を拒否します（`config-validation-failed`）。`Object.prototype` のメンバー（`__proto__`、`constructor`、`toString` など）または `prototype` と同じ名前のキーも、どの階層にあっても、スキーマの結果にかかわらず同じく拒否します: スキーマは `__proto__` を読まずに捨て、それ以外の名前では、名前による参照が継承されたメンバーを見つけることがあるためです。この検査が見るのは設定自身のデータプロパティで、パースされた HOCON ファイルが持つものはすべてこれに当たります。コードで組み立てた設定の getter は、この検査ではなくスキーマのパースが読みます。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、設定と並べて bootstrap したロガーに一度だけ名前が出ます — `config_sections_ignored`（`warn`、名前つき）。セクション名の綴り間違いはここに現れます。何も設定しないセクション — 空のもの、または空のセクションだけを持つもの — は名前が出ません。`JWKS_PATH` と `JWKS_CACHE_MAX_AGE` が未設定のとき core 自身の `reference.conf` が残す `jwks` がそれに当たります。core のスキーマが他パッケージのセクションをまだミラーしている間（下記）、それらはどれも名前が出ません: ミラーされたセクションは、モジュールが読み込まれているかどうかにかかわらず所有されているものとして数えます。boot がパースしたものは `config` スロットにあります。ハンドルから読んでください。
 
 ```typescript
 import { fileURLToPath } from "node:url";
@@ -242,7 +242,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 `createCode` は `client_id` と `redirect_uri` を必須とし、`Client.tokenEndpointAuthMethod` も必須です。`Code` のその他のフィールドはすべて必須キーで、記録がなければ `undefined` を保持します。`createCode` は `CreateCodeInput` を受け取り、省略できるのは `expiresIn`（省略時はリポジトリの既定値）だけです。`nonce` と `sid` は OIDC の nonce とセッション ID を `/authorize` から `/token` へ運びます。`grantedScope` / `grantedAudience` は `/authorize` でのグラントポリシーの決定で、`authorization_code` グラントはポリシーを再評価せずにこれを読みます。ディレクトリの責務マップは [`src/repositories/README.md`](src/repositories/README.md) です。
 
-`readUserSnapshot(user)`（[`src/repositories/userSnapshot.mts`](src/repositories/userSnapshot.mts)）は、リポジトリが答えた `User` をログインが一度だけ読むものです。`User` が宣言する各フィールドを、オブジェクトがどう保持していても（getter、ORM エンティティ）名前で一度ずつ読み、すべての深さで凍結したプレーンなスナップショットにします。答えは `{ ok: true, snapshot }`（`id` は空でない文字列）か `{ ok: false, refused }`（`not_an_object`、`id`、または `field` を添えた `not_plain_data`）です。ログインのルートは subject とクレームをスナップショットから読み、`User` を再び読みません。
+`readUserSnapshot(user)` は、リポジトリが答えた `User` をログインが一度だけ読むものです。`User` が宣言する各フィールドを、オブジェクトがどう保持していても（getter、ORM エンティティ）名前で一度ずつ読み、すべての深さで凍結したプレーンなスナップショットにするか、拒否します。ログインのルートは subject とクレームをスナップショットから読み、`User` を再び読みません。答えと拒否の種類は [`src/repositories/userSnapshot.mts`](src/repositories/userSnapshot.mts) の `UserSnapshotReading` が定義します。
 
 #### 組み込み実装
 
@@ -271,7 +271,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 設定を読むモジュールは、自分のセクションをマニフェストで宣言します（[#728](https://github.com/o3co/auth.provider/issues/728)）: `section.schema` はモジュールが所有する唯一のセクションの Zod スキーマで、boot はどのファクトリーよりも先にそのセクションをパースし、スキーマの出力の型を持つ `deps.section` としてすべてのファクトリーに渡します。スキーマが拒否する値は、オペレーターが書いたパスを示して boot を拒否します（`config-validation-failed`）。セクションはモジュール名の位置から読まれ、まだ古いパスにある間は `section.at` の位置から読まれます。`section.relocatedFrom` はセクションの移動元のパスを示します。そこにまだキーを設定している設定は、そのキーの新しいパスとそれを束縛する環境変数、またはキーが削除されたことを示して boot を拒否します（`config-path-relocated`）。0.x 系の間の橋渡しで、最初のメジャーリリースで削除されます（削除を忘れたリリースカットは relocated-paths のドリフトテストが失敗させます）。`section.renamedVariables` は名前が変わった環境変数を、古い名前からそれが束縛されていた古いパスへの対応で示します（新しい名前は新しいパスが束縛される変数で、削除されたキーのものにはありません）。パッケージの `reference.conf` は各名前を予約セクション `renamed-variables` に捕捉します。解決時に古い名前が設定されていたと捕捉された場合、新しい名前が同じ値で捕捉されていなければ boot を拒否します（`environment-variable-renamed`）。削除されたキーの変数が設定されている場合と、名前が捕捉されていない場合も同じく拒否します。`section.reference` はパッケージの `config/reference.conf` を指します: boot はこれを読まず、`moduleReferences(modules)`（[`src/config/references.mts`](src/config/references.mts)）が、構成が読み込むモジュールの reference を、それぞれ一度ずつ、core 自身のもの（`coreReference()`）を一番下にして答え、composition root はそれを自分のファイルの下に重ねます。パッケージは自分の reference を、自分のテストで `@o3co/auth-provider-core/testing` の `packageReferenceProblems` を使って検査します。boot はパースした各モジュールのセクションをそのパスで設定に書き戻すので、`config` を読むファクトリーは、セクションのスキーマがそれをどうしたかを見ます。別のモジュールのセクションの内側にあるセクションはその内側に書き戻され、二つのモジュールが同じパスにセクションを宣言することはできません（`module-section-path-invalid`）。boot が core のスキーマの後に設定全体をパースする `configSchema` は、各セクションがモジュール名の下に移った時点で非推奨になります。
 
-自分の `enabled` キーを持つモジュールは、それをスイッチ `section.isEnabled` として宣言し、boot はパース済みのセクションでそれを呼びます。`false` を答えたモジュールは何も登録しません — スロット、コントリビューション、ルート、admission action、レート制限の予算、他のスロットへの要求、absence policy、ライフサイクルのいずれも — し、そのファクトリーは一つも実行されず、インストールされていないのと同じになります。ただしセクションはパースされ、旧パスは引き続き拒否されます。そのモジュールだけが提供するはずだったスロットを要求するモジュールは、インストールされていないときと同じく拒否されます。意図的な例外が一つあります: `webauthn-mfa-factor` はスイッチを宣言しないため、ファクターがオフでも `webauthn.allowCredentialsForKnownUser` の拒否は実行されます — ファクターがオンの間に登録された第二要素のクレデンシャルは、スイッチを切った後も残るためです。
+自分の `enabled` キーを持つモジュールは、それをスイッチ `section.isEnabled` として宣言し、boot はパース済みのセクションでそれを呼びます。`false` を答えたモジュールは何も登録しません — スロット、コントリビューション、ルート、admission action、レート制限の予算、他のスロットへの要求、absence policy、ライフサイクルのいずれも — し、そのファクトリーは一つも実行されず、インストールされていないのと同じになります。ただしセクションはパースされ、旧パスは引き続き拒否されます。そのモジュールだけが提供するはずだったスロットを要求するモジュールは、インストールされていないときと同じく拒否されます。
 
 環境変数が設定できるセクションの葉は、HOCON が `${?VAR}` に代入する文字列を読みます。core はその文字列の読み手を export します。定義はすべて [`src/config/application.schema.mts`](src/config/application.schema.mts) にあり、どのパッケージも変数を同じように読みます:
 
@@ -625,7 +625,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 
 - `userSessionStore` と、sid / subject をキーとするその兄弟: セッションのメタデータ（auth_time、セッションがどう確立されたか — `authentication` —、アクティブな RP、family ID、OIDC claim）、ログアウトの fan-out 用インデックス、subject 単位の失効 — [`src/user-sessions/README.md`](src/user-sessions/README.md)。`SupportsSecondFactorUpdate` — `UserSessionStore` の任意の capability で、生きているセッションで検証された第 2 要素を記録する（`recordSecondFactor`）。ステップアップに必要。同梱の 2 つのストアはどちらも実装している。`supportsSecondFactorUpdate(store)` ガードで検出する。
 - `SupportsSessionEnd` — `SessionFamilyIndex` の任意の capability（`endSession`、`addFamilyIdUnlessEnded`）。同じセッションに対するログアウトの end とグラントの add について、end の一覧がその family を含むか、add が `"ended"` と答えるかのどちらかになる。同梱の 2 つのインデックスはどちらも実装している（Redis のものは印を書けるクライアントの上で）。`supportsSessionEnd(index)` ガードで検出する。ストアが読み書きを線形化可能に保ち、読み取りをプライマリで処理すること（各操作は、それが始まる前に完了したすべての書き込みを見る）を信頼している。Redis の非同期レプリケーションはフェイルオーバーをまたいでこれを保証しない。昇格したレプリカは、旧プライマリが応答済みの書き込みを持たないことがある。レプリカが答える読み取りも同様である。この保証は、関係するすべての時計でセッションの寿命内にある操作について成り立つ。印はその寿命にクロックスキューの許容幅（`DEFAULT_CLOCK_SKEW_MS`）を足した間だけ残る。
-- `federationTokenStore`: `(sid, federationName)` をキーとする上流 IdP のトークンで、ログアウトで削除される。Redis アダプターは `refresh_token` を AES-256-GCM で暗号化し、`allow-plaintext` は opt-in で警告を出力する。ストアは `FederationTokens` のすべてのフィールドを round-trip させなければならない — `expiresAt: null` を含め、記録がないフィールドは `null` ではなく `undefined` で返す（`obtainedAt` は代わりにキーごと省く）。フィールドごとのポート契約は [src/README.md](src/README.md#federation-tokens) に、必須キーのためにストア実装者が変えることは [docs/upgrading-required-record-keys.md](../../docs/upgrading-required-record-keys.md) にある。
+- `federationTokenStore`: `(sid, federationName)` をキーとする上流 IdP のトークンで、ログアウトで削除される。Redis アダプターは `refresh_token` を AES-256-GCM で暗号化し、`allow-plaintext` は opt-in で警告を出力する。ストアは `FederationTokens` のすべてのフィールドを round-trip させなければならない — `expiresAt: null` を含め、記録がないフィールドは `null` ではなく `undefined` で返す（`obtainedAt` もキーを残したまま `undefined` で返す）。フィールドごとのポート契約は [src/README.md](src/README.md#federation-tokens) に、必須キーのためにストア実装者が変えることは [docs/upgrading-required-record-keys.md](../../docs/upgrading-required-record-keys.md) にある。
 
 `@o3co/auth-provider-oauth` が両方を消費します: ログアウトと連鎖失効、id_token と `/userinfo`、`POST /oauth/federation/:name/token`。いずれかの `core.federations.<name>.enabled` が true のとき、`userSessionStore`、`sessionRPRegistry`、`sessionFamilyIndex`、`sessionFederationIndex`、`federationTokenStore`、`refreshTokenFamilyRevocation` のどれかが欠けた構成を boot は拒否します（`federation-stores-incomplete`）。
 

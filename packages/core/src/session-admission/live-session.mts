@@ -32,7 +32,6 @@ import { coveredByRevocationBoundary } from "../federation-grants/effective-stat
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import { isRenewalNonce } from "../user-sessions/renewalNonce.mjs";
 import {
-	type SubjectRevocation,
 	supportsSecondFactorUpdate,
 	type UserSession,
 	type UserSessionStore,
@@ -162,7 +161,7 @@ export async function readLiveSession(
 	// off `deps` once, in the same guarded section as its answer.
 	if (session !== null && presented.carrier !== "token") {
 		try {
-			const subjectRevocation: SubjectRevocation | undefined = checked.readSubjectRevocation();
+			const subjectRevocation = checked.readSubjectRevocation();
 			const boundary =
 				subjectRevocation === undefined ? null : await subjectRevocation.revokedBefore(session.sub);
 			if (boundary !== null && !isValidDate(boundary)) {

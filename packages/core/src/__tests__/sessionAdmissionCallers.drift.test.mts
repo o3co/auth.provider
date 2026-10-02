@@ -18,18 +18,18 @@
  * No shipped source outside `packages/core/src/session-admission/` reads a
  * session by other means than admission (the session-admission ADR's D10).
  *
- * What it finds, by shape and by following the receiver, since a literal grep
- * would miss an aliased store (`const store = opts.userSessionStore`) or
- * boundary (`const revocation = options.subjectRevocation;
- * revocation.revokedBefore(…)`):
+ * What it finds, in one TypeScript program over every shipped source, typed
+ * as the workspace builds it:
  *
- * - `get(` on a receiver typed `UserSessionStore`: a property named
- *   `userSessionStore` on anything; a local, destructured name or parameter
- *   followed to its declaration (a type annotation naming `UserSessionStore`,
- *   a binding element keyed `userSessionStore`, or an initializer that
- *   resolves the same way, through `await`, `!`, `as`, `??` and `?:`);
- * - `revokedBefore(` on a receiver typed `SubjectRevocation`, followed the
- *   same way (`subjectRevocation`, a type naming `SubjectRevocation`);
+ * - `get` on a receiver whose type is core's `UserSessionStore`, and
+ *   `revokedBefore` on one whose type is core's `SubjectRevocation`: the
+ *   checker resolves the member on the receiver's type (a member of its union,
+ *   an intersection, a type parameter's constraint, a `Pick`) to the
+ *   interface's own declaration. How the receiver is reached or written does
+ *   not matter: a property, an alias, a call's result, a name declared in
+ *   another file, optional chaining, an element access by a literal key, or
+ *   the method destructured off it. A property or interface merely named like
+ *   one is not it;
  * - a call of `selectAcr(`;
  * - a `SessionClaim` literal: an object literal with a `carrier` property
  *   whose value is one of the four carriers;
@@ -43,9 +43,9 @@
  *   `admitPrimary`.
  *
  * A guarded function is found under an import alias (`import { selectAcr as
- * pick }`), as a string element access (`store["get"]`), and as a reference
- * that is not a call (`.bind`, `.call`, a method taken off its object, a
- * value passed on).
+ * pick }`), as a member access (`store["recordSecondFactor"]`), and as a
+ * reference that is not a call (`.bind`, `.call`, a value passed on); a
+ * guarded method, also when taken off its object without being called there.
  *
  * Every site outside the home is pinned to its file and count with a reason
  * ({@link ALLOWED}): the token-side reads of that ADR's D9, outside
@@ -53,15 +53,16 @@
  * A site not listed, a second one in a listed file, or an entry whose site
  * went away fails.
  *
- * Left to review: a receiver reached under a name declared in another file; a
- * namespace import (`core.selectAcr`) or a computed key (`store[key]`); a
- * local alias of a guarded function (`const f = selectAcr` is a site,
- * `f(…)` is not a second one); a store reached through reflection
- * (`Reflect.get`, `Object.values`); a receiver whose type only a
- * `ts.Program` knows, which this guard does not build.
+ * Left to review: a receiver typed `any`, or a class's own `get` (a store
+ * implementation's, not the interface's); a namespace import
+ * (`core.selectAcr`) or a computed key that is not one literal; a local alias
+ * of a guarded function (`const f = selectAcr` is a site, `f(…)` is not a
+ * second one); a store reached through reflection (`Reflect.get`,
+ * `Object.values`). The program resolves another package's import of core to
+ * core's build, so the guard runs after the workspace build, as CI runs it.
  */
 
-import { type Dirent, readdirSync, readFileSync } from "node:fs";
+import { type Dirent, readdirSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -110,120 +111,92 @@ const GUARDED_METHODS: ReadonlyMap<string, Receiver> = new Map([
 	["revokedBefore", "revocation"],
 ]);
 
+/** The interfaces whose guarded methods are tracked, by name, as core declares them. */
+const TRACKED_INTERFACES: ReadonlyMap<string, Receiver> = new Map([
+	["UserSessionStore", "store"],
+	["SubjectRevocation", "revocation"],
+]);
+
+/** Where core declares them: its source, and the build every other package's import resolves to. */
+const TRACKED_DECLARATION_FILES: ReadonlySet<string> = new Set([
+	"packages/core/src/user-sessions/types.mts",
+	"packages/core/dist/user-sessions/types.d.mts",
+]);
+
 const CARRIERS: ReadonlySet<string> = new Set(["cookie", "code", "link", "token"]);
 
+/** `fileName`, `/`-separated from the root. */
+const fromRoot = (fileName: string): string => relative(repoRoot, fileName).split(sep).join("/");
+
 /**
- * The sites in `source`: each `get(` on a store-typed receiver, each
- * `revokedBefore(` on a revocation-typed one, each `selectAcr(` call, each
- * claim literal, each `recordSecondFactor(` and `establishWithoutAsking(`
- * call, with its 1-based line.
+ * The sites in `file`: each `get` on a `UserSessionStore` and each
+ * `revokedBefore` on a `SubjectRevocation`, as `checker` types the receiver;
+ * each guarded function; each claim literal; with its 1-based line.
  */
-function sessionAdmissionSites(source: string, fileName = "scan.mts"): Site[] {
-	const kind = /\.(?:js|mjs|cjs)$/.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
-	const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+function sessionAdmissionSites(checker: ts.TypeChecker, file: ts.SourceFile): Site[] {
 	const sites: Site[] = [];
 	const found = (node: ts.Node, what: What): void => {
 		sites.push({ line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1, what });
 	};
-	const bare = (node: ts.Expression): ts.Expression =>
-		ts.isParenthesizedExpression(node) ||
-		ts.isAsExpression(node) ||
-		ts.isSatisfiesExpression(node) ||
-		ts.isTypeAssertionExpression(node) ||
-		ts.isNonNullExpression(node) ||
-		ts.isAwaitExpression(node)
-			? bare(node.expression)
-			: node;
-	const byName = (name: string): Receiver | undefined =>
-		name === "userSessionStore" ? "store" : name === "subjectRevocation" ? "revocation" : undefined;
-	const byType = (type: ts.TypeNode | undefined): Receiver | undefined => {
-		if (type === undefined) return undefined;
-		const text = type.getText(file);
-		if (/\bUserSessionStore\b/.test(text)) return "store";
-		if (/\bSubjectRevocation\b/.test(text)) return "revocation";
-		return undefined;
+	/** The tracked interface `declaration` is a member of, if any. */
+	const trackedOwner = (declaration: ts.Declaration): Receiver | undefined => {
+		const owner = declaration.parent;
+		return ts.isInterfaceDeclaration(owner) &&
+			TRACKED_DECLARATION_FILES.has(fromRoot(owner.getSourceFile().fileName))
+			? TRACKED_INTERFACES.get(owner.name.text)
+			: undefined;
 	};
-	const keyOf = (element: ts.BindingElement): string | undefined => {
+	/**
+	 * Whether `name` on a value of `type` is the guarded method of its kind: the
+	 * member some part of the type resolves it to — the type itself, a member of
+	 * its union, an intersection, a constraint, a `Pick` — is the tracked
+	 * interface's own.
+	 */
+	const isGuarded = (type: ts.Type, name: string): boolean => {
+		const kind = GUARDED_METHODS.get(name);
+		if (kind === undefined) return false;
+		const defined = checker.getNonNullableType(type);
+		return (defined.isUnion() ? defined.types : [defined]).some((part) =>
+			(checker.getPropertyOfType(checker.getApparentType(part), name)?.declarations ?? []).some(
+				(declaration) => trackedOwner(declaration) === kind,
+			),
+		);
+	};
+	/** A computed key's name: a string literal, or an expression whose type is one string literal. */
+	const keyOf = (key: ts.Expression): string | undefined => {
+		if (ts.isStringLiteralLike(key)) return key.text;
+		const type = checker.getTypeAtLocation(key);
+		return type.isStringLiteral() ? type.value : undefined;
+	};
+	/** A binding element's property name: `get` in `{ get }`, `{ get: read }`, `{ "get": read }` or `{ [key]: read }`. */
+	const boundName = (element: ts.BindingElement): string | undefined => {
 		const key = element.propertyName ?? element.name;
-		return ts.isIdentifier(key) || ts.isStringLiteralLike(key) ? key.text : undefined;
+		if (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) return key.text;
+		return ts.isComputedPropertyName(key) ? keyOf(key.expression) : undefined;
 	};
-	/** The binding element naming `name` in `pattern`, at any depth. */
-	const elementNamed = (pattern: ts.BindingName, name: string): ts.BindingElement | undefined => {
-		if (ts.isIdentifier(pattern)) return undefined;
-		for (const element of pattern.elements) {
-			if (ts.isOmittedExpression(element)) continue;
-			if (ts.isIdentifier(element.name) && element.name.text === name) return element;
-			const inner = elementNamed(element.name, name);
-			if (inner !== undefined) return inner;
-		}
-		return undefined;
+	/** A member access — `x.get`, `x?.get`, `x["get"]`, `x[key]` — as its receiver and member name. */
+	const member = (
+		node: ts.Node,
+	): { readonly receiver: ts.Expression; readonly name: string | undefined } | undefined =>
+		ts.isPropertyAccessExpression(node)
+			? { receiver: node.expression, name: node.name.text }
+			: ts.isElementAccessExpression(node)
+				? { receiver: node.expression, name: keyOf(node.argumentExpression) }
+				: undefined;
+	/** A guarded method on a receiver typed as its interface: the site's kind, else `undefined`. */
+	const guardedMember = (node: ts.Node): What | undefined => {
+		const access = member(node);
+		if (access?.name === undefined || !GUARDED_METHODS.has(access.name)) return undefined;
+		return isGuarded(checker.getTypeAtLocation(access.receiver), access.name)
+			? (access.name as What)
+			: undefined;
 	};
-	/** What the declaration of `name` in scope at `from` says its value is. */
-	const resolveName = (name: string, from: ts.Node, depth: number): Receiver | undefined => {
-		if (depth > 8) return undefined;
-		for (let scope = from.parent; scope !== undefined; scope = scope.parent) {
-			let statements: ts.NodeArray<ts.Statement> | undefined;
-			if (ts.isBlock(scope) || ts.isSourceFile(scope) || ts.isModuleBlock(scope)) {
-				statements = scope.statements;
-			} else if (ts.isCaseClause(scope) || ts.isDefaultClause(scope)) {
-				statements = scope.statements;
-			}
-			if (statements !== undefined) {
-				for (const statement of statements) {
-					if (!ts.isVariableStatement(statement)) continue;
-					for (const declaration of statement.declarationList.declarations) {
-						if (ts.isIdentifier(declaration.name)) {
-							if (declaration.name.text !== name) continue;
-							return (
-								byType(declaration.type) ??
-								(declaration.initializer === undefined
-									? undefined
-									: classify(declaration.initializer, depth + 1))
-							);
-						}
-						const element = elementNamed(declaration.name, name);
-						if (element !== undefined) {
-							const key = keyOf(element);
-							return key === undefined ? undefined : byName(key);
-						}
-					}
-				}
-			}
-			if (ts.isFunctionLike(scope)) {
-				for (const parameter of scope.parameters) {
-					if (ts.isIdentifier(parameter.name)) {
-						if (parameter.name.text === name) return byType(parameter.type);
-						continue;
-					}
-					const element = elementNamed(parameter.name, name);
-					if (element !== undefined) {
-						const key = keyOf(element);
-						return key === undefined ? undefined : byName(key);
-					}
-				}
-			}
-		}
-		return undefined;
-	};
-	/** What `expression`'s value is, by its shape or by its declaration. */
-	const classify = (expression: ts.Expression, depth = 0): Receiver | undefined => {
-		const node = bare(expression);
-		if (ts.isPropertyAccessExpression(node)) return byName(node.name.text);
-		if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
-			return byName(node.argumentExpression.text);
-		}
-		if (ts.isIdentifier(node)) return resolveName(node.text, node, depth);
-		if (ts.isConditionalExpression(node)) {
-			return classify(node.whenTrue, depth + 1) ?? classify(node.whenFalse, depth + 1);
-		}
-		if (ts.isBinaryExpression(node)) {
-			const op = node.operatorToken.kind;
-			if (op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.BarBarToken) {
-				return classify(node.left, depth + 1) ?? classify(node.right, depth + 1);
-			}
-			if (op === ts.SyntaxKind.AmpersandAmpersandToken) return classify(node.right, depth + 1);
-		}
-		return undefined;
+	/** A guarded method taken off its object by destructuring: `const { get } = store`. */
+	const guardedBinding = (element: ts.BindingElement): What | undefined => {
+		if (!ts.isObjectBindingPattern(element.parent)) return undefined;
+		const name = boundName(element);
+		if (name === undefined || !GUARDED_METHODS.has(name)) return undefined;
+		return isGuarded(checker.getTypeAtLocation(element.parent), name) ? (name as What) : undefined;
 	};
 	// An import alias: `import { selectAcr as pick }` makes `pick` the guarded name.
 	const aliases = new Map<string, string>();
@@ -238,15 +211,6 @@ function sessionAdmissionSites(source: string, fileName = "scan.mts"): Site[] {
 	}
 	const guardedFunction = (name: string): string | undefined =>
 		GUARDED_FUNCTIONS.has(name) ? name : aliases.get(name);
-	/** A member access — `x.get` or `x["get"]` — as its receiver and member name. */
-	const member = (
-		node: ts.Node,
-	): { readonly receiver: ts.Expression; readonly name: string } | undefined =>
-		ts.isPropertyAccessExpression(node)
-			? { receiver: node.expression, name: node.name.text }
-			: ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
-				? { receiver: node.expression, name: node.argumentExpression.text }
-				: undefined;
 	/** Whether `node` is the callee of the call that is its parent. */
 	const isCallee = (node: ts.Node): boolean =>
 		ts.isCallExpression(node.parent) && node.parent.expression === node;
@@ -272,15 +236,6 @@ function sessionAdmissionSites(source: string, fileName = "scan.mts"): Site[] {
 			ts.isQualifiedName(parent)
 		);
 	};
-	/** A guarded method on a receiver of its kind: the site's kind, else `undefined`. */
-	const guardedMember = (node: ts.Node): What | undefined => {
-		const access = member(node);
-		if (access === undefined) return undefined;
-		const receiver = GUARDED_METHODS.get(access.name);
-		return receiver !== undefined && classify(access.receiver) === receiver
-			? (access.name as What)
-			: undefined;
-	};
 	const visit = (node: ts.Node): void => {
 		if (ts.isCallExpression(node)) {
 			const callee = node.expression;
@@ -291,16 +246,9 @@ function sessionAdmissionSites(source: string, fileName = "scan.mts"): Site[] {
 				const name = guardedFunction(callee.text);
 				if (name !== undefined) found(node, name as What);
 			} else {
-				// A string element access to a guarded function: `x["recordSecondFactor"](…)`.
-				const access = member(callee);
-				if (access !== undefined && GUARDED_FUNCTIONS.has(access.name)) {
-					found(node, access.name as What);
-				} else if (
-					ts.isPropertyAccessExpression(callee) &&
-					GUARDED_FUNCTIONS.has(callee.name.text)
-				) {
-					found(node, callee.name.text as What);
-				}
+				// A member access to a guarded function: `x.recordSecondFactor(…)`, `x["recordSecondFactor"](…)`.
+				const name = member(callee)?.name;
+				if (name !== undefined && GUARDED_FUNCTIONS.has(name)) found(node, name as What);
 			}
 		} else if (ts.isIdentifier(node) && !isCallee(node) && !isDeclarationName(node)) {
 			// A reference that is not a call: `.bind`, `.call`, a value passed on.
@@ -313,6 +261,9 @@ function sessionAdmissionSites(source: string, fileName = "scan.mts"): Site[] {
 			// A method taken off its object without being called there — not a
 			// `typeof` check of it, which reads nothing.
 			const method = ts.isTypeOfExpression(node.parent) ? undefined : guardedMember(node);
+			if (method !== undefined) found(node, method);
+		} else if (ts.isBindingElement(node)) {
+			const method = guardedBinding(node);
 			if (method !== undefined) found(node, method);
 		} else if (ts.isObjectLiteralExpression(node)) {
 			for (const property of node.properties) {
@@ -355,8 +306,7 @@ function shippedSources(): string[] {
 			}
 			const path = join(dir, entry.name);
 			if (entry.isDirectory()) collect(path);
-			else if (isShippedSource(entry.name))
-				files.push(relative(repoRoot, path).split(sep).join("/"));
+			else if (isShippedSource(entry.name)) files.push(fromRoot(path));
 		}
 	};
 	for (const pkg of readdirSync(join(repoRoot, "packages"), { withFileTypes: true })) {
@@ -468,108 +418,215 @@ const counted = (sites: readonly Site[]): Partial<Record<What, number>> => {
 	return counts;
 };
 
+/**
+ * The probes the tests below hold the recognizer to. Each is a module beside
+ * core's tests that sees the two tracked interfaces as core declares them, on
+ * its first line, so a site on that line is on line 1.
+ */
+const PRELUDE =
+	'import type { SubjectRevocation, UserSessionStore } from "../user-sessions/types.mjs"; ';
+
+const STORE_READS: readonly string[] = [
+	"declare const deps: { userSessionStore: UserSessionStore }; await deps.userSessionStore.get(sid);",
+	"declare const opts: { sessions: UserSessionStore }; const store = opts.sessions; await store.get(sid);",
+	"declare const options: { userSessionStore: UserSessionStore }; const { userSessionStore: s } = options; await s.get(sid);",
+	"function f(store: UserSessionStore) { return store.get(sid); }",
+	"type Sessions = UserSessionStore; function f(store: Sessions) { return store.get(sid); }",
+	"declare function sessions(): UserSessionStore; await sessions().get(sid);",
+	"declare const c: { readUserSessionStore(): UserSessionStore }; const s = c.readUserSessionStore(); await s.get(sid);",
+	"declare const store: UserSessionStore | undefined; await store?.get(sid);",
+	"declare const a: boolean; declare const opts: { userSessionStore: UserSessionStore }; const store = a ? opts.userSessionStore : undefined; store?.get(sid);",
+	"function f<S extends UserSessionStore>(store: S) { return store.get(sid); }",
+	"function f(store: UserSessionStore & { readonly extra: true }) { return store.get(sid); }",
+	"function f(store: Readonly<UserSessionStore>) { return store.get(sid); }",
+	"async function f(store: Promise<UserSessionStore>) { return (await store).get(sid); }",
+];
+
+const NOT_STORE_READS: readonly string[] = [
+	"const store = new Map<string, number>(); store.get(sid);",
+	"declare const deps: { userSessionStore: Map<string, number> }; deps.userSessionStore.get(sid);",
+	"declare const opts: { federationTokenStore: { get(sid: string, name: string): unknown } }; await opts.federationTokenStore.get(sid, name);",
+	"declare const store: { get(key: string, cb: () => void): void }; store.get(key, cb);",
+	"class Own { get(sid: string) { return sid; } } new Own().get(sid);",
+	"namespace local { export interface UserSessionStore { get(sid: string): unknown } } declare const store: local.UserSessionStore; store.get(sid);",
+	"declare const store: UserSessionStore; const other = new Map<string, number>(); other.get(sid); store.kind;",
+	"declare const store: UserSessionStore; typeof store.get;",
+];
+
+const BOUNDARY_READS: readonly string[] = [
+	"declare const deps: { subjectRevocation: SubjectRevocation }; await deps.subjectRevocation.revokedBefore(sub);",
+	"declare const options: { subjectRevocation: SubjectRevocation }; const revocation = options.subjectRevocation; await revocation.revokedBefore(subject);",
+	'const sessionsBoundaryFor = (revocation: Pick<SubjectRevocation, "revokedBefore">) => async (s: string) => revocation.revokedBefore(s);',
+	'declare const revocation: "none" | { subjectRevocation: SubjectRevocation }; const r = revocation === "none" ? undefined : revocation.subjectRevocation; await r?.revokedBefore(sub);',
+	"declare const c: { readSubjectRevocation(): SubjectRevocation }; const r = c.readSubjectRevocation(); await r.revokedBefore(sub);",
+	"declare const r: SubjectRevocation; const { revokedBefore: boundary } = r; await boundary(sub);",
+];
+
+const NOT_BOUNDARY_READS: readonly string[] = [
+	"declare const grants: { revokedBefore(sub: string): unknown }; await grants.revokedBefore(sub);",
+	"declare const store: UserSessionStore & { revokedBefore(sub: string): unknown }; await store.revokedBefore(sub);",
+];
+
+/** A probe and the one kind of site it holds. */
+const ONE_SITE: ReadonlyArray<readonly [string, What]> = [
+	['import { selectAcr as pick } from "@o3co/auth-provider-core"; pick(a, b, t, r);', "selectAcr"],
+	[
+		'import { resumePrimary as go } from "@o3co/auth-provider-core"; await go(d, c, x);',
+		"resumePrimary",
+	],
+	['function f(store: UserSessionStore) { return store["get"](sid); }', "get"],
+	['function f(store: UserSessionStore) { const key = "get"; return store[key](sid); }', "get"],
+	['await store["recordSecondFactor"](sid, event);', "recordSecondFactor"],
+	["function f(store: UserSessionStore) { const read = store.get; return read(sid); }", "get"],
+	["function f(store: UserSessionStore) { return store.get.bind(store); }", "get"],
+	["function f(store: UserSessionStore) { return store.get.call(store, sid); }", "get"],
+	["function f(store: UserSessionStore) { return use(store.get); }", "get"],
+	["function f({ get }: UserSessionStore) { return get(sid); }", "get"],
+	["declare const store: UserSessionStore; const { get: read } = store; read(sid);", "get"],
+	["const f = selectAcr; f(a, b, t, r);", "selectAcr"],
+	["run(establishWithoutAsking);", "establishWithoutAsking"],
+	["const c = brandClaim({ authenticated: true });", "brandClaim"],
+	["return establish(primary);", "establish"],
+	["return askEvery(deps, requirements, primary, primary, []);", "askEvery"],
+	[
+		'import { establish as mint } from "../session-admission/establishment.mjs"; mint(p);',
+		"establish",
+	],
+	["run(askEvery);", "askEvery"],
+];
+
+/** A probe and the one site it holds, on its first line. */
+const LINE_ONE_SITE: ReadonlyArray<readonly [string, What]> = [
+	["const s = selectAcr(requested, amr, table, reach);", "selectAcr"],
+	['const c = { authenticated: true, sid, subject, carrier: "cookie" };', "claim"],
+	["await store.recordSecondFactor(sid, event);", "recordSecondFactor"],
+	["const e = establishWithoutAsking(login);", "establishWithoutAsking"],
+	["const a = await resumePrimary(deps, c, done);", "resumePrimary"],
+	["const c = continuationOf(primary, [], name);", "continuationOf"],
+];
+
+const NO_SITE: readonly string[] = ['const c = { carrier: kind }; const d = { carrier: "bus" };'];
+
+const PROBES: ReadonlyMap<string, string> = new Map(
+	[
+		...STORE_READS,
+		...NOT_STORE_READS,
+		...BOUNDARY_READS,
+		...NOT_BOUNDARY_READS,
+		...ONE_SITE.map(([source]) => source),
+		...LINE_ONE_SITE.map(([source]) => source),
+		...NO_SITE,
+	].map((source, i) => [
+		source,
+		join(repoRoot, "packages/core/src/__tests__", `__session_admission_probe_${i}__.mts`),
+	]),
+);
+
+/**
+ * One program over every shipped source and every probe, typed as the
+ * workspace builds them: each package's `#/` import resolves to its source,
+ * a package import to that package's build.
+ */
+function workspaceProgram(sources: readonly string[]): ts.Program {
+	const base = ts.readConfigFile(join(repoRoot, "tsconfig.base.json"), ts.sys.readFile);
+	const options: ts.CompilerOptions = {
+		...ts.parseJsonConfigFileContent(base.config, ts.sys, repoRoot).options,
+		noEmit: true,
+		allowJs: true,
+		customConditions: ["development"],
+		types: [],
+	};
+	const probes = new Map([...PROBES].map(([source, fileName]) => [fileName, PRELUDE + source]));
+	const host = ts.createCompilerHost(options, true);
+	// JSDoc only where it carries types (a JavaScript file): about half the parse.
+	host.jsDocParsingMode = ts.JSDocParsingMode.ParseForTypeInfo;
+	const readFile = host.readFile.bind(host);
+	const fileExists = host.fileExists.bind(host);
+	const getSourceFile = host.getSourceFile.bind(host);
+	host.readFile = (f) => probes.get(f) ?? readFile(f);
+	host.fileExists = (f) => probes.has(f) || fileExists(f);
+	host.getSourceFile = (f, language, onError, create) => {
+		const probe = probes.get(f);
+		return probe === undefined
+			? getSourceFile(f, language, onError, create)
+			: ts.createSourceFile(f, probe, language, true, ts.ScriptKind.TS);
+	};
+	return ts.createProgram({
+		rootNames: [...sources.map((file) => join(repoRoot, file)), ...probes.keys()],
+		options,
+		host,
+	});
+}
+
+const shipped = shippedSources();
+const program = workspaceProgram(shipped);
+const checker = program.getTypeChecker();
+
+/** The sites in a probe. */
+const sitesIn = (source: string): Site[] => {
+	const fileName = PROBES.get(source);
+	const file = fileName === undefined ? undefined : program.getSourceFile(fileName);
+	if (file === undefined) throw new Error(`not a probe: ${source}`);
+	return sessionAdmissionSites(checker, file);
+};
+
 describe("session-admission callers", () => {
-	it("finds a store read whatever the receiver is called: a property, an alias, a destructured name, a typed parameter", () => {
-		for (const source of [
-			"await deps.userSessionStore.get(sid);",
-			"const store = opts.userSessionStore; await store.get(sid);",
-			"const { userSessionStore } = options; await userSessionStore.get(sid);",
-			"const { userSessionStore: sessions } = options; await sessions.get(sid);",
-			"function f(store: UserSessionStore) { return store.get(sid); }",
-			"function f({ userSessionStore }: Options) { return userSessionStore.get(sid); }",
-			"async function f() { const store = opts.userSessionStore; if (store) { const s = await (store as UserSessionStore).get(sid); } }",
-			"const store = a ? opts.userSessionStore : undefined; store?.get(sid);",
-			"let store: UserSessionStore | undefined; store = undefined; store?.get(sid);",
-		]) {
+	it("finds a store read by the receiver's type, however the receiver is reached or written", () => {
+		for (const source of STORE_READS) {
 			expect(
-				sessionAdmissionSites(source).map((s) => s.what),
+				sitesIn(source).map((s) => s.what),
 				source,
 			).toEqual(["get"]);
 		}
 	});
 
-	it("does not take a map, another store, or the express-session store for one", () => {
-		for (const source of [
-			"const store = new Map<string, Bucket>(); store.get(sid);",
-			"await opts.federationTokenStore.get(sid, name);",
-			"function f(store: SessionStore) { store.get(key(id), cb); }",
-			"const { federationTokenStore: store } = deps; store.get(sid);",
-			"const store = deps.userSessionStore; const other = new Map(); other.get(sid);",
-		]) {
-			expect(sessionAdmissionSites(source), source).toEqual([]);
-		}
+	it("does not take a map, another store, the express-session store, or a property or interface merely named like one", () => {
+		for (const source of NOT_STORE_READS) expect(sitesIn(source), source).toEqual([]);
 	});
 
-	it("finds a boundary read on a subject revocation: a property, an alias, a typed parameter, a conditional", () => {
-		for (const source of [
-			"await deps.subjectRevocation.revokedBefore(sub);",
-			"const revocation = options.subjectRevocation; await revocation.revokedBefore(subject);",
-			'const sessionsBoundaryFor = (revocation: Pick<SubjectRevocation, "revokedBefore">) => async (s) => revocation.revokedBefore(s);',
-			'const subjectRevocation = revocation === "none" ? undefined : revocation.subjectRevocation; await subjectRevocation.revokedBefore(sub);',
-		]) {
+	it("finds a boundary read on a subject revocation by its type: a property, an alias, a Pick, a conditional, a call's result, a destructured method", () => {
+		for (const source of BOUNDARY_READS) {
 			expect(
-				sessionAdmissionSites(source).map((s) => s.what),
+				sitesIn(source).map((s) => s.what),
 				source,
 			).toEqual(["revokedBefore"]);
 		}
-		expect(sessionAdmissionSites("await grants.revokedBefore(sub);")).toEqual([]);
+		for (const source of NOT_BOUNDARY_READS) expect(sitesIn(source), source).toEqual([]);
 	});
 
-	it("finds a selectAcr call, a claim literal, and the two guarded calls", () => {
-		expect(sessionAdmissionSites("const s = selectAcr(requested, amr, table, reach);")).toEqual([
-			{ line: 1, what: "selectAcr" },
-		]);
-		expect(
-			sessionAdmissionSites('const c = { authenticated: true, sid, subject, carrier: "cookie" };'),
-		).toEqual([{ line: 1, what: "claim" }]);
-		expect(
-			sessionAdmissionSites('const c = { carrier: kind }; const d = { carrier: "bus" };'),
-		).toEqual([]);
-		expect(sessionAdmissionSites("await store.recordSecondFactor(sid, event);")).toEqual([
-			{ line: 1, what: "recordSecondFactor" },
-		]);
-		expect(sessionAdmissionSites("const e = establishWithoutAsking(login);")).toEqual([
-			{ line: 1, what: "establishWithoutAsking" },
-		]);
-		expect(sessionAdmissionSites("const a = await resumePrimary(deps, c, done);")).toEqual([
-			{ line: 1, what: "resumePrimary" },
-		]);
-		expect(sessionAdmissionSites("const c = continuationOf(primary, [], name);")).toEqual([
-			{ line: 1, what: "continuationOf" },
-		]);
+	it("finds a selectAcr call, a claim literal, and the guarded calls, each on its line", () => {
+		for (const [source, what] of LINE_ONE_SITE) {
+			expect(sitesIn(source), source).toEqual([{ line: 1, what }]);
+		}
+		for (const source of NO_SITE) expect(sitesIn(source), source).toEqual([]);
 	});
 
-	it("follows an import alias, a string element access, and a reference that is not a call — bind, call, a value passed on", () => {
-		for (const [source, what] of [
-			[
-				'import { selectAcr as pick } from "@o3co/auth-provider-core"; pick(a, b, t, r);',
-				"selectAcr",
-			],
-			[
-				'import { resumePrimary as go } from "@o3co/auth-provider-core"; await go(d, c, x);',
-				"resumePrimary",
-			],
-			['function f(store: UserSessionStore) { return store["get"](sid); }', "get"],
-			['await store["recordSecondFactor"](sid, event);', "recordSecondFactor"],
-			["function f(store: UserSessionStore) { const read = store.get; return read(sid); }", "get"],
-			["function f(store: UserSessionStore) { return store.get.bind(store); }", "get"],
-			["function f(store: UserSessionStore) { return store.get.call(store, sid); }", "get"],
-			["function f(store: UserSessionStore) { return use(store.get); }", "get"],
-			["const f = selectAcr; f(a, b, t, r);", "selectAcr"],
-			["run(establishWithoutAsking);", "establishWithoutAsking"],
-		] as const) {
+	it("follows an import alias, an element access, a destructured method, and a reference that is not a call — bind, call, a value passed on", () => {
+		for (const [source, what] of ONE_SITE) {
 			expect(
-				sessionAdmissionSites(source).map((s) => s.what),
+				sitesIn(source).map((s) => s.what),
 				source,
 			).toEqual([what]);
 		}
 	});
 
 	const sites = new Map<string, Site[]>();
-	for (const file of shippedSources()) {
-		const found = sessionAdmissionSites(readFileSync(join(repoRoot, file), "utf8"), file);
+	for (const file of shipped) {
+		const sourceFile = program.getSourceFile(join(repoRoot, file));
+		if (sourceFile === undefined) throw new Error(`not in the program: ${file}`);
+		const found = sessionAdmissionSites(checker, sourceFile);
 		if (found.length > 0) sites.set(file, found);
 	}
+
+	it("types the other packages' receivers through core's build (sanity: run after the workspace build)", () => {
+		const declarations = [...TRACKED_DECLARATION_FILES].map((file) =>
+			program.getSourceFile(join(repoRoot, file)),
+		);
+		expect(
+			declarations.map((file) => file !== undefined),
+			[...TRACKED_DECLARATION_FILES].join(", "),
+		).toEqual([true, true]);
+	});
 
 	it("scans the home, which builds the claims and selects the acr (sanity: the guard is not vacuous)", () => {
 		const home = [...sites].filter(([file]) => file.startsWith(HOME));
@@ -618,24 +675,6 @@ describe("session-admission callers", () => {
 		expect(offenders("establishWithoutAsking", ESTABLISH_WITHOUT_ASKING_CALLERS)).toEqual([]);
 		expect(offenders("resumePrimary", RESUME_PRIMARY_CALLERS)).toEqual([]);
 		expect(offenders("continuationOf", RESUME_PRIMARY_CALLERS)).toEqual([]);
-	});
-
-	it("finds a call of each brand minter, under an alias and as a value passed on", () => {
-		for (const [source, what] of [
-			["const c = brandClaim({ authenticated: true });", "brandClaim"],
-			["return establish(primary);", "establish"],
-			["return askEvery(deps, requirements, primary, primary, []);", "askEvery"],
-			[
-				'import { establish as mint } from "../session-admission/establishment.mjs"; mint(p);',
-				"establish",
-			],
-			["run(askEvery);", "askEvery"],
-		] as const) {
-			expect(
-				sessionAdmissionSites(source).map((s) => s.what),
-				source,
-			).toEqual([what]);
-		}
 	});
 
 	it("keeps admission's brand minters to admit.mts and the file that defines each, its testing entry excluded", () => {

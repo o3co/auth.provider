@@ -36,12 +36,14 @@ import {
 } from "@o3co/auth-provider-core";
 import { buildActClaim } from "./act.mjs";
 import { invalidRequest } from "./answers.mjs";
-import { reportedFamily } from "./tokenValidation.mjs";
+import type { ReportedBindings } from "./tokenValidation.mjs";
 
 /** What the issued token is minted from. */
 export interface Issuance {
 	readonly client: PublicClient;
 	readonly subjectValidated: ValidatedToken;
+	/** The subject's family and session, as read once at validation. */
+	readonly subjectBindings: ReportedBindings;
 	readonly actorValidated: ValidatedToken | null;
 	readonly grantedScope: readonly string[] | undefined;
 	readonly audienceForToken: string;
@@ -56,6 +58,7 @@ export async function issueAccessToken(
 	{
 		client,
 		subjectValidated,
+		subjectBindings,
 		actorValidated,
 		grantedScope,
 		audienceForToken,
@@ -98,12 +101,12 @@ export async function issueAccessToken(
 
 	const accessToken = await generateToken(
 		formatObject({
-			family_id: reportedFamily(subjectValidated),
+			family_id: subjectBindings.familyId,
 			// The subject's session as a liveness link only (core's
 			// `grants/sessionClaims.mts`): the logout that ends the subject token ends this
 			// one at introspection and userinfo, and nothing a `sid` authorises is reachable
 			// with it. The actor's session is not carried.
-			[LIVENESS_SID_CLAIM]: subjectValidated.sid ? subjectValidated.sid : undefined,
+			[LIVENESS_SID_CLAIM]: subjectBindings.sid,
 			act,
 		}),
 		{

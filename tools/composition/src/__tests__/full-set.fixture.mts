@@ -71,6 +71,7 @@ import {
 	type GrantPolicyHook,
 	type InterruptionAnswer,
 	loggableError,
+	type MfaFactorRecord,
 	type MfaFactorStore,
 	type Module,
 	memoryChallengeStoreModule,
@@ -220,6 +221,46 @@ export async function seedTotp(
 	if (factorStore === undefined) throw new Error("the composition holds no MFA factor store");
 	const { record, secret } = await seedTotpFactor({ config, factorStore, subject });
 	return { factorId: record.id, secret };
+}
+
+/**
+ * Writes `record` into its subject's factor set at the generation the set
+ * stands at, as the MFA package's writer does: the store's conditional
+ * create, never an unconditional one. Throws on a conflict: the set moved in
+ * between, or the id is already stored.
+ */
+export async function addFactorRecord(
+	factorStore: MfaFactorStore,
+	record: MfaFactorRecord,
+): Promise<void> {
+	const { generation } = await factorStore.listVersioned(record.subject);
+	const answer = await factorStore.createIf(record, generation);
+	if (answer.outcome !== "created") {
+		throw new Error(
+			`createIf answered ${answer.outcome}: the set moved, or the id is already stored`,
+		);
+	}
+}
+
+/**
+ * Removes every record of `subject`'s factor set, each at the generation the
+ * previous removal left, and answers the records removed. Throws when the
+ * set moved in between.
+ */
+export async function removeFactorRecords(
+	factorStore: MfaFactorStore,
+	subject: string,
+): Promise<readonly MfaFactorRecord[]> {
+	const { items, generation } = await factorStore.listVersioned(subject);
+	let at = generation;
+	for (const record of items) {
+		const answer = at === null ? undefined : await factorStore.removeIf(subject, record.id, at);
+		if (answer?.outcome !== "removed") {
+			throw new Error(`the factor set moved while a test removed from it: ${answer?.outcome}`);
+		}
+		at = answer.generation;
+	}
+	return items;
 }
 
 /**

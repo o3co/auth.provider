@@ -108,6 +108,18 @@ describe("coveredByRevocationBoundary", () => {
 		expect(() => coveredByRevocationBoundary(CONSENT, CONSENT, Number.NaN)).toThrow(RangeError);
 		expect(() => coveredByRevocationBoundary(INVALID, null, 1_000)).toThrow(RangeError);
 	});
+
+	it("throws the same on a date a store answered as something other than a Date: it is no instant either", () => {
+		for (const stored of ["2026-09-18T00:00:00.000Z", CONSENT.getTime(), {}, undefined]) {
+			const notADate = stored as unknown as Date;
+			expect(() => coveredByRevocationBoundary(CONSENT, notADate, 1_000)).toThrow(RangeError);
+			expect(() => coveredByRevocationBoundary(notADate, CONSENT, 1_000)).toThrow(RangeError);
+			expect(() => coveredByRevocationBoundary(notADate, null, 1_000)).toThrow(RangeError);
+		}
+		expect(() => coveredByRevocationBoundary(null as unknown as Date, null, 1_000)).toThrow(
+			RangeError,
+		);
+	});
 });
 
 describe("effectiveFederationGrantStatus", () => {
@@ -195,6 +207,26 @@ describe("effectiveFederationGrantStatus", () => {
 		expect(() =>
 			effectiveFederationGrantStatus(active, { ...context, grantsBoundary: INVALID }),
 		).toThrow(RangeError);
+	});
+
+	it("lets a stored consent date that is not a Date surface as the same error: neither revoked nor live", () => {
+		for (const stored of ["2026-09-18T00:00:00.000Z", null]) {
+			const grant = { ...active, consent: { ...active.consent, at: stored as unknown as Date } };
+			expect(() => effectiveFederationGrantStatus(grant, context)).toThrow(RangeError);
+			expect(() =>
+				effectiveFederationGrantStatus(grant, { ...context, grantsBoundary: at(1_000) }),
+			).toThrow(RangeError);
+		}
+	});
+
+	it("reads a stored expiry that is not a Date as expired, as one holding no instant: never as live", () => {
+		for (const stored of ["2026-12-18T00:00:00.000Z", null]) {
+			const grant = { ...active, expiresAt: stored as unknown as Date };
+			expect(effectiveFederationGrantStatus(grant, context)).toEqual({
+				status: "expired",
+				reason: "consented_lifetime",
+			});
+		}
 	});
 
 	it("reads a changed upstream identity as terminal, and any other connection change as a reauthorization", () => {

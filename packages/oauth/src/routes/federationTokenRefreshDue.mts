@@ -19,7 +19,7 @@
  * finite expiry never is; one that ends within the refresh buffer is, unless
  * it is known to be obtained less than half its lifetime ago and has at least
  * the refresh floor left. That rule only ever delays a refresh: an
- * `obtainedAt` that is absent, or that core's `judgeHeldUpstreamToken` does
+ * `obtainedAt` that is `undefined`, or that core's `judgeHeldUpstreamToken` does
  * not believe (dated more than the floor ahead of this replica's clock, or
  * not before its own end), leaves the buffer rule alone. It reads the
  * record's instants on this replica's clock, so it assumes replicas' clocks

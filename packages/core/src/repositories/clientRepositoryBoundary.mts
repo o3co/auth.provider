@@ -55,11 +55,6 @@
  * is validated at each boundary it passes; a boundary this module built is
  * recognised and reused, never wrapped twice. A boundary over another lets
  * the inner one's refusal through unchanged, without a second warn.
- *
- * The boundary also tells a refused record from an absent one as a verdict
- * ({@link ValidatedClientRepository.lookupClient}), for a caller that falls
- * back to another source of clients only on `absent`. That verdict is the
- * boundary's own, never one a repository claims.
  */
 
 import type { z } from "zod";
@@ -172,35 +167,6 @@ function readClientRecord(record: object, clientId: string): ClientRecordReading
 /** How many reasons a refusal's log line keeps. */
 const LOGGED_REASONS_MAX = 10;
 
-/**
- * What {@link ValidatedClientRepository.lookupClient} answers for an id:
- *
- * - `found`: the record, read and validated, as `findById` answers it;
- * - `refused`: the repository answered a record and the boundary refused it,
- *   with each reason. The client is unknown, and nothing stands in for it;
- * - `absent`: the repository answered no record (`null` or `undefined`).
- */
-export type ClientLookup =
-	| { readonly outcome: "found"; readonly client: PublicClient }
-	| { readonly outcome: "refused"; readonly reasons: readonly string[] }
-	| { readonly outcome: "absent" };
-
-/**
- * A `ClientRepository` behind core's boundary. `findById` and `authenticate`
- * keep the port's meaning (a client, or `null` for an unknown one), answer
- * only validated records, and reject with a {@link ClientRecordRefusedError}
- * for a record the boundary refuses; `lookupClient` answers that refusal as
- * a verdict.
- */
-export interface ValidatedClientRepository extends ClientRepository {
-	/**
-	 * The repository's `findById` answer for `clientId`, read and judged once:
-	 * found, refused or absent. A read that throws is let through as it was
-	 * thrown, an inner boundary's refusal included.
-	 */
-	lookupClient(clientId: string): Promise<ClientLookup>;
-}
-
 /** What {@link validatedClientRepository} takes beside the repository. */
 export interface ClientRepositoryBoundaryOptions {
 	/**
@@ -219,12 +185,12 @@ const boundaries = new WeakSet<ClientRepository>();
  * schema, and the copy is what is answered.
  *
  * - A record that fails is refused: `findById` and `authenticate` reject
- *   with a new {@link ClientRecordRefusedError}, and `lookupClient` answers
- *   `refused`. Each refusal writes one `client_record_refused` warn: the `step`
- *   (`find` or `authenticate`), the client id sanitised and capped, and the
- *   reasons, at most ten, each sanitised and capped (`reasonCount` when
- *   more). The record itself is never logged.
- * - `null` or `undefined` is no record: `absent`, or `null`, silently.
+ *   with a new {@link ClientRecordRefusedError}. Each refusal writes one
+ *   `client_record_refused` warn: the `step` (`find` or `authenticate`), the
+ *   client id sanitised and capped, and the reasons, at most ten, each
+ *   sanitised and capped (`reasonCount` when more). The record itself is
+ *   never logged.
+ * - `null` or `undefined` is no record: `null`, silently.
  * - A throw, the repository's or a field read's, is let through as it was
  *   thrown. So is an inner boundary's refusal, which stays a refusal and is
  *   not warned again; anything else is the store's outage.
@@ -242,20 +208,20 @@ const boundaries = new WeakSet<ClientRepository>();
 export function validatedClientRepository(
 	inner: ClientRepository,
 	options: ClientRepositoryBoundaryOptions = {},
-): ValidatedClientRepository {
-	if (boundaries.has(inner)) return inner as ValidatedClientRepository;
+): ClientRepository {
+	if (boundaries.has(inner)) return inner;
 	const logger = options.logger ?? consoleLogger;
-	const judge = (
+	const admit = (
 		step: ClientRepositoryOutage["step"],
 		clientId: string,
 		record: PublicClient | null | undefined,
-	): ClientLookup => {
-		if (record === null || record === undefined) return { outcome: "absent" };
+	): PublicClient | null => {
+		if (record === null || record === undefined) return null;
 		const reading =
 			typeof record === "object"
 				? readClientRecord(record, clientId)
 				: ({ ok: false, reasons: ["not an object"] } as const);
-		if (reading.ok) return { outcome: "found", client: reading.client };
+		if (reading.ok) return reading.client;
 		logger.warn(
 			{
 				step,
@@ -267,19 +233,12 @@ export function validatedClientRepository(
 			},
 			"client_record_refused",
 		);
-		return { outcome: "refused", reasons: reading.reasons };
+		throw new ClientRecordRefusedError();
 	};
-	const clientOf = (lookup: ClientLookup): PublicClient | null => {
-		if (lookup.outcome === "refused") throw new ClientRecordRefusedError();
-		return lookup.outcome === "found" ? lookup.client : null;
-	};
-	const lookupClient = async (clientId: string): Promise<ClientLookup> =>
-		judge("find", clientId, await inner.findById(clientId));
-	const boundary: ValidatedClientRepository & AsyncDisposable = {
-		lookupClient,
-		findById: async (clientId) => clientOf(await lookupClient(clientId)),
+	const boundary: ClientRepository & AsyncDisposable = {
+		findById: async (clientId) => admit("find", clientId, await inner.findById(clientId)),
 		authenticate: async (clientId, secret) =>
-			clientOf(judge("authenticate", clientId, await inner.authenticate(clientId, secret))),
+			admit("authenticate", clientId, await inner.authenticate(clientId, secret)),
 		[Symbol.asyncDispose]: async () => {
 			const dispose = (inner as { [Symbol.asyncDispose]?: unknown })[Symbol.asyncDispose];
 			if (typeof dispose === "function") await dispose.call(inner);

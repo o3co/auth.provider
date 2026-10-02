@@ -152,8 +152,8 @@ export const recordRefresh = async (
 		// this route does not own.
 		grantedScope: canonicalScope(currentTokens.grantedScope),
 		// From this answer alone, like the expiry: the stored one dates the
-		// token being replaced. Absent with no finite expiry.
-		...(obtainedAt === undefined ? {} : { obtainedAt }),
+		// token being replaced. `undefined` with no finite expiry.
+		obtainedAt,
 	};
 
 	// The refresh worked but its token may not be handed on. Keep the

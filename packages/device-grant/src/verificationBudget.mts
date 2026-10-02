@@ -41,7 +41,7 @@ export const isDeviceVerificationRateLimitSpec: (value: unknown) => value is Rat
 
 /**
  * `device-grant.rateLimit` as the budget, `null` when not given;
- * read as a coercing schema reads it, and a `RangeError` naming the key when
+ * read as the schema reads it, and a `RangeError` naming the key when
  * no limiter can apply it.
  */
 export function readVerificationRateLimitBudget(

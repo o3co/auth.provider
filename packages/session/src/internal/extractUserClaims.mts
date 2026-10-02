@@ -14,16 +14,17 @@
  * limitations under the License.
  */
 
-import type { User, UserSessionClaims } from "@o3co/auth-provider-core";
+import type { UserSessionClaims } from "@o3co/auth-provider-core";
 
 /**
- * Picks UserSessionClaims-shaped fields off a User. Used by LOCAL and
+ * Picks UserSessionClaims-shaped fields off a login's user snapshot
+ * (core's `readUserSnapshot`), never the `User` itself. Used by LOCAL and
  * FEDERATION login paths to seed the session's claims envelope.
  *
  * It lives in the session package, not in core, because both its callers
  * are inside this package.
  */
-export function extractUserClaims(user: User): UserSessionClaims {
+export function extractUserClaims(user: Readonly<Record<string, unknown>>): UserSessionClaims {
 	const c: Record<string, unknown> = {};
 	if (typeof user.email === "string") c.email = user.email;
 	if (typeof user.emailVerified === "boolean") c.emailVerified = user.emailVerified;

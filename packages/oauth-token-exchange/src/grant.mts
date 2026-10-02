@@ -54,7 +54,7 @@ import { issueAccessToken } from "./issuance.mjs";
 import { issuedTarget, type RequestTargets, requestTargets } from "./targetCeilings.mjs";
 import { readTokenRequest, type TokenRequest } from "./tokenRequest.mjs";
 import {
-	reportedFamily,
+	type ReportedBindings,
 	resolveValidators,
 	validateActor,
 	validateSubject,
@@ -131,28 +131,38 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (isRefusal(validators)) return validators;
 			const subject = await validateSubject(deps, ctx, request, validators.subjectValidator);
 			if (isRefusal(subject)) return subject;
-			const { subjectValidated, issuedConfirmation } = subject;
+			const { subjectValidated, subjectBindings, issuedConfirmation } = subject;
 
 			// The refresh-token family rule — this grant's, not the validator's;
 			// see `familyRefusal`. After the sender-constraint matrices, so a cheap
 			// refusal still short-circuits ahead of the store read.
-			const subjectFamilyRefusal = await familyRefusal(deps, "subject", subjectValidated);
+			const subjectFamilyRefusal = await familyRefusal(deps, "subject", subjectBindings);
 			if (subjectFamilyRefusal) return subjectFamilyRefusal;
 			// The session rule, beside it: see `sessionRefusal`.
-			const subjectSessionRefusal = await sessionRefusal(deps, "subject", subjectValidated);
+			const subjectSessionRefusal = await sessionRefusal(
+				deps,
+				"subject",
+				subjectValidated,
+				subjectBindings,
+			);
 			if (subjectSessionRefusal) return subjectSessionRefusal;
 
 			const actor = await validateActor(deps, ctx, request, validators.actorValidator);
 			if (isRefusal(actor)) return actor;
-			const { actorValidated } = actor;
-			if (actorValidated) {
+			const { actorValidated, actorBindings } = actor;
+			if (actorValidated && actorBindings) {
 				// The subject's family rule, applied to the actor: a revoked actor credential
 				// must not be recorded in `act` as a live delegation.
-				const actorFamilyRefusal = await familyRefusal(deps, "actor", actorValidated);
+				const actorFamilyRefusal = await familyRefusal(deps, "actor", actorBindings);
 				if (actorFamilyRefusal) return actorFamilyRefusal;
 				// And the session rule: an actor whose session a logout ended is
 				// not a live delegation either.
-				const actorSessionRefusal = await sessionRefusal(deps, "actor", actorValidated);
+				const actorSessionRefusal = await sessionRefusal(
+					deps,
+					"actor",
+					actorValidated,
+					actorBindings,
+				);
 				if (actorSessionRefusal) return actorSessionRefusal;
 			}
 			const delegationRefused = delegationRefusal(deps, client, subjectValidated, actorValidated);
@@ -184,6 +194,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				{
 					client,
 					subjectValidated,
+					subjectBindings,
 					actorValidated,
 					grantedScope,
 					audienceForToken,
@@ -379,9 +390,8 @@ async function applyGrantPolicy(
 async function familyRefusal(
 	deps: Pick<TokenExchangeDependencies, "refreshTokenFamilyRevocation" | "logger">,
 	role: "subject" | "actor",
-	validated: ValidatedToken,
+	{ familyId }: ReportedBindings,
 ): Promise<GrantHandlerResult | null> {
-	const familyId = reportedFamily(validated);
 	if (familyId === undefined) return null;
 	const revocation = deps.refreshTokenFamilyRevocation;
 	if (!revocation) {
@@ -433,8 +443,8 @@ async function sessionRefusal(
 	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "logger">,
 	role: "subject" | "actor",
 	validated: ValidatedToken,
+	{ sid }: ReportedBindings,
 ): Promise<GrantHandlerResult | null> {
-	const sid = validated.sid ? validated.sid : undefined;
 	const store = deps.userSessionStore;
 	if (sid === undefined || store === undefined) return null;
 	let live: boolean;

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { instantOf } from "../federations/token-lifetime.mjs";
 import {
 	federationGrantIneligibilityStands,
 	federationGrantInteractionCode,
@@ -42,7 +43,8 @@ import type {
  * refuse the re-login a revocation sends the user to. A negative allowance
  * reads as none; `null` is no boundary in force.
  *
- * @throws RangeError for a value that cannot be compared. Neither answer is
+ * @throws RangeError for a value that cannot be compared, a stored date that
+ * is not a `Date` included. Neither answer is
  * safe: "not covered" switches the backstop off (for every grant, if the
  * allowance is NaN), and "covered" revokes durably over a corrupt value. The
  * caller answers 503, as `verifyJwt` does.
@@ -52,17 +54,19 @@ export function coveredByRevocationBoundary(
 	boundary: Date | null,
 	skewMs: number,
 ): boolean {
-	if (Number.isNaN(instant.getTime())) {
+	const instantMs = instantOf(instant);
+	if (instantMs === undefined) {
 		throw new RangeError("coveredByRevocationBoundary: the instant is not a valid date");
 	}
 	if (boundary === null) return false;
-	if (Number.isNaN(boundary.getTime())) {
+	const boundaryMs = instantOf(boundary);
+	if (boundaryMs === undefined) {
 		throw new RangeError("coveredByRevocationBoundary: the boundary is not a valid date");
 	}
 	if (!Number.isFinite(skewMs)) {
 		throw new RangeError("coveredByRevocationBoundary: skewMs must be a finite number");
 	}
-	return instant.getTime() <= boundary.getTime() + Math.max(0, skewMs);
+	return instantMs <= boundaryMs + Math.max(0, skewMs);
 }
 
 export interface EffectiveFederationGrantStatusContext {

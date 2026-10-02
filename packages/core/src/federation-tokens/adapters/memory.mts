@@ -19,8 +19,8 @@ const cloneTokens = (t: FederationTokens): FederationTokens => ({
 	tokenType: t.tokenType,
 	scope: t.scope,
 	grantedScope: t.grantedScope,
-	// Copied like `expiresAt`; a record without it stays without the key.
-	...(t.obtainedAt === undefined ? {} : { obtainedAt: new Date(t.obtainedAt.getTime()) }),
+	// Copied like `expiresAt`; an unknown age stays `undefined`, the key named.
+	obtainedAt: t.obtainedAt === undefined ? undefined : new Date(t.obtainedAt.getTime()),
 });
 
 /**
@@ -69,9 +69,6 @@ export function createInMemoryFederationTokenStore(): FederationTokenStore & Sup
 			if (entry.generation !== expected) return { outcome: "conflict" };
 			store.delete(key(sid, name));
 			return { outcome: "removed" };
-		},
-		async update(sid, name, tokens) {
-			write(sid, name, tokens);
 		},
 		async removeBySid(sid) {
 			for (const k of [...store.keys()]) {

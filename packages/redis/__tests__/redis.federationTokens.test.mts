@@ -49,6 +49,7 @@ const tokens: FederationTokens = {
 	tokenType: undefined,
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 let suiteCounter = 0;
@@ -163,6 +164,7 @@ describe("mode=required over a real Redis", () => {
 		scope: "openid email",
 		// Included, so the round-trip pins this field too.
 		grantedScope: "openid email profile",
+		obtainedAt: undefined,
 	};
 	const makeEncrypted = () => makeStore(false, { mode: "required", key: encryptionKey });
 
@@ -225,10 +227,10 @@ describe("mode=required over a real Redis", () => {
 	});
 });
 
-// `obtainedAt` is one optional field inside the sealed envelope: written only
-// when the record has one, read back as a fresh Date, absent as no key, and a
-// value this store would never write takes the same self-heal as any
-// unreadable record. The wrapper stays `v: 2`.
+// `obtainedAt` is one field inside the sealed envelope: written only when the
+// record has one, read back as a fresh Date, absent as `undefined` with the key
+// named, and a value this store would never write takes the same self-heal as
+// any unreadable record. The wrapper stays `v: 2`.
 describe("obtainedAt over a real Redis", () => {
 	const encryptionKey = Buffer.alloc(32, 7);
 	const obtainedAt = new Date(1_899_999_000_000);
@@ -246,27 +248,41 @@ describe("obtainedAt over a real Redis", () => {
 					? JSON.stringify({ v: 2, c: encryptTokenField(innerJson, encryptionKey, key) })
 					: `{"v":2,"p":${innerJson}}`;
 
-			it("round-trips obtainedAt through attach, update and get", async () => {
+			/** Replaces the live record of `(sid, google)` at its current generation. */
+			const replace = async (
+				store: ReturnType<typeof makeStore>["store"],
+				sid: string,
+				next: FederationTokens,
+			): Promise<void> => {
+				const read = await store.getVersioned(sid, "google");
+				if (read === null) throw new Error(`${sid}/google is not live`);
+				expect(await store.replaceIf(sid, "google", read.generation, next)).toMatchObject({
+					outcome: "updated",
+				});
+			};
+
+			it("round-trips obtainedAt through attach, replaceIf and get", async () => {
 				const { store } = makeStore(false, encryption);
 				await store.attach("sid-1", "google", { ...tokens, obtainedAt });
 				expect(await store.get("sid-1", "google")).toStrictEqual({ ...tokens, obtainedAt });
 
 				const later = new Date(obtainedAt.getTime() + 60_000);
-				await store.update("sid-1", "google", { ...tokens, obtainedAt: later });
+				await replace(store, "sid-1", { ...tokens, obtainedAt: later });
 				expect((await store.get("sid-1", "google"))?.obtainedAt).toStrictEqual(later);
 			});
 
-			it("a record without obtainedAt reads back with the key absent, not undefined", async () => {
+			it("a record without obtainedAt reads back with the key named, as undefined, never null", async () => {
 				const { store } = makeStore(false, encryption);
 				await store.attach("sid-1", "google", tokens);
 				const read = await store.get("sid-1", "google");
 				expect(read).toStrictEqual(tokens);
-				expect(Object.hasOwn(read ?? {}, "obtainedAt")).toBe(false);
+				expect(Object.hasOwn(read ?? {}, "obtainedAt")).toBe(true);
+				expect((await store.getVersioned("sid-1", "google"))?.value).toStrictEqual(tokens);
 
-				// An update without it removes a value an earlier write held.
+				// A replace without it removes a value an earlier write held.
 				await store.attach("sid-2", "google", { ...tokens, obtainedAt });
-				await store.update("sid-2", "google", tokens);
-				expect(Object.hasOwn((await store.get("sid-2", "google")) ?? {}, "obtainedAt")).toBe(false);
+				await replace(store, "sid-2", tokens);
+				expect(await store.get("sid-2", "google")).toStrictEqual(tokens);
 			});
 
 			it("hands out a copy: mutating either Date leaves the stored value", async () => {
@@ -367,7 +383,9 @@ describe("conditional writes over a real Redis", () => {
 		const read = await live(store, "sid-1", "google");
 		expect(read.generation).toBe(record.g);
 		expect(isStoreGeneration(read.generation)).toBe(true);
-		await store.update("sid-1", "google", tokens);
+		expect(await store.replaceIf("sid-1", "google", read.generation, tokens)).toMatchObject({
+			outcome: "updated",
+		});
 		const after = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
 		expect(after.g).not.toBe(record.g);
 		expect(await store.get("sid-1", "google")).toEqual(tokens);
@@ -483,7 +501,7 @@ describe("conditional writes over a real Redis", () => {
 		// Nor does conflict.
 		await store.attach("sid-1", "github", tokens);
 		const stale = await live(store, "sid-1", "github");
-		await store.update("sid-1", "github", tokens);
+		await store.attach("sid-1", "github", tokens);
 		await raw.srem(index, "github");
 		expect(await store.replaceIf("sid-1", "github", stale.generation, tokens)).toEqual({
 			outcome: "conflict",

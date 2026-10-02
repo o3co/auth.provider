@@ -659,22 +659,37 @@ export async function lodgeFederationGrantReauthorization(
 
 type Inspection = NonNullable<Awaited<ReturnType<FederationGrantStore["inspect"]>>>;
 
-/** The grant's effective status against `connection`, the grant's as configured now. */
+/**
+ * The grant's effective status against `connection`, the grant's as configured
+ * now; or, for a record holding a date that cannot be compared, the storage
+ * refusal naming the read that answered it: judged neither way, as retrieval
+ * does. Anything else that is thrown is a bug, and is not dressed up as an
+ * outage.
+ */
 function statusOf(
 	deps: FederationGrantLodgingDeps,
 	inspection: Inspection,
 	connection: FederationGrantAcquisitionConnection | undefined,
 	boundary: Date | null,
 	at: Date,
-) {
-	return effectiveFederationGrantStatus(inspection.grant, {
-		now: at,
-		connection,
-		maxExpiresInMs: deps.maxExpiresInMs,
-		grantsBoundary: boundary,
-		revocationSkewMs: deps.revocationSkewMs,
-		credentials: inspection.credentials === "ok" ? "ok" : "unreadable",
-	});
+):
+	| { readonly status: ReturnType<typeof effectiveFederationGrantStatus> }
+	| { readonly unreadable: ReturnType<typeof storage> } {
+	try {
+		return {
+			status: effectiveFederationGrantStatus(inspection.grant, {
+				now: at,
+				connection,
+				maxExpiresInMs: deps.maxExpiresInMs,
+				grantsBoundary: boundary,
+				revocationSkewMs: deps.revocationSkewMs,
+				credentials: inspection.credentials === "ok" ? "ok" : "unreadable",
+			}),
+		};
+	} catch (error) {
+		if (!(error instanceof RangeError)) throw error;
+		return { unreadable: storage({ store: "federation_grant", step: "inspect", error }) };
+	}
 }
 
 /** The statuses a renewal is admitted from, which its 201 reports unchanged. */
@@ -766,7 +781,9 @@ async function judgeAndLodge(
 ): Promise<FederationGrantReauthorizationResult> {
 	const { grant } = inspection;
 	const configured = deps.connections.get(grant.connection);
-	const status = statusOf(deps, inspection, configured, boundary, now());
+	const read = statusOf(deps, inspection, configured, boundary, now());
+	if ("unreadable" in read) return read.unreadable;
+	const { status } = read;
 
 	if (status.status === "revoked" && status.reason === "backstop") {
 		// Written down, not only reported: a revocation that lived only in the
@@ -881,11 +898,9 @@ async function judgeAndLodge(
 	// honest answer is that this attempt did not take — with the write's own
 	// error as what failed.
 	const configuredNow = deps.connections.get(fresh.grant.connection);
-	const again = admission(
-		statusOf(deps, fresh, configuredNow, boundary, now()),
-		configuredNow,
-		request.client,
-	);
+	const reread = statusOf(deps, fresh, configuredNow, boundary, now());
+	if ("unreadable" in reread) return absorbing(reread.unreadable, [...writeThrew, ...after]);
+	const again = admission(reread.status, configuredNow, request.client);
 	return "refused" in again
 		? absorbing(again.refused, [...writeThrew, ...after])
 		: absorbing(storage({ store: "federation_grant", step: "name_intent", ...named.why }), after);

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { instantOf } from "../federations/token-lifetime.mjs";
 import { isBearerTokenType } from "../federations/token-type.mjs";
 import type {
 	FederationGrantConnection,
@@ -139,16 +140,17 @@ export function federationGrantIneligibilityStands(
  *
  * The marker is outside the authenticated envelope, so one dated more than
  * `allowanceMs` (replica clock skew) ahead is not believed and a retry is
- * due. The wait is rounded up and never exceeds the interval. NaN arithmetic
- * means a retry is due, which is safe because `judgeUpstreamAccessToken`
- * still guards disclosure.
+ * due. The wait is rounded up and never exceeds the interval. A marker date
+ * that holds no instant (a store's string or `null` included) and NaN
+ * arithmetic mean a retry is due, which is safe because
+ * `judgeUpstreamAccessToken` still guards disclosure.
  */
 export function federationGrantIneligibilityRetry(
 	marker: FederationGrantIneligibilityMarker | undefined,
 	context: { readonly now: Date; readonly retryAfterMs: number; readonly allowanceMs: number },
 ): { readonly due: true } | { readonly due: false; readonly retryAfterSeconds: number } {
 	if (marker === undefined) return { due: true };
-	const at = marker.at.getTime();
+	const at = instantOf(marker.at) ?? Number.NaN;
 	const now = context.now.getTime();
 	if (!(at <= now + context.allowanceMs)) return { due: true };
 	const remainingMs = at + context.retryAfterMs - now;
@@ -228,7 +230,7 @@ export function federationGrantRefreshFailureStands(
 			readonly retryAfterSeconds: number;
 	  } {
 	if (failure === undefined) return { stands: false };
-	const at = failure.at.getTime();
+	const at = instantOf(failure.at) ?? Number.NaN;
 	const now = context.now.getTime();
 	if (!(at <= now + context.allowanceMs)) return { stands: false };
 	let waitMs: number;

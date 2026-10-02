@@ -36,8 +36,11 @@ const SRC = join(import.meta.dirname, "..");
 const GENERATION_WORDS =
 	/\b(?:listVersioned|createIf|removeIf|StoreGeneration|storeGeneration|isStoreGeneration|newStoreGeneration|VersionedSet|readMfaFactorSet|readVersionedSet|readConditional\w*)\b/;
 
-/** An unfenced write called on a factor store: only the factor set's writer and its reset make one. */
-const STORE_WRITES = /\b\w*factorStore\??\s*\.\s*(?:create|remove|removeAllForSubject)\s*\(/i;
+/** An unfenced membership write called on a factor store: no module makes one. */
+const STORE_WRITES = /\b\w*factorStore\??\s*\.\s*(?:create|remove)\s*\(/i;
+
+/** The reset's removal of a whole set, called on a factor store: only the factor set's reset makes it. */
+const STORE_RESETS = /\b\w*factorStore\??\s*\.\s*removeAllForSubject\s*\(/i;
 
 /** Every module specifier a file names: static and dynamic imports, re-exports, `require`. */
 const SPECIFIERS = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']([^"']+)["']/g;
@@ -76,8 +79,12 @@ describe("the factor set's store generation", () => {
 });
 
 describe("the factor store's unfenced writes", () => {
-	it("create, remove and removeAllForSubject are called on a factor store by factorSet.mts alone", () => {
-		expect(naming(STORE_WRITES)).toEqual(["factorSet.mts"]);
+	it("create and remove are called on a factor store by no module", () => {
+		expect(naming(STORE_WRITES)).toEqual([]);
+	});
+
+	it("removeAllForSubject is called on a factor store by factorSet.mts alone", () => {
+		expect(naming(STORE_RESETS)).toEqual(["factorSet.mts"]);
 	});
 });
 

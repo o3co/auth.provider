@@ -209,21 +209,7 @@ describe("webauthnMfaFactorModule", () => {
 	});
 });
 
-describe("the factor installed beside the grant's allowCredentialsForKnownUser", () => {
-	/** The relying party the grant and the factor share, `allowCredentialsForKnownUser` as given. */
-	const relyingPartyWith = (allowCredentialsForKnownUser: boolean): Module =>
-		defineModule({
-			name: "test:webauthn-config",
-			provides: {
-				webauthnConfig: () =>
-					createTestWebAuthnConfig({
-						rpId: "login.example",
-						rpName: "Login",
-						allowCredentialsForKnownUser,
-					}),
-			},
-		});
-
+describe("the factor installed beside the grant", () => {
 	/** The grant's module and what it requires beside the relying party. */
 	const grant: readonly Module[] = [
 		webauthnModule,
@@ -246,41 +232,33 @@ describe("the factor installed beside the grant's allowCredentialsForKnownUser",
 		memoryWebAuthnCredentialStoreModule,
 	];
 
-	it.each([true, false])(
-		"refuses the boot with the flag on, the factor enabled: %s, naming the setting and its variable and quoting no value",
-		async (enabled) => {
-			const refused = await refusal(configWith({ ...ON, enabled }), [
-				relyingPartyWith(true),
-				...grant,
-			]);
-			expect(refused.reason).toBe("contribute-factory-failed");
-			const said = `${refused.message} ${String((refused as { cause?: unknown }).cause)}`;
-			expect(said).toContain("webauthn.allowCredentialsForKnownUser");
-			expect(said).toContain("WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER");
-			expect(said).not.toContain("login.example");
-		},
-	);
-
-	it("declares no module switch (isEnabled), so the refusal still runs with the factor off", () => {
-		// Second-factor credentials registered while the factor was on outlive
-		// switching it off; a module switched off would run no check at all.
-		expect("isEnabled" in (webauthnMfaFactorModule.section ?? {})).toBe(false);
-	});
-
-	it("boots the grant with the flag on when the factor is not installed", async () => {
-		disposable = await createApp({
-			modules: [relyingPartyWith(true), ...grant],
-			bootstrapComponents: {
-				config: configWith(undefined),
-				pathResolver: (p: string) => p,
-			} as never,
-		});
-		expect(disposable).toBeDefined();
-	});
-
-	it("boots the factor beside the grant with the flag off, and contributes it", async () => {
-		const { resolver } = await boot(configWith(ON), [relyingPartyWith(false), ...grant]);
+	it("boots beside the grant and contributes the factor", async () => {
+		const { resolver } = await boot(configWith(ON), [relyingParty, ...grant]);
 		expect(resolver?.get("webauthn")).toBeDefined();
+	});
+});
+
+describe("webauthn-mfa-factor.enabled as the module's switch", () => {
+	it("is declared as the module's switch (isEnabled), answering the parsed section's enabled", () => {
+		const isEnabled = webauthnMfaFactorModule.section?.isEnabled;
+		expect(isEnabled).toBeTypeOf("function");
+		expect(isEnabled?.({ ...ON, enabled: true })).toBe(true);
+		expect(isEnabled?.({ ...ON, enabled: false })).toBe(false);
+	});
+
+	it("switched off, runs no factory: a relying party whose slot factory throws is never read", async () => {
+		const throwing = defineModule({
+			name: "test:webauthn-config",
+			provides: {
+				webauthnConfig: () => {
+					throw new Error("the relying party was built");
+				},
+			},
+		});
+		const { resolver } = await boot(configWith({ ...ON, enabled: false }), [throwing]);
+		expect(resolver).toBeDefined();
+		expect(resolver?.get("webauthn")).toBeUndefined();
+		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 });
 

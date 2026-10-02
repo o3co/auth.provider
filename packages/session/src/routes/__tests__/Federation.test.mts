@@ -233,7 +233,6 @@ function makeFederationTokenStore(): FederationTokenStore & {
 		getVersioned: vi.fn(async () => null),
 		replaceIf: vi.fn(async () => ({ outcome: "missing" as const })),
 		removeIf: vi.fn(async () => ({ outcome: "missing" as const })),
-		update: vi.fn(async () => {}),
 		removeBySid: vi.fn(async () => {}),
 		delete: vi.fn(async () => {}),
 	};
@@ -1502,6 +1501,42 @@ describe("account linking across federations", () => {
 			);
 		});
 
+		describe.each(["login", "link"] as const)("on the %s path", (path) => {
+			it.each([
+				["an Invalid Date", () => new Date(Number.NaN)],
+				["an ISO string", () => new Date(Date.now() + 3_600_000).toISOString()],
+				["a number", () => Date.now() + 3_600_000],
+			])(
+				"an expiresAt that is %s names no end a store can keep: refused as a failed exchange, and nothing is linked",
+				async (_label, expiresAt) => {
+					// A store keeps an Invalid Date as no finite end, never refreshed,
+					// and refuses any other value as an outage.
+					const provider = makeFakeProvider({
+						exchangeCode: vi.fn(
+							async () =>
+								({
+									issuer: "https://idp.example.com",
+									sub: "external-42",
+									accessToken: "at",
+									expiresAt: expiresAt(),
+								}) as unknown as FederationProfile,
+						),
+					});
+					const logger = spyLogger();
+					const { res, fts, repo } = await runCallback(path, provider, logger as unknown as Logger);
+
+					expect(res.status).toBe(502);
+					expect(res.body.error).toBe("exchange_failed");
+					expect(fts.attach).not.toHaveBeenCalled();
+					expect(repo.authenticateByToken).not.toHaveBeenCalled();
+					expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+					const warned = logger.warn.mock.calls.map((call) => call[1]);
+					expect(warned).toEqual(["federation_callback_exchange_failed"]);
+					expect(logger.error).not.toHaveBeenCalled();
+				},
+			);
+		});
+
 		it.each(["login", "link"] as const)(
 			"on the %s path, an expires_in lifetime is counted from the instant before the exchange",
 			async (path) => {
@@ -1525,13 +1560,14 @@ describe("account linking across federations", () => {
 		it.each(["login", "link"] as const)(
 			"on the %s path, an end stated only as an instant is kept as stated and never aged",
 			async (path) => {
-				// An absolute end is on the upstream's clock: no `obtainedAt`, so
-				// the token route keeps its refresh buffer for this record.
+				// An absolute end is on the upstream's clock: `obtainedAt` is
+				// undefined, so the token route keeps its refresh buffer for this record.
 				const end = Date.now() + 3_600_000;
 				const { provider } = timedProvider(() => ({ expiresAt: new Date(end) }));
 				const attached = await attachedOn(path, provider);
 
-				expect(attached).not.toHaveProperty("obtainedAt");
+				expect(Object.hasOwn(attached, "obtainedAt")).toBe(true);
+				expect(attached.obtainedAt).toBeUndefined();
 				expect((attached.expiresAt as Date).getTime()).toBe(end);
 			},
 		);
@@ -1557,8 +1593,8 @@ describe("account linking across federations", () => {
 			it.each(unusable)(
 				"%s records no obtainedAt and the end the adapter stated",
 				async (_label, lifetime, end) => {
-					// A record without `obtainedAt` fails closed: a token of unknown
-					// age is refreshed sooner, never kept longer.
+					// A record whose `obtainedAt` is undefined fails closed: a token of
+					// unknown age is refreshed sooner, never kept longer.
 					let stated: unknown;
 					const { provider } = timedProvider((answeredAt) => {
 						const fields = lifetime(answeredAt);
@@ -1567,7 +1603,8 @@ describe("account linking across federations", () => {
 					});
 					const attached = await attachedOn(path, provider);
 
-					expect(attached).not.toHaveProperty("obtainedAt");
+					expect(Object.hasOwn(attached, "obtainedAt")).toBe(true);
+					expect(attached.obtainedAt).toBeUndefined();
 					if (end === "null") expect(attached.expiresAt).toBeNull();
 					else expect(attached.expiresAt).toBe(stated);
 				},

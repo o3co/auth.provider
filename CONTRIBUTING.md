@@ -23,6 +23,11 @@ test first).
 - **`main` takes only the `develop` → `main` pull request** that precedes a
   release. Its required checks are `build-and-test` and `umbrella-e2e` (see
   [AGENTS.md](AGENTS.md#umbrella-e2e)).
+- **The `develop` → `main` pull request never has `develop` as its head**:
+  every merge into `develop` moves its head and restarts the required checks,
+  so they never settle. It runs from a fixed `release-train/<YYYY-MM-DD>`
+  branch cut at a chosen `develop` commit, merged with a merge commit and then
+  deleted ([runbook, Step 4](docs/release-runbook.md)).
 - **Release tags are cut from `main`**, after that pull request merges with
   both checks green ([release runbook](docs/release-runbook.md)).
 

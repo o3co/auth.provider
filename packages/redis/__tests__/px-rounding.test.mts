@@ -212,6 +212,7 @@ const federationTokens: FederationTokens = {
 	tokenType: "Bearer",
 	scope: undefined,
 	grantedScope: undefined,
+	obtainedAt: undefined,
 };
 
 /** A lock client that records the `PX` of each attempt, and takes every one. */
@@ -361,9 +362,8 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 				ttl,
 			});
 			await store.attach("sid-1", "google", federationTokens);
-			await store.update("sid-1", "google", federationTokens);
-			expectRoundedUp(recording.px, [ttl * 1000, ttl * 1000]);
-			expectRoundedUp(recording.indexTtls, [ttl * 1000, ttl * 1000]);
+			expectRoundedUp(recording.px, [ttl * 1000]);
+			expectRoundedUp(recording.indexTtls, [ttl * 1000]);
 		}
 	});
 
