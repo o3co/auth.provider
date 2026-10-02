@@ -155,11 +155,18 @@ const outbound = (
 	return { fetch, lookups, exchanges };
 };
 
-/** The `reason` of the one warn line logged as `event`. */
+/**
+ * What the warn line logged as `event` says failed: its `reason`, then the
+ * `reason` code of the error that caused it (a refusal by core's outbound
+ * policy travels as the cause).
+ */
 const reasonOf = (warn: ReturnType<typeof vi.fn>, event: string): string => {
 	const line = warn.mock.calls.find(([, name]) => name === event);
 	expect(line, event).toBeDefined();
-	return String((line?.[0] as { reason?: unknown } | undefined)?.reason);
+	const fields = line?.[0] as
+		| { reason?: unknown; err?: { cause?: { reason?: unknown } } }
+		| undefined;
+	return `${String(fields?.reason)} / ${String(fields?.err?.cause?.reason)}`;
 };
 
 describe("isClientIdMetadataDocumentUrl (draft §3.1)", () => {

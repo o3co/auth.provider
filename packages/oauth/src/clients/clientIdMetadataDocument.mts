@@ -436,9 +436,12 @@ export function createClientIdMetadataDocumentResolver(
 			});
 		} catch (err) {
 			// The policy refusing the destination or the answer is a verdict on
-			// this id; anything else is the exchange failing.
+			// this id; anything else is the exchange failing. The refusal travels
+			// as the cause, whose `reason` code the log line keeps.
 			if (isOutboundRefusal(err)) {
-				throw new DocumentRejected((err as Error).message, { cause: err });
+				throw new DocumentRejected("core.outbound refused the document's destination or answer", {
+					cause: err,
+				});
 			}
 			throw err;
 		}

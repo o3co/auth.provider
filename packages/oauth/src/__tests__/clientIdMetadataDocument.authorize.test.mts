@@ -283,7 +283,11 @@ describe("/authorize fetches a document under core.outbound", () => {
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_client");
 		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ reason: expect.stringContaining("host_not_allowed") }),
+			expect.objectContaining({
+				err: expect.objectContaining({
+					cause: expect.objectContaining({ reason: "host_not_allowed" }),
+				}),
+			}),
 			"cimd_document_rejected",
 		);
 	});
