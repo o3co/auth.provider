@@ -31,3 +31,9 @@ export {
 	APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS,
 	createAppleClientSecret,
 } from "./client-secret.mjs";
+export type { AppleEntry } from "./entry.mjs";
+export {
+	APPLE_FEDERATION_TYPE,
+	type AppleFederationTypeModuleOptions,
+	appleFederationTypeModule,
+} from "./type-module.mjs";
