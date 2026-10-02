@@ -493,9 +493,10 @@ describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never th
 		expect(scopeOf(result)).toBe("read");
 	});
 
-	it("filters the defaultScopes by the allowlist even so", async () => {
-		// Schema-validated registrations are a subset by boot; a custom
-		// repository is under no such obligation.
+	it("bounds the defaultScopes by the client's allowlist, a ceiling like the assertion's", async () => {
+		// A client `/token` authenticated through core's boundary never declares
+		// a default outside its allowlist; one handed to the grant directly can,
+		// and the allowlist is still one of the ceilings.
 		const { result } = await build({}).handle(
 			ctx({}, client({ allowedScopes: ["read"], defaultScopes: ["read", "admin"] })),
 		);

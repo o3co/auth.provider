@@ -210,9 +210,10 @@ function resolveScope(
 		| { scopes: readonly string[] }
 		| { status: 400; error: "invalid_scope"; errorDescription: string } => {
 		if (client.defaultScopes !== undefined) {
-			// Filtered even so: schema-validated registrations are ⊆ by boot,
-			// custom repositories are under no such obligation.
-			return { scopes: client.defaultScopes.filter((s) => allowed.includes(s)) };
+			// Within the allowlist already: `/token` authenticates the client
+			// through core's client-record boundary, whose copy holds
+			// defaultScopes to a subset of allowedScopes.
+			return { scopes: client.defaultScopes };
 		}
 		if (allowed.length === 0) return { scopes: [] };
 		return {

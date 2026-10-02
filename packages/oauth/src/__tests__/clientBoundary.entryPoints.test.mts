@@ -252,6 +252,42 @@ describe("createOAuthRouter with documents off reads registered clients through 
 	});
 });
 
+describe("a record whose defaultScopes leave its allowedScopes never reaches a scope decision", () => {
+	// `/authorize` and the grants `/token` dispatches to grant an omitted scope
+	// from the client's defaultScopes as they are: the boundary is what holds
+	// them within the allowlist.
+	const OVER_DEFAULT = { ...VALID, defaultScopes: ["read", "admin"] };
+
+	it("answers it 503 at /authorize for a request that omits scope, with no redirect", async () => {
+		const { app, logger } = await buildRouter(answering(OVER_DEFAULT));
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: CLIENT_ID,
+			redirect_uri: REDIRECT_URI,
+			state: "xyz",
+			code_challenge: S256_CHALLENGE,
+			code_challenge_method: "S256",
+		});
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(res.headers.location).toBeUndefined();
+		expect(refusals(logger).map(([line]) => line.reasons)).toEqual([
+			[expect.stringContaining("defaultScopes")],
+		]);
+	});
+
+	it.each(["client_credentials", "urn:ietf:params:oauth:grant-type:jwt-bearer"])(
+		"answers it 503 at /token for %s, before any grant runs",
+		async (grantType) => {
+			const { app, seen } = await buildRouter(answering(OVER_DEFAULT));
+			const res = await basic("/oauth/token", app, { grant_type: grantType });
+			expect(res.status).toBe(503);
+			expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+			expect(seen).toEqual([]);
+		},
+	);
+});
+
 describe("createClientAuthMiddleware reads clients through core's boundary", () => {
 	const app = (clientRepository: ClientRepository, logger = createMockLogger()) => {
 		const server = express();
