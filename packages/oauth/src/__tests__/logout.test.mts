@@ -738,6 +738,62 @@ describe("POST /oauth/logout", () => {
 			}
 		});
 
+		it("renders exactly the RPs it accepts, reading each registry field once", async () => {
+			const reads = new Map<string, number>();
+			const counted = (clientId: string, uri: string, sessionRequired?: boolean) => {
+				const count = (field: string) =>
+					reads.set(`${clientId}.${field}`, (reads.get(`${clientId}.${field}`) ?? 0) + 1);
+				return {
+					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					get clientId(): string {
+						count("clientId");
+						return clientId;
+					},
+					get frontchannelLogoutUri(): string {
+						count("frontchannelLogoutUri");
+						return uri;
+					},
+					get frontchannelLogoutSessionRequired(): boolean | undefined {
+						count("frontchannelLogoutSessionRequired");
+						return sessionRequired;
+					},
+				};
+			};
+			const rpData = [
+				counted("rp-1", "https://rp1.example.com/fc"),
+				counted("rp-2", "https://rp2.example.com/fc", false),
+				counted("rp-skipped", "com.example.app:/x"),
+			];
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry, logger: createMockLogger() });
+
+			const res = await postLogout(
+				app,
+				{ id_token_hint: await mintIdToken() },
+				{ Accept: "text/html" },
+			);
+
+			expect(res.status).toBe(200);
+			const srcs = [...res.text.matchAll(/<iframe src="([^"]*)"/g)].map((m) => m[1] ?? "");
+			expect(srcs).toEqual([
+				"https://rp1.example.com/fc?iss=https%3A%2F%2Fauth.example.com&amp;sid=sid-1",
+				"https://rp2.example.com/fc?iss=https%3A%2F%2Fauth.example.com",
+			]);
+			for (const [field, count] of reads) {
+				if (
+					field.endsWith(".frontchannelLogoutUri") ||
+					field.endsWith(".frontchannelLogoutSessionRequired")
+				) {
+					expect(count, field).toBe(1);
+				}
+			}
+			expect(reads.get("rp-1.frontchannelLogoutUri")).toBe(1);
+			expect(reads.get("rp-skipped.frontchannelLogoutSessionRequired")).toBeUndefined();
+		});
+
 		it("warns through the route's console fallback for an RP it skips when no logger is wired", async () => {
 			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 			try {

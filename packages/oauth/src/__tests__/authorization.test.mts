@@ -2040,7 +2040,7 @@ describe("createAuthorizationGrant", () => {
 
 			describe("a frontchannelLogoutUri must be http(s)", () => {
 				/** One code exchange against `record`; the RP registration it made and the logger. */
-				const exchangeWith = async (record: object, warn?: () => void) => {
+				const exchangeWith = async (record: object, warn?: () => void, wired = true) => {
 					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
 					const logger = createMockLogger();
 					if (warn !== undefined) logger.warn.mockImplementation(warn);
@@ -2072,7 +2072,7 @@ describe("createAuthorizationGrant", () => {
 						},
 						sessionFamilyIndex: makeSessionFamilyIndex({ addFamilyId: vi.fn(async () => {}) }),
 						sessionRPRegistry: makeSessionRPRegistry({ registerRP: registerRPSpy }),
-						logger,
+						...(wired ? { logger } : {}),
 					});
 					const { result } = await handler.handle({
 						body: {
@@ -2131,6 +2131,30 @@ describe("createAuthorizationGrant", () => {
 						expectUriNotLogged(logger, String(uri));
 					},
 				);
+
+				it("warns through the console fallback when the grant has no logger", async () => {
+					const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+					try {
+						const { result, rpData } = await exchangeWith(
+							{ ...baseRecord, frontchannelLogoutUri: "ftp://rp.example/front" },
+							undefined,
+							false,
+						);
+						expect(result.status).toBe(200);
+						expect(rpData.frontchannelLogoutUri).toBeUndefined();
+						const refused = warn.mock.calls.filter(
+							([, name]) => name === "logout_frontchannel_uri_refused",
+						);
+						expect(refused).toHaveLength(1);
+						expect(refused[0]?.[0]).toMatchObject({
+							site: "authorization_code",
+							clientId: "client1",
+							reason: "not-http",
+						});
+					} finally {
+						warn.mockRestore();
+					}
+				});
 
 				it("names the authenticated client in the warn, not the record's clientId", async () => {
 					const { rpData, logger } = await exchangeWith({
