@@ -135,6 +135,18 @@ describe("matchesHostList", () => {
 		);
 	});
 
+	it("reads its input as entries are read, whatever produced the hostname", () => {
+		expect(matchesHostList(list("corp.example"), new URL("ldap://CORP.EXAMPLE/").hostname)).toBe(
+			true,
+		);
+		expect(matchesHostList(list("corp.example"), "CORP.EXAMPLE.")).toBe(true);
+		expect(
+			matchesHostList(list(".corp.example"), new URL("https://a_b.corp.example/").hostname),
+		).toBe(true);
+		expect(matchesHostList(list("10.0.0.5"), "::ffff:10.0.0.5")).toBe(true);
+		expect(() => matchesHostList([], "rp.example/path")).toThrow(TypeError);
+	});
+
 	it("refuses to answer for a hostname with an empty label, for an allow and a deny list alike", () => {
 		const host = new URL("https://foo..corp.example/").hostname;
 		expect(() => matchesHostList(list(".corp.example"), host)).toThrow(TypeError);

@@ -121,7 +121,22 @@ export function urlHost(url: URL): string | undefined {
 export function readHostEntry(entry: string): HostPattern | undefined {
 	const trimmed = entry.trim();
 	const suffix = trimmed.startsWith(".");
-	const body = suffix ? trimmed.slice(1) : trimmed;
+	const host = canonicalHost(suffix ? trimmed.slice(1) : trimmed);
+	if (host === undefined) return undefined;
+	const address = host.startsWith("[") || isIP(host) === 4;
+	if (suffix && address) return undefined;
+	if (!address && !host.split(".").every((label) => LDH_LABEL.test(label))) return undefined;
+	return { host: hostIdentity(host), suffix };
+}
+
+/**
+ * `text` read as a bare host, as the URL parser reads an https URL's host
+ * (lower case, punycode, canonical IPv4 and bracketed IPv6), less one
+ * trailing dot; `undefined` for anything that is not a bare host (a port, a
+ * path, credentials, an empty label).
+ */
+function canonicalHost(text: string): string | undefined {
+	const body = text.trim();
 	if (body === "" || /[\s/\\?#@]/.test(body)) return undefined;
 	const bracketed = body.startsWith("[");
 	if (bracketed && !/^\[[^\]]+\]$/.test(body)) return undefined;
@@ -135,12 +150,7 @@ export function readHostEntry(entry: string): HostPattern | undefined {
 	if (url.port !== "" || url.pathname !== "/" || url.username !== "" || url.password !== "") {
 		return undefined;
 	}
-	const host = withoutRootDot(url.hostname);
-	if (host === undefined) return undefined;
-	const address = host.startsWith("[") || isIP(host) === 4;
-	if (suffix && address) return undefined;
-	if (!address && !host.split(".").every((label) => LDH_LABEL.test(label))) return undefined;
-	return { host: hostIdentity(host), suffix };
+	return withoutRootDot(url.hostname);
 }
 
 /** The eight groups of a canonical bracketed IPv6 host, or `undefined`. */
@@ -180,14 +190,14 @@ const hostIdentity = (host: string): string => {
 };
 
 /**
- * Whether `patterns` cover `host`: a URL's `hostname` as the URL parser gives
- * it, a trailing dot or not. A hostname with an empty label is a `TypeError`,
- * for an allow list and a deny list alike: the caller refuses such a URL.
+ * Whether `patterns` cover `host`, read as an entry is read (any URL's
+ * `hostname`; a trailing dot, case and IP spellings alike). A host it cannot
+ * read (an empty label, a port, a path) is a `TypeError`, for an allow list
+ * and a deny list alike: the caller refuses such a URL.
  */
 export function matchesHostList(patterns: readonly HostPattern[], host: string): boolean {
-	const canonical = withoutRootDot(host);
-	if (canonical === undefined)
-		throw new TypeError("matchesHostList: a hostname with an empty label");
+	const canonical = canonicalHost(host);
+	if (canonical === undefined) throw new TypeError("matchesHostList: not a host");
 	const key = hostIdentity(canonical);
 	return patterns.some(
 		(pattern) => key === pattern.host || (pattern.suffix && key.endsWith(`.${pattern.host}`)),
