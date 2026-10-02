@@ -171,13 +171,16 @@ const refuse = (): never => {
  *
  * - `null`, a boolean, a string or a finite number, as it is;
  * - a plain array (prototype `Array.prototype`): its `length` read once, its
- *   own enumerable keys exactly its indices — a hole, or a field of its own
- *   JSON would drop, is refused — and each index read once; `undefined` in
- *   it is refused, since JSON would write `null`;
+ *   own keys exactly its indices — a hole, or a field of its own JSON would
+ *   drop, is refused — and each index read once; `undefined` in it is
+ *   refused, since JSON would write `null`;
  * - a plain object (prototype `Object.prototype` or none, read once): each
- *   own enumerable string key read once — an own getter runs once — one read
- *   as `undefined` left out as JSON leaves it out, an own `__proto__` kept as
- *   the field it is.
+ *   own key read once — an own getter runs once — one read as `undefined`
+ *   left out as JSON leaves it out, an own `__proto__` kept as the field it is.
+ *
+ * Every own key of either must be one JSON writes — a string, enumerable — so
+ * a symbol's field or a hidden one, a hidden `toJSON` among them, is refused
+ * rather than lost.
  *
  * Anything else is a `RangeError` with one fixed text: a class's instance, an
  * Array subclass, a built-in (a Date, a Map, a RegExp, a boxed number, a
@@ -220,9 +223,27 @@ function copyPlain(value: unknown, copies: Map<object, unknown>): unknown {
 	return copy;
 }
 
+/**
+ * `value`'s own keys, listed once, when each is a field JSON writes: a string
+ * key, enumerable — else refused, since a field JSON would skip (a symbol's,
+ * a hidden one) or call (a hidden `toJSON`) is content the copy would lose.
+ * A list's `length` is not a field.
+ */
+function fieldsOf(value: object, list: boolean): string[] {
+	const fields: string[] = [];
+	for (const key of Reflect.ownKeys(value)) {
+		if (list && key === "length") continue;
+		if (typeof key !== "string" || !Object.prototype.propertyIsEnumerable.call(value, key)) {
+			return refuse();
+		}
+		fields.push(key);
+	}
+	return fields;
+}
+
 function copyList(list: readonly unknown[], copies: Map<object, unknown>): readonly unknown[] {
 	const length = list.length;
-	const keys = Object.keys(list);
+	const keys = fieldsOf(list, true);
 	if (keys.length !== length || keys.some((key, index) => key !== String(index))) return refuse();
 	const copy: unknown[] = [];
 	for (let index = 0; index < length; index++) {
@@ -239,7 +260,7 @@ function copyFields(
 ): Readonly<Record<string, unknown>> {
 	const source = value as Readonly<Record<string, unknown>>;
 	const copy: Record<string, unknown> = {};
-	for (const key of Object.keys(source)) {
+	for (const key of fieldsOf(source, false)) {
 		const field = source[key];
 		if (field === undefined) continue;
 		// Defined, not assigned: an own `__proto__` stays the field it is.

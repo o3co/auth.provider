@@ -529,6 +529,8 @@ describe("what is sealed: plain JSON-shaped values, copied once", () => {
 		listWithExtra.extra = SECRET_TEXT;
 		const mapTaggedObject = new Map([["secret", SECRET_TEXT]]);
 		Object.defineProperty(mapTaggedObject, Symbol.toStringTag, { value: "Object" });
+		const hidden = (target: object, key: PropertyKey, value: unknown) =>
+			Object.defineProperty(target, key, { value, enumerable: false });
 		let deep: Record<string, unknown> = { secret: SECRET_TEXT };
 		for (let depth = 0; depth < 200_000; depth++) deep = { deep };
 		for (const [label, value] of [
@@ -546,6 +548,17 @@ describe("what is sealed: plain JSON-shaped values, copied once", () => {
 			["an Array subclass", { list: Listish.from([SECRET_TEXT]) }],
 			["an Array subclass with a field of its own", { list: subclassWithExtra }],
 			["a list with a field of its own", { list: listWithExtra }],
+			[
+				"a toJSON JSON would call, hidden from the keys",
+				hidden({ secret: "s" }, "toJSON", () => ({})),
+			],
+			["a field hidden from the keys", hidden({ secret: "s" }, "extra", SECRET_TEXT)],
+			["a field keyed by a symbol", { secret: "s", [Symbol("extra")]: SECRET_TEXT }],
+			["a list with a hidden field", { list: hidden([SECRET_TEXT], "extra", SECRET_TEXT) }],
+			[
+				"a list with a field keyed by a symbol",
+				{ list: hidden(["s"], Symbol("extra"), SECRET_TEXT) },
+			],
 			["a BigInt inside", { secret: SECRET_TEXT, n: 1n }],
 			["a cycle", cycle],
 			["a Map inside", { secret: SECRET_TEXT, m: new Map([["a", 1]]) }],
