@@ -608,13 +608,19 @@ export function createMemoryFederationGrantStore(
 
 		async takeRotation(input) {
 			const nowMs = instant(input.now, "now");
+			if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+				throw new RangeError("takeRotation: limit must be a whole number of at least 1");
+			}
+			if (!Number.isFinite(input.windowMs) || input.windowMs <= 0) {
+				throw new RangeError("takeRotation: windowMs must be a positive finite number");
+			}
 			const entry = visible(input.grantId, nowMs);
 			if (entry === undefined) return failed();
 			const grant = entry.grant;
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
 			// Checked and counted with no await in between, so takes at once are
-			// each counted. A window bound that is not a number never reopens one.
+			// each counted.
 			const previous = grant.rotations;
 			let rotations: FederationGrantRotations;
 			if (previous === undefined || nowMs >= previous.since.getTime() + input.windowMs) {

@@ -162,9 +162,9 @@ export interface FederationGrantStore {
 	 *   stored: a renewal never re-points a grant to another upstream account.
 	 *
 	 * Effects: `active`; authorization fields and credentials replaced whole;
-	 * the ineligibility marker and `rotations` cleared; the intent retired (no double
-	 * activation); `version` bumped; `lastUsedAt` kept. A refused activation
-	 * changes nothing.
+	 * the ineligibility marker and `rotations` cleared; the intent retired (no
+	 * double activation); `version` bumped; `lastUsedAt` kept. A refused
+	 * activation changes nothing.
 	 */
 	activate(input: {
 		readonly grantId: string;
@@ -262,7 +262,20 @@ export interface FederationGrantStore {
 	 * - else the budget is spent, and the write is refused.
 	 *
 	 * No `version` bump, nothing else touched. Kept by `replaceCredentials`,
-	 * reset by `activate`. `limit` and `windowMs` are compared as given.
+	 * reset by `activate`.
+	 *
+	 * Bounds are checked before the record, and rejected with a `RangeError`, as
+	 * a `now` that is not a date is: a `limit` that is not a whole number of at
+	 * least `1` (`0` would still admit a window's first take), and a `windowMs`
+	 * that is not a positive finite number (one of `0` or less would reopen on
+	 * every take, NaN never). Every adapter applies the same rule, a Redis
+	 * script included.
+	 *
+	 * Clocks: a `now` behind `since` counts into the current window and opens
+	 * none, so an earlier clock fails closed. A replica whose clock is ahead
+	 * opens a window later than the others would, so for them it lasts longer.
+	 * A `now` far in the future holds the budget spent until real time passes
+	 * `since + windowMs`.
 	 *
 	 * Optional: a store without it keeps no rotation budget.
 	 */

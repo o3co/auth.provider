@@ -2030,6 +2030,39 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(await store.find("g-1", at(DAY))).toStrictEqual(before);
 			});
 
+			it("refuses a limit that is not a whole number of at least one, and a window that is not a positive finite number, with a RangeError, changing nothing", async () => {
+				// A limit of 0 would still admit a window's first take, a window of 0
+				// or less would reopen on every take, and a NaN one would never reopen.
+				const grant = await activated();
+				await take(grant.version, at(DAY));
+				const before = await store.find("g-1", at(DAY));
+				const refused: Array<{ readonly limit?: number; readonly windowMs?: number }> = [
+					...[0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY].map((limit) => ({ limit })),
+					...[0, -1, Number.NaN, Number.POSITIVE_INFINITY].map((windowMs) => ({ windowMs })),
+				];
+				for (const bounds of refused) {
+					await expect(
+						take(grant.version, at(DAY + MIN), bounds),
+						JSON.stringify(bounds),
+					).rejects.toThrow(RangeError);
+				}
+				expect(await store.find("g-1", at(DAY))).toStrictEqual(before);
+			});
+
+			it("counts a time behind the window's opening into that window, and opens none: an earlier clock spends the budget too", async () => {
+				const grant = await activated();
+				const bounds = { limit: 2, windowMs: HOUR };
+				expect((await take(grant.version, at(DAY), bounds)).ok).toBe(true);
+				expect(await take(grant.version, at(DAY - MIN), bounds)).toMatchObject({
+					ok: true,
+					grant: { rotations: { since: at(DAY), count: 2 } },
+				});
+				expect(await take(grant.version, at(DAY - 2 * HOUR), bounds)).toEqual({ ok: false });
+				expect(await rotationsOf(at(DAY))).toStrictEqual({ since: at(DAY), count: 2 });
+			});
+
+			// Meaningful only for an adapter whose take crosses an await (a network
+			// round trip): the memory store settles each take synchronously.
 			it("counts takes at once exactly: of eight against a limit of five, five land, each with its own count", async () => {
 				const grant = await activated();
 				const results = await Promise.all(

@@ -752,6 +752,10 @@ honours from the text itself (#627) — read as the TypeScript reader reads it,
 so a value the reader refuses gives no horizon and the revocation proceeds —
 and a copy moved into the past cannot keep a live grant from being ended.
 
+The Redis adapter does not implement the port's optional `takeRotation` yet,
+so it keeps no rotation budget, and the contract's rotation cases skip
+against it.
+
 The credential is sealed under a key **ring**, in core's `v2` key-ring
 envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the
 first key seals, every configured key opens, and the envelope names the one
