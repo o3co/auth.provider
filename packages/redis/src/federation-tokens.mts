@@ -42,6 +42,9 @@
  * within that skew. A conditional write keeps its answer under a replay key
  * of its own until a millisecond past its deadline, so a copy the driver
  * sends again within it answers as the first did and writes nothing. A
+ * conditional write answered `late`, like one unanswered within the write
+ * timeout, rejects with an unknown outcome: the copy that answered wrote
+ * nothing, but an earlier copy whose reply was lost may have committed. A
  * conditional write never shrinks the index, and adds to it only after
  * `updated`, so the index outlives the record it names. The
  * store assumes acknowledged writes are not rolled back (persistence, plus a
@@ -425,17 +428,27 @@ export function createRedisFederationTokenStore(
 		return null;
 	};
 
-	/** A conditional write the server took past its deadline: nothing was written. */
-	const late = (operation: string): Error =>
+	/**
+	 * A conditional write whose outcome is unknown: it may have committed, no
+	 * later than its deadline. A rejection of a conditional write means only
+	 * that, never that nothing was written.
+	 */
+	const unknownOutcome = (operation: string, what: string): Error =>
 		new Error(
-			`FederationTokenStore (redis): ${operation} reached the server past its deadline and wrote nothing`,
+			`FederationTokenStore (redis): ${operation} ${what}; its outcome is unknown: it may have committed, no later than its deadline`,
 		);
 
-	/** A conditional write unanswered within the write timeout: its outcome is unknown. */
+	/**
+	 * Answered `late`: the copy that answered reached the server past its
+	 * deadline and wrote nothing, but an earlier copy the driver sent of the
+	 * same write, whose reply was lost, may have committed before it.
+	 */
+	const late = (operation: string): Error =>
+		unknownOutcome(operation, "was answered past its deadline");
+
+	/** Unanswered within the write timeout. */
 	const unanswered = (operation: string) => (): Error =>
-		new Error(
-			`FederationTokenStore (redis): ${operation} had no answer within ${WRITE_TIMEOUT_MS} ms; it may have committed, and no later than its deadline`,
-		);
+		unknownOutcome(operation, `had no answer within ${WRITE_TIMEOUT_MS} ms`);
 
 	/** Unlink `keys` in bounded batches. */
 	const unlinkBatched = async (keys: AsyncIterable<string>): Promise<void> => {

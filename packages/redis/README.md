@@ -611,9 +611,11 @@ conditional-write convention for a record
 - **The deadline.** Each conditional write carries a deadline the adapter
   sets at issue, its `Date.now()` plus the 1 s write timeout, in `ARGV`; the
   script compares it with `redis.call('TIME')` before it reads or writes
-  anything, and past it writes nothing (`late`, which the store rejects as
-  written nothing). The adapter stops waiting at the same timeout, rejecting
-  with an unknown outcome, never that nothing was written. So the write
+  anything, and past it writes nothing (`late`). The adapter stops waiting
+  at the same timeout. Either way it rejects with an unknown outcome, never
+  that nothing was written: a `late` answer says only that the copy that
+  answered wrote nothing, and an earlier copy of the same write, whose reply
+  was lost, may have committed before the deadline. So the write
   lifetime W is 2 s: the 1 s write timeout plus the 1 s clock skew allowed
   between the app's and Redis's clocks (NTP; the operator runbook's "Replica
   clocks"). An issued conditional write commits or fails within W. That holds
@@ -627,7 +629,7 @@ conditional-write convention for a record
   millisecond past its deadline: a copy that reaches the server before then
   answers what the first copy answered and writes nothing, so a write that
   landed is not answered `conflict` or `missing`; one that reaches it later
-  is `late`.
+  is `late`, an unknown outcome (above).
 - **The index.** A conditional write never removes an index member, and
   `missing` and `conflict` never add one. `replaceIf` raises the index's TTL
   before its script (`pExpireGT`, which adds no member and makes no key), and

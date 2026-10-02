@@ -1273,22 +1273,73 @@ describe("redis FederationTokenStore conditional members", () => {
 		}
 	});
 
-	it("rejects a conditional write the server took past its deadline, naming it as written nothing", async () => {
+	it("rejects a conditional write answered late as an unknown outcome, never as written nothing", async () => {
 		const store = storeOver();
 		await store.attach("sid-1", "google", tokens);
 		const read = await store.getVersioned("sid-1", "google");
 		if (read === null) throw new Error("not live");
-		const before = redis.data.get("ft:sid-1:google");
 		redis.replaceIfGeneration.mockResolvedValueOnce("late");
 		await expect(store.replaceIf("sid-1", "google", read.generation, tokens)).rejects.toThrow(
-			/replaceIf reached the server past its deadline and wrote nothing/,
+			/replaceIf was answered past its deadline; its outcome is unknown/,
 		);
 		redis.removeIfGeneration.mockResolvedValueOnce("late");
 		await expect(store.removeIf("sid-1", "google", read.generation)).rejects.toThrow(
-			/removeIf reached the server past its deadline and wrote nothing/,
+			/removeIf was answered past its deadline; its outcome is unknown/,
 		);
-		expect(redis.data.get("ft:sid-1:google")).toBe(before);
+		// No add to the index on an unknown outcome.
 		expect(redis.sAddWithTtl).toHaveBeenCalledTimes(1);
+	});
+
+	// The driver sends a write again after a reconnect: copy 1 commits just
+	// before the deadline and its reply is lost, and copy 2 reaches the server
+	// past the deadline, whose check runs before the replay key's, so it answers
+	// `late`. That answer is all the adapter sees, and copy 1 wrote.
+	const firstCopyLandsThenLateCopy = <I extends { deadlineMs: number }, A>(
+		write: (k: string, input: I) => Promise<A>,
+	) => {
+		return async (k: string, input: I): Promise<A> => {
+			await write(k, input);
+			vi.setSystemTime(input.deadlineMs + 1);
+			return write(k, input);
+		};
+	};
+
+	it("rejects with an unknown outcome when a resent replace answers late after its first copy wrote, and the record holds that write", async () => {
+		const store = storeOver();
+		await store.attach("sid-1", "google", tokens);
+		const read = await store.getVersioned("sid-1", "google");
+		if (read === null) throw new Error("not live");
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const write = redis.replaceIfGeneration.getMockImplementation();
+		if (write === undefined) throw new Error("no fake replace");
+		let written: string | undefined;
+		redis.replaceIfGeneration.mockImplementationOnce(
+			firstCopyLandsThenLateCopy(async (k, input: FederationTokenReplaceIfInput) => {
+				written = input.value;
+				return write(k, input);
+			}),
+		);
+		const next = { ...tokens, accessToken: "at-2" };
+		await expect(store.replaceIf("sid-1", "google", read.generation, next)).rejects.toThrow(
+			/replaceIf was answered past its deadline; its outcome is unknown: it may have committed/,
+		);
+		expect(redis.data.get("ft:sid-1:google")).toBe(written);
+		expect((await store.get("sid-1", "google"))?.accessToken).toBe("at-2");
+	});
+
+	it("rejects with an unknown outcome when a resent removal answers late after its first copy removed, and the record is gone", async () => {
+		const store = storeOver();
+		await store.attach("sid-1", "google", tokens);
+		const read = await store.getVersioned("sid-1", "google");
+		if (read === null) throw new Error("not live");
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const remove = redis.removeIfGeneration.getMockImplementation();
+		if (remove === undefined) throw new Error("no fake removal");
+		redis.removeIfGeneration.mockImplementationOnce(firstCopyLandsThenLateCopy(remove));
+		await expect(store.removeIf("sid-1", "google", read.generation)).rejects.toThrow(
+			/removeIf was answered past its deadline; its outcome is unknown: it may have committed/,
+		);
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
 
 	it("stamps each conditional write with a deadline 1 s past its issue, and stops waiting there with an unknown outcome", async () => {
@@ -1300,7 +1351,7 @@ describe("redis FederationTokenStore conditional members", () => {
 		redis.replaceIfGeneration.mockImplementationOnce(() => new Promise(() => {}));
 		const replaced = store.replaceIf("sid-1", "google", read.generation, tokens);
 		const settled = expect(replaced).rejects.toThrow(
-			/replaceIf had no answer within 1000 ms; it may have committed/,
+			/replaceIf had no answer within 1000 ms; its outcome is unknown: it may have committed/,
 		);
 		await vi.advanceTimersByTimeAsync(1_000);
 		await settled;
