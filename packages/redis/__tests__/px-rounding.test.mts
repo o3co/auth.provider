@@ -183,10 +183,7 @@ const federationTokenRecorder = () => {
 	const nothing = (async function* () {})();
 	const client: FederationTokenStoreClient = {
 		get: async () => null,
-		set: (async (_key: string, _value: string, _mode: "PX", ttlMs: number) => {
-			px.push(ttlMs);
-			return "OK";
-		}) as FederationTokenStoreClient["set"],
+		set: (async () => "OK") as FederationTokenStoreClient["set"],
 		del: async () => 0,
 		unlink: async () => 0,
 		sAddWithTtl: async (_key, _member, ttlMs) => {
@@ -196,10 +193,20 @@ const federationTokenRecorder = () => {
 		sScanIterator: () => nothing,
 		scanIterator: () => nothing,
 		compareAndDelete: async () => true,
+		attachRecord: async (_key, input) => {
+			px.push(input.ttlMs);
+			return "attached";
+		},
 		readVersioned: async () => null,
 		replaceIfGeneration: async () => "missing" as const,
 		removeIfGeneration: async () => "missing" as const,
 		pExpireGT: async () => {},
+		durability: async () => ({
+			maxmemoryPolicy: "noeviction",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		}),
 	};
 	return { px, indexTtls, client };
 };

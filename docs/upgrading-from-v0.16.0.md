@@ -494,8 +494,9 @@ with what a store of yours records and refuses. Per port:
   `advanceRevocationBoundaries`, and `setRevocationBoundaries` is gone (#993):
   add the method on the current release first.
   `UserSessionStoreClient` implements `replaceIfUnchanged` (#707). A
-  `FederationTokenStoreClient` wrapper implements `readVersioned`,
-  `replaceIfGeneration`, `removeIfGeneration` and `pExpireGT` (#1176).
+  `FederationTokenStoreClient` wrapper implements `attachRecord`,
+  `readVersioned`, `replaceIfGeneration`, `removeIfGeneration`, `pExpireGT`
+  and `durability` (#1176, #1149).
   `makeIoredisClients` provides them all.
 - **The MFA ports**, new since v0.16.0. An `MfaFactorStore`'s membership
   writes are `createIf`, `removeIf` and the reset `removeAllForSubject`, at

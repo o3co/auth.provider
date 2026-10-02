@@ -17,14 +17,20 @@
 /**
  * The federation token store's client over one ioredis connection. The index's add and its
  * expiry are one MULTI/EXEC whose reply is checked, the lock is released only by the
- * compare-and-delete script, and each conditional member is one script whose reply is held to
- * its declared answers.
+ * compare-and-delete script, and the attach and each conditional member are one script whose
+ * reply is held to its declared answers.
  */
 
 import type { Redis } from "ioredis";
 import type { FederationTokenStoreClient } from "../../clients.mjs";
 import { assertPipelineSucceeded, runScript } from "../commands.mjs";
-import { FT_READ_VERSIONED, FT_REMOVE_IF, FT_REPLACE_IF } from "../scripts/federation-tokens.mjs";
+import { redisDurability } from "../durability.mjs";
+import {
+	FT_ATTACH,
+	FT_READ_VERSIONED,
+	FT_REMOVE_IF,
+	FT_REPLACE_IF,
+} from "../scripts/federation-tokens.mjs";
 import { COMPARE_AND_DELETE } from "../scripts/lock.mjs";
 
 /** `reply` when it is one of `answers`; anything else is a script this client did not run. */
@@ -92,6 +98,22 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 			}
 			return { raw: reply[0], generation: reply[1] };
 		},
+		attachRecord: async (key, input) =>
+			answerOf(
+				await runScript(
+					io,
+					FT_ATTACH,
+					[key, input.replayKey],
+					[
+						String(input.deadlineMs),
+						String(input.deadlineMs + input.clockSkewMs + 1),
+						input.value,
+						String(input.ttlMs),
+					],
+				),
+				["attached", "late"] as const,
+				"attachRecord",
+			),
 		replaceIfGeneration: async (key, input) =>
 			answerOf(
 				await runScript(
@@ -127,6 +149,7 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 		pExpireGT: async (key, ttlMs) => {
 			await io.pexpire(key, ttlMs, "GT");
 		},
+		durability: () => redisDurability(io),
 	};
 	return federationTokenStoreClient;
 }
