@@ -118,8 +118,9 @@ function snapshot(answer: unknown): AnswerSnapshot {
  *
  * - `token_type` is required (RFC 6749 §5.1): an answer without one is malformed.
  * - The scope is read by RFC 6749 §3.3's grammar (`parseScopeTokens`). Absent
- *   means `requestedScopes`; named but naming no scope-token, blank included,
- *   is malformed. More than `consentedScopes` is `scope_exceeded`.
+ *   or blank means `requestedScopes`; named but naming no scope-token is
+ *   malformed. More than `consentedScopes` is `scope_exceeded`, judged before
+ *   the token type.
  * - Only a lifetime both `expiresIn` and `expiresAt` state, with life left at
  *   `receivedAt`, is finite (`readUpstreamTokenLifetime`).
  *
@@ -149,11 +150,12 @@ export function readFederationGrantUpstreamAnswer(
 		tokenType === "" ||
 		(expiresIn !== null && typeof expiresIn !== "number") ||
 		expiresAt === MALFORMED ||
-		(scope !== undefined && (typeof scope !== "string" || named.length === 0))
+		(scope !== undefined &&
+			(typeof scope !== "string" || (named.length === 0 && scope.trim() !== "")))
 	) {
 		return refused("malformed_token_response");
 	}
-	const scopes = scope === undefined ? [...context.requestedScopes] : [...named];
+	const scopes = named.length === 0 ? [...context.requestedScopes] : [...named];
 
 	const reading = readUpstreamTokenLifetime(
 		{ expiresIn, expiresAt: expiresAt === null ? null : new Date(expiresAt) },
