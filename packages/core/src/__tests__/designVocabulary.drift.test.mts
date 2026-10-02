@@ -426,6 +426,37 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const|let|var)\s+BUNDLED_STORE_WRITE_LIFETIME_MS\b/,
 	},
 	{
+		concept: "conditional write — a versioned read's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+Versioned\b|\btype\s+Versioned\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a versioned set read's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+VersionedSet\b|\btype\s+VersionedSet\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a conditional replace's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalReplaceAnswer\b|\btype\s+ConditionalReplaceAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a record-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalRemoveAnswer\b|\btype\s+ConditionalRemoveAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a conditional create's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalCreateAnswer\b|\btype\s+ConditionalCreateAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a set-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition:
+			/\binterface\s+ConditionalSetRemoveAnswer\b|\btype\s+ConditionalSetRemoveAnswer\s*[=<]/,
+	},
+	{
 		concept: "conditional write — what a store generation may be",
 		home: "packages/core/src/adapters/conditionalWrite.mts",
 		definition: /(?:function|const|let|var)\s+isStoreGeneration\b/,

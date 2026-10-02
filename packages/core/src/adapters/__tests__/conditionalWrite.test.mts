@@ -46,6 +46,8 @@ const MALFORMED_GENERATIONS: readonly unknown[] = [
 	"has space",
 	"tab\there",
 	"line\n",
+	'quote"d',
+	'"',
 	"nul\u0000",
 	"del\u007f",
 	"é",
@@ -76,13 +78,13 @@ describe("BUNDLED_STORE_WRITE_LIFETIME_MS", () => {
 });
 
 describe("isStoreGeneration", () => {
-	it("accepts 1 to 128 visible ASCII characters", () => {
+	it("accepts 1 to 128 visible ASCII characters other than a double quote", () => {
 		expect(isStoreGeneration("a")).toBe(true);
 		expect(isStoreGeneration("!")).toBe(true);
 		expect(isStoreGeneration("~")).toBe(true);
 		expect(isStoreGeneration("a".repeat(128))).toBe(true);
 		expect(isStoreGeneration(G)).toBe(true);
-		expect(isStoreGeneration('W/"etag-like"')).toBe(true);
+		expect(isStoreGeneration("#$%&'()*+,-./:;<=>?@[\\]^_`{|}")).toBe(true);
 	});
 
 	it("refuses anything else, and never throws", () => {

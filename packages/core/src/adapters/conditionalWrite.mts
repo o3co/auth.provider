@@ -28,33 +28,36 @@ declare const storeGenerationBrand: unique symbol;
 /**
  * The generation a store issued for one record, or for one set's membership:
  * opaque, compared only with `===`. Fresh on every write of what it guards,
- * the create included. Never issued twice for one key: not after a delete and
- * a re-create, and not for a byte-identical value. So it is never a counter,
- * a digest or a timestamp. Only the store makes one; a caller only hands
- * back one it was given.
+ * the create included, and never re-issued for its key (docs/adapter-surface.md,
+ * "Conditional writes", rule 8): random, never a counter, a digest or a
+ * timestamp. Only the store makes one; a caller only hands back one it was
+ * given.
  */
 export type StoreGeneration = string & { readonly [storeGenerationBrand]: true };
 
-const GENERATION_SHAPE = /^[\x21-\x7e]{1,128}$/;
+const GENERATION_SHAPE = /^[\x21\x23-\x7e]{1,128}$/;
 
-/** Whether `value` is a generation a store may answer: 1 to 128 visible ASCII characters (0x21–0x7e). Never throws. */
+/**
+ * Whether `value` is a generation a store may answer: 1 to 128 visible ASCII
+ * characters (0x21–0x7e) other than `"`, so that `"<generation>"` is a strong
+ * ETag. Never throws.
+ */
 export function isStoreGeneration(value: unknown): value is StoreGeneration {
 	return typeof value === "string" && GENERATION_SHAPE.test(value);
 }
 
-/** A fresh generation: a random UUID. One way for a store that makes its own. */
+/** A fresh generation: a random (v4) UUID. One way for a store that makes its own. */
 export function newStoreGeneration(): StoreGeneration {
 	return randomUUID() as StoreGeneration;
 }
 
 /**
- * The bundled stores' write-lifetime bound, 24 hours: a set emptied by any
- * membership write (its last removal or a reset) keeps its tombstone for at
- * least this long from that write, and a membership write commits
- * or fails well within it, counted from the versioned read that produced its
- * expected generation, transport and queues included: a write past that
- * cannot execute. The port's owning module keeps that; callers outside it
- * never hold a generation.
+ * The bundled stores' write-lifetime bound, 24 hours. A set reads absent only
+ * once this has passed since its last membership write, and a
+ * `createIf(…, null)` commits or fails within it of the read that answered
+ * `null`: from the read to issuing the write, kept by the port's owning
+ * module; from issuing it to its commit or failure, kept by the adapter
+ * (docs/adapter-surface.md, "Conditional writes", rule 6).
  */
 export const BUNDLED_STORE_WRITE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -67,10 +70,10 @@ export interface Versioned<T> {
 /**
  * A set's members and the set's generation, from one snapshot. `generation`
  * is `null` only for an absent set: never written, or its tombstone expired.
- * A set's generation outlives its members: a set emptied by any membership
- * write (its last removal or a reset) keeps its tombstone for at least the
- * store's write-lifetime bound
- * ({@link BUNDLED_STORE_WRITE_LIFETIME_MS} for the bundled stores).
+ * A set emptied by any membership write (its last removal or a reset) keeps
+ * its tombstone: it reads absent only once the store's write-lifetime bound
+ * ({@link BUNDLED_STORE_WRITE_LIFETIME_MS} for the bundled stores) has passed
+ * since its last membership write.
  */
 export interface VersionedSet<T> {
 	readonly items: readonly T[];
