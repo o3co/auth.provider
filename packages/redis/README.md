@@ -831,7 +831,7 @@ of core's conditional-write convention
 - **The deadline.** Each membership write carries a deadline the adapter sets
   at issue, on the app's clock: `Date.now()` plus the write timeout, 1 000 ms.
   The script compares it with the server's clock (`TIME`) before it reads or
-  writes anything; past it, the script writes nothing and answers `late`,
+  writes anything; at or past it, the script writes nothing and answers `late`,
   which the adapter rejects as an outage. The adapter waits for the answer no
   longer than the write timeout. Either rejection, `late` or the wait ending,
   means the outcome is unknown, never that nothing was written: a `late`

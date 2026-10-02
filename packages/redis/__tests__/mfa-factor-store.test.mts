@@ -612,6 +612,41 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 		},
 	);
 
+	it.each(Object.entries(SCRIPTS))(
+		"%s's script refuses a write the server takes at its deadline, to the millisecond, and lets through one taken a millisecond before it",
+		async (_, script) => {
+			// The server's clock is pinned: a local `redis` ahead of the script's
+			// own text answers `TIME` with a fixed instant and `GET` (the replay key)
+			// with nothing, and fails any other call, which only a write let past
+			// the deadline check makes. The `#!lua` line, which must be the first,
+			// is left off; nothing here reaches the server's keys.
+			const instantMs = 1_700_000_000_123;
+			const pinned = `local redis = { call = function(command)
+  if command == 'TIME' then return { '1700000000', '123456' } end
+  if command == 'GET' then return false end
+  error('let through: ' .. command)
+end }
+${script.source.slice(script.source.indexOf("\n") + 1)}`;
+			const key = keyAt(freshPrefix(), "user-1");
+			const run = (deadlineMs: number): Promise<unknown> =>
+				first().eval(
+					pinned,
+					2,
+					key,
+					`${key}:w:pinned`,
+					"pinned",
+					String(deadlineMs),
+					String(SKEW_MS),
+					"",
+					"field",
+					"value",
+				);
+			expect(await run(instantMs)).toBe("late");
+			expect(await run(instantMs - 1)).toBe("late");
+			await expect(run(instantMs + 1)).rejects.toThrow(/let through/);
+		},
+	);
+
 	it("lets the removals and the versioned read run on a full server, and keeps the creates refused there", () => {
 		// Under `noeviction` a full Redis refuses a `#!lua` script without
 		// `allow-oom`. A removal, the reset and the read a removal starts from
@@ -696,10 +731,11 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 				tombstoneMs,
 			}),
 		).toBe("late");
+		const absent = keyAt(prefix, "nobody");
 		expect(
-			await client.removeAll(keyAt(prefix, "nobody"), {
+			await client.removeAll(absent, {
 				next: "n6",
-				replayKey: `${key}:w:n6`,
+				replayKey: `${absent}:w:n6`,
 				clockSkewMs: SKEW_MS,
 				deadlineMs: past,
 				tombstoneMs,
@@ -708,7 +744,7 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 		expect({ fields: await first().hgetall(key), pttl: await first().pttl(key) }).toStrictEqual(
 			before,
 		);
-		expect(await first().exists(keyAt(prefix, "nobody"))).toBe(0);
+		expect(await first().exists(absent)).toBe(0);
 
 		const future = now + 60_000;
 		expect(

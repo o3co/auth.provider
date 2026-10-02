@@ -68,8 +68,8 @@ export interface MfaFactorSetWriteInput {
 	readonly next: string;
 	/**
 	 * Epoch milliseconds, on the app's clock at issue plus the adapter's write
-	 * timeout. A write that reaches the server when its clock (`TIME`) is past
-	 * this answers `late` and writes nothing, however it got there late: queued
+	 * timeout. A write that reaches the server when its clock (`TIME`), to the
+	 * millisecond, is at or past this answers `late` and writes nothing, however it got there late: queued
 	 * while the connection was down, sent again after a reconnect, or held by
 	 * a stalled server. `late` says only that this copy wrote nothing: an
 	 * earlier copy, once its replay key has gone, may have committed, so the
@@ -129,7 +129,7 @@ export interface MfaFactorSetRemoveIfInput extends MfaFactorSetEmptyingWriteInpu
  * Every membership write — `createIf`, `removeIf`, `create`, `remove` and
  * `removeAll` — is one indivisible step that first answers a copy of a write
  * already applied with that write's answer (its `replayKey`), then refuses a
- * write past its deadline (`late`), then checks, then writes the fields and
+ * write at or past its deadline (`late`), then checks, then writes the fields and
  * `~g` = `next`, and keeps its answer under `replayKey` until `clockSkewMs`
  * past its deadline. The removals, the reset and `listVersioned` run on a
  * full server (`allow-oom`): they write only `~g`, the replay key and an

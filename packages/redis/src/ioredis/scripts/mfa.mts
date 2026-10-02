@@ -51,8 +51,8 @@ export const MFA_FACTOR_UPDATE = defineScript(LUA_MFA_FACTOR_UPDATE);
 //
 // A membership write is `apply`, a function each script defines, run by one shared step
 // (`LUA_MFA_FACTOR_SET_STEP`): a copy of a write already applied answers that write's answer and
-// writes nothing; a write the server takes past the deadline the adapter set at issue writes
-// nothing and answers `late`; otherwise `apply` checks and writes the fields, `~g` = the
+// writes nothing; a write the server takes at or past the deadline the adapter set at issue
+// writes nothing and answers `late`; otherwise `apply` checks and writes the fields, `~g` = the
 // generation it was handed and the key's expiry (none while the set holds a factor, the
 // tombstone's while it holds `~g` alone), and its answer is kept until the declared clock skew
 // past the deadline, so a server whose clock lags the one that kept it (after a failover or a
@@ -69,14 +69,14 @@ export const MFA_FACTOR_UPDATE = defineScript(LUA_MFA_FACTOR_UPDATE);
 // the declared clock skew (ms), then each script's own arguments from `ARGV[4]`.
 
 /**
- * What every membership script starts with. `mfa_factor_late()`: whether the server's clock is
- * past the deadline. `mfa_factor_settle(tombstone)`: the key's expiry for what the write left —
- * the tombstone's `PEXPIRE` when `~g` is all it holds, none otherwise.
+ * What every membership script starts with. `mfa_factor_late()`: whether the server's clock, to
+ * the millisecond, is at or past the deadline. `mfa_factor_settle(tombstone)`: the key's expiry
+ * for what the write left — the tombstone's `PEXPIRE` when `~g` is all it holds, none otherwise.
  */
 const LUA_MFA_FACTOR_SET_PRELUDE = `
 local function mfa_factor_late()
   local t = redis.call('TIME')
-  return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) > tonumber(ARGV[2])
+  return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) >= tonumber(ARGV[2])
 end
 
 local function mfa_factor_settle(tombstone)
