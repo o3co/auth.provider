@@ -86,6 +86,7 @@ export const oauthSectionSchema = z.object({
 			negativeCacheMs: z.coerce.number().int().nonnegative().optional(),
 			maxConcurrentFetches: z.coerce.number().int().positive().optional(),
 		})
+		.strict()
 		.optional(),
 });
 
@@ -420,6 +421,9 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// RFC 8414 §2 requires the field; with no authorization
 							// endpoint it lists none.
 							response_types_supported: authorizationEndpoint ? ["code"] : [],
+							// RFC 8414 §2 defaults an omitted value to query and fragment;
+							// `/authorize` answers in the query only.
+							...(authorizationEndpoint ? { response_modes_supported: ["query"] } : {}),
 							// OIDC Discovery defaults this to **true** when omitted,
 							// which would claim `request_uri` support `/authorize`
 							// does not have: an RP that believed it had sent a signed
