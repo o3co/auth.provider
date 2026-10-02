@@ -118,8 +118,9 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 		// sink for a subject mismatch, and the logger, which carries
 		// admission's outage line (`session_admission_unavailable`). Boot hands
 		// a module only the slots its manifest names, so without them the
-		// grant would read no boundary and log nothing.
-		optional: ["userSessionStore", "subjectRevocation", "auditSink", "logger"],
+		// grant would read no boundary and log nothing. `grantPolicy`: the
+		// grant consults it, when wired, before it mints.
+		optional: ["userSessionStore", "subjectRevocation", "auditSink", "grantPolicy", "logger"],
 		// Optional to wire, not optional to decide: an unfilled
 		// slot must be declared absent, as every other consumer of the two
 		// slots declares it, so that the grants installed without `oauthModule`

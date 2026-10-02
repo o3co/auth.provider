@@ -18,9 +18,11 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	authTimeAt,
+	boundPolicyAudience,
 	checkResolver,
 	cookieClaim,
 	describeAdmissionOutage,
+	evaluateGrantPolicy,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantError,
@@ -46,8 +48,9 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  *
  * The client is `ctx.authenticatedClient` (RFC 6749 §2.3 authentication via
  * `clientAuthMw`), never a body `client_id`: no identity decision reads the
- * raw body. Its `allowedScopes` bound the request; `aud` is its first
- * `allowedAudiences` entry, else its client id; `azp` is its client id.
+ * raw body. Its `allowedScopes` bound the request; `aud` is a wired
+ * `grantPolicy`'s `grantedAudience` within its `allowedAudiences`, else its
+ * first `allowedAudiences` entry, else its client id; `azp` is its client id.
  */
 /**
  * What the session grant reads. The requirement resolver, `subjectRevocation`
@@ -56,7 +59,7 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  */
 export type SessionGrantDeps = Pick<
 	GrantDependencies,
-	"config" | "keyStore" | "userSessionStore" | "subjectRevocation" | "logger"
+	"config" | "keyStore" | "userSessionStore" | "subjectRevocation" | "grantPolicy" | "logger"
 > &
 	ProviderDeps<"sessionRequirementResolver", "auditSink">;
 
@@ -163,26 +166,6 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// (as `/authorize` records on the code), never the record's raw `amr`;
 			// an untracked browser session is not a source.
 			const trackedAmr = tracked === null ? undefined : wellFormedAmr(vouchedAmr(tracked));
-			// The primary authentication's time, which a step-up never moves (RFC
-			// 9470 §6.1), read against the minting clock (core's `authTimeAt`):
-			// never later than it. One this clock cannot read — further ahead than
-			// the skew allows — refuses the grant before anything is minted.
-			// One issuance instant: `authTime` is read against it and the access
-			// token carries it as `iat`, so a wall clock moved back before the
-			// signing cannot put `auth_time` after `iat`.
-			const mintingNow = Date.now();
-			const trackedAuthTime =
-				tracked === null ? undefined : authTimeAt(tracked.authTime, mintingNow);
-			if (tracked !== null && trackedAuthTime === undefined) {
-				deps.logger?.warn(
-					{ sid, clientId: client.clientId, aheadMs: tracked.authTime.getTime() - mintingNow },
-					"auth_time_ahead_of_clock",
-				);
-				return {
-					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
-				};
-			}
-
 			// The email gate covers every path that mints for a user.
 			// `invalid_grant`, not `access_denied`: RFC 6749 §5.2 does not define
 			// the latter for the token endpoint.
@@ -242,6 +225,59 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 				}
 			}
 
+			// A wired policy decides last, on the admitted, checked request, by
+			// core's fail-closed rules: it may only narrow the scope and audience.
+			let effectiveScopes: readonly string[] = scopes ?? [];
+			let policyAudience: string | null = null;
+			if (deps.grantPolicy) {
+				const policy = await evaluateGrantPolicy(
+					deps.grantPolicy,
+					{
+						grantType: "session",
+						clientId: client.clientId,
+						subject: userId,
+						// A copy, so the policy cannot reach the ceiling it is held to.
+						requestedScope: scopes ? [...scopes] : undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					effectiveScopes,
+					{ logger: deps.logger },
+				);
+				if (!policy.ok) return { result: policy.result };
+				effectiveScopes = policy.scopes;
+				const bounded = boundPolicyAudience(policy.decision, client.allowedAudiences ?? []);
+				if (!bounded.ok) return { result: bounded.result };
+				policyAudience = bounded.audience;
+			}
+
+			// The primary authentication's time, which a step-up never moves (RFC
+			// 9470 §6.1), read against the minting clock (core's `authTimeAt`):
+			// never later than it. One this clock cannot read — further ahead than
+			// the skew allows — refuses the grant before anything is minted.
+			// One issuance instant: `authTime` is read against it and the access
+			// token carries it as `iat`, so a wall clock moved back before the
+			// signing cannot put `auth_time` after `iat`. Taken after the policy,
+			// so a slow policy cannot mint a token already expired.
+			const mintingNow = Date.now();
+			// Admission held the tracked session live on its own clock, before
+			// the policy's await: a session that expired since then mints nothing.
+			if (tracked !== null && !(tracked.expiresAt.getTime() > mintingNow)) {
+				return {
+					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
+				};
+			}
+			const trackedAuthTime =
+				tracked === null ? undefined : authTimeAt(tracked.authTime, mintingNow);
+			if (tracked !== null && trackedAuthTime === undefined) {
+				deps.logger?.warn(
+					{ sid, clientId: client.clientId, aheadMs: tracked.authTime.getTime() - mintingNow },
+					"auth_time_ahead_of_clock",
+				);
+				return {
+					result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
+				};
+			}
+
 			// `sid` binds the token to the browser session, so either logout
 			// endpoint (both delete the `UserSession` record) revokes it wherever
 			// liveness is checked (`/userinfo`, `/introspect`). No refresh token
@@ -249,11 +285,11 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// that checks only signature and `exp` cannot see a logout; the lever
 			// there is a short `accessToken.defaultExpiresIn`.
 			//
-			// `aud` defaults to `allowedAudiences[0]`, the client's configured
-			// resource (the AuthenticatedClient contract), falling back to the
-			// client id as `authorization_code` does — never the issuer, since the
-			// token is for a resource, and never null.
-			const audience = client.allowedAudiences?.[0] ?? client.clientId;
+			// `aud` is the policy's, else defaults to `allowedAudiences[0]`, the
+			// client's configured resource (the AuthenticatedClient contract),
+			// falling back to the client id as `authorization_code` does — never
+			// the issuer, since the token is for a resource, and never null.
+			const audience = policyAudience ?? client.allowedAudiences?.[0] ?? client.clientId;
 			// The member the binding's mechanism kind owns (core's
 			// `ownedConfirmation`): a contributed mechanism cannot have a binding
 			// minted that no owning mechanism validated. The response's
@@ -277,7 +313,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 								audience,
 								subject: userId ?? null,
 								authorizedParty: client.clientId,
-								scope: scopes?.join(" ") ?? null,
+								scope: effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null,
 								tokenType: "at+jwt",
 								issuedAt: Math.floor(mintingNow / 1000),
 								...(confirmation ? { confirmation } : {}),
