@@ -21,6 +21,26 @@
  * the rules `ClientEntrySchema` holds a registered entry to). What a
  * consumer reads through the boundary is the validated copy.
  *
+ * - **What is read.** Exactly the fields `PublicClient` declares, each once,
+ *   by name, however the record holds it (own data, a prototype getter, an
+ *   ORM entity, an Array subclass, a Proxy); never `clientSecret`, and
+ *   nothing else of the record. The field list is checked against
+ *   `PublicClient` and against the schema, both ways, at compile time.
+ * - **What is held.** The registration's fields and rules with the id in
+ *   place of the secret, the defaults filled. The record's `clientId` must be
+ *   the id looked up, exactly, and one no request could name
+ *   (`isWellFormedClientId`) is refused, as at boot.
+ * - **What is answered.** The parse, copied once more by the same copier, so
+ *   it is frozen at every depth and shares nothing with the record or with
+ *   another answer.
+ * - **What a refusal says.** One `client_record_refused` warn with the step,
+ *   the client id sanitised and capped, and the reasons. A reason names the
+ *   field, an entry's position (`allowedRedirectUris[2]`) and the rule it
+ *   broke, never a URI: a URI's query can carry a credential registered by
+ *   mistake. A rule about a scheme or a host names that scheme or host, and
+ *   one about default scopes names the scopes outside the allowed ones. The
+ *   record object is never logged.
+ *
  * The boundary tells a refused record from an absent one
  * ({@link ValidatedClientRepository.lookupClient}): a caller that falls back
  * to another source of clients when none is registered falls back only on
@@ -104,12 +124,12 @@ type ClientRecordReading =
  * `record`, answered for `clientId`, as the plain validated copy every
  * consumer reads: each field `PublicClient` declares read once, by name,
  * however the record holds it (own data, a prototype getter, an ORM entity, a
- * Proxy), and nothing else of it — never a `clientSecret` beside them. That
- * copy is frozen at every depth before it is parsed; what is answered is the
- * schema's parse of it, its defaults filled: a fresh object per lookup that
- * shares nothing with the record or with another answer, and is not frozen.
- * Its `clientId` must be the id that was looked up, and an id no request
- * could name (`isWellFormedClientId`) is refused, as at boot.
+ * Proxy), and nothing else of it — never a `clientSecret` beside them. The
+ * copy is parsed with its defaults filled, and the parse is copied once more,
+ * so what is answered is frozen at every depth: a fresh object per lookup
+ * that shares nothing with the record or with another answer. Its
+ * `clientId` must be the id that was looked up, and an id no request could
+ * name (`isWellFormedClientId`) is refused, as at boot.
  *
  * Refused, with each reason: a record that is not an object, a field holding
  * what JSON does not hold as it is, a field the schema refuses, an id that
@@ -131,7 +151,13 @@ function readClientRecord(record: object, clientId: string): ClientRecordReading
 	if (parsed.data.clientId !== clientId) {
 		return { ok: false, reasons: ["clientId: not the id that was looked up"] };
 	}
-	return { ok: true, client: parsed.data };
+	// The parse is a new, mutable object with the defaults filled: copied once
+	// more by the same copier, so what is answered is frozen at every depth.
+	// It holds only what the frozen copy held and the schema's defaults, so
+	// the copy cannot fail.
+	const answer = readPlainFields(parsed.data, CLIENT_RECORD_FIELDS);
+	if (!answer.ok) return { ok: false, reasons: [`${answer.field}: not plain data`] };
+	return { ok: true, client: answer.copy as PublicClient };
 }
 
 /** How many reasons a refusal's log line keeps. */
@@ -198,10 +224,8 @@ const boundaries = new WeakSet<ClientRepository>();
  * logger it was first built with; `options` are not read. The boundary is
  * disposable when `inner` is, and disposing it disposes `inner`.
  *
- * The reasons a refusal logs name each field and the rule it broke, and some
- * quote the field's value (a refused redirect URI, a scope outside the
- * allowed ones): registration data, none of it secret. The record object is
- * never logged.
+ * The reasons a refusal logs name the field and an entry's position, never a
+ * URI (see the file header). The record object is never logged.
  */
 export function validatedClientRepository(
 	inner: ClientRepository,

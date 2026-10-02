@@ -405,6 +405,29 @@ describe("validatedClientRepository — a malformed record is answered as no cli
 		expect(logger.warn.mock.calls[0]?.[0]).toMatchObject({ clientId: "a?b" });
 	});
 
+	it("names a refused URI by its field and position, never by the URI, in the reasons and the warn", async () => {
+		const SECRET = "tok-3f9a";
+		const logger = recordingLogger();
+		const boundary = validatedClientRepository(
+			repositoryAnswering({
+				...validRecord(),
+				allowedRedirectUris: [
+					"https://rp.example/cb",
+					`https://rp.example/cb?token=${SECRET}&iss=x`,
+				],
+				federationGrantRedirectUris: [`https://rp.example/grant?token=${SECRET}&grant_id=1`],
+			}),
+			{ logger },
+		);
+		const lookup = await boundary.lookupClient(CLIENT_ID);
+		expect(lookup.outcome).toBe("refused");
+		const reasons = lookup.outcome === "refused" ? lookup.reasons.join("\n") : "";
+		expect(reasons).toContain("allowedRedirectUris[1]: ");
+		expect(reasons).toContain("federationGrantRedirectUris[0]: ");
+		expect(reasons).not.toContain(SECRET);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(SECRET);
+	});
+
 	it("keeps ten reasons and counts them all when a record breaks more rules", async () => {
 		const logger = recordingLogger();
 		const boundary = validatedClientRepository(
@@ -470,6 +493,48 @@ describe("validatedClientRepository — a read that throws is the store's outage
 		});
 		await expect(boundary.findById(CLIENT_ID)).rejects.toBe(outage);
 		await expect(boundary.authenticate(CLIENT_ID, "secret")).rejects.toBe(outage);
+	});
+});
+
+describe("validatedClientRepository — what it answers is frozen", () => {
+	it("freezes the answer at every depth, the schema's defaults included", async () => {
+		const boundary = validatedClientRepository(repositoryAnswering(validRecord()));
+		const lookup = await boundary.lookupClient(CLIENT_ID);
+		const client = lookup.outcome === "found" ? lookup.client : undefined;
+		expect(client).toBeDefined();
+		const unfrozen: string[] = [];
+		const walk = (value: unknown, at: string): void => {
+			if (typeof value !== "object" || value === null) return;
+			if (!Object.isFrozen(value)) unfrozen.push(at);
+			for (const [key, inner] of Object.entries(value)) walk(inner, `${at}.${key}`);
+		};
+		walk(client, "client");
+		walk(await boundary.findById(CLIENT_ID), "findById");
+		walk(await boundary.authenticate(CLIENT_ID, "secret"), "authenticate");
+		expect(unfrozen).toEqual([]);
+		const defaulted = await validatedClientRepository(
+			repositoryAnswering({ clientId: CLIENT_ID, tokenEndpointAuthMethod: "none" }),
+		).findById(CLIENT_ID);
+		expect(Object.isFrozen(defaulted?.allowedRedirectUris)).toBe(true);
+		expect(Object.isFrozen(defaulted?.allowedAudiences)).toBe(true);
+	});
+
+	it("freezes nested objects: the key set and the sender constraint", async () => {
+		const boundary = validatedClientRepository(
+			repositoryAnswering({
+				...validRecord(),
+				tokenEndpointAuthMethod: "private_key_jwt",
+				jwks: {
+					keys: [{ kty: "OKP", crv: "Ed25519", x: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo" }],
+				},
+			}),
+		);
+		const client = await boundary.findById(CLIENT_ID);
+		expect(Object.isFrozen(client?.jwks)).toBe(true);
+		expect(Object.isFrozen(client?.jwks?.keys)).toBe(true);
+		expect(Object.isFrozen(client?.jwks?.keys[0])).toBe(true);
+		expect(Object.isFrozen(client?.senderConstrained)).toBe(true);
+		expect(Object.isFrozen(client?.senderConstrained?.methods)).toBe(true);
 	});
 });
 

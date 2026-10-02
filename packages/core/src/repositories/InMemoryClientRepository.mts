@@ -105,25 +105,33 @@ const jwksUriSchema = z
 	);
 
 /**
- * One entry of a registered-redirect-URI list, held to the shared
- * `net/redirect-uri` grammar and reporting refusals under `field`.
+ * A registered-redirect-URI list, each entry held to the shared
+ * `net/redirect-uri` grammar, a refusal reported as `field[index]` and the
+ * rule broken. The rule's wording comes from the checker, so a custom
+ * `ClientRepository` opting into `checkRedirectUri` refuses in the same
+ * words.
  *
  * Shared by `allowedRedirectUris` and `postLogoutRedirectUris`, the two lists
- * of URIs a user agent is sent to. The refusal wording comes from the
- * checker, so a custom `ClientRepository` opting into `checkRedirectUri`
- * refuses in the same words.
+ * of URIs a user agent is sent to.
+ *
+ * A refusal never quotes the URI: its query can carry a token or a
+ * credential someone registered by mistake, and the message reaches a boot
+ * error and the boundary's log line. The position finds the entry.
  *
  * @internal
  */
-const redirectUriEntrySchema = (field: string) =>
-	z.string().superRefine((uri, ctx) => {
-		const rejection = checkRedirectUri(uri);
-		if (rejection !== null) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: `${field} entry ${JSON.stringify(uri)}: ${describeRedirectUriRejection(rejection)}`,
-			});
-		}
+const redirectUriListSchema = (field: string) =>
+	z.array(z.string()).superRefine((uris, ctx) => {
+		uris.forEach((uri, index) => {
+			const rejection = checkRedirectUri(uri);
+			if (rejection !== null) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `${field}[${index}]: ${describeRedirectUriRejection(rejection)}`,
+					path: [index],
+				});
+			}
+		});
 	});
 
 /**
@@ -150,7 +158,7 @@ const registrationFields = z.object({
 	// boot: a `javascript:` target, a fragment, userinfo, plain http off
 	// loopback, and a query name outside the allowlist or one the
 	// authorization response appends are refused.
-	allowedRedirectUris: z.array(redirectUriEntrySchema("allowedRedirectUris")).default([]),
+	allowedRedirectUris: redirectUriListSchema("allowedRedirectUris").default([]),
 	allowedScopes: z.array(z.string()).default([]),
 	// What an omitted `scope` parameter grants. Absent plus a non-empty
 	// allowlist makes a scope-omitting request `invalid_scope`
@@ -171,7 +179,7 @@ const registrationFields = z.object({
 	// grammar. A custom scheme (`com.example.app:/signout`) is allowed; a
 	// fragment (RFC 6749 §3.1.2), userinfo, control characters and `http:` off
 	// a loopback host are refused.
-	postLogoutRedirectUris: z.array(redirectUriEntrySchema("postLogoutRedirectUris")).optional(),
+	postLogoutRedirectUris: redirectUriListSchema("postLogoutRedirectUris").optional(),
 	// The other two logout fields stay on `httpUrlSchema` deliberately: neither
 	// is a redirect target. `backchannelLogoutUri` is POSTed by this server and
 	// `frontchannelLogoutUri` is rendered as an iframe `src`; a custom scheme is
@@ -280,13 +288,15 @@ function checkRegistration(data: Registration, ctx: z.RefinementCtx, secretHeld:
 			});
 		}
 	}
-	for (const uri of data.federationGrantRedirectUris ?? []) {
+	// Each refusal names the entry by its position, never by the URI, as
+	// `redirectUriListSchema` does.
+	(data.federationGrantRedirectUris ?? []).forEach((uri, index) => {
 		const rejection = checkRedirectUri(uri);
 		if (rejection !== null) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
-				message: `federationGrantRedirectUris: ${rejection.reason}`,
-				path: ["federationGrantRedirectUris"],
+				message: `federationGrantRedirectUris[${index}]: ${rejection.reason}`,
+				path: ["federationGrantRedirectUris", index],
 			});
 		}
 		// The end of a grant flow appends these; refused at boot rather than when
@@ -296,13 +306,13 @@ function checkRegistration(data: Registration, ctx: z.RefinementCtx, secretHeld:
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				message:
-					`federationGrantRedirectUris: ${uri} already carries "${reserved}" (compared ignoring ` +
+					`federationGrantRedirectUris[${index}]: already carries "${reserved}" (compared ignoring ` +
 					'case, "_" and "-"), which the end of a grant flow appends — the client would receive ' +
 					"it twice",
-				path: ["federationGrantRedirectUris"],
+				path: ["federationGrantRedirectUris", index],
 			});
 		}
-	}
+	});
 	if (data.tokenEndpointAuthMethod === "none" && data.clientSecret !== undefined) {
 		ctx.addIssue({
 			code: z.ZodIssueCode.custom,

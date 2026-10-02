@@ -256,24 +256,26 @@ Module-level messages that arrive wrapped in a factory failure:
   `allowedRedirectUris`, `postLogoutRedirectUris` and
   `federationGrantRedirectUris` to core's `checkRedirectUri`,
   `packages/core/src/net/redirect-uri.mts`): `Invalid entry "<client>" in
-  <file>: …`, naming each bad entry. Two of them are about the query:
-  `allowedRedirectUris entry "https://client.example/cb?iss=x": must not
-  carry "iss" in its query (compared ignoring case, "_" and "-"): …` — the
+  <file>: …`, naming each bad entry by its list and position, never by the
+  URI (a query can carry a token registered by mistake): the second entry of
+  `allowedRedirectUris` is `allowedRedirectUris[1]`. Two of them are about
+  the query: `allowedRedirectUris[0]: must not carry "iss" in its query
+  (compared ignoring case, "_" and "-"): …` — the
   query names `code`, `state`, `iss`, `error` or `error_description`, the
   names an authorization response carries, in any case and with `_` or `-`
   anywhere in it (`_state`, `errorDescription`); and
-  `allowedRedirectUris entry "https://client.example/cb?filter[x]=1": query
-  parameter names may use only letters, digits, "_" and "-", each parameter
+  `allowedRedirectUris[0]: query parameter names may use only letters,
+  digits, "_" and "-", each parameter
   must have a name, and the query must not contain ";": …` — a name outside
   `[A-Za-z0-9_-]`, a parameter with no name (`?=x`, `?a=1&&b=2`, a trailing
   `&`), or a `;` anywhere in the query, values included.
   `postLogoutRedirectUris` reads the same with its own field name;
   `federationGrantRedirectUris` reports the reason alone
-  (`federationGrantRedirectUris: reserved-parameter` or
+  (`federationGrantRedirectUris[0]: reserved-parameter` or
   `… query-name-invalid`), and also refuses `grant_id`, compared the same
-  way (`GRANT_ID`, `grantId`, `_grant_id`): `federationGrantRedirectUris:
-  <uri> already carries "grant_id" (compared ignoring case, "_" and "-"),
-  …`. Rename or remove the parameter in
+  way (`GRANT_ID`, `grantId`, `_grant_id`):
+  `federationGrantRedirectUris[0]: already carries "grant_id" (compared
+  ignoring case, "_" and "-"), …`. Rename or remove the parameter in
   the registration, and carry the client's own context in `state` or in the
   path. The comparison covers names as written and the common
   normalizations (case, `_`, `-`), not a mapping a client configures, such
