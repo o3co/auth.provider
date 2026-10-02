@@ -39,7 +39,7 @@ import type {
 	MfaVerification,
 	PrimaryContinuation,
 } from "@o3co/auth-provider-core";
-import type { MfaFactorSetStart } from "./factorSet.mjs";
+import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
 import type { RequireEmailProof, UnprovableReason } from "./firstBinding.mjs";
 import type { MfaMailRefusal } from "./mail.mjs";
 import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
@@ -342,10 +342,16 @@ export type MfaEnrollmentBeginOutcome =
 			readonly expiresIn?: number;
 	  } & MfaCeremonySubject);
 
-export type MfaEnrollmentCompleteOutcome =
+export type MfaEnrollmentCompleteOutcome = (
 	| MfaEnrollmentRefusal
 	| MfaFactorUnreadable
 	| { readonly outcome: "no_pending_enrollment" }
+	/**
+	 * Another write held the subject's factor set past the wait: nothing was
+	 * written and the transaction stands; the attempt the completion reserved
+	 * before its proof was checked counts, as any completion's does.
+	 */
+	| { readonly outcome: "factors_busy"; readonly retryAfterSeconds: number }
 	| { readonly outcome: "invalid_label" }
 	| { readonly outcome: "spent" }
 	| ({
@@ -395,7 +401,11 @@ export type MfaEnrollmentCompleteOutcome =
 			readonly witness: MfaWitnessMark | undefined;
 			/** Why D25's flag could not be cleared after the proof was given; `undefined` when it was, or none was due. */
 			readonly flagUncleared: unknown;
-	  } & MfaCeremonySubject);
+	  } & MfaCeremonySubject)
+) & {
+	/** The binding's writes ran past the subject's lease: a reset or a recovery may have run beside them. */
+	readonly overran?: true;
+};
 
 /**
  * What a session's step-up answers: for a subject with no record that may
@@ -428,6 +438,8 @@ export interface MfaCeremonyKit {
 	readonly sealing: MfaSealing;
 	readonly mailSender: MailSender | undefined;
 	readonly witness: MfaEnrollmentWitness;
+	/** The subject's factor set: where an enrollment's start is taken and carried, and its writes run under the subject's lease. */
+	readonly factorSet: MfaFactorSet;
 	readonly now: () => number;
 	/** `mfa.maxFactorsPerSubject`: the records a subject may hold before an enrollment in a session is refused. */
 	readonly maxFactorsPerSubject: number;

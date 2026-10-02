@@ -60,6 +60,7 @@ describe("the MFA package's admission actions", () => {
 			"mfa-email-factor",
 			"mfa-recovery-code-factor",
 			"mfa-recovery-code-factor",
+			"mfa-reset",
 			"mfa-totp-factor",
 			"mfa-totp-factor",
 		]);

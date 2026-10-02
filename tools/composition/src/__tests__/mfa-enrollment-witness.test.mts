@@ -21,9 +21,10 @@
  * mark endpoint; the factors kept by the same Store or in memory. A first
  * binding marks the witness after the factor is written, a mark that failed
  * is written at the next login, a removal that leaves no record that may
- * count clears it after the removal, and a witness that says the subject enrolled
- * beside no factor stops a password login and every first binding of a
- * federated session — never a binding the lost factors would open.
+ * count clears it after the removal, the operator reset clears it last, and
+ * a witness that says the subject enrolled beside no factor stops a password
+ * login and every first binding of a federated session — never a binding the
+ * lost factors would open.
  */
 
 import type {
@@ -33,6 +34,7 @@ import type {
 	SupportsMfaEnrollmentWitness,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { type MfaReset, mfaResetModule } from "@o3co/auth-provider-mfa";
 import { mfaConfigForTests, totpCodeForTests } from "@o3co/auth-provider-mfa/testing";
 import { type FakeStore, startFakeStore } from "@o3co/auth-provider-test-kit";
 import type { Express } from "express";
@@ -338,6 +340,37 @@ describe.each(["store", "memory"] as const)(
 			expect(removed.status, JSON.stringify(removed.body)).toBe(200);
 			expect(endpointsSince(from)).not.toContain("markMfaEnrolled");
 			expect(store.enrolled(ALICE.id)).toBe(true);
+		});
+	},
+);
+
+describe.each(["store", "memory"] as const)(
+	"the witness at the operator reset, the factors kept in %s",
+	(factors) => {
+		it("sends {enrolled: false} to the Store last, after every record was removed", async () => {
+			// The full set installs core's subject revocation service: the reset ends the sessions through it.
+			const set = await boot(factors, { modules: [mfaResetModule] });
+			const { done } = await firstBinding(set.app);
+			expect(done.status, JSON.stringify(done.body)).toBe(200);
+			expect(store.enrolled(ALICE.id)).toBe(true);
+			const stores = storesOf(set);
+			const reset = (set.handle.components as unknown as { readonly mfaReset: MfaReset }).mfaReset;
+			const from = store.requests.length;
+
+			const report = await reset.resetMfaForSubject(ALICE.id);
+
+			expect(report.complete, JSON.stringify(report)).toBe(true);
+			const endpoints = endpointsSince(from);
+			expect(endpoints.at(-1)).toBe("markMfaEnrolled");
+			expect(await stores.mfaFactorStore.list(ALICE.id)).toEqual([]);
+			const marks = store.requests
+				.slice(from)
+				.filter(({ endpoint }) => endpoint === "markMfaEnrolled");
+			expect(marks.map(({ body }) => body)).toEqual([{ subject: ALICE.id, enrolled: false }]);
+			expect(store.enrolled(ALICE.id)).toBe(false);
+			if (factors === "store") {
+				expect(endpoints.indexOf("delete")).toBeLessThan(endpoints.indexOf("markMfaEnrolled"));
+			}
 		});
 	},
 );

@@ -421,6 +421,12 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		sites: { revokedBefore: 1 },
 		why: "a login's MFA transaction held to its subject's sessions boundary at every use: no session exists yet for admission to read, and a ceremony begun before a revocation must bind nothing (the MFA ADR's D8)",
 	},
+	// The subject's own release of its MFA lock: the MFA ADR's D21.
+	{
+		file: "packages/mfa/src/lockRecovery.mts",
+		sites: { revokedBefore: 1 },
+		why: "the release of a subject's MFA lock hands the store the subject's sessions boundary, which the store holds against the attack's first counted failure: a value, not a session's admission (the MFA ADR's D21)",
+	},
 	// The token side's boundary, permanent.
 	{
 		file: "packages/core/src/jwt/verify.mts",

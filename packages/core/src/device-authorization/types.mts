@@ -65,10 +65,13 @@ export interface DeviceAuthorization {
 	 */
 	readonly amr: readonly string[] | undefined;
 	/**
-	 * Set by an approval handed one: when the approving session authenticated,
-	 * in epoch milliseconds — never the approval's own instant. `undefined`
-	 * otherwise, which the grant reads as "cannot tell" and stamps no
-	 * `auth_time` for.
+	 * Set by an approval handed one: when the approving session authenticated
+	 * (its primary authentication, which a step-up never moves), in whole epoch
+	 * milliseconds, as `recordableDeviceApproval` records it — no later than
+	 * the approval's clock, so an `authTime` up to `DEFAULT_CLOCK_SKEW_MS`
+	 * ahead of it is recorded as that clock. It is not when the session
+	 * approved. `undefined` otherwise, which the grant reads as "cannot tell"
+	 * and stamps no `auth_time` for.
 	 */
 	readonly authTimeMs: number | undefined;
 }

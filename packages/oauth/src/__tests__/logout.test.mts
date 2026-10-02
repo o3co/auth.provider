@@ -693,6 +693,231 @@ describe("POST /oauth/logout", () => {
 			expect(res.text).toContain("<iframe");
 			expect(res.text).toContain("rp1.example.com");
 		});
+
+		const storedRP = (clientId: string, frontchannelLogoutUri: string) => ({
+			clientId,
+			frontchannelLogoutUri,
+			registeredAt: new Date(),
+			backchannelLogoutUri: undefined,
+			backchannelLogoutSessionRequired: undefined,
+			frontchannelLogoutSessionRequired: undefined,
+		});
+		const NON_HTTP_URIS = [
+			"javascript:void(0)",
+			"JAVASCRIPT:void(0)",
+			"java\tscript:void(0)",
+			"data:text/plain,signed-out",
+			"blob:https://rp.example/x",
+			"com.example.app:/x",
+		];
+
+		it("renders only http(s) front-channel URIs, and warns once for each RP it skips", async () => {
+			const logger = createMockLogger();
+			const rpData = [
+				storedRP("rp-1", "https://rp1.example.com/fc-logout"),
+				...NON_HTTP_URIS.map((uri, i) => storedRP(`rp-skipped-${i}`, uri)),
+			];
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry, logger });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
+
+			expect(res.status).toBe(200);
+			expect(res.headers["content-type"]).toMatch(/text\/html/);
+			const srcs = [...res.text.matchAll(/<iframe src="([^"]*)"/g)].map((m) => m[1] ?? "");
+			expect(srcs).toHaveLength(1);
+			for (const src of srcs) expect(src).toMatch(/^https?:\/\//);
+			const refused = logger.warn.mock.calls.filter(
+				([, name]) => name === "logout_frontchannel_uri_refused",
+			);
+			expect(refused).toHaveLength(NON_HTTP_URIS.length);
+			for (const [line] of refused) {
+				expect(line).toMatchObject({ site: "logout", reason: "not-http" });
+			}
+		});
+
+		it("renders exactly the RPs it accepts, reading each registry field once", async () => {
+			const reads = new Map<string, number>();
+			const counted = (clientId: string, uri: string, sessionRequired?: boolean) => {
+				const count = (field: string) =>
+					reads.set(`${clientId}.${field}`, (reads.get(`${clientId}.${field}`) ?? 0) + 1);
+				return {
+					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					get clientId(): string {
+						count("clientId");
+						return clientId;
+					},
+					get frontchannelLogoutUri(): string {
+						count("frontchannelLogoutUri");
+						return uri;
+					},
+					get frontchannelLogoutSessionRequired(): boolean | undefined {
+						count("frontchannelLogoutSessionRequired");
+						return sessionRequired;
+					},
+				};
+			};
+			const rpData = [
+				counted("rp-1", "https://rp1.example.com/fc"),
+				counted("rp-2", "https://rp2.example.com/fc", false),
+				counted("rp-skipped", "com.example.app:/x"),
+			];
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry, logger: createMockLogger() });
+
+			const res = await postLogout(
+				app,
+				{ id_token_hint: await mintIdToken() },
+				{ Accept: "text/html" },
+			);
+
+			expect(res.status).toBe(200);
+			const srcs = [...res.text.matchAll(/<iframe src="([^"]*)"/g)].map((m) => m[1] ?? "");
+			expect(srcs).toEqual([
+				"https://rp1.example.com/fc?iss=https%3A%2F%2Fauth.example.com&amp;sid=sid-1",
+				"https://rp2.example.com/fc?iss=https%3A%2F%2Fauth.example.com",
+			]);
+			for (const [field, count] of reads) {
+				if (
+					field.endsWith(".frontchannelLogoutUri") ||
+					field.endsWith(".frontchannelLogoutSessionRequired")
+				) {
+					expect(count, field).toBe(1);
+				}
+			}
+			expect(reads.get("rp-1.frontchannelLogoutUri")).toBe(1);
+			expect(reads.get("rp-skipped.frontchannelLogoutSessionRequired")).toBeUndefined();
+		});
+
+		it("warns through the route's console fallback for an RP it skips when no logger is wired", async () => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			try {
+				const rpData = [storedRP("rp-skipped", "com.example.app:/x")];
+				const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+				const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+				const app = buildApp({ sessionStore, sessionRPRegistry });
+				const token = await mintIdToken();
+
+				const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
+
+				expect(res.status).toBe(200);
+				const refused = warn.mock.calls.filter(
+					([, name]) => name === "logout_frontchannel_uri_refused",
+				);
+				expect(refused).toHaveLength(1);
+				expect(refused[0]?.[0]).toMatchObject({
+					site: "logout",
+					clientId: "rp-skipped",
+					reason: "not-http",
+				});
+			} finally {
+				warn.mockRestore();
+			}
+		});
+
+		it("answers the JSON fallback when no RP's front-channel URI is http(s) and nothing else redirects", async () => {
+			const logger = createMockLogger();
+			const rpData = NON_HTTP_URIS.map((uri, i) => storedRP(`rp-skipped-${i}`, uri));
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry, logger });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ logged_out: true });
+			expect(res.text).not.toContain("<iframe");
+			expect(
+				logger.warn.mock.calls.filter(([, name]) => name === "logout_frontchannel_uri_refused"),
+			).toHaveLength(NON_HTTP_URIS.length);
+		});
+
+		it("redirects to the registered post_logout_redirect_uri when no RP's front-channel URI is http(s)", async () => {
+			const rpData = NON_HTTP_URIS.map((uri, i) => storedRP(`rp-skipped-${i}`, uri));
+			const clientRepo = makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					allowedRedirectUris: [],
+					allowedScopes: [],
+					postLogoutRedirectUris: ["https://app.example.com/logged-out"],
+				}),
+			});
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({
+				sessionStore,
+				sessionRPRegistry,
+				clientRepo,
+				logger: createMockLogger(),
+			});
+
+			const res = await postLogout(
+				app,
+				{
+					id_token_hint: await mintIdToken(),
+					post_logout_redirect_uri: "https://app.example.com/logged-out",
+					state: "s-1",
+				},
+				{ Accept: "text/html" },
+			);
+
+			expect(res.status).toBe(303);
+			expect(res.headers.location).toBe("https://app.example.com/logged-out?state=s-1");
+		});
+
+		it.each([
+			["text/html", /text\/html/],
+			["application/json", /application\/json/],
+		])(
+			"a registered RP whose frontchannelLogoutUri read throws does not fail the logout (Accept: %s)",
+			async (accept, contentType) => {
+				const logger = createMockLogger();
+				const rpData = [
+					{
+						clientId: "rp-throws",
+						registeredAt: new Date(),
+						backchannelLogoutUri: undefined,
+						backchannelLogoutSessionRequired: undefined,
+						get frontchannelLogoutUri(): string | undefined {
+							throw new Error("field unavailable");
+						},
+						frontchannelLogoutSessionRequired: undefined,
+					},
+					{
+						clientId: "rp-1",
+						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+						registeredAt: new Date(),
+						backchannelLogoutUri: undefined,
+						backchannelLogoutSessionRequired: undefined,
+						frontchannelLogoutSessionRequired: undefined,
+					},
+				];
+				const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+				const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+				const app = buildApp({ sessionStore, sessionRPRegistry, logger });
+				const token = await mintIdToken();
+
+				const res = await postLogout(app, { id_token_hint: token }, { Accept: accept });
+
+				expect(res.status).toBe(200);
+				expect(res.headers["content-type"]).toMatch(contentType);
+				if (accept === "text/html") {
+					expect(res.text).toContain("rp1.example.com");
+					expectBestEffortWarn(
+						logger,
+						"logout_frontchannel_uri_refused",
+						{ site: "logout", clientId: "rp-throws", reason: "unreadable" },
+						null,
+					);
+				}
+			},
+		);
 	});
 
 	describe("HTML branch open-redirect defense", () => {
