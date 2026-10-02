@@ -19,13 +19,9 @@ import {
 	createFederationRedirectPolicy,
 	extractFederationSection,
 } from "@o3co/auth-provider-session";
-import type { OidcPrivateKey } from "./client-auth.mjs";
-import {
-	checkFederationName,
-	createOidcProvider,
-	type OidcEndpointOverrides,
-	type OidcProviderConfig,
-} from "./oidc.mjs";
+import { OIDC_ENTRY_KEYS, oidcEntrySchema } from "./entry.mjs";
+import { checkFederationName, createOidcProvider, type OidcProviderConfig } from "./oidc.mjs";
+import { OIDC_FEDERATION_TYPE } from "./type-module.mjs";
 
 // ComponentMap slot declaration-merge: one slot holds the config of every
 // OIDC instance, keyed by federation name. A composition root fills it —
@@ -33,12 +29,14 @@ import {
 // it — and each `oidcFederationModule(name)` reads its own entry.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
+		/**
+		 * @deprecated Read only by the deprecated `oidcFederationModule(name)`.
+		 * `oidcFederationTypeModule()` takes each entry from `core.federations`
+		 * itself, through core's dispatch by type.
+		 */
 		readonly oidcFederationConfigs?: Readonly<Record<string, OidcProviderConfig>>;
 	}
 }
-
-/** The `type` a `core.federations.<name>` entry names to select this provider. */
-export const OIDC_FEDERATION_TYPE = "oidc";
 
 function entryFor(
 	configs: Readonly<Record<string, OidcProviderConfig>> | undefined,
@@ -63,6 +61,11 @@ function entryFor(
  * prefix of the identity handed to the Store (`<name>:<sub>`). The module
  * name, `federation-oidc-<name>`, is kebab-case only when the federation name
  * is lower-case letters, digits and hyphens.
+ *
+ * @deprecated Use `oidcFederationTypeModule()`: one module handles every
+ * `core.federations` entry of type `oidc`, read from the configuration by
+ * core, with no `oidcFederationConfigs` slot to fill. Composing both for one
+ * entry refuses boot.
  */
 export function oidcFederationModule(name: string): Module {
 	checkFederationName(name);
@@ -81,7 +84,12 @@ export function oidcFederationModule(name: string): Module {
 	});
 }
 
-/** Names of every enabled `core.federations.<name>` entry of type `oidc`, sorted. */
+/**
+ * Names of every enabled `core.federations.<name>` entry of type `oidc`, sorted.
+ *
+ * @deprecated Use `oidcFederationTypeModule()`, which core hands every
+ * enabled entry of type `oidc`: no composition root lists them.
+ */
 export function oidcFederationNames(
 	federations: Readonly<Record<string, unknown>> | undefined,
 ): string[] {
@@ -93,136 +101,32 @@ export function oidcFederationNames(
 
 type Slice = Record<string, unknown>;
 
-const ENDPOINT_KEYS: ReadonlyArray<keyof OidcEndpointOverrides> = [
-	"authorizationEndpoint",
-	"tokenEndpoint",
-	"jwksUri",
-	"userinfoEndpoint",
-	"endSessionEndpoint",
-];
-
-const isObject = (value: unknown): value is Slice =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
-
+/**
+ * One entry, read as the type's schema reads it (`entry.mts`) — the one
+ * reading both modules share — with its `callbackURL` beside it. Keys the
+ * schema does not name are left unread rather than refused: this reader also
+ * takes the nested shape, whose outer keys arrive beside the nested ones. A
+ * refusal names `core.federations.<name>.<field>`.
+ */
 function readSection(name: string, slice: Slice): OidcProviderConfig {
-	const at = (field: string): string => `core.federations.${name}.${field}`;
-	const present = (field: string): boolean => slice[field] !== undefined && slice[field] !== null;
-
-	const requiredString = (field: string): string => {
-		const value = slice[field];
-		if (typeof value !== "string" || value.length === 0) {
-			throw new Error(`${at(field)} is required (a non-empty string)`);
-		}
-		return value;
-	};
-	const optionalString = (field: string): string | undefined => {
-		if (!present(field)) return undefined;
-		const value = slice[field];
-		if (typeof value !== "string") throw new Error(`${at(field)} must be a string when present`);
-		return value;
-	};
-	const optionalBoolean = (field: string): boolean | undefined => {
-		if (!present(field)) return undefined;
-		const value = slice[field];
-		if (typeof value === "boolean") return value;
-		if (value === "true") return true;
-		if (value === "false") return false;
-		throw new Error(`${at(field)} must be true or false`);
-	};
-	const optionalNumber = (field: string): number | undefined => {
-		if (!present(field)) return undefined;
-		const value = slice[field];
-		if (typeof value !== "number" || !Number.isFinite(value)) {
-			throw new Error(`${at(field)} must be a number`);
-		}
-		return value;
-	};
-	const optionalStringList = (field: string): readonly string[] | undefined => {
-		if (!present(field)) return undefined;
-		const value = slice[field];
-		if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
-			throw new Error(`${at(field)} must be a list of strings`);
-		}
-		return value as string[];
-	};
-
-	const issuer = requiredString("issuer");
-	const clientId = requiredString("clientId");
-	const callbackURL = requiredString("callbackURL");
-	const clientSecret = optionalString("clientSecret");
-
-	let privateKey: string | OidcPrivateKey | undefined;
-	if (present("privateKey")) {
-		const raw = slice.privateKey;
-		if (typeof raw === "string" && raw.length > 0) {
-			privateKey = raw;
-		} else if (isObject(raw) && typeof raw.pem === "string" && raw.pem.length > 0) {
-			for (const key of ["kid", "alg"]) {
-				if (raw[key] !== undefined && raw[key] !== null && typeof raw[key] !== "string") {
-					throw new Error(`${at(`privateKey.${key}`)} must be a string when present`);
-				}
-			}
-			privateKey = {
-				pem: raw.pem,
-				...(typeof raw.kid === "string" ? { kid: raw.kid } : {}),
-				...(typeof raw.alg === "string" ? { alg: raw.alg } : {}),
-			};
-		} else {
-			throw new Error(`${at("privateKey")} must be a PEM string or { pem, kid?, alg? }`);
-		}
+	const callbackURL = slice.callbackURL;
+	if (typeof callbackURL !== "string" || callbackURL.length === 0) {
+		throw new Error(`core.federations.${name}.callbackURL is required (a non-empty string)`);
 	}
-	if ((clientSecret === undefined) === (privateKey === undefined)) {
+	const result = oidcEntrySchema.safeParse(
+		Object.fromEntries(Object.entries(slice).filter(([key]) => OIDC_ENTRY_KEYS.includes(key))),
+	);
+	if (!result.success) {
 		throw new Error(
-			`core.federations.${name} must set exactly one of clientSecret (client_secret_basic) or privateKey (private_key_jwt)`,
+			result.error.issues
+				.map(
+					(issue) =>
+						`${["core", "federations", name, ...issue.path.map(String)].join(".")}: ${issue.message}`,
+				)
+				.join("; "),
 		);
 	}
-
-	let endpoints: OidcEndpointOverrides | undefined;
-	if (present("endpoints")) {
-		const raw = slice.endpoints;
-		if (!isObject(raw)) throw new Error(`${at("endpoints")} must be an object of endpoint URLs`);
-		const out: Record<string, string> = {};
-		for (const key of Object.keys(raw)) {
-			if (!(ENDPOINT_KEYS as readonly string[]).includes(key)) {
-				throw new Error(
-					`${at("endpoints")} has an unknown key "${key}" (expected ${ENDPOINT_KEYS.join(", ")})`,
-				);
-			}
-			const value = raw[key];
-			if (value === undefined || value === null) continue;
-			if (typeof value !== "string") throw new Error(`${at(`endpoints.${key}`)} must be a string`);
-			out[key] = value;
-		}
-		endpoints = out;
-	}
-
-	const scopes = optionalStringList("scopes");
-	const discovery = optionalBoolean("discovery");
-	const idTokenSignedResponseAlg = optionalString("idTokenSignedResponseAlg");
-	const userInfo = optionalBoolean("userInfo");
-	const clockToleranceSeconds = optionalNumber("clockToleranceSeconds");
-	const redirectAllowlist = optionalStringList("redirectAllowlist");
-	const sessionDomain = optionalString("sessionDomain");
-	const authCallbackUrl = optionalString("authCallbackUrl");
-	const clientUrl = optionalString("clientUrl");
-
-	return {
-		issuer,
-		clientId,
-		callbackURL,
-		...(clientSecret !== undefined ? { clientSecret } : {}),
-		...(privateKey !== undefined ? { privateKey } : {}),
-		...(scopes !== undefined ? { scopes } : {}),
-		...(discovery !== undefined ? { discovery } : {}),
-		...(endpoints !== undefined ? { endpoints } : {}),
-		...(idTokenSignedResponseAlg !== undefined ? { idTokenSignedResponseAlg } : {}),
-		...(userInfo !== undefined ? { userInfo } : {}),
-		...(clockToleranceSeconds !== undefined ? { clockToleranceSeconds } : {}),
-		...(redirectAllowlist !== undefined ? { redirectAllowlist } : {}),
-		...(sessionDomain !== undefined ? { sessionDomain } : {}),
-		...(authCallbackUrl !== undefined ? { authCallbackUrl } : {}),
-		...(clientUrl !== undefined ? { clientUrl } : {}),
-	};
+	return { ...result.data, callbackURL };
 }
 
 /**
@@ -233,6 +137,10 @@ function readSection(name: string, slice: Slice): OidcProviderConfig {
  * and every name is checked before it becomes a key: a section named
  * `__proto__` is refused by name rather than assigned through the prototype
  * setter.
+ *
+ * @deprecated Use `oidcFederationTypeModule()`, which core hands each
+ * enabled entry of type `oidc`, parsed by the type's schema: the slot this
+ * fills is read only by the deprecated `oidcFederationModule(name)`.
  */
 export function readOidcFederationConfigs(
 	federations: Readonly<Record<string, unknown>> | undefined,
