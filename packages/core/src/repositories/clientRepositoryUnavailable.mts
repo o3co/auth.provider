@@ -15,11 +15,18 @@
  */
 
 /**
- * The one log line for a {@link ClientRepository} that could not answer.
- * Every route and grant that looks a client up answers a throwing repository
- * with `503 temporarily_unavailable` (the store's outage, never the client's
- * fault) and writes this line at error level, so the outage reads the same
- * wherever it happened.
+ * The one log line for a {@link ClientRepository} lookup that rejected.
+ * Every route and grant that looks a client up answers a rejecting
+ * repository with `503 temporarily_unavailable` (never the client's fault)
+ * and writes this line at error level, so the outage reads the same wherever
+ * it happened; the `private_key_jwt` assertion verifier writes its own
+ * `client_assertion_refused` line instead.
+ *
+ * A rejection is either the store's outage or a client-record boundary's
+ * refusal (`ClientRecordRefusedError`), an operator's data error the
+ * boundary has already warned `client_record_refused`. The error's
+ * projection tells them apart: a refusal's carries
+ * `reason: "client_record_refused"`.
  *
  * @see ClientRepository
  */

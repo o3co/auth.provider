@@ -2580,9 +2580,13 @@ describe("/authorize — every authorization response names its issuer (RFC 9207
 // record as written. The router reads it through core's client-record
 // boundary, which holds it to the registration schema: a registered entry
 // that core's `checkRedirectUri` refuses makes the whole record refused, and
-// the client is answered as unknown: 400 JSON, and no redirect to it.
+// the lookup rejects with the boundary's refusal: 503 JSON, as for any
+// rejected lookup, and no redirect to it.
 describe("/authorize — a registered redirect_uri that checkRedirectUri refuses", () => {
-	const UNKNOWN_CLIENT = { error: "invalid_client", error_description: "client not found" };
+	const REFUSED_RECORD = {
+		error: "temporarily_unavailable",
+		error_description: "client repository unavailable",
+	};
 
 	/** An app whose client registers `entry`, and the logger it writes to. */
 	const registering = async (entry: string, extra: Parameters<typeof makeApp>[0] = {}) => {
@@ -2600,9 +2604,17 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 	) => {
 		const rejection = checkRedirectUri(entry);
 		expect(rejection?.reason).toBe(reason);
-		expect(res.status).toBe(400);
-		expect(res.body).toEqual(UNKNOWN_CLIENT);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(REFUSED_RECORD);
 		expect(res.headers.location).toBeUndefined();
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				site: "authorize",
+				step: "find",
+				err: expect.objectContaining({ reason: "client_record_refused" }),
+			}),
+			"client_repository_unavailable",
+		);
 		const refusals = logger.warn.mock.calls.filter(
 			([, message]) => message === "client_record_refused",
 		);
@@ -2626,7 +2638,7 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 	] as const;
 
 	it.each(refusedQueries)(
-		"answers GET 400 with no redirect for a registered query that carries %s",
+		"answers GET 503 with no redirect for a registered query that carries %s",
 		async (_label, entry, reason) => {
 			const { app, logger, createCode } = await registering(entry);
 			expectRefused(
@@ -2640,7 +2652,7 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 	);
 
 	it.each(refusedQueries)(
-		"answers POST 400 with no redirect for a registered query that carries %s",
+		"answers POST 503 with no redirect for a registered query that carries %s",
 		async (_label, entry, reason) => {
 			const { app, logger, createCode } = await registering(entry);
 			expectRefused(
@@ -2653,7 +2665,7 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		},
 	);
 
-	it("answers prompt=none with no session 400, not a login_required redirect to it", async () => {
+	it("answers prompt=none with no session 503, not a login_required redirect to it", async () => {
 		const entry = `${REDIRECT_URI}?iss=x`;
 		const { app, logger } = await registering(entry, { session: { isAuthenticated: false } });
 		expectRefused(
@@ -2673,7 +2685,7 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("answers 400 for a loopback entry presented with a port", async () => {
+	it("answers 503 for a loopback entry presented with a port", async () => {
 		const entry = "http://127.0.0.1/cb?state=x";
 		const { app, logger } = await registering(entry);
 		expectRefused(
@@ -2687,7 +2699,7 @@ describe("/authorize — a registered redirect_uri that checkRedirectUri refuses
 	it.each([
 		["in an executable scheme", "javascript:alert(document.domain)", "executable-scheme"],
 		["with a fragment", `${REDIRECT_URI}#top`, "fragment"],
-	] as const)("answers 400 for an entry %s", async (_label, entry, reason) => {
+	] as const)("answers 503 for an entry %s", async (_label, entry, reason) => {
 		const { app, logger } = await registering(entry);
 		expectRefused(
 			await authorize(app, { ...baseQuery, redirect_uri: entry }),

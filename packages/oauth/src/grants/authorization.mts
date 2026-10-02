@@ -115,7 +115,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	const { config, codeRepository, keyStore, logger } = deps;
 	// The client's logout metadata is snapshotted into the session RP
 	// registry, so the record is read through core's client-record boundary:
-	// a record it refuses is registered as an unknown client is.
+	// a record it refuses rejects the lookup, answered as the store's outage.
 	const clientRepository = behindClientBoundary(deps.clientRepository, logger ?? consoleLogger);
 	// No acr table: the acr was chosen at /authorize and travels on the code.
 	const admissionDeps: AdmissionDeps = {

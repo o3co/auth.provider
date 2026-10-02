@@ -584,8 +584,10 @@ export function isClientIdMetadataDocumentFallback(repository: ClientRepository)
  * - `refused`: no client. The document is never resolved in its place, so a
  *   malformed registration cannot be replaced by whatever the URL serves.
  * - `absent`: the document, resolved as {@link createClientIdMetadataDocumentResolver} does.
- * - A throw is the repository's outage and is let through, never answered
- *   from the document cache or its stale window.
+ * - A rejection is let through, never answered from the document cache or
+ *   its stale window: the repository's outage, or the refusal of a boundary
+ *   `inner` reads through (behind a cache or a forwarder), which stays a
+ *   refusal.
  *
  * `authenticate` is `inner`'s alone, through the boundary: a document never
  * carries a secret.
@@ -596,13 +598,10 @@ export function isClientIdMetadataDocumentFallback(repository: ClientRepository)
  * only the object this function returned, not one behind a forwarder or
  * built by another loaded copy of this package.
  *
- * Interim composition rule, until a refusal is carried on the answer itself
- * rather than recognised by object identity (the step that installs core's
- * boundary in the `clientRepository` slot): the boundary sits over the
- * registered clients, under this fallback, never over it; this fallback is
- * the only one and is never wrapped by anything, including core's
- * `validatedClientRepository`; and one copy of core and of this package is
- * loaded. Without a logger, a refused registration is not logged, as a
+ * Interim composition rule, until this fallback lets a registration it
+ * refuses through as the lookup's rejection: this fallback is the only one
+ * and is never wrapped by anything, including core's
+ * `validatedClientRepository`. Without a logger, a refused registration is not logged, as a
  * refused document is not.
  */
 export function withClientIdMetadataDocuments(

@@ -2098,13 +2098,34 @@ describe("createAuthorizationGrant", () => {
 					return { result, registerRPSpy, logger };
 				};
 
-				/** The one `client_record_refused` warn, which names the authenticated id. */
+				/**
+				 * What a refused record leaves: one `client_record_refused` warn and
+				 * one `client_repository_unavailable` line naming the refusal as its
+				 * cause, both naming the authenticated id.
+				 */
 				const expectRecordRefused = (logger: ReturnType<typeof createMockLogger>) => {
 					const refused = logger.warn.mock.calls.filter(
 						([, event]) => event === "client_record_refused",
 					);
 					expect(refused).toHaveLength(1);
 					expect(refused[0]?.[0]).toMatchObject({ step: "find", clientId: "client1" });
+					expect(logger.error.mock.calls).toHaveLength(1);
+					expect(logger.error.mock.calls[0]).toEqual([
+						expect.objectContaining({
+							site: "authorization_code",
+							step: "find",
+							clientId: "client1",
+							err: expect.objectContaining({ reason: "client_record_refused" }),
+						}),
+						"client_repository_unavailable",
+					]);
+				};
+
+				/** The answer to a refused record: 503, as for the store's outage. */
+				const SESSION_LINKING_UNAVAILABLE = {
+					status: 503,
+					error: "temporarily_unavailable",
+					errorDescription: "session linking unavailable",
 				};
 
 				const baseRecord = {
@@ -2127,17 +2148,15 @@ describe("createAuthorizationGrant", () => {
 					["a value that is not a URL", "not-a-url"],
 					["a value that is not a string", 42],
 				])(
-					"refuses a record with %s from a custom repository whole: the RP is registered without logout metadata, the exchange still succeeds, and one client_record_refused warn never names the URI",
+					"refuses a record with %s from a custom repository whole: 503, no RP registered, and neither the warn nor the outage line names the URI",
 					async (_label, uri) => {
-						const { result, rpData, logger } = await exchangeWith({
+						const { result, registerRPSpy, logger } = await attempt({
 							...baseRecord,
 							frontchannelLogoutUri: uri,
 						});
 
-						expect(result.status).toBe(200);
-						expect(rpData.clientId).toBe("client1");
-						expect(rpData.frontchannelLogoutUri).toBeUndefined();
-						expect(rpData.backchannelLogoutUri).toBeUndefined();
+						expect(result).toMatchObject(SESSION_LINKING_UNAVAILABLE);
+						expect(registerRPSpy).not.toHaveBeenCalled();
 						expect(logger.warn).toHaveBeenCalledTimes(1);
 						expectRecordRefused(logger);
 						expectUriNotLogged(logger, String(uri));
@@ -2148,16 +2167,15 @@ describe("createAuthorizationGrant", () => {
 					["null", null],
 					["an empty string", ""],
 				])(
-					"refuses a record whose frontchannelLogoutUri is %s whole: the RP is registered without logout metadata, and the exchange still succeeds",
+					"refuses a record whose frontchannelLogoutUri is %s whole: 503, and no RP registered",
 					async (_label, uri) => {
-						const { result, rpData, logger } = await exchangeWith({
+						const { result, registerRPSpy, logger } = await attempt({
 							...baseRecord,
 							frontchannelLogoutUri: uri,
 						});
 
-						expect(result.status).toBe(200);
-						expect(rpData.frontchannelLogoutUri).toBeUndefined();
-						expect(rpData.backchannelLogoutUri).toBeUndefined();
+						expect(result).toMatchObject(SESSION_LINKING_UNAVAILABLE);
+						expect(registerRPSpy).not.toHaveBeenCalled();
 						expectRecordRefused(logger);
 					},
 				);
@@ -2165,13 +2183,13 @@ describe("createAuthorizationGrant", () => {
 				it("warns through the console fallback when the grant has no logger", async () => {
 					const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 					try {
-						const { result, rpData } = await exchangeWith(
+						const { result, registerRPSpy } = await attempt(
 							{ ...baseRecord, frontchannelLogoutUri: "ftp://rp.example/front" },
 							undefined,
 							false,
 						);
-						expect(result.status).toBe(200);
-						expect(rpData.frontchannelLogoutUri).toBeUndefined();
+						expect(result).toMatchObject(SESSION_LINKING_UNAVAILABLE);
+						expect(registerRPSpy).not.toHaveBeenCalled();
 						const refused = warn.mock.calls.filter(([, name]) => name === "client_record_refused");
 						expect(refused).toHaveLength(1);
 						expect(refused[0]?.[0]).toMatchObject({ step: "find", clientId: "client1" });
@@ -2180,14 +2198,14 @@ describe("createAuthorizationGrant", () => {
 					}
 				});
 
-				it("names the authenticated client in the warn, not the record's clientId", async () => {
-					const { rpData, logger } = await exchangeWith({
+				it("names the authenticated client in the warn and the outage line, not the record's clientId", async () => {
+					const { result, logger } = await attempt({
 						...baseRecord,
 						clientId: "record-client",
 						frontchannelLogoutUri: "ftp://rp.example/front",
 					});
 
-					expect(rpData.clientId).toBe("client1");
+					expect(result).toMatchObject(SESSION_LINKING_UNAVAILABLE);
 					expectRecordRefused(logger);
 				});
 

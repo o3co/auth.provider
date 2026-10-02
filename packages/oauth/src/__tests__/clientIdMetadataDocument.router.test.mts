@@ -17,10 +17,11 @@
 /**
  * The router with Client ID Metadata Documents on: its one document
  * fallback reads every registered client through core's boundary, so a
- * registration the boundary refuses, of any id shape, is an unknown client.
- * With documents off the router reads the repository through the boundary
- * itself, with the same answer. A router built over a repository that
- * already is a document fallback is refused, when it would stack its own.
+ * registration the boundary refuses, of any id shape, is an unknown client,
+ * never a document. With documents off the router reads the repository
+ * through the boundary itself, whose refusal rejects the lookup: `503`, as
+ * for any rejected lookup. A router built over a repository that already is
+ * a document fallback is refused, when it would stack its own.
  */
 
 import crypto from "node:crypto";
@@ -150,13 +151,13 @@ describe("the router's one document fallback reads every registered client throu
 		);
 	});
 
-	it("answers the same refused registration as an unknown client with documents off", async () => {
+	it("answers the same refused registration 503 with documents off", async () => {
 		const { app, fetchImpl, logger } = await buildRouter(answering(refusedRecord), {
 			documents: false,
 		});
 		const res = await authorize(app);
-		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("invalid_client");
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
 		expect(res.headers.location).toBeUndefined();
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(logger.warn).toHaveBeenCalledWith(

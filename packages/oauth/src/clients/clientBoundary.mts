@@ -17,9 +17,8 @@
 /**
  * The one reading of the `ClientRepository` an oauth entry point or grant is
  * handed (`createOAuthRouter`, `createClientAuthMiddleware`, the
- * authorization-code grant): behind core's client-record boundary, as the
- * outermost layer, so every registered client an endpoint reads is held to
- * the registration schema.
+ * authorization-code grant): behind core's client-record boundary, so every
+ * registered client an endpoint reads is held to the registration schema.
  */
 
 import {

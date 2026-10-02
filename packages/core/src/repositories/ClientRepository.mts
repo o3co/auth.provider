@@ -36,10 +36,16 @@ export type PublicClient = Omit<Client, "clientSecret">;
  *   interpolate it.
  * - When a repository is wrapped with core's boundary
  *   (`validatedClientRepository`), each record it answers is read once, by
- *   name, and held to the registration's rules: a record the boundary
- *   refuses is an unknown client, and the boundary's `lookupClient` tells
- *   that refusal from an absent record. The boundary is the outermost layer
- *   over the repository; a layer that forwards its answers hides a refusal.
+ *   name, and held to the registration's rules: for a record the boundary
+ *   refuses, `findById` and `authenticate` reject with the branded refusal
+ *   (`isClientRecordRefused`). Every caller answers it as it answers a throw
+ *   (`503`; the logout routes go on without the redirect).
+ * - A layer that wraps a repository — a cache, a decorator, a fallback to
+ *   another source of clients — passes a rejection through unchanged, a
+ *   refusal or an outage alike. It never turns a rejection into `null`,
+ *   which would answer a refused or unreachable client as an unknown one
+ *   and let a fallback serve something in its place, and it never caches a
+ *   rejection as an answer.
  */
 export interface ClientRepository {
 	/**
