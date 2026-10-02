@@ -242,6 +242,8 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 `createCode` は `client_id` と `redirect_uri` を必須とし、`Client.tokenEndpointAuthMethod` も必須です。`Code` のその他のフィールドはすべて必須キーで、記録がなければ `undefined` を保持します。`createCode` は `CreateCodeInput` を受け取り、省略できるのは `expiresIn`（省略時はリポジトリの既定値）だけです。`nonce` と `sid` は OIDC の nonce とセッション ID を `/authorize` から `/token` へ運びます。`grantedScope` / `grantedAudience` は `/authorize` でのグラントポリシーの決定で、`authorization_code` グラントはポリシーを再評価せずにこれを読みます。ディレクトリの責務マップは [`src/repositories/README.md`](src/repositories/README.md) です。
 
+`readUserSnapshot(user)`（[`src/repositories/userSnapshot.mts`](src/repositories/userSnapshot.mts)）は、リポジトリが答えた `User` をログインが一度だけ読むものです。`User` が宣言する各フィールドを、オブジェクトがどう保持していても（getter、ORM エンティティ）名前で一度ずつ読み、すべての深さで凍結したプレーンなスナップショットにします。答えは `{ ok: true, snapshot }`（`id` は空でない文字列）か `{ ok: false, refused }`（`not_an_object`、`id`、または `field` を添えた `not_plain_data`）です。ログインのルートは subject とクレームをスナップショットから読み、`User` を再び読みません。
+
 #### 組み込み実装
 
 `InMemoryClientRepository` と `InMemoryUserRepository` は、`ClientEntrySchema` / `UserEntrySchema` で検証済みのエントリーの `Map` を受け取ります。`InMemoryCodeRepository` は任意の `defaultExpiresIn` を受け取り、`dispose()` で止める GC タイマーを持ちます。`loadYamlMap(filePath, schema)`（[`src/repositories/loadYamlMap.mts`](src/repositories/loadYamlMap.mts)）はトップレベルのキーをレコード ID とする YAML ファイルを読み込み、各エントリーを `schema` で検証します。結果を `InMemoryClientRepository` や `InMemoryUserRepository` にそのまま渡せます — [YAML からクライアントとユーザーを読み込む](#yaml-からクライアントとユーザーを読み込む) を参照。パースできないファイルは `Invalid YAML in <file> at <line>:<column>: <reason>` として拒否され、`cause` もファイルの中身も持ちません。js-yaml 自身のエラーは問題箇所の前後の行を引用し、ファイル全体を保持しており、これらのファイルはシークレットを含むからです。
