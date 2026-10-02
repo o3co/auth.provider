@@ -141,12 +141,12 @@ describe("renderFrontchannelLogoutHtml", () => {
 		expect(iframeCount).toBe(2);
 	});
 
-	it("redirects to postLogoutRedirectUri via setTimeout when provided", () => {
+	it("redirects to postLogoutRedirect via setTimeout when provided", () => {
 		const html = renderFrontchannelLogoutHtml({
 			rps: [],
 			issuer: "iss",
 			sid: "sid",
-			postLogoutRedirectUri: "https://rp.example/logged-out",
+			postLogoutRedirect: { uri: "https://rp.example/logged-out" },
 		});
 		expect(html).toContain("https://rp.example/logged-out");
 		expect(html).toMatch(/window\.location\.href/);
@@ -158,13 +158,13 @@ describe("renderFrontchannelLogoutHtml", () => {
 			rps: [],
 			issuer: "iss",
 			sid: "sid",
-			postLogoutRedirectUri: "https://rp.example/logged-out",
+			postLogoutRedirect: { uri: "https://rp.example/logged-out" },
 			redirectDelayMs: 500,
 		});
 		expect(html).toContain(", 500)");
 	});
 
-	it("no redirect script when postLogoutRedirectUri is absent", () => {
+	it("no redirect script when postLogoutRedirect is absent", () => {
 		const html = renderFrontchannelLogoutHtml({
 			rps: [{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" }],
 			issuer: "iss",
@@ -407,7 +407,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 				rps: [],
 				issuer: "iss",
 				sid: "sid",
-				postLogoutRedirectUri: "https://rp.example/logged-out",
+				postLogoutRedirect: { uri: "https://rp.example/logged-out" },
 				redirectDelayMs,
 			});
 			const match = html.match(/\}, ([^)]*)\);<\/script>/);
@@ -427,33 +427,36 @@ describe("renderFrontchannelLogoutHtml", () => {
 		});
 	});
 
-	describe("postLogoutRedirectUri is held to the redirect-URI rules", () => {
-		const scriptFor = (
-			postLogoutRedirectUri: unknown,
-			logger: MockLogger,
-		): { html: string; hasScript: boolean } => {
-			const html = renderFrontchannelLogoutHtml({
+	describe("the post-logout redirect is a checked base plus the RP's state", () => {
+		const render = (postLogoutRedirect: unknown, logger: MockLogger): string =>
+			renderFrontchannelLogoutHtml({
 				rps: [{ clientId: "rp", frontchannelLogoutUri: "https://rp.example/fc" }],
 				issuer: "https://auth.example",
 				sid: "sid-1",
-				postLogoutRedirectUri: postLogoutRedirectUri as string,
+				postLogoutRedirect: postLogoutRedirect as { uri: string; state?: string },
 				logger,
 			});
-			return { html, hasScript: html.includes("<script>") };
+		/** The URL the page's script sends the browser to, or `undefined` for no script. */
+		const targetOf = (html: string): string | undefined => {
+			const match = html.match(/window\.location\.href = ("(?:[^"\\]|\\.)*");/);
+			return match === null ? undefined : (JSON.parse(match[1] ?? "") as string);
 		};
 
 		it.each([
 			["a non-http(s) scheme", "data:text/plain,signed-out", "executable-scheme"],
 			["a scheme that is not reverse-domain", "ftp://rp.example/out", "scheme-not-reverse-domain"],
 			["plain http off a loopback host", "http://rp.example/out", "http-non-loopback"],
+			["a base that already carries state", "https://rp.example/out?state=x", "reserved-parameter"],
+			["a base with a fragment", "https://rp.example/out#done", "fragment"],
 			["a value that is not a URL", "not-a-url", "unparsable"],
 		])(
 			"refuses %s: the page keeps its iframes, has no redirect script, and one warn names the reason, never the URI",
 			(_label, uri, reason) => {
 				const logger = createMockLogger();
-				const { html, hasScript } = scriptFor(uri, logger);
+				const html = render({ uri, state: "s-1" }, logger);
 
-				expect(hasScript).toBe(false);
+				expect(targetOf(html)).toBeUndefined();
+				expect(html).not.toContain("<script>");
 				expect(html).toContain("<iframe");
 				expect(html).not.toContain(uri);
 				expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -462,25 +465,50 @@ describe("renderFrontchannelLogoutHtml", () => {
 			},
 		);
 
-		it("refuses a value that is not a string, and a read that throws, without throwing", () => {
+		it.each([
+			["a base that is not a string", { uri: 42 }, "not-a-string"],
+			[
+				"a state that is not a string",
+				{ uri: "https://rp.example/out", state: 42 },
+				"state-not-a-string",
+			],
+			[
+				"a base whose read throws",
+				{
+					get uri(): string {
+						throw new Error("field unavailable");
+					},
+				},
+				"unreadable",
+			],
+			[
+				"a state whose read throws",
+				{
+					uri: "https://rp.example/out",
+					get state(): string {
+						throw new Error("field unavailable");
+					},
+				},
+				"unreadable",
+			],
+		])("refuses %s without throwing", (_label, redirect, reason) => {
 			const logger = createMockLogger();
-			expect(scriptFor(42, logger).hasScript).toBe(false);
-			const throwing = {
+			expect(targetOf(render(redirect, logger))).toBeUndefined();
+			expectBestEffortWarn(logger, "logout_frontchannel_redirect_refused", { reason }, null);
+		});
+
+		it("refuses a redirect option whose read throws, without throwing", () => {
+			const logger = createMockLogger();
+			const html = renderFrontchannelLogoutHtml({
 				rps: [],
 				issuer: "iss",
 				sid: "sid",
 				logger,
-				get postLogoutRedirectUri(): string {
+				get postLogoutRedirect(): { uri: string } {
 					throw new Error("field unavailable");
 				},
-			};
-			expect(renderFrontchannelLogoutHtml(throwing)).not.toContain("<script>");
-			expectBestEffortWarn(
-				logger,
-				"logout_frontchannel_redirect_refused",
-				{ reason: "not-a-string" },
-				null,
-			);
+			});
+			expect(html).not.toContain("<script>");
 			expectBestEffortWarn(
 				logger,
 				"logout_frontchannel_redirect_refused",
@@ -489,84 +517,83 @@ describe("renderFrontchannelLogoutHtml", () => {
 			);
 		});
 
+		it("appends the state with URLSearchParams encoding, leaving the base's scheme, host and path as they are", () => {
+			const logger = createMockLogger();
+			const state = "a b;c?d&e/f#g@other.example//x";
+			const target = targetOf(render({ uri: "https://rp.example/out", state }, logger));
+
+			assert(target !== undefined, "expected the redirect script");
+			const url = new URL(target);
+			expect(url.origin).toBe("https://rp.example");
+			expect(url.pathname).toBe("/out");
+			expect(url.hash).toBe("");
+			expect([...url.searchParams]).toEqual([["state", state]]);
+			expect(target).toBe(
+				"https://rp.example/out?state=a+b%3Bc%3Fd%26e%2Ff%23g%40other.example%2F%2Fx",
+			);
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it("appends the state after a query the base already has", () => {
+			const target = targetOf(
+				render({ uri: "https://rp.example/out?tenant=a", state: "s-1" }, createMockLogger()),
+			);
+			expect(target).toBe("https://rp.example/out?tenant=a&state=s-1");
+		});
+
 		it.each([
-			["an https URI", "https://rp.example/logged-out"],
-			["an https URI carrying the RP's state", "https://rp.example/logged-out?state=s-1"],
-			["a reverse-domain custom scheme", "com.example.app:/signed-out?state=s-1"],
-			["plain http on a loopback host", "http://127.0.0.1:8080/out"],
-		])("keeps the redirect script for %s, without a warn", (_label, uri) => {
-			const logger = createMockLogger();
-			const { html, hasScript } = scriptFor(uri, logger);
-			expect(hasScript).toBe(true);
-			expect(html).toContain(JSON.stringify(uri));
-			expect(logger.warn).not.toHaveBeenCalled();
+			["absent", undefined],
+			["empty", ""],
+		])("writes no state parameter when the state is %s", (_label, state) => {
+			const target = targetOf(render({ uri: "https://rp.example/out", state }, createMockLogger()));
+			expect(target).toBe("https://rp.example/out");
 		});
 
 		it.each([
-			["a state carrying a semicolon", "https://rp.example/out?state=x;code=y"],
-			["a state carrying a newline", "https://rp.example/out?state=x\n"],
-			["an empty pair before the state", "https://rp.example/out?&state=x"],
-			["an empty pair after the state", "https://rp.example/out?state=x&"],
-			["two state parameters", "https://rp.example/out?state=x&state=y"],
-			["a state carrying a question mark", "https://rp.example/out?state=x?code=y"],
-			["a state with no value", "https://rp.example/out?state"],
-			["a state pair outside the query (in the host)", "http://localhost&state=x"],
-			["a state pair outside the query (after the port)", "https://rp.example:443&state=x"],
-		])("sets aside only a state the logout route writes: refuses %s", (_label, uri) => {
+			["an https base", "https://rp.example/logged-out", "https://rp.example/logged-out?state=s-1"],
+			[
+				"a reverse-domain custom scheme",
+				"com.example.app:/signed-out",
+				"com.example.app:/signed-out?state=s-1",
+			],
+			[
+				"plain http on a loopback host",
+				"http://127.0.0.1:8080/out",
+				"http://127.0.0.1:8080/out?state=s-1",
+			],
+		])("keeps the redirect for %s, without a warn", (_label, uri, expected) => {
 			const logger = createMockLogger();
-			const { hasScript } = scriptFor(uri, logger);
-			expect(hasScript).toBe(false);
-			expect(
-				logger.warn.mock.calls.filter(
-					([, name]) => name === "logout_frontchannel_redirect_refused",
-				),
-			).toHaveLength(1);
-		});
-
-		it("keeps the state the logout route writes on a registered path that ends in an ampersand", () => {
-			const logger = createMockLogger();
-			const url = new URL("https://rp.example/out&");
-			url.searchParams.set("state", "s-1");
-			expect(scriptFor(url.toString(), logger).hasScript).toBe(true);
+			expect(targetOf(render({ uri, state: "s-1" }, logger))).toBe(expected);
 			expect(logger.warn).not.toHaveBeenCalled();
 		});
 
-		it("keeps the state the logout route writes, percent-encoded and with a plus for a space", () => {
-			const logger = createMockLogger();
-			const url = new URL("https://rp.example/out?tenant=a");
-			url.searchParams.set("state", "a b;c?d&e/f");
-			const { hasScript } = scriptFor(url.toString(), logger);
-			expect(hasScript).toBe(true);
-			expect(logger.warn).not.toHaveBeenCalled();
-		});
-
-		it("refuses a value without throwing when the logger throws", () => {
+		it("refuses a base without throwing when the logger throws", () => {
 			const logger = createMockLogger();
 			logger.warn.mockImplementation(() => {
 				throw new Error("logger unavailable");
 			});
-			expect(scriptFor("ftp://rp.example/out", logger).hasScript).toBe(false);
+			expect(targetOf(render({ uri: "ftp://rp.example/out" }, logger))).toBeUndefined();
 		});
 
-		it("writes no script and no warn when the value is absent", () => {
+		it("writes no script and no warn when the redirect or its base is absent", () => {
 			const logger = createMockLogger();
-			expect(scriptFor(undefined, logger).hasScript).toBe(false);
-			expect(scriptFor("", logger).hasScript).toBe(false);
+			expect(targetOf(render(undefined, logger))).toBeUndefined();
+			expect(targetOf(render({ uri: "" }, logger))).toBeUndefined();
 			expect(logger.warn).not.toHaveBeenCalled();
 		});
 	});
 
-	it("postLogoutRedirectUri is safe against </script> injection (CSP-safe pattern)", () => {
+	it("postLogoutRedirect cannot close the inline script (CSP-safe pattern)", () => {
 		const html = renderFrontchannelLogoutHtml({
 			rps: [],
 			issuer: "iss",
 			sid: "sid",
-			postLogoutRedirectUri: "https://evil.example/</script><script>alert(1)</script>",
+			postLogoutRedirect: { uri: "https://rp.example/</script><script>x</script>" },
 		});
 		// The literal </script> must not appear in the output — it would prematurely
-		// close the inline <script> block wrapping the redirect.
+		// close the inline <script> block wrapping the redirect. The URL parser
+		// percent-encodes it, and the string literal escapes `<` and `>` besides.
 		expect(html).not.toContain("</script><script>");
-		// The escaped form (\u003c/script\u003e) is what we expect instead.
-		expect(html).toContain("\\u003c/script");
+		expect(html).toContain("%3C/script%3E");
 	});
 });
