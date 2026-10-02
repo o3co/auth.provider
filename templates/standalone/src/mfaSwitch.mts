@@ -198,8 +198,12 @@ export function mfaSectionForBoot(options: {
 	readonly env: Readonly<Record<string, string>>;
 }): unknown {
 	const { mode, written, resolved } = options;
-	const writtenMode =
-		written === undefined ? undefined : isPlainSection(written) ? written.mode : null;
+	if (written !== undefined && !isPlainSection(written)) {
+		throw new RangeError(
+			`mfa is written as a value in the configuration; it is the MFA package's section, and ${MFA_SWITCH} (MFA_MODE) decides whether the template installs MFA. Remove mfa, and set MFA_MODE or ${MFA_SWITCH}`,
+		);
+	}
+	const writtenMode = written === undefined ? undefined : written.mode;
 	if (writtenMode !== undefined && writtenMode !== mode) {
 		throw new RangeError(
 			`mfa.mode is written in the configuration and differs from ${MFA_SWITCH} (MFA_MODE), which decides whether the template installs MFA and writes mfa.mode from it. Set MFA_MODE or ${MFA_SWITCH}, and remove mfa.mode`,

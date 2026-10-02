@@ -167,7 +167,6 @@ describe("what the template hands boot of the mfa section", () => {
 		["the switch off, the mode optional", {}, 'mfa.mode = "optional"\n'],
 		["MFA_MODE=optional", { MFA_MODE: "optional" }, 'mfa.mode = "required"\n'],
 		["MFA_MODE=required", { MFA_MODE: "required" }, 'mfa.mode = "optional"\n'],
-		["MFA_MODE=required, the section a value", { MFA_MODE: "required" }, 'mfa = "required"\n'],
 	])(
 		"refuses, under %s, an mfa.mode the configuration writes that the switch does not say, naming both keys and quoting nothing",
 		(_label, env, hocon) => {
@@ -182,6 +181,28 @@ describe("what the template hands boot of the mfa section", () => {
 			expect(err).toBeInstanceOf(RangeError);
 			const message = (err as RangeError).message;
 			expect(message).toContain("mfa.mode");
+			expect(message).toContain("mfaMode");
+			expect(message).not.toMatch(/"(?:off|optional|required)"/);
+		},
+	);
+
+	it.each([
+		["the switch off", {}],
+		["MFA_MODE=required", { MFA_MODE: "required" }],
+	])(
+		"refuses, under %s, an mfa written as a value, naming mfa itself and quoting nothing",
+		(_label, env) => {
+			const own = ownUnder({ ...SINGLE_ENV, ...env }, 'mfa = "required"\n');
+			let err: unknown;
+			try {
+				resolveForBoot(own, [reader], readSwitches(own));
+			} catch (caught) {
+				err = caught;
+			}
+			expect(err).toBeInstanceOf(RangeError);
+			const message = (err as RangeError).message;
+			expect(message).toMatch(/^mfa is written as a value/);
+			expect(message).not.toContain("remove mfa.mode");
 			expect(message).toContain("mfaMode");
 			expect(message).not.toMatch(/"(?:off|optional|required)"/);
 		},
