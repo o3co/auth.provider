@@ -422,6 +422,9 @@ whose HTTP wire the table follows. Core's codec carries it on both sides
 - **A conditional write states its deadline.** A conditional create or delete carries `deadlineMs`: the instant, in epoch milliseconds on the provider's clock, after which it must not be applied. The adapter sets it to the moment it sends plus its request timeout, and gives up at that moment itself. The Store checks `deadlineMs` against its own clock in the same atomic step as the conditional write; at or after it, the write is not applied and the answer is `408`.
   The adapter's write lifetime W is its request timeout plus the clock skew assumed between the provider and the Store.
   The provider's and the Store's clocks agree within that skew.
+  This adapter takes `deadlineMs` just before it sends the request, and its
+  timer starts after that, so the deadline is at or before the moment it gives
+  up: a write past it is never applied after the adapter stopped waiting.
   A `deadlineMs` absent or not a whole instant above 0 within the `Date`
   range is `400`.
 - **No retry.** The adapter never retries a conditional write; it gives up at

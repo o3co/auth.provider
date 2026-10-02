@@ -32,9 +32,10 @@
  * not give is `unexpected_status`, read before any body, and whatever the
  * codec refuses — a `404` or `409` without its outcome body among them — is
  * `malformed_answer`. A conditional write states its deadline on the wire
- * (`deadlineMs`, the send time plus the request timeout), at which the
- * transport gives up too; a Store that reads it as passed answers `408`, which
- * is `unexpected_status`. A conditional write that is sent and then fails,
+ * (`deadlineMs`, the request timeout from just before it is sent), at or
+ * before the moment the transport gives up, whose timer starts after it: a
+ * write past it is never applied after the adapter stopped waiting. A Store
+ * that reads it as passed answers `408`, which is `unexpected_status`. A conditional write that is sent and then fails,
  * its deadline included, is unknown: it may have committed.
  */
 
@@ -179,9 +180,10 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		record: MfaFactorRecord,
 		expected: StoreGeneration | null,
 	): Promise<ConditionalCreateAnswer> {
-		const body = toMfaStoreCreateIfRequest(record, expected, this.#deadline());
-		const { response, text } = await this.#post("create", body, (status) =>
-			CREATE_IF_STATUSES.has(status),
+		const { response, text } = await this.#postConditional(
+			"create",
+			(deadlineMs) => toMfaStoreCreateIfRequest(record, expected, deadlineMs),
+			(status) => CREATE_IF_STATUSES.has(status),
 		);
 		if (text === undefined) throw mfaStoreStatusError("create", this.#urls.create, response);
 		return this.#read("create", () => readMfaStoreCreateIfAnswer(response.status, parsed(text)));
@@ -192,9 +194,10 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		id: string,
 		expected: StoreGeneration,
 	): Promise<ConditionalSetRemoveAnswer> {
-		const body = toMfaStoreRemoveIfRequest(subject, id, expected, this.#deadline());
-		const { response, text } = await this.#post("delete", body, (status) =>
-			REMOVE_IF_STATUSES.has(status),
+		const { response, text } = await this.#postConditional(
+			"delete",
+			(deadlineMs) => toMfaStoreRemoveIfRequest(subject, id, expected, deadlineMs),
+			(status) => REMOVE_IF_STATUSES.has(status),
 		);
 		if (text === undefined) throw mfaStoreStatusError("delete", this.#urls.delete, response);
 		return this.#read("delete", () => readMfaStoreRemoveIfAnswer(response.status, parsed(text)));
@@ -254,11 +257,19 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 	}
 
 	/**
-	 * A conditional write's `deadlineMs`: now, as it is sent, plus the
-	 * request timeout the transport gives up at.
+	 * A conditional write to `operation`'s endpoint, its body built by
+	 * `build` with its `deadlineMs`: the request timeout from now, taken just
+	 * before the request is sent. Nothing yields between this and the
+	 * transport's timer, which starts after it, so the deadline is at or
+	 * before the moment the adapter gives up.
 	 */
-	#deadline(): number {
-		return Date.now() + this.#settings.timeout;
+	#postConditional(
+		operation: "create" | "delete",
+		build: (deadlineMs: number) => unknown,
+		readsBody: (status: number) => boolean,
+	): Promise<StoreAnswer> {
+		const deadlineMs = Date.now() + this.#settings.timeout;
+		return this.#post(operation, build(deadlineMs), readsBody);
 	}
 
 	/**

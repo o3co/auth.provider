@@ -46,6 +46,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import {
 	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	isStorableExpiry,
 	isStoreGeneration,
 	type MfaStoreCreateIfAnswer,
 	type MfaStoreFactor,
@@ -195,12 +196,12 @@ const empty = (status: number): FakeStoreAnswer => ({ status });
 const CONFLICT = json(409, { outcome: "conflict" } satisfies MfaStoreCreateIfAnswer);
 const LATE = empty(408);
 
-/** The latest instant a `Date` holds, in epoch milliseconds. */
-const MAX_DATE_MS = 8.64e15;
-
-/** Whether `value` is a `deadlineMs` the wire carries: a whole instant above 0 within the Date range. */
+/**
+ * Whether `value` is a `deadlineMs` the wire carries: a whole instant above
+ * 0 within the Date range, as core's codec holds it (`isStorableExpiry`).
+ */
 const isDeadline = (value: unknown): value is number =>
-	typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_DATE_MS;
+	typeof value === "number" && Number.isInteger(value) && value > 0 && isStorableExpiry(value);
 const MISSING = json(404, { outcome: "missing" } satisfies MfaStoreRemoveIfAnswer);
 
 /**

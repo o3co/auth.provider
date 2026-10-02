@@ -32,6 +32,7 @@ import { request as httpRequest } from "node:http";
 import {
 	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	isStoreGeneration,
+	MAX_STORABLE_EXPIRY_MS,
 	type MfaFactorRecord,
 	type MfaStoreFactor,
 	toMfaStoreFactor,
@@ -529,7 +530,16 @@ describe("the factor set's generation", () => {
 
 	it("answers 400 to a conditional write whose deadlineMs is absent or no whole instant above 0 within the Date range, writing nothing", async () => {
 		const fake = await start();
-		const deadlines = [undefined, null, "9999999999999", 0, -1, 1.5, 8.64e15 + 1, Number.NaN];
+		const deadlines = [
+			undefined,
+			null,
+			"9999999999999",
+			0,
+			-1,
+			1.5,
+			MAX_STORABLE_EXPIRY_MS + 1,
+			Number.NaN,
+		];
 		for (const deadlineMs of deadlines) {
 			const create = await post(fake.urls.createUrl, {
 				factor: WIRE,
