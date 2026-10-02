@@ -98,7 +98,7 @@ test("a federations entry is the factory alone, name-keyed by the federation's n
 	expectTypeOf<Entry>().toEqualTypeOf<FederationFactory<LocalDeps>>();
 });
 
-test("federationTypes is name-keyed by the type an entry names, each declaring its entry schema and a factory given the entry", () => {
+test("federationTypes is name-keyed by the type an entry names, each declaring its entry schema and the provider and redirect-policy factories given the entry", () => {
 	type Field = NonNullable<ContributesMap<LocalDeps>["federationTypes"]>;
 	expectTypeOf<Field>().toEqualTypeOf<{
 		readonly [type: string]: FederationTypeContribution<LocalDeps>;
@@ -109,8 +109,12 @@ test("federationTypes is name-keyed by the type an entry names, each declaring i
 	expectTypeOf<Parameters<Declared["factory"]>>().toEqualTypeOf<
 		[deps: LocalDeps, instance: FederationInstance<Entry>]
 	>();
+	expectTypeOf<Parameters<Declared["redirectPolicy"]>>().toEqualTypeOf<
+		[deps: LocalDeps, instance: FederationInstance<Entry>]
+	>();
 	expectTypeOf<FederationInstance<Entry>>().toEqualTypeOf<{
 		readonly name: string;
+		readonly callbackURL: string;
 		readonly entry: Entry;
 	}>();
 	// A declaration typed for its entry is one the record accepts.

@@ -54,6 +54,26 @@ function makeBootWithNoFederations() {
 	} as never;
 }
 
+/**
+ * The module that handles the enabled federation: it contributes
+ * `federations.google` and its redirect policy, so the entry is handled by
+ * name (`federation-entries-handled`).
+ */
+const googleFederationModule = defineModule({
+	name: "test:google-federation",
+	contributes: {
+		federations: {
+			google: () => ({
+				name: "google",
+				scope: ["openid"],
+				buildAuthorizationUrl: () => new URL("https://google.example/authorize"),
+				exchangeCode: async () => ({ issuer: "https://google.example", sub: "1", expiresAt: null }),
+			}),
+		},
+		federationRedirectPolicies: { google: () => ({}) },
+	} as never,
+});
+
 /** A module that provides all 6 required session/federation/refresh-family stores. */
 const allStoresModule = defineModule({
 	name: "test:all-federation-stores",
@@ -109,7 +129,7 @@ describe("checkFederationStoresWiring", () => {
 	it("does not throw when federation is enabled and all 6 stores are wired", async () => {
 		await expect(
 			createApp({
-				modules: [allStoresModule],
+				modules: [allStoresModule, googleFederationModule],
 				bootstrapComponents: makeBootWithFederationEnabled(),
 			}),
 		).resolves.toBeDefined();
@@ -131,7 +151,7 @@ describe("checkFederationStoresWiring", () => {
 		} as never;
 		await expect(
 			createApp({
-				modules: [],
+				modules: [googleFederationModule],
 				bootstrapComponents: bootstrapWithStores,
 			}),
 		).resolves.toBeDefined();
@@ -140,7 +160,7 @@ describe("checkFederationStoresWiring", () => {
 	it("does not throw when stores come via overrideComponents", async () => {
 		await expect(
 			createApp({
-				modules: [],
+				modules: [googleFederationModule],
 				bootstrapComponents: makeBootWithFederationEnabled(),
 				overrideComponents: {
 					userSessionStore: { kind: "stub" },

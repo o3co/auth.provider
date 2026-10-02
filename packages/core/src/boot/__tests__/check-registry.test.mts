@@ -73,6 +73,7 @@ describe("stage-1 check registries", () => {
 			"lifecycle-closure",
 			"grant-policy-issuer",
 			"federation-stores-wiring",
+			"federation-entries-handled",
 			"declared-absence",
 			"replica-safety",
 			"host-token-settings-lifetimes",

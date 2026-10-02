@@ -48,6 +48,7 @@ import {
 } from "../session-admission/requirement.mjs";
 import { auditHookRegistrations } from "./audit-fan-out.mjs";
 import { failureSummary } from "./failure-summary.mjs";
+import { buildDispatchedFederation } from "./federation-entries.mjs";
 import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
 	CleanupRecord,
@@ -191,7 +192,8 @@ function makeFederationProviders<T>(collector: NameKeyedCollector<T>): ReadonlyM
 /**
  * Instantiate a stable read-through view of the `federationRedirectPolicies`
  * collector, shaped like `makeFederationProviders`. The reference is stable
- * from step 0; its contents are complete after step 2.
+ * from step 0; its contents are complete after step 2a, which registers the
+ * entries dispatched by type, and it is readable from then on.
  * @internal
  */
 function makeFederationRedirectPolicyResolver(
@@ -264,30 +266,57 @@ function makeRateLimitBudgetResolver(
 
 /**
  * Whether the projections of one boot's working map may be read: closed while
- * stage 3 runs the `provides` factories, open from stage 4 on. Keyed by the
- * working map, which stages 3 and 4 share.
+ * stage 3 runs the `provides` factories, open from stage 4 on (`open`). The
+ * two federation projections stay closed through the name-keyed pass too,
+ * until step 2a has registered the entries dispatched by type
+ * (`federationsOpen`). Keyed by the working map, which stages 3 and 4 share.
  */
-const projectionGates = new WeakMap<object, { open: boolean }>();
+interface ProjectionGate {
+	open: boolean;
+	federationsOpen: boolean;
+}
+const projectionGates = new WeakMap<object, ProjectionGate>();
+
+/** What a projection waits for before its contents may be read. */
+type ReadableFrom = "contributions" | "dispatched federations";
+
+/** Why a read of a projection is refused now, or `undefined` when it may be read. */
+function closedWhile(gate: ProjectionGate, from: ReadableFrom): string | undefined {
+	if (!gate.open) {
+		return "while the provides factories run: it fills as the contributions register, so read it at request time";
+	}
+	if (from === "dispatched federations" && !gate.federationsOpen) {
+		return "before every federation was registered (during the name-keyed contribution factories or the federation dispatch): read it in a routes factory or at request time";
+	}
+	return undefined;
+}
 
 /**
  * A projection that refuses a read of its contents while its gate is closed.
  * During stage 3 it would be empty (its contributions register in stage 4),
  * and a provider that computed from it would keep an empty answer; the read
- * throws instead and the boot is refused (`provides-factory-failed`). Only
- * the view's own members (`get`, `entries`, a map view's `size` and
- * iterator) are guarded. `then` answers `undefined`, so the view is not
- * thenable, and `Symbol.toStringTag`, `Symbol.toPrimitive` and
- * `Object.prototype` members pass, so a factory may hold, await, return or
- * print it.
+ * throws instead and the boot is refused (`provides-factory-failed`). A
+ * federation projection read before step 2a has finished — by a name-keyed
+ * contribution factory, or by a type's factory during step 2a — would miss
+ * entries step 2a registers, so that read throws too
+ * (`contribute-factory-failed`). Only the view's own members (`get`,
+ * `entries`, a map view's `size` and iterator) are guarded. `then` answers
+ * `undefined`, so the view is not thenable, and `Symbol.toStringTag`,
+ * `Symbol.toPrimitive` and `Object.prototype` members pass, so a factory may
+ * hold, await, return or print it.
  */
-function readableFromStage4<T extends object>(view: T, key: string, gate: { open: boolean }): T {
+function readableFromStage4<T extends object>(
+	view: T,
+	key: string,
+	gate: ProjectionGate,
+	from: ReadableFrom = "contributions",
+): T {
 	return new Proxy(view, {
 		get(target, property, receiver) {
 			if (property === "then") return undefined;
-			if (!gate.open && Object.hasOwn(target, property)) {
-				throw new Error(
-					`${key} was read while the provides factories run: it fills as the contributions register, so read it at request time`,
-				);
+			const closed = Object.hasOwn(target, property) ? closedWhile(gate, from) : undefined;
+			if (closed !== undefined) {
+				throw new Error(`${key} was read ${closed}`);
 			}
 			return Reflect.get(target, property, receiver);
 		},
@@ -295,12 +324,19 @@ function readableFromStage4<T extends object>(view: T, key: string, gate: { open
 }
 
 /**
- * Stage 4 opens the projections of `components` for reading (step 0).
+ * Stage 4 opens the projections of `components` for reading (step 0), all
+ * but the two federation projections, which open after step 2a.
  * @internal
  */
 export function openSyntheticProjections(components: Record<string, unknown>): void {
 	const gate = projectionGates.get(components);
 	if (gate !== undefined) gate.open = true;
+}
+
+/** Stage 4 opens the federation projections of `components` for reading, after step 2a. */
+function openFederationProjections(components: Record<string, unknown>): void {
+	const gate = projectionGates.get(components);
+	if (gate !== undefined) gate.federationsOpen = true;
 }
 
 /**
@@ -324,13 +360,13 @@ export function prepareSyntheticProjections(
 ): void {
 	let gate = projectionGates.get(components);
 	if (gate === undefined) {
-		gate = { open: false };
+		gate = { open: false, federationsOpen: false };
 		projectionGates.set(components, gate);
 	}
 	const readGate = gate;
-	const inject = (key: string, make: () => object): void => {
+	const inject = (key: string, make: () => object, from?: ReadableFrom): void => {
 		if (!Object.hasOwn(components, key)) {
-			components[key] = readableFromStage4(make(), key, readGate);
+			components[key] = readableFromStage4(make(), key, readGate, from);
 		}
 	};
 	const {
@@ -354,15 +390,20 @@ export function prepareSyntheticProjections(
 		);
 	}
 	if (federations !== undefined) {
-		inject("federationProviders", () =>
-			makeFederationProviders(federations as NameKeyedCollector<unknown>),
+		inject(
+			"federationProviders",
+			() => makeFederationProviders(federations as NameKeyedCollector<unknown>),
+			"dispatched federations",
 		);
 	}
 	if (federationRedirectPolicies !== undefined) {
-		inject("federationRedirectPolicyResolver", () =>
-			makeFederationRedirectPolicyResolver(
-				federationRedirectPolicies as NameKeyedCollector<unknown>,
-			),
+		inject(
+			"federationRedirectPolicyResolver",
+			() =>
+				makeFederationRedirectPolicyResolver(
+					federationRedirectPolicies as NameKeyedCollector<unknown>,
+				),
+			"dispatched federations",
 		);
 	}
 	if (mfaFactors !== undefined) {
@@ -1104,6 +1145,15 @@ function warnOnTokenBindingSurfaceOverlap(
  *      factories runs, so a failing module leaves no side effect; factories
  *      then feed `collector.register` (contributes) or `collector.replace`
  *      (overrides).
+ *   2a. Each `core.federations` entry stage 1 dispatched to its type
+ *      (`ValidatedManifests.dispatchedFederations`), in the configuration's
+ *      key order: the type's factories build its provider and redirect
+ *      policy, which register under the entry's name together — after every
+ *      name-keyed contribution, so the types are registered, and before any
+ *      list-shaped factory reads `federationProviders`. The two federation
+ *      projections open for reading once this step ends: a name-keyed
+ *      factory or a type's factory that reads one throws
+ *      (`readableFromStage4`).
  *   2b. `checkSessionRequirements`, before a list-shaped factory reads a
  *      requirement's reach; then the rate-limit budgets' and the admission
  *      actions' boot lines.
@@ -1292,6 +1342,41 @@ export async function applyContributions(
 			collector.replace(name, value);
 		}
 	}
+
+	// ---------------------------------------------------------------------------
+	// Step 2a: each entry stage 1 dispatched by type, once every type has
+	// registered and before any list-shaped factory reads the providers.
+	// ---------------------------------------------------------------------------
+
+	for (const federation of material.plan.validated.dispatchedFederations) {
+		const { name } = federation.instance;
+		try {
+			const pair = await buildDispatchedFederation(federation, contributionKinds.federationTypes);
+			// Both, under the entry's name, or neither: the pair is made here.
+			(contributionKinds.federations as NameKeyedCollector<unknown>).register(name, pair.provider);
+			(contributionKinds.federationRedirectPolicies as NameKeyedCollector<unknown>).register(
+				name,
+				pair.redirectPolicy,
+			);
+		} catch (thrownValue) {
+			const cleanupErrors = await runCleanupsReverse(material.cleanups);
+			throw new BootError({
+				message: `Module "${federation.module}" contribution factory for kind "federations" name "${name}" (type "${federation.type}") failed: ${failureSummary(thrownValue)}`,
+				reason: "contribute-factory-failed",
+				stage: "applyContributions",
+				details: {
+					reason: "contribute-factory-failed",
+					module: federation.module,
+					kind: "federations",
+					name,
+					originalError: thrownValue,
+					...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+				},
+				cause: thrownValue,
+			});
+		}
+	}
+	openFederationProjections(components);
 
 	// ---------------------------------------------------------------------------
 	// Step 2b: the session-requirement checks and the boot line, once every

@@ -85,42 +85,67 @@ export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler>;
 export type FederationFactory<Deps> = (deps: Deps) => Contributed<FederationProvider>;
 
 /**
- * One configured federation as a type's factory receives it: the operator's
- * name for it (the `:name` of its login route and the name the provider
- * registers under) and its entry, parsed by the type's `entrySchema`.
+ * One configured federation as a type's factories receive it: the operator's
+ * name for it (the `:name` of its login route and the name its provider and
+ * redirect policy register under), its `callbackURL` — a key every entry
+ * carries and core reads, handed on here so no type declares it — and the
+ * rest of its entry, parsed by the type's `entrySchema`.
  */
 export interface FederationInstance<E> {
 	readonly name: string;
+	readonly callbackURL: string;
 	readonly entry: E;
 }
 
 /**
+ * What a `federationTypes` declaration's `redirectPolicy` answers: the value
+ * the `federationRedirectPolicies` contribution kind takes. That kind is
+ * declared by the package that owns the redirect policy, by augmenting
+ * `ContributesMap`; with its declaration in the program this is its policy
+ * type, and `unknown` without it.
+ */
+export type FederationRedirectPolicyContribution = ContributesMap extends {
+	readonly federationRedirectPolicies?: {
+		readonly [name: string]: (deps: never) => infer Answer;
+	};
+}
+	? Awaited<Answer>
+	: unknown;
+
+/**
  * A `federationTypes` entry: what one federation package handles, keyed by the
- * `type` a `core.federations` entry names (`"oidc"`, `"google"`). It
- * holds the schema an entry of that type is parsed with, and the factory that
- * builds a provider from one entry and its name.
- *
- * Not dispatched yet: boot registers the declaration under its type (two
- * packages claiming one type are `duplicate-contribute`) but parses no entry
- * and calls no factory.
+ * `type` a `core.federations` entry names (`"oidc"`, `"google"`). It holds
+ * the schema an entry of that type is parsed with, and the two factories boot
+ * calls for each enabled entry of the type: the provider and its redirect
+ * policy, which register under the entry's name as a pair.
  *
  * Author it with `defineFederationType`, which infers `E` from `entrySchema` so
- * a schema and a factory that disagree do not compile. Written inline, `E` is
- * `unknown` (the record cannot type each key, and the factory method is
- * bivariant in its entry), so nothing ties an annotated entry to the schema.
+ * a schema and factories that disagree do not compile. Written inline, `E` is
+ * `unknown` (the record cannot type each key, and a method is bivariant in
+ * its entry), so nothing ties an annotated entry to the schema.
  *
- * Boot reads the schema and factory once, at stage 1; changing the declaration
- * afterwards changes nothing registered.
+ * Boot reads the schema and both factories once, at stage 1; changing the
+ * declaration afterwards changes nothing registered.
  */
 export interface FederationTypeContribution<Deps, E = unknown> {
 	/**
 	 * The schema of an entry of this type: the keys the adapter reads. The keys
-	 * every entry carries (`enabled`, `type`, `trustUpstreamAmr`) are stripped
-	 * first, so a strict schema names only the type's keys.
+	 * core owns on every entry (`enabled`, `type`, `trustUpstreamAmr`,
+	 * `callbackURL`) are stripped first, so a strict schema names only the
+	 * type's keys.
 	 */
 	readonly entrySchema: z.ZodType<E>;
-	/** Builds the provider for one configured entry, which registers under the entry's name. */
+	/**
+	 * Builds the provider for one configured entry. Its `name` must be the
+	 * entry's: the provider registers under it, and the redirect policy is
+	 * found by it.
+	 */
 	factory(deps: Deps, instance: FederationInstance<E>): Contributed<FederationProvider>;
+	/** Builds the redirect policy for the same entry, which registers beside its provider. */
+	redirectPolicy(
+		deps: Deps,
+		instance: FederationInstance<E>,
+	): Contributed<FederationRedirectPolicyContribution>;
 }
 export type ExchangeTokenValidatorFactory<Deps> = (
 	deps: Deps,
@@ -207,10 +232,12 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	};
 	/**
 	 * Federation types, keyed by the `type` a `core.federations` entry names
-	 * ({@link FederationTypeContribution}). Two packages claiming one type refuse
-	 * boot (`duplicate-contribute`); a declaration without an `entrySchema` and a
-	 * `factory` refuses it at stage 1 (`contribution-malformed`); a host may not
-	 * supply the collector (`contribution-kind-guarded`). Not dispatched yet.
+	 * ({@link FederationTypeContribution}). Boot dispatches each enabled entry
+	 * of a registered type to it. Two packages claiming one type refuse boot
+	 * (`duplicate-contribute`); a declaration without an `entrySchema`, a
+	 * `factory` and a `redirectPolicy` refuses it at stage 1
+	 * (`contribution-malformed`); a host may not supply the collector
+	 * (`contribution-kind-guarded`).
 	 */
 	readonly federationTypes?: {
 		readonly [type: string]: FederationTypeContribution<Deps>;

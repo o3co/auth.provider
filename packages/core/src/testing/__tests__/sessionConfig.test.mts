@@ -70,6 +70,19 @@ describe("withFederation", () => {
 		expect(config).not.toHaveProperty("federations");
 	});
 
+	it("writes the type the entry names when given one, and none otherwise", () => {
+		const typed = withFederation(makeValidAppConfig(), "corp", {
+			type: "oidc",
+			callbackURL: "https://auth.test/corp",
+		});
+		expect(typed.core.federations.corp).toMatchObject({ enabled: true, type: "oidc" });
+		expect(AppConfigSchema.parse(typed).core?.federations?.corp).toMatchObject({ type: "oidc" });
+		const typeless = withFederation(makeValidAppConfig(), "stub", {
+			callbackURL: "https://auth.test/stub",
+		});
+		expect(typeless.core.federations.stub).not.toHaveProperty("type");
+	});
+
 	it("keeps the federations already there, and leaves the configuration it was given as it was", () => {
 		const base = makeValidAppConfig();
 		const one = withFederation(base, "first", { callbackURL: "https://auth.test/first" });

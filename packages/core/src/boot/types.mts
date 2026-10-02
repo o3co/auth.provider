@@ -184,6 +184,30 @@ export interface ValidatedManifests {
 	 * config.
 	 */
 	readonly bootstrapComponents: BootstrapMap;
+	/**
+	 * Each enabled `core.federations` entry whose `type` a module switched on
+	 * registers, parsed by that type's schema, in the configuration's key
+	 * order: what stage 4 builds a provider and a redirect policy from.
+	 */
+	readonly dispatchedFederations: readonly DispatchedFederation[];
+}
+
+/**
+ * An enabled `core.federations` entry dispatched to the type it names, as
+ * stage 1 parsed it.
+ */
+export interface DispatchedFederation {
+	readonly type: string;
+	/**
+	 * The module whose declaration of the type is in force: the one that
+	 * overrides it, or else the one that contributes it.
+	 */
+	readonly module: string;
+	/**
+	 * What both of the type's factories receive, frozen: the entry's name, its
+	 * `callbackURL`, and the rest of it as the type's `entrySchema` answered.
+	 */
+	readonly instance: FederationInstance<unknown>;
 }
 
 /**
@@ -417,8 +441,8 @@ export interface ContributionCollectorMap {
 	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
 	/**
 	 * Collector for `federationTypes` contributions, by type: each
-	 * package's declaration, its factory bound to the module's deps. Nothing
-	 * dispatches configured entries to it yet.
+	 * package's declaration, its factories bound to the module's deps, which
+	 * stage 4 calls for each entry stage 1 dispatched to the type.
 	 */
 	readonly federationTypes?: NameKeyedCollector<RegisteredFederationType>;
 	/**
@@ -457,13 +481,14 @@ export interface ContributionCollectorMap {
 
 /**
  * A `federationTypes` declaration as registered: the type's entry
- * schema, and `create`, its factory bound to the contributing module's deps —
- * what the dispatch of configured entries by type will call once per entry
- * of the type, with the entry parsed by `entrySchema` and its name.
+ * schema, and its two factories bound to the contributing module's deps —
+ * `create`, the provider's, and `redirectPolicy` — which stage 4 calls once
+ * per entry dispatched to the type, with that entry's instance.
  */
 export interface RegisteredFederationType {
 	readonly entrySchema: z.ZodType;
 	readonly create: (instance: FederationInstance<unknown>) => Contributed<FederationProvider>;
+	readonly redirectPolicy: (instance: FederationInstance<unknown>) => Contributed<unknown>;
 }
 
 /**
@@ -619,12 +644,12 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 40 literals
+// BootErrorReason — 41 literals
 // ---------------------------------------------------------------------------
 
 /**
  * Every reason a BootError can carry: one literal per validation or runtime
- * failure the boot planner detects, 40 in all.
+ * failure the boot planner detects, 41 in all.
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -650,6 +675,7 @@ export type BootErrorReason =
 	| "federation-redirect-policy-unpaired"
 	| "grant-policy-without-issuer"
 	| "federation-stores-incomplete"
+	| "federation-type-unhandled"
 	| "discovery-document-invalid"
 	| "replica-unsafe-adapter"
 	| "component-absence-undeclared"
@@ -669,7 +695,7 @@ export type BootErrorReason =
 	| "token-settings-lifetime-exceeds-configuration";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 40 in all
+// Per-reason *Details interfaces — one per BootErrorReason, 41 in all
 // ---------------------------------------------------------------------------
 
 /**
@@ -1122,6 +1148,21 @@ export interface FederationStoresIncompleteDetails {
 }
 
 /**
+ * An enabled `core.federations` entry no installed module handles: its `type`
+ * is not one a module registers under `federationTypes`, and no module
+ * contributes `federations.<name>` either. Every such entry is listed, in the
+ * order written. Its routes would otherwise answer `404` while the operator
+ * believes the federation is on.
+ */
+export interface FederationTypeUnhandledDetails {
+	readonly reason: "federation-type-unhandled";
+	/** Each unhandled entry: its name, and its `type` when it names one. */
+	readonly unhandled: readonly { readonly federationName: string; readonly type?: string }[];
+	/** The types the installed modules register, in module order. */
+	readonly handled: readonly string[];
+}
+
+/**
  * The aggregated OIDC discovery document could not be formed from the
  * `discoveryMetadata` contributions (missing required field, reserved-field
  * contribution, conflicting values, empty signing algs, endpoint-in-metadata,
@@ -1314,7 +1355,7 @@ export interface SecondFactorAuthorityNotDeclaredDetails {
 
 /**
  * Discriminated union (on `reason`) of the per-reason details: one member
- * per `BootErrorReason`, 40 in all.
+ * per `BootErrorReason`, 41 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1340,6 +1381,7 @@ export type BootErrorDetails =
 	| FederationRedirectPolicyUnpairedDetails
 	| GrantPolicyWithoutIssuerDetails
 	| FederationStoresIncompleteDetails
+	| FederationTypeUnhandledDetails
 	| DiscoveryDocumentInvalidDetails
 	| ReplicaUnsafeAdapterDetails
 	| ComponentAbsenceUndeclaredDetails
