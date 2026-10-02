@@ -61,6 +61,8 @@ export type {
 	FederationGrantIntentStoreClient,
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
+	FederationTokenRemoveIfInput,
+	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
 	GrantConsentInput,
 	MfaFactorRecordUpdateInput,

@@ -15,9 +15,27 @@
  */
 
 /**
- * The federation token store's client: the envelopes, the per-session index that finds them,
- * and the atomic release of the store's advisory lock.
+ * The federation token store's client: the envelopes, their conditional writes, the per-session
+ * index that finds them, and the atomic release of the store's advisory lock.
  */
+
+/** What `replaceIfGeneration` writes, and the deadline past which it writes nothing. */
+export interface FederationTokenReplaceIfInput {
+	/** The generation the stored value must carry: its wrapper's `g`. */
+	readonly expected: string;
+	/** The new stored value, carrying its new generation. */
+	readonly value: string;
+	/** The store TTL the value is written with (`PX`), in whole milliseconds. */
+	readonly ttlMs: number;
+	/** Epoch ms on the server's clock past which the write is refused (`late`), nothing read or written. */
+	readonly deadlineMs: number;
+}
+
+/** What `removeIfGeneration` checks, and the deadline past which it writes nothing. */
+export interface FederationTokenRemoveIfInput {
+	readonly expected: string;
+	readonly deadlineMs: number;
+}
 
 // --- FederationTokenStoreClient --------------------------------------------
 
@@ -104,4 +122,37 @@ export interface FederationTokenStoreClient {
 	 *          the holder — a different process acquired the lock).
 	 */
 	compareAndDelete(key: string, expectedValue: string): Promise<boolean>;
+	/**
+	 * The stored value at `key` and the generation its wrapper carries, read in
+	 * one atomic step: `null` when there is no key. A value the store's format
+	 * wrote without a generation is given `candidate` in the same step, its TTL
+	 * kept. Any other value is answered with the generation `""`. Implementations
+	 * MUST be atomic (`makeIoredisClients()` runs one script).
+	 */
+	readVersioned(
+		key: string,
+		candidate: string,
+	): Promise<{ raw: string; generation: string } | null>;
+	/**
+	 * Replace the value at `key` with `input.value` (`PX input.ttlMs`) only while
+	 * the stored value's generation is `input.expected`, as one atomic step that
+	 * first refuses past `input.deadlineMs` on the server's clock. `missing`: no
+	 * key; `conflict`: another generation, or none; `late`: past the deadline.
+	 * Only `updated` writes.
+	 */
+	replaceIfGeneration(
+		key: string,
+		input: FederationTokenReplaceIfInput,
+	): Promise<"updated" | "missing" | "conflict" | "late">;
+	/** Delete `key` only while its value's generation is `input.expected`, as `replaceIfGeneration` checks. */
+	removeIfGeneration(
+		key: string,
+		input: FederationTokenRemoveIfInput,
+	): Promise<"removed" | "missing" | "conflict" | "late">;
+	/**
+	 * Raise the TTL of `key` to `ttlMs` from now when it is nearer (Redis
+	 * `PEXPIRE … GT`): never lowers it, never creates the key, never adds a
+	 * member.
+	 */
+	pExpireGT(key: string, ttlMs: number): Promise<void>;
 }

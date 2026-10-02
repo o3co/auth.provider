@@ -196,6 +196,10 @@ const federationTokenRecorder = () => {
 		sScanIterator: () => nothing,
 		scanIterator: () => nothing,
 		compareAndDelete: async () => true,
+		readVersioned: async () => null,
+		replaceIfGeneration: async () => "missing" as const,
+		removeIfGeneration: async () => "missing" as const,
+		pExpireGT: async () => {},
 	};
 	return { px, indexTtls, client };
 };

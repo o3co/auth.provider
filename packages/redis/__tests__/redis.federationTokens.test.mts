@@ -19,13 +19,13 @@
 // write, the SSCAN-paged read, the batched UNLINK, and the migration fallback
 // that reaches records written before the index existed.
 
-import type { FederationTokens } from "@o3co/auth-provider-core";
+import { type FederationTokens, isStoreGeneration } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationTokenStore, type EncryptionConfig } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
-import { testRedis } from "./support/redis.mjs";
+import { serverClock, testRedis, until } from "./support/redis.mjs";
 
 let raw: Redis;
 
@@ -172,7 +172,7 @@ describe("mode=required over a real Redis", () => {
 			expect(value).not.toContain(marker);
 		}
 		const record = JSON.parse(value) as Record<string, unknown>;
-		expect(Object.keys(record).sort()).toEqual(["c", "v"]);
+		expect(Object.keys(record).sort()).toEqual(["c", "g", "v"]);
 		expect(record.v).toBe(2);
 	});
 
@@ -184,7 +184,7 @@ describe("mode=required over a real Redis", () => {
 		expect(await store.get("sid-1", "github")).toEqual({ ...fullTokens, expiresAt: null });
 	});
 
-	it("drops a legacy per-field record on read — key and index member gone, null returned", async () => {
+	it("drops a legacy per-field record on read — key gone, index member kept, null returned", async () => {
 		const { keyPrefix, store } = makeEncrypted();
 		// A legacy per-field record, under the same key this store holds.
 		await raw.set(
@@ -203,7 +203,7 @@ describe("mode=required over a real Redis", () => {
 
 		expect(await store.get("sid-1", "google")).toBeNull();
 		expect(await raw.exists(`${keyPrefix}sid-1:google`)).toBe(0);
-		expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(0);
+		expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(1);
 		expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "github")).toBe(1);
 	});
 
@@ -216,7 +216,7 @@ describe("mode=required over a real Redis", () => {
 
 		expect(await store.get("sid-2", "google")).toBeNull();
 		expect(await raw.exists(`${keyPrefix}sid-2:google`)).toBe(0);
-		expect(await raw.exists(`${keyPrefix}idx:sid-2`)).toBe(0);
+		expect(await raw.sismember(`${keyPrefix}idx:sid-2`, "google")).toBe(1);
 		// The original is still readable under the key it was sealed for.
 		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
 	});
@@ -284,7 +284,7 @@ describe("obtainedAt over a real Redis", () => {
 				>;
 				expect(record.v).toBe(2);
 				expect(Object.keys(record).sort()).toEqual(
-					encryption.mode === "required" ? ["c", "v"] : ["p", "v"],
+					encryption.mode === "required" ? ["c", "g", "v"] : ["g", "p", "v"],
 				);
 			});
 
@@ -303,7 +303,7 @@ describe("obtainedAt over a real Redis", () => {
 				["past the Date range", "8640000000000001"],
 				["before the Date range", "-8640000000000001"],
 			])(
-				"a corrupt obtainedAtMs (%s) self-heals: key and index member gone, null returned",
+				"a corrupt obtainedAtMs (%s) self-heals: key gone, index member kept, null returned",
 				async (_label, value) => {
 					const { keyPrefix, store } = makeStore(false, encryption);
 					await store.attach("sid-1", "github", tokens);
@@ -318,10 +318,225 @@ describe("obtainedAt over a real Redis", () => {
 
 					expect(await store.get("sid-1", "google")).toBeNull();
 					expect(await raw.exists(key)).toBe(0);
-					expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(0);
+					expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(1);
 					expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "github")).toBe(1);
 				},
 			);
 		});
 	}
+});
+
+// The conditional members over the wire: the generation in the wrapper, minted
+// into a record written without one, the deadline each conditional script
+// keeps, the index they never shrink, and the index the record never outlives.
+describe("conditional writes over a real Redis", () => {
+	const encryptionKey = Buffer.alloc(32, 7);
+	const makeEncrypted = () => makeStore(false, { mode: "required", key: encryptionKey });
+
+	/** The record at `key` rewritten as a replica without generations writes it: no `g`, `PX` `ttlMs`. */
+	const rewriteWithoutGeneration = async (key: string, ttlMs: number): Promise<string> => {
+		const { g: _g, ...rest } = JSON.parse((await raw.get(key)) as string) as Record<
+			string,
+			unknown
+		>;
+		const bytes = JSON.stringify(rest);
+		await raw.set(key, bytes, "PX", ttlMs);
+		return bytes;
+	};
+
+	const live = async (
+		store: ReturnType<typeof makeEncrypted>["store"],
+		sid: string,
+		name: string,
+	) => {
+		const read = await store.getVersioned(sid, name);
+		if (read === null) throw new Error(`${sid}/${name} is not live`);
+		return read;
+	};
+
+	it("keeps the generation in the wrapper, outside the ciphertext, and moves it on every write", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const record = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
+		expect(Object.keys(record).sort()).toEqual(["c", "g", "v"]);
+		expect(record.v).toBe(2);
+		const read = await live(store, "sid-1", "google");
+		expect(read.generation).toBe(record.g);
+		expect(isStoreGeneration(read.generation)).toBe(true);
+		await store.update("sid-1", "google", tokens);
+		const after = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
+		expect(after.g).not.toBe(record.g);
+		expect(await store.get("sid-1", "google")).toEqual(tokens);
+	});
+
+	it("mints a generation into a record written without one, at its first versioned read, keeping its TTL", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		await rewriteWithoutGeneration(key, 600_000);
+		// A replica without generations still reads it.
+		expect(await store.get("sid-1", "google")).toEqual(tokens);
+		expect(JSON.parse((await raw.get(key)) as string)).not.toHaveProperty("g");
+
+		const read = await live(store, "sid-1", "google");
+		expect(isStoreGeneration(read.generation)).toBe(true);
+		expect(read.value).toEqual(tokens);
+		const stored = JSON.parse((await raw.get(key)) as string) as Record<string, unknown>;
+		expect(stored.g).toBe(read.generation);
+		const pttl = await raw.pttl(key);
+		expect(pttl).toBeGreaterThan(0);
+		expect(pttl).toBeLessThanOrEqual(600_000);
+		// The minted generation is the record's now: read again, and written at.
+		expect((await live(store, "sid-1", "google")).generation).toBe(read.generation);
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, tokens);
+		expect(replaced.outcome).toBe("updated");
+	});
+
+	it("answers conflict to a conditional write against a record rewritten without a generation, and mints nothing", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		// A replica without generations rewrites the record after that read.
+		const bytes = await rewriteWithoutGeneration(key, 600_000);
+
+		expect(await store.replaceIf("sid-1", "google", read.generation, tokens)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await store.removeIf("sid-1", "google", read.generation)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await raw.get(key)).toBe(bytes);
+
+		const again = await live(store, "sid-1", "google");
+		expect(again.generation).not.toBe(read.generation);
+	});
+
+	it("answers null to a versioned read of an unreadable record, removes it, and keeps its index member", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await raw.set(key, "{not-json", "PX", 600_000);
+		await raw.sadd(`${keyPrefix}idx:sid-1`, "google");
+
+		expect(await store.getVersioned("sid-1", "google")).toBeNull();
+		expect(await raw.exists(key)).toBe(0);
+		expect(await raw.sismember(`${keyPrefix}idx:sid-1`, "google")).toBe(1);
+	});
+
+	it("never shrinks the index, and never adds to it but on updated", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const index = `${keyPrefix}idx:sid-1`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		// A removal leaves the member: a concurrent attach may have just added it.
+		expect(await store.removeIf("sid-1", "google", read.generation)).toEqual({
+			outcome: "removed",
+		});
+		expect(await raw.sismember(index, "google")).toBe(1);
+
+		// missing never re-adds an entry.
+		await raw.srem(index, "google");
+		expect(await store.replaceIf("sid-1", "google", read.generation, tokens)).toEqual({
+			outcome: "missing",
+		});
+		expect(await raw.sismember(index, "google")).toBe(0);
+
+		// Nor does conflict.
+		await store.attach("sid-1", "github", tokens);
+		const stale = await live(store, "sid-1", "github");
+		await store.update("sid-1", "github", tokens);
+		await raw.srem(index, "github");
+		expect(await store.replaceIf("sid-1", "github", stale.generation, tokens)).toEqual({
+			outcome: "conflict",
+		});
+		expect(await raw.sismember(index, "github")).toBe(0);
+	});
+
+	it("after updated, the index outlives the record, and an index that had expired is made again", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const index = `${keyPrefix}idx:sid-1`;
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		await raw.pexpire(index, 60_000);
+		const read = await live(store, "sid-1", "google");
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, tokens);
+		expect(replaced.outcome).toBe("updated");
+		expect(await raw.pttl(index)).toBeGreaterThanOrEqual(await raw.pttl(key));
+
+		await raw.del(index);
+		if (replaced.outcome !== "updated") throw new Error("not updated");
+		expect((await store.replaceIf("sid-1", "google", replaced.generation, tokens)).outcome).toBe(
+			"updated",
+		);
+		expect(await raw.sismember(index, "google")).toBe(1);
+		expect(await raw.pttl(index)).toBeGreaterThanOrEqual(await raw.pttl(key));
+	});
+
+	it("a logout after a replace finds the record by the index, however long the replace took to reach the record", async () => {
+		suiteCounter += 1;
+		const keyPrefix = `t291ft:${suiteCounter}:`;
+		const { federationTokenStoreClient } = makeIoredisClients(raw);
+		// The index's TTL is raised, then the replace is held back past that TTL's end.
+		const heldMs = 1_500;
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: {
+				...federationTokenStoreClient,
+				pExpireGT: async (k, ttlMs) => {
+					await federationTokenStoreClient.pExpireGT(k, ttlMs);
+					await new Promise((resolve) => setTimeout(resolve, heldMs));
+				},
+			},
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix,
+			scanFallback: false,
+			ttl: 2,
+		});
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const raisedAt = Date.now();
+		expect((await store.replaceIf("sid-1", "google", read.generation, tokens)).outcome).toBe(
+			"updated",
+		);
+		// Past the deadline the raise set (2 s from it), short of the record's.
+		await until(
+			async () => Date.now() > raisedAt + 2_200,
+			"the raised TTL to pass",
+			raisedAt + 10_000,
+		);
+		expect(await raw.exists(`${keyPrefix}sid-1:google`)).toBe(1);
+		await store.removeBySid("sid-1");
+		expect(await raw.exists(`${keyPrefix}sid-1:google`)).toBe(0);
+	});
+
+	it("a conditional write that reaches the server past its deadline writes nothing", async () => {
+		const { keyPrefix, store } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		await store.attach("sid-1", "google", tokens);
+		const read = await live(store, "sid-1", "google");
+		const before = await raw.get(key);
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const past = (await serverClock(() => raw)()) - 1;
+		expect(
+			await client.replaceIfGeneration(key, {
+				expected: read.generation,
+				value: "replaced",
+				ttlMs: 60_000,
+				deadlineMs: past,
+			}),
+		).toBe("late");
+		expect(
+			await client.removeIfGeneration(key, { expected: read.generation, deadlineMs: past }),
+		).toBe("late");
+		expect(await raw.get(key)).toBe(before);
+		// Within its deadline, the same write commits.
+		expect(
+			await client.removeIfGeneration(key, {
+				expected: read.generation,
+				deadlineMs: Date.now() + 60_000,
+			}),
+		).toBe("removed");
+		expect(await raw.exists(key)).toBe(0);
+	});
 });

@@ -74,6 +74,11 @@ function createFakeRedis() {
 			}
 			return false;
 		}),
+		// The conditional members' primitives; these tests write unconditionally.
+		readVersioned: vi.fn(async (_k: string, _candidate: string) => null),
+		replaceIfGeneration: vi.fn(async () => "missing" as const),
+		removeIfGeneration: vi.fn(async () => "missing" as const),
+		pExpireGT: vi.fn(async (_key: string, _ttlMs: number) => {}),
 	} satisfies FederationTokenStoreClient & {
 		data: Map<string, string>;
 		sets: Map<string, Set<string>>;

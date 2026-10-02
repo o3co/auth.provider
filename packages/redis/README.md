@@ -562,12 +562,15 @@ removal.
 
 The federation-token store seals the **whole** envelope (#293) — `tokenType`,
 `scope`, `grantedScope` and the access-token expiry included, not just the
-three token fields — as one ciphertext, `{ "v": 2, "c": "…" }`, bound to its
-own Redis key as additional authenticated data (`allow-plaintext`, development
-only, writes `{ "v": 2, "p": { … } }`). A record without that wrapper — the
-per-field shape of earlier releases — is dropped on first read: `get` returns
-`null`, the key and its index member go, and the user re-federates. There is
-no dual-read path by design.
+three token fields — as one ciphertext, `{ "v": 2, "g": "…", "c": "…" }`, bound
+to its own Redis key as additional authenticated data (`allow-plaintext`,
+development only, writes `{ "v": 2, "g": "…", "p": { … } }`). `g` is the
+record's store generation, outside the ciphertext (below). A record without
+that wrapper — the per-field shape of earlier releases — is dropped on first
+read: the read returns `null`, the key goes while it still holds the bytes
+read, and the user re-federates. Its index member stays: a concurrent `attach`
+may have just added it, and a member naming no key is harmless. There is no
+dual-read path by design.
 
 The envelope also carries `obtainedAt`, when the access token's lifetime counts
 from, as `obtainedAtMs`, and only when the record has one. A record without it
@@ -578,6 +581,53 @@ it does not know, so a rolling deploy or a rollback reads records either
 release wrote, and an older replica's write leaves the field out, which costs
 only the refresh damping it feeds. The convention: adding an envelope key keeps
 `v: 2`; changing a present key's type or meaning bumps the version.
+
+### Conditional writes
+
+The store's `getVersioned`, `replaceIf` and `removeIf` follow core's
+conditional-write convention for a record
+([docs/adapter-surface.md, "Conditional writes"](../../docs/adapter-surface.md#conditional-writes)).
+
+- **The generation** is the wrapper's `g`, a random UUID every write sets
+  (`attach`, `update`, `replaceIf`). It sits outside the ciphertext and the
+  wrapper stays `v: 2`, so a replica that does not know `g` reads the record
+  as before, and its own write leaves `g` out. Such a record is given a fresh
+  `g` by its first versioned read, in the same script, its TTL kept; a
+  conditional write against it answers `conflict` and mints nothing. A `g`
+  that is no generation makes the record unreadable, like any other.
+- **One script per conditional member**, on the record's key alone (one
+  Cluster slot): the versioned read (`readVersioned`), the replace
+  (`replaceIfGeneration`) and the delete (`removeIfGeneration`). `missing`
+  means no key, so a record past its `PX` is `missing` on Redis's own clock.
+- **The deadline.** Each conditional write carries a deadline the adapter
+  sets at issue, its `Date.now()` plus the 1 s write timeout, in `ARGV`; the
+  script compares it with `redis.call('TIME')` before it reads or writes
+  anything, and past it writes nothing (`late`, which the store rejects as
+  written nothing). The adapter stops waiting at the same timeout, rejecting
+  with an unknown outcome. So the write lifetime W is 2 s: the 1 s write
+  timeout plus the 1 s clock skew it allows. That holds while the app's and
+  Redis's clocks agree within the skew (NTP; the operator runbook's "Replica
+  clocks"). A late command — resent by the driver after a reconnect, queued,
+  or held by a stalled server — writes nothing.
+- **The index.** A conditional write never removes an index member, and
+  `missing` and `conflict` never add one. `replaceIf` raises the index's TTL
+  before its script (`pExpireGT`, which adds no member and makes no key), and
+  after `updated` re-adds the member with `sAddWithTtl`, so the index's
+  deadline is no earlier than the record's and an index that had expired is
+  made again. A member that names a removed record is harmless: `removeBySid`
+  unlinks a missing key.
+- **No rollback.** This store assumes acknowledged writes are not rolled back
+  (persistence, plus a failover setup that keeps acknowledged writes). A
+  deployment that accepts acknowledged-write loss on failover also accepts
+  that a conditional write may see a restored, older generation.
+
+A `FederationTokenStoreClient` of your own implements the four primitives
+the conditional members use: `readVersioned`, `replaceIfGeneration`,
+`removeIfGeneration` (each one atomic step, the last two refusing past the
+deadline they are handed) and `pExpireGT`. The builder refuses a client
+without them. [`federation-tokens.conditional.test.mts`](__tests__/federation-tokens.conditional.test.mts)
+runs `federationTokenStoreConditionalContract` (`@o3co/auth-provider-test-kit`)
+over the store on two connections.
 
 ## Federation grants
 
