@@ -45,6 +45,7 @@ import type {
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
 	SecondFactorAuthorityNotDeclaredDetails,
+	SessionRequirementMissingDetails,
 	SyntheticKeyCollisionDetails,
 	UnknownContributionKindDetails,
 } from "../types.mjs";
@@ -270,7 +271,13 @@ describe("per-reason *Details discriminators", () => {
 			string | undefined
 		>();
 		expectTypeOf<SecondFactorAuthorityNotDeclaredDetails["unmet"]>().toEqualTypeOf<
-			"not-expected" | "not-declared"
+			readonly ("not-expected" | "not-registered" | "not-declared")[]
+		>();
+	});
+
+	it("SessionRequirementMissingDetails names the second-factor authority when it is among the missing", () => {
+		expectTypeOf<SessionRequirementMissingDetails["secondFactorAuthority"]>().toEqualTypeOf<
+			string | undefined
 		>();
 	});
 });

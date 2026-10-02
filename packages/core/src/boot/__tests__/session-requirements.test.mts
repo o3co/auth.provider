@@ -1152,12 +1152,13 @@ describe("core.sessionRequirements.secondFactorAuthority: the requirement the co
 				configKey: "core.sessionRequirements.secondFactorAuthority",
 				name: "mfa",
 				module: "test:named-mfa",
-				unmet: "not-declared",
+				unmet: ["not-declared"],
 			});
 			expect(err.message).toContain("core.sessionRequirements.secondFactorAuthority");
-			expect(err.message).toContain('module "test:named-mfa"');
-			expect(err.message).toContain("does not declare the second-factor authority");
-			expect(err.message).toContain("install the module whose requirement declares it");
+			expect(err.message).toContain(
+				'replace module "test:named-mfa" with a module whose requirement declares the second-factor authority',
+			);
+			expect(err.message).not.toMatch(/install/);
 		}
 	});
 
@@ -1190,7 +1191,7 @@ describe("core.sessionRequirements.secondFactorAuthority: the requirement the co
 		},
 	);
 
-	it("refuses a name the list does not expect, registered or not, before the list's own comparison", async () => {
+	it("refuses a name the list does not expect, registered or not, before the list's own comparison, naming every condition unmet", async () => {
 		const registered = await refusal(
 			boot(
 				[factors, ...stores, authorityModule({}, undefined, "mfa", "test:mfa")],
@@ -1202,9 +1203,18 @@ describe("core.sessionRequirements.secondFactorAuthority: the requirement the co
 			configKey: "core.sessionRequirements.secondFactorAuthority",
 			name: "mfa",
 			module: "test:mfa",
-			unmet: "not-expected",
+			unmet: ["not-expected"],
 		});
 		expect(registered.message).toContain("core.sessionRequirements.expected");
+		const both = await refusal(
+			boot([namedMfa()], coreConfigForTests({ expected: [], secondFactorAuthority: "mfa" })),
+		);
+		expect(both.details).toMatchObject({
+			module: "test:named-mfa",
+			unmet: ["not-expected", "not-declared"],
+		});
+		expect(both.message).toContain("core.sessionRequirements.expected");
+		expect(both.message).toContain('replace module "test:named-mfa"');
 		const unregistered = await refusal(
 			boot([closing], coreConfigForTests({ expected: [], secondFactorAuthority: "mfa" })),
 		);
@@ -1212,16 +1222,23 @@ describe("core.sessionRequirements.secondFactorAuthority: the requirement the co
 			reason: "second-factor-authority-not-declared",
 			configKey: "core.sessionRequirements.secondFactorAuthority",
 			name: "mfa",
-			unmet: "not-expected",
+			unmet: ["not-expected", "not-registered"],
 			cleanupErrors: [expect.objectContaining({ module: "test:closing" })],
 		});
 	});
 
-	it("leaves a named and expected requirement nothing registers to session-requirement-missing, checked first", async () => {
+	it("leaves a named and expected requirement nothing registers to session-requirement-missing, checked first, which says the key names it too", async () => {
 		const err = await refusal(
-			boot([], coreConfigForTests({ expected: ["mfa"], secondFactorAuthority: "mfa" })),
+			boot([], coreConfigForTests({ expected: ["mfa", "risk"], secondFactorAuthority: "mfa" })),
 		);
 		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({ missing: ["mfa", "risk"], secondFactorAuthority: "mfa" });
+		expect(err.message).toContain('core.sessionRequirements.secondFactorAuthority names "mfa"');
+		const other = await refusal(
+			boot([], coreConfigForTests({ expected: ["risk"], secondFactorAuthority: "verifier" })),
+		);
+		expect(other.details).not.toHaveProperty("secondFactorAuthority");
+		expect(other.message).not.toContain("secondFactorAuthority");
 	});
 
 	it("unset, asks nothing of any requirement's declaration: a requirement named mfa that does not declare it boots under mfa.mode = required", async () => {

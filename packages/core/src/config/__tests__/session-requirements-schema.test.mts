@@ -15,11 +15,13 @@
  */
 
 /**
- * `core.sessionRequirements.expected` (the session-admission ADR's D7): the
- * requirement names a composition expects, a list of strings with no
+ * `core.sessionRequirements` (the session-admission ADR's D7): `expected`,
+ * the requirement names a composition expects, a list of strings with no
  * default in the schema or in `reference.conf` — a composition that
  * installs a consumer of admission writes it, and boot compares it with
- * what registered.
+ * what registered; and `secondFactorAuthority`, the expected requirement
+ * held to declaring the second-factor authority, an optional non-empty
+ * string with no default either.
  */
 
 import { fileURLToPath } from "node:url";

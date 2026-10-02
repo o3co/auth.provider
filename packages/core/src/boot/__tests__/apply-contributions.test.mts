@@ -18,7 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuditSink } from "../../audit/types.mjs";
 import type { GrantHandler } from "../../grants/types.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { coreConfigForTests, makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { applyContributions } from "../apply-contributions.mjs";
 import { materializeComponents } from "../materialize-components.mjs";
 import { planBoot } from "../plan-boot.mjs";
@@ -651,5 +651,34 @@ describe("applyContributions — consumer-defined kinds, routed by collector.kin
 		} as never);
 		const values = Array.from(stubCollector.values());
 		expect(values).toHaveLength(2);
+	});
+});
+
+describe("core.sessionRequirements.secondFactorAuthority without a sessionRequirements collector", () => {
+	it("refuses the key rather than skipping it: nothing can register the requirement it names", async () => {
+		const bootstrap = {
+			config: {
+				...makeValidCoreConfig(),
+				...coreConfigForTests({ expected: ["mfa"], secondFactorAuthority: "mfa" }),
+			} as never,
+			pathResolver: (s: string) => s,
+		} satisfies Record<string, unknown> as BootstrapMap;
+		const validated = validateManifests({
+			modules: [],
+			bootstrapComponents: bootstrap,
+			contributionKinds: {},
+		});
+		const plan = planBoot(validated, bootstrap, undefined);
+		const world = await materializeComponents(plan, bootstrap, undefined, {});
+		await expect(applyContributions(world, {})).rejects.toSatisfy((err: unknown) => {
+			expect(err).toBeInstanceOf(BootError);
+			expect((err as BootError).details).toEqual({
+				reason: "second-factor-authority-not-declared",
+				configKey: "core.sessionRequirements.secondFactorAuthority",
+				name: "mfa",
+				unmet: ["not-registered"],
+			});
+			return true;
+		});
 	});
 });

@@ -619,12 +619,12 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 39 literals
+// BootErrorReason — 40 literals
 // ---------------------------------------------------------------------------
 
 /**
  * Every reason a BootError can carry: one literal per validation or runtime
- * failure the boot planner detects, 39 in all.
+ * failure the boot planner detects, 40 in all.
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -669,7 +669,7 @@ export type BootErrorReason =
 	| "token-settings-lifetime-exceeds-configuration";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 39 in all
+// Per-reason *Details interfaces — one per BootErrorReason, 40 in all
 // ---------------------------------------------------------------------------
 
 /**
@@ -1264,6 +1264,8 @@ export interface SessionRequirementMissingDetails {
 	readonly declared: readonly string[];
 	/** What registered, in registration order. */
 	readonly registered: readonly string[];
+	/** `core.sessionRequirements.secondFactorAuthority`, when it names one of the missing. */
+	readonly secondFactorAuthority?: string;
 	readonly cleanupErrors?: readonly {
 		readonly module: string;
 		readonly componentKey: ComponentKey;
@@ -1288,11 +1290,13 @@ export interface DuplicateSecondFactorAuthorityDetails {
 
 /**
  * `core.sessionRequirements.secondFactorAuthority` names a requirement that
- * `core.sessionRequirements.expected` does not (`not-expected`), or one that
- * registered without declaring the second-factor authority
- * (`not-declared`): refused, rather than left believing the requirement the
- * composition holds to the authority enforces a second factor. `module` is
- * the module that registered it, when one did.
+ * fails one or more of: `core.sessionRequirements.expected` lists it
+ * (`not-expected`), a module registers it (`not-registered`), and the
+ * registered requirement declares the second-factor authority
+ * (`not-declared`). Refused, rather than left believing the requirement the
+ * composition holds to the authority enforces a second factor. `unmet` lists
+ * every failed condition, in that order; `module` is the module that
+ * registered it, when one did.
  */
 export interface SecondFactorAuthorityNotDeclaredDetails {
 	readonly reason: "second-factor-authority-not-declared";
@@ -1300,7 +1304,7 @@ export interface SecondFactorAuthorityNotDeclaredDetails {
 	/** The requirement the key names. */
 	readonly name: string;
 	readonly module?: string;
-	readonly unmet: "not-expected" | "not-declared";
+	readonly unmet: readonly ("not-expected" | "not-registered" | "not-declared")[];
 	readonly cleanupErrors?: readonly {
 		readonly module: string;
 		readonly componentKey: ComponentKey;
