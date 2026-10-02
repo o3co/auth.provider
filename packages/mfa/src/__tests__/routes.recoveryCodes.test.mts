@@ -64,6 +64,7 @@ import {
 	STEP_UP_REQUIRED,
 	seedFactor,
 	seedTotp,
+	signIn,
 	signInWithTotp,
 	stepUp,
 	storedData,
@@ -345,6 +346,71 @@ describe("POST /session/mfa/recovery-codes", () => {
 	});
 });
 
+describe("a regeneration's own checks under the lease", () => {
+	it("sends a session signed in before the subject's first binding to log in again: a password-only session admitted while no factor stood, racing the owner's first binding, gets no codes", async () => {
+		const built = await composed({ mode: "optional", requireEmailProof: "never" });
+		const { agent } = await signIn(built.app, built.userSessionStore);
+		const store = built.transactionStore;
+		const acquire = store.acquireSubjectLease.bind(store);
+		vi.spyOn(store, "acquireSubjectLease").mockImplementationOnce(async (subject, asked) => {
+			// The owner's first binding lands between this request's admission and its lease.
+			await store.noteFirstBinding(subject, Date.now(), Date.now() + 1_800_000);
+			await seedTotp(built.factorStore);
+			return acquire(subject, asked);
+		});
+		const create = vi.spyOn(built.factorStore, "create");
+
+		const res = await regenerate(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toMatchObject({ error: "login_required" });
+		expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
+		expect(create).not.toHaveBeenCalled();
+		expect(await built.transactionStore.recoverySetFloor(ALICE.id)).toBe(0);
+	});
+
+	it("is 503, nothing written, when the subject's first-binding mark cannot be read", async () => {
+		const built = await composed();
+		const { agent } = await signedIn(built);
+		vi.spyOn(built.transactionStore, "firstBindingAt").mockRejectedValue(new Error("down"));
+		const create = vi.spyOn(built.factorStore, "create");
+
+		const res = await regenerate(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(503);
+		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("refuses 409 mfa_factor_limit, nothing written, a subject at mfa.maxFactorsPerSubject holding no recovery set", async () => {
+		const built = await composed();
+		const totp = await seedTotp(built.factorStore);
+		for (let n = 1; n < 10; n++) await seedTotp(built.factorStore);
+		const { agent } = await signInWithTotp(built.app, built.userSessionStore, totp);
+		const create = vi.spyOn(built.factorStore, "create");
+
+		const res = await regenerate(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(409);
+		expect(res.body).toEqual({
+			error: "mfa_factor_limit",
+			error_description: "The subject holds as many second factors as it may",
+		});
+		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("replaces the set of a subject at mfa.maxFactorsPerSubject that holds one", async () => {
+		const built = await composed();
+		const { agent } = await signedIn(built);
+		for (let n = 2; n < 10; n++) await seedTotp(built.factorStore);
+		expect(await built.factorStore.list(ALICE.id)).toHaveLength(10);
+
+		const res = await regenerate(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(await built.factorStore.list(ALICE.id)).toHaveLength(10);
+	});
+});
+
 describe("a regeneration's answer", () => {
 	it("answers no codes when the set cannot be marked shown: 503, said once, the set left unshown and the list saying so", async () => {
 		const built = await composed();
@@ -611,6 +677,7 @@ describe("a retired set left stored", () => {
 		const built = await composed();
 		const { agent, old, fresh } = await leftStored(built);
 		vi.spyOn(built.transactionStore, "recoverySetFloor").mockRejectedValue(new Error("down"));
+		built.logger.warn.mockClear();
 
 		expect((await offered(built)).sort()).toEqual([old.record.id, fresh.record.id].sort());
 		const listed = await agent.get("/session/mfa/factors");
@@ -620,18 +687,26 @@ describe("a retired set left stored", () => {
 				(factor) => factor.id === old.record.id,
 			)?.state,
 		).toBe("usable");
+		// Said at warn once per reading: the login's ask, the offers, the list.
+		expect(events(built.logger, "warn")).toEqual([
+			"mfa_recovery_set_floor_unread",
+			"mfa_recovery_set_floor_unread",
+			"mfa_recovery_set_floor_unread",
+		]);
+		expect(built.logger.warn.mock.calls[0]?.[0]).toMatchObject({ sub: ALICE.id });
 		expect((await loginWithCode(built, old.record, old.codes[0])).status).toBe(503);
 		vi.restoreAllMocks();
 		expect((await loginWithCode(built, old.record, old.codes[0])).status).toBe(401);
 	});
 
-	it("never hides the current set when a regeneration lands between the floor read and the list: the floor is read first", async () => {
+	it("never hides the newest set when a regeneration lands after the records were listed: a retired set read under the floor lists the records again", async () => {
 		const built = await composed();
 		const { agent } = await signedIn(built);
 		expect((await regenerate(agent)).status).toBe(200);
 		const [current] = await setsOf(built.factorStore);
 		if (current === undefined) throw new Error("no set");
 		const { agent: browser, transaction } = await beginLogin(built.app);
+		let newest: MfaFactorRecord | undefined;
 		const list = built.factorStore.list.bind(built.factorStore);
 		vi.spyOn(built.factorStore, "list").mockImplementationOnce(async (subject) => {
 			const snapshot = await list(subject);
@@ -642,7 +717,7 @@ describe("a retired set left stored", () => {
 				2,
 			);
 			if (next === undefined) throw new Error("no set");
-			await seedFactor(built.factorStore, "recovery_code", next.data);
+			newest = await seedFactor(built.factorStore, "recovery_code", next.data);
 			await raiseRecoverySetFloor(built.transactionStore, 2);
 			return snapshot;
 		});
@@ -653,17 +728,19 @@ describe("a retired set left stored", () => {
 			(res.body.factors as { id: string; kind: string }[])
 				.filter((factor) => factor.kind === "recovery_code")
 				.map((factor) => factor.id),
-		).toEqual([current.record.id]);
+		).toEqual([newest?.id]);
+		expect(current.record.id).not.toBe(newest?.id);
 	});
 
-	it("reads no floor while the recovery-code factor is off", async () => {
-		const built = await composed({ recoveryCodes: false });
+	it("reads no floor for a subject holding no recovery set: a password login's ask, the offers, the list and a step-up", async () => {
+		const built = await composed();
 		const totp = await seedTotp(built.factorStore);
-		const { agent } = await signInWithTotp(built.app, built.userSessionStore, totp);
 		const floor = vi.spyOn(built.transactionStore, "recoverySetFloor");
+		const { agent } = await signInWithTotp(built.app, built.userSessionStore, totp);
 
 		await offered(built);
 		await agent.get("/session/mfa/factors");
+		expect((await stepUp(agent)).status).toBe(200);
 
 		expect(floor).not.toHaveBeenCalled();
 	});
@@ -704,10 +781,12 @@ describe("routing over a retired set: one reading of usable, the floor's", () =>
 		const { built, agent } = await retiredOnly();
 		if (agent === undefined) throw new Error("not signed in");
 		vi.spyOn(built.transactionStore, "recoverySetFloor").mockRejectedValue(new Error("down"));
+		built.logger.warn.mockClear();
 
 		const res = await stepUp(agent);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(events(built.logger, "warn")).toContain("mfa_recovery_set_floor_unread");
 	});
 
 	it("does not ask a password login for a second factor over a retired set alone: under optional the login is established, as over an exhausted set", async () => {

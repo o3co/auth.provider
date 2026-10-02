@@ -784,6 +784,50 @@ describe("issueRecoveryCodes, replacing the sets that stood", () => {
 		},
 	);
 
+	it("lets two writers the lease admitted together both yield when each reads the other after its write: no new set left, never two", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const floor = floorAt();
+		const create = factorStore.create.bind(factorStore);
+		let arrived = 0;
+		let release: () => void = () => undefined;
+		const both = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		vi.spyOn(factorStore, "create").mockImplementation(async (record) => {
+			await create(record);
+			// Each writer's set is written before either reads the records again.
+			arrived += 1;
+			if (arrived === 2) release();
+			await both;
+		});
+
+		const [a, b] = await Promise.all([
+			issue(factorStore, "mfa", floor),
+			issue(factorStore, "mfa", floor),
+		]);
+
+		expect(a).toMatchObject({ issued: false, conflict: true });
+		expect(b).toMatchObject({ issued: false, conflict: true });
+		expect(await setsIn(factorStore)).toEqual([]);
+	});
+
+	it("says both failures when the floor cannot be raised and its own set cannot be removed: the set stays stored, unshown", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		const floor = floorAt(1);
+		const raised = new Error("the lease was not held");
+		const unremoved = new Error("remove failed");
+		floor.raise.mockRejectedValueOnce(raised);
+		vi.spyOn(factorStore, "remove").mockRejectedValueOnce(unremoved);
+
+		const issued = await issue(factorStore, "mfa", floor);
+
+		expect(issued).toMatchObject({ issued: false });
+		const cause = (issued as { cause?: unknown }).cause;
+		expect(cause).toBeInstanceOf(AggregateError);
+		expect((cause as AggregateError).errors).toEqual([raised, unremoved]);
+		expect((await setsIn(factorStore)).map((set) => set.shown)).toEqual([false]);
+	});
+
 	it("removes no record of another kind", async () => {
 		const factorStore = createMemoryMfaFactorStore();
 		await factorStore.create(recordOf("totp-1", { kind: "totp" }));

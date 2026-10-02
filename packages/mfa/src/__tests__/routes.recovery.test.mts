@@ -338,9 +338,14 @@ describe("a recovery code of a retired set", () => {
 				calls++ < answered ? floor(subject) : new Promise<number>(() => undefined),
 			);
 
+			const started = performance.now();
 			const res = await verify(agent, transaction, set.record.id, set.codes[0]);
+			const elapsed = performance.now() - started;
 
 			expect(res.status, JSON.stringify(res.body)).toBe(503);
+			// One mfa.storeTimeoutMs (1000 ms) per read that never answers, with room for the rest.
+			expect(elapsed).toBeGreaterThanOrEqual(900);
+			expect(elapsed).toBeLessThan(3_000);
 			expect(create).not.toHaveBeenCalled();
 			const after = await transactionStore.get(transaction);
 			expect(after === null ? "spent" : after.attempts).toBe(left);
