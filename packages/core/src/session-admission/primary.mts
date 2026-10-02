@@ -162,10 +162,14 @@ const DECLARED_CLAIM_NAMES = Object.keys(DECLARED_CLAIMS) as DeclaredClaim[];
  * route seeds from an ORM-backed `User`, its `groups` an ORM's list, is
  * copied as a plain string array.
  *
+ * A class instance is read by the declared names and its own enumerable
+ * keys, nothing else of it; a null-prototype or frozen object is read as
+ * any other.
+ *
  * Refused: `claims` that are not an object; a claim holding what is not
  * plain data, quoting nothing of it; a declared claim that is not what
- * `UserSessionClaims` declares. A read that throws is let through as it was
- * thrown.
+ * `UserSessionClaims` declares — `null` included. A read that throws is let
+ * through as it was thrown.
  */
 function copyClaims(claims: unknown, refuse: (what: string) => never): UserSessionClaims {
 	if (!isPlainObject(claims)) return refuse("claims must be an object");

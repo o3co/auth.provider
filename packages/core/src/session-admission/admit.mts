@@ -448,7 +448,20 @@ const knownPrimaries = new WeakSet<object>();
 export interface PasswordLoginFacts {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
-	/** The route's `extractUserClaims(user)`: what the session record's `claims` will hold. */
+	/**
+	 * The route's `extractUserClaims(user)`: what the session record's `claims` will hold.
+	 *
+	 * Core reads it by name, each claim once, into a plain frozen copy. It
+	 * must be an object; a class instance is read by the declared claims'
+	 * names and its own enumerable keys, nothing else of it. A claim
+	 * `UserSessionClaims` declares must, when present, be of its declared
+	 * type: `email`, `name` and `picture` a string, `emailVerified` a
+	 * boolean, `groups` a list of strings (an ORM's list or an Array
+	 * subclass is copied by index into a plain array). `null`, or any other
+	 * value, is refused with a `RangeError`. A custom claim must be JSON
+	 * data: a string, a finite number, a boolean, `null`, or a list or plain
+	 * object of those. A claim read as `undefined` is left out.
+	 */
 	readonly claims: UserSessionClaims;
 	readonly authTime: Date;
 	readonly redirectTo: string | undefined;
@@ -621,7 +634,12 @@ export async function resumePrimary(
 export interface FederatedLogin {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
-	/** The merged claims envelope the callback composed: what the session record's `claims` will hold. */
+	/**
+	 * The merged claims envelope the callback composed: what the session
+	 * record's `claims` will hold. Read as {@link PasswordLoginFacts.claims}
+	 * is: declared claims of their declared types, `null` refused; custom
+	 * claims JSON data.
+	 */
 	readonly claims: UserSessionClaims;
 	/** The federation's name (`core.federations.<name>`). */
 	readonly federation: string;

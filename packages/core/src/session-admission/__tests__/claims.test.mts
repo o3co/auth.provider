@@ -248,6 +248,35 @@ describe("the claims are read by name, each once, into a plain copy", () => {
 		}
 	});
 
+	it("reads a null-prototype claims object as any other", () => {
+		const claims = Object.assign(Object.create(null), {
+			email: "alice@example.com",
+			groups: proxiedList(["staff"]),
+			custom: { tier: "gold" },
+		});
+		for (const build of bothLogins(claims)) {
+			expect(build()).toStrictEqual({
+				email: "alice@example.com",
+				groups: ["staff"],
+				custom: { tier: "gold" },
+			});
+		}
+	});
+
+	it("reads a frozen claims object, and answers a copy that is not it", () => {
+		const claims = Object.freeze({
+			email: "alice@example.com",
+			groups: Object.freeze(["staff"]),
+			custom: Object.freeze({ tier: "gold" }),
+		});
+		for (const build of bothLogins(claims)) {
+			const copied = build();
+			expect(copied).toStrictEqual(claims);
+			expect(copied).not.toBe(claims);
+			expect(copied.groups).not.toBe(claims.groups);
+		}
+	});
+
 	it("lets a getter that throws through as it threw", () => {
 		const outage = new Error("the entity's connection is closed");
 		const claims = Object.defineProperty({}, "groups", {
@@ -267,7 +296,7 @@ describe("the claims are read by name, each once, into a plain copy", () => {
 	});
 });
 
-describe("malformed claims are still refused", () => {
+describe("malformed claims are refused", () => {
 	const cyclic: Record<string, unknown> = {};
 	cyclic.self = cyclic;
 	it.each([
@@ -291,6 +320,7 @@ describe("malformed claims are still refused", () => {
 			/claims\.emailVerified must be a boolean/,
 		],
 		["a name that is not a string", { name: null }, /claims\.name must be a string/],
+		["an email that is null", { email: null }, /claims\.email must be a string/],
 		["a picture that is not a string", { picture: ["x"] }, /claims\.picture must be a string/],
 		["a function", { hook: () => 1 }, /claims hold a value that cannot be copied/],
 		["a Date", { at: new Date(0) }, /claims hold a value that cannot be copied/],

@@ -20,9 +20,10 @@
  * login derives — and the session's `user` — is read from. It sits with
  * `User`, its owner, so a field added to `User` changes this file alone.
  *
- * Its copy of plain data (`readPlainFields`) is core's one: the claims
- * envelope a login records is read through it too, so what a login stores
- * is copied by one rule. Core-internal: not exported from the package.
+ * Its copy (`readPlainFields`) is the by-name plain-data copy a login's
+ * user and claims go through: session admission reads the claims envelope
+ * a login records through it too. Core-internal: not exported from the
+ * package.
  */
 
 import type { User } from "./types.mjs";
