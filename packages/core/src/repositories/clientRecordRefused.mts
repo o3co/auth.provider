@@ -26,7 +26,9 @@
  *   the boundary's own `client_record_refused` warn says what was refused
  *   and why. Its own `reason` is the code a log line's error projection keeps
  *   (`loggableError`), so an outage line written for it names its cause.
- * - **Frozen**, so no layer it passes through can rewrite it.
+ * - **Frozen**, so no layer it passes through can rewrite it. A consumer
+ *   never annotates it (`err.status = …` throws in strict mode): it passes
+ *   the refusal on as it is, or wraps it as a new error's `cause`.
  */
 
 /** The global brand a client-record refusal carries on itself. */
