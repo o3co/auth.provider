@@ -1,6 +1,6 @@
 # composition — every workspace package, booted together
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 The contracts that exist only when all of this repository's modules are
 composed: the standalone template's composition with every package it does not
@@ -82,6 +82,13 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   one: with the shipped configuration, with each owner's own key set, with the
   limiter's own `limits` declaring every prefix (which wins), and with the
   owners switched off.
+- **A module its own `enabled` key switches off registers nothing.** Each
+  such module — DPoP, mTLS, the device grant, the session grant, federation
+  grants and the MFA package's factors — at its package's own off section
+  is switched off by it or declares nothing but its section, and booted
+  alone needs none of what it would require and contributes no route, grant
+  or factor
+  ([`disabled-modules.test.mts`](src/__tests__/disabled-modules.test.mts)).
 - **What it checks on real Redis, under `core.deployment.mode = "multi"`.** That
   nothing in the full set declares replica-unsafe state, that each added
   memory store is refused at boot by name, and that two replicas on one
