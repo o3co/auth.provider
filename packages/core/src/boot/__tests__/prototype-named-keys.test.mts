@@ -111,6 +111,15 @@ describe("a configuration key named after an Object.prototype member refuses boo
 		expect(err.message).toContain("extra.1.__proto__");
 	});
 
+	it("names a key under every path that reaches it when one object is shared", () => {
+		const shared = loaded(`__proto__ = x`);
+
+		const err = refusal([], resolved({ first: { at: shared }, second: { at: shared } }));
+
+		expect(err.message).toContain("first.at.__proto__");
+		expect(err.message).toContain("second.at.__proto__");
+	});
+
 	it("names every such key in one refusal", () => {
 		const core = makeValidCoreConfig().core as Record<string, unknown>;
 		const err = refusal(

@@ -1754,19 +1754,21 @@ const PROTOTYPE_MEMBER_NAMES: ReadonlySet<string> = new Set([
  * One issue per key of the configuration as written that is named after an
  * `Object.prototype` member, at the key's full path. A schema drops a
  * `__proto__` key unvalidated, and code reading any such key may meet the
- * inherited member instead. Plain objects and lists are walked through
- * their data properties; a getter is not called (the parse that follows
- * reads it, and names what it throws), and anything else is a value.
+ * inherited member instead. The walk covers the own data properties of
+ * plain objects and lists, which is everything a parsed HOCON file holds;
+ * a getter is read by the parse that follows, not by this walk, and
+ * anything else is a value. An object reached by several paths is named
+ * under each; only its ancestors stop a cycle.
  */
 function prototypeNamedKeyIssues(
 	value: unknown,
 	path: readonly PropertyKey[] = [],
-	seen = new Set<object>(),
+	ancestors = new Set<object>(),
 ): z.core.$ZodIssue[] {
 	if (!Array.isArray(value) && !isPlainConfigObject(value)) return [];
-	if (seen.has(value)) return [];
-	seen.add(value);
-	return Object.keys(value).flatMap((key) => {
+	if (ancestors.has(value)) return [];
+	ancestors.add(value);
+	const issues = Object.keys(value).flatMap((key) => {
 		const at = [...path, Array.isArray(value) ? Number(key) : key];
 		const below = Object.getOwnPropertyDescriptor(value, key);
 		return [
@@ -1781,10 +1783,12 @@ function prototypeNamedKeyIssues(
 					]
 				: []),
 			...(below !== undefined && "value" in below
-				? prototypeNamedKeyIssues(below.value, at, seen)
+				? prototypeNamedKeyIssues(below.value, at, ancestors)
 				: []),
 		];
 	});
+	ancestors.delete(value);
+	return issues;
 }
 
 /**
