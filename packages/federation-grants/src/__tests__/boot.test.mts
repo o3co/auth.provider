@@ -541,7 +541,7 @@ describe("the actions it registers", () => {
 		}
 	});
 
-	it("registers them while the feature is off too: the switch is read when the routes are built, after the actions register", async () => {
+	it("registers none of them while the feature is off: the switched-off module registers nothing", async () => {
 		const handle = await boot({
 			enabled: false,
 			withStore: false,
@@ -552,7 +552,7 @@ describe("the actions it registers", () => {
 		try {
 			expect(
 				handle.components.sessionRequirementResolver?.action("federation_grants.connect"),
-			).toEqual({ name: "federation_grants.connect", grade: "use" });
+			).toBeUndefined();
 		} finally {
 			await handle.dispose();
 		}
