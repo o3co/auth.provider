@@ -684,6 +684,8 @@ interface SetFaults {
 	readonly updateNoop?: boolean;
 	/** A member is stored and answered as the caller's own object. */
 	readonly alias?: boolean;
+	/** A member created at a generation, into a set that holds one, is stored as the caller's own object. */
+	readonly aliasLaterMembers?: boolean;
 	/** Reads drop an expired set, and writes do not check expiry. */
 	readonly writesIgnoreExpiry?: boolean;
 	/** A removal does not check expiry. */
@@ -732,6 +734,12 @@ interface SetFaults {
 	readonly counterRestarts?: boolean;
 	/** A create after the set expired answers the generation the set had before, not the one it issued. */
 	readonly recreateAnswersStale?: boolean;
+	/** A create after a reset's tombstone expired answers the tombstone's generation, not the one it issued. */
+	readonly recreateAfterResetAnswersStale?: boolean;
+	/** A reset's tombstone never expires: of a set that was written, or of one never written. */
+	readonly resetNeverExpires?: "written" | "never-written";
+	/** A conditional write that lands while another one starts answers the generation the set had before it. */
+	readonly raceWinnerStale?: boolean;
 	/** An outage is answered as an empty set. */
 	readonly outageAsMissing?: boolean;
 }
@@ -744,14 +752,18 @@ interface SetEntry {
 	readonly members: Map<string, Item>;
 	/** When an emptied set's tombstone expires, on the backend's clock; none while it holds a member. */
 	deadline?: number;
+	/** The set is the tombstone a reset left. */
+	byReset?: boolean;
 }
 
 /** A set backend, and a target over it per call to `target`. */
 function setBackend(faults: SetFaults = {}) {
 	const sets = new Map<string, SetEntry>();
 	const counters = new Map<string, number>();
-	const expired = new Map<string, StoreGeneration>();
+	const expired = new Map<string, { generation: StoreGeneration; byReset: boolean }>();
 	let now = 0;
+	/** Conditional writes started so far: one started while another is in flight contends with it. */
+	let conditionalStarts = 0;
 	const issue = (members: ReadonlyMap<string, Item>, scope = ""): StoreGeneration => {
 		if (faults.counterRestarts === true) {
 			const next = (counters.get(scope) ?? 0) + 1;
@@ -765,21 +777,45 @@ function setBackend(faults: SetFaults = {}) {
 					.slice(0, 32) as StoreGeneration)
 			: newStoreGeneration();
 	};
-	const keep = (item: Item): Item => (faults.alias === true ? item : { ...item });
+	const keep = (item: Item, alias = false): Item =>
+		faults.alias === true || alias ? item : { ...item };
 	/** After a membership write: an emptied set starts its tombstone's deadline; one holding a member has none. */
 	const retain = (entry: SetEntry): void => {
+		entry.byReset = false;
 		if (entry.members.size === 0) entry.deadline = now + TOMBSTONE_MS;
 		else if (faults.revivedKeepsDeadline !== true) entry.deadline = undefined;
 	};
-	const add = (item: Item): StoreGeneration => {
+	const add = (item: Item, alias = false): StoreGeneration => {
 		const held = live(item.scope, true);
 		const entry = held ?? { generation: newStoreGeneration(), members: new Map() };
 		const before = held !== undefined ? undefined : expired.get(item.scope);
-		entry.members.set(item.id, keep(item));
+		entry.members.set(item.id, keep(item, alias));
 		entry.generation = issue(entry.members, item.scope);
 		retain(entry);
 		sets.set(item.scope, entry);
-		return faults.recreateAnswersStale === true && before !== undefined ? before : entry.generation;
+		const stale =
+			before !== undefined &&
+			(faults.recreateAnswersStale === true ||
+				(faults.recreateAfterResetAnswersStale === true && before.byReset));
+		return stale ? before.generation : entry.generation;
+	};
+	/**
+	 * `write`'s answer; with raceWinnerStale, a write that lands while another
+	 * conditional write starts answers the generation `scope` was at before it.
+	 */
+	const contended = async <A extends ConditionalCreateAnswer | ConditionalSetRemoveAnswer>(
+		scope: string,
+		write: () => Promise<A>,
+	): Promise<A> => {
+		if (faults.raceWinnerStale !== true) return write();
+		conditionalStarts += 1;
+		const mine = conditionalStarts;
+		const prior = sets.get(scope)?.generation ?? newStoreGeneration();
+		const answer = await write();
+		await gap();
+		return answer.outcome !== "conflict" && answer.outcome !== "missing" && conditionalStarts > mine
+			? { ...answer, generation: prior }
+			: answer;
 	};
 	/** The set, unless its tombstone is past its deadline: a read drops it, and so does a write unless writes ignore expiry. */
 	const live = (scope: string, forWrite: boolean): SetEntry | undefined => {
@@ -793,7 +829,7 @@ function setBackend(faults: SetFaults = {}) {
 			return entry;
 		}
 		if (forWrite && faults.writesIgnoreExpiry === true) return entry;
-		expired.set(scope, entry.generation);
+		expired.set(scope, { generation: entry.generation, byReset: entry.byReset === true });
 		sets.delete(scope);
 		counters.delete(scope);
 		return undefined;
@@ -853,44 +889,47 @@ function setBackend(faults: SetFaults = {}) {
 				const members = [...(live(scope, false)?.members.values() ?? [])].map(out);
 				return faults.listDisagrees === true ? members.slice(1) : members;
 			},
-			async createIf(item, expected): Promise<ConditionalCreateAnswer> {
-				const entry = live(item.scope, true);
-				if (expected === null && entry !== undefined && faults.createIgnoresExpected !== true) {
-					return { outcome: "conflict" };
-				}
-				if (expected !== null) {
-					if (entry === undefined && faults.absentSetCreates !== true)
-						return { outcome: "conflict" };
-					if (
-						entry !== undefined &&
-						entry.generation !== expected &&
-						faults.createIgnoresExpected !== true
-					) {
+			createIf: (item, expected) =>
+				contended(item.scope, async (): Promise<ConditionalCreateAnswer> => {
+					const entry = live(item.scope, true);
+					if (expected === null && entry !== undefined && faults.createIgnoresExpected !== true) {
 						return { outcome: "conflict" };
 					}
-				}
-				if (entry?.members.has(item.id) === true && faults.upsertHeld !== true)
-					return { outcome: "conflict" };
-				if (faults.createCheckThenWrite === true) await gap();
-				return { outcome: "created", generation: add(item) };
-			},
-			async removeIf(scope, id, expected): Promise<ConditionalSetRemoveAnswer> {
-				const entry = faults.removeIgnoresExpiry === true ? sets.get(scope) : live(scope, true);
-				if (entry === undefined) return { outcome: "missing" };
-				if (entry.generation !== expected) return { outcome: "conflict" };
-				if (!entry.members.has(id)) {
-					if (faults.absentMemberMoves === true) entry.generation = newStoreGeneration();
-					return faults.malformedMissing === true
-						? ({ outcome: "absent" } as unknown as ConditionalSetRemoveAnswer)
-						: { outcome: "missing" };
-				}
-				if (faults.removeCheckThenWrite === true) await gap();
-				entry.members.delete(id);
-				entry.generation = issue(entry.members, scope);
-				retain(entry);
-				if (faults.lastRemovalDeletes === true && entry.members.size === 0) sets.delete(scope);
-				return { outcome: "removed", generation: entry.generation };
-			},
+					if (expected !== null) {
+						if (entry === undefined && faults.absentSetCreates !== true)
+							return { outcome: "conflict" };
+						if (
+							entry !== undefined &&
+							entry.generation !== expected &&
+							faults.createIgnoresExpected !== true
+						) {
+							return { outcome: "conflict" };
+						}
+					}
+					if (entry?.members.has(item.id) === true && faults.upsertHeld !== true)
+						return { outcome: "conflict" };
+					if (faults.createCheckThenWrite === true) await gap();
+					const alias = faults.aliasLaterMembers === true && expected !== null;
+					return { outcome: "created", generation: add(item, alias) };
+				}),
+			removeIf: (scope, id, expected) =>
+				contended(scope, async (): Promise<ConditionalSetRemoveAnswer> => {
+					const entry = faults.removeIgnoresExpiry === true ? sets.get(scope) : live(scope, true);
+					if (entry === undefined) return { outcome: "missing" };
+					if (entry.generation !== expected) return { outcome: "conflict" };
+					if (!entry.members.has(id)) {
+						if (faults.absentMemberMoves === true) entry.generation = newStoreGeneration();
+						return faults.malformedMissing === true
+							? ({ outcome: "absent" } as unknown as ConditionalSetRemoveAnswer)
+							: { outcome: "missing" };
+					}
+					if (faults.removeCheckThenWrite === true) await gap();
+					entry.members.delete(id);
+					entry.generation = issue(entry.members, scope);
+					retain(entry);
+					if (faults.lastRemovalDeletes === true && entry.members.size === 0) sets.delete(scope);
+					return { outcome: "removed", generation: entry.generation };
+				}),
 			async reset(scope) {
 				const entry = live(scope, true);
 				if (faults.resetEmptyNoop === true && entry !== undefined && entry.members.size === 0)
@@ -913,6 +952,9 @@ function setBackend(faults: SetFaults = {}) {
 				}
 				const emptied: SetEntry = { generation: newStoreGeneration(), members: new Map() };
 				retain(emptied);
+				emptied.byReset = true;
+				if (faults.resetNeverExpires === (entry === undefined ? "never-written" : "written"))
+					emptied.deadline = undefined;
 				sets.set(scope, emptied);
 			},
 			async updateMember(scope, id) {
@@ -1135,6 +1177,42 @@ describe("conditionalSetContract refuses a set store that breaks a rule", () => 
 			"a create after expiry that answers the expired generation",
 			{ recreateAnswersStale: true },
 			SET.recreate,
+		],
+		[
+			"a reset's tombstone, of a set that was written, that never expires",
+			{ resetNeverExpires: "written" },
+			SET.tombstone,
+		],
+		[
+			"a reset's tombstone, of a set never written, that never expires",
+			{ resetNeverExpires: "never-written" },
+			SET.tombstone,
+		],
+		[
+			"a create after a reset's tombstone expired that answers the tombstone's generation",
+			{ recreateAfterResetAnswersStale: true },
+			SET.tombstone,
+		],
+		["a member after the first shared with the caller", { aliasLaterMembers: true }, SET.alias],
+		[
+			"a first-create winner that answers a stale generation under contention",
+			{ raceWinnerStale: true },
+			SET.firstRace,
+		],
+		[
+			"a removal winner that answers a stale generation under contention",
+			{ raceWinnerStale: true },
+			SET.removeRace,
+		],
+		[
+			"a create winner, among many, that answers a stale generation under contention",
+			{ raceWinnerStale: true },
+			SET.createRace,
+		],
+		[
+			"a removal or create winner that answers a stale generation under contention",
+			{ raceWinnerStale: true },
+			SET.mixedRace,
 		],
 	];
 	for (const [what, faults, refusing] of cases) {

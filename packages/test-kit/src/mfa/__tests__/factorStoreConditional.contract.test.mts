@@ -571,8 +571,14 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 		});
 	}
 
-	it("one whose race winner answers a stale generation under contention, refused by the race case alone", async () => {
-		expect(await refusedBy(() => modelStore("race-winner-stale-generation"))).toEqual([CASE.race]);
+	it("one whose race winner answers a stale generation under contention, refused by the race cases alone", async () => {
+		expect(await refusedBy(() => modelStore("race-winner-stale-generation"))).toEqual([
+			CASE.firstCreates,
+			CASE.twoRemovals,
+			CASE.manyCreates,
+			CASE.removalRacingCreate,
+			CASE.race,
+		]);
 	});
 
 	const outages: ReadonlyArray<readonly [string, Outage]> = [
