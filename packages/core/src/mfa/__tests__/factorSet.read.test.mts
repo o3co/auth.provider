@@ -56,6 +56,11 @@ describe("readMfaFactorSet", () => {
 		expect(read).toStrictEqual({ generation: G, items });
 		expect(read.items).not.toBe(items);
 		expect(Object.isFrozen(read)).toBe(true);
+		expect(Object.isFrozen(read.items)).toBe(true);
+		for (const [i, copy] of read.items.entries()) {
+			expect(copy).not.toBe(items[i]);
+			expect(Object.isFrozen(copy)).toBe(true);
+		}
 		expect(readMfaFactorSet({ generation: G, items: [] }, "user-1")).toStrictEqual({
 			generation: G,
 			items: [],
@@ -94,6 +99,62 @@ describe("readMfaFactorSet", () => {
 		]) {
 			expect(() => readMfaFactorSet(answer, "user-1"), JSON.stringify(answer)).toThrow(TypeError);
 		}
+	});
+
+	it("throws a TypeError for a record that leaves out a key of its type, an optional value's included", () => {
+		const keys: readonly (keyof MfaFactorRecord)[] = [
+			"id",
+			"subject",
+			"kind",
+			"label",
+			"binding",
+			"createdAt",
+			"lastUsedAt",
+			"version",
+			"data",
+		];
+		for (const key of keys) {
+			const { [key]: _left, ...rest } = record("a");
+			expect(() => readMfaFactorSet({ generation: G, items: [rest] }, "user-1"), key).toThrow(
+				TypeError,
+			);
+			// Inherited is not enough: every key is the record's own.
+			const inherited = Object.assign(Object.create({ [key]: record("a")[key] }), rest);
+			expect(
+				() => readMfaFactorSet({ generation: G, items: [inherited] }, "user-1"),
+				`${key} inherited`,
+			).toThrow(TypeError);
+		}
+	});
+
+	it("reads each field of a record once, and checks for a repeated id by the id it read", () => {
+		const counted = (ids: readonly string[]) => {
+			const reads = new Map<string, number>();
+			const source = record("a");
+			const item = {};
+			for (const key of Object.keys(source) as (keyof MfaFactorRecord)[]) {
+				Object.defineProperty(item, key, {
+					enumerable: true,
+					get: () => {
+						const n = reads.get(key) ?? 0;
+						reads.set(key, n + 1);
+						return key === "id" ? (ids[n] ?? ids.at(-1)) : source[key];
+					},
+				});
+			}
+			return { item, reads };
+		};
+		const one = counted(["a", "b"]);
+		const read = readMfaFactorSet({ generation: G, items: [one.item] }, "user-1");
+		expect(read.items).toStrictEqual([record("a")]);
+		expect([...one.reads.values()].every((n) => n === 1)).toBe(true);
+		expect(one.reads.size).toBe(9);
+		// Each id reads "a" first and something else after: a second read would miss the repeat.
+		const first = counted(["a", "x"]);
+		const second = counted(["a", "y"]);
+		expect(() =>
+			readMfaFactorSet({ generation: G, items: [first.item, second.item] }, "user-1"),
+		).toThrow(new TypeError("MfaFactorStore.listVersioned: a record id repeats"));
 	});
 
 	it("throws a TypeError for an answer whose read throws, a record's included", () => {

@@ -266,9 +266,27 @@ const RECORD_BINDINGS: ReadonlySet<unknown> = new Set([
 const isInstant = (value: unknown): value is Date =>
 	value instanceof Date && Number.isFinite(value.getTime());
 
-/** `item` as a record of `subject`, its fields each read once; `undefined` for anything else. */
+/** Every key of {@link MfaFactorRecord}: each a required key, so each must be an own property. */
+const RECORD_KEYS = [
+	"id",
+	"subject",
+	"kind",
+	"label",
+	"binding",
+	"createdAt",
+	"lastUsedAt",
+	"version",
+	"data",
+] as const satisfies readonly (keyof MfaFactorRecord)[];
+
+/**
+ * `item` as a record of `subject`: every key an own property, each read once,
+ * and a fresh frozen record built from the values read; `undefined` for
+ * anything else.
+ */
 function recordOf(item: unknown, subject: string): MfaFactorRecord | undefined {
 	if (typeof item !== "object" || item === null) return undefined;
+	if (!RECORD_KEYS.every((key) => Object.hasOwn(item, key))) return undefined;
 	const {
 		id,
 		subject: owner,
@@ -289,23 +307,36 @@ function recordOf(item: unknown, subject: string): MfaFactorRecord | undefined {
 	if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 0) {
 		return undefined;
 	}
-	return typeof data === "string" ? (item as MfaFactorRecord) : undefined;
+	if (typeof data !== "string") return undefined;
+	return Object.freeze({
+		id,
+		subject: owner,
+		kind,
+		label,
+		binding: binding as MfaFactorRecord["binding"],
+		createdAt,
+		lastUsedAt,
+		version,
+		data,
+	});
 }
 
 /**
  * What `listVersioned` answered for `subject`, read as the port promises it:
  * a versioned set (`readVersionedSet`) whose items are whole records, every
- * field of its type, each naming `subject`, no id twice, and none for an
- * absent set. A fresh frozen answer; the records are the ones answered.
- * Throws a `TypeError` for anything else, a read that throws included — the
- * store's fault, which the caller answers as the store's outage, never as a
- * set with nothing in it.
+ * key of its type an own property and every field of its type, each naming
+ * `subject`, no id twice, and none for an absent set. A fresh frozen answer
+ * whose records are fresh frozen copies, each field of the answered record
+ * read once. Throws a `TypeError` for anything else, a read that throws
+ * included — the store's fault, which the caller answers as the store's
+ * outage, never as a set with nothing in it.
  */
 export function readMfaFactorSet(answer: unknown, subject: string): VersionedSet<MfaFactorRecord> {
 	const read = readVersionedSet<unknown>(answer as VersionedSet<unknown>);
 	const refuse = (what: string): TypeError =>
 		new TypeError(`MfaFactorStore.listVersioned: ${what}`);
 	const ids = new Set<string>();
+	const records: MfaFactorRecord[] = [];
 	for (const item of read.items) {
 		let record: MfaFactorRecord | undefined;
 		try {
@@ -316,8 +347,9 @@ export function readMfaFactorSet(answer: unknown, subject: string): VersionedSet
 		if (record === undefined) throw refuse("an item is not a whole record of the subject");
 		if (ids.has(record.id)) throw refuse("a record id repeats");
 		ids.add(record.id);
+		records.push(record);
 	}
-	return read as VersionedSet<MfaFactorRecord>;
+	return Object.freeze({ items: Object.freeze(records), generation: read.generation });
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaFactorStore}. */
