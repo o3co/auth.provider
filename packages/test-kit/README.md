@@ -39,7 +39,11 @@ devDependencies.
   [`src/mfa/factor.contract.mts`](src/mfa/factor.contract.mts);
 - `mailSenderContract`, the conformance suite of a mail sender — the value of
   core's `mailSender` slot — in
-  [`src/mail/mailSender.contract.mts`](src/mail/mailSender.contract.mts).
+  [`src/mail/mailSender.contract.mts`](src/mail/mailSender.contract.mts);
+- `conditionalRecordContract` and `conditionalSetContract`, the generic suites
+  of core's conditional-write convention, which a port's binding runs over its
+  conditional members, in
+  [`src/conditionalWrite/conditionalWrite.contract.mts`](src/conditionalWrite/conditionalWrite.contract.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
@@ -384,6 +388,107 @@ What it cannot see, and a sender's own tests must: what the sender logs
 itself (a transport's debug transcript, say), an error's properties outside
 the projection, and an encoding of the mail other than base64.
 
+## The conditional-write suites
+
+The generic suites of core's conditional-write convention (core's
+`adapters/conditionalWrite.mts`; the rules in
+[docs/adapter-surface.md](../../docs/adapter-surface.md#conditional-writes)).
+A port with conditional members has a binding that maps them onto a target
+and runs the suite; the suite reads every answer through core's readers, so
+an answer outside its type fails the case.
+
+- `conditionalRecordContract(input)`, for a generation that guards one
+  record. The target (`ConditionalRecordTarget`) is `put`, the port's
+  create path, `getVersioned`, `replaceIf`, `removeIf`, and its
+  unconditional writes of a key by name. Each writes the value it is given, or, named in the input's
+  `removals` (a logout-style delete), removes the key. `values()` answers
+  two distinct values, equal on every call; `mutate`, when given, changes a
+  value in place, each mutable part on its own and leaving a frozen part
+  without throwing, to prove the store keeps its own copy.
+- `conditionalSetContract(input)`, for a generation that guards a set's
+  membership. The target (`ConditionalSetTarget`) is `listVersioned`,
+  `createIf`, `removeIf`, `reset`, and, when the port has them, `list`,
+  `updateMember` and its unconditional membership writes. `items(scope, n)`
+  answers `n` distinct items of a scope, equal on every call; `idOf` and
+  `scopeOf` read an item, and every item `items` answers is checked to be of
+  the scope asked for. `mutate`, when given, changes an item in place, never
+  its id or scope, to prove the store keeps its own copy, as the record
+  suite's does.
+
+`build()` answers a fresh harness for each case (`ConditionalRecordHarness`,
+`ConditionalSetHarness`):
+
+- `store`;
+- `second`, the same backend through a second instance (another connection,
+  pool or client). The races and the cross-instance case run across the two;
+  absent, `store` is used again, with no cross-process proof;
+- `forceExpire`, which **moves the backend's clock past any retention
+  deadline the store set; it never judges membership or deletes**. The key
+  or scope it is given names what the case expires, for a backend whose clock
+  is per key. What then reads as expired is the store's own doing: a record
+  past its deadline, an emptied set's tombstone, and never a set that holds a
+  member, one revived from its tombstone included. A hook that deletes the
+  key, or decides by itself what expires, proves nothing of the store;
+- `unreachable`, a target over the backend that cannot reach it. It fails
+  fast: a closed port or a refused connection, not an address that drops
+  packets until a timeout;
+- `close`.
+
+`supports` declares, when the suite is built, what every harness and target
+has, so the case list is fixed at registration:
+
+| Key | Suite | Declared | Undeclared |
+| --- | --- | --- | --- |
+| `forceExpire` | both | the expiry cases run | `not run: …` |
+| `unreachable` | both | the outage case runs | `not run: …` |
+| `unconditional` | both | the unconditional-write case runs, over every write the target's `unconditional` names (an empty map fails it) | `not run: …` |
+| `updateMember` | set | the member-update case runs | `not run: …` |
+| `list` | set | the plain-listing case runs | `not run: …` |
+
+A key declared and missing from the harness or the target fails its case. A
+suite's aliasing case runs only with `mutate`, and says so otherwise. A
+binding declares every hook and member its port and backend have.
+
+The races run either operation first, over every delay of up to 8
+microtasks and one macrotask, through `store` and `second`: a conditional
+write against another, and an unconditional write (an unconditional removal,
+say, as a logout makes; a set's reset) against a conditional one. A race's
+loser that meets a record already removed may answer `missing` or
+`conflict`; there is always exactly one winner, and the state is the
+winner's.
+
+Notes for a binding:
+
+- The record suite's create-over-a-live-record case assumes the target's
+  `put` overwrites a live record in place, as a relink does. A port whose
+  create refuses a live record maps `put` to its overwriting write.
+- A store reached over HTTP runs many requests per race case. Give its cases
+  a longer per-case timeout (`it(name, run, timeoutMs)`) rather than fewer
+  rounds.
+
+What the suites cannot see, and a store's own tests must:
+
+- the isolation a real engine gives under schedules the races do not force;
+- anything a store keeps outside its members (an index, a listing);
+- minting a generation into state written without one, and that a
+  conditional write against such state answers `conflict` without minting
+  (rule 8);
+- how a store keeps generations from coming back after a failover or a
+  restore (rule 8);
+- the retention's length, the write-lifetime bound, and that a set's
+  retention starts again at each emptying write (rule 6): each needs a clock
+  moved short of a deadline, and `forceExpire` only moves it past every one;
+- that the retention is the store's own, never a domain field such as an
+  access token's `expiresAt` (rule 3);
+- an HTTP adapter's mapping of statuses: a bare `404` or `409`, without its
+  body, throws (the status table in "Conditional writes");
+- a set's unconditional membership writes other than the reset raced
+  against conditional ones (rule 1); the record suite races every
+  unconditional write;
+- with `forceExpire` undeclared, expiry (rule 3), and with `unreachable`
+  undeclared, the outage (rule 4): the suite then names those cases as not
+  run.
+
 ## The fake Store
 
 `startFakeStore({ users, bearerToken, now })` starts an in-memory HTTP server on
@@ -440,6 +545,10 @@ too — for as long as it runs: give it test data only.
 Exported from [`src/index.mts`](src/index.mts):
 
 - `ContractCase`, core's type of a suite's case;
+- `conditionalRecordContract`, with `ConditionalRecordContractInput`,
+  `ConditionalRecordHarness` and `ConditionalRecordTarget`;
+- `conditionalSetContract`, with `ConditionalSetContractInput`,
+  `ConditionalSetHarness` and `ConditionalSetTarget`;
 - `mailSenderContract`, with `MailSenderContractInput`, `MAIL_RELAY_REFUSALS`,
   `MailRelayRefusal` and `RelayedMail`;
 - `mfaFactorStoreContract`, with `MfaFactorStoreContractInput` (`build` and
@@ -465,6 +574,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`credentialStore.contract.test.mts`](src/webauthn/__tests__/credentialStore.contract.test.mts) | the WebAuthn credential store's suite over core's in-process store; each broken store — one that lets a registration take a credential id another user holds, overwrites a held credential's record and then throws `duplicate-credential`, refuses a held id with another error, lists a credential under the user it refused, lets a user register a held id again over its record, checks for a held id and inserts in two steps, finds a credential with a sign count of 0, lists every credential whoever's, updates a sign count whatever the count it expects, leaves a removed credential, keeps the `lastUsedAt` it held, answers `true` to a sign count update of an id it does not hold, throws on or empties itself at a removal of an id it does not hold, keeps a removed credential in its user's list, removes every credential of the user, or drops a credential's transports, backup state or nickname — refused by the case that names what it breaks; a store that answers transports in another order accepted; a harness built and closed per case |
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges, an identity two authenticators share — read from the record already held, or the latest enrollment's answered for every record — one keyed per factor instance, or one that answers none for the second — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
+| [`conditionalWrite.contract.test.mts`](src/conditionalWrite/__tests__/conditionalWrite.contract.test.mts) | both suites over a reference record store, whose writes take a lock per key, and a reference set store, each serving two instances over one backend and keeping retention deadlines on a clock of its own, which `forceExpire` moves; every case refuses a store broken one way (a write that skips the lock, an unconditional delete among them, a counter or a digest as the generation, a torn versioned read, a write on `conflict`, a create that upserts a held id, a reset or a last removal that leaves no tombstone, a reset in two steps, a store that ignores its own deadline, a set revived from its tombstone that keeps the tombstone's deadline, a re-create after expiry at a generation seen before, an outage answered as absent, writes that skip the expiry check, a second instance reading from a cache, a member update that changes nothing, a value or a member shared with the caller, among them); stores answering frozen values, listing members in another order, or labelling a losing write from a read taken before their lock pass; an undeclared hook's or member's cases left out and named; a declared one missing fails its case; items of another scope fail the case |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, `400` for an expected generation that is none, and one winner among concurrent conditional writes |
 
 ## See also
