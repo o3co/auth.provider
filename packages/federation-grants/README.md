@@ -848,21 +848,23 @@ It checks, in this order:
    that both claims are issued for your registration and account types, and
    the scope set Entra reports with `profile` added. Otherwise, choose
    `identityLookup = "unsupported"` and accept the loss of this one check.
-6. **Eligibility**: a refresh token, and an access token with a finite lifetime
-   within `maxAccessTokenLifetime`, of a type a route without a proof key can
-   present. The answer is read by the rule a refresh's is (core's
-   `readFederationGrantUpstreamAnswer`): each field once, and a field that
-   throws when read, or is not what its type says, makes the answer
-   ineligible, never an outage. `tokenType` is required (RFC 6749 §5.1). Both
-   `expiresIn` and `expiresAt` must state the lifetime, with life left when
-   the answer arrives. An answer with only one of them, or whose `expiresAt`
-   has passed, is `upstream_token_ineligible`.
-7. **Scope containment**, judged by the same rule: nothing beyond what the
-   user was shown. The upstream's `scope` is read tolerantly by RFC 6749
-   §3.3's grammar: whitespace separates, and only scope-tokens count. An
-   omitted `scope` means as requested; one that names no scope-token, blank
-   included, is `upstream_token_ineligible`; an upstream that granted more is
-   `scope_exceeded`, because a token cannot be narrowed after the fact.
+6. **Eligibility**: a refresh token, then an access token with a finite
+   lifetime within `maxAccessTokenLifetime`. The answer is read by the rule a
+   refresh's is (core's `readFederationGrantUpstreamAnswer`): each field once,
+   and a field that throws when read, or is not what its type says, makes the
+   answer `upstream_token_ineligible`, never an outage. Both `expiresIn` and
+   `expiresAt` must state the lifetime, with life left when the answer
+   arrives. An answer with only one of them, or whose `expiresAt` has passed,
+   is `upstream_token_ineligible`.
+7. **Scope containment, then the token type**, judged by the same rule, in
+   that order. Nothing beyond what the user was shown: the upstream's `scope`
+   is read tolerantly by RFC 6749 §3.3's grammar, where whitespace separates
+   and only scope-tokens count. An omitted or blank `scope` means as
+   requested; one that names no scope-token is `upstream_token_ineligible`;
+   an upstream that granted more is `scope_exceeded`, because a token cannot
+   be narrowed after the fact. Then the type: one a route without a proof key
+   can present, and required (RFC 6749 §5.1); any other, or none, is
+   `upstream_token_ineligible`.
 8. **Activation**, immediately after admitting the session again — a second
    admission with the same claim — and re-reading the current-intent pointer
    and the grants boundary. It replaces

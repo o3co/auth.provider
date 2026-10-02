@@ -1342,7 +1342,8 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 			// RFC 6749 §5.1: `token_type` is REQUIRED; an answer without one is not taken for Bearer.
 			[{ tokenType: undefined }, "upstream_token_ineligible"],
 			[{ scope: "openid offline_access calendar.read admin" }, "scope_exceeded"],
-			[{ scope: "" }, "upstream_token_ineligible"],
+			// Scope is judged before the token type.
+			[{ scope: "openid offline_access calendar.read admin", tokenType: "dpop" }, "scope_exceeded"],
 			// Named, but naming no scope-token: not an answer, and not "as
 			// requested" either.
 			[{ scope: '\t"openid"' }, "upstream_token_ineligible"],
@@ -1529,6 +1530,23 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 		expect(await w.grants.find(a.grantId, w.state.now)).toMatchObject({
 			scopes: ["openid", "offline_access"],
 		});
+	});
+
+	it("reads a blank scope as an omitted one: the scopes requested", async () => {
+		for (const scope of ["", " \t "]) {
+			const w = world();
+			const a = await approved(w, "b-1");
+			w.state.exchange = {
+				...w.state.exchange,
+				tokens: { ...w.state.exchange.tokens, scope },
+			};
+			const back = returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+			expect(back.has("error"), JSON.stringify(scope)).toBe(false);
+			const grant = await w.grants.find(a.grantId, w.state.now);
+			expect(grant?.status, JSON.stringify(scope)).toBe("active");
+			expect(grant?.scopes, JSON.stringify(scope)).toStrictEqual(grant?.consent?.scopes);
+			expect(grant?.scopes?.length, JSON.stringify(scope)).toBeGreaterThan(0);
+		}
 	});
 
 	it("reads the upstream's scope by RFC 6749 §3.3's grammar: a tab separates, it does not join", async () => {

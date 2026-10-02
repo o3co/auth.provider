@@ -254,8 +254,8 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 
 			// 6. Eligibility, by core's one rule for an upstream token answer: a
 			// refresh token, and an access token this provider may disclose. An
-			// omitted scope means as requested (RFC 6749 §5.1), i.e. what the user
-			// was shown. Each failure names its own check.
+			// omitted or blank scope means as requested (RFC 6749 §5.1), i.e. what
+			// the user was shown. Each failure names its own check.
 			const answered = readFederationGrantUpstreamAnswer(exchanged.tokens, {
 				calledAt,
 				receivedAt,
@@ -268,9 +268,9 @@ export function createCallbackHandler(flow: BrowserFlow): RequestHandler {
 				await fail("refresh_token_absent");
 				return;
 			}
-			// 7. Scope containment is the rule's: an upstream that granted more than
-			// the user was shown is refused, because a token cannot be narrowed
-			// after the fact.
+			// 7. Scope containment, then the token type, are the rule's: an upstream
+			// that granted more than the user was shown is refused, because a token
+			// cannot be narrowed after the fact.
 			if (!answered.accessToken.eligible) {
 				await fail(
 					answered.accessToken.reason === "scope_exceeded"
