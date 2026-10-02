@@ -230,11 +230,3 @@ export function createFederationGrantBrowserRouter(
 	router.use(unexpectedErrors(options.logger, "federation_grants_browser"));
 	return router;
 }
-
-/** What a disabled deployment mounts here: a plain 404 that names no feature. */
-export function createDisabledFederationGrantBrowserRouter(): Router {
-	const router = express.Router();
-	router.use(noStoreNoReferrer);
-	router.use((_req, res) => plain(res, 404, "Not found."));
-	return router;
-}

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-mtls
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tokens for [`auth.provider`](../../README.md): a token issued to a client that presented a certificate is bound to that certificate, and is refused from anyone presenting another.
 
@@ -118,7 +118,7 @@ A refusal is an `MtlsError` (core's `TokenBindingRefusal`): a `reason` from `Mtl
 
 ## Discovery metadata
 
-When `mtls.enabled = true`, this module contributes `tls_client_certificate_bound_access_tokens: true` (RFC 8705 §3.3) to `/.well-known/openid-configuration`. While disabled it contributes nothing, and the RFC already reads an omitted flag as `false`.
+When `mtls.enabled = true`, this module contributes `tls_client_certificate_bound_access_tokens: true` (RFC 8705 §3.3) to `/.well-known/openid-configuration`. While disabled the module registers nothing — `mtls.enabled` is its switch (`section.isEnabled`) — and the RFC already reads an omitted flag as `false`.
 
 The flag does **not** vary with `source`: both source modes above produce the same `cnf["x5t#S256"]` on the issued token, and §3.3 describes the token, not the transport the certificate arrived over.
 

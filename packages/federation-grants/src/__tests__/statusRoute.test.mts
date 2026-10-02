@@ -333,20 +333,20 @@ describe("the status route — who may ask", () => {
 		}
 	});
 
-	it("refuses a client whose allowlist is not a list as an unknown client", async () => {
+	it("refuses a client whose allowlist is not a list, as a rejected lookup: 503", async () => {
 		// `ClientRepository` is a port, and a deployment's own repository may
 		// answer anything. On a comma-joined string, `.includes` would let
 		// `"calendar,mail"` allow `"cal"`. The client authentication in front
 		// of this route reads clients through core's client-record boundary,
-		// which refuses such a record: the client is unknown, and nothing is
+		// which refuses such a record: the lookup rejects, and nothing is
 		// allowed.
 		const h = harness();
 		await h.seed();
 		h.world.allowedConnections = "calendar,mail" as unknown as readonly string[];
 
 		const response = await ask(h);
-		expect(response.status).toBe(401);
-		expect(response.body.error).toBe("invalid_client");
+		expect(response.status).toBe(503);
+		expect(response.body.error).toBe("temporarily_unavailable");
 	});
 
 	it("reads an absent allowlist as allowing nothing", async () => {

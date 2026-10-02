@@ -28,6 +28,12 @@ import { redisDurability } from "../durability.mjs";
 import {
 	MFA_BINDING_INDEX,
 	MFA_BINDING_UNINDEX,
+	MFA_FACTOR_CREATE,
+	MFA_FACTOR_CREATE_IF,
+	MFA_FACTOR_LIST_VERSIONED,
+	MFA_FACTOR_REMOVE,
+	MFA_FACTOR_REMOVE_ALL,
+	MFA_FACTOR_REMOVE_IF,
 	MFA_FACTOR_UPDATE,
 	MFA_FIRST_BINDING_NOTE,
 	MFA_FIRST_BINDING_READ,
@@ -48,6 +54,21 @@ import {
 } from "../scripts/mfa.mjs";
 
 /**
+ * A membership script's reply as one of `outcomes`; anything else throws, an outage, never an
+ * outcome. The message names the operation in fixed words and quotes nothing it read.
+ */
+function outcomeOf<const O extends string>(
+	reply: unknown,
+	outcomes: readonly O[],
+	operation: string,
+): O {
+	if ((outcomes as readonly unknown[]).includes(reply)) return reply as O;
+	throw new Error(
+		`mfaFactorStoreClient.${operation}: the script answered a reply it does not document`,
+	);
+}
+
+/**
  * The `MfaFactorStore`'s client over one ioredis connection. Also part of
  * {@link makeIoredisClients}; exported alone so a deployment can keep enrolled factors on a
  * dedicated database or instance, as the MFA ADR's durability requirements prefer.
@@ -57,8 +78,62 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 		async list(key) {
 			return await io.hgetall(key);
 		},
-		async create(key, field, value) {
-			return (await io.hsetnx(key, field, value)) === 1;
+		async listVersioned(key, mint) {
+			const reply = await runScript(io, MFA_FACTOR_LIST_VERSIONED, [key], [mint]);
+			if (!Array.isArray(reply) || reply.length % 2 !== 0) {
+				throw new Error(
+					"mfaFactorStoreClient.listVersioned: the script answered a reply it does not document",
+				);
+			}
+			// Each field an own property, `__proto__` included, as `HGETALL`'s
+			// reply gives `list`: a field the adapter cannot read is refused there,
+			// never dropped here.
+			const pairs: [string, string][] = [];
+			for (let i = 0; i < reply.length; i += 2) {
+				pairs.push([String(reply[i]), String(reply[i + 1])]);
+			}
+			return Object.fromEntries(pairs);
+		},
+		async createIf(key, field, value, input) {
+			const reply = await runScript(
+				io,
+				MFA_FACTOR_CREATE_IF,
+				[key, input.replayKey],
+				[
+					input.next,
+					String(input.deadlineMs),
+					String(input.clockSkewMs),
+					input.expected ?? "",
+					field,
+					value,
+				],
+			);
+			return outcomeOf(reply, ["created", "conflict", "late"], "createIf");
+		},
+		async removeIf(key, field, input) {
+			const reply = await runScript(
+				io,
+				MFA_FACTOR_REMOVE_IF,
+				[key, input.replayKey],
+				[
+					input.next,
+					String(input.deadlineMs),
+					String(input.clockSkewMs),
+					String(input.tombstoneMs),
+					input.expected,
+					field,
+				],
+			);
+			return outcomeOf(reply, ["removed", "missing", "conflict", "late"], "removeIf");
+		},
+		async create(key, field, value, input) {
+			const reply = await runScript(
+				io,
+				MFA_FACTOR_CREATE,
+				[key, input.replayKey],
+				[input.next, String(input.deadlineMs), String(input.clockSkewMs), field, value],
+			);
+			return outcomeOf(reply, ["created", "conflict", "late"], "create");
 		},
 		async update(key, field, input) {
 			const reply = await runScript(
@@ -69,11 +144,34 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 			);
 			return typeof reply === "string" ? reply : null;
 		},
-		async remove(key, field) {
-			await io.hdel(key, field);
+		async remove(key, field, input) {
+			const reply = await runScript(
+				io,
+				MFA_FACTOR_REMOVE,
+				[key, input.replayKey],
+				[
+					input.next,
+					String(input.deadlineMs),
+					String(input.clockSkewMs),
+					String(input.tombstoneMs),
+					field,
+				],
+			);
+			return outcomeOf(reply, ["removed", "missing", "late"], "remove");
 		},
-		async removeAll(key) {
-			await io.del(key);
+		async removeAll(key, input) {
+			const reply = await runScript(
+				io,
+				MFA_FACTOR_REMOVE_ALL,
+				[key, input.replayKey],
+				[
+					input.next,
+					String(input.deadlineMs),
+					String(input.clockSkewMs),
+					String(input.tombstoneMs),
+				],
+			);
+			return outcomeOf(reply, ["removed", "late"], "removeAll");
 		},
 		durability: () => redisDurability(io),
 	};

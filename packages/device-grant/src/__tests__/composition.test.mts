@@ -32,6 +32,7 @@ import type {
 	CodeRepository,
 	ComponentMap,
 	DeviceCodeStore,
+	GrantPolicyHook,
 	Logger,
 	SubjectRevocation,
 	SubjectRevocationService,
@@ -1289,6 +1290,72 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 				.send({ action: "approve", user_code: verified.userCode });
 			expect(approved.status).toBe(200);
 			expect(approved.body.status).toBe("approved");
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
+describe("deviceGrantModule beside oauthModule — the composition's grantPolicy decides at the poll", () => {
+	// Boot hands a module only the slots its manifest names: without the
+	// declaration the grant reads no policy and mints.
+	const policyModule = (evaluate: GrantPolicyHook["evaluate"]): Module =>
+		defineModule({
+			name: "test:grant-policy",
+			provides: { grantPolicy: (): GrantPolicyHook => ({ kind: "test", evaluate }) },
+		});
+
+	const approvedDeviceCode = async (app: express.Express): Promise<string> => {
+		const started = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send({ client_id: CLIENT_ID });
+		expect(started.status).toBe(200);
+		const agent = request.agent(app);
+		await signIn(agent);
+		const { header, token } = await csrfToken(agent);
+		const approved = await agent
+			.post("/oauth/device/verification")
+			.set(header, token)
+			.send({ action: "approve", user_code: started.body.user_code });
+		expect(approved.status).toBe(200);
+		return started.body.device_code as string;
+	};
+
+	const pollFor = (app: express.Express, deviceCode: string) =>
+		request(app).post("/oauth/token").type("form").send({
+			grant_type: DEVICE_CODE_GRANT_TYPE,
+			client_id: CLIENT_ID,
+			device_code: deviceCode,
+		});
+
+	it("refuses an approved poll the policy denies, with the policy's error", async () => {
+		const config = makeConfig(ENABLED);
+		const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({
+			outcome: "deny",
+			error: "access_denied",
+			errorDescription: "devices are closed",
+		}));
+		const { handle, app } = await bootWith(config, [
+			sessionStoreModuleFor(config),
+			oauthModule({ config }),
+			deviceGrantModule({ config }),
+			policyModule(evaluate),
+		]);
+		try {
+			const polled = await pollFor(app, await approvedDeviceCode(app));
+			expect(polled.status).toBe(400);
+			expect(polled.body).toMatchObject({
+				error: "access_denied",
+				error_description: "devices are closed",
+			});
+			expect(polled.body.access_token).toBeUndefined();
+			expect(evaluate).toHaveBeenCalledTimes(1);
+			expect(evaluate.mock.calls[0]?.[0]).toMatchObject({
+				grantType: DEVICE_CODE_GRANT_TYPE,
+				clientId: CLIENT_ID,
+				subject: "user-1",
+			});
 		} finally {
 			await handle.dispose();
 		}

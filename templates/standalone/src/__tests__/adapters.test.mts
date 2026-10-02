@@ -149,8 +149,8 @@ describe("the shipped selections", () => {
 			replaySeenSet: "redis",
 			consentStore: "none",
 			federationTokenStore: "memory",
-			federationGrantStore: "redis",
-			federationGrantIntentStore: "redis",
+			federationGrantStore: "none",
+			federationGrantIntentStore: "none",
 			mfaFactorStore: "memory",
 			mfaTransactionStore: "memory",
 			codeRepository: "redis",
@@ -279,6 +279,47 @@ describe("the modules phase one chooses by the selections", () => {
 		const modules = names({ [variable]: value });
 		expect(modules).toContain(installed);
 		expect(modules).not.toContain(absent);
+	});
+});
+
+describe("the federation-grant stores", () => {
+	const namesWith = (env: Record<string, string>) =>
+		buildModules(
+			readSwitches(
+				readOwnLayers(ownFiles(), { env: { FEDERATION_GRANTS_ENABLED: "true", ...env } }),
+			),
+			{ environment: "production" },
+		).map((module) => module.name);
+	const STORES = [
+		"core-federation-grant-store-memory",
+		"redis-federation-grant-store",
+		"core-federation-grant-intent-store-memory",
+		"redis-federation-grant-intent-store",
+	];
+
+	it("default to none: with the feature on, neither store is installed until one is selected", () => {
+		expect(namesWith({}).filter((name) => STORES.includes(name))).toEqual([]);
+	});
+
+	it("read none from ADAPTERS_FEDERATION_GRANT_STORE and ADAPTERS_FEDERATION_GRANT_INTENT_STORE", () => {
+		expect(
+			adaptersFrom({
+				ADAPTERS_FEDERATION_GRANT_STORE: "none",
+				ADAPTERS_FEDERATION_GRANT_INTENT_STORE: "none",
+			}),
+		).toMatchObject({ federationGrantStore: "none", federationGrantIntentStore: "none" });
+	});
+
+	it.each([
+		["memory", "core-federation-grant-store-memory", "core-federation-grant-intent-store-memory"],
+		["redis", "redis-federation-grant-store", "redis-federation-grant-intent-store"],
+	])("install the %s stores once selected", (value, grants, intents) => {
+		const names = namesWith({
+			ADAPTERS_FEDERATION_GRANT_STORE: value,
+			ADAPTERS_FEDERATION_GRANT_INTENT_STORE: value,
+		});
+		expect(names).toContain(grants);
+		expect(names).toContain(intents);
 	});
 });
 

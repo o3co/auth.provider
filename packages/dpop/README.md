@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -150,7 +150,7 @@ A refused proof is a `DPoPError` with a `reason` (`DPoPReasonCode`) and this pac
 
 When `dpop.enabled = true`, this module contributes `dpop_signing_alg_values_supported` (RFC 9449 §5.1) to `/.well-known/openid-configuration`, carrying the configured `algWhitelist` verbatim. It is the same read the proof verifier is constructed from, so an algorithm a client picks off discovery is one this deployment will accept.
 
-Nothing is contributed while DPoP is disabled — a client then has no way to tell this module apart from an uninstalled one, which is accurate.
+While DPoP is disabled the module registers nothing — `dpop.enabled` is its switch (`section.isEnabled`) — so a client has no way to tell it apart from an uninstalled one, which is accurate.
 
 ## Server-provided nonces (RFC 9449 §8 / §9)
 

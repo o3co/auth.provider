@@ -771,8 +771,8 @@ describe("createClientAuthMiddleware", () => {
 				.sign(privateKey);
 		};
 		// A method value outside the set, as a repository could answer: core's
-		// client-record boundary refuses the record, so the client is unknown
-		// and its method is never quoted.
+		// client-record boundary refuses the record, so the lookup rejects,
+		// answered `503` as any rejected lookup, and its method is never quoted.
 		const oddMethod = 'client_secret_"b\\\u00e9' as TokenEndpointAuthMethod;
 		const buildApp = () => {
 			const app = express().use(express.urlencoded({ extended: false }));
@@ -806,13 +806,13 @@ describe("createClientAuthMiddleware", () => {
 				);
 			});
 
-			it("answers a configured method outside the set as an unknown client, never quoting it", async () => {
+			it("answers a configured method outside the set 503, never quoting it", async () => {
 				const res = await request(buildApp())
 					.post("/test")
 					.type("form")
 					.send({ client_id: "odd", client_secret: "s3cret" });
-				expect(res.status).toBe(401);
-				expect(described(res)).toBe("Unknown client");
+				expect(res.status).toBe(503);
+				expect(described(res)).toBe("client repository unavailable");
 			});
 
 			it("names RFC 6749 section 2.3 without a section sign", async () => {
@@ -852,10 +852,10 @@ describe("createClientAuthMiddleware", () => {
 				);
 			});
 
-			it("answers a configured method outside the set as an unknown client, never quoting it", async () => {
+			it("answers a configured method outside the set 503, never quoting it", async () => {
 				const res = await assert({ iss: "odd", sub: "odd" });
-				expect(res.status).toBe(401);
-				expect(described(res)).toBe("Unknown client");
+				expect(res.status).toBe(503);
+				expect(described(res)).toBe("client repository unavailable");
 			});
 		});
 	});

@@ -117,8 +117,8 @@ export const resolveRouterSettings = ({
 	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
 	const canonicalIssuer = options.issuer as string;
 	// Every endpoint reads registered clients through core's client-record
-	// boundary, outermost: the document fallback over it, or the boundary
-	// itself (`behindClientBoundary`).
+	// boundary: the document fallback over it, or the boundary itself
+	// (`behindClientBoundary`).
 	//
 	// Client ID Metadata Documents. Pre-registered clients answer first; a
 	// client_id that is an https URL is then resolved from the document it

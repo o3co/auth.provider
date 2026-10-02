@@ -96,9 +96,8 @@ export const noStore: RequestHandler = (_req, res, next) => {
 
 /**
  * The last handler under the mount path: every method and sub-path this
- * package does not serve. The body carries no description, so on a disabled
- * deployment it names no feature to an unauthenticated caller. See README, "A
- * disabled deployment names no feature and runs nothing".
+ * package does not serve. The body carries no description: it names no
+ * feature to an unauthenticated caller.
  */
 export const notFound: RequestHandler = (_req, res) => {
 	res.status(404).json({ error: "not_found" });
@@ -112,7 +111,11 @@ const transport = (): Router => {
 	return router;
 };
 
-/** What a deployment that has not enabled the feature mounts. */
+/**
+ * A 404 under the mount path that names no feature, for a composition root
+ * that mounts the path itself while the feature is off; the module mounts
+ * nothing then.
+ */
 export function createDisabledFederationGrantRouter(): Router {
 	const router = express.Router();
 	router.use(transport());
