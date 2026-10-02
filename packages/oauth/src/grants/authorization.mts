@@ -23,6 +23,7 @@ import {
 	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
+	consoleLogger,
 	constantTimeStringEqual,
 	describeAdmissionOutage,
 	extractResourceParam,
@@ -49,6 +50,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { stepUpRefusal } from "../admission.mjs";
 import type { AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS } from "../admissionActions.mjs";
+import { usableFrontchannelLogoutUri } from "../logout/frontchannelLogoutUri.mjs";
 import { joinSession } from "../logout/sessionEnd.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
@@ -758,7 +760,23 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 								// from the logout cascade.
 								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
 								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-								frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
+								// http(s) only, checked here as at logout: a refused URI
+								// leaves this RP without a front-channel entry, and the
+								// exchange goes on.
+								frontchannelLogoutUri: usableFrontchannelLogoutUri(
+									{
+										// The RP is registered under the authenticated id,
+										// so the warn names that one.
+										clientId: authenticatedClientId,
+										// Read by the helper, inside its guard.
+										get frontchannelLogoutUri(): unknown {
+											return clientRecord?.frontchannelLogoutUri;
+										},
+									},
+									"authorization_code",
+									// The refusal is logged even on a grant built without one.
+									logger ?? consoleLogger,
+								),
 								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
 								registeredAt: new Date(),
 							},

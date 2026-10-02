@@ -94,9 +94,8 @@ afterEach(async () => {
  * login and to the stub federation's identity, and answers the app and the
  * session records each login created, as the memory store reads them back.
  */
-async function boot(user: User) {
+async function boot(user: User, created: string[] = []) {
 	const sessions = createInMemoryUserSessionStore();
-	const created: string[] = [];
 	const recording: UserSessionStore = {
 		...sessions,
 		create: async (input) => {
@@ -192,7 +191,59 @@ const USERS: ReadonlyArray<
 		} as unknown as User,
 		{ witness: "malformed", mailAddress: "unreadable" },
 	],
+	[
+		"answered as a class instance whose fields are prototype getters",
+		new (class {
+			get id() {
+				return "user-4";
+			}
+			get username() {
+				return "dave";
+			}
+			get email() {
+				return "dave@example.com";
+			}
+			get mfaEnrolled() {
+				return true;
+			}
+		})() as unknown as User,
+		{ witness: "enrolled", mailAddress: "address" },
+	],
+	[
+		"answered as an ORM entity, its columns prototype getters over an internal record",
+		ormEntity({ id: "user-5", username: "erin", email: "erin@example.com", mfaEnrolled: true }),
+		{ witness: "enrolled", mailAddress: "address" },
+	],
+	[
+		"with a Date field the login does not need",
+		{
+			id: "user-6",
+			username: "frank",
+			mfaEnrolled: false,
+			createdAt: new Date(0),
+		} as unknown as User,
+		{ witness: "not_enrolled", mailAddress: "none" },
+	],
 ];
+
+/** An entity as an ORM hands it out: its columns in an internal record, each a getter on the prototype. */
+function ormEntity(columns: Record<string, unknown>): User {
+	class Entity {
+		dataValues: Record<string, unknown>;
+		constructor(values: Record<string, unknown>) {
+			this.dataValues = values;
+		}
+	}
+	for (const column of Object.keys(columns)) {
+		Object.defineProperty(Entity.prototype, column, {
+			get(this: Entity) {
+				return this.dataValues[column];
+			},
+			configurable: true,
+		});
+	}
+	return new Entity({ ...columns }) as unknown as User;
+}
 
 describe("a password login through createApp records the enrollment facts its User says", () => {
 	it.each(USERS)("for a user %s", async (_label, user, facts) => {
@@ -207,5 +258,21 @@ describe("a federated login through createApp records the enrollment facts its U
 		const { app, record } = await boot(user);
 		await federatedLogin(app);
 		expect((await record())?.enrollmentFacts).toStrictEqual(facts);
+	});
+});
+
+describe("a login whose User holds a field it needs that is not plain data is refused, and records nothing", () => {
+	it("answers a password login 500 for a witness that is a Date, and writes no session", async () => {
+		const user = { id: "user-7", username: "grace", mfaEnrolled: new Date(0) } as unknown as User;
+		const sessions: string[] = [];
+		const { app } = await boot(user, sessions);
+		const agent = request.agent(app);
+		const csrf = await agent.get("/session/csrf");
+		const login = await agent
+			.post("/session/login")
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.send({ username: "grace", password: PASSWORD });
+		expect(login.status).toBe(500);
+		expect(sessions).toEqual([]);
 	});
 });

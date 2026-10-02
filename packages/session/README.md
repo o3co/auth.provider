@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -412,9 +412,9 @@ The manifest ([`src/module.mts`](src/module.mts)):
   (core's `describeAdmissionOutage`) with nothing written, logged once by
   admission as `session_admission_unavailable` (`store` the requirement's
   name, `phase: "establishment"`). A requirement's interruption is
-  [below](#when-a-requirement-interrupts-the-login). A `User` holding a value
-  core cannot copy into the primary (a function) is refused before anything
-  is written, as the route's error (`500`).
+  [below](#when-a-requirement-interrupts-the-login). A `User` whose
+  declared field holds what is not plain data (a `Date` witness, a function)
+  is refused before anything is written, as the route's error (`500`).
 - On success — every requirement answered `establish` — it creates a
   `UserSession` (`amr: ["pwd"]`, `authentication` primary `pwd`, lifetime
   `session-store.maxAge`), records it in `subjectSessionIndex` when that is wired,
@@ -502,10 +502,14 @@ from the `User` (the MFA enrollment witness and what its address is — none,
 one the provider reads, or one it cannot — never the address), and the `redirectTo`; nothing a caller passes
 beside it. Anything that is not an `Establishment` core built —
 an object shaped like one, a copy of one — is a `RangeError` before anything
-is written. On both paths core copies the `User` into the primary with
-`structuredClone`, so a Store's `toJSON` is not applied and a value that
-cannot be copied (a function) refuses the login with nothing written (`500`):
-a `UserRepository` returns plain data. It runs, in order: the
+is written. On both paths core reads the `User` into the primary as a plain snapshot —
+exactly the fields `User` declares, each by name, once, however the object
+holds it, so a class instance with getters or an ORM entity logs in — and
+`req.session.user` holds that snapshot: the declared fields alone, nothing
+else the Store answered, and no Store's `toJSON` applied. Core refuses a
+`User` whose `id` is not a non-empty string or not the subject, or whose
+declared field holds what is not plain data; the login then answers `500`
+with nothing written. It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session-store.maxAge` after
 `authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the

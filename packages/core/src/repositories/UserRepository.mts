@@ -83,11 +83,11 @@ export type LinkFederatedIdentityResult =
 	  };
 
 export interface UserRepository {
-	/** The user `username` and `password` authenticate, as plain data (see {@link User}), or `null`. */
+	/** The user `username` and `password` authenticate (read as {@link User} says), or `null`. */
 	authenticate(username: string, password: string): Promise<User | null>;
 	/**
-	 * The user a federated identity token is linked to, as plain data (see
-	 * {@link User}), or `null`. The Store answers the MFA enrollment witness
+	 * The user a federated identity token is linked to (read as {@link User}
+	 * says), or `null`. The Store answers the MFA enrollment witness
 	 * (`User.mfaEnrolled`) here as on {@link authenticate}: a federated
 	 * session records it from this answer.
 	 */
