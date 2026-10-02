@@ -73,7 +73,7 @@ export const createRepositoryFactories = (
 		// Whole seconds in decimal digits, as the Redis repository's module schema
 		// requires. A RangeError, as the repository's own constructor refuses the same.
 		const read =
-			config.defaultExpiresIn != null
+			config.defaultExpiresIn !== undefined
 				? positiveWholeNumber.safeParse(config.defaultExpiresIn)
 				: undefined;
 		if (read !== undefined && !read.success) {

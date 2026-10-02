@@ -36,7 +36,7 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 
 ## Dependencies
 
-- Depends on: `adapters/`, `net/` (loopback and the redirect-URI grammar), `security/` (the identifier rule), `errors/` and `logging/` (the `client_repository_unavailable` and `client_record_refused` lines), `grants/` (`SenderConstraint`, type-only) and `federation-grants/` (one value: the reserved-parameter check on a registered federation-grant redirect URI, which loads the lodging module with it — a judgement call recorded in [the directory map](../README.md#where-a-boundary-is-a-judgement-call)); `bcrypt`, `js-yaml`, `zod`, `node:crypto`, `node:fs`.
+- Depends on: `adapters/`, `config/` (the strict whole-number reader the memory code repository's `defaultExpiresIn` is read with), `net/` (loopback and the redirect-URI grammar), `security/` (the identifier rule), `errors/` and `logging/` (the `client_repository_unavailable` and `client_record_refused` lines), `grants/` (`SenderConstraint`, type-only) and `federation-grants/` (one value: the reserved-parameter check on a registered federation-grant redirect URI, which loads the lodging module with it — a judgement call recorded in [the directory map](../README.md#where-a-boundary-is-a-judgement-call)); `bcrypt`, `js-yaml`, `zod`, `node:crypto`, `node:fs`.
 - Depended on by: `grants/` (type-only) and the root barrel; downstream, `packages/oauth`, `session`, `foundation`, `redis` and `federation-grants`.
 - Must never import `boot/`, `middleware/`, `routes/`, `testing/`, or an adapter package. The `grants` edge is type-only in both directions.
 

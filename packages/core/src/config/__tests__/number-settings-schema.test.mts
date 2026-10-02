@@ -165,6 +165,18 @@ describe("the memory code repository reads defaultExpiresIn in decimal digits", 
 		},
 	);
 
+	it("refuses a present null, which is not the key left out", async () => {
+		const { codeFactory } = createRepositoryFactories();
+		await expect(codeFactory.create({ type: "memory", defaultExpiresIn: null })).rejects.toThrow(
+			'"defaultExpiresIn" must be a positive whole number of seconds, in decimal digits',
+		);
+	});
+
+	it("takes the key left out as absent", async () => {
+		const { codeFactory } = createRepositoryFactories();
+		await expect(codeFactory.create({ type: "memory" })).resolves.toBeDefined();
+	});
+
 	it("reads a string of decimal digits", async () => {
 		const { codeFactory } = createRepositoryFactories();
 		await expect(
