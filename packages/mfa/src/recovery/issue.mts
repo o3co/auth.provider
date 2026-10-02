@@ -39,9 +39,15 @@
  *   answered as the loser (`conflict`), shown to nobody. Whichever of two
  *   writers reads the other after its own write yields, so two never both
  *   stand; both may yield. Records that cannot be read again show nothing.
- * - Last, the set is marked shown by compare-and-set; only once it is are its
- *   codes answered, so codes are never answered while the set says it was
- *   not shown. A mark that fails shows nothing, and leaves the set unshown.
+ * - Last, the set is marked shown by compare-and-set at the version it was
+ *   written; only once it is are its codes answered, so codes are never
+ *   answered while the set says it was not shown. A mark that fails, or
+ *   finds the set changed, shows nothing, and leaves the set unshown.
+ *   `issueRecoveryCodes` marks it at once, through the writes it is handed;
+ *   `writeRecoveryCodes` leaves the mark to the answer that carries the
+ *   codes (`show`), for a caller whose answer may still be another one. The
+ *   mark needs no lease: a writer that replaced, removed or changed the set
+ *   since fails it. A set is marked once, so its codes are answered once.
  *
  * A binding by `password` — no account-email proof was asked — replaces
  * nothing: whoever holds the password and one code could make it, so the
@@ -57,6 +63,7 @@ import {
 	type MfaFactor,
 	type MfaFactorRecord,
 	type MfaFactorResolver,
+	type MfaFactorStore,
 } from "@o3co/auth-provider-core";
 import { OUTSIDE_CONTRACT } from "../ceremony.mjs";
 import type { MfaFactorSetWrites } from "../factorSet.mjs";
@@ -89,6 +96,18 @@ export type MfaIssuedRecoveryCodes =
 	| { readonly issued: false; readonly cause: unknown; readonly conflict?: true }
 	| undefined;
 
+/** A set written and not yet shown: its codes are reached through `show` alone, which marks it shown (see this file's header). Never throws. */
+export interface MfaUnshownRecoveryCodes {
+	readonly issued: "unshown";
+	show(): Promise<Exclude<MfaIssuedRecoveryCodes, undefined>>;
+}
+
+/** What writing a set came to: nothing while the factor is off, not issued with why, or the set written unshown. */
+export type MfaWrittenRecoveryCodes =
+	| MfaUnshownRecoveryCodes
+	| Extract<MfaIssuedRecoveryCodes, { readonly issued: false }>
+	| undefined;
+
 export interface IssueRecoveryCodesOptions {
 	readonly factors: MfaFactorResolver;
 	/** The factor store and the subject's recovery-set floor, as the subject's lease hands them. */
@@ -102,6 +121,11 @@ export interface IssueRecoveryCodesOptions {
 	readonly listed?: readonly MfaFactorRecord[];
 }
 
+export interface WriteRecoveryCodesOptions extends IssueRecoveryCodesOptions {
+	/** The factor store `show` marks the set shown through: the lease's while it is held, else one outside it. */
+	readonly markedThrough: Pick<MfaFactorStore, "update">;
+}
+
 /** Whether a set issued beside a binding by `binding` replaces the sets that stood: the one rule (see this file's header). */
 export const replacesStandingSets = (binding: NonNullable<MfaFactorRecord["binding"]>): boolean =>
 	binding !== "password";
@@ -109,10 +133,21 @@ export const replacesStandingSets = (binding: NonNullable<MfaFactorRecord["bindi
 /** Thrown inside issuing when another writer's set won. */
 class LostToAnotherSet extends Error {}
 
-/** A new set for `options.subject` (see this file's header). */
+/** A new set for `options.subject`, marked shown at once (see this file's header). */
 export async function issueRecoveryCodes(
 	options: IssueRecoveryCodesOptions,
 ): Promise<MfaIssuedRecoveryCodes> {
+	const written = await writeRecoveryCodes({
+		...options,
+		markedThrough: options.writes.factorStore,
+	});
+	return written?.issued === "unshown" ? written.show() : written;
+}
+
+/** A new set for `options.subject`, written unshown for its answer to mark (see this file's header). */
+export async function writeRecoveryCodes(
+	options: WriteRecoveryCodesOptions,
+): Promise<MfaWrittenRecoveryCodes> {
 	const { factors, writes, sealing, subject } = options;
 	const { factorStore, recoverySetFloor } = writes;
 	const factor = factors.get(RECOVERY_CODE_FACTOR_KIND);
@@ -188,35 +223,15 @@ export async function issueRecoveryCodes(
 			if (winner !== undefined) throw new LostToAnotherSet("another set of the subject's won");
 		}
 
-		let marked: unknown;
-		try {
-			marked = await factorStore.update(subject, id, 0, {
-				data: sealedShown,
-				label: undefined,
-				lastUsedAt: undefined,
-			});
-		} catch (cause) {
-			return { issued: false, cause };
-		}
-		if (marked === null) {
-			return { issued: false, cause: new Error("the set changed before it was marked shown") };
-		}
-		if (
-			!isMfaFactorUpdateWritten(marked, {
-				subject,
-				id,
-				expectedVersion: 0,
-				next: { data: sealedShown },
-			})
-		) {
-			return { issued: false, cause: OUTSIDE_CONTRACT };
-		}
-		const regenerated = "cause" in standing || standing.records.length > 0;
-		return {
-			issued: true,
+		const issued = {
+			issued: true as const,
 			codes: set.codes,
-			regenerated,
+			regenerated: "cause" in standing || standing.records.length > 0,
 			...(unreplaced === undefined ? {} : { unreplaced }),
+		};
+		return {
+			issued: "unshown",
+			show: () => markShown(options.markedThrough, subject, id, sealedShown, issued),
 		};
 	} catch (cause) {
 		if (cause instanceof LostToAnotherSet) {
@@ -235,6 +250,43 @@ export async function issueRecoveryCodes(
 		return opened.state === "ok"
 			? (recoverySetGeneration(factor as MfaFactor, opened.value) ?? -1)
 			: -1;
+	}
+}
+
+/**
+ * The set `id` marked shown by compare-and-set at the version it was written,
+ * then `issued`, its codes; not issued, with why, when the mark fails or finds
+ * the set changed. Never throws.
+ */
+async function markShown(
+	factorStore: Pick<MfaFactorStore, "update">,
+	subject: string,
+	id: string,
+	sealedShown: string,
+	issued: Extract<MfaIssuedRecoveryCodes, { readonly issued: true }>,
+): Promise<Exclude<MfaIssuedRecoveryCodes, undefined>> {
+	try {
+		const marked: unknown = await factorStore.update(subject, id, 0, {
+			data: sealedShown,
+			label: undefined,
+			lastUsedAt: undefined,
+		});
+		if (marked === null) {
+			return { issued: false, cause: new Error("the set changed before it was marked shown") };
+		}
+		if (
+			!isMfaFactorUpdateWritten(marked, {
+				subject,
+				id,
+				expectedVersion: 0,
+				next: { data: sealedShown },
+			})
+		) {
+			return { issued: false, cause: OUTSIDE_CONTRACT };
+		}
+		return issued;
+	} catch (cause) {
+		return { issued: false, cause };
 	}
 }
 

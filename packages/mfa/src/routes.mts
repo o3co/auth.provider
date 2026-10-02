@@ -63,6 +63,11 @@
  *   session (`escalation.mts`). A step-up answers as the escalation came to;
  *   a binding answers its factor and codes, shown once, whatever it came to.
  *   Neither reaches a login's completion.
+ * - A login's binding marks its recovery codes shown just before the answer
+ *   that carries them, once nothing else can answer the login: one answered
+ *   otherwise — another requirement's interruption, `401`, `503` — leaves
+ *   the set unshown, and a mark that fails answers `recovery_codes_issued:
+ *   false`.
  * - A factor bound beside another that cannot stand — past the limit, or
  *   its records unreadable — and cannot be removed stands: it is audited as
  *   enrolled and said once at error before the `503`.
@@ -134,6 +139,7 @@ import {
 	type MfaManagingSession,
 } from "./management.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
+import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
 import { createMfaRecoveryCodesRouter, type MfaRecoveryCodesOptions } from "./recoveryCodes.mjs";
 import { MFA_REQUIREMENT_NAME } from "./requirement.mjs";
 import type { MfaWitnessMark } from "./witness.mjs";
@@ -602,7 +608,10 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		req: Request,
 		res: Response,
 		verified: Pick<Extract<MfaVerifyOutcome, { outcome: "verified" }>, "continuation" | "adds">,
-		answer: Readonly<Record<string, unknown>> = {},
+		/** What the login's answer carries; made last, once nothing else can answer the login, when it marks what it carries as answered. */
+		answer:
+			| Readonly<Record<string, unknown>>
+			| (() => Promise<Readonly<Record<string, unknown>>>) = {},
 		/** Run once the session is established, before the answer: what follows from the login's sid. */
 		onEstablished?: (sid: string) => Promise<void>,
 	): Promise<void> => {
@@ -669,8 +678,9 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			return;
 		}
 		if (established.sid !== undefined) await onEstablished?.(established.sid);
+		const carried = typeof answer === "function" ? await answer() : answer;
 		csrfGuard.issue(res);
-		res.status(200).json({ message: "Logged in successfully", ...answer });
+		res.status(200).json({ message: "Logged in successfully", ...carried });
 	};
 
 	const { escalate: escalateSession, answer: answerEscalation } = createSessionEscalation({
@@ -1303,36 +1313,52 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 							by: "user",
 						},
 					});
-					const codes = outcome.recoveryCodes;
-					if (codes?.issued === true) {
-						emitAuditEvent(auditSink, {
-							...audited,
-							type: "mfa.recovery_codes.generated",
-							details: {
-								kind: RECOVERY_CODE_FACTOR_KIND,
-								purpose: outcome.purpose,
-								binding: outcome.binding,
-								by: "user",
-								regenerated: codes.regenerated,
-								// A set that stood may still stand beside the new one: kept, or not removed.
-								...(codes.unreplaced === undefined ? {} : { unreplaced: true }),
-								...(codes.unreplaced !== undefined && "kept" in codes.unreplaced
-									? { kept: codes.unreplaced.kept }
-									: {}),
-							},
-						});
-						if (codes.unreplaced !== undefined && "cause" in codes.unreplaced) {
+					/** What the binding's codes came to, audited and said once: the answer's part of them. */
+					const codesAnswered = (codes: MfaIssuedRecoveryCodes) => {
+						if (codes?.issued === true) {
+							emitAuditEvent(auditSink, {
+								...audited,
+								type: "mfa.recovery_codes.generated",
+								details: {
+									kind: RECOVERY_CODE_FACTOR_KIND,
+									purpose: outcome.purpose,
+									binding: outcome.binding,
+									by: "user",
+									regenerated: codes.regenerated,
+									// A set that stood may still stand beside the new one: kept, or not removed.
+									...(codes.unreplaced === undefined ? {} : { unreplaced: true }),
+									...(codes.unreplaced !== undefined && "kept" in codes.unreplaced
+										? { kept: codes.unreplaced.kept }
+										: {}),
+								},
+							});
+							if (codes.unreplaced !== undefined && "cause" in codes.unreplaced) {
+								logger.error(
+									{ sub: outcome.subject, err: loggableError(codes.unreplaced.cause) },
+									"mfa_recovery_codes_unreplaced",
+								);
+							}
+						} else if (codes?.issued === false) {
 							logger.error(
-								{ sub: outcome.subject, err: loggableError(codes.unreplaced.cause) },
-								"mfa_recovery_codes_unreplaced",
+								{ sub: outcome.subject, err: loggableError(codes.cause) },
+								"mfa_recovery_codes_unwritten",
 							);
 						}
-					} else if (codes?.issued === false) {
-						logger.error(
-							{ sub: outcome.subject, err: loggableError(codes.cause) },
-							"mfa_recovery_codes_unwritten",
-						);
-					}
+						// A page that got none points to their regeneration.
+						return codes === undefined
+							? {}
+							: codes.issued
+								? { recovery_codes: codes.codes }
+								: { recovery_codes_issued: false };
+					};
+					/** The binding's answer, made just before it is sent: a set written unshown is marked shown there. */
+					const answer = async () => {
+						const codes = outcome.recoveryCodes;
+						return {
+							factor: outcome.factor,
+							...codesAnswered(codes?.issued === "unshown" ? await codes.show() : codes),
+						};
+					};
 					witnessUnwritten(outcome.subject, outcome.witness);
 					if (outcome.flagUncleared !== undefined) {
 						logger.warn(
@@ -1340,15 +1366,6 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 							"mfa_email_proof_flag_uncleared",
 						);
 					}
-					// The codes are answered here, once; a page that got none points to their regeneration.
-					const answer = {
-						factor: outcome.factor,
-						...(codes === undefined
-							? {}
-							: codes.issued
-								? { recovery_codes: codes.codes }
-								: { recovery_codes_issued: false }),
-					};
 					if (outcome.purpose === "enroll") {
 						// The binding escalates its session. The codes are shown this once, so
 						// the binding is answered whether or not the escalation lands; each
@@ -1363,7 +1380,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 								outcome.adds,
 							);
 						}
-						res.status(200).json(answer);
+						res.status(200).json(await answer());
 						return;
 					}
 					await completeLogin("enrollment", req, res, outcome, answer);

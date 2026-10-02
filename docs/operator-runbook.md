@@ -907,9 +907,11 @@ wires it.
   raises the subject's recovery-set floor (`MfaTransactionStore`) to it:
   every older set is retired at once, its codes refused even while its
   record is still stored, and then removed. A set is written unshown and
-  marked shown just before its codes are answered: the account page's list
-  says `recovery_codes_shown: false` for a set whose codes never reached the
-  user, who should regenerate it.
+  marked shown just before its codes are answered — at a login's first
+  binding, once the session is established, so a login answered otherwise
+  (another requirement's interruption, `401`, `503`) leaves it unshown: the
+  account page's list says `recovery_codes_shown: false` for a set whose
+  codes never reached the user, who should regenerate it.
   The same holds for the email factor's address digests: each login records
   the digest again under the ring's first key, but a record unused since its
   key left the ring answers `503` (`mfa_factor_unreadable`,
@@ -1651,7 +1653,8 @@ longer matches the login's; `mfa.factor.enrolled` (`binding`: `password` or
 `login` or `enroll`; `by: "user"`) and `mfa.recovery_codes.generated`
 (`regenerated: true` when a set stood, or may have; `unreplaced: true` when
 an older set is still stored beside the new one — kept and usable, with
-`kept: "password_binding"`, or retired and not removed) at a first binding,
+`kept: "password_binding"`, or retired and not removed) at a first binding —
+at a login's, once the answer carrying the codes marked them shown —
 and at a regeneration from the account page (`binding: "mfa"`, no
 `purpose`), and `mfa.first_binding_conflict`
 (`kind`) for one dropped because another binding of the subject stood at

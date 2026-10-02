@@ -118,12 +118,13 @@ const LEASE_WAITS_MS = [25, 50, 100, 200, 400] as const;
 /**
  * The most Store and directory calls one writer makes under the lease — what
  * the lease is sized from, and `factorSetBudget.test.mts` holds every writer
- * to: a first binding by the account-email proof over two standing
- * recovery-code sets (a binding by password keeps the one that stood) makes
- * fourteen (the first-binding note, the consume, the factor, the records read
- * again, D25's flag, the sets read, the recovery-set floor read, the new set,
- * the floor raised, each old set's removal, the records read again, the set
- * marked shown, the witness); a regeneration of recovery codes seven and one
+ * to: a first binding by the account-email proof in a session over two
+ * standing recovery-code sets (a binding by password keeps the one that
+ * stood) makes fourteen (the first-binding note, the consume, the factor, the
+ * records read again, D25's flag, the sets read, the recovery-set floor read,
+ * the new set, the floor raised, each old set's removal, the records read
+ * again, the set marked shown, the witness) — a login's thirteen, its set
+ * marked shown by its answer, past the lease; a regeneration of recovery codes seven and one
  * per standing set (the records read, the first-binding mark read, the floor
  * read, the new set, the floor raised, the removals, the records read again,
  * the set marked shown); the

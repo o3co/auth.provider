@@ -43,7 +43,7 @@ import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
 import type { MfaSubjectRecords } from "./factorState.mjs";
 import type { RequireEmailProof, UnprovableReason } from "./firstBinding.mjs";
 import type { MfaMailRefusal } from "./mail.mjs";
-import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
+import type { MfaIssuedRecoveryCodes, MfaUnshownRecoveryCodes } from "./recovery/issue.mjs";
 import type { MfaSealing } from "./sealing.mjs";
 import type { MfaEnrollmentWitness, MfaWitnessMark } from "./witness.mjs";
 
@@ -397,7 +397,8 @@ export type MfaEnrollmentCompleteOutcome = (
 			readonly adds: { readonly amr: readonly string[]; readonly mfaAt: Date };
 			readonly factor: { readonly id: string; readonly kind: string; readonly label?: string };
 			readonly binding: NonNullable<MfaFactorRecord["binding"]>;
-			readonly recoveryCodes: MfaIssuedRecoveryCodes;
+			/** A login's set is written unshown: the answer that carries its codes marks it (`show`). */
+			readonly recoveryCodes: MfaIssuedRecoveryCodes | MfaUnshownRecoveryCodes;
 			/** The witness marked after a first binding; `undefined` for a factor bound beside another. */
 			readonly witness: MfaWitnessMark | undefined;
 			/** Why D25's flag could not be cleared after the proof was given; `undefined` when it was, or none was due. */
