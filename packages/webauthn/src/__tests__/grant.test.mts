@@ -968,7 +968,7 @@ describe("createWebAuthnGrant — grantPolicy", () => {
 		};
 	}
 
-	it("answers a policy's access_denied deny 400 invalid_grant, the token endpoint's code", async () => {
+	it("answers a policy's access_denied deny 400 invalid_request, the token endpoint's code", async () => {
 		const { store, deps } = makeDepsWith(async () => ({
 			outcome: "deny",
 			error: "access_denied",
@@ -983,7 +983,7 @@ describe("createWebAuthnGrant — grantPolicy", () => {
 
 		expect(result).toEqual({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription: "policy denied",
 		});
 	});

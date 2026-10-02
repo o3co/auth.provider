@@ -30,7 +30,11 @@ import type {
 	GrantPolicyHook,
 	SubjectRevocation,
 } from "@o3co/auth-provider-core";
-import { createMemoryDeviceCodeStore, createSymmetricKeyStore } from "@o3co/auth-provider-core";
+import {
+	consoleLogger,
+	createMemoryDeviceCodeStore,
+	createSymmetricKeyStore,
+} from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, type Mock, vi } from "vitest";
 import { createDeviceCodeGrant } from "#/grant.mjs";
@@ -133,13 +137,37 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 		},
 	);
 
-	it("drops a deny's description outside RFC 6749 §5.2's characters", async () => {
+	it("repairs a deny's description to RFC 6749 §5.2's characters", async () => {
 		const { poll } = await approvedWith(async () => ({
 			outcome: "deny",
 			error: "invalid_scope",
 			errorDescription: 'devices are "closed"',
 		}));
-		expect((await poll()).result).toEqual({ status: 400, error: "invalid_scope" });
+		expect((await poll()).result).toEqual({
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: "devices are ?closed?",
+		});
+	});
+
+	it("leaves the rewrite line to core's console logger when the grant's logger has no warn function", async () => {
+		const spy = vi.spyOn(consoleLogger, "warn").mockImplementation(() => {});
+		try {
+			const logger = { warn: undefined, error: vi.fn() } as unknown as {
+				warn: Mock<(obj: Record<string, unknown>, msg: string) => void>;
+				error: Mock;
+			};
+			const { poll } = await approvedWith(
+				async () => ({ outcome: "deny", error: "consent_required" }),
+				undefined,
+				undefined,
+				logger,
+			);
+			expect((await poll()).result).toEqual({ status: 400, error: "invalid_grant" });
+			expect(spy.mock.calls.map((call) => call[1])).toEqual(["grant_policy_refusal_rewritten"]);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
 	it("answers a policy that throws 503", async () => {

@@ -1389,10 +1389,6 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			["a number", { outcome: "deny", error: "invalid_scope", errorDescription: 42 }],
 			["the empty string", { outcome: "deny", error: "invalid_scope", errorDescription: "" }],
 			["absent", { outcome: "deny", error: "invalid_scope" }],
-			[
-				"outside RFC 6749 §5.2's characters",
-				{ outcome: "deny", error: "invalid_scope", errorDescription: 'say "no"' },
-			],
 		])("answers a deny whose description is %s with no description", async (_label, decision) => {
 			const { grant } = await boot([
 				defineModule({
@@ -1423,6 +1419,12 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				expect(log.of("grant_policy_refusal_rewritten")).toHaveLength(1);
 			},
 		);
+
+		it("repairs a deny's description to RFC 6749 §5.2's characters, as /oauth/token does", async () => {
+			const { grant } = await boot([denying("invalid_scope", 'say "no"')]);
+			const { result } = await exchange(grant, await body());
+			expect(result).toEqual({ status: 400, error: "invalid_scope", errorDescription: "say ?no?" });
+		});
 
 		// The other grants answer a deny through core's `evaluateGrantPolicy`.
 		it.each(["invalid_request", "invalid_scope", "unauthorized_client", "invalid_target"])(

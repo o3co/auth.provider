@@ -45,7 +45,7 @@
  * - A wired `grantPolicy` is consulted on the approval once its client is
  *   checked, before the revocation read and the minting instant, through
  *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error when
- *   it is a token-endpoint code (RFC 6749 §5.2's, `invalid_target`),
+ *   it is a token-endpoint code (RFC 6749 §5.2's, `invalid_target`), and
  *   `invalid_grant` otherwise (never an RFC 8628 polling code: the approval is spent), a
  *   throw is 503, a scope or audience past the approval or `allowedAudiences`
  *   is 500. It may only narrow; its audience, within `allowedAudiences`, is
@@ -131,21 +131,26 @@ const error = (status: number, code: string, description: string): GrantHandlerR
 
 /**
  * Where core writes a policy's lines, object-first: its outage and
- * invalid-decision lines at error, a deny it rewrites at warn. A logger with
- * no error channel leaves the error lines to core's console logger.
+ * invalid-decision lines at error, a deny it rewrites at warn. A channel the
+ * logger lacks is left to core's console logger.
  */
 const policyLoggerOf = (
 	logger: DeviceCodeGrantOptions["logger"],
 ): EvaluateGrantPolicyOptions["logger"] => {
 	if (logger === undefined) return undefined;
-	const writeWarn = logger.warn.bind(logger);
 	const writeError =
 		typeof logger.error === "function"
 			? logger.error.bind(logger)
 			: consoleLogger.error.bind(consoleLogger);
+	const writeWarn = typeof logger.warn === "function" ? logger.warn.bind(logger) : undefined;
 	return {
 		error: (obj: unknown, msg?: unknown) => writeError(obj as Record<string, unknown>, String(msg)),
-		warn: (obj: unknown, msg?: unknown) => writeWarn(obj as Record<string, unknown>, String(msg)),
+		...(writeWarn !== undefined
+			? {
+					warn: (obj: unknown, msg?: unknown) =>
+						writeWarn(obj as Record<string, unknown>, String(msg)),
+				}
+			: {}),
 	};
 };
 
@@ -287,7 +292,9 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
 					scope,
-					{ logger: policyLogger },
+					// The poll has spent the approval: a refusal the device must not
+					// retry is `invalid_grant`, never a polling code.
+					{ logger: policyLogger, denyFallback: "invalid_grant" },
 				);
 				if (!policy.ok) return policyRefusal(policy.result);
 				scope = policy.scopes;

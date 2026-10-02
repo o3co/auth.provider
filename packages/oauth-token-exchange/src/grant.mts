@@ -286,16 +286,14 @@ async function applyGrantPolicy(
 		});
 		if (reading.verdict === "invalid") return { result: reading.result };
 		if (reading.verdict === "deny") {
-			// Core's answer to a deny, as on every grant; a code that is not a
-			// token-endpoint code is `invalid_request`, RFC 8693 §2.2.2's code for a
-			// request refused by policy.
+			// Core's answer to a deny, as on every grant: a code that is not a
+			// token-endpoint code is `invalid_request`, also RFC 8693 §2.2.2's code for
+			// a request refused by policy.
 			return {
-				result: policyDenied(
-					reading.decision,
-					deps.logger,
-					{ grantType: GRANT_TYPE, policy: deps.grantPolicy.kind },
-					"invalid_request",
-				),
+				result: policyDenied(reading, deps.logger, {
+					grantType: GRANT_TYPE,
+					policy: deps.grantPolicy.kind,
+				}),
 			};
 		}
 		const { decision } = reading;

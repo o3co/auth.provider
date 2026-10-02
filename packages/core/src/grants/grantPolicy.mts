@@ -21,7 +21,7 @@
  * is read once, into a plain copy, before anything acts on it.
  */
 
-import { auditErrorText, isWellFormedErrorCode } from "../errors/envelope.mjs";
+import { auditErrorText, sanitizeErrorText } from "../errors/envelope.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
@@ -144,52 +144,76 @@ const TOKEN_ENDPOINT_REFUSAL_CODES: ReadonlySet<unknown> = new Set<TokenEndpoint
 	"invalid_target",
 ]);
 
+/** A deny as {@link readGrantPolicyDecision} reads it. */
+type GrantPolicyDenyReading = Extract<GrantPolicyReading, { readonly verdict: "deny" }>;
+
+/**
+ * How many `(policy, code)` pairs {@link policyDenied} remembers having
+ * logged; past it the memory starts over, so a policy whose codes vary
+ * without bound costs bounded memory and at most one line per pair per round.
+ */
+const REWRITES_REMEMBERED = 1024;
+
+/** The `(policy, code)` pairs logged as rewritten in this process. */
+const loggedRewrites = new Set<string>();
+
 /**
  * A policy's deny as the token endpoint answers it: `400` with the policy's
- * `error` when it is a token-endpoint code ({@link TokenEndpointRefusalCode}), and `fallback` (`invalid_grant` unless
- * the caller's grant names another) for any other code — `access_denied`,
- * RFC 8628's polling codes, which would tell a device to keep polling an
- * approval already spent, an extension code, a malformed one.
+ * `error` when it is a token-endpoint code ({@link TokenEndpointRefusalCode}),
+ * and `fallback` for any other code — `access_denied`, RFC 8628's polling
+ * codes, another extension code, a malformed one. `fallback` is
+ * `invalid_request` unless the grant names another: not `invalid_grant`,
+ * which clients read as a dead grant (a refresh token discarded).
  *
- * `errorDescription` is sent only when it is a non-empty string of RFC 6749
- * §5.2's characters (`%x20-21 / %x23-5B / %x5D-7E`). Any other string is
- * dropped, not repaired; an empty or non-string one is not sent.
+ * It takes the deny {@link readGrantPolicyDecision} read — its plain copy —
+ * never a policy's raw decision.
  *
- * A rewritten code or a dropped description is logged once as
- * `grant_policy_refusal_rewritten` at warn, with the grant type, the policy's
- * `kind`, the caller's `site` when it has one, the policy's code sanitised
- * and capped (`auditErrorText`), the code `answered`, and
- * `descriptionDropped` — never the description — on core's console logger
- * when `logger` has no `warn`.
+ * `errorDescription` is sent repaired to RFC 6749 §5.2's characters
+ * (`sanitizeErrorText`), as every `/oauth/token` description is; one that is
+ * empty or not a string is not sent.
+ *
+ * A rewritten code is logged as `grant_policy_refusal_rewritten` at warn —
+ * once per policy `kind` and code in this process — with the grant type, the
+ * policy's `kind`, the caller's `site` when it has one, the policy's code
+ * sanitised and capped (`auditErrorText`), and the code `answered`; on core's
+ * console logger when `logger` has no `warn`.
  */
 export function policyDenied(
-	decision: GrantPolicyDeny,
+	reading: GrantPolicyDenyReading,
 	logger: Partial<Pick<Logger, "warn">> | undefined,
 	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
-	fallback: TokenEndpointRefusalCode = "invalid_grant",
+	fallback: TokenEndpointRefusalCode = "invalid_request",
 ): GrantError {
-	const code: unknown = decision.error;
-	const description: unknown = decision.errorDescription;
+	const code: unknown = reading.decision.error;
+	const description = sanitizeErrorText(reading.decision.errorDescription as unknown);
 	const error = TOKEN_ENDPOINT_REFUSAL_CODES.has(code) ? (code as string) : fallback;
-	// `error_description` is `1*NQSCHAR`, the grammar `error` has (Appendix A.7, A.8).
-	const sent = isWellFormedErrorCode(description) ? description : undefined;
-	const descriptionDropped = typeof description === "string" && description !== "" && !sent;
-	if (error !== code || descriptionDropped) {
-		const sink: Pick<Logger, "warn"> =
-			typeof logger?.warn === "function" ? (logger as Pick<Logger, "warn">) : consoleLogger;
-		sink.warn(
-			{
-				...(context.site !== undefined ? { site: context.site } : {}),
-				grantType: context.grantType,
-				policy: context.policy,
-				error: auditErrorText(code) ?? `(${typeof code})`,
-				answered: error,
-				...(descriptionDropped ? { descriptionDropped } : {}),
-			},
-			"grant_policy_refusal_rewritten",
-		);
-	}
-	return { status: 400, error, ...(sent !== undefined ? { errorDescription: sent } : {}) };
+	if (error !== code)
+		logRewriteOnce(logger, context, auditErrorText(code) ?? `(${typeof code})`, error);
+	return { status: 400, error, ...(description ? { errorDescription: description } : {}) };
+}
+
+function logRewriteOnce(
+	logger: Partial<Pick<Logger, "warn">> | undefined,
+	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
+	loggedCode: string,
+	answered: string,
+): void {
+	const key = JSON.stringify([context.policy, loggedCode]);
+	if (loggedRewrites.has(key)) return;
+	if (loggedRewrites.size >= REWRITES_REMEMBERED) loggedRewrites.clear();
+	loggedRewrites.add(key);
+	const sink: Pick<Logger, "warn"> =
+		typeof logger?.warn === "function" ? (logger as Pick<Logger, "warn">) : consoleLogger;
+	sink.warn(
+		{
+			...(context.site !== undefined ? { site: context.site } : {}),
+			grantType: context.grantType,
+			policy: context.policy,
+			error: loggedCode,
+			answered,
+		},
+		"grant_policy_refusal_rewritten",
+	);
 }
 
 /**
@@ -291,6 +315,13 @@ export interface EvaluateGrantPolicyOptions {
 	 * core's console logger, and so does a logger with no `warn` for that line.
 	 */
 	readonly logger: (Pick<Logger, "error"> & Partial<Pick<Logger, "warn">>) | undefined;
+	/**
+	 * The code a deny outside the token-endpoint codes is answered with
+	 * ({@link policyDenied}); `invalid_request` when absent. A grant whose
+	 * refusal at this point really ends the grant — the device grant, whose
+	 * poll has spent the approval — passes `invalid_grant`.
+	 */
+	readonly denyFallback?: TokenEndpointRefusalCode;
 }
 
 /**
@@ -305,8 +336,9 @@ export interface EvaluateGrantPolicyOptions {
  * - **A decision that is neither `allow` nor `deny` is `500 server_error`**,
  *   never allow ({@link readGrantPolicyDecision}).
  * - **`deny` is `400`** with the policy's own error when it is a
- *   token-endpoint code (RFC 6749 §5.2, `invalid_target`), `invalid_grant` otherwise, and its
- *   description when it keeps to §5.2's characters ({@link policyDenied}).
+ *   token-endpoint code (RFC 6749 §5.2, `invalid_target`), and
+ *   `options.denyFallback` (`invalid_request` by default) otherwise
+ *   ({@link policyDenied}).
  * - **`grantedScope` may only narrow.** It is checked against the ceiling
  *   (by default `effectiveScopes`, the request already narrowed to every
  *   ceiling the grant knows), not a broader allowlist: a scope the caller did
@@ -349,10 +381,12 @@ export async function evaluateGrantPolicy(
 	if (reading.verdict === "deny") {
 		return {
 			ok: false,
-			result: policyDenied(reading.decision, logger, {
-				grantType: request.grantType,
-				policy: grantPolicy.kind,
-			}),
+			result: policyDenied(
+				reading,
+				logger,
+				{ grantType: request.grantType, policy: grantPolicy.kind },
+				options.denyFallback,
+			),
 		};
 	}
 	const { decision } = reading;

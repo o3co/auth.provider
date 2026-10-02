@@ -584,7 +584,7 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed", () => {
 		expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ requestedScope: undefined });
 	});
 
-	it("denies access_denied as invalid_grant, the token endpoint's code, with the policy's description", async () => {
+	it("denies access_denied as invalid_request, the token endpoint's code, with the policy's description", async () => {
 		const { result } = await build({
 			grantPolicy: policyOf(async () => ({
 				outcome: "deny",
@@ -593,7 +593,7 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed", () => {
 			})),
 		}).handle(ctx({ scope: "read" }, authed));
 		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_grant");
+		expect("error" in result && result.error).toBe("invalid_request");
 		expect("errorDescription" in result && result.errorDescription).toBe("device is quarantined");
 	});
 
