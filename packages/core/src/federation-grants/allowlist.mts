@@ -18,7 +18,7 @@
  * A client's federation-grant registration list
  * (`allowedFederationGrantConnections`, `federationGrantRedirectUris`), read
  * defensively. An exported entry point that takes a client record from its
- * caller — lodging, a package's exported handler — cannot assume the record
+ * caller, such as lodging, cannot assume the record
  * came through the client-record boundary, and a comma-joined string would
  * turn membership into a substring match (`"calendar,mail".includes("cal")`),
  * allowing an ungranted connection or a prefix of a registered redirect URI.
