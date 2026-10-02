@@ -562,6 +562,15 @@ export function createClientIdMetadataDocumentResolver(
 const documentFallbacks = new WeakSet<ClientRepository>();
 
 /**
+ * Whether `repository` is a fallback {@link withClientIdMetadataDocuments}
+ * built: by identity, so not one behind a forwarder or from another loaded
+ * copy of this package.
+ */
+export function isClientIdMetadataDocumentFallback(repository: ClientRepository): boolean {
+	return documentFallbacks.has(repository);
+}
+
+/**
  * A {@link ClientRepository} that answers pre-registered clients from `inner`
  * first and Client ID Metadata Documents second.
  *
