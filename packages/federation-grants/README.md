@@ -141,9 +141,11 @@ say what each one means and what to do.
   write retried within the persist budget is one line, with `attempts`. A
   lodging's `connection_not_configured` names the `connection` it asked for.
   A grant the status route reads whose stored date holds no instant is the
-  grant store's outage too (`store: "federation_grant"`, `step: "inspect"`,
-  `err` a `TypeError` naming the date's field on the wire, never its value),
-  as retrieval answers it.
+  grant store's outage too, as retrieval answers it: a consent instant the
+  status cannot be judged against is `step: "status"` with core's
+  `RangeError` as `err`; a date the answer cannot put on the wire is
+  `step: "inspect"`, `err` a `TypeError` naming its field on the wire. Never
+  the value.
 - **The browser's session that cannot be judged** — the session store, the
   subject's sessions boundary, or a session requirement that throws — is the
   same `503` or redirect, and its one line is session admission's:

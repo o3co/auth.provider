@@ -217,21 +217,30 @@ export function createFederationGrantStatusHandler(
 				return;
 			}
 
-			const status = effectiveFederationGrantStatus(grant, {
-				now: at,
-				connection,
-				maxExpiresInMs,
-				// `undefined` never reaches here from the module's bridge, which
-				// refuses an answer that is neither; a hand-mounted reader that
-				// returns one is treated as a failure above rather than as "nothing
-				// was revoked".
-				grantsBoundary: boundary ?? null,
-				revocationSkewMs: options.limits.revocationSkewMs,
-				// A key that is not in the ring is not a status — it is an outage,
-				// answered below and only where it would otherwise have read as a
-				// credential that cannot be opened.
-				credentials: inspection.credentials === "ok" ? "ok" : "unreadable",
-			});
+			// A stored date it cannot compare throws a RangeError: the record's
+			// outage, `503` `storage`, as retrieval answers it.
+			let status: EffectiveFederationGrantStatus;
+			try {
+				status = effectiveFederationGrantStatus(grant, {
+					now: at,
+					connection,
+					maxExpiresInMs,
+					// `undefined` never reaches here from the module's bridge, which
+					// refuses an answer that is neither; a hand-mounted reader that
+					// returns one is treated as a failure above rather than as "nothing
+					// was revoked".
+					grantsBoundary: boundary ?? null,
+					revocationSkewMs: options.limits.revocationSkewMs,
+					// A key that is not in the ring is not a status — it is an outage,
+					// answered below and only where it would otherwise have read as a
+					// credential that cannot be opened.
+					credentials: inspection.credentials === "ok" ? "ok" : "unreadable",
+				});
+			} catch (error) {
+				if (!(error instanceof RangeError)) throw error;
+				unavailable("storage", { store: "federation_grant", step: "status", error });
+				return;
+			}
 
 			if (status.status === "revoked" && status.reason === "backstop") {
 				// Persisted, not merely reported (see the file comment). The event
