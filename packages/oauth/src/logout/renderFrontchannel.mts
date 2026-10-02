@@ -14,8 +14,13 @@
  */
 
 import type { Logger, RedirectUriRejection } from "@o3co/auth-provider-core";
-import { auditErrorText, checkRedirectUri, loggableError } from "@o3co/auth-provider-core";
-import { usableFrontchannelLogoutUri } from "./frontchannelLogoutUri.mjs";
+import {
+	auditErrorText,
+	checkRedirectUri,
+	guardedRead,
+	loggableError,
+} from "@o3co/auth-provider-core";
+import { usableFrontchannelRP } from "./frontchannelLogoutUri.mjs";
 
 export interface FrontchannelRP {
 	readonly clientId: string;
@@ -118,18 +123,18 @@ function postLogoutRedirectTarget(
 		}
 		return undefined;
 	};
-	let uri: unknown;
-	let state: unknown;
-	try {
-		const redirect: unknown = opts.postLogoutRedirect;
-		if (redirect === undefined || redirect === null) return undefined;
-		// A joined URI string from a caller written for the earlier shape.
-		if (typeof redirect !== "object") return refuse("not-an-object");
-		({ uri, state } = redirect as { uri?: unknown; state?: unknown });
-	} catch {
-		// The error is not logged: its message could carry the value.
-		return refuse("unreadable");
-	}
+	// Each read once, through core's `guardedRead`: `null` is a read that
+	// threw, never logged since its message could carry the value.
+	const redirectRead = guardedRead(opts, "postLogoutRedirect");
+	if (redirectRead === null) return refuse("unreadable");
+	const redirect = redirectRead.value;
+	if (redirect === undefined || redirect === null) return undefined;
+	// A joined URI string from a caller written for the earlier shape.
+	if (typeof redirect !== "object") return refuse("not-an-object");
+	const uriRead = guardedRead(redirect, "uri");
+	const stateRead = guardedRead(redirect, "state");
+	if (uriRead === null || stateRead === null) return refuse("unreadable");
+	const [uri, state] = [uriRead.value, stateRead.value];
 	if (uri === undefined || uri === null || uri === "") return undefined;
 	if (typeof uri !== "string") return refuse("not-a-string");
 	if (state !== undefined && typeof state !== "string") return refuse("state-not-a-string");
@@ -154,31 +159,29 @@ function postLogoutRedirectTarget(
 export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
 	const logger = opts.logger ?? console;
 	const iframes = opts.rps
-		.flatMap((rp) => {
+		.flatMap((entry) => {
 			// http(s) only, whoever calls this: a registry entry made before the
 			// code exchange checked it, or by a custom registry, is checked here.
-			const uri = usableFrontchannelLogoutUri(rp, "logout", logger);
-			if (uri === undefined) return [];
+			// Each field is read once; the iframe is built from what was read.
+			const rp = usableFrontchannelRP(entry, "logout", logger);
+			if (rp === undefined) return [];
 			// A failure building the iframe URL skips that RP's iframe: throwing
 			// after cascadeLogout has cleared session state would answer a 500
 			// with an empty body.
 			try {
 				const includeSid = rp.frontchannelLogoutSessionRequired !== false;
-				const iframeSrc = buildIframeUrl(uri, opts.issuer, includeSid ? opts.sid : undefined);
+				const iframeSrc = buildIframeUrl(
+					rp.frontchannelLogoutUri,
+					opts.issuer,
+					includeSid ? opts.sid : undefined,
+				);
 				// `URL` encodes for URL context; the HTML attribute still needs `&amp;`.
 				return [
 					`<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`,
 				];
 			} catch (err) {
-				// Read here only, and guarded: it is only logged.
-				let clientId: unknown;
-				try {
-					clientId = rp.clientId;
-				} catch {
-					clientId = undefined;
-				}
 				logger.warn(
-					{ clientId: auditErrorText(clientId), err: loggableError(err) },
+					{ clientId: auditErrorText(rp.clientId), err: loggableError(err) },
 					"logout_frontchannel_iframe_skipped",
 				);
 				return [];

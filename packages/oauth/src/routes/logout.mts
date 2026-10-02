@@ -46,7 +46,7 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
 import { cascadeLogoutFrom } from "../logout/cascadeLogout.mjs";
-import { usableFrontchannelLogoutUri } from "../logout/frontchannelLogoutUri.mjs";
+import { usableFrontchannelRP } from "../logout/frontchannelLogoutUri.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
 import { beginLogout, type LogoutLeftState } from "../logout/sessionEnd.mjs";
 import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
@@ -888,10 +888,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// Only RPs with an http(s) front-channel URI get an iframe; one refused
 		// is logged once here and skipped. With none, the logout answers as
 		// without front-channel logout (7b–7d). Read only for an HTML answer.
+		// Each accepted RP is passed on as read here, once.
 		const frontchannelRps = acceptsHtml
-			? rps.filter(
-					(rp) => usableFrontchannelLogoutUri(rp, "logout", opts.logger ?? console) !== undefined,
-				)
+			? rps.flatMap((rp) => {
+					const usable = usableFrontchannelRP(rp, "logout", opts.logger ?? console);
+					return usable === undefined ? [] : [usable];
+				})
 			: [];
 		if (frontchannelRps.length > 0) {
 			const html = renderFrontchannelLogoutHtml({

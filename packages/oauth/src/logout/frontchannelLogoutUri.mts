@@ -14,7 +14,7 @@
  */
 
 import type { Logger } from "@o3co/auth-provider-core";
-import { auditErrorText } from "@o3co/auth-provider-core";
+import { auditErrorText, guardedRead, loggableError } from "@o3co/auth-provider-core";
 
 /**
  * Why a front-channel logout URI was not used: `not-http` for a parsed
@@ -39,53 +39,31 @@ export interface FrontchannelLogoutUriSource {
 
 const HTTP_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:"]);
 
-/** `read()`, or `fallback` when the read throws. */
-function guardedRead(read: () => unknown, fallback: unknown): unknown {
+/** One warn that cannot throw: a logger that throws costs the line, never the caller's flow. */
+function warnOnce(
+	logger: Pick<Logger, "warn">,
+	fields: Record<string, unknown>,
+	event: string,
+): void {
 	try {
-		return read();
+		logger.warn(fields, event);
 	} catch {
-		return fallback;
+		// The line is lost; the flow goes on.
 	}
 }
 
-/** Marks a read that threw, apart from every value a field can hold. */
-const UNREADABLE = Symbol("unreadable");
-
 /**
- * The source's front-channel logout URI, when it may be used; otherwise
- * `undefined`. Absent (`undefined`, `null`, `""`) is silent. Anything else
- * must be a string whose parsed protocol is `http:` or `https:`, on any host,
- * the rule the bundled client schema applies at registration. A refused
- * value is one warn with the reason, never the value. Every read and the
- * warn are guarded, so this never throws: front-channel logout is
- * best-effort, so a refusal drops only this URI.
- *
- * Interim: a custom `ClientRepository` or session RP registry bypasses the
- * registration schema, so the value is checked where it is used. Exit
- * condition: core validating every client record at the repository
- * boundary; once it does, the rule moves to core and this helper goes.
+ * The URI `read` holds, when it may be used; otherwise `undefined`, a refusal
+ * logged through `refuse`. `read` is `guardedRead`'s answer: `null` when the
+ * read threw, kept apart from `{ value: undefined }`, an absent field.
  */
-export function usableFrontchannelLogoutUri(
-	source: FrontchannelLogoutUriSource | null | undefined,
-	site: FrontchannelLogoutUriSite,
-	logger: Pick<Logger, "warn"> | undefined,
+function checkedUri(
+	read: { readonly value: unknown } | null,
+	refuse: (reason: FrontchannelLogoutUriRefusal) => undefined,
 ): string | undefined {
-	if (source === null || source === undefined) return undefined;
-	const refuse = (reason: FrontchannelLogoutUriRefusal): undefined => {
-		const clientId = guardedRead(() => source.clientId, undefined);
-		try {
-			logger?.warn(
-				{ site, clientId: auditErrorText(clientId), reason },
-				"logout_frontchannel_uri_refused",
-			);
-		} catch {
-			// A logger that throws costs the line, never the caller's flow.
-		}
-		return undefined;
-	};
 	// The error is not logged: its message could carry the value.
-	const value = guardedRead(() => source.frontchannelLogoutUri, UNREADABLE);
-	if (value === UNREADABLE) return refuse("unreadable");
+	if (read === null) return refuse("unreadable");
+	const value = read.value;
 	if (value === undefined || value === null || value === "") return undefined;
 	if (typeof value !== "string") return refuse("not-a-string");
 	let protocol: string;
@@ -97,4 +75,88 @@ export function usableFrontchannelLogoutUri(
 		return refuse("unparsable");
 	}
 	return HTTP_PROTOCOLS.has(protocol) ? value : refuse("not-http");
+}
+
+/** The warn for one refusal: the site, the client id and the reason, never the URI. */
+const refuser =
+	(site: FrontchannelLogoutUriSite, clientId: () => unknown, logger: Pick<Logger, "warn">) =>
+	(reason: FrontchannelLogoutUriRefusal): undefined => {
+		warnOnce(
+			logger,
+			{ site, clientId: auditErrorText(clientId()), reason },
+			"logout_frontchannel_uri_refused",
+		);
+		return undefined;
+	};
+
+/**
+ * The source's front-channel logout URI, when it may be used; otherwise
+ * `undefined`. Absent (`undefined`, `null`, `""`) is silent. Anything else
+ * must be a string whose parsed protocol is `http:` or `https:`, on any host,
+ * the rule the bundled client schema applies at registration. A refused
+ * value is one warn with the reason, never the value. Every read goes through
+ * core's `guardedRead` and the warn is guarded, so this never throws:
+ * front-channel logout is best-effort, so a refusal drops only this URI.
+ *
+ * Interim: a custom `ClientRepository` or session RP registry bypasses the
+ * registration schema, so the value is checked where it is used. Exit
+ * condition: core validating every client record at the repository
+ * boundary; once it does, the rule moves to core and this helper goes.
+ */
+export function usableFrontchannelLogoutUri(
+	source: FrontchannelLogoutUriSource | null | undefined,
+	site: FrontchannelLogoutUriSite,
+	logger: Pick<Logger, "warn">,
+): string | undefined {
+	if (source === null || source === undefined) return undefined;
+	return checkedUri(
+		guardedRead(source, "frontchannelLogoutUri"),
+		refuser(site, () => guardedRead(source, "clientId")?.value, logger),
+	);
+}
+
+/** An RP's front-channel registration as read once: plain values, the URI checked. */
+export interface UsableFrontchannelRP {
+	readonly clientId: string;
+	readonly frontchannelLogoutUri: string;
+	readonly frontchannelLogoutSessionRequired: boolean | undefined;
+}
+
+/**
+ * The RP's front-channel fields, each read once, when its URI may be used
+ * (the rule of {@link usableFrontchannelLogoutUri}); otherwise `undefined`.
+ * A session flag whose read throws skips the RP with one
+ * `logout_frontchannel_iframe_skipped` warn, as an iframe that cannot be
+ * built does. Never throws. Who renders from the answer reads nothing of the
+ * RP again.
+ */
+export function usableFrontchannelRP(
+	rp: FrontchannelLogoutUriSource & { readonly frontchannelLogoutSessionRequired?: unknown },
+	site: FrontchannelLogoutUriSite,
+	logger: Pick<Logger, "warn">,
+): UsableFrontchannelRP | undefined {
+	const clientId = guardedRead(rp, "clientId")?.value;
+	const uri = checkedUri(
+		guardedRead(rp, "frontchannelLogoutUri"),
+		refuser(site, () => clientId, logger),
+	);
+	if (uri === undefined) return undefined;
+	let sessionRequired: unknown;
+	try {
+		sessionRequired = rp.frontchannelLogoutSessionRequired;
+	} catch (err) {
+		// A flag, not the URI: its error's projection is logged, as for an iframe.
+		warnOnce(
+			logger,
+			{ clientId: auditErrorText(clientId), err: loggableError(err) },
+			"logout_frontchannel_iframe_skipped",
+		);
+		return undefined;
+	}
+	return {
+		clientId: typeof clientId === "string" ? clientId : "",
+		frontchannelLogoutUri: uri,
+		// Only an explicit `false` leaves `sid` out; anything else keeps the default.
+		frontchannelLogoutSessionRequired: sessionRequired === false ? false : undefined,
+	};
 }

@@ -23,6 +23,7 @@ import {
 	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
+	consoleLogger,
 	constantTimeStringEqual,
 	describeAdmissionOutage,
 	extractResourceParam,
@@ -773,7 +774,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 										},
 									},
 									"authorization_code",
-									logger,
+									// The refusal is logged even on a grant built without one.
+									logger ?? consoleLogger,
 								),
 								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
 								registeredAt: new Date(),
