@@ -142,6 +142,8 @@ interface RecordFaults {
 	readonly legacyKeepsGeneration?: boolean;
 	/** A versioned read takes the value and the generation apart, with an `await` between. */
 	readonly tornRead?: "value-first" | "generation-first";
+	/** A versioned read made between a replace's check and its write answers the old value at a generation it mints. */
+	readonly readMintsGeneration?: boolean;
 	/** A replace that answers conflict writes anyway. */
 	readonly writeOnConflict?: boolean;
 	/** A removal of an absent key answers an outcome outside the type. */
@@ -169,7 +171,7 @@ interface RecordEntry {
 /** A lock per key, as a row lock would be: `body` runs once every earlier holder of `key` is done. */
 function keyLocks() {
 	const tails = new Map<string, Promise<void>>();
-	return async <R,>(key: string, body: () => Promise<R>): Promise<R> => {
+	const run = async <R,>(key: string, body: () => Promise<R>): Promise<R> => {
 		const before = tails.get(key) ?? Promise.resolve();
 		let release = (): void => {};
 		const held = new Promise<void>((resolve) => {
@@ -185,6 +187,7 @@ function keyLocks() {
 			if (tails.get(key) === tail) tails.delete(key);
 		}
 	};
+	return run;
 }
 
 /** A record backend, and a target over it per call to `target`. */
@@ -192,6 +195,8 @@ function recordBackend(faults: RecordFaults = {}) {
 	const entries = new Map<string, RecordEntry>();
 	const counters = new Map<string, number>();
 	const locked = keyLocks();
+	/** The keys a replace has checked and not yet written. */
+	const replacing = new Set<string>();
 	let now = 0;
 	/** Runs `body` under `key`'s lock, unless the write skips it. */
 	const serialised = <R,>(key: string, body: () => Promise<R>, skips = false): Promise<R> =>
@@ -272,7 +277,13 @@ function recordBackend(faults: RecordFaults = {}) {
 				const current = entries.get(key);
 				return current === undefined ? null : { value: out(current.value), generation };
 			}
-			return { value: out(entry.value), generation: entry.generation };
+			return {
+				value: out(entry.value),
+				generation:
+					faults.readMintsGeneration === true && replacing.has(key)
+						? newStoreGeneration()
+						: entry.generation,
+			};
 		};
 		return {
 			put: (key, value) =>
@@ -310,7 +321,9 @@ function recordBackend(faults: RecordFaults = {}) {
 							return refused("conflict");
 						}
 						// A round trip inside the step, as a transaction's would be.
+						replacing.add(key);
 						await gap();
+						replacing.delete(key);
 						if (faults.replaceKeepsGeneration === true) {
 							entries.set(key, { ...entry, value: copy(value) });
 							return { outcome: "updated", generation: entry.generation };
@@ -530,6 +543,11 @@ describe("conditionalRecordContract refuses a record store that breaks a rule", 
 		],
 		["a read of the value, then the generation", { tornRead: "value-first" }, RECORD.snapshot],
 		["a read of the generation, then the value", { tornRead: "generation-first" }, RECORD.snapshot],
+		[
+			"a read that answers the value at a generation it mints",
+			{ readMintsGeneration: true },
+			RECORD.snapshot,
+		],
 		["a replace that writes on conflict", { writeOnConflict: true }, RECORD.nothingWritten],
 		["an answer outside the type", { malformedMissing: true }, RECORD.readers],
 		["a value shared with the caller", { alias: true }, RECORD.alias],

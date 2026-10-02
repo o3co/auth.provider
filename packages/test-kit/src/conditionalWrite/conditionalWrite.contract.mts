@@ -527,6 +527,11 @@ export function conditionalRecordContract<V>(
 					} else {
 						assert.deepStrictEqual(snapshot.value, input.values()[0], `${where}: neither value`);
 						assert.equal(
+							snapshot.generation,
+							read.generation,
+							`${where}: the old value at another generation`,
+						);
+						assert.equal(
 							(await writer.replace(key, snapshot.generation, input.values()[0])).outcome,
 							"conflict",
 							`${where}: the old value at the new generation`,
@@ -1205,6 +1210,11 @@ export function conditionalSetContract<T>(
 					} else {
 						sameItems(snapshot.items, [x], where);
 						assert.ok(snapshot.generation !== null, where);
+						assert.equal(
+							snapshot.generation,
+							generation,
+							`${where}: the old members at another generation`,
+						);
 						assert.equal(
 							(await writer.createIf(z, snapshot.generation)).outcome,
 							"conflict",
