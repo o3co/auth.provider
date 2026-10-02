@@ -264,9 +264,10 @@ export function createMfaLockRecovery(options: MfaLockRecoveryOptions): MfaLockR
 		},
 
 		async release(subject, sid) {
-			const nowMs = now();
 			const sessions = await boundary(subject);
 			if ("outcome" in sessions) return sessions;
+			// Taken after the boundary's read, which has no deadline: the store judges the boundary against it.
+			const nowMs = now();
 			const recovered = await factorSet.recover(subject, {
 				sid,
 				nowMs,
