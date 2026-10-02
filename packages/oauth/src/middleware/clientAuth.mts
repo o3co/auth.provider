@@ -51,10 +51,7 @@ export interface ClientAuthMiddlewareOptions {
 	 * header still carries a syntactically valid realm.
 	 */
 	issuer?: string;
-	/**
-	 * Structured logger for repository-failure traces. Defaults to
-	 * `consoleLogger` so existing callers compile unchanged.
-	 */
+	/** Structured logger for refusals and repository failures. Defaults to `consoleLogger`. */
 	logger?: Logger;
 	/**
 	 * Whether `tokenEndpointAuthMethod: "none"` clients are accepted. Only
