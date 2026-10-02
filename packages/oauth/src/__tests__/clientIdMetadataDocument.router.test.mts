@@ -249,6 +249,19 @@ describe("only the router installs the document fallback", () => {
 		expect(entry).not.toHaveProperty("createClientIdMetadataDocumentResolver");
 	});
 
+	it("leaves the fallback's option and resolver types out of the package entry", () => {
+		// Both names are type-only, so a runtime check passes whether or not
+		// they are exported. vitest's typecheck mode compiles this file, so each
+		// `@ts-expect-error` fails the run the moment its name comes back.
+		if (false as boolean) {
+			// @ts-expect-error — the fallback's options are the router's, not exported
+			type _O = import("#/index.mjs").ClientIdMetadataDocumentOptions;
+			// @ts-expect-error — the resolver is the router's, not exported
+			type _R = import("#/index.mjs").ClientIdMetadataDocumentResolver;
+		}
+		expect(true).toBe(true);
+	});
+
 	it("still exports the predicates on a client id and on a resolved client", async () => {
 		const entry: Record<string, unknown> = await import("#/index.mjs");
 		expect(entry.isClientIdMetadataDocumentUrl).toBeTypeOf("function");
