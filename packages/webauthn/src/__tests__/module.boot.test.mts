@@ -546,6 +546,22 @@ describe("the retired webauthn.allowCredentialsForKnownUser", () => {
 		},
 	);
 
+	it.each([true, false])(
+		"refuses it set to %j in a configuration a composition parsed with AppConfigSchema before the boot",
+		async (value) => {
+			const parsed = AppConfigSchema.parse({
+				...coreConfig,
+				webauthn: { allowCredentialsForKnownUser: value },
+			});
+			const refused = await refusedWith({
+				...parsed,
+				"renamed-variables": coreConfig["renamed-variables"],
+			});
+			expect(refused).toMatchObject({ name: "BootError", reason: "config-path-relocated" });
+			expect(refused.message).toContain("webauthn.allowCredentialsForKnownUser was removed");
+		},
+	);
+
 	it.each(["true", "false", ""])(
 		`refuses an environment setting ${VARIABLE} to %j, naming the variable`,
 		async (value) => {

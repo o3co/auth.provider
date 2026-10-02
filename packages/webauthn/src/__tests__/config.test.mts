@@ -20,6 +20,7 @@ import { AppConfigSchema, MAX_DURATION_SECONDS } from "@o3co/auth-provider-core"
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { webauthnConfigSchema } from "../config.mjs";
+import { webauthnModule } from "../module.mjs";
 
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
 // packages/webauthn/config/reference.conf (not in Zod .default() calls).
@@ -519,7 +520,7 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 // hands `config.webauthn` to `webauthnConfigSchema`. Core cannot
 // import this package, so the parity is checked from this side, over the
 // whole key tree.
-describe("core's AppConfigSchema passes through every key webauthnConfigSchema reads", () => {
+describe("core's AppConfigSchema passes through every key webauthnConfigSchema reads, and every removed one", () => {
 	/** Every dotted key path in an object schema, through optional / default / pipe wrappers. */
 	const keyPaths = (schema: z.ZodType, prefix = ""): string[] => {
 		let inner: z.ZodType = schema;
@@ -541,9 +542,17 @@ describe("core's AppConfigSchema passes through every key webauthnConfigSchema r
 		});
 	};
 
-	it("names the same key tree in both schemas", () => {
+	it("names the same key tree in both schemas, and the keys the module declares removed", () => {
 		const coreSection = AppConfigSchema.shape.webauthn;
-		expect(keyPaths(coreSection).sort()).toEqual(keyPaths(webauthnConfigSchema).sort());
+		// A removed key stays in core's shape, presence-only, so the removed-key
+		// refusal still sees it in a configuration parsed before boot.
+		const removed = Object.entries(webauthnModule.section?.relocatedFrom ?? {})
+			.filter(([, to]) => to === null)
+			.map(([from]) => from.replace(/^webauthn\./, ""));
+		expect(removed).toEqual(["allowCredentialsForKnownUser"]);
+		expect(keyPaths(coreSection).sort()).toEqual(
+			[...keyPaths(webauthnConfigSchema), ...removed].sort(),
+		);
 		// Not vacuous: the walk reached the nested rate-limit spec.
 		expect(keyPaths(webauthnConfigSchema)).toContain("rateLimit.authenticationOptions.limit");
 	});

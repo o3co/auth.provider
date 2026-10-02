@@ -821,6 +821,9 @@ export const fullSectionsSchema = z.object({
 			challengeTtlMs: wholeNumberInRangeFromEnv(1).optional(),
 			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
 			userVerification: z.enum(["required", "preferred", "discouraged"]).optional(),
+			// Presence-only: a removed key, kept so a root that parses with
+			// `AppConfigSchema` before boot still hands it to the removed-key refusal.
+			allowCredentialsForKnownUser: z.unknown().optional(),
 			rateLimit: z
 				.object({
 					authenticationOptions: rateLimitSpecSchema.optional(),
