@@ -142,6 +142,7 @@ Since the MFA ADR's build-order step 9, a session also records what its login's 
 - **What to do.** A host whose own provider-side pages read another field of `req.session.user` fetches that display data from its user repository by the session's `user.id`.
 - **RPs are unaffected.** They get claims through ID tokens and userinfo, which never read `req.session.user` beyond the declared fields.
 - **The session store holds less.** It no longer holds repository columns the provider does not use, such as a password-hash column.
+- **Sessions that already exist keep the `user` they were written with** until they end: a session renewal carries it over as it is. A fresh login stores the declared fields alone.
 - **Still refused, with a `500`, nothing written:** a `User` that is not an object; an `id` that is not a non-empty string, or not the subject the login names; and a declared field holding what JSON does not hold as it is (a `Date`, a `Map`, a class instance, a function, a bigint, a non-finite number, a list with a hole or an `undefined`, a cycle, the `User` itself). Left out of the snapshot, such a field would read the witness as not enrolled.
 - **A getter that throws** fails the login as it threw (a `500`). It is never read as a witness or an address.
 
