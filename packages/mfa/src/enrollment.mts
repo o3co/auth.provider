@@ -70,9 +70,11 @@
  *   three times, and the user signs in again; one it cannot remove is
  *   reported standing. It then clears D25's flag where the proof was given,
  *   issues the recovery codes — replacing the sets that stood, unless bound
- *   by `password` (`recovery/issue.mts`) — and marks the witness. So at most one first binding stands, and a lost race
- *   spends the transaction, never a factor. The caller resumes a login, or
- *   escalates the session the binding was made in by what it adds.
+ *   by `password` (`recovery/issue.mts`); a login's written unshown, for the
+ *   answer that carries them to mark shown — and marks the witness. So at
+ *   most one first binding stands, and a lost race spends the transaction,
+ *   never a factor. The caller resumes a login, or escalates the session the
+ *   binding was made in by what it adds.
  * - A codes write or a witness mark that fails never undoes the factor:
  *   the outcome says so, and the binding stands.
  */
@@ -105,7 +107,7 @@ import {
 import type { MfaFactorSetCarried, MfaFactorSetWrites } from "./factorSet.mjs";
 import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
-import { issueRecoveryCodes } from "./recovery/issue.mjs";
+import { issueRecoveryCodes, writeRecoveryCodes } from "./recovery/issue.mjs";
 
 const NOT_OPEN = Object.freeze({ outcome: "enrollment_not_open" as const });
 const PROOF_REQUIRED = Object.freeze({ outcome: "email_proof_required" as const });
@@ -743,14 +745,13 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 								(failed) => ({ failed }),
 							)
 						: undefined;
-				const recoveryCodes = await issueRecoveryCodes({
-					factors,
-					writes,
-					sealing,
-					subject: tx.subject,
-					binding,
-					nowMs,
-				});
+				const issuing = { factors, writes, sealing, subject: tx.subject, binding, nowMs };
+				// A login's answer may still be another requirement's, or a refusal: its
+				// codes are marked shown by the answer that carries them.
+				const recoveryCodes =
+					tx.purpose === "enroll"
+						? await issueRecoveryCodes(issuing)
+						: await writeRecoveryCodes({ ...issuing, markedThrough: kit.factorStore });
 				const witness = await writes.witness.mark(tx.subject);
 
 				return { ...enrolled, recoveryCodes, witness, flagUncleared: flagCleared?.failed };
