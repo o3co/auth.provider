@@ -95,6 +95,8 @@ describe("session grant — grantPolicy refusals", () => {
 			throw new Error("decision service down");
 		}).handle(ctx());
 		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		if (!("error" in result)) expect.fail("expected a refusal");
+		expect(result.errorDescription ?? "").not.toContain("decision service down");
 	});
 
 	it("answers a grantedScope past the requested scope 500", async () => {

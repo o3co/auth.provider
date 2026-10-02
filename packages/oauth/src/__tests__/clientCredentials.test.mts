@@ -621,13 +621,17 @@ describe("createClientCredentialsGrant — a wired grant policy is consulted wha
 		);
 		const { result } = await handler.handle(makeCtx(makeClient()));
 		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		if (!("error" in result)) expect.fail("expected a refusal");
+		expect(result.errorDescription ?? "").not.toContain("decision service down");
 	});
 
 	it("narrows the minted scope to the policy's grantedScope, the flag off", async () => {
 		const handler = createClientCredentialsGrant(
 			withPolicy(async () => ({ outcome: "allow", grantedScope: ["read:foo"] })),
 		);
-		const { result } = await handler.handle(makeCtx(makeClient()));
+		const { result } = await handler.handle(
+			makeCtx(makeClient(), { grant_type: "client_credentials", scope: "read:foo write:foo" }),
+		);
 		if (!("tokens" in result)) throw new Error("expected tokens in result");
 		expect(decodeJwt(result.tokens.access_token).scope).toBe("read:foo");
 	});
