@@ -57,7 +57,7 @@ describe("CompletingRequirement — what the addition checks read of a requireme
 const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 	({
 		subject: "user-1",
-		user: { id: "user-1", groups: ["staff"], joined: "2020-01-01T00:00:00Z" },
+		user: { id: "user-1", groups: ["staff"], name: "User One" },
 		claims: { email: "user-1@example.test", emailVerified: true, groups: ["staff"] },
 		recorded: {
 			amr: ["pwd"],
@@ -80,14 +80,16 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 	it("freezes user and claims deeply: a nested object or list in the copy cannot be changed either", () => {
 		const checked = checkPrimaryAuthentication(
 			primary({
-				user: { id: "user-1", profile: { roles: ["staff"], address: { city: "x" } } },
+				// A declared field holding what an untyped Store's JSON may: a list and an object.
+				user: { id: "user-1", groups: [{ roles: ["staff"], address: { city: "x" } }] },
 				claims: { email: "u@example.test", groups: ["staff"], custom: { nested: [1] } },
 			}),
 		);
-		const user = checked.user as { profile: { roles: string[]; address: object } };
-		expect(Object.isFrozen(user.profile)).toBe(true);
-		expect(Object.isFrozen(user.profile.roles)).toBe(true);
-		expect(Object.isFrozen(user.profile.address)).toBe(true);
+		const user = checked.user as { groups: [{ roles: string[]; address: object }] };
+		expect(Object.isFrozen(user.groups)).toBe(true);
+		expect(Object.isFrozen(user.groups[0])).toBe(true);
+		expect(Object.isFrozen(user.groups[0].roles)).toBe(true);
+		expect(Object.isFrozen(user.groups[0].address)).toBe(true);
 		const claims = checked.claims as { groups: string[]; custom: { nested: number[] } };
 		expect(Object.isFrozen(claims.groups)).toBe(true);
 		expect(Object.isFrozen(claims.custom)).toBe(true);

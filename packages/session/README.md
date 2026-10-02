@@ -412,9 +412,9 @@ The manifest ([`src/module.mts`](src/module.mts)):
   (core's `describeAdmissionOutage`) with nothing written, logged once by
   admission as `session_admission_unavailable` (`store` the requirement's
   name, `phase: "establishment"`). A requirement's interruption is
-  [below](#when-a-requirement-interrupts-the-login). A `User` holding a value
-  core cannot copy into the primary (a function) is refused before anything
-  is written, as the route's error (`500`).
+  [below](#when-a-requirement-interrupts-the-login). A `User` whose
+  declared field holds what is not plain data (a `Date` witness, a function)
+  is refused before anything is written, as the route's error (`500`).
 - On success — every requirement answered `establish` — it creates a
   `UserSession` (`amr: ["pwd"]`, `authentication` primary `pwd`, lifetime
   `session-store.maxAge`), records it in `subjectSessionIndex` when that is wired,
@@ -502,12 +502,14 @@ from the `User` (the MFA enrollment witness and what its address is — none,
 one the provider reads, or one it cannot — never the address), and the `redirectTo`; nothing a caller passes
 beside it. Anything that is not an `Establishment` core built —
 an object shaped like one, a copy of one — is a `RangeError` before anything
-is written. On both paths core reads the `User` into the primary by name, once, as a
-plain snapshot — each field `User` declares however the object holds it, so a
-class instance with getters or an ORM entity logs in, then each other own
-enumerable field — and a Store's `toJSON` is not applied. A `User` core
-refuses (an `id` that is not a non-empty string, a declared field holding
-what is not plain data) refuses the login with nothing written (`500`). It runs, in order: the
+is written. On both paths core reads the `User` into the primary as a plain snapshot —
+exactly the fields `User` declares, each by name, once, however the object
+holds it, so a class instance with getters or an ORM entity logs in — and
+`req.session.user` holds that snapshot: the declared fields alone, nothing
+else the Store answered, and no Store's `toJSON` applied. A `User` core
+refuses (an `id` that is not a non-empty string or not the subject, a
+declared field holding what is not plain data) refuses the login with
+nothing written (`500`). It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session-store.maxAge` after
 `authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the

@@ -27,8 +27,8 @@
  * caller's object; a value the contract does not admit is a `RangeError`
  * naming what is wrong and quoting nothing but an `amr` value's marker.
  *
- * A primary's `user` is a plain snapshot of the `User`, each field read by
- * name once (`userSnapshot`), and its `enrollmentFacts` are derived here from
+ * A primary's `user` is a plain snapshot of the fields `User` declares, each
+ * read by name once (`readUserSnapshot`), and its `enrollmentFacts` are derived here from
  * that snapshot, as it is checked and as it is rehydrated, and never read
  * from what a caller hands in; a continuation carries none, and its holder
  * reads them through `enrollmentFactsOfContinuation`, the same derivation.
@@ -41,8 +41,8 @@ import {
 	PASSWORD_AMR,
 } from "../grants/authenticationClaims.mjs";
 import { normaliseMailAddress } from "../mail/address.mjs";
-import type { User } from "../repositories/types.mjs";
 import { readMfaEnrollmentWitness } from "../repositories/UserRepository.mjs";
+import { readUserSnapshot } from "../repositories/userSnapshot.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
 import type {
 	MailAddressFact,
@@ -86,229 +86,26 @@ function deepFreeze<T>(value: T): T {
 	return value;
 }
 
-/** What `plainCopy` and `copyByName` throw for a value that is not plain data. */
-class NotPlainData extends Error {}
-
 /**
- * `value` copied as plain data — a primitive; an array; or an object whose
- * prototype is `Object.prototype` or `null` — frozen at every depth and
- * sharing nothing with it. Every own property must be an enumerable data
- * property under a string key, read once from its descriptor, so no accessor
- * of the object runs (a Proxy's traps are read once); anything else throws
- * `NotPlainData`. `copies` keeps a shared or
- * cyclic reference one copy.
- */
-function plainCopy(value: unknown, copies: Map<object, unknown>): unknown {
-	if (value === null) return null;
-	switch (typeof value) {
-		case "string":
-		case "number":
-		case "boolean":
-		case "bigint":
-		case "undefined":
-			return value;
-		case "object":
-			break;
-		default:
-			throw new NotPlainData();
-	}
-	const source = value as object;
-	const known = copies.get(source);
-	if (known !== undefined) return known;
-	const isArray = Array.isArray(source);
-	const prototype = Reflect.getPrototypeOf(source);
-	if (
-		isArray ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null
-	) {
-		throw new NotPlainData();
-	}
-	const copy: object = isArray ? [] : {};
-	copies.set(source, copy);
-	for (const key of Reflect.ownKeys(source)) {
-		if (typeof key !== "string") throw new NotPlainData();
-		const descriptor = Reflect.getOwnPropertyDescriptor(source, key);
-		if (descriptor === undefined || !Object.hasOwn(descriptor, "value")) throw new NotPlainData();
-		if (isArray && key === "length") {
-			(copy as unknown[]).length = descriptor.value as number;
-			continue;
-		}
-		if (descriptor.enumerable !== true) throw new NotPlainData();
-		Object.defineProperty(copy, key, {
-			value: plainCopy(descriptor.value, copies),
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
-	}
-	return Object.freeze(copy);
-}
-
-/**
- * `user` copied as plain data, frozen at every depth and sharing nothing
- * with it (`plainCopy`); `undefined` for a value that is not an object, or
- * holds anything but plain data — a field an accessor, a prototype or a
- * non-enumerable property holds would be lost from the copy.
- */
-export function frozenUserCopy(user: unknown): Readonly<Record<string, unknown>> | undefined {
-	if (!isPlainObject(user)) return undefined;
-	try {
-		return plainCopy(user, new Map()) as Readonly<Record<string, unknown>>;
-	} catch {
-		return undefined;
-	}
-}
-
-/**
- * The fields `User` declares, which a login reads by name however the
- * object holds them. A field `User` declares that this list misses fails
- * to compile below.
- */
-const USER_FIELDS = [
-	"id",
-	"username",
-	"email",
-	"emailVerified",
-	"name",
-	"picture",
-	"groups",
-	"mfaEnrolled",
-] as const;
-
-type DeclaredUserField = keyof {
-	[K in keyof User as string extends K ? never : number extends K ? never : K]: unknown;
-};
-type UnreadUserField = Exclude<DeclaredUserField, (typeof USER_FIELDS)[number]>;
-const everyDeclaredFieldRead: [UnreadUserField] extends [never] ? true : UnreadUserField = true;
-void everyDeclaredFieldRead;
-
-const DECLARED_USER_FIELDS: ReadonlySet<string> = new Set(USER_FIELDS);
-
-/** Whether `key` is an array index as an array's own property names spell one. */
-const isArrayIndex = (key: string): boolean =>
-	/^(0|[1-9][0-9]*)$/.test(key) && Number(key) < 2 ** 32 - 1;
-
-/** What `copies` holds for an object `copyByName` found not plain data. */
-const NOT_PLAIN: unique symbol = Symbol("not plain data");
-
-/**
- * `value` copied by name as plain data, frozen at every depth and sharing
- * nothing with it: a primitive as it is; an array (`Array.isArray`), each of
- * its own indices read once, and its `length`; an object whose prototype is
- * `Object.prototype` or `null`, each own enumerable string key read once.
- * Every read is an ordinary one, so an accessor runs and a throw is let
- * through as it was thrown. Anything else (a class instance, a `Date`, a
- * `Map`, a function, a symbol) throws `NotPlainData`. `copies` keeps a
- * shared or cyclic reference one copy, read once, and remembers an object
- * found not plain data, so it is not read again.
- */
-function copyByName(value: unknown, copies: Map<object, unknown>): unknown {
-	if (value === null) return null;
-	switch (typeof value) {
-		case "string":
-		case "number":
-		case "boolean":
-		case "bigint":
-		case "undefined":
-			return value;
-		case "object":
-			break;
-		default:
-			throw new NotPlainData();
-	}
-	const source = value as Record<string, unknown>;
-	const known = copies.get(source);
-	if (known === NOT_PLAIN) throw new NotPlainData();
-	if (known !== undefined) return known;
-	// An array is read by index whatever its prototype — an ORM's list type
-	// included — and copied as a plain one.
-	const isArray = Array.isArray(source);
-	if (!isArray) {
-		const prototype = Reflect.getPrototypeOf(source);
-		if (prototype !== Object.prototype && prototype !== null) {
-			copies.set(source, NOT_PLAIN);
-			throw new NotPlainData();
-		}
-	}
-	const copy: Record<string, unknown> = isArray ? ([] as unknown as Record<string, unknown>) : {};
-	copies.set(source, copy);
-	const keys = isArray
-		? Object.getOwnPropertyNames(source).filter(isArrayIndex)
-		: Object.keys(source);
-	try {
-		for (const key of keys) {
-			Object.defineProperty(copy, key, {
-				value: copyByName(source[key], copies),
-				enumerable: true,
-				writable: true,
-				configurable: true,
-			});
-		}
-	} catch (err) {
-		// A copy a cyclic reference already took stays frozen plain data.
-		Object.freeze(copy);
-		if (err instanceof NotPlainData) copies.set(source, NOT_PLAIN);
-		throw err;
-	}
-	if (isArray) (copy as unknown as unknown[]).length = (source as unknown as unknown[]).length;
-	return Object.freeze(copy);
-}
-
-/**
- * The plain snapshot a login takes of `user`, its one read of it. Each field
- * `User` declares is read by name, once, however the object holds it — own
- * data, an accessor, inherited, as a class instance or an ORM entity holds
- * it — then each other own enumerable string-keyed field, by name, once. A
- * field read as `undefined` is left out. Frozen at every depth, sharing
- * nothing with `user`: every fact a login derives is read from it.
- *
- * Refused, quoting nothing of it: a `user` that is not an object, an `id`
- * that is not a non-empty string, and a declared field holding what is not
- * plain data (`copyByName`) — left out, the witness would read as not
- * enrolled. Another field holding what is not plain data (a `Date`, a `Map`,
- * an instance) is left out of the snapshot. A field that refers back to the
- * user is not plain data. A read that throws is let
- * through as it was thrown: never read as a witness or an address.
+ * `user` as `readUserSnapshot` reads it — the fields `User` declares, each
+ * read by name once — or refused, quoting nothing of it.
  */
 function userSnapshot(
 	user: unknown,
 	refuse: (what: string) => never,
 ): Readonly<Record<string, unknown>> {
-	if (!isPlainObject(user)) return refuse("user must be an object");
-	const snapshot: Record<string, unknown> = {};
-	// One map for every field: an object two fields share is read once. The
-	// user is a record, not a value: a field that refers back to it is not
-	// plain data, and the user is not read again.
-	const copies = new Map<object, unknown>([[user, NOT_PLAIN]]);
-	const keep = (key: string, value: unknown): void => {
-		Object.defineProperty(snapshot, key, {
-			value,
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
-	};
-	for (const field of USER_FIELDS) {
-		const value = user[field];
-		if (value === undefined) continue;
-		try {
-			keep(field, copyByName(value, copies));
-		} catch (err) {
-			if (!(err instanceof NotPlainData)) throw err;
-			refuse(`user.${field} must be plain data: a primitive, an array or a plain object`);
-		}
+	const reading = readUserSnapshot(user);
+	if (reading.ok) return reading.snapshot;
+	switch (reading.refused) {
+		case "not_an_object":
+			return refuse("user must be an object");
+		case "id":
+			return refuse("user.id must be a non-empty string");
+		case "not_plain_data":
+			return refuse(
+				`user.${reading.field} must be plain data: a string, a finite number, a boolean, null, or a list or plain object of those`,
+			);
 	}
-	if (!isNonEmptyString(snapshot.id)) refuse("user.id must be a non-empty string");
-	for (const key of Object.keys(user)) {
-		if (DECLARED_USER_FIELDS.has(key)) continue;
-		const value = user[key];
-		if (value === undefined) continue;
-		try {
-			keep(key, copyByName(value, copies));
-		} catch (err) {
-			if (!(err instanceof NotPlainData)) throw err;
-		}
-	}
-	return Object.freeze(snapshot);
 }
 
 /**
@@ -397,6 +194,9 @@ function copyPrimaryFields(
 ): Omit<PrimaryAuthentication, "authTime" | "enrollmentFacts"> {
 	if (!isNonEmptyString(value.subject)) refuse("subject must be a non-empty string");
 	const user = userSnapshot(value.user, refuse);
+	// What reads the session's user back (`cookieClaim`, `cookieSessionUser`)
+	// takes its `id` for the subject.
+	if (user.id !== value.subject) refuse("user.id must be the subject");
 	const claims = copyClaims(value.claims, refuse);
 	const recorded = copyRecorded(value.recorded, refuse);
 	if (value.redirectTo !== undefined && typeof value.redirectTo !== "string") {

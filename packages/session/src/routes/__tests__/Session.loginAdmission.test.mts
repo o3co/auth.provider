@@ -89,6 +89,9 @@ const ALICE = {
 	locale: "en",
 };
 
+/** What the session holds of `ALICE`: the fields `User` declares, nothing else of the Store's. */
+const { locale: _notCarried, ...ALICE_SNAPSHOT } = ALICE;
+
 /** The body the fixture requirement answers a login it interrupts with: core's closed shape. */
 const INTERRUPTION = {
 	status: 403 as const,
@@ -353,7 +356,7 @@ describe("POST /session/login — every requirement answers establish", () => {
 		expect(asked).toHaveLength(1);
 		const [primary] = asked;
 		expect(primary?.subject).toBe("u-1");
-		expect(primary?.user).toEqual(ALICE);
+		expect(primary?.user).toStrictEqual(ALICE_SNAPSHOT);
 		// `extractUserClaims(user)`: the claims the record will hold.
 		expect(primary?.claims).toEqual({
 			email: "alice@example.com",
@@ -398,10 +401,14 @@ describe("POST /session/login — every requirement answers establish", () => {
 		expect(sid).toBeDefined();
 		expect(stored(cookieStore, sid as string)).toMatchObject({
 			isAuthenticated: true,
-			user: ALICE,
+			user: ALICE_SNAPSHOT,
 			sid: created.sid,
 			redirectTo: "https://app.example.com/after",
 		});
+		// Exactly the declared fields: the Store's `locale` is not carried.
+		expect((stored(cookieStore, sid as string) as { user: unknown }).user).toStrictEqual(
+			ALICE_SNAPSHOT,
+		);
 		expect(setCookies(res).some((c) => c.startsWith(`${csrf.cookieName}=`))).toBe(true);
 	});
 
@@ -510,7 +517,7 @@ describe("POST /session/login — a requirement interrupts", () => {
 			done: [],
 			primary: {
 				subject: "u-1",
-				user: ALICE,
+				user: ALICE_SNAPSHOT,
 				claims: { email: "alice@example.com", name: "Alice", groups: ["staff"] },
 				recorded: { amr: ["pwd"] },
 				redirectTo: "https://app.example.com/after",
