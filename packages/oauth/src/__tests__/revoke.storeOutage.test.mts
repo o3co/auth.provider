@@ -31,6 +31,7 @@ import {
 	type AccessTokenDenylist,
 	type ClientRepository,
 	createMemoryAccessTokenDenylist,
+	createOutboundFetch,
 	createRefreshTokenFamilyRevocation,
 	createSymmetricKeyStore,
 	DEFAULT_CLOCK_SKEW_MS,
@@ -47,6 +48,9 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRevokeRouter } from "#/routes/revoke.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
+
+/** Core's outbound fetch, as the composed router hands the endpoint. */
+const outboundFetch = createOutboundFetch({ source: "registration" });
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -127,6 +131,7 @@ function appWith(opts: {
 	app.use(
 		"/oauth",
 		createRevokeRouter(express, {
+			fetch: outboundFetch,
 			clientRepository,
 			keyStore,
 			...(opts.revocation === undefined ? {} : { refreshTokenFamilyRevocation: opts.revocation }),

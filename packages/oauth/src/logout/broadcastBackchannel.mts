@@ -15,7 +15,6 @@
 
 import {
 	auditErrorText,
-	createOutboundFetch,
 	generateLogoutToken,
 	isOutboundRefusal,
 	type KeyStore,
@@ -43,12 +42,11 @@ export interface BroadcastBackchannelLogoutOptions {
 	readonly sid: string;
 	readonly keyStore: KeyStore;
 	/**
-	 * The fetch every POST goes through. Absent → core's outbound fetch with
-	 * `core.outbound`'s defaults, built once on first use. A substitute
-	 * replaces that policy; pass `createOutboundFetch({ config, source:
-	 * "registration" })` to apply a deployment's `core.outbound`.
+	 * The fetch every POST goes through: core's
+	 * `createOutboundFetch({ config, source: "registration" })`, built once, so
+	 * `core.outbound` applies. Anything else replaces that policy.
 	 */
-	readonly fetchImpl?: typeof fetch;
+	readonly fetchImpl: typeof fetch;
 	/** Per-request timeout in milliseconds. Defaults to 5000ms. */
 	readonly timeoutMs?: number;
 	/** Optional structured logger. Defaults to `console`. */
@@ -57,21 +55,17 @@ export interface BroadcastBackchannelLogoutOptions {
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 
-let outboundDefault: typeof fetch | undefined;
-const defaultFetch = (): typeof fetch =>
-	(outboundDefault ??= createOutboundFetch({ source: "registration" }));
-
 /**
  * Best-effort parallel POST of OIDC Back-Channel Logout 1.0 logout_token to each RP's
- * `backchannelLogoutUri`. 4xx/5xx/network/timeout failures, and a destination the
- * outbound fetch refuses (`step: "destination"`, the RP treated as unreachable), are
- * logged via `opts.logger ?? console`. RPs without a `backchannelLogoutUri` are skipped.
- * Throws only when `fetchImpl` is absent and core's outbound fetch cannot be built.
+ * `backchannelLogoutUri`. Never throws; 4xx/5xx/network/timeout failures, and a
+ * destination the outbound fetch refuses (`step: "destination"`, the RP treated as
+ * unreachable), are logged via `opts.logger ?? console`. RPs without a
+ * `backchannelLogoutUri` are skipped.
  */
 export async function broadcastBackchannelLogout(
 	opts: BroadcastBackchannelLogoutOptions,
 ): Promise<void> {
-	const fetchImpl = opts.fetchImpl ?? defaultFetch();
+	const fetchImpl = opts.fetchImpl;
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const logger = opts.logger ?? console;
 

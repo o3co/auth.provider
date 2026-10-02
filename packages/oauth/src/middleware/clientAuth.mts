@@ -75,11 +75,8 @@ export interface ClientAuthMiddlewareOptions {
 	 * alongside `issuer` (RFC 7523 §3). Defaults to `<issuer>/oauth/token`.
 	 */
 	tokenEndpoint?: string;
-	/**
-	 * The fetch used for a client's `jwksUri`. Absent → core's outbound fetch
-	 * with `core.outbound`'s defaults; see `createClientAssertionVerifier`.
-	 */
-	fetch?: typeof fetch;
+	/** The fetch used for a client's `jwksUri`; see `createClientAssertionVerifier`. */
+	fetch: typeof fetch;
 }
 
 // URI-safe characters per RFC 3986 (plus the few sub-delims commonly seen in
@@ -154,14 +151,8 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  */
 export function createClientAuthMiddleware(
 	clientRepository: ClientRepository,
-	loggerOrOptions: Logger | ClientAuthMiddlewareOptions = {},
+	opts: ClientAuthMiddlewareOptions,
 ): RequestHandler {
-	// Also accepts a bare Logger, as older call sites pass; the options object
-	// is needed to supply `issuer`.
-	const opts: ClientAuthMiddlewareOptions =
-		typeof loggerOrOptions === "object" && "warn" in loggerOrOptions
-			? { logger: loggerOrOptions as Logger }
-			: (loggerOrOptions as ClientAuthMiddlewareOptions);
 	const logger: Logger = opts.logger ?? consoleLogger;
 	// `resolveRealm` sanitises the issuer. Shared with the sender-constrained
 	// reject path in `routes/token.mts` so the two emission sites cannot drift.

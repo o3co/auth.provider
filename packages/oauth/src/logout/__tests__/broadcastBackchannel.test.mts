@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { createSymmetricKeyStore } from "@o3co/auth-provider-core";
+import { createOutboundFetch, createSymmetricKeyStore } from "@o3co/auth-provider-core";
 import {
 	createOutboundFetchForTesting,
 	type OutboundExchange,
@@ -305,7 +305,7 @@ describe("broadcastBackchannelLogout — core's outbound fetch", () => {
 	const broadcast = (
 		rps: { clientId: string; backchannelLogoutUri: string }[],
 		logger: ReturnType<typeof createMockLogger>,
-		fetchImpl?: typeof fetch,
+		fetchImpl: typeof fetch = createOutboundFetch({ source: "registration" }),
 	) =>
 		broadcastBackchannelLogout({
 			rps,
@@ -314,7 +314,7 @@ describe("broadcastBackchannelLogout — core's outbound fetch", () => {
 			sid: "sid",
 			keyStore,
 			logger,
-			...(fetchImpl === undefined ? {} : { fetchImpl }),
+			fetchImpl,
 		});
 
 	it.each([
@@ -324,7 +324,7 @@ describe("broadcastBackchannelLogout — core's outbound fetch", () => {
 		"https://u:p@127.0.0.1/bc",
 		"http://127.0.0.1/bc",
 	])(
-		"with no fetchImpl, %s is refused as a destination and logout still completes",
+		"through core's outbound fetch, %s is refused as a destination and logout still completes",
 		async (uri) => {
 			const logger = createMockLogger();
 			await expect(

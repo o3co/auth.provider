@@ -17,6 +17,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	createMemoryReplaySeenSet,
+	createOutboundFetch,
 	type Logger,
 	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	type PublicClient,
@@ -109,12 +110,16 @@ const body = (assertion: string, extra: Record<string, unknown> = {}) => ({
 	...extra,
 });
 
+/** Core's outbound fetch, as a composition hands the verifier. */
+const outboundFetch = createOutboundFetch({ source: "registration" });
+
 const build = (overrides: Partial<Parameters<typeof createClientAssertionVerifier>[0]> = {}) =>
 	createClientAssertionVerifier({
 		issuer: ISSUER,
 		tokenEndpoint: TOKEN_ENDPOINT,
 		replaySeenSet: createMemoryReplaySeenSet(),
 		logger: silent,
+		fetch: outboundFetch,
 		...overrides,
 	});
 
@@ -340,24 +345,27 @@ describe("createClientAssertionVerifier", () => {
 			"https://[::ffff:127.0.0.1]/jwks",
 			"https://u:p@rp.test/jwks",
 			"http://rp.test/jwks",
-		])("with no fetch option, %s is refused exactly as a bad signature is", async (jwksUri) => {
-			const { logger, lines } = warnings();
-			const outcome = refused(
-				await build({ logger }).verify(
-					body(await mint()),
-					findClient(client({ jwks: undefined, jwksUri })),
-				),
-			);
-			expect(outcome).toEqual(await badSignature());
-			expect(outcome).toEqual({
-				kind: "refused",
-				status: 401,
-				error: "invalid_client",
-				description: "Invalid client assertion",
-			});
-			expect(lines).toHaveLength(1);
-			expect(lines[0]).toMatchObject({ reason: "jwks_uri_refused", clientId: CLIENT_ID });
-		});
+		])(
+			"through core's outbound fetch, %s is refused exactly as a bad signature is",
+			async (jwksUri) => {
+				const { logger, lines } = warnings();
+				const outcome = refused(
+					await build({ logger }).verify(
+						body(await mint()),
+						findClient(client({ jwks: undefined, jwksUri })),
+					),
+				);
+				expect(outcome).toEqual(await badSignature());
+				expect(outcome).toEqual({
+					kind: "refused",
+					status: 401,
+					error: "invalid_client",
+					description: "Invalid client assertion",
+				});
+				expect(lines).toHaveLength(1);
+				expect(lines[0]).toMatchObject({ reason: "jwks_uri_refused", clientId: CLIENT_ID });
+			},
+		);
 
 		it("refuses a key set that answers with a redirect, without following it", async () => {
 			const transport = vi.fn(answering(302, "", [["location", "https://rp.test/elsewhere"]]));

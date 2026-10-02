@@ -57,8 +57,8 @@
 # an hour, a fresh jti) per token request. Rotating the key is a JWKS
 # publish when `jwksUri` is used. Needs the replay seen-set wired
 # (REPLAY_SEEN_SET_ADAPTER, on by default). A `jwksUri` (or a
-# `backchannelLogoutUri`) served from a loopback, private or link-local
-# address needs its host in `core.outbound.internalHosts`
+# `backchannelLogoutUri`) served from a loopback, private, link-local or other
+# special-use address (for example 100.64.0.0/10) needs its host in `core.outbound.internalHosts`
 # (CORE_OUTBOUND_INTERNAL_HOSTS); plain http only for a listed loopback host.
 #
 # orders-service:

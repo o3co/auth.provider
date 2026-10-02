@@ -59,6 +59,7 @@ import { CLIENT_ID, connection, SUBJECT } from "./harness.mjs";
 const ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 
 let privateKey: KeyObject;
+let stranger: KeyObject;
 let publicJwk: Record<string, unknown>;
 let peer: Server;
 let jwksUri: string;
@@ -67,6 +68,7 @@ const hits: string[] = [];
 beforeAll(async () => {
 	const pair = generateKeyPairSync("ec", { namedCurve: "P-256" });
 	privateKey = pair.privateKey;
+	stranger = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey;
 	publicJwk = { ...pair.publicKey.export({ format: "jwk" }), kid: "k1", alg: "ES256" };
 	peer = createServer((req, res) => {
 		hits.push(req.url ?? "");
@@ -83,23 +85,45 @@ afterAll(async () => {
 
 afterEach(() => {
 	hits.length = 0;
+	reasons.length = 0;
 	vi.unstubAllEnvs();
 });
 
+const INLINE_CLIENT = "inline-app";
+
+const registered = (clientId: string, keys: object) =>
+	({
+		clientId,
+		tokenEndpointAuthMethod: "private_key_jwt",
+		allowedScopes: ["openid"],
+		defaultScopes: ["openid"],
+		allowedGrantTypes: [],
+		allowedFederationGrantConnections: [connection.name],
+		...keys,
+	}) as unknown as Client;
+
 const clientRepository: ClientRepository = {
 	findById: async (id) =>
-		id === CLIENT_ID
-			? ({
-					clientId: CLIENT_ID,
-					tokenEndpointAuthMethod: "private_key_jwt",
-					allowedScopes: ["openid"],
-					defaultScopes: ["openid"],
-					allowedGrantTypes: [],
-					allowedFederationGrantConnections: [connection.name],
-					jwksUri,
-				} as unknown as Client as never)
-			: null,
+		(id === CLIENT_ID
+			? registered(CLIENT_ID, { jwksUri })
+			: id === INLINE_CLIENT
+				? registered(INLINE_CLIENT, { jwks: { keys: [publicJwk] } })
+				: null) as never,
 	authenticate: async () => null,
+};
+
+/** What each `client_assertion_refused` line gave as its reason. */
+const reasons: unknown[] = [];
+const logger = {
+	trace: () => {},
+	debug: () => {},
+	info: () => {},
+	warn: (line: unknown, event?: unknown) => {
+		if (event === "client_assertion_refused") reasons.push((line as { reason?: unknown }).reason);
+	},
+	error: () => {},
+	fatal: () => {},
+	child: () => logger,
 };
 
 const federationModule = defineModule({
@@ -159,6 +183,7 @@ const boot = async (outbound?: OutboundSectionForTests) => {
 		bootstrapComponents: {
 			config,
 			pathResolver: (s: string) => s,
+			logger,
 			clientRepository,
 			...acquisitionComponents(),
 			rateLimiter: createMemoryRateLimiter({
@@ -183,33 +208,44 @@ const boot = async (outbound?: OutboundSectionForTests) => {
 	return { handle, app };
 };
 
-/** A compact ES256 JWS over `claims`, signed with the client's key. */
-const signed = (claims: Record<string, unknown>): string => {
+/** A compact ES256 JWS over `claims`, signed with `key`. */
+const signed = (claims: Record<string, unknown>, key: KeyObject): string => {
 	const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 	const input = `${encode({ alg: "ES256", kid: "k1" })}.${encode(claims)}`;
 	const signature = sign("sha256", Buffer.from(input), {
-		key: privateKey,
+		key,
 		dsaEncoding: "ieee-p1363",
 	});
 	return `${input}.${signature.toString("base64url")}`;
 };
 
-const inspect = async (app: express.Express) => {
+const inspect = async (app: express.Express, clientId = CLIENT_ID, key = privateKey) => {
 	const now = Math.floor(Date.now() / 1000);
-	const assertion = signed({
-		iss: CLIENT_ID,
-		sub: CLIENT_ID,
-		aud: `${makeValidCoreConfig().oauth.jwt.issuer}/oauth/token`,
-		iat: now,
-		exp: now + 60,
-		jti: randomUUID(),
-	});
+	const assertion = signed(
+		{
+			iss: clientId,
+			sub: clientId,
+			aud: `${makeValidCoreConfig().oauth.jwt.issuer}/oauth/token`,
+			iat: now,
+			exp: now + 60,
+			jti: randomUUID(),
+		},
+		key,
+	);
 	return request(app).post("/oauth/federation-grants/g-1/status").type("form").send({
 		sub: SUBJECT,
 		client_assertion_type: ASSERTION_TYPE,
 		client_assertion: assertion,
 	});
 };
+
+/** What a client is shown: the status, the body's bytes and the headers that describe it. */
+const shown = (res: request.Response) => ({
+	status: res.status,
+	text: res.text,
+	contentType: res.headers["content-type"],
+	wwwAuthenticate: res.headers["www-authenticate"],
+});
 
 describe("federation-grant client routes — a client's jwksUri and core.outbound", () => {
 	it("authenticates against a key set at a loopback host core.outbound.internalHosts lists", async () => {
@@ -221,14 +257,33 @@ describe("federation-grant client routes — a client's jwksUri and core.outboun
 		await handle.dispose();
 	});
 
-	it("refuses the same key set without the listing, and never asks it", async () => {
+	it("refuses the same key set without the listing with the bytes a bad signature gets, and never asks it", async () => {
 		const { handle, app } = await boot();
-		const res = await inspect(app);
-		expect(res.status).toBe(401);
-		expect(res.body).toEqual({
+		const refused = await inspect(app);
+		const badSignature = await inspect(app, INLINE_CLIENT, stranger);
+		expect(refused.status).toBe(401);
+		expect(refused.body).toEqual({
 			error: "invalid_client",
 			error_description: "Invalid client assertion",
 		});
+		expect(shown(refused)).toEqual(shown(badSignature));
+		expect(reasons[0]).toBe("jwks_uri_refused");
+		const leaked = JSON.stringify({ text: refused.text, headers: refused.headers });
+		for (const fragment of ["127.0.0.1", "jwks_uri_refused", "special_use", "scheme_not_allowed"]) {
+			expect(leaked).not.toContain(fragment);
+		}
+		expect(hits).toEqual([]);
+		await handle.dispose();
+	});
+
+	it("lets core.outbound.deniedHosts win over internalHosts", async () => {
+		const { handle, app } = await boot({
+			internalHosts: ["127.0.0.1"],
+			deniedHosts: ["127.0.0.1"],
+		});
+		const res = await inspect(app);
+		expect(res.status).toBe(401);
+		expect(reasons).toEqual(["jwks_uri_refused"]);
 		expect(hits).toEqual([]);
 		await handle.dispose();
 	});

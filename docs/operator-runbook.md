@@ -227,8 +227,9 @@ Back-channel logout POSTs and `private_key_jwt` key-set fetches
 (`/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, device authorization and
 the federation-grant client routes) go through it. A relying party whose
 `backchannelLogoutUri`, or a client whose `jwksUri`, is served from a loopback,
-private or link-local address needs its host in `core.outbound.internalHosts`;
-plain `http` is used only for a listed loopback host.
+private, link-local or other special-use address (for example `100.64.0.0/10`)
+needs its host in `core.outbound.internalHosts`; plain `http` is used only for a
+listed loopback host. Node's own fetch ignored `HTTPS_PROXY` unless `NODE_USE_ENV_PROXY` was set, so a deployment with the variable set that always connected directly now meets the boot refusal.
 
 Every address a host resolves to is checked, and the connection goes to the
 checked address. Egress filtering at the network is still expected. IPv6-only

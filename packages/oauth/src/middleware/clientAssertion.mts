@@ -31,7 +31,6 @@ import {
 	assertionLifetime,
 	auditErrorText,
 	consoleLogger,
-	createOutboundFetch,
 	createRemoteKeySetCache,
 	describeInvalidAssertionClockTolerance,
 	isOutboundRefusal,
@@ -108,12 +107,11 @@ export interface ClientAssertionVerifierOptions {
 	 */
 	readonly clockToleranceSeconds?: number;
 	/**
-	 * The fetch used for `jwksUri`. Absent → core's outbound fetch with
-	 * `core.outbound`'s defaults, built here. A substitute replaces that
-	 * policy; pass `createOutboundFetch({ config, source: "registration" })`
-	 * to apply a deployment's `core.outbound`.
+	 * The fetch used for `jwksUri`: core's
+	 * `createOutboundFetch({ config, source: "registration" })`, built once, so
+	 * `core.outbound` applies. Anything else replaces that policy.
 	 */
-	readonly fetch?: typeof fetch;
+	readonly fetch: typeof fetch;
 	/** Test seam. */
 	readonly now?: () => number;
 }
@@ -163,11 +161,7 @@ export function createClientAssertionVerifier(
 	);
 	// One remote key set per `jwksUri`, shared across requests (core's
 	// `createRemoteKeySetCache`, which the trust-registry verifier uses too).
-	// The default fetch is built with the verifier, so a configuration it
-	// refuses fails construction rather than a request.
-	const remoteKeySets = createRemoteKeySetCache({
-		fetch: options.fetch ?? createOutboundFetch({ source: "registration" }),
-	});
+	const remoteKeySets = createRemoteKeySetCache({ fetch: options.fetch });
 
 	const keySetFor = (client: PublicClient): JWTVerifyGetKey | undefined => {
 		if (client.jwks !== undefined) {
