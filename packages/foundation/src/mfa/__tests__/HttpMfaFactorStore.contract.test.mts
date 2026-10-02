@@ -20,7 +20,8 @@
  * fake Store: a fresh Store for each case, every request carrying the bearer
  * token the Store requires. The second instance is another adapter on the
  * same Store, the unreachable one an adapter whose Store has closed, and
- * `forceExpire` moves the Store's clock on by the write-lifetime bound.
+ * `forceExpire` moves the Store's tombstone clock on by the write-lifetime
+ * bound, leaving the clock a write's deadline is checked against.
  */
 
 import { BUNDLED_STORE_WRITE_LIFETIME_MS } from "@o3co/auth-provider-core";

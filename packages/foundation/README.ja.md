@@ -134,10 +134,10 @@ Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を
 | エンドポイント | リクエスト | 応答 |
 | --- | --- | --- |
 | list（`listUrl`） | `{ subject }` | `200 { factors: [record…], generation }`: 主体について保持するすべてのレコードと集合の世代を、一つのスナップショットから。集合が無ければ `{ factors: [], generation: null }`。他のステータスは throw。 |
-| create（`createUrl`）、条件付き | `{ factor: record, expectedGeneration }` | `200 { outcome: "created", generation }`: 作成し、集合は新しい世代になった。`409 { outcome: "conflict" }`: 何も書いていない。他のステータスは `404` も含めて throw。 |
+| create（`createUrl`）、条件付き | `{ factor: record, expectedGeneration, deadlineMs }` | `200 { outcome: "created", generation }`: 作成し、集合は新しい世代になった。`409 { outcome: "conflict" }`: 何も書いていない。他のステータスは `404` も含めて throw。 |
 | create、無条件 | `{ factor: record }` | `2xx`（`204`）: 作成。`409`: その `(subject, id)` は保持済みで、そのまま残る。他のステータスは throw。 |
 | update（`updateUrl`） | `{ subject, id, expectedVersion, changes: { data, label?, lastUsedAtMs? } }` | `200 { factor: record }`、`expectedVersion + 1` で書かれたレコード。`409`: バージョンが動いた。`404`: レコードが無い — どちらもポートの `null`。他のステータスは throw。 |
-| delete（`deleteUrl`）、条件付き | `{ subject, id, expectedGeneration }` | `200 { outcome: "removed", generation }`: 削除し、集合は新しい世代になった。`404 { outcome: "missing" }` と `409 { outcome: "conflict" }`: 何も書いていない。他のステータスは throw。 |
+| delete（`deleteUrl`）、条件付き | `{ subject, id, expectedGeneration, deadlineMs }` | `200 { outcome: "removed", generation }`: 削除し、集合は新しい世代になった。`404 { outcome: "missing" }` と `409 { outcome: "conflict" }`: 何も書いていない。他のステータスは throw。 |
 | delete、無条件 | `{ subject, id }` または `{ subject, all: true }` | `2xx`（`204`）、または何も無かったときの `404`: どちらも完了。他のステータスは throw。 |
 | markMfaEnrolled（`markMfaEnrolledUrl`） | `{ subject, enrolled }` | `204`（すでにその値を保持しているときも）。`404`: Store にその主体が無い — エラー（主体は認証したばかりである）。他のステータスは throw。 |
 
@@ -158,6 +158,7 @@ Store は主体の第二要素（MFA ADR の D7）と登録の証人（D12）を
 - **世代を持たずに保持された集合** — Store が世代を保つ前に書かれたもの — は、最初の list でレコードを保ったまま原子的に新しい世代を与えられる。それに対する条件付き書き込みは `conflict` を返し、世代を作らない。
 - **list をキャッシュから返さない。** list はレコードと世代を、list が始まる前に Store が認めたすべての書き込みを反映した一つのスナップショットから返す: Store 自身のものも、その前段の HTTP キャッシュのものも、遅れたレプリカのものも、キャッシュされた応答は決して返さない。古い list は、すでに削除した要素をあるものとして、すでに動いた世代を返す。
 - **巻き戻しで世代を戻さない。** Store が認めた書き込みより前の状態に集合を戻す復元やフェイルオーバーは、その状態の世代を再び返すことになり、書き手がまだそれを持っているかもしれない。Store は、復元した集合のどれについても応答する前に新しい世代を作るか、認めた書き込みを決して巻き戻さないように運用するかのどちらかで、どちらであるかを明記する。
+- **条件付き書き込みは期限を述べる。** 条件付きの作成や削除は `deadlineMs` を運ぶ: それを過ぎたら適用してはならない時刻を、プロバイダーの時計のエポックミリ秒で示す。アダプターはそれを送る瞬間にリクエストの期限を足した値にし、その瞬間に自分でも諦める。Store は `deadlineMs` を、条件付き書き込みと同じ原子的な手順の中で自分の時計と比べる。その時刻かそれより後なら、書き込みは適用せず、応答は `408` である。アダプターの書き込み寿命 W は、リクエストの期限に、プロバイダーと Store のあいだに想定する時計のずれを足したものである。プロバイダーと Store の時計は、そのずれの範囲で一致する。`deadlineMs` が無いか、`Date` の範囲内の 0 より大きい整数の時刻でなければ `400`。
 
 **呼び出しが失敗したとき、Store が送ったものは何一つクライアントに届かない**: ステータスも、エラーの文面も、ヘッダーも、レコードも、レコードが読めなかったかどうかも。これらのエンドポイントの失敗はすべて、プロバイダーの障害の応答 `503 temporarily_unavailable` になる。何が起きたかは運用者のログ行と監査イベントにだけ届き、アダプターが投げる `MfaStoreError`（[`src/mfa/storeFailure.mts`](src/mfa/storeFailure.mts)）を通る。それは操作、エンドポイントのオリジンとパス、数値としてのステータス、そしてバージョンが飛んだときは主体と要素の ID — ログ行が切り詰めても両方が残るようにメッセージの先頭に置き、それぞれ core の `auditErrorText` を通して最大 64 文字 — から作られ、ボディやステータス文言やヘッダーからは決して作られない。ボディは読まずに解放され、HTTP 層が応答に使ったり表示したりする `status`・`statusCode`・`cause` を持たない。通信の失敗・期限・拒否された資格情報は、ユーザーリポジトリのエラーを投げる。`reason` は `unexpected_status`（表に無いステータス。`storeStatus` に入る）、`unknown_subject`（`markMfaEnrolledUrl` の `404`）、`malformed_answer`（表と違うボディの `2xx`、または結果のボディを持たない条件付き書き込みの `404` や `409`）、`unreadable_record`（読めないレコードを含む一覧）、`version_skipped`（`expectedVersion + 1` 以外のバージョン）。
 
@@ -199,11 +200,11 @@ const modules = [
 | `listVersioned` | `200 { factors, generation }` | レコードと集合の世代を `readMfaStoreVersionedListAnswer` で丸ごと読んだもの。集合が無ければ `{ items: [], generation: null }`。変換が拒否する応答 — 世代を持つ前の Store が返すような `generation` の無いもの、形の外の世代、読めないレコード、別の主体のレコード、同じ ID の二つ目 — は `malformed_answer` を throw。 |
 | `listVersioned` | 他のすべてのステータス | `unexpected_status` を throw。 |
 | `createIf` | 結果のボディ付きの `200` / `409` | 集合の新しい世代付きの `created` / `conflict`。ボディが無いか、別のステータスの結果なら `malformed_answer` を throw。 |
-| `createIf` | 他のすべてのステータス（`404` と、`expectedGeneration` を無視する Store の `204` も） | `unexpected_status` を throw。 |
+| `createIf` | 他のすべてのステータス（`404`、遅れた書き込みの `408`、`expectedGeneration` を無視する Store の `204` も） | `unexpected_status` を throw。 |
 | `removeIf` | 結果のボディ付きの `200` / `404` / `409` | 集合の新しい世代付きの `removed` / `missing` / `conflict`。ボディが無いか、別のステータスの結果なら `malformed_answer` を throw。 |
-| `removeIf` | 他のすべてのステータス | `unexpected_status` を throw。 |
+| `removeIf` | 他のすべてのステータス（遅れた書き込みの `408` も） | `unexpected_status` を throw。 |
 
-集合のメンバーは先にステータスを読む: 操作に与えられていないステータスは `unexpected_status` を throw し、ボディは読まずに解放する。与えられたステータスのボディは一度だけ解析して core の変換だけで読み、変換が拒否したものは、変換の言葉を何も持たない `malformed_answer` を throw する。送ったあとで失敗した条件付き書き込み — 期限、切れた接続、拒否した応答 — は不明であり、決して `missing` や `conflict` ではない: コミットしたかもしれない。`expectedGeneration` を無視する Store は、その応答が拒否される前に囲いなしで書いたかもしれない。そうしないことを示せるのは、Store 自身の CI で走らせる契約スイートだけである。
+集合のメンバーは先にステータスを読む: 操作に与えられていないステータスは `unexpected_status` を throw し、ボディは読まずに解放する。与えられたステータスのボディは一度だけ解析して core の変換だけで読み、変換が拒否したものは、変換の言葉を何も持たない `malformed_answer` を throw する。送ったあとで失敗した条件付き書き込み — 期限、切れた接続、`408`、拒否した応答 — は不明であり、決して `missing` や `conflict` ではない: コミットしたかもしれない。`expectedGeneration` を無視する Store は、その応答が拒否される前に囲いなしで書いたかもしれない。そうしないことを示せるのは、Store 自身の CI で走らせる契約スイートだけである。
 
 リクエストの前に、ワイヤの変換が読み戻せないレコードや更新 — base64url の 22 文字でない ID、形の外のラベル、`Number.MAX_SAFE_INTEGER` での更新、世代でない期待する世代 — は `RangeError` になり、何も送らない。渡された `data` はそのまま送る: 封印したのは MFA パッケージで、ここでは開かない。
 
@@ -289,8 +290,8 @@ URL が無ければ何も書かれず、プロバイダーは Store が返す `m
 | [`storeFailure.test.mts`](src/mfa/__tests__/storeFailure.test.mts) | MFA エンドポイントの失敗が投げるもの: Store の書いたものがエラーのどの形にも届かないこと、ボディを読まずに解放すること、応答に使うステータスを持たないこと。飛んだバージョンのログ行が、どれほど長くても主体と要素 ID を無害化し上限をつけて名指すこと |
 | [`section.test.mts`](src/mfa/__tests__/section.test.mts) | `foundation-mfa-factor-store` セクション: スキーマ、読み取り、パッケージのモジュールで `createApp` を通した欠落・不正・未知のキーでの起動拒否（モジュールだけを入れた構成も） |
 | [`module.test.mts`](src/mfa/__tests__/module.test.mts) | `createApp` を通した `foundationMfaFactorStoreModule`: 他に何も入れずにセクションの URL の上に Store を使うストアを提供すること。Store の通信設定が必須であること、そこから読むユーザーリポジトリのベアラートークン・期限・上限（文字列は数値として読む）、設定が無いかキーのセクションでないとき、およびユーザーリポジトリも拒否する値のときの起動拒否 |
-| [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | テストキットの `MfaFactorStore` スイートと要素の集合の条件付き書き込みのスイートを、偽の Store の上の `HttpMfaFactorStore` に対して、同じ Store の上の二つ目のアダプター、Store が閉じたアダプター、書き込み寿命の上限を越えて進めた Store の時計とともに走らせる |
-| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | 送るもの — 設定どおりの各 URL、ベアラートークン、バイト単位でそのままの封印されたデータと、その封印元を何も送らないこと、変換が拒否するものを送らないこと。各操作の応答と、契約を破る Store: `404`、`5xx`、リダイレクト、壊れた応答、読めないレコード、別の主体、重複した ID、飛んだバージョン、変更を書かなかった応答。集合のメンバー: 送るもの、結果のボディ付きの各ステータス、ボディの無い `404` や `409` は壊れた応答、他のステータスは想定外、世代の無い一覧は壊れた応答、期限で諦める条件付き書き込み。Store が送ったものが投げるものに何も現れないこと。拒否された資格情報（このストアを名指す）、ヘッドまたはボディでの期限切れ、上限、届かない Store。構築と、ストアを検査したときにトークンもエンドポイントも見えないこと |
+| [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | テストキットの `MfaFactorStore` スイートと要素の集合の条件付き書き込みのスイートを、偽の Store の上の `HttpMfaFactorStore` に対して、同じ Store の上の二つ目のアダプター、Store が閉じたアダプター、書き込み寿命の上限を越えて進めた Store の墓標の時計とともに走らせる |
+| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | 送るもの — 設定どおりの各 URL、ベアラートークン、バイト単位でそのままの封印されたデータと、その封印元を何も送らないこと、変換が拒否するものを送らないこと。各操作の応答と、契約を破る Store: `404`、`5xx`、リダイレクト、壊れた応答、読めないレコード、別の主体、重複した ID、飛んだバージョン、変更を書かなかった応答。集合のメンバー: 送るもの、結果のボディ付きの各ステータス、ボディの無い `404` や `409` は壊れた応答、他のステータスは想定外、世代の無い一覧は壊れた応答、期限で諦める条件付き書き込み、送った時刻に期限を足した `deadlineMs`、`408` で拒否され適用されない遅れた書き込み、期限内に適用される書き込み。Store が送ったものが投げるものに何も現れないこと。拒否された資格情報（このストアを名指す）、ヘッドまたはボディでの期限切れ、上限、届かない Store。構築と、ストアを検査したときにトークンもエンドポイントも見えないこと |
 | [`foundationMfaFactorStoreConfig.test.mts`](src/testing/__tests__/foundationMfaFactorStoreConfig.test.mts) | testing 入口のセクションのビルダー |
 | [`foundationUserRepositoryHttpConfig.test.mts`](src/testing/__tests__/foundationUserRepositoryHttpConfig.test.mts) | testing 入口のユーザーリポジトリの `http` ブロックのビルダーと、`"http"` ビルダーがそれを受け取ること |
 | [`storeRequestMessages.test.mts`](src/mfa/__tests__/storeRequestMessages.test.mts) | MFA エンドポイントでの通信の失敗が、どのクライアントから送っても同じ文言になること |

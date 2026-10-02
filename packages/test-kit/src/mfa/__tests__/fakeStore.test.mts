@@ -330,11 +330,23 @@ describe("the factor set's generation", () => {
 		return generation as string;
 	}
 
-	const createIf = (fake: FakeStore, factor: MfaStoreFactor, expected: string | null) =>
-		post(fake.urls.createUrl, { factor, expectedGeneration: expected });
+	/** A deadline well ahead of the request clock. */
+	const later = (): number => Date.now() + 60_000;
 
-	const removeIf = (fake: FakeStore, subject: string, id: string, expected: unknown) =>
-		post(fake.urls.deleteUrl, { subject, id, expectedGeneration: expected });
+	const createIf = (
+		fake: FakeStore,
+		factor: MfaStoreFactor,
+		expected: string | null,
+		deadlineMs: unknown = later(),
+	) => post(fake.urls.createUrl, { factor, expectedGeneration: expected, deadlineMs });
+
+	const removeIf = (
+		fake: FakeStore,
+		subject: string,
+		id: string,
+		expected: unknown,
+		deadlineMs: unknown = later(),
+	) => post(fake.urls.deleteUrl, { subject, id, expectedGeneration: expected, deadlineMs });
 
 	it("lists a set never written as no records and a null generation, and a written one with its generation, which a read leaves", async () => {
 		const fake = await start();
@@ -497,10 +509,66 @@ describe("the factor set's generation", () => {
 					subject: "user-1",
 					all: true,
 					expectedGeneration: g1,
+					deadlineMs: later(),
 				})
 			).status,
 		).toBe(400);
 		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation: g1 });
+	});
+
+	it("answers 400 to a conditional write whose deadlineMs is absent or no whole instant above 0 within the Date range, writing nothing", async () => {
+		const fake = await start();
+		const deadlines = [undefined, null, "9999999999999", 0, -1, 1.5, 8.64e15 + 1, Number.NaN];
+		for (const deadlineMs of deadlines) {
+			const create = await post(fake.urls.createUrl, {
+				factor: WIRE,
+				expectedGeneration: null,
+				...(deadlineMs === undefined ? {} : { deadlineMs }),
+			});
+			expect(create.status, `create ${String(deadlineMs)}`).toBe(400);
+		}
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		for (const deadlineMs of deadlines) {
+			const remove = await post(fake.urls.deleteUrl, {
+				subject: "user-1",
+				id: ID_1,
+				expectedGeneration: g1,
+				...(deadlineMs === undefined ? {} : { deadlineMs }),
+			});
+			expect(remove.status, `remove ${String(deadlineMs)}`).toBe(400);
+		}
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation: g1 });
+	});
+
+	it("answers 408 to a conditional write whose deadlineMs is at or before its request clock, writing nothing, and applies one before it", async () => {
+		const requestMs = Date.parse("2026-10-02T12:00:00.000Z");
+		const fake = await start({ users: USERS, requestNow: () => requestMs });
+		for (const deadlineMs of [requestMs, requestMs - 1]) {
+			const late = await createIf(fake, WIRE, null, deadlineMs);
+			expect(late.status, String(deadlineMs)).toBe(408);
+			expect(late.body, String(deadlineMs)).toBeUndefined();
+		}
+		expect(await listed(fake)).toStrictEqual({ factors: [], generation: null });
+		const created = await createIf(fake, WIRE, null, requestMs + 1);
+		expect(created).toMatchObject({ status: 200, body: { outcome: "created" } });
+		const g1 = (created.body as { generation: string }).generation;
+		expect((await removeIf(fake, "user-1", ID_1, g1, requestMs)).status).toBe(408);
+		expect(await listed(fake)).toStrictEqual({ factors: [WIRE], generation: g1 });
+		expect(await removeIf(fake, "user-1", ID_1, g1, requestMs + 1)).toMatchObject({
+			status: 200,
+			body: { outcome: "removed" },
+		});
+	});
+
+	it("checks a deadline on its request clock, never on the tombstone clock: moving that past the write-lifetime bound makes no write late", async () => {
+		let tombstoneMs = Date.now();
+		const fake = await start({ users: USERS, now: () => tombstoneMs });
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		const removed = await removeIf(fake, "user-1", ID_1, g1);
+		expect(removed.status).toBe(200);
+		tombstoneMs += 2 * BUNDLED_STORE_WRITE_LIFETIME_MS;
+		expect(await listed(fake)).toStrictEqual({ factors: [], generation: null });
+		expect((await createIf(fake, WIRE, null)).status).toBe(200);
 	});
 
 	it("lets exactly one of concurrent conditional writes at one generation through", async () => {

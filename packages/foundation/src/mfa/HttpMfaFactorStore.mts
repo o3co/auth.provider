@@ -31,8 +31,11 @@
  * every answer through core's codec alone, once: a status the operation does
  * not give is `unexpected_status`, read before any body, and whatever the
  * codec refuses — a `404` or `409` without its outcome body among them — is
- * `malformed_answer`. A conditional write that is sent and then fails, its
- * deadline included, is unknown: it may have committed.
+ * `malformed_answer`. A conditional write states its deadline on the wire
+ * (`deadlineMs`, the send time plus the request timeout), at which the
+ * transport gives up too; a Store that reads it as passed answers `408`, which
+ * is `unexpected_status`. A conditional write that is sent and then fails,
+ * its deadline included, is unknown: it may have committed.
  */
 
 import {
@@ -176,7 +179,7 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		record: MfaFactorRecord,
 		expected: StoreGeneration | null,
 	): Promise<ConditionalCreateAnswer> {
-		const body = toMfaStoreCreateIfRequest(record, expected);
+		const body = toMfaStoreCreateIfRequest(record, expected, this.#deadline());
 		const { response, text } = await this.#post("create", body, (status) =>
 			CREATE_IF_STATUSES.has(status),
 		);
@@ -189,7 +192,7 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		id: string,
 		expected: StoreGeneration,
 	): Promise<ConditionalSetRemoveAnswer> {
-		const body = toMfaStoreRemoveIfRequest(subject, id, expected);
+		const body = toMfaStoreRemoveIfRequest(subject, id, expected, this.#deadline());
 		const { response, text } = await this.#post("delete", body, (status) =>
 			REMOVE_IF_STATUSES.has(status),
 		);
@@ -248,6 +251,14 @@ export class HttpMfaFactorStore implements MfaFactorStore {
 		const { response } = await this.#post("delete", body, () => false);
 		if (response.ok || response.status === 404) return;
 		throw mfaStoreStatusError("delete", this.#urls.delete, response);
+	}
+
+	/**
+	 * A conditional write's `deadlineMs`: now, as it is sent, plus the
+	 * request timeout the transport gives up at.
+	 */
+	#deadline(): number {
+		return Date.now() + this.#settings.timeout;
 	}
 
 	/**

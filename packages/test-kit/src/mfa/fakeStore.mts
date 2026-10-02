@@ -29,7 +29,9 @@
  * "Conditional writes"): every membership write mints a fresh one, an update
  * keeps it, a conditional write checks it, an emptied set stays as its
  * tombstone until the write-lifetime bound has passed on its clock, and a set
- * held without one is given one by its first list; each request is answered
+ * held without one is given one by its first list; a conditional write whose
+ * `deadlineMs` is at or before its request clock is answered `408` and not
+ * applied, checked in the same step as the write; each request is answered
  * by the contract from state it reads and writes without yielding, so
  * concurrent requests are atomic; a request with an
  * absolute or odd target, naming a host other than its own address, with a
@@ -80,6 +82,12 @@ export interface FakeStoreOptions {
 	 * tombstone expires. Default `Date.now`.
 	 */
 	readonly now?: () => number;
+	/**
+	 * The Store's clock a conditional write's `deadlineMs` is checked
+	 * against, in epoch milliseconds: apart from `now`, so moving the
+	 * tombstones' clock makes no write late. Default `Date.now`.
+	 */
+	readonly requestNow?: () => number;
 }
 
 /** The fake Store's endpoints. */
@@ -184,6 +192,14 @@ const json = (status: number, value: unknown): FakeStoreAnswer => ({
 const empty = (status: number): FakeStoreAnswer => ({ status });
 
 const CONFLICT = json(409, { outcome: "conflict" } satisfies MfaStoreCreateIfAnswer);
+const LATE = empty(408);
+
+/** The latest instant a `Date` holds, in epoch milliseconds. */
+const MAX_DATE_MS = 8.64e15;
+
+/** Whether `value` is a `deadlineMs` the wire carries: a whole instant above 0 within the Date range. */
+const isDeadline = (value: unknown): value is number =>
+	typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_DATE_MS;
 const MISSING = json(404, { outcome: "missing" } satisfies MfaStoreRemoveIfAnswer);
 
 /**
@@ -228,6 +244,9 @@ function send(response: ServerResponse, answer: FakeStoreAnswer): void {
 export async function startFakeStore(options: FakeStoreOptions = {}): Promise<FakeStore> {
 	const users = options.users ?? [];
 	const now = options.now ?? Date.now;
+	const requestNow = options.requestNow ?? Date.now;
+	/** Whether a conditional write due by `deadlineMs` arrived too late to apply. */
+	const late = (deadlineMs: number): boolean => requestNow() >= deadlineMs;
 	const sets = new Map<string, HeldSet>();
 	const witness = new Map<string, boolean>();
 	const answerers = new Map<FakeStoreEndpoint, FakeStoreAnswerer>();
@@ -302,8 +321,10 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 					written(factor.subject, [...records, factor]);
 					return empty(204);
 				}
-				const expected = body.expectedGeneration;
+				const { expectedGeneration: expected, deadlineMs } = body;
 				if (expected !== null && !isStoreGeneration(expected)) return empty(400);
+				if (!isDeadline(deadlineMs)) return empty(400);
+				if (late(deadlineMs)) return LATE;
 				// An absent set is at `null`; one held without a generation matches nothing.
 				const at = set === undefined ? null : set.generation;
 				if (at !== expected || held) return CONFLICT;
@@ -355,8 +376,10 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 					written(subject, kept);
 					return empty(204);
 				}
-				const expected = body.expectedGeneration;
+				const { expectedGeneration: expected, deadlineMs } = body;
 				if (!isStoreGeneration(expected)) return empty(400);
+				if (!isDeadline(deadlineMs)) return empty(400);
+				if (late(deadlineMs)) return LATE;
 				if (set === undefined) return MISSING;
 				if (set.generation !== expected) return CONFLICT;
 				if (kept.length === records.length) return MISSING;

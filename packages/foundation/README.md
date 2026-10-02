@@ -328,10 +328,10 @@ cannot read (core's `isMfaFactorId`, `isMfaFactorKind`, `isMfaFactorLabel`).
 | Endpoint | Request | Answers |
 | --- | --- | --- |
 | list (`listUrl`) | `{ subject }` | `200 { factors: [record…], generation }`: every record held for the subject and the set's generation, from one snapshot; `{ factors: [], generation: null }` for an absent set. Any other status throws. |
-| create (`createUrl`), conditional | `{ factor: record, expectedGeneration }` | `200 { outcome: "created", generation }`: created, the set at its new generation. `409 { outcome: "conflict" }`: nothing written. Any other status throws, a `404` included. |
+| create (`createUrl`), conditional | `{ factor: record, expectedGeneration, deadlineMs }` | `200 { outcome: "created", generation }`: created, the set at its new generation. `409 { outcome: "conflict" }`: nothing written. Any other status throws, a `404` included. |
 | create, unconditional | `{ factor: record }` | `2xx` (`204`): created. `409`: the `(subject, id)` is held, and stays as it was. Any other status throws. |
 | update (`updateUrl`) | `{ subject, id, expectedVersion, changes: { data, label?, lastUsedAtMs? } }` | `200 { factor: record }`, the record as written at `expectedVersion + 1`. `409`: the version moved; `404`: the record is gone — each the port's `null`. Any other status throws. |
-| delete (`deleteUrl`), conditional | `{ subject, id, expectedGeneration }` | `200 { outcome: "removed", generation }`: removed, the set at its new generation. `404 { outcome: "missing" }` and `409 { outcome: "conflict" }`: nothing written. Any other status throws. |
+| delete (`deleteUrl`), conditional | `{ subject, id, expectedGeneration, deadlineMs }` | `200 { outcome: "removed", generation }`: removed, the set at its new generation. `404 { outcome: "missing" }` and `409 { outcome: "conflict" }`: nothing written. Any other status throws. |
 | delete, unconditional | `{ subject, id }`, or `{ subject, all: true }` | `2xx` (`204`), or `404` when nothing was held: both done. Any other status throws. |
 | markMfaEnrolled (`markMfaEnrolledUrl`) | `{ subject, enrolled }` | `204`, the value held already included. `404`: the Store holds no such subject — an error, since the subject has just authenticated. Any other status throws. |
 
@@ -416,6 +416,11 @@ whose HTTP wire the table follows. Core's codec carries it on both sides
   The Store mints a fresh generation for every set it restores before it
   answers one, or runs so that acknowledged writes are never rolled back, and
   states which.
+- **A conditional write states its deadline.** A conditional create or delete carries `deadlineMs`: the instant, in epoch milliseconds on the provider's clock, after which it must not be applied. The adapter sets it to the moment it sends plus its request timeout, and gives up at that moment itself. The Store checks `deadlineMs` against its own clock in the same atomic step as the conditional write; at or after it, the write is not applied and the answer is `408`.
+  The adapter's write lifetime W is its request timeout plus the clock skew assumed between the provider and the Store.
+  The provider's and the Store's clocks agree within that skew.
+  A `deadlineMs` absent or not a whole instant above 0 within the `Date`
+  range is `400`.
 
 **When a call fails, nothing the Store sent reaches a client**: no status, no
 error text, no header, no record, and not whether a record was unreadable.
@@ -531,17 +536,17 @@ answer, and throws on anything else:
 | `listVersioned` | `200 { factors, generation }` | The records and the set's generation, read whole by `readMfaStoreVersionedListAnswer`; `{ items: [], generation: null }` for an absent set. An answer the codec refuses — no `generation`, as a Store from before it answers, a generation out of shape, a record it cannot read, of another subject or twice — throws `malformed_answer`. |
 | `listVersioned` | Any other status | Throws `unexpected_status`. |
 | `createIf` | `200` / `409`, each with its outcome body | `created` with the set's new generation / `conflict`. Without its body, or with another status's outcome, throws `malformed_answer`. |
-| `createIf` | Any other status, a `404` and a `204` from a Store that ignores `expectedGeneration` included | Throws `unexpected_status`. |
+| `createIf` | Any other status, a `404`, a late write's `408` and a `204` from a Store that ignores `expectedGeneration` included | Throws `unexpected_status`. |
 | `removeIf` | `200` / `404` / `409`, each with its outcome body | `removed` with the set's new generation / `missing` / `conflict`. Without its body, or with another status's outcome, throws `malformed_answer`. |
-| `removeIf` | Any other status | Throws `unexpected_status`. |
+| `removeIf` | Any other status, a late write's `408` included | Throws `unexpected_status`. |
 
 The set's members read the status first: one the operation is not given
 throws `unexpected_status`, its body released unread. The body of a status
 it is given is parsed once and read by core's codec alone, and what the codec
 refuses throws `malformed_answer`, carrying none of the codec's words. A
 conditional write that rejects after it was sent — its deadline, a lost
-connection, a refused answer — is unknown, never `missing` or `conflict`: it
-may have committed. A Store that ignores `expectedGeneration` may have
+connection, a `408`, a refused answer — is unknown, never `missing` or
+`conflict`: it may have committed. A Store that ignores `expectedGeneration` may have
 written unfenced before its answer is refused; only the contract suite, run
 in the Store's own CI, shows that it does not.
 
@@ -823,8 +828,8 @@ composition places with core's `withUserRepositoryHttp`.
 | [`storeFailure.test.mts`](src/mfa/__tests__/storeFailure.test.mts) | what the MFA endpoints' failures throw: nothing the Store wrote in any form the error leaves in, the body released unread, no status to answer with; a skipped version's log line naming the subject and the factor id, each sanitised and bounded, however long they are |
 | [`section.test.mts`](src/mfa/__tests__/section.test.mts) | the `foundation-mfa-factor-store` section: its schema, its reader, and through `createApp` with the package's module the boot refused for a missing, malformed or unknown key, the module installed alone included |
 | [`module.test.mts`](src/mfa/__tests__/module.test.mts) | `foundationMfaFactorStoreModule` through `createApp`: the Store-backed store provided over the section's URLs with nothing else installed; the Store transport settings required, the user repository's bearer token, deadline and cap read from them (text read as numbers), the boot refused for settings absent or not a section of keys and for a value the user repository refuses too |
-| [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | the test kit's `MfaFactorStore` suite and the factor set's conditional-write binding against `HttpMfaFactorStore` over the fake Store, with a second adapter on the same Store, one whose Store has closed, and the Store's clock moved past the write-lifetime bound |
-| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | what it sends — each URL as configured, the bearer token, the sealed data byte for byte and nothing it was sealed from, nothing the codec refuses; each operation's answers, and a Store that breaks the contract: `404`, `5xx`, a redirect, a malformed answer, an unreadable record, a foreign subject, a repeated id, a skipped version, an answer that did not write the changes; the set's members: what they send, each status with its outcome body, a `404` or `409` without one malformed, any other status unexpected, a list without its generation malformed, a conditional write given up at its deadline; nothing the Store sent in anything thrown; the credential refused (naming this store), a deadline over the head or the body, the cap, an unreachable Store; construction, and neither the token nor the endpoints shown when the store is inspected |
+| [`HttpMfaFactorStore.contract.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.contract.test.mts) | the test kit's `MfaFactorStore` suite and the factor set's conditional-write binding against `HttpMfaFactorStore` over the fake Store, with a second adapter on the same Store, one whose Store has closed, and the Store's tombstone clock moved past the write-lifetime bound |
+| [`HttpMfaFactorStore.test.mts`](src/mfa/__tests__/HttpMfaFactorStore.test.mts) | what it sends — each URL as configured, the bearer token, the sealed data byte for byte and nothing it was sealed from, nothing the codec refuses; each operation's answers, and a Store that breaks the contract: `404`, `5xx`, a redirect, a malformed answer, an unreadable record, a foreign subject, a repeated id, a skipped version, an answer that did not write the changes; the set's members: what they send, each status with its outcome body, a `404` or `409` without one malformed, any other status unexpected, a list without its generation malformed, a conditional write given up at its deadline, its `deadlineMs` the send time plus the timeout, a late one refused `408` and not applied, one within its deadline applied; nothing the Store sent in anything thrown; the credential refused (naming this store), a deadline over the head or the body, the cap, an unreachable Store; construction, and neither the token nor the endpoints shown when the store is inspected |
 | [`foundationMfaFactorStoreConfig.test.mts`](src/testing/__tests__/foundationMfaFactorStoreConfig.test.mts) | the testing entry's section builder |
 | [`foundationUserRepositoryHttpConfig.test.mts`](src/testing/__tests__/foundationUserRepositoryHttpConfig.test.mts) | the testing entry's builder of the user repository's `http` block, which the `"http"` builder takes |
 | [`storeRequestMessages.test.mts`](src/mfa/__tests__/storeRequestMessages.test.mts) | one wording for a transport failure at the MFA endpoints, whichever client sends to them |

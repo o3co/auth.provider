@@ -498,16 +498,24 @@ describe("the conditional members: what they send", () => {
 			response.end(JSON.stringify(answer));
 		});
 		const store = storeAt(origin, TOKEN);
+		const before = Date.now();
 		await store.listVersioned("user-1");
 		await store.createIf(RECORD, null);
 		await store.createIf(RECORD, G1);
 		await store.removeIf("user-1", ID, G1);
+		const after = Date.now();
+		const deadline = expect.any(Number);
 		expect(bodies).toEqual([
 			{ subject: "user-1" },
-			{ factor: WIRE, expectedGeneration: null },
-			{ factor: WIRE, expectedGeneration: G1 },
-			{ subject: "user-1", id: ID, expectedGeneration: G1 },
+			{ factor: WIRE, expectedGeneration: null, deadlineMs: deadline },
+			{ factor: WIRE, expectedGeneration: G1, deadlineMs: deadline },
+			{ subject: "user-1", id: ID, expectedGeneration: G1, deadlineMs: deadline },
 		]);
+		// Each states its own send time plus the request timeout (5000 ms).
+		for (const body of bodies.slice(1) as { deadlineMs: number }[]) {
+			expect(body.deadlineMs).toBeGreaterThanOrEqual(before + 5000);
+			expect(body.deadlineMs).toBeLessThanOrEqual(after + 5000);
+		}
 	});
 
 	it("refuses, with a RangeError and sending nothing, a generation or a record the wire cannot carry", async () => {
@@ -633,7 +641,7 @@ describe("createIf", () => {
 	});
 
 	it("throws unexpected_status on any other status — a 404 (a create is never missing), a 204 from an older Store, a 412 — whatever its body", async () => {
-		for (const status of [404, 204, 201, 412, 400, 500, 503, 307]) {
+		for (const status of [404, 408, 204, 201, 412, 400, 500, 503, 307]) {
 			fake.answer("create", () => ({
 				status,
 				headers: { "Content-Type": "application/json", Location: fake.urls.createUrl },
@@ -691,7 +699,7 @@ describe("removeIf", () => {
 	});
 
 	it("throws unexpected_status on any other status — a 204 from an older Store, a 412 — whatever its body", async () => {
-		for (const status of [204, 201, 412, 400, 500, 503, 307]) {
+		for (const status of [408, 204, 201, 412, 400, 500, 503, 307]) {
 			fake.answer("delete", () => ({
 				status,
 				headers: { "Content-Type": "application/json", Location: fake.urls.deleteUrl },
@@ -706,6 +714,39 @@ describe("removeIf", () => {
 });
 
 describe("a conditional write at the request deadline", () => {
+	it("is refused 408 and not applied by a Store whose clock reads its deadline as passed: unexpected_status, never conflict or missing", async () => {
+		const ahead = await startFakeStore({
+			bearerToken: TOKEN,
+			requestNow: () => Date.now() + 60 * 60 * 1000,
+		});
+		try {
+			const store = new HttpMfaFactorStore({ ...urlsOf(ahead), bearerToken: TOKEN, timeout: 5000 });
+			const created = await rejection(store.createIf(RECORD, null));
+			expect(created).toBeInstanceOf(MfaStoreError);
+			expect((created as MfaStoreError).reason).toBe("unexpected_status");
+			expect((created as MfaStoreError).storeStatus).toBe(408);
+			expect(ahead.factors("user-1")).toEqual([]);
+			await store.create(RECORD);
+			const { generation } = await store.listVersioned("user-1");
+			const removed = await rejection(store.removeIf("user-1", ID, generation as StoreGeneration));
+			expect((removed as MfaStoreError).reason).toBe("unexpected_status");
+			expect((removed as MfaStoreError).storeStatus).toBe(408);
+			expect(await store.listVersioned("user-1")).toStrictEqual({
+				items: [RECORD],
+				generation,
+			});
+		} finally {
+			await ahead.close();
+		}
+	});
+
+	it("is applied by a Store whose clock reads it within its deadline", async () => {
+		const store = storeOver({ timeout: 200 });
+		const created = await store.createIf(RECORD, null);
+		expect(created).toMatchObject({ outcome: "created" });
+		expect(fake.factors("user-1")).toEqual([WIRE]);
+	});
+
 	it("gives up at its deadline, sent and unanswered: a TimeoutError, never conflict or missing", async () => {
 		fake.answer("create", () => new Promise(() => {}));
 		fake.answer("delete", () => new Promise(() => {}));
