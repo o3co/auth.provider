@@ -652,7 +652,7 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 		},
 	);
 
-	it("lets the removals and the versioned read run on a full server, and keeps the creates refused there", () => {
+	it("lets the removal, the reset and the versioned read run on a full server, and keeps the create refused there", () => {
 		// Under `noeviction` a full Redis refuses a `#!lua` script without
 		// `allow-oom`. A removal, the reset and the read a removal starts from
 		// write only `~g`, the replay key and an expiry; an attacker's factor
