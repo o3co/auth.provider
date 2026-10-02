@@ -71,7 +71,7 @@ export function clientRecordSlotFor(components: Record<string, unknown>): Client
 			: validatedClientRepository(value as ClientRepository, { logger });
 	return {
 		beforeProviders() {
-			if ("clientRepository" in components) {
+			if (Object.hasOwn(components, "clientRepository")) {
 				components.clientRepository = behindBoundary(components.clientRepository);
 			}
 		},

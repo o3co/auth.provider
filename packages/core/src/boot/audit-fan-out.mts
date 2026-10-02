@@ -99,7 +99,7 @@ export function auditSlotFor(
 	);
 	return {
 		beforeProviders() {
-			if ("auditSink" in components || !provider)
+			if (Object.hasOwn(components, "auditSink") || !provider)
 				components.auditSink = fanOut(components.auditSink);
 		},
 		provided(key, value) {
