@@ -41,7 +41,7 @@ const UNREACHABLE_NOT_RUN = "not run: the outage case (unreachable not declared)
 const OUTAGE =
 	"rejects every member when it cannot reach its backend, and answers none as no factors, null or done";
 
-/** A store over the same backend that cannot reach it: every member rejects, or, `answers`, answers as if empty. */
+/** A store over the same backend that cannot reach it: every member rejects, or, `answers`, the record members answer as if empty. */
 function unreachableStore(answers = false): MfaFactorStore {
 	const down = async (): Promise<never> => {
 		throw new Error("ECONNREFUSED");
@@ -50,6 +50,9 @@ function unreachableStore(answers = false): MfaFactorStore {
 		? {
 				kind: "unreachable-answering",
 				list: async () => [],
+				listVersioned: down,
+				createIf: down,
+				removeIf: down,
 				create: down,
 				update: async () => null,
 				remove: async () => {},
@@ -58,6 +61,9 @@ function unreachableStore(answers = false): MfaFactorStore {
 		: {
 				kind: "unreachable",
 				list: down,
+				listVersioned: down,
+				createIf: down,
+				removeIf: down,
 				create: down,
 				update: down,
 				remove: down,

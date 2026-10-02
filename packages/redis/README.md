@@ -927,7 +927,8 @@ of core's conditional-write convention
   which the adapter rejects as an outage. The adapter waits for the answer no
   longer than the write timeout. Either rejection, `late` or the wait ending,
   means the outcome is unknown, never that nothing was written: a `late`
-  copy wrote nothing, but an earlier copy may have committed (below). The deadline stays inside the
+  copy wrote nothing, but another copy may have committed, or may still
+  commit within W (below). The deadline stays inside the
   adapter: nothing crosses the port.
 - **A copy sent again.** ioredis sends again a command whose reply a dropped
   connection lost, and the first copy may have run. Each membership write
@@ -938,7 +939,8 @@ of core's conditional-write convention
   writes a generation back over a later one nor answers `conflict` for a
   write that landed, even when another server, whose clock may lag by the
   skew, judges the copy after a failover or a slot migration; one that
-  reaches it later is `late`, though the first copy may have committed. A
+  reaches it later is `late`, though another copy may have committed, or may
+  still commit within W on a server whose clock lags by the skew. A
   `volatile-*` policy may evict a replay key
   early; the module's warning names it.
 - **A full server.** Under `noeviction`, Redis refuses a script that does

@@ -70,8 +70,10 @@
  * - Each membership write carries a deadline set at issue, `Date.now()` plus
  *   {@link WRITE_TIMEOUT_MS}, which its script compares with the server's
  *   clock before it reads or writes anything: at or past it, that copy writes
- *   nothing and the write rejects with its outcome unknown, since an earlier
- *   copy may have committed. The wait ends at the same timeout. So the write
+ *   nothing and the write rejects with its outcome unknown, since another
+ *   copy may have committed, or may still commit within W (a server whose
+ *   clock lags by the skew may judge another copy on time after a
+ *   failover). The wait ends at the same timeout. So the write
  *   lifetime W is {@link REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS} (rule 6).
  *   Half 2 of the bound holds while the app's and Redis's clocks agree within
  *   the declared skew. A late command, whether resent, queued or stalled,
@@ -285,19 +287,20 @@ const GENERATION_FIELD = "~g";
 
 /**
  * What a membership write its script answers `late` is answered with: its outcome is unknown,
- * never that nothing was written. The copy the server judged late wrote nothing, but it may be
- * a copy the driver sent again after an earlier one committed, once that write's replay key
- * had gone.
+ * never that nothing was written. The copy the server judged late wrote nothing, but another
+ * copy may have committed (one the driver sent before, whose replay key has gone), or may
+ * still commit within W (a server whose clock lags by the skew may judge it on time after a
+ * failover).
  */
 const late = (operation: string): Error =>
 	new Error(
-		`MfaFactorStore (redis): ${operation} was answered past its deadline; the outcome is unknown: an earlier copy may have committed`,
+		`MfaFactorStore (redis): ${operation} was answered past its deadline; the outcome is unknown: another copy may have committed, or may still commit within W`,
 	);
 
 /** What a membership write unanswered within the write timeout is answered with: its outcome is unknown. */
 const unanswered = (operation: string): Error =>
 	new Error(
-		`MfaFactorStore (redis): ${operation} had no answer within ${WRITE_TIMEOUT_MS} ms; it may have committed, and no later than its deadline`,
+		`MfaFactorStore (redis): ${operation} had no answer within ${WRITE_TIMEOUT_MS} ms; it may have committed, or may still commit within W`,
 	);
 
 /**

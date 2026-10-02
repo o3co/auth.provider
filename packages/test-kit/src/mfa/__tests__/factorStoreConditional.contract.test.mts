@@ -77,6 +77,19 @@ const memoryOnItsClock = (): MfaFactorStoreHarness => {
 
 const isNotRun = (contractCase: ContractCase): boolean => contractCase.name.startsWith("not run:");
 
+/**
+ * `store` with the factor set's `members` taken away: outside the port's
+ * type, as a store written in JavaScript can be, which the binding refuses
+ * when it runs.
+ */
+const without = (
+	store: MfaFactorStore,
+	...members: readonly ("listVersioned" | "createIf" | "removeIf")[]
+): MfaFactorStore =>
+	Object.fromEntries(
+		Object.entries(store).filter(([name]) => !(members as readonly string[]).includes(name)),
+	) as unknown as MfaFactorStore;
+
 describe("mfaFactorStoreConditionalContract over core's in-process store", () => {
 	// No second: the memory store is one process by contract, so this run
 	// proves no fence across processes. No unreachable: it has no backend.
@@ -463,15 +476,12 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 	it("passes the model store with no fault, and a store without the set's members fails every case", async () => {
 		expect(await refusedBy(() => modelStore("none"))).toEqual([]);
 		expect(await refusedBy(memoryOnItsClock)).toEqual([]);
-		const plain = createMemoryMfaFactorStore();
-		const withoutMembers: MfaFactorStore = {
-			kind: plain.kind,
-			list: (subject) => plain.list(subject),
-			create: (record) => plain.create(record),
-			update: (subject, id, version, next) => plain.update(subject, id, version, next),
-			remove: (subject, id) => plain.remove(subject, id),
-			removeAllForSubject: (subject) => plain.removeAllForSubject(subject),
-		};
+		const withoutMembers = without(
+			createMemoryMfaFactorStore(),
+			"listVersioned",
+			"createIf",
+			"removeIf",
+		);
 		const cases = mfaFactorStoreConditionalContract({
 			build: async () => ({ store: withoutMembers }),
 			supports: { unreachable: true, forceExpire: true },
@@ -655,7 +665,7 @@ describe("the binding's records", () => {
 				...store,
 				createIf: (record, expected) => {
 					seen.push(record);
-					return store.createIf?.(record, expected) ?? Promise.reject(new Error("no createIf"));
+					return store.createIf(record, expected);
 				},
 			};
 		};
@@ -691,7 +701,7 @@ describe("each case", () => {
 		const cases = mfaFactorStoreConditionalContract(counting(createMemoryMfaFactorStore));
 		for (const contractCase of cases) await contractCase.run();
 		const failing = mfaFactorStoreConditionalContract(
-			counting(() => ({ ...createMemoryMfaFactorStore(), listVersioned: undefined })),
+			counting(() => without(createMemoryMfaFactorStore(), "listVersioned")),
 		);
 		for (const contractCase of failing) await contractCase.run().catch(() => {});
 		const building = (list: readonly ContractCase[]): number =>
@@ -758,7 +768,7 @@ describe("each case", () => {
 			...store,
 			removeIf: (subject, id, expected) => {
 				used.add(tag);
-				return store.removeIf?.(subject, id, expected) ?? Promise.reject(new Error("none"));
+				return store.removeIf(subject, id, expected);
 			},
 		});
 		const race = mfaFactorStoreConditionalContract({

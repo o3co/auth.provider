@@ -900,6 +900,9 @@ ${script.source.slice(script.source.indexOf("\n") + 1)}`;
 			);
 			expect(error).toBeInstanceOf(Error);
 			expect((error as Error).message).toMatch(/past its deadline; the outcome is unknown/);
+			expect((error as Error).message).toMatch(
+				/another copy may have committed, or may still commit within W/,
+			);
 			expect((error as Error).message).not.toMatch(/wrote nothing/);
 		}
 	});
@@ -987,7 +990,7 @@ describe("createRedisMfaFactorStore — on a server of its own", () => {
 		await admin.call("CLIENT", "PAUSE", "2500", "WRITE");
 		const started = Date.now();
 		await expect(store.createIf?.(RECORD({ id: FACTOR_B }), at)).rejects.toThrow(
-			/no answer within 1000 ms/,
+			/no answer within 1000 ms; it may have committed, or may still commit within W/,
 		);
 		const waited = Date.now() - started;
 		expect(waited).toBeGreaterThanOrEqual(900);
