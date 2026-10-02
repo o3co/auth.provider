@@ -76,6 +76,7 @@ const NOT_DECIMAL_DIGITS: ReadonlyArray<readonly [string, unknown]> = [
 	["blank", "  "],
 	["hexadecimal", "0x10"],
 	["an exponent", "1e3"],
+	["a decimal point", "5.0"],
 	["the string Infinity", "Infinity"],
 	["the string NaN", "NaN"],
 	["Infinity", Number.POSITIVE_INFINITY],

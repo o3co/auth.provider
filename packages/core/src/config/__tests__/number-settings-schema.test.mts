@@ -99,6 +99,9 @@ const RATE_LIMITER_KEYS: ReadonlyArray<readonly [path: string, set: (value: unkn
 const REFUSED: ReadonlyArray<unknown> = [
 	"0x10",
 	"1e3",
+	"5.0",
+	"+5",
+	true,
 	"",
 	"  ",
 	"Infinity",
@@ -152,12 +155,15 @@ describe("the memory rate limiter's section reads each number setting in decimal
 });
 
 describe("the memory code repository reads defaultExpiresIn in decimal digits", () => {
-	it.each(["0x3c", "6e1", "Infinity"])("refuses %j", async (defaultExpiresIn) => {
-		const { codeFactory } = createRepositoryFactories();
-		await expect(codeFactory.create({ type: "memory", defaultExpiresIn })).rejects.toThrow(
-			'"defaultExpiresIn" must be a positive whole number of seconds',
-		);
-	});
+	it.each(["0x3c", "6e1", "60.0", "+60", true, "Infinity"])(
+		"refuses %j",
+		async (defaultExpiresIn) => {
+			const { codeFactory } = createRepositoryFactories();
+			await expect(codeFactory.create({ type: "memory", defaultExpiresIn })).rejects.toThrow(
+				'"defaultExpiresIn" must be a positive whole number of seconds, in decimal digits',
+			);
+		},
+	);
 
 	it("reads a string of decimal digits", async () => {
 		const { codeFactory } = createRepositoryFactories();

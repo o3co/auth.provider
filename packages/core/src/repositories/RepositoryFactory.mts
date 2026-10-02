@@ -77,7 +77,9 @@ export const createRepositoryFactories = (
 				? positiveWholeNumber.safeParse(config.defaultExpiresIn)
 				: undefined;
 		if (read !== undefined && !read.success) {
-			throw new RangeError('"defaultExpiresIn" must be a positive whole number of seconds');
+			throw new RangeError(
+				'"defaultExpiresIn" must be a positive whole number of seconds, in decimal digits',
+			);
 		}
 		const defaultExpiresIn = read?.data;
 		const repo = new InMemoryCodeRepository({ defaultExpiresIn });
