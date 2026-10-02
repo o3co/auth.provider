@@ -38,7 +38,9 @@
  *
  * Beside the suite, the factor set's own cases: an update keeps the
  * generation and a write at it lands, and a tombstone refuses a late first
- * binding as well as a late write read before the reset.
+ * binding as well as a late write read before the reset. With
+ * `supports.forceExpire`, a reset's tombstone expires across the two
+ * instances, of a set written and of one never written.
  *
  * The cases talk only to the port and read every answer with core's
  * readers, so a SQL-backed, a REST-backed and a bundled store run them
@@ -83,6 +85,7 @@ const factorId = (name: string): string => name.padEnd(22, "A");
 
 const FACTOR_A = factorId("set-a");
 const FACTOR_B = factorId("set-b");
+const FACTOR_X = factorId("set-x");
 
 /** The version every record is created at. */
 const SEEDED_VERSION = 1;
@@ -256,14 +259,14 @@ export function mfaFactorStoreConditionalContract(
 ): readonly ContractCase[] {
 	const test = (
 		name: string,
-		body: (one: SetView, two: SetView) => Promise<void>,
+		body: (one: SetView, two: SetView, harness: MfaFactorStoreHarness) => Promise<void>,
 	): ContractCase => ({
 		name,
 		run: async () => {
 			const harness = await input.build();
 			try {
 				const one = viewOf(harness.store);
-				await body(one, harness.second === undefined ? one : viewOf(harness.second));
+				await body(one, harness.second === undefined ? one : viewOf(harness.second), harness);
 			} finally {
 				await harness.close?.();
 			}
@@ -316,5 +319,47 @@ export function mfaFactorStoreConditionalContract(
 			});
 			assert.deepStrictEqual(await one.read("user-1"), tombstone);
 		}),
+
+		// Kept beside the generic expiry case, which runs on one instance: an
+		// expired tombstone must read as absent through the other instance too.
+		input.supports?.forceExpire === true
+			? test("a reset's tombstone expires: a set reset, and a set never written reset, read as absent once the clock passes the deadline, and a re-create repeats neither tombstone's generation", async (one, two, harness) => {
+					const forceExpire = harness.forceExpire?.bind(harness);
+					assert.ok(
+						forceExpire !== undefined,
+						"supports.forceExpire is declared, and the harness gives no forceExpire",
+					);
+					await seed(one, "user-1", [RECORD(FACTOR_A, "user-1"), RECORD(FACTOR_B, "user-1")]);
+					await two.store.removeAllForSubject("user-1");
+					await one.store.removeAllForSubject("nobody");
+					const tombstones = [
+						{ subject: "user-1", generation: (await one.read("user-1")).generation },
+						{ subject: "nobody", generation: (await two.read("nobody")).generation },
+					];
+					for (const { subject, generation } of tombstones) {
+						assert.ok(generation !== null, `the reset of ${subject} left no tombstone`);
+						await forceExpire(subject);
+					}
+					for (const { subject, generation } of tombstones) {
+						assert.deepStrictEqual(
+							await two.read(subject),
+							{ generation: null, items: [] },
+							`${subject}'s tombstone did not expire`,
+						);
+						const again = landed(
+							await one.createIf(RECORD(FACTOR_X, subject), null),
+							`the re-create of ${subject}`,
+						);
+						assert.notEqual(
+							again,
+							generation,
+							`the re-create of ${subject} repeated the tombstone's generation`,
+						);
+					}
+				})
+			: {
+					name: "not run: the reset tombstone expiry case (supports.forceExpire not declared)",
+					run: async () => {},
+				},
 	];
 }
