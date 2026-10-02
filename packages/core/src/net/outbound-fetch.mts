@@ -113,6 +113,22 @@ export function outboundPolicyOf(config: unknown): OutboundPolicy {
 	});
 }
 
+/** The deadline and the body cap `core.outbound` sets: the ceilings over every use's own. */
+export interface OutboundLimits {
+	readonly timeoutMs: number;
+	readonly maxResponseBytes: number;
+}
+
+/**
+ * The limits `config` states in `core.outbound`, as the outbound fetch
+ * applies them (the defaults for an absent section). Refuses a malformed
+ * section, naming the key, as building the fetch does.
+ */
+export function outboundLimitsOf(config: unknown): OutboundLimits {
+	const { timeoutMs, maxResponseBytes } = outboundPolicyOf(config);
+	return Object.freeze({ timeoutMs, maxResponseBytes });
+}
+
 const PROXY_VARIABLES = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] as const;
 
 /**
