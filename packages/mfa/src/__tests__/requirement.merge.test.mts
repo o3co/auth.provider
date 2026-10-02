@@ -36,9 +36,6 @@ import {
 	type MfaFactor,
 	type SessionRequirement,
 	type StepUpPage,
-	type SupportsSecondFactorUpdate,
-	type UserSession,
-	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	MERGE_ACR_TABLE,
@@ -46,6 +43,7 @@ import {
 	type MergeFactors,
 	type MergeRow,
 	mergeAdmission,
+	mergeSessionStore,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
@@ -85,13 +83,12 @@ const PAGE: StepUpPage = { url: "/mfa", params: {} };
 
 /**
  * The requirement the MFA module registers under `mode`, over the factors
- * of `factors`; able to record a step-up exactly when the session store
- * can, as boot builds it.
+ * of `factors`, as boot builds it: whether a step-up can be recorded is
+ * admission's view's to say.
  */
 const realRequirement = (
 	mode: "optional" | "required",
 	factors: MergeFactors,
-	stepUpRecordable: boolean,
 ): SessionRequirement =>
 	createMfaRequirement({
 		// No recovery set below a floor in these suites: a floor of 0.
@@ -106,7 +103,6 @@ const realRequirement = (
 			ttlSeconds: 600,
 		}),
 		stepUpPage: PAGE,
-		stepUpRecordable,
 		recentMfaMaxAgeSeconds: 300,
 		logger: consoleLogger,
 		...WITHOUT_MAIL,
@@ -114,34 +110,18 @@ const realRequirement = (
 		sealing: SEALING,
 	});
 
-/**
- * Whether a row's store can record a second factor: every row's can,
- * unless the row says its store cannot.
- */
-const recordsSecondFactor = (row: MergeRow): boolean =>
-	!("storeRecords" in row && row.storeRecords === false);
-
-const storeOf = (
-	session: UserSession,
-	records: boolean,
-): UserSessionStore & Partial<SupportsSecondFactorUpdate> => ({
-	kind: "test",
-	create: async () => {},
-	get: async (sid) => (sid === session.sid ? session : null),
-	delete: async () => {},
-	...(records ? { recordSecondFactor: async () => null } : {}),
-});
-
 const claim = () =>
 	cookieClaim({ session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } } });
 
-/** What a composition registers under the row's mode: the real requirement, or — under off, which the module refuses — none. */
+/**
+ * What a composition registers under the row's mode — the real requirement,
+ * or, under off, which the module refuses, none — over the row's store.
+ */
 const deps = (row: MergeRow): AdmissionDeps => ({
-	userSessionStore:
-		row.session === null ? undefined : storeOf(row.session, recordsSecondFactor(row)),
+	userSessionStore: mergeSessionStore(row),
 	subjectRevocation: undefined,
 	requirements: resolverForTests(
-		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors, recordsSecondFactor(row))],
+		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors)],
 		{ issuer: ISSUER, actions: { "test.use": { grade: "use" } } },
 	),
 	acrTable: MERGE_ACR_TABLE,
@@ -162,7 +142,12 @@ for (const group of MERGE_ROW_GROUPS) {
 			// The requirement the row's composition registered: under `off`, none.
 			const rowDeps = deps(row);
 			expect(await decide(rowDeps, row)).toEqual(
-				mergeAdmission(row.expected, row.session, rowDeps.requirements.get("mfa")),
+				mergeAdmission(
+					row.expected,
+					row.session,
+					rowDeps.requirements.get("mfa"),
+					rowDeps.userSessionStore,
+				),
 			);
 		});
 	});
