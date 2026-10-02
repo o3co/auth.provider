@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, posix, win32 } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
+import { type Config, parseFile, parseString } from "@o3co/ts.hocon";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { shouldCopyTemplateEntry } from "../internal/template-filter.mjs";
 
@@ -24,6 +25,9 @@ const {
 	main,
 	scaffold,
 } = await import("../index.mjs");
+
+/** The templates this package bundles, which `scaffold()` copies from. */
+const BUNDLED_TEMPLATES = resolve(import.meta.dirname, "../../templates");
 
 const enoent = (bin: string) => Object.assign(new Error(`spawn ${bin} ENOENT`), { code: "ENOENT" });
 
@@ -373,6 +377,75 @@ describe("scaffold — pnpm-workspace.yaml generation", () => {
 	});
 });
 
+describe("scaffold — the MFA switch (--no-mfa)", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "create-auth-provider-mfa-"));
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	const applicationConf = (projectDir: string): string =>
+		join(projectDir, "config", "application.conf");
+
+	/**
+	 * `mfaMode` as the template reads it: the project's application.conf over
+	 * `reference` (the project's own config/reference.conf unless given), each
+	 * substituted with `env`.
+	 */
+	const resolvedMfaMode = (
+		projectDir: string,
+		env: Record<string, string>,
+		reference: Config = parseFile(join(projectDir, "config", "reference.conf"), { env }),
+	): unknown =>
+		(
+			parseFile(applicationConf(projectDir), { env }).withFallback(reference).toObject() as Record<
+				string,
+				unknown
+			>
+		).mfaMode;
+
+	it("writes the switch off, then binds MFA_MODE, at the end of application.conf", () => {
+		const targetDir = join(tempDir, "my-auth");
+		scaffold(targetDir, "my-auth", DEFAULT_TEMPLATE, { noMfa: true });
+
+		const written = readFileSync(applicationConf(targetDir), "utf-8");
+		expect(written).toMatch(
+			/# written by create-app --no-mfa: MFA is off unless MFA_MODE turns it on\nmfaMode = "off"\nmfaMode = \$\{\?MFA_MODE\}\n$/,
+		);
+	});
+
+	it("resolves the switch off with no MFA_MODE, whatever the template's default", () => {
+		const targetDir = join(tempDir, "my-auth");
+		scaffold(targetDir, "my-auth", DEFAULT_TEMPLATE, { noMfa: true });
+
+		expect(resolvedMfaMode(targetDir, {})).toBe("off");
+		expect(resolvedMfaMode(targetDir, {}, parseString('mfaMode = "required"', { env: {} }))).toBe(
+			"off",
+		);
+	});
+
+	it("lets MFA_MODE turn MFA on", () => {
+		const targetDir = join(tempDir, "my-auth");
+		scaffold(targetDir, "my-auth", DEFAULT_TEMPLATE, { noMfa: true });
+
+		expect(resolvedMfaMode(targetDir, { MFA_MODE: "required" })).toBe("required");
+		expect(resolvedMfaMode(targetDir, { MFA_MODE: "optional" })).toBe("optional");
+	});
+
+	it("leaves application.conf as the template has it without the option", () => {
+		const targetDir = join(tempDir, "my-auth");
+		scaffold(targetDir, "my-auth");
+
+		expect(readFileSync(applicationConf(targetDir))).toEqual(
+			readFileSync(join(BUNDLED_TEMPLATES, DEFAULT_TEMPLATE, "config", "application.conf")),
+		);
+	});
+});
+
 describe("generateLockfile", () => {
 	const LOCKFILE_ARGS = ["install", "--lockfile-only", "--ignore-workspace"];
 
@@ -554,6 +627,20 @@ describe("main (argv parsing and directory derivation)", () => {
 		const r = runMain(["my-auth", "--no-lockfile"]);
 		expect(r.exitCode).toBe(0);
 		expect(spawnSyncMock).not.toHaveBeenCalled();
+	});
+
+	it("--no-mfa writes the scaffold's MFA switch off", () => {
+		const r = runMain(["my-auth", "--no-mfa"]);
+		expect(r.exitCode).toBe(0);
+		const written = readFileSync(join(workdir, "my-auth", "config", "application.conf"), "utf-8");
+		expect(written).toMatch(/\nmfaMode = "off"\nmfaMode = \$\{\?MFA_MODE\}\n$/);
+	});
+
+	it("without --no-mfa the scaffold's application.conf writes no MFA switch", () => {
+		const r = runMain(["my-auth"]);
+		expect(r.exitCode).toBe(0);
+		const written = readFileSync(join(workdir, "my-auth", "config", "application.conf"), "utf-8");
+		expect(written).not.toMatch(/^mfaMode\b/m);
 	});
 
 	// Positive: --template names the template, in both forms

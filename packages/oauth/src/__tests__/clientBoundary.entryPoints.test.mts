@@ -46,6 +46,7 @@ import express from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { behindClientBoundary } from "#/clients/clientBoundary.mjs";
 import {
 	isClientIdMetadataDocumentClient,
 	withClientIdMetadataDocuments,
@@ -235,18 +236,19 @@ describe("createOAuthRouter with documents off reads registered clients through 
 		expect(exchanged.body).toMatchObject({ error: "temporarily_unavailable" });
 	});
 
-	it("dispatches /token with the client a boundary handed in answered, not a second copy of it", async () => {
-		const boundary = validatedClientRepository(answering(VALID), { logger: createMockLogger() });
-		const authenticate = vi.spyOn(boundary, "authenticate");
+	it("dispatches /token with the client a boundary handed in answered, read through it as it is", async () => {
+		const inner = answering(VALID);
+		const authenticate = vi.spyOn(inner, "authenticate");
+		const boundary = validatedClientRepository(inner, { logger: createMockLogger() });
+		// The boundary is frozen, so it cannot be spied on: it is kept as it is.
+		expect(behindClientBoundary(boundary, createMockLogger())).toBe(boundary);
 		const { app, seen } = await buildRouter(boundary);
 		const res = await token(app);
 		expect(res.status).toBe(400);
 		expect(authenticate).toHaveBeenCalledTimes(1);
-		const answered = (await authenticate.mock.results[0]?.value) as PublicClient;
 		expect(seen).toHaveLength(1);
-		// The grant's client is built from the boundary's answer: the frozen
-		// array is the same one, which a second boundary would have copied.
-		expect(seen[0]?.allowedScopes).toBe(answered.allowedScopes);
+		expect(seen[0]).toMatchObject({ clientId: CLIENT_ID, allowedScopes: VALID.allowedScopes });
+		expect(Object.isFrozen(seen[0]?.allowedScopes)).toBe(true);
 	});
 });
 
@@ -294,9 +296,10 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 	});
 
-	it("sets the client a boundary handed in answered, not a second copy of it", async () => {
-		const boundary = validatedClientRepository(answering(VALID), { logger: createMockLogger() });
-		const authenticate = vi.spyOn(boundary, "authenticate");
+	it("sets the client a boundary handed in answered, read through it as it is", async () => {
+		const inner = answering(VALID);
+		const authenticate = vi.spyOn(inner, "authenticate");
+		const boundary = validatedClientRepository(inner, { logger: createMockLogger() });
 		const server = express();
 		server.use(express.urlencoded({ extended: false }));
 		let set: PublicClient | undefined;
@@ -307,7 +310,8 @@ describe("createClientAuthMiddleware reads clients through core's boundary", () 
 		const res = await basic("/token", server, {});
 		expect(res.status).toBe(200);
 		expect(authenticate).toHaveBeenCalledTimes(1);
-		expect(set).toBe(await authenticate.mock.results[0]?.value);
+		expect(set).toMatchObject({ clientId: CLIENT_ID, clientName: VALID.clientName });
+		expect(Object.isFrozen(set)).toBe(true);
 	});
 
 	it("reads a document fallback unwrapped, so a document client keeps its provenance", async () => {

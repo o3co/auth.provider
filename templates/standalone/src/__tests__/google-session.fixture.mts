@@ -58,9 +58,9 @@ import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths, type Switches } from "#/configPath.mjs";
 import { templateReference } from "../modules.mjs";
 import {
-	adaptersOf,
 	capturedRenames,
 	libraryLayers,
+	rootSectionsOf,
 	sectionsCoreDoesNotDeclare,
 } from "./library-references.fixture.mjs";
 
@@ -132,7 +132,7 @@ function resolveConfig(google: GoogleWiring): Switches {
 		.withFallback(libraryLayers(env));
 	return {
 		...sectionsCoreDoesNotDeclare(layers),
-		adapters: adaptersOf(layers, env),
+		...rootSectionsOf(layers, env),
 		...validate(layers, AppConfigSchema),
 		// What the resolution captured of core's renamed variables, which the
 		// schema's parse drops.

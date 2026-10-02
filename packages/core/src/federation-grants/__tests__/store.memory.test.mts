@@ -27,6 +27,7 @@ import {
 	type MemoryFederationGrantStore,
 } from "#/federation-grants/memory.mjs";
 import { memoryFederationGrantStoreModule } from "#/federation-grants/module.mjs";
+import type { FederationGrantRefreshFailureInput } from "#/federation-grants/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { runFederationGrantStoreContract } from "./store.contract.mjs";
 
@@ -380,6 +381,58 @@ describe("createMemoryFederationGrantStore", () => {
 			now: at(3 * MIN),
 		});
 		expect(written.ok).toBe(false);
+	});
+
+	describe("a failure report whose fields are accessors", () => {
+		// A legitimate shape: a class instance answers its fields from its
+		// prototype, where a spread does not look.
+		class Report {
+			readonly #fields: FederationGrantRefreshFailureInput;
+			constructor(fields: FederationGrantRefreshFailureInput) {
+				this.#fields = fields;
+			}
+			get at(): Date {
+				return this.#fields.at;
+			}
+			get kind(): FederationGrantRefreshFailureInput["kind"] {
+				return this.#fields.kind;
+			}
+			get retryAfterSeconds(): number | undefined {
+				return this.#fields.retryAfterSeconds;
+			}
+			get upstreamCode(): string | undefined {
+				return this.#fields.upstreamCode;
+			}
+		}
+
+		const reports: FederationGrantRefreshFailureInput[] = [
+			{ at: at(DAY), kind: "rejected", upstreamCode: "interaction_required" },
+			{ at: at(DAY), kind: "rate_limited", retryAfterSeconds: 17 },
+		];
+		for (const fields of reports) {
+			it(`stamps every field of a ${fields.kind} report`, async () => {
+				const store = createMemoryFederationGrantStore();
+				await lodge(store, "g-1");
+				const activated = await activate(store, "g-1");
+				if (!activated.ok) throw new Error("activation failed");
+				const written = await store.noteRefreshFailure({
+					grantId: "g-1",
+					expectedVersion: activated.grant.version,
+					failure: new Report(fields),
+					rowMs: MIN,
+					now: at(DAY),
+				});
+				const stamp = {
+					at: at(DAY),
+					kind: fields.kind,
+					retryAfterSeconds: fields.retryAfterSeconds,
+					upstreamCode: fields.upstreamCode,
+					count: 1,
+				};
+				expect(written).toMatchObject({ ok: true, grant: { refreshFailure: stamp } });
+				expect((await store.find("g-1", at(DAY)))?.refreshFailure).toStrictEqual(stamp);
+			});
+		}
 	});
 
 	it("hands every failed write its own result: one caller's object is not another's", async () => {

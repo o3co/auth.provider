@@ -573,12 +573,14 @@ export function createMemoryFederationGrantStore(
 			const grant = entry.grant;
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
-			if (!isDate(input.failure.at)) return failed();
+			// Each field read once, by name, and not spread: a report's fields may
+			// be accessors, and what was judged is what is stamped.
+			const { at, kind, retryAfterSeconds: retryAfter, upstreamCode } = input.failure;
+			if (!isDate(at)) return failed();
 			// A backoff that is not a finite number is not one the classifier
 			// bounded, nor one every adapter can keep.
-			const retryAfter = input.failure.retryAfterSeconds;
 			if (retryAfter !== undefined && !Number.isFinite(retryAfter)) return failed();
-			const atMs = input.failure.at.getTime();
+			const atMs = at.getTime();
 			const previous = grant.refreshFailure;
 			// Never back: a stamp that outlived its caller's budget arrives after a
 			// newer one, and must not replace it.
@@ -595,7 +597,7 @@ export function createMemoryFederationGrantStore(
 			const next: AuthorizedFederationGrant = {
 				...grant,
 				refreshFailure: federationGrantRefreshFailureStamp(
-					{ ...input.failure, at: new Date(atMs) },
+					{ at: new Date(atMs), kind, retryAfterSeconds: retryAfter, upstreamCode },
 					inRow ? previous.count + 1 : 1,
 				),
 			};

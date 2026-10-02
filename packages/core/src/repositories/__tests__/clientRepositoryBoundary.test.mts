@@ -19,15 +19,19 @@
  * record is read by name once, into a plain copy, and held to the
  * registration schema. A record that fails makes the lookup reject with the
  * branded refusal (`isClientRecordRefused`), with one warn naming the client
- * id and the reasons; a read that throws is the store's outage and is let
- * through as it was thrown. A layer that lets rejections through keeps the
- * refusal.
+ * id and the reasons. A field whose read throws is refused as unreadable,
+ * never its value or what was thrown; the repository's own throw is the
+ * store's outage. A logger that throws changes nothing of the answer, and
+ * the boundary itself is frozen. A layer that lets rejections through keeps
+ * the refusal.
  */
 
+import { inspect } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import type { ClientRepository, PublicClient } from "#/repositories/ClientRepository.mjs";
 import { isClientRecordRefused } from "#/repositories/clientRecordRefused.mjs";
 import { validatedClientRepository } from "#/repositories/clientRepositoryBoundary.mjs";
+import { logClientRepositoryUnavailable } from "#/repositories/clientRepositoryUnavailable.mjs";
 import { InMemoryClientRepository } from "#/repositories/InMemoryClientRepository.mjs";
 import { clientEntries } from "#/testing/index.mjs";
 
@@ -69,6 +73,12 @@ const repositoryAnswering = (record: unknown): ClientRepository => ({
 });
 
 const recordingLogger = () => ({ warn: vi.fn() });
+
+/**
+ * Everything `value` holds, Errors expanded (name, message, stack, cause),
+ * for a leak assertion: `JSON.stringify` renders an Error as `{}`.
+ */
+const rendered = (value: unknown): string => inspect(value, { depth: null });
 
 /** What `answer` rejects with; fails when it resolves. */
 const rejectionOf = async (answer: Promise<unknown>): Promise<unknown> => {
@@ -415,12 +425,43 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		}
 	});
 
+	it("refuses a record whose shape cannot be read, as not an object", async () => {
+		// Revoked once `await` has read its `then`: what reaches the boundary
+		// is a Proxy every read of which throws.
+		const revokedOnArrival = () => {
+			const { proxy, revoke } = Proxy.revocable(validRecord(), {
+				get(target, key, receiver) {
+					if (key === "then") {
+						revoke();
+						return undefined;
+					}
+					return Reflect.get(target, key, receiver);
+				},
+			});
+			return proxy;
+		};
+		const logger = recordingLogger();
+		const boundary = validatedClientRepository(
+			{
+				findById: async () => revokedOnArrival() as PublicClient,
+				authenticate: async () => revokedOnArrival() as PublicClient,
+			},
+			{ logger },
+		);
+		expect(await refusedBy(boundary.findById(CLIENT_ID))).toBe(true);
+		expect(await refusedBy(boundary.authenticate(CLIENT_ID, "secret"))).toBe(true);
+		expect(logger.warn.mock.calls.map(([line]) => line)).toEqual([
+			{ step: "find", clientId: CLIENT_ID, reasons: ["not an object"] },
+			{ step: "authenticate", clientId: CLIENT_ID, reasons: ["not an object"] },
+		]);
+	});
+
 	it("logs the client id and the reasons, never the record", async () => {
 		const logger = recordingLogger();
 		const record = { ...validRecord(), clientSecret: "do-not-log-me", firstParty: "true" };
 		const boundary = validatedClientRepository(repositoryAnswering(record), { logger });
 		await rejectionOf(boundary.findById(CLIENT_ID));
-		const line = JSON.stringify(logger.warn.mock.calls);
+		const line = rendered(logger.warn.mock.calls);
 		expect(line).not.toContain("do-not-log-me");
 		expect(line).not.toContain("Relying Party");
 		expect(Object.keys(logger.warn.mock.calls[0]?.[0] ?? {}).sort()).toEqual([
@@ -481,7 +522,7 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		expect(reasons).toContain("allowedRedirectUris[1]: ");
 		expect(reasons).toContain("federationGrantRedirectUris[0]: ");
 		expect(reasons).not.toContain(SECRET);
-		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(SECRET);
+		expect(rendered(logger.warn.mock.calls)).not.toContain(SECRET);
 	});
 
 	it("keeps ten reasons and counts them all when a record breaks more rules", async () => {
@@ -524,7 +565,7 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		const refusal = await rejectionOf(boundary.findById(CLIENT_ID));
 		expect(isClientRecordRefused(refusal)).toBe(true);
 		expect(Object.isFrozen(refusal)).toBe(true);
-		const carried = JSON.stringify({ ...(refusal as object), message: (refusal as Error).message });
+		const carried = rendered(refusal);
 		expect(carried).not.toContain(SECRET);
 		expect(carried).not.toContain(CLIENT_ID);
 		expect(carried).not.toContain("allowedRedirectUris");
@@ -541,6 +582,28 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 		expect(first).not.toBe(second);
 	});
 
+	it("answers a refused record with the refusal when its logger throws, and a valid one as it is", async () => {
+		const SAID = "logger sink down: tok-3f9a";
+		const logger = {
+			warn: vi.fn(() => {
+				throw new Error(SAID);
+			}),
+		};
+		const refusing = validatedClientRepository(
+			repositoryAnswering({ ...validRecord(), firstParty: "true" }),
+			{ logger },
+		);
+		const found = await rejectionOf(refusing.findById(CLIENT_ID));
+		const authenticated = await rejectionOf(refusing.authenticate(CLIENT_ID, "secret"));
+		expect(isClientRecordRefused(found) && isClientRecordRefused(authenticated)).toBe(true);
+		expect(logger.warn).toHaveBeenCalledTimes(2);
+		const outage = { error: vi.fn() };
+		logClientRepositoryUnavailable(outage, { step: "find", clientId: CLIENT_ID }, found);
+		expect(rendered(outage.error.mock.calls)).not.toContain("tok-3f9a");
+		const valid = validatedClientRepository(repositoryAnswering(validRecord()), { logger });
+		expect(await valid.findById(CLIENT_ID)).toEqual(validRecord());
+	});
+
 	it("answers no record as no client, silently", async () => {
 		for (const answer of [null, undefined]) {
 			const logger = recordingLogger();
@@ -552,23 +615,84 @@ describe("validatedClientRepository — a malformed record makes the lookup reje
 	});
 });
 
-describe("validatedClientRepository — a read that throws is the store's outage", () => {
-	it("lets a getter's throw through as it was thrown, for the caller to answer 503", async () => {
-		const outage = new Error("connection reset");
-		const record = Object.defineProperty({ ...validRecord() }, "allowedScopes", {
-			get() {
-				throw outage;
-			},
-		});
-		const logger = recordingLogger();
-		const boundary = validatedClientRepository(repositoryAnswering(record), { logger });
-		await expect(boundary.findById(CLIENT_ID)).rejects.toBe(outage);
-		await expect(boundary.authenticate(CLIENT_ID, "secret")).rejects.toBe(outage);
-		expect(isClientRecordRefused(outage)).toBe(false);
-		expect(logger.warn).not.toHaveBeenCalled();
-	});
+describe("validatedClientRepository — a field whose read throws is refused as unreadable", () => {
+	/** What a throw may carry: the field's value, quoted by a driver's message. */
+	const VALUE = "https://rp.example/cb?token=tok-3f9a";
 
-	it("lets the repository's own throw through", async () => {
+	/** `validRecord()` whose `field` is read through `read`, which throws. */
+	const unreadableAt = (field: string, read: () => unknown): object =>
+		Object.defineProperty({ ...validRecord() }, field, { get: read, enumerable: true });
+
+	const CASES: ReadonlyArray<readonly [string, object, string]> = [
+		[
+			"a getter throwing an Error that quotes the value",
+			unreadableAt("allowedRedirectUris", () => {
+				throw new Error(`column allowedRedirectUris failed to load: ${VALUE}`);
+			}),
+			"allowedRedirectUris: unreadable",
+		],
+		[
+			"a getter throwing a string",
+			unreadableAt("clientName", () => {
+				throw `lazy load of ${VALUE}`;
+			}),
+			"clientName: unreadable",
+		],
+		[
+			"a nested object's getter",
+			{
+				...validRecord(),
+				senderConstrained: Object.defineProperty({ required: true }, "methods", {
+					get() {
+						throw new TypeError(`cannot read ${VALUE}`);
+					},
+					enumerable: true,
+				}),
+			},
+			"senderConstrained: unreadable",
+		],
+		[
+			"a Proxy-backed list whose element read throws",
+			{
+				...validRecord(),
+				allowedScopes: new Proxy(["openid"], {
+					get(target, key, receiver) {
+						if (key === "0") throw new RangeError(VALUE);
+						return Reflect.get(target, key, receiver);
+					},
+				}),
+			},
+			"allowedScopes: unreadable",
+		],
+	];
+
+	for (const [name, record, reason] of CASES) {
+		it(`refuses ${name}, naming the field, never the value or what was thrown`, async () => {
+			const logger = recordingLogger();
+			const boundary = validatedClientRepository(repositoryAnswering(record), { logger });
+			const found = await rejectionOf(boundary.findById(CLIENT_ID));
+			const authenticated = await rejectionOf(boundary.authenticate(CLIENT_ID, "secret"));
+			expect(isClientRecordRefused(found) && isClientRecordRefused(authenticated)).toBe(true);
+			expect(logger.warn.mock.calls).toEqual([
+				[{ step: "find", clientId: CLIENT_ID, reasons: [reason] }, "client_record_refused"],
+				[{ step: "authenticate", clientId: CLIENT_ID, reasons: [reason] }, "client_record_refused"],
+			]);
+			// Neither the warn, the refusal, nor the outage line a caller writes
+			// for it carries the value or the thrown message.
+			const outage = { error: vi.fn() };
+			logClientRepositoryUnavailable(outage, { step: "find", clientId: CLIENT_ID }, found);
+			expect(outage.error.mock.calls[0]?.[0]).toMatchObject({
+				err: { reason: "client_record_refused" },
+			});
+			const said = rendered([logger.warn.mock.calls, outage.error.mock.calls, found]);
+			expect(said).not.toContain("tok-3f9a");
+			expect(said).not.toContain("failed to load");
+			expect(said).not.toContain("lazy load");
+			expect(said).not.toContain("cannot read");
+		});
+	}
+
+	it("still lets the repository's own throw through, as the store's outage", async () => {
 		const outage = new Error("store down");
 		const boundary = validatedClientRepository({
 			findById: async () => {
@@ -813,6 +937,26 @@ describe("validatedClientRepository — one boundary", () => {
 		expect(twice).toBe(once);
 		await twice.findById(CLIENT_ID);
 		expect(reads.get("clientId")).toBe(1);
+	});
+
+	it("is frozen: no consumer can replace its lookups or its dispose", async () => {
+		const boundary = validatedClientRepository(repositoryAnswering(validRecord()));
+		expect(Object.isFrozen(boundary)).toBe(true);
+		const replacement = async () => null;
+		expect(() => {
+			(boundary as { findById: unknown }).findById = replacement;
+		}).toThrow(TypeError);
+		expect(() => {
+			(boundary as { authenticate: unknown }).authenticate = replacement;
+		}).toThrow(TypeError);
+		expect(() => {
+			(boundary as { [Symbol.asyncDispose]?: unknown })[Symbol.asyncDispose] = replacement;
+		}).toThrow(TypeError);
+		expect(() => Object.defineProperty(boundary, "findById", { value: replacement })).toThrow(
+			TypeError,
+		);
+		expect(validatedClientRepository(boundary)).toBe(boundary);
+		expect(await boundary.findById(CLIENT_ID)).toEqual(validRecord());
 	});
 
 	it("disposes the repository it holds when the repository is disposable", async () => {

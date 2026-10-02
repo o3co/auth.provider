@@ -117,7 +117,11 @@ const config: AppConfig & Record<string, unknown> = {
 
 /** What phase one hands `buildModules`: the configuration, with `changes` over every store in process. */
 const switchesWith = (changes: Partial<Adapters> = {}): Switches =>
-	({ ...config, adapters: { ...inProcessAdapters(), ...changes } }) as unknown as Switches;
+	({
+		...config,
+		adapters: { ...inProcessAdapters(), ...changes },
+		mfaMode: "off",
+	}) as unknown as Switches;
 
 const switches = switchesWith();
 

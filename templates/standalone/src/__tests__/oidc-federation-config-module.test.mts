@@ -47,6 +47,7 @@ const configWith = (federations: Record<string, unknown>): Switches =>
 		...makeValidAppConfig(),
 		...coreConfigForTests({ declaredAbsent: ["auditSink"], federations: federations as never }),
 		adapters: inProcessAdapters(),
+		mfaMode: "off",
 	}) as unknown as Switches;
 
 describe("oidcFederationConfigModule", () => {

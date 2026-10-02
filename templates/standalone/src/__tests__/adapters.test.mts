@@ -32,13 +32,7 @@ import { defineModule } from "@o3co/auth-provider-core";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildModules } from "#/buildModules.mjs";
-import {
-	expectedSessionRequirements,
-	readOwnLayers,
-	readSwitches,
-	resolveConfigPaths,
-	resolveForBoot,
-} from "#/configPath.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "#/configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -330,7 +324,7 @@ describe("boot and the section", () => {
 		const resolved = resolveForBoot(
 			own,
 			buildModules(switches, { environment: "production" }),
-			expectedSessionRequirements(switches),
+			switches,
 		);
 		expect(resolved).not.toHaveProperty("adapters");
 	});
@@ -352,7 +346,7 @@ describe("boot and the section", () => {
 			resolveForBoot(
 				own,
 				[...buildModules(switches, { environment: "production" }), mine],
-				expectedSessionRequirements(switches),
+				switches,
 			),
 		).toThrow(new RegExp(`"${name}".*adapters`));
 	});

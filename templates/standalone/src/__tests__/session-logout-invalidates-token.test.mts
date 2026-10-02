@@ -124,7 +124,11 @@ const config: AppConfig & Record<string, unknown> = {
 } as unknown as AppConfig;
 
 /** What phase one hands `buildModules`: the configuration, and every store in process. */
-const switches = { ...config, adapters: inProcessAdapters() } as unknown as Switches;
+const switches = {
+	...config,
+	adapters: inProcessAdapters(),
+	mfaMode: "off",
+} as unknown as Switches;
 
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",

@@ -26,6 +26,7 @@
 		"@o3co/auth-provider-federation-grants": "workspace:*",
 		"@o3co/auth-provider-federation-oidc": "workspace:*",
 		"@o3co/auth-provider-foundation": "workspace:*",
+		"@o3co/auth-provider-mfa": "workspace:*",
 		"@o3co/auth-provider-oauth": "workspace:*",
 		"@o3co/auth-provider-redis": "workspace:*",
 		"@o3co/auth-provider-session": "workspace:*",

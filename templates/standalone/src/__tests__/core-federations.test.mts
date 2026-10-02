@@ -33,13 +33,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "@o3co/auth-provider-core";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
-import {
-	expectedSessionRequirements,
-	readOwnLayers,
-	readSwitches,
-	resolveConfigPaths,
-	resolveForBoot,
-} from "#/configPath.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "#/configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -208,7 +202,7 @@ describe("the map written at the top level", () => {
 			createApp({
 				modules,
 				bootstrapComponents: {
-					config: resolveForBoot(own, modules, expectedSessionRequirements(switches)),
+					config: resolveForBoot(own, modules, switches),
 					pathResolver: (s: string) => s,
 				} as never,
 			}),
