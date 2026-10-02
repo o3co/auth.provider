@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+// no-mfa:omit-file
+
 /**
  * The template's MFA switch under the name production, where the MFA stores
  * must be shared: both on Redis, as a production deployment selects them.

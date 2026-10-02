@@ -11,9 +11,13 @@ not a library: nothing imports it. `@o3co/create-auth-provider` copies it into
 a new project, and from then on the operator owns and edits the copy. It sits
 on top of the packages: it composes `@o3co/auth-provider-oauth`, `-session`,
 the Google and generic OpenID Connect federation adapters, `-federation-grants`,
-`-mfa`, `-redis`, `-foundation` and `-standard`'s mail senders over
+`-redis`, `-foundation` and `-standard`'s mail senders over
 `@o3co/auth-provider-core`.
 
+<!-- no-mfa:omit-begin -->
+It composes `-mfa` too, which its MFA switch installs.
+
+<!-- no-mfa:omit-end -->
 **Owns** the choices that are specific to one deployment:
 
 - which modules are composed, in what order, and which adapter fills each
@@ -290,7 +294,7 @@ Configuration is loaded from `config/application.conf` (HOCON format), over the 
    `http.cors`), `key-store`, the shared Redis connection's `redis-clients`,
    `repositories`, the in-process code repository's
    `standalone-in-memory-code-repository` and `audit-sink` — and of the
-   composition root's own `adapters` and `mfaMode` (below). Set a deployment's own value in
+   composition root's own keys (below). Set a deployment's own value in
    the two files above, not there. `config/reference.conf` binds each of these
    keys' variables beside its default, so a value either file above sets wins
    over the variable, except for `HTTP_PORT`, `HTTP_TRUST_PROXY`,
@@ -327,7 +331,7 @@ the `logging` module's section, with that module's schema, over the template's
 template logs while it reads its configuration and chooses its modules. Then it hands `createApp` the configuration as resolved over every
 loaded module's `reference.conf` (`resolveForBoot`), unparsed, with the session
 requirements phase one derived written in, and the `mfa` section as the MFA
-switch decides it (see [Multi-factor authentication](#multi-factor-authentication)):
+switch decides it ([`src/mfaSwitch.mts`](src/mfaSwitch.mts)):
 boot parses it once, with every loaded module's schema. What
 the template reads after boot — the trusted hops, the port, the readiness
 deadline — it reads from the `http` module: core's `httpSettings` slot and the
@@ -336,13 +340,16 @@ loaded module owns is kept and logged once at boot as
 `config_sections_ignored`: that is where a misspelt section name shows.
 
 Values in the overlay take precedence over `application.conf`. The scaffold
-ships with `development.conf`, `production.conf` and `mailpit.conf` (the
-development overlay under the name the
-[Mailpit overlay](#mailpit-for-the-smtp-sender-development-only) selects). To add another
+ships with `development.conf` and `production.conf`. To add another
 environment (e.g. `staging`), create `config/staging.conf` and set
 `CONFIG_ENV=staging`. A missing `{ENV}.conf` is a boot-time error — typos
 fail fast rather than silently falling back to defaults.
 
+<!-- no-mfa:omit-begin -->
+It ships `mailpit.conf` too: the development overlay under the name the
+[Mailpit overlay](#mailpit-for-the-smtp-sender-development-only) selects.
+
+<!-- no-mfa:omit-end -->
 ### Adapters
 
 Which adapter fills each slot is the composition root's own choice, its own
@@ -360,7 +367,7 @@ fails before boot, naming it.
 | `ADAPTERS_FEDERATION_TOKEN_STORE` | `memory` | `adapters.federationTokenStore`: `memory` or `redis`. See [Federation Token Store](#federation-token-store) |
 | `ADAPTERS_FEDERATION_GRANT_STORE` | `none` | `adapters.federationGrantStore`: `none`, `memory` or `redis`. See [Federation Grants](#federation-grants) |
 | `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `none` | `adapters.federationGrantIntentStore`: `none`, `memory` or `redis`. See [Federation Grants](#federation-grants) |
-| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory` (development and test only), `redis` or `store` (the Store's endpoints), read while `MFA_MODE` installs MFA. See [Multi-factor authentication](#multi-factor-authentication) |
+| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory` (development and test only), `redis` or `store` (the Store's endpoints), read while `MFA_MODE` installs MFA |
 | `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` (development and test only) or `redis`, read while `MFA_MODE` installs MFA |
 | `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: the authorization-code repository, `memory` or `redis`. See [Code Repository](#code-repository) |
 | `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`, or `static` (core's alias of `yaml`). See [Client Repository](#client-repository) |
@@ -758,6 +765,7 @@ socket configured by `REDIS_CLIENTS_URL`.
 |---|---|---|
 | `ADAPTERS_CONSENT_STORE` | `none` | Consent store for clients that are not first-party (#527): `none` (such clients are refused), `memory` (single replica) or `redis` (shared, #561) |
 
+<!-- no-mfa:omit-begin -->
 ### Multi-factor authentication
 
 A second factor after a password login, and a step-up when a relying party
@@ -821,6 +829,7 @@ The rest of the MFA settings — each factor's, the lock, a transaction's life
   what the switch says, are refused before boot, naming the keys. While MFA
   is off, nothing the configuration writes under `mfa` is handed to boot.
 
+<!-- no-mfa:omit-end -->
 ### Federation Grants
 
 Offline delegation of an upstream IdP's tokens (#593): a user consents once
@@ -1106,6 +1115,7 @@ docker run -e HTTP_PORT=8080 -p 8080:8080 my-auth-provider
 `EXPOSE` is image metadata and does not publish ports by itself, so the
 explicit `-p` mapping is still required.
 
+<!-- no-mfa:omit-begin -->
 ### Mailpit for the SMTP sender (development only)
 
 [`docker-compose.mailpit.yml`](docker-compose.mailpit.yml) is an overlay on
@@ -1147,6 +1157,7 @@ What the overlay sets on the app service:
 It is an overlay rather than a compose profile because a profile only adds
 services: it cannot change the app service's environment or ports.
 
+<!-- no-mfa:omit-end -->
 ### Health endpoints
 
 Two routes, answering two different questions. Both are mounted on the host

@@ -107,9 +107,11 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		const off = buildResolvedConfig("development");
 		expect(off.mfaMode).toBe("off");
 		expect(mfaNames(off)).toEqual([]);
+		// no-mfa:omit-begin
 		const optional = buildResolvedConfig("development", { MFA_MODE: "optional" });
 		expect(optional.mfaMode).toBe("optional");
 		expect(mfaNames(optional)).toContain("mfa");
+		// no-mfa:omit-end
 	});
 
 	it("core's reference.conf ships no rateLimit.failMode: it is the Redis limiter's own key", () => {

@@ -64,12 +64,14 @@ const refusal = (composing: Promise<Composition>): Promise<unknown> =>
 		(caught: unknown) => caught,
 	);
 
+// no-mfa:omit-begin
 /** What MFA on needs in production beside the switch: a key, and a mail relay. */
 const MFA_ENV: Readonly<Record<string, string>> = {
 	MFA_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
 	STANDARD_SMTP_MAIL_SENDER_HOST: "smtp.auth.test",
 	STANDARD_SMTP_MAIL_SENDER_FROM: "auth@auth.test",
 };
+// no-mfa:omit-end
 
 describe("what the template expects of session admission", () => {
 	it("is [] in the shipped configuration under the shipped switch, off, and the composition boots with it", async () => {
@@ -84,6 +86,7 @@ describe("what the template expects of session admission", () => {
 		);
 	});
 
+	// no-mfa:omit-begin
 	it.each(["optional", "required"] as const)(
 		"adds mfa under MFA_MODE=%s, which the MFA module the template installs registers",
 		async (mode) => {
@@ -118,6 +121,7 @@ describe("what the template expects of session admission", () => {
 			declared: ["risk", "mfa"],
 		});
 	});
+	// no-mfa:omit-end
 
 	it("refuses the boot when the configuration expects mfa under the switch off: nothing registers it", async () => {
 		const err = await refusal(
@@ -152,6 +156,7 @@ describe("what the template hands boot of the mfa section", () => {
 		});
 	});
 
+	// no-mfa:omit-begin
 	it("hands it, owned by the MFA module the switch installs, with the mode written from the switch over the MFA package's default", () => {
 		for (const mode of ["optional", "required"] as const) {
 			// The switch written in a layer, MFA_MODE unset: the package's reference says off.
@@ -161,13 +166,17 @@ describe("what the template hands boot of the mfa section", () => {
 			expect(mfaOf(resolveForBoot(own, modules, switches)), mode).toMatchObject({ mode });
 		}
 	});
+	// no-mfa:omit-end
 
 	it.each([
 		["the switch off", {}, 'mfa.mode = "required"\n'],
 		["the switch off, the mode optional", {}, 'mfa.mode = "optional"\n'],
+		["the switch off, the section a value", {}, 'mfa = "off"\n'],
+		// no-mfa:omit-begin
 		["MFA_MODE=optional", { MFA_MODE: "optional" }, 'mfa.mode = "required"\n'],
 		["MFA_MODE=required", { MFA_MODE: "required" }, 'mfa.mode = "optional"\n'],
 		["MFA_MODE=required, the section a value", { MFA_MODE: "required" }, 'mfa = "required"\n'],
+		// no-mfa:omit-end
 	])(
 		"refuses, under %s, an mfa.mode the configuration writes that the switch does not say, naming both keys and quoting nothing",
 		(_label, env, hocon) => {
@@ -190,7 +199,9 @@ describe("what the template hands boot of the mfa section", () => {
 	it("accepts an mfa.mode the configuration writes that the switch says", () => {
 		for (const [env, hocon] of [
 			[{}, 'mfa.mode = "off"\n'],
+			// no-mfa:omit-begin
 			[{ MFA_MODE: "required" }, 'mfa.mode = "required"\n'],
+			// no-mfa:omit-end
 		] as const) {
 			const own = ownUnder({ ...SINGLE_ENV, ...env }, hocon);
 			expect(() => resolveForBoot(own, [reader], readSwitches(own)), hocon).not.toThrow();

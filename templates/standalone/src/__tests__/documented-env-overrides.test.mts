@@ -207,6 +207,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// The intent store's own namespace, which a deployment moves with the grant store's.
 	REDIS_FEDERATION_GRANT_INTENT_STORE_KEY_PREFIX: "fg:",
 
+	// no-mfa:omit-begin
 	// --- multi-factor authentication ----------------------------------
 	// The template's switch, `mfaMode`: off here, so the parse below
 	// layers nothing of MFA. The rest is what the switch installs — the MFA
@@ -232,6 +233,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FOUNDATION_MFA_FACTOR_STORE_CREATE_URL: "https://users.example.com/mfa/factors/create",
 	FOUNDATION_MFA_FACTOR_STORE_UPDATE_URL: "https://users.example.com/mfa/factors/update",
 	FOUNDATION_MFA_FACTOR_STORE_DELETE_URL: "https://users.example.com/mfa/factors/delete",
+	// no-mfa:omit-end
 
 	// --- mail ---------------------------------------------------------
 	// The SMTP sender's section, which the template installs outside
@@ -624,7 +626,9 @@ function liveSubstitutions(): Set<string> {
 	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
 	const references = [
 		DOCUMENTED_ENV,
+		// no-mfa:omit-begin
 		{ ...DOCUMENTED_ENV, MFA_MODE: "required", ADAPTERS_MFA_FACTOR_STORE: "store" },
+		// no-mfa:omit-end
 	].flatMap((env) =>
 		moduleReferences(buildModules(readShippedSwitches(env), { environment: "production" })),
 	);
@@ -950,6 +954,7 @@ describe("the shipped config boots with every documented override supplied as a 
 			await expect(bootParsed(env)).rejects.toThrow(/mfaMode/);
 		});
 
+		// no-mfa:omit-begin
 		for (const mode of ["optional", "required"] as const) {
 			it(`reads MFA_MODE=${mode} as the switch that installs MFA, expecting mfa`, () => {
 				const switches = readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: mode });
@@ -960,6 +965,7 @@ describe("the shipped config boots with every documented override supplied as a 
 				});
 			});
 		}
+		// no-mfa:omit-end
 
 		it("refuses DEPLOYMENT_MODE set alone, naming CORE_DEPLOYMENT_MODE", async () => {
 			const { CORE_DEPLOYMENT_MODE: _new, ...env } = DOCUMENTED_ENV;

@@ -1,3 +1,4 @@
+# no-mfa:omit-file
 # Mailpit for the SMTP mail sender: a DEVELOPMENT overlay on
 # docker-compose.yml, for a run with MFA on whose mail you can read.
 #
