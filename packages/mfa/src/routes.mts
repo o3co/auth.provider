@@ -678,8 +678,8 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			return;
 		}
 		if (established.sid !== undefined) await onEstablished?.(established.sid);
-		const carried = typeof answer === "function" ? await answer() : answer;
 		csrfGuard.issue(res);
+		const carried = typeof answer === "function" ? await answer() : answer;
 		res.status(200).json({ message: "Logged in successfully", ...carried });
 	};
 
