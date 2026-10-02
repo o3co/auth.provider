@@ -779,9 +779,9 @@ async function evaluate(
 	}
 	// The rotation budget, read as a hint: while it is spent the upstream is
 	// not asked, and the store's take would refuse anyway. Reported after the
-	// marker and the stamp.
+	// marker and the stamp; not read where the store keeps no budget.
 	let spent: FederationGrantDenial | undefined;
-	if (notAsked === undefined) {
+	if (notAsked === undefined && deps.store.takeRotation !== undefined) {
 		const budget = judgeFederationGrantRotationBudget(
 			grant.rotations,
 			federationGrantRotationBudget(deps.limits),
@@ -1346,13 +1346,24 @@ async function refreshUnderLock(
 	if (answered.accessToken.eligible) {
 		const fresh = answered.accessToken.token;
 		// Nor is a held token that serves what was asked given up for one that
-		// does not: the call is answered from the held token.
-		const servesLess =
+		// does not, while the fresh one still carries all the grant's scopes:
+		// what it lacks is a broadening beyond the grant that the upstream no
+		// longer repeats. A fresh token that lacks a scope of the grant's own is
+		// a narrowing, and is stored. The call is answered from the held token,
+		// and the marker keeps the upstream from being asked again at once.
+		const keepHeld =
 			held.keep !== undefined &&
 			request.scope !== undefined &&
 			scopesWithin(request.scope, held.keep.scopes) &&
-			!scopesWithin(request.scope, fresh.scopes);
-		if (!servesLess) {
+			!scopesWithin(request.scope, fresh.scopes) &&
+			scopesWithin(grant.scopes, fresh.scopes);
+		if (keepHeld) {
+			ineligible = {
+				reason: "scope_not_granted",
+				at: new Date(receivedAt),
+				judgedAgainst: connection.maxAccessTokenLifetime,
+			};
+		} else {
 			credentials = { refreshToken, accessToken: fresh };
 			fetched = fresh.value;
 		}

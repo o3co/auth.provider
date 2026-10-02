@@ -759,6 +759,17 @@ describe("lodging a reauthorization", () => {
 		});
 	});
 
+	it("admits a grant whose upstream no longer grants a scope its held token carries: a renewal is how it is asked for again", async () => {
+		await establish();
+		await starved("scope_not_granted");
+		expect(await lodgeFederationGrantReauthorization(deps(), renewal())).toMatchObject({
+			ok: true,
+			grantId: "g-est",
+			status: "upstream_token_ineligible",
+		});
+		expect(intents.size).toBe(1);
+	});
+
 	it("refuses a grant starved by no finite lifetime, an unsupported token type or a malformed token response before an intent is lodged: a consent mends none of them", async () => {
 		await establish();
 		for (const reason of [

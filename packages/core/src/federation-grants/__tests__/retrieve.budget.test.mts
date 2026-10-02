@@ -115,34 +115,27 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		});
 
 	describe("bounds what an upstream and a client can cause together", () => {
-		it.each([
-			["the default budget", undefined],
-			["a budget of four", 4],
-		])(
-			"a re-answer of the same token with a fixed end, `min_ttl` an hour, polled every 10 s: at most the limit in the hour — under %s",
-			async (_, limit) => {
-				if (limit !== undefined) budgetOf(limit);
-				const END = T0.getTime() + HOUR;
-				await h.seed();
-				h.refresh.mockImplementation(async () =>
-					refreshed(`n${h.refresh.mock.calls.length}`, now(), {
-						accessToken: "at-0",
-						expiresIn: Math.max(1, Math.floor((END - now().getTime()) / 1000)),
-						expiresAt: new Date(END),
-					}),
-				);
-				for (let elapsed = 0; elapsed < HOUR; elapsed += 10_000) {
-					setNow(at(elapsed));
-					// A good token is answered with the life it has, below `min_ttl` too.
-					expect(await retrieve({ minTtlSeconds: 3600 })).toMatchObject({
-						ok: true,
-						accessToken: "at-0",
-					});
-				}
-				expect(h.refresh.mock.calls.length).toBeLessThanOrEqual(limit ?? 24);
-				expect(h.refresh.mock.calls.length).toBeGreaterThan(0);
-			},
-		);
+		it("a re-answer of the same token with a fixed end, `min_ttl` an hour, polled every 10 s: the limit in the hour, and no more", async () => {
+			budgetOf(4);
+			const END = T0.getTime() + HOUR;
+			await h.seed();
+			h.refresh.mockImplementation(async () =>
+				refreshed(`n${h.refresh.mock.calls.length}`, now(), {
+					accessToken: "at-0",
+					expiresIn: Math.max(1, Math.floor((END - now().getTime()) / 1000)),
+					expiresAt: new Date(END),
+				}),
+			);
+			for (let elapsed = 0; elapsed < HOUR; elapsed += 10_000) {
+				setNow(at(elapsed));
+				// A good token is answered with the life it has, below `min_ttl` too.
+				expect(await retrieve({ minTtlSeconds: 3600 })).toMatchObject({
+					ok: true,
+					accessToken: "at-0",
+				});
+			}
+			expect(h.refresh).toHaveBeenCalledTimes(4);
+		});
 
 		it("a token stored already past half its life, five seconds effective of an hour issued, three to answer: at most the limit, and a 429 once nothing stored serves", async () => {
 			budgetOf(3);
@@ -171,36 +164,45 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			expect(answers.at(-1)).toMatchObject({ ok: false, code: "rate_limited", reason: "provider" });
 		});
 
-		it("a token one millisecond effective, requested a millisecond apart: at most the limit in each window", async () => {
-			budgetOf(5);
-			await h.seed();
-			h.refresh.mockImplementation(async () =>
-				refreshed(`n${h.refresh.mock.calls.length}`, now(), {
-					expiresIn: 3600,
-					expiresAt: new Date(now().getTime() + 1),
-				}),
-			);
-			setNow(at(HOUR));
-			for (let i = 0; i < 50; i++) {
-				await retrieve();
-				setNow(new Date(now().getTime() + 1));
-			}
-			expect(h.refresh).toHaveBeenCalledTimes(5);
+		it.each([
+			["the default budget", undefined],
+			["a budget of five", 5],
+		])(
+			"a token one millisecond effective, requested a millisecond apart: the limit in each window, and no more — under %s",
+			async (_, given) => {
+				if (given !== undefined) budgetOf(given);
+				const limit = given ?? 24;
+				await h.seed();
+				h.refresh.mockImplementation(async () =>
+					refreshed(`n${h.refresh.mock.calls.length}`, now(), {
+						expiresIn: 3600,
+						expiresAt: new Date(now().getTime() + 1),
+					}),
+				);
+				setNow(at(HOUR));
+				for (let i = 0; i < 60; i++) {
+					await retrieve();
+					setNow(new Date(now().getTime() + 1));
+				}
+				expect(h.refresh).toHaveBeenCalledTimes(limit);
 
-			// The next window: as many again, and no more.
-			setNow(at(2 * HOUR));
-			for (let i = 0; i < 50; i++) {
-				await retrieve();
-				setNow(new Date(now().getTime() + 1));
-			}
-			expect(h.refresh).toHaveBeenCalledTimes(10);
-		});
+				// The next window: as many again, and no more.
+				setNow(at(2 * HOUR));
+				for (let i = 0; i < 60; i++) {
+					await retrieve();
+					setNow(new Date(now().getTime() + 1));
+				}
+				expect(h.refresh).toHaveBeenCalledTimes(2 * limit);
+			},
+		);
 
-		it("keeps today's behaviour beside a store that keeps no budget", async () => {
-			const { takeRotation: _none, ...withoutBudget } = h.store;
-			h.deps.store = withoutBudget;
+		it("keeps today's behaviour beside a store that keeps no budget, whatever its record says", async () => {
 			budgetOf(2);
 			await h.seed();
+			// Spent, as a record could read after a rollback to a store without the member.
+			await spend(2, at(HOUR));
+			const { takeRotation: _none, ...withoutBudget } = h.store;
+			h.deps.store = withoutBudget;
 			h.refresh.mockImplementation(async () =>
 				refreshed(`n${h.refresh.mock.calls.length}`, now(), {
 					expiresIn: 3600,
@@ -458,7 +460,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 				},
 			});
 
-		it("keeps the held token while it is good and serves the request, storing only the rotated refresh token", async () => {
+		it("keeps the held token while it is good and serves the request, storing only the rotated refresh token and the marker", async () => {
 			await seedBroad();
 			// The upstream answers the grant's scopes alone.
 			h.refresh.mockImplementation(async () =>
@@ -475,22 +477,51 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			const held = await stored();
 			expect(held?.refreshToken).toBe(`${SECRET}-narrow`);
 			expect(held?.accessToken).toMatchObject({ value: "at-0", scopes: [...CONSENTED] });
+			// The marker keeps the upstream from being asked again about it at once.
+			expect(await h.store.find("g-1", now())).toMatchObject({
+				ineligible: { reason: "scope_not_granted", at: at(59 * MIN) },
+			});
 		});
 
-		it("asks again no more often than the budget allows while the held token runs down", async () => {
-			budgetOf(3);
+		it("honours a narrowing of the grant's own scopes: the fresh token is stored and answered", async () => {
+			await seedBroad();
+			// The user withdrew `calendar.read` upstream: a scope of the grant's own.
+			h.refresh.mockImplementation(async () =>
+				refreshed("narrowed", now(), { scope: "openid offline_access" }),
+			);
+			setNow(at(59 * MIN));
+			expect(await retrieve({ scope: ["calendar.read"], minTtlSeconds: 3600 })).toStrictEqual({
+				ok: false,
+				code: "invalid_scope",
+			});
+			expect((await stored())?.accessToken).toMatchObject({
+				value: "at-narrowed",
+				scopes: ["openid", "offline_access"],
+			});
+			expect((await h.store.find("g-1", now()))?.ineligible).toBeUndefined();
+			// And a request the narrowed token serves is answered from it.
+			expect(await retrieve({ scope: ["openid"] })).toMatchObject({
+				ok: true,
+				accessToken: "at-narrowed",
+			});
+		});
+
+		it("asks again at most once per marker interval, not once per request", async () => {
 			await seedBroad();
 			h.refresh.mockImplementation(async () =>
 				refreshed(`n${h.refresh.mock.calls.length}`, now(), { scope: SCOPES.join(" ") }),
 			);
-			for (let left = limits.refreshBufferMs; left > 0; left -= 5_000) {
-				setNow(at(HOUR - left));
-				expect(await retrieve({ scope: ["calendar.write"] })).toMatchObject({
+			// Half spent from 30 minutes on: every poll wants more than the token has.
+			for (let elapsed = 30 * MIN; elapsed < 50 * MIN; elapsed += 10_000) {
+				setNow(at(elapsed));
+				expect(await retrieve({ scope: ["calendar.write"], minTtlSeconds: 3600 })).toMatchObject({
 					ok: true,
 					accessToken: "at-0",
 				});
 			}
-			expect(h.refresh).toHaveBeenCalledTimes(3);
+			// At 30, 35, 40 and 45 minutes: one per `ineligibleRetryAfter`.
+			expect(limits.ineligibleRetryAfterMs).toBe(5 * MIN);
+			expect(h.refresh).toHaveBeenCalledTimes(4);
 		});
 
 		it("replaces it where the request asked for nothing the new token lacks", async () => {

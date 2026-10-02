@@ -256,13 +256,16 @@ export interface FederationGrantStore {
 	 * caller's `version`, with `now` before `expiresAt`. Then, in one atomic
 	 * step against `rotations`:
 	 *
-	 * - none, or `now` at or after `since + windowMs`: a new window,
-	 *   `{ since: now, count: 1 }`;
+	 * - none, a `since` that holds no instant, or `now` at or after
+	 *   `since + windowMs`: a new window, `{ since: now, count: 1 }`;
 	 * - else, `count` below `limit`: `count + 1`;
 	 * - else the budget is spent, and the write is refused.
 	 *
 	 * No `version` bump, nothing else touched. Kept by `replaceCredentials`,
 	 * reset by `activate`.
+	 *
+	 * The window is fixed, not sliding: it opens at its first take, so any
+	 * `windowMs` that straddles two windows can hold up to twice `limit` takes.
 	 *
 	 * Bounds are checked before the record, and rejected with a `RangeError`, as
 	 * a `now` that is not a date is: a `limit` that is not a whole number of at

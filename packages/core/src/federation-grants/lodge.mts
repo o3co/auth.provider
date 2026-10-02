@@ -761,7 +761,8 @@ function admission(
 		case "connection_identity_changed":
 			return { refused: { ok: false, reason: "connection_identity_changed" } };
 		case "upstream_token_ineligible":
-			return status.reason === "scope_exceeded"
+			// A scope problem is what a renewal can mend; the others it cannot.
+			return status.reason === "scope_exceeded" || status.reason === "scope_not_granted"
 				? { admitted: "upstream_token_ineligible", connection }
 				: {
 						refused: {

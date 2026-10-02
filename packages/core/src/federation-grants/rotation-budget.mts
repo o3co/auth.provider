@@ -20,6 +20,10 @@
  * `takeRotation` is what spends it, under the refresh lock; this reading is a
  * hint, by the same rule, that spares a spent budget the lock and the
  * upstream call. Pure: no clock, no store.
+ *
+ * The window is fixed, not sliding: it opens at its first take and closes
+ * `windowMs` later, so any `windowMs` that straddles two windows can hold up
+ * to twice `limit`.
  */
 
 import { instantOf } from "../federations/token-lifetime.mjs";
@@ -54,8 +58,7 @@ export type FederationGrantRotationBudgetJudgement =
  * Whether a take at `nowMs` would be refused, by the store's rule: spent while
  * the window opened at `since` holds `limit` rotations and `nowMs` is before
  * `since + windowMs`. A `nowMs` behind `since` counts into the window. A `since`
- * that holds no instant reopens nothing, as in the store, and the wait told is
- * one whole window.
+ * that holds no instant is no window: the next take opens one.
  */
 export function judgeFederationGrantRotationBudget(
 	rotations: FederationGrantRotations | undefined,
@@ -64,7 +67,6 @@ export function judgeFederationGrantRotationBudget(
 ): FederationGrantRotationBudgetJudgement {
 	if (rotations === undefined || rotations.count < budget.limit) return { spent: false };
 	const closesAt = (instantOf(rotations.since) ?? Number.NaN) + budget.windowMs;
-	if (nowMs >= closesAt) return { spent: false };
-	const waitMs = Number.isFinite(closesAt) ? closesAt - nowMs : budget.windowMs;
-	return { spent: true, retryAfterSeconds: Math.max(1, Math.ceil(waitMs / 1000)) };
+	if (!(nowMs < closesAt)) return { spent: false };
+	return { spent: true, retryAfterSeconds: Math.max(1, Math.ceil((closesAt - nowMs) / 1000)) };
 }

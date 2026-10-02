@@ -296,8 +296,9 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE, { scope: "openid" }));
-			// Consented, and carried by neither the stored token nor the fresh one.
-			expect(await retrieve({ scope: ["calendar.write"] })).toStrictEqual({
+			// The fresh token lacks a scope of the grant's own: the upstream narrowed
+			// the grant, and that is what is stored and answered.
+			expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
 				ok: false,
 				code: "invalid_scope",
 			});

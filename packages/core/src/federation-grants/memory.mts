@@ -623,7 +623,8 @@ export function createMemoryFederationGrantStore(
 			// each counted.
 			const previous = grant.rotations;
 			let rotations: FederationGrantRotations;
-			if (previous === undefined || nowMs >= previous.since.getTime() + input.windowMs) {
+			// A `since` that holds no instant is no window: this take opens one.
+			if (previous === undefined || !(nowMs < previous.since.getTime() + input.windowMs)) {
 				rotations = { since: new Date(nowMs), count: 1 };
 			} else if (previous.count < input.limit) {
 				rotations = { since: new Date(previous.since), count: previous.count + 1 };

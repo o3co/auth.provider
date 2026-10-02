@@ -83,15 +83,9 @@ describe("judgeFederationGrantRotationBudget — the store's rule, read as a hin
 		});
 	});
 
-	it("reads a window whose start holds no instant as the store does, and waits a whole window", () => {
-		// The store compares with NaN, which reopens nothing: spent at the limit.
+	it("reads a window whose start holds no instant as no window: the next take opens one", () => {
+		// Denying for ever on a date nobody can read would starve the grant.
 		const rotations = { since: new Date(Number.NaN), count: 3 };
-		expect(judgeFederationGrantRotationBudget(rotations, budget, T0)).toEqual({
-			spent: true,
-			retryAfterSeconds: 3600,
-		});
-		expect(judgeFederationGrantRotationBudget({ ...rotations, count: 2 }, budget, T0)).toEqual({
-			spent: false,
-		});
+		expect(judgeFederationGrantRotationBudget(rotations, budget, T0)).toEqual({ spent: false });
 	});
 });
