@@ -62,6 +62,8 @@
  *   the witness and the subject's recovery-set floor this file hands it, each
  *   held to the lease's time as above; the floor is raised with the lease
  *   this file holds, never handed out.
+ * - `recoverySetFloor`, a verification's read of the subject's recovery-set
+ *   floor, bounded by one Store timeout as every transaction-store call here.
  * - `recover`, the subject's own authorized recovery: the records read under
  *   the lease, the caller's reading of them handed to the store's apply with
  *   the lease. It needs no start of the caller's: the store judges the apply
@@ -288,6 +290,12 @@ export interface MfaFactorSet {
 	resume(subject: string, carried: unknown): MfaFactorSetStart;
 	/** The subject's records, oldest first; throws for a store that cannot answer, or answers anything but a list of records. */
 	list(subject: string): Promise<MfaFactorRecord[]>;
+	/**
+	 * The subject's recovery-set floor, read outside any lease — a
+	 * verification's — and bounded by one Store timeout; throws for a store
+	 * that cannot answer in time, or answers outside its port.
+	 */
+	recoverySetFloor(subject: string): Promise<number>;
 	/**
 	 * The witness marked under the subject's lease when the records read first
 	 * hold one that may count; a directory that cannot write the witness takes no lease,
@@ -781,6 +789,14 @@ export function createMfaFactorSet(options: {
 		},
 
 		list,
+
+		async recoverySetFloor(subject) {
+			const floor = readMfaSubjectCount(
+				await within(() => leases.recoverySetFloor(subject), storeTimeoutMs, "recoverySetFloor"),
+			);
+			if (floor === undefined) throw OUTSIDE_CONTRACT;
+			return floor;
+		},
 
 		async markEnrolled(start, subject) {
 			if (!witness.writable) return witness.mark(subject);

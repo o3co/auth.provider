@@ -119,7 +119,6 @@ import {
 	type MfaTransactionStore,
 	type MfaVerification,
 	readMfaAttemptReservation,
-	readMfaSubjectCount,
 	readSessionEmailProof,
 	type SubjectRevocation,
 } from "@o3co/auth-provider-core";
@@ -394,13 +393,11 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		factor: MfaFactor,
 	): Promise<number | undefined | MfaStoreOutage> => {
 		if (!isRecoveryCodeFactor(factor)) return undefined;
-		let floor: number | undefined;
 		try {
-			floor = readMfaSubjectCount(await transactions.recoverySetFloor(subject));
+			return await factorSet.recoverySetFloor(subject);
 		} catch (cause) {
 			return outage("mfa_transaction", "recoverySetFloor", cause);
 		}
-		return floor ?? outage("mfa_transaction", "recoverySetFloor", OUTSIDE_CONTRACT);
 	};
 
 	/**
