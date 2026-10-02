@@ -31,6 +31,7 @@ const client: RedisSidSetClient = {
 	sRem: vi.fn(async () => 0),
 	sScanIterator: vi.fn(() => (async function* () {})()),
 	unlink: vi.fn(async () => 0),
+	pExpireGT: vi.fn(async () => {}),
 };
 
 describe("createRedisSidSet validates scanCount at construction", () => {
