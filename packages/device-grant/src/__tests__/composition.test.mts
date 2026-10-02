@@ -1329,7 +1329,7 @@ describe("deviceGrantModule beside oauthModule — the composition's grantPolicy
 			device_code: deviceCode,
 		});
 
-	it("refuses an approved poll the policy denies access_denied as invalid_grant, the token endpoint's code", async () => {
+	it("refuses an approved poll the policy denies, passing RFC 8628's terminal access_denied", async () => {
 		const config = makeConfig(ENABLED);
 		const evaluate = vi.fn<GrantPolicyHook["evaluate"]>(async () => ({
 			outcome: "deny",
@@ -1345,8 +1345,8 @@ describe("deviceGrantModule beside oauthModule — the composition's grantPolicy
 		try {
 			const polled = await pollFor(app, await approvedDeviceCode(app));
 			expect(polled.status).toBe(400);
-			expect(polled.body).toMatchObject({
-				error: "invalid_grant",
+			expect(polled.body).toEqual({
+				error: "access_denied",
 				error_description: "devices are closed",
 			});
 			expect(polled.body.access_token).toBeUndefined();

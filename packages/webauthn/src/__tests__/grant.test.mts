@@ -985,6 +985,7 @@ describe("createWebAuthnGrant — grantPolicy", () => {
 			status: 400,
 			error: "invalid_request",
 			errorDescription: "policy denied",
+			policyDenial: { error: "access_denied" },
 		});
 	});
 

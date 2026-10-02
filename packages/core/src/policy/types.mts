@@ -55,7 +55,8 @@ export type GrantPolicyDecision =
 			 * The OAuth `error` the refusal carries. At `/oauth/token` it is
 			 * sent only when it is a token-endpoint code (RFC 6749 §5.2's, or
 			 * `invalid_target`), and answered `invalid_request` otherwise
-			 * (`invalid_grant` at the device-code poll; `policyDenied`). At
+			 * (`policyDenied`; the device-code poll also passes `access_denied`
+			 * and `expired_token`, and answers anything else `invalid_grant`). At
 			 * `/oauth/authorize` it must be an RFC 6749 error code,
 			 * `1*NQSCHAR` (`isWellFormedErrorCode`), and is answered
 			 * `access_denied` otherwise.

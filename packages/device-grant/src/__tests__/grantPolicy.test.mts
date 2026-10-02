@@ -112,11 +112,31 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 			status: 400,
 			error: "invalid_scope",
 			errorDescription: "devices are closed",
+			policyDenial: { error: "invalid_scope" },
 		});
 	});
 
-	it.each(["authorization_pending", "slow_down", "expired_token", "access_denied"])(
-		"answers a deny with the RFC 8628 polling code %s invalid_grant, so the device stops polling a spent approval",
+	it.each(["access_denied", "expired_token"])(
+		"answers a deny with RFC 8628's terminal code %s as itself: the device stops and starts over",
+		async (code) => {
+			const logger = { warn: vi.fn(), error: vi.fn() };
+			const { poll } = await approvedWith(
+				async () => ({ outcome: "deny", error: code, errorDescription: "devices are closed" }),
+				undefined,
+				undefined,
+				logger,
+			);
+			expect((await poll()).result).toMatchObject({
+				status: 400,
+				error: code,
+				errorDescription: "devices are closed",
+			});
+			expect(logger.warn).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each(["authorization_pending", "slow_down", "consent_required"])(
+		"answers a deny with %s invalid_grant, so the device stops polling a spent approval",
 		async (code) => {
 			const logger = { warn: vi.fn(), error: vi.fn() };
 			const { poll } = await approvedWith(
@@ -129,6 +149,7 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 				status: 400,
 				error: "invalid_grant",
 				errorDescription: "devices are closed",
+				policyDenial: { error: code },
 			});
 			expect(logger.warn).toHaveBeenCalledWith(
 				expect.objectContaining({ error: code, answered: "invalid_grant" }),
@@ -143,7 +164,7 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 			error: "invalid_scope",
 			errorDescription: 'devices are "closed"',
 		}));
-		expect((await poll()).result).toEqual({
+		expect((await poll()).result).toMatchObject({
 			status: 400,
 			error: "invalid_scope",
 			errorDescription: "devices are ?closed?",
@@ -163,7 +184,7 @@ describe("device-code grant — grantPolicy refusals at the poll", () => {
 				undefined,
 				logger,
 			);
-			expect((await poll()).result).toEqual({ status: 400, error: "invalid_grant" });
+			expect((await poll()).result).toMatchObject({ status: 400, error: "invalid_grant" });
 			expect(spy.mock.calls.map((call) => call[1])).toEqual(["grant_policy_refusal_rewritten"]);
 		} finally {
 			spy.mockRestore();

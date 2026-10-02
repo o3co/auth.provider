@@ -292,7 +292,7 @@ async function applyGrantPolicy(
 			return {
 				result: policyDenied(reading, deps.logger, {
 					grantType: GRANT_TYPE,
-					policy: deps.grantPolicy.kind,
+					hook: deps.grantPolicy,
 				}),
 			};
 		}

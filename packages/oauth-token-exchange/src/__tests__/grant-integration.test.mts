@@ -1351,6 +1351,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					status: 400,
 					error: "invalid_request",
 					errorDescription: "denied by the test policy",
+					policyDenial: { error: logged },
 				});
 				expect(log.of("grant_policy_refusal_rewritten")).toEqual([
 					[
@@ -1402,7 +1403,11 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				}),
 			]);
 			const { result } = await exchange(grant, await body());
-			expect(result).toStrictEqual({ status: 400, error: "invalid_scope" });
+			expect(result).toStrictEqual({
+				status: 400,
+				error: "invalid_scope",
+				policyDenial: { error: "invalid_scope" },
+			});
 		});
 
 		it.each(["access_denied", "authorization_pending", "slow_down"])(
@@ -1415,6 +1420,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					status: 400,
 					error: "invalid_request",
 					errorDescription: "denied by the test policy",
+					policyDenial: { error: code },
 				});
 				expect(log.of("grant_policy_refusal_rewritten")).toHaveLength(1);
 			},
@@ -1423,7 +1429,11 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		it("repairs a deny's description to RFC 6749 §5.2's characters, as /oauth/token does", async () => {
 			const { grant } = await boot([denying("invalid_scope", 'say "no"')]);
 			const { result } = await exchange(grant, await body());
-			expect(result).toEqual({ status: 400, error: "invalid_scope", errorDescription: "say ?no?" });
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: "say ?no?",
+			});
 		});
 
 		// The other grants answer a deny through core's `evaluateGrantPolicy`.
@@ -1436,6 +1446,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					status: 400,
 					error: code,
 					errorDescription: "denied by the test policy",
+					policyDenial: { error: code },
 				});
 				const otherGrants = await evaluateGrantPolicy(
 					denyingPolicy(code),

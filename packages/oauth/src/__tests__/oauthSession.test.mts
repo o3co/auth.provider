@@ -171,6 +171,7 @@ describe("oauthSessionModule", () => {
 				status: 400,
 				error: "invalid_request",
 				errorDescription: "browser tokens are closed",
+				policyDenial: { error: "access_denied" },
 			});
 			expect(evaluate).toHaveBeenCalledTimes(1);
 		} finally {

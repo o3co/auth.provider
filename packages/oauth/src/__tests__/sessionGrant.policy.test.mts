@@ -89,6 +89,7 @@ describe("session grant — grantPolicy refusals", () => {
 			status: 400,
 			error: "invalid_request",
 			errorDescription: "browser tokens are closed",
+			policyDenial: { error: "access_denied" },
 		});
 	});
 

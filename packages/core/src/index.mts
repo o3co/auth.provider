@@ -435,6 +435,7 @@ export {
 	type GrantPolicyReading,
 	logGrantPolicyUnavailable,
 	type PolicyAudienceOutcome,
+	type PolicyDeniedOptions,
 	type PolicyScopeCeiling,
 	policyDenied,
 	policyOutOfBounds,

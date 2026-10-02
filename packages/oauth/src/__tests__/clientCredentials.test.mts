@@ -610,6 +610,7 @@ describe("createClientCredentialsGrant — a wired grant policy is consulted wha
 			status: 400,
 			error: "unauthorized_client",
 			errorDescription: "machine access is closed",
+			policyDenial: { error: "unauthorized_client" },
 		});
 	});
 
@@ -618,7 +619,11 @@ describe("createClientCredentialsGrant — a wired grant policy is consulted wha
 			withPolicy(async () => ({ outcome: "deny", error: "slow_down" })),
 		);
 		const { result } = await handler.handle(makeCtx(makeClient()));
-		expect(result).toEqual({ status: 400, error: "invalid_request" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			policyDenial: { error: "slow_down" },
+		});
 	});
 
 	it("answers a policy that throws 503, the flag off", async () => {

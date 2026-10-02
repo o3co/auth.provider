@@ -45,8 +45,10 @@
  * - A wired `grantPolicy` is consulted on the approval once its client is
  *   checked, before the revocation read and the minting instant, through
  *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error when
- *   it is a token-endpoint code (RFC 6749 §5.2's, `invalid_target`), and
- *   `invalid_grant` otherwise (never an RFC 8628 polling code: the approval is spent), a
+ *   it is a token-endpoint code (RFC 6749 §5.2's, `invalid_target`) or
+ *   RFC 8628 §3.5's terminal `access_denied` or `expired_token`, and
+ *   `invalid_grant` otherwise (never `authorization_pending` or `slow_down`:
+ *   the approval is spent), a
  *   throw is 503, a scope or audience past the approval or `allowedAudiences`
  *   is 500. It may only narrow; its audience, within `allowedAudiences`, is
  *   `aud`.
@@ -292,9 +294,14 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
 					scope,
-					// The poll has spent the approval: a refusal the device must not
-					// retry is `invalid_grant`, never a polling code.
-					{ logger: policyLogger, denyFallback: "invalid_grant" },
+					// The poll has spent the approval: a refusal ends the device's
+					// polling. RFC 8628 §3.5's terminal codes pass; anything else is
+					// `invalid_grant`, never a keep-polling code.
+					{
+						logger: policyLogger,
+						denyFallback: "invalid_grant",
+						denyAllowed: ["access_denied", "expired_token"],
+					},
 				);
 				if (!policy.ok) return policyRefusal(policy.result);
 				scope = policy.scopes;

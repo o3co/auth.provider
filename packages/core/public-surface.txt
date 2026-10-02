@@ -471,6 +471,7 @@
 . PendingConsentStoreFactory type
 . PendingFederationGrant type
 . PolicyAudienceOutcome type
+. PolicyDeniedOptions type
 . PolicyScopeCeiling type
 . PrimaryAdditions type
 . PrimaryAdditionsDto type
