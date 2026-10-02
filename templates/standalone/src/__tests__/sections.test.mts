@@ -24,6 +24,7 @@ import { MAX_KID_LENGTH } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import {
 	httpSectionSchema,
+	inMemoryCodeRepositorySectionSchema,
 	keyStoreSectionSchema,
 	loggingSectionSchema,
 	redisClientsSectionSchema,
@@ -271,6 +272,33 @@ describe("http — the rest of the section", () => {
 		]);
 	});
 
+	describe("the readiness deadline is read in decimal digits", () => {
+		const MESSAGE = "must be a whole number from 1 to 2147483647, in decimal digits";
+		const messagesAt = (readinessTimeoutMs: unknown) =>
+			(httpSectionSchema.safeParse(http({ readinessTimeoutMs })).error?.issues ?? [])
+				.filter((issue) => issue.path.join(".") === "readinessTimeoutMs")
+				.map((issue) => issue.message);
+
+		it.each([
+			["0x10"],
+			["1e3"],
+			["5.0"],
+			["+5"],
+			[true],
+			[""],
+			["  "],
+			["Infinity"],
+			[0],
+			[2_147_483_648],
+		])("refuses %j, naming the range", (readinessTimeoutMs) => {
+			expect(messagesAt(readinessTimeoutMs)).toEqual([MESSAGE]);
+		});
+
+		it.each([[60], ["60"], [" 60 "]])("reads %j as 60", (readinessTimeoutMs) => {
+			expect(httpSectionSchema.parse(http({ readinessTimeoutMs })).readinessTimeoutMs).toBe(60);
+		});
+	});
+
 	it.each([
 		[8080, 8080],
 		[" 8080 ", 8080],
@@ -427,5 +455,26 @@ describe("redis-clients", () => {
 		["a key the section does not declare", { url: "redis://r:6379", db: 2 }],
 	])("refuses %s", (_what, section) => {
 		expect(redisClientsSectionSchema.safeParse(section).success).toBe(false);
+	});
+});
+
+describe("the in-process code repository", () => {
+	const MESSAGE = "must be a whole number of at least 1, in decimal digits";
+	const messagesAt = (defaultExpiresIn: unknown) =>
+		(inMemoryCodeRepositorySectionSchema.safeParse({ defaultExpiresIn }).error?.issues ?? [])
+			.filter((issue) => issue.path.join(".") === "defaultExpiresIn")
+			.map((issue) => issue.message);
+
+	it.each([["0x10"], ["1e3"], ["5.0"], ["+5"], [true], [""], ["  "], ["Infinity"], [0], ["0"]])(
+		"refuses %j as defaultExpiresIn, naming the range",
+		(defaultExpiresIn) => {
+			expect(messagesAt(defaultExpiresIn)).toEqual([MESSAGE]);
+		},
+	);
+
+	it.each([[60], ["60"], [" 60 "]])("reads %j as defaultExpiresIn 60", (defaultExpiresIn) => {
+		expect(inMemoryCodeRepositorySectionSchema.parse({ defaultExpiresIn }).defaultExpiresIn).toBe(
+			60,
+		);
 	});
 });
