@@ -546,9 +546,9 @@ describe("the refusals each field names", () => {
 
 	it.each([
 		[
-			"claims that cannot be copied",
-			{ claims: { hook: () => 1 } },
-			/claims hold a value that cannot be copied/,
+			"a declared claim that is not of its declared type",
+			{ claims: { email: () => "u@example.test" } },
+			/claims\.email must be a string or absent/,
 		],
 		[
 			"an authentication that is not an object",
