@@ -336,7 +336,9 @@ loaded module owns is kept and logged once at boot as
 `config_sections_ignored`: that is where a misspelt section name shows.
 
 Values in the overlay take precedence over `application.conf`. The scaffold
-ships with `development.conf` and `production.conf`. To add another
+ships with `development.conf`, `production.conf` and `mailpit.conf` (the
+development overlay under the name the
+[Mailpit overlay](#mailpit-for-the-smtp-sender-development-only) selects). To add another
 environment (e.g. `staging`), create `config/staging.conf` and set
 `CONFIG_ENV=staging`. A missing `{ENV}.conf` is a boot-time error — typos
 fail fast rather than silently falling back to defaults.
@@ -810,6 +812,10 @@ The rest of the MFA settings — each factor's, the lock, a transaction's life
   to `oauth.authorize.acrValues`, unless your configuration writes that
   entry, and discovery advertises it. With MFA off it adds nothing: the acr
   table and discovery are what they are without MFA.
+- **The mail in development.** Under `CONFIG_ENV=development` the template's
+  sender logs each code (`mail_code_issued`) and sends nothing. To run the
+  SMTP sender and read what it sends, use the
+  [Mailpit overlay](#mailpit-for-the-smtp-sender-development-only).
 - **One switch.** A file that writes `mfaMode` while `MFA_MODE` is set to
   something else, and a configuration that writes `mfa.mode` other than
   what the switch says, are refused before boot, naming the keys. While MFA
@@ -1099,6 +1105,47 @@ docker run -e HTTP_PORT=8080 -p 8080:8080 my-auth-provider
 
 `EXPOSE` is image metadata and does not publish ports by itself, so the
 explicit `-p` mapping is still required.
+
+### Mailpit for the SMTP sender (development only)
+
+[`docker-compose.mailpit.yml`](docker-compose.mailpit.yml) is an overlay on
+`docker-compose.yml` that adds [Mailpit](https://mailpit.axllent.org/), a mail
+catcher, so a development run with MFA on sends its mail — the account-email
+proof, the email factor's codes — through the SMTP sender instead of the
+development sender, which only logs each code:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mailpit.yml up --build
+```
+
+Read the mail at <http://localhost:8025>. Mailpit keeps it and delivers
+nothing onward. A plain `docker compose up` (`make dev`) starts no Mailpit, and
+the production file names none. It is for development only: a deployment
+names a real relay with the `STANDARD_SMTP_MAIL_SENDER_*` variables
+([Multi-factor authentication](#multi-factor-authentication)).
+
+What the overlay sets on the app service:
+
+- `CONFIG_ENV=mailpit`. Under `development` the template installs the sender
+  that logs each code ([Module Composition Order](#module-composition-order),
+  rule 7). [`config/mailpit.conf`](config/mailpit.conf) includes
+  `development.conf`, so the run is otherwise the development one, the MFA
+  sample key included.
+- `MFA_MODE` from your `.env`, or `optional` when it sets none: with MFA off
+  nothing sends mail.
+- `ADAPTERS_MFA_FACTOR_STORE=redis` and `ADAPTERS_MFA_TRANSACTION_STORE=redis`,
+  on the compose Redis: under a name other than `development` or `test` the
+  MFA stores may not be kept in memory.
+- `STANDARD_SMTP_MAIL_SENDER_HOST=localhost`,
+  `STANDARD_SMTP_MAIL_SENDER_PORT=1025`, `STANDARD_SMTP_MAIL_SENDER_SECURE=none`
+  and `STANDARD_SMTP_MAIL_SENDER_FROM=auth@example.com`. The SMTP sender sends
+  in plaintext only to a loopback host, so Mailpit runs in the app container's
+  network namespace (`network_mode: service:app`) and listens on its
+  `localhost`; the app service therefore publishes Mailpit's web UI, on
+  loopback.
+
+It is an overlay rather than a compose profile because a profile only adds
+services: it cannot change the app service's environment or ports.
 
 ### Health endpoints
 
