@@ -130,6 +130,7 @@ import {
 	REQUIRED_BINDER,
 	seedTotp,
 	TV,
+	addFactorRecord,
 } from "./full-set.fixture.mts";
 import { softwarePasskey } from "./software-passkey.mts";
 
@@ -885,7 +886,7 @@ describe("a password login the mfa requirement interrupts, through the template'
 				mfaTransactionStore: MfaTransactionStore;
 				userSessionStore: UserSessionStore;
 			};
-		await mfaFactorStore.create({
+		await addFactorRecord(mfaFactorStore, {
 			id: "f-alice",
 			subject: ALICE.sub,
 			kind: "totp",
@@ -1709,7 +1710,7 @@ describe("recent MFA at the link start and WebAuthn registration, under mfa.mode
 
 	/** A TOTP factor for alice: a counting factor. */
 	const holdTotp = (set: FullSet) =>
-		storesOf(set).mfaFactorStore.create({
+		addFactorRecord(storesOf(set).mfaFactorStore, {
 			id: "f-alice",
 			subject: ALICE.sub,
 			kind: "totp",
