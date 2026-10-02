@@ -50,6 +50,7 @@ import type {
 	RequireFederationGrantReauthorizationInput,
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
+	TakeFederationGrantRotationInput,
 } from "./clients/federation-grant.mjs";
 import type {
 	FederationGrantConsentAnswered,
@@ -186,6 +187,7 @@ export type {
 	SubjectRevocationClient,
 	SubjectSessionIndexClient,
 	SubjectSessionIndexMultiClient,
+	TakeFederationGrantRotationInput,
 	UserSessionStoreClient,
 };
 

@@ -77,6 +77,12 @@ const alternating = (keyPrefix: string): FederationGrantStore => {
 		requireReauthorization: (input) => pick().requireReauthorization(input),
 		revoke: (id, by, at) => pick().revoke(id, by, at),
 		noteRefreshFailure: (input) => pick().noteRefreshFailure(input),
+		takeRotation: async (input) => {
+			const store = pick();
+			if (store.takeRotation === undefined)
+				throw new Error("fixture: the store has no takeRotation");
+			return await store.takeRotation(input);
+		},
 		touch: (id, at) => pick().touch(id, at),
 		acquireRefreshLock: (id, bounds) => pick().acquireRefreshLock(id, bounds),
 	};
