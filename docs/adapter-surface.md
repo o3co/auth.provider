@@ -375,7 +375,12 @@ Redis and Store adapters run once they have the set members; so is a
 second factor's, `mfaFactorContract`, which the MFA package's TOTP factor
 and the webauthn package's WebAuthn factor run, and which the kit's own tests
 run over core's doubles; and so is a mail sender's, `mailSenderContract`,
-which the standard package runs over its SMTP sender. A new port
+which the standard package runs over its SMTP sender; and so are the generic
+suites of the conditional-write convention, `conditionalRecordContract` and
+`conditionalSetContract`
+(`packages/test-kit/src/conditionalWrite/conditionalWrite.contract.mts`),
+which a port's binding runs over its conditional members, and which the kit's
+own tests run over reference stores and stores broken one rule at a time. A new port
 should gain a suite: "typed and swappable" means an implementer can prove they
 got it right, not only that they read the interface carefully.
 
@@ -405,7 +410,35 @@ while what they guard is still at the generation the caller read. The types,
 `isStoreGeneration`, `newStoreGeneration` and core's readers of every answer
 are in `packages/core/src/adapters/conditionalWrite.mts`, on core's root
 entry, with `BUNDLED_STORE_WRITE_LIFETIME_MS`, the bundled stores'
-write-lifetime bound. These are the rules every store with conditional members keeps.
+write-lifetime bound. These are the rules every store with conditional
+members keeps.
+
+`@o3co/auth-provider-test-kit`'s `conditionalRecordContract` and
+`conditionalSetContract` hold a store to the rules they can observe. Their
+`forceExpire` hook moves the backend's clock past any retention deadline the
+store set; it never judges membership or deletes. What the suites cannot
+see, and a store's own tests must:
+
+- the isolation a real engine gives under schedules the races do not force;
+- anything a store keeps outside its members (an index, a listing);
+- minting a generation into state written without one, and that a
+  conditional write against such state answers `conflict` without minting
+  (rule 8);
+- how a store keeps generations from coming back after a failover or a
+  restore (rule 8);
+- the retention's length, the write-lifetime bound, and that a set's
+  retention starts again at each emptying write (rule 6): each needs a clock
+  moved short of a deadline, and `forceExpire` only moves it past every one;
+- that the retention is the store's own, never a domain field such as an
+  access token's `expiresAt` (rule 3);
+- an HTTP adapter's mapping of statuses: a bare `404` or `409`, without its
+  body, throws (the status table below);
+- a set's unconditional membership writes other than the reset raced
+  against conditional ones (rule 1); the record suite races every
+  unconditional write;
+- with `forceExpire` undeclared, expiry (rule 3), and with `unreachable`
+  undeclared, the outage (rule 4): the suite then names those cases as not
+  run.
 
 **Scopes.** A generation guards one of two things:
 
