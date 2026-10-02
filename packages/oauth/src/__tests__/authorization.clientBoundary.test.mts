@@ -29,6 +29,7 @@ import {
 	createInMemoryUserSessionStore,
 	createSymmetricKeyStore,
 	type PublicClient,
+	passwordSessionAuthentication,
 	type RegisteredRP,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -37,7 +38,7 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
+import { serialisedCalls } from "./_helpers/projectedLog.mjs";
 
 const CLIENT_ID = "client1";
 const REDIRECT_URI = "https://rp.example/cb";
@@ -75,6 +76,7 @@ const exchangeWith = async (findById: ClientRepository["findById"]) => {
 		authTime: new Date(Date.now() - 60_000),
 		expiresAt: new Date(Date.now() + 3_600_000),
 		claims: {},
+		...passwordSessionAuthentication(),
 	});
 	const sessionRPRegistry = createInMemorySessionRPRegistry();
 	const codeRepository = {
@@ -102,7 +104,12 @@ const exchangeWith = async (findById: ClientRepository["findById"]) => {
 		logger,
 	});
 	const { result } = await handler.handle({
-		body: { code: "abc", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI, code_verifier: VERIFIER },
+		body: {
+			code: "abc",
+			client_id: CLIENT_ID,
+			redirect_uri: REDIRECT_URI,
+			code_verifier: VERIFIER,
+		},
 		session: { code: "abc", user: { id: SUBJECT } },
 		issuer: "localhost",
 		metadata: { ip: "127.0.0.1" },
@@ -133,16 +140,25 @@ describe("createAuthorizationGrant — the client's logout metadata is read thro
 	});
 
 	it.each([
-		["a back-channel logout URI that is not http(s)", { backchannelLogoutUri: "javascript:alert(1)" }],
+		[
+			"a back-channel logout URI that is not http(s)",
+			{ backchannelLogoutUri: "javascript:alert(1)" },
+		],
 		["a registered redirect URI with a fragment", { allowedRedirectUris: [`${REDIRECT_URI}#f`] }],
 		["a clientId that is not the id looked up", { clientId: "another-client" }],
 		["no token endpoint auth method", { tokenEndpointAuthMethod: undefined }],
 	])(
 		"registers the RP as for an unknown client, and warns client_record_refused, for a record with %s",
 		async (_label, change) => {
-			const refused = await exchangeWith(async () => ({ ...validRecord, ...change }) as PublicClient);
+			const refused = await exchangeWith(
+				async () => ({ ...validRecord, ...change }) as PublicClient,
+			);
 			const absent = await exchangeWith(async () => null);
 
+			// The exchange answers as it does for a client the repository does not
+			// hold: tokens, and the RP registered under the authenticated id with
+			// no logout metadata.
+			expect(absent.result.status).toBe(200);
 			expect(refused.result.status).toBe(200);
 			expect(refused.rps.map(withoutRegisteredAt)).toEqual(absent.rps.map(withoutRegisteredAt));
 			expect(refused.rps[0]?.frontchannelLogoutUri).toBeUndefined();
@@ -152,8 +168,10 @@ describe("createAuthorizationGrant — the client's logout metadata is read thro
 			);
 			expect(warned).toHaveLength(1);
 			expect(warned[0]?.[0]).toMatchObject({ step: "find", clientId: CLIENT_ID });
-			expectUriNotLogged(refused.logger, FRONT);
-			expectUriNotLogged(refused.logger, BACK);
+			const logged = serialisedCalls(refused.logger);
+			for (const uri of [FRONT, BACK, "javascript:alert(1)", REDIRECT_URI]) {
+				expect(logged).not.toContain(uri);
+			}
 		},
 	);
 
