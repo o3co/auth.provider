@@ -768,7 +768,7 @@ describe("a session store without recordSecondFactor", () => {
 		return { ...store, kind: "legacy-sessions" };
 	};
 
-	it("is said once at boot — mfa_step_up_unsupported, naming the adapter kind — and a password session is sent to log in again where it would step up", async () => {
+	it("is said once at boot — mfa_step_up_unsupported, naming the adapter kind — and a password session is sent to log in again where it would step up, its view saying no second factor can be recorded", async () => {
 		const { handle, logger } = await boot({ userSessionStore: withoutStepUp() });
 		const said = logger.warn.mock.calls.filter((call) => call[1] === "mfa_step_up_unsupported");
 		expect(said).toHaveLength(1);
@@ -790,6 +790,8 @@ describe("a session store without recordSecondFactor", () => {
 					sub: session.sub,
 					authTime: session.authTime,
 					expiresAt: session.expiresAt,
+					// What admission's view holds over a store without the capability.
+					secondFactorRecordable: false,
 				},
 				authentication: requirementSession(session),
 				carrier: "cookie",
@@ -838,6 +840,8 @@ describe("recent MFA's window", () => {
 				sub: session.sub,
 				authTime: session.authTime,
 				expiresAt: session.expiresAt,
+				// The booted store records a second factor, and the record is well formed.
+				secondFactorRecordable: true,
 			},
 			authentication: requirementSession(session),
 			carrier: "cookie" as const,

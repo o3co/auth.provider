@@ -253,8 +253,6 @@ export interface MfaCoordinatorOptions {
 	readonly firstBindingMarkMs: number;
 	/** The subjects' sessions boundary a login's transaction is held to; none wired, none is read. */
 	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
-	/** Whether the session store can record a second factor verified in a session (`supportsSecondFactorUpdate`). */
-	readonly stepUpRecordable: boolean;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -285,7 +283,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		sessionProofSeconds,
 		firstBindingMarkMs,
 		subjectRevocation,
-		stepUpRecordable,
 	} = options;
 	const now = options.now ?? (() => Date.now());
 
@@ -652,7 +649,6 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				return outage("mfa_transaction", "create", cause);
 			}
 		},
-		stepUpRecordable,
 		holdsUsable,
 		readSubject,
 		openLoginBinding: async (binding, continuation, shape) => {

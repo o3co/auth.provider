@@ -24,8 +24,10 @@
  * alone, for `mfa.manage.maxAgeSeconds`. For a subject holding a record
  * that may count, it opens a `step_up` transaction bound the same way,
  * owing no proof, with the `acr_values` hinted; one with no usable factor
- * is `403 mfa_no_qualifying_factor`, and a session store that cannot record
- * the step-up `401`. A stale sign-in, a session that recorded no facts and
+ * is `403 mfa_no_qualifying_factor`, and a session no second factor can be
+ * recorded on — admission's view says so of every session over a store
+ * without the capability, and of a record not in a shape one can be
+ * recorded on — `401`, opening nothing. A stale sign-in, a session that recorded no facts and
  * no session `401`; a witness that says the subject enrolled beside no
  * counting record `503`.
  */
@@ -621,6 +623,54 @@ describe("the step-up of a subject holding a counting factor", () => {
 		expect(res.status, JSON.stringify(res.body)).toBe(401);
 		expect(res.body).toEqual(LOGIN_REQUIRED);
 		expect(create).not.toHaveBeenCalled();
+	});
+
+	describe("over a store that records a step-up, a record no second factor can be recorded on — an amr no type admits, as a custom store may answer it", () => {
+		/** The record as such a store answers it: its `amr` holding an empty value. */
+		const unrecordable = (session: UserSession): UserSession => ({
+			...session,
+			amr: [...(session.amr ?? []), ""],
+		});
+
+		it("answers 401 login_required, opening nothing, to a session that already holds recent MFA", async () => {
+			const { app, factorStore, transactionStore, userSessionStore } = await composed();
+			const seeded = await seedTotp(factorStore);
+			const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+			reading(userSessionStore, unrecordable);
+			const create = vi.spyOn(transactionStore, "create");
+
+			const res = await stepUp(agent);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(401);
+			expect(res.body).toEqual(LOGIN_REQUIRED);
+			expect(create).not.toHaveBeenCalled();
+		});
+
+		for (const mode of ["optional", "required"] as const) {
+			it(`answers 401 login_required, opening nothing, to a password session without a second factor — ${mode}`, async () => {
+				const { app, factorStore, transactionStore, userSessionStore } = await composed({ mode });
+				const seeded = await seedTotp(factorStore);
+				const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+				// The session as one written before its second factor: a password alone.
+				reading(userSessionStore, (session) =>
+					unrecordable({
+						...session,
+						amr: ["pwd"],
+						authentication: {
+							...(session.authentication as NonNullable<UserSession["authentication"]>),
+							mfaAt: undefined,
+						},
+					}),
+				);
+				const create = vi.spyOn(transactionStore, "create");
+
+				const res = await stepUp(agent);
+
+				expect(res.status, JSON.stringify(res.body)).toBe(401);
+				expect(res.body).toEqual(LOGIN_REQUIRED);
+				expect(create).not.toHaveBeenCalled();
+			});
+		}
 	});
 });
 
