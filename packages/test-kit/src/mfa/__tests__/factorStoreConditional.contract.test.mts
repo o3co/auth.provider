@@ -95,7 +95,8 @@ type Fault =
 	| "reset-of-empty-keeps-generation"
 	| "removed-answers-another-generation"
 	| "tombstone-never-expires"
-	| "expiry-kept-after-write";
+	| "expiry-kept-after-write"
+	| "recreate-answers-another-generation";
 
 /** A model store and its `forceExpire`. */
 interface Model {
@@ -123,6 +124,7 @@ function modelStore(fault: Fault): Model {
 		expiring: boolean;
 	}
 	const sets = new Map<string, FactorSet>();
+	const purged = new Set<string>();
 
 	// The torn snapshot's barrier: a read's second half waits for the commit
 	// of a write started beside it, or, with none, for its batch to run.
@@ -220,10 +222,18 @@ function modelStore(fault: Fault): Model {
 					const held = set?.records.has(record.id) === true && fault !== "create-upserts-held-id";
 					return atExpected && !held ? undefined : ({ outcome: "conflict" } as const);
 				},
-				() => ({
-					outcome: "created" as const,
-					generation: write(record.subject, (records) => records.set(record.id, copyOf(record))),
-				}),
+				() => {
+					const generation = write(record.subject, (records) =>
+						records.set(record.id, copyOf(record)),
+					);
+					return {
+						outcome: "created" as const,
+						generation:
+							fault === "recreate-answers-another-generation" && purged.has(record.subject)
+								? (randomUUID() as StoreGeneration)
+								: generation,
+					};
+				},
 			),
 		removeIf: (subject, id, expected) =>
 			fenced<ConditionalSetRemoveAnswer>(
@@ -290,6 +300,7 @@ function modelStore(fault: Fault): Model {
 		forceExpire: async (subject) => {
 			if (fault !== "tombstone-never-expires" && sets.get(subject)?.expiring === true) {
 				sets.delete(subject);
+				purged.add(subject);
 			}
 		},
 	};
@@ -458,6 +469,12 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 	it("one whose removal answers a generation other than the one it wrote", async () => {
 		const refused = await refusedBy(() => modelStore("removed-answers-another-generation"));
 		expect(refused).toEqual(expect.arrayContaining([CASE.twoRemovals, CASE.removalRacingCreate]));
+	});
+
+	it("one whose create after a purge answers a generation other than the one it wrote", async () => {
+		expect(await refusedBy(() => modelStore("recreate-answers-another-generation"))).toContain(
+			CASE.expired,
+		);
 	});
 
 	it("one whose tombstone never expires", async () => {

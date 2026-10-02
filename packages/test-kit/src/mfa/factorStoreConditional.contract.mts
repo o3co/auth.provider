@@ -268,6 +268,10 @@ export function mfaFactorStoreConditionalContract(
 				!seen.has(again),
 				"a generation seen before the tombstone expired was issued again",
 			);
+			assert.deepStrictEqual(await two.read("user-1"), {
+				generation: again,
+				items: [RECORD(FACTOR_X, "user-1")],
+			});
 
 			const last = await seed(one, "user-2", [RECORD(FACTOR_A, "user-2")]);
 			landed(await two.removeIf("user-2", FACTOR_A, last), "the last removal");

@@ -139,11 +139,19 @@ describe("the in-process store's tombstone", () => {
 	it("keeps a reset's tombstone until the bound has passed on its clock, then reads it as never written", async () => {
 		const { store, advance } = clocked();
 		await store.create(RECORD);
+		const read = await store.listVersioned?.("user-1");
+		const stale = read?.generation;
+		if (stale === null || stale === undefined) throw new Error("the create left no generation");
 		await store.removeAllForSubject("user-1");
 		const tombstone = await store.listVersioned?.("user-1");
 		advance(BUNDLED_STORE_WRITE_LIFETIME_MS - 1);
 		expect(await store.listVersioned?.("user-1")).toStrictEqual(tombstone);
 		expect(await store.createIf?.(RECORD, null)).toStrictEqual({ outcome: "conflict" });
+		expect(await store.createIf?.(RECORD, stale)).toStrictEqual({ outcome: "conflict" });
+		expect(await store.removeIf?.("user-1", RECORD.id, stale)).toStrictEqual({
+			outcome: "conflict",
+		});
+		expect(await store.listVersioned?.("user-1")).toStrictEqual(tombstone);
 		advance(1);
 		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
 	});
