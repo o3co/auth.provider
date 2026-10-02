@@ -128,7 +128,7 @@ const makeGrant = (opts: {
 	requirements?: readonly SessionRequirement[];
 	logger?: MockLogger;
 	auditEvents?: AuditEvent[];
-	/** Runs while the grant looks the client up, between the two reads. */
+	/** Runs while the grant signs each token, between the two reads. */
 	betweenReads?: () => Promise<void>;
 	sid?: string | undefined;
 }) => {
@@ -149,10 +149,7 @@ const makeGrant = (opts: {
 		removeByCode: vi.fn(),
 	} as unknown as CodeRepository;
 	const clientRepository: ClientRepository = {
-		findById: vi.fn(async () => {
-			await opts.betweenReads?.();
-			return null;
-		}),
+		findById: vi.fn(async () => null),
 		authenticate: vi.fn(async () => null),
 	};
 	const sessionFamilyIndex = {
@@ -168,7 +165,11 @@ const makeGrant = (opts: {
 		removeBySid: vi.fn(async () => {}),
 	} as unknown as SessionRPRegistry;
 	const keyStore = createSymmetricKeyStore("test-secret");
-	const signed = vi.spyOn(keyStore, "sign");
+	const sign = keyStore.sign.bind(keyStore);
+	const signed = vi.spyOn(keyStore, "sign").mockImplementation(async (options) => {
+		await opts.betweenReads?.();
+		return sign(options);
+	});
 	const handler = createAuthorizationGrant({
 		config,
 		keyStore,

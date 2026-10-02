@@ -317,6 +317,30 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
+			// The client's logout metadata, read before the code is spent: a
+			// record the boundary refuses, or a repository that cannot answer, is
+			// a logged `503` that leaves the code redeemable and nothing signed or
+			// registered. Read only where it is used, with a session store wired.
+			let clientRecord: Awaited<ReturnType<typeof clientRepository.findById>> = null;
+			if (deps.userSessionStore) {
+				try {
+					clientRecord = await clientRepository.findById(authenticatedClientId);
+				} catch (err) {
+					logClientRepositoryUnavailable(
+						logger,
+						{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
+						err,
+					);
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session linking unavailable",
+						},
+					};
+				}
+			}
+
 			// Atomic consume (replay prevention). A store that cannot answer is a
 			// logged `503`, not `500`: the client did nothing wrong. If the
 			// consume never ran, a retry redeems the code; if it ran and the reply
@@ -716,103 +740,84 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// to logout. With a store wired, the first read already refused a code
 			// without a sid.
 			if (deps.userSessionStore && sid) {
-				try {
-					const clientRecord = await clientRepository.findById(authenticatedClientId);
-
-					// The second read, right before the family is added: a session
-					// ended since the first read (spanning both signings, the family
-					// registration and `findById`) is refused here. A logout between
-					// this read and the add is caught by the add itself (below).
-					//
-					// The claim carries the first read's `sub`: the tokens were signed
-					// from it and the id_token's other claims are read from this one, so a different
-					// subject under the same `sid` would yield tokens that disagree on
-					// the user. That is a store invariant violation, refused by
-					// admission (`subject_mismatch`, audited).
-					const revalidation = await admitSession(admissionDeps, {
-						// With a store wired and admitted, the subject is the record's
-						// non-empty `sub` (above).
-						claim: codeClaimRevalidation(codeData, subject as string),
-						action:
-							"oauth.code_exchange" satisfies keyof typeof AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS,
-					});
-					if (revalidation.outcome !== "admitted" || revalidation.session === null) {
-						return {
-							result: revalidationRefusal(revalidation, {
-								sid,
-								clientId: authenticatedClientId,
-							}),
-						};
-					}
-					// The revalidated session drives the TTLs below and the id_token's other claims.
-					userSession = revalidation.session;
-
-					// Composition-root invariant: the session-stores module wires its
-					// sibling stores together, so with userSessionStore present these
-					// two are too. `?.` would silently no-op on a misconfigured root.
-					const joined = await joinSession(
-						{
-							// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
-							sessionRPRegistry: deps.sessionRPRegistry!,
-							// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
-							sessionFamilyIndex: deps.sessionFamilyIndex!,
-						},
-						{
+				// The second read, right before the family is added: a session
+				// ended since the first read (spanning both signings and the
+				// family registration) is refused here. A logout between
+				// this read and the add is caught by the add itself (below).
+				//
+				// The claim carries the first read's `sub`: the tokens were signed
+				// from it and the id_token's other claims are read from this one, so a different
+				// subject under the same `sid` would yield tokens that disagree on
+				// the user. That is a store invariant violation, refused by
+				// admission (`subject_mismatch`, audited).
+				const revalidation = await admitSession(admissionDeps, {
+					// With a store wired and admitted, the subject is the record's
+					// non-empty `sub` (above).
+					claim: codeClaimRevalidation(codeData, subject as string),
+					action:
+						"oauth.code_exchange" satisfies keyof typeof AUTHORIZATION_CODE_GRANT_ADMISSION_ACTIONS,
+				});
+				if (revalidation.outcome !== "admitted" || revalidation.session === null) {
+					return {
+						result: revalidationRefusal(revalidation, {
 							sid,
-							rp: {
-								clientId: authenticatedClientId,
-								// Typed reads: a misspelt field would silently drop the RP
-								// from the logout cascade.
-								backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
-								backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
-								// http(s) only, checked here as at logout: a refused URI
-								// leaves this RP without a front-channel entry, and the
-								// exchange goes on.
-								frontchannelLogoutUri: usableFrontchannelLogoutUri(
-									{
-										// The RP is registered under the authenticated id,
-										// so the warn names that one.
-										clientId: authenticatedClientId,
-										// Read by the helper, inside its guard.
-										get frontchannelLogoutUri(): unknown {
-											return clientRecord?.frontchannelLogoutUri;
-										},
+							clientId: authenticatedClientId,
+						}),
+					};
+				}
+				// The revalidated session drives the TTLs below and the id_token's other claims.
+				userSession = revalidation.session;
+
+				// Composition-root invariant: the session-stores module wires its
+				// sibling stores together, so with userSessionStore present these
+				// two are too. `?.` would silently no-op on a misconfigured root.
+				const joined = await joinSession(
+					{
+						// biome-ignore lint/style/noNonNullAssertion: intentional — see the invariant above
+						sessionRPRegistry: deps.sessionRPRegistry!,
+						// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
+						sessionFamilyIndex: deps.sessionFamilyIndex!,
+					},
+					{
+						sid,
+						rp: {
+							clientId: authenticatedClientId,
+							// Typed reads: a misspelt field would silently drop the RP
+							// from the logout cascade.
+							backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
+							backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
+							// http(s) only, checked here as at logout: a refused URI
+							// leaves this RP without a front-channel entry, and the
+							// exchange goes on.
+							frontchannelLogoutUri: usableFrontchannelLogoutUri(
+								{
+									// The RP is registered under the authenticated id,
+									// so the warn names that one.
+									clientId: authenticatedClientId,
+									// Read by the helper, inside its guard.
+									get frontchannelLogoutUri(): unknown {
+										return clientRecord?.frontchannelLogoutUri;
 									},
-									"authorization_code",
-									// The refusal is logged even on a grant built without one.
-									logger ?? consoleLogger,
-								),
-								frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
-								registeredAt: new Date(),
-							},
-							familyId,
-							expiresAt: userSession.expiresAt,
+								},
+								"authorization_code",
+								// The refusal is logged even on a grant built without one.
+								logger ?? consoleLogger,
+							),
+							frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
+							registeredAt: new Date(),
 						},
-					);
-					if (joined.outcome === "ended") {
-						const at = { sid, clientId: authenticatedClientId };
-						const refusal = sessionInvalidated(at);
-						await revokeRefusedFamily(familyId, at);
-						return { result: refusal };
-					}
-					if (joined.outcome === "unavailable") {
-						storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
-						return {
-							result: {
-								status: 503,
-								error: "temporarily_unavailable",
-								errorDescription: "session linking unavailable",
-							},
-						};
-					}
-				} catch (err) {
-					// Fail closed: the client lookup threw (the joins answer their
-					// outages above, and admission answers its own).
-					logClientRepositoryUnavailable(
-						logger,
-						{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
-						err,
-					);
+						familyId,
+						expiresAt: userSession.expiresAt,
+					},
+				);
+				if (joined.outcome === "ended") {
+					const at = { sid, clientId: authenticatedClientId };
+					const refusal = sessionInvalidated(at);
+					await revokeRefusedFamily(familyId, at);
+					return { result: refusal };
+				}
+				if (joined.outcome === "unavailable") {
+					storeUnavailable(joined.store, joined.step, authenticatedClientId, joined.error);
 					return {
 						result: {
 							status: 503,
