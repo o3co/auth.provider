@@ -109,12 +109,9 @@ export async function broadcastBackchannelLogout(
 						);
 					}
 				} catch (err) {
+					const step = isOutboundRefusal(err) ? "destination" : "post";
 					logger.warn(
-						{
-							clientId: auditErrorText(rp.clientId),
-							step: isOutboundRefusal(err) ? "destination" : "post",
-							err: loggableError(err),
-						},
+						{ clientId: auditErrorText(rp.clientId), step, err: loggableError(err) },
 						"logout_backchannel_failed",
 					);
 				} finally {
