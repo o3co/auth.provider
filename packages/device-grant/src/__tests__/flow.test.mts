@@ -251,6 +251,56 @@ const makeSink = () => {
 	return { sink, events };
 };
 
+/** The poll's answer for an approval whose record cannot be read. */
+const UNREADABLE_APPROVAL = {
+	status: 400,
+	error: "invalid_grant",
+	errorDescription: "the approval cannot be read; start a new device authorization request",
+} as const;
+
+/** How a store's record is broken: a field holding `value`, or one whose read throws. */
+type Broken = { readonly value: unknown } | "throws";
+
+/** `authorization` with `field` broken as `broken` says. */
+const breakRecord = (authorization: object, field: string, broken: Broken): object => {
+	const copy: Record<string, unknown> = { ...authorization };
+	if (broken === "throws") {
+		Object.defineProperty(copy, field, {
+			enumerable: true,
+			get() {
+				throw new Error(`${field} unreadable`);
+			},
+		});
+	} else {
+		copy[field] = broken.value;
+	}
+	return copy;
+};
+
+/** A memory store whose `method` answers its record with `field` broken. */
+const answeringBroken = (
+	method: "poll" | "findPendingByUserCode" | "approve" | "deny",
+	field: string,
+	broken: Broken,
+) => {
+	const inner = createMemoryDeviceCodeStore();
+	const answer = inner[method] as (...args: unknown[]) => Promise<unknown>;
+	return {
+		...inner,
+		[method]: async (...args: unknown[]) => {
+			const answered = (await answer(...args)) as Record<string, unknown> | null;
+			if (answered === null) return null;
+			if (method === "findPendingByUserCode") return breakRecord(answered, field, broken);
+			return answered.status === "approved" || answered.status === "ok"
+				? {
+						...answered,
+						authorization: breakRecord(answered.authorization as object, field, broken),
+					}
+				: answered;
+		},
+	} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+};
+
 /** The sink is fire-and-forget, so give the detached promise a turn. */
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -1164,11 +1214,27 @@ describe("the token carries the approving session's authentication", () => {
 		expect(claims.iat).toBe((LOGIN + 10_000) / 1000);
 	});
 
+	it("refuses an authentication time further ahead of the minting clock than the skew: invalid_grant, nothing minted, warned", async () => {
+		const logger = makeLogger();
+		const harness = makeHarness({
+			logger,
+			store: pollingWith((nowMs) => ({ authTimeMs: nowMs + DEFAULT_CLOCK_SKEW_MS + 1_000 })),
+		});
+		const { result } = await approvedAndPolled(harness);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approving session's authentication time cannot be read; start a new device authorization request",
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ clientId: CLIENT_ID }),
+			"auth_time_ahead_of_clock",
+		);
+	});
+
 	it.each([
-		[
-			"further ahead of the minting clock than the skew",
-			(nowMs: number) => nowMs + DEFAULT_CLOCK_SKEW_MS + 1_000,
-		],
 		["before the epoch", () => -1_000],
 		["a fraction before the epoch", () => -0.5],
 		["a fraction of a millisecond", (nowMs: number) => nowMs - 60_000.5],
@@ -1176,7 +1242,7 @@ describe("the token carries the approving session's authentication", () => {
 		["NaN", () => Number.NaN],
 		["null", () => null],
 	])(
-		"refuses an authentication time %s: invalid_grant, nothing minted, warned",
+		"refuses an authentication time %s as a record it cannot read: invalid_grant, nothing minted, logged",
 		async (_label, authTimeMs) => {
 			const logger = makeLogger();
 			const harness = makeHarness({
@@ -1184,16 +1250,10 @@ describe("the token carries the approving session's authentication", () => {
 				store: pollingWith((nowMs) => ({ authTimeMs: authTimeMs(nowMs) })),
 			});
 			const { result } = await approvedAndPolled(harness);
-			expect(result).toEqual({
-				status: 400,
-				error: "invalid_grant",
-				errorDescription:
-					"the approving session's authentication time cannot be read; start a new device authorization request",
-			});
-			expect(logger.warn).toHaveBeenCalledTimes(1);
-			expect(logger.warn).toHaveBeenCalledWith(
-				expect.objectContaining({ clientId: CLIENT_ID }),
-				"auth_time_ahead_of_clock",
+			expect(result).toEqual(UNREADABLE_APPROVAL);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, refused: "malformed", field: "authTimeMs" },
+				"device_code_grant_record_unreadable",
 			);
 		},
 	);
@@ -1221,8 +1281,11 @@ describe("the token carries the approving session's authentication", () => {
 		const logger = makeLogger();
 		const harness = makeHarness({ logger, store: throwingOn("authTimeMs") });
 		const { result } = await approvedAndPolled(harness);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
-		expect(logger.warn).toHaveBeenCalledWith({ clientId: CLIENT_ID }, "auth_time_ahead_of_clock");
+		expect(result).toEqual(UNREADABLE_APPROVAL);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ clientId: CLIENT_ID, refused: "malformed", field: "authTimeMs" },
+			"device_code_grant_record_unreadable",
+		);
 	});
 
 	it.each([
@@ -1259,6 +1322,112 @@ describe("the token carries the approving session's authentication", () => {
 			"auth_time_ahead_of_clock",
 		);
 	});
+});
+
+describe("a record the store answers that cannot be read", () => {
+	const BROKEN: ReadonlyArray<readonly [string, Broken]> = [
+		["clientId", "throws"],
+		["clientId", { value: 42 }],
+		["subject", "throws"],
+		["subject", { value: 42 }],
+		["grantedScope", "throws"],
+		["grantedScope", { value: "openid profile" }],
+		["approvedAtMs", "throws"],
+		["approvedAtMs", { value: "1800000000000" }],
+		["status", "throws"],
+		["userCode", "throws"],
+		["expiresAtMs", { value: Number.NaN }],
+		["intervalSeconds", "throws"],
+	];
+
+	it.each(BROKEN)(
+		"refuses an approval whose %s is %o at the poll: invalid_grant, nothing minted, logged",
+		async (field, broken) => {
+			const logger = makeLogger();
+			const { app, poll } = makeHarness({
+				logger,
+				store: answeringBroken("poll", field, broken),
+			});
+			const started = await startDevice(app);
+			await verify(app, { action: "approve", user_code: started.body.user_code });
+			const { result } = await poll(started.body.device_code as string);
+			expect(result).toEqual(UNREADABLE_APPROVAL);
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, refused: "malformed", field },
+				"device_code_grant_record_unreadable",
+			);
+		},
+	);
+
+	it("refuses an approved poll that answers no record at all", async () => {
+		const logger = makeLogger();
+		const inner = createMemoryDeviceCodeStore();
+		const store = {
+			...inner,
+			poll: async (code: string, nowMs: number) => {
+				const outcome = await inner.poll(code, nowMs);
+				return outcome.status === "approved"
+					? { status: "approved", authorization: null }
+					: outcome;
+			},
+		} as unknown as ReturnType<typeof createMemoryDeviceCodeStore>;
+		const { app, poll } = makeHarness({ logger, store });
+		const started = await startDevice(app);
+		await verify(app, { action: "approve", user_code: started.body.user_code });
+		const { result } = await poll(started.body.device_code as string);
+		expect(result).toEqual(UNREADABLE_APPROVAL);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ clientId: CLIENT_ID, refused: "not_an_object" },
+			"device_code_grant_record_unreadable",
+		);
+	});
+
+	it.each(BROKEN)(
+		"answers a lookup whose record's %s is %o with 503, logged at error",
+		async (field, broken) => {
+			const logger = makeLogger();
+			const { app } = makeHarness({
+				logger,
+				store: answeringBroken("findPendingByUserCode", field, broken),
+			});
+			const started = await startDevice(app);
+			const res = await verify(app, { action: "lookup", user_code: started.body.user_code });
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "the device authorization store is unavailable; retry later",
+			});
+			expect(logger.error).toHaveBeenCalledWith(
+				{ action: "lookup", refused: "malformed", field },
+				"device_verification_record_unreadable",
+			);
+		},
+	);
+
+	it.each(["approve", "deny"] as const)(
+		"answers a %s whose recorded decision cannot be read with 503, audited as an unknown outcome",
+		async (action) => {
+			const logger = makeLogger();
+			const { sink, events } = makeSink();
+			const { app } = makeHarness({
+				logger,
+				auditSink: sink,
+				store: answeringBroken(action, "clientId", "throws"),
+			});
+			const started = await startDevice(app);
+			const res = await verify(app, { action, user_code: started.body.user_code });
+			await settle();
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			expect(logger.error).toHaveBeenCalledWith(
+				{ action, refused: "malformed", field: "clientId" },
+				"device_verification_record_unreadable",
+			);
+			expect(events.map((event) => event.type)).toEqual(["device.decision_outcome_unknown"]);
+			expect(events[0]).toMatchObject({ subject: "user-1", details: { action } });
+		},
+	);
 });
 
 describe("the access-token lifetime it is built with", () => {

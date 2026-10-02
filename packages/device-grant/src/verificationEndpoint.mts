@@ -43,6 +43,10 @@
  *   outage.
  * - Outages fail closed as 503 (a limiter outage follows the limiter's own
  *   `failMode`), never as `login_required`.
+ * - A record the store answers is read through core's
+ *   `readDeviceAuthorization` before any of it is used. One it refuses is
+ *   answered as an outage (503), logged at error; on a decision the store has
+ *   already applied, it is audited as an unknown outcome, as a lost reply is.
  * - Decisions and budget exhaustion are audit events; none carries the user
  *   code (the brute-force target) or the device code (a bearer credential).
  * - JSON only, checked here whatever parsed the body: a form POST is a CORS
@@ -76,13 +80,19 @@ import {
 	isEmailVerified,
 	normaliseUserCode,
 	rateLimiterUnavailableEnvelope,
+	readDeviceAuthorization,
 	recordableDeviceApproval,
 	vouchedAmr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import type { DeviceGrantAdmissionAction } from "./admissionActions.mjs";
-import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
+import {
+	DEVICE_CODE_STORE_UNAVAILABLE,
+	type DeviceAuthorizationRefusal,
+	reportDeviceCodeStoreOutage,
+	reportUnreadableDeviceAuthorization,
+} from "./storeOutage.mjs";
 import { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX, type DeviceGrantDependencies } from "./types.mjs";
 
 type Action = "lookup" | "approve" | "deny";
@@ -414,21 +424,58 @@ export const createDeviceVerificationHandler = (
 			});
 		};
 
+		/** The store answered a record nothing can be read of: answered as an outage. */
+		const recordUnreadable = (refusal: DeviceAuthorizationRefusal): void => {
+			reportUnreadableDeviceAuthorization(
+				options.logger,
+				"device_verification_record_unreadable",
+				refusal,
+				{ action },
+			);
+			respond(res, 503, {
+				error: DEVICE_CODE_STORE_UNAVAILABLE.error,
+				error_description: DEVICE_CODE_STORE_UNAVAILABLE.description,
+			});
+		};
+
+		/**
+		 * The store may have recorded the decision, and the device's poll may
+		 * then get tokens no `device.approved` accounts for, so the unknown
+		 * outcome is audited, attributed to the subject. It names no client: the
+		 * record could not be read.
+		 */
+		const auditUnknownOutcome = (): void => {
+			emitAuditEvent(options.auditSink, {
+				timestamp: new Date(),
+				type: "device.decision_outcome_unknown",
+				subject,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { action },
+			});
+		};
+
 		if (action === "lookup") {
-			let authorization: Awaited<ReturnType<typeof options.store.findPendingByUserCode>>;
+			let pending: Awaited<ReturnType<typeof options.store.findPendingByUserCode>>;
 			try {
-				authorization = await options.store.findPendingByUserCode(userCode, nowMs);
+				pending = await options.store.findPendingByUserCode(userCode, nowMs);
 			} catch (err) {
 				storeUnavailable(err);
 				return;
 			}
-			if (authorization === null) {
+			if (pending === null) {
 				respond(res, 404, {
 					error: "invalid_user_code",
 					error_description: "that code is not valid; check it and try again",
 				});
 				return;
 			}
+			const reading = readDeviceAuthorization(pending);
+			if (!reading.ok) {
+				recordUnreadable(reading);
+				return;
+			}
+			const { authorization } = reading;
 			// §5.4: "it is RECOMMENDED to inform the user that they are
 			// authorizing a device ... and to confirm that the device is in
 			// their possession". The page needs the client's identity and the
@@ -480,25 +527,21 @@ export const createDeviceVerificationHandler = (
 					? await options.store.approve(approval)
 					: await options.store.deny(userCode, nowMs);
 		} catch (err) {
-			// The store may have recorded the decision before its reply was lost,
-			// and the device's poll may then get tokens no `device.approved`
-			// accounts for, so the unknown outcome is audited, attributed to the
-			// subject. It names no client: the record could not be read.
-			emitAuditEvent(options.auditSink, {
-				timestamp: new Date(),
-				type: "device.decision_outcome_unknown",
-				subject,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { action },
-			});
+			// The reply was lost, the decision perhaps recorded before it.
+			auditUnknownOutcome();
 			storeUnavailable(err);
 			return;
 		}
 
 		switch (outcome.status) {
 			case "ok": {
-				const { authorization } = outcome;
+				const reading = readDeviceAuthorization(outcome.authorization);
+				if (!reading.ok) {
+					auditUnknownOutcome();
+					recordUnreadable(reading);
+					return;
+				}
+				const { authorization } = reading;
 				const scope = (authorization.grantedScope ?? authorization.requestedScope ?? []).join(" ");
 				options.logger?.info?.(
 					{ subject, clientId: authorization.clientId, action },

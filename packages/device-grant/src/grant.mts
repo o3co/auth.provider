@@ -48,13 +48,17 @@
  *   throw is 503, a scope or audience past the approval or `allowedAudiences`
  *   is 500. It may only narrow; its audience, within `allowedAudiences`, is
  *   `aud`.
- * - The token carries the approval's recorded `amr` (`wellFormedAmr`) and its
- *   `authTimeMs` as `auth_time`, read against the minting clock with
- *   `authTimeAt`; the same instant is its `iat`. Neither recorded, neither is
- *   stamped. An `authTimeMs` that is not whole epoch milliseconds that clock
- *   can read is `invalid_grant`; an `amr` that cannot be read is stamped as
- *   none. A read that throws is one that cannot be read. No `acr`: device
- *   verification selects none.
+ * - The approved record is read through core's `readDeviceAuthorization`
+ *   before any of it is used. A record it refuses — a field whose read
+ *   throws or that is not what `DeviceAuthorization` declares, an
+ *   `authTimeMs` that is not whole epoch milliseconds included — is
+ *   `invalid_grant`, logged at error: the approval is already spent.
+ * - The token carries the approval's recorded `amr` and its `authTimeMs` as
+ *   `auth_time`, read against the minting clock with `authTimeAt`; the same
+ *   instant is its `iat`. Neither recorded, neither is stamped. An
+ *   `authTimeMs` that clock cannot read is `invalid_grant`; an `amr` the
+ *   reader reads as none is stamped as none. No `acr`: device verification
+ *   selects none.
  *
  * `poll` consumes an approval in the same step that reads it.
  * `authorization_pending` and `slow_down` leave the code in place and the device
@@ -83,9 +87,13 @@ import {
 	generateTokenResponse,
 	isLifetimeSeconds,
 	ownedConfirmation,
-	wellFormedAmr,
+	readDeviceAuthorization,
 } from "@o3co/auth-provider-core";
-import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
+import {
+	DEVICE_CODE_STORE_UNAVAILABLE,
+	reportDeviceCodeStoreOutage,
+	reportUnreadableDeviceAuthorization,
+} from "./storeOutage.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 
 export interface DeviceCodeGrantOptions {
@@ -114,15 +122,6 @@ const error = (status: number, code: string, description: string): GrantHandlerR
 	result: { status, error: code, errorDescription: description },
 });
 
-/** `read()`, or `fallback` when it throws: a polled record's field, read once. */
-const readOr = <T,>(read: () => T, fallback: T): T => {
-	try {
-		return read();
-	} catch {
-		return fallback;
-	}
-};
-
 /**
  * Where core writes a policy's outage and invalid-decision lines, object-first
  * at error; a logger with no error channel leaves them to core's console logger.
@@ -146,10 +145,6 @@ const policyRefusal = (result: GrantError): GrantHandlerResult =>
 				"the grant policy is unavailable; start a new device authorization request",
 			)
 		: { result };
-
-/** Whole epoch milliseconds at or after the epoch: what a store records. */
-const isRecordedInstant = (ms: unknown): ms is number =>
-	typeof ms === "number" && Number.isSafeInteger(ms) && ms >= 0;
 
 export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHandler => {
 	const now = options.now ?? Date.now;
@@ -225,7 +220,22 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					break;
 			}
 
-			const { authorization } = outcome;
+			// See the file header: nothing of the store's object is read but this.
+			const reading = readDeviceAuthorization(outcome.authorization);
+			if (!reading.ok) {
+				reportUnreadableDeviceAuthorization(
+					options.logger,
+					"device_code_grant_record_unreadable",
+					reading,
+					{ clientId: client.clientId },
+				);
+				return error(
+					400,
+					"invalid_grant",
+					"the approval cannot be read; start a new device authorization request",
+				);
+			}
+			const { authorization } = reading;
 
 			// The code has already been consumed by `poll` at this point, so a
 			// refusal here does not leave a redeemable authorization behind. That
@@ -323,20 +333,12 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			// One minting instant: `auth_time` is read against it and stamped as
 			// `iat`, so `auth_time` is never after `iat` — see the file header.
 			const mintingNow = now();
-			const authTimeMs = readOr<unknown>(() => authorization.authTimeMs, Number.NaN);
+			const { authTimeMs } = authorization;
 			const authTime =
-				authTimeMs === undefined
-					? undefined
-					: authTimeAt(
-							isRecordedInstant(authTimeMs) ? new Date(authTimeMs) : undefined,
-							mintingNow,
-						);
+				authTimeMs === undefined ? undefined : authTimeAt(new Date(authTimeMs), mintingNow);
 			if (authTimeMs !== undefined && authTime === undefined) {
 				options.logger?.warn(
-					{
-						clientId: client.clientId,
-						...(isRecordedInstant(authTimeMs) ? { aheadMs: authTimeMs - mintingNow } : {}),
-					},
+					{ clientId: client.clientId, aheadMs: authTimeMs - mintingNow },
 					"auth_time_ahead_of_clock",
 				);
 				return error(
@@ -345,7 +347,7 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 					"the approving session's authentication time cannot be read; start a new device authorization request",
 				);
 			}
-			const amr = readOr(() => wellFormedAmr(authorization.amr), undefined);
+			const amr = authorization.amr;
 
 			// The policy's audience, else the rule the session and
 			// authorization-code grants use: the client's configured resource
