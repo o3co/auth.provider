@@ -122,6 +122,8 @@ async function composed(
 		readonly recoveryCodes?: boolean;
 		/** Whether alice's directory entry says she enrolled: by default, as a subject holding a factor; false for one holding none. */
 		readonly enrolled?: boolean;
+		/** More of the `mfa` section, laid over the suite's. */
+		readonly mfa?: Record<string, unknown>;
 	} = {},
 ) {
 	const factorStore = options.factorStore ?? createMemoryMfaFactorStore();
@@ -135,12 +137,12 @@ async function composed(
 	const users = new WitnessingUserRepository(entries);
 	const booted = await boot({
 		config: {
-			...configFor(
-				options.mode ?? "required",
-				options.requireEmailProof === undefined
+			...configFor(options.mode ?? "required", {
+				...(options.requireEmailProof === undefined
 					? {}
-					: { enrollment: { requireEmailProof: options.requireEmailProof } },
-			),
+					: { enrollment: { requireEmailProof: options.requireEmailProof } }),
+				...(options.mfa ?? {}),
+			}),
 			...(options.recoveryCodes === false
 				? mfaRecoveryCodeFactorConfigForTests({ enabled: false })
 				: {}),
@@ -422,6 +424,35 @@ describe("a regeneration's own checks under the lease", () => {
 			if (status === 409) expect(res.body).toEqual(REQUEST_STALE);
 		},
 	);
+
+	it("sends to log in again a session signed in later than the mark by just over the skew: the owner's factor may still have been landing, up to a lease after its mark", async () => {
+		const built = await composed({ mode: "optional", requireEmailProof: "never", enrolled: false });
+		const { agent } = await signIn(built.app, built.userSessionStore);
+		const store = built.transactionStore;
+		const acquire = store.acquireSubjectLease.bind(store);
+		vi.spyOn(store, "acquireSubjectLease").mockImplementationOnce(async (subject, asked) => {
+			// The mark dated 301 s before this session's sign-in — a clock just under the skew apart.
+			const at = Date.now() - 301_000;
+			await store.noteFirstBinding(subject, at, at + 1_800_000);
+			await seedTotp(built.factorStore);
+			return acquire(subject, asked);
+		});
+
+		const res = await regenerate(agent);
+
+		expect(res.status, JSON.stringify(res.body)).toBe(401);
+		expect(res.body).toMatchObject({ error: "login_required" });
+		expect(await setsOf(built.factorStore)).toEqual([]);
+	});
+
+	it("answers an ordinary regeneration at the shortest windows and the longest Store timeout: the stall bound stays positive", async () => {
+		const built = await composed({
+			mfa: { manage: { maxAgeSeconds: 60 }, transactionTtlSeconds: 60, storeTimeoutMs: 37_500 },
+		});
+		const { agent } = await signedIn(built);
+
+		expect((await regenerate(agent)).status).toBe(200);
+	});
 
 	it("is 503, nothing written, when the subject's first-binding mark cannot be read", async () => {
 		const built = await composed();
