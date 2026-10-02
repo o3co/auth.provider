@@ -699,6 +699,8 @@ describe("a conditional write at the request deadline", () => {
 			expect((created as MfaStoreError).reason).toBe("unexpected_status");
 			expect((created as MfaStoreError).storeStatus).toBe(408);
 			expect(ahead.factors("user-1")).toEqual([]);
+			// The fake's own seeding: a create through this store would be late too.
+			// The read then mints the set's generation, which the removal is held to.
 			ahead.holdFactor("user-1", WIRE);
 			const { generation } = await store.listVersioned("user-1");
 			const removed = await rejection(store.removeIf("user-1", ID, generation as StoreGeneration));
