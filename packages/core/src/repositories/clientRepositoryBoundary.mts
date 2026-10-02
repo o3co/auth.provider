@@ -50,10 +50,11 @@
  *   behind such a layer can read it as an absent client. A caller answers it
  *   as it answers any rejection of the lookup.
  *
- * A record is validated at each boundary it passes; a boundary this module
- * built is recognised and reused, never wrapped twice. A boundary over
- * another lets the inner one's refusal through unchanged, without a second
- * warn.
+ * Boot installs the boundary in the `clientRepository` slot, over whatever
+ * fills it, so every module that reads the slot reads through it. A record
+ * is validated at each boundary it passes; a boundary this module built is
+ * recognised and reused, never wrapped twice. A boundary over another lets
+ * the inner one's refusal through unchanged, without a second warn.
  *
  * The boundary also tells a refused record from an absent one as a verdict
  * ({@link ValidatedClientRepository.lookupClient}), for a caller that falls
