@@ -79,6 +79,7 @@ import {
 	emitAuditEvent,
 	FEDERATED_AMR,
 	type Logger,
+	loggableError,
 	type MailAddressFact,
 	MFA_AMR,
 	type MfaFactorRecord,
@@ -97,7 +98,7 @@ import {
 	type SessionView,
 	type StepUpPage,
 } from "@o3co/auth-provider-core";
-import { asksForSecondFactor, withRecoverySetFloor } from "./factorState.mjs";
+import { asksForSecondFactor, readSubjectRecords } from "./factorState.mjs";
 import {
 	countingKinds,
 	enrollableKinds,
@@ -152,10 +153,10 @@ export interface MfaRequirementOptions {
 	readonly emailProofRequiredAtNextBinding: (subject: string) => Promise<boolean>;
 	/**
 	 * The subject's recovery-set floor, bounded by one Store timeout: a
-	 * password login asks for no second factor over a set below it. Absent, or
-	 * one that cannot be read, reads every set as without it.
+	 * password login asks for no second factor over a set below it; one that
+	 * cannot be read is said at warn and reads every set as without it.
 	 */
-	readonly recoverySetFloor?: (subject: string) => Promise<number>;
+	readonly recoverySetFloor: (subject: string) => Promise<number>;
 	/**
 	 * When the account-email proof was given in the session `sid` of
 	 * `subject`, while it stands at `nowMs` (`MfaTransactionStore.sessionEmailProofAt`);
@@ -273,11 +274,6 @@ function reachOf(factors: MfaFactorResolver): ReadonlySet<string> {
 }
 
 /** The `mfa` requirement over `options` (see this file's header). */
-/** No floor to read: every recovery set reads as without one. */
-const noFloor = async (): Promise<never> => {
-	throw new Error("no recovery-set floor is read here");
-};
-
 export function createMfaRequirement(options: MfaRequirementOptions): SessionRequirement {
 	const {
 		mode,
@@ -574,13 +570,13 @@ export function createMfaRequirement(options: MfaRequirementOptions): SessionReq
 		},
 		admitPrimary: async (primary) => {
 			if (primary.recorded.authentication.primary !== PASSWORD_AMR) return "establish";
-			// Read before the records, as the offers read it: a retired set asks for nothing.
-			const context = await withRecoverySetFloor(
-				{ factors, sealing },
-				primary.subject,
-				options.recoverySetFloor ?? noFloor,
-			);
-			const records = await listRecords(primary.subject);
+			// Read as every judgment over the records reads them: a retired set asks for nothing.
+			const { context, records } = await readSubjectRecords({ factors, sealing }, primary.subject, {
+				list: listRecords,
+				recoverySetFloor: options.recoverySetFloor,
+				floorUnread: (subject, cause) =>
+					logger.warn({ sub: subject, err: loggableError(cause) }, "mfa_recovery_set_floor_unread"),
+			});
 			if (!records.some((record) => mayCount(factors, record))) checkWitness(primary);
 			if (records.some((record) => asksForSecondFactor(context, primary.subject, record))) {
 				return interrupt({ error: "mfa_required" });

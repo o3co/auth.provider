@@ -513,6 +513,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 						factors: deps.mfaFactorResolver,
 						factorStore: deps.mfaFactorStore,
 						witness,
+						sealing,
+						logger,
 						leases: createMfaSubjectLeases({
 							store: deps.mfaTransactionStore,
 							storeTimeoutMs: settings.storeTimeoutMs,
@@ -611,6 +613,11 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 								mode,
 							},
 							lockRecovery,
+							recoveryCodes: {
+								maxFactorsPerSubject: settings.maxFactorsPerSubject,
+								firstBindingAt: (subject, nowMs) =>
+									deps.mfaTransactionStore.firstBindingAt(subject, nowMs),
+							},
 						}),
 					};
 				},

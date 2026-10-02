@@ -138,7 +138,7 @@ import {
 	type MfaManagingSession,
 } from "./management.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
-import { createMfaRecoveryCodesRouter } from "./recoveryCodes.mjs";
+import { createMfaRecoveryCodesRouter, type MfaRecoveryCodesOptions } from "./recoveryCodes.mjs";
 import { MFA_REQUIREMENT_NAME } from "./requirement.mjs";
 import type { MfaWitnessMark } from "./witness.mjs";
 
@@ -283,6 +283,8 @@ export interface MfaRoutesOptions {
 	readonly management: Omit<MfaManagementOptions, "admit" | "logger" | "auditSink">;
 	/** The authorized-recovery entry: minted at an exempt verification, applied by the subject's release. */
 	readonly lockRecovery: MfaLockRecovery;
+	/** What the regeneration of recovery codes reads beside the management's (`recoveryCodes.mts`). */
+	readonly recoveryCodes: Pick<MfaRecoveryCodesOptions, "maxFactorsPerSubject" | "firstBindingAt">;
 }
 
 /** The express session id the request presents; empty when it presents none, which no binding matches. */
@@ -388,6 +390,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		auditSink,
 		management,
 		lockRecovery,
+		recoveryCodes,
 	} = options;
 	const router = express.Router();
 
@@ -903,6 +906,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				factors: management.factors,
 				factorSet: management.factorSet,
 				sealing: management.sealing,
+				...recoveryCodes,
 				admit: async (req, res) =>
 					(await sessionFor(req, res, MFA_MANAGE))?.session as MfaManagingSession | undefined,
 				logger,

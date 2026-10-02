@@ -28,7 +28,8 @@
  *   it once it is written, so every set that stood is retired: a
  *   verification refuses a set below the floor. A floor that cannot be read
  *   writes nothing; one that cannot be raised removes the new set and keeps
- *   those that stood.
+ *   those that stood — a removal that fails too is said beside it, the set
+ *   left stored and unshown.
  * - Every set listed before the write, readable or not, is then removed; a
  *   set written after the listing (another binding's) never is. One that
  *   cannot be removed, or a listing that failed, leaves a retired set
@@ -157,8 +158,17 @@ export async function issueRecoveryCodes(
 			try {
 				await recoverySetFloor.raise(subject, generation);
 			} catch (cause) {
-				await removeEach(factorStore, subject, [id]);
-				return { issued: false, cause };
+				const unremoved = await removeEach(factorStore, subject, [id]);
+				return {
+					issued: false,
+					cause:
+						unremoved === undefined
+							? cause
+							: new AggregateError(
+									[cause, unremoved.cause],
+									"the recovery-set floor was not raised, and the new set could not be removed: it stays stored, unshown",
+								),
+				};
 			}
 			if ("cause" in standing) {
 				unreplaced = { cause: standing.cause };

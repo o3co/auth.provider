@@ -31,6 +31,14 @@
  * - `409 mfa_enrollment_required`: no record that may count stands, so
  *   admission took the session on a recent primary; codes are issued beside a
  *   counting factor only.
+ * - `401 login_required` with `Retry-After`: the subject's first-binding mark
+ *   (`firstBindingMark.mts`), read under the lease, distrusts the session's
+ *   sign-in — one made before a first binding, which admission may have taken
+ *   on a recent primary while no factor stood; said at info
+ *   (`mfa_first_binding_distrusted`). A mark that cannot be read is `503`.
+ * - `409 mfa_factor_limit`: the set would take the subject past
+ *   `mfa.maxFactorsPerSubject` (`recordsAfterRecoveryCodes`: replacing a set
+ *   at the limit stays allowed); nothing written.
  * - `409 mfa_recovery_codes_conflict`: another writer's set at the same
  *   generation or a later one was read after the write; this one was
  *   removed, its codes never answered (warn).
@@ -52,7 +60,12 @@ import {
 } from "@o3co/auth-provider-core";
 import express, { type Request, type Response, type Router } from "express";
 import type { MfaFactorSet } from "./factorSet.mjs";
-import { mayCount } from "./firstBinding.mjs";
+import { mayCount, recordsAfterRecoveryCodes } from "./firstBinding.mjs";
+import {
+	distrustedByFirstBinding,
+	firstBindingRetryAfterMs,
+	readFirstBindingMark,
+} from "./firstBindingMark.mjs";
 import type { MfaManagingSession } from "./management.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
 import { issueRecoveryCodes, type MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
@@ -60,6 +73,11 @@ import type { MfaSealing } from "./sealing.mjs";
 
 const MFA_UNAVAILABLE = errorEnvelope("temporarily_unavailable", "MFA temporarily unavailable");
 const NOT_ISSUED = errorEnvelope("invalid_request", "Recovery codes are not issued here");
+const LOGIN_REQUIRED = errorEnvelope("login_required", "Log in again");
+const FACTOR_LIMIT = errorEnvelope(
+	"mfa_factor_limit",
+	"The subject holds as many second factors as it may",
+);
 const NO_COUNTING_FACTOR = errorEnvelope(
 	"mfa_enrollment_required",
 	"Recovery codes are issued beside a second factor that counts: enroll one first",
@@ -89,6 +107,10 @@ export interface MfaRecoveryCodesOptions {
 	readonly admit: (req: Request, res: Response) => Promise<MfaManagingSession | undefined>;
 	readonly logger: Logger;
 	readonly auditSink: AuditSink | undefined;
+	/** `mfa.maxFactorsPerSubject`. */
+	readonly maxFactorsPerSubject: number;
+	/** The subject's first-binding mark (`MfaTransactionStore.firstBindingAt`), read under the lease. */
+	readonly firstBindingAt: (subject: string, nowMs: number) => Promise<unknown>;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	readonly now?: () => number;
 }
@@ -97,11 +119,14 @@ export interface MfaRecoveryCodesOptions {
 type Regenerated =
 	| { readonly outcome: "unlisted"; readonly cause: unknown }
 	| { readonly outcome: "no_counting_factor" }
+	| { readonly outcome: "unmarked"; readonly cause: unknown }
+	| { readonly outcome: "distrusted"; readonly retryAfterMs: number }
+	| { readonly outcome: "factor_limit" }
 	| { readonly outcome: "issued"; readonly codes: MfaIssuedRecoveryCodes };
 
 /** The regeneration route's router (see this file's header). */
 export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): Router {
-	const { factors, factorSet, sealing, admit, logger, auditSink } = options;
+	const { factors, factorSet, sealing, admit, logger, auditSink, maxFactorsPerSubject } = options;
 	const now = options.now ?? (() => Date.now());
 	const router = express.Router();
 
@@ -137,6 +162,22 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 				// Admission took a subject with none on a recent primary: no codes stand alone.
 				if (!records.some((record) => mayCount(factors, record))) {
 					return { outcome: "no_counting_factor" };
+				}
+				// A session signed in before a first binding may have been admitted while no factor stood.
+				let mark: number | null;
+				try {
+					mark = readFirstBindingMark(
+						await writes.read(() => options.firstBindingAt(subject, nowMs)),
+						nowMs,
+					);
+				} catch (cause) {
+					return { outcome: "unmarked", cause };
+				}
+				if (distrustedByFirstBinding(session.authTimeMs, mark) && mark !== null) {
+					return { outcome: "distrusted", retryAfterMs: firstBindingRetryAfterMs(mark, nowMs) };
+				}
+				if (recordsAfterRecoveryCodes(factors, records, "mfa") > maxFactorsPerSubject) {
+					return { outcome: "factor_limit" };
 				}
 				return {
 					outcome: "issued",
@@ -177,6 +218,20 @@ export function createMfaRecoveryCodesRouter(options: MfaRecoveryCodesOptions): 
 		}
 		if (done.outcome === "no_counting_factor") {
 			res.status(409).json(NO_COUNTING_FACTOR);
+			return;
+		}
+		if (done.outcome === "unmarked") {
+			unavailable(res, "mfa_transaction", "firstBindingAt", done.cause);
+			return;
+		}
+		if (done.outcome === "distrusted") {
+			logger.info({ route: ROUTE, sub: subject }, "mfa_first_binding_distrusted");
+			res.set("Retry-After", String(Math.max(1, Math.ceil(done.retryAfterMs / 1000))));
+			res.status(401).json(LOGIN_REQUIRED);
+			return;
+		}
+		if (done.outcome === "factor_limit") {
+			res.status(409).json(FACTOR_LIMIT);
 			return;
 		}
 		const codes = done.codes;

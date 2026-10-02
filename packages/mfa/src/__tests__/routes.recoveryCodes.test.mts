@@ -116,13 +116,19 @@ async function composed(
 		readonly factorStore?: MfaFactorStore;
 		readonly requireEmailProof?: "when-mail" | "always" | "never";
 		readonly recoveryCodes?: boolean;
+		/** Whether alice's directory entry says she enrolled: by default, as a subject holding a factor; false for one holding none. */
+		readonly enrolled?: boolean;
 	} = {},
 ) {
 	const factorStore = options.factorStore ?? createMemoryMfaFactorStore();
 	const transactionStore: MfaTransactionStore = createMemoryMfaTransactionStore();
 	const audit = recordingAuditSink();
 	const logger = spyLogger();
-	const users = new WitnessingUserRepository(directoryEntries());
+	const entries = directoryEntries();
+	const alice = entries.get(ALICE.username);
+	// A subject holding a factor whose directory says so: no login reconciles the witness, so no first-binding mark is noted.
+	if (alice !== undefined) alice.mfaEnrolled = options.enrolled ?? true;
+	const users = new WitnessingUserRepository(entries);
 	const booted = await boot({
 		config: {
 			...configFor(
@@ -317,7 +323,7 @@ describe("POST /session/mfa/recovery-codes", () => {
 	});
 
 	it("refuses a subject with no record that may count, whom mfa.manage admits on a recent primary: 409 mfa_enrollment_required, nothing written", async () => {
-		const built = await composed({ mode: "optional", requireEmailProof: "never" });
+		const built = await composed({ mode: "optional", requireEmailProof: "never", enrolled: false });
 		const set = recoverySet(3);
 		const record = await seedFactor(built.factorStore, "recovery_code", set.data);
 		const { agent, transaction } = await beginLogin(built.app);
@@ -348,7 +354,7 @@ describe("POST /session/mfa/recovery-codes", () => {
 
 describe("a regeneration's own checks under the lease", () => {
 	it("sends a session signed in before the subject's first binding to log in again: a password-only session admitted while no factor stood, racing the owner's first binding, gets no codes", async () => {
-		const built = await composed({ mode: "optional", requireEmailProof: "never" });
+		const built = await composed({ mode: "optional", requireEmailProof: "never", enrolled: false });
 		const { agent } = await signIn(built.app, built.userSessionStore);
 		const store = built.transactionStore;
 		const acquire = store.acquireSubjectLease.bind(store);
@@ -358,14 +364,14 @@ describe("a regeneration's own checks under the lease", () => {
 			await seedTotp(built.factorStore);
 			return acquire(subject, asked);
 		});
-		const create = vi.spyOn(built.factorStore, "create");
 
 		const res = await regenerate(agent);
 
 		expect(res.status, JSON.stringify(res.body)).toBe(401);
 		expect(res.body).toMatchObject({ error: "login_required" });
 		expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
-		expect(create).not.toHaveBeenCalled();
+		expect(await setsOf(built.factorStore)).toEqual([]);
+		expect(events(built.logger, "info")).toContain("mfa_first_binding_distrusted");
 		expect(await built.transactionStore.recoverySetFloor(ALICE.id)).toBe(0);
 	});
 
@@ -790,7 +796,7 @@ describe("routing over a retired set: one reading of usable, the floor's", () =>
 	});
 
 	it("does not ask a password login for a second factor over a retired set alone: under optional the login is established, as over an exhausted set", async () => {
-		const built = await composed({ mode: "optional" });
+		const built = await composed({ mode: "optional", enrolled: false });
 		await seedFactor(built.factorStore, "recovery_code", recoverySet(3).data);
 		await raiseRecoverySetFloor(built.transactionStore, 1);
 
@@ -800,7 +806,7 @@ describe("routing over a retired set: one reading of usable, the floor's", () =>
 	});
 
 	it("still asks over a retired set alone when the floor cannot be read: an outage never lowers the bar", async () => {
-		const built = await composed({ mode: "optional" });
+		const built = await composed({ mode: "optional", enrolled: false });
 		await seedFactor(built.factorStore, "recovery_code", recoverySet(3).data);
 		await raiseRecoverySetFloor(built.transactionStore, 1);
 		vi.spyOn(built.transactionStore, "recoverySetFloor").mockRejectedValue(new Error("down"));

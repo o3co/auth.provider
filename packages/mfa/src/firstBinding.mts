@@ -70,13 +70,13 @@ export const reopenedEnrollment = (
 	records.some((record) => mayCount(factors, record)) ? "allowed" : "required";
 
 /**
- * How many records the subject holds once a first binding by `binding`
- * stands beside `records` (its own factor not among them): those records,
- * less the recovery-code sets the binding's new set replaces, plus its
- * factor and — the recovery-code factor installed — the new set. Held to
+ * How many records the subject holds once a recovery-code set issued beside
+ * a binding by `binding` — `mfa` for a regeneration — stands beside
+ * `records`: those records, less the sets the new one replaces, plus — the
+ * recovery-code factor installed — the new set. Held to
  * `mfa.maxFactorsPerSubject`.
  */
-export const recordsAfterFirstBinding = (
+export const recordsAfterRecoveryCodes = (
 	factors: MfaFactorResolver,
 	records: readonly Pick<MfaFactorRecord, "kind">[],
 	binding: NonNullable<MfaFactorRecord["binding"]>,
@@ -85,8 +85,20 @@ export const recordsAfterFirstBinding = (
 	const staying = records.filter(
 		(record) => !(replaced && record.kind === RECOVERY_CODE_FACTOR_KIND),
 	).length;
-	return staying + 1 + (factors.get(RECOVERY_CODE_FACTOR_KIND) === undefined ? 0 : 1);
+	return staying + (factors.get(RECOVERY_CODE_FACTOR_KIND) === undefined ? 0 : 1);
 };
+
+/**
+ * How many records the subject holds once a first binding by `binding`
+ * stands beside `records` (its own factor not among them): what its
+ * recovery codes leave (`recordsAfterRecoveryCodes`), plus its factor. Held
+ * to `mfa.maxFactorsPerSubject`.
+ */
+export const recordsAfterFirstBinding = (
+	factors: MfaFactorResolver,
+	records: readonly Pick<MfaFactorRecord, "kind">[],
+	binding: NonNullable<MfaFactorRecord["binding"]>,
+): number => recordsAfterRecoveryCodes(factors, records, binding) + 1;
 
 /** A factor's `enrollable` that threw: its `kind`, and the factor's error as `cause`, never quoted. */
 export class MfaEnrollableError extends Error {

@@ -146,10 +146,10 @@ import {
 import { createMfaEnrollment } from "./enrollment.mjs";
 import type { MfaFactorSet } from "./factorSet.mjs";
 import {
-	holdsUsableRecord,
+	holdsUsableIn,
 	isOffered,
+	type MfaSubjectRecords,
 	readFactorRecord,
-	withRecoverySetFloor,
 } from "./factorState.mjs";
 import type { RequireEmailProof } from "./firstBinding.mjs";
 import {
@@ -382,25 +382,25 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		return record === undefined || factor === undefined ? undefined : { record, factor };
 	};
 
-	/** Whether `subject` holds a usable record (`factorState.mts`) — one that counts, when `options.counting` asks it. */
-	const holdsUsable = (
-		subject: string,
-		records: readonly MfaFactorRecord[],
-		options: { readonly counting: boolean },
-		floor?: number,
-	): boolean =>
-		holdsUsableRecord(
-			{ factors, sealing, ...(floor === undefined ? {} : { recoverySetFloor: floor }) },
-			subject,
-			records,
-			options,
-		);
+	/** Whether the subject `read` holds a usable record (`factorState.mts`) — one that counts, when `options.counting` asks it. */
+	const holdsUsable = (read: MfaSubjectRecords, options: { readonly counting: boolean }): boolean =>
+		holdsUsableIn(read, options);
+
+	/** `subject`'s records read for a judgment over them (`factorSet.readSubject`); an outage is never "none". */
+	const readSubject = async (subject: string): Promise<MfaSubjectRecords | MfaStoreOutage> => {
+		try {
+			return await factorSet.readSubject(subject);
+		} catch (cause) {
+			return outage("mfa_factor", "list", cause);
+		}
+	};
 
 	/**
 	 * `subject`'s recovery-set floor, for a verification of `factor` that is a
-	 * recovery-code factor; `undefined` for any other, which reads none.
+	 * recovery-code factor — read fail-closed: one that cannot be read is the
+	 * verification's outage; `undefined` for any other factor, which reads none.
 	 */
-	const recoverySetFloorFor = async (
+	const floorForVerification = async (
 		subject: string,
 		factor: MfaFactor,
 	): Promise<number | undefined | MfaStoreOutage> => {
@@ -654,9 +654,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 		},
 		stepUpRecordable,
 		holdsUsable,
-		recoverySetFloorFor: async (subject) =>
-			(await withRecoverySetFloor({ factors, sealing }, subject, factorSet.recoverySetFloor))
-				.recoverySetFloor,
+		readSubject,
 		openLoginBinding: async (binding, continuation, shape) => {
 			try {
 				return await openLoginBinding(transactions, {
@@ -782,20 +780,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
 			// An enroll transaction verifies the account-email proof alone: it lists no factor.
-			// A retired recovery set is not offered; a floor that cannot be read offers every
-			// set. Read before the records, so no set they hold is retired by a later raise.
-			const context =
+			// A retired recovery set is not offered (`readSubjectRecords`).
+			const reading =
 				tx.purpose === "enroll"
-					? { factors, sealing }
-					: await withRecoverySetFloor(
-							{ factors, sealing },
-							tx.subject,
-							factorSet.recoverySetFloor,
-						);
-			const records = tx.purpose === "enroll" ? [] : await recordsOf(tx.subject);
-			if ("outcome" in records) return records;
-			const listed = records.flatMap((record) => {
-				const read = readFactorRecord(context, tx.subject, record);
+					? { subject: tx.subject, context: { factors, sealing }, records: [] }
+					: await readSubject(tx.subject);
+			if ("outcome" in reading) return reading;
+			const listed = reading.records.flatMap((record) => {
+				const read = readFactorRecord(reading.context, tx.subject, record);
 				if (!isOffered(read)) return [];
 				let hint: unknown;
 				if (read.state === "usable") {
@@ -1013,7 +1005,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			// The factor must open, and a recovery-code set pass its rule under the
 			// subject's recovery-set floor, before an attempt is spent on it: an
 			// outage spends nothing, and a retired set is refused unchecked.
-			const floor = await recoverySetFloorFor(tx.subject, factor);
+			const floor = await floorForVerification(tx.subject, factor);
 			if (typeof floor === "object") return floor;
 			const retired = () =>
 				refused("invalid", Math.max(0, maxAttemptsPerTransaction - tx.attempts));
@@ -1030,7 +1022,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				mode === "required" &&
 				tx.purpose === "login" &&
 				!factor.counting &&
-				!holdsUsable(tx.subject, current, { counting: true })
+				!holdsUsable(
+					{ subject: tx.subject, context: { factors, sealing }, records: current },
+					{ counting: true },
+				)
 					? reopen.plan(tx, current)
 					: undefined;
 			let reopening = await planOver(records);
@@ -1221,7 +1216,7 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				// The floor read again once the spend is written: a regeneration that
 				// raised it meanwhile has retired this set, and its answer may be out.
 				if (floor !== undefined) {
-					const again = await recoverySetFloorFor(tx.subject, factor);
+					const again = await floorForVerification(tx.subject, factor);
 					if (typeof again === "object") {
 						settled = "void";
 						return again;

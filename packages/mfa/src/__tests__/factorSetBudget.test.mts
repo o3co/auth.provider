@@ -181,7 +181,7 @@ describe("the subject lease's call budget", () => {
 		},
 	);
 
-	it.each([1, 2, 8])(
+	it.each([1, 2, 7])(
 		"covers a regeneration of recovery codes over %i standing set(s)",
 		async (sets) => {
 			const factorStore = createMemoryMfaFactorStore();
@@ -190,7 +190,11 @@ describe("the subject lease's call budget", () => {
 			for (let n = 0; n < sets; n++) {
 				await seedFactor(factorStore, "recovery_code", recoverySet(3).data);
 			}
-			const users = new WitnessingUserRepository(directoryEntries());
+			const entries = directoryEntries();
+			const alice = entries.get(ALICE.username);
+			// Her directory says she enrolled: her login reconciles nothing, so notes no first-binding mark.
+			if (alice !== undefined) alice.mfaEnrolled = true;
+			const users = new WitnessingUserRepository(entries);
 			const { app, userSessionStore } = await boot({
 				config: configFor("required"),
 				factorStore,
@@ -203,9 +207,9 @@ describe("the subject lease's call budget", () => {
 			const done = await mfaPost(agent, "/recovery-codes", {});
 
 			expect(done.status, JSON.stringify(done.body)).toBe(200);
-			// The records read, the floor read, the new set, the floor raised, each old set's
-			// removal, the records read again, the set marked shown.
-			expect(counted.most()).toBe(6 + sets);
+			// The records read, the first-binding mark read, the floor read, the new set, the
+			// floor raised, each old set's removal, the records read again, the set marked shown.
+			expect(counted.most()).toBe(7 + sets);
 			expect(counted.most()).toBeLessThanOrEqual(FACTOR_SET_STORE_CALLS);
 		},
 	);

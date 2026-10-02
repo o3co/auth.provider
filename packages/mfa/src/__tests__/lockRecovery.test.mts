@@ -38,6 +38,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMfaFactorSet, createMfaSubjectLeases } from "#/factorSet.mjs";
 import { createMfaLockRecovery } from "#/lockRecovery.mjs";
 import { createMfaEnrollmentWitness } from "#/witness.mjs";
+import { suiteSealing } from "./routesHarness.mjs";
 
 const SUBJECT = "u-alice";
 const SID = "sid-alice";
@@ -104,6 +105,7 @@ function setup(
 		factorStore,
 		witness: createMfaEnrollmentWitness(undefined),
 		leases: createMfaSubjectLeases({ store, storeTimeoutMs: 1_000 }),
+		sealing: suiteSealing(),
 	});
 	const recovery = createMfaLockRecovery({
 		store,
@@ -205,6 +207,7 @@ describe("the entry's configuration", () => {
 			factorStore: createMemoryMfaFactorStore(),
 			witness: createMfaEnrollmentWitness(undefined),
 			leases: createMfaSubjectLeases({ store, storeTimeoutMs: 1_000 }),
+			sealing: suiteSealing(),
 		});
 		const options = { store, factorSet, factors: FACTORS };
 		expect(() =>

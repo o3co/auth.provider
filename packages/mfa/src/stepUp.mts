@@ -30,8 +30,8 @@
  *   nothing here. Every factor the subject can use is offered, one that does
  *   not count included; none usable (`factorState.mts`: of an installed kind,
  *   its data opening, a recovery set with a code left at or above the
- *   subject's recovery-set floor, read before the records as the offers read
- *   it — one that cannot be read is no floor) is `no_qualifying_factor`. A session store that cannot record the step-up
+ *   subject's recovery-set floor, the records read as the offers read them,
+ *   `readSubjectRecords`) is `no_qualifying_factor`. A session store that cannot record the step-up
  *   opens none, whatever the session already holds.
  */
 
@@ -64,13 +64,12 @@ export function createMfaStepUp(kit: MfaCeremonyKit): {
 		async open(call) {
 			const session = call.session;
 			if (session === undefined) return UNKNOWN_TRANSACTION;
-			// Read before the records, as the offers read it: a retired set is not usable.
-			const floor = await kit.recoverySetFloorFor(session.subject);
-			const records = await kit.recordsOf(session.subject);
-			if ("outcome" in records) return records;
-			if (records.some((record) => mayCount(kit.factors, record))) {
+			// Read as the offers read it: a retired set is not usable.
+			const reading = await kit.readSubject(session.subject);
+			if ("outcome" in reading) return reading;
+			if (reading.records.some((record) => mayCount(kit.factors, record))) {
 				if (!kit.stepUpRecordable) return { outcome: "step_up_unrecordable" };
-				if (!kit.holdsUsable(session.subject, records, { counting: false }, floor)) {
+				if (!kit.holdsUsable(reading, { counting: false })) {
 					return { outcome: "no_qualifying_factor" };
 				}
 				if (call.transactionId !== undefined) {

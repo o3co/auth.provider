@@ -170,6 +170,8 @@ function build(options: BuildOptions = {}) {
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
 	const events = options.events;
 	const requirement = createMfaRequirement({
+		// No recovery set below a floor in these suites: a floor of 0.
+		recoverySetFloor: async () => 0,
 		mode: options.mode ?? "optional",
 		factors: resolverOver(options.factors ?? [FACTORS.totp(), FACTORS.recovery()]),
 		factorStore: factorStoreHolding(...(options.records ?? [])),

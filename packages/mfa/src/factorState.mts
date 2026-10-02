@@ -21,10 +21,10 @@
  * - `not_installed`: no installed factor verifies its kind.
  * - `unreadable`: its data does not open, or a digest it holds names a key
  *   the ring no longer holds (`keyId`, when the key is known).
- * - `retired`, read only where the subject's recovery-set floor was read
- *   (`withRecoverySetFloor`), before the records: a recovery-code set below
- *   it, replaced by a newer set and kept until it is removed. Its codes
- *   verify nothing.
+ * - `retired`, read only over a subject's records as `readSubjectRecords`
+ *   reads them: a recovery-code set below the subject's recovery-set floor,
+ *   replaced by a newer set and kept until it is removed. Its codes verify
+ *   nothing.
  * - `exhausted`: a recovery-code set whose data opened and holds no code
  *   left. It stays on record, for audit.
  * - `address_changed`, read for a signed-in session alone
@@ -46,10 +46,10 @@
  *   (`asksForSecondFactor`): every state but `exhausted` and `retired`, so
  *   one the provider cannot read — a TOTP whose key is lost among them — or
  *   whose kind it no longer installs fails closed and asks;
- * - every reading that decides on a recovery set — the offers, the list, a
+ * - every reading that judges a recovery set — the offers, the list, a
  *   step-up's `no_qualifying_factor`, a password login's ask — reads the
- *   floor before the records, through `withRecoverySetFloor`, so all agree
- *   on what is usable;
+ *   subject's records through `readSubjectRecords`, the one place the floor
+ *   and the records are read in order, so all agree on what is usable;
  * - whether a first binding may open: `mayCount` (`firstBinding.mts`), which
  *   reads no data.
  */
@@ -150,26 +150,71 @@ export function readFactorRecordAt(
 export const isOffered = (read: MfaRecordReading): boolean =>
 	read.state !== "not_installed" && read.state !== "exhausted" && read.state !== "retired";
 
+/** A subject's records as one reading holds them, and the context they are read over — the recovery-set floor in it where it was read. */
+export interface MfaSubjectRecords {
+	readonly subject: string;
+	readonly context: MfaRecordContext;
+	readonly records: readonly MfaFactorRecord[];
+}
+
+/** What `readSubjectRecords` reads through. */
+export interface MfaSubjectRecordsReaders {
+	/** The subject's records; throws for a store that cannot answer. */
+	readonly list: (subject: string) => Promise<readonly MfaFactorRecord[]>;
+	/** The subject's recovery-set floor, bounded; throws for one that cannot be read. */
+	readonly recoverySetFloor: (subject: string) => Promise<number>;
+	/** Told of a floor that could not be read: said at warn. */
+	readonly floorUnread: (subject: string, cause: unknown) => void;
+}
+
 /**
- * `context` with the subject's recovery-set floor, read by `readFloor` while
- * the recovery-code factor is installed; `context` as given otherwise, or
- * when the floor cannot be read — sets are then read as without one. Read it
- * before the records: a floor read after them can postdate a regeneration
- * whose new set they do not hold, and retire every set they do.
+ * `subject`'s records, read for a judgment over them, with the floor its
+ * recovery-code sets are held to. The records are listed; holding no set of
+ * the installed recovery-code factor, no floor is read. Otherwise the floor
+ * is read, and when it retires a set listed, the records are listed again —
+ * a floor read after a listing may postdate a regeneration whose new set the
+ * listing missed, but a regeneration writes its set before it raises the
+ * floor, so the listing after the floor holds it. A floor that cannot be
+ * read is told to `floorUnread` and reads every set as without one, so no
+ * outage hides a way in. A listing that fails throws.
  */
-export async function withRecoverySetFloor(
+export async function readSubjectRecords(
 	context: MfaRecordContext,
 	subject: string,
-	readFloor: (subject: string) => Promise<number>,
-): Promise<MfaRecordContext> {
+	readers: MfaSubjectRecordsReaders,
+): Promise<MfaSubjectRecords> {
+	const records = await readers.list(subject);
 	const factor = context.factors.get(RECOVERY_CODE_FACTOR_KIND);
-	if (factor === undefined || !isRecoveryCodeFactor(factor)) return context;
-	try {
-		return { ...context, recoverySetFloor: await readFloor(subject) };
-	} catch {
-		return context;
+	if (
+		factor === undefined ||
+		!isRecoveryCodeFactor(factor) ||
+		!records.some((record) => record.kind === RECOVERY_CODE_FACTOR_KIND)
+	) {
+		return { subject, context, records };
 	}
+	let floor: number;
+	try {
+		floor = await readers.recoverySetFloor(subject);
+	} catch (cause) {
+		readers.floorUnread(subject, cause);
+		return { subject, context, records };
+	}
+	const floored: MfaRecordContext = { ...context, recoverySetFloor: floor };
+	const retires = records.some(
+		(record) => readFactorRecord(floored, subject, record).state === "retired",
+	);
+	return {
+		subject,
+		context: floored,
+		records: retires ? await readers.list(subject) : records,
+	};
 }
+
+/** Whether the subject `read` holds a usable record (`holdsUsableRecord`, over its context). */
+export const holdsUsableIn = (
+	read: MfaSubjectRecords,
+	options: { readonly counting: boolean },
+): boolean => holdsUsableRecord(read.context, read.subject, read.records, options);
 
 /** Whether a password login asks for a second factor over `record`: every state but `exhausted` and `retired`. */
 export const asksForSecondFactor = (

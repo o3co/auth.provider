@@ -40,6 +40,7 @@ import type {
 	PrimaryContinuation,
 } from "@o3co/auth-provider-core";
 import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
+import type { MfaSubjectRecords } from "./factorState.mjs";
 import type { RequireEmailProof, UnprovableReason } from "./firstBinding.mjs";
 import type { MfaMailRefusal } from "./mail.mjs";
 import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
@@ -504,18 +505,11 @@ export interface MfaCeremonyKit {
 	 * code left) — one that counts, when `options.counting` asks it.
 	 */
 	readonly holdsUsable: (
-		subject: string,
-		records: readonly MfaFactorRecord[],
+		read: MfaSubjectRecords,
 		options: { readonly counting: boolean },
-		/** The subject's recovery-set floor, read before `records`: a set below it is not usable. */
-		floor?: number,
 	) => boolean;
-	/**
-	 * The subject's recovery-set floor, to read before its records, bounded by
-	 * one Store timeout; `undefined` while the recovery-code factor is off, or
-	 * when it cannot be read — every set is then read as without one.
-	 */
-	readonly recoverySetFloorFor: (subject: string) => Promise<number | undefined>;
+	/** The subject's records read for a judgment over them (`factorState.mts`'s `readSubjectRecords`); a listing that fails is the outage. */
+	readonly readSubject: (subject: string) => Promise<MfaSubjectRecords | MfaStoreOutage>;
 	/** Whether the session store can record a second factor verified in a session: a step-up is opened only then. */
 	readonly stepUpRecordable: boolean;
 	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */
