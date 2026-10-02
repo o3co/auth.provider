@@ -1026,7 +1026,6 @@
 . resolveFederationGrantLifetimeMs value
 . resolveFederationGrantRetrievalLimits value
 . resolveFederationResponseMode value
-. resolveJwksPath value
 . resolveRefreshTokenLifetime value
 . resolveSubjectRevocationHorizonMs value
 . resolveTokenBindingSettings value

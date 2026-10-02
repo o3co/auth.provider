@@ -499,11 +499,10 @@ export {
 } from "./issuer/canonical.mjs";
 // JWKS publishing — `jwksModule` mounts the route so every provider that signs
 // tokens exposes its verification keys for offline validation; `createJwksRouter`
-// is the underlying factory for direct composition. `resolveJwksPath` is the
-// single source of truth for the publishing path, shared with oauth
-// discovery's `jwks_uri` so the two never drift.
+// is the underlying factory for direct composition. `jwksModule` resolves the
+// publishing path and advertises it as discovery's `jwks_uri`, so the two
+// never drift.
 export { jwksModule } from "./jwks/module.mjs";
-export { resolveJwksPath } from "./jwks/path.mjs";
 export { createRouter as createJwksRouter, type JwksRouterOptions } from "./jwks/router.mjs";
 // A JWT's exp / iat / nbf, checked before anything computes an expiry from them.
 export type { NumericDateClaim } from "./jwt/numericDate.mjs";
