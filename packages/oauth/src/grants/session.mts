@@ -18,9 +18,11 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	authTimeAt,
+	boundPolicyAudience,
 	checkResolver,
 	cookieClaim,
 	describeAdmissionOutage,
+	evaluateGrantPolicy,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantError,
@@ -56,7 +58,7 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  */
 export type SessionGrantDeps = Pick<
 	GrantDependencies,
-	"config" | "keyStore" | "userSessionStore" | "subjectRevocation" | "logger"
+	"config" | "keyStore" | "userSessionStore" | "subjectRevocation" | "grantPolicy" | "logger"
 > &
 	ProviderDeps<"sessionRequirementResolver", "auditSink">;
 
@@ -242,6 +244,31 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 				}
 			}
 
+			// A wired policy decides last, on the admitted, checked request, by
+			// core's fail-closed rules: it may only narrow the scope and audience.
+			let effectiveScopes: readonly string[] = scopes ?? [];
+			let policyAudience: string | null = null;
+			if (deps.grantPolicy) {
+				const policy = await evaluateGrantPolicy(
+					deps.grantPolicy,
+					{
+						grantType: "session",
+						clientId: client.clientId,
+						subject: userId,
+						// A copy, so the policy cannot reach the ceiling it is held to.
+						requestedScope: scopes ? [...scopes] : undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					effectiveScopes,
+					{ logger: deps.logger },
+				);
+				if (!policy.ok) return { result: policy.result };
+				effectiveScopes = policy.scopes;
+				const bounded = boundPolicyAudience(policy.decision, client.allowedAudiences ?? []);
+				if (!bounded.ok) return { result: bounded.result };
+				policyAudience = bounded.audience;
+			}
+
 			// `sid` binds the token to the browser session, so either logout
 			// endpoint (both delete the `UserSession` record) revokes it wherever
 			// liveness is checked (`/userinfo`, `/introspect`). No refresh token
@@ -249,11 +276,11 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// that checks only signature and `exp` cannot see a logout; the lever
 			// there is a short `accessToken.defaultExpiresIn`.
 			//
-			// `aud` defaults to `allowedAudiences[0]`, the client's configured
-			// resource (the AuthenticatedClient contract), falling back to the
-			// client id as `authorization_code` does — never the issuer, since the
-			// token is for a resource, and never null.
-			const audience = client.allowedAudiences?.[0] ?? client.clientId;
+			// `aud` is the policy's, else defaults to `allowedAudiences[0]`, the
+			// client's configured resource (the AuthenticatedClient contract),
+			// falling back to the client id as `authorization_code` does — never
+			// the issuer, since the token is for a resource, and never null.
+			const audience = policyAudience ?? client.allowedAudiences?.[0] ?? client.clientId;
 			// The member the binding's mechanism kind owns (core's
 			// `ownedConfirmation`): a contributed mechanism cannot have a binding
 			// minted that no owning mechanism validated. The response's
@@ -277,7 +304,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 								audience,
 								subject: userId ?? null,
 								authorizedParty: client.clientId,
-								scope: scopes?.join(" ") ?? null,
+								scope: effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null,
 								tokenType: "at+jwt",
 								issuedAt: Math.floor(mintingNow / 1000),
 								...(confirmation ? { confirmation } : {}),
