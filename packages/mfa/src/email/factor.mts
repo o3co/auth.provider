@@ -32,9 +32,12 @@
  *   recorded keeps the handed one, so the old key can leave the ring. The
  *   account page's list reads the recorded digest (`enrolledAddressDigest`)
  *   to tell a record whose address changed.
- * - A completion is refused as a duplicate when one of the records it is
- *   handed holds the same digest under the same key. That is the records as
- *   read before the create: it does not see another completion at once.
+ * - Its identity is the recorded digest with its key id
+ *   (`MfaFactor.identity`): the same address under the same key is one
+ *   authenticator, under another key another. A completion is refused as a
+ *   duplicate when one of the records it is handed answers the identity its
+ *   data would. Those are the records as read before the lease; the
+ *   coordinator judges again by identity on the records its lease reads.
  * - A kept code whose key left the ring, or a pending state that is not a
  *   kept code, throws: an outage, never a code refused.
  */
@@ -56,6 +59,7 @@ import {
 	readLongCode,
 	readSixDigitCode,
 } from "../codes.mjs";
+import { addressDigestOf } from "../mail.mjs";
 
 /** The kind an email factor's records carry, and the key it is contributed under. */
 export const EMAIL_FACTOR_KIND = "email";
@@ -95,6 +99,10 @@ function matches(digests: MfaDigests, parts: readonly string[], kept: MfaKeyedDi
 	return found === "match";
 }
 
+/** The identity of a record holding `recorded`: its key id and digest, both of which it compares; `undefined` for none. */
+const identityOf = (recorded: MfaKeyedDigest | undefined): string | undefined =>
+	recorded === undefined ? undefined : JSON.stringify([recorded.keyId, recorded.digest]);
+
 /** The factors this file made. */
 const made = new WeakSet<object>();
 
@@ -110,6 +118,22 @@ export function enrolledAddressDigest(
 	return made.has(factor) ? (keyedDigest(data.addressDigest) ?? null) : undefined;
 }
 
+/**
+ * The identity the record of an enrollment of `factor`, a factor this file
+ * made, would answer once its code went to `user`'s address — its digest
+ * under `digests` as the coordinator keeps it at the send
+ * (`addressDigestOf`); `undefined` for an account with no address, and for
+ * any other factor, which is answered before anything is digested.
+ */
+export function enrollmentIdentity(
+	factor: MfaFactor,
+	digests: MfaDigests,
+	user: Readonly<Record<string, unknown>>,
+): string | undefined {
+	if (!made.has(factor)) return undefined;
+	return identityOf(addressDigestOf(digests, user.email));
+}
+
 /** The `email` factor, its codes living `settings.codeTtlSeconds`. */
 export function createEmailFactor(settings: EmailFactorSettings): MfaFactor {
 	const ttlMs = settings.codeTtlSeconds * 1000;
@@ -123,6 +147,7 @@ export function createEmailFactor(settings: EmailFactorSettings): MfaFactor {
 		reusableChallenge: true,
 		describe: () => ({}),
 		enrollable: (user) => normaliseMailAddress(user.email) !== undefined,
+		identity: (data) => identityOf(keyedDigest(data.addressDigest)),
 
 		async challenge(ctx) {
 			const code = generateSixDigitCode();
@@ -172,12 +197,12 @@ export function createEmailFactor(settings: EmailFactorSettings): MfaFactor {
 			// The address the code went to, as the coordinator kept it at the send.
 			const handed = keyedDigest(ctx.addressDigest);
 			if (handed === undefined) return { ok: false, reason: "expired" };
-			// Among the records handed, read before the create: not another completion at once.
-			const held = ctx.factors.some((enrolled) => {
-				const recorded = keyedDigest(enrolled.data.addressDigest);
-				return recorded?.keyId === handed.keyId && recorded.digest === handed.digest;
-			});
-			if (held) return { ok: false, reason: "duplicate" };
+			const own = identityOf(handed);
+			if (
+				ctx.factors.some((enrolled) => identityOf(keyedDigest(enrolled.data.addressDigest)) === own)
+			) {
+				return { ok: false, reason: "duplicate" };
+			}
 			return { ok: true, data: { addressDigest: handed } };
 		},
 	};
