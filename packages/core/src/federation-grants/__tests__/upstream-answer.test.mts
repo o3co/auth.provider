@@ -82,12 +82,26 @@ describe("readFederationGrantUpstreamAnswer", () => {
 			expect(read_.accessToken.token.scopes).toStrictEqual(["openid", "calendar.read"]);
 		});
 
-		it("named but naming no scope-token, blank included, is a malformed answer: never silence, never nothing", () => {
-			for (const scope of ["", "  \t ", '"openid"']) {
+		it("is what the request asked for when the answer is blank: a blank scope names none, and is not a token that carries nothing", () => {
+			for (const scope of ["", "  \t "]) {
+				const read_ = read(answer({ scope }), { requestedScopes: ["openid"] });
+				if (!read_.accessToken.eligible) throw new Error(`refused ${JSON.stringify(scope)}`);
+				expect(read_.accessToken.token.scopes, JSON.stringify(scope)).toStrictEqual(["openid"]);
+			}
+		});
+
+		it("named but naming no scope-token is a malformed answer: never the requested scopes", () => {
+			for (const scope of ['"openid"', '\t"openid"']) {
 				expect(read(answer({ scope })).accessToken, JSON.stringify(scope)).toStrictEqual(
 					refusedFor("malformed_token_response"),
 				);
 			}
+		});
+
+		it("is judged before the token type: a wider scope with a token that is not bearer is scope_exceeded", () => {
+			expect(
+				read(answer({ scope: "openid files.readwrite", tokenType: "dpop" })).accessToken,
+			).toStrictEqual(refusedFor("scope_exceeded"));
 		});
 
 		it("is refused beyond the consent: a token cannot be narrowed after the fact", () => {
