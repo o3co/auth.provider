@@ -110,7 +110,7 @@ redis-rate-limiter {
 - replay seen-set — `private_key_jwt` クライアント認証（#484）の背後にある、`jti` の一回限り使用の記録 — は `adapters.replaySeenSet`（`ADAPTERS_REPLAY_SEEN_SET`）で切り替わる。テンプレートは共有接続上の `"redis"` を同梱しており、`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。捕獲されたクライアントアサーションが、レプリカごとに 1 回ずつリプレイできてしまうためである。
 - ファーストパーティでないクライアントのための同意ステップ（#527）は `adapters.consentStore`（`ADAPTERS_CONSENT_STORE`）で切り替わる。デフォルトはオフ（`none`）である。`memory` は `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。あるレプリカで与えた同意が他のすべてのレプリカで再度求められ、同意ページが保留したリクエストを、回答を受け取ったレプリカが知らないという事態になるためである。`redis`（#561）は両方を共有接続上に保持する。[同意ストア](#同意ストア) を参照。
 - フェデレーショントークンストアのデフォルトは memory である。`ADAPTERS_FEDERATION_TOKEN_STORE=redis`（`adapters.federationTokenStore = "redis"`）を設定し、`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 バイト、base64 エンコード（`openssl rand -base64 32`） — を与えること。ストアは保持する上流のリフレッシュトークンを暗号化する。`REDIS_CLIENTS_URL` で設定した ioredis ソケットを共有する。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照。
-- フェデレーショングラント（#593）は、有効にするとさらに 2 つのストアを持つ: グラントそのもの（`ADAPTERS_FEDERATION_GRANT_STORE`）と、取得フローの記録（`ADAPTERS_FEDERATION_GRANT_INTENT_STORE`）。どちらも共有ソケット上の `redis` を同梱している。いずれかを `memory` にすると `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否され、Redis のグラントと memory のユーザーセッションストアの組み合わせはレプリカ数にかかわらず拒否される。グラントが、それを終わらせる境界より長生きしてしまうためである。[フェデレーショングラント](#フェデレーショングラント) を参照。
+- フェデレーショングラント（#593）は、有効にするとさらに 2 つのストアを持つ: グラントそのもの（`ADAPTERS_FEDERATION_GRANT_STORE`）と、取得フローの記録（`ADAPTERS_FEDERATION_GRANT_INTENT_STORE`）。どちらも `none` を同梱しており、機能を有効にするとそのストアを名指しして起動が拒否される。それぞれ `redis`（共有ソケット）か `memory` を選ぶ。いずれかを `memory` にすると `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否され、Redis のグラントと memory のユーザーセッションストアの組み合わせはレプリカ数にかかわらず拒否される。グラントが、それを終わらせる境界より長生きしてしまうためである。[フェデレーショングラント](#フェデレーショングラント) を参照。
 
 ## 使い方
 
@@ -217,8 +217,8 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `ADAPTERS_REPLAY_SEEN_SET` | `redis` | `adapters.replaySeenSet`: `private_key_jwt` の背後の replay seen-set、`memory` または `redis` |
 | `ADAPTERS_CONSENT_STORE` | `none` | `adapters.consentStore`: `none`、`memory` または `redis`。[同意ストア](#同意ストア) を参照 |
 | `ADAPTERS_FEDERATION_TOKEN_STORE` | `memory` | `adapters.federationTokenStore`: `memory` または `redis`。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照 |
-| `ADAPTERS_FEDERATION_GRANT_STORE` | `redis` | `adapters.federationGrantStore`: `memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
-| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `redis` | `adapters.federationGrantIntentStore`: `memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
+| `ADAPTERS_FEDERATION_GRANT_STORE` | `none` | `adapters.federationGrantStore`: `none`、`memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
+| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `none` | `adapters.federationGrantIntentStore`: `none`、`memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
 | `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`、`redis` または `store`。MFA を組み込む合成のためのもので、テンプレートは組み込まない |
 | `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` または `redis`。MFA を組み込む合成のためのもの |
 | `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: 認可コードリポジトリ、`memory` または `redis`。[コードリポジトリ](#コードリポジトリ) を参照 |
@@ -478,11 +478,11 @@ core.federations {
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `FEDERATION_GRANTS_ENABLED` | `false` | ルート、下記 2 つのストア、subject-revocation service をインストールする |
+| `FEDERATION_GRANTS_ENABLED` | `false` | ルート、下記で選んだ 2 つのストア（選ぶまではなし）、subject-revocation service をインストールする |
 | `FEDERATION_GRANTS_CONSENT_URL` | — | グラント用の、デプロイ側の同意ページ: パス、またはプロバイダーの origin 上の絶対 URL。デフォルトは無い — グラントの有効化はページが存在するという表明であり、無ければ起動を拒否する |
 | `FEDERATION_GRANTS_IDENTITY_LOOKUP` | `required` | connect callback が、既に別のローカルユーザーに紐づいた上流アカウントを拒否するかどうか。`required` には、すべての connection の registration を cover するユーザーリポジトリが必要（下記）。`unsupported` はこの検査を行わないことを記録する |
-| `ADAPTERS_FEDERATION_GRANT_STORE` | `redis` | グラントの保存先: `memory`（1 レプリカ。再起動で失われ、全ユーザーが再接続する）または `redis`（共有ソケット） |
-| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `redis` | 取得フローの記録 — バックエンドが登録した intent、同意チャレンジ、connect トランザクション — の保存先: `memory`（1 レプリカ。再起動で失うのは進行中のフローだけ）または `redis` |
+| `ADAPTERS_FEDERATION_GRANT_STORE` | `none` | グラントの保存先: `none`（ストアなし。機能を有効にするとそれを名指しして起動が拒否される）、`memory`（1 レプリカ。再起動で失われ、全ユーザーが再接続する）または `redis`（共有ソケット） |
+| `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `none` | 取得フローの記録 — バックエンドが登録した intent、同意チャレンジ、connect トランザクション — の保存先: `none`（ストアなし。機能を有効にするとそれを名指しして起動が拒否される）、`memory`（1 レプリカ。再起動で失うのは進行中のフローだけ）または `redis` |
 | `REDIS_FEDERATION_GRANT_STORE_ENCRYPTION_MODE` | `required` | `required` または `allow-plaintext`。`FEDERATION_TOKENS_ALLOW_INSECURE=1` でない限り、平文は production/staging と `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | subject 全体の失効に、確立済みのグラントを残すよう*求めて*よいかどうか。許可であって指示ではない |
 | `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Redis グラントストアのキー名前空間 |
