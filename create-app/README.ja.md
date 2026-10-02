@@ -1,6 +1,6 @@
 # @o3co/create-auth-provider
 
-最終更新: 2026-10-01
+最終更新: 2026-10-03
 
 auth.provider 用の CLI スキャフォルダーです。内包するテンプレートの 1 つから新しいサーバープロジェクトを生成します。
 
@@ -31,7 +31,7 @@ auth.provider 用の CLI スキャフォルダーです。内包するテンプ�
 ## 使い方
 
 ```bash
-npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]
+npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile] [--no-mfa]
 ```
 
 `--template` はコピーするテンプレートを指定します（デフォルトは `standalone`）。
@@ -73,6 +73,13 @@ cd provider
 
 `--no-lockfile` を付けると lockfile の生成（下記の手順 7）を省略します。
 
+`--no-mfa` を付けると、テンプレートの MFA スイッチ `mfaMode` をスキャフォールド上で
+off と書きます。`config/application.conf` の末尾に `mfaMode = "off"` と
+`mfaMode = ${?MFA_MODE}` をこの順に追記するので、後のテンプレートがデフォルトを
+変えてもプロジェクトは off のままで、`MFA_MODE` を設定すれば作り直さずに MFA を
+有効にできます。MFA パッケージは依存に残り、ほかには何も削除・変更しません。
+スイッチが何をインストールするかはテンプレートの README にあります。
+
 生成されるプロジェクトは pnpm のプロジェクトです。`Dockerfile` は
 `pnpm install --frozen-lockfile` でインストールし、ビルドの許可リストは
 `pnpm-workspace.yaml` にあります。
@@ -90,7 +97,7 @@ CLI は最後のメッセージで次に `pnpm run debug` を実行するよう�
 1. `<project-name>` を検証する（[バリデーションルール](#バリデーションルール) 参照）。
 2. 生成先ディレクトリ名を決定する: `--dir <value>` が指定されていればその値、そうでなければスコープ付き名のパッケージ部分、最終的には入力値そのもの。
 3. `--template`（デフォルト `standalone`）が内包するテンプレートの名前であることを確かめ、生成先ディレクトリを `<cwd>/<dir-name>` として解決し、すでに存在する場合はエラーで終了する。
-4. 指定したテンプレートを生成先ディレクトリにコピーし（`node_modules/` と `dist/` は除外）、`.gitignore` を復元する（npm は公開パッケージから `.gitignore` という名前のファイルを落とすため、tarball には `gitignore` として入っている）。
+4. 指定したテンプレートを生成先ディレクトリにコピーし（`node_modules/` と `dist/` は除外）、`.gitignore` を復元する（npm は公開パッケージから `.gitignore` という名前のファイルを落とすため、tarball には `gitignore` として入っている）。`--no-mfa` のときは、その `config/application.conf` に MFA スイッチの行を追記する。
 5. 生成されたディレクトリの `package.json` を書き換える:
    - `name` を `<project-name>` そのままに設定する（スコープを保持）。
    - `"private": true` は意図的に残す: スキャフォールドされた ID プロバイダーが誤って公開できてはならないため。本当に公開するつもりなら自分でこのフィールドを削除する。
@@ -170,7 +177,7 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 モジュールは CLI を構成する関数を export しています。シグネチャは
 [`src/index.mts`](src/index.mts) にあります。
 
-- `scaffold(targetDir, projectName, template?)` — 手順 4〜6。`template`（デフォルトは `DEFAULT_TEMPLATE` = `"standalone"`）からコピーする。コピーできないときは何も書かずに `templateRefusal` のメッセージで例外を投げる。`workspace:*` 依存が `versions.json` に見つからない場合も例外を投げる。
+- `scaffold(targetDir, projectName, template?, options?)` — 手順 4〜6。`template`（デフォルトは `DEFAULT_TEMPLATE` = `"standalone"`）からコピーする。`options.noMfa` は `--no-mfa` にあたる。コピーできないときは何も書かずに `templateRefusal` のメッセージで例外を投げる。`workspace:*` 依存が `versions.json` に見つからない場合も例外を投げる。
 - `availableTemplates(templatesRoot?)` — 内包するテンプレートの名前（ソート済み）。
 - `templateRefusal(template, templates)` — `template` からスキャフォールドできない理由（1 つも内包されていない、またはそのどれでもない）。できるときは `undefined`。
 - `generateLockfile(targetDir)` — 手順 7。例外を投げず、`{ ok: true, command }` か `{ ok: false, reason }` を返す。
