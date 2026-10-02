@@ -114,7 +114,7 @@ const config = handle.components.config; // boot がパースしたもの
 - 1 つの期限 `timeoutMs` が解決・接続・TLS・ヘッダー・body をまとめて覆う。`core.outbound` の `timeoutMs` と `maxResponseBytes` は上限で、呼び出し側の値（`createOutboundFetch` のオプション）はそれより小さいときだけ効く。呼び出し側の `signal` も効き、その中断は呼び出し側自身の理由で reject する。
 - 文字列または `URL`、`GET` または `POST`、文字列・`URLSearchParams`・`Uint8Array` の body を取る。
 
-`matchesHostList` と `readHostEntry`（[`src/net/outbound-policy.mts`](src/net/outbound-policy.mts)）はホストリスト文法の公開リーダーで、同じ形のリストを別の場所で持つときに使う。`isOutboundRefusal(err)` はポリシーによる拒否と交換の失敗（解決、ネットワーク、期限）を区別する。理由はコードで、`loggableError` が `reason` として保つ。コードで設定されたプロキシや dispatcher は参照しない: 外向きのクライアントメタデータ fetch は直接接続する。`HTTPS_PROXY` または `HTTP_PROXY` が設定されている間は、`core.outbound.egress` が `"direct"` でない限り fetch の構築を拒否する。NAT64（`64:ff9b::/96`）で IPv4 に到達する IPv6 のみのネットワークは対象外: それらのアドレスは special-use であるため。テストは `@o3co/auth-provider-core/testing` の `createOutboundFetchForTesting` と `withOutbound` を使い、ポリシーの下に自前の resolver と transport を置く。
+`matchesHostList` と `readHostEntry`（[`src/net/outbound-policy.mts`](src/net/outbound-policy.mts)）はホストリスト文法の公開リーダーで、同じ形のリストを別の場所で持つときに使う。`matchesHostList` は URL パーサーが返す `hostname` をそのまま取り、空のラベルを含むものには `TypeError` を投げる（呼び出し側がその URL を拒否する）。`isOutboundRefusal(err)` はポリシーによる拒否と交換の失敗（解決、ネットワーク、期限）を区別する。理由はコードで、`loggableError` が `reason` として保つ。コードで設定されたプロキシや dispatcher は参照しない: 外向きのクライアントメタデータ fetch は直接接続する。`HTTPS_PROXY` または `HTTP_PROXY` が設定されている間は、`core.outbound.egress` が `"direct"` でない限り fetch の構築を拒否する。NAT64（`64:ff9b::/96`）で IPv4 に到達する IPv6 のみのネットワークは対象外: それらのアドレスは special-use であるため。テストは `@o3co/auth-provider-core/testing` の `createOutboundFetchForTesting` と `withOutbound` を使い、ポリシーの下に自前の resolver と transport を置く。
 
 ### エラーのテキスト（RFC 6749）
 

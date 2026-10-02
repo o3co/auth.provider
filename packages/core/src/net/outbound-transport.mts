@@ -137,8 +137,8 @@ export function createNodeTransport(tls: { readonly ca?: string } = {}): Outboun
 				close();
 				reject(err);
 			});
-			// A 101 answer takes the upgrade path, never `response`: no protocol
-			// switch is asked for, so it ends the exchange as a failure at once.
+			// A 101 answer that names an upgrade takes this path, not `response`:
+			// no protocol switch is asked for, so it ends the exchange at once.
 			req.on("upgrade", (_res, socket) => {
 				socket.destroy();
 				close();

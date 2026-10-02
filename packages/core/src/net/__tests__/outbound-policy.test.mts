@@ -135,10 +135,10 @@ describe("matchesHostList", () => {
 		);
 	});
 
-	it("matches no entry for a hostname with an empty label", () => {
+	it("refuses to answer for a hostname with an empty label, for an allow and a deny list alike", () => {
 		const host = new URL("https://foo..corp.example/").hostname;
-		expect(matchesHostList(list(".corp.example"), host)).toBe(false);
-		expect(matchesHostList(list("foo..corp.example".replace("..", ".")), host)).toBe(false);
+		expect(() => matchesHostList(list(".corp.example"), host)).toThrow(TypeError);
+		expect(() => matchesHostList([], host)).toThrow(TypeError);
 	});
 
 	it("matches nothing when the list is empty", () => {

@@ -181,11 +181,13 @@ const hostIdentity = (host: string): string => {
 
 /**
  * Whether `patterns` cover `host`: a URL's `hostname` as the URL parser gives
- * it, a trailing dot or not. A hostname with an empty label matches no entry.
+ * it, a trailing dot or not. A hostname with an empty label is a `TypeError`,
+ * for an allow list and a deny list alike: the caller refuses such a URL.
  */
 export function matchesHostList(patterns: readonly HostPattern[], host: string): boolean {
 	const canonical = withoutRootDot(host);
-	if (canonical === undefined) return false;
+	if (canonical === undefined)
+		throw new TypeError("matchesHostList: a hostname with an empty label");
 	const key = hostIdentity(canonical);
 	return patterns.some(
 		(pattern) => key === pattern.host || (pattern.suffix && key.endsWith(`.${pattern.host}`)),
