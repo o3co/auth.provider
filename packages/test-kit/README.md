@@ -492,7 +492,7 @@ What the suites cannot see, and a store's own tests must:
 
 ## The fake Store
 
-`startFakeStore({ users, bearerToken })` starts an in-memory HTTP server on
+`startFakeStore({ users, bearerToken, now, requestNow })` starts an in-memory HTTP server on
 `127.0.0.1`, on a port of its own, answering each endpoint as
 [the contract](../foundation/README.md#the-stores-mfa-endpoints) says, with
 the bodies of core's `mfa/storeWire.mts`:
@@ -510,6 +510,19 @@ the bodies of core's `mfa/storeWire.mts`:
   read included; an update writes its changes and nothing else at the
   expected version plus one; each request is answered from state it reads
   and writes without yielding, so concurrent updates are a compare-and-set;
+- a subject's records are one set at a store generation, as the contract's
+  table says: a list answers it with the records, `null` for an absent set;
+  every membership write mints a fresh one and an update keeps it; a
+  conditional create or removal checks it and answers `200`, `404` or `409`
+  with its outcome body, and concurrent ones are atomic too; an emptied set
+  stays as its tombstone until `BUNDLED_STORE_WRITE_LIFETIME_MS` has passed
+  since its last membership write on the Store's clock, `now` (default
+  `Date.now`); a set held without a generation is given one by its first
+  list, a conditional write against it answering `conflict`; and a
+  conditional write whose `deadlineMs` is at or before the request clock,
+  `requestNow` (default `Date.now`, apart from `now` so moving the
+  tombstones' clock makes no write late), is answered `408` and not applied,
+  checked in the same step as the write;
 - a body the contract does not give an endpoint is `400`, a method but `POST`
   `405`, an unknown path `404`; with `bearerToken`, a request without
   `Authorization: Bearer <token>` is `401` with
@@ -524,7 +537,10 @@ To test how an adapter reads a Store that breaks the contract:
 (`{ status, headers?, body? }`), or by the contract when it returns
 `undefined` — at once, or through a promise that settles later or never, for
 a slow or hung Store — until released with `answer(endpoint, undefined)`; and
-`holdFactor(subject, record)` holds a record as it is, readable or not. What
+`holdFactor(subject, record)` holds a record as it is, readable or not, and
+leaves the set without a generation, as an older writer's rewrite of the
+whole set would: its next list mints one, and a conditional write at the one
+it had answers `conflict`. What
 it received is `requests` (the endpoint, the headers, the body as parsed);
 what it holds is `factors(subject)` and `enrolled(subject)`. `close()` stops
 it. It keeps every request it records, headers included — the bearer token
@@ -565,7 +581,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`factor.contract.test.mts`](src/mfa/__tests__/factor.contract.test.mts) | the factor suite over core's double, with and without a challenge, and mailing its codes, for accounts whose address is padded, internationalised or decomposed; each broken factor — a code in any spelling or escaping in a response, an address in any case, escaping or normalised spelling in what it keeps, in a challenge's answer, or in an enrollment's answer beside a username that is not it, an error quoting the account, the address kept where its keyed digest belongs, a digest of the address the account answered at the start or answers by the completion rather than the one handed, a completion that completes with none handed, a verification that keeps no digest handed under a newer key or keeps the old one, a challenge over an unreadable digest that throws or mails no `null`, a code for another purpose, an expiry already past, one code at two challenges, an identity two authenticators share — read from the record already held, or the latest enrollment's answered for every record — one keyed per factor instance, or one that answers none for the second — refused by the case that names what it breaks |
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
 | [`conditionalWrite.contract.test.mts`](src/conditionalWrite/__tests__/conditionalWrite.contract.test.mts) | both suites over a reference record store, whose writes take a lock per key, and a reference set store, each serving two instances over one backend and keeping retention deadlines on a clock of its own, which `forceExpire` moves; every case refuses a store broken one way (a write that skips the lock, an unconditional delete among them, a counter or a digest as the generation, a torn versioned read, a write on `conflict`, a create that upserts a held id, a reset or a last removal that leaves no tombstone, a reset in two steps, a store that ignores its own deadline, a set revived from its tombstone that keeps the tombstone's deadline, a re-create after expiry at a generation seen before, an outage answered as absent, writes that skip the expiry check, a second instance reading from a cache, a member update that changes nothing, a value or a member shared with the caller, among them); stores answering frozen values, listing members in another order, or labelling a losing write from a read taken before their lock pass; an undeclared hook's or member's cases left out and named; a declared one missing fails its case; items of another scope fail the case |
-| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never |
+| [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, a record held into a set dropping its generation, `400` for an expected generation or a `deadlineMs` that is none, a late conditional write answered `408` and not applied while one before its deadline is, a deadline checked on the request clock and never the tombstones', and one winner among concurrent conditional writes |
 
 ## See also
 
