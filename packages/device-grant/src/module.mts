@@ -194,6 +194,8 @@ const OPTIONAL = [
 	// endpoint may dispatch through core's grant registry, and then they are
 	// read from the configuration (`tokenSettings`).
 	"oauthTokenSettings",
+	// Consulted by the grant at the poll, when wired.
+	"grantPolicy",
 ] as const;
 
 /**
@@ -640,6 +642,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 									keyStore: deps.keyStore,
 									accessTokenExpiresIn: tokenSettings(deps).accessTokenDefaultExpiresIn(),
 									logger: deps.logger,
+									grantPolicy: deps.grantPolicy,
 									// An approval a later sessions boundary covers is refused
 									// at the poll (see grant.mts).
 									...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),

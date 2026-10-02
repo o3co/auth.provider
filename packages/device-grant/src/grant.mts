@@ -42,6 +42,12 @@
  *   `temporarily_unavailable`.
  * - A throwing `poll` is a store outage, answered 503
  *   `temporarily_unavailable` — none of the four codes is true of it.
+ * - A wired `grantPolicy` is consulted on the approval once its client is
+ *   checked, before the revocation read and the minting instant, through
+ *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error, a
+ *   throw is 503, a scope or audience past the approval or `allowedAudiences`
+ *   is 500. It may only narrow; its audience, within `allowedAudiences`, is
+ *   `aud`.
  * - The token carries the approval's recorded `amr` (`wellFormedAmr`) and its
  *   `authTimeMs` as `auth_time`, read against the minting clock with
  *   `authTimeAt`; the same instant is its `iat`. Neither recorded, neither is
@@ -59,15 +65,20 @@
 import type {
 	DeviceCodeStore,
 	GrantContext,
+	GrantError,
 	GrantHandler,
 	GrantHandlerResult,
+	GrantPolicyHook,
 	KeyStore,
+	Logger,
 	SubjectRevocation,
 } from "@o3co/auth-provider-core";
 import {
 	authTimeAt,
+	boundPolicyAudience,
 	coveredByRevocationBoundary,
 	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+	evaluateGrantPolicy,
 	generateToken,
 	generateTokenResponse,
 	isLifetimeSeconds,
@@ -75,6 +86,7 @@ import {
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
+import { DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 
 export interface DeviceCodeGrantOptions {
 	readonly store: DeviceCodeStore;
@@ -91,6 +103,11 @@ export interface DeviceCodeGrantOptions {
 	 * is at every surface that reads it.
 	 */
 	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
+	/**
+	 * The deployment's grant policy, consulted at the poll. A required key, not
+	 * a required value: a grant built without one says so with `undefined`.
+	 */
+	readonly grantPolicy: GrantPolicyHook | undefined;
 }
 
 const error = (status: number, code: string, description: string): GrantHandlerResult => ({
@@ -105,6 +122,30 @@ const readOr = <T,>(read: () => T, fallback: T): T => {
 		return fallback;
 	}
 };
+
+/**
+ * Where core writes a policy's outage and invalid-decision lines, object-first
+ * at error; a logger with no error channel leaves them to core's console logger.
+ */
+const policyLoggerOf = (
+	logger: DeviceCodeGrantOptions["logger"],
+): Pick<Logger, "error"> | undefined => {
+	if (typeof logger?.error !== "function") return undefined;
+	const write = logger.error.bind(logger);
+	return {
+		error: (obj: unknown, msg?: unknown) => write(obj as Record<string, unknown>, String(msg)),
+	};
+};
+
+/** A policy refusal; an outage says what any refusal after `poll` means for the device. */
+const policyRefusal = (result: GrantError): GrantHandlerResult =>
+	result.status === 503
+		? error(
+				503,
+				result.error,
+				"the grant policy is unavailable; start a new device authorization request",
+			)
+		: { result };
 
 /** Whole epoch milliseconds at or after the epoch: what a store records. */
 const isRecordedInstant = (ms: unknown): ms is number =>
@@ -121,6 +162,7 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			`createDeviceCodeGrant: accessTokenExpiresIn must be a whole number of seconds from 1 to a year (got ${String(accessTokenExpiresIn)})`,
 		);
 	}
+	const policyLogger = policyLoggerOf(options.logger);
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -206,6 +248,31 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 				return error(400, "invalid_grant", "authorization carries no approving subject");
 			}
 
+			// See the file header. The approval is the ceiling, and the policy is
+			// handed a copy of it. Ahead of the revocation read and the minting
+			// instant, so neither is stale by the policy's latency.
+			let scope: readonly string[] = authorization.grantedScope ?? [];
+			let policyAudience: string | null = null;
+			if (options.grantPolicy !== undefined) {
+				const policy = await evaluateGrantPolicy(
+					options.grantPolicy,
+					{
+						grantType: DEVICE_CODE_GRANT_TYPE,
+						clientId: client.clientId,
+						subject: authorization.subject,
+						requestedScope: scope.length > 0 ? [...scope] : undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
+					scope,
+					{ logger: policyLogger },
+				);
+				if (!policy.ok) return policyRefusal(policy.result);
+				scope = policy.scopes;
+				const bounded = boundPolicyAudience(policy.decision, client.allowedAudiences ?? []);
+				if (!bounded.ok) return { result: bounded.result };
+				policyAudience = bounded.audience;
+			}
+
 			// See the file header: a revocation stamped between the approval and
 			// this poll.
 			const revocation = options.subjectRevocation;
@@ -280,12 +347,11 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			}
 			const amr = readOr(() => wellFormedAmr(authorization.amr), undefined);
 
-			const scope = authorization.grantedScope ?? [];
-			// Same audience rule the session and authorization-code grants use:
-			// the client's configured resource audience, falling back to the
-			// client id. Never null — an audience-less token is accepted by
-			// anything that checks `aud` loosely.
-			const audience = client.allowedAudiences?.[0] ?? client.clientId;
+			// The policy's audience, else the rule the session and
+			// authorization-code grants use: the client's configured resource
+			// audience, falling back to the client id. Never null — an
+			// audience-less token is accepted by anything that checks `aud` loosely.
+			const audience = policyAudience ?? client.allowedAudiences?.[0] ?? client.clientId;
 			// See the file header: the owned member only, and the envelope's
 			// `token_type` follows it.
 			const confirmation = ownedConfirmation(ctx.tokenBinding);

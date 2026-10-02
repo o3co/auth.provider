@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { ProviderDeps, RateLimiter } from "@o3co/auth-provider-core";
+import type { DeviceCodeStore, ProviderDeps, RateLimiter } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { createDeviceCodeGrant } from "#/grant.mjs";
@@ -47,6 +47,8 @@ const OPTIONAL = [
 	// What the oauth module provides of `oauth {}`; read with the
 	// configuration's value as the fallback.
 	"oauthTokenSettings",
+	// Consulted by the grant at the poll, when wired.
+	"grantPolicy",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
@@ -63,8 +65,8 @@ describe("deviceGrantModule's deps are the slots it declares", () => {
 			const deps = {} as DeviceGrantModuleDeps;
 			// @ts-expect-error — `consentStore` is in neither requires nor optional
 			void deps.consentStore;
-			// @ts-expect-error — nor is `grantPolicy`
-			void deps.grantPolicy;
+			// @ts-expect-error — nor is `codeRepository`
+			void deps.codeRepository;
 		}
 		expect(true).toBe(true);
 	});
@@ -80,12 +82,34 @@ describe("deviceGrantModule's deps are the slots it declares", () => {
 				store: deps.deviceCodeStore,
 				keyStore: deps.keyStore,
 				accessTokenExpiresIn: 60,
+				grantPolicy: deps.grantPolicy,
 			});
 			const useLimiter = (_limiter: RateLimiter): void => {};
 			// A dropped slot would satisfy this too (TS2339, not TS2345); the pin above catches that.
 			// @ts-expect-error — `rateLimiter` is optional too
 			useLimiter(deps.rateLimiter);
 			if (deps.rateLimiter) useLimiter(deps.rateLimiter);
+		}
+		expect(true).toBe(true);
+	});
+});
+
+describe("createDeviceCodeGrant states its grant policy", () => {
+	it("refuses, at compile time, a hand-built grant that leaves the policy unsaid", () => {
+		if (false as boolean) {
+			const deps = {} as DeviceGrantModuleDeps & { deviceCodeStore: DeviceCodeStore };
+			// @ts-expect-error — `grantPolicy` is a required key: a policy, or `undefined` for none
+			createDeviceCodeGrant({
+				store: deps.deviceCodeStore,
+				keyStore: deps.keyStore,
+				accessTokenExpiresIn: 60,
+			});
+			createDeviceCodeGrant({
+				store: deps.deviceCodeStore,
+				keyStore: deps.keyStore,
+				accessTokenExpiresIn: 60,
+				grantPolicy: undefined,
+			});
 		}
 		expect(true).toBe(true);
 	});
