@@ -1555,7 +1555,7 @@ describe("step 5 — what a requirement answers is validated at the boundary", (
 		}
 	});
 
-	it("hands the requirement the subject:the record's sub when one was read, else the claim's — undefined only on the code record's first read", async () => {
+	it("hands the requirement the subject: the record's sub when one was read, else the claim's — undefined only on the code record's first read", async () => {
 		const seen: (string | undefined)[] = [];
 		const watching = met("watch", {
 			admit: async ({ subject }) => {
