@@ -87,9 +87,9 @@ export function requireUsableConfiguredRateLimitSpec(key: string, value: unknown
 
 /**
  * A configured `{ limit, windowSeconds }` budget, read as the key's owning
- * schema reads it (`configuredNumber`, so a numeric string is its number)
- * and judged by the one predicate; `undefined` when it is not one a limiter
- * can apply. The adapters' own `limits` take no such reading: their schemas
+ * schema reads it (`configuredNumber`, so a string of decimal digits is its
+ * number) and judged by the one predicate; `undefined` when it is not one a
+ * limiter can apply. The adapters' own `limits` take no such reading: their schemas
  * do not coerce, and neither do they.
  */
 export const readConfiguredRateLimitSpec = (value: unknown): RateLimitSpec | undefined => {
