@@ -29,18 +29,26 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { StoreGeneration } from "#/adapters/conditionalWrite.mjs";
 import type { MfaFactorRecord, MfaFactorRecordUpdate } from "#/mfa/factorStore.mjs";
 import {
 	fromMfaStoreFactor,
+	type MfaStoreCreateIfRequest,
 	type MfaStoreFactor,
 	type MfaStoreFactorBinding,
 	type MfaStoreFactorChanges,
+	type MfaStoreRemoveIfRequest,
 	type MfaStoreUpdateRequest,
+	readMfaStoreCreateIfAnswer,
 	readMfaStoreFactor,
 	readMfaStoreFactorChanges,
 	readMfaStoreListAnswer,
+	readMfaStoreRemoveIfAnswer,
+	readMfaStoreVersionedListAnswer,
+	toMfaStoreCreateIfRequest,
 	toMfaStoreFactor,
 	toMfaStoreFactorChanges,
+	toMfaStoreRemoveIfRequest,
 	toMfaStoreUpdateRequest,
 } from "#/mfa/storeWire.mjs";
 
@@ -402,5 +410,295 @@ describe("an update on the wire", () => {
 				lastUsedAt: new Date(Number.NaN),
 			}),
 		).toThrow(RangeError);
+	});
+});
+
+/** Generations as a Store issues them: opaque, 1 to 128 visible ASCII characters, none of them `"`. */
+const GENERATION = "6f1d2c3b-4a59-4e8f-9d7c-0b1a2c3d4e5f" as StoreGeneration;
+const NEXT_GENERATION = "c0ffee-2" as StoreGeneration;
+
+/** Values no Store may answer, nor a caller hand back, as a generation. */
+const NOT_GENERATIONS: readonly unknown[] = [
+	"",
+	'a"b',
+	'"6f1d2c3b"',
+	"with space",
+	"x".repeat(129),
+	"généré",
+	"tab\there",
+	7,
+	true,
+	{},
+];
+
+describe("a versioned list answer", () => {
+	const SECOND = { ...FULL_WIRE, id: ID_2, kind: "email" };
+
+	it("reads factors and generation into the port's set: items as records, and the generation", () => {
+		const set = readMfaStoreVersionedListAnswer(
+			overJson({ factors: [{ ...FULL_WIRE, storeNote: "x" }, SECOND], generation: GENERATION }),
+			"user-1",
+		);
+		expect(set).toStrictEqual({
+			items: [fromMfaStoreFactor(FULL_WIRE), fromMfaStoreFactor(SECOND)],
+			generation: GENERATION,
+		});
+		expect(Object.isFrozen(set)).toBe(true);
+		expect(Object.isFrozen(set.items)).toBe(true);
+		expect(set.items.every((record) => Object.isFrozen(record))).toBe(true);
+	});
+
+	it("reads an absent set as a 200 stating it: no factors and a null generation", () => {
+		expect(
+			readMfaStoreVersionedListAnswer(overJson({ factors: [], generation: null }), "user-1"),
+		).toStrictEqual({ items: [], generation: null });
+	});
+
+	it("reads an emptied set, whose tombstone stands, as no factors at its generation", () => {
+		expect(
+			readMfaStoreVersionedListAnswer({ factors: [], generation: GENERATION }, "user-1"),
+		).toStrictEqual({ items: [], generation: GENERATION });
+	});
+
+	it("throws a TypeError for an answer that is not { factors: [...], generation }", () => {
+		for (const value of [
+			undefined,
+			null,
+			[],
+			"factors",
+			{},
+			{ factors: [] },
+			{ generation: GENERATION },
+			{ factors: null, generation: GENERATION },
+			{ factors: {}, generation: GENERATION },
+			{ factors: [], generation: undefined },
+		]) {
+			expect(() => readMfaStoreVersionedListAnswer(value, "user-1"), String(value)).toThrow(
+				TypeError,
+			);
+		}
+	});
+
+	it("throws a TypeError for a generation that is no store generation, one holding a quote included", () => {
+		for (const generation of NOT_GENERATIONS) {
+			expect(
+				() => readMfaStoreVersionedListAnswer({ factors: [], generation }, "user-1"),
+				String(generation),
+			).toThrow(TypeError);
+		}
+	});
+
+	it("throws a TypeError for factors held by an absent set", () => {
+		expect(() =>
+			readMfaStoreVersionedListAnswer({ factors: [FULL_WIRE], generation: null }, "user-1"),
+		).toThrow(TypeError);
+	});
+
+	it("throws a TypeError, whole, when one record is unreadable, names another subject, or repeats an id", () => {
+		for (const [what, factors] of [
+			["an unreadable record", [FULL_WIRE, { ...SECOND, label: null }]],
+			["a record of another subject", [FULL_WIRE, { ...SECOND, subject: "user-2" }]],
+			["two records with one id", [FULL_WIRE, { ...SECOND, id: ID_1 }]],
+			["a record that is no object", [FULL_WIRE, "record"]],
+		] as const) {
+			expect(
+				() => readMfaStoreVersionedListAnswer({ factors, generation: GENERATION }, "user-1"),
+				what,
+			).toThrow(TypeError);
+		}
+	});
+
+	it("throws a TypeError, never another error, for a field whose read throws", () => {
+		const throwing = {
+			get factors(): never {
+				throw new Error("read");
+			},
+			generation: GENERATION,
+		};
+		const record = {
+			...FULL_WIRE,
+			get data(): never {
+				throw new Error("read");
+			},
+		};
+		expect(() => readMfaStoreVersionedListAnswer(throwing, "user-1")).toThrow(TypeError);
+		expect(() =>
+			readMfaStoreVersionedListAnswer({ factors: [record], generation: GENERATION }, "user-1"),
+		).toThrow(TypeError);
+	});
+
+	it("leaves the plain list answer as it was: it reads the same answer and ignores the generation", () => {
+		expect(
+			readMfaStoreListAnswer({ factors: [FULL_WIRE], generation: GENERATION }, "user-1"),
+		).toStrictEqual({ ok: true, factors: [FULL_WIRE] });
+	});
+});
+
+describe("a conditional create on the wire", () => {
+	it("carries the factor and the generation the writer read as expectedGeneration", () => {
+		expect(toMfaStoreCreateIfRequest(FULL, GENERATION)).toStrictEqual({
+			factor: FULL_WIRE,
+			expectedGeneration: GENERATION,
+		});
+		expectTypeOf<keyof MfaStoreCreateIfRequest>().toEqualTypeOf<"factor" | "expectedGeneration">();
+	});
+
+	it("carries null, present and never left out, for a set the writer read as absent", () => {
+		const request = toMfaStoreCreateIfRequest(BARE, null);
+		expect(request).toStrictEqual({ factor: toMfaStoreFactor(BARE), expectedGeneration: null });
+		expect(overJson(request)).toHaveProperty("expectedGeneration", null);
+	});
+
+	it("refuses, with a RangeError, an expected generation that is no store generation, or none", () => {
+		for (const expected of [...NOT_GENERATIONS, undefined]) {
+			expect(
+				() => toMfaStoreCreateIfRequest(FULL, expected as StoreGeneration),
+				String(expected),
+			).toThrow(RangeError);
+		}
+	});
+
+	it("refuses, with a RangeError, a record the factor reader would not read back", () => {
+		expect(() => toMfaStoreCreateIfRequest({ ...FULL, id: "short" }, GENERATION)).toThrow(
+			RangeError,
+		);
+	});
+
+	it("reads a 200 as created, with the set's new generation, and a 409 as a conflict", () => {
+		expect(
+			readMfaStoreCreateIfAnswer(200, { outcome: "created", generation: NEXT_GENERATION }),
+		).toStrictEqual({ outcome: "created", generation: NEXT_GENERATION });
+		expect(readMfaStoreCreateIfAnswer(409, { outcome: "conflict" })).toStrictEqual({
+			outcome: "conflict",
+		});
+	});
+
+	it("throws a TypeError for a 409 or a 200 without its body: a bare status may be a misrouted request or an older Store", () => {
+		for (const status of [200, 409]) {
+			for (const body of [undefined, null, "", {}]) {
+				expect(() => readMfaStoreCreateIfAnswer(status, body), `${status} ${String(body)}`).toThrow(
+					TypeError,
+				);
+			}
+		}
+	});
+
+	it("throws a TypeError for a body whose outcome is not its status's, or a created one with no generation", () => {
+		for (const [status, body] of [
+			[200, { outcome: "conflict" }],
+			[409, { outcome: "created", generation: NEXT_GENERATION }],
+			[200, { outcome: "created" }],
+			[200, { generation: NEXT_GENERATION }],
+			[200, { outcome: "updated", generation: NEXT_GENERATION }],
+		] as const) {
+			expect(() => readMfaStoreCreateIfAnswer(status, body), JSON.stringify(body)).toThrow(
+				TypeError,
+			);
+		}
+		for (const generation of NOT_GENERATIONS) {
+			expect(
+				() => readMfaStoreCreateIfAnswer(200, { outcome: "created", generation }),
+				String(generation),
+			).toThrow(TypeError);
+		}
+	});
+
+	it("throws a TypeError for any other status, a 404 included: a create is never missing", () => {
+		for (const [status, body] of [
+			[404, { outcome: "missing" }],
+			[404, { outcome: "conflict" }],
+			[201, { outcome: "created", generation: NEXT_GENERATION }],
+			[204, undefined],
+			[400, { outcome: "conflict" }],
+			[412, { outcome: "conflict" }],
+			[500, undefined],
+		] as const) {
+			expect(() => readMfaStoreCreateIfAnswer(status, body), String(status)).toThrow(TypeError);
+		}
+	});
+});
+
+describe("a conditional remove on the wire", () => {
+	it("names the record by subject and id, and carries the generation the writer read as expectedGeneration", () => {
+		expect(toMfaStoreRemoveIfRequest("user-1", ID_1, GENERATION)).toStrictEqual({
+			subject: "user-1",
+			id: ID_1,
+			expectedGeneration: GENERATION,
+		});
+		expectTypeOf<keyof MfaStoreRemoveIfRequest>().toEqualTypeOf<
+			"subject" | "id" | "expectedGeneration"
+		>();
+	});
+
+	it("refuses, with a RangeError, an expected generation that is no store generation, null included", () => {
+		for (const expected of [...NOT_GENERATIONS, null, undefined]) {
+			expect(
+				() => toMfaStoreRemoveIfRequest("user-1", ID_1, expected as StoreGeneration),
+				String(expected),
+			).toThrow(RangeError);
+		}
+	});
+
+	it("refuses, with a RangeError, an id no record can have, or a subject that is no string", () => {
+		expect(() => toMfaStoreRemoveIfRequest("user-1", "short", GENERATION)).toThrow(RangeError);
+		expect(() => toMfaStoreRemoveIfRequest(7 as unknown as string, ID_1, GENERATION)).toThrow(
+			RangeError,
+		);
+	});
+
+	it("reads a 200 as removed, with the set's new generation, a 404 as missing, and a 409 as a conflict", () => {
+		expect(
+			readMfaStoreRemoveIfAnswer(200, { outcome: "removed", generation: NEXT_GENERATION }),
+		).toStrictEqual({ outcome: "removed", generation: NEXT_GENERATION });
+		expect(readMfaStoreRemoveIfAnswer(404, { outcome: "missing" })).toStrictEqual({
+			outcome: "missing",
+		});
+		expect(readMfaStoreRemoveIfAnswer(409, { outcome: "conflict" })).toStrictEqual({
+			outcome: "conflict",
+		});
+	});
+
+	it("throws a TypeError for a 404, a 409 or a 200 without its body", () => {
+		for (const status of [200, 404, 409]) {
+			for (const body of [undefined, null, "", {}]) {
+				expect(() => readMfaStoreRemoveIfAnswer(status, body), `${status} ${String(body)}`).toThrow(
+					TypeError,
+				);
+			}
+		}
+	});
+
+	it("throws a TypeError for a body whose outcome is not its status's, or a removed one with no generation", () => {
+		for (const [status, body] of [
+			[404, { outcome: "conflict" }],
+			[409, { outcome: "missing" }],
+			[200, { outcome: "missing" }],
+			[404, { outcome: "removed", generation: NEXT_GENERATION }],
+			[200, { outcome: "removed" }],
+			[200, { generation: NEXT_GENERATION }],
+		] as const) {
+			expect(
+				() => readMfaStoreRemoveIfAnswer(status, body),
+				`${status} ${JSON.stringify(body)}`,
+			).toThrow(TypeError);
+		}
+		for (const generation of NOT_GENERATIONS) {
+			expect(
+				() => readMfaStoreRemoveIfAnswer(200, { outcome: "removed", generation }),
+				String(generation),
+			).toThrow(TypeError);
+		}
+	});
+
+	it("throws a TypeError for any other status", () => {
+		for (const [status, body] of [
+			[204, undefined],
+			[202, { outcome: "removed", generation: NEXT_GENERATION }],
+			[400, { outcome: "conflict" }],
+			[412, { outcome: "conflict" }],
+			[503, undefined],
+		] as const) {
+			expect(() => readMfaStoreRemoveIfAnswer(status, body), String(status)).toThrow(TypeError);
+		}
 	});
 });
