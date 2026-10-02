@@ -19,12 +19,7 @@ import {
 	isKnownFederationRefreshErrorCode,
 } from "../federation-tokens/refresh-error.mjs";
 import { isFederationUpstreamOutage } from "../federation-tokens/upstreamOutage.mjs";
-import { parseScopeTokens } from "../federations/scope.mjs";
-import {
-	instantOf,
-	judgeHeldUpstreamToken,
-	readUpstreamTokenLifetime,
-} from "../federations/token-lifetime.mjs";
+import { instantOf, judgeHeldUpstreamToken } from "../federations/token-lifetime.mjs";
 import type { DelegatedTokens } from "../federations/types.mjs";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import { carryingFailure } from "./carry.mjs";
@@ -39,7 +34,6 @@ import {
 	scopesWithin,
 } from "./eligibility.mjs";
 import {
-	federationGrantAccessToken,
 	federationGrantHeldToken,
 	federationGrantKeptAccessToken,
 	type StoredAccessToken,
@@ -61,6 +55,7 @@ import {
 	type FederationGrantUnavailableReason,
 	hasFederationGrantAuthorization,
 } from "./types.mjs";
+import { readFederationGrantUpstreamAnswer } from "./upstream-answer.mjs";
 
 export type { FederationGrantRetrievalFailure } from "./types.mjs";
 
@@ -963,125 +958,6 @@ type RefreshOutcome =
 
 const PERSIST_RETRY_DELAY_MS = 100;
 
-interface ReadResponse {
-	/** The rotated refresh token, or the stored one when the upstream sent none that is usable. */
-	readonly refreshToken: string;
-	/** `undefined` when the response is not one an adapter should report. */
-	readonly token?: {
-		readonly accessToken: string;
-		readonly tokenType: string;
-		readonly expiresIn: number | null;
-		/** Of this module's own making: the instant the answer's Date held, or none when it held none. */
-		readonly expiresAt: Date | null;
-		readonly scopes: readonly string[];
-	};
-}
-
-/** A field whose reading threw, or that is an object where a primitive must be. */
-const MALFORMED = Symbol("malformed");
-
-type Primitive = string | number | bigint | boolean | symbol | null | undefined;
-
-/**
- * The adapter's answer, each field read exactly once and reduced to
- * primitives. Nothing reads the adapter's objects after this.
- */
-interface AnswerSnapshot {
-	/** `undefined` when absent, unusable, or its reading threw. */
-	readonly refreshToken: string | undefined;
-	readonly accessToken: Primitive;
-	readonly tokenType: Primitive;
-	readonly expiresIn: Primitive;
-	/** Epoch ms; `NaN` for a Date that holds no instant. */
-	readonly expiresAt: number | null | undefined | typeof MALFORMED;
-	readonly scope: Primitive;
-}
-
-/** `answer[key]`, read once; `MALFORMED` when reading it throws. */
-function readField(answer: unknown, key: keyof DelegatedTokens): unknown {
-	try {
-		return (answer as Record<string, unknown>)[key];
-	} catch {
-		return MALFORMED;
-	}
-}
-
-/** `value`, or `MALFORMED` for an object: no adapter object outlives the snapshot. */
-const primitive = (value: unknown): Primitive =>
-	(typeof value === "object" && value !== null) || typeof value === "function"
-		? MALFORMED
-		: (value as Primitive);
-
-/** An answered expiry by the instant its Date holds, never by a method it may override. */
-function readExpiry(value: unknown): AnswerSnapshot["expiresAt"] {
-	if (value === undefined || value === null || value === MALFORMED) return value;
-	const ms = instantOf(value);
-	if (ms !== undefined) return ms;
-	// Refused either way: whether it is a Date at all only names why.
-	try {
-		return value instanceof Date ? Number.NaN : MALFORMED;
-	} catch {
-		return MALFORMED;
-	}
-}
-
-/**
- * Anything at all may have been answered: `null` throws when it is read, a
- * field may be a getter, and a getter may throw. Each field is read once, on
- * its own, so a read that throws costs only its field.
- */
-function snapshotAnswer(answer: unknown): AnswerSnapshot {
-	const refreshToken = readField(answer, "refreshToken");
-	return {
-		refreshToken:
-			typeof refreshToken === "string" && refreshToken !== "" ? refreshToken : undefined,
-		accessToken: primitive(readField(answer, "accessToken")),
-		tokenType: primitive(readField(answer, "tokenType")),
-		expiresIn: primitive(readField(answer, "expiresIn")),
-		expiresAt: readExpiry(readField(answer, "expiresAt")),
-		scope: primitive(readField(answer, "scope")),
-	};
-}
-
-/**
- * Reads a refresh response without trusting its shape, and without throwing:
- * the refresh token is taken first and whatever else is wrong with the
- * response, it is kept. Discarding the response would discard the only valid
- * credential.
- */
-function readResponse(
-	response: unknown,
-	grant: AuthorizedFederationGrant,
-	storedRefreshToken: string,
-): ReadResponse {
-	const answer = snapshotAnswer(response);
-	const refreshToken = answer.refreshToken ?? storedRefreshToken;
-	const { accessToken, tokenType = "Bearer", expiresIn = null, expiresAt = null, scope } = answer;
-	if (typeof accessToken !== "string" || accessToken === "") return { refreshToken };
-	if (typeof tokenType !== "string" || tokenType === "") return { refreshToken };
-	if (expiresIn !== null && typeof expiresIn !== "number") return { refreshToken };
-	if (expiresAt === MALFORMED) return { refreshToken };
-	if (scope !== undefined && typeof scope !== "string") return { refreshToken };
-
-	// RFC 6749 §3.3, read as every upstream answer is (`parseScopeTokens`):
-	// split on any whitespace, keeping the scope-tokens. Absent — or blank,
-	// which is not a scope — means "as the grant's" (§6). Named but naming no
-	// scope-token is not silence: it is a malformed answer, never the grant's
-	// scopes to be disclosed under.
-	const named = parseScopeTokens(scope);
-	if (scope !== undefined && named.length === 0 && scope.trim() !== "") return { refreshToken };
-	return {
-		refreshToken,
-		token: {
-			accessToken,
-			tokenType,
-			expiresIn,
-			expiresAt: expiresAt === null ? null : new Date(expiresAt),
-			scopes: named.length === 0 ? [...grant.scopes] : named,
-		},
-	};
-}
-
 /** A marker's date, `undefined` for none, and NaN, equal to nothing, for a date that holds no instant. */
 const markerInstant = (
 	marker: FederationGrantIneligibilityMarker | undefined,
@@ -1361,54 +1237,31 @@ async function refreshUnderLock(
 
 	// --- the upstream answered ------------------------------------------------
 	const receivedAt = deps.now().getTime();
-	const response = readResponse(settled.value, grant, held.refreshToken);
+	const answered = readFederationGrantUpstreamAnswer(settled.value, {
+		calledAt,
+		receivedAt,
+		// A refresh asks for the grant's scopes, so an answer that names none carries them (RFC 6749 §6).
+		requestedScopes: grant.scopes,
+		consentedScopes: grant.consent.scopes,
+		maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+	});
+	// The rotated refresh token, or the stored one when the upstream sent none that is usable.
+	const refreshToken = answered.refreshToken ?? held.refreshToken;
 	// A rotated refresh token is ALWAYS persisted, even beside an access token
 	// that cannot be disclosed. The access token that cannot be is never
 	// written — and the stored one that still can be is kept: a refresh that
 	// brought nothing usable must not cost the grant the token that worked. It
 	// is judged again, against the maximum and the clock, at every disclosure.
-	let credentials: FederationGrantCredentialsInput = {
-		refreshToken: response.refreshToken,
-		accessToken: held.keep,
-	};
+	let credentials: FederationGrantCredentialsInput = { refreshToken, accessToken: held.keep };
 	let ineligible: FederationGrantIneligibilityMarker | null = null;
-	const marker = (
-		reason: FederationGrantIneligibilityMarker["reason"],
-	): FederationGrantIneligibilityMarker => ({
-		reason,
-		at: new Date(receivedAt),
-		judgedAgainst: connection.maxAccessTokenLifetime,
-	});
-	if (response.token === undefined) {
-		ineligible = marker("malformed_token_response");
+	if (answered.accessToken.eligible) {
+		credentials = { refreshToken, accessToken: answered.accessToken.token };
 	} else {
-		const { expiresIn, expiresAt, scopes } = response.token;
-		// A lifetime both fields state, with life left when the answer is read,
-		// or none that is finite: the `expires_in` as issued is what is judged.
-		const reading = readUpstreamTokenLifetime(
-			{ expiresIn, expiresAt },
-			{ calledAt, now: receivedAt, floorMs: 0 },
-		);
-		const lifetime =
-			reading.verdict === "finite" && reading.stated === "both" ? reading : undefined;
-		const judgement = judgeUpstreamAccessToken({
-			issuedLifetime: lifetime?.issuedLifetime ?? null,
-			scopes,
-			consentedScopes: grant.consent.scopes,
-			maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
-			tokenType: response.token.tokenType,
-		});
-		if (!judgement.eligible) {
-			ineligible = marker(judgement.reason);
-		} else if (lifetime !== undefined) {
-			credentials = {
-				refreshToken: response.refreshToken,
-				accessToken: federationGrantAccessToken(
-					{ value: response.token.accessToken, tokenType: response.token.tokenType, scopes },
-					lifetime,
-				),
-			};
-		}
+		ineligible = {
+			reason: answered.accessToken.reason,
+			at: new Date(receivedAt),
+			judgedAgainst: connection.maxAccessTokenLifetime,
+		};
 	}
 
 	// --- the guarded write, retried only when it THROWS -------------------------

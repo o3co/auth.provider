@@ -1614,6 +1614,14 @@ export {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 } from "./federation-grants/types.mjs";
+// The one rule from an upstream token answer to the access token a grant's
+// credential stores, or the reason it may not be: retrieval and the connect
+// callback both read their answer here.
+export {
+	type FederationGrantUpstreamAnswer,
+	type FederationGrantUpstreamAnswerContext,
+	readFederationGrantUpstreamAnswer,
+} from "./federation-grants/upstream-answer.mjs";
 // The two boundaries of a subject revocation, and how long each has to be
 // kept. The skews come from `jwt/verify.mts` so the grants comparison uses the
 // allowance the watermark comparison does.
