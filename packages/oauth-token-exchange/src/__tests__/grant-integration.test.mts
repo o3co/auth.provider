@@ -1425,7 +1425,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		);
 
 		// The other grants answer a deny through core's `evaluateGrantPolicy`.
-		it.each(["invalid_request", "invalid_scope", "unauthorized_client"])(
+		it.each(["invalid_request", "invalid_scope", "unauthorized_client", "invalid_target"])(
 			"answers a deny carrying %s as core's policy evaluation does: 400, the policy's code and description",
 			async (code) => {
 				const { grant } = await boot([denying(code)]);

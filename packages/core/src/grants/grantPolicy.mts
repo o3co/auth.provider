@@ -121,8 +121,9 @@ export function logGrantPolicyUnavailable(
 }
 
 /**
- * The codes RFC 6749 §5.2 defines for the token endpoint: the only codes a
- * policy refusal is answered with there.
+ * The codes registered for the token endpoint that a policy refusal may
+ * carry: RFC 6749 §5.2's, and `invalid_target` (RFC 8707 §2, RFC 8693
+ * §2.2.2). The only codes a policy refusal is answered with there.
  */
 export type TokenEndpointRefusalCode =
 	| "invalid_request"
@@ -130,7 +131,8 @@ export type TokenEndpointRefusalCode =
 	| "invalid_grant"
 	| "unauthorized_client"
 	| "unsupported_grant_type"
-	| "invalid_scope";
+	| "invalid_scope"
+	| "invalid_target";
 
 const TOKEN_ENDPOINT_REFUSAL_CODES: ReadonlySet<unknown> = new Set<TokenEndpointRefusalCode>([
 	"invalid_request",
@@ -139,12 +141,12 @@ const TOKEN_ENDPOINT_REFUSAL_CODES: ReadonlySet<unknown> = new Set<TokenEndpoint
 	"unauthorized_client",
 	"unsupported_grant_type",
 	"invalid_scope",
+	"invalid_target",
 ]);
 
 /**
  * A policy's deny as the token endpoint answers it: `400` with the policy's
- * `error` when it is one of RFC 6749 §5.2's codes
- * ({@link TokenEndpointRefusalCode}), and `fallback` (`invalid_grant` unless
+ * `error` when it is a token-endpoint code ({@link TokenEndpointRefusalCode}), and `fallback` (`invalid_grant` unless
  * the caller's grant names another) for any other code — `access_denied`,
  * RFC 8628's polling codes, which would tell a device to keep polling an
  * approval already spent, an extension code, a malformed one.
@@ -302,8 +304,8 @@ export interface EvaluateGrantPolicyOptions {
  *   `grant_policy_unavailable` ({@link logGrantPolicyUnavailable}).
  * - **A decision that is neither `allow` nor `deny` is `500 server_error`**,
  *   never allow ({@link readGrantPolicyDecision}).
- * - **`deny` is `400`** with the policy's own error when RFC 6749 §5.2
- *   defines it for the token endpoint, `invalid_grant` otherwise, and its
+ * - **`deny` is `400`** with the policy's own error when it is a
+ *   token-endpoint code (RFC 6749 §5.2, `invalid_target`), `invalid_grant` otherwise, and its
  *   description when it keeps to §5.2's characters ({@link policyDenied}).
  * - **`grantedScope` may only narrow.** It is checked against the ceiling
  *   (by default `effectiveScopes`, the request already narrowed to every

@@ -668,7 +668,8 @@ describe("policyDenied", () => {
 		"unauthorized_client",
 		"unsupported_grant_type",
 		"invalid_scope",
-	])("answers the RFC 6749 §5.2 code %s as itself, logging nothing", (code) => {
+		"invalid_target",
+	])("answers the token-endpoint code %s as itself, logging nothing", (code) => {
 		const logger = { warn: vi.fn() };
 		expect(policyDenied(deny(code, "no"), logger, site)).toEqual({
 			status: 400,
@@ -683,7 +684,7 @@ describe("policyDenied", () => {
 		["the RFC 8628 polling code authorization_pending", "authorization_pending"],
 		["the RFC 8628 polling code slow_down", "slow_down"],
 		["the RFC 8628 polling code expired_token", "expired_token"],
-		["another extension code", "invalid_target"],
+		["another extension code", "consent_required"],
 		["a code that differs only in case", "Invalid_Grant"],
 	])("answers %s invalid_grant, logging the policy's code", (_label, code) => {
 		const logger = { warn: vi.fn() };

@@ -45,8 +45,8 @@
  * - A wired `grantPolicy` is consulted on the approval once its client is
  *   checked, before the revocation read and the minting instant, through
  *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error when
- *   RFC 6749 §5.2 defines it for the token endpoint, `invalid_grant`
- *   otherwise (never an RFC 8628 polling code: the approval is spent), a
+ *   it is a token-endpoint code (RFC 6749 §5.2's, `invalid_target`),
+ *   `invalid_grant` otherwise (never an RFC 8628 polling code: the approval is spent), a
  *   throw is 503, a scope or audience past the approval or `allowedAudiences`
  *   is 500. It may only narrow; its audience, within `allowedAudiences`, is
  *   `aud`.

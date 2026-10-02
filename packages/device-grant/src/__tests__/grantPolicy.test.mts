@@ -17,8 +17,8 @@
 /**
  * The device-code grant consults a wired `grantPolicy` at the poll, after the
  * approval is read and checked, before minting, with core's fail-closed rules:
- * deny is 400 with the policy's error when RFC 6749 §5.2 defines it for the
- * token endpoint (`invalid_grant` otherwise), a throw is 503, a scope or audience past
+ * deny is 400 with the policy's error when it is a token-endpoint code
+ * (`invalid_grant` otherwise), a throw is 503, a scope or audience past
  * the ceiling is 500. `poll` has consumed the approval by then, so each of
  * those spends it.
  */
