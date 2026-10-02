@@ -399,7 +399,7 @@ describe("createSessionEscalation", () => {
 		expect(reach).not.toHaveBeenCalled();
 		expect(await call(escalation)).toBe<Escalation>("invalid");
 		// The reach registered since is the one the next escalation holds to.
-		expect(await call(escalation)).not.toBe<Escalation>("invalid");
+		expect(await call(escalation)).toBe<Escalation>("unbound");
 		expect(reach).toHaveBeenCalledTimes(2);
 	});
 

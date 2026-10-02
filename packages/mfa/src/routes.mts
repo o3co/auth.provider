@@ -58,13 +58,10 @@
  *   established, or at a step-up once its session is escalated, mints the
  *   authorization that release takes (`lockRecovery.mts`), for that session;
  *   one that cannot be minted is said at warn, the answer standing.
- * - A session is escalated (`escalation.mts`) behind its admission, by the
- *   renewal nonce of the claim admission compared: the express id renewed,
- *   then the second factor recorded on its `UserSession` once, never
- *   retried. A step-up answers `200` only once recorded with that renewal's
- *   nonce, and each failure as its own (`ESCALATION_REFUSALS`); a binding in
- *   a session answers its factor and codes, shown once, whatever the
- *   escalation came to. Neither reaches a login's completion.
+ * - A step-up's verification and a binding in a session escalate that
+ *   session (`escalation.mts`). A step-up answers as the escalation came to;
+ *   a binding answers its factor and codes, shown once, whatever it came to.
+ *   Neither reaches a login's completion.
  * - A factor bound beside another that cannot stand — past the limit, or
  *   its records unreadable — and cannot be removed stands: it is audited as
  *   enrolled and said once at error before the `503`.
