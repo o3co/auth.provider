@@ -53,17 +53,12 @@ export interface ClientRecordSlot {
  *   same object back.
  * - **The logger.** A refusal is warned through the `logger` component the
  *   map holds when the refusal happens, else `consoleLogger`.
- * - **Lifecycle.** A provider's cleanup is still handed its own value.
- *   Disposing the boundary disposes the value it wraps when that has a
- *   `Symbol.asyncDispose`, so boot's dispose reaches it as it would
- *   unwrapped; a host's value is still never disposed by boot.
- *
- * A Client ID Metadata Document fallback put in the slot is wrapped like any
- * other repository. That composition is unsupported: the boundary answers a
- * copy of each document client, so the client loses its provenance (consent
- * shows it as a pre-registered client, without its host). A refused
- * registration under it is still refused, since the fallback lets the
- * refusal through as the lookup's rejection.
+ * - **Lifecycle.** Wrapping reads nothing of the value, so a value whose
+ *   reads throw is installed as any other. A provider's cleanup is still
+ *   handed its own value. Disposing the boundary disposes the value it wraps
+ *   when that has a `Symbol.asyncDispose`, read at dispose, so boot's
+ *   dispose reaches it as it would unwrapped; a host's value is still never
+ *   disposed by boot.
  */
 export function clientRecordSlotFor(components: Record<string, unknown>): ClientRecordSlot {
 	const logger: Pick<EventLogger, "warn"> = {

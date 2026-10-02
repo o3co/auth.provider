@@ -591,17 +591,19 @@ export function isClientIdMetadataDocumentFallback(repository: ClientRepository)
  * carries a secret.
  *
  * Built only by the router, once, over the repository it is handed, from
- * `oauth.clientIdMetadataDocuments`; the package entry does not export it.
- * Without a logger, a refused registration is not logged, as a refused
- * document is not.
+ * `oauth.clientIdMetadataDocuments`, with its logger; the package entry does
+ * not export it. A refused registration is warned by the boundary `inner`
+ * already is when it is one (the slot's, through the composition's logger),
+ * else through `logger`; only a boundary this builds without a logger says
+ * nothing of it, as the resolver says nothing of a refused document.
  */
 export function withClientIdMetadataDocuments(
 	inner: ClientRepository,
 	opts: ClientIdMetadataDocumentOptions,
 ): ClientRepository {
-	// Without a logger the fallback says nothing of a refused registration, as
-	// the resolver says nothing of a refused document; core's own default
-	// would write it to the console.
+	// Read only when `inner` is not already a boundary. Without a logger it
+	// says nothing, as the resolver says nothing of a refused document; core's
+	// own default would write to the console.
 	const registered = validatedClientRepository(inner, {
 		logger: opts.logger ?? { warn: () => {} },
 	});

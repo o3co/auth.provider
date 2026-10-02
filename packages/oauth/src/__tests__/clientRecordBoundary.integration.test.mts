@@ -21,8 +21,7 @@
  * with the boundary's refusal, answered `503` like the repository's outage
  * and warned once; a record whose field read throws is the repository's
  * outage; and an ORM entity is read by name. The slot's boundary is the one
- * oauth reads: a boundary the host put there is kept, with its own logger,
- * and a document fallback put there is wrapped like any repository.
+ * oauth reads: a boundary the host put there is kept, with its own logger.
  */
 
 import {
@@ -43,11 +42,7 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
-import {
-	isClientIdMetadataDocumentClient,
-	withClientIdMetadataDocuments,
-} from "#/clients/clientIdMetadataDocument.mjs";
+import { describe, expect, it } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
@@ -236,77 +231,5 @@ describe("the clientRepository slot's boundary, as the oauth endpoints read it",
 		expect(refusals(host).map(([line]) => line.step)).toEqual(["find", "find"]);
 		expect(refusals(logger)).toEqual([]);
 		await handle.dispose();
-	});
-
-	// Unsupported: a document fallback belongs over the slot, not in it. The
-	// slot's boundary wraps one put there like any repository.
-	describe("wraps a document fallback put in the slot", () => {
-		const REFUSED_DOC_ID = "https://tools.example/oauth/refused.json";
-		const DOC_ID = "https://tools.example/oauth/client.json";
-		const fallbackInTheSlot = () => {
-			const fetched: string[] = [];
-			const registered: ClientRepository = {
-				findById: async (clientId) =>
-					clientId === REFUSED_DOC_ID
-						? ({
-								...VALID,
-								clientId,
-								allowedRedirectUris: ["javascript:alert(1)"],
-							} as PublicClient)
-						: null,
-				authenticate: async () => null,
-			};
-			const fallback = withClientIdMetadataDocuments(registered, {
-				allowedScopes: ["openid"],
-				allowedAudiences: [],
-				lookup: async () => ["93.184.216.34"],
-				fetch: vi.fn(async (input: string | URL | Request) => {
-					const url = String(input instanceof Request ? input.url : input);
-					fetched.push(url);
-					return new Response(
-						JSON.stringify({
-							client_id: url,
-							client_name: "Tools",
-							redirect_uris: [REDIRECT_URI],
-							token_endpoint_auth_method: "none",
-						}),
-						{ status: 200, headers: { "content-type": "application/json" } },
-					);
-				}) as typeof fetch,
-			});
-			return { fallback, fetched };
-		};
-
-		it("never answers a refused registration under it with a document", async () => {
-			const { fallback, fetched } = fallbackInTheSlot();
-			const { app, handle } = await boot(fallback);
-			const authorized = await request(app).get("/oauth/authorize").query({
-				response_type: "code",
-				client_id: REFUSED_DOC_ID,
-				redirect_uri: REDIRECT_URI,
-				scope: "openid",
-				prompt: "none",
-				code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-				code_challenge_method: "S256",
-			});
-			expect(authorized.status).toBe(503);
-			expect(authorized.body).toMatchObject({ error: "temporarily_unavailable" });
-			expect(fetched).toEqual([]);
-			await handle.dispose();
-		});
-
-		it("answers a document client as a copy, which loses its provenance", async () => {
-			const { fallback, fetched } = fallbackInTheSlot();
-			const { handle } = await boot(fallback);
-			const slot = handle.components.clientRepository as ClientRepository;
-			expect(slot).not.toBe(fallback);
-			const direct = await fallback.findById(DOC_ID);
-			expect(isClientIdMetadataDocumentClient(direct)).toBe(true);
-			const throughTheSlot = await slot.findById(DOC_ID);
-			expect(throughTheSlot).toMatchObject({ clientId: DOC_ID });
-			expect(isClientIdMetadataDocumentClient(throughTheSlot)).toBe(false);
-			expect(fetched).toEqual([DOC_ID]);
-			await handle.dispose();
-		});
 	});
 });

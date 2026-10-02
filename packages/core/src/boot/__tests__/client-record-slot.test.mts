@@ -329,6 +329,29 @@ describe("the clientRepository slot holds core's client-record boundary", () => 
 		expect(disposed).toEqual(["provider"]);
 	});
 
+	it("boots over a host's value whose every read throws, and never reads it at dispose", async () => {
+		const reads: (string | symbol)[] = [];
+		const host = new Proxy(
+			{},
+			{
+				get(_target, key) {
+					reads.push(key);
+					throw new Error("a read boot must not make");
+				},
+			},
+		);
+
+		const handle = await createApp({
+			modules: slotReaders().modules,
+			bootstrapComponents: bootWith({ clientRepository: host }),
+		});
+		await handle.dispose();
+
+		// Compared by identity alone: a matcher handed `host` would read it.
+		expect(handle.components.clientRepository === host).toBe(false);
+		expect(reads).toEqual([]);
+	});
+
 	it("never disposes a host's value through the boundary", async () => {
 		const disposed: string[] = [];
 		const host = Object.assign(rawRepository(), {
