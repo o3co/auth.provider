@@ -43,15 +43,16 @@ import {
 	BUNDLED_STORE_WRITE_LIFETIME_MS,
 	type ConditionalCreateAnswer,
 	type ConditionalSetRemoveAnswer,
+	isStoreGeneration,
 	newStoreGeneration,
 	type StoreGeneration,
 	type VersionedSet,
 } from "../adapters/conditionalWrite.mjs";
-import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
+import { createAmortizedSweep } from "../single-use/sweep.mjs";
 import type { MfaFactorRecord, MfaFactorRecordUpdate, MfaFactorStore } from "./factorStore.mjs";
 import { checkMfaVersionAdvances } from "./version.mjs";
 
-export interface MemoryMfaFactorStoreOptions extends AmortizedSweepOptions {
+export interface MemoryMfaFactorStoreOptions {
 	/** The clock a tombstone expires by, in epoch milliseconds. Default `Date.now`. */
 	readonly now?: () => number;
 }
@@ -91,7 +92,7 @@ export function createMemoryMfaFactorStore(
 ): MfaFactorStore {
 	const now = options.now ?? Date.now;
 	const schedule = createAmortizedSweep(
-		options,
+		{},
 		{ sweepInterval: SWEEP_INTERVAL, minSweepIntervalMs: MIN_SWEEP_INTERVAL_MS },
 		"memory MfaFactorStore",
 	);
@@ -153,6 +154,9 @@ export function createMemoryMfaFactorStore(
 			record: MfaFactorRecord,
 			expected: StoreGeneration | null,
 		): Promise<ConditionalCreateAnswer> {
+			if (expected !== null && !isStoreGeneration(expected)) {
+				throw new RangeError("MfaFactorStore.createIf: expected is not a store generation");
+			}
 			const set = live(record.subject);
 			const atExpected = expected === null ? set === undefined : set?.generation === expected;
 			if (!atExpected || set?.records.has(record.id) === true) return { outcome: "conflict" };
@@ -167,6 +171,9 @@ export function createMemoryMfaFactorStore(
 			id: string,
 			expected: StoreGeneration,
 		): Promise<ConditionalSetRemoveAnswer> {
+			if (!isStoreGeneration(expected)) {
+				throw new RangeError("MfaFactorStore.removeIf: expected is not a store generation");
+			}
 			const set = live(subject);
 			if (set === undefined) return { outcome: "missing" };
 			if (set.generation !== expected) return { outcome: "conflict" };

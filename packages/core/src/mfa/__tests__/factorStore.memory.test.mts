@@ -15,7 +15,10 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { BUNDLED_STORE_WRITE_LIFETIME_MS } from "#/adapters/conditionalWrite.mjs";
+import {
+	BUNDLED_STORE_WRITE_LIFETIME_MS,
+	type StoreGeneration,
+} from "#/adapters/conditionalWrite.mjs";
 import { createApp, defineModule } from "#/index.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import type { MfaFactorRecord, MfaFactorStore } from "#/mfa/factorStore.mjs";
@@ -116,6 +119,37 @@ describe("the in-process store's factor set generation", () => {
 		expect(after?.generation).not.toBeNull();
 		await store.removeAllForSubject("nobody");
 		expect((await store.listVersioned?.("nobody"))?.generation).not.toBeNull();
+	});
+});
+
+describe("the in-process store's expected generation", () => {
+	it("refuses a create whose expected is neither null nor a store generation, and writes nothing", async () => {
+		const store = createMemoryMfaFactorStore();
+		for (const expected of [undefined, "", 'a"b', 7]) {
+			await expect(
+				store.createIf?.(RECORD, expected as unknown as StoreGeneration | null),
+			).rejects.toThrow(
+				new RangeError("MfaFactorStore.createIf: expected is not a store generation"),
+			);
+		}
+		expect(await store.listVersioned?.("user-1")).toStrictEqual({ generation: null, items: [] });
+	});
+
+	it("refuses a removal whose expected is not a store generation, and writes nothing", async () => {
+		const store = createMemoryMfaFactorStore();
+		const created = await store.createIf?.(RECORD, null);
+		if (created?.outcome !== "created") throw new Error("the first binding was refused");
+		for (const expected of [undefined, null, "", 'a"b']) {
+			await expect(
+				store.removeIf?.("user-1", RECORD.id, expected as unknown as StoreGeneration),
+			).rejects.toThrow(
+				new RangeError("MfaFactorStore.removeIf: expected is not a store generation"),
+			);
+		}
+		expect(await store.listVersioned?.("user-1")).toStrictEqual({
+			generation: created.generation,
+			items: [RECORD],
+		});
 	});
 });
 
