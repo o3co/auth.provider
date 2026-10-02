@@ -712,6 +712,26 @@ describe("step 2 — the live read", () => {
 		expect(JSON.stringify(lines[0]?.fields)).not.toContain("args");
 	});
 
+	it("answers unavailable (user_session) when reading the store off deps throws, logged once at error — never a rejection", async () => {
+		const { logger, lines } = recordingLogger();
+		const throwing = {
+			...deps({ logger }),
+			get userSessionStore(): UserSessionStore {
+				throw new Error("deps down");
+			},
+		};
+		expect(await admitSession(throwing, request())).toEqual({
+			outcome: "unavailable",
+			store: "user_session",
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({
+			level: "error",
+			message: "session_admission_unavailable",
+			fields: { store: "user_session", action: "test.use" },
+		});
+	});
+
 	it("reads no session without a store: the requirements decide what null means, and with none registered a cookie-only composition is admitted", async () => {
 		const seen: RequirementInput[] = [];
 		const watching = met("watch", {
@@ -903,6 +923,26 @@ describe("step 4 — the revocation boundary", () => {
 				fields: { store: "revocation_boundary", action: "test.peek" },
 			});
 		}
+	});
+
+	it("answers unavailable (revocation_boundary) when reading the boundary off deps throws, logged once at error — never a rejection", async () => {
+		const { logger, lines } = recordingLogger();
+		const throwing = {
+			...deps({ logger }),
+			get subjectRevocation(): SubjectRevocation {
+				throw new Error("deps down");
+			},
+		};
+		expect(await admitSession(throwing, request())).toEqual({
+			outcome: "unavailable",
+			store: "revocation_boundary",
+		});
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({
+			level: "error",
+			message: "session_admission_unavailable",
+			fields: { store: "revocation_boundary", action: "test.use" },
+		});
 	});
 
 	it("does not read the boundary for a token carrier: verifyJwt reads it, so the two readings do not double up", async () => {

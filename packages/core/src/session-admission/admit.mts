@@ -267,9 +267,11 @@ export const viewOf = (session: UserSession, storeRecords: boolean): SessionView
  * session: it carries a renewal nonce the cookie session does not hold, or
  * one that is not a nonce (the record's nonce read once). `false` for a
  * claim that is not a cookie's, one without a `sid`, and a record that is
- * gone or bound to none. Rejects with the store's own error. For a route
- * that acts on the record without admitting the session — a logout — so a
- * copy the record was renewed away from cannot end it.
+ * gone or bound to none. For a route that acts on the record without
+ * admitting the session — a logout — so a copy the record was renewed away
+ * from cannot end it. Rejects with the store's own error, never answering
+ * `unavailable`: the one exception to admission's promise that a store that
+ * throws is `unavailable`, and its caller handles the rejection.
  */
 export async function cookieRenewedAway(
 	store: UserSessionStore,
