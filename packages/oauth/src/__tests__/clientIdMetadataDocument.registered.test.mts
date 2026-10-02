@@ -104,7 +104,7 @@ const cimd = (
 		allowedScopes: ["read"],
 		allowedAudiences: [],
 		fetch: fetchImpl,
-		lookup: async () => ["93.184.216.34"],
+		config: {},
 		...over,
 	});
 
