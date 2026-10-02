@@ -99,8 +99,13 @@ export function auditSlotFor(
 	);
 	return {
 		beforeProviders() {
-			if (Object.hasOwn(components, "auditSink") || !provider)
+			// A host's sink is the map's own key; with neither it nor a provider,
+			// the fan-out has the hooks alone.
+			if (Object.hasOwn(components, "auditSink")) {
 				components.auditSink = fanOut(components.auditSink);
+			} else if (!provider) {
+				components.auditSink = fanOut(undefined);
+			}
 		},
 		provided(key, value) {
 			return key === "auditSink" ? fanOut(value) : value;

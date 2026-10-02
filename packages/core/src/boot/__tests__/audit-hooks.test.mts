@@ -163,6 +163,34 @@ describe("auditHooks — fanned out through the auditSink slot", () => {
 		expect(calls).toEqual(["slot", "hook-a"]);
 	});
 
+	it("fans out to the hooks alone, with no provider, not to a sink a polluted Object.prototype carries", async () => {
+		const calls: string[] = [];
+		const named = (name: string): AuditSink => ({
+			kind: name,
+			record: async () => {
+				calls.push(name);
+			},
+		});
+		const reader = auditReader();
+		// Not enumerable, as a configuration parse would otherwise refuse it.
+		Object.defineProperty(Object.prototype, "auditSink", {
+			value: named("inherited"),
+			configurable: true,
+			writable: true,
+		});
+		try {
+			await createApp({
+				modules: [auditHooksModule("a", named("hook-a")), reader.module],
+				bootstrapComponents: bootWith(),
+			});
+		} finally {
+			delete (Object.prototype as Record<string, unknown>).auditSink;
+		}
+		await recordAuditEvent(reader.handed.sink as AuditSink, event);
+
+		expect(calls).toEqual(["hook-a"]);
+	});
+
 	it("fills the slot from the hooks alone, satisfying its absence policy", async () => {
 		const hook = createRecordingAuditSink();
 		const reader = auditReader();
