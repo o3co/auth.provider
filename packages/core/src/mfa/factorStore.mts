@@ -169,13 +169,12 @@ export function isMfaFactorUpdateWritten(
  * - Generations are never re-issued (rule 8): a store mints each one at
  *   random, as `newStoreGeneration` does.
  * - The write-lifetime bound (rule 6). The port's owning module is the MFA
- *   package's factor-set writer. It reads with `listVersioned` under the
- *   subject's lease, and issues a conditional write only inside that lease's
- *   window: 16 × `mfa.storeTimeoutMs` (or core's shortest lease, if longer)
- *   from the acquire, enforced on a local monotonic deadline. `mfa.storeTimeoutMs` is at most 37 500 ms, so the
- *   window is at most 600 000 ms, which is at most the bound
- *   (`BUNDLED_STORE_WRITE_LIFETIME_MS`, 24 h) less W for every bundled
- *   adapter. The memory store's W is 0, because its check and write happen in
+ *   package's factor-set writer. A conditional write is issued only under the
+ *   subject's lease, from a `listVersioned` read taken under that same lease.
+ *   The lease is at most `MFA_SUBJECT_LEASE_MAX_MS` (600 000 ms), so the
+ *   write is issued at most the bound (`BUNDLED_STORE_WRITE_LIFETIME_MS`,
+ *   24 h) less W after its read; each adapter declares its W well under the
+ *   bound. The memory store's W is 0, because its check and write happen in
  *   one synchronous block. The one assumption: the process or the store does
  *   not stall for the whole bound between a `null` read and its commit.
  * - A writer that changes the set's membership but leaves the generation in
