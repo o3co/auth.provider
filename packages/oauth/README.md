@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 The OAuth 2.0 / OpenID Connect authorization-server endpoints of [auth.provider](../../README.md): the HTTP surface under `/oauth`, the built-in grant types, client authentication, and the logout cascade.
 
@@ -274,7 +274,7 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 **A `claims` parameter that names `acr` is refused** with `invalid_request` (`request acr through acr_values`) — essential or not, for the id_token or for userinfo (OIDC Core §5.5.1.1) — and so is one that is not a JSON object, or is repeated, since it cannot be told not to name it. An empty `claims=` is omitted (RFC 6749 §3.1). This server vouches for an `acr` only through `acr_values` and its table; ignoring the request would hand back a token the RP reads as having honoured it. The refusal comes before a `prompt=login` or `max_age` sends the browser to log in. Every other use of `claims` is ignored.
 
-**`response_mode` is ignored**: whatever it names, `/authorize` answers with a query redirect. Discovery says `response_modes_supported: ["query"]`, since RFC 8414 defaults an omitted value to `["query", "fragment"]`, which would claim a mode this server does not serve.
+**A `response_mode` other than `query` is refused** with `invalid_request` on the `redirect_uri` (in the query, with `state`), not ignored: `form_post`, `fragment`, an unknown value and a repeat alike. Answering in the query anyway would deliver the response somewhere the client is not reading it. An absent or empty `response_mode`, or `query`, is served. Like the other parameter refusals, it comes after the client and `redirect_uri` are validated (until then the answer is 400 JSON) and before a `prompt=login` or `max_age` sends the browser to log in. Discovery says `response_modes_supported: ["query"]`, since RFC 8414 defaults an omitted value to `["query", "fragment"]`, which would claim a mode this server does not serve.
 
 **Not implemented:** the `claims` parameter beyond that refusal. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document tells the truth about them by saying nothing.
 

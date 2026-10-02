@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-10-02
+最終更新: 2026-10-03
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -268,7 +268,7 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **`acr` を名指す `claims` パラメーターは拒否する**（`invalid_request`、`request acr through acr_values`）— essential かどうか、id_token 向けか userinfo 向けかを問わない（OIDC Core §5.5.1.1）。JSON オブジェクトでない `claims` や繰り返された `claims` も、`acr` を名指していないと判断できないので拒否する。空の `claims=` は省略されたものとして扱う（RFC 6749 §3.1）。このサーバーは `acr` を `acr_values` とその表を通してのみ保証する。リクエストを無視すれば、RP はそれが尊重されたと読むトークンを受け取ることになる。この拒否は `prompt=login` や `max_age` がブラウザーをログインへ送るより先に行う。`claims` のそれ以外の使い方は無視する。
 
-**`response_mode` は無視する**: 何を指定しても、`/authorize` はクエリでのリダイレクトで答える。ディスカバリーは `response_modes_supported: ["query"]` と言う。RFC 8414 は省略時の既定を `["query", "fragment"]` としているので、省略するとこのサーバーが提供しないモードを主張することになる。
+**`query` 以外の `response_mode` は無視せず拒否する**（`redirect_uri` への `invalid_request`。クエリで、`state` を付けて返す）: `form_post`、`fragment`、未知の値、繰り返しのいずれも同じ。それでもクエリで答えれば、クライアントが読んでいない場所に応答を届けることになる。`response_mode` が無い・空・`query` のときは、そのまま答える。他のパラメーターの拒否と同じく、クライアントと `redirect_uri` の検証の後（それまでは 400 JSON）、`prompt=login` や `max_age` がブラウザーをログインへ送るより先に行う。ディスカバリーは `response_modes_supported: ["query"]` と言う。RFC 8414 は省略時の既定を `["query", "fragment"]` としているので、省略するとこのサーバーが提供しないモードを主張することになる。
 
 **未実装:** その拒否を除く `claims` パラメーター。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
 
