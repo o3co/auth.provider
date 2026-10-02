@@ -8,26 +8,20 @@ name: umbrella-e2e
 # runs the suite at the umbrella's develop, with only PROVIDER_REV overridden:
 # auth.proxy and auth.policy-verifier stay at the umbrella's pins.
 #
+# It runs on every pull request to main — the develop → main pull request that
+# precedes a release tag — and by hand. It is a required check on main, so it
+# has no paths filter: a workflow filtered out never reports, and a required
+# check that never reports blocks the pull request. Feature pull requests to
+# develop do not run it.
+#
 # Red means this change breaks the umbrella's contract — or the umbrella's
 # develop is itself red: check its latest e2e run first. For a broken contract,
 # fix the umbrella's tests/ first, or change this PR. AGENTS.md ("Umbrella
-# E2E") says how. Not a required check; AGENTS.md also says what making it
-# one takes.
+# E2E") says how.
 
-# Until the v0.17.0 release this runs only by hand: one manual run before the
-# release cut, and the daily local `make test-e2e` in between. Restore the
-# `pull_request` trigger below after the release.
 on:
-  # pull_request:
-  #   branches: [develop]
-  #   # No Markdown reaches the image the suite builds (it is built from
-  #   # packages/ and templates/standalone/), so a Markdown-only PR would only
-  #   # re-test develop, which the umbrella's nightly e2e-develop run does. A
-  #   # workflow filtered out here never reports: as a REQUIRED check it would
-  #   # leave such a PR pending forever — see AGENTS.md before requiring it.
-  #   paths-ignore:
-  #     - '**/*.md'
-  #     - 'docs/**'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -38,6 +32,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The job id is the required check's name on main: renaming it leaves main
+  # waiting for a check that never reports.
   umbrella-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -53,7 +49,7 @@ jobs:
       # Where the umbrella's `make setup` clones auth.provider. Finding a clone
       # there, it only runs `git fetch origin` and `git checkout --detach
       # $(PROVIDER_REV)`, and the commit checked out here — for a pull request,
-      # its merge commit into develop — is already local, so the checkout finds
+      # its merge commit into main — is already local, so the checkout finds
       # it although no branch on origin points at it.
       - name: Check out this change as the umbrella's auth.provider
         uses: actions/checkout@v4
@@ -67,7 +63,7 @@ jobs:
           provider="$(git -C umbrella/repos/auth.provider rev-parse HEAD)"
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            what="this pull request merged into develop"
+            what="this pull request merged into main"
           else
             what="$GITHUB_REF_NAME"
           fi

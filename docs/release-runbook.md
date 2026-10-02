@@ -12,7 +12,7 @@ This runbook captures patterns established through `v0.7.0` (manual bootstrap re
 1. **Run cumulative final audit** (multi-agent + FCoT) on the cut diff BEFORE pushing the tag — not after.
 2. **For each new monorepo package, pre-flight `npm view`**. If 404, pre-bootstrap with a 0.0.1 dummy publish from local BEFORE pushing the tag.
 3. **Run R6 label audit** per [release-policy.md §R6](release-policy.md#r6-release-cut-audit-pass-mandatory-checklist-before-tagging).
-4. **Tag + push** → `release.yml` does the rest (`pnpm -r exec pnpm version` from the tag).
+4. **Merge `develop` → `main`, then tag `main` + push**: the pull request needs `build-and-test` and `umbrella-e2e` green; then `release.yml` does the rest (`pnpm -r exec pnpm version` from the tag).
 5. **Verify** all packages on npm + GitHub Release page.
 
 ---
@@ -44,8 +44,9 @@ cp profiles/google.env.example profiles/google.env   # the IdP client; git-ignor
 Run multi-agent review + FCoT on the **full release diff** before tagging:
 
 ```bash
-# From the develop branch at the commit that will be tagged
-LAST_TAG=$(git describe --tags --abbrev=0)
+# From develop at the commit the develop → main pull request will carry.
+# Tags are cut from main, so look the last one up there.
+LAST_TAG=$(git describe --tags --abbrev=0 origin/main)
 git diff "$LAST_TAG"..HEAD --stat
 # Then run /multi-agent-review on the diff range
 ```
@@ -120,9 +121,19 @@ For each scoped package that returns **404 / E404**: it has never been published
 - **Pre-bootstrap (recommended)** — see [Pattern A](#pattern-a-pre-bootstrap-recommended) below
 - **Tag-first manual recovery** — see [Pattern B](#pattern-b-tag-first-manual-recovery)
 
-### Step 4. Tag + push
+### Step 4. Merge `develop` → `main`, then tag + push
+
+Open a pull request from `develop` to `main`. Its required checks are
+`build-and-test` and `umbrella-e2e` (the umbrella's suite with the pull
+request's code as `PROVIDER_REV`; see
+[AGENTS.md](../AGENTS.md#umbrella-e2e)). Merge it with a merge commit, not a
+squash or a rebase, so `main` keeps `develop`'s commits and the next cut's
+`git log <lastTag>..HEAD` on `develop` lists only what is new.
+Then tag the commit that merge left on `main`:
 
 ```bash
+git fetch origin
+RELEASE_COMMIT=$(git rev-parse origin/main)
 git tag -a "vX.Y.Z" -m "Release vX.Y.Z" "$RELEASE_COMMIT"
 git push origin "vX.Y.Z"
 ```
@@ -171,7 +182,7 @@ cd packages/<new-pkg>
 npm version 0.0.1 --no-git-tag-version
 pnpm publish --access public --no-git-checks
 
-# 3. Revert the local version bump (keep develop clean for the tag)
+# 3. Revert the local version bump (keep the working tree clean for the tag)
 cd ../..
 git checkout packages/<new-pkg>/package.json
 
