@@ -582,7 +582,7 @@ Every other key is open, and is still expected to keep one type across the event
 - A policy that throws is never allow: core's answer is `policyUnavailable()`, `503 temporarily_unavailable` with the description `policy evaluation unavailable`, which `evaluateGrantPolicy` gives every grant that consults the policy through it
 - A deny's `error` must be an RFC 6749 error code, `1*NQSCHAR`: non-empty printable ASCII without `"` and `\` (`isWellFormedErrorCode`, [`errors/envelope.mts`](src/errors/envelope.mts)). `/oauth/token` answers any other code `invalid_request`, and `/oauth/authorize` answers it `access_denied`, logging the policy's code sanitised
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
-- Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
+- Every other bundled grant that mints a token consults a wired `grantPolicy` at the token endpoint: `client_credentials`, `session`, `refresh_token`, jwt-bearer, token exchange, the WebAuthn grant and the device-code grant (at the poll that redeems the approval). A grant handler a deployment contributes consults it only by calling `evaluateGrantPolicy` itself
 
 All five are optional. The audit sink carries an absence policy (`AUDIT_SINK_ABSENCE_POLICY`): when nothing fills the slot — no sink and no `auditHooks` contribution — the config must declare it absent (`core.declaredAbsent = ["auditSink"]`) or boot refuses. The other four are simply off when absent.
 
