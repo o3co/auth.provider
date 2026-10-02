@@ -140,7 +140,7 @@ export function rootSectionsOf(
 	const repositories = raw.repositories as { user?: { http?: unknown } } | undefined;
 	return {
 		adapters: readAdapters(raw, env),
-		mfaMode: readMfaSwitch(raw),
+		mfaMode: readMfaSwitch(raw, env),
 		storeTransport: repositories?.user?.http,
 	};
 }

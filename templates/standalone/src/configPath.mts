@@ -44,11 +44,12 @@ import {
 } from "@o3co/auth-provider-redis";
 import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 import { ADAPTERS_SECTION, readAdapters } from "./adapters.mjs";
-import { MFA_SWITCH, readMfaSwitch } from "./mfaSwitch.mjs";
+import { MFA_SWITCH, mfaSectionForBoot, oauthForBoot, readMfaSwitch } from "./mfaSwitch.mjs";
 import { loggingModule, templateReference } from "./modules.mjs";
 import { refuseRenamedVariables, SHIPPED_FEDERATION_RENAMES } from "./rootRenames.mjs";
 import {
 	type Adapters,
+	isPlainSection,
 	type LoggingSettings,
 	loggingSectionSchema,
 	type MfaSwitch,
@@ -160,13 +161,6 @@ export const SWITCHES: readonly string[] = [
 	"oauth.accessToken",
 ];
 
-/** A section of keys: an object whose prototype is `Object.prototype` or none. */
-function isPlainSection(value: unknown): value is Readonly<Record<string, unknown>> {
-	if (typeof value !== "object" || value === null) return false;
-	const prototype: unknown = Object.getPrototypeOf(value);
-	return prototype === Object.prototype || prototype === null;
-}
-
 /** `core.sessionRequirements`, as the composition declares it to boot. */
 export type SessionRequirements = NonNullable<AppConfig["core"]>["sessionRequirements"];
 
@@ -206,7 +200,7 @@ export type Switches = AppConfig & {
 export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): Switches {
 	const template = resolveLayers(own, [templateReference()]);
 	const adapters = readAdapters(template, own.env);
-	const mfaMode = readMfaSwitch(template);
+	const mfaMode = readMfaSwitch(template, own.env);
 	refuseRenamedVariables(own.env, SHIPPED_FEDERATION_RENAMES);
 	const switches = readTransitionalConfig(resolveLayers(own, [coreReference()]), [
 		...SWITCHES,
@@ -393,63 +387,23 @@ function refuseModuleAtRootSections(modules: readonly Module[]): void {
 /** The section a resolution captures renamed variables in: never left out. */
 const RENAMED_VARIABLES = "renamed-variables";
 
-/** The MFA module's section, which the template's MFA switch decides. */
-const MFA_SECTION = "mfa";
-
-/** What an `mfa` that is not a section of keys reads as: a mode no switch says. */
-const NOT_A_SECTION = Symbol("not a section");
-
-/**
- * The `mfa` section boot is handed, from `layered`, under the template's MFA
- * switch `mode`; `undefined` hands none. None when no module in `modules`
- * owns it: what the configuration writes there — `config/development.conf`'s
- * key ring included — sets nothing while the switch installs no MFA. Owned,
- * it is handed as resolved, with `mfa.mode` written from the switch when the
- * switch installs MFA (`optional`, `required`).
- *
- * Refuses, with a `RangeError` naming `mfa.mode` and `mfaMode` and
- * quoting no value, an `mfa.mode` the composition's own layers write that
- * the switch does not say — or an `mfa` written as a value rather than a
- * section of keys — whatever the switch: so a configuration that asks for a
- * second factor by the module's key, with the switch off, is not booted on a
- * password alone, and one that asks for less than the switch says is not
- * silently raised.
- */
-function mfaSectionForBoot(
-	own: OwnLayers,
-	layered: Readonly<Record<string, unknown>>,
-	modules: readonly Module[],
-	mode: MfaSwitch,
-): unknown {
-	const written = (own.config.toObject() as Record<string, unknown>)[MFA_SECTION];
-	const writtenMode =
-		written === undefined ? undefined : isPlainSection(written) ? written.mode : NOT_A_SECTION;
-	if (writtenMode !== undefined && writtenMode !== mode) {
-		throw new RangeError(
-			"mfa.mode is written in the configuration and differs from mfaMode (MFA_MODE), which decides whether the template installs MFA and writes mfa.mode from it. Set MFA_MODE or mfaMode, and remove mfa.mode",
-		);
-	}
-	if (!ownsSection(modules, MFA_SECTION)) return undefined;
-	const section = layered[MFA_SECTION];
-	return mode !== "off" && isPlainSection(section) ? { ...section, mode } : section;
-}
-
 /**
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
  * `reference.conf` of every package `modules` come from, core's last,
  * resolved and unparsed, with `core.sessionRequirements` — what phase one
  * says the composition expects (`expectedSessionRequirements`) — written over
- * the resolved section when there is one to write, and the `mfa` section as
- * the template's MFA switch decides it (`mfaSectionForBoot`). Left out:
+ * the resolved section when there is one to write, and the `mfa` section and
+ * the `oauth` acr table as the template's MFA switch decides them
+ * (`mfaSectionForBoot`, `oauthForBoot`). Left out:
  * `adapters` and `mfaMode`, the composition root's own keys, which phase one
  * consumed, and a section the template's own `reference.conf` sets for a
  * module the composition does not load, left as that file sets it
  * (`unownedTemplateDefaults`).
  *
  * Refuses, with a `RangeError`, a module whose section is under a section of
- * the composition root's (`refuseModuleAtRootSections`), an `mfa.mode` the
- * switch does not say (`mfaSectionForBoot`), and the Redis intent store left
+ * the composition root's (`refuseModuleAtRootSections`), what
+ * `mfaSectionForBoot` refuses of the `mfa` section, and the Redis intent store left
  * on its default key prefix where the grant store's was moved
  * (`refuseIntentPrefixLeftAtDefault`).
  *
@@ -459,19 +413,30 @@ function mfaSectionForBoot(
 export function resolveForBoot(
 	own: OwnLayers,
 	modules: readonly Module[],
-	switches: Pick<Switches, "core" | "mfaMode">,
+	switches: Pick<Switches, "core" | "mfaMode" | "adapters">,
 ): AppConfig {
 	refuseModuleAtRootSections(modules);
 	const all = resolveLayers(own, moduleReferences(modules));
 	refuseIntentPrefixLeftAtDefault(all, modules);
 	const unowned = new Set([...ROOT_SECTIONS, ...unownedTemplateDefaults(all, modules)]);
 	const layered = Object.fromEntries(Object.entries(all).filter(([name]) => !unowned.has(name)));
-	const { [MFA_SECTION]: _decided, ...resolved } = layered;
-	const mfa = mfaSectionForBoot(own, layered, modules, switches.mfaMode);
+	const { mfa: _decided, ...resolved } = layered;
+	const mfa = mfaSectionForBoot({
+		mode: switches.mfaMode,
+		written: (own.config.toObject() as Record<string, unknown>).mfa,
+		resolved: all,
+		owned: ownsSection(modules, "mfa"),
+		storeCalled:
+			switches.adapters.userRepository === "http" || switches.adapters.mfaFactorStore === "store",
+		env: own.env,
+	});
 	const sessionRequirements = expectedSessionRequirements(switches);
 	return {
 		...resolved,
-		...(mfa === undefined ? {} : { [MFA_SECTION]: mfa }),
+		...(mfa === undefined ? {} : { mfa }),
+		...(resolved.oauth === undefined
+			? {}
+			: { oauth: oauthForBoot(switches.mfaMode, resolved.oauth) }),
 		...(sessionRequirements === undefined
 			? {}
 			: {

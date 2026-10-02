@@ -88,6 +88,8 @@ const ENVIRONMENTS: Readonly<Record<string, Readonly<Record<string, string>>>> =
 		HTTP_TRUST_PROXY: "loopback",
 		SESSION_STORE_SECURE: "false",
 		MFA_MODE: "optional",
+		ADAPTERS_MFA_FACTOR_STORE: "redis",
+		ADAPTERS_MFA_TRANSACTION_STORE: "redis",
 	},
 };
 

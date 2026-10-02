@@ -87,7 +87,10 @@ describe("what the template expects of session admission", () => {
 	it.each(["optional", "required"] as const)(
 		"adds mfa under MFA_MODE=%s, which the MFA module the template installs registers",
 		async (mode) => {
-			current = await compose({ env: { ...SINGLE_ENV, ...MFA_ENV, MFA_MODE: mode } });
+			current = await compose({
+				env: { ...SINGLE_ENV, ...MFA_ENV, MFA_MODE: mode },
+				environment: "test",
+			});
 			expect(current.config.core?.sessionRequirements).toEqual({ expected: ["mfa"] });
 			expect(
 				[...(current.handle.components.sessionRequirementResolver?.entries() ?? [])].map(
@@ -101,6 +104,7 @@ describe("what the template expects of session admission", () => {
 		const err = await refusal(
 			compose({
 				env: { ...SINGLE_ENV, ...MFA_ENV, MFA_MODE: "required" },
+				environment: "test",
 				operatorHocon: 'core.sessionRequirements.expected = ["risk"]\n',
 			}),
 		);
@@ -150,7 +154,7 @@ describe("what the template hands boot of the mfa section", () => {
 			// The switch written in a layer, MFA_MODE unset: the package's reference says off.
 			const own = ownUnder(SINGLE_ENV, `mfaMode = "${mode}"\n`);
 			const switches = readSwitches(own);
-			const modules = buildModules(switches, { environment: "production" });
+			const modules = buildModules(switches, { environment: "test" });
 			expect(mfaOf(resolveForBoot(own, modules, switches)), mode).toMatchObject({ mode });
 		}
 	});

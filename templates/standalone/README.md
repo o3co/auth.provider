@@ -358,8 +358,8 @@ fails before boot, naming it.
 | `ADAPTERS_FEDERATION_TOKEN_STORE` | `memory` | `adapters.federationTokenStore`: `memory` or `redis`. See [Federation Token Store](#federation-token-store) |
 | `ADAPTERS_FEDERATION_GRANT_STORE` | `none` | `adapters.federationGrantStore`: `none`, `memory` or `redis`. See [Federation Grants](#federation-grants) |
 | `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `none` | `adapters.federationGrantIntentStore`: `none`, `memory` or `redis`. See [Federation Grants](#federation-grants) |
-| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`, `redis` or `store` (the Store's endpoints), read while `MFA_MODE` installs MFA. See [Multi-factor authentication](#multi-factor-authentication) |
-| `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` or `redis`, read while `MFA_MODE` installs MFA |
+| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory` (development and test only), `redis` or `store` (the Store's endpoints), read while `MFA_MODE` installs MFA. See [Multi-factor authentication](#multi-factor-authentication) |
+| `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` (development and test only) or `redis`, read while `MFA_MODE` installs MFA |
 | `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: the authorization-code repository, `memory` or `redis`. See [Code Repository](#code-repository) |
 | `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`, or `static` (core's alias of `yaml`). See [Client Repository](#client-repository) |
 | `ADAPTERS_USER_REPOSITORY` | `http` | `adapters.userRepository`: `http`, `yaml` or `static` (core's alias of `yaml`). See [User Repository](#user-repository) |
@@ -776,9 +776,9 @@ three is refused before boot, naming `mfaMode` and `MFA_MODE`.
 | Variable | Default | Description |
 |---|---|---|
 | `MFA_MODE` | `off` | `mfaMode`: `off`, `optional` or `required` |
-| `MFA_ENCRYPTION_KEY` | — | The MFA key ring's first key, which seals every factor's data: canonical base64 of 32 bytes (`openssl rand -base64 32`). Required with MFA on. Under `CONFIG_ENV=development`, `config/development.conf` puts the MFA package's published sample key in its place (write your own there to replace it), refused under `CONFIG_ENV` or `NODE_ENV` `production` or `staging` and under `CORE_DEPLOYMENT_MODE=multi` |
+| `MFA_ENCRYPTION_KEY` | — | The MFA key ring's first key, which seals every factor's data: canonical base64 of 32 bytes (`openssl rand -base64 32`). Required with MFA on. Under `CONFIG_ENV=development`, `config/development.conf` puts the MFA package's published sample key in its place: write your own key there instead, since this variable set beside that ring refuses the boot. The sample key is refused under `CONFIG_ENV` or `NODE_ENV` `production` or `staging` and under `CORE_DEPLOYMENT_MODE=multi` |
 | `MFA_PAGE_URL` | `/mfa` | The deployment's MFA page, where a login's second factor and a step-up start. The template ships no page: the page contract is the [MFA package's](../../packages/mfa/README.md#the-routes) |
-| `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`, one Store call's time: at least every store's own per-call timeout, the user directory's `REPOSITORIES_USER_HTTP_TIMEOUT` among them, so raise the two together; above 37500 ms the boot is refused |
+| `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`, one Store call's time: at least every store's own per-call timeout. Below `REPOSITORIES_USER_HTTP_TIMEOUT` where the Store is called (`ADAPTERS_USER_REPOSITORY=http`, or the factors in the Store) the boot is refused, so raise the two together; above 37500 ms it is refused too |
 | `STANDARD_SMTP_MAIL_SENDER_HOST` | — | The SMTP relay outside development, where MFA mails the account-email proof and the email factor's codes. With MFA on, the boot needs it and `STANDARD_SMTP_MAIL_SENDER_FROM` |
 | `STANDARD_SMTP_MAIL_SENDER_FROM` | — | The one sender address of that mail |
 | `STANDARD_SMTP_MAIL_SENDER_PORT` | `587` | The relay's port |
@@ -790,22 +790,28 @@ The rest of the MFA settings — each factor's, the lock, a transaction's life
 — are the MFA package's, with their variables, in its
 [README](../../packages/mfa/README.md#configuration). A few things to know:
 
-- **The stores.** `memory` forks per replica and is refused under
-  `CORE_DEPLOYMENT_MODE=multi`; `redis` shares the socket `REDIS_CLIENTS_URL`
-  opens; `store` (factors only) keeps them behind the Store's four endpoints
+- **The stores.** `memory`, the shipped selection, is for development and
+  test alone: a restart loses every factor, lock and recorded email proof,
+  after which whoever holds a password can bind a factor of their own. With
+  MFA on it is refused before boot unless the configuration's name, and
+  `CONFIG_ENV` and `NODE_ENV` wherever set, each say `development` or
+  `test`, and core refuses it under `CORE_DEPLOYMENT_MODE=multi`. Production
+  needs `redis` for both, or `store` for the factors: `redis` shares the
+  socket `REDIS_CLIENTS_URL` opens; `store` (factors only) keeps them behind the Store's four endpoints
   (`FOUNDATION_MFA_FACTOR_STORE_*`,
   [foundation's README](../../packages/foundation/README.md)), sent the same
   bearer token as the user repository.
 - **The enrollment witness.** With `ADAPTERS_USER_REPOSITORY=http`, set
   `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` ([User Repository](#user-repository));
   without it, boot warns once (`mfa_enrollment_witness_unwritable`).
-- **`acr`.** `config/application.conf` ships `urn:o3co:acr:mfa` in
-  `oauth.authorize.acrValues`: advertised and met with MFA on; with MFA off it
-  is dropped at boot and logged at info, not warn.
-- **`mfa.mode` is written from the switch.** A configuration that writes
-  `mfa.mode` itself must write what `MFA_MODE` says, or the boot is refused
-  before it starts, naming both keys. While MFA is off, nothing the
-  configuration writes under `mfa` is handed to boot.
+- **`acr`.** With MFA on, the template adds `"urn:o3co:acr:mfa" = ["mfa"]`
+  to `oauth.authorize.acrValues`, unless your configuration writes that
+  entry, and discovery advertises it. With MFA off it adds nothing: the acr
+  table and discovery are what they are without MFA.
+- **One switch.** A file that writes `mfaMode` while `MFA_MODE` is set to
+  something else, and a configuration that writes `mfa.mode` other than
+  what the switch says, are refused before boot, naming the keys. While MFA
+  is off, nothing the configuration writes under `mfa` is handed to boot.
 
 ### Federation Grants
 

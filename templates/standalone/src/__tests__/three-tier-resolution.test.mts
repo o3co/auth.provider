@@ -57,7 +57,7 @@ function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {})
 			AppConfigSchema,
 		),
 		adapters: readAdapters(own.toObject() as Record<string, unknown>, resolvedEnv),
-		mfaMode: readMfaSwitch(own.toObject() as Record<string, unknown>),
+		mfaMode: readMfaSwitch(own.toObject() as Record<string, unknown>, resolvedEnv),
 		storeTransport: undefined,
 	};
 }

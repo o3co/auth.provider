@@ -181,7 +181,7 @@ export const ALL_ON: Features = {
 /**
  * The deployment's own MFA key (canonical base64 of 32 bytes), one per test
  * file, so every replica a file boots shares it — never the development
- * sample key: the full set boots as `production` does.
+ * sample key, which a deployment's own key replaces.
  */
 export const MFA_KEY = randomBytes(32).toString("base64");
 
@@ -941,6 +941,9 @@ export async function fullSetOptions(
 		: {};
 	return {
 		...compose,
+		// Under the name test: the template lets the MFA stores in memory in
+		// only where every environment name says development or test.
+		environment: compose.environment ?? "test",
 		env: { ...env, ...mfaEnv },
 		config: (resolved) => {
 			const adjusted = options.config ? options.config(resolved) : resolved;

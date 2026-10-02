@@ -25,16 +25,12 @@ import {
 	memoryConsentStoreModule,
 	memoryFederationGrantIntentStoreModule,
 	memoryFederationGrantStoreModule,
-	memoryMfaFactorStoreModule,
-	memoryMfaTransactionStoreModule,
 	memoryRateLimiterModule,
 	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import { oidcFederationModule, oidcFederationNames } from "@o3co/auth-provider-federation-oidc";
-import { foundationMfaFactorStoreModule } from "@o3co/auth-provider-foundation";
-import { mfaModules, mfaResetModule } from "@o3co/auth-provider-mfa";
 import {
 	oauthAuthorizationModule,
 	oauthModule,
@@ -48,8 +44,6 @@ import {
 	redisFederationGrantIntentStoreModule,
 	redisFederationGrantStoreModuleFor,
 	redisFederationTokenStoreModuleFor,
-	redisMfaFactorStoreModule,
-	redisMfaTransactionStoreModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 	redisReplaySeenSetModule,
@@ -57,7 +51,6 @@ import {
 } from "@o3co/auth-provider-redis";
 import {
 	extractFederationSection,
-	loginCompletionModule,
 	sessionModule,
 	sessionStoreModuleFor,
 } from "@o3co/auth-provider-session";
@@ -66,6 +59,7 @@ import {
 	standardSmtpMailSenderModule,
 } from "@o3co/auth-provider-standard";
 import type { Switches } from "./configPath.mjs";
+import { mfaModulesFor } from "./mfaSwitch.mjs";
 import {
 	auditSinkModuleFor,
 	googleFederationConfigModule,
@@ -187,10 +181,8 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		config["federation-grants"]?.enabled === true || setsAnything(config.federationGrants);
 
 	// MFA: the template's own switch, `mfaMode` (MFA_MODE). `off` installs
-	// nothing of MFA. `optional` and `required` install the MFA package's
-	// modules, the operator reset and the session package's login completion,
-	// which a verified second factor finishes a login through, over the two
-	// MFA stores `adapters` selects; the configuration then expects `mfa`
+	// nothing of MFA; `optional` and `required` install what `mfaModulesFor`
+	// lists, the configuration then expects `mfa`
 	// (`expectedSessionRequirements`) and `mfa.mode` is written from the
 	// switch (`resolveForBoot`).
 	const mfaInstalled = config.mfaMode !== "off";
@@ -334,32 +326,13 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 				? [memoryFederationGrantIntentStoreModule]
 				: [];
 
-	// One module per MFA store, nothing while MFA is off. The memory ones
-	// declare themselves replica-unsafe, so `core.deployment.mode = "multi"`
-	// refuses them by name. `store` keeps the factors in the Store, over the
-	// user repository's HTTP settings, so one credential goes to every Store
-	// endpoint.
-	const mfaStoreModules: Module[] = !mfaInstalled
-		? []
-		: [
-				adapters.mfaFactorStore === "redis"
-					? redisMfaFactorStoreModule
-					: adapters.mfaFactorStore === "store"
-						? foundationMfaFactorStoreModule({ storeTransport: config.storeTransport })
-						: memoryMfaFactorStoreModule,
-				adapters.mfaTransactionStore === "redis"
-					? redisMfaTransactionStoreModule
-					: memoryMfaTransactionStoreModule,
-			];
-	const mfaInstalledModules: Module[] = !mfaInstalled
-		? []
-		: [
-				...mfaModules(
-					overrides.environment === undefined ? {} : { environment: overrides.environment },
-				),
-				mfaResetModule,
-				loginCompletionModule,
-			];
+	// What the MFA switch installs (`mfaSwitch.mts`): nothing while it is off.
+	const mfaInstalledModules = mfaModulesFor({
+		mode: config.mfaMode,
+		adapters,
+		storeTransport: config.storeTransport,
+		environment: overrides.environment,
+	});
 
 	// The mail sender behind core's `mailSender` slot: the deployment's own when
 	// given, otherwise the bundled one for the environment. The development one
@@ -418,12 +391,11 @@ export function buildModules(config: Switches, overrides: BuildModulesOverrides 
 		...accessTokenDenylistModules,
 		...replaySeenSetModules,
 		...consentStoreModules,
-		...mfaStoreModules,
 		...refreshTokenFamilyModules,
 		defaultRefreshTokenFamilyRotationModule,
 		defaultRefreshTokenFamilyRevocationModule,
-		// MFA's modules, after the session middleware, which the MFA routes
-		// order themselves after.
+		// MFA's modules and stores; the MFA routes order themselves after the
+		// session middleware.
 		...mfaInstalledModules,
 		// The composed "end everything this subject holds" a credential change
 		// calls, reached as `handle.components.subjectRevocationService`.

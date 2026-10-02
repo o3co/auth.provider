@@ -274,6 +274,13 @@ export const adaptersSchema = z
 /** The composition root's adapter selections, as `adaptersSchema` reads them. */
 export type Adapters = z.output<typeof adaptersSchema>;
 
+/** A section of keys: an object whose prototype is `Object.prototype` or none. */
+export function isPlainSection(value: unknown): value is Readonly<Record<string, unknown>> {
+	if (typeof value !== "object" || value === null) return false;
+	const prototype: unknown = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
 /**
  * `mfaMode`: whether the composition root installs MFA, its own choice — the
  * MFA package's mode, read with that package's schema for `mfa.mode`. `off`

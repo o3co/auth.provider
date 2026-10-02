@@ -219,8 +219,8 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `ADAPTERS_FEDERATION_TOKEN_STORE` | `memory` | `adapters.federationTokenStore`: `memory` または `redis`。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照 |
 | `ADAPTERS_FEDERATION_GRANT_STORE` | `none` | `adapters.federationGrantStore`: `none`、`memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
 | `ADAPTERS_FEDERATION_GRANT_INTENT_STORE` | `none` | `adapters.federationGrantIntentStore`: `none`、`memory` または `redis`。[フェデレーショングラント](#フェデレーショングラント) を参照 |
-| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`、`redis` または `store`（Store のエンドポイント）。`MFA_MODE` が MFA を組み込む間に読む。[多要素認証](#多要素認証) を参照 |
-| `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory` または `redis`。`MFA_MODE` が MFA を組み込む間に読む |
+| `ADAPTERS_MFA_FACTOR_STORE` | `memory` | `adapters.mfaFactorStore`: `memory`（development と test のみ）、`redis` または `store`（Store のエンドポイント）。`MFA_MODE` が MFA を組み込む間に読む。[多要素認証](#多要素認証) を参照 |
+| `ADAPTERS_MFA_TRANSACTION_STORE` | `memory` | `adapters.mfaTransactionStore`: `memory`（development と test のみ）または `redis`。`MFA_MODE` が MFA を組み込む間に読む |
 | `ADAPTERS_CODE_REPOSITORY` | `redis` | `adapters.codeRepository`: 認可コードリポジトリ、`memory` または `redis`。[コードリポジトリ](#コードリポジトリ) を参照 |
 | `ADAPTERS_CLIENT_REPOSITORY` | `yaml` | `adapters.clientRepository`: `yaml`、または `static`（core の `yaml` の別名）。[クライアントリポジトリ](#クライアントリポジトリ) を参照 |
 | `ADAPTERS_USER_REPOSITORY` | `http` | `adapters.userRepository`: `http`、`yaml` または `static`（core の `yaml` の別名）。[ユーザーリポジトリ](#ユーザーリポジトリ) を参照 |
@@ -479,9 +479,9 @@ core.federations {
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `MFA_MODE` | `off` | `mfaMode`: `off`、`optional` または `required` |
-| `MFA_ENCRYPTION_KEY` | — | MFA の鍵リングの最初の鍵で、すべての要素のデータを封じる: 32 バイトの canonical な base64（`openssl rand -base64 32`）。MFA が有効なら必須。`CONFIG_ENV=development` では `config/development.conf` が代わりに MFA パッケージの公開サンプル鍵を置く（置き換えるにはそこに自分の鍵を書く）が、`CONFIG_ENV` か `NODE_ENV` が `production` か `staging` のとき、また `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
+| `MFA_ENCRYPTION_KEY` | — | MFA の鍵リングの最初の鍵で、すべての要素のデータを封じる: 32 バイトの canonical な base64（`openssl rand -base64 32`）。MFA が有効なら必須。`CONFIG_ENV=development` では `config/development.conf` が代わりに MFA パッケージの公開サンプル鍵を置く: 自分の鍵はそこに書く。そのリングの横でこの変数を設定すると boot は拒否される。サンプル鍵は `CONFIG_ENV` か `NODE_ENV` が `production` か `staging` のとき、また `CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される |
 | `MFA_PAGE_URL` | `/mfa` | デプロイの MFA ページ。ログインの第二要素とステップアップはここから始まる。テンプレートはページを同梱しない: ページの契約は [MFA パッケージのもの](../../packages/mfa/README.md#the-routes) |
-| `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`、Store の呼び出し 1 回の時間: 各ストアの呼び出しごとのタイムアウト以上でなければならず、ユーザーディレクトリの `REPOSITORIES_USER_HTTP_TIMEOUT` もその一つなので、二つは一緒に上げる。37500 ms を超えると boot を拒否する |
+| `MFA_STORE_TIMEOUT_MS` | `5000` | `mfa.storeTimeoutMs`、Store の呼び出し 1 回の時間: 各ストアの呼び出しごとのタイムアウト以上でなければならない。Store を呼ぶ構成（`ADAPTERS_USER_REPOSITORY=http`、または要素を Store に置く）で `REPOSITORIES_USER_HTTP_TIMEOUT` を下回ると boot を拒否するので、二つは一緒に上げる。37500 ms を超えても拒否する |
 | `STANDARD_SMTP_MAIL_SENDER_HOST` | — | development 以外での SMTP リレー。MFA はここにアカウントのメールの証明とメール要素のコードを送る。MFA が有効なら、boot にはこれと `STANDARD_SMTP_MAIL_SENDER_FROM` が要る |
 | `STANDARD_SMTP_MAIL_SENDER_FROM` | — | そのメールの唯一の送信者アドレス |
 | `STANDARD_SMTP_MAIL_SENDER_PORT` | `587` | リレーのポート |
@@ -491,10 +491,10 @@ core.federations {
 
 残りの MFA の設定 — 各要素のもの、ロック、トランザクションの寿命 — は MFA パッケージのもので、その変数とともに [README](../../packages/mfa/README.md#configuration) にある。知っておくべきこと:
 
-- **ストア。** `memory` はレプリカごとに分岐し、`CORE_DEPLOYMENT_MODE=multi` のもとでは拒否される。`redis` は `REDIS_CLIENTS_URL` が開くソケットを共有する。`store`（要素のみ）は Store の 4 つのエンドポイント（`FOUNDATION_MFA_FACTOR_STORE_*`、[foundation の README](../../packages/foundation/README.md)）の向こうに保持し、ユーザーリポジトリと同じ bearer トークンを送る。
+- **ストア。** 同梱の選択である `memory` は development と test のためだけのものである: 再起動ですべての要素、ロック、記録したメールの証明を失い、その後はパスワードを持つ者が自分の要素を紐付けられる。MFA が有効なら、設定の名前と、設定されていれば `CONFIG_ENV` と `NODE_ENV` のそれぞれが `development` か `test` でない限り boot の前に拒否され、`CORE_DEPLOYMENT_MODE=multi` のもとでは core が拒否する。本番には両方に `redis`、または要素に `store` が要る。`redis` は `REDIS_CLIENTS_URL` が開くソケットを共有する。`store`（要素のみ）は Store の 4 つのエンドポイント（`FOUNDATION_MFA_FACTOR_STORE_*`、[foundation の README](../../packages/foundation/README.md)）の向こうに保持し、ユーザーリポジトリと同じ bearer トークンを送る。
 - **登録の証人。** `ADAPTERS_USER_REPOSITORY=http` なら `REPOSITORIES_USER_HTTP_MARK_MFA_ENROLLED_URL` を設定する（[ユーザーリポジトリ](#ユーザーリポジトリ)）。無ければ boot は一度警告する（`mfa_enrollment_witness_unwritable`）。
-- **`acr`。** `config/application.conf` は `oauth.authorize.acrValues` に `urn:o3co:acr:mfa` を同梱する: MFA が有効なら広告され満たされる。MFA が off なら boot で落とされ、warn ではなく info でログに出る。
-- **`mfa.mode` はスイッチから書かれる。** 設定が自ら `mfa.mode` を書くなら、`MFA_MODE` が言うものを書かなければならない。そうでなければ boot は始まる前に、両方のキーを名指して拒否される。MFA が off の間、設定が `mfa` の下に書くものは何も boot に渡されない。
+- **`acr`。** MFA が有効なら、テンプレートは `oauth.authorize.acrValues` に `"urn:o3co:acr:mfa" = ["mfa"]` を加え（設定がそのエントリを書いていなければ）、ディスカバリーがそれを広告する。MFA が off なら何も加えない: acr の表とディスカバリーは MFA が無いときと同じである。
+- **スイッチは一つ。** `MFA_MODE` が別の値に設定されているのにファイルが `mfaMode` を書くこと、また設定がスイッチと違う `mfa.mode` を書くことは、キーを名指して boot の前に拒否される。MFA が off の間、設定が `mfa` の下に書くものは何も boot に渡されない。
 
 ### フェデレーショングラント
 
