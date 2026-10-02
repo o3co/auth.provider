@@ -118,7 +118,9 @@ export interface BuildModulesOverrides {
 	 * The deployment's own modules behind core's `mailSender` slot. Given, they
 	 * are installed under every environment name in place of the bundled
 	 * sender, which is never installed beside them (a second provider would be
-	 * a boot-time slot collision); an empty list installs no sender.
+	 * a boot-time slot collision); an empty list installs no sender, and a
+	 * module that needs one (the MFA email factor, or the MFA module with
+	 * `requireEmailProof = "always"`) then refuses the boot.
 	 */
 	readonly mailSenderModules?: readonly Module[];
 }

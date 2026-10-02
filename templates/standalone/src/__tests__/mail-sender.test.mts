@@ -122,5 +122,13 @@ describe("the template's mail sender", () => {
 				expect(current.handle.components.mailSender).toBe(OWN_SENDER);
 			},
 		);
+
+		it("boots in production with no sender when the list is empty", async () => {
+			current = await compose({ environment: "production", mailSenderModules: [] });
+			const names = current.modules.map((module) => module.name);
+			expect(names).not.toContain(DEVELOPMENT);
+			expect(names).not.toContain(SMTP);
+			expect(current.handle.components.mailSender).toBeUndefined();
+		});
 	});
 });
