@@ -772,15 +772,18 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			if (tx === null) return UNKNOWN_TRANSACTION;
 			if ("outcome" in tx) return tx;
 			// An enroll transaction verifies the account-email proof alone: it lists no factor.
+			// A retired recovery set is not offered; a floor that cannot be read offers every
+			// set. Read before the records, so no set they hold is retired by a later raise.
+			const context =
+				tx.purpose === "enroll"
+					? { factors, sealing }
+					: await withRecoverySetFloor(
+							{ factors, sealing },
+							tx.subject,
+							factorSet.recoverySetFloor,
+						);
 			const records = tx.purpose === "enroll" ? [] : await recordsOf(tx.subject);
 			if ("outcome" in records) return records;
-			// A retired recovery set is not offered; a floor that cannot be read offers every set.
-			const context = await withRecoverySetFloor(
-				{ factors, sealing },
-				tx.subject,
-				records,
-				factorSet.recoverySetFloor,
-			);
 			const listed = records.flatMap((record) => {
 				const read = readFactorRecord(context, tx.subject, record);
 				if (!isOffered(read)) return [];

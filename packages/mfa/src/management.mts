@@ -23,8 +23,8 @@
  * - `GET /factors`, admitted as `mfa.view`: every record of the subject, oldest
  *   first, with its state as `factorState.mts` reads it for the session's login
  *   address — a recovery set below the subject's recovery-set floor
- *   `retired`, the floor read once, and every set read as without it when
- *   it cannot be — and a usable or exhausted recovery set's codes left and
+ *   `retired`, the floor read once before the records, and every set read as
+ *   without it when it cannot be — and a usable or exhausted recovery set's codes left and
  *   whether they were ever answered (`recovery_codes_shown`); never a
  *   record's data. A record
  *   whose data or digest needs a key the ring no longer holds is said at error
@@ -183,15 +183,15 @@ export function createMfaManagementRouter(options: MfaManagementOptions): Router
 		.get("/factors", async (req: Request, res: Response) => {
 			const session = await admit(req, res, "mfa.view");
 			if (session === undefined) return;
-			const records = await recordsOf(res, session.subject);
-			if (records === undefined) return;
-			// A floor that cannot be read lists every set as read without it.
+			// A floor that cannot be read lists every set as read without it. Read before the
+			// records, so no set they hold is retired by a later raise.
 			const context = await withRecoverySetFloor(
 				{ factors, sealing },
 				session.subject,
-				records,
 				factorSet.recoverySetFloor,
 			);
+			const records = await recordsOf(res, session.subject);
+			if (records === undefined) return;
 			res.status(200).json({
 				factors: records.map((record) => {
 					const read = readFactorRecordAt(context, session.subject, record, session.user.email);

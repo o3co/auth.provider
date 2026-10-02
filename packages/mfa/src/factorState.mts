@@ -22,8 +22,9 @@
  * - `unreadable`: its data does not open, or a digest it holds names a key
  *   the ring no longer holds (`keyId`, when the key is known).
  * - `retired`, read only where the subject's recovery-set floor was read
- *   (`withRecoverySetFloor`): a recovery-code set below it, replaced by a
- *   newer set and kept until it is removed. Its codes verify nothing.
+ *   (`withRecoverySetFloor`), before the records: a recovery-code set below
+ *   it, replaced by a newer set and kept until it is removed. Its codes
+ *   verify nothing.
  * - `exhausted`: a recovery-code set whose data opened and holds no code
  *   left. It stays on record, for audit.
  * - `address_changed`, read for a signed-in session alone
@@ -61,6 +62,7 @@ import {
 	isExhaustedRecoverySet,
 	isRecoveryCodeFactor,
 	isRetiredRecoverySet,
+	RECOVERY_CODE_FACTOR_KIND,
 	recoverySetKeyIds,
 } from "./recovery/factor.mjs";
 import type { MfaSealing } from "./sealing.mjs";
@@ -145,21 +147,19 @@ export const isOffered = (read: MfaRecordReading): boolean =>
 	read.state !== "not_installed" && read.state !== "exhausted" && read.state !== "retired";
 
 /**
- * `context` with the subject's recovery-set floor, read by `readFloor` only
- * when `records` hold a recovery-code set; `context` as given when they hold
- * none, or the floor cannot be read — sets are then read as without one.
+ * `context` with the subject's recovery-set floor, read by `readFloor` while
+ * the recovery-code factor is installed; `context` as given otherwise, or
+ * when the floor cannot be read — sets are then read as without one. Read it
+ * before the records: a floor read after them can postdate a regeneration
+ * whose new set they do not hold, and retire every set they do.
  */
 export async function withRecoverySetFloor(
 	context: MfaRecordContext,
 	subject: string,
-	records: readonly Pick<MfaFactorRecord, "kind">[],
 	readFloor: (subject: string) => Promise<number>,
 ): Promise<MfaRecordContext> {
-	const holdsSet = records.some((record) => {
-		const factor = context.factors.get(record.kind);
-		return factor !== undefined && isRecoveryCodeFactor(factor);
-	});
-	if (!holdsSet) return context;
+	const factor = context.factors.get(RECOVERY_CODE_FACTOR_KIND);
+	if (factor === undefined || !isRecoveryCodeFactor(factor)) return context;
 	try {
 		return { ...context, recoverySetFloor: await readFloor(subject) };
 	} catch {
