@@ -134,17 +134,18 @@ describe("the federation callback's login establishes without asking", () => {
 	});
 });
 
-describe("the federation callback's login — a user core cannot copy into the primary", () => {
+describe("the federation callback's login — a user whose field the login needs is not plain data", () => {
 	it("answers 500 with nothing written, as the password login does: no record, no index entry, no tokens, no authenticated session", async () => {
 		const harness = buildFederationApp({
 			providers: new Map([["test", provider]]),
 			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
-			// `establishWithoutAsking` holds a structured-clone copy of the user:
-			// a function cannot be copied.
+			// `establishWithoutAsking` reads the user into a plain snapshot: a
+			// field the login needs that is not plain data — a witness that is a
+			// Date — is a RangeError there.
 			userRepository: makeUserRepository({
 				id: "user-1",
 				username: "alice",
-				greet: () => "hello",
+				mfaEnrolled: new Date(0),
 			}),
 		});
 		harness.store.set("browser", {

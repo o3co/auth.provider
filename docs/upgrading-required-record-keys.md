@@ -131,7 +131,20 @@ Since the MFA ADR's build-order step 9, a session also records what its login's 
 - **A store of your own round-trips it.** Its `create` records what core's `recordableEnrollmentFacts(sid, enrollmentFacts)` answers — `undefined` for none, else a copy of the two fields and nothing else — and refuses anything else with that function's `RangeError`, recording nothing; its `get` answers the two fields back, leaving the key out when none was recorded, and `recordSecondFactor`, where the store has it, keeps them. `readEnrollmentFacts` reads a stored value back. `runUserSessionStoreContract` checks all of it, and `runSecondFactorUpdateContract` that a step-up keeps them.
 - **A login path of your own** does not pass it: `establishSession` writes it from the primary core's builders made, which derive it from the `User` and never read one handed in.
 - **Sessions that already exist carry none**, and are read as sessions that recorded nothing; a fresh login records them. On Redis, a release before this one reads an envelope that has the key and ignores it.
-- **The `User` a repository answers is plain data**: its own enumerable data properties, holding primitives, arrays and plain objects — what JSON parses to, as `HttpUserRepository` answers. A login refuses anything else (a class instance, an accessor, an inherited or non-enumerable field, a `Date`, a `Map`) with a `500`: the facts are derived from a copy, and a copy would drop such a field and read the witness as not enrolled.
+- **The facts come from the login's snapshot of the `User`**, described [below](#reqsessionuser-holds-the-declared-user-fields-alone).
+
+## `req.session.user` holds the declared `User` fields alone
+
+**BREAKING.** A login reads the `User` a repository answers into a plain snapshot, and that snapshot is what `req.session.user` holds, and what the session's enrollment facts are derived from.
+
+- **What is read.** Exactly the 8 fields `User` declares — `id`, `username`, `email`, `emailVerified`, `name`, `picture`, `groups`, `mfaEnrolled` — each by name, once, however the object holds it: own data, an accessor, an inherited or non-enumerable field. So a class instance with getters, or an entity an ORM hands out, logs in. Arrays and plain objects inside a declared field are copied the same way, by name. Nothing else of the `User` is read.
+- **What `req.session.user` holds.** Exactly those 8 fields, whatever the `User` is: a plain object or a class instance. A field the repository answers beyond them (a `locale`, a `department`, an ORM's internals) is not carried. In v0.16.0, `req.session.user` held the repository's `User` as it was.
+- **What to do.** A host whose own provider-side pages read another field of `req.session.user` fetches that display data from its user repository by the session's `user.id`.
+- **RPs are unaffected.** They get claims through ID tokens and userinfo, which never read `req.session.user` beyond the declared fields.
+- **The session store holds less.** It no longer holds repository columns the provider does not use, such as a password-hash column.
+- **Sessions that already exist keep the `user` they were written with** until they end: a session renewal carries it over as it is. A fresh login stores the declared fields alone.
+- **Still refused, with a `500`, nothing written:** a `User` that is not an object; an `id` that is not a non-empty string, or not the subject the login names; and a declared field holding what JSON does not hold as it is (a `Date`, a `Map`, a class instance, a function, a bigint, a non-finite number, a list with a hole or an `undefined`, a cycle, the `User` itself). Left out of the snapshot, such a field would read the witness as not enrolled.
+- **A getter that throws** fails the login as it threw (a `500`). It is never read as a witness or an address.
 
 ## If you compile with `exactOptionalPropertyTypes`
 

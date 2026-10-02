@@ -215,11 +215,22 @@ export interface Client {
  * MFA package and never stamped on a token. The index signature carries
  * custom claims, which a consumer may map through a custom claim filter.
  *
- * A `User` is plain data: its own enumerable data properties, holding
- * primitives, arrays and objects whose prototype is `Object.prototype` or
- * `null` — what JSON parses to. A login refuses anything else with a
- * `RangeError` (a `500`): a copy would lose a field an accessor, a prototype
- * or a non-enumerable property holds, and read the witness as not enrolled.
+ * A login reads a `User` into a plain snapshot (`readUserSnapshot`): each
+ * field declared here, by name, once, however the object holds it (own
+ * data, an accessor, an inherited or non-enumerable field, as a class
+ * instance or an ORM entity holds it), and nothing else; arrays and plain
+ * objects inside are copied by name. The snapshot is what the session's
+ * `user` holds: exactly the declared fields, whether the `User` is a plain
+ * object or an instance. A field the index signature carries is not read
+ * and does not reach the session.
+ *
+ * Plain data is what JSON holds as it is: a string, a finite number, a
+ * boolean, `null`, and lists and plain objects of those. A login refuses
+ * with a `RangeError` (a `500`) a `User` that is not an object, an `id` that
+ * is not a non-empty string, and a declared field holding anything that is
+ * not plain data — a `Date`, a `Map`, an instance, a function, a bigint, a
+ * non-finite number, a list with a hole, a cycle — which left out would read
+ * the witness as not enrolled.
  */
 export interface User {
 	readonly id: string;
