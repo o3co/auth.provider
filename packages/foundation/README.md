@@ -388,7 +388,10 @@ whose HTTP wire the table follows. Core's codec carries it on both sides
 - **`expectedGeneration` absent and `null` differ.** Absent, the request is
   the unconditional write. `null`, on a create only, means "only while the
   set is absent". A value that is no generation, and `null` on a removal, are
-  `400`.
+  `400`. A request without `expectedGeneration` is the legacy unconditional
+  write only while the port keeps its unconditional `create` and `remove`;
+  that differs from the convention, where it is `400`, and becomes `400` here
+  once they are removed.
 - **`conflict` and `missing` write nothing.** A create answers `conflict`
   when the set is at another generation, absent while `expectedGeneration`
   names one, present while it is `null`, or holding the `(subject, id)`
@@ -421,6 +424,11 @@ whose HTTP wire the table follows. Core's codec carries it on both sides
   The provider's and the Store's clocks agree within that skew.
   A `deadlineMs` absent or not a whole instant above 0 within the `Date`
   range is `400`.
+- **No retry.** The adapter never retries a conditional write; it gives up at
+  its deadline, and a timeout or an unexpected status leaves the outcome
+  unknown. The Store, and anything in front of it, answers `421` only for a
+  request it did not apply, because the HTTP client may send it again: Node's
+  `fetch` sends a `POST` once more on a `421`.
 
 **When a call fails, nothing the Store sent reaches a client**: no status, no
 error text, no header, no record, and not whether a record was unreadable.
@@ -445,8 +453,8 @@ holds them to, so nothing else the Store writes in them does.
 | --- | --- |
 | `unexpected_status` | A status the table does not give the endpoint; `storeStatus` holds it |
 | `unknown_subject` | `markMfaEnrolledUrl` answered `404` |
-| `malformed_answer` | A `2xx` whose body is not the table's, or a conditional write's `404` or `409` without its outcome body |
-| `unreadable_record` | A list holding a record the provider cannot read |
+| `malformed_answer` | A `2xx` whose body is not the table's, or a conditional write's `404` or `409` without its outcome body; from `listVersioned`, a list holding a record the provider cannot read too |
+| `unreadable_record` | From `list`, a list holding a record the provider cannot read. One fault, two reasons: the same list makes `listVersioned` throw `malformed_answer`, since core's codec reads it as an answer outside the contract |
 | `version_skipped` | An update answered a version other than `expectedVersion + 1` |
 
 ### Where the factor endpoints are configured

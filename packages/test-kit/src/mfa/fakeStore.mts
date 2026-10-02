@@ -147,9 +147,10 @@ export interface FakeStore {
 	/** The witness held for `subject`; `undefined` when never marked. */
 	enrolled(subject: string): boolean | undefined;
 	/**
-	 * Holds `record` for `subject` as it is, readable or not, leaving the
-	 * set's generation as it is: a set this makes holds none until its first
-	 * list, as one an older writer left.
+	 * Holds `record` for `subject` as it is, readable or not, and leaves the
+	 * set without a generation, as an older writer's rewrite of the whole set
+	 * would: its next list mints one, and a conditional write at the one it
+	 * had answers `conflict`.
 	 */
 	holdFactor(subject: string, record: unknown): void;
 	/** Answers `endpoint` with `answerer` first while set; `undefined` restores the contract. */
@@ -464,7 +465,7 @@ export async function startFakeStore(options: FakeStoreOptions = {}): Promise<Fa
 			const set = setOf(subject);
 			sets.set(subject, {
 				records: [...(set?.records ?? []), record],
-				generation: set?.generation,
+				generation: undefined,
 				expiresAtMs: undefined,
 			});
 		},

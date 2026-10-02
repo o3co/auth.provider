@@ -488,6 +488,17 @@ describe("the factor set's generation", () => {
 		expect(fake.factors("user-1")).toStrictEqual([WIRE, RECORD_2]);
 	});
 
+	it("drops a set's generation when it holds a record into it, as an older writer's whole rewrite would: the old generation meets conflict, and the next list mints another", async () => {
+		const fake = await start();
+		const g1 = ((await createIf(fake, WIRE, null)).body as { generation: string }).generation;
+		fake.holdFactor("user-1", RECORD_2);
+		expect((await createIf(fake, { ...WIRE, id: ID_GONE }, g1)).status).toBe(409);
+		expect((await removeIf(fake, "user-1", ID_1, g1)).status).toBe(409);
+		const minted = await generationOf(fake);
+		expect(minted).not.toBe(g1);
+		expect(fake.factors("user-1")).toStrictEqual([WIRE, RECORD_2]);
+	});
+
 	it("answers 400 to a conditional write whose expectedGeneration is not one, writing nothing", async () => {
 		const fake = await start();
 		for (const expected of [1, "", 'with"quote', "x".repeat(129), {}, []]) {

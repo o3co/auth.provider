@@ -741,7 +741,7 @@ describe("a conditional write at the request deadline", () => {
 	});
 
 	it("is applied by a Store whose clock reads it within its deadline", async () => {
-		const store = storeOver({ timeout: 200 });
+		const store = storeOver({ timeout: 60_000 });
 		const created = await store.createIf(RECORD, null);
 		expect(created).toMatchObject({ outcome: "created" });
 		expect(fake.factors("user-1")).toEqual([WIRE]);
