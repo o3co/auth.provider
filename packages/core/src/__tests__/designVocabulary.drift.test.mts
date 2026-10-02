@@ -415,6 +415,88 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+readHostEntry\b/,
 	},
 	{
+		concept: "conditional write — the store generation's type",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\btype\s+StoreGeneration\s*[=<]|\binterface\s+StoreGeneration\b/,
+	},
+	{
+		concept:
+			"conditional write — the bundled stores' write-lifetime bound and set-tombstone lifetime",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+BUNDLED_STORE_WRITE_LIFETIME_MS\b/,
+	},
+	{
+		concept: "conditional write — a versioned read's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+Versioned\b|\btype\s+Versioned\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a versioned set read's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+VersionedSet\b|\btype\s+VersionedSet\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a conditional replace's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalReplaceAnswer\b|\btype\s+ConditionalReplaceAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a record-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalRemoveAnswer\b|\btype\s+ConditionalRemoveAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a conditional create's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /\binterface\s+ConditionalCreateAnswer\b|\btype\s+ConditionalCreateAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — a set-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition:
+			/\binterface\s+ConditionalSetRemoveAnswer\b|\btype\s+ConditionalSetRemoveAnswer\s*[=<]/,
+	},
+	{
+		concept: "conditional write — what a store generation may be",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+isStoreGeneration\b/,
+	},
+	{
+		concept: "conditional write — a fresh store generation",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+newStoreGeneration\b/,
+	},
+	{
+		concept: "conditional write — reading a versioned read",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readVersioned\b/,
+	},
+	{
+		concept: "conditional write — reading a versioned set read",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readVersionedSet\b/,
+	},
+	{
+		concept: "conditional write — reading a conditional replace's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readConditionalReplaceAnswer\b/,
+	},
+	{
+		concept: "conditional write — reading a record-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readConditionalRemoveAnswer\b/,
+	},
+	{
+		concept: "conditional write — reading a conditional create's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readConditionalCreateAnswer\b/,
+	},
+	{
+		concept: "conditional write — reading a set-scoped conditional remove's answer",
+		home: "packages/core/src/adapters/conditionalWrite.mts",
+		definition: /(?:function|const|let|var)\s+readConditionalSetRemoveAnswer\b/,
+	},
+	{
 		concept: "RFC 8707 resource indicator — reading `resource` (#172, #173)",
 		home: "packages/core/src/grants/resourceIndicator.mts",
 		definition: /(?:function|const)\s+extractResourceParam\b/,
