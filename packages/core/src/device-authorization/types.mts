@@ -36,6 +36,9 @@ import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
  * Every field is a required key, `undefined` where there is none: stores
  * rebuild the record field by field, and a required key turns a forgotten
  * field (a lost `subject` or `grantedScope`) into a compile error.
+ *
+ * A consumer reads a record a store answers through `readDeviceAuthorization`,
+ * never the store's object itself.
  */
 export interface DeviceAuthorization {
 	/** The code the human types. Normalised — see `normaliseUserCode`. */
