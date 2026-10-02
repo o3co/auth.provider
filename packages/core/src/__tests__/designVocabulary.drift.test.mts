@@ -1196,6 +1196,12 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "the device-code store's client encoding an approval's amr as the approval script's argument: what device verification filled with vouchedAmr, never a session record",
 	},
 	{
+		file: "packages/device-grant/src/grant.mts",
+		read: "authorization.amr",
+		count: 1,
+		why: "the device grant stamps the amr the approval recorded, which device verification filled with vouchedAmr, never a session record",
+	},
+	{
 		file: "packages/oauth/src/grants/authorization.mts",
 		read: "codeData.amr",
 		count: 1,
