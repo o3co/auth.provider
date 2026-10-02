@@ -106,6 +106,7 @@ import {
 	describeAdmissionOutage,
 	emitAuditEvent,
 	errorEnvelope,
+	FEDERATED_AMR,
 	type IssuedRemediationAction,
 	isMfaFactorId,
 	type Logger,
@@ -117,6 +118,7 @@ import {
 	resumePrimary,
 	type SessionView,
 	type SupportsSecondFactorUpdate,
+	sessionAuthentication,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
@@ -467,6 +469,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				subject: session.sub,
 				user,
 				authTimeMs,
+				federated: sessionAuthentication(session)?.primary === FEDERATED_AMR,
 				witness,
 				secondFactorRecordable,
 				...(factorSetStart === undefined ? {} : { factorSetStart }),

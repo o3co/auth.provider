@@ -30,6 +30,7 @@ import {
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
 	type MfaFactor,
+	type MfaFactorRecord,
 	type MfaFactorResolver,
 	type MfaFactorStore,
 	type UserSessionStore,
@@ -616,7 +617,7 @@ describe("issueRecoveryCodes, replacing the sets that stood", () => {
 	});
 	const issue = (
 		factorStore: MfaFactorStore,
-		binding: "email_proof" | "password" | "mfa" = "email_proof",
+		binding: NonNullable<MfaFactorRecord["binding"]> = "email_proof",
 		floor = floorAt(),
 	) =>
 		underBind(factorStore, factors, floor, (writes) =>
@@ -742,6 +743,27 @@ describe("issueRecoveryCodes, replacing the sets that stood", () => {
 		expect(removeIf).not.toHaveBeenCalled();
 		expect(floor.raise).not.toHaveBeenCalled();
 		expect((await setsIn(factorStore)).map((set) => set.generation)).toEqual([2, 2]);
+	});
+
+	it("keeps the sets that stood for a binding by a federated sign-in, as for one by password, and says why", async () => {
+		const factorStore = createMemoryMfaFactorStore();
+		await addRecord(factorStore, recordOf("old-set", { data: setAt(2) }));
+		const floor = floorAt(2);
+		const removeIf = vi.spyOn(factorStore, "removeIf");
+
+		expect(await issue(factorStore, "federated", floor)).toEqual({
+			issued: true,
+			codes: expect.any(Array),
+			regenerated: true,
+			unreplaced: { kept: "federated_binding" },
+		});
+		expect(removeIf).not.toHaveBeenCalled();
+		expect(floor.raise).not.toHaveBeenCalled();
+		expect((await setsIn(factorStore)).map((set) => set.generation)).toEqual([2, 2]);
+		expect((await factorStore.list("u-alice")).map((record) => record.binding).sort()).toEqual([
+			"federated",
+			"password",
+		]);
 	});
 
 	it("leaves an old set stored when it cannot be removed — below the floor, so dead — and says why, a rejection with no reason included", async () => {

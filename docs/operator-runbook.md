@@ -850,7 +850,10 @@ wires it.
   step-up — for that session, lasting `mfa.manage.maxAgeSeconds`, and the
   user's page releases it with `POST /session/mfa/lock/release` (the MFA
   package README, "The lock's release"). The page's order is: change the
-  password, sign in with a recovery code or a passkey, replace every TOTP or
+  password — for a federated account, secure the upstream account at its
+  identity provider instead; the release still asks for the subject's
+  sessions revoked since the attack began — sign in with a recovery code or
+  a passkey, replace every TOTP or
   email factor where the hard hold stands, then release — one code spent. A
   release before the replacement gives the week back and answers that the
   hard hold stands; the next release needs another code. Without a sessions
@@ -1047,7 +1050,12 @@ wires it.
   `mfa.recovery_code.used`, then `mfa.factor.enrolled {purpose: "login",
   binding: "password"}`, then `mfa.recovery_codes.generated {regenerated:
   true, binding: "password", kept: "password_binding"}`; a Store that keeps
-  the witness (`markMfaEnrolled`) refuses it (D12).
+  the witness (`markMfaEnrolled`) refuses it (D12). A federated account is
+  in the same place from the account page, without a login to reopen:
+  whoever holds its upstream account at the identity provider signs in and
+  binds the first factor by `federated` (`kept: "federated_binding"`), the
+  owner's codes kept. The remedy is that upstream account's, at its
+  identity provider — not a password change here.
   The provider marks the enrollment witness (`markMfaEnrolled`) after the
   factor is written; a directory without it is said once at boot
   (`mfa_enrollment_witness_unwritable`), and D12's defence is then what the
@@ -1203,7 +1211,8 @@ wires it.
   and tells the account holder — by mail, a chat message, anything — of every
   factor enrolled (`mfa.factor.enrolled`) or removed (`mfa.factor.removed`),
   recovery codes regenerated (`mfa.recovery_codes.generated`,
-  `regenerated: true`; with `kept: "password_binding"` the older codes still
+  `regenerated: true`; with `kept` (`"password_binding"` or
+  `"federated_binding"`) the older codes still
   work — word the notice "new recovery codes were issued; your earlier codes
   still work until you regenerate them", never "your old codes no longer
   work"; otherwise, `unreplaced: true` included, the older codes no longer
@@ -1211,7 +1220,8 @@ wires it.
   an operator reset (`mfa.reset`), the first lock of
   an episode (`mfa.locked.first`) and an email factor refused at a changed
   address (`mfa.email_address_mismatch`). Wire it: it is how a user learns that a
-  leaked password bound a factor first (D24). To keep the audit trail and
+  leaked password — or, for a federated account, a taken-over upstream
+  account — bound a factor first (D24). To keep the audit trail and
   notify at once, contribute the notifier as `auditHooks` from a module of
   your own: core hands every event to the `auditSink` and to each hook.
   Boot names each hook's position and module (`audit_hooks_registered`,
