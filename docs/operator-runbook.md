@@ -2309,6 +2309,9 @@ Rotate each key well before 2^32 seals under it: the envelope uses a random
 
 ### Before you upgrade
 
+Upgrading from v0.16.0: [upgrading-from-v0.16.0.md](upgrading-from-v0.16.0.md)
+lists every breaking change since, and which of the steps below each needs.
+
 1. Read the release's section in `CHANGELOG.md` — entries that start
    **`BREAKING:`** and every **Migration:** paragraph. Between cuts there is no
    pending section — the release-cut PR writes the section from the commit log
