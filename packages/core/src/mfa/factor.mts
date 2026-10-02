@@ -33,14 +33,17 @@ import type { MailPurpose } from "../mail/types.mjs";
 /**
  * A factor's own state, as the coordinator opened it from a record's `data`.
  * The factor decides its shape. It must survive a JSON round trip: the
- * coordinator serialises it before sealing it.
+ * coordinator serialises it before sealing it. Factor data and state must be
+ * plain JSON-shaped values — plain objects and arrays, strings, finite
+ * numbers, booleans and `null`; a class instance is refused.
  */
 export type MfaFactorData = Readonly<Record<string, unknown>>;
 
 /**
  * What a factor keeps between two requests of one ceremony (a challenge and its
  * verification, or the two halves of an enrollment). The coordinator keeps it
- * on the transaction, sealed or digested. JSON, like {@link MfaFactorData}.
+ * on the transaction, sealed or digested. Plain JSON-shaped values, like
+ * {@link MfaFactorData}: a class instance is refused.
  */
 export type MfaFactorState = Readonly<Record<string, unknown>>;
 

@@ -31,6 +31,7 @@ import { createHmac, hkdfSync, randomBytes } from "node:crypto";
 import { type Logger, type SealingKeyRing, sealWithKeyRing } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import {
+	copyFactorValue,
 	createMfaSealing,
 	MFA_CHALLENGE_SEALING_PURPOSE,
 	MFA_ENROLLMENT_SEALING_PURPOSE,
@@ -423,10 +424,25 @@ describe("keyed digests", () => {
 		expect(reads).toBe(1);
 	});
 
-	it("refuses parts that are not strings, and a kind it cannot bind to", () => {
+	it("refuses parts that are not strings, in its own words, and a kind it cannot bind to", () => {
 		const digests = sealingOver([K1]).digestsFor("email");
-		expect(() => digests.digest([1 as unknown as string])).toThrow(RangeError);
+		const PARTS = "a digest is made over a list of well-formed strings";
+		for (const parts of [[1], ["a", ["b"]], ["a", { b: "c" }], "ab", null]) {
+			expect(() => digests.digest(parts as never)).toThrow(new RangeError(PARTS));
+			expect(() => digests.matchesDigest(parts as never, digests.digest(["a"]))).toThrow(
+				new RangeError(PARTS),
+			);
+		}
 		expect(() => sealingOver([K1]).digestsFor("")).toThrow(RangeError);
+	});
+
+	it("never descends into a part: one nested past any stack is refused as a part that is not a string", () => {
+		const digests = sealingOver([K1]).digestsFor("email");
+		let deep: unknown = "x";
+		for (let depth = 0; depth < 200_000; depth++) deep = [deep];
+		expect(() => digests.digest(["a", deep] as never)).toThrow(
+			new RangeError("a digest is made over a list of well-formed strings"),
+		);
 	});
 });
 
@@ -472,48 +488,68 @@ describe("text that is not well-formed: a binding or a digest must be one-to-one
 	});
 });
 
-describe("what is sealed is what opening gives back", () => {
+describe("what is sealed: plain JSON-shaped values, copied once", () => {
 	const SECRET_TEXT = "S3CR3T-VALUE";
+	const STATE_BINDING = { transactionId: "tx-1", kind: "totp", use: "enrollment" } as const;
+	/** What every refusal says, whatever was refused: nothing of the value. */
+	const NOT_PLAIN = "a factor's data or state must be a plain JSON object of plain JSON values";
 
-	it("refuses, quoting nothing, a value that is not a JSON object of JSON values", () => {
+	/** What `run` threw, or `undefined`. */
+	const thrownBy = (run: () => unknown): unknown => {
+		try {
+			run();
+		} catch (error) {
+			return error;
+		}
+		return undefined;
+	};
+
+	it("refuses, in one fixed text that quotes nothing, anything but a plain JSON object of plain JSON values — a class's instance, an Array subclass and a built-in among them — never sealing part of it", () => {
 		const sealing = sealingOver([K1]);
 		const cycle: Record<string, unknown> = { secret: SECRET_TEXT };
 		cycle.self = cycle;
-		class Secret {
+		class OwnFields {
 			readonly secret = SECRET_TEXT;
-			readonly n = 1n;
 		}
-		/** A value type JSON writes as what its `toJSON` answers, never as its fields. */
-		class Amount {
-			readonly digits = [1, 2];
-			readonly exponent = 0;
-			toJSON(): string {
+		class PrototypeGetters {
+			get secret(): string {
 				return SECRET_TEXT;
 			}
 		}
-		class Packed extends Array<number> {
-			toJSON(): string {
-				return SECRET_TEXT;
+		class Tagged {
+			readonly secret = SECRET_TEXT;
+			get [Symbol.toStringTag](): string {
+				return "Tagged";
 			}
 		}
-		class Listish extends Array<number> {}
-		const holed = Listish.from([1, 2, 3]);
-		delete holed[1];
+		class Listish extends Array<string> {}
+		const subclassWithExtra = Listish.from([SECRET_TEXT]) as Listish & { extra?: string };
+		subclassWithExtra.extra = SECRET_TEXT;
+		const listWithExtra = [SECRET_TEXT] as string[] & { extra?: string };
+		listWithExtra.extra = SECRET_TEXT;
+		const mapTaggedObject = new Map([["secret", SECRET_TEXT]]);
+		Object.defineProperty(mapTaggedObject, Symbol.toStringTag, { value: "Object" });
+		let deep: Record<string, unknown> = { secret: SECRET_TEXT };
+		for (let depth = 0; depth < 200_000; depth++) deep = { deep };
 		for (const [label, value] of [
 			["a Date", new Date(0)],
 			["a toJSON that answers a string", { secret: SECRET_TEXT, toJSON: () => SECRET_TEXT }],
-			["a toJSON that answers an object", { toJSON: () => ({ secret: SECRET_TEXT }) }],
-			["a class's instance JSON writes through its toJSON", { amount: new Amount() }],
-			["an Array subclass JSON writes through its toJSON", { list: Packed.from([1, 2]) }],
 			["a Map", new Map([["secret", SECRET_TEXT]])],
+			["a Map tagged Object", { map: mapTaggedObject }],
+			["a Proxy over a RegExp", { pattern: new Proxy(/S3CR3T/, {}) }],
+			["a Proxy over a Number", { n: new Proxy(new Number(1), {}) }],
+			["a class's instance with its own fields", new OwnFields()],
+			["a class's instance with prototype getters", new PrototypeGetters()],
+			["a class's instance nested", { nested: new PrototypeGetters() }],
+			["a class with a tag of its own", { tagged: new Tagged() }],
+			["an object over another prototype", { nested: Object.create({ secret: SECRET_TEXT }) }],
+			["an Array subclass", { list: Listish.from([SECRET_TEXT]) }],
+			["an Array subclass with a field of its own", { list: subclassWithExtra }],
+			["a list with a field of its own", { list: listWithExtra }],
 			["a BigInt inside", { secret: SECRET_TEXT, n: 1n }],
 			["a cycle", cycle],
-			["a class's instance holding a BigInt", new Secret()],
-			["a hole in a list that is an Array subclass", { secret: SECRET_TEXT, list: holed }],
-			["a Set inside", { secret: SECRET_TEXT, s: new Set([SECRET_TEXT]) }],
-			["a RegExp inside", { secret: SECRET_TEXT, r: /S3CR3T/ }],
-			["a list at the top", [SECRET_TEXT]],
 			["a Map inside", { secret: SECRET_TEXT, m: new Map([["a", 1]]) }],
+			["a Set inside", { secret: SECRET_TEXT, s: new Set([SECRET_TEXT]) }],
 			["a Date inside", { secret: SECRET_TEXT, at: new Date(0) }],
 			["NaN inside", { secret: SECRET_TEXT, n: Number.NaN }],
 			["Infinity inside", { secret: SECRET_TEXT, n: Number.POSITIVE_INFINITY }],
@@ -521,6 +557,8 @@ describe("what is sealed is what opening gives back", () => {
 			["undefined in a list", { secret: SECRET_TEXT, list: [1, undefined] }],
 			// biome-ignore lint/suspicious/noSparseArray: a hole is what this case is
 			["a hole in a list", { secret: SECRET_TEXT, list: [1, , 2] }],
+			["a list at the top", [SECRET_TEXT]],
+			["nesting past any stack", deep],
 			[
 				"a getter that throws",
 				{
@@ -530,103 +568,108 @@ describe("what is sealed is what opening gives back", () => {
 				},
 			],
 		] as const) {
-			for (const seal of [
+			for (const run of [
 				() => sealing.sealFactorData(RECORD, value as never),
-				() =>
-					sealing.sealState(
-						{ transactionId: "tx-1", kind: "totp", use: "enrollment" },
-						value as never,
-					),
+				() => sealing.sealState(STATE_BINDING, value as never),
+				() => copyFactorValue(value),
 			]) {
-				let thrown: unknown;
-				try {
-					seal();
-				} catch (error) {
-					thrown = error;
-				}
+				const thrown = thrownBy(run);
 				expect(thrown, label).toBeInstanceOf(RangeError);
-				expect((thrown as Error).message, label).not.toContain(SECRET_TEXT);
+				expect((thrown as Error).message, label).toBe(NOT_PLAIN);
 			}
 		}
 	});
 
-	/**
-	 * A value whose every field is a getter that counts its reads, answering
-	 * "first" to the first read and the secret to any later one: a class's
-	 * instance, an object nested in it, an index of a list, an object two
-	 * fields share, and a list that is an Array subclass.
-	 */
-	const getterBacked = () => {
-		const counts = [0, 0, 0, 0];
-		const counted = (slot: number) => () => {
-			counts[slot] = (counts[slot] ?? 0) + 1;
-			return counts[slot] === 1 ? "first" : SECRET_TEXT;
+	it("copies a plain value's every field once, an own getter's among them, into a frozen plain copy, and seals that copy", () => {
+		const reads = { secret: 0, shared: 0, index: 0 };
+		/** Counts its reads; answers "first" to the first and the secret to any later one. */
+		const counted = (key: keyof typeof reads) => () => {
+			reads[key] += 1;
+			return reads[key] === 1 ? "first" : SECRET_TEXT;
 		};
-		const shared = Object.defineProperty({}, "value", { get: counted(3), enumerable: true });
+		const shared = Object.defineProperty({}, "value", { get: counted("shared"), enumerable: true });
 		const list: unknown[] = ["a", "b"];
-		Object.defineProperty(list, 1, { get: counted(2), enumerable: true });
-		class Steps extends Array<number> {}
-		class TotpState {
-			readonly lastUsedStep = 42;
-			constructor() {
-				Object.defineProperty(this, "secret", { get: counted(0), enumerable: true });
-			}
-		}
-		const value = Object.assign(new TotpState(), {
-			nested: Object.defineProperty({}, "secret", { get: counted(1), enumerable: true }),
-			list,
-			steps: Steps.from([1, 2]),
-			one: shared,
-			two: shared,
-		});
-		// A class's instance has no index signature; a factor's data is any object.
-		return { value: value as unknown as Readonly<Record<string, unknown>>, counts };
-	};
-	const GETTER_BACKED_COPY = {
-		lastUsedStep: 42,
-		secret: "first",
-		nested: { secret: "first" },
-		list: ["a", "first"],
-		steps: [1, 2],
-		one: { value: "first" },
-		two: { value: "first" },
-	};
-	const STATE_BINDING = { transactionId: "tx-1", kind: "totp", use: "enrollment" } as const;
+		Object.defineProperty(list, 1, { get: counted("index"), enumerable: true });
+		const value = Object.defineProperty(
+			{ lastUsedStep: 42, list, one: shared, two: shared },
+			"secret",
+			{ get: counted("secret"), enumerable: true },
+		);
 
-	it("copies each field by name, once, however the value holds it — a getter, a class's instance, a list that is an Array subclass — and seals that copy", () => {
+		const copy = copyFactorValue(value);
+
+		expect(copy).toEqual({
+			lastUsedStep: 42,
+			list: ["a", "first"],
+			one: { value: "first" },
+			two: { value: "first" },
+			secret: "first",
+		});
+		// Each field read once, an object two fields share among them: it is one copy.
+		expect(reads).toEqual({ secret: 1, shared: 1, index: 1 });
+		expect(copy.one).toBe(copy.two);
+		for (const part of [copy, copy.list, copy.one]) {
+			expect(Object.isFrozen(part)).toBe(true);
+		}
+		expect(Object.getPrototypeOf(copy)).toBe(Object.prototype);
+		expect(Object.getPrototypeOf(copy.list)).toBe(Array.prototype);
+
 		const sealing = sealingOver([K1]);
-		const data = getterBacked();
-		expect(sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, data.value))).toEqual({
+		expect(sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, copy))).toEqual({
 			state: "ok",
-			value: GETTER_BACKED_COPY,
+			value: copy,
 			keyId: "k1",
 		});
-		// Each field read once, an object two fields share among them.
-		expect(data.counts).toEqual([1, 1, 1, 1]);
-
-		const state = getterBacked();
 		expect(
-			sealing.openState(STATE_BINDING, sealing.sealState(STATE_BINDING, { state: state.value })),
-		).toEqual({ state: "ok", value: { state: GETTER_BACKED_COPY }, keyId: "k1" });
-		expect(state.counts).toEqual([1, 1, 1, 1]);
+			sealing.openState(STATE_BINDING, sealing.sealState(STATE_BINDING, { state: copy })),
+		).toEqual({ state: "ok", value: { state: copy }, keyId: "k1" });
 	});
 
-	it("leaves out what JSON leaves out of an object: what its prototype holds, and a field a setter alone answers", () => {
+	it("copies a Proxy over a plain object or list as the plain value it shows, each field read once", () => {
+		const gets: string[] = [];
+		const traced = <T extends object>(target: T): T =>
+			new Proxy(target, {
+				get(on, key, receiver) {
+					if (typeof key === "string") gets.push(key);
+					return Reflect.get(on, key, receiver);
+				},
+			});
+		const value = traced({ secret: "s", list: traced(["a", "b"]) });
+		expect(copyFactorValue(value)).toEqual({ secret: "s", list: ["a", "b"] });
+		expect(gets.filter((key) => key !== "length").sort()).toEqual(["0", "1", "list", "secret"]);
+		expect(gets.filter((key) => key === "length")).toEqual(["length"]);
+	});
+
+	it("keeps an own __proto__ key as the field it is, through the seal and back", () => {
+		const value = JSON.parse('{"__proto__":{"polluted":true},"b":2}') as Record<string, unknown>;
+		const copy = copyFactorValue(value);
+		expect(Object.hasOwn(copy, "__proto__")).toBe(true);
+		expect(Object.getPrototypeOf(copy)).toBe(Object.prototype);
 		const sealing = sealingOver([K1]);
-		class WithPrototypeGetter {
-			readonly own = 1;
-			get derived(): number {
-				return 2;
-			}
-		}
-		const value = {
-			instance: new WithPrototypeGetter(),
-			inherited: Object.create({ inherited: 1 }),
-			setterOnly: Object.defineProperty({}, "secret", { set: () => {}, enumerable: true }),
-		};
-		expect(sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, value))).toEqual({
+		const opened = sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, copy));
+		expect(opened.state).toBe("ok");
+		const reopened = (opened as { value: Record<string, unknown> }).value;
+		expect(Object.hasOwn(reopened, "__proto__")).toBe(true);
+		expect(JSON.stringify(reopened)).toBe('{"__proto__":{"polluted":true},"b":2}');
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+	});
+
+	it("copies a diamond — one object reached by two paths — once, and seals it at both", () => {
+		let reads = 0;
+		const leaf = Object.defineProperty({}, "n", {
+			get: () => {
+				reads += 1;
+				return 1;
+			},
+			enumerable: true,
+		});
+		const value = { left: { leaf }, right: { leaf } };
+		const copy = copyFactorValue(value);
+		expect(reads).toBe(1);
+		const sealing = sealingOver([K1]);
+		expect(sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, copy))).toEqual({
 			state: "ok",
-			value: { instance: { own: 1 }, inherited: {}, setterOnly: {} },
+			value: { left: { leaf: { n: 1 } }, right: { leaf: { n: 1 } } },
 			keyId: "k1",
 		});
 	});

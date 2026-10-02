@@ -99,8 +99,12 @@
  *   Another is dropped and flagged, never quoted.
  * - A factor's answer — a challenge's, a verification's — is read once, field
  *   by field, however the factor holds it (a getter, a class's instance), and
- *   only what was read is used; the state and data in it are sealed as their
- *   fields (`sealing.mts`).
+ *   only what was read is used. The state and data in it are taken as their
+ *   plain copy (`copyFactorValue`) where the answer is read, and that one copy
+ *   is what `amrFor`, the recovery-code rules and the seal act on; data or
+ *   state that is not plain JSON-shaped is the factor's failure (`503`), the
+ *   stored data left as it was. A challenge's `response` must be a plain
+ *   object: it is answered as the factor built it.
  */
 
 import {
@@ -169,7 +173,7 @@ import { ACCOUNT_EMAIL_FACTOR_ID, createAccountEmailProof } from "./proof.mjs";
 import { isRecoveryCodeFactor, recoveryCodesLeft, recoverySetRefusal } from "./recovery/factor.mjs";
 import { createLoginReopen } from "./reopen.mjs";
 import type { MfaRequirementMode } from "./requirement.mjs";
-import type { MfaSealing } from "./sealing.mjs";
+import { copyFactorValue, type MfaSealing } from "./sealing.mjs";
 import { createMfaStepUp } from "./stepUp.mjs";
 import { openEnrollTransaction, openLoginBinding, openStepUpTransaction } from "./transactions.mjs";
 import { type MfaEnrollmentWitness, reconciles, reconcilesSession } from "./witness.mjs";
@@ -862,8 +866,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 					factor: opened.named,
 					factors: opened.all,
 				});
-				// The factor's answer, each field read once, however it holds them.
-				issued = { state: answer?.state, response: answer?.response, mail: answer?.mail };
+				// The factor's answer, each field read once, however it holds them; its
+				// state as the plain copy that is sealed (`copyFactorValue`).
+				const state = answer?.state;
+				issued = {
+					state: state === undefined ? undefined : copyFactorValue(state),
+					response: answer?.response,
+					mail: answer?.mail,
+				};
 				if (!isPlainObject(issued.response)) {
 					throw new TypeError("the factor's challenge answered a response that is not an object");
 				}
@@ -1102,11 +1112,21 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 								: { addressDigest: pending.addressDigest }),
 							proof: call.proof,
 						});
-						// The factor's answer, each field read once, however it holds them: a
-						// read that throws is the factor's failure, as a throw of its own.
-						result = answer.ok
-							? { ok: true, factorId: answer.factorId, next: answer.next }
-							: { ok: false, reason: answer.reason, factorId: answer.factorId };
+						// The factor's answer, each field read once, however it holds them, its
+						// data as the plain copy that is sealed (`copyFactorValue`) and that
+						// everything after acts on: a read that throws, or data that is not
+						// plain, is the factor's failure, as a throw of its own.
+						if (answer.ok) {
+							const factorId = answer.factorId;
+							const next = answer.next;
+							result = {
+								ok: true,
+								factorId,
+								next: next === undefined ? undefined : copyFactorValue(next),
+							};
+						} else {
+							result = { ok: false, reason: answer.reason, factorId: answer.factorId };
+						}
 					} catch (cause) {
 						return unreadable(cause);
 					}
@@ -1118,14 +1138,14 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 							? { reason, factorIdDropped: true }
 							: { reason, factorId: concerned.id };
 					}
-					const { factorId, next: answered } = result;
+					const { factorId } = result;
 					const verified = all.find((candidate) => candidate.id === factorId);
 					if (verified === undefined) {
 						return unreadable(
 							new TypeError("the factor verified a factor id the subject does not hold"),
 						);
 					}
-					const next = answered ?? verified.data;
+					const next = result.next ?? verified.data;
 					let amr: unknown;
 					try {
 						amr = factor.amrFor(next);

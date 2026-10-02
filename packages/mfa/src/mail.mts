@@ -320,8 +320,15 @@ export interface MfaKeptState {
 	readonly addressDigest: MfaKeyedDigest | undefined;
 }
 
-/** What is sealed for a pending state: `state` and `addressDigest`, each when present. */
+/**
+ * What is sealed for a pending state: `state` and `addressDigest`, each when
+ * present. A `RangeError`, quoting nothing, for a `state` {@link readKeptState}
+ * would not read back: one that is not an object, or is a list.
+ */
 export function keptState(kept: MfaKeptState): Readonly<Record<string, unknown>> {
+	if (kept.state !== undefined && !isRecord(kept.state)) {
+		throw new RangeError("a pending state is kept only as an object that is not a list");
+	}
 	return {
 		...(kept.state === undefined ? {} : { state: kept.state }),
 		...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),

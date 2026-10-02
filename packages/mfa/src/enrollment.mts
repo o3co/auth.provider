@@ -79,8 +79,11 @@
  *   the outcome says so, and the binding stands.
  * - The factor's answers — its enrollment's start and end — are read once,
  *   field by field, however the factor holds them (a getter, a class's
- *   instance); the state and data in them are sealed as their fields
- *   (`sealing.mts`), so a state may be any object but a list.
+ *   instance). The state and data in them are taken as their plain copy
+ *   (`copyFactorValue`) where the answer is read, and that one copy is what
+ *   `amrFor` and the seal act on; a state or data that is not plain
+ *   JSON-shaped is the factor's failure (`503`), nothing kept or bound. The
+ *   start's `response` must be a plain object: it is answered as built.
  */
 
 import { randomBytes } from "node:crypto";
@@ -112,6 +115,7 @@ import type { MfaFactorSetCarried, MfaFactorSetWrites } from "./factorSet.mjs";
 import { mayCount, recordsAfterFirstBinding, reopenedEnrollment } from "./firstBinding.mjs";
 import { keptState, mailedAnswer, mailRefusalOf, readKeptState, sendMfaMail } from "./mail.mjs";
 import { issueRecoveryCodes, writeRecoveryCodes } from "./recovery/issue.mjs";
+import { copyFactorValue } from "./sealing.mjs";
 
 const NOT_OPEN = Object.freeze({ outcome: "enrollment_not_open" as const });
 const PROOF_REQUIRED = Object.freeze({ outcome: "email_proof_required" as const });
@@ -466,17 +470,15 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					user,
 					factors: isFirstBinding(tx) ? [] : enrolledOfKind(tx.subject, factor.kind, records),
 				});
-				// The factor's answer, each field read once, however it holds them. The
-				// response is answered as the factor built it; the state is sealed as its
-				// fields, so any object but a list (`sealing.mts`).
-				started = { state: answer?.state, response: answer?.response, mail: answer?.mail };
-				const { state } = started;
-				if (
-					!kit.answerable(started.response) ||
-					typeof state !== "object" ||
-					state === null ||
-					Array.isArray(state)
-				) {
+				// The factor's answer, each field read once, however it holds them; its
+				// state as the plain copy that is sealed (`copyFactorValue`). The response
+				// is answered as the factor built it.
+				started = {
+					state: copyFactorValue(answer?.state),
+					response: answer?.response,
+					mail: answer?.mail,
+				};
+				if (!kit.answerable(started.response)) {
 					throw new TypeError(
 						"the factor's enrollment answered a response or a state that is not an object",
 					);
@@ -654,9 +656,11 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					...(kept.addressDigest === undefined ? {} : { addressDigest: kept.addressDigest }),
 					proof: call.proof,
 				});
-				// The factor's answer, each field read once, however it holds them.
+				// The factor's answer, each field read once, however it holds them; its
+				// data as the plain copy that is sealed (`copyFactorValue`) and that
+				// `amrFor` is handed.
 				completion = answer.ok
-					? { ok: true, data: answer.data, label: answer.label }
+					? { ok: true, data: copyFactorValue(answer.data), label: answer.label }
 					: { ok: false, reason: answer.reason };
 				if (completion.ok) amr = kit.declaredAmr(factor, completion.data);
 			} catch (cause) {
@@ -675,8 +679,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 					cause: new TypeError("the factor's amrFor answered values it does not declare"),
 				});
 			}
-			const answered = completion.label;
-			const named = label ?? (isMfaFactorLabel(answered) ? answered : undefined);
+			const named = label ?? (isMfaFactorLabel(completion.label) ? completion.label : undefined);
 			const id = randomBytes(16).toString("base64url");
 			let data: string;
 			try {

@@ -28,7 +28,7 @@ import { randomBytes } from "node:crypto";
 import type { MailSender, MfaKeyedDigest } from "@o3co/auth-provider-core";
 import { createRecordingMailSender } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
-import { maskMailAddress, sendMfaMail } from "#/mail.mjs";
+import { keptState, maskMailAddress, readKeptState, sendMfaMail } from "#/mail.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 
 const NOW = 1_900_000_000_000;
@@ -306,6 +306,32 @@ describe("maskMailAddress", () => {
 	it("answers nothing for a value that is no address", () => {
 		for (const value of [undefined, null, "", "kate", "a@b, c@d", 5]) {
 			expect(maskMailAddress(value), JSON.stringify(value)).toBeUndefined();
+		}
+	});
+});
+
+describe("keptState — what is kept of a pending state", () => {
+	it("keeps a state and an address digest that readKeptState reads back", () => {
+		const addressDigest = { keyId: "k1", digest: "d" };
+		for (const kept of [
+			{ state: { nonce: "n" }, addressDigest },
+			{ state: { nonce: "n" }, addressDigest: undefined },
+			{ state: undefined, addressDigest },
+		]) {
+			expect(readKeptState(keptState(kept))).toEqual(kept);
+		}
+	});
+
+	it("refuses a state readKeptState would not read back — a list, null, a scalar — with a RangeError that quotes nothing", () => {
+		for (const state of [["S3CR3T"], null, "S3CR3T", 1]) {
+			let thrown: unknown;
+			try {
+				keptState({ state: state as never, addressDigest: undefined });
+			} catch (error) {
+				thrown = error;
+			}
+			expect(thrown, JSON.stringify(state)).toBeInstanceOf(RangeError);
+			expect((thrown as Error).message).not.toContain("S3CR3T");
 		}
 	});
 });

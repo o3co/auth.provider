@@ -426,8 +426,9 @@ describe("a verification against a challenge", () => {
 	});
 });
 
-describe("a factor's challenge, read by name", () => {
-	it("keeps a challenge a class's instance answers behind getters, reading each field once and sealing the state as its fields", async () => {
+describe("a factor's answers, read by name, and the copy of what it hands to be sealed", () => {
+	/** Counts each named read in `reads`, answering `value`. */
+	const counter = () => {
 		const reads: Record<string, number> = {};
 		const counted =
 			<T,>(name: string, value: T) =>
@@ -435,34 +436,32 @@ describe("a factor's challenge, read by name", () => {
 				reads[name] = (reads[name] ?? 0) + 1;
 				return value;
 			};
-		class Nonce {
-			constructor(nonce: string) {
-				Object.defineProperty(this, "nonce", {
-					get: counted("state.nonce", nonce),
-					enumerable: true,
-				});
+		/** An answer whose every field is a getter on its class: an answer is read by name. */
+		const answer = (name: string, fields: Record<string, unknown>): never => {
+			class Answer {}
+			for (const [key, value] of Object.entries(fields)) {
+				Object.defineProperty(Answer.prototype, key, { get: counted(`${name}.${key}`, value) });
 			}
-		}
-		/** The challenge's answer, its every field a getter on its class. */
-		class Issued {
-			readonly #nonce: string;
-			constructor(nonce: string) {
-				this.#nonce = nonce;
-			}
-			get state(): Nonce {
-				return counted("issued.state", new Nonce(this.#nonce))();
-			}
-			get response(): { readonly nonce: string } {
-				return counted("issued.response", { nonce: this.#nonce })();
-			}
-			get mail(): undefined {
-				return counted("issued.mail", undefined)();
-			}
-		}
+			return new Answer() as never;
+		};
+		/** A plain object whose field `key` is an own getter: plain JSON-shaped data. */
+		const plainWithGetter = (name: string, key: string, value: unknown) =>
+			Object.defineProperty({}, key, { get: counted(`${name}.${key}`, value), enumerable: true });
+		return { reads, answer, plainWithGetter };
+	};
+
+	it("keeps a challenge whose answer is a class's instance behind getters, reading each field once and sealing the plain state it holds", async () => {
+		const { reads, answer, plainWithGetter } = counter();
 		const { app, record } = await withChallengedFactor(
 			challenged({
-				// A class's instance has no index signature; a factor may answer one all the same.
-				challenge: async () => new Issued(randomBytes(8).toString("hex")) as never,
+				challenge: async () => {
+					const nonce = randomBytes(8).toString("hex");
+					return answer("issued", {
+						state: plainWithGetter("state", "nonce", nonce),
+						response: { nonce },
+						mail: undefined,
+					});
+				},
 			}),
 		);
 		const { agent, transaction } = await beginLogin(app);
@@ -488,57 +487,91 @@ describe("a factor's challenge, read by name", () => {
 		expect(verified.status).toBe(200);
 	});
 
-	it("reads a verification's answer once, by name — a refusal's and a success's, a class's instance behind getters — and re-seals the data it answers as its fields", async () => {
-		const reads: Record<string, number> = {};
-		const counted =
-			<T,>(name: string, value: T) =>
-			(): T => {
-				reads[name] = (reads[name] ?? 0) + 1;
-				return value;
-			};
-		/** An answer whose every field is a getter on its class, as an ORM entity holds its columns. */
-		const answer = (name: string, fields: Record<string, unknown>): never => {
-			class Answer {}
-			for (const [key, value] of Object.entries(fields)) {
-				Object.defineProperty(Answer.prototype, key, { get: counted(`${name}.${key}`, value) });
-			}
-			return new Answer() as never;
-		};
-		class Data {
-			constructor(secret: string) {
-				Object.defineProperty(this, "secret", {
-					get: counted("next.secret", secret),
-					enumerable: true,
-				});
+	it("refuses a challenge whose state is a class's instance, 503 once, keeping nothing", async () => {
+		class NonceState {
+			get nonce(): string {
+				return "n";
 			}
 		}
-		const base = challenged();
+		const { app, logger, transactionStore, record } = await withChallengedFactor(
+			challenged({
+				challenge: async () => ({ state: new NonceState() as never, response: { nonce: "n" } }),
+			}),
+		);
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_challenge_unavailable"]);
+		expect((await transactionStore.get(transaction))?.challenge).toBeUndefined();
+	});
+
+	it("answers 503 once, the challenge failed, when reading its answer's mail throws, keeping nothing", async () => {
+		const { app, logger, transactionStore, record } = await withChallengedFactor(
+			challenged({
+				challenge: async () =>
+					new (class {
+						readonly state = { nonce: "n" };
+						readonly response = { nonce: "n" };
+						get mail(): undefined {
+							throw new Error("the answer cannot be read");
+						}
+					})() as never,
+			}),
+		);
+		const { agent, transaction } = await beginLogin(app);
+
+		const res = await mfaPost(agent, "/challenge", {
+			transaction_id: transaction,
+			factor_id: record.id,
+		});
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_challenge_unavailable"]);
+		expect((await transactionStore.get(transaction))?.challenge).toBeUndefined();
+	});
+
+	/** Boots the double, re-verified by `verify`, with alice holding another factor of its kind ahead of hers. */
+	async function withVerifier(overrides: Partial<MfaFactor>) {
 		const factorStore = createMemoryMfaFactorStore();
 		// Another factor of the kind ahead of it: finding the one verified walks past it.
 		await seedFactor(factorStore, "test", { secret: "0ther" });
 		const record = await seedFactor(factorStore, "test", { secret: "s3cret" });
-		const { app } = await boot({
+		const booted = await boot({
 			config: configFor("required"),
 			factorStore,
-			extraModules: [
-				contributing({
-					...base,
-					verify: async (ctx) => {
-						const result = await base.verify(ctx);
-						return result.ok
-							? answer("verified", {
-									ok: true,
-									factorId: result.factorId,
-									next: new Data("s3cret"),
-								})
-							: answer("refused", { ok: false, reason: result.reason, factorId: record.id });
-					},
-				}),
-			],
+			extraModules: [contributing(challenged(overrides))],
 		});
-		const { agent, transaction } = await beginLogin(app);
+		const { agent, transaction } = await beginLogin(booted.app);
 		const challenge = () =>
 			mfaPost(agent, "/challenge", { transaction_id: transaction, factor_id: record.id });
+		return { ...booted, factorStore, record, agent, transaction, challenge };
+	}
+
+	it("reads a verification's answer once, by name — a refusal's and a success's — and hands amrFor and the seal one plain copy of the data it answers", async () => {
+		const { reads, answer, plainWithGetter } = counter();
+		const base = challenged();
+		const handed: unknown[] = [];
+		const { factorStore, record, agent, transaction, challenge } = await withVerifier({
+			amrFor: (data) => {
+				handed.push(data);
+				return base.amrFor(data);
+			},
+			verify: async (ctx) => {
+				const result = await base.verify(ctx);
+				return result.ok
+					? answer("verified", {
+							ok: true,
+							factorId: result.factorId,
+							next: plainWithGetter("next", "secret", "s3cret"),
+						})
+					: answer("refused", { ok: false, reason: result.reason, factorId: ctx.factor.id });
+			},
+		});
 
 		await challenge();
 		expect((await verify(agent, transaction, record.id, "wrong:proof")).status).toBe(401);
@@ -559,20 +592,53 @@ describe("a factor's challenge, read by name", () => {
 			"verified.next": 1,
 			"next.secret": 1,
 		});
-		expect((await storedData(factorStore, record)).data).toEqual({ secret: "s3cret" });
+		// amrFor was handed the copy: plain, frozen, the getter not read again — what was sealed.
+		const [copy] = handed;
+		expect(Object.isFrozen(copy)).toBe(true);
+		expect(Object.getOwnPropertyDescriptor(copy, "secret")).toMatchObject({ value: "s3cret" });
+		expect((await storedData(factorStore, record)).data).toEqual(copy);
+	});
+
+	it("refuses a correct proof whose answered data is a class's instance — 503 once, the factor's data left as it was — never sealing it as an empty object", async () => {
+		class TotpData {
+			get secret(): string {
+				return "s3cret";
+			}
+		}
+		const base = challenged();
+		const { factorStore, record, agent, transaction, challenge, logger } = await withVerifier({
+			verify: async (ctx) => {
+				const result = await base.verify(ctx);
+				return result.ok ? { ...result, next: new TotpData() as never } : result;
+			},
+		});
+		const before = await storedData(factorStore, record);
+
+		const res = await verify(
+			agent,
+			transaction,
+			record.id,
+			`s3cret:${(await challenge()).body.nonce as string}`,
+		);
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+		const after = await storedData(factorStore, record);
+		expect(after.data).toEqual({ secret: "s3cret" });
+		expect(after.record.version).toBe(before.record.version);
 	});
 
 	it("answers 503 once, the factor unreadable, when reading its verification's answer throws, as when the verification itself throws", async () => {
-		const base = challenged();
-		const { app, logger, record } = await withChallengedFactor({
-			...base,
-			verify: async () =>
-				new (class {
-					get ok(): boolean {
-						throw new Error("the answer cannot be read");
-					}
-				})() as never,
-		});
+		const { app, logger, record } = await withChallengedFactor(
+			challenged({
+				verify: async () =>
+					new (class {
+						get ok(): boolean {
+							throw new Error("the answer cannot be read");
+						}
+					})() as never,
+			}),
+		);
 		const { agent, transaction } = await beginLogin(app);
 		const issued = await mfaPost(agent, "/challenge", {
 			transaction_id: transaction,
@@ -585,6 +651,27 @@ describe("a factor's challenge, read by name", () => {
 			record.id,
 			`s3cret:${issued.body.nonce as string}`,
 		);
+
+		expect(res.status).toBe(503);
+		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
+	});
+
+	it("answers 503 once, the factor unreadable, when reading its refusal's reason throws", async () => {
+		const { app, logger, record } = await withChallengedFactor(
+			challenged({
+				verify: async () =>
+					new (class {
+						readonly ok = false;
+						get reason(): string {
+							throw new Error("the answer cannot be read");
+						}
+					})() as never,
+			}),
+		);
+		const { agent, transaction } = await beginLogin(app);
+		await mfaPost(agent, "/challenge", { transaction_id: transaction, factor_id: record.id });
+
+		const res = await verify(agent, transaction, record.id, "wrong:proof");
 
 		expect(res.status).toBe(503);
 		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
