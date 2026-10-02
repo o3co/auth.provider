@@ -76,7 +76,22 @@ const withThrowingField = (record: DeviceAuthorization, field: string): unknown 
 const MALFORMED: ReadonlyArray<readonly [keyof DeviceAuthorization, readonly unknown[]]> = [
 	["userCode", [undefined, null, "", 42, ["BCDFGHJK"]]],
 	["clientId", [undefined, null, "", 42, { id: "tv-app" }]],
-	["requestedScope", [null, "openid", [1], ["openid", null], { 0: "openid", length: 1 }]],
+	[
+		"requestedScope",
+		[
+			null,
+			"openid",
+			[1],
+			["openid", null],
+			{ 0: "openid", length: 1 },
+			[""],
+			["openid admin"],
+			["openid\tadmin"],
+			['"openid"'],
+			["open\\id"],
+			["openïd"],
+		],
+	],
 	[
 		"expiresAtMs",
 		[
@@ -92,9 +107,15 @@ const MALFORMED: ReadonlyArray<readonly [keyof DeviceAuthorization, readonly unk
 	["intervalSeconds", [undefined, null, Number.NaN, -1, Number.POSITIVE_INFINITY, "5"]],
 	["status", [undefined, null, "", "APPROVED", "consumed", 1]],
 	["subject", [null, "", 42, { sub: "user-1" }]],
-	["grantedScope", [null, "openid", [1], [undefined]]],
-	["approvedAtMs", [null, Number.NaN, 8_640_000_000_000_001, "1799999999000", new Date(NOW)]],
-	["authTimeMs", [null, -1, 0.5, Number.NaN, 2 ** 53, "1799999940000", new Date(NOW)]],
+	["grantedScope", [null, "openid", [1], [undefined], [""], ["openid admin"], ["openid", " "]]],
+	[
+		"approvedAtMs",
+		[null, Number.NaN, -1, 0.5, 2 ** 53, 8_640_000_000_000_001, "1799999999000", new Date(NOW)],
+	],
+	[
+		"authTimeMs",
+		[null, -1, 0.5, Number.NaN, 2 ** 53, 8_640_000_000_000_001, "1799999940000", new Date(NOW)],
+	],
 ];
 
 describe("readDeviceAuthorization", () => {
@@ -196,8 +217,8 @@ describe("readDeviceAuthorization", () => {
 		expect(reading.ok && reading.authorization.expiresAtMs).toBe(NOW + 0.5);
 	});
 
-	it("reads an authentication time as whole epoch milliseconds at or after the epoch", () => {
-		for (const authTimeMs of [0, NOW, Number.MAX_SAFE_INTEGER]) {
+	it("reads an authentication time as whole epoch milliseconds at or after the epoch that a Date holds", () => {
+		for (const authTimeMs of [0, NOW, 8_640_000_000_000_000]) {
 			const reading = readDeviceAuthorization(withField(approved(), "authTimeMs", authTimeMs));
 			expect(reading.ok && reading.authorization.authTimeMs, String(authTimeMs)).toBe(authTimeMs);
 		}
