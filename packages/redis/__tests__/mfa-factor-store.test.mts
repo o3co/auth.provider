@@ -833,7 +833,10 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 		expect(await first().pexpiretime(replayKey("reset-g"))).toBe(deadlineMs + SKEW_MS + 1);
 	});
 
-	it("rejects, as an outage, a membership write its client answers late", async () => {
+	it("rejects, as an outage whose outcome is unknown, a membership write its client answers late", async () => {
+		// `late` says only that the copy the server judged wrote nothing: a copy
+		// resent after an earlier one committed, once its replay key had gone,
+		// answers `late` too. So the rejection never says nothing was written.
 		const prefix = freshPrefix();
 		const real = makeIoredisMfaFactorStoreClient(first());
 		const store = createRedisMfaFactorStore({
@@ -847,14 +850,22 @@ describe("createRedisMfaFactorStore — a membership write past its deadline", (
 				removeAll: async () => "late",
 			},
 		});
-		const pastDeadline = /past its deadline and wrote nothing/;
-		await expect(store.createIf?.(RECORD({ id: FACTOR_A }), null)).rejects.toThrow(pastDeadline);
-		await expect(store.removeIf?.("user-1", FACTOR_A, generation("g"))).rejects.toThrow(
-			pastDeadline,
-		);
-		await expect(store.create(RECORD({ id: FACTOR_A }))).rejects.toThrow(pastDeadline);
-		await expect(store.remove("user-1", FACTOR_A)).rejects.toThrow(pastDeadline);
-		await expect(store.removeAllForSubject("user-1")).rejects.toThrow(pastDeadline);
+		const writes: (() => Promise<unknown>)[] = [
+			() => store.createIf?.(RECORD({ id: FACTOR_A }), null) as Promise<unknown>,
+			() => store.removeIf?.("user-1", FACTOR_A, generation("g")) as Promise<unknown>,
+			() => store.create(RECORD({ id: FACTOR_A })),
+			() => store.remove("user-1", FACTOR_A),
+			() => store.removeAllForSubject("user-1"),
+		];
+		for (const write of writes) {
+			const error = await write().then(
+				() => undefined,
+				(rejected: unknown) => rejected,
+			);
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toMatch(/past its deadline; the outcome is unknown/);
+			expect((error as Error).message).not.toMatch(/wrote nothing/);
+		}
 	});
 });
 

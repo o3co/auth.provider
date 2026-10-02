@@ -71,7 +71,9 @@ export interface MfaFactorSetWriteInput {
 	 * timeout. A write that reaches the server when its clock (`TIME`) is past
 	 * this answers `late` and writes nothing, however it got there late: queued
 	 * while the connection was down, sent again after a reconnect, or held by
-	 * a stalled server.
+	 * a stalled server. `late` says only that this copy wrote nothing: an
+	 * earlier copy, once its replay key has gone, may have committed, so the
+	 * adapter rejects it with the outcome unknown.
 	 */
 	readonly deadlineMs: number;
 	/**

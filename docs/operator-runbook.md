@@ -663,7 +663,8 @@ and Redis's clocks agree within the declared skew. A late command, whether
 resent, queued or stalled, writes nothing. A Redis clock ahead of the
 replicas' by close to the second refuses factor-set writes that reach it
 late in their window, as an outage (`mfa_store_unavailable`), never a write
-past its lifetime.
+past its lifetime. Such a refusal leaves the write's outcome unknown, not
+undone: a copy resent after an earlier one committed is refused the same way.
 
 A credential change, or any other call to `revokeAllForSubject`, sets a boundary
 for the subject when a subject revocation store is installed and the write

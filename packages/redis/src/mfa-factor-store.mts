@@ -69,8 +69,9 @@
  *   `listVersioned` gives it one (rule 8).
  * - Each membership write carries a deadline set at issue, `Date.now()` plus
  *   {@link WRITE_TIMEOUT_MS}, which its script compares with the server's
- *   clock before it reads or writes anything: past it, nothing is written and
- *   the write rejects. The wait ends at the same timeout. So the write
+ *   clock before it reads or writes anything: past it, that copy writes
+ *   nothing and the write rejects with its outcome unknown, since an earlier
+ *   copy may have committed. The wait ends at the same timeout. So the write
  *   lifetime W is {@link REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS} (rule 6).
  *   Half 2 of the bound holds while the app's and Redis's clocks agree within
  *   the declared skew. A late command, whether resent, queued or stalled,
@@ -282,10 +283,15 @@ export const REDIS_MFA_FACTOR_STORE_WRITE_LIFETIME_MS = WRITE_TIMEOUT_MS + CLOCK
 /** The field of a subject's hash that holds its set's generation; no factor's field is it. */
 const GENERATION_FIELD = "~g";
 
-/** What a membership write the server took past its deadline is answered with. Nothing was written. */
+/**
+ * What a membership write its script answers `late` is answered with: its outcome is unknown,
+ * never that nothing was written. The copy the server judged late wrote nothing, but it may be
+ * a copy the driver sent again after an earlier one committed, once that write's replay key
+ * had gone.
+ */
 const late = (operation: string): Error =>
 	new Error(
-		`MfaFactorStore (redis): ${operation} reached the server past its deadline and wrote nothing`,
+		`MfaFactorStore (redis): ${operation} was answered past its deadline; the outcome is unknown: an earlier copy may have committed`,
 	);
 
 /** What a membership write unanswered within the write timeout is answered with: its outcome is unknown. */

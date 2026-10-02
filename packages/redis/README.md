@@ -831,10 +831,11 @@ of core's conditional-write convention
 - **The deadline.** Each membership write carries a deadline the adapter sets
   at issue, on the app's clock: `Date.now()` plus the write timeout, 1 000 ms.
   The script compares it with the server's clock (`TIME`) before it reads or
-  writes anything; past it, the script writes nothing and answers a refusal,
+  writes anything; past it, the script writes nothing and answers `late`,
   which the adapter rejects as an outage. The adapter waits for the answer no
-  longer than the write timeout; a rejection then means the outcome is
-  unknown, never that nothing was written. The deadline stays inside the
+  longer than the write timeout. Either rejection, `late` or the wait ending,
+  means the outcome is unknown, never that nothing was written: a `late`
+  copy wrote nothing, but an earlier copy may have committed (below). The deadline stays inside the
   adapter: nothing crosses the port.
 - **A copy sent again.** ioredis sends again a command whose reply a dropped
   connection lost, and the first copy may have run. Each membership write
@@ -845,7 +846,8 @@ of core's conditional-write convention
   writes a generation back over a later one nor answers `conflict` for a
   write that landed, even when another server, whose clock may lag by the
   skew, judges the copy after a failover or a slot migration; one that
-  reaches it later is `late`. A `volatile-*` policy may evict a replay key
+  reaches it later is `late`, though the first copy may have committed. A
+  `volatile-*` policy may evict a replay key
   early; the module's warning names it.
 - **A full server.** Under `noeviction`, Redis refuses a script that does
   not declare `allow-oom` once `maxmemory` is reached. The removals
@@ -1076,7 +1078,8 @@ and the per-port `*-parity.test.mts` tests fail when a copy differs from its
 core original anywhere below its imports, and when no Redis test runs it.
 `MfaFactorStore`'s suite is not copied: it is the test kit's published
 `mfaFactorStoreContract` and `mfaFactorStoreConditionalContract`
-(`@o3co/auth-provider-test-kit`, a devDependency), which
+(`@o3co/auth-provider-test-kit`, a devDependency; the latter runs the generic
+conditional-set suite and the factor set's own cases), which
 [`mfa-factor-store.test.mts`](__tests__/mfa-factor-store.test.mts) runs over
 two connections, with a tombstone's expiry brought forward by `PEXPIRE`.
 Which ports have a suite, and the one Redis adapter the suites do not run
