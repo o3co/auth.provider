@@ -76,6 +76,27 @@ describe("the device grant's device_verification budget", () => {
 		});
 	});
 
+	it("reads a string only as decimal digits", async () => {
+		expect(
+			await verificationBudget({ rateLimit: { limit: " 5 ", windowSeconds: " 300 " } }),
+		).toEqual({ limit: 5, windowSeconds: 300 });
+		for (const [limit, windowSeconds] of [
+			["0x10", 300],
+			["1e1", 300],
+			["5.0", 300],
+			["+5", 300],
+			[5, "0x12c"],
+			[5, "3e2"],
+			[5, "300.0"],
+			[5, "+300"],
+		]) {
+			await expect(
+				verificationBudget({ rateLimit: { limit, windowSeconds } }),
+				`limit=${JSON.stringify(limit)} windowSeconds=${JSON.stringify(windowSeconds)}`,
+			).rejects.toThrow(/^device-grant\.rateLimit must be/);
+		}
+	});
+
 	it("refuses a budget that is given but unusable, naming the key", async () => {
 		for (const [limit, windowSeconds] of [
 			[0, 300],
