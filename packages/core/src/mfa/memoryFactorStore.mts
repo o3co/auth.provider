@@ -20,8 +20,8 @@
  * reads as having nothing enrolled; the enrollment witness catches that loss.
  *
  * Each operation is one synchronous `Map` step, so atomic: no `await` falls
- * between a check and its write, and the unconditional writes are serialised
- * with the conditional ones. So its write lifetime W (docs/adapter-surface.md,
+ * between a check and its write, and the reset is serialised with the
+ * conditional writes. So its write lifetime W (docs/adapter-surface.md,
  * "Conditional writes", rule 6) is 0. Records are copied in and out: changing
  * a returned or written record changes nothing kept here.
  *
@@ -182,13 +182,6 @@ export function createMemoryMfaFactorStore(
 			return { outcome: "removed", generation };
 		},
 
-		async create(record: MfaFactorRecord): Promise<void> {
-			if (live(record.subject)?.records.has(record.id) === true) {
-				throw new Error("an MFA factor record with this id already exists for the subject");
-			}
-			written(record.subject, (records) => records.set(record.id, copyOf(record)));
-		},
-
 		async update(
 			subject: string,
 			id: string,
@@ -210,12 +203,6 @@ export function createMemoryMfaFactorStore(
 			});
 			records.set(id, updated);
 			return copyOf(updated);
-		},
-
-		async remove(subject: string, id: string): Promise<void> {
-			if (live(subject)?.records.has(id) === true) {
-				written(subject, (records) => records.delete(id));
-			}
 		},
 
 		async removeAllForSubject(subject: string): Promise<void> {

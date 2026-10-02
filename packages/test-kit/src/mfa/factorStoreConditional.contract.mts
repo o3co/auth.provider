@@ -25,9 +25,8 @@
  * both. It maps the store onto `conditionalSetContract`'s target and runs
  * that suite, so the factor set is held to every rule of a set the suite
  * holds: a subject is the scope, a record the item, `removeAllForSubject`
- * the reset, `update` the member's own update, `removeAllForSubject` and,
- * when the store provides them, the port's optional `create` and `remove`
- * the unconditional membership writes. Every versioned listing is read with
+ * the reset, `update` the member's own update, `removeAllForSubject` the
+ * unconditional membership write. Every versioned listing is read with
  * `readMfaFactorSet`, so a record that is not a whole record of its subject,
  * or an id listed twice, fails the case that read it.
  * The unreachable store is mapped bare: each member is the port's call
@@ -35,7 +34,7 @@
  * resolves, whatever it is, fails the case. `second`, `forceExpire`,
  * `unreachable` and `close` pass through, bound to the harness, and the
  * harness's `supports` is the suite's; the port has `list`, `update` and
- * its unconditional writes, so their cases always run.
+ * its unconditional reset, so their cases always run.
  *
  * Beside the suite, the factor set's own cases: an update keeps the
  * generation and a write at it lands, and a tombstone refuses a late first
@@ -181,8 +180,6 @@ function memberOf<K extends SetMember>(
  * unchecked, so only the store's own rejection passes the outage case.
  */
 function targetOf(store: MfaFactorStore, bare = false): ConditionalSetTarget<MfaFactorRecord> {
-	const create = store.create?.bind(store);
-	const remove = store.remove?.bind(store);
 	return {
 		listVersioned: async (subject) => {
 			const answer = await memberOf(store, "listVersioned", bare)(subject);
@@ -203,10 +200,6 @@ function targetOf(store: MfaFactorStore, bare = false): ConditionalSetTarget<Mfa
 			if (!bare) assert.ok(updated !== null, "the update did not land");
 		},
 		unconditional: {
-			...(create === undefined ? {} : { create }),
-			...(remove === undefined
-				? {}
-				: { remove: (record: MfaFactorRecord) => remove(record.subject, record.id) }),
 			removeAllForSubject: (record) => store.removeAllForSubject(record.subject),
 		},
 	};
@@ -328,35 +321,6 @@ export function mfaFactorStoreConditionalContract(
 				await two.createIf(RECORD(FACTOR_B, "user-1"), generation),
 				"a create after the update",
 			);
-		}),
-
-		test("where the store still provides create and remove: create refuses a held id and keeps the record and the generation; remove is idempotent and moves the generation only when it removes", async (one, two) => {
-			const legacyCreate = one.store.create?.bind(one.store);
-			const legacyRemove = two.store.remove?.bind(two.store);
-			if (legacyCreate === undefined || legacyRemove === undefined) return;
-			const held = RECORD(FACTOR_A, "user-1");
-			const generation = await seed(one, "user-1", [held]);
-			await assert.rejects(
-				legacyCreate(RECORD(FACTOR_A, "user-1", { label: "Another" })),
-				"create took an id the set already holds",
-			);
-			assert.deepStrictEqual(
-				await two.read("user-1"),
-				{ generation, items: [held] },
-				"a refused create changed the set",
-			);
-			await legacyRemove("user-1", FACTOR_B);
-			assert.equal(
-				(await one.read("user-1")).generation,
-				generation,
-				"removing an id never held moved the generation",
-			);
-			await legacyRemove("user-1", FACTOR_A);
-			const after = await two.read("user-1");
-			assert.deepStrictEqual(after.items, [], "remove left the record");
-			assert.notEqual(after.generation, generation, "a removal that removed kept the generation");
-			await legacyRemove("user-1", FACTOR_A);
-			assert.deepStrictEqual(await one.read("user-1"), after, "a repeated remove changed the set");
 		}),
 
 		test("a tombstone stands: a late first binding and a late write at a generation read before the reset are refused, and write nothing", async (one, two) => {

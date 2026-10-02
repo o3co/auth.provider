@@ -411,7 +411,6 @@
 . MfaSessionBinding type
 . MfaStoreCreateIfAnswer type
 . MfaStoreCreateIfRequest type
-. MfaStoreCreateRequest type
 . MfaStoreDeleteRequest type
 . MfaStoreFactor type
 . MfaStoreFactorBinding type

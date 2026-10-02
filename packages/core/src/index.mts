@@ -659,7 +659,6 @@ export {
 	fromMfaStoreFactor,
 	type MfaStoreCreateIfAnswer,
 	type MfaStoreCreateIfRequest,
-	type MfaStoreCreateRequest,
 	type MfaStoreDeleteRequest,
 	type MfaStoreFactor,
 	type MfaStoreFactorBinding,
