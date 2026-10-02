@@ -109,8 +109,9 @@ vi.mock("ioredis", () => {
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
-/** A single-replica deployment with every shared store on memory, grants off. */
+/** A single-replica deployment with every shared store on memory, grants off, MFA off. */
 const BASE_ENV: Readonly<Record<string, string>> = {
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: "federation-grants-composition.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",

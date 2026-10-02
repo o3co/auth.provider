@@ -483,6 +483,7 @@ const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
 	OAUTH_GRANTS_SESSION_ENABLED: "true",
 	OAUTH_SESSION_ENABLED: "true",
+	MFA_MODE: "off",
 };
 
 /** The template's own files for `configEnv`, under `operatorLayer` — HOCON an operator adds above them — when given. */

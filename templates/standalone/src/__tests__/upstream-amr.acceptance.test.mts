@@ -73,6 +73,8 @@ const MFA_ACR = "urn:example:mfa";
 const FED_ACR = "urn:example:fed";
 
 const ENV: Readonly<Record<string, string>> = {
+	// This provider verifies no second factor of its own here: only upstream's.
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: "upstream-amr.acceptance.at-least-32-bytes",
 	OAUTH_JWT_ISSUER: ISSUER,

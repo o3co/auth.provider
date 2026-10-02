@@ -85,6 +85,8 @@ const GOOGLE_CLIENT_SECRET = "google-secret";
 const GOOGLE_CALLBACK = `${ISSUER}/session/oauth/federation/google/callback`;
 
 const ENV: Readonly<Record<string, string>> = {
+	// A session signed in through Google alone, no second factor.
+	MFA_MODE: "off",
 	KEY_STORE_LOCAL_ALGORITHM: "HS256",
 	KEY_STORE_LOCAL_SECRET: JWT_SECRET,
 	OAUTH_JWT_ISSUER: ISSUER,
