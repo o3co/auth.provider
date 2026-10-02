@@ -220,3 +220,44 @@ describe("device-code grant — what the policy is asked", () => {
 		expect((await poll()).result).toMatchObject({ status: 500, error: "server_error" });
 	});
 });
+
+describe("device-code grant — the minting instant", () => {
+	it("is taken after the policy answers, so a slow policy cannot shorten the token's life", async () => {
+		const store = createMemoryDeviceCodeStore();
+		await store.create({
+			deviceCode: "device-code-1",
+			userCode: "BCDFGHJK",
+			clientId: client.clientId,
+			requestedScope: ["openid"],
+			expiresAtMs: NOW + 600_000,
+			intervalSeconds: 5,
+		});
+		await store.approve({ userCode: "BCDFGHJK", subject: "user-1", nowMs: NOW });
+		let clock = NOW + 10_000;
+		const answered = clock + 600_000;
+		const grant = createDeviceCodeGrant({
+			store,
+			keyStore: createSymmetricKeyStore("device-policy-test-secret-32-bytes!"),
+			accessTokenExpiresIn: 300,
+			now: () => clock,
+			grantPolicy: {
+				kind: "slow",
+				evaluate: async () => {
+					clock = answered;
+					return { outcome: "allow" };
+				},
+			},
+		});
+		const token = minted(
+			await grant.handle({
+				body: { device_code: "device-code-1" },
+				session: {},
+				metadata: {},
+				issuer: ISSUER,
+				authenticatedClient: client,
+			} as GrantContext),
+		);
+		expect(token.iat).toBe(answered / 1000);
+		expect(token.exp).toBe(answered / 1000 + 300);
+	});
+});

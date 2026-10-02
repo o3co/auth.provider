@@ -42,10 +42,11 @@
  *   `temporarily_unavailable`.
  * - A throwing `poll` is a store outage, answered 503
  *   `temporarily_unavailable` — none of the four codes is true of it.
- * - A wired `grantPolicy` is consulted last, on the checked approval, through
- *   core's `evaluateGrantPolicy`: deny is 400 with the policy's error, a throw
- *   is 503, a scope or audience past the approval or `allowedAudiences` is
- *   500. It may only narrow; its audience, within `allowedAudiences`, is `aud`.
+ * - A wired `grantPolicy` is consulted on the checked approval, before the
+ *   minting instant is taken, through core's `evaluateGrantPolicy`: deny is
+ *   400 with the policy's error, a throw is 503, a scope or audience past the
+ *   approval or `allowedAudiences` is 500. It may only narrow; its audience,
+ *   within `allowedAudiences`, is `aud`.
  * - The token carries the approval's recorded `amr` (`wellFormedAmr`) and its
  *   `authTimeMs` as `auth_time`, read against the minting clock with
  *   `authTimeAt`; the same instant is its `iat`. Neither recorded, neither is
@@ -293,6 +294,31 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 				}
 			}
 
+			// See the file header. The approval is the ceiling, and the policy is
+			// handed a copy of it. Ahead of the minting instant, so a slow policy
+			// cannot mint a token already expired.
+			let scope: readonly string[] = authorization.grantedScope ?? [];
+			let policyAudience: string | null = null;
+			if (options.grantPolicy !== undefined) {
+				const policy = await evaluateGrantPolicy(
+					options.grantPolicy,
+					{
+						grantType: DEVICE_CODE_GRANT_TYPE,
+						clientId: client.clientId,
+						subject: authorization.subject,
+						requestedScope: scope.length > 0 ? [...scope] : undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
+					scope,
+					{ logger: policyLogger },
+				);
+				if (!policy.ok) return policyRefusal(policy.result);
+				scope = policy.scopes;
+				const bounded = boundPolicyAudience(policy.decision, client.allowedAudiences ?? []);
+				if (!bounded.ok) return { result: bounded.result };
+				policyAudience = bounded.audience;
+			}
+
 			// One minting instant: `auth_time` is read against it and stamped as
 			// `iat`, so `auth_time` is never after `iat` — see the file header.
 			const mintingNow = now();
@@ -320,29 +346,6 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			}
 			const amr = readOr(() => wellFormedAmr(authorization.amr), undefined);
 
-			// See the file header. The approval is the ceiling, and the policy is
-			// handed a copy of it.
-			let scope: readonly string[] = authorization.grantedScope ?? [];
-			let policyAudience: string | null = null;
-			if (options.grantPolicy !== undefined) {
-				const policy = await evaluateGrantPolicy(
-					options.grantPolicy,
-					{
-						grantType: DEVICE_CODE_GRANT_TYPE,
-						clientId: client.clientId,
-						subject: authorization.subject,
-						requestedScope: scope.length > 0 ? [...scope] : undefined,
-					},
-					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
-					scope,
-					{ logger: policyLogger },
-				);
-				if (!policy.ok) return policyRefusal(policy.result);
-				scope = policy.scopes;
-				const bounded = boundPolicyAudience(policy.decision, client.allowedAudiences ?? []);
-				if (!bounded.ok) return { result: bounded.result };
-				policyAudience = bounded.audience;
-			}
 			// The policy's audience, else the rule the session and
 			// authorization-code grants use: the client's configured resource
 			// audience, falling back to the client id. Never null — an
