@@ -53,13 +53,16 @@
  * outlives the record it names. The store assumes acknowledged writes are not
  * rolled back (persistence, plus a failover setup that keeps acknowledged
  * writes); a deployment that accepts acknowledged-write loss on failover also
- * accepts that a conditional write may see a restored, older generation.
+ * accepts that a conditional write may see a restored, older generation. It
+ * also assumes `noeviction`: an evicted replay key lets a resent `attach`
+ * write again, which the module's boot check warns about.
  */
 
 import {
 	type AdapterBuilder,
 	checkDeploymentMode,
 	coerceBooleanFromEnv,
+	consoleLogger,
 	type DeploymentMode,
 	decodeSealingKey,
 	defineModule,
@@ -83,6 +86,7 @@ import {
 	validateEncryptionMode,
 } from "./internal/encryption-mode.mjs";
 
+import { checkFederationTokenEviction } from "./internal/federation-token-eviction.mjs";
 import { createRedisLock } from "./internal/lock.mjs";
 import { createRedisSidSet } from "./internal/redisSidSet.mjs";
 import { replayKeyOf } from "./internal/replay-key.mjs";
@@ -645,7 +649,8 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 	// `compareAndDelete` releases the advisory lock and removes an unreadable
 	// record; `unlink`, the three SET primitives and `pExpireGT` serve the
 	// per-session index; `attachRecord` writes a record; the three scripts
-	// after it are the conditional members.
+	// after it are the conditional members; `durability` serves the module's
+	// boot check.
 	// Checked here so a custom client
 	// missing one fails at build time, not with a `TypeError` at first logout,
 	// the path that must remove a logged-out session's upstream tokens.
@@ -664,6 +669,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		"replaceIfGeneration",
 		"removeIfGeneration",
 		"pExpireGT",
+		"durability",
 	] as const;
 	const missing = requiredMethods.filter((m) => typeof clientObj[m] !== "function");
 	if (missing.length > 0) {
@@ -762,6 +768,11 @@ export interface RedisFederationTokenStoreModuleOptions {
  * environment off `options`, since only the
  * composition root knows how it chose its config file. Its notice goes to the
  * optional `logger` slot (`consoleLogger` when empty).
+ *
+ * Once the store is built, the module reads the server's eviction policy
+ * once and writes there too: a warning for any policy but `noeviction`, under
+ * which a resent write's replay key may be evicted, or an info line when the
+ * policy could not be read. Neither stops the boot.
  */
 export function redisFederationTokenStoreModuleFor(
 	options: RedisFederationTokenStoreModuleOptions = {},
@@ -783,7 +794,7 @@ export function redisFederationTokenStoreModuleFor(
 		provides: {
 			federationTokenStore: (deps) => {
 				const cfg = deps.section;
-				return redisFederationTokenStoreBuilder(
+				const built = redisFederationTokenStoreBuilder(
 					{
 						client: deps.federationTokenStoreClient,
 						encryption: { mode: cfg.encryptionMode, key: cfg.encryptionKey },
@@ -798,6 +809,15 @@ export function redisFederationTokenStoreModuleFor(
 					},
 					deps.logger !== undefined ? { logger: deps.logger } : {},
 				);
+				// Built first, so a setting it refuses throws before the server is asked.
+				return (async () => {
+					const store = await built;
+					await checkFederationTokenEviction(
+						() => deps.federationTokenStoreClient.durability(),
+						deps.logger ?? consoleLogger,
+					);
+					return store;
+				})();
 			},
 		},
 	});

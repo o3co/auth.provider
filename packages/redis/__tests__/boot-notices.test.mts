@@ -69,6 +69,12 @@ const tokenClient = {
 	replaceIfGeneration: async () => "missing" as const,
 	removeIfGeneration: async () => "missing" as const,
 	pExpireGT: async () => {},
+	durability: async () => ({
+		maxmemoryPolicy: "noeviction",
+		appendOnly: true,
+		snapshots: undefined,
+		refusal: undefined,
+	}),
 } as unknown as FederationTokenStoreClient;
 
 const grantClient = {} as FederationGrantStoreClient;
@@ -229,6 +235,83 @@ describe("the plaintext guard's notices", () => {
 			[{ store: "federation-tokens", mode: "allow-plaintext" }, "federation_store_plaintext"],
 		]);
 		expect(error).not.toHaveBeenCalled();
+	});
+});
+
+describe("the token store module's eviction-policy notice", () => {
+	const SEALED_CONFIG = {
+		"redis-federation-token-store": {
+			encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+		},
+	};
+
+	/** Provides the store through the module, its client's server answering `durability`. */
+	const provideOver = async (durability: FederationTokenStoreClient["durability"]) => {
+		const { logger, calls } = recordingLogger();
+		const module = redisFederationTokenStoreModuleFor();
+		const provide = module.provides?.federationTokenStore as (deps: unknown) => unknown;
+		const store = (await provide(
+			withSection(module, {
+				federationTokenStoreClient: { ...tokenClient, durability },
+				config: SEALED_CONFIG,
+				deploymentMode: "multi",
+				logger,
+			}),
+		)) as { kind: string };
+		return { store, calls };
+	};
+
+	const report = (maxmemoryPolicy: string | undefined, refusal?: unknown) => async () => ({
+		maxmemoryPolicy,
+		appendOnly: true,
+		snapshots: undefined,
+		refusal,
+	});
+
+	it("says nothing on a noeviction server", async () => {
+		const { store, calls } = await provideOver(report("noeviction"));
+		expect(store.kind).toBe("redis");
+		expect(calls).toEqual([]);
+	});
+
+	it.each(["volatile-lru", "allkeys-lru", "volatile-ttl"])(
+		"warns once, object-first, on a server whose policy is %s, and boots",
+		async (policy) => {
+			const { store, calls } = await provideOver(report(policy));
+			expect(store.kind).toBe("redis");
+			expect(calls).toEqual([
+				{
+					level: "warn",
+					args: [
+						{ store: "federation-tokens", adapter: "redis", maxmemoryPolicy: policy },
+						"federation_token_store_evictable",
+					],
+				},
+			]);
+		},
+	);
+
+	it("says once, at info, that it could not read the policy where the server refuses the question, and boots", async () => {
+		const refusal = Object.assign(new Error("ERR unknown command 'CONFIG'"), {
+			name: "ReplyError",
+		});
+		const { store, calls } = await provideOver(report(undefined, refusal));
+		expect(store.kind).toBe("redis");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.level).toBe("info");
+		expect(calls[0]?.args[0]).toMatchObject({ store: "federation-tokens", adapter: "redis" });
+		expect(calls[0]?.args[0]).toHaveProperty("err");
+		expect(calls[0]?.args[1]).toBe("federation_token_store_eviction_unchecked");
+	});
+
+	it("says the same where the server cannot answer at boot, and boots", async () => {
+		const { store, calls } = await provideOver(async () => {
+			throw new Error("connect ECONNREFUSED");
+		});
+		expect(store.kind).toBe("redis");
+		expect(calls.map((call) => [call.level, call.args[1]])).toEqual([
+			["info", "federation_token_store_eviction_unchecked"],
+		]);
 	});
 });
 

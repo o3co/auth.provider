@@ -203,6 +203,12 @@ function createFakeRedis() {
 			const held = ttls.get(key);
 			if (held !== undefined && held < ttlMs) ttls.set(key, ttlMs);
 		}),
+		durability: async () => ({
+			maxmemoryPolicy: "noeviction",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		}),
 	} satisfies FederationTokenStoreClient & {
 		data: Map<string, string>;
 		sets: Map<string, Set<string>>;
@@ -1387,6 +1393,12 @@ describe("redis FederationTokenStore conditional members", () => {
 		await resend(attachCommands);
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 		expect(await store.get("sid-1", "google")).toBeNull();
+		// The resent index add lands: the session's index is made again, naming
+		// a record that is gone, until the store TTL. A later logout unlinks the
+		// missing key and the index.
+		expect([...(redis.sets.get("ft:idx:sid-1") ?? [])]).toEqual(["google"]);
+		await store.removeBySid("sid-1");
+		expect(redis.sets.has("ft:idx:sid-1")).toBe(false);
 	});
 
 	it("rejects an attach answered late as an unknown outcome, never as written nothing", async () => {
@@ -1634,6 +1646,7 @@ describe("redis FederationTokenStore conditional members", () => {
 			"replaceIfGeneration",
 			"removeIfGeneration",
 			"pExpireGT",
+			"durability",
 		] as const) {
 			const { [missing]: _dropped, ...client } = createFakeRedis();
 			expect(() =>

@@ -201,6 +201,12 @@ const federationTokenRecorder = () => {
 		replaceIfGeneration: async () => "missing" as const,
 		removeIfGeneration: async () => "missing" as const,
 		pExpireGT: async () => {},
+		durability: async () => ({
+			maxmemoryPolicy: "noeviction",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		}),
 	};
 	return { px, indexTtls, client };
 };

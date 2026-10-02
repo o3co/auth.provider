@@ -120,6 +120,12 @@ describe("the Redis store hands each attach and conditional write a replay key o
 			replaceIfGeneration,
 			removeIfGeneration,
 			pExpireGT: async () => {},
+			durability: async () => ({
+				maxmemoryPolicy: "noeviction",
+				appendOnly: true,
+				snapshots: undefined,
+				refusal: undefined,
+			}),
 		} as unknown as FederationTokenStoreClient;
 		const store = createRedisFederationTokenStore({
 			deploymentMode: "unset",

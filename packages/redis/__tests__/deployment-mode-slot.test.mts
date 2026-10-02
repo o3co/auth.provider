@@ -48,6 +48,12 @@ const tokenClient = {
 	replaceIfGeneration: async () => "missing" as const,
 	removeIfGeneration: async () => "missing" as const,
 	pExpireGT: async () => {},
+	durability: async () => ({
+		maxmemoryPolicy: "noeviction",
+		appendOnly: true,
+		snapshots: undefined,
+		refusal: undefined,
+	}),
 } as unknown as FederationTokenStoreClient;
 
 const grantClient = {} as FederationGrantStoreClient;
@@ -170,14 +176,14 @@ describe.each(STORES)("the $label store's module reads the deploymentMode slot",
 
 	it.each(["single", "unset"] as const)(
 		"allows plaintext with the warning when the slot says %s, whatever the configuration's deployment says",
-		(deploymentMode: DeploymentMode) => {
+		async (deploymentMode: DeploymentMode) => {
 			const { logger, warn } = recordingLogger();
-			const built = provide(store.module, store.provided, {
+			const built = (await provide(store.module, store.provided, {
 				...store.client,
 				config: { ...store.plaintext, core: { deployment: { mode: "multi" } } },
 				deploymentMode,
 				logger,
-			}) as { kind: string };
+			})) as { kind: string };
 			expect(built.kind).toBe("redis");
 			expect(warn).toHaveBeenCalledWith(
 				{ store: store.label, mode: "allow-plaintext" },

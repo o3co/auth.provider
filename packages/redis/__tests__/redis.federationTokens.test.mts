@@ -814,9 +814,10 @@ describe("conditional writes on a full noeviction server of its own", () => {
 	it("serves a versioned read of a record written without a generation, minting one, and removes it, where an attach is refused", async () => {
 		if (io === undefined) throw new Error("the container did not start");
 		const admin = io;
+		const client = makeIoredisClients(admin).federationTokenStoreClient;
 		const store = createRedisFederationTokenStore({
 			deploymentMode: "unset",
-			client: makeIoredisClients(admin).federationTokenStoreClient,
+			client,
 			encryption: { mode: "required", key: encryptionKey },
 			keyPrefix: "full:",
 			scanFallback: false,
@@ -832,8 +833,21 @@ describe("conditional writes on a full noeviction server of its own", () => {
 		await admin.config("SET", "maxmemory-policy", "noeviction");
 		await admin.config("SET", "maxmemory", "1");
 		try {
-			await expect(store.attach("sid-2", "google", tokens)).rejects.toThrow();
-			expect(await admin.exists("full:sid-2:google")).toBe(0);
+			// The attach's own script, past the index's MULTI that a full server
+			// refuses first: it is refused too, and keeps no answer.
+			const replayKey = "full:w:{full:sid-2:google}:oom";
+			await expect(
+				client.attachRecord("full:sid-2:google", {
+					value: '{"v":2,"g":"oom","c":"x"}',
+					ttlMs: 60_000,
+					deadlineMs: (await serverClock(() => admin)()) + 30_000,
+					replayKey,
+					clockSkewMs: CLOCK_SKEW_MS,
+				}),
+			).rejects.toThrow(/OOM/);
+			expect(await admin.exists("full:sid-2:google", replayKey)).toBe(0);
+			// Through the store, the index's MULTI is refused first.
+			await expect(store.attach("sid-2", "google", tokens)).rejects.toThrow(/EXECABORT/);
 			const read = await store.getVersioned("sid-1", "google");
 			if (read === null) throw new Error("not live");
 			expect(read.value).toEqual(tokens);

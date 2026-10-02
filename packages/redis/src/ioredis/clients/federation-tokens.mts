@@ -24,6 +24,7 @@
 import type { Redis } from "ioredis";
 import type { FederationTokenStoreClient } from "../../clients.mjs";
 import { assertPipelineSucceeded, runScript } from "../commands.mjs";
+import { redisDurability } from "../durability.mjs";
 import {
 	FT_ATTACH,
 	FT_READ_VERSIONED,
@@ -148,6 +149,7 @@ export function makeIoredisFederationTokenStoreClient(io: Redis): FederationToke
 		pExpireGT: async (key, ttlMs) => {
 			await io.pexpire(key, ttlMs, "GT");
 		},
+		durability: () => redisDurability(io),
 	};
 	return federationTokenStoreClient;
 }

@@ -19,6 +19,8 @@
  * index that finds them, and the atomic release of the store's advisory lock.
  */
 
+import type { RedisDurability } from "./mfa.mjs";
+
 /** What `attachRecord` writes, the deadline at or after which it writes nothing, and where it keeps its answer. */
 export interface FederationTokenAttachInput {
 	/** The new stored value, carrying its new generation. */
@@ -188,4 +190,10 @@ export interface FederationTokenStoreClient {
 	 * member.
 	 */
 	pExpireGT(key: string, ttlMs: number): Promise<void>;
+	/**
+	 * What the server says about keeping what it is written, read once at boot
+	 * by the store's module for its eviction policy: a policy that may evict a
+	 * replay key lets a resent write apply again.
+	 */
+	durability(): Promise<RedisDurability>;
 }

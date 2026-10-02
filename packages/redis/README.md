@@ -672,7 +672,11 @@ conditional-write convention for a record
   by the skew. `attach` overwrites whatever the record holds, so without
   this a resent copy would put an older record and its generation back over
   a later write.
-- **The index.** A conditional write never removes an index member, and
+- **The index.** A copy of `attach` the driver resends after a logout
+  writes no record, but its index add (one MULTI before the script) lands
+  again: the session's `idx:` set is made again, naming a record that is
+  gone, until the store TTL. That is harmless: a later `removeBySid` unlinks
+  the missing key and the set. A conditional write never removes an index member, and
   `missing` and `conflict` never add one. `replaceIf` raises the index's TTL
   before its script (`pExpireGT`, which adds no member and makes no key), and
   after `updated` re-adds the member with `sAddWithTtl`, so the index's
@@ -683,13 +687,28 @@ conditional-write convention for a record
   (persistence, plus a failover setup that keeps acknowledged writes). A
   deployment that accepts acknowledged-write loss on failover also accepts
   that a conditional write may see a restored, older generation.
+- **No eviction.** The replay guarantee assumes `maxmemory-policy
+  noeviction`. A replay key carries a TTL of about 2 s, so a `volatile-*` or
+  `allkeys-*` policy may evict it first, and a copy the driver resends within
+  W then writes again: an `attach` puts an older record back over a later
+  write, or a logged-out session's tokens back (`replaceIf` and `removeIf`
+  still meet their generation check). The module reads the policy once at
+  boot (`INFO memory`, then `CONFIG GET maxmemory-policy`) and logs
+  `federation_token_store_evictable` (warn, `store`, `adapter`,
+  `maxmemoryPolicy`) for any policy but `noeviction`, or
+  `federation_token_store_eviction_unchecked` (info, `store`, `adapter`,
+  `err` when the server refused the question or could not answer) when it
+  could not read it, as on a managed server that blocks both. Neither stops
+  the boot. A store built with `createRedisFederationTokenStore` or the
+  builder is not checked.
 
 A `FederationTokenStoreClient` of your own implements the five primitives
 `attach` and the conditional members use: `attachRecord`, `readVersioned`,
 `replaceIfGeneration`, `removeIfGeneration` (each one atomic step, all but
 `readVersioned` refusing at or after the deadline they are handed and
 keeping their answer under the replay key they are handed until the clock
-skew they are handed past it) and `pExpireGT`. The builder refuses a client
+skew they are handed past it) and `pExpireGT`; and `durability`, the
+server's report the module's boot check reads. The builder refuses a client
 without them. [`federation-tokens.conditional.test.mts`](__tests__/federation-tokens.conditional.test.mts)
 runs `federationTokenStoreConditionalContract` (`@o3co/auth-provider-test-kit`)
 over the store on two connections.

@@ -84,6 +84,12 @@ function createFakeRedis() {
 		replaceIfGeneration: vi.fn(async () => "missing" as const),
 		removeIfGeneration: vi.fn(async () => "missing" as const),
 		pExpireGT: vi.fn(async (_key: string, _ttlMs: number) => {}),
+		durability: async () => ({
+			maxmemoryPolicy: "noeviction",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		}),
 	} satisfies FederationTokenStoreClient & {
 		data: Map<string, string>;
 		sets: Map<string, Set<string>>;
