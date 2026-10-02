@@ -23,7 +23,8 @@
  * The lifetime is read once, through core's reading at a floor of 0 with no
  * cap. Finite with `expiresIn` stated: `obtainedAt` is the instant before the
  * exchange and `expiresAt` the reading's end. Otherwise: the adapter's
- * `expiresAt` and `obtainedAt` undefined. A lifetime that cannot be read is a failed
+ * `expiresAt` and `obtainedAt` undefined. A lifetime that cannot be read, or an
+ * `expiresAt` that is neither absent, `null` nor an instant, is a failed
  * exchange (502).
  */
 
@@ -62,18 +63,23 @@ export interface FederatedIdentity {
  * reading's end, and `obtainedAt` = `calledAt`. Any other reading (an end
  * stated only as an instant, which is on the upstream's clock; none;
  * malformed; contradictory; spent): the adapter's `expiresAt` as stated,
- * `null` included, and `obtainedAt` undefined, which fails closed. Throws only
- * where reading the answer's fields throws.
+ * `null` included, and `obtainedAt` undefined, which fails closed. Throws where
+ * reading the answer's fields throws, and for an `expiresAt` that is neither
+ * absent, `null` nor an instant: no store keeps it as an end.
  */
 const readLinkedLifetime = (
 	profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>,
 	calledAt: number,
 ): LinkedTokenLifetime => {
 	const { expiresIn, expiresAt } = profile;
-	const reading = readUpstreamTokenLifetime(
-		{ expiresIn, expiresAt },
-		{ calledAt, now: Date.now(), floorMs: 0 },
-	);
+	const clock = { calledAt, now: Date.now(), floorMs: 0 };
+	const reading = readUpstreamTokenLifetime({ expiresIn, expiresAt }, clock);
+	// The end alone, through the same reading: `malformed` is an end that names no instant.
+	if (
+		readUpstreamTokenLifetime({ expiresIn: undefined, expiresAt }, clock).verdict === "malformed"
+	) {
+		throw new TypeError("the exchange answered an expiresAt that names no instant");
+	}
 	if (reading.verdict === "finite" && reading.stated !== "expiresAt") {
 		return { expiresAt: reading.expiresAt, obtainedAt: reading.obtainedAt };
 	}
