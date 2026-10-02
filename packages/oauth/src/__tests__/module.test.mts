@@ -442,7 +442,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 // advertises `jwks_uri`) by oauth, so an issuer-enabled composition MUST
 // co-install both or discovery publishes a dangling `jwks_uri`. The
 // advertised `jwks_uri` must resolve to a mounted JWKS route, including under
-// a `jwks.path` override (both resolve it via the shared `resolveJwksPath`).
+// a `jwks.path` override (the route and `jwks_uri` resolve the same path).
 // ---------------------------------------------------------------------------
 
 describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
