@@ -16,17 +16,20 @@
 
 /**
  * The template's MFA switch, the composition root's own key `mfaMode`
- * (`MFA_MODE`): reading it before the modules are chosen, the modules it
- * installs, and what it hands boot of the MFA module's section. Off installs
- * nothing of MFA and hands boot nothing of it; on installs the MFA package's
- * modules over the two MFA stores `adapters` selects.
+ * (`MFA_MODE`), `required` unless set otherwise: reading it before the
+ * modules are chosen, the modules it installs, and what it hands boot of the
+ * MFA module's section. Off installs nothing of MFA and hands boot nothing of
+ * it; on installs the MFA package's modules over the two MFA stores
+ * `adapters` selects.
  *
  * Refuses, each with a `RangeError` before boot that names the keys and
  * variables and quotes no value of a mode, a timeout or a key:
  * - a switch outside its three values, or a file's `mfaMode` that `MFA_MODE`
  *   contradicts (`readMfaSwitch`);
  * - an MFA store kept in memory with MFA on, unless every environment name
- *   it reads says development or test (`mfaModulesFor`);
+ *   it reads says development or test (`mfaModulesFor`) — the first refusal a
+ *   deployment that sets nothing about MFA meets outside development, so it
+ *   also names what MFA needs there and `MFA_MODE=off`;
  * - an `mfa.mode` the configuration writes that the switch does not say;
  *   `MFA_ENCRYPTION_KEY` set beside a ring that holds the development sample
  *   key in its place; and `mfa.storeTimeoutMs` below the user directory's
@@ -142,7 +145,7 @@ export function mfaModulesFor(options: {
 	const reasons = inMemory.length === 0 ? [] : memoryRefusals(environment);
 	if (reasons.length > 0) {
 		throw new RangeError(
-			`MFA is on and ${inMemory.join(" and ")} ${inMemory.length === 1 ? "is" : "are"} "memory", refused because ${reasons.join(" and ")}: a store in memory loses every factor, lock and recorded email proof at a restart, after which whoever holds a password can bind a factor of their own. Select "redis" (or, for the factors, "store"); memory is for development and test alone`,
+			`MFA is on (${MFA_SWITCH}, MFA_MODE, which installs it unless set to off) and ${inMemory.join(" and ")} ${inMemory.length === 1 ? "is" : "are"} "memory", refused because ${reasons.join(" and ")}: a store in memory loses every factor, lock and recorded email proof at a restart, after which whoever holds a password can bind a factor of their own. Select "redis" (or, for the factors, "store"); memory is for development and test alone. Outside development MFA also needs MFA_ENCRYPTION_KEY, the SMTP relay (STANDARD_SMTP_MAIL_SENDER_HOST and STANDARD_SMTP_MAIL_SENDER_FROM) or your own mail sender, and an MFA page served at MFA_PAGE_URL. A deployment that wants no MFA sets MFA_MODE=off`,
 		);
 	}
 	return [
@@ -198,8 +201,12 @@ export function mfaSectionForBoot(options: {
 	readonly env: Readonly<Record<string, string>>;
 }): unknown {
 	const { mode, written, resolved } = options;
-	const writtenMode =
-		written === undefined ? undefined : isPlainSection(written) ? written.mode : null;
+	if (written !== undefined && !isPlainSection(written)) {
+		throw new RangeError(
+			`mfa is written as a value in the configuration; it is the MFA package's section, and ${MFA_SWITCH} (MFA_MODE) decides whether the template installs MFA. Remove mfa, and set MFA_MODE or ${MFA_SWITCH}`,
+		);
+	}
+	const writtenMode = written === undefined ? undefined : written.mode;
 	if (writtenMode !== undefined && writtenMode !== mode) {
 		throw new RangeError(
 			`mfa.mode is written in the configuration and differs from ${MFA_SWITCH} (MFA_MODE), which decides whether the template installs MFA and writes mfa.mode from it. Set MFA_MODE or ${MFA_SWITCH}, and remove mfa.mode`,

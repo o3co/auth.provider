@@ -38,16 +38,9 @@
  *
  * Beside the suite, the factor set's own cases: an update keeps the
  * generation and a write at it lands, and a tombstone refuses a late first
- * binding as well as a late write read before the reset; the winner of each
- * race answers the generation the set is then read at. With
- * `supports.forceExpire`, a reset's tombstone expires, of a set written and
- * of one never written.
- *
- * STAND-IN: two of them stand in for what the generic suite does not check
- * yet. The race case goes once its races compare the winner's generation
- * with the set read after them; the reset's tombstone expiry case goes once
- * its expiry cases expire a set a reset emptied, not only one removals
- * emptied.
+ * binding as well as a late write read before the reset. With
+ * `supports.forceExpire`, a reset's tombstone expires across the two
+ * instances, of a set written and of one never written.
  *
  * The cases talk only to the port and read every answer with core's
  * readers, so a SQL-backed, a REST-backed and a bundled store run them
@@ -96,12 +89,6 @@ const FACTOR_X = factorId("set-x");
 
 /** The version every record is created at. */
 const SEEDED_VERSION = 1;
-
-/** How many rounds the race case runs. */
-const ROUNDS = 10;
-
-/** How many writers race in one batch of creates. */
-const WRITERS = 6;
 
 const RECORD = (
 	id: string,
@@ -246,16 +233,9 @@ function viewOf(store: MfaFactorStore): SetView {
 	};
 }
 
-/** The generation of a write that had to land. */
-function landed(
-	answer: { readonly outcome: string; readonly generation?: StoreGeneration },
-	what: string,
-): StoreGeneration {
-	assert.ok(
-		(answer.outcome === "created" || answer.outcome === "removed") &&
-			answer.generation !== undefined,
-		`${what} answered ${answer.outcome}`,
-	);
+/** The generation of a create that had to land. */
+function landed(answer: ConditionalCreateAnswer, what: string): StoreGeneration {
+	assert.ok(answer.outcome === "created", `${what} answered ${answer.outcome}`);
 	return answer.generation;
 }
 
@@ -340,74 +320,8 @@ export function mfaFactorStoreConditionalContract(
 			assert.deepStrictEqual(await one.read("user-1"), tombstone);
 		}),
 
-		test("the winner of a race answers the generation the set is then read at: two first bindings, two removals, many creates, a removal and a create, split across both instances", async (one, two) => {
-			const at = (i: number): SetView => (i % 2 === 0 ? one : two);
-			const winnerRead = async (
-				subject: string,
-				answers: readonly (ConditionalCreateAnswer | ConditionalSetRemoveAnswer)[],
-				where: string,
-			): Promise<void> => {
-				const won = answers.flatMap((answer) =>
-					answer.outcome === "created" || answer.outcome === "removed" ? [answer.generation] : [],
-				);
-				assert.equal(won.length, 1, `${where}: ${won.length} writes landed`);
-				assert.equal(
-					(await at(1).read(subject)).generation,
-					won[0],
-					`${where}: the set is at another generation than the winner answered`,
-				);
-			};
-			for (let i = 0; i < ROUNDS; i += 1) {
-				const first = `first-${i}`;
-				await winnerRead(
-					first,
-					await Promise.all([
-						at(i).createIf(RECORD(FACTOR_A, first), null),
-						at(i + 1).createIf(RECORD(FACTOR_B, first), null),
-					]),
-					`round ${i}, first bindings`,
-				);
-
-				const removals = `removals-${i}`;
-				const held = await seed(at(0), removals, [
-					RECORD(FACTOR_A, removals),
-					RECORD(FACTOR_B, removals),
-				]);
-				await winnerRead(
-					removals,
-					await Promise.all([
-						at(i).removeIf(removals, FACTOR_A, held),
-						at(i + 1).removeIf(removals, FACTOR_B, held),
-					]),
-					`round ${i}, removals`,
-				);
-
-				const creates = `creates-${i}`;
-				const before = await seed(at(0), creates, [RECORD(FACTOR_A, creates)]);
-				await winnerRead(
-					creates,
-					await Promise.all(
-						Array.from({ length: WRITERS }, (_, w) =>
-							at(i + w).createIf(RECORD(factorId(`writer-${w}`), creates), before),
-						),
-					),
-					`round ${i}, creates`,
-				);
-
-				const mixed = `mixed-${i}`;
-				const read = await seed(at(0), mixed, [RECORD(FACTOR_A, mixed)]);
-				const removal = () => at(i).removeIf(mixed, FACTOR_A, read);
-				const create = () => at(i + 1).createIf(RECORD(FACTOR_B, mixed), read);
-				await winnerRead(
-					mixed,
-					i % 2 === 0
-						? await Promise.all([removal(), create()])
-						: await Promise.all([create(), removal()]),
-					`round ${i}, a removal and a create`,
-				);
-			}
-		}),
-
+		// Kept beside the generic expiry case, which runs on one instance: an
+		// expired tombstone must read as absent through the other instance too.
 		input.supports?.forceExpire === true
 			? test("a reset's tombstone expires: a set reset, and a set never written reset, read as absent once the clock passes the deadline, and a re-create repeats neither tombstone's generation", async (one, two, harness) => {
 					const forceExpire = harness.forceExpire?.bind(harness);

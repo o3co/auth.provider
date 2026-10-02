@@ -54,6 +54,7 @@ const ENV = {
 	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_STORE_SECRET: "test-session-secret-rate-limiter-e2e.at-least-32-bytes.ok",
 	ADAPTERS_RATE_LIMITER: "redis",
+	MFA_MODE: "off",
 };
 
 /**

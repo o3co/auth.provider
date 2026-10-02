@@ -265,6 +265,7 @@ compose ファイル、secret としての鍵ファイル、それなしでは�
 
 ## 運用
 
+- [docs/upgrading-from-v0.16.0.md](docs/upgrading-from-v0.16.0.md) — v0.16.0 からのアップグレード: それ以降の破壊的変更すべてと各々への対処、Store 実装者のチェックリスト。
 - [docs/operator-runbook.md](docs/operator-runbook.md) — 運用: デプロイ形態と起動拒否、liveness と readiness、各依存先で fail-closed がどう見えるか、アラート対象のログ・監査イベント、Redis のキーファミリーとサイジング、鍵のローテーション、アップグレードとロールバック。
 - [docs/release-runbook.md](docs/release-runbook.md) — リリースの切り方。[docs/release-policy.md](docs/release-policy.md) — リリースと廃止された設定キーのラベル付け。
 - [docs/adapter-surface.md](docs/adapter-surface.md) — コンポジションルートが埋められる全コンポーネントスロットと、何がスロットになり得るかを決める境界。

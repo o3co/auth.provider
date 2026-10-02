@@ -164,7 +164,7 @@ describe("phase one reads each switch as the template's AppConfigSchema pre-pars
 		expect(SWITCHES.filter((path) => path.split(".")[0] === "mfa")).toEqual([]);
 		for (const [name, env] of Object.entries(ENVIRONMENTS)) {
 			expect(readSwitches(readOwnLayers(ownFiles("production"), { env })).mfaMode, name).toBe(
-				env.MFA_MODE ?? "off",
+				env.MFA_MODE ?? "required",
 			);
 		}
 	});

@@ -54,9 +54,12 @@ function ownFiles(hocon?: string): string[] {
 	return [file, envConfPath, applicationConfPath];
 }
 
+/** MFA, on by default, switched off: these are about the federations. */
+const MFA_OFF: Readonly<Record<string, string>> = { MFA_MODE: "off" };
+
 /** Phase one under `env` and an operator's `hocon`. */
 const switchesFrom = (env: Record<string, string> = {}, hocon?: string) =>
-	readSwitches(readOwnLayers(ownFiles(hocon), { env }));
+	readSwitches(readOwnLayers(ownFiles(hocon), { env: { ...MFA_OFF, ...env } }));
 
 /** What phase one refuses under `env`. */
 function refusal(env: Record<string, string>): Error {
@@ -191,6 +194,7 @@ describe("the map written at the top level", () => {
 	it("refuses boot, naming its paths under core.federations", async () => {
 		const own = readOwnLayers(ownFiles("federations.okta.enabled = false\n"), {
 			env: {
+				...MFA_OFF,
 				KEY_STORE_LOCAL_SECRET: "core-federations-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
 				SESSION_STORE_SECRET: "core-federations-session.at-least-32-bytes.ok",

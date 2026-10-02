@@ -98,13 +98,16 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(grants(config).authorizationCode?.enabled).toBe("false");
 	});
 
-	it("reads the MFA switch, mfaMode, as off where MFA_MODE is unset, and installs no MFA module until MFA_MODE does", () => {
-		// The template's reference.conf ships the switch off and binds MFA_MODE.
+	it("reads the MFA switch, mfaMode, as required where MFA_MODE is unset, and installs no MFA module under MFA_MODE=off", () => {
+		// The template's reference.conf ships the switch required and binds MFA_MODE.
 		const mfaNames = (config: Switches) =>
 			buildModules(config)
 				.map((m) => m.name)
 				.filter((name) => /mfa/i.test(name));
-		const off = buildResolvedConfig("development");
+		const shipped = buildResolvedConfig("development");
+		expect(shipped.mfaMode).toBe("required");
+		expect(mfaNames(shipped)).toContain("mfa");
+		const off = buildResolvedConfig("development", { MFA_MODE: "off" });
 		expect(off.mfaMode).toBe("off");
 		expect(mfaNames(off)).toEqual([]);
 		const optional = buildResolvedConfig("development", { MFA_MODE: "optional" });
@@ -213,6 +216,8 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 				// module declares itself replica-unsafe.
 				ADAPTERS_FEDERATION_TOKEN_STORE: "redis",
 				REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+				// The umbrella sets MFA off.
+				MFA_MODE: "off",
 			});
 			const modules = buildModules(config);
 			expect(modules.map((m) => m.name)).toContain("redis-access-token-denylist");

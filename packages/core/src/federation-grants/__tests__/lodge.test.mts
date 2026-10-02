@@ -187,11 +187,12 @@ describe("lodging a first-time intent", () => {
 		expect(intents.size).toBe(0);
 	});
 
-	it("reads the client's registration as a list or as nothing: a repository answering a string is not a substring match", async () => {
-		// A deployment's own `ClientRepository` validates nothing this code can
-		// see. Read with a bare `.includes`, a comma-joined string would let
-		// "okta-calendar-prod" permit "okta-calendar" — the rule the token
-		// route already applies, applied at lodging too.
+	it("reads the client's registration as a list or as nothing: a record carrying a string is not a substring match", async () => {
+		// Lodging is exported and takes the record from its caller, which need
+		// not have read it through the client-record boundary. Read with a bare
+		// `.includes`, a comma-joined string would let "okta-calendar-prod"
+		// permit "okta-calendar" — the rule the token route already applies,
+		// applied at lodging too.
 		const asString = (value: string) => value as unknown as readonly string[];
 		expect(
 			await lodgeFederationGrantIntent(
@@ -271,7 +272,7 @@ describe("lodging a first-time intent", () => {
 	});
 
 	it("refuses a registered redirect URI that registration itself would have refused", async () => {
-		// A repository that validates nothing can hand one back; the flow would
+		// A record handed to lodging directly can carry one; the flow would
 		// otherwise fail only at its end, after the grant was activated.
 		const client = { ...CLIENT, federationGrantRedirectUris: ["not a uri"] };
 		expect(

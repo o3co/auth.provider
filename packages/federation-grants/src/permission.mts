@@ -15,16 +15,17 @@
  */
 
 /**
- * `allowedFederationGrantConnections`, read defensively (the federation-grants
- * ADR, D9).
+ * `allowedFederationGrantConnections` of the authenticated client, read
+ * defensively (the federation-grants ADR, D9).
  *
- * `ClientRepository` is a port, and a deployment's own repository validates
- * nothing this package can see. One that answers a comma-joined string would
- * turn the permission check into a substring match, where
- * `"calendar,mail".includes("cal")` is `true`. So anything that is not an
- * array reads as an empty allowlist — what absence means: nothing is allowed
- * — and an array keeps only its strings. The reader is core's
- * `federationGrantAllowlist`, shared with lodging and the consent page.
+ * The token and status handlers are exported, and read `req.oauthClient` from
+ * whatever client authentication the composer mounts in front of them: that
+ * record need not have come through core's client-record boundary. One whose
+ * field is a comma-joined string would turn the permission check into a
+ * substring match, where `"calendar,mail".includes("cal")` is `true`. So
+ * anything that is not an array reads as an empty allowlist — what absence
+ * means: nothing is allowed — and an array keeps only its strings. The reader
+ * is core's `federationGrantAllowlist`.
  */
 
 import { federationGrantAllowlist } from "@o3co/auth-provider-core";

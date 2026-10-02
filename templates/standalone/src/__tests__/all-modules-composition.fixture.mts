@@ -93,9 +93,11 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
  * One replica, every store in memory, every feature the template can switch
  * on switched on: the four token grants, the consent step with Client ID
  * Metadata Documents, federation grants, the Google federation and the
- * shipped generic OIDC one.
+ * shipped generic OIDC one. MFA, on by default, is switched off: the suites
+ * about MFA turn it on with `MFA_MODE`.
  */
 export const SINGLE_ENV: Readonly<Record<string, string>> = {
+	MFA_MODE: "off",
 	OAUTH_JWT_ISSUER: ISSUER,
 	// The shipped default algorithm (EdDSA), with the key pair inline.
 	KEY_STORE_LOCAL_PRIVATE_KEY: signingKey.privateKey,

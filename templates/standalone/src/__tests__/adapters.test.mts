@@ -53,6 +53,9 @@ function ownFiles(hocon?: string): string[] {
 	return [file, envConfPath, applicationConfPath];
 }
 
+/** MFA, on by default, switched off where modules are built: these are about the other adapters. */
+const MFA_OFF: Readonly<Record<string, string>> = { MFA_MODE: "off" };
+
 /** Phase one's reading of `adapters`, under `env` and an operator's `hocon`. */
 const adaptersFrom = (env: Record<string, string> = {}, hocon?: string) =>
 	readSwitches(readOwnLayers(ownFiles(hocon), { env })).adapters;
@@ -243,7 +246,7 @@ describe("a variable renamed with a selection", () => {
 
 describe("the modules phase one chooses by the selections", () => {
 	const names = (env: Record<string, string>) =>
-		buildModules(readSwitches(readOwnLayers(ownFiles(), { env })), {
+		buildModules(readSwitches(readOwnLayers(ownFiles(), { env: { ...MFA_OFF, ...env } })), {
 			environment: "production",
 		}).map((module) => module.name);
 
@@ -280,7 +283,9 @@ describe("the federation-grant stores", () => {
 	const namesWith = (env: Record<string, string>) =>
 		buildModules(
 			readSwitches(
-				readOwnLayers(ownFiles(), { env: { FEDERATION_GRANTS_ENABLED: "true", ...env } }),
+				readOwnLayers(ownFiles(), {
+					env: { ...MFA_OFF, FEDERATION_GRANTS_ENABLED: "true", ...env },
+				}),
 			),
 			{ environment: "production" },
 		).map((module) => module.name);
@@ -319,7 +324,7 @@ describe("the federation-grant stores", () => {
 
 describe("boot and the section", () => {
 	it("hands boot no adapters section: the composition root consumed it", () => {
-		const own = readOwnLayers(ownFiles(), { env: {} });
+		const own = readOwnLayers(ownFiles(), { env: MFA_OFF });
 		const switches = readSwitches(own);
 		const resolved = resolveForBoot(
 			own,
@@ -333,7 +338,7 @@ describe("boot and the section", () => {
 		["named adapters", "adapters", undefined],
 		["with its section at adapters.custom", "custom-thing", "adapters.custom"],
 	] as const)("refuses a module %s: its section would never reach boot", (_label, name, at) => {
-		const own = readOwnLayers(ownFiles(), { env: {} });
+		const own = readOwnLayers(ownFiles(), { env: MFA_OFF });
 		const switches = readSwitches(own);
 		const mine = defineModule({
 			name,

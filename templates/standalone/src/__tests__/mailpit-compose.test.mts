@@ -15,14 +15,15 @@
  */
 
 /**
- * The Mailpit overlay, `docker-compose.mailpit.yml`: a development run with
- * MFA on whose mail goes through the SMTP sender to Mailpit. It is an overlay
- * on `docker-compose.yml`, so a plain `docker compose up` starts no Mailpit,
- * and the production file names none. The overlay is read as the fixed-shape
- * file it is, and the process it describes is booted from the shipped files,
- * as `app.mts` boots them, under the environment it sets: `.env.example`'s
- * lines, then each compose file's `environment`, the overlay's last. Redis is
- * a stand-in: nothing here issues a command.
+ * The development compose run, `docker-compose.yml`, with MFA on as the
+ * template ships it, and the Mailpit overlay, `docker-compose.mailpit.yml`: a
+ * development run whose mail goes through the SMTP sender to Mailpit. It is an
+ * overlay on `docker-compose.yml`, so a plain `docker compose up` starts no
+ * Mailpit, and the production file names none. The compose files are read as
+ * the fixed-shape files they are, and the process each run describes is booted
+ * from the shipped files, as `app.mts` boots them, under the environment the
+ * run sets: `.env.example`'s lines, then each compose file's `environment`, the
+ * overlay's last. Redis is a stand-in: nothing here issues a command.
  */
 
 import { generateKeyPairSync } from "node:crypto";
@@ -201,7 +202,7 @@ describe("Mailpit runs only in the overlay", () => {
 	});
 });
 
-describe("the process the overlay describes", () => {
+describe("the process each development run describes", () => {
 	const handles: { dispose(): Promise<void> }[] = [];
 	afterEach(async () => {
 		for (const handle of handles.splice(0)) await handle.dispose();
@@ -228,8 +229,11 @@ describe("the process the overlay describes", () => {
 		REPOSITORIES_CLIENT_YAML_PATH: clientsFile,
 	};
 
-	/** The container's environment: `.env`, then each compose file's `environment`, the overlay's last. */
-	function containerEnv(): Record<string, string> {
+	/**
+	 * The container's environment: `.env`, then each compose file's
+	 * `environment`, the overlay's last unless `overlay` is false.
+	 */
+	function containerEnv(overlay = true): Record<string, string> {
 		const dotenv: Record<string, string> = { ...dotenvExample(), ...OPERATOR };
 		// The pem pair is given inline here; the paths name files this test has not written.
 		delete dotenv.KEY_STORE_LOCAL_PRIVATE_KEY_PATH;
@@ -237,9 +241,46 @@ describe("the process the overlay describes", () => {
 		return {
 			...Object.fromEntries(Object.entries(dotenv).filter(([, value]) => value !== "")),
 			...environmentOf("docker-compose.yml", "app", dotenv),
-			...environmentOf(OVERLAY, "app", dotenv),
+			...(overlay ? environmentOf(OVERLAY, "app", dotenv) : {}),
 		};
 	}
+
+	it("boots docker-compose.yml's run with MFA required: development, the development mail sender, the MFA stores on its Redis", async () => {
+		const env = containerEnv(false);
+		// `app.mts`: CONFIG_ENV, then NODE_ENV, then development; the run sets neither.
+		expect(env.CONFIG_ENV ?? env.NODE_ENV).toBeUndefined();
+		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "development");
+		const own = readOwnLayers([envConfPath, applicationConfPath], { env });
+		const switches = readSwitches(own);
+		expect(switches.mfaMode).toBe("required");
+		// A hot reload restarts the process on every save, and Redis keeps the
+		// factors, and the sessions beside them, across it.
+		expect(switches.adapters).toMatchObject({
+			mfaFactorStore: "redis",
+			mfaTransactionStore: "redis",
+		});
+
+		const modules = buildModules(switches, {
+			environment: "development",
+			logger: createRecordingLogger(),
+			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+		});
+		const handle = await createApp({
+			modules,
+			bootstrapComponents: {
+				config: resolveForBoot(own, modules, switches),
+				pathResolver: (s: string) => s,
+				logger: createRecordingLogger(),
+			},
+		});
+		handles.push(handle);
+		expect((handle.components.mailSender as MailSender | undefined)?.kind).toBe(
+			"standard-development",
+		);
+		expect((handle.components.config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode).toBe(
+			"required",
+		);
+	});
 
 	it("selects a configuration that is not development, so the SMTP sender is installed", () => {
 		const configEnv = containerEnv().CONFIG_ENV;
@@ -255,7 +296,7 @@ describe("the process the overlay describes", () => {
 		const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
 		const own = readOwnLayers([envConfPath, applicationConfPath], { env });
 		const switches = readSwitches(own);
-		expect(switches.mfaMode).not.toBe("off");
+		expect(switches.mfaMode).toBe("required");
 
 		const modules = buildModules(switches, {
 			environment: configEnv,

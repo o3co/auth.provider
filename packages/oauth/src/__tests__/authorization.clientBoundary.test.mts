@@ -23,10 +23,13 @@ import crypto from "node:crypto";
 import {
 	type AppConfig,
 	type ClientRepository,
+	type Code,
 	type CodeRepository,
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
+	createMemoryRefreshTokenFamilyStore,
+	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type PublicClient,
 	passwordSessionAuthentication,
@@ -37,6 +40,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import { serialisedCalls } from "./_helpers/projectedLog.mjs";
 
@@ -64,10 +68,11 @@ const validRecord: PublicClient = {
 };
 
 /**
- * One code exchange whose `findById` is `findById`; what the session RP
- * registry holds for the session afterwards, the result and the logger.
+ * A code exchange handler whose client lookup is `findById`, over a
+ * single-use code store holding one code, with a refresh-token family
+ * rotation whose `register` is a spy.
  */
-const exchangeWith = async (findById: ClientRepository["findById"]) => {
+const exchangeSetup = async (findById: ClientRepository["findById"]) => {
 	const logger = createMockLogger();
 	const userSessionStore = createInMemoryUserSessionStore();
 	await userSessionStore.create({
@@ -79,42 +84,70 @@ const exchangeWith = async (findById: ClientRepository["findById"]) => {
 		...passwordSessionAuthentication(),
 	});
 	const sessionRPRegistry = createInMemorySessionRPRegistry();
+	let stored: Code | null = codeRecord({
+		code: "abc",
+		sid: SID,
+		client_id: CLIENT_ID,
+		redirect_uri: REDIRECT_URI,
+		code_challenge: CHALLENGE,
+		code_challenge_method: "S256",
+	});
+	const consumeByCode = vi.fn(async (code: string) => {
+		if (stored === null || code !== stored.code) return null;
+		const consumed = stored;
+		stored = null;
+		return consumed;
+	});
 	const codeRepository = {
-		consumeByCode: vi.fn().mockResolvedValue({
-			code: "abc",
-			sid: SID,
-			client_id: CLIENT_ID,
-			redirect_uri: REDIRECT_URI,
-			code_challenge: CHALLENGE,
-			code_challenge_method: "S256",
-		}),
+		consumeByCode,
 		createCode: vi.fn(),
 		findByCode: vi.fn(),
 		removeByCode: vi.fn(),
 	} as unknown as CodeRepository;
+	const rotation = createRefreshTokenFamilyRotation({
+		refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
+		accessTokenHorizonMs: 3_600_000,
+	});
+	const register = vi.fn(rotation.register);
+	const keyStore = createSymmetricKeyStore("test-secret");
+	const signed = vi.spyOn(keyStore, "sign");
 	const handler = createAuthorizationGrant({
 		sessionRequirementResolver: resolverForTests([], { actions: OAUTH_ADMISSION_ACTIONS }),
 		config,
-		keyStore: createSymmetricKeyStore("test-secret"),
+		keyStore,
 		codeRepository,
 		clientRepository: { findById, authenticate: vi.fn().mockResolvedValue(null) },
 		userSessionStore,
 		sessionFamilyIndex: createInMemorySessionFamilyIndex(),
 		sessionRPRegistry,
+		refreshTokenFamilyRotation: { ...rotation, register },
 		logger,
 	});
-	const { result } = await handler.handle({
-		body: {
-			code: "abc",
-			client_id: CLIENT_ID,
-			redirect_uri: REDIRECT_URI,
-			code_verifier: VERIFIER,
-		},
-		session: { code: "abc", user: { id: SUBJECT } },
-		issuer: "localhost",
-		metadata: { ip: "127.0.0.1" },
-		authenticatedClient: { clientId: CLIENT_ID, tokenEndpointAuthMethod: "client_secret_basic" },
-	});
+	const exchange = async () => {
+		const { result } = await handler.handle({
+			body: {
+				code: "abc",
+				client_id: CLIENT_ID,
+				redirect_uri: REDIRECT_URI,
+				code_verifier: VERIFIER,
+			},
+			session: { code: "abc", user: { id: SUBJECT } },
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: { clientId: CLIENT_ID, tokenEndpointAuthMethod: "client_secret_basic" },
+		});
+		return result;
+	};
+	return { exchange, consumeByCode, register, signed, sessionRPRegistry, logger };
+};
+
+/**
+ * One code exchange whose `findById` is `findById`; what the session RP
+ * registry holds for the session afterwards, the result and the logger.
+ */
+const exchangeWith = async (findById: ClientRepository["findById"]) => {
+	const { exchange, sessionRPRegistry, logger } = await exchangeSetup(findById);
+	const result = await exchange();
 	const rps = await sessionRPRegistry.listRPs(SID);
 	return { result, rps, logger };
 };
@@ -208,5 +241,49 @@ describe("createAuthorizationGrant — the client's logout metadata is read thro
 		expect(logger.error.mock.calls.map(([, event]) => event)).toContain(
 			"client_repository_unavailable",
 		);
+	});
+});
+
+describe("createAuthorizationGrant — the client is looked up before the code is spent", () => {
+	const refusedRecord = async () =>
+		({ ...validRecord, backchannelLogoutUri: "javascript:alert(1)" }) as PublicClient;
+	const outage = async (): Promise<PublicClient | null> => {
+		throw new Error("db down");
+	};
+
+	it.each([
+		["a record the boundary refuses", refusedRecord],
+		["a repository that throws", outage],
+	])(
+		"leaves the code unspent, signs nothing and registers no refresh-token family for %s",
+		async (_label, findById) => {
+			const { exchange, consumeByCode, register, signed } = await exchangeSetup(findById);
+
+			const result = await exchange();
+
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "session linking unavailable",
+			});
+			expect(consumeByCode).not.toHaveBeenCalled();
+			expect(signed).not.toHaveBeenCalled();
+			expect(register).not.toHaveBeenCalled();
+		},
+	);
+
+	it("redeems the same code once the client's record is answered again", async () => {
+		let lookup: ClientRepository["findById"] = refusedRecord;
+		const { exchange, consumeByCode, register } = await exchangeSetup((id) => lookup(id));
+
+		expect((await exchange()).status).toBe(503);
+		lookup = async () => validRecord;
+		const redeemed = await exchange();
+
+		expect(redeemed.status).toBe(200);
+		expect(consumeByCode).toHaveBeenCalledTimes(1);
+		expect(register).toHaveBeenCalledTimes(1);
+		// Single use: a second redemption after the success is refused.
+		expect(await exchange()).toMatchObject({ status: 400, error: "invalid_grant" });
 	});
 });
