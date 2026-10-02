@@ -224,7 +224,7 @@ describe("the URL: scheme, credentials and port", () => {
 	it("refuses a port on the Fetch standard's bad-port list, before any lookup", async () => {
 		const lookup = resolver();
 		const fetch = outboundFetch({ lookup });
-		for (const port of [636, 25, 22, 6667, 10080]) {
+		for (const port of [0, 636, 25, 22, 6667, 10080]) {
 			await refusal(fetch(`https://rp.example:${port}/`), "port_not_allowed");
 		}
 		expect(lookup.calls).toEqual([]);
@@ -726,6 +726,12 @@ describe("building the fetch", () => {
 	});
 
 	it("refuses a per-use timeoutMs or maxResponseBytes that is not a positive whole number", () => {
+		expect(() => createOutboundFetch({ source: "request", timeoutMs: 2_147_483_648 })).toThrow(
+			TypeError,
+		);
+		expect(() =>
+			createOutboundFetch({ source: "request", timeoutMs: 2_147_483_647 }),
+		).not.toThrow();
 		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
 			expect(() => createOutboundFetch({ source: "request", timeoutMs: bad })).toThrow(TypeError);
 			expect(() => createOutboundFetch({ source: "request", maxResponseBytes: bad })).toThrow(
@@ -749,19 +755,13 @@ describe("building the fetch", () => {
 		expect(() => createOutboundFetch({ source: "registration" })).not.toThrow();
 	});
 
-	it('refuses to build while a proxying global fetch dispatcher is installed, unless egress = "direct"', () => {
+	it("does not consult the global fetch dispatcher, which it never connects through", () => {
 		const key = Symbol.for("undici.globalDispatcher.1");
 		const holder = globalThis as unknown as Record<symbol, unknown>;
 		const before = holder[key];
-		class EnvHttpProxyAgent {}
-		holder[key] = new EnvHttpProxyAgent();
+		holder[key] = { dispatch: () => false };
 		try {
-			expect(() => createOutboundFetch({ source: "registration" })).toThrow(
-				/core\.outbound\.egress/,
-			);
-			expect(() =>
-				createOutboundFetch({ config: config({ egress: "direct" }), source: "registration" }),
-			).not.toThrow();
+			expect(() => createOutboundFetch({ source: "registration" })).not.toThrow();
 		} finally {
 			holder[key] = before;
 		}

@@ -62,6 +62,9 @@ describe("readHostEntry: a host-list entry, read as a URL's host is", () => {
 			"rp example",
 			".10.0.0.5",
 			".[::1]",
+			"[::1]:443",
+			"[::1]:8080",
+			"[::1]x",
 		]) {
 			expect(readHostEntry(entry), JSON.stringify(entry)).toBeUndefined();
 		}
@@ -103,6 +106,13 @@ describe("matchesHostList", () => {
 		expect(matchesHostList(list("10.0.0.6"), host)).toBe(false);
 		const translated = urlHost(new URL("https://[::ffff:0:10.0.0.5]/")) ?? "";
 		expect(matchesHostList(list("10.0.0.5"), translated)).toBe(true);
+	});
+
+	it("matches an IPv4-mapped entry against the IPv4 host of the same address, both sides read alike", () => {
+		expect(
+			matchesHostList(list("[::ffff:8.8.8.8]"), urlHost(new URL("https://8.8.8.8/")) ?? ""),
+		).toBe(true);
+		expect(matchesHostList(list("::ffff:0:8.8.8.8"), "8.8.8.8")).toBe(true);
 	});
 
 	it("matches nothing when the list is empty", () => {

@@ -92,6 +92,10 @@ const headerPairs = (res: IncomingMessage): [string, string][] => {
 export function createNodeTransport(tls: { readonly ca?: string } = {}): OutboundTransport {
 	return (exchange) =>
 		new Promise<OutboundAnswer>((resolve, reject) => {
+			if (exchange.signal.aborted) {
+				reject(exchange.signal.reason);
+				return;
+			}
 			const secure = exchange.url.protocol === "https:";
 			const agent = secure
 				? new HttpsAgent({ keepAlive: false, ...(tls.ca !== undefined ? { ca: tls.ca } : {}) })
@@ -127,15 +131,11 @@ export function createNodeTransport(tls: { readonly ca?: string } = {}): Outboun
 				agent.destroy();
 				reject(reason);
 			};
-			if (exchange.signal.aborted) {
-				onAbort();
-				return;
-			}
-			exchange.signal.addEventListener("abort", onAbort, { once: true });
 			req.on("error", (err) => {
 				close();
 				reject(err);
 			});
+			exchange.signal.addEventListener("abort", onAbort, { once: true });
 			req.on("response", (incoming) => {
 				res = incoming;
 				// A body destroyed before it is read must not surface as an

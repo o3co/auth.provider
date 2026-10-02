@@ -30,6 +30,7 @@ import {
 	type AdmittedDestination,
 	admitAddresses,
 	admitUrl,
+	MAX_TIMEOUT_MS,
 	OutboundFetchError,
 	type OutboundPolicy,
 	OutboundSectionSchema,
@@ -114,31 +115,22 @@ export function outboundPolicyOf(config: unknown): OutboundPolicy {
 
 const PROXY_VARIABLES = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] as const;
 
-/** The global fetch dispatchers Node installs itself, which connect directly. */
-const DIRECT_DISPATCHERS: ReadonlySet<string> = new Set(["Agent", "Dispatcher1Wrapper"]);
+/**
+ * The environment variable that configures an egress proxy, if one does. A
+ * fetch dispatcher installed in code is not consulted: this fetch never
+ * connects through it.
+ */
+const configuredProxy = (): string | undefined =>
+	PROXY_VARIABLES.find((variable) => (process.env[variable] ?? "").trim() !== "");
 
-/** What configures an egress proxy in this process, if anything does. */
-const configuredProxy = (): string | undefined => {
-	for (const variable of PROXY_VARIABLES) {
-		if ((process.env[variable] ?? "").trim() !== "") return variable;
-	}
-	const holder = globalThis as unknown as Record<symbol, unknown>;
-	for (const key of ["undici.globalDispatcher.1", "undici.globalDispatcher.2"]) {
-		const dispatcher = holder[Symbol.for(key)];
-		if (typeof dispatcher === "object" && dispatcher !== null) {
-			const name = (dispatcher as { constructor?: { name?: unknown } }).constructor?.name;
-			if (typeof name !== "string" || !DIRECT_DISPATCHERS.has(name)) {
-				return "a global fetch dispatcher";
-			}
-		}
-	}
-	return undefined;
-};
-
-const positiveWholeNumber = (value: number | undefined, name: string): number | undefined => {
+const positiveWholeNumber = (
+	value: number | undefined,
+	name: string,
+	max = Number.MAX_SAFE_INTEGER,
+): number | undefined => {
 	if (value === undefined) return undefined;
-	if (!Number.isSafeInteger(value) || value <= 0) {
-		throw new TypeError(`createOutboundFetch: ${name} must be a positive whole number`);
+	if (!Number.isSafeInteger(value) || value <= 0 || value > max) {
+		throw new TypeError(`createOutboundFetch: ${name} must be a whole number from 1 to ${max}`);
 	}
 	return value;
 };
@@ -326,7 +318,8 @@ export function buildOutboundFetch(
 				"direct egress is intended",
 		);
 	}
-	const timeoutMs = positiveWholeNumber(options.timeoutMs, "timeoutMs") ?? policy.timeoutMs;
+	const timeoutMs =
+		positiveWholeNumber(options.timeoutMs, "timeoutMs", MAX_TIMEOUT_MS) ?? policy.timeoutMs;
 	const cap =
 		positiveWholeNumber(options.maxResponseBytes, "maxResponseBytes") ?? policy.maxResponseBytes;
 
@@ -390,7 +383,7 @@ export function buildOutboundFetch(
 /**
  * A `fetch` that only reaches destinations `core.outbound` admits, for URLs
  * from `options.source`. Throws when `core.outbound` is malformed, and when
- * an egress proxy is configured without `core.outbound.egress = "direct"`.
+ * `HTTPS_PROXY` or `HTTP_PROXY` is set without `core.outbound.egress = "direct"`.
  *
  * It takes a string or `URL` (a `Request` is a `TypeError`), `GET` or
  * `POST`, a string, `URLSearchParams` or `Uint8Array` body, any headers, and

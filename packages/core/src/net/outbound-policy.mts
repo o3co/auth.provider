@@ -120,6 +120,7 @@ export function readHostEntry(entry: string): HostPattern | undefined {
 	const body = suffix ? trimmed.slice(1) : trimmed;
 	if (body === "" || /[\s/\\?#@]/.test(body)) return undefined;
 	const bracketed = body.startsWith("[");
+	if (bracketed && !/^\[[^\]]+\]$/.test(body)) return undefined;
 	if (!bracketed && body.includes(":") && isIP(body) !== 6) return undefined;
 	let url: URL;
 	try {
@@ -133,16 +134,19 @@ export function readHostEntry(entry: string): HostPattern | undefined {
 	const host = withoutRootDot(url.hostname);
 	if (host === undefined) return undefined;
 	if (suffix && (host.startsWith("[") || isIP(host) === 4)) return undefined;
-	return { host, suffix };
+	return { host: hostIdentity(host), suffix };
 }
 
 /**
- * The IPv4 address an IPv4-mapped or IPv4-translated IPv6 host embeds
- * (`[::ffff:a00:5]`, `[::ffff:0:a00:5]` → `10.0.0.5`).
+ * The identity a host is matched by: its canonical form, with an
+ * IPv4-mapped or IPv4-translated IPv6 literal (`[::ffff:a00:5]`,
+ * `[::ffff:0:a00:5]`) read as the IPv4 address it embeds (`10.0.0.5`).
+ * Entries and URL hosts both go through it, so either spelling of one
+ * address matches the other.
  */
-const mappedIpv4 = (host: string): string | undefined => {
+const hostIdentity = (host: string): string => {
 	const match = /^\[::ffff:(?:0:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/.exec(host);
-	if (match === null) return undefined;
+	if (match === null) return host;
 	const high = Number.parseInt(match[1] ?? "", 16);
 	const low = Number.parseInt(match[2] ?? "", 16);
 	return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
@@ -150,12 +154,9 @@ const mappedIpv4 = (host: string): string | undefined => {
 
 /** Whether `patterns` cover `host` (canonical, as {@link urlHost} gives it). */
 export function matchesHostList(patterns: readonly HostPattern[], host: string): boolean {
-	const mapped = mappedIpv4(host);
-	const keys = mapped === undefined ? [host] : [host, mapped];
-	return patterns.some((pattern) =>
-		keys.some(
-			(key) => key === pattern.host || (pattern.suffix && key.endsWith(`.${pattern.host}`)),
-		),
+	const key = hostIdentity(host);
+	return patterns.some(
+		(pattern) => key === pattern.host || (pattern.suffix && key.endsWith(`.${pattern.host}`)),
 	);
 }
 
@@ -185,6 +186,19 @@ const outboundHostList = z
 		),
 	);
 
+/** The longest deadline a timer holds: Node runs a longer one at once. */
+export const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * A positive whole number: a number, or a string of decimal digits as an
+ * environment variable carries it. Nothing else is converted (`true`, `[1]`,
+ * `""` and `"1e3"` are refused).
+ */
+const wholeNumber = z
+	.union([z.number(), z.string().regex(/^\s*\d+\s*$/, { error: "must be a whole number" })])
+	.transform(Number)
+	.pipe(z.number().int().positive());
+
 /**
  * `core.outbound`, this policy's section: core's schema declares it under
  * `core`, and `outboundPolicyOf` (`outbound-fetch.mts`) alone reads it.
@@ -203,11 +217,11 @@ export const OutboundSectionSchema = z
 		internalHosts: outboundHostList.optional(),
 		// One deadline over resolution, connection, TLS, headers and body. It
 		// shortens a caller's own deadline, never lengthens it.
-		timeoutMs: z.coerce.number().int().positive().max(2_147_483_647).optional(),
+		timeoutMs: wholeNumber.pipe(z.number().max(MAX_TIMEOUT_MS)).optional(),
 		// The most bytes of a 2xx body that are read.
-		maxResponseBytes: z.coerce.number().int().positive().optional(),
-		// `"direct"` states that the outbound fetch connects directly while an
-		// environment proxy is configured; without it, building one refuses.
+		maxResponseBytes: wholeNumber.optional(),
+		// `"direct"` states that the outbound fetch connects directly while
+		// HTTPS_PROXY / HTTP_PROXY is set; without it, building one refuses.
 		egress: z.enum(["direct"]).optional(),
 	})
 	.strict();
@@ -227,6 +241,7 @@ export interface OutboundPolicy {
  * which `fetch` refuses and a raw `https.request` would not.
  */
 const BAD_PORTS: ReadonlySet<string> = new Set([
+	"0",
 	"1",
 	"7",
 	"9",

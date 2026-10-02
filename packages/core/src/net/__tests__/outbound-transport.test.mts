@@ -266,6 +266,26 @@ describe("plain http to a listed loopback host", () => {
 	});
 });
 
+describe("the transport alone", () => {
+	it("rejects an exchange whose signal is already aborted, without opening a connection", async () => {
+		const peer = await httpPeer((_req, res) => res.end("ok"));
+		const reason = new Error("already aborted");
+		await expect(
+			createNodeTransport()({
+				url: new URL(`http://localhost:${peer.port}/`),
+				servername: undefined,
+				addresses: ["127.0.0.1"],
+				method: "GET",
+				headers: {},
+				body: undefined,
+				signal: AbortSignal.abort(reason),
+			}),
+		).rejects.toBe(reason);
+		expect(peer.closedSockets()).toBe(0);
+		expect(peer.requests).toEqual([]);
+	});
+});
+
 describe("https", () => {
 	let dir: string;
 	let full: { key: string; cert: string };

@@ -86,7 +86,7 @@ describe("core.outbound in core's schema", () => {
 			timeoutMs: 2500,
 			maxResponseBytes: 1024,
 		});
-		for (const bad of ["", "0", "-1", "1.5", "abc", 0, -1, 1.5, null]) {
+		for (const bad of ["", "0", "-1", "1.5", "1e3", "abc", 0, -1, 1.5, null, true, [5000]]) {
 			expect(issuePaths(OutboundSectionSchema.safeParse({ timeoutMs: bad })), String(bad)).toEqual([
 				"timeoutMs",
 			]);

@@ -221,7 +221,7 @@ request supplies. Its policy is `core.outbound`; the defaults need no setting.
 | --- | --- | --- |
 | `core.outbound.allowedHosts` / `deniedHosts` / `internalHosts` (`CORE_OUTBOUND_ALLOWED_HOSTS`, `CORE_OUTBOUND_DENIED_HOSTS`, `CORE_OUTBOUND_INTERNAL_HOSTS`) | `[]` | hosts or `.suffix` entries, as a list or comma-separated. `deniedHosts` wins; a non-empty `allowedHosts` admits only what it lists. `internalHosts` admits a host at loopback, private or link-local addresses, for a registration's URL only, and plain `http` only to a loopback one. An entry that is not a bare host fails boot as `config-validation-failed`, naming its index |
 | `core.outbound.timeoutMs` / `maxResponseBytes` (`CORE_OUTBOUND_TIMEOUT_MS`, `CORE_OUTBOUND_MAX_RESPONSE_BYTES`) | `5000` / `65536` | positive integers. The deadline covers the whole exchange and only shortens a caller's own |
-| `core.outbound.egress` (`CORE_OUTBOUND_EGRESS`) | unset | `"direct"` only. The fetch connects directly; while `HTTPS_PROXY` / `HTTP_PROXY` or a proxying global fetch dispatcher is configured, building it refuses until this is set |
+| `core.outbound.egress` (`CORE_OUTBOUND_EGRESS`) | unset | `"direct"` only. The fetch connects directly, never through a fetch dispatcher installed in code; while `HTTPS_PROXY` / `HTTP_PROXY` is set, building it refuses until this is set |
 
 Every address a host resolves to is checked, and the connection goes to the
 checked address. Egress filtering at the network is still expected. IPv6-only
