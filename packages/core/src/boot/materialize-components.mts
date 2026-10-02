@@ -58,7 +58,7 @@ function buildDeps(
 	const deps: Record<string, unknown> = {};
 
 	for (const key of requires) {
-		if (!(key in components)) {
+		if (!Object.hasOwn(components, key)) {
 			throw new Error(
 				`invariant violated: missing required dep "${String(key)}" — stage 1/2 should have caught this`,
 			);
@@ -181,7 +181,7 @@ export async function materializeComponents(
 		const { module: moduleName, componentKey } = activation;
 
 		// Already present from bootstrap or override.
-		if (componentKey in components) {
+		if (Object.hasOwn(components, componentKey)) {
 			continue;
 		}
 

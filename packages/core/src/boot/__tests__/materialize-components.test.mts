@@ -458,3 +458,46 @@ describe("materializeComponents — CleanupRecord only when cleanup defined", ()
 		expect(world.cleanups[0]?.value).toBe(42);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 9. A slot named on a polluted Object.prototype
+// ---------------------------------------------------------------------------
+
+describe("materializeComponents — a slot name Object.prototype carries", () => {
+	it("still runs that slot's provider, and hands its own value as a dep", async () => {
+		// Not enumerable, as a configuration parse would otherwise refuse it.
+		Object.defineProperty(Object.prototype, "slotA", {
+			value: "inherited",
+			configurable: true,
+			writable: true,
+		});
+		try {
+			let received: unknown;
+			const modA = defineModule({
+				name: "A",
+				provides: { slotA: () => 42 },
+				lifecycle: { slotA: { eager: true } },
+			});
+			const modB = defineModule({
+				name: "B",
+				requires: ["slotA"] as const,
+				provides: {
+					slotB: (deps) => {
+						received = deps.slotA;
+						return 1;
+					},
+				},
+				lifecycle: { slotB: { eager: true } },
+			});
+
+			const plan = buildPlan([modA, modB]);
+			const world = await materializeComponents(plan, minBoot, undefined);
+
+			expect(Object.hasOwn(world.components, "slotA")).toBe(true);
+			expect(world.components.slotA).toBe(42);
+			expect(received).toBe(42);
+		} finally {
+			delete (Object.prototype as Record<string, unknown>).slotA;
+		}
+	});
+});

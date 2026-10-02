@@ -25,6 +25,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { clientRecordSlotFor } from "#/boot/client-record-slot.mjs";
 import { createApp } from "#/boot/create-app.mjs";
 import type { BootstrapMap } from "#/boot/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
@@ -367,5 +368,23 @@ describe("the clientRepository slot holds core's client-record boundary", () => 
 		await handle.dispose();
 
 		expect(disposed).toEqual([]);
+	});
+});
+
+describe("the clientRepository slot on a polluted Object.prototype", () => {
+	it("puts no boundary over an inherited value: only the map's own slot is the host's", () => {
+		// Not enumerable, as a configuration parse would otherwise refuse it.
+		Object.defineProperty(Object.prototype, "clientRepository", {
+			value: rawRepository(),
+			configurable: true,
+			writable: true,
+		});
+		try {
+			const components: Record<string, unknown> = {};
+			clientRecordSlotFor(components).beforeProviders();
+			expect(Object.hasOwn(components, "clientRepository")).toBe(false);
+		} finally {
+			delete (Object.prototype as Record<string, unknown>).clientRepository;
+		}
 	});
 });
