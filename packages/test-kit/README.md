@@ -305,9 +305,9 @@ and runs the suite; the suite reads every answer through core's readers, so
 an answer outside its type fails the case.
 
 - `conditionalRecordContract(input)`, for a generation that guards one
-  record. The target (`ConditionalRecordTarget`) is the port's create path,
-  `getVersioned`, `replaceIf`, `removeIf`, and its unconditional writes of a
-  key by name. Each writes the value it is given, or, named in the input's
+  record. The target (`ConditionalRecordTarget`) is `put`, the port's
+  create path, `getVersioned`, `replaceIf`, `removeIf`, and its
+  unconditional writes of a key by name. Each writes the value it is given, or, named in the input's
   `removals` (a logout-style delete), removes the key. `values()` answers
   two distinct values, equal on every call; `mutate`, when given, changes a
   value in place, each mutable part on its own and leaving a frozen part
@@ -367,8 +367,8 @@ winner's.
 Notes for a binding:
 
 - The record suite's create-over-a-live-record case assumes the target's
-  `create` overwrites a live record in place, as a relink does. A port whose
-  create refuses a live record maps `create` to its overwriting write.
+  `put` overwrites a live record in place, as a relink does. A port whose
+  create refuses a live record maps `put` to its overwriting write.
 - A store reached over HTTP runs many requests per race case. Give its cases
   a longer per-case timeout (`it(name, run, timeoutMs)`) rather than fewer
   rounds.

@@ -83,7 +83,7 @@ import type { ContractCase } from "@o3co/auth-provider-core/testing";
 /** One key's record-scoped conditional members, as a port exposes them. */
 export interface ConditionalRecordTarget<V> {
 	/** The port's create path: writes the record, live or not, at a new generation. */
-	create(key: string, value: V): Promise<void>;
+	put(key: string, value: V): Promise<void>;
 	getVersioned(key: string): Promise<Versioned<V> | null>;
 	replaceIf(key: string, expected: StoreGeneration, value: V): Promise<ConditionalReplaceAnswer>;
 	removeIf(key: string, expected: StoreGeneration): Promise<ConditionalRemoveAnswer>;
@@ -326,7 +326,7 @@ export function conditionalRecordContract<V>(
 	/** A live record of a new key at value `0`, and its read. */
 	const seeded = async (raw: ConditionalRecordTarget<V>, label: string) => {
 		const key = fresh(label);
-		await raw.create(key, input.values()[0]);
+		await raw.put(key, input.values()[0]);
 		return { key, read: await readRecord(raw).live(key) };
 	};
 
@@ -395,7 +395,7 @@ export function conditionalRecordContract<V>(
 		test("a record removed and created again with the same value is at a new generation, and the old one answers conflict", async (store, _h, raw) => {
 			const { key, read } = await seeded(raw, "aba");
 			assert.equal((await store.remove(key, read.generation)).outcome, "removed");
-			await raw.create(key, input.values()[0]);
+			await raw.put(key, input.values()[0]);
 			const again = await store.live(key);
 			assert.deepStrictEqual(again.value, read.value);
 			assert.notEqual(again.generation, read.generation);
@@ -561,7 +561,7 @@ export function conditionalRecordContract<V>(
 		test("every answer is one core's readers accept", async (_store, _h, raw) => {
 			const key = fresh("readers");
 			readVersioned(await raw.getVersioned(key));
-			await raw.create(key, input.values()[0]);
+			await raw.put(key, input.values()[0]);
 			const read = readVersioned(await raw.getVersioned(key));
 			assert.ok(read !== null);
 			const updated = readConditionalReplaceAnswer(
@@ -577,7 +577,7 @@ export function conditionalRecordContract<V>(
 
 		test("a create over a live record, as a relink does, issues a new generation, the same value included, and the old one answers conflict", async (store, _h, raw) => {
 			const { key, read } = await seeded(raw, "overwrite");
-			await raw.create(key, input.values()[1]);
+			await raw.put(key, input.values()[1]);
 			const after = await store.live(key);
 			assert.deepStrictEqual(after.value, input.values()[1]);
 			assert.notEqual(after.generation, read.generation);
@@ -587,7 +587,7 @@ export function conditionalRecordContract<V>(
 			);
 			assert.equal((await store.remove(key, read.generation)).outcome, "conflict");
 			assert.equal((await store.live(key)).generation, after.generation);
-			await raw.create(key, input.values()[1]);
+			await raw.put(key, input.values()[1]);
 			const again = await store.live(key);
 			assert.deepStrictEqual(again.value, input.values()[1]);
 			assert.notEqual(again.generation, after.generation, "the same value kept the generation");
@@ -602,7 +602,7 @@ export function conditionalRecordContract<V>(
 			const one = readRecord(a);
 			const other = readRecord(b);
 			const key = fresh("instances");
-			await a.create(key, input.values()[0]);
+			await a.put(key, input.values()[0]);
 			const read = await other.live(key);
 			assert.deepStrictEqual(read.value, input.values()[0]);
 			const replaced = await one.replace(key, read.generation, input.values()[1]);
@@ -753,10 +753,10 @@ export function conditionalRecordContract<V>(
 			: test("the store keeps its own copy: changing a value written or read changes nothing stored", async (store, _h, raw) => {
 					const key = fresh("alias");
 					const written = input.values()[0];
-					await raw.create(key, written);
+					await raw.put(key, written);
 					mutate(written);
 					const read = await store.live(key);
-					assert.deepStrictEqual(read.value, input.values()[0], "the value handed to create");
+					assert.deepStrictEqual(read.value, input.values()[0], "the value handed to put");
 					mutate(read.value);
 					assert.deepStrictEqual(
 						(await store.live(key)).value,
@@ -812,7 +812,7 @@ export function conditionalRecordContract<V>(
 						"getVersioned of an absent key",
 					);
 					await assert.rejects(
-						unreachable.create(fresh("outage-create"), input.values()[0]),
+						unreachable.put(fresh("outage-create"), input.values()[0]),
 						"create",
 					);
 					await assert.rejects(
@@ -849,7 +849,7 @@ export function conditionalRecordContract<V>(
 function readSet<T>(target: ConditionalSetTarget<T>) {
 	return {
 		list: async (scope: string) => readVersionedSet(await target.listVersioned(scope)),
-		create: async (item: T, expected: StoreGeneration | null) =>
+		createIf: async (item: T, expected: StoreGeneration | null) =>
 			readConditionalCreateAnswer(await target.createIf(item, expected)),
 		remove: async (scope: string, id: string, expected: StoreGeneration) =>
 			readConditionalSetRemoveAnswer(await target.removeIf(scope, id, expected)),
@@ -905,7 +905,7 @@ export function conditionalSetContract<T>(
 		const store = readSet(raw);
 		let generation: StoreGeneration | null = null;
 		for (const item of items.slice(0, n)) {
-			const answer = await store.create(item, generation);
+			const answer = await store.createIf(item, generation);
 			assert.ok(answer.outcome === "created", `seeding ${idOf(item)} answered ${answer.outcome}`);
 			generation = answer.generation;
 		}
@@ -928,10 +928,10 @@ export function conditionalSetContract<T>(
 			for (let round = 0; round < RACE_ROUNDS; round += 1) {
 				const scope = fresh(`first-${round}`);
 				const [x, y] = itemsOf(scope, 2) as [T, T];
-				const first = readSet(round % 2 === 0 ? a : b).create(x, null);
+				const first = readSet(round % 2 === 0 ? a : b).createIf(x, null);
 				const delay = RACE_DELAYS[round % RACE_DELAYS.length] ?? 0;
 				if (delay !== 0) await pause(delay);
-				const second = readSet(round % 2 === 0 ? b : a).create(y, null);
+				const second = readSet(round % 2 === 0 ? b : a).createIf(y, null);
 				const answers = await Promise.all([first, second]);
 				assert.deepStrictEqual(
 					answers.map((answer) => answer.outcome).sort(),
@@ -950,16 +950,16 @@ export function conditionalSetContract<T>(
 			assert.deepStrictEqual(read.items, []);
 			assert.notEqual(read.generation, null);
 			const [x] = itemsOf(scope, 1) as [T];
-			assert.equal((await store.create(x, null)).outcome, "conflict");
+			assert.equal((await store.createIf(x, null)).outcome, "conflict");
 			sameSet(await store.list(scope), read);
 		}),
 
 		test("a create at a stale generation answers conflict and adds nothing", async (store, _h, raw) => {
 			const { scope, items, generation } = await seeded(raw, "stale-create", 1, 2);
 			const [x, y, z] = items as [T, T, T];
-			const moved = await store.create(y, generation);
+			const moved = await store.createIf(y, generation);
 			assert.ok(moved.outcome === "created");
-			assert.equal((await store.create(z, generation)).outcome, "conflict");
+			assert.equal((await store.createIf(z, generation)).outcome, "conflict");
 			const read = await store.list(scope);
 			sameItems(read.items, [x, y]);
 			assert.equal(read.generation, moved.generation);
@@ -975,7 +975,7 @@ export function conditionalSetContract<T>(
 				items: [],
 				generation: removed.generation,
 			});
-			assert.equal((await store.create(y, null)).outcome, "conflict");
+			assert.equal((await store.createIf(y, null)).outcome, "conflict");
 		}),
 
 		test("of two concurrent removals of different members at one generation through two instances, exactly one is removed", async (_store, harness, raw) => {
@@ -1008,7 +1008,7 @@ export function conditionalSetContract<T>(
 			const { scope, items, generation } = await seeded(raw, "create-race", 1, writers);
 			const candidates = items.slice(1);
 			const answers = await Promise.all(
-				candidates.map((item, i) => readSet(i % 2 === 0 ? a : b).create(item, generation)),
+				candidates.map((item, i) => readSet(i % 2 === 0 ? a : b).createIf(item, generation)),
 			);
 			const created = answers.filter((answer) => answer.outcome === "created");
 			assert.equal(created.length, 1, `created: ${created.length} of ${writers}`);
@@ -1023,7 +1023,7 @@ export function conditionalSetContract<T>(
 				const [remover, creator] = round % 2 === 0 ? [a, b] : [b, a];
 				const removeFirst = Math.floor(round / 2) % 2 === 0;
 				const remove = () => readSet(remover).remove(scope, idOf(x), generation);
-				const create = () => readSet(creator).create(y, generation);
+				const create = () => readSet(creator).createIf(y, generation);
 				const started = removeFirst ? remove() : create();
 				const delay = RACE_DELAYS[round % RACE_DELAYS.length] ?? 0;
 				if (delay !== 0) await pause(delay);
@@ -1058,7 +1058,7 @@ export function conditionalSetContract<T>(
 							ConditionalCreateAnswer | ConditionalSetRemoveAnswer
 						> =>
 							write === "create"
-								? readSet(writer).create(y, generation)
+								? readSet(writer).createIf(y, generation)
 								: readSet(writer).remove(scope, idOf(x), generation);
 						const reset = () => resetter.reset(scope);
 						const started = resetFirst ? reset() : conditional();
@@ -1099,7 +1099,7 @@ export function conditionalSetContract<T>(
 			assert.deepStrictEqual(read.items, []);
 			assert.notEqual(read.generation, null);
 			assert.notEqual(read.generation, removed.generation);
-			assert.equal((await store.create(y, removed.generation)).outcome, "conflict");
+			assert.equal((await store.createIf(y, removed.generation)).outcome, "conflict");
 		}),
 
 		test("a write through one instance is read through the other at the generation it answered, and the old generation conflicts there", async (_store, harness) => {
@@ -1108,16 +1108,16 @@ export function conditionalSetContract<T>(
 			const other = readSet(b);
 			const scope = fresh("instances");
 			const [x, y, z] = itemsOf(scope, 3) as [T, T, T];
-			const first = await one.create(x, null);
+			const first = await one.createIf(x, null);
 			assert.ok(first.outcome === "created");
 			const read = await other.list(scope);
 			assert.equal(read.generation, first.generation);
-			const second = await one.create(y, first.generation);
+			const second = await one.createIf(y, first.generation);
 			assert.ok(second.outcome === "created");
 			const seen = await other.list(scope);
 			assert.equal(seen.generation, second.generation);
 			sameItems(seen.items, [x, y]);
-			assert.equal((await other.create(z, first.generation)).outcome, "conflict");
+			assert.equal((await other.createIf(z, first.generation)).outcome, "conflict");
 			assert.equal((await other.remove(scope, idOf(x), first.generation)).outcome, "conflict");
 			const removed = await other.remove(scope, idOf(x), second.generation);
 			assert.ok(removed.outcome === "removed");
@@ -1131,13 +1131,13 @@ export function conditionalSetContract<T>(
 			const [x, y, z] = items as [T, T, T];
 			const removed = await store.remove(scope, idOf(x), generation);
 			assert.ok(removed.outcome === "removed");
-			const created = await store.create(x, removed.generation);
+			const created = await store.createIf(x, removed.generation);
 			assert.ok(created.outcome === "created");
 			const read = await store.list(scope);
 			sameItems(read.items, [x, y]);
 			assert.equal(new Set([generation, removed.generation, created.generation]).size, 3);
 			assert.equal(read.generation, created.generation);
-			assert.equal((await store.create(z, generation)).outcome, "conflict");
+			assert.equal((await store.createIf(z, generation)).outcome, "conflict");
 			assert.equal((await store.remove(scope, idOf(y), generation)).outcome, "conflict");
 		}),
 
@@ -1149,7 +1149,7 @@ export function conditionalSetContract<T>(
 			assert.deepStrictEqual(read.items, []);
 			assert.notEqual(read.generation, null);
 			assert.notEqual(read.generation, generation);
-			assert.equal((await store.create(z, generation)).outcome, "conflict");
+			assert.equal((await store.createIf(z, generation)).outcome, "conflict");
 			assert.equal((await store.remove(scope, idOf(x), generation)).outcome, "conflict");
 			sameSet(await store.list(scope), read);
 		}),
@@ -1161,7 +1161,7 @@ export function conditionalSetContract<T>(
 			const read = await store.list(scope);
 			assert.equal(read.generation, generation);
 			sameItems(read.items, [x]);
-			assert.equal((await store.create(y, generation)).outcome, "created");
+			assert.equal((await store.createIf(y, generation)).outcome, "created");
 		}),
 
 		test("against an absent set, a removal with a generation answers missing and a create with one answers conflict", async (store, _h, raw) => {
@@ -1169,7 +1169,7 @@ export function conditionalSetContract<T>(
 			const scope = fresh("absent-set");
 			const [x] = itemsOf(scope, 1) as [T];
 			assert.equal((await store.remove(scope, idOf(x), generation)).outcome, "missing");
-			assert.equal((await store.create(x, generation)).outcome, "conflict");
+			assert.equal((await store.createIf(x, generation)).outcome, "conflict");
 			assert.deepStrictEqual(await store.list(scope), { items: [], generation: null });
 		}),
 
@@ -1186,9 +1186,9 @@ export function conditionalSetContract<T>(
 					if (readFirst) {
 						seen = reader.list(scope);
 						if (delay !== 0) await pause(delay);
-						written = writer.create(y, generation);
+						written = writer.createIf(y, generation);
 					} else {
-						written = writer.create(y, generation);
+						written = writer.createIf(y, generation);
 						if (delay !== 0) await pause(delay);
 						seen = reader.list(scope);
 					}
@@ -1206,7 +1206,7 @@ export function conditionalSetContract<T>(
 						sameItems(snapshot.items, [x], where);
 						assert.ok(snapshot.generation !== null, where);
 						assert.equal(
-							(await writer.create(z, snapshot.generation)).outcome,
+							(await writer.createIf(z, snapshot.generation)).outcome,
 							"conflict",
 							`${where}: the old members at the new generation`,
 						);
@@ -1241,7 +1241,7 @@ export function conditionalSetContract<T>(
 			const { scope, items, generation } = await seeded(raw, "held", 2);
 			const [x] = items as [T];
 			const before = await store.list(scope);
-			assert.equal((await store.create(x, generation)).outcome, "conflict");
+			assert.equal((await store.createIf(x, generation)).outcome, "conflict");
 			sameSet(await store.list(scope), before);
 		}),
 	];
@@ -1253,7 +1253,7 @@ export function conditionalSetContract<T>(
 			: test("the store keeps its own copy: changing a member written or read changes nothing stored", async (store) => {
 					const scope = fresh("alias");
 					const [x] = itemsOf(scope, 1) as [T];
-					assert.equal((await store.create(x, null)).outcome, "created");
+					assert.equal((await store.createIf(x, null)).outcome, "created");
 					mutate(x);
 					const read = await store.list(scope);
 					sameItems(read.items, itemsOf(scope, 1), "the member handed to createIf");
@@ -1324,7 +1324,7 @@ export function conditionalSetContract<T>(
 								generation,
 								`${name} (${target} member) kept the generation`,
 							);
-							assert.equal((await store.create(w, generation)).outcome, "conflict", name);
+							assert.equal((await store.createIf(w, generation)).outcome, "conflict", name);
 							assert.equal(
 								(await store.remove(scope, idOf(x), generation)).outcome,
 								"conflict",
@@ -1347,12 +1347,12 @@ export function conditionalSetContract<T>(
 					const removed = await store.remove(written.scope, idOf(x), written.generation);
 					assert.ok(removed.outcome === "removed");
 					await expire(written.scope);
-					assert.equal((await store.create(y, removed.generation)).outcome, "conflict");
+					assert.equal((await store.createIf(y, removed.generation)).outcome, "conflict");
 					assert.equal(
 						(await store.remove(written.scope, idOf(x), removed.generation)).outcome,
 						"missing",
 					);
-					const created = await store.create(y, null);
+					const created = await store.createIf(y, null);
 					assert.ok(created.outcome === "created");
 					assert.notEqual(created.generation, removed.generation);
 					assert.notEqual(created.generation, written.generation);
@@ -1385,13 +1385,13 @@ export function conditionalSetContract<T>(
 					const [x, y] = fromRemoval.items as [T, T];
 					const emptied = await store.remove(fromRemoval.scope, idOf(x), fromRemoval.generation);
 					assert.ok(emptied.outcome === "removed");
-					assert.equal((await store.create(y, emptied.generation)).outcome, "created");
+					assert.equal((await store.createIf(y, emptied.generation)).outcome, "created");
 					const fromReset = fresh("held-reset");
 					await raw.reset(fromReset);
 					const tombstone = await store.list(fromReset);
 					assert.ok(tombstone.generation !== null, "a reset leaves a generation");
 					const [z] = itemsOf(fromReset, 1) as [T];
-					assert.equal((await store.create(z, tombstone.generation)).outcome, "created");
+					assert.equal((await store.createIf(z, tombstone.generation)).outcome, "created");
 					const sets = [
 						{ scope: held.scope, what: "a set created" },
 						{ scope: fromRemoval.scope, what: "a set revived from a removal's tombstone" },
@@ -1413,10 +1413,10 @@ export function conditionalSetContract<T>(
 					const scope = fresh("recreate");
 					const [x, y, z] = itemsOf(scope, 3) as [T, T, T];
 					const seen = new Set<StoreGeneration>();
-					const first = await store.create(x, null);
+					const first = await store.createIf(x, null);
 					assert.ok(first.outcome === "created");
 					seen.add(first.generation);
-					const second = await store.create(y, first.generation);
+					const second = await store.createIf(y, first.generation);
 					assert.ok(second.outcome === "created");
 					seen.add(second.generation);
 					const removedX = await store.remove(scope, idOf(x), second.generation);
@@ -1426,7 +1426,7 @@ export function conditionalSetContract<T>(
 					assert.ok(removedY.outcome === "removed");
 					seen.add(removedY.generation);
 					await expire(scope);
-					const created = await store.create(z, null);
+					const created = await store.createIf(z, null);
 					assert.ok(created.outcome === "created");
 					assert.ok(!seen.has(created.generation), "a generation seen before was issued again");
 					const read = await store.list(scope);

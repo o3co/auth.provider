@@ -275,7 +275,7 @@ function recordBackend(faults: RecordFaults = {}) {
 			return { value: out(entry.value), generation: entry.generation };
 		};
 		return {
-			create: (key, value) =>
+			put: (key, value) =>
 				serialised(key, async () => {
 					const held = live(key, true);
 					if (faults.createKeepsGeneration === true && held !== undefined) {
@@ -387,14 +387,14 @@ function recordBackend(faults: RecordFaults = {}) {
 	const unreachable = (): ConditionalRecordTarget<Value> =>
 		faults.outageAsMissing === true
 			? {
-					create: outage,
+					put: outage,
 					getVersioned: async () => null,
 					replaceIf: async () => ({ outcome: "missing" }),
 					removeIf: async () => ({ outcome: "missing" }),
 					unconditional: { put: outage, delete: outage },
 				}
 			: {
-					create: outage,
+					put: outage,
 					getVersioned: outage,
 					replaceIf: outage,
 					removeIf: outage,
