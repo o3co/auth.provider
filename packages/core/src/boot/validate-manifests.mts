@@ -1744,6 +1744,49 @@ function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
 		.join("; ");
 }
 
+/** The key names configuration cannot carry: every `Object.prototype` member, and `prototype`. */
+const PROTOTYPE_MEMBER_NAMES: ReadonlySet<string> = new Set([
+	...Object.getOwnPropertyNames(Object.prototype),
+	"prototype",
+]);
+
+/**
+ * One issue per key of the configuration as written that is named after an
+ * `Object.prototype` member, at the key's full path. A schema drops a
+ * `__proto__` key unvalidated, and code reading any such key may meet the
+ * inherited member instead. Plain objects and lists are walked through
+ * their data properties; a getter is not called (the parse that follows
+ * reads it, and names what it throws), and anything else is a value.
+ */
+function prototypeNamedKeyIssues(
+	value: unknown,
+	path: readonly PropertyKey[] = [],
+	seen = new Set<object>(),
+): z.core.$ZodIssue[] {
+	if (!Array.isArray(value) && !isPlainConfigObject(value)) return [];
+	if (seen.has(value)) return [];
+	seen.add(value);
+	return Object.keys(value).flatMap((key) => {
+		const at = [...path, Array.isArray(value) ? Number(key) : key];
+		const below = Object.getOwnPropertyDescriptor(value, key);
+		return [
+			...(PROTOTYPE_MEMBER_NAMES.has(key)
+				? [
+						{
+							code: "custom",
+							path: at,
+							message: `the key "${key}" is named after an Object.prototype member, which configuration cannot carry`,
+							input: undefined,
+						} as z.core.$ZodIssue,
+					]
+				: []),
+			...(below !== undefined && "value" in below
+				? prototypeNamedKeyIssues(below.value, at, seen)
+				: []),
+		];
+	});
+}
+
 /**
  * Step 13: parses the configuration the composition root handed over
  * (`bootstrapComponents.config`) once, with every schema that reads it:
@@ -1760,9 +1803,10 @@ function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
  *
  * Returns the composed configuration, which becomes the `config` slot once
  * `parseModuleSections` writes each section back. Refused values make one
- * `config-validation-failed` naming each operator path: the base's alone
- * when the base refuses (the module schemas have no output to read), else
- * every module schema's.
+ * `config-validation-failed` naming each operator path: every key named
+ * after an `Object.prototype` member (`prototypeNamedKeyIssues`), then the
+ * base's issues alone when the base refuses (the module schemas have no
+ * output to read), else every module schema's.
  * @internal
  */
 function validateAndComposeConfig(modules: readonly Module[], bootstrap: BootstrapMap): unknown {
@@ -1772,6 +1816,7 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 
 	for (const m of modules) if (m.configSchema) participants.push({ module: m.name });
 
+	issues.push(...prototypeNamedKeyIssues(raw));
 	// Each parse through `parseSection`: a schema that throws instead of
 	// answering — an async refinement, a transform or a getter that throws —
 	// is one more issue naming whose schema it was, not an error escaping
