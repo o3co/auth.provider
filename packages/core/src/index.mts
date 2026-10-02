@@ -95,9 +95,6 @@ export {
 // A remote JSON Web Key Set, memoised per uri and tuning, with a fetch seam
 export {
 	createRemoteKeySetCache,
-	DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS,
-	DEFAULT_REMOTE_JWKS_COOLDOWN_MS,
-	DEFAULT_REMOTE_JWKS_TIMEOUT_MS,
 	type RemoteKeySet,
 	type RemoteKeySetCache,
 	type RemoteKeySetCacheOptions,
@@ -141,7 +138,6 @@ export type {
 	BootstrapComponentCollisionDetails,
 	BootstrapMap,
 	CircularDependencyDetails,
-	CleanupRecord,
 	CollectedRouteContribution,
 	ConfigPathRelocatedDetails,
 	ConfigValidationFailedDetails,
@@ -296,7 +292,6 @@ export {
 	classifyFederationRefreshError,
 	type FederationRefreshErrorClassification,
 	type FederationRefreshErrorReason,
-	isKnownFederationRefreshErrorCode,
 } from "./federation-tokens/refresh-error.mjs";
 // FederationTokenStore. Backing client interface
 // (FederationTokenStoreClient) lives in @o3co/auth-provider-redis.
@@ -504,18 +499,16 @@ export {
 } from "./issuer/canonical.mjs";
 // JWKS publishing — `jwksModule` mounts the route so every provider that signs
 // tokens exposes its verification keys for offline validation; `createJwksRouter`
-// is the underlying factory for direct composition. `DEFAULT_JWKS_PATH` /
-// `resolveJwksPath` are the single source of truth for the publishing path,
-// shared with oauth discovery's `jwks_uri` so the two never drift.
-export { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "./jwks/cache.mjs";
+// is the underlying factory for direct composition. `resolveJwksPath` is the
+// single source of truth for the publishing path, shared with oauth
+// discovery's `jwks_uri` so the two never drift.
 export { jwksModule } from "./jwks/module.mjs";
-export { DEFAULT_JWKS_PATH, resolveJwksPath } from "./jwks/path.mjs";
+export { resolveJwksPath } from "./jwks/path.mjs";
 export { createRouter as createJwksRouter, type JwksRouterOptions } from "./jwks/router.mjs";
 // A JWT's exp / iat / nbf, checked before anything computes an expiry from them.
 export type { NumericDateClaim } from "./jwt/numericDate.mjs";
 export {
 	isNumericDate,
-	MAX_NUMERIC_DATE_SECONDS,
 	malformedNumericDateClaim,
 } from "./jwt/numericDate.mjs";
 // JWT verifier — central verifyJwt with alg/iss/aud/typ pinning
@@ -591,8 +584,6 @@ export {
 	LOGGED_AGGREGATE_MAX_ERRORS,
 	LOGGED_MAX_PROJECTIONS,
 	LOGGED_PRINT_DEPTH,
-	LOGGED_STACK_MAX_FRAMES,
-	LOGGED_STACK_MAX_LENGTH,
 	LOGGED_STRING_MAX_LENGTH,
 	type LoggableError,
 	lineSafeText,
@@ -656,8 +647,6 @@ export {
 export {
 	createMemoryMfaTransactionStore,
 	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,
-	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS,
-	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL,
 	type MemoryMfaTransactionStore,
 	type MemoryMfaTransactionStoreOptions,
 	MfaTransactionStoreFullError,
@@ -676,13 +665,11 @@ export {
 	type MfaStoreFactor,
 	type MfaStoreFactorBinding,
 	type MfaStoreFactorChanges,
-	type MfaStoreListAnswer,
 	type MfaStoreListReading,
 	type MfaStoreListRequest,
 	type MfaStoreMarkEnrolledRequest,
 	type MfaStoreRemoveIfAnswer,
 	type MfaStoreRemoveIfRequest,
-	type MfaStoreUpdateAnswer,
 	type MfaStoreUpdateRequest,
 	type MfaStoreVersionedListAnswer,
 	readMfaStoreCreateIfAnswer,
@@ -726,7 +713,6 @@ export {
 	MFA_RECOVERY_AUTHORIZATION_MAX_MS,
 	MFA_SUBJECT_LEASE_MAX_MS,
 	MFA_SUBJECT_LEASE_MIN_MS,
-	MFA_TRANSACTION_PATCH_KEYS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaRecoverySetFloorAnswer,
@@ -968,7 +954,6 @@ export {
 } from "./ratelimit/guard.mjs";
 export {
 	createMemoryRateLimiter,
-	DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
 	type MemoryRateLimiterOptions,
 } from "./ratelimit/memory.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
@@ -985,7 +970,6 @@ export type {
 export {
 	assertUsableRateLimitSpecs,
 	isUsableRateLimitSpec,
-	readConfiguredRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "./ratelimit/usableSpec.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
@@ -1009,10 +993,7 @@ export {
 // to the registration schema. A refused record makes `findById` and
 // `authenticate` reject with the branded refusal, recognised by
 // `isClientRecordRefused` and never by `instanceof`.
-export {
-	ClientRecordRefusedError,
-	isClientRecordRefused,
-} from "./repositories/clientRecordRefused.mjs";
+export { isClientRecordRefused } from "./repositories/clientRecordRefused.mjs";
 export {
 	type ClientRepositoryBoundaryOptions,
 	validatedClientRepository,
@@ -1076,7 +1057,6 @@ export {
 // actions and their grades, the requirement contract, and the acr vocabulary.
 export {
 	type AcrRequirement,
-	type AcrSelection,
 	type AcrTable,
 	type ProducibleAmr,
 	producibleAmr,
@@ -1143,7 +1123,6 @@ export {
 	type Admission,
 	type AdmissionAsks,
 	type AdmissionDeps,
-	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,
 	type CompletedRequirementDto,
@@ -1294,9 +1273,6 @@ export {
 export {
 	ChallengeStoreFullError,
 	createMemoryChallengeStore,
-	DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
-	DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
-	DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
 	type MemoryChallengeStore,
 	type MemoryChallengeStoreOptions,
 } from "./challenges/adapters/memory.mjs";
@@ -1325,9 +1301,6 @@ export type {
 } from "./challenges/types.mjs";
 export {
 	createMemoryReplaySeenSet,
-	DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES,
-	DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
-	DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
 	type MemoryReplaySeenSet,
 	type MemoryReplaySeenSetOptions,
 	ReplaySeenSetFullError,
@@ -1339,10 +1312,7 @@ export {
 } from "./replay-seen-set/factory.mjs";
 export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
-export {
-	DPOP_PROOF_REPLAY_SCOPE_PREFIX,
-	DPOP_PROOF_REPLAY_SHARE,
-} from "./replay-seen-set/scopes.mjs";
+export { DPOP_PROOF_REPLAY_SCOPE_PREFIX } from "./replay-seen-set/scopes.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
 // Canonical key helper, exported so integrators' own adapters keep
 // cross-adapter parity
@@ -1371,13 +1341,9 @@ export {
 	memoryRefreshTokenFamilyStoreModule,
 } from "./refresh-token-family/module.mjs";
 export { withReason } from "./refresh-token-family/reason.mjs";
-export {
-	resolveFamilyAccessTokenHorizonMs,
-	revokedFamilyExpiresAtMs,
-} from "./refresh-token-family/retention.mjs";
+export { resolveFamilyAccessTokenHorizonMs } from "./refresh-token-family/retention.mjs";
 export {
 	createRefreshTokenFamilyRevocation,
-	REVOKED_WITHOUT_RECORD_JTI,
 	type RefreshTokenFamilyRevocationDeps,
 } from "./refresh-token-family/revocation.mjs";
 export {
@@ -1407,10 +1373,7 @@ export type {
 	MemoryAccessTokenDenylist,
 	MemoryAccessTokenDenylistOptions,
 } from "./access-token-denylist/memory.mjs";
-export {
-	createMemoryAccessTokenDenylist,
-	DEFAULT_MEMORY_DENYLIST_SWEEP_INTERVAL,
-} from "./access-token-denylist/memory.mjs";
+export { createMemoryAccessTokenDenylist } from "./access-token-denylist/memory.mjs";
 export { memoryAccessTokenDenylistModule } from "./access-token-denylist/module.mjs";
 export type { AccessTokenDenylist } from "./access-token-denylist/types.mjs";
 // The declared-absence policy the denylist readers share: a boot refusal
@@ -1461,12 +1424,9 @@ export {
 	effectiveFederationGrantStatus,
 } from "./federation-grants/effective-status.mjs";
 export {
-	FEDERATION_GRANT_INTERACTION_CODES,
 	type FederationGrantIntentScopes,
-	type FederationGrantInteractionCode,
 	federationGrantIneligibilityRetry,
 	federationGrantIneligibilityStands,
-	federationGrantInteractionCode,
 	federationGrantRefreshFailureStands,
 	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
@@ -1488,7 +1448,6 @@ export {
 } from "./federation-grants/intentFactory.mjs";
 export {
 	createMemoryFederationGrantIntentStore,
-	MEMORY_FEDERATION_GRANT_INTENT_STORE_SWEEP_FLOOR,
 	type MemoryFederationGrantIntentStore,
 } from "./federation-grants/intentMemory.mjs";
 export {
@@ -1528,7 +1487,6 @@ export {
 	type FederationGrantLodgingStepFailure,
 	type FederationGrantReauthorizationRequest,
 	type FederationGrantReauthorizationResult,
-	federationGrantRedirectUriReservedParameter,
 	lodgeFederationGrantIntent,
 	lodgeFederationGrantReauthorization,
 } from "./federation-grants/lodge.mjs";
@@ -1544,7 +1502,6 @@ export {
 } from "./federation-grants/module.mjs";
 export {
 	assertFederationGrantRetrievalLimits,
-	FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS,
 	type FederationGrantAuditEvent,
 	type FederationGrantRefresher,
 	type FederationGrantRetrievalFailure,
@@ -1668,8 +1625,6 @@ export {
 } from "./device-authorization/errors.mjs";
 export {
 	createMemoryDeviceCodeStore,
-	DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES,
-	DEFAULT_MEMORY_DEVICE_CODE_STORE_SWEEP_INTERVAL,
 	type MemoryDeviceCodeStore,
 	type MemoryDeviceCodeStoreOptions,
 } from "./device-authorization/memory.mjs";

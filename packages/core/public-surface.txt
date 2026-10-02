@@ -12,7 +12,6 @@
 . AccessTokenScheme type
 . AcquireLockOptions type
 . AcrRequirement type
-. AcrSelection type
 . AcrTable type
 . ActionGrade type
 . AdapterBuilder type
@@ -24,7 +23,6 @@
 . AdmissionAsks type
 . AdmissionDeps type
 . AdmissionGrade type
-. AdmissionInfrastructureStore type
 . AdmissionRequest type
 . Algorithm type
 . AppConfig type
@@ -79,11 +77,9 @@
 . ChallengeStoreFullError value
 . CheckReplicaSafetyInput type
 . CircularDependencyDetails type
-. CleanupRecord type
 . Client type
 . ClientEntry type
 . ClientEntrySchema value
-. ClientRecordRefusedError value
 . ClientRepository type
 . ClientRepositoryBoundaryOptions type
 . ClientRepositoryOutage type
@@ -132,30 +128,12 @@
 . DEFAULT_CLOCK_SKEW_MS value
 . DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS value
 . DEFAULT_FEDERATION_RESPONSE_MODE value
-. DEFAULT_JWKS_CACHE_MAX_AGE value
-. DEFAULT_JWKS_PATH value
-. DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES value
-. DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS value
-. DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL value
-. DEFAULT_MEMORY_DENYLIST_SWEEP_INTERVAL value
-. DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES value
-. DEFAULT_MEMORY_DEVICE_CODE_STORE_SWEEP_INTERVAL value
 . DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES value
-. DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS value
-. DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL value
-. DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS value
-. DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES value
-. DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS value
-. DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL value
 . DEFAULT_MFA_SUBJECT_LEASE_MS value
-. DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS value
-. DEFAULT_REMOTE_JWKS_COOLDOWN_MS value
-. DEFAULT_REMOTE_JWKS_TIMEOUT_MS value
 . DEFAULT_SIGNING_ALGORITHM value
 . DEFAULT_SUBJECT_REVOCATION_SKEW_MS value
 . DEVICE_CODE_STORE_ABSENCE_POLICY value
 . DPOP_PROOF_REPLAY_SCOPE_PREFIX value
-. DPOP_PROOF_REPLAY_SHARE value
 . DefaultBootstrapMap type
 . DelegatedAuthorizationRequest type
 . DelegatedAuthorizationResult type
@@ -195,9 +173,7 @@
 . FEDERATED_AMR value
 . FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT value
 . FEDERATION_GRANT_FLOW_BUDGET_MS value
-. FEDERATION_GRANT_INTERACTION_CODES value
 . FEDERATION_GRANT_LIFETIME_CEILING_MS value
-. FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS value
 . FEDERATION_GRANT_SETTING_DEFAULTS value
 . FEDERATION_RESPONSE_MODES value
 . FederatedIdentityLink type
@@ -237,7 +213,6 @@
 . FederationGrantIntentStore type
 . FederationGrantIntentStoreFactory type
 . FederationGrantIntentWrite type
-. FederationGrantInteractionCode type
 . FederationGrantLockResult type
 . FederationGrantLodged type
 . FederationGrantLodgingAbsorbedCarrier type
@@ -336,8 +311,6 @@
 . LOGGED_AGGREGATE_MAX_ERRORS value
 . LOGGED_MAX_PROJECTIONS value
 . LOGGED_PRINT_DEPTH value
-. LOGGED_STACK_MAX_FRAMES value
-. LOGGED_STACK_MAX_LENGTH value
 . LOGGED_STRING_MAX_LENGTH value
 . LOGIN_RETURN_PARAMETER value
 . LifecycleCleanupOptions type
@@ -368,10 +341,8 @@
 . MAX_DURATION_SECONDS value
 . MAX_JTI_LENGTH value
 . MAX_KID_LENGTH value
-. MAX_NUMERIC_DATE_SECONDS value
 . MAX_STORABLE_EXPIRY_MS value
 . MAX_TRUST_PROXY_HOPS value
-. MEMORY_FEDERATION_GRANT_INTENT_STORE_SWEEP_FLOOR value
 . MFA_AMR value
 . MFA_CLOCK_SKEW_ALLOWANCE_MS value
 . MFA_FACTOR_LABEL_MAX_LENGTH value
@@ -382,7 +353,6 @@
 . MFA_RECOVERY_AUTHORIZATION_MAX_MS value
 . MFA_SUBJECT_LEASE_MAX_MS value
 . MFA_SUBJECT_LEASE_MIN_MS value
-. MFA_TRANSACTION_PATCH_KEYS value
 . MFA_WEEKLY_WINDOW_MS value
 . MIN_SECRET_ENTROPY_BYTES value
 . MailAddressFact type
@@ -446,13 +416,11 @@
 . MfaStoreFactor type
 . MfaStoreFactorBinding type
 . MfaStoreFactorChanges type
-. MfaStoreListAnswer type
 . MfaStoreListReading type
 . MfaStoreListRequest type
 . MfaStoreMarkEnrolledRequest type
 . MfaStoreRemoveIfAnswer type
 . MfaStoreRemoveIfRequest type
-. MfaStoreUpdateAnswer type
 . MfaStoreUpdateRequest type
 . MfaStoreVersionedListAnswer type
 . MfaSubjectAttemptOutcome type
@@ -522,7 +490,6 @@
 . RESERVED_DELEGATED_AUTHORIZATION_PARAMS value
 . RESERVED_IDENTITY_CLAIMS value
 . REVOCATION_RETENTION_ALLOWANCE_MS value
-. REVOKED_WITHOUT_RECORD_JTI value
 . RateLimitBudget type
 . RateLimitBudgetFactory type
 . RateLimitBudgetLookup type
@@ -872,8 +839,6 @@
 . federationGrantIdentityRevision value
 . federationGrantIneligibilityRetry value
 . federationGrantIneligibilityStands value
-. federationGrantInteractionCode value
-. federationGrantRedirectUriReservedParameter value
 . federationGrantRefreshFailureStands value
 . federationTokenSnapshot value
 . federationTrustsUpstreamAmr value
@@ -907,7 +872,6 @@
 . isGrantTypeAllowed value
 . isHintToken value
 . isInterruptAdmission value
-. isKnownFederationRefreshErrorCode value
 . isLifetimeSeconds value
 . isLoopbackHostname value
 . isMfaFactorId value
@@ -998,7 +962,6 @@
 . readConditionalRemoveAnswer value
 . readConditionalReplaceAnswer value
 . readConditionalSetRemoveAnswer value
-. readConfiguredRateLimitSpec value
 . readDeviceAuthorization value
 . readEnrollmentFacts value
 . readEnvironmentName value
@@ -1063,7 +1026,6 @@
 . resolveFederationGrantLifetimeMs value
 . resolveFederationGrantRetrievalLimits value
 . resolveFederationResponseMode value
-. resolveJwksCacheMaxAge value
 . resolveJwksPath value
 . resolveRefreshTokenLifetime value
 . resolveSubjectRevocationHorizonMs value
@@ -1072,7 +1034,6 @@
 . retrieveFederationGrantToken value
 . revokeAllForSubject value
 . revokeFederationGrant value
-. revokedFamilyExpiresAtMs value
 . runReadinessProbes value
 . sanitizeErrorText value
 . sealWithKeyRing value
@@ -1193,7 +1154,6 @@
 ./testing OAuthTokenSettingsContractInput type
 ./testing OutboundAnswer type
 ./testing OutboundExchange type
-./testing OutboundFetchError value
 ./testing OutboundFetchForTestingOptions type
 ./testing OutboundSectionForTests type
 ./testing OutboundTransport type
@@ -1243,7 +1203,6 @@
 ./testing loginEntryContract value
 ./testing makeValidAppConfig value
 ./testing makeValidCoreConfig value
-./testing makeValidFullSections value
 ./testing mergeAdmission value
 ./testing mergeSessionStore value
 ./testing oauthTokenSettingsContract value
