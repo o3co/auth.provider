@@ -480,7 +480,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 				};
 				if (!kit.answerable(started.response)) {
 					throw new TypeError(
-						"the factor's enrollment answered a response or a state that is not an object",
+						"the factor's enrollment answered a response that is not a plain object",
 					);
 				}
 			} catch (cause) {

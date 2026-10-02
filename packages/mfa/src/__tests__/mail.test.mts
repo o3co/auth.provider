@@ -322,6 +322,19 @@ describe("keptState — what is kept of a pending state", () => {
 		}
 	});
 
+	it("refuses an address digest readKeptState would not read back — null, empty, a digest that is not a string — with a RangeError that quotes nothing", () => {
+		for (const addressDigest of [null, {}, { keyId: "k1", digest: 42 }, { keyId: "S3CR3T" }]) {
+			let thrown: unknown;
+			try {
+				keptState({ state: {}, addressDigest: addressDigest as never });
+			} catch (error) {
+				thrown = error;
+			}
+			expect(thrown, JSON.stringify(addressDigest)).toBeInstanceOf(RangeError);
+			expect((thrown as Error).message).not.toContain("S3CR3T");
+		}
+	});
+
 	it("refuses a state readKeptState would not read back — a list, null, a scalar — with a RangeError that quotes nothing", () => {
 		for (const state of [["S3CR3T"], null, "S3CR3T", 1]) {
 			let thrown: unknown;

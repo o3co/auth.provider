@@ -536,13 +536,16 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 	});
 
 	/** Boots the double, re-verified by `verify`, with alice holding another factor of its kind ahead of hers. */
-	async function withVerifier(overrides: Partial<MfaFactor>) {
+	async function withVerifier(
+		overrides: Partial<MfaFactor>,
+		config: ReturnType<typeof configFor> = configFor("required"),
+	) {
 		const factorStore = createMemoryMfaFactorStore();
 		// Another factor of the kind ahead of it: finding the one verified walks past it.
 		await seedFactor(factorStore, "test", { secret: "0ther" });
 		const record = await seedFactor(factorStore, "test", { secret: "s3cret" });
 		const booted = await boot({
-			config: configFor("required"),
+			config,
 			factorStore,
 			extraModules: [contributing(challenged(overrides))],
 		});
@@ -599,20 +602,76 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 		expect((await storedData(factorStore, record)).data).toEqual(copy);
 	});
 
-	it("refuses a correct proof whose answered data is a class's instance — 503 once, the factor's data left as it was — never sealing it as an empty object", async () => {
+	it("refuses a right proof whose factor answers data that cannot be sealed — a class's instance, or null — 503, the factor's data left as it was, the subject's attempt void, the transaction kept and still usable", async () => {
 		class TotpData {
 			get secret(): string {
 				return "s3cret";
 			}
 		}
+		for (const [label, answered] of [
+			["a class's instance", new TotpData()],
+			["null", null],
+		] as const) {
+			const base = challenged();
+			let broken = true;
+			const { factorStore, transactionStore, record, agent, transaction, challenge, logger } =
+				await withVerifier(
+					{
+						// Guessable: each proof reserves one of the subject's attempts.
+						guessable: true,
+						verify: async (ctx) => {
+							const result = await base.verify(ctx);
+							return result.ok && broken ? { ...result, next: answered as never } : result;
+						},
+					},
+					configFor("required", { lockout: { threshold: 2 } }),
+				);
+			const before = await storedData(factorStore, record);
+			const right = async () =>
+				verify(agent, transaction, record.id, `s3cret:${(await challenge()).body.nonce as string}`);
+
+			// Two, counted as failures, would hold the third.
+			for (let n = 0; n < 2; n++) expect((await right()).status, label).toBe(503);
+
+			expect(events(logger, "error"), label).toEqual([
+				"mfa_factor_unreadable",
+				"mfa_factor_unreadable",
+			]);
+			const after = await storedData(factorStore, record);
+			expect(after.data, label).toEqual({ secret: "s3cret" });
+			expect(after.record.version, label).toBe(before.record.version);
+			// The transaction is kept, each attempt counted at its reservation.
+			expect((await transactionStore.get(transaction))?.attempts, label).toBe(2);
+
+			broken = false;
+			const res = await right();
+			expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(200);
+			await disposeAll();
+		}
+	});
+
+	it("hands amrFor and the seal one plain copy of the factor's data when the verification answers no next, the data read once", async () => {
+		let reads = 0;
 		const base = challenged();
-		const { factorStore, record, agent, transaction, challenge, logger } = await withVerifier({
+		const handed: unknown[] = [];
+		const { factorStore, record, agent, transaction, challenge } = await withVerifier({
+			amrFor: (data) => {
+				handed.push(data);
+				return base.amrFor(data);
+			},
 			verify: async (ctx) => {
 				const result = await base.verify(ctx);
-				return result.ok ? { ...result, next: new TotpData() as never } : result;
+				// A factor that put a getter on the data it was handed, and answers no next.
+				Object.defineProperty(ctx.factor.data, "secret", {
+					get: () => {
+						reads += 1;
+						return "s3cret";
+					},
+					enumerable: true,
+				});
+				return result;
 			},
 		});
-		const before = await storedData(factorStore, record);
 
 		const res = await verify(
 			agent,
@@ -621,11 +680,12 @@ describe("a factor's answers, read by name, and the copy of what it hands to be 
 			`s3cret:${(await challenge()).body.nonce as string}`,
 		);
 
-		expect(res.status).toBe(503);
-		expect(events(logger, "error")).toEqual(["mfa_factor_unreadable"]);
-		const after = await storedData(factorStore, record);
-		expect(after.data).toEqual({ secret: "s3cret" });
-		expect(after.record.version).toBe(before.record.version);
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
+		expect(reads).toBe(1);
+		const [copy] = handed;
+		expect(Object.isFrozen(copy)).toBe(true);
+		expect(copy).toEqual({ secret: "s3cret" });
+		expect((await storedData(factorStore, record)).data).toEqual(copy);
 	});
 
 	it("answers 503 once, the factor unreadable, when reading its verification's answer throws, as when the verification itself throws", async () => {

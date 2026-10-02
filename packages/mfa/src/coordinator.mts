@@ -53,7 +53,12 @@
  *   ends: `success` once the factor was written, `void` for a right proof
  *   that completed nothing, and a failure otherwise — a refusal, an outage
  *   or a factor that throws before a verdict. An exempt proof records its
- *   success once the factor was written.
+ *   success once the factor was written. A right proof whose factor answers
+ *   data that cannot be sealed (`copyFactorValue`), the data it was handed
+ *   included, is `void` too — the factor's bug never counts against the
+ *   subject — and is answered `503` before anything is consumed: the
+ *   transaction kept and still usable, its attempt counted at the
+ *   reservation, the factor's data as it was.
  * - A recovery code's verification reads the subject's recovery-set floor
  *   before its attempt is reserved, and again once the code is spent: a set
  *   the recovery-code rule refuses (`recoverySetRefusal`) — below the floor —
@@ -1074,6 +1079,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 			}
 			// How the subject's attempt settles: a failure until the proof verifies.
 			let settled: "failure" | "void" | "success" = "failure";
+			// Whether a right proof's factor answered data that cannot be sealed: its
+			// bug, never the subject's, so the attempt settles `void`.
+			let dataRefused = false;
 			try {
 				const pending = await challengeState(tx, factor, record, nowMs);
 				if ("outcome" in pending) return pending;
@@ -1096,7 +1104,9 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 						return opened.outcome === "retired" ? { reason: "invalid" } : opened;
 					}
 					const { named: self, all } = opened;
-					let result: MfaVerification;
+					let result:
+						| { readonly ok: true; readonly factorId: string; readonly next: unknown }
+						| Extract<MfaVerification, { readonly ok: false }>;
 					try {
 						const answer = await factor.verify({
 							subject: tx.subject,
@@ -1112,18 +1122,10 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 								: { addressDigest: pending.addressDigest }),
 							proof: call.proof,
 						});
-						// The factor's answer, each field read once, however it holds them, its
-						// data as the plain copy that is sealed (`copyFactorValue`) and that
-						// everything after acts on: a read that throws, or data that is not
-						// plain, is the factor's failure, as a throw of its own.
+						// The factor's answer, each field read once, however it holds them: a
+						// read that throws is the factor's failure, as a throw of its own.
 						if (answer.ok) {
-							const factorId = answer.factorId;
-							const next = answer.next;
-							result = {
-								ok: true,
-								factorId,
-								next: next === undefined ? undefined : copyFactorValue(next),
-							};
+							result = { ok: true, factorId: answer.factorId, next: answer.next };
 						} else {
 							result = { ok: false, reason: answer.reason, factorId: answer.factorId };
 						}
@@ -1145,7 +1147,16 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 							new TypeError("the factor verified a factor id the subject does not hold"),
 						);
 					}
-					const next = result.next ?? verified.data;
+					// The data after this use as the plain copy that is sealed
+					// (`copyFactorValue`), and that everything after acts on: the answered
+					// `next`, or — none answered — the data the factor was handed, taken once.
+					let next: MfaEnrolledFactor["data"];
+					try {
+						next = copyFactorValue(result.next === undefined ? verified.data : result.next);
+					} catch (cause) {
+						dataRefused = true;
+						return unreadable(cause);
+					}
 					let amr: unknown;
 					try {
 						amr = factor.amrFor(next);
@@ -1161,7 +1172,12 @@ export function createMfaCoordinator(options: MfaCoordinatorOptions): MfaCoordin
 				};
 
 				let checked = await check();
-				if ("outcome" in checked) return checked;
+				if ("outcome" in checked) {
+					// Right, and the factor's data refused: the transaction kept, the attempt
+					// counted at its reservation, the subject's attempt void.
+					if (dataRefused) settled = "void";
+					return checked;
+				}
 				if ("reason" in checked) {
 					const { reason, ...concerns } = checked;
 					return refused(reason, attemptsRemaining, concerns);

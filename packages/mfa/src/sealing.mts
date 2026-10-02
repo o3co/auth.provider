@@ -169,7 +169,8 @@ const refuse = (): never => {
  * frozen at every depth: what is sealed, and what the coordinator hands
  * everything that acts on the value, so nothing acts on what was not sealed.
  *
- * - `null`, a boolean, a string or a finite number, as it is;
+ * - `null`, a boolean, a string or a finite number other than `-0` (JSON writes
+ *   it as `0`), as it is;
  * - a plain array (prototype `Array.prototype`): its `length` read once, its
  *   own keys exactly its indices — a hole, or a field of its own JSON would
  *   drop, is refused — and each index read once; `undefined` in it is
@@ -185,8 +186,8 @@ const refuse = (): never => {
  * Anything else is a `RangeError` with one fixed text: a class's instance, an
  * Array subclass, a built-in (a Date, a Map, a RegExp, a boxed number, a
  * Proxy over any of them), a function — a `toJSON` among them — a bigint,
- * NaN, an infinity, a cycle, and a read that throws or nesting past the
- * stack. So a value is sealed whole or not at all, never in part. An object
+ * NaN, an infinity, `-0`, a cycle, a read that throws, and nesting past the
+ * stack, the copy's or JSON's. So a value is sealed whole or not at all, never in part. An object
  * two fields share is copied once.
  *
  * Not core's `copyByName` (beside `readPlainFields`), which snapshots a
@@ -197,7 +198,12 @@ const refuse = (): never => {
 export function copyFactorValue(value: unknown): Readonly<Record<string, unknown>> {
 	try {
 		if (!isJsonObject(value)) return refuse();
-		return copyPlain(value, new Map()) as Readonly<Record<string, unknown>>;
+		const copy = copyPlain(value, new Map()) as Readonly<Record<string, unknown>>;
+		// Written once here, so a copy JSON cannot write — nesting a shared object
+		// keeps shallow for the copy, deep for JSON — is refused where it is taken,
+		// before anything acts on it.
+		JSON.stringify(copy);
+		return copy;
 	} catch {
 		// A value refused, a getter or a Proxy trap that throws, or nesting past
 		// the stack: one answer, quoting nothing.
@@ -205,9 +211,22 @@ export function copyFactorValue(value: unknown): Readonly<Record<string, unknown
 	}
 }
 
+/** `value`'s copy ({@link copyFactorValue}) as JSON text; writing it is inside the same refusal. */
+function factorValueText(value: unknown): string {
+	const copy = copyFactorValue(value);
+	try {
+		return JSON.stringify(copy);
+	} catch {
+		throw new RangeError(NOT_PLAIN_VALUE);
+	}
+}
+
 function copyPlain(value: unknown, copies: Map<object, unknown>): unknown {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-	if (typeof value === "number") return Number.isFinite(value) ? value : refuse();
+	// -0 is refused: JSON writes it as 0, which would open as another value.
+	if (typeof value === "number") {
+		return Number.isFinite(value) && !Object.is(value, -0) ? value : refuse();
+	}
 	if (typeof value !== "object") return refuse();
 	const known = copies.get(value);
 	if (known === COPYING) return refuse();
@@ -320,7 +339,7 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 				`${what} is sealed to a binding whose every part is non-empty, well-formed text`,
 			);
 		}
-		const text = JSON.stringify(copyFactorValue(value));
+		const text = factorValueText(value);
 		return sealWithKeyRing(text, keys, {
 			purpose: placement.purpose,
 			record: placement.record,
@@ -359,13 +378,18 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 
 	/** What a digest is made over: the kind and the parts — `length` read once, each part once — length-prefixed. A `RangeError` for parts that are not a list of well-formed strings. */
 	const digestInput = (kind: string, parts: readonly string[]): Buffer => {
-		if (!Array.isArray(parts)) throw new RangeError(DIGEST_PARTS);
-		const length = parts.length;
 		const read: string[] = [];
-		for (let index = 0; index < length; index++) {
-			const part: unknown = parts[index];
-			if (!isWellFormedText(part)) throw new RangeError(DIGEST_PARTS);
-			read.push(part);
+		try {
+			if (!Array.isArray(parts)) throw new RangeError(DIGEST_PARTS);
+			const length = parts.length;
+			for (let index = 0; index < length; index++) {
+				const part: unknown = parts[index];
+				if (!isWellFormedText(part)) throw new RangeError(DIGEST_PARTS);
+				read.push(part);
+			}
+		} catch {
+			// A part that is not text, or a read that throws: the same answer, quoting nothing.
+			throw new RangeError(DIGEST_PARTS);
 		}
 		return lengthPrefixed([kind, ...read]);
 	};

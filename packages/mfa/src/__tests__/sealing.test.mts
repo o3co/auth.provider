@@ -436,6 +436,26 @@ describe("keyed digests", () => {
 		expect(() => sealingOver([K1]).digestsFor("")).toThrow(RangeError);
 	});
 
+	it("refuses, in its own words, parts whose length or a part cannot be read", () => {
+		const digests = sealingOver([K1]).digestsFor("email");
+		const unreadableLength = new Proxy(["a"], {
+			get: (target, key, receiver) => {
+				if (key === "length") throw new Error("S3CR3T");
+				return Reflect.get(target, key, receiver);
+			},
+		});
+		const unreadablePart = Object.defineProperty(["a", "b"], 1, {
+			get: () => {
+				throw new Error("S3CR3T");
+			},
+		});
+		for (const parts of [unreadableLength, unreadablePart]) {
+			expect(() => digests.digest(parts)).toThrow(
+				new RangeError("a digest is made over a list of well-formed strings"),
+			);
+		}
+	});
+
 	it("never descends into a part: one nested past any stack is refused as a part that is not a string", () => {
 		const digests = sealingOver([K1]).digestsFor("email");
 		let deep: unknown = "x";
@@ -531,6 +551,12 @@ describe("what is sealed: plain JSON-shaped values, copied once", () => {
 		Object.defineProperty(mapTaggedObject, Symbol.toStringTag, { value: "Object" });
 		const hidden = (target: object, key: PropertyKey, value: unknown) =>
 			Object.defineProperty(target, key, { value, enumerable: false });
+		// Each node holds the one before. Every thousandth is listed in order, so the copy
+		// meets each shared node once and never goes past a thousand deep, while JSON
+		// writes each listed node whole, deeper than its stack.
+		const chain: Record<string, unknown>[] = [];
+		for (let index = 0; index < 20_000; index++) chain.push({ n: chain[index - 1] ?? null });
+		const everyThousandth = chain.filter((_, index) => index % 1000 === 999);
 		let deep: Record<string, unknown> = { secret: SECRET_TEXT };
 		for (let depth = 0; depth < 200_000; depth++) deep = { deep };
 		for (const [label, value] of [
@@ -572,6 +598,9 @@ describe("what is sealed: plain JSON-shaped values, copied once", () => {
 			["a hole in a list", { secret: SECRET_TEXT, list: [1, , 2] }],
 			["a list at the top", [SECRET_TEXT]],
 			["nesting past any stack", deep],
+			["nesting JSON cannot write, each level shared", { nodes: everyThousandth }],
+			["-0 inside", { secret: SECRET_TEXT, n: -0 }],
+			["-0 in a list", { list: [0, -0] }],
 			[
 				"a getter that throws",
 				{
@@ -696,6 +725,23 @@ describe("what is sealed: plain JSON-shaped values, copied once", () => {
 		expect(sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, value))).toEqual({
 			state: "ok",
 			value: { lastUsedStep: 7, nested: { a: [1] } },
+			keyId: "k1",
+		});
+	});
+
+	it("leaves out, as absent, a field an own getter answers undefined for, and one a setter alone holds", () => {
+		const value = Object.defineProperties(
+			{ kept: 1 },
+			{
+				answersUndefined: { get: () => undefined, enumerable: true },
+				setterOnly: { set: () => {}, enumerable: true },
+			},
+		);
+		expect(copyFactorValue(value)).toEqual({ kept: 1 });
+		const sealing = sealingOver([K1]);
+		expect(sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, value))).toEqual({
+			state: "ok",
+			value: { kept: 1 },
 			keyId: "k1",
 		});
 	});
