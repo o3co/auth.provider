@@ -79,6 +79,7 @@ const refreshed = vi.fn(async () => ({
 }));
 
 const delegated = {
+	name: "upstream",
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	exchangeDelegatedCode: async () => ({
 		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },

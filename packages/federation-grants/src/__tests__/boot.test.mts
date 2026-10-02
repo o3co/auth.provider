@@ -116,6 +116,7 @@ const olderRevocation = {
 
 /** An adapter with all three delegated methods: the whole capability (the federation-grants ADR, D17). */
 const delegated = {
+	name: "upstream",
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	exchangeDelegatedCode: async () => ({
 		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
@@ -126,12 +127,14 @@ const delegated = {
 
 /** Two of the three delegated methods, without the code exchange. */
 const slice2Pair = {
+	name: "upstream",
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	refreshDelegatedToken: async () => ({}),
 } as unknown as FederationProvider;
 
 /** A custom adapter with the capability, whose callbacks arrive as a cross-site POST. */
 const formPost = {
+	name: "upstream",
 	responseMode: "form_post",
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	exchangeDelegatedCode: async () => ({
@@ -142,7 +145,10 @@ const formPost = {
 } as unknown as FederationProvider;
 
 /** An adapter with an ordinary session refresh and nothing else. */
-const sessionOnly = { refreshToken: async () => ({}) } as unknown as FederationProvider;
+const sessionOnly = {
+	name: "upstream",
+	refreshToken: async () => ({}),
+} as unknown as FederationProvider;
 
 const federationModule = (name: string, provider: FederationProvider) =>
 	defineModule({
