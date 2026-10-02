@@ -35,7 +35,7 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { OAUTH_ADMISSION_ACTIONS } from "./_helpers/admissionActions.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-import { expectBestEffortWarn, expectUriNotLogged } from "./_helpers/projectedLog.mjs";
+import { expectUriNotLogged } from "./_helpers/projectedLog.mjs";
 
 // codeData must carry client_id and redirect_uri (required fields), and
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
@@ -1976,6 +1976,7 @@ describe("createAuthorizationGrant", () => {
 						...mockClientRepository,
 						findById: vi.fn().mockResolvedValue({
 							clientId: "client1",
+							tokenEndpointAuthMethod: "client_secret_basic",
 							allowedRedirectUris: [RP_URI],
 							allowedScopes: ["read"],
 							backchannelLogoutUri: "https://rp.example/back",
@@ -2041,6 +2042,14 @@ describe("createAuthorizationGrant", () => {
 			describe("a frontchannelLogoutUri must be http(s)", () => {
 				/** One code exchange against `record`; the RP registration it made and the logger. */
 				const exchangeWith = async (record: object, warn?: () => void, wired = true) => {
+					const { result, registerRPSpy, logger } = await attempt(record, warn, wired);
+					expect(registerRPSpy).toHaveBeenCalledTimes(1);
+					const [, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>, Date];
+					return { result, rpData, logger };
+				};
+
+				/** One code exchange against `record`: its result, the RP registry's spy and the logger. */
+				const attempt = async (record: object, warn?: () => void, wired = true) => {
 					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
 					const logger = createMockLogger();
 					if (warn !== undefined) logger.warn.mockImplementation(warn);
@@ -2086,32 +2095,61 @@ describe("createAuthorizationGrant", () => {
 						metadata: { ip: "127.0.0.1" },
 						authenticatedClient: DEFAULT_AUTH_CLIENT,
 					});
-					expect(registerRPSpy).toHaveBeenCalledTimes(1);
-					const [, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>, Date];
-					return { result, rpData, logger };
+					return { result, registerRPSpy, logger };
+				};
+
+				/** The one `client_record_refused` warn, which names the authenticated id. */
+				const expectRecordRefused = (logger: ReturnType<typeof createMockLogger>) => {
+					const refused = logger.warn.mock.calls.filter(
+						([, event]) => event === "client_record_refused",
+					);
+					expect(refused).toHaveLength(1);
+					expect(refused[0]?.[0]).toMatchObject({ step: "find", clientId: "client1" });
 				};
 
 				const baseRecord = {
 					clientId: "client1",
+					tokenEndpointAuthMethod: "client_secret_basic",
 					allowedRedirectUris: [RP_URI],
 					allowedScopes: ["read"],
 					backchannelLogoutUri: "https://rp.example/back",
 				};
 
 				it.each([
-					["a non-http(s) scheme (lower case)", "javascript:void(0)", "not-http"],
-					["a non-http(s) scheme (upper case)", "JAVASCRIPT:void(0)", "not-http"],
+					["a non-http(s) scheme (lower case)", "javascript:void(0)"],
+					["a non-http(s) scheme (upper case)", "JAVASCRIPT:void(0)"],
 					// The URL parser strips the tab, so this parses as the scheme above.
-					["a non-http(s) scheme (a tab inside the scheme)", "java\tscript:void(0)", "not-http"],
-					["a non-http(s) scheme (a data URL)", "data:text/plain,signed-out", "not-http"],
-					["a non-http(s) scheme (a blob URL)", "blob:https://rp.example/x", "not-http"],
-					["a non-http(s) scheme (a custom scheme)", "com.example.app:/x", "not-http"],
-					["a non-http(s) scheme (an ftp URL)", "ftp://rp.example/front", "not-http"],
-					["a value that is not a URL", "not-a-url", "unparsable"],
-					["a value that is not a string", 42, "not-a-string"],
+					["a non-http(s) scheme (a tab inside the scheme)", "java\tscript:void(0)"],
+					["a non-http(s) scheme (a data URL)", "data:text/plain,signed-out"],
+					["a non-http(s) scheme (a blob URL)", "blob:https://rp.example/x"],
+					["a non-http(s) scheme (a custom scheme)", "com.example.app:/x"],
+					["a non-http(s) scheme (an ftp URL)", "ftp://rp.example/front"],
+					["a value that is not a URL", "not-a-url"],
+					["a value that is not a string", 42],
 				])(
-					"refuses %s from a custom repository: the RP is registered without it, the exchange still succeeds, and one warn names the reason, never the URI",
-					async (_label, uri, reason) => {
+					"refuses a record with %s from a custom repository whole: the RP is registered without logout metadata, the exchange still succeeds, and one client_record_refused warn never names the URI",
+					async (_label, uri) => {
+						const { result, rpData, logger } = await exchangeWith({
+							...baseRecord,
+							frontchannelLogoutUri: uri,
+						});
+
+						expect(result.status).toBe(200);
+						expect(rpData.clientId).toBe("client1");
+						expect(rpData.frontchannelLogoutUri).toBeUndefined();
+						expect(rpData.backchannelLogoutUri).toBeUndefined();
+						expect(logger.warn).toHaveBeenCalledTimes(1);
+						expectRecordRefused(logger);
+						expectUriNotLogged(logger, String(uri));
+					},
+				);
+
+				it.each([
+					["null", null],
+					["an empty string", ""],
+				])(
+					"refuses a record whose frontchannelLogoutUri is %s whole: the RP is registered without logout metadata, and the exchange still succeeds",
+					async (_label, uri) => {
 						const { result, rpData, logger } = await exchangeWith({
 							...baseRecord,
 							frontchannelLogoutUri: uri,
@@ -2119,16 +2157,8 @@ describe("createAuthorizationGrant", () => {
 
 						expect(result.status).toBe(200);
 						expect(rpData.frontchannelLogoutUri).toBeUndefined();
-						// The other logout channel is untouched.
-						expect(rpData.backchannelLogoutUri).toBe("https://rp.example/back");
-						expect(logger.warn).toHaveBeenCalledTimes(1);
-						expectBestEffortWarn(
-							logger,
-							"logout_frontchannel_uri_refused",
-							{ site: "authorization_code", clientId: "client1", reason },
-							null,
-						);
-						expectUriNotLogged(logger, String(uri));
+						expect(rpData.backchannelLogoutUri).toBeUndefined();
+						expectRecordRefused(logger);
 					},
 				);
 
@@ -2142,15 +2172,9 @@ describe("createAuthorizationGrant", () => {
 						);
 						expect(result.status).toBe(200);
 						expect(rpData.frontchannelLogoutUri).toBeUndefined();
-						const refused = warn.mock.calls.filter(
-							([, name]) => name === "logout_frontchannel_uri_refused",
-						);
+						const refused = warn.mock.calls.filter(([, name]) => name === "client_record_refused");
 						expect(refused).toHaveLength(1);
-						expect(refused[0]?.[0]).toMatchObject({
-							site: "authorization_code",
-							clientId: "client1",
-							reason: "not-http",
-						});
+						expect(refused[0]?.[0]).toMatchObject({ step: "find", clientId: "client1" });
 					} finally {
 						warn.mockRestore();
 					}
@@ -2164,46 +2188,40 @@ describe("createAuthorizationGrant", () => {
 					});
 
 					expect(rpData.clientId).toBe("client1");
-					expectBestEffortWarn(
-						logger,
-						"logout_frontchannel_uri_refused",
-						{ site: "authorization_code", clientId: "client1", reason: "not-http" },
-						null,
-					);
+					expectRecordRefused(logger);
 				});
 
-				it("refuses a non-http(s) scheme without failing the exchange when the logger throws", async () => {
-					const { result, rpData, logger } = await exchangeWith(
+				it("answers 503 and registers no RP when the refusal's warn throws", async () => {
+					const { result, registerRPSpy, logger } = await attempt(
 						{ ...baseRecord, frontchannelLogoutUri: "ftp://rp.example/front" },
 						() => {
 							throw new Error("logger unavailable");
 						},
 					);
 
-					expect(result.status).toBe(200);
-					expect(rpData.frontchannelLogoutUri).toBeUndefined();
+					expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+					expect(registerRPSpy).not.toHaveBeenCalled();
 					expect(logger.warn).toHaveBeenCalledTimes(1);
 				});
 
-				it("refuses a frontchannelLogoutUri whose read throws, without failing the exchange", async () => {
+				it("answers a frontchannelLogoutUri whose read throws as a client repository outage: 503, no RP registered", async () => {
 					const record = {
 						...baseRecord,
 						get frontchannelLogoutUri(): string {
 							throw new Error("field unavailable");
 						},
 					};
-					const { result, rpData, logger } = await exchangeWith(record);
+					const { result, registerRPSpy, logger } = await attempt(record);
 
-					expect(result.status).toBe(200);
-					expect(rpData.frontchannelLogoutUri).toBeUndefined();
-					expect(rpData.backchannelLogoutUri).toBe("https://rp.example/back");
-					expect(logger.error).not.toHaveBeenCalled();
-					expectBestEffortWarn(
-						logger,
-						"logout_frontchannel_uri_refused",
-						{ site: "authorization_code", clientId: "client1", reason: "unreadable" },
-						null,
-					);
+					expect(result).toMatchObject({
+						status: 503,
+						error: "temporarily_unavailable",
+						errorDescription: "session linking unavailable",
+					});
+					expect(registerRPSpy).not.toHaveBeenCalled();
+					expect(logger.error.mock.calls.map(([, event]) => event)).toEqual([
+						"client_repository_unavailable",
+					]);
 				});
 
 				it("registers an http(s) frontchannelLogoutUri on any host, with a query or a fragment, without a warn", async () => {
@@ -2223,14 +2241,13 @@ describe("createAuthorizationGrant", () => {
 				});
 
 				it("registers no front-channel entry, silently, for a record without one", async () => {
-					for (const uri of [undefined, null, ""]) {
-						const { rpData, logger } = await exchangeWith({
-							...baseRecord,
-							frontchannelLogoutUri: uri,
-						});
-						expect(rpData.frontchannelLogoutUri).toBeUndefined();
-						expect(logger.warn).not.toHaveBeenCalled();
-					}
+					const { rpData, logger } = await exchangeWith({
+						...baseRecord,
+						frontchannelLogoutUri: undefined,
+					});
+					expect(rpData.frontchannelLogoutUri).toBeUndefined();
+					expect(rpData.backchannelLogoutUri).toBe("https://rp.example/back");
+					expect(logger.warn).not.toHaveBeenCalled();
 				});
 			});
 
