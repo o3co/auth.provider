@@ -24,6 +24,7 @@
  */
 
 import { isStorableExpiry } from "../adapters/expiry.mjs";
+import { isScopeToken } from "../federations/scope.mjs";
 import { wellFormedAmr } from "../grants/authenticationClaims.mjs";
 import { isRecordableInstant } from "./approval.mjs";
 import type { DeviceAuthorization, DeviceAuthorizationStatus } from "./types.mjs";
@@ -51,14 +52,18 @@ const STATUSES = {
 const nonEmptyString = (value: unknown): string | typeof MALFORMED =>
 	typeof value === "string" && value.length > 0 ? value : MALFORMED;
 
-/** A list of strings, each index read once, as a frozen copy; a hole is not a string. */
-const stringList = (value: unknown): readonly string[] | typeof MALFORMED => {
+/**
+ * A list of RFC 6749 §3.3 scope-tokens (`isScopeToken`), each index read
+ * once, as a frozen copy: an entry holding a space would name a second scope
+ * once the list is joined. A hole is not a scope-token.
+ */
+const scopeList = (value: unknown): readonly string[] | typeof MALFORMED => {
 	if (!Array.isArray(value)) return MALFORMED;
 	const copy: string[] = [];
 	const length = value.length;
 	for (let index = 0; index < length; index++) {
 		const entry: unknown = value[index];
-		if (typeof entry !== "string") return MALFORMED;
+		if (typeof entry !== "string" || !isScopeToken(entry)) return MALFORMED;
 		copy.push(entry);
 	}
 	return Object.freeze(copy);
@@ -70,9 +75,13 @@ const optional =
 	(value: unknown): T | undefined | typeof MALFORMED =>
 		value === undefined ? undefined : rule(value);
 
-/** An instant a `Date` can hold, in epoch milliseconds. */
-const instant = (value: unknown): number | typeof MALFORMED =>
-	typeof value === "number" && !Number.isNaN(new Date(value).getTime()) ? value : MALFORMED;
+/** Whole epoch milliseconds at or after the epoch that a `Date` holds, as a store records an instant. */
+const recordedInstant = (value: unknown): number | typeof MALFORMED =>
+	typeof value === "number" &&
+	isRecordableInstant(value) &&
+	!Number.isNaN(new Date(value).getTime())
+		? value
+		: MALFORMED;
 
 /**
  * How each field `DeviceAuthorization` declares is read: handed a thunk that
@@ -87,7 +96,7 @@ const FIELDS: {
 } = {
 	userCode: (read) => nonEmptyString(read()),
 	clientId: (read) => nonEmptyString(read()),
-	requestedScope: (read) => optional(stringList)(read()),
+	requestedScope: (read) => optional(scopeList)(read()),
 	// The rule a store's `create` holds an expiry to; a fractional one is valid.
 	expiresAtMs: (read) => {
 		const value = read();
@@ -104,8 +113,8 @@ const FIELDS: {
 			: MALFORMED;
 	},
 	subject: (read) => optional(nonEmptyString)(read()),
-	grantedScope: (read) => optional(stringList)(read()),
-	approvedAtMs: (read) => optional(instant)(read()),
+	grantedScope: (read) => optional(scopeList)(read()),
+	approvedAtMs: (read) => optional(recordedInstant)(read()),
 	// An `amr` that cannot be read — a throwing read included — is none:
 	// "cannot tell", which stamps no `amr`.
 	amr: (read) => {
@@ -116,10 +125,7 @@ const FIELDS: {
 			return undefined;
 		}
 	},
-	authTimeMs: (read) =>
-		optional((value) =>
-			typeof value === "number" && isRecordableInstant(value) ? value : MALFORMED,
-		)(read()),
+	authTimeMs: (read) => optional(recordedInstant)(read()),
 };
 
 const FIELD_NAMES = Object.keys(FIELDS) as (keyof DeviceAuthorization)[];
@@ -133,10 +139,11 @@ const FIELD_NAMES = Object.keys(FIELDS) as (keyof DeviceAuthorization)[];
  *
  * Refused: a `record` that is not an object (`not_an_object`); a field whose
  * read throws or whose value is not what the type declares (`malformed`,
- * naming it). An expiry is held to `isStorableExpiry`, an approval instant to
- * what a `Date` can hold, and an authentication time to whole epoch
- * milliseconds at or after the epoch, as `recordableDeviceApproval` records
- * it. An `amr` that is not a non-empty list of non-empty strings, or cannot be
+ * naming it). A scope is a list of RFC 6749 §3.3 scope-tokens. An expiry is
+ * held to `isStorableExpiry`; an approval instant and an authentication time
+ * to whole epoch milliseconds at or after the epoch that a `Date` holds, as
+ * `recordableDeviceApproval` records one. Neither is read against a clock
+ * here: that is the consumer's. An `amr` that is not a non-empty list of non-empty strings, or cannot be
  * read, is read as none rather than refused.
  */
 export function readDeviceAuthorization(record: unknown): DeviceAuthorizationReading {
