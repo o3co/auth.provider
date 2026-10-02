@@ -17,11 +17,13 @@
 /**
  * The router with Client ID Metadata Documents on: its one document
  * fallback reads every registered client through core's boundary, so a
- * registration the boundary refuses, of any id shape, is an unknown client,
- * never a document. With documents off the router reads the repository
- * through the boundary itself, whose refusal rejects the lookup: `503`, as
- * for any rejected lookup. A router built over a repository that already is
- * a document fallback is refused, when it would stack its own.
+ * registration the boundary refuses, of any id shape, rejects the lookup
+ * with core's refusal, `503` as for any rejected lookup, and is never
+ * replaced by a document. With documents off the router reads the
+ * repository through the boundary itself, with the same answer. An id no
+ * client is registered under still resolves its document, and consent names
+ * the document's host. A router built over a repository that already is a
+ * document fallback is refused, when it would stack its own.
  */
 
 import crypto from "node:crypto";
@@ -60,10 +62,31 @@ const refusedRecord = {
 	clientName: "",
 };
 
-const answering = (record: unknown): ClientRepository => ({
-	findById: async (id) => (id === CLIENT_ID ? (record as PublicClient) : null),
+const answering = (record: unknown, id: string = CLIENT_ID): ClientRepository => ({
+	findById: async (asked) => (asked === id ? (record as PublicClient) : null),
 	authenticate: async () => null,
 });
+
+/** A URL-shaped client id, the shape a document client takes. */
+const DOC_ID = "https://tools.example/oauth/client.json";
+
+/** A registration under the URL-shaped id that the boundary refuses (its name is empty). */
+const refusedUrlRecord = { ...refusedRecord, clientId: DOC_ID };
+
+/** A fetch that serves the document at `DOC_ID`. */
+const servingDocument = () =>
+	vi.fn(
+		async () =>
+			new Response(
+				JSON.stringify({
+					client_id: DOC_ID,
+					client_name: "Tools",
+					redirect_uris: [REDIRECT_URI],
+					token_endpoint_auth_method: "none",
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			),
+	) as unknown as typeof fetch;
 
 const configWith = (documents: boolean) =>
 	({
@@ -91,11 +114,12 @@ const codeRepository: CodeRepository = {
 
 const buildRouter = async (
 	clientRepository: ClientRepository,
-	{ documents = true, consent = true }: { documents?: boolean; consent?: boolean } = {},
+	{
+		documents = true,
+		consent = true,
+		fetchImpl = vi.fn(async () => new Response("{}", { status: 404 })) as unknown as typeof fetch,
+	}: { documents?: boolean; consent?: boolean; fetchImpl?: typeof fetch } = {},
 ) => {
-	const fetchImpl = vi.fn(
-		async () => new Response("{}", { status: 404 }),
-	) as unknown as typeof fetch;
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
 		loginEntry: createTestLoginEntry(),
@@ -127,10 +151,10 @@ const buildRouter = async (
 	return { app, fetchImpl, logger };
 };
 
-const authorize = (app: express.Express) =>
+const authorize = (app: express.Express, clientId = CLIENT_ID) =>
 	request(app).get("/oauth/authorize").query({
 		response_type: "code",
-		client_id: CLIENT_ID,
+		client_id: clientId,
 		redirect_uri: REDIRECT_URI,
 		state: "xyz",
 		code_challenge: S256_CHALLENGE,
@@ -138,12 +162,31 @@ const authorize = (app: express.Express) =>
 		scope: "read",
 	});
 
+/** A public client's `/token` request: client authentication looks the client up first. */
+const token = (app: express.Express, clientId: string) =>
+	request(app).post("/oauth/token").type("form").send({
+		grant_type: "authorization_code",
+		client_id: clientId,
+		code: "code-x",
+		redirect_uri: REDIRECT_URI,
+		code_verifier: VERIFIER,
+	});
+
+/** The outage lines naming the boundary's refusal as their cause. */
+const refusedLookups = (logger: ReturnType<typeof createMockLogger>) =>
+	logger.error.mock.calls.filter(
+		([line, message]) =>
+			message === "client_repository_unavailable" &&
+			(line as { err?: { reason?: string } }).err?.reason === "client_record_refused",
+	);
+
 describe("the router's one document fallback reads every registered client through core's boundary", () => {
-	it("answers a refused registration whose id is not a URL as an unknown client, with documents on", async () => {
+	it("answers a refused registration whose id is not a URL 503, with documents on", async () => {
 		const { app, fetchImpl, logger } = await buildRouter(answering(refusedRecord));
 		const res = await authorize(app);
-		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("invalid_client");
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expect(res.headers.location).toBeUndefined();
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ clientId: CLIENT_ID }),
@@ -164,6 +207,44 @@ describe("the router's one document fallback reads every registered client throu
 			expect.objectContaining({ clientId: CLIENT_ID }),
 			"client_record_refused",
 		);
+	});
+});
+
+describe("a refused registration under a URL-shaped id, with documents on", () => {
+	it("answers 503 at /authorize, with no redirect, and never fetches the document", async () => {
+		const fetchImpl = servingDocument();
+		const { app, logger } = await buildRouter(answering(refusedUrlRecord, DOC_ID), { fetchImpl });
+		const res = await authorize(app, DOC_ID);
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expect(res.headers.location).toBeUndefined();
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(refusedLookups(logger)).toHaveLength(1);
+	});
+
+	it("answers 503 at client authentication, with no challenge, and never fetches the document", async () => {
+		const fetchImpl = servingDocument();
+		const { app, logger } = await buildRouter(answering(refusedUrlRecord, DOC_ID), { fetchImpl });
+		const res = await token(app, DOC_ID);
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expect(res.headers["www-authenticate"]).toBeUndefined();
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(refusedLookups(logger)).toHaveLength(1);
+	});
+
+	it("still resolves the document for the same id when no client is registered under it, and consent names its host", async () => {
+		const fetchImpl = servingDocument();
+		const { app } = await buildRouter(answering(null, DOC_ID), { fetchImpl });
+		const res = await authorize(app, DOC_ID);
+		expect(res.status).toBe(302);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		const location = new URL(res.headers.location as string, "https://issuer.example");
+		expect(location.pathname).toBe("/consent");
+		const challenge = location.searchParams.get("challenge");
+		const page = await request(app).get("/oauth/consent").query({ challenge });
+		expect(page.status).toBe(200);
+		expect(page.body).toMatchObject({ client_id: DOC_ID, client_id_host: "tools.example" });
 	});
 });
 
