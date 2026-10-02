@@ -25,9 +25,11 @@
  *   its own, so neither opens as the other or as a factor's data.
  * - Every binding or digest part must be well-formed text: UTF-8 writes a lone
  *   surrogate as U+FFFD's bytes, which would make two bindings one.
- * - Only a JSON object of plain JSON values is sealed (no Date, Map, `toJSON`,
- *   BigInt, NaN, cycle, or accessor at any depth); it is copied once and the copy
- *   is serialised, so a getter cannot answer the check and the text differently.
+ * - What is sealed is a copy: each field of the value read by name, once,
+ *   however it is held (a getter, a class's instance, an Array subclass), into
+ *   plain JSON data that is then checked and serialised. A value JSON does not
+ *   hold as it is (a Date, a Map, a function, BigInt, NaN, a cycle, a hole) is
+ *   refused, and so is a read that throws, quoting nothing.
  * - Opening never throws: `unreadable` for anything no key would cure, and
  *   `key_unavailable` (naming the key) when the sealing key has left the ring.
  *   Callers answer both with a `503`, never "no factor" or a wrong code.
@@ -149,74 +151,90 @@ const bindingRecord = (parts: readonly unknown[]): Buffer | undefined =>
 const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** What {@link jsonCopy} answers for a value JSON would not give back as it is. */
+/** What {@link copyByName} answers for a value that is not JSON data. */
 const NOT_JSON: unique symbol = Symbol("not JSON");
-
-/** Whether any own property of `value` — enumerable or not, keyed by a string or a symbol — is an accessor. */
-const hasAccessor = (value: object): boolean =>
-	Reflect.ownKeys(value).some((key) => {
-		const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
-		return descriptor !== undefined && !("value" in descriptor);
-	});
+/** What `copies` holds for an object while it is copied: met again inside itself, it is a cycle. */
+const COPYING: unique symbol = Symbol("being copied");
 
 /**
- * A copy of `value` built from its own data properties, each read once through
- * its descriptor, or {@link NOT_JSON} when JSON would not give it back unchanged.
- * Accepted: `null`, booleans, finite numbers, strings, real arrays with no hole
- * or `undefined`, and plain (or null-prototype) objects, whose `undefined` values
- * are dropped as JSON drops them. Refused: any accessor at any depth (a getter
- * could answer the check and the serialisation differently), other objects,
- * functions, BigInt, NaN, Infinity and cycles.
+ * Whether JSON writes `value` as its own fields: a plain object, one without a
+ * prototype, a class's instance — not a Date, a Map, a RegExp or another
+ * built-in, which JSON writes as something else or as nothing.
  */
-function jsonCopy(value: unknown, ancestors: Set<object>): unknown {
+const writtenAsFields = (value: object): boolean =>
+	Object.prototype.toString.call(value) === "[object Object]";
+
+/**
+ * `value` copied by name as JSON data, or {@link NOT_JSON}. Every read is an
+ * ordinary one, so a getter runs, and each runs once:
+ *
+ * - `null`, a boolean, a string or a finite number, as it is;
+ * - a list (`Array.isArray`, whatever its prototype): its `length` and each
+ *   index read once, in order, into a plain array; a hole or an `undefined`
+ *   is not JSON data, since JSON would write it as `null`;
+ * - an object JSON writes as its fields ({@link writtenAsFields}): each own
+ *   enumerable string key read once, one read as `undefined` left out as JSON
+ *   leaves it out, into an object without a prototype. What its prototype
+ *   holds is not a field, as JSON says, and a `toJSON` is not asked.
+ *
+ * Anything else is not JSON data: a bigint, NaN, an infinity, a symbol, a
+ * function, `undefined`, a Date, a Map, and a cycle. `copies` keeps one copy
+ * of an object two fields share, so it is read once. A read that throws is
+ * let through as it was thrown.
+ */
+function copyByName(value: unknown, copies: Map<object, unknown>): unknown {
 	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
 	if (typeof value === "number") return Number.isFinite(value) ? value : NOT_JSON;
-	if (typeof value !== "object" || ancestors.has(value) || hasAccessor(value)) return NOT_JSON;
-	const prototype = Object.getPrototypeOf(value);
-	ancestors.add(value);
-	try {
-		if (Array.isArray(value)) {
-			if (prototype !== Array.prototype) return NOT_JSON;
-			// An array's length is an own data property it cannot redefine: read once.
-			const length = Reflect.getOwnPropertyDescriptor(value, "length")?.value as number;
-			const copy: unknown[] = [];
-			for (let index = 0; index < length; index++) {
-				// A hole has no descriptor; `undefined` JSON would write as null.
-				const descriptor = Reflect.getOwnPropertyDescriptor(value, String(index));
-				if (descriptor === undefined || descriptor.value === undefined) return NOT_JSON;
-				const entry = jsonCopy(descriptor.value, ancestors);
-				if (entry === NOT_JSON) return NOT_JSON;
-				copy.push(entry);
-			}
-			return copy;
-		}
-		if (prototype !== Object.prototype && prototype !== null) return NOT_JSON;
-		const copy: Record<string, unknown> = Object.create(null);
-		for (const key of Object.keys(value)) {
-			const entry: unknown = Reflect.getOwnPropertyDescriptor(value, key)?.value;
-			if (entry === undefined) continue;
-			const copied = jsonCopy(entry, ancestors);
-			if (copied === NOT_JSON) return NOT_JSON;
-			copy[key] = copied;
-		}
-		return copy;
-	} finally {
-		ancestors.delete(value);
+	if (typeof value !== "object") return NOT_JSON;
+	const known = copies.get(value);
+	if (known === COPYING) return NOT_JSON;
+	if (known !== undefined) return known;
+	copies.set(value, COPYING);
+	const copy = Array.isArray(value) ? copyList(value, copies) : copyFields(value, copies);
+	copies.set(value, copy);
+	return copy;
+}
+
+function copyList(list: readonly unknown[], copies: Map<object, unknown>): unknown {
+	const length = list.length;
+	const copy: unknown[] = [];
+	for (let index = 0; index < length; index++) {
+		if (!Object.hasOwn(list, index)) return NOT_JSON;
+		const element = list[index];
+		if (element === undefined) return NOT_JSON;
+		const copied = copyByName(element, copies);
+		if (copied === NOT_JSON) return NOT_JSON;
+		copy.push(copied);
 	}
+	return copy;
+}
+
+function copyFields(value: object, copies: Map<object, unknown>): unknown {
+	if (!writtenAsFields(value)) return NOT_JSON;
+	const source = value as Readonly<Record<string, unknown>>;
+	const copy: Record<string, unknown> = Object.create(null);
+	for (const key of Object.keys(source)) {
+		const field = source[key];
+		if (field === undefined) continue;
+		const copied = copyByName(field, copies);
+		if (copied === NOT_JSON) return NOT_JSON;
+		copy[key] = copied;
+	}
+	return copy;
 }
 
 /**
- * `value` as JSON text, when it is a JSON object JSON gives back as it is —
- * the text of the copy {@link jsonCopy} checked, so parsing it gives back an
- * equal object — and `undefined` otherwise. Never throws.
+ * `value`'s copy ({@link copyByName}) as JSON text, when `value` is an object
+ * whose copy is JSON data — so parsing the text gives back an equal object —
+ * and `undefined` otherwise, a read that throws included. Never throws.
  */
 function jsonObjectText(value: unknown): string | undefined {
-	if (!isJsonObject(value)) return undefined;
 	try {
-		const copy = jsonCopy(value, new Set());
+		if (!isJsonObject(value)) return undefined;
+		const copy = copyByName(value, new Map());
 		return copy === NOT_JSON ? undefined : JSON.stringify(copy);
 	} catch {
-		// A Proxy whose traps throw, or anything else that cannot be read.
+		// A getter that throws, or a Proxy whose trap does: the value cannot be read.
 		return undefined;
 	}
 }
@@ -235,15 +253,18 @@ const factorPlacement = (binding: MfaFactorBinding): Placement => ({
 	record: bindingRecord([binding?.subject, binding?.id, binding?.kind]),
 });
 
-const statePlacement = (binding: MfaStateBinding): Placement => ({
-	purpose:
-		binding?.use === "challenge"
-			? MFA_CHALLENGE_SEALING_PURPOSE
-			: binding?.use === "enrollment"
-				? MFA_ENROLLMENT_SEALING_PURPOSE
-				: "",
-	record: bindingRecord([binding?.transactionId, binding?.kind]),
-});
+const statePlacement = (binding: MfaStateBinding): Placement => {
+	const use = binding?.use;
+	return {
+		purpose:
+			use === "challenge"
+				? MFA_CHALLENGE_SEALING_PURPOSE
+				: use === "enrollment"
+					? MFA_ENROLLMENT_SEALING_PURPOSE
+					: "",
+		record: bindingRecord([binding?.transactionId, binding?.kind]),
+	};
+};
 
 /** A sealing over `ring`. A `RangeError` for a ring the envelope refuses, or an empty one. */
 export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOptions): MfaSealing {
@@ -303,12 +324,13 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 		return derived;
 	};
 
-	/** What a digest is made over: the kind and the parts, length-prefixed. A `RangeError` for parts that are not well-formed strings. */
+	/** What a digest is made over: the kind and the parts, each read once, length-prefixed. A `RangeError` for parts that are not a list of well-formed strings. */
 	const digestInput = (kind: string, parts: readonly string[]): Buffer => {
-		if (!Array.isArray(parts) || !parts.every(isWellFormedText)) {
+		const read = Array.isArray(parts) ? copyByName(parts, new Map()) : NOT_JSON;
+		if (!Array.isArray(read) || !read.every(isWellFormedText)) {
 			throw new RangeError("a digest is made over a list of well-formed strings");
 		}
-		return lengthPrefixed([kind, ...parts]);
+		return lengthPrefixed([kind, ...read]);
 	};
 
 	const mac = (entry: SealingKey, input: Buffer): string =>
@@ -344,19 +366,17 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 					digest: mac(first, digestInput(kind, parts)),
 				}),
 				matchesDigest(parts: readonly string[], stored: MfaKeyedDigest): MfaDigestMatch {
-					// A record that is not a digest is neither a missing key nor a wrong code: it is
-					// refused, quoting nothing.
-					if (
-						typeof stored !== "object" ||
-						stored === null ||
-						!isSealingKeyId(stored.keyId) ||
-						typeof stored.digest !== "string" ||
-						!DIGEST_TEXT.test(stored.digest)
-					) {
+					// Each field read once, by name. A record that is not a digest is neither a
+					// missing key nor a wrong code: it is refused, quoting nothing.
+					const { keyId, digest } =
+						typeof stored === "object" && stored !== null
+							? stored
+							: ({} as Partial<MfaKeyedDigest>);
+					if (!isSealingKeyId(keyId) || typeof digest !== "string" || !DIGEST_TEXT.test(digest)) {
 						throw new RangeError("a stored digest must be { keyId, digest } as digest made it");
 					}
 					const input = digestInput(kind, parts);
-					const entry = keys.find((candidate) => candidate.id === stored.keyId);
+					const entry = keys.find((candidate) => candidate.id === keyId);
 					if (entry === undefined) return "key_unavailable";
 					// A stored digest names the key it was made under: that key is still needed,
 					// whatever this comparison finds.
@@ -364,7 +384,7 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 						retiredDigestSaid.add(entry.id);
 						logger.info({ keyId: entry.id }, "mfa_digest_made_with_retired_key");
 					}
-					return constantTimeStringEqual(mac(entry, input), stored.digest) ? "match" : "mismatch";
+					return constantTimeStringEqual(mac(entry, input), digest) ? "match" : "mismatch";
 				},
 			});
 		},
