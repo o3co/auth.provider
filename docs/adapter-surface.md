@@ -491,8 +491,9 @@ write-lifetime bound. These are the rules every store with conditional members k
      would serve that state's old generation again, which a caller may still
      hold. A store that can lose acknowledged writes re-mints the generation
      of everything it restores before serving it, or runs so that
-     acknowledged state never rolls back (synchronous replication, say), and
-     its documentation says which.
+     acknowledged state never rolls back (persistence, and a failover setup
+     that keeps acknowledged writes), and its documentation says which: an
+     assumption of the second kind is stated as one (the checklist below).
    - **State with no generation** (written before the store had conditional
      members, or by an older writer) is given a fresh one, atomically, by its
      first versioned read, which keeps its retention. A conditional write
@@ -520,6 +521,12 @@ write-lifetime bound. These are the rules every store with conditional members k
 - The adapter keeps the second half of the bound: a write it issues commits
   or fails within the bound. Its documentation says how, and states the
   operational assumption that rests on (rule 6).
+- An adapter whose store can lose acknowledged writes (asynchronous
+  replication on failover, say) states it: the store assumes acknowledged
+  writes are not rolled back (persistence, plus a failover setup that keeps
+  acknowledged writes). A deployment that accepts losing acknowledged writes
+  on failover also accepts that a conditional write may then meet a restored,
+  older generation (rule 8).
 - The port's conformance suite passes, where it has one.
 
 **A SQL store.** One row per record, `(key…, body, generation, expires_at)`;
