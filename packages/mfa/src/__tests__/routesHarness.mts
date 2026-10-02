@@ -31,6 +31,7 @@ import type {
 	MfaFactorData,
 	MfaFactorRecord,
 	MfaFactorStore,
+	MfaTransactionStore,
 	Module,
 	PrimaryAuthentication,
 	PrimaryContinuation,
@@ -147,6 +148,23 @@ export function recoverySet(count: number): {
 	);
 	if (set === undefined) throw new Error("the recovery-code factor issued no set");
 	return set;
+}
+
+/** Raises `subject`'s recovery-set floor to `setGeneration` in `store`, under a lease of its own, as a regeneration does. */
+export async function raiseRecoverySetFloor(
+	store: MfaTransactionStore,
+	setGeneration: number,
+	subject: string = ALICE.id,
+): Promise<void> {
+	const generation = await store.subjectGeneration(subject);
+	const lease = await store.acquireSubjectLease(subject, { ttlMs: 60_000, generation });
+	if (lease.outcome !== "acquired") throw new Error(`the lease was not acquired: ${lease.outcome}`);
+	const raised = await store.raiseRecoverySetFloor(subject, {
+		setGeneration,
+		leaseToken: lease.token,
+	});
+	await store.releaseSubjectLease(subject, lease.token);
+	if (raised.outcome !== "raised") throw new Error("the floor was not raised");
 }
 
 /** The TOTP code of `secret` at `atMs`, `offset` steps away (SHA1, 6 digits, 30 s). */

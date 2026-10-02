@@ -745,7 +745,7 @@ export function createMfaEnrollment(kit: MfaCeremonyKit): {
 						: undefined;
 				const recoveryCodes = await issueRecoveryCodes({
 					factors,
-					factorStore: writes.factorStore,
+					writes,
 					sealing,
 					subject: tx.subject,
 					binding,

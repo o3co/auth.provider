@@ -24,8 +24,10 @@
  * alone, for `mfa.manage.maxAgeSeconds`. For a subject holding a record
  * that may count, it opens a `step_up` transaction bound the same way,
  * owing no proof, with the `acr_values` hinted; one with no usable factor
- * is `403 mfa_no_qualifying_factor`, and a session store that cannot record
- * the step-up `401`. A stale sign-in, a session that recorded no facts and
+ * is `403 mfa_no_qualifying_factor`, and a session no second factor can be
+ * recorded on — admission's view says so of every session over a store
+ * without the capability, and of a record not in a shape one can be
+ * recorded on — `401`, opening nothing. A stale sign-in, a session that recorded no facts and
  * no session `401`; a witness that says the subject enrolled beside no
  * counting record `503`.
  */
@@ -621,6 +623,71 @@ describe("the step-up of a subject holding a counting factor", () => {
 		expect(res.status, JSON.stringify(res.body)).toBe(401);
 		expect(res.body).toEqual(LOGIN_REQUIRED);
 		expect(create).not.toHaveBeenCalled();
+	});
+
+	describe("over a store that records a step-up, a record no second factor can be recorded on — an amr no type admits, as a custom store may answer it", () => {
+		/** The record as such a store answers it: its `amr` holding an empty value. */
+		const unrecordable = (session: UserSession): UserSession => ({
+			...session,
+			amr: [...(session.amr ?? []), ""],
+		});
+
+		it("answers 401 login_required, opening nothing, to a session that already holds recent MFA", async () => {
+			const { app, factorStore, transactionStore, userSessionStore } = await composed();
+			const seeded = await seedTotp(factorStore);
+			const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+			reading(userSessionStore, unrecordable);
+			const create = vi.spyOn(transactionStore, "create");
+
+			// Recent MFA meets mfa.manage, so the step-up's own check refuses it, before anything is opened.
+			const res = await stepUp(agent);
+
+			expect(res.status, JSON.stringify(res.body)).toBe(401);
+			expect(res.body).toEqual(LOGIN_REQUIRED);
+			expect(create).not.toHaveBeenCalled();
+		});
+
+		it("answers 401 login_required to the session's own step_up transaction named again, once its record is one no second factor can be recorded on", async () => {
+			const { app, factorStore, userSessionStore } = await composed();
+			const seeded = await seedTotp(factorStore);
+			const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+			const opened = await stepUp(agent);
+			expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+			reading(userSessionStore, unrecordable);
+
+			// Recent MFA meets mfa.manage, so the step-up's own check refuses it, before the transaction is answered again.
+			const again = await stepUp(agent, opened.body.transaction as string);
+
+			expect(again.status, JSON.stringify(again.body)).toBe(401);
+			expect(again.body).toEqual(LOGIN_REQUIRED);
+		});
+
+		for (const mode of ["optional", "required"] as const) {
+			it(`answers 401 login_required, opening nothing, to a password session without a second factor — ${mode}`, async () => {
+				const { app, factorStore, transactionStore, userSessionStore } = await composed({ mode });
+				const seeded = await seedTotp(factorStore);
+				const { agent } = await signInWithTotp(app, userSessionStore, seeded);
+				// The session as one written before its second factor: a password alone.
+				reading(userSessionStore, (session) =>
+					unrecordable({
+						...session,
+						amr: ["pwd"],
+						authentication: {
+							...(session.authentication as NonNullable<UserSession["authentication"]>),
+							mfaAt: undefined,
+						},
+					}),
+				);
+				const create = vi.spyOn(transactionStore, "create");
+
+				// No recent MFA: the requirement, asked as mfa.manage, answers a new login before the step-up's own check.
+				const res = await stepUp(agent);
+
+				expect(res.status, JSON.stringify(res.body)).toBe(401);
+				expect(res.body).toEqual(LOGIN_REQUIRED);
+				expect(create).not.toHaveBeenCalled();
+			});
+		}
 	});
 });
 

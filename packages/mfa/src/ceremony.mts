@@ -40,6 +40,7 @@ import type {
 	PrimaryContinuation,
 } from "@o3co/auth-provider-core";
 import type { MfaFactorSet, MfaFactorSetStart } from "./factorSet.mjs";
+import type { MfaSubjectRecords } from "./factorState.mjs";
 import type { RequireEmailProof, UnprovableReason } from "./firstBinding.mjs";
 import type { MfaMailRefusal } from "./mail.mjs";
 import type { MfaIssuedRecoveryCodes } from "./recovery/issue.mjs";
@@ -136,6 +137,12 @@ export interface MfaCeremonySession {
 	readonly user: Readonly<Record<string, unknown>>;
 	readonly authTimeMs: number | undefined;
 	readonly witness: "enrolled" | "not_enrolled" | "malformed" | undefined;
+	/**
+	 * Whether a second factor can be recorded on the session, as admission's
+	 * view holds it (`secondFactorRecordable`); `false` without a view. A
+	 * step-up is opened only when it is `true`.
+	 */
+	readonly secondFactorRecordable: boolean;
 	/** Where a write to the subject's factor set begins, taken before the session was admitted for one (`factorSet.mts`); none for an action that writes none. */
 	readonly factorSetStart?: MfaFactorSetStart;
 }
@@ -416,7 +423,7 @@ export type MfaEnrollmentCompleteOutcome = (
 export type MfaStepUpOutcome =
 	| UnknownTransaction
 	| MfaStoreOutage
-	/** The session store cannot record a second factor: the session logs in again instead. */
+	/** No second factor can be recorded on the session (`MfaCeremonySession.secondFactorRecordable`): it logs in again instead. */
 	| { readonly outcome: "step_up_unrecordable" }
 	/** The subject holds no record of an installed kind whose data opens: nothing could step it up. */
 	| { readonly outcome: "no_qualifying_factor" }
@@ -499,17 +506,13 @@ export interface MfaCeremonyKit {
 		acrValues: readonly string[] | undefined,
 	) => Promise<MfaTransaction | MfaStoreOutage>;
 	/**
-	 * Whether `subject` holds a usable record among `records` (`factorState.mts`:
-	 * a factor of an installed kind whose data opens, but a recovery set with no
-	 * code left) — one that counts, when `options.counting` asks it.
+	 * Whether the subject `read` holds a usable record of any kind
+	 * (`factorState.mts`'s `holdsUsableIn`: of an installed kind, its data
+	 * opening, a recovery set with a code left at or above the floor).
 	 */
-	readonly holdsUsable: (
-		subject: string,
-		records: readonly MfaFactorRecord[],
-		options: { readonly counting: boolean },
-	) => boolean;
-	/** Whether the session store can record a second factor verified in a session: a step-up is opened only then. */
-	readonly stepUpRecordable: boolean;
+	readonly holdsUsable: (read: MfaSubjectRecords) => boolean;
+	/** The subject's records read for a judgment over them (`factorState.mts`'s `readSubjectRecords`); a listing that fails is the outage. */
+	readonly readSubject: (subject: string) => Promise<MfaSubjectRecords | MfaStoreOutage>;
 	/** Whether the account-email proof given in the session `sid` of `subject` stands now; the outage otherwise. */
 	readonly provedInSession: (subject: string, sid: string) => Promise<boolean | MfaStoreOutage>;
 	/**

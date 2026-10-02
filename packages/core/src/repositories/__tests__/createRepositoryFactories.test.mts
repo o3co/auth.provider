@@ -74,8 +74,27 @@ describe("createRepositoryFactories", () => {
 
 			const { clientFactory } = createRepositoryFactories();
 			await expect(clientFactory.create({ type: "yaml", path: yamlPath })).rejects.toThrow(
-				'allowedRedirectUris entry "https://app.example/cb?iss=x": must not carry "iss" in its query',
+				'allowedRedirectUris[0]: must not carry "iss" in its query',
 			);
+		});
+
+		it("never quotes a refused redirect URI in the boot error, whose query may carry a credential", async () => {
+			const yamlPath = writeYaml(
+				"clients-secret.yaml",
+				`my-client:
+  tokenEndpointAuthMethod: "client_secret_basic"
+  clientSecret: "secret123"
+  allowedRedirectUris:
+    - "https://app.example/cb?token=tok-3f9a&iss=x"
+`,
+			);
+			const { clientFactory } = createRepositoryFactories();
+			const refusal = await clientFactory.create({ type: "yaml", path: yamlPath }).then(
+				() => undefined,
+				(err: unknown) => String((err as Error).message),
+			);
+			expect(refusal).toContain("allowedRedirectUris[0]");
+			expect(refusal).not.toContain("tok-3f9a");
 		});
 
 		it("throws AdapterFactoryError for unregistered type", async () => {

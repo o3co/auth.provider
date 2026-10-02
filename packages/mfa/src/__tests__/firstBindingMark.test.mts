@@ -26,6 +26,7 @@ import { MFA_RECENT_WINDOW_SECONDS } from "#/config.mjs";
 import {
 	distrustedByFirstBinding,
 	firstBindingMarkLifetimeMs,
+	firstBindingRetryAfterMs,
 	readFirstBindingMark,
 } from "#/firstBindingMark.mjs";
 import { MFA_TRANSACTION_TTL_SECONDS } from "#/transactions.mjs";
@@ -33,17 +34,41 @@ import { MFA_TRANSACTION_TTL_SECONDS } from "#/transactions.mjs";
 const NOW = 1_800_000_010_000;
 
 describe("the mark's lifetime", () => {
-	it("is max(mfa.manage.maxAgeSeconds, 2 × mfa.transactionTtlSeconds) and twice the clock skew, in whole milliseconds", () => {
+	it("is max(mfa.manage.maxAgeSeconds, 2 × mfa.transactionTtlSeconds), twice the clock skew and one factor-set lease, in whole milliseconds", () => {
 		for (const [manageMaxAgeSeconds, transactionTtlSeconds, expected] of [
 			[300, 600, 1_200_000],
 			[3600, 60, 3_600_000],
 			[60, 1800, 3_600_000],
 			[3600, 1800, 3_600_000],
 		] as const) {
-			const lifetime = firstBindingMarkLifetimeMs({ manageMaxAgeSeconds, transactionTtlSeconds });
-			expect(lifetime).toBe(expected + 2 * DEFAULT_CLOCK_SKEW_MS);
+			const lifetime = firstBindingMarkLifetimeMs({
+				manageMaxAgeSeconds,
+				transactionTtlSeconds,
+				leaseMs: 80_000,
+			});
+			expect(lifetime).toBe(expected + 2 * DEFAULT_CLOCK_SKEW_MS + 80_000);
 			expect(Number.isSafeInteger(lifetime)).toBe(true);
 		}
+	});
+
+	it("outlasts the skew and a lease by at least a minute at the shortest windows and the longest lease: a regeneration can rely on it", () => {
+		const lifetime = firstBindingMarkLifetimeMs({
+			manageMaxAgeSeconds: MFA_RECENT_WINDOW_SECONDS.min,
+			transactionTtlSeconds: MFA_TRANSACTION_TTL_SECONDS.min,
+			leaseMs: 600_000,
+		});
+		expect(lifetime - DEFAULT_CLOCK_SKEW_MS - 600_000).toBeGreaterThanOrEqual(60_000);
+	});
+
+	it("distrusts, for a write's window beyond the skew, an authentication later than the mark plus the skew: a sign-in made while the marked write was still landing", () => {
+		const mark = NOW;
+		const within = mark + DEFAULT_CLOCK_SKEW_MS + 1_000;
+		expect(distrustedByFirstBinding(within, mark)).toBe(false);
+		expect(distrustedByFirstBinding(within, mark, 80_000)).toBe(true);
+		expect(distrustedByFirstBinding(mark + DEFAULT_CLOCK_SKEW_MS + 80_001, mark, 80_000)).toBe(
+			false,
+		);
+		expect(firstBindingRetryAfterMs(mark, NOW, 80_000)).toBe(DEFAULT_CLOCK_SKEW_MS + 80_001);
 	});
 
 	it("stays within a day, the most a store keeps a mark, at the longest mfa.manage.maxAgeSeconds and mfa.transactionTtlSeconds admit", () => {
@@ -51,6 +76,7 @@ describe("the mark's lifetime", () => {
 			firstBindingMarkLifetimeMs({
 				manageMaxAgeSeconds: MFA_RECENT_WINDOW_SECONDS.max,
 				transactionTtlSeconds: MFA_TRANSACTION_TTL_SECONDS.max,
+				leaseMs: 600_000,
 			}),
 		).toBeLessThanOrEqual(MFA_CLOCK_SKEW_ALLOWANCE_MS);
 	});

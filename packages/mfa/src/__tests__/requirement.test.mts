@@ -54,6 +54,7 @@ import {
 	requirementSessionFromAmr,
 	type SessionClaim,
 	type SessionRequirement,
+	type SupportsSecondFactorUpdate,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -102,8 +103,6 @@ function build(
 		readonly factors?: MfaFactor[];
 		readonly factorStore?: MfaFactorStore;
 		readonly transactionStore?: MfaTransactionStore;
-		/** Whether the session store can record a step-up (`supportsSecondFactorUpdate`); it can, by default. */
-		readonly stepUpRecordable?: boolean;
 		/** `mfa.manage.maxAgeSeconds`; the package's default, by default. */
 		readonly recentMfaMaxAgeSeconds?: number;
 		readonly logger?: Logger;
@@ -116,6 +115,8 @@ function build(
 ): Built {
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
 	const requirement = createMfaRequirement({
+		// No recovery set below a floor in these suites: a floor of 0.
+		recoverySetFloor: async () => 0,
 		mode,
 		factors: resolverOver(options.factors ?? [FACTORS.totp()]),
 		factorStore: options.factorStore ?? factorStoreHolding(),
@@ -125,7 +126,6 @@ function build(
 			now: () => NOW,
 		}),
 		stepUpPage: PAGE,
-		stepUpRecordable: options.stepUpRecordable ?? true,
 		recentMfaMaxAgeSeconds: options.recentMfaMaxAgeSeconds ?? 300,
 		logger: options.logger ?? silentLogger(),
 		auditSink: options.auditSink,
@@ -315,7 +315,11 @@ const USE: AdmissionAction = { name: "test.use", grade: "use" };
 const NOTHING: AdmissionAction = { name: "test.peek", grade: "grants_nothing" };
 const CHANGE: AdmissionAction = { name: "test.change", grade: "credential_change" };
 
-/** What admission hands a requirement about a record read by `carrier`: the view with what the login recorded of an account that is not enrolled. */
+/**
+ * What admission hands a requirement about a record read by `carrier`: the
+ * view with what the login recorded of an account that is not enrolled, a
+ * second factor recordable on it, as over a store that records one.
+ */
 const about = (
 	session: UserSession | null,
 	action: AdmissionAction = USE,
@@ -330,6 +334,7 @@ const about = (
 					authTime: session.authTime,
 					expiresAt: session.expiresAt,
 					enrollmentFacts: NOT_ENROLLED_FACTS,
+					secondFactorRecordable: true,
 				},
 	authentication: requirementSession(session),
 	carrier,
@@ -337,6 +342,12 @@ const about = (
 	action,
 	asks: undefined,
 	now: new Date(),
+});
+
+/** `input` with a view admission found no second factor can be recorded on (`secondFactorRecordable`). */
+const unrecordable = (input: RequirementInput): RequirementInput => ({
+	...input,
+	session: input.session === null ? null : { ...input.session, secondFactorRecordable: false },
 });
 
 /** What admission hands a requirement about a refresh token: the token's own amr, whatever the record. */
@@ -658,7 +669,6 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 		readonly input: RequirementInput;
 		readonly records: MfaFactorRecord[];
 		readonly factors?: MfaFactor[];
-		readonly stepUpRecordable?: boolean;
 		readonly expected: RequirementVerdict;
 		/** The answer under `required` where the baseline, asked first, answers otherwise; `expected` when absent. */
 		readonly required?: RequirementVerdict;
@@ -736,10 +746,9 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			expected: UNMET,
 		},
 		{
-			row: "a counting factor held, and a session store that cannot record a step-up → reauthenticate",
-			input: about(password(), CHANGE),
+			row: "a counting factor held, and a session no second factor can be recorded on → reauthenticate",
+			input: unrecordable(about(password(), CHANGE)),
 			records: HOLDING_TOTP,
-			stepUpRecordable: false,
 			expected: REAUTHENTICATE,
 		},
 		// A subject with no counting factor: a recent primary instead.
@@ -806,10 +815,9 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 			required: REAUTHENTICATE,
 		},
 		{
-			row: "no factor record, a stale primary, and a session store that cannot record a step-up → reauthenticate: never stepped up",
-			input: about(aged(password(), 24 * 60), CHANGE),
+			row: "no factor record, a stale primary, and a session no second factor can be recorded on → reauthenticate: never stepped up",
+			input: unrecordable(about(aged(password(), 24 * 60), CHANGE)),
 			records: [],
-			stepUpRecordable: false,
 			expected: REAUTHENTICATE,
 		},
 		// No session, or a primary the rule cannot judge.
@@ -834,19 +842,15 @@ describe("admit — credential_change: recent MFA on a session a record carries;
 	];
 
 	for (const mode of ["optional", "required"] as const) {
-		it.each(rows)(
-			`${mode} · $row`,
-			async ({ input, records, factors, stepUpRecordable, expected, required }) => {
-				const { requirement } = build(mode, {
-					...(factors === undefined ? {} : { factors }),
-					...(stepUpRecordable === undefined ? {} : { stepUpRecordable }),
-					factorStore: factorStoreHolding(...records),
-				});
-				expect(await requirement.admit(input)).toEqual(
-					mode === "required" ? (required ?? expected) : expected,
-				);
-			},
-		);
+		it.each(rows)(`${mode} · $row`, async ({ input, records, factors, expected, required }) => {
+			const { requirement } = build(mode, {
+				...(factors === undefined ? {} : { factors }),
+				factorStore: factorStoreHolding(...records),
+			});
+			expect(await requirement.admit(input)).toEqual(
+				mode === "required" ? (required ?? expected) : expected,
+			);
+		});
 	}
 
 	it("measures the window mfa.manage.maxAgeSeconds gives: a second factor half an hour old is recent under an hour's window, not under the default", async () => {
@@ -894,9 +898,7 @@ describe("admit — under required, credential_change is never looser than use",
 			await build("required", { factors: [] }).requirement.admit(about(password(), CHANGE)),
 		).toEqual(UNMET);
 		expect(
-			await build("required", { stepUpRecordable: false }).requirement.admit(
-				about(preUpgradePassword(), CHANGE),
-			),
+			await build("required").requirement.admit(unrecordable(about(preUpgradePassword(), CHANGE))),
 		).toEqual(REAUTHENTICATE);
 	});
 
@@ -997,7 +999,7 @@ describe("admit — credential_change reads the subject's factor records", () =>
 		expect(await requirement.admit(about(knownNot("magiclink"), CHANGE))).toEqual(REAUTHENTICATE);
 	});
 
-	it("reads none under required where the baseline answers without them: no factor enabled, or a step-up the store cannot record", async () => {
+	it("reads none under required where the baseline answers without them: no factor enabled, or a session no second factor can be recorded on", async () => {
 		const down = unreachableFactorStore();
 		expect(
 			await build("required", { factorStore: down, factors: [] }).requirement.admit(
@@ -1005,8 +1007,8 @@ describe("admit — credential_change reads the subject's factor records", () =>
 			),
 		).toEqual(UNMET);
 		expect(
-			await build("required", { factorStore: down, stepUpRecordable: false }).requirement.admit(
-				about(preUpgradePassword(), CHANGE),
+			await build("required", { factorStore: down }).requirement.admit(
+				unrecordable(about(preUpgradePassword(), CHANGE)),
 			),
 		).toEqual(REAUTHENTICATE);
 	});
@@ -1027,14 +1029,17 @@ describe("admit — credential_change reads the subject's factor records", () =>
 	});
 });
 
+/** A store holding `session` as it is handed, with the step-up capability: its `recordSecondFactor` records nothing. */
+const storeHolding = (session: UserSession): UserSessionStore & SupportsSecondFactorUpdate => ({
+	kind: "test",
+	create: async () => {},
+	get: async (sid) => (sid === session.sid ? session : null),
+	delete: async () => {},
+	recordSecondFactor: async () => null,
+});
+
 describe("credential_change through admission, under each mode", () => {
 	const CHANGE_ACTIONS = { "test.change": { grade: "credential_change" } } as const;
-	const storeHolding = (session: UserSession): UserSessionStore => ({
-		kind: "test",
-		create: async () => {},
-		get: async (sid) => (sid === session.sid ? session : null),
-		delete: async () => {},
-	});
 	const admitChange = (session: UserSession, requirements: SessionRequirement[]) =>
 		admitSession(
 			{
@@ -1106,27 +1111,123 @@ describe("admit — decides by grade alone, over every grade core has", () => {
 	});
 });
 
-describe("admit — a step-up only where the session store can record one", () => {
-	it("sends a password session to log in again, where the table steps it up, when the store cannot record a second factor", async () => {
+describe("admit — a step-up only where admission's view says a second factor can be recorded on the session", () => {
+	it("sends a password session to log in again, where the table steps it up, when its view says none can be recorded", async () => {
 		const { requirement } = build("required", {
-			stepUpRecordable: false,
 			factorStore: factorStoreHolding(...HOLDING_TOTP),
 		});
-		expect(await requirement.admit(about(password()))).toEqual(REAUTHENTICATE);
-		expect(await requirement.admit(about(password(), CHANGE))).toEqual(REAUTHENTICATE);
-		expect(await requirement.admit(about(password(), USE))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(about(password()))).toEqual(STEP_UP);
+		expect(await requirement.admit(unrecordable(about(password())))).toEqual(REAUTHENTICATE);
+		expect(await requirement.admit(unrecordable(about(password(), CHANGE)))).toEqual(
+			REAUTHENTICATE,
+		);
+		expect(await requirement.admit(unrecordable(about(password(), USE)))).toEqual(REAUTHENTICATE);
+	});
+
+	it("reads a view without the answer as one none can be recorded on", async () => {
+		const { requirement } = build("required", {
+			factorStore: factorStoreHolding(...HOLDING_TOTP),
+		});
+		const input = about(password());
+		const { secondFactorRecordable: _answer, ...without } = input.session ?? {};
+		expect(
+			await requirement.admit({ ...input, session: without as NonNullable<typeof input.session> }),
+		).toEqual(REAUTHENTICATE);
 	});
 
 	it("changes nothing else: met stays met and unmet stays unmet, for a token too", async () => {
-		const { requirement } = build("required", { stepUpRecordable: false });
-		expect(await requirement.admit(about(password(["pwd", "otp", "mfa"], minutesAgo(1))))).toEqual(
-			MET,
-		);
-		expect(await requirement.admit(about(federated()))).toEqual(MET);
-		expect(await requirement.admit(about(password(), NOTHING))).toEqual(MET);
+		const { requirement } = build("required");
+		expect(
+			await requirement.admit(unrecordable(about(password(["pwd", "otp", "mfa"], minutesAgo(1))))),
+		).toEqual(MET);
+		expect(await requirement.admit(unrecordable(about(federated())))).toEqual(MET);
+		expect(await requirement.admit(unrecordable(about(password(), NOTHING)))).toEqual(MET);
 		expect(await requirement.admit(aboutToken(["pwd"]))).toEqual(UNMET);
-		const nothing = build("required", { stepUpRecordable: false, factors: [] }).requirement;
-		expect(await nothing.admit(about(password()))).toEqual(UNMET);
+		const nothing = build("required", { factors: [] }).requirement;
+		expect(await nothing.admit(unrecordable(about(password())))).toEqual(UNMET);
+	});
+});
+
+describe("admit — through admission, over a store that records a step-up, a record no second factor can be recorded on", () => {
+	const ACTIONS = {
+		"test.use": { grade: "use" },
+		"test.change": { grade: "credential_change" },
+	} as const;
+	const admitOver = (
+		session: UserSession,
+		requirement: SessionRequirement,
+		action: keyof typeof ACTIONS,
+	) =>
+		admitSession(
+			{
+				userSessionStore: storeHolding(session),
+				subjectRevocation: undefined,
+				requirements: resolverForTests([requirement], { issuer: ISSUER, actions: ACTIONS }),
+				acrTable: readAcrTable({}),
+				logger: undefined,
+				auditSink: undefined,
+			},
+			{
+				claim: cookieClaim({
+					session: { isAuthenticated: true, sid: session.sid, user: { id: session.sub } },
+				}),
+				action,
+			},
+		);
+	/** `session` with an `amr` no type admits beside its well-formed `authentication`: a custom store's record. */
+	const withAmr = (session: UserSession, amr: unknown): UserSession =>
+		({ ...session, amr }) as unknown as UserSession;
+	const UNRECORDABLE_AMR: Readonly<Record<string, (amr: readonly string[]) => unknown>> = {
+		"an empty value": (amr) => [...amr, ""],
+		"a number": (amr) => [...amr, 1],
+		"a string": (amr) => amr.join(" "),
+	};
+
+	for (const [shape, amrOf] of Object.entries(UNRECORDABLE_AMR)) {
+		it(`required · use: the baseline sends a password session without a second factor to log in again, never to a step-up it could not record — amr holding ${shape}`, async () => {
+			const { requirement } = build("required", {
+				factorStore: factorStoreHolding(...HOLDING_TOTP),
+			});
+			const session = withAmr(password(), amrOf(["pwd"]));
+			expect(await admitOver(session, requirement, "test.use")).toMatchObject({
+				outcome: "reauthenticate",
+				requirement: "mfa",
+			});
+		});
+
+		for (const mode of ["optional", "required"] as const) {
+			it(`${mode} · credential_change: recent MFA sends a session whose second factor is a day old to log in again, never to a step-up it could not record — amr holding ${shape}`, async () => {
+				const { requirement } = build(mode, {
+					factorStore: factorStoreHolding(...HOLDING_TOTP),
+				});
+				const session = withAmr(
+					password(["pwd", "otp", "mfa"], minutesAgo(24 * 60)),
+					amrOf(["pwd", "otp", "mfa"]),
+				);
+				expect(await admitOver(session, requirement, "test.change")).toMatchObject({
+					outcome: "reauthenticate",
+					requirement: "mfa",
+				});
+			});
+		}
+	}
+
+	it("steps up the same sessions whose record a second factor can be recorded on", async () => {
+		const factorStore = factorStoreHolding(...HOLDING_TOTP);
+		const stepUp = { outcome: "step_up", requirement: "mfa", whenStillUnmet: "reauthenticate" };
+		expect(
+			await admitOver(password(), build("required", { factorStore }).requirement, "test.use"),
+		).toMatchObject(stepUp);
+		for (const mode of ["optional", "required"] as const) {
+			expect(
+				await admitOver(
+					password(["pwd", "otp", "mfa"], minutesAgo(24 * 60)),
+					build(mode, { factorStore }).requirement,
+					"test.change",
+				),
+				mode,
+			).toMatchObject(stepUp);
+		}
 	});
 });
 

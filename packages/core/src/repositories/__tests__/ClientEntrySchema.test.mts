@@ -236,8 +236,9 @@ describe("ClientEntrySchema — allowedRedirectUris shape", () => {
 		expect(result.success).toBe(false);
 		if (!result.success) {
 			const message = result.error.issues.map((issue) => issue.message).join("\n");
-			expect(message).toContain("javascript:alert(1)");
+			expect(message).toContain("allowedRedirectUris[0]: ");
 			expect(message).toContain("executable");
+			expect(message).not.toContain("alert(1)");
 		}
 	});
 
@@ -260,8 +261,9 @@ describe("ClientEntrySchema — allowedRedirectUris shape", () => {
 		expect(result.success).toBe(false);
 		if (!result.success) {
 			const message = result.error.issues.map((issue) => issue.message).join("\n");
-			expect(message).toContain("javascript:alert(1)");
-			expect(message).toContain("myapp://cb");
+			expect(message).toContain("allowedRedirectUris[0]: ");
+			expect(message).toContain("allowedRedirectUris[2]: ");
+			expect(message).not.toContain("allowedRedirectUris[1]");
 		}
 	});
 });
@@ -278,28 +280,28 @@ describe("ClientEntrySchema — redirect URI query names", () => {
 
 	it("refuses an allowedRedirectUris entry that carries a response parameter, naming it", () => {
 		expect(issues({ allowedRedirectUris: ["https://app.example/cb?iss=x"] })).toContain(
-			'allowedRedirectUris entry "https://app.example/cb?iss=x": must not carry "iss" in its query',
+			'allowedRedirectUris[0]: must not carry "iss" in its query',
 		);
 	});
 
 	it("refuses an allowedRedirectUris entry whose query name is outside the allowlist", () => {
 		expect(issues({ allowedRedirectUris: ["https://app.example/cb?filter[x]=1"] })).toContain(
-			'allowedRedirectUris entry "https://app.example/cb?filter[x]=1": query parameter names may use only letters, digits, "_" and "-"',
+			'allowedRedirectUris[0]: query parameter names may use only letters, digits, "_" and "-"',
 		);
 	});
 
 	it("refuses a postLogoutRedirectUris entry that carries a response parameter", () => {
 		expect(issues({ postLogoutRedirectUris: ["https://app.example/out?state=x"] })).toContain(
-			'postLogoutRedirectUris entry "https://app.example/out?state=x": must not carry "state" in its query',
+			'postLogoutRedirectUris[0]: must not carry "state" in its query',
 		);
 	});
 
 	it("refuses a federationGrantRedirectUris entry by the same query rule", () => {
 		expect(issues({ federationGrantRedirectUris: ["https://app.example/cb?code=x"] })).toContain(
-			"federationGrantRedirectUris: reserved-parameter",
+			"federationGrantRedirectUris[0]: reserved-parameter",
 		);
 		expect(issues({ federationGrantRedirectUris: ["https://app.example/cb?a[]=1"] })).toContain(
-			"federationGrantRedirectUris: query-name-invalid",
+			"federationGrantRedirectUris[0]: query-name-invalid",
 		);
 	});
 
@@ -309,8 +311,46 @@ describe("ClientEntrySchema — redirect URI query names", () => {
 				issues({ federationGrantRedirectUris: [`https://app.example/cb?${name}=x`] }),
 				name,
 			).toContain(
-				`https://app.example/cb?${name}=x already carries "grant_id" (compared ignoring case, "_" and "-")`,
+				'federationGrantRedirectUris[0]: already carries "grant_id" (compared ignoring case, "_" and "-")',
 			);
+		}
+	});
+
+	it("names a refused URI by its list and position, never by the URI: a query may carry a credential", () => {
+		const SECRET = "tok-3f9a";
+		const refused = {
+			allowedRedirectUris: [
+				"https://app.example/cb",
+				`https://app.example/cb?token=${SECRET}&iss=x`,
+				`http://app.example/cb?token=${SECRET}`,
+			],
+			postLogoutRedirectUris: [`https://app.example/out?token=${SECRET}#x`],
+			federationGrantRedirectUris: [
+				`https://app.example/grant?token=${SECRET}&grant_id=1`,
+				`https://app.example/grant?token=${SECRET}&a[]=1`,
+			],
+		};
+		const result = ClientEntrySchema.safeParse({ ...base, ...refused });
+		expect(result.success).toBe(false);
+		const messages = issues(refused);
+		for (const at of [
+			"allowedRedirectUris[1]",
+			"allowedRedirectUris[2]",
+			"postLogoutRedirectUris[0]",
+			"federationGrantRedirectUris[0]",
+			"federationGrantRedirectUris[1]",
+		]) {
+			expect(messages).toContain(`${at}: `);
+		}
+		expect(messages).not.toContain(SECRET);
+		expect(result.success ? "" : result.error.message).not.toContain(SECRET);
+		expect(
+			() => new InMemoryClientRepository(clientEntries([["c", { ...base, ...refused } as never]])),
+		).toThrow(/allowedRedirectUris\[1\]/);
+		try {
+			new InMemoryClientRepository(clientEntries([["c", { ...base, ...refused } as never]]));
+		} catch (err) {
+			expect(String((err as Error).message)).not.toContain(SECRET);
 		}
 	});
 
@@ -332,6 +372,22 @@ describe("ClientEntrySchema — defaultScopes field", () => {
 		allowedScopes: ["read", "write"],
 	};
 
+	it("names a default scope outside allowedScopes by its position, never by its value", () => {
+		const SECRET = "https://x.example/?token=tok-3f9a";
+		const result = ClientEntrySchema.safeParse({
+			...base,
+			defaultScopes: ["read", SECRET, "admin"],
+		});
+		expect(result.success).toBe(false);
+		const messages = result.success ? "" : result.error.issues.map((i) => i.message).join("\n");
+		expect(messages).toContain("defaultScopes[1]");
+		expect(messages).toContain("defaultScopes[2]");
+		expect(messages).not.toContain("defaultScopes[0]");
+		expect(messages).not.toContain("tok-3f9a");
+		expect(messages).not.toContain("admin");
+		expect(result.success ? "" : result.error.message).not.toContain("tok-3f9a");
+	});
+
 	it("accepts defaultScopes that are a subset of allowedScopes", () => {
 		const result = ClientEntrySchema.safeParse({ ...base, defaultScopes: ["read"] });
 		expect(result.success).toBe(true);
@@ -344,7 +400,7 @@ describe("ClientEntrySchema — defaultScopes field", () => {
 		if (result.success) expect(result.data.defaultScopes).toBeUndefined();
 	});
 
-	it("refuses defaultScopes outside allowedScopes at boot, naming them", () => {
+	it("refuses defaultScopes outside allowedScopes at boot, naming their positions", () => {
 		// A default the allowlist would refuse could never be granted to a
 		// scope-carrying request; letting it ride the omitted-scope path would
 		// make omission the wider grant.
@@ -352,8 +408,8 @@ describe("ClientEntrySchema — defaultScopes field", () => {
 		expect(result.success).toBe(false);
 		if (!result.success) {
 			const message = result.error.issues.map((issue) => issue.message).join("\n");
-			expect(message).toContain("admin");
-			expect(message).not.toContain('"read"');
+			expect(message).toContain("defaultScopes[1]");
+			expect(message).not.toContain("defaultScopes[0]");
 		}
 	});
 });

@@ -46,14 +46,16 @@
  *   `step_up` transaction, with the `acr_values` the body hints read
  *   strictly — at most 16 values of at most 256 characters, else none — as a
  *   hint only; `403 mfa_no_qualifying_factor` when no factor can be used, and
- *   `401` where the session store cannot record a step-up.
+ *   `401` where admission's view says no second factor can be recorded on
+ *   the session (`secondFactorRecordable`), before anything is opened.
  * - The account page's management of the subject's factors, under
  *   `/factors`, is `management.mts`'s, mounted here behind the same guards
  *   and admitted through `sessionFor`, which takes a session admitted as
  *   `mfa.manage` with where its factor-set write begins (`factorSet.mts`),
  *   read before the admission. The subject's own release of its lock,
- *   `POST /lock/release`, is `lockRelease.mts`'s, mounted and admitted the
- *   same way.
+ *   `POST /lock/release`, is `lockRelease.mts`'s, and the regeneration of its
+ *   recovery codes, `POST /recovery-codes`, `recoveryCodes.mts`'s, each
+ *   mounted and admitted the same way.
  * - A factor that is not guessable verified at a login once its session is
  *   established, or at a step-up once its session is escalated, mints the
  *   authorization that release takes (`lockRecovery.mts`), for that session;
@@ -127,8 +129,13 @@ import { createSessionEscalation } from "./escalation.mjs";
 import type { MfaLockRecovery } from "./lockRecovery.mjs";
 import { createMfaLockReleaseRouter } from "./lockRelease.mjs";
 import { type MfaMailRefusal, mailFailureOf } from "./mail.mjs";
-import { createMfaManagementRouter, type MfaManagementOptions } from "./management.mjs";
+import {
+	createMfaManagementRouter,
+	type MfaManagementOptions,
+	type MfaManagingSession,
+} from "./management.mjs";
 import { RECOVERY_CODE_FACTOR_KIND } from "./recovery/factor.mjs";
+import { createMfaRecoveryCodesRouter, type MfaRecoveryCodesOptions } from "./recoveryCodes.mjs";
 import { MFA_REQUIREMENT_NAME } from "./requirement.mjs";
 import type { MfaWitnessMark } from "./witness.mjs";
 
@@ -245,6 +252,11 @@ export interface MfaRoutesOptions {
 	readonly management: Omit<MfaManagementOptions, "admit" | "logger" | "auditSink">;
 	/** The authorized-recovery entry: minted at an exempt verification, applied by the subject's release. */
 	readonly lockRecovery: MfaLockRecovery;
+	/** What the regeneration of recovery codes reads beside the management's (`recoveryCodes.mts`). */
+	readonly recoveryCodes: Pick<
+		MfaRecoveryCodesOptions,
+		"maxFactorsPerSubject" | "firstBindingAt" | "firstBindingMarkMs" | "leaseMs"
+	>;
 }
 
 /** The express session id the request presents; empty when it presents none, which no binding matches. */
@@ -331,6 +343,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		auditSink,
 		management,
 		lockRecovery,
+		recoveryCodes,
 	} = options;
 	const router = express.Router();
 
@@ -419,10 +432,12 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 		}
 		let authTimeMs: number | undefined;
 		let witness: MfaCeremonySession["witness"];
+		let secondFactorRecordable = false;
 		if (admitted.outcome === "admitted" && admitted.view !== null) {
 			const view: SessionView = admitted.view;
 			authTimeMs = view.authTime.getTime();
 			witness = view.enrollmentFacts?.witness;
+			secondFactorRecordable = view.secondFactorRecordable === true;
 		}
 		return {
 			session: {
@@ -431,6 +446,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				user,
 				authTimeMs,
 				witness,
+				secondFactorRecordable,
 				...(factorSetStart === undefined ? {} : { factorSetStart }),
 			},
 			expectedRenewalNonce,
@@ -704,6 +720,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				"/factors/rename",
 				"/factors/remove",
 				"/lock/release",
+				"/recovery-codes",
 			],
 			noStore,
 		)
@@ -719,6 +736,7 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 				"/factors/rename",
 				"/factors/remove",
 				"/lock/release",
+				"/recovery-codes",
 			],
 			express.json(),
 			express.urlencoded({ extended: false }),
@@ -738,6 +756,18 @@ export function createMfaRouter(options: MfaRoutesOptions): Router {
 			createMfaLockReleaseRouter({
 				lockRecovery,
 				admit: async (req, res) => (await sessionFor(req, res, MFA_MANAGE))?.session,
+				logger,
+				auditSink,
+			}),
+		)
+		.use(
+			createMfaRecoveryCodesRouter({
+				factors: management.factors,
+				factorSet: management.factorSet,
+				sealing: management.sealing,
+				...recoveryCodes,
+				admit: async (req, res) =>
+					(await sessionFor(req, res, MFA_MANAGE))?.session as MfaManagingSession | undefined,
 				logger,
 				auditSink,
 			}),

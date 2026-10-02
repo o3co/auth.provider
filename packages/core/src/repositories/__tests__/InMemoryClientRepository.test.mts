@@ -343,12 +343,12 @@ describe("InMemoryClientRepository", () => {
 			expect(parse([uri]).success).toBe(false);
 		});
 
-		it("names the field and the offending entry when it refuses", () => {
+		it("names the field and the offending entry's position when it refuses, never the URI", () => {
 			const result = parse(["javascript:alert(1)"]);
 			expect(result.success).toBe(false);
 			const message = result.success ? "" : (result.error.issues[0]?.message ?? "");
-			expect(message).toContain("postLogoutRedirectUris");
-			expect(message).toContain("javascript:alert(1)");
+			expect(message).toContain("postLogoutRedirectUris[0]: ");
+			expect(message).not.toContain("alert(1)");
 		});
 
 		it("leaves backchannelLogoutUri and frontchannelLogoutUri on http/https", () => {
