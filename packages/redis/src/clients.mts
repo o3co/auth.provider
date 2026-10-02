@@ -37,6 +37,7 @@ import type {
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 } from "./clients/device-code.mjs";
+import type { RedisDurability } from "./clients/durability.mjs";
 import type {
 	ActivateFederationGrantInput,
 	CreatePendingFederationGrantInput,
@@ -84,7 +85,6 @@ import type {
 	NoteMfaFirstBindingReply,
 	RaiseMfaRecoverySetFloorInput,
 	RaiseMfaRecoverySetFloorReply,
-	RedisDurability,
 	ReserveMfaSubjectAttemptInput,
 	ReserveMfaSubjectAttemptReply,
 } from "./clients/mfa.mjs";

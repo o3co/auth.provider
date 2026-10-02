@@ -19,7 +19,7 @@
  * index that finds them, and the atomic release of the store's advisory lock.
  */
 
-import type { RedisDurability } from "./mfa.mjs";
+import type { RedisDurability } from "./durability.mjs";
 
 /** What `attachRecord` writes, the deadline at or after which it writes nothing, and where it keeps its answer. */
 export interface FederationTokenAttachInput {
