@@ -22,7 +22,8 @@
  * addresses (`outbound-transport.mts`), refuses redirects and encoded
  * answers, reads a 2xx body under a cap, and holds the whole exchange to one
  * deadline. A caller sees a `fetch`, and tells a refusal from a failure with
- * `isOutboundRefusal` alone.
+ * `isOutboundRefusal` alone. `outboundLimitsOf` answers the deadline and cap
+ * `core.outbound` sets, the ceilings over every use's own.
  */
 
 import { lookup as dnsLookup } from "node:dns/promises";
