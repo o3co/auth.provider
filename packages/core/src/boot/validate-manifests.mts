@@ -46,7 +46,7 @@ import {
 	withoutRenamedVariables,
 } from "../config/removed-keys.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
-import { federationsOf } from "../federations/configured.mjs";
+import { enabledFederationsOf } from "../federations/configured.mjs";
 import {
 	describeAbsenceDeclaration,
 	isAbsenceDeclared,
@@ -1337,8 +1337,7 @@ export function checkFederationStoresWiring(
 	config: AppConfig,
 	plannedKeys: ReadonlySet<string>,
 ): void {
-	for (const [name, fed] of Object.entries(federationsOf(config))) {
-		if ((fed as { enabled?: unknown } | null)?.enabled !== true) continue;
+	for (const [name] of enabledFederationsOf(config)) {
 		const missing = FEDERATION_REQUIRED_STORES.filter((k) => !plannedKeys.has(k));
 		if (missing.length > 0) {
 			throw new BootError({
@@ -3102,7 +3101,8 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 	{
 		id: "federation-entries-handled",
 		spec: "issue #728 (an enabled core.federations entry is handled by its type, or by a module contributing its name)",
-		run: (ctx) => checkFederationEntriesHandled(ctx.modules, ctx.parsedConfig),
+		run: (ctx) =>
+			checkFederationEntriesHandled(ctx.modules, ctx.parsedConfig, ctx.contributionKinds),
 	},
 	{
 		id: "declared-absence",

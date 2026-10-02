@@ -490,9 +490,11 @@ const authorizeSchema = withRemovedKeys(
 export const MAX_TRUST_PROXY_HOPS = 255;
 
 /**
- * One federation in `core.federations`: whether it is on, the package that
- * handles it (`type`), and whether its upstream IdP's `amr` counts. Every
- * other key is the handling package's, kept as written.
+ * One federation in `core.federations`. Core owns `enabled`, `type`,
+ * `trustUpstreamAmr` and `callbackURL`, and boot strips them before the
+ * schema of the entry's type sees the entry; every other key is the type's,
+ * kept as written here. `callbackURL` is not declared here: boot requires it
+ * of an entry it dispatches by type.
  */
 const federationEntrySchema = z
 	.object({

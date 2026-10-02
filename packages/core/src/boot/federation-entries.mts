@@ -34,8 +34,10 @@ import type {
 	FederationInstance,
 	FederationTypeContribution,
 } from "../modules/manifest/contributes-map.mjs";
+import { failureSummary } from "./failure-summary.mjs";
 import { frozenSection, parseSection } from "./parsed-values.mjs";
 import type {
+	ContributionKindMap,
 	DispatchedFederation,
 	NameKeyedCollector,
 	NormalisedModule,
@@ -136,6 +138,18 @@ function directFederations(modules: readonly NormalisedModule[]): ReadonlyMap<st
 	return names;
 }
 
+/**
+ * Whether the host's `federations` collector already holds `name`. A host
+ * may pre-load a name-keyed collector — the `override-targets` row takes such
+ * an entry as a target — and a provider it pre-loaded serves its federation.
+ */
+function seededFederation(
+	contributionKinds: ContributionKindMap | undefined,
+	name: string,
+): boolean {
+	return contributionKinds?.federations?.get(name) !== undefined;
+}
+
 /** The `type` an entry names, when it names one. */
 const typeOf = (entry: object): string | undefined => {
 	const type = (entry as { readonly type?: unknown }).type;
@@ -146,18 +160,32 @@ const typeOf = (entry: object): string | undefined => {
 const quoted = (names: readonly string[]): string =>
 	`[${names.map((name) => JSON.stringify(name)).join(", ")}]`;
 
+/** A key that reads as itself in a path: no `.`, quote, space or control character. */
+const BARE_KEY = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Where an entry is written, as the operator writes the path: its name bare
+ * when it is a bare key, and otherwise quoted as JSON, so a name with a dot,
+ * a quote or a newline in it reads as one key on one line.
+ */
+const entryAt = (name: string): string =>
+	`core.federations.${BARE_KEY.test(name) ? name : JSON.stringify(name)}`;
+
 /**
  * Every enabled `core.federations` entry is handled by an installed module:
  * one that registers its `type` under `federationTypes`, or one that
- * contributes or overrides `federations.<name>` directly. An enabled entry
- * neither handles is `federation-type-unhandled`, every such entry listed at
- * once with its type, and the types handled; one both handle is
- * `duplicate-contribute`. A disabled entry is not read.
+ * contributes or overrides `federations.<name>` directly — or a host whose
+ * `federations` collector already holds the name. An enabled entry neither
+ * handles is `federation-type-unhandled`, every such entry listed at once
+ * with its type, and the types handled; one both handle is
+ * `duplicate-contribute`. The message names each entry and its type, and
+ * quotes nothing else of it. A disabled entry is not read.
  * @internal
  */
 export function checkFederationEntriesHandled(
 	modules: readonly NormalisedModule[],
 	config: unknown,
+	contributionKinds?: ContributionKindMap,
 ): void {
 	const types = declaredTypes(modules);
 	const direct = directFederations(modules);
@@ -169,7 +197,11 @@ export function checkFederationEntriesHandled(
 		const contributor = direct.get(name);
 		if (declared !== undefined && contributor !== undefined) {
 			both.push({ name, modules: [declared.module, contributor] });
-		} else if (declared === undefined && contributor === undefined) {
+		} else if (
+			declared === undefined &&
+			contributor === undefined &&
+			!seededFederation(contributionKinds, name)
+		) {
 			unhandled.push(
 				type === undefined ? { federationName: name } : { federationName: name, type },
 			);
@@ -178,9 +210,13 @@ export function checkFederationEntriesHandled(
 	if (unhandled.length > 0) {
 		const handled = [...types.keys()];
 		const fixes = unhandled.map(({ federationName, type }) => {
-			const at = `core.federations.${federationName}`;
+			const at = entryAt(federationName);
+			// The type named like the entry, when one is handled: a hint, never a default.
+			const settable = types.has(federationName)
+				? `set ${at}.type = ${JSON.stringify(federationName)} (an installed module handles the type of its name), set its type to another one`
+				: "set its type to one";
 			return type === undefined
-				? `${at} names no type: set its type to one an installed module handles, install the module that contributes federations[${JSON.stringify(federationName)}], or set ${at}.enabled = false`
+				? `${at} names no type: ${settable} an installed module handles, install the module that contributes federations[${JSON.stringify(federationName)}], or set ${at}.enabled = false`
 				: `${at} names the type ${JSON.stringify(type)}: install the module that contributes federationTypes[${JSON.stringify(type)}], correct the type to one an installed module handles, or set ${at}.enabled = false`;
 		});
 		throw new BootError({
@@ -197,7 +233,7 @@ export function checkFederationEntriesHandled(
 	if (first !== undefined) {
 		throw new BootError({
 			message:
-				`core.federations.${first.name} is dispatched by its type to module "${first.modules[0]}" ` +
+				`${entryAt(first.name)} is dispatched by its type to module "${first.modules[0]}" ` +
 				`and contributed by name by module "${first.modules[1]}": one federation has one handler, so remove its ` +
 				`type or remove the module that contributes federations[${JSON.stringify(first.name)}].`,
 			reason: "duplicate-contribute",
@@ -220,16 +256,31 @@ const typeKeysOf = (entry: object): Record<string, unknown> =>
 	);
 
 /**
+ * Whether `entry` holds an object under the key its type is named by: the
+ * shape of an entry whose type's keys are nested, where a dispatched entry is
+ * flat.
+ */
+const nestsUnderType = (entry: object, type: string): boolean => {
+	if (!Object.hasOwn(entry, type)) return false;
+	const nested = (entry as Record<string, unknown>)[type];
+	return typeof nested === "object" && nested !== null;
+};
+
+/**
  * Parses each enabled `core.federations` entry whose `type` a module
- * registers, in the order written: its name held to the federation-name rule,
- * its `callbackURL` a non-empty string, and the rest of it — the keys core
- * owns removed — parsed synchronously by the type's `entrySchema` as stage 1
- * read it. Answers what stage 4 dispatches. Any refusal makes one
- * `config-validation-failed` naming every issue at the path the operator
- * wrote (`core.federations.<name>…`), each refused entry listed with the
- * module whose declaration of its type is in force and its path. Runs after
- * `checkFederationEntriesHandled`, so an entry it dispatches is contributed
- * by no module directly.
+ * registers, in the configuration's key order: its name held to the
+ * federation-name rule, its `callbackURL` a non-empty string, and the rest of
+ * it — the keys core owns removed — parsed synchronously by the type's
+ * `entrySchema` as stage 1 read it, then copied and frozen. Answers what
+ * stage 4 dispatches. Any refusal makes one `config-validation-failed`
+ * naming every issue at the path the operator wrote
+ * (`core.federations.<name>…`), each refused entry listed with the module
+ * whose declaration of its type is in force and its path; a schema that
+ * throws, or answers a value that throws as it is copied, is an issue at the
+ * entry. An entry is flat: a key named after its type is read as one of the
+ * type's keys, and the refusal of a missing `callbackURL` says so when that
+ * key holds an object. Runs after `checkFederationEntriesHandled`, so an
+ * entry it dispatches is contributed by no module directly.
  * @internal
  */
 export function parseFederationEntries(
@@ -239,6 +290,8 @@ export function parseFederationEntries(
 	const types = declaredTypes(modules);
 	const dispatched: DispatchedFederation[] = [];
 	const issues: z.ZodIssue[] = [];
+	// Each issue as the message names it, its entry's name written by `entryAt`.
+	const named: string[] = [];
 	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
 	for (const [name, entry] of enabledFederationsOf(config)) {
 		const type = typeOf(entry);
@@ -246,18 +299,21 @@ export function parseFederationEntries(
 		if (type === undefined || declared === undefined) continue;
 		const at = ["core", "federations", name];
 		const found = issues.length;
+		const issue = (path: readonly PropertyKey[], message: string, extra: object = {}): void => {
+			issues.push({ code: "custom", ...extra, path: [...at, ...path], message } as z.ZodIssue);
+			named.push(`${[entryAt(name), ...path.map(String)].join(".")}: ${message}`);
+		};
 		const nameProblem = federationNameProblem(name);
-		if (nameProblem !== undefined) {
-			issues.push({ code: "custom", path: at, message: nameProblem } as z.ZodIssue);
-		}
+		if (nameProblem !== undefined) issue([], nameProblem);
 		const callbackURL = (entry as { readonly callbackURL?: unknown }).callbackURL;
 		if (typeof callbackURL !== "string" || callbackURL.length === 0) {
-			issues.push({
-				code: "custom",
-				path: [...at, "callbackURL"],
-				message:
-					"an enabled federation's callbackURL is required: the URL its upstream redirects back to",
-			} as z.ZodIssue);
+			issue(
+				["callbackURL"],
+				"an enabled federation's callbackURL is required: the URL its upstream redirects back to" +
+					(nestsUnderType(entry, type)
+						? `; a dispatched entry is flat: the keys nested under ${JSON.stringify(type)} are not read, so write them beside its type`
+						: ""),
+			);
 		}
 		const result = parseSection(
 			declared.snapshot.entrySchema as z.ZodType,
@@ -265,8 +321,17 @@ export function parseFederationEntries(
 			`the entry schema of the type ${JSON.stringify(type)}`,
 		);
 		if ("issues" in result) {
-			for (const issue of result.issues) {
-				issues.push({ ...issue, path: [...at, ...issue.path] } as z.ZodIssue);
+			for (const { path, message, ...extra } of result.issues) issue(path, message, extra);
+		}
+		let parsed: unknown;
+		if ("data" in result) {
+			try {
+				parsed = frozenSection(result.data);
+			} catch (thrown) {
+				issue(
+					[],
+					`the entry the schema of the type ${JSON.stringify(type)} answered threw as it was copied: ${failureSummary(thrown)}`,
+				);
 			}
 		}
 		if (issues.length > found || !("data" in result)) {
@@ -276,15 +341,10 @@ export function parseFederationEntries(
 		dispatched.push({
 			type,
 			module: declared.module,
-			instance: Object.freeze({
-				name,
-				callbackURL: callbackURL as string,
-				entry: frozenSection(result.data),
-			}),
+			instance: Object.freeze({ name, callbackURL: callbackURL as string, entry: parsed }),
 		});
 	}
 	if (issues.length > 0) {
-		const named = issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`);
 		throw new BootError({
 			message: `Config validation failed — ${issues.length} issue(s) found in core.federations: ${named.join("; ")}.`,
 			reason: "config-validation-failed",

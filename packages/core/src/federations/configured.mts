@@ -60,7 +60,11 @@ export function federationsOf(config: unknown): Readonly<Record<string, unknown>
 	return Object.fromEntries(Object.entries(federations));
 }
 
-/** The entries of `core.federations` switched on (`enabled` is `true`), by name, in the order written. */
+/**
+ * The entries of `core.federations` switched on (`enabled` is `true`), by
+ * name, in the configuration's key order — JavaScript's: a name that reads as
+ * an integer comes first.
+ */
 export function enabledFederationsOf(config: unknown): readonly (readonly [string, object])[] {
 	return Object.entries(federationsOf(config)).filter(
 		(pair): pair is [string, object] =>

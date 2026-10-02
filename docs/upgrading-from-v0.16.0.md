@@ -371,6 +371,12 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **The federation projections.** A name-keyed contribution factory (a
+  `grants` or `mfaFactors` entry, say) that reads `federationProviders` or
+  `federationRedirectPolicyResolver` while it runs refuses the boot
+  (`contribute-factory-failed`, #1273): the federations `core.federations`
+  dispatches by type register after that pass, so it would miss them. Read
+  them in a routes factory or at request time, as the bundled modules do.
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). An override
   that loosens a budget refuses the boot. In code: the `failMode` options are

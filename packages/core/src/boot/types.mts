@@ -186,8 +186,8 @@ export interface ValidatedManifests {
 	readonly bootstrapComponents: BootstrapMap;
 	/**
 	 * Each enabled `core.federations` entry whose `type` a module switched on
-	 * registers, parsed by that type's schema, in the order written: what
-	 * stage 4 builds a provider and a redirect policy from.
+	 * registers, parsed by that type's schema, in the configuration's key
+	 * order: what stage 4 builds a provider and a redirect policy from.
 	 */
 	readonly dispatchedFederations: readonly DispatchedFederation[];
 }

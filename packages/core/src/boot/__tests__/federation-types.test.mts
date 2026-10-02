@@ -343,6 +343,98 @@ describe("core.federations — dispatched by type", () => {
 		});
 	});
 
+	it("refuses an entry whose type's schema answers a value that throws as it is copied", async () => {
+		const { module, factory } = acmePackage({
+			entrySchema: z.object({ issuer: z.string() }).transform(() => ({
+				get issuer(): string {
+					throw new Error("issuer unreadable");
+				},
+			})),
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toMatchObject({
+			issues: [expect.objectContaining({ path: ["core", "federations", "corp"] })],
+			modules: [{ module: "federation-acme", schemaPath: "core.federations.corp" }],
+		});
+		expect(err.message).toContain("core.federations.corp");
+		expect(err.message).toContain("issuer unreadable");
+		expect(factory).not.toHaveBeenCalled();
+	});
+
+	it("says a dispatched entry is flat when its keys are nested under its type", async () => {
+		const { module, factory } = acmePackage();
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					corp: {
+						enabled: true,
+						type: "acme",
+						acme: {
+							callbackURL: "https://auth.example/session/federation/corp/callback",
+							issuer: "https://corp.example",
+						},
+					},
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("core.federations.corp.callbackURL");
+		expect(err.message).toContain(
+			'a dispatched entry is flat: the keys nested under "acme" are not read',
+		);
+		expect(factory).not.toHaveBeenCalled();
+	});
+
+	it("does not say an entry is flat when the key named after its type is not an object", async () => {
+		const { module } = acmePackage({
+			entrySchema: z.object({ issuer: z.string(), acme: z.string() }),
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					corp: { enabled: true, type: "acme", issuer: "https://corp.example", acme: "x" },
+				}),
+			}),
+		);
+
+		expect(err.message).toContain("core.federations.corp.callbackURL");
+		expect(err.message).not.toContain("flat");
+	});
+
+	it("writes a name that is not a bare key quoted, so a newline in it does not split the message", async () => {
+		const { module } = acmePackage();
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					"corp\nidp": enabledEntry("acme", "corp", { issuer: 42 }),
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).not.toContain("\n");
+		expect(err.message).toContain('core.federations."corp\\nidp": ');
+		expect(err.message).toContain('core.federations."corp\\nidp".issuer');
+	});
+
 	it("refuses a dispatched entry whose name is not one URL path segment", async () => {
 		const { module, factory } = acmePackage();
 
@@ -395,6 +487,8 @@ describe("core.federations — dispatched by type", () => {
 				lifecycle: { closingSlot: { eager: true, cleanup } },
 			} as never);
 			const { module } = acmePackage(options);
+			// The host's empty collectors, so what was registered can be read after the refusal.
+			const { federations, federationRedirectPolicies } = mergeWithBuiltins(undefined);
 
 			const err = await refusal(
 				createApp({
@@ -402,6 +496,7 @@ describe("core.federations — dispatched by type", () => {
 					bootstrapComponents: federationsConfig({
 						corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
 					}),
+					contributionKinds: { federations, federationRedirectPolicies },
 				}),
 			);
 
@@ -416,6 +511,8 @@ describe("core.federations — dispatched by type", () => {
 			expect(err.message).toContain('"federation-acme"');
 			expect(err.message).toContain('"corp"');
 			expect(cleanup).toHaveBeenCalledOnce();
+			expect([...(federations?.entries() ?? [])]).toEqual([]);
+			expect([...(federationRedirectPolicies?.entries() ?? [])]).toEqual([]);
 		},
 	);
 
@@ -512,6 +609,72 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 		});
 	});
 
+	it("suggests the type of the entry's name when an installed module handles it, without assuming it", async () => {
+		const { module, factory } = acmePackage();
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					acme: enabledEntry(undefined, "acme", { issuer: "https://acme.example" }),
+					corp: enabledEntry(undefined, "corp"),
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("federation-type-unhandled");
+		expect(err.details).toEqual({
+			reason: "federation-type-unhandled",
+			unhandled: [{ federationName: "acme" }, { federationName: "corp" }],
+			handled: ["acme"],
+		});
+		expect(err.message).toContain('set core.federations.acme.type = "acme"');
+		expect(err.message).not.toContain("core.federations.corp.type =");
+		expect(factory).not.toHaveBeenCalled();
+	});
+
+	it("boots an enabled entry without a type whose name the host's federations collector already holds", async () => {
+		const { federations } = mergeWithBuiltins(undefined);
+		federations?.register("google", providerNamed("google"));
+
+		const handle = await createApp({
+			modules: [federationStores],
+			bootstrapComponents: federationsConfig({ google: enabledEntry(undefined, "google") }),
+			contributionKinds: { federations },
+		});
+
+		expect(handle.components.federationProviders?.get("google")?.name).toBe("google");
+		await handle.dispose();
+	});
+
+	it("writes a name that is not a bare key quoted in the refusals of the row, so a newline does not split them", async () => {
+		const unhandled = await refusal(
+			createApp({
+				modules: [federationStores],
+				bootstrapComponents: federationsConfig({
+					"corp\nidp": enabledEntry(undefined, "corp"),
+					"partner\nidp": enabledEntry("nobody", "partner"),
+				}),
+			}),
+		);
+		expect(unhandled.reason).toBe("federation-type-unhandled");
+		expect(unhandled.message).not.toContain("\n");
+		expect(unhandled.message).toContain('core.federations."corp\\nidp" names no type');
+		expect(unhandled.message).toContain('core.federations."partner\\nidp".enabled = false');
+
+		const both = await refusal(
+			createApp({
+				modules: [federationStores, acmePackage().module, directly("federation-corp", "corp\nidp")],
+				bootstrapComponents: federationsConfig({
+					"corp\nidp": enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
+				}),
+			}),
+		);
+		expect(both.reason).toBe("duplicate-contribute");
+		expect(both.message).not.toContain("\n");
+		expect(both.message).toContain('core.federations."corp\\nidp" is dispatched');
+	});
+
 	it("refuses an entry both dispatched by its type and contributed by its name", async () => {
 		const { module, factory } = acmePackage();
 
@@ -581,6 +744,116 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 
 		expect(err.reason).toBe("federation-type-unhandled");
 		expect(err.details).toMatchObject({ unhandled: [{ federationName: "corp", type: "acme" }] });
+	});
+});
+
+describe("core.federations — a dispatched entry has no override target", () => {
+	const corp = federationsConfig({
+		corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
+	});
+
+	it.each<readonly [string, Record<string, unknown>, string]>([
+		[
+			"its provider alone",
+			{ federations: { corp: () => providerNamed("corp") } },
+			"federation-redirect-policy-unpaired",
+		],
+		[
+			"its redirect policy alone",
+			{ federationRedirectPolicies: { corp: () => policyFor("corp") } },
+			"federation-redirect-policy-unpaired",
+		],
+		[
+			"both",
+			{
+				federations: { corp: () => providerNamed("corp") },
+				federationRedirectPolicies: { corp: () => policyFor("corp") },
+			},
+			"override-target-missing",
+		],
+	])("refuses a module overriding %s under the entry's name", async (_label, overrides, reason) => {
+		const { module, factory } = acmePackage();
+		const overriding = defineModule({ name: "test:overriding", overrides: overrides as never });
+
+		const err = await refusal(
+			createApp({ modules: [federationStores, module, overriding], bootstrapComponents: corp }),
+		);
+
+		expect(err.reason).toBe(reason);
+		expect(err.stage).toBe("validateManifests");
+		expect(factory).not.toHaveBeenCalled();
+	});
+});
+
+describe("core.federations — the dispatched entries are read once they register", () => {
+	const corp = federationsConfig({
+		corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
+	});
+
+	it.each(["federationProviders", "federationRedirectPolicyResolver"])(
+		"refuses a name-keyed contribution factory that reads %s before the dispatched entries register",
+		async (key) => {
+			const reader = defineModule({
+				name: "test:early-reader",
+				requires: [key] as never,
+				contributes: {
+					grants: {
+						"urn:test:early": ((deps: Record<string, ReadonlyMap<string, unknown>>) => {
+							deps[key]?.get("corp");
+							return { handle: async () => ({}) };
+						}) as never,
+					},
+				},
+			});
+
+			const err = await refusal(
+				createApp({
+					modules: [federationStores, acmePackage().module, reader],
+					bootstrapComponents: corp,
+				}),
+			);
+
+			expect(err.reason).toBe("contribute-factory-failed");
+			expect(err.details).toMatchObject({
+				module: "test:early-reader",
+				kind: "grants",
+				name: "urn:test:early",
+			});
+			expect(err.message).toContain(
+				`${key} was read while the name-keyed contribution factories run`,
+			);
+		},
+	);
+
+	it("hands a routes factory both projections with every dispatched entry registered", async () => {
+		const seen: unknown[] = [];
+		const reader = defineModule({
+			name: "test:route-reader",
+			requires: ["federationProviders", "federationRedirectPolicyResolver"] as never,
+			contributes: {
+				routes: [
+					((deps: Record<string, ReadonlyMap<string, unknown>>) => {
+						seen.push(
+							[...(deps.federationProviders?.keys() ?? [])],
+							[...(deps.federationRedirectPolicyResolver?.keys() ?? [])],
+						);
+						return {
+							id: "test-route-reader",
+							mountPath: "/__test_route_reader__",
+							handler: (_req: unknown, _res: unknown, next: () => void) => next(),
+						};
+					}) as never,
+				],
+			},
+		});
+
+		const handle = await createApp({
+			modules: [federationStores, acmePackage().module, reader],
+			bootstrapComponents: corp,
+		});
+
+		expect(seen).toEqual([["corp"], ["corp"]]);
+		await handle.dispose();
 	});
 });
 
