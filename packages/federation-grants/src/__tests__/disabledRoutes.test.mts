@@ -15,32 +15,20 @@
  */
 
 /**
- * What a deployment that has not enabled offline delegation answers (README,
- * "A disabled deployment names no feature and runs nothing"): a 404 with no
- * description, and no dependency on anything the feature would need. A
- * description naming the feature would tell an unauthenticated caller this
- * deployment could do offline delegation if someone flipped a key; a 404 that
- * first parsed a body, authenticated a client or read a store would give it a
- * way to measure that.
+ * A deployment that has not enabled offline delegation: the routes module is
+ * switched off by its section and registers nothing — no route, admission
+ * action or rate-limit prefix — and asks for none of what the feature would
+ * need. A request to either path is answered by whatever the host mounts
+ * after the router, as when the package is not installed.
  */
 
-import type { BootstrapMap, ClientRepository } from "@o3co/auth-provider-core";
-import { createApp, createSymmetricKeyStore } from "@o3co/auth-provider-core";
+import type { BootstrapMap } from "@o3co/auth-provider-core";
+import { createApp } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
-
-/** Every call is a failure: nothing on the disabled path may reach a client record. */
-const refusingClientRepository: ClientRepository = {
-	findById: async () => {
-		throw new Error("the disabled route read a client record");
-	},
-	authenticate: async () => {
-		throw new Error("the disabled route authenticated a client");
-	},
-};
 
 const makeBoot = (federationGrants?: Record<string, unknown>): BootstrapMap =>
 	({
@@ -49,13 +37,9 @@ const makeBoot = (federationGrants?: Record<string, unknown>): BootstrapMap =>
 			...(federationGrants === undefined ? {} : { "federation-grants": federationGrants }),
 		},
 		pathResolver: (s: string) => s,
-		// Present because the enabled routes authenticate: what this file
-		// asserts is that the disabled path never reaches them, not that a
-		// deployment may omit them.
-		clientRepository: refusingClientRepository,
-		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 	}) as unknown as BootstrapMap;
 
+/** Booted, with a host fallback after the router that names itself. */
 const boot = async (federationGrants?: Record<string, unknown>) => {
 	const handle = await createApp({
 		modules: [...federationGrantsModules],
@@ -63,94 +47,47 @@ const boot = async (federationGrants?: Record<string, unknown>) => {
 	});
 	const app = express();
 	app.use(handle.router);
+	app.use((_req, res) => {
+		res.status(404).json({ answeredBy: "host" });
+	});
 	return { handle, app };
 };
 
-describe("the routes a disabled deployment mounts", () => {
-	it("boots with no grant store, no rate limiter and no audit sink", async () => {
-		// The feature's dependencies are the feature's. A composition that
-		// installs the package and leaves it off must not be asked for the
-		// store it would need if it turned it on.
+describe("a deployment with federation grants off", () => {
+	it("boots with nothing the feature would need: no grant store, client repository, key store, rate limiter or audit sink", async () => {
 		const { handle } = await boot();
 		expect(handle.components.federationGrantStore).toBeUndefined();
 		await handle.dispose();
 	});
 
-	it("answers 404 not_found on the token route, with no description", async () => {
-		const { handle, app } = await boot();
-		const response = await request(app)
-			.post("/oauth/federation-grants/g1/token")
-			.send({ sub: "local-subject" });
-
-		expect(response.status).toBe(404);
-		// Names no feature: nothing in it says what is missing.
-		expect(response.body).toEqual({ error: "not_found" });
+	it("mounts no route and registers no admission action", async () => {
+		const { handle } = await boot();
+		expect(handle.routes.filter((route) => route.contributedBy === "federation-grants")).toEqual(
+			[],
+		);
+		expect(
+			handle.components.sessionRequirementResolver?.action("federation_grants.connect"),
+		).toBeUndefined();
 		await handle.dispose();
 	});
 
-	it("answers 404 on the lodging route, and a plain-text 404 with no redirect on the browser half", async () => {
-		const { handle, app } = await boot();
-		const lodged = await request(app)
-			.post("/oauth/federation-grants")
-			.send({ sub: "local-subject", connection: "calendar" });
-		expect(lodged.status).toBe(404);
-		expect(lodged.body).toEqual({ error: "not_found" });
-		// The browser half is a navigation: a plain 404, no JSON, no redirect to
-		// a login page for a feature that is not there.
-		for (const path of [
-			"/session/federation-grants/connect?request=h",
-			"/session/federation-grants/consent?challenge=c",
-		]) {
-			const response = await request(app).get(path);
-			expect(response.status, path).toBe(404);
-			expect(response.headers["content-type"], path).toMatch(/^text\/plain/);
-			expect(response.headers.location, path).toBeUndefined();
-		}
-		await handle.dispose();
-	});
-
-	it("answers the same 404 on the status route", async () => {
-		const { handle, app } = await boot();
-		const response = await request(app)
-			.post("/oauth/federation-grants/g1/status")
-			.send({ sub: "local-subject" });
-
-		expect(response.status).toBe(404);
-		expect(response.body).toEqual({ error: "not_found" });
-		await handle.dispose();
-	});
-
-	it("answers 404 for a method the routes do not have, including a GET status alias", async () => {
+	it("leaves every request under either path to the host", async () => {
 		const { handle, app } = await boot();
 		for (const response of [
-			await request(app).get("/oauth/federation-grants/g1/status"),
-			await request(app).put("/oauth/federation-grants/g1/token"),
-			await request(app).get("/oauth/federation-grants/g1"),
+			await request(app).post("/oauth/federation-grants/g1/token").send({ sub: "s" }),
+			await request(app).post("/oauth/federation-grants").send({ sub: "s" }),
+			await request(app).get("/session/federation-grants/connect?request=h"),
 		]) {
 			expect(response.status).toBe(404);
-			expect(response.body).toEqual({ error: "not_found" });
+			expect(response.body).toEqual({ answeredBy: "host" });
 		}
 		await handle.dispose();
 	});
 
-	it("sets the cache directives the live routes will, so nothing caches the refusal", async () => {
-		// A bare 404 with no directives is the shape an intermediary caches
-		// heuristically, and a cached "this deployment has no federation
-		// grants" would outlive the operator turning them on.
-		const { handle, app } = await boot();
-		const response = await request(app).post("/oauth/federation-grants/g1/token");
-
-		expect(response.headers["cache-control"]).toBe("no-store");
-		expect(response.headers.pragma).toBe("no-cache");
-		await handle.dispose();
-	});
-
-	it("refuses an explicit enabled = false the same way as an absent section", async () => {
+	it("reads an explicit enabled = false as an absent section does", async () => {
 		const { handle, app } = await boot({ enabled: false });
 		const response = await request(app).post("/oauth/federation-grants/g1/token");
-
-		expect(response.status).toBe(404);
-		expect(response.body).toEqual({ error: "not_found" });
+		expect(response.body).toEqual({ answeredBy: "host" });
 		await handle.dispose();
 	});
 });

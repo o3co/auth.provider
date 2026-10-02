@@ -64,20 +64,15 @@ describe("mtlsModule — discoveryMetadata contribution", () => {
 		expect(meta.metadata?.tls_client_certificate_bound_access_tokens).toBe(true);
 	});
 
-	it("contributes nothing when mTLS is disabled (the secure default)", async () => {
-		// RFC 8705 §3.3: an omitted flag already means `false`. Contributing the
-		// field as `false` would make a disabled module indistinguishable from an
-		// uninstalled one only by accident; omission says the same thing and
-		// cannot collide with another contributor.
-		const meta = await contribution(mtlsConfig());
-		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
-		expect(all).not.toHaveProperty("tls_client_certificate_bound_access_tokens");
+	it("is switched off by its section when mTLS is disabled (the secure default), so nothing is contributed", () => {
+		// RFC 8705 §3.3: an omitted flag already means `false`, and a disabled
+		// module registers nothing, so the field is never contributed as `false`.
+		expect(mtlsModule.section?.isEnabled?.(mtlsConfigSchema.parse({}))).toBe(false);
+		expect(mtlsModule.section?.isEnabled?.(mtlsConfigSchema.parse({ enabled: true }))).toBe(true);
 	});
 
-	it("contributes nothing when the mtls section is absent entirely", async () => {
-		const meta = await contribution(mtlsConfig(undefined));
-		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
-		expect(all).not.toHaveProperty("tls_client_certificate_bound_access_tokens");
+	it("is switched off when the mtls section is absent entirely", () => {
+		expect(mtlsModule.section?.isEnabled?.(mtlsConfigSchema.parse(undefined))).toBe(false);
 	});
 
 	it("never advertises the RFC 8705 §2 client-authentication methods", async () => {

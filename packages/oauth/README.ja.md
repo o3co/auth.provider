@@ -36,7 +36,7 @@
 |---|---|---|
 | [`oauthModule`](./src/module.mts) | `/oauth` のルートとディスカバリーの一部。グラントは 1 つも登録しない: `/oauth/token` は core の `grantHandlerResolver` を引いて振り分け、それはインストールされた各モジュールの `grants` 提供で埋まる。 | トークンエンドポイントはどのグラントがインストールされていても同じで、セッションストアが 1 つも無くても動く。 |
 | [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれ有効化されたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` と `auditSink` の absence policy を宣言する。セッションを読む 2 つのグラントがそれを通してセッションを読む `sessionRequirementResolver` を要求する。`refresh_token` が有効なときは、トークンファミリーの 2 つのスロットが両方配線されていなければ起動を拒否する（[`refresh_token`](#refresh_token) を参照）。 |
-| [`oauthSessionModule`](./src/oauthSession.mts) | `session` グラント。有効化されたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `config`、`keyStore`、`sessionRequirementResolver` と、任意でアドミッションがその横で読むもの — `userSessionStore`、`subjectRevocation`、`auditSink`、障害の行を書き出す `logger` — だけで、`subjectRevocation` と `auditSink` の absence policy を付ける。 |
+| [`oauthSessionModule`](./src/oauthSession.mts) | `session` グラント。有効化されたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `config`、`keyStore`、`sessionRequirementResolver` と、任意でアドミッションがその横で読むもの — `userSessionStore`、`subjectRevocation`、`auditSink`、障害の行を書き出す `logger` — と、参照する `grantPolicy` だけで、`subjectRevocation` と `auditSink` の absence policy を付ける。 |
 | [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthModule` のルートはそれを要求しない。`federation-grants.enabled = true` のときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。そのカスケードはセッションを読まず `expiresAt` を渡さないので、ファミリーを列挙するだけで終了の印は書かない。そのため `subjectRevocation` を配線しない構成では、失効と同時に交換されたコードがそのファミリーを失効させないまま残しうる。`subjectRevocation` を配線すれば、サブジェクトのウォーターマークがそれを覆う。core がカスケードに `expiresAt` を渡すのは MFA 後の後続作業である（#894）。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
 
 どれも明示的にインストールする: どのモジュールも他のモジュールを登録しない。
@@ -231,9 +231,13 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 グラントに渡されたブラウザーセッションは、トークンに署名する前に core のアドミッションを通して `oauth.session_grant` として読まれる（[セッションアドミッション](#セッションアドミッション)）。認証されていない Cookie は `401 unauthorized`、ユーザーを名指さない Cookie はストアの有無にかかわらず `400 invalid_grant`。`userSessionStore` が配線されているとき、Cookie は空でない `sid` を持たなければならず（`400 invalid_grant`、"session identifier (sid) is required"）、それが名指す生存中の `UserSession` のサブジェクトは Cookie のユーザーでなければならない: 無い、`expiresAt` を過ぎた、別のサブジェクトを答える、あるいは（`subjectRevocation` が配線されていれば）サブジェクトのセッションが失効される前に確立されたセッションは `400 invalid_grant` / `session_invalid`、ストアの障害は `503 temporarily_unavailable` で、アドミッションが `session_admission_unavailable` として 1 度だけログに出す。セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant` で、ステップアップで満たせるなら `step_up: "<要件>"` を添える — RFC 6749 のコードなので既存のクライアントは対応付けを保ち、更新されたクライアントはこのメンバーで動ける。`userSessionStore` が無ければ、グラントはブラウザーセッションだけを頼りにする。検証済みの DPoP / mTLS バインディングはアクセストークンの `cnf` に保持される: DPoP は `token_type=DPoP`、mTLS は `Bearer` のままで、リソースサーバーは対応する証明を検証しなければならない。
 
+`grantPolicy` が配線されていれば、アドミッションとスコープの確認の後、署名の前に、`grantType: "session"`、認証済みクライアント、セッションのサブジェクト、要求されたスコープ（`scope` を省略したときは無し）で参照する。ポリシーは絞ることしかできない: deny はポリシー自身の `error` で `400`、例外を投げたポリシーは `503 temporarily_unavailable`、要求されたスコープを超える `grantedScope` やクライアントの `allowedAudiences` の外の `grantedAudience` は `500 server_error`。その範囲内の `grantedAudience` がトークンの `aud` になる。
+
 ### `client_credentials`
 
 RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され、トークンの `sub` はクライアント ID で、リフレッシュトークンは発行されない。クライアントの `allowedGrantTypes` がこのグラントを名指している必要がある — リストが無ければ省略による許可ではなく拒否になる。jwt-bearer、token exchange、device グラント、WebAuthn グラントも同じである。
+
+`grantPolicy` が配線されていれば、`oauth.resourceIndicator.enabled` の有無に関係なく、`session` グラントと同じ規則で参照する。RFC 8707 の `resource` がポリシーに渡るのは、そのフラグが有効なときだけである。
 
 ## OIDC の対応範囲 (#284)
 

@@ -128,7 +128,7 @@ describe("the grant factories declare the slots they read", () => {
 		expectTypeOf<RefreshDeps>().not.toHaveProperty("sessionRPRegistry");
 		expectTypeOf<JwtBearerDeps>().not.toHaveProperty("userSessionStore");
 		expectTypeOf<ClientCredentialsDeps>().not.toHaveProperty("userSessionStore");
-		expectTypeOf<SessionDeps>().not.toHaveProperty("grantPolicy");
+		expectTypeOf<SessionDeps>().not.toHaveProperty("codeRepository");
 		if (false as boolean) {
 			const deps = {} as ClientCredentialsDeps;
 			// @ts-expect-error — client_credentials reads no session store
@@ -158,6 +158,7 @@ describe("the grant factories declare the slots they read", () => {
 		expectTypeOf<JwtBearerDeps>().toHaveProperty("logger");
 		expectTypeOf<ClientCredentialsDeps>().toHaveProperty("grantPolicy");
 		expectTypeOf<SessionDeps>().toHaveProperty("userSessionStore");
+		expectTypeOf<SessionDeps>().toHaveProperty("grantPolicy");
 		expect(true).toBe(true);
 	});
 });

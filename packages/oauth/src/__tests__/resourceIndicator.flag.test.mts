@@ -18,8 +18,8 @@
  * RFC 8707 opt-in plumbing: flag-off / flag-on tests for the grant handlers
  * that carry `extractResourceParam` wiring. Token exchange is excluded.
  *
- * - refresh_token, client_credentials: flag-on forwards body.resource to the
- *   policy hook.
+ * - refresh_token, client_credentials: the policy hook runs whatever the
+ *   flag; flag-on forwards body.resource to it, flag-off forwards none.
  * - authorization_code: the policy is evaluated once, at /authorize, which
  *   locks scope; the token endpoint never invokes it, whatever the flag or
  *   body.resource, since re-evaluating there can mint over-scoped tokens
@@ -251,16 +251,20 @@ describe("RFC 8707 resource indicator — flag off (default, resourceIndicator a
 		expect(seenPolicy).not.toHaveBeenCalled();
 	});
 
-	it("client_credentials: grantPolicy.evaluate is NOT called when flag is off", async () => {
-		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
-		const policy = makeStubPolicy(seenPolicy);
+	it("client_credentials: grantPolicy.evaluate sees resource: undefined when flag is off", async () => {
+		let capturedResource: unknown = "NOT_CALLED";
+		const policy = makeStubPolicy(async (req) => {
+			capturedResource = req.resource;
+			return { outcome: "allow" };
+		});
 		const deps = makeCCDeps({ grantPolicy: policy });
 		const handler = createClientCredentialsGrant(deps);
 
 		await handler.handle(makeCCCtx({ resource: "https://rs1" }));
 
-		// Flag-off must NOT introduce a new policy invocation for client_credentials.
-		expect(seenPolicy).not.toHaveBeenCalled();
+		// client_credentials calls grantPolicy.evaluate whatever the flag; flag-off,
+		// resource is NOT forwarded (undefined).
+		expect(capturedResource).toBeUndefined();
 	});
 });
 
@@ -303,16 +307,19 @@ describe("RFC 8707 resource indicator — flag off (explicit false)", () => {
 		expect(seenPolicy).not.toHaveBeenCalled();
 	});
 
-	it("client_credentials: grantPolicy.evaluate is NOT called when explicit false", async () => {
-		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
-		const policy = makeStubPolicy(seenPolicy);
+	it("client_credentials: grantPolicy.evaluate sees resource: undefined when explicit false", async () => {
+		let capturedResource: unknown = "NOT_CALLED";
+		const policy = makeStubPolicy(async (req) => {
+			capturedResource = req.resource;
+			return { outcome: "allow" };
+		});
 		const deps = makeCCDeps({ grantPolicy: policy }, false);
 		const handler = createClientCredentialsGrant(deps);
 
 		await handler.handle(makeCCCtx({ resource: "https://rs1" }));
 
-		// Explicit false behaves as absent: no policy invocation.
-		expect(seenPolicy).not.toHaveBeenCalled();
+		// client_credentials: the policy call runs, resource NOT forwarded.
+		expect(capturedResource).toBeUndefined();
 	});
 });
 
