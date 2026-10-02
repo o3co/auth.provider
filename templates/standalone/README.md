@@ -1261,8 +1261,10 @@ together.
 Sinks are fire-and-forget by contract: core dispatches without awaiting and
 swallows rejections, so a slow or failing sink cannot add latency to — or
 fail — an auth flow. The flip side is that a sink which cannot deliver drops
-events silently, and those drops are not counted yet — see **Not published
-yet** under Metrics below.
+the event. On its own a sink's failure is swallowed silently; once a module
+contributes `auditHooks`, the fan-out logs each failing call at error as
+`audit_sink_failed`, with the sink's position and the event's `type`. The
+drops are not counted yet — see **Not published yet** under Metrics below.
 
 ### Metrics
 
