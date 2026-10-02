@@ -1367,6 +1367,18 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "the cookie-session storage settings, the base of a pinned spread into a store factory's create",
 	},
 	{
+		file: "packages/redis/src/mfa-factor-store.mts",
+		read: "value=storedValueOf(factor)",
+		count: 1,
+		why: "the MFA factor store's client create (HSETNX), handed the text of the factor record it was given: a second factor's, no session record",
+	},
+	{
+		file: "packages/redis/src/mfa-factor-store.mts",
+		read: "key=keyOf(factor.subject)",
+		count: 1,
+		why: "the MFA factor store's client create (HSETNX), handed the text of the factor record it was given: a second factor's, no session record",
+	},
+	{
 		file: "packages/redis/src/mfa-transaction-store.mts",
 		read: "record=newMfaTransactionRecord(tx)",
 		count: 1,
