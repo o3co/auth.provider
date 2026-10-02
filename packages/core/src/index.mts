@@ -1167,6 +1167,7 @@ export {
 	type RecordedAuthentication,
 	type RenewalNonces,
 	readRenewalNonces,
+	recordableAuthTime,
 	recordableSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,
