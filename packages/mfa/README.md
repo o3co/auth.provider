@@ -269,7 +269,7 @@ The suites that pin these: `src/__tests__/routes.*.test.mts` (`routes.selfServic
 
 ## The TOTP factor
 
-`mfaTotpFactorModule` ([`src/totp/module.mts`](src/totp/module.mts)) contributes the factor ([`src/totp/factor.mts`](src/totp/factor.mts)), built from its section, `mfa-totp-factor`; it answers `null` when the factor is switched off, which leaves the kind absent from `mfaFactorResolver`. It holds no state and reads no key.
+`mfaTotpFactorModule` ([`src/totp/module.mts`](src/totp/module.mts)) contributes the factor ([`src/totp/factor.mts`](src/totp/factor.mts)), built from its section, `mfa-totp-factor`. Each factor's module is switched by its section's `enabled` (`section.isEnabled`): off, the module registers nothing, so the kind is absent from `mfaFactorResolver`. It holds no state and reads no key.
 
 - A verification adds `otp`, and `mfa` beside it (D14). The factor counts as MFA, and its six-to-eight-digit proof is guessable, so the subject lock applies to it (D21).
 - A code is accepted at the steps `T - window` to `T + window`, and only when its step is after the factor's `lastUsedStep` — the same code twice, or an older code once a newer one was accepted, is refused as `replayed` (RFC 6238 §5.2). There is no drift resynchronisation (D22). HOTP and TOTP are pinned by RFC 4226 Appendix D's and RFC 6238 Appendix B's vectors.

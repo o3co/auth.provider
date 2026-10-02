@@ -52,14 +52,17 @@ describe("the device grant's device_verification budget", () => {
 		expect(DEVICE_VERIFICATION_RATE_LIMIT_PREFIX).toBe("device_verification");
 	});
 
-	it("is device-grant.rateLimit, with the grant on or off", async () => {
-		// Nothing keys the prefix while the grant is off; the budget stands
-		// either way, as the section's default does.
-		for (const enabled of [true, false]) {
-			expect(
-				await verificationBudget({ rateLimit: { limit: 5, windowSeconds: 300 } }, enabled),
-			).toEqual({ limit: 5, windowSeconds: 300 });
-		}
+	it("is device-grant.rateLimit while the grant is on", async () => {
+		expect(await verificationBudget({ rateLimit: { limit: 5, windowSeconds: 300 } })).toEqual({
+			limit: 5,
+			windowSeconds: 300,
+		});
+	});
+
+	it("is not contributed while the grant is off: the module registers nothing", async () => {
+		expect(
+			await verificationBudget({ rateLimit: { limit: 5, windowSeconds: 300 } }, false),
+		).toBeUndefined();
 	});
 
 	it("is switched off when the section gives no budget", async () => {

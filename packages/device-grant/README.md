@@ -4,7 +4,7 @@ Last updated: 2026-10-02
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
-Optional, and off until `device-grant.enabled = true`: installed but disabled, it registers no grant — `/oauth/token` answers `unsupported_grant_type` for the device-code grant, and the discovery document names neither the grant nor the endpoint — and its two routes answer `404 not_found`.
+Optional, and off until `device-grant.enabled = true`: installed but disabled, the module registers nothing — no grant, so `/oauth/token` answers `unsupported_grant_type` for the device-code grant and the discovery document names neither the grant nor the endpoint; no route, so the host answers both paths as for an uninstalled package; and no budget, requirement or absence policy, so it asks the composition for nothing.
 
 ## Responsibility
 
@@ -329,13 +329,13 @@ Two things about the Redis adapter are worth knowing before choosing it:
 
 The standalone template provides `deviceCodeStoreClient` from its shared ioredis connection but does not mount this grant; a deployment that adds `deviceGrantModule({ config })` to that manifest selects `redisDeviceCodeStoreModule` alongside it.
 
-Mounting the module without any store fails boot naming `device-grant.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363) — for a deployment that leaves the grant off; with `enabled = true` the module refuses to boot without a store whatever the declaration says.
+Enabling the grant without any store fails boot naming `device-grant.store`; the module refuses to boot without a store whatever that key says. A deployment that leaves the grant off needs no store and no declaration.
 
 Every field of the `DeviceAuthorization` an adapter hands back is a required key: `requestedScope`, `subject`, `grantedScope`, `approvedAtMs`, `amr` and `authTimeMs` hold `undefined` where there is none, so a read-back that forgets one is a compile error rather than a dropped field; `create`'s `requestedScope` is a required key the same way ([Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md)). The conformance suite compares the whole record with `toStrictEqual`, which also catches the two scope lists swapped.
 
 ## Tests
 
-[`flow.test.mts`](./src/__tests__/flow.test.mts) runs the ceremony end to end, [`admission.test.mts`](./src/__tests__/admission.test.mts) pins the three admitted actions and what each admission is answered with, [`composition.test.mts`](./src/__tests__/composition.test.mts) boots the module beside `oauthModule` as the Quick start does — the discovery document, the disabled grant, the JSON-only rule, the body limit and the JSON error answers in both list orders, and that a route of another module under `/oauth` still receives its body unread — [`verificationCsrf.test.mts`](./src/__tests__/verificationCsrf.test.mts) pins the CSRF guard, [`configRateLimit.test.mts`](./src/__tests__/configRateLimit.test.mts) the verification budget, and [`module.test.mts`](./src/__tests__/module.test.mts) the boot refusals, the disabled routes and what an error log line carries. The store's atomicity is core's conformance suite, run against both adapters.
+[`flow.test.mts`](./src/__tests__/flow.test.mts) runs the ceremony end to end, [`admission.test.mts`](./src/__tests__/admission.test.mts) pins the three admitted actions and what each admission is answered with, [`composition.test.mts`](./src/__tests__/composition.test.mts) boots the module beside `oauthModule` as the Quick start does — the discovery document, the disabled grant, the JSON-only rule, the body limit and the JSON error answers in both list orders, and that a route of another module under `/oauth` still receives its body unread — [`verificationCsrf.test.mts`](./src/__tests__/verificationCsrf.test.mts) pins the CSRF guard, [`configRateLimit.test.mts`](./src/__tests__/configRateLimit.test.mts) the verification budget, and [`module.test.mts`](./src/__tests__/module.test.mts) the boot refusals, that a disabled module mounts nothing and what an error log line carries. The store's atomicity is core's conformance suite, run against both adapters.
 
 ## License
 

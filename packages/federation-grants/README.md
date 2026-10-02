@@ -18,7 +18,7 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 
 - the client routes: the order of their guards (correlation id, throttle, body bound and parsing, client authentication), their answers and their error identifiers;
 - the browser half: the connect handle, the consent page's contract, and the checks the callback runs before a grant is activated;
-- the boot refusals of an enabled feature that is missing what it needs, and what a disabled deployment answers;
+- the boot refusals of an enabled feature that is missing what it needs;
 - the shutdown drain of work still in flight after a response (`federationGrantBackgroundModule`).
 
 **Does not own:**
@@ -190,9 +190,9 @@ say what each one means and what to do.
 - **The throttles** log and audit a limiter outage through core with the
   deployment's own logger and sink — `rate_limiter_failed_closed` /
   `rate_limiter_failed_open` and `rate_limit.unavailable`, tagged
-  `federation_grants` or `federation_grants_browser`. The module claims both
-  prefixes with no budget of its own (`rateLimitBudgets`), whether or not the
-  feature is enabled: the limiter's `limits` entry or its default applies,
+  `federation_grants` or `federation_grants_browser`. While the feature is on,
+  the module claims both prefixes with no budget of its own
+  (`rateLimitBudgets`): the limiter's `limits` entry or its default applies,
   and no other module can set a budget for them.
 
 ## Public API
@@ -200,43 +200,16 @@ say what each one means and what to do.
 Exported from [`src/index.mts`](src/index.mts); the linked file holds each definition and its doc comment:
 
 - `federationGrantsModules` — the pair to install — and its two halves `federationGrantsModule` and `federationGrantBackgroundModule`, with `federationGrantsConfigSchema` — [`module.mts`](src/module.mts).
-- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication), for a root that mounts them itself; and what a disabled deployment mounts instead. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`.
+- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication), for a root that mounts them itself; and a 404 that names no feature, for a root that mounts the path itself while the feature is off. `createFederationGrantRouter` holds its `issuer` to core's `checkCanonicalIssuer` — the rule `oauth.jwt.issuer` is held to — and refuses to be built on anything else: a `connect_uri` could not be built on a `mailto:` or `urn:`.
 - `createFederationGrantTokenHandler`, `FederationGrantTokenHandlerOptions` — [`tokenRoute.mts`](src/tokenRoute.mts); `createFederationGrantStatusHandler`, `FederationGrantStatusHandlerOptions` — [`statusRoute.mts`](src/statusRoute.mts). Single handlers, without that chain.
 - `createFederationGrantBackground`, `FederationGrantBackground`, `federationGrantsCleanupTailMs` — [`background.mts`](src/background.mts). The shutdown registry, and the tail its drain is registered with ([below](#shutting-down-without-losing-a-rotated-credential)).
 - `FEDERATION_GRANTS_MOUNT_PATH` — [`types.mts`](src/types.mts).
 
 The browser half is mounted only by the module. The store ports, the grant domain types and retrieval are core's and are not re-exported.
 
-## A disabled deployment names no feature and runs nothing
+## A disabled deployment registers nothing
 
-`federation-grants.enabled` defaults to `false`, and while it is false the package still mounts both of its paths, each answering every request with a `404` that says nothing about the feature.
-
-Under `/oauth/federation-grants`, the client routes' JSON shape:
-
-```http
-HTTP/1.1 404 Not Found
-Cache-Control: no-store
-Pragma: no-cache
-x-request-id: 4f1e…
-
-{"error":"not_found"}
-```
-
-Under `/session/federation-grants`, the browser half's shape — a navigation, so plain text and no redirect, and no `x-request-id`:
-
-```http
-HTTP/1.1 404 Not Found
-Cache-Control: no-store
-Pragma: no-cache
-Referrer-Policy: no-referrer
-Content-Type: text/plain; charset=utf-8
-
-Not found.
-```
-
-No description, deliberately. A body naming the feature would tell an unauthenticated caller that this deployment could do offline delegation if someone flipped one key. Nothing on either path parses a body, authenticates a client or reads a store either, so there is no timing to measure it by — and a deployment that leaves the feature off needs none of the components it would need to turn it on.
-
-What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. The difference is the headers and the content type, not what the body reveals. So the property this has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a 404 of its own. [`disabledRoutes.test.mts`](src/__tests__/disabledRoutes.test.mts) pins both shapes.
+`federation-grants.enabled` defaults to `false`, and it is the routes module's switch (`section.isEnabled`): while it is false, `federationGrantsModule` registers nothing — no route, admission action or rate-limit prefix — and reads none of the feature's configuration or components, so a deployment that leaves the feature off needs none of what it would need to turn it on. Its section is still parsed, and its old path still refused. Nothing is mounted under `/oauth/federation-grants` or `/session/federation-grants`: the host's own fallback answers both, as for a deployment that never installed the package, so nothing in the answer names the feature. A root that wants the client routes' JSON `404`, with its cache directives, while the feature is off mounts `createDisabledFederationGrantRouter` at `FEDERATION_GRANTS_MOUNT_PATH` itself. [`disabledRoutes.test.mts`](src/__tests__/disabledRoutes.test.mts) pins it.
 
 ## The routes a client calls
 
@@ -527,11 +500,8 @@ admitted by core's session admission, on the cookie's claim, as the step's own
 action — `federation_grants.connect`, `federation_grants.consent` (the read
 and the answer) and `federation_grants.callback` (check 3, and again, with
 the same claim, just before the activation), each graded `use` as
-`federationGrantsModule` registers it — whether or not `federation-grants.enabled`
-is set, so `admission_actions_registered` lists them either way: a module's
-registration follows a switch only when the module decides, as it is built,
-whether it installs the admitting code, and this one reads its switch when the
-routes are built. Admission
+`federationGrantsModule` registers it while `federation-grants.enabled` is set;
+switched off, the module registers none of them. Admission
 reads the durable session behind the cookie — live, the cookie's own
 subject's, not past its `expiresAt` — the subject's sessions boundary through
 `subjectRevocation`, and the registered session requirements. What stays
