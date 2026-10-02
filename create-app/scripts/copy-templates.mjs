@@ -65,6 +65,7 @@ const versions = {
 	),
 	"@o3co/auth-provider-session": readVersion("../../packages/session/package.json"),
 	"@o3co/auth-provider-foundation": readVersion("../../packages/foundation/package.json"),
+	"@o3co/auth-provider-mfa": readVersion("../../packages/mfa/package.json"),
 	"@o3co/auth-provider-redis": readVersion("../../packages/redis/package.json"),
 	"@o3co/auth-provider-standard": readVersion("../../packages/standard/package.json"),
 	"@o3co/auth-provider-test-kit": readVersion("../../packages/test-kit/package.json"),

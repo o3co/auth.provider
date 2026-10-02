@@ -4,7 +4,7 @@ Last updated: 2026-10-03
 
 Multi-factor authentication for [`auth.provider`](../../README.md): a second factor after a password login, and a step-up when a relying party asks for one at `/authorize` — the package [the MFA ADR](../core/docs/adr/2026-09-25-multi-factor-authentication.md) designs (its D1).
 
-> **Private.** The package is `"private": true`: built and tested in this workspace, never published, until the standalone template wires it (the ADR's build-order step 20). Nothing here is a supported API yet. No revocation and no password change clears the subject lock (D21): it is given back early only through the authorized-recovery entry — the subject's own release after a recent exempt proof (`POST /session/mfa/lock/release`, [The lock's release](#the-routes)), or the operator reset (`resetMfaForSubject`, from `mfaResetModule`).
+> No revocation and no password change clears the subject lock (D21): it is given back early only through the authorized-recovery entry — the subject's own release after a recent exempt proof (`POST /session/mfa/lock/release`, [The lock's release](#the-routes)), or the operator reset (`resetMfaForSubject`, from `mfaResetModule`).
 
 ## Responsibility
 

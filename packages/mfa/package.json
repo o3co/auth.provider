@@ -1,13 +1,14 @@
 {
 	"name": "@o3co/auth-provider-mfa",
-	"description": "Multi-factor authentication for @o3co/auth-provider — a second factor after a password login. Private until the standalone template wires it.",
+	"description": "Multi-factor authentication for @o3co/auth-provider — a second factor after a password login, and a step-up at /authorize",
 	"version": "0.0.0",
-	"private": true,
 	"license": "Apache-2.0",
 	"engines": {
 		"node": ">=22.0.0"
 	},
 	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
 	"exports": {
 		".": {
 			"import": "./dist/index.mjs",

@@ -195,7 +195,7 @@ export type MfaMode = (typeof MFA_MODES)[number];
  * off phase one's switches — the template's own layers, where
  * `config/application.conf` binds `MFA_MODE`, since core's `reference.conf`
  * does not — and held to its values here, as the template cannot import the
- * MFA package's schema (it is private). Absent is `off`; anything else is a
+ * MFA package's schema (the template does not depend on it). Absent is `off`; anything else is a
  * `RangeError` naming `mfa.mode` that quotes nothing of the value, never read
  * as `off`, which would drop the declaration on a typo.
  *

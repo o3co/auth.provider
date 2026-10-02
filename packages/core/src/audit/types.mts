@@ -76,8 +76,8 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// each carries `subject`, and the ceremonies' events `kind` and
 	// `purpose` in their details. Those of its routes carry `ip` and
 	// `userAgent`; the operator reset's `mfa.reset`, a library call with no
-	// request behind it, carries neither. The MFA package is private until
-	// the template wires it, so no released composition emits them. A
+	// request behind it, carries neither. A composition that installs the MFA
+	// package emits them. A
 	// deployment notifies the account holder from seven of them, each
 	// carrying, beside those, in its details:
 	// `mfa.factor.enrolled` the factor's `binding` (`password`, `email_proof`,

@@ -356,8 +356,8 @@ Module-level messages that arrive wrapped in a factory failure:
   left out or are anything else, and a `bearerToken`, `timeout` or
   `maxResponseBytes` the user repository would refuse is refused the same
   way, the message leading with `HttpMfaFactorStore`.
-- The MFA module (`mfaModule`, `packages/mfa/src/module.mts` — private
-  until the template wires it): `mfa.mode is "off" (or unset) while the MFA
+- The MFA module (`mfaModule`, `packages/mfa/src/module.mts`):
+  `mfa.mode is "off" (or unset) while the MFA
   module is installed: remove the MFA module, or set mfa.mode to "required"
   or "optional"` — installed is on, so an MFA-off deployment does not install
   it; the package's settings, each a `RangeError` `cause` naming its key — the
@@ -801,8 +801,7 @@ upstream `amr` (`profile.amr`); a custom adapter may.
 ### Multi-factor authentication: the lock, mail and notices
 
 What a composition that installs the MFA package owns beside it (the MFA
-ADR's D5, D21, D24). The package is private until the standalone template
-wires it.
+ADR's D5, D21, D24).
 
 - **The lock on guessable proofs.** Five attempts per transaction. From the
   fifth consecutive failure a lock of 15 minutes, doubling to 24 hours. Ten
@@ -1679,8 +1678,7 @@ check this page, so when the two disagree, the constant is right:
 `token.issued`, `token.issued.failure`.
 
 The `mfa.*` events are the multi-factor authentication package's (the MFA
-ADR's D28). The MFA package is private until the standalone template wires
-it, so no released composition emits them. Its routes emit
+ADR's D28), emitted by a composition that installs it. Its routes emit
 `mfa.challenge.sent`, `mfa.verified` and `mfa.verify.failure` (`reason`:
 `invalid`, `expired`, `replayed`, `malformed`, `sign_count_regression`, or
 `exhausted` for a verification that arrives after the transaction's attempts

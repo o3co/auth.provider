@@ -16,8 +16,6 @@
 
 // @o3co/auth-provider-mfa — multi-factor authentication (the MFA ADR,
 // packages/core/docs/adr/2026-09-25-multi-factor-authentication.md).
-// Private until the standalone template wires it (the ADR's build-order
-// step 20).
 
 // The admission actions the package's routes admit, with their grades:
 // declared, and registered by the module whose route admits one.
