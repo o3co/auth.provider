@@ -65,6 +65,7 @@ const tokenClient = {
 	scanIterator: async function* () {},
 	compareAndDelete: async () => false,
 	readVersioned: async () => null,
+	attachRecord: async () => "attached" as const,
 	replaceIfGeneration: async () => "missing" as const,
 	removeIfGeneration: async () => "missing" as const,
 	pExpireGT: async () => {},

@@ -11,6 +11,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+	FederationTokenAttachInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
@@ -22,6 +23,7 @@ import {
 import { encryptTokenField } from "#/internal/crypto.mjs";
 import { CLOCK_SKEW_MS } from "#/internal/write-deadline.mjs";
 import {
+	FT_ATTACH,
 	FT_READ_VERSIONED,
 	FT_REMOVE_IF,
 	FT_REPLACE_IF,
@@ -151,6 +153,18 @@ function createFakeRedis() {
 				return { raw: minted, generation: candidate };
 			}
 			return { raw: stored, generation: "" };
+		}),
+		attachRecord: vi.fn(async (k: string, input: FederationTokenAttachInput) => {
+			if (lateAt(input.deadlineMs)) return "late" as const;
+			const kept = keptAnswer(input.replayKey) as "attached" | undefined;
+			if (kept !== undefined) return kept;
+			data.set(k, input.value);
+			ttls.set(k, input.ttlMs);
+			replays.set(input.replayKey, {
+				answer: "attached",
+				untilMs: input.deadlineMs + input.clockSkewMs + 1,
+			});
+			return "attached" as const;
 		}),
 		replaceIfGeneration: vi.fn(async (k: string, input: FederationTokenReplaceIfInput) => {
 			if (lateAt(input.deadlineMs)) return "late" as const;
@@ -1320,6 +1334,93 @@ describe("redis FederationTokenStore conditional members", () => {
 		}
 	});
 
+	/**
+	 * `client` with every call `attach` makes through it recorded, so a test
+	 * can send each one again as a driver does after a reconnect.
+	 */
+	const recording = (client: FederationTokenStoreClient) => {
+		const calls: { method: string; args: unknown[] }[] = [];
+		const recorded = new Proxy(client, {
+			get(target, method, receiver) {
+				const member = Reflect.get(target, method, receiver) as unknown;
+				if (typeof member !== "function" || typeof method !== "string") return member;
+				return (...args: unknown[]) => {
+					calls.push({ method, args });
+					return (member as (...a: unknown[]) => unknown).apply(target, args);
+				};
+			},
+		});
+		const resend = async (sent: typeof calls) => {
+			for (const { method, args } of sent) {
+				const member = Reflect.get(client, method) as (...a: unknown[]) => unknown;
+				await member.apply(client, args);
+			}
+		};
+		return { client: recorded, calls, resend };
+	};
+
+	it("an attach the driver sends again after a later replace does not put the older record back", async () => {
+		const { client, calls, resend } = recording(redis);
+		const store = storeOver(client);
+		await store.attach("sid-1", "google", tokens);
+		const attachCommands = calls.splice(0);
+		const read = await store.getVersioned("sid-1", "google");
+		if (read === null) throw new Error("not live");
+		const next = { ...tokens, accessToken: "at-2" };
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, next);
+		if (replaced.outcome !== "updated") throw new Error("not updated");
+		const after = redis.data.get("ft:sid-1:google");
+		await resend(attachCommands);
+		expect(redis.data.get("ft:sid-1:google")).toBe(after);
+		expect(await store.getVersioned("sid-1", "google")).toEqual({
+			value: next,
+			generation: replaced.generation,
+		});
+	});
+
+	it("an attach the driver sends again after a logout does not bring the record back", async () => {
+		const { client, calls, resend } = recording(redis);
+		const store = storeOver(client);
+		await store.attach("sid-1", "google", tokens);
+		const attachCommands = calls.splice(0);
+		await store.removeBySid("sid-1");
+		await resend(attachCommands);
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+		expect(await store.get("sid-1", "google")).toBeNull();
+	});
+
+	it("rejects an attach answered late as an unknown outcome, never as written nothing", async () => {
+		const store = storeOver();
+		redis.attachRecord.mockResolvedValueOnce("late");
+		await expect(store.attach("sid-1", "google", tokens)).rejects.toThrow(
+			/attach was answered past its deadline; the outcome is unknown: another copy may have committed, or may still commit within W/,
+		);
+	});
+
+	it("stamps an attach with a deadline 1 s past its issue and the declared clock skew, and stops waiting there with an unknown outcome", async () => {
+		const store = storeOver();
+		vi.useFakeTimers({ now: 1_000_000, toFake: ["Date", "setTimeout", "clearTimeout"] });
+		redis.attachRecord.mockImplementationOnce(() => new Promise(() => {}));
+		const attached = store.attach("sid-1", "google", tokens);
+		const settled = expect(attached).rejects.toThrow(
+			/attach had no answer within 1000 ms; the outcome is unknown: it may have committed, or may still commit within W/,
+		);
+		await vi.advanceTimersByTimeAsync(1_000);
+		await settled;
+		expect(redis.attachRecord).toHaveBeenLastCalledWith(
+			"ft:sid-1:google",
+			expect.objectContaining({ deadlineMs: 1_001_000, clockSkewMs: CLOCK_SKEW_MS }),
+		);
+	});
+
+	it("keys each attach's answer by the generation it writes", async () => {
+		const store = storeOver();
+		await store.attach("sid-1", "google", tokens);
+		const [, input] = redis.attachRecord.mock.calls[0] as [string, FederationTokenAttachInput];
+		const read = await store.getVersioned("sid-1", "google");
+		expect(input.replayKey).toBe(`ft:w:{ft:sid-1:google}:${read?.generation}`);
+	});
+
 	it("rejects a conditional write answered late as an unknown outcome, never as written nothing", async () => {
 		const store = storeOver();
 		await store.attach("sid-1", "google", tokens);
@@ -1519,14 +1620,16 @@ describe("redis FederationTokenStore conditional members", () => {
 		expect(redis.compareAndDelete).not.toHaveBeenCalled();
 	});
 
-	it("runs the removal's script on a full server: it alone starts with the allow-oom shebang", () => {
+	it("runs the removal's and the versioned read's scripts on a full server: they alone start with the allow-oom shebang", () => {
 		expect(FT_REMOVE_IF.source.startsWith("#!lua flags=allow-oom\n")).toBe(true);
+		expect(FT_READ_VERSIONED.source.startsWith("#!lua flags=allow-oom\n")).toBe(true);
 		expect(FT_REPLACE_IF.source.startsWith("#!")).toBe(false);
-		expect(FT_READ_VERSIONED.source.startsWith("#!")).toBe(false);
+		expect(FT_ATTACH.source.startsWith("#!")).toBe(false);
 	});
 
 	it("the builder refuses a client without the conditional primitives", () => {
 		for (const missing of [
+			"attachRecord",
 			"readVersioned",
 			"replaceIfGeneration",
 			"removeIfGeneration",

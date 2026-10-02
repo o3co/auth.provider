@@ -37,18 +37,19 @@
  * reads that the versioned read can neither find a generation in nor mint one
  * into makes `getVersioned` reject, as an outage would: it is never removed.
  *
- * Each conditional member is one script on the record's key, refused at or
- * after a deadline the adapter stamps at issue and the server's clock judges,
- * so its write lifetime W is the write timeout plus the declared clock skew
- * (`internal/write-deadline.mts`), while the app's and Redis's clocks agree
- * within that skew. A conditional write keeps its answer under a replay key of
- * its own until the declared clock skew past its deadline, so a copy the
- * driver sends again before then answers as the first did and writes nothing,
- * even when a server whose clock lags by the skew judges it. A conditional
- * write answered `late`, like one unanswered within the write timeout, rejects
- * with an unknown outcome: the copy that answered wrote nothing, but another
- * copy may have committed, or may still commit within W. A conditional write
- * never shrinks the index, and adds to it only after `updated`, so the index
+ * `attach` and each conditional member are one script on the record's key,
+ * refused at or after a deadline the adapter stamps at issue and the server's
+ * clock judges, so a write's lifetime W is the write timeout plus the declared
+ * clock skew (`internal/write-deadline.mts`), while the app's and Redis's
+ * clocks agree within that skew. Each such write keeps its answer under a
+ * replay key of its own until the declared clock skew past its deadline, so a
+ * copy the driver sends again before then answers as the first did and writes
+ * nothing, even when a server whose clock lags by the skew judges it: a resent
+ * `attach` never puts an older record back over a later write. A write
+ * answered `late`, like one unanswered within the write timeout, rejects with
+ * an unknown outcome: the copy that answered wrote nothing, but another copy
+ * may have committed, or may still commit within W. A conditional write never
+ * shrinks the index, and adds to it only after `updated`, so the index
  * outlives the record it names. The store assumes acknowledged writes are not
  * rolled back (persistence, plus a failover setup that keeps acknowledged
  * writes); a deployment that accepts acknowledged-write loss on failover also
@@ -410,18 +411,6 @@ export function createRedisFederationTokenStore(
 		return inner;
 	};
 
-	const writeEnv = async (sid: string, name: string, env: Envelope) => {
-		// Index before the envelope: a failure between them leaves an index
-		// member naming a missing key, which removal tolerates, where the other
-		// order would leave an envelope nothing knows about.
-		await index.add(sid, name, storeTtlMs);
-		// The key TTL is the store lifetime, not the access token's expiry
-		// (kept in the envelope): the refresh_token must outlive the access
-		// token.
-		const key = k(sid, name);
-		await opts.client.set(key, seal(key, env, newStoreGeneration()), "PX", storeTtlMs);
-	};
-
 	/**
 	 * Removes a record this store cannot read, only while it still holds `raw`,
 	 * the bytes read: a write since then is kept. The index member stays.
@@ -432,7 +421,7 @@ export function createRedisFederationTokenStore(
 	};
 
 	/**
-	 * A conditional write whose outcome is unknown. A rejection of a
+	 * A write whose outcome is unknown. A rejection of `attach` or of a
 	 * conditional write means only that, never that nothing was written.
 	 */
 	const unknownOutcome = (operation: string, what: string, why: string): Error =>
@@ -459,8 +448,9 @@ export function createRedisFederationTokenStore(
 		);
 
 	/**
-	 * The replay key of a conditional write, on its record's Cluster slot, or a
-	 * refusal before any command when there is none (`replayKeyOf`).
+	 * The replay key of `attach` or a conditional write, on its record's
+	 * Cluster slot, or a refusal before any command when there is none
+	 * (`replayKeyOf`).
 	 */
 	const replayKeyFor = (operation: string, key: string, writeId: string): string => {
 		const replayKey = replayKeyOf(key, prefix, writeId);
@@ -488,7 +478,28 @@ export function createRedisFederationTokenStore(
 	return {
 		kind: "redis",
 		async attach(sid, name, tokens) {
-			await writeEnv(sid, name, toEnvelope(tokens));
+			const key = k(sid, name);
+			const generation = newStoreGeneration();
+			const replayKey = replayKeyFor("attach", key, generation);
+			const value = seal(key, toEnvelope(tokens), generation);
+			// Index before the record: a failure between them leaves an index
+			// member naming a missing key, which removal tolerates, where the
+			// other order would leave a record nothing knows about.
+			await index.add(sid, name, storeTtlMs);
+			// The key TTL is the store lifetime, not the access token's expiry
+			// (kept in the envelope): the refresh_token must outlive it.
+			const outcome = await withWriteDeadline(
+				(deadlineMs) =>
+					opts.client.attachRecord(key, {
+						value,
+						ttlMs: storeTtlMs,
+						deadlineMs,
+						replayKey,
+						clockSkewMs: CLOCK_SKEW_MS,
+					}),
+				unanswered("attach"),
+			);
+			if (outcome === "late") throw late("attach");
 		},
 		async get(sid, name) {
 			const key = k(sid, name);
@@ -633,7 +644,8 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 	const clientObj = cfg.client as Record<string, unknown>;
 	// `compareAndDelete` releases the advisory lock and removes an unreadable
 	// record; `unlink`, the three SET primitives and `pExpireGT` serve the
-	// per-session index; the three scripts are the conditional members.
+	// per-session index; `attachRecord` writes a record; the three scripts
+	// after it are the conditional members.
 	// Checked here so a custom client
 	// missing one fails at build time, not with a `TypeError` at first logout,
 	// the path that must remove a logged-out session's upstream tokens.
@@ -647,6 +659,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		"sScanIterator",
 		"scanIterator",
 		"compareAndDelete",
+		"attachRecord",
 		"readVersioned",
 		"replaceIfGeneration",
 		"removeIfGeneration",

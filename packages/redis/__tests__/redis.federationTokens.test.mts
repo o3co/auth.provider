@@ -21,6 +21,7 @@
 
 import { type FederationTokens, isStoreGeneration } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationTokenStore, type EncryptionConfig } from "#/federation-tokens.mjs";
 import { encryptTokenField } from "#/internal/crypto.mjs";
@@ -596,6 +597,77 @@ describe("conditional writes over a real Redis", () => {
 		expect(await raw.get(key)).toBe(later.value);
 	});
 
+	it("an attach the driver sends again after a later replace does not put the older record back", async () => {
+		suiteCounter += 1;
+		const keyPrefix = `t291ft:${suiteCounter}:`;
+		const key = `${keyPrefix}sid-1:google`;
+		const { federationTokenStoreClient } = makeIoredisClients(raw);
+		// Every command `attach` sends, recorded so it can be sent again as the
+		// driver does after a reconnect.
+		const sent: { method: string; args: unknown[] }[] = [];
+		const client = new Proxy(federationTokenStoreClient, {
+			get(target, method, receiver) {
+				const member = Reflect.get(target, method, receiver) as unknown;
+				if (typeof member !== "function" || typeof method !== "string") return member;
+				return (...args: unknown[]) => {
+					sent.push({ method, args });
+					return (member as (...a: unknown[]) => unknown).apply(target, args);
+				};
+			},
+		});
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client,
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix,
+			scanFallback: false,
+		});
+		await store.attach("sid-1", "google", tokens);
+		const attachCommands = sent.splice(0);
+		const read = await live(store, "sid-1", "google");
+		const next = { ...tokens, accessToken: "at-2" };
+		const replaced = await store.replaceIf("sid-1", "google", read.generation, next);
+		if (replaced.outcome !== "updated") throw new Error("not updated");
+		const after = await raw.get(key);
+		for (const { method, args } of attachCommands) {
+			const member = Reflect.get(federationTokenStoreClient, method) as (
+				...a: unknown[]
+			) => unknown;
+			await member.apply(federationTokenStoreClient, args);
+		}
+		expect(await raw.get(key)).toBe(after);
+		expect(await store.getVersioned("sid-1", "google")).toEqual({
+			value: next,
+			generation: replaced.generation,
+		});
+	});
+
+	it("an attach that reaches the server past its deadline writes nothing; one on time keeps its answer the declared clock skew past its deadline", async () => {
+		const { keyPrefix } = makeEncrypted();
+		const key = `${keyPrefix}sid-1:google`;
+		const { federationTokenStoreClient: client } = makeIoredisClients(raw);
+		const now = await serverClock(() => raw)();
+		const attach = (replayKey: string, deadlineMs: number, value: string) =>
+			client.attachRecord(key, {
+				value,
+				ttlMs: 60_000,
+				deadlineMs,
+				replayKey,
+				clockSkewMs: CLOCK_SKEW_MS,
+			});
+		expect(await attach(`${key}:w:attach-late`, now - 1, '{"v":2,"g":"late","c":"x"}')).toBe(
+			"late",
+		);
+		expect(await raw.exists(key, `${key}:w:attach-late`)).toBe(0);
+		const deadlineMs = now + 30_000;
+		expect(await attach(`${key}:w:attach-1`, deadlineMs, '{"v":2,"g":"one","c":"x"}')).toBe(
+			"attached",
+		);
+		expect(await raw.get(key)).toBe('{"v":2,"g":"one","c":"x"}');
+		expect(await raw.pttl(key)).toBeGreaterThan(50_000);
+		expect(await raw.pexpiretime(`${key}:w:attach-1`)).toBe(deadlineMs + CLOCK_SKEW_MS + 1);
+	});
+
 	it("a removal the driver sends again answers removed, and leaves a record made since", async () => {
 		const { keyPrefix, store } = makeEncrypted();
 		const key = `${keyPrefix}sid-1:google`;
@@ -716,5 +788,62 @@ return 0`,
 			}),
 		).toBe("removed");
 		expect(await raw.exists(key)).toBe(0);
+	});
+});
+
+/** A case that fills a whole server: on a container of its own, so no other file's server fills. */
+describe("conditional writes on a full noeviction server of its own", () => {
+	const encryptionKey = Buffer.alloc(32, 7);
+	let full: StartedTestContainer | undefined;
+	let io: Redis | undefined;
+
+	beforeAll(async () => {
+		full = await new GenericContainer("redis:7.2-alpine")
+			.withExposedPorts(6379)
+			.withStartupTimeout(60_000)
+			.start();
+		io = new Redis({ host: full.getHost(), port: full.getMappedPort(6379) });
+		io.on("error", () => {});
+	}, 120_000);
+
+	afterAll(async () => {
+		io?.disconnect();
+		await full?.stop();
+	});
+
+	it("serves a versioned read of a record written without a generation, minting one, and removes it, where an attach is refused", async () => {
+		if (io === undefined) throw new Error("the container did not start");
+		const admin = io;
+		const store = createRedisFederationTokenStore({
+			deploymentMode: "unset",
+			client: makeIoredisClients(admin).federationTokenStoreClient,
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix: "full:",
+			scanFallback: false,
+		});
+		const key = "full:sid-1:google";
+		await store.attach("sid-1", "google", tokens);
+		// As a replica that does not know `g` writes it.
+		const { g: _g, ...rest } = JSON.parse((await admin.get(key)) as string) as Record<
+			string,
+			unknown
+		>;
+		await admin.set(key, JSON.stringify(rest), "PX", 60_000);
+		await admin.config("SET", "maxmemory-policy", "noeviction");
+		await admin.config("SET", "maxmemory", "1");
+		try {
+			await expect(store.attach("sid-2", "google", tokens)).rejects.toThrow();
+			expect(await admin.exists("full:sid-2:google")).toBe(0);
+			const read = await store.getVersioned("sid-1", "google");
+			if (read === null) throw new Error("not live");
+			expect(read.value).toEqual(tokens);
+			expect(await store.getVersioned("sid-1", "google")).toEqual(read);
+			expect(await store.removeIf("sid-1", "google", read.generation)).toEqual({
+				outcome: "removed",
+			});
+			expect(await admin.exists(key)).toBe(0);
+		} finally {
+			await admin.config("SET", "maxmemory", "0");
+		}
 	});
 });

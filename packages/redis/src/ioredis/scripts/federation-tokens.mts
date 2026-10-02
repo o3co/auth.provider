@@ -15,16 +15,18 @@
  */
 
 /**
- * The federation token store's conditional members, one script each over the
- * record's key and, for a write, its replay key on the same Cluster slot. A
- * record's generation is its wrapper's `g`, outside the ciphertext. The
- * scripts make no generation: the adapter hands each one in.
+ * The federation token store's record writes and conditional members, one
+ * script each over the record's key and, for a write, its replay key on the
+ * same Cluster slot. A record's generation is its wrapper's `g`, outside the
+ * ciphertext. The scripts make no generation: the adapter hands each one in.
  *
- * The removal declares `allow-oom`: under `noeviction` a full server still
- * runs it, since a record must stay removable when nothing more can be
- * written. Besides the delete, it writes only its answer: one small replay key
- * per call, living about 2 s, and on `missing` or `conflict` that key is all
- * it writes. The replace and the versioned read declare no flags.
+ * The removal and the versioned read declare `allow-oom`: under `noeviction`
+ * a full server still runs them, since a record must stay readable and
+ * removable when nothing more can be written. Besides the delete, the removal
+ * writes only its answer: one small replay key per call, living about 2 s,
+ * and on `missing` or `conflict` that key is all it writes. The read writes
+ * only a mint, once per record written without a generation. The attach and
+ * the replace declare no flags.
  */
 
 import { defineScript } from "./define.mjs";
@@ -65,9 +67,10 @@ end
  * `g`, and its first byte is `{`) is given `ARGV[1]`, its TTL kept, and
  * answered with it. The mint splices `"g"` in after that first byte rather
  * than re-encoding the object, which could change its numbers. Any other
- * value without a generation is answered with the generation `""`.
+ * value without a generation is answered with the generation `""`. Its first
+ * line declares `allow-oom`, so it must stay the script's first line.
  */
-const LUA_READ_VERSIONED = `${FT_PRELUDE}
+const LUA_READ_VERSIONED = `${ALLOW_OOM}${FT_PRELUDE}
 local raw = redis.call('GET', KEYS[1])
 if not raw then return false end
 local g = ft_generation(raw)
@@ -79,6 +82,21 @@ if ok and type(rec) == 'table' and rec['v'] == 2 and rec['g'] == nil and string.
   return {minted, ARGV[1]}
 end
 return {raw, ''}
+`.trim();
+
+/**
+ * The attach. `KEYS[1]` = the record, `KEYS[2]` = the write's replay key;
+ * `ARGV[1]` = the deadline (epoch ms), `ARGV[2]` = when the replay key expires,
+ * `ARGV[3]` = the new value (carrying its new generation), `ARGV[4]` = the
+ * store TTL (ms). Returns `late`, a kept answer, or `attached`, kept until
+ * `ARGV[2]`, as the replace does; whatever the record holds is overwritten.
+ */
+const LUA_ATTACH = `${FT_PRELUDE}
+if ft_late(ARGV[1]) then return 'late' end
+local kept = redis.call('GET', KEYS[2])
+if kept then return kept end
+redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[4])
+return ft_keep(KEYS[2], 'attached', ARGV[2])
 `.trim();
 
 /**
@@ -122,6 +140,7 @@ redis.call('DEL', KEYS[1])
 return ft_keep(KEYS[2], 'removed', ARGV[2])
 `.trim();
 
+export const FT_ATTACH = defineScript(LUA_ATTACH);
 export const FT_READ_VERSIONED = defineScript(LUA_READ_VERSIONED);
 export const FT_REPLACE_IF = defineScript(LUA_REPLACE_IF);
 export const FT_REMOVE_IF = defineScript(LUA_REMOVE_IF);

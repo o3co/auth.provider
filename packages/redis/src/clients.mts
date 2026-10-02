@@ -56,6 +56,7 @@ import type {
 	FederationGrantIntentStoreClient,
 } from "./clients/federation-grant-intent.mjs";
 import type {
+	FederationTokenAttachInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,
@@ -139,6 +140,7 @@ export type {
 	FederationGrantIntentStoreClient,
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
+	FederationTokenAttachInput,
 	FederationTokenRemoveIfInput,
 	FederationTokenReplaceIfInput,
 	FederationTokenStoreClient,

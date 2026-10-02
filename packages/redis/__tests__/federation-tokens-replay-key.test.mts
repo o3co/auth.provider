@@ -89,7 +89,7 @@ describe("replayKeyOf", () => {
 	);
 });
 
-describe("the Redis store hands each conditional write a replay key of its own, on its record's slot", () => {
+describe("the Redis store hands each attach and conditional write a replay key of its own, on its record's slot", () => {
 	const tokens: FederationTokens = {
 		accessToken: "at",
 		refreshToken: "rt",
@@ -101,7 +101,8 @@ describe("the Redis store hands each conditional write a replay key of its own, 
 		obtainedAt: undefined,
 	};
 
-	it("for a replace and a removal", async () => {
+	it("for an attach, a replace and a removal", async () => {
+		const attachRecord = vi.fn(async () => "attached" as const);
 		const replaceIfGeneration = vi.fn(async () => "conflict" as const);
 		const removeIfGeneration = vi.fn(async () => "conflict" as const);
 		const client = {
@@ -115,6 +116,7 @@ describe("the Redis store hands each conditional write a replay key of its own, 
 			scanIterator: async function* () {},
 			compareAndDelete: async () => false,
 			readVersioned: async () => null,
+			attachRecord,
 			replaceIfGeneration,
 			removeIfGeneration,
 			pExpireGT: async () => {},
@@ -127,15 +129,18 @@ describe("the Redis store hands each conditional write a replay key of its own, 
 		const expected = "00000000-0000-4000-8000-000000000000" as Parameters<
 			typeof store.replaceIf
 		>[2];
+		await store.attach("sid-1", "google", tokens);
+		await store.attach("sid-1", "google", tokens);
 		await store.replaceIf("sid-1", "google", expected, tokens);
 		await store.replaceIf("sid-1", "google", expected, tokens);
 		await store.removeIf("sid-1", "google", expected);
 		await store.removeIf("sid-1", "google", expected);
 		const keys = [
+			...attachRecord.mock.calls.map((call) => (call as unknown[])[1]),
 			...replaceIfGeneration.mock.calls.map((call) => (call as unknown[])[1]),
 			...removeIfGeneration.mock.calls.map((call) => (call as unknown[])[1]),
 		].map((input) => (input as { replayKey: string }).replayKey);
-		expect(new Set(keys).size).toBe(4);
+		expect(new Set(keys).size).toBe(6);
 		for (const replayKey of keys) {
 			expect(replayKey.startsWith("ft:w:{")).toBe(true);
 			expect(slotOf(replayKey)).toBe(slotOf("ft:sid-1:google"));
@@ -146,7 +151,7 @@ describe("the Redis store hands each conditional write a replay key of its own, 
 		["sid-1", "go}ogle"],
 		["sid}1", "google"],
 	])(
-		"refuses a replace and a removal of a record whose key no replay key can share a slot with, before any command (sid %s, name %s)",
+		"refuses an attach, a replace and a removal of a record whose key no replay key can share a slot with, before any command (sid %s, name %s)",
 		async (sid, name) => {
 			const calls: string[] = [];
 			const client = new Proxy(
@@ -169,6 +174,11 @@ describe("the Redis store hands each conditional write a replay key of its own, 
 			const expected = "00000000-0000-4000-8000-000000000000" as Parameters<
 				typeof store.replaceIf
 			>[2];
+			await expect(store.attach(sid, name, tokens)).rejects.toThrow(
+				new RangeError(
+					"FederationTokenStore (redis): attach refused: no replay key can share the record's Redis Cluster slot (its key holds a brace but no hash tag)",
+				),
+			);
 			await expect(store.replaceIf(sid, name, expected, tokens)).rejects.toThrow(
 				new RangeError(
 					"FederationTokenStore (redis): replaceIf refused: no replay key can share the record's Redis Cluster slot (its key holds a brace but no hash tag)",
