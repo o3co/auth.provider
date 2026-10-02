@@ -378,8 +378,8 @@ const CASE = {
 		"missing writes nothing: the generation stays and a write at it lands; an absent set answers missing to a removal and conflict to a create",
 	snapshot:
 		"a snapshot read beside a create is one snapshot: without the record its generation is fenced, with it the create's generation",
-	withinBound:
-		"a tombstone stands within the write-lifetime bound: a late first binding and a late write at a generation read before it are refused, and write nothing",
+	tombstone:
+		"a tombstone stands: a late first binding and a late write at a generation read before the reset are refused, and write nothing",
 	expired:
 		"an expired tombstone reads as absent, and a generation seen before it is never issued again",
 	heldSetKept:
@@ -488,7 +488,7 @@ describe("the binding refuses a store that breaks the factor set's fence", () =>
 	});
 
 	it("one whose reset deletes the set fails the cases within the bound too", async () => {
-		expect(await refusedBy(() => modelStore("reset-deletes-set"))).toContain(CASE.withinBound);
+		expect(await refusedBy(() => modelStore("reset-deletes-set"))).toContain(CASE.tombstone);
 	});
 
 	it("(f) one whose removal of a record not there moves the generation", async () => {
@@ -556,12 +556,13 @@ describe("each case", () => {
 				build: async () => ({ store: createMemoryMfaFactorStore() }),
 				...(supports === undefined ? {} : { supports }),
 			}).map((contractCase) => contractCase.name);
-		const hooked = [CASE.outage, CASE.withinBound, CASE.expired, CASE.heldSetKept];
+		const hooked = [CASE.outage, CASE.expired, CASE.heldSetKept];
 		const none = names();
 		expect(none.filter((name) => name.startsWith("not run:"))).toEqual([
-			"not run: the outage case (unreachable not declared); the tombstone cases (forceExpire not declared)",
+			"not run: the outage case (unreachable not declared); the expiry cases (forceExpire not declared)",
 		]);
 		for (const name of hooked) expect(none).not.toContain(name);
+		expect(none).toContain(CASE.tombstone);
 		expect(names({ forceExpire: true }).filter((name) => name.startsWith("not run:"))).toEqual([
 			"not run: the outage case (unreachable not declared)",
 		]);
@@ -574,7 +575,7 @@ describe("each case", () => {
 		await expect(marker?.run()).resolves.toBeUndefined();
 	});
 
-	it("fails a tombstone case of a harness that declares forceExpire and does not give it", async () => {
+	it("fails an expiry case of a harness that declares forceExpire and does not give it", async () => {
 		const expired = mfaFactorStoreConditionalContract({
 			build: async () => ({ store: createMemoryMfaFactorStore() }),
 			supports: { forceExpire: true },

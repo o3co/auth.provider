@@ -41,7 +41,7 @@
  * The rules are core's conditional-write convention for a set
  * (docs/adapter-surface.md, "Conditional writes"); `MfaFactorStore` says what
  * they mean for the factor set, the write-lifetime bound among them.
- * The tombstone cases run under `forceExpire`; no case can prove the bound
+ * The expiry cases run under `forceExpire`; no case can prove the bound
  * itself, which the adapter's write lifetime and the writer's lease keep.
  *
  * STAND-IN: the first group, and the expired-tombstone and the
@@ -213,30 +213,7 @@ export function mfaFactorStoreConditionalContract(
 			await rejects(async () => down.removeIf?.("user-1", FACTOR_A, generation), "removeIf");
 		});
 
-	const tombstoneCases: readonly ContractCase[] = [
-		// The factor set's own: what a late writer meets within the bound.
-		test("a tombstone stands within the write-lifetime bound: a late first binding and a late write at a generation read before it are refused, and write nothing", async ({
-			one,
-			two,
-			harness,
-		}) => {
-			forceExpireOf(harness);
-			const read = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
-			await two.store.removeAllForSubject("user-1");
-			const tombstone = await one.read("user-1");
-			assert.ok(tombstone.generation !== null, "the reset left no tombstone");
-			assert.deepStrictEqual(await two.createIf(RECORD(FACTOR_B, "user-1"), null), {
-				outcome: "conflict",
-			});
-			assert.deepStrictEqual(await one.createIf(RECORD(FACTOR_B, "user-1"), read), {
-				outcome: "conflict",
-			});
-			assert.deepStrictEqual(await two.removeIf("user-1", FACTOR_A, read), {
-				outcome: "conflict",
-			});
-			assert.deepStrictEqual(await one.read("user-1"), tombstone);
-		}),
-
+	const expiryCases: readonly ContractCase[] = [
 		// STAND-IN until the generic suite's set variant runs its own expiry
 		// case, and its case that a re-create after a purge answers a fresh
 		// generation never seen before; then this one is dropped.
@@ -256,9 +233,14 @@ export function mfaFactorStoreConditionalContract(
 				note(generation);
 			}
 			await two.store.removeAllForSubject("user-1");
-			note((await one.read("user-1")).generation);
+			const tombstone = (await one.read("user-1")).generation;
+			assert.ok(tombstone !== null, "the reset left no tombstone");
+			note(tombstone);
 			await forceExpire("user-1");
 			assert.deepStrictEqual(await two.read("user-1"), { generation: null, items: [] });
+			assert.deepStrictEqual(await one.removeIf("user-1", FACTOR_A, tombstone), {
+				outcome: "missing",
+			});
 			const again = landed(await one.createIf(RECORD(FACTOR_X, "user-1"), null), "the re-create");
 			assert.ok(
 				!seen.has(again),
@@ -270,9 +252,12 @@ export function mfaFactorStoreConditionalContract(
 			});
 
 			const last = await seed(one, "user-2", [RECORD(FACTOR_A, "user-2")]);
-			landed(await two.removeIf("user-2", FACTOR_A, last), "the last removal");
+			const emptied = landed(await two.removeIf("user-2", FACTOR_A, last), "the last removal");
 			await forceExpire("user-2");
 			assert.deepStrictEqual(await one.read("user-2"), { generation: null, items: [] });
+			assert.deepStrictEqual(await two.removeIf("user-2", FACTOR_A, emptied), {
+				outcome: "missing",
+			});
 
 			await one.store.removeAllForSubject("nobody");
 			await forceExpire("nobody");
@@ -670,15 +655,36 @@ export function mfaFactorStoreConditionalContract(
 			assert.equal(raw.length, 7);
 		}),
 
+		// The factor set's own: what a late writer meets at a tombstone.
+		test("a tombstone stands: a late first binding and a late write at a generation read before the reset are refused, and write nothing", async ({
+			one,
+			two,
+		}) => {
+			const read = await seed(one, "user-1", [RECORD(FACTOR_A, "user-1")]);
+			await two.store.removeAllForSubject("user-1");
+			const tombstone = await one.read("user-1");
+			assert.ok(tombstone.generation !== null, "the reset left no tombstone");
+			assert.deepStrictEqual(await two.createIf(RECORD(FACTOR_B, "user-1"), null), {
+				outcome: "conflict",
+			});
+			assert.deepStrictEqual(await one.createIf(RECORD(FACTOR_B, "user-1"), read), {
+				outcome: "conflict",
+			});
+			assert.deepStrictEqual(await two.removeIf("user-1", FACTOR_A, read), {
+				outcome: "conflict",
+			});
+			assert.deepStrictEqual(await one.read("user-1"), tombstone);
+		}),
+
 		...(input.supports?.unreachable === true ? [outageCase] : []),
-		...(input.supports?.forceExpire === true ? tombstoneCases : []),
+		...(input.supports?.forceExpire === true ? expiryCases : []),
 		...notRunCase([
 			...(input.supports?.unreachable === true
 				? []
 				: ["the outage case (unreachable not declared)"]),
 			...(input.supports?.forceExpire === true
 				? []
-				: ["the tombstone cases (forceExpire not declared)"]),
+				: ["the expiry cases (forceExpire not declared)"]),
 		]),
 	];
 }
