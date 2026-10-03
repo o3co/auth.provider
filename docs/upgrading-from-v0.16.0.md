@@ -133,8 +133,10 @@ An old path refuses the boot, naming the new one and the variable bound to
 it, while the module that owns it is loaded. A renamed variable refuses the
 boot when it is set alone or beside its new name at a different value; set
 to the same value as its new name, it boots, so a fleet can carry both
-through a rolling upgrade. Sections are strict: a key a section does not
-declare refuses the boot, naming it, where it used to be dropped.
+through a rolling upgrade. Sections are strict: a key a module's section
+does not declare refuses the boot, naming its path, where it used to be
+dropped — [Values read more strictly](#values-read-more-strictly) lists the
+sections that still accept one.
 
 | What moved | Where it is listed |
 | --- | --- |
@@ -201,6 +203,18 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   A key named after an `Object.prototype` member (`__proto__`,
   `constructor`, `toString`, …), at any depth, refuses the boot naming its
   path (#1216).
+- **BREAKING: a key a module's section does not declare refuses the boot
+  (#1325).** From this release, a key inside a module's own section that the
+  module does not read — a typo, or a key an older version read — refuses the
+  boot (`config-validation-failed`), naming the section or block that holds it
+  and the key, where it used to be ignored. Before you upgrade, check every
+  key you set against the module's README, and correct or delete the ones it
+  does not list. The sections that still accept an unknown key are `oauth`
+  (the section and its nested blocks), `mfa` (the section and its nested
+  blocks), `mfa-totp-factor`, `webauthn` (the section and its `rateLimit`
+  blocks) and `session-store.storage`. The keys under `audit-sink` are the
+  names of the sinks you register, and each sink's options are its own, so
+  those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
   or is empty, a `__Secure-` or `__Host-` name (in any case) without what the
   prefix requires, and a `SESSION_STORE_DOMAIN` that is not a host name refuse

@@ -175,6 +175,17 @@ describe("jwksModule — its own section, jwks {}", () => {
 		expect(err.message).toContain("jwks.cacheMaxAge");
 	});
 
+	it("refuses an unknown key under jwks — a typo of path — naming jwks and the key", async () => {
+		const err = await refusal(withJwks({ pth: "/keys/jwks.json" }));
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("jwks");
+		expect(err.message).toContain("pth");
+		expect(err.details).toMatchObject({
+			issues: [expect.objectContaining({ code: "unrecognized_keys", path: ["jwks"] })],
+			modules: [{ module: "jwks", schemaPath: "jwks" }],
+		});
+	});
+
 	it.each([
 		["jwksPath", "jwks.path", "JWKS_PATH", "/keys/jwks.json"],
 		["jwksCacheMaxAge", "jwks.cacheMaxAge", "JWKS_CACHE_MAX_AGE", 3600],
@@ -250,6 +261,10 @@ describe("JWKS_SECTION, the schema of jwks {}", () => {
 		for (const path of ["keys/jwks.json", "/keys//jwks.json", "/../keys", "/keys?x=1"]) {
 			expect(issuesAt({ path }), path).toEqual(["path"]);
 		}
+	});
+
+	it("refuses an unknown key, at the section", () => {
+		expect(issuesAt({ path: "/keys/jwks.json", jwksPath: "/keys/jwks.json" })).toEqual([""]);
 	});
 
 	it("refuses a negative or fractional max-age at cacheMaxAge", () => {
