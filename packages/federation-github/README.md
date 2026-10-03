@@ -115,8 +115,6 @@ read by the provider and the redirect policy; the schema fills in no default.
 `fetch` is not an entry key: it is the type module's option (above), and a
 `GithubProviderConfig` field for `createGithubProvider`.
 
-The fixed-name module `githubFederationModule` and its `githubFederationConfig`
-slot were removed in favour of `githubFederationTypeModule()`.
 
 `createGithubProvider` throws at boot when `clientId`, `clientSecret` or
 `callbackURL` is missing.
