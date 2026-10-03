@@ -46,14 +46,17 @@ devDependencies.
   [`src/conditionalWrite/conditionalWrite.contract.mts`](src/conditionalWrite/conditionalWrite.contract.mts);
 - `federationTokenStoreConditionalContract`, `FederationTokenStore`'s binding
   of the record suite, in
-  [`src/federationTokens/federationTokenStoreConditional.contract.mts`](src/federationTokens/federationTokenStoreConditional.contract.mts).
+  [`src/federationTokens/federationTokenStoreConditional.contract.mts`](src/federationTokens/federationTokenStoreConditional.contract.mts);
+- `attemptCounterContract`, the contract suite of `AttemptCounter`, the
+  counter behind a verifier's own attempt limits, in
+  [`src/attempts/attemptCounter.contract.mts`](src/attempts/attemptCounter.contract.mts).
 
 **Does not own:** the ports, their types and the reading of the witness
 (core); the wire format of the Store's MFA endpoints (core's
 [`mfa/storeWire.mts`](../core/src/mfa/storeWire.mts)) and what each answer
 means ([`@o3co/auth-provider-foundation`](../foundation/README.md#the-stores-mfa-endpoints));
 any adapter, core's in-process ones included (the kit's own tests run
-`mfaFactorStoreContract`, `mfaFactorStoreConditionalContract`, `federationTokenStoreConditionalContract` and `webAuthnCredentialStoreContract` over core's); the doubles a factor's tests use — `createTestMfaFactor`,
+`mfaFactorStoreContract`, `mfaFactorStoreConditionalContract`, `federationTokenStoreConditionalContract`, `webAuthnCredentialStoreContract` and `attemptCounterContract` over core's); the doubles a factor's tests use — `createTestMfaFactor`,
 `testMfaFactorProofs` and `createTestMfaDigests` — which stay on
 `@o3co/auth-provider-core/testing`, since core's own tests use them and core
 cannot depend on this package. The other ports' suites are core's, on
@@ -522,6 +525,35 @@ and no other session's record; a replace at a generation read before a
 `obtainedAt` read back, after `attach` and after `replaceIf`, with the key
 named as `undefined`, never left out and never `null`.
 
+## The attempt counter's contract suite
+
+`attemptCounterContract({ build, supports })` holds an `AttemptCounter` to
+what a verifier's attempt limit relies on. `build()` answers a fresh
+`AttemptCounterHarness`: `counter`; `second`, the same backend through
+another instance, which the concurrent case splits its attempts across;
+`clock`, optional, the counter's clock as `now()` and `advance(ms)` —
+absent, the window cases wait out a one-second window in real time and judge
+a window's end within `REAL_CLOCK_TOLERANCE_MS` (one second, so a counter on
+the real clock is held to its window's end only that closely); `unreachable()`, a counter
+over the backend that cannot reach it, declared with
+`supports: { unreachable: true }`; and `close`.
+
+It holds the counter to: a limit allowing exactly that many attempts in a
+window, `remaining` counting down to 0 and every answer, refusals included,
+naming the same end, `windowSeconds` after the window's first attempt; the
+first attempt after that end starting another window; keys counted apart,
+however much of one another they share; each key counted against the spec
+handed in with its attempt, never one of the counter's own, so a limit
+lowered or raised on a live key applies at once, a shortened or lengthened
+window keeps a running window's end, and a refused attempt counts nothing; concurrent attempts on one key counted exactly, each allowed one
+answered its own `remaining`; a key of up to 512 characters counted, and a
+longer key, or any other key or spec it cannot count, rejected, counting
+nothing; and,
+declared, an outage rejected rather than answered as a count. Every answer
+is read through core's `readAttemptCount`, on the counter's clock, as the
+attempt guard reads it, so a window's end more than 5 s past, or more than a
+day and 5 s ahead (a spec's window is at most a day), is not a count.
+
 ## The fake Store
 
 `startFakeStore({ users, bearerToken, now, requestNow })` starts an in-memory HTTP server on
@@ -586,6 +618,8 @@ too — for as long as it runs: give it test data only.
 Exported from [`src/index.mts`](src/index.mts):
 
 - `ContractCase`, core's type of a suite's case;
+- `attemptCounterContract`, with `AttemptCounterContractInput`,
+  `AttemptCounterHarness` and `REAL_CLOCK_TOLERANCE_MS`;
 - `conditionalRecordContract`, with `ConditionalRecordContractInput`,
   `ConditionalRecordHarness` and `ConditionalRecordTarget`;
 - `conditionalSetContract`, with `ConditionalSetContractInput`,
@@ -620,6 +654,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`mailSender.contract.test.mts`](src/mail/__tests__/mailSender.contract.test.mts) | the mail sender suite over core's recording sender; each broken sender — an old answer, a lost mail, a mail to another mailbox too, a limit read as an outage, an outage or a transient failure answered, a rejection carrying the mail or the relay's reply in any case or in base64, the mail changed — refused by the case that names what it breaks |
 | [`conditionalWrite.contract.test.mts`](src/conditionalWrite/__tests__/conditionalWrite.contract.test.mts) | both suites over a reference record store, whose writes take a lock per key, and a reference set store, each serving two instances over one backend and keeping retention deadlines on a clock of its own, which `forceExpire` moves; every case refuses a store broken one way (a write that skips the lock, an unconditional delete among them, a counter or a digest as the generation, a torn versioned read, a write on `conflict`, a create that upserts a held id, a reset or a last removal that leaves no tombstone, a reset in two steps, a store that ignores its own deadline, a set revived from its tombstone that keeps the tombstone's deadline, a re-create after expiry at a generation seen before, a reset's tombstone that never expires, of a set written or never written, a re-create after it answering the tombstone's generation, a race winner answering a stale generation under contention, an outage answered as absent, writes that skip the expiry check, a second instance reading from a cache, a member update that changes nothing, a value or a member shared with the caller, or only a member after the first, among them); stores answering frozen values, listing members in another order, or labelling a losing write from a read taken before their lock pass; an undeclared hook's or member's cases left out and named; a declared one missing fails its case; items of another scope fail the case |
 | [`federationTokenStoreConditional.contract.test.mts`](src/federationTokens/__tests__/federationTokenStoreConditional.contract.test.mts) | the federation token store's binding over core's in-process store; a store without the conditional members refused by every case; a `get` that answers another record than `getVersioned`, a replace that moves a sibling federation's generation, a `removeBySid` that leaves a federation of the session or reaches another session's, a replace that restores a record a logout removed, and a store that drops `obtainedAt`, leaves an unset one out or answers it as `null`, each refused by the case that names it; the outage and expiry cases named as not run when undeclared |
+| [`attemptCounter.contract.test.mts`](src/attempts/__tests__/attemptCounter.contract.test.mts) | the attempt counter's suite over core's in-process counter, on a fake clock and on the real one; each broken counter — one that applies a limit of its own, counts every key as one or only a key's first segment, never ends a window or ends it late or far late, is not atomic, keeps the limit a key's window started with, starts a new window when a spec changes the window, or only when it lengthens it, counts refused attempts, answers `remaining` one off, a refusal with attempts remaining or `resetAt` as a number, counts a key or spec it should reject or a key past 512 characters, or answers an outage as an allowed attempt — refused by the case that names it; the outage case run only when declared, failing when declared and not given, and otherwise named as not run |
 | [`fakeStore.test.mts`](src/mfa/__tests__/fakeStore.test.mts) | each endpoint's answers over real HTTP: every record answered back, the update's compare-and-set and what it writes, `409` / `404`, changes carrying another field refused, the witness mark's `204` / `404` and idempotence, `authenticateByToken` answering the user a token names with the witness as `authenticate` does and `401` otherwise, the credential, what it refuses before it records a request, what it records, and an endpoint answered as told — at once, later, or never; a create or a removal of one record without `expectedGeneration` refused `400` and writing nothing, the reset still applied; the factor set's generation: a list's, a conditional create's and a conditional removal's answers, an update keeping it and every membership write moving it, the tombstone a last removal or a reset leaves and its expiry on the Store's clock, a set held without a generation, a record held into a set dropping its generation, `400` for an expected generation or a `deadlineMs` that is none, a late conditional write answered `408` and not applied while one before its deadline is, a deadline checked on the request clock and never the tombstones', and one winner among concurrent conditional writes |
 
 ## See also

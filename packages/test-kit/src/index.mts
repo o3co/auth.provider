@@ -23,6 +23,12 @@
 /** A suite's case, as core's slot suites give them: run each with any test runner's `it`. */
 export type { ContractCase } from "@o3co/auth-provider-core/testing";
 export {
+	type AttemptCounterContractInput,
+	type AttemptCounterHarness,
+	attemptCounterContract,
+	REAL_CLOCK_TOLERANCE_MS,
+} from "./attempts/attemptCounter.contract.mjs";
+export {
 	type ConditionalRecordContractInput,
 	type ConditionalRecordHarness,
 	type ConditionalRecordTarget,
