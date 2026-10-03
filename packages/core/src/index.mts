@@ -317,7 +317,7 @@ export { isFederationUpstreamOutage } from "./federation-tokens/upstreamOutage.m
 export { callbackUrlForExchange } from "./federations/callback-url.mjs";
 export type { FederationClientSecret } from "./federations/client-secret.mjs";
 export { resolveClientSecret } from "./federations/client-secret.mjs";
-export { federationsOf } from "./federations/configured.mjs";
+export { enabledFederationsOf, federationsOf } from "./federations/configured.mjs";
 export { codeChallenge } from "./federations/pkce.mjs";
 export type { FederationResponseMode } from "./federations/response-mode.mjs";
 export {

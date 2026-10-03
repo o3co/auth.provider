@@ -826,6 +826,7 @@
 . durationFromEnv value
 . effectiveFederationGrantStatus value
 . emitAuditEvent value
+. enabledFederationsOf value
 . enrollmentFactsOfContinuation value
 . errorEnvelope value
 . establishWithoutAsking value
@@ -1146,6 +1147,7 @@
 ./testing FakeIdpRequest type
 ./testing FederationEntryForTests type
 ./testing FederationForTests type
+./testing FederationTypeForTestsOptions type
 ./testing GrantRegistry value
 ./testing GrantRegistryError value
 ./testing HttpSettingsContractInput type
@@ -1206,6 +1208,7 @@
 ./testing csrfGuardContract value
 ./testing csrfTokenSignerContract value
 ./testing deploymentModeContract value
+./testing federationTypeForTests value
 ./testing httpSettingsContract value
 ./testing loginCompletionContract value
 ./testing loginEntryContract value
