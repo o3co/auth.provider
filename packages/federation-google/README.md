@@ -94,8 +94,6 @@ const handle = await createApp({
 test double. Without it the global `fetch` is used. Its module name is
 `federation-google-type`.
 
-The fixed-name module `googleFederationModule` and its `googleFederationConfig`
-slot were removed in favour of `googleFederationTypeModule()`.
 
 ### Configuration
 
