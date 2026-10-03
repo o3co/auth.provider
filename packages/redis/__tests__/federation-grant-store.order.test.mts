@@ -109,6 +109,12 @@ const recording = () => {
 		async noteRefreshFailure() {
 			return null;
 		},
+		async takeRotation() {
+			return null;
+		},
+		async refundRotation() {
+			return null;
+		},
 		async tryLock() {
 			return true;
 		},

@@ -27,7 +27,6 @@ import type {
 	BootstrapMap,
 	ClientRepository,
 	FederationProvider,
-	Logger,
 	LoginEntry,
 } from "@o3co/auth-provider-core";
 import {
@@ -57,7 +56,6 @@ import {
 	callbackUrlFor,
 	sessionMiddlewareModule,
 } from "./acquisitionFixture.mjs";
-import { createLogSpy, payloadOf, written } from "./logSpy.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -110,16 +108,17 @@ const durableStoreModule = defineModule({
 	} as never,
 });
 
-/** The memory store without `takeRotation`: a store that keeps no rotation budget. */
-const noBudgetStoreModule = defineModule({
-	name: "test-no-budget-federation-grant-store",
-	provides: {
-		federationGrantStore: () => {
-			const { takeRotation: _none, ...store } = createMemoryFederationGrantStore();
-			return store;
-		},
-	},
-});
+/** The memory store without `member`, as a store written against an earlier port would be. */
+const storeModuleWithout = (member: "takeRotation" | "refundRotation") =>
+	defineModule({
+		name: `test-federation-grant-store-without-${member}`,
+		provides: {
+			federationGrantStore: () => {
+				const { [member]: _none, ...store } = createMemoryFederationGrantStore();
+				return store;
+			},
+		} as never,
+	});
 
 /** A single-boundary adapter: `revokeBefore` and `revokedBefore`, with no grants boundary on it. */
 const olderRevocation = {
@@ -190,11 +189,9 @@ interface Setup {
 	readonly withStore?: boolean;
 	/**
 	 * `"memory"` is the bundled pair; `"durable"` says grants outlive the
-	 * process; `"no-budget"` keeps no rotation budget.
+	 * process; `"without-take"` / `"without-refund"` lack a rotation member.
 	 */
-	readonly store?: "memory" | "durable" | "no-budget";
-	/** The deployment's logger; none by default. */
-	readonly logger?: Logger;
+	readonly store?: "memory" | "durable" | "without-take" | "without-refund";
 	/** What ends a grant a user withdrew on a replica that never saw the withdrawal. */
 	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
@@ -265,11 +262,13 @@ const boot = (setup: Setup) => {
 			: [
 					setup.store === "durable"
 						? durableStoreModule
-						: setup.store === "no-budget"
-							? noBudgetStoreModule
-							: setup.storeClosed === undefined
-								? storeModule
-								: storeModuleClosingInto(setup.storeClosed),
+						: setup.store === "without-take"
+							? storeModuleWithout("takeRotation")
+							: setup.store === "without-refund"
+								? storeModuleWithout("refundRotation")
+								: setup.storeClosed === undefined
+									? storeModule
+									: storeModuleClosingInto(setup.storeClosed),
 				]),
 		...(setup.federationFirst === false ? federation : []),
 	];
@@ -310,7 +309,6 @@ const boot = (setup: Setup) => {
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
-			...(setup.logger === undefined ? {} : { logger: setup.logger }),
 			...(setup.tokenSettingsIssuer === undefined
 				? {}
 				: {
@@ -387,21 +385,14 @@ describe("enabling the feature", () => {
 		await handle.dispose();
 	});
 
-	it("warns once, at boot, that a store without `takeRotation` keeps no rotation budget", async () => {
-		const spy = createLogSpy();
-		const handle = await boot({ store: "no-budget", logger: spy.logger });
-		// Exactly one line, object-first, at warn.
-		payloadOf(spy.lines, "federation_grant_store_no_rotation_budget");
-		expect(written(spy.lines)).toContain("warn federation_grant_store_no_rotation_budget");
-		await handle.dispose();
-	});
-
-	it("says nothing of the budget beside a store that keeps one", async () => {
-		const spy = createLogSpy();
-		const handle = await boot({ logger: spy.logger });
-		expect(written(spy.lines)).not.toContain("warn federation_grant_store_no_rotation_budget");
-		await handle.dispose();
-	});
+	it.each(["without-take", "without-refund"] as const)(
+		"refuses to boot with a grant store %s, naming both rotation members",
+		async (store) => {
+			// A store without them keeps no rotation budget, or keeps every rotation
+			// it took: refused here, not met as a storage outage at every refresh.
+			await expect(boot({ store })).rejects.toThrow(/takeRotation.*refundRotation/s);
+		},
+	);
 
 	it("boots with the rotation budget's settings written", async () => {
 		const handle = await boot({ grants: { rotationBudget: 2, rotationWindow: "600" } });

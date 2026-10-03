@@ -813,7 +813,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 					landed = written;
 					return written;
 				});
-				const takes = h.store.takeRotation?.bind(h.store);
+				const takes = h.store.takeRotation.bind(h.store);
 				let taken = 0;
 				h.deps.store = {
 					...h.store,
@@ -823,7 +823,6 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 							land();
 							await landed;
 						}
-						if (takes === undefined) throw new Error("fixture: no takeRotation");
 						return takes(input);
 					},
 				};
@@ -1002,7 +1001,12 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 					version: _bumped,
 					...afterRest
 				} = after?.grant ?? {};
-				const { refreshFailure: _before, version: _version, ...beforeRest } = before?.grant ?? {};
+				const {
+					refreshFailure: _before,
+					rotations: _none,
+					version: _version,
+					...beforeRest
+				} = before?.grant ?? {};
 				expect(afterRest).toStrictEqual(beforeRest);
 				expect(
 					(await types()).filter((entry) => entry.startsWith("federation.grant.refresh_failed ")),

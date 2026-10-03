@@ -39,9 +39,7 @@
  *   to the ceiling.
  *
  * So every field of the authorization, the usage, the failure stamp and the
- * credentials is a required key, holding `undefined` where there is none,
- * but the usage's `rotations`, which a store without `takeRotation` never
- * writes.
+ * credentials is a required key, holding `undefined` where there is none.
  * Asserted with conditional types rather than `@ts-expect-error`; this file
  * proves anything only under the TypeScript checker, so it is on both of
  * core's typecheck lists.
@@ -77,14 +75,16 @@ describe("what a grant store answers with", () => {
 		expectTypeOf<FederationGrantAuthorization["resource"]>().toEqualTypeOf<string | undefined>();
 	});
 
-	it("names every usage field but the rotation budget", () => {
-		// `rotations` is optional on the port, as `takeRotation` is: a store
-		// without the member has no budget to write.
-		expectTypeOf<OptionalKeys<FederationGrantUsage>>().toEqualTypeOf<"rotations">();
+	it("names every usage field, the rotation budget included", () => {
+		expectTypeOf<OptionalKeys<FederationGrantUsage>>().toEqualTypeOf<never>();
 		expectTypeOf<OptionalKeys<FederationGrantRotations>>().toEqualTypeOf<never>();
 		expectTypeOf<IsRequiredKey<FederationGrantUsage, "lastUsedAt">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationGrantUsage, "ineligible">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationGrantUsage, "refreshFailure">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<FederationGrantUsage, "rotations">>().toEqualTypeOf<true>();
+		expectTypeOf<FederationGrantUsage["rotations"]>().toEqualTypeOf<
+			FederationGrantRotations | undefined
+		>();
 	});
 
 	it("names every field of the failure stamp", () => {
@@ -139,6 +139,15 @@ describe("what a writer hands a grant store", () => {
 		type Token = ReturnType<typeof federationGrantAccessToken>;
 		expectTypeOf<OptionalKeys<Token>>().toEqualTypeOf<never>();
 		expectTypeOf<Token["effectiveExpiresAt"]>().toEqualTypeOf<Date>();
+	});
+});
+
+describe("what a grant store implements", () => {
+	// A store without the take keeps no rotation budget, and one without the
+	// give-back keeps every rotation it took: neither compiles as the port.
+	it("takes and gives back a rotation", () => {
+		expectTypeOf<IsRequiredKey<FederationGrantStore, "takeRotation">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<FederationGrantStore, "refundRotation">>().toEqualTypeOf<true>();
 	});
 });
 

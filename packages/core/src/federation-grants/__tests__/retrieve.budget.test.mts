@@ -79,21 +79,21 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		const opened = await h.store.open("g-1", when);
 		let version = opened?.grant.version as number;
 		for (let i = 0; i < limit; i++) {
-			const taken = await h.store.takeRotation?.({
+			const taken = await h.store.takeRotation({
 				grantId: "g-1",
 				expectedVersion: version,
 				limit,
 				windowMs: HOUR,
 				now: when,
 			});
-			if (!taken?.ok) throw new Error("fixture: the take was refused");
+			if (!taken.ok) throw new Error("fixture: the take was refused");
 			version = taken.grant.version;
 		}
 	};
 
-	type Take = NonNullable<FederationGrantStore["takeRotation"]>;
+	type Take = FederationGrantStore["takeRotation"];
 	/** The memory store's own take. */
-	const realTake: Take = (input) => (h.store.takeRotation as Take)(input);
+	const realTake: Take = (input) => h.store.takeRotation(input);
 	/** The store, with `take` in place of its own. */
 	const withTake = (take: Take) => {
 		h.deps.store = { ...h.store, takeRotation: take };
@@ -196,27 +196,6 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 				expect(h.refresh).toHaveBeenCalledTimes(2 * limit);
 			},
 		);
-
-		it("keeps today's behaviour beside a store that keeps no budget, whatever its record says", async () => {
-			budgetOf(2);
-			await h.seed();
-			// Spent, as a record could read after a rollback to a store without the member.
-			await spend(2, at(HOUR));
-			const { takeRotation: _none, ...withoutBudget } = h.store;
-			h.deps.store = withoutBudget;
-			h.refresh.mockImplementation(async () =>
-				refreshed(`n${h.refresh.mock.calls.length}`, now(), {
-					expiresIn: 3600,
-					expiresAt: new Date(now().getTime() + 1),
-				}),
-			);
-			setNow(at(HOUR));
-			for (let i = 0; i < 5; i++) {
-				await retrieve();
-				setNow(new Date(now().getTime() + 1));
-			}
-			expect(h.refresh).toHaveBeenCalledTimes(5);
-		});
 	});
 
 	describe("a spent budget", () => {
@@ -653,8 +632,8 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 	});
 
 	describe("the version the take left", () => {
-		type Refund = NonNullable<FederationGrantStore["refundRotation"]>;
-		const realRefund: Refund = (input) => (h.store.refundRotation as Refund)(input);
+		type Refund = FederationGrantStore["refundRotation"];
+		const realRefund: Refund = (input) => h.store.refundRotation(input);
 
 		/** Spies on every guarded write after the take, and answers the versions each named. */
 		const guardedWrites = () => {
@@ -712,24 +691,6 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			expect(named).toEqual([["requireReauthorization", grant.version + 1]]);
 		});
 
-		it("is the version the look read for a store whose take does not bump: its writes are guarded by that", async () => {
-			const grant = await seedEndingAt(10 * MIN);
-			const named = guardedWrites();
-			const store = h.deps.store;
-			// A take that does not bump, as a store that predates the bump does.
-			h.deps.store = {
-				...store,
-				takeRotation: async (input) => {
-					const found = await h.store.find(input.grantId, input.now);
-					return found === null ? { ok: false } : { ok: true, grant: found };
-				},
-			};
-			h.refresh.mockImplementation(async () => refreshed("next", now()));
-			setNow(at(20 * MIN));
-			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-next", refreshed: true });
-			expect(named).toEqual([["replaceCredentials", grant.version]]);
-		});
-
 		it.each([
 			["a fraction", 2.5],
 			["NaN", Number.NaN],
@@ -757,10 +718,11 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		);
 
 		it.each([
+			["the look's own", (grant: { version: number }) => grant.version - 1],
 			["two past the look's", (grant: { version: number }) => grant.version + 1],
 			["behind the look's", (grant: { version: number }) => grant.version - 2],
 		])(
-			"that is %s asks the upstream nothing, and answers `storage`: a take bumps once or not at all",
+			"that is %s asks the upstream nothing, and answers `storage`: a take bumps exactly once",
 			async (_, answered) => {
 				await seedEndingAt(10 * MIN);
 				withTake(async (input) => {

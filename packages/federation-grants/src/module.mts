@@ -66,7 +66,6 @@ import {
 	type FederationGrantDelegatedAuthorizer,
 } from "./browserRoutes.mjs";
 import { resolveFederationGrantConnections } from "./connections.mjs";
-import { createFederationGrantLog } from "./log.mjs";
 import { createFederationGrantRouter, FEDERATION_GRANTS_RATE_LIMIT_PREFIX } from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 
@@ -199,12 +198,15 @@ const issuerOf = (deps: FederationGrantsModuleDeps): string =>
 /**
  * An enabled deployment with nowhere to keep grants would
  * authenticate a client and then answer 503 to everything, having accepted
- * `enabled = true` as if it meant something.
+ * `enabled = true` as if it meant something. A store without the rotation
+ * budget's members (one written against an earlier port, or in plain
+ * JavaScript) would answer 503 to every refresh instead.
  */
 const requireStore = (
 	deps: FederationGrantsModuleDeps,
 ): NonNullable<FederationGrantsModuleDeps["federationGrantStore"]> => {
-	if (deps.federationGrantStore === undefined) {
+	const store = deps.federationGrantStore;
+	if (store === undefined) {
 		throw new Error(
 			"federationGrantsModule: federation-grants.enabled = true requires a " +
 				"federationGrantStore component. A grant is a user's standing consent that " +
@@ -214,7 +216,17 @@ const requireStore = (
 				"redisFederationGrantStoreModule.",
 		);
 	}
-	return deps.federationGrantStore;
+	const members: Partial<typeof store> = store;
+	if (typeof members.takeRotation !== "function" || typeof members.refundRotation !== "function") {
+		throw new Error(
+			"federationGrantsModule: the federationGrantStore component does not implement " +
+				"takeRotation and refundRotation, which the FederationGrantStore port requires. " +
+				"They keep the per-grant rotation budget that bounds upstream refresh-token " +
+				"rotations; implement both, or install the bundled memory store (single replica " +
+				"only) or redisFederationGrantStoreModule.",
+		);
+	}
+	return store;
 };
 
 /**
@@ -507,14 +519,6 @@ export const federationGrantsModule = defineModule<
 					connections,
 				);
 				const lifetimes = resolveFederationGrantAcquisitionLimits(deps.section);
-				// Booted, but without the bound on upstream rotations a store keeps
-				// with `takeRotation`: said once, here.
-				if (store.takeRotation === undefined) {
-					createFederationGrantLog(deps.logger).degraded(
-						"federation_grant_store_no_rotation_budget",
-						{},
-					);
-				}
 				// The drain's allowance, for a host that bounds dispose(). The component
 				// cleanup runs the drain, ahead of the store; this waits only on a drain
 				// already started, never on a registry the host supplied.

@@ -875,8 +875,6 @@ describe("noteRefreshFailure", () => {
 describe("takeRotation", () => {
 	const HOUR = 3_600_000;
 	const take = (over: Partial<TakeFederationGrantRotationInput> = {}, id = "g-1") => {
-		if (client.takeRotation === undefined)
-			throw new Error("fixture: the client has no takeRotation");
 		return client.takeRotation(grantKey(id), {
 			nowMs: at(DAY),
 			expectedVersion: 2,
@@ -1050,8 +1048,6 @@ describe("takeRotation", () => {
 
 describe("refundRotation", () => {
 	const refund = (over: Partial<RefundFederationGrantRotationInput> = {}, id = "g-1") => {
-		if (client.refundRotation === undefined)
-			throw new Error("fixture: the client has no refundRotation");
 		return client.refundRotation(grantKey(id), {
 			nowMs: at(DAY + MIN),
 			expectedVersion: 2,
@@ -1105,8 +1101,6 @@ describe("the stored version, as every script reads it", () => {
 		credential: "v2.sealed-2",
 	});
 	const take = (expectedVersion: number) => {
-		if (client.takeRotation === undefined)
-			throw new Error("fixture: the client has no takeRotation");
 		return client.takeRotation(grantKey("g-1"), {
 			nowMs: at(DAY),
 			expectedVersion,
@@ -1125,8 +1119,6 @@ describe("the stored version, as every script reads it", () => {
 			upstreamCode: undefined,
 		});
 	const refund = (expectedVersion: number) => {
-		if (client.refundRotation === undefined)
-			throw new Error("fixture: the client has no refundRotation");
 		return client.refundRotation(grantKey("g-1"), {
 			nowMs: at(DAY),
 			expectedVersion,

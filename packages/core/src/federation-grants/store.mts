@@ -267,9 +267,7 @@ export interface FederationGrantStore {
 	 * attempt, its give-back included, is guarded by that version, so one from
 	 * an earlier attempt can never land after a later take. A refused take
 	 * writes nothing and bumps nothing. Kept by `replaceCredentials`, reset by
-	 * `activate`. A store whose take does not bump is tolerated: retrieval
-	 * reads the guard off the answered grant, which then carries the version
-	 * the take was made at.
+	 * `activate`.
 	 *
 	 * The window is fixed, not sliding: it opens at its first take, so any
 	 * `windowMs` that straddles two windows can hold up to twice `limit` takes.
@@ -286,10 +284,8 @@ export interface FederationGrantStore {
 	 * opens a window later than the others would, so for them it lasts longer.
 	 * A `now` far in the future holds the budget spent until real time passes
 	 * `since + windowMs`.
-	 *
-	 * Optional: a store without it keeps no rotation budget.
 	 */
-	takeRotation?(input: {
+	takeRotation(input: {
 		readonly grantId: string;
 		readonly expectedVersion: number;
 		readonly limit: number;
@@ -308,11 +304,8 @@ export interface FederationGrantStore {
 	 * `version` bumped; nothing else touched. The bump makes it once per
 	 * attempt: a second give-back at the same version is refused. A `now` or a
 	 * `since` that is not a date is a `RangeError`.
-	 *
-	 * Optional for now, as `takeRotation` is, and the two become required
-	 * together: a store without it keeps every rotation taken.
 	 */
-	refundRotation?(input: {
+	refundRotation(input: {
 		readonly grantId: string;
 		readonly expectedVersion: number;
 		readonly since: Date;

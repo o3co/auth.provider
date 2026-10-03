@@ -91,8 +91,7 @@ export interface FederationGrantAuthorization {
  * (and the refresh token rotated) on every request instead of after the
  * interval. A write that spreads the old record clears one explicitly
  * (`refreshFailure: undefined`); the contract suite, not the compiler,
- * holds those writes. `rotations` is the exception: optional, absent until
- * the store's `takeRotation` first writes it.
+ * holds those writes.
  */
 export interface FederationGrantUsage {
 	readonly lastUsedAt: Date | undefined;
@@ -100,8 +99,11 @@ export interface FederationGrantUsage {
 	readonly ineligible: FederationGrantIneligibilityMarker | undefined;
 	/** Left by a refresh that failed. Cleared by whatever replaces or ends the credentials. */
 	readonly refreshFailure: FederationGrantRefreshFailure | undefined;
-	/** The rotation budget spent in the current window. Kept by a refresh, reset by an activation. */
-	readonly rotations?: FederationGrantRotations;
+	/**
+	 * The rotation budget spent in the current window; `undefined` until the
+	 * first take. Kept by a refresh, reset by an activation.
+	 */
+	readonly rotations: FederationGrantRotations | undefined;
 }
 
 /**

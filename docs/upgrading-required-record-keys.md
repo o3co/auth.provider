@@ -39,6 +39,7 @@ A deployment that only wires the bundled stores and modules has nothing to chang
 | `FederationGrantIntent` | `resource`, `upstreamSubject` | #658 |
 | `FederationGrantAuthorization`, `FederationGrantUsage`, `FederationGrantCredentials` | `resource`; `lastUsedAt`, `ineligible`, `refreshFailure`; `accessToken` | #657 |
 | `FederationGrantCredentialsInput` (new: what `FederationGrantStore.activate` / `replaceCredentials` take) | the access token's `effectiveExpiresAt`, as a `Date`: when the token ends. What a store answers, `FederationGrantCredentials`, keeps it optional — a record written before the field, or rewritten by an earlier release during a rolling deploy, has none, and ends at `obtainedAt + issuedLifetime`. A store of your own keeps it as given and reads it back absent when it has none, as before. | — |
+| `FederationGrantUsage` | `rotations`: the rotation budget spent in the current window, `{ since, count }`, or `undefined` before the first take and after an activation. A `FederationGrantStore` of your own persists what `takeRotation` and `refundRotation` write and hands it back on every read with the key named; the contract suite checks it. | #1032 |
 | `FederationGrantRefreshFailure` (the stored stamp) | `retryAfterSeconds`, `upstreamCode`. It no longer `extends` `FederationGrantRefreshFailureInput`, whose fields stay optional. | #657 |
 | Redis `NoteFederationGrantRefreshFailureInput` | `retryAfterSeconds`, `upstreamCode` | #657 |
 | `UserSession`, `CreateUserSessionInput` | `amr` | #659 |

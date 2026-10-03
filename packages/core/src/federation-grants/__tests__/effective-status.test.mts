@@ -65,6 +65,7 @@ const active: AuthorizedFederationGrant = {
 	lastUsedAt: undefined,
 	ineligible: undefined,
 	refreshFailure: undefined,
+	rotations: undefined,
 };
 
 const needsUser: FederationGrant = { ...active, status: "reauthorization_required" };

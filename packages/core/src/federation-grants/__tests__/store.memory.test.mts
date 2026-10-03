@@ -82,25 +82,6 @@ describe("createMemoryFederationGrantStore", () => {
 		vi.useRealTimers();
 	});
 
-	it("keeps a rotation budget: the contract's takeRotation cases run, not skip", () => {
-		expect(typeof createMemoryFederationGrantStore().takeRotation).toBe("function");
-	});
-
-	it("bumps the version in its take: the contract's cases on the bump run for it, not skip", async () => {
-		const store = createMemoryFederationGrantStore();
-		await lodge(store, "g-1");
-		const activated = await activate(store, "g-1");
-		if (!activated.ok) throw new Error("fixture: the activation did not succeed");
-		const taken = await store.takeRotation?.({
-			grantId: "g-1",
-			expectedVersion: activated.grant.version,
-			limit: 1,
-			windowMs: DAY,
-			now: at(3 * MIN),
-		});
-		expect(taken).toMatchObject({ ok: true, grant: { version: activated.grant.version + 1 } });
-	});
-
 	it("retains a record for thirty days past its expiry by default", () => {
 		expect(DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS).toBe(30 * DAY);
 	});
