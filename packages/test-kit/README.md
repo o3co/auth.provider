@@ -551,8 +551,8 @@ longer key, or any other key or spec it cannot count, rejected, counting
 nothing; and,
 declared, an outage rejected rather than answered as a count. Every answer
 is read through core's `readAttemptCount`, on the counter's clock, as the
-attempt guard reads it, so a window's end outside its spec's window is not a
-count.
+attempt guard reads it, so a window's end more than 5 s past, or past the
+longer of its spec's window and a day, is not a count.
 
 ## The fake Store
 

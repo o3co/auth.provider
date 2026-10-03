@@ -334,6 +334,13 @@ describe("createAttemptGuard: answers and headers", () => {
 		});
 	});
 
+	it("reads a refusal from a longer window started under an earlier spec, with Retry-After from its end", async () => {
+		const app = appOf(guardOf({ counter: scripted(() => count(false, 0, 900_000)) }));
+		const res = await request(app).post("/per-ip");
+		expect(res.status).toBe(429);
+		expect(res.headers["retry-after"]).toBe("900");
+	});
+
 	it("reports a reset already past as 0", async () => {
 		const app = appOf(guardOf({ counter: scripted(() => count(false, 0, -3_000)) }));
 		const res = await request(app).post("/per-ip");
@@ -439,8 +446,8 @@ describe("createAttemptGuard: fails closed", () => {
 		["an Invalid Date", { allowed: true, remaining: 1, resetAt: new Date(Number.NaN) }],
 		["a reset long past", { allowed: true, remaining: 1, resetAt: new Date(NOW - 5_001) }],
 		[
-			"a reset past the owner's window",
-			{ allowed: false, remaining: 0, resetAt: new Date(NOW + 65_001) },
+			"a reset more than a day out",
+			{ allowed: false, remaining: 0, resetAt: new Date(NOW + 86_405_001) },
 		],
 		[
 			"more remaining than the owner's limit leaves",

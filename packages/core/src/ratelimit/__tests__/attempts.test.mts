@@ -149,15 +149,22 @@ describe("readAttemptCount", () => {
 		expect(readAttemptCount(answer, SPEC, NOW)).toBeUndefined();
 	});
 
-	it("reads a window's end from the allowance before now to a window and the allowance after it", () => {
+	it("reads a window's end from the allowance before now to the longer of the window and a day, and the allowance, after it", () => {
 		expect(ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS).toBe(5_000);
 		const at = (ms: number) =>
 			readAttemptCount({ allowed: true, remaining: 1, resetAt: new Date(ms) }, SPEC, NOW);
 		expect(at(NOW - 5_000)?.resetAt.getTime()).toBe(NOW - 5_000);
-		expect(at(NOW + 60_000 + 5_000)?.resetAt.getTime()).toBe(NOW + 65_000);
+		expect(at(NOW + 86_400_000 + 5_000)?.resetAt.getTime()).toBe(NOW + 86_405_000);
 		expect(at(NOW - 5_001)).toBeUndefined();
-		expect(at(NOW + 65_001)).toBeUndefined();
+		expect(at(NOW + 86_405_001)).toBeUndefined();
 		expect(at(NOW + 365 * 86_400_000)).toBeUndefined();
+		// A window started under an earlier, longer spec is still a count.
+		expect(at(NOW + 900_000)?.resetAt.getTime()).toBe(NOW + 900_000);
+		const twoDays: AttemptSpec = { limit: 5, windowSeconds: 172_800 };
+		const long = (ms: number) =>
+			readAttemptCount({ allowed: true, remaining: 1, resetAt: new Date(ms) }, twoDays, NOW);
+		expect(long(NOW + 172_805_000)?.resetAt.getTime()).toBe(NOW + 172_805_000);
+		expect(long(NOW + 172_805_001)).toBeUndefined();
 		expect(
 			readAttemptCount({ allowed: true, remaining: 1, resetAt: RESET }, SPEC, Number.NaN),
 		).toBeUndefined();

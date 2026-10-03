@@ -52,7 +52,8 @@ export interface AttemptCount {
  * the first `spec.limit` are allowed, each against the spec handed in with
  * it, and a refused attempt counts nothing. A window starts at the first
  * attempt counted under a key with no window running, and ends
- * `spec.windowSeconds` later. Keys are counted apart.
+ * `spec.windowSeconds` later; a window keeps its end when a later spec
+ * changes the window. Keys are counted apart.
  *
  * It rejects, counting nothing, a key `isAttemptKey` refuses or a spec
  * `isAttemptSpec` refuses. A backend that cannot count rejects: an outage is
@@ -86,13 +87,17 @@ export const isAttemptKey = (value: unknown): value is string =>
 /** How far a counter's clock may stand from the reader's when its window's end is judged. */
 export const ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS = 5_000;
 
+/** The least horizon a window's end is read within, so a window shortened on a shared store mid-window is still a count. */
+const MIN_RESET_HORIZON_SECONDS = 86_400;
+
 /**
  * A counter's answer, read at `nowMs`, as a fresh, frozen count, each field
  * read once, or `undefined` when it is not one under `spec`: `allowed` not a
  * boolean, `remaining` not a whole number below `spec.limit` on an allowed
  * attempt or 0 on a refused one, `resetAt` not a valid `Date` within
- * {@link ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS} of `[nowMs, nowMs + windowSeconds]`,
- * or a read that throws.
+ * {@link ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS} of `[nowMs, nowMs + max(windowSeconds,
+ * one day)]`, or a read that throws. The day keeps a window started under an
+ * earlier, longer spec a count rather than an outage.
  */
 export function readAttemptCount(
 	answer: unknown,
@@ -117,7 +122,10 @@ export function readAttemptCount(
 	if (resetMs === undefined || !Number.isFinite(nowMs)) return undefined;
 	if (
 		resetMs < nowMs - ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS ||
-		resetMs > nowMs + spec.windowSeconds * 1000 + ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS
+		resetMs >
+			nowMs +
+				Math.max(spec.windowSeconds, MIN_RESET_HORIZON_SECONDS) * 1000 +
+				ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS
 	) {
 		return undefined;
 	}
