@@ -770,6 +770,16 @@ without `refundRotation` a store that keeps every rotation taken. During a rolli
 release leaves the fields in place, so a renewed grant can start with the
 budget it had.
 
+The port's take is a version fence: it bumps the version, and every later
+write of the attempt, its give-back included, is guarded by the version of the
+grant it answered, so a late give-back of an earlier attempt can never refuse
+the next holder's write. This store's take does not bump yet, so the fence
+does not hold here: retrieval reads the version it was taken at off the
+answered grant and behaves as before. It joins the fence in a follow-up
+release. Upgrade core first: a core older than the fence keeps the version it
+read before the take, and against a take that bumps, every write after the
+take would be refused.
+
 The credential is sealed under a key **ring**, in core's `v2` key-ring
 envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the
 first key seals, every configured key opens, and the envelope names the one

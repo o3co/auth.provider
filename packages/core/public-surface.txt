@@ -236,7 +236,6 @@
 . FederationGrantRetrievalLimits type
 . FederationGrantRevocation type
 . FederationGrantRevokedBy type
-. FederationGrantRotationTake type
 . FederationGrantRotations type
 . FederationGrantSettings type
 . FederationGrantStore type

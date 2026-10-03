@@ -382,6 +382,34 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			expect(h.refresh).not.toHaveBeenCalled();
 		});
 
+		it("that does not answer in time keeps the lock: it may still land and bump the version under the next holder", async () => {
+			await seedEndingAt(10 * MIN);
+			withTake(() => new Promise(() => {}));
+			setNow(at(20 * MIN));
+			const pending = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.upstreamTimeoutMs);
+			expect(await pending).toMatchObject({ ok: false, reason: "storage" });
+			await Promise.all(h.background);
+			expect(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).toEqual({
+				acquired: false,
+				reason: "timeout",
+			});
+		});
+
+		it("that answers, if only after the soft deadline, lets the lock go: nothing of it is left in flight", async () => {
+			await seedEndingAt(10 * MIN);
+			withTake(async (input) => {
+				setNow(new Date(now().getTime() + limits.upstreamTimeoutMs));
+				return realTake(input);
+			});
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: false, reason: "storage" });
+			await Promise.all(h.background);
+			expect(
+				(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).acquired,
+			).toBe(true);
+		});
+
 		it("that answers after the soft deadline has passed asks the upstream nothing either", async () => {
 			await seedEndingAt(10 * MIN);
 			withTake(async (input) => {
@@ -588,7 +616,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 		);
 	});
 
-	describe("the version the take answered", () => {
+	describe("the version the take left", () => {
 		type Refund = NonNullable<FederationGrantStore["refundRotation"]>;
 		const realRefund: Refund = (input) => (h.store.refundRotation as Refund)(input);
 
@@ -648,11 +676,11 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			expect(named).toEqual([["requireReauthorization", grant.version + 1]]);
 		});
 
-		it("is not there for a store whose take answers none: its writes are guarded by the version the look read", async () => {
+		it("is the version the look read for a store whose take does not bump: its writes are guarded by that", async () => {
 			const grant = await seedEndingAt(10 * MIN);
 			const named = guardedWrites();
 			const store = h.deps.store;
-			// A take that counts without bumping, as a store that predates the bump does.
+			// A take that does not bump, as a store that predates the bump does.
 			h.deps.store = {
 				...store,
 				takeRotation: async (input) => {
@@ -676,7 +704,9 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 				await seedEndingAt(10 * MIN);
 				withTake(async (input) => {
 					const taken = await realTake(input);
-					return taken.ok ? { ...taken, version: version as number } : taken;
+					return taken.ok
+						? { ok: true, grant: { ...taken.grant, version: version as number } }
+						: taken;
 				});
 				setNow(at(20 * MIN));
 				const result = await retrieve();

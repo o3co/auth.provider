@@ -86,7 +86,7 @@ describe("createMemoryFederationGrantStore", () => {
 		expect(typeof createMemoryFederationGrantStore().takeRotation).toBe("function");
 	});
 
-	it("answers the version its take bumped to: the contract's cases on the bump run, not skip", async () => {
+	it("bumps the version in its take: the contract's cases on the bump run for it, not skip", async () => {
 		const store = createMemoryFederationGrantStore();
 		await lodge(store, "g-1");
 		const activated = await activate(store, "g-1");
@@ -98,7 +98,7 @@ describe("createMemoryFederationGrantStore", () => {
 			windowMs: DAY,
 			now: at(3 * MIN),
 		});
-		expect(taken).toMatchObject({ ok: true, version: activated.grant.version + 1 });
+		expect(taken).toMatchObject({ ok: true, grant: { version: activated.grant.version + 1 } });
 	});
 
 	it("retains a record for thirty days past its expiry by default", () => {

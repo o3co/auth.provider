@@ -262,11 +262,11 @@ export interface FederationGrantStore {
 	 * - else, `count` below `limit`: `count + 1`;
 	 * - else the budget is spent, and the write is refused.
 	 *
-	 * In the same step `version` is bumped, once, and the outcome answers it as
-	 * `version`; nothing else is touched. Every later write of the attempt,
-	 * its give-back included, is guarded by that version, so one from an
-	 * earlier attempt can never land over a later take. A refused take writes
-	 * nothing and bumps nothing. Kept by `replaceCredentials`, reset by
+	 * In the same step `version` is bumped, once, and the grant answered
+	 * carries the new one; nothing else is touched. Every later write of the
+	 * attempt, its give-back included, is guarded by that version, so one from
+	 * an earlier attempt can never land after a later take. A refused take
+	 * writes nothing and bumps nothing. Kept by `replaceCredentials`, reset by
 	 * `activate`.
 	 *
 	 * The window is fixed, not sliding: it opens at its first take, so any
@@ -293,13 +293,14 @@ export interface FederationGrantStore {
 		readonly limit: number;
 		readonly windowMs: number;
 		readonly now: Date;
-	}): Promise<FederationGrantRotationTake>;
+	}): Promise<FederationGrantWrite>;
 
 	/**
 	 * Gives back a rotation `takeRotation` took, for an attempt the upstream
 	 * definitely did not perform. A rotation here is a refresh the upstream
-	 * may have acted on, whether or not it issued a new refresh token. The grant must be `active`, at the caller's
-	 * `version` (the one the take answered), with `now` before `expiresAt`,
+	 * may have acted on, whether or not it issued a new refresh token. The
+	 * grant must be `active`, at the caller's `version` (the one the take left,
+	 * on the grant it answered), with `now` before `expiresAt`,
 	 * and `rotations.since` must be `since`, the window the take counted into,
 	 * with a `count` of at least one. Then, in one atomic step, `count - 1` and
 	 * `version` bumped; nothing else touched. The bump makes it once per
@@ -351,17 +352,6 @@ export interface FederationGrantIntentPointer {
 /** The record as the write left it, or only that the write did not happen. */
 export type FederationGrantWrite =
 	| { readonly ok: true; readonly grant: FederationGrant }
-	| { readonly ok: false };
-
-/**
- * A rotation take: the write, and with it `version`, the version the take
- * bumped the grant to (`grant.version`), which every later write of the
- * attempt names. Optional for now, as `takeRotation` is: a store whose take
- * answers none does not bump, and its attempt's writes name the version the
- * take was made at.
- */
-export type FederationGrantRotationTake =
-	| { readonly ok: true; readonly grant: FederationGrant; readonly version?: number }
 	| { readonly ok: false };
 
 /**

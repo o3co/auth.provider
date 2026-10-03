@@ -509,7 +509,7 @@ type Evaluation =
 			/**
 			 * What every write of the refresh is guarded by, read before the upstream
 			 * is asked: the version the look read, and after a rotation is taken, the
-			 * version the take answered.
+			 * version of the grant the take answered.
 			 */
 			readonly guard: WriteGuard;
 			readonly connection: FederationGrantConnection;
@@ -1560,9 +1560,11 @@ async function stamp(
  * look tells apart: a budget spent meanwhile, or a grant that changed. A store
  * without the member keeps no budget, and nothing is taken. `at`: when the
  * take was answered; `since`: the window it counted into; `guard`: what every
- * later write of the attempt is guarded by, the version the take bumped to. A
- * take that answers a version no write could be guarded by is the take's
- * outage: the upstream must not rotate a token that could not be stored.
+ * later write of the attempt is guarded by, the version of the grant the take
+ * answered (one past the look's where the take bumps, the look's where it does
+ * not). One that answers a version no write could be guarded by is the take's
+ * outage: the upstream must not rotate a token that could not be stored. One
+ * that never answered keeps the lock.
  */
 async function takeRotation(
 	deps: RetrieveFederationGrantTokenDeps,
@@ -1576,7 +1578,11 @@ async function takeRotation(
 			readonly since?: Date;
 			readonly guard: WriteGuard;
 	  }
-	| { readonly taken: false; readonly denial: FederationGrantDenial }
+	| {
+			readonly taken: false;
+			readonly denial: FederationGrantDenial;
+			readonly keepLock?: true;
+	  }
 > {
 	const { store } = deps;
 	const take = store.takeRotation;
@@ -1598,19 +1604,15 @@ async function takeRotation(
 		return {
 			taken: false,
 			denial: unavailable("storage", report(deps, request, "rotation", NOT_ANSWERED)),
+			// One that never answered may still land, and it bumps the version: it
+			// must not land under the next holder's refresh.
+			...(taken === "elapsed" ? { keepLock: true as const } : {}),
 		};
 	}
 	if (!taken.value.ok) return { taken: false, denial: unavailable("concurrent_update") };
-	const version: unknown = taken.value.version;
-	let after: WriteGuard;
-	if (version === undefined) {
-		// TRANSITIONAL: a store whose take does not bump answers no version, and
-		// the version the take was made at still guards the writes. Removed when
-		// the take's `version` becomes required.
-		after = guard;
-	} else if (typeof version === "number" && Number.isSafeInteger(version)) {
-		after = { grantId: guard.grantId, expectedVersion: version };
-	} else {
+	const written = taken.value.grant;
+	const version: unknown = written.version;
+	if (typeof version !== "number" || !Number.isSafeInteger(version)) {
 		const unusable = new TypeError(
 			"the store's take answered a version that is not a safe integer",
 		);
@@ -1619,8 +1621,8 @@ async function takeRotation(
 			denial: unavailable("storage", report(deps, request, "rotation", unusable)),
 		};
 	}
+	const after: WriteGuard = { grantId: guard.grantId, expectedVersion: version };
 	// The window the take counted into, as the store answered it: what a give-back names.
-	const written = taken.value.grant;
 	const since = hasFederationGrantAuthorization(written) ? written.rotations?.since : undefined;
 	return instantOf(since) === undefined
 		? { taken: true, at, guard: after }
@@ -1831,7 +1833,7 @@ async function refresh(
 			leaseStartedAt + deps.limits.upstreamTimeoutMs,
 		);
 		if (!take.taken) {
-			handOver(deps, request, release());
+			if (take.keepLock !== true) handOver(deps, request, release());
 			return lastLook(deps, request, take.denial);
 		}
 		// The take's time is spent of the soft deadline.

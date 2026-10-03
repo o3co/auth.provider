@@ -14,13 +14,9 @@
  * limitations under the License.
  */
 
-import { afterEach, beforeEach, describe, expect, it, type TestContext } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "#/federation-grants/lifetime.mjs";
-import type {
-	FederationGrantRotationTake,
-	FederationGrantStore,
-	FederationGrantWrite,
-} from "#/federation-grants/store.mjs";
+import type { FederationGrantStore, FederationGrantWrite } from "#/federation-grants/store.mjs";
 import {
 	type AuthorizedFederationGrant,
 	type FederationGrantAuthorization,
@@ -51,6 +47,12 @@ export interface FederationGrantStoreContractFactory<
 	 * provided `waitedMs` places it before the deadline. Unset, they do not.
 	 */
 	readonly lockCallsMayOvertake?: true;
+	/**
+	 * `false` for a store whose `takeRotation` does not bump the version yet:
+	 * the cases on the bump skip it, and takes at once are held to the count
+	 * alone. Unset, a take must bump.
+	 */
+	readonly takeBumpsVersion?: false;
 }
 
 const MIN = 60_000;
@@ -1919,7 +1921,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				now = at(DAY),
 				bounds: { readonly limit?: number; readonly windowMs?: number } = {},
 				grantId = "g-1",
-			): Promise<FederationGrantRotationTake> => {
+			): Promise<FederationGrantWrite> => {
 				if (store.takeRotation === undefined) throw new Error("fixture: no takeRotation");
 				return store.takeRotation({
 					grantId,
@@ -1930,17 +1932,13 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				});
 			};
 			/** The version a take that landed left the grant at: what the next write names. */
-			const leftAt = (written: FederationGrantRotationTake): number => {
+			const leftAt = (written: FederationGrantWrite): number => {
 				if (!written.ok) throw new Error("fixture: the take was refused");
 				return written.grant.version;
 			};
-			/** A take that answers no version does not bump it: the cases on the bump skip that store. */
-			const skipUnlessBumped = (context: TestContext, written: FederationGrantRotationTake) => {
-				context.skip(
-					written.ok && written.version === undefined,
-					"the store's take bumps no version",
-				);
-			};
+			const takeBumpsVersion = factory.takeBumpsVersion !== false;
+			/** A case on the bump: skipped for a store whose take does not bump yet. */
+			const onBump = it.skipIf(!takeBumpsVersion);
 			const rotationsOf = async (now: Date, grantId = "g-1") => {
 				const record = await store.find(grantId, now);
 				if (record === null || !hasFederationGrantAuthorization(record)) {
@@ -1949,69 +1947,73 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				return record.rotations;
 			};
 
-			it("opens a window on an active grant with the first take, bumps the version once and answers it", async (context) => {
-				const grant = await activated();
-				await store.touch("g-1", at(DAY - MIN));
-				const now = at(DAY);
-				const written = await take(grant.version, now);
-				skipUnlessBumped(context, written);
-				now.setTime(0);
-				const expected = {
-					...grant,
-					version: grant.version + 1,
-					lastUsedAt: at(DAY - MIN),
-					rotations: { since: at(DAY), count: 1 },
-				};
-				expect(written).toStrictEqual({ ok: true, grant: expected, version: grant.version + 1 });
-				expect(await store.find("g-1", at(DAY))).toStrictEqual(expected);
-				// The credentials and the other usage fields are not its to touch.
-				expect(await store.open("g-1", at(DAY))).toMatchObject({
-					grant: { ineligible: undefined, refreshFailure: undefined },
-					credentials: { state: "ok", value: credentials("1") },
-				});
-			});
+			onBump(
+				"opens a window on an active grant with the first take, and bumps the version once: the grant it answers carries the new one",
+				async () => {
+					const grant = await activated();
+					await store.touch("g-1", at(DAY - MIN));
+					const now = at(DAY);
+					const written = await take(grant.version, now);
+					now.setTime(0);
+					const expected = {
+						...grant,
+						version: grant.version + 1,
+						lastUsedAt: at(DAY - MIN),
+						rotations: { since: at(DAY), count: 1 },
+					};
+					expect(written).toStrictEqual({ ok: true, grant: expected });
+					expect(await store.find("g-1", at(DAY))).toStrictEqual(expected);
+					// The credentials and the other usage fields are not its to touch.
+					expect(await store.open("g-1", at(DAY))).toMatchObject({
+						grant: { ineligible: undefined, refreshFailure: undefined },
+						credentials: { state: "ok", value: credentials("1") },
+					});
+				},
+			);
 
-			it("fences off every write at the version it was taken at: only the version it answered writes", async (context) => {
-				const grant = await activated();
-				const taken = await take(grant.version, at(DAY));
-				skipUnlessBumped(context, taken);
-				const before = await store.find("g-1", at(DAY));
-				expect(
-					await store.replaceCredentials({
-						grantId: "g-1",
-						expectedVersion: grant.version,
-						credentials: credentials("2"),
-						ineligible: null,
-						now: at(DAY + MIN),
-					}),
-				).toEqual({ ok: false });
-				expect(
-					await store.noteRefreshFailure({
-						grantId: "g-1",
-						expectedVersion: grant.version,
-						failure: { at: at(DAY + MIN), kind: "unavailable" },
-						rowMs: MIN,
-						now: at(DAY + MIN),
-					}),
-				).toEqual({ ok: false });
-				expect(
-					await store.requireReauthorization({
-						grantId: "g-1",
-						expectedVersion: grant.version,
-						now: at(DAY + MIN),
-					}),
-				).toEqual({ ok: false });
-				expect(await store.find("g-1", at(DAY + MIN))).toStrictEqual(before);
-				expect(
-					await store.replaceCredentials({
-						grantId: "g-1",
-						expectedVersion: leftAt(taken),
-						credentials: credentials("2"),
-						ineligible: null,
-						now: at(DAY + MIN),
-					}),
-				).toMatchObject({ ok: true, grant: { version: leftAt(taken) + 1 } });
-			});
+			onBump(
+				"fences off every write at the version it was taken at: only the version it left writes",
+				async () => {
+					const grant = await activated();
+					const taken = await take(grant.version, at(DAY));
+					const before = await store.find("g-1", at(DAY));
+					expect(
+						await store.replaceCredentials({
+							grantId: "g-1",
+							expectedVersion: grant.version,
+							credentials: credentials("2"),
+							ineligible: null,
+							now: at(DAY + MIN),
+						}),
+					).toEqual({ ok: false });
+					expect(
+						await store.noteRefreshFailure({
+							grantId: "g-1",
+							expectedVersion: grant.version,
+							failure: { at: at(DAY + MIN), kind: "unavailable" },
+							rowMs: MIN,
+							now: at(DAY + MIN),
+						}),
+					).toEqual({ ok: false });
+					expect(
+						await store.requireReauthorization({
+							grantId: "g-1",
+							expectedVersion: grant.version,
+							now: at(DAY + MIN),
+						}),
+					).toEqual({ ok: false });
+					expect(await store.find("g-1", at(DAY + MIN))).toStrictEqual(before);
+					expect(
+						await store.replaceCredentials({
+							grantId: "g-1",
+							expectedVersion: leftAt(taken),
+							credentials: credentials("2"),
+							ineligible: null,
+							now: at(DAY + MIN),
+						}),
+					).toMatchObject({ ok: true, grant: { version: leftAt(taken) + 1 } });
+				},
+			);
 
 			it("counts on within the window up to the limit, then refuses and changes nothing", async () => {
 				const grant = await activated();
@@ -2116,18 +2118,29 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(await rotationsOf(at(DAY))).toStrictEqual({ since: at(DAY), count: 2 });
 			});
 
-			// Meaningful only for an adapter whose take crosses an await (a network
-			// round trip): the memory store settles each take synchronously.
-			it("lets exactly one of takes at once at one version land: of eight, one counts and bumps", async (context) => {
+			// Eight takes at once at one version, against a limit of five. A take
+			// that bumps admits exactly one: the version moves on under the rest. A
+			// take that does not bump counts each, up to the limit, and leaves the
+			// version. Meaningful only for an adapter whose take crosses an await (a
+			// network round trip): the memory store settles each take synchronously.
+			it("counts takes at once exactly: one lands where a take bumps, five where it does not", async () => {
 				const grant = await activated();
 				const results = await Promise.all(
 					Array.from({ length: 8 }, () => take(grant.version, at(DAY), { limit: 5 })),
 				);
-				const landed = results.filter((result) => result.ok);
-				skipUnlessBumped(context, landed[0] ?? { ok: false });
-				expect(landed).toHaveLength(1);
-				expect(await rotationsOf(at(DAY))).toStrictEqual({ since: at(DAY), count: 1 });
-				expect((await store.find("g-1", at(DAY)))?.version).toBe(grant.version + 1);
+				const counts = results
+					.flatMap((result) =>
+						result.ok && hasFederationGrantAuthorization(result.grant)
+							? [result.grant.rotations?.count]
+							: [],
+					)
+					.sort((a, b) => (a ?? 0) - (b ?? 0));
+				const landed = takeBumpsVersion ? 1 : 5;
+				expect(counts).toEqual(Array.from({ length: landed }, (_, i) => i + 1));
+				expect(await rotationsOf(at(DAY))).toStrictEqual({ since: at(DAY), count: landed });
+				expect((await store.find("g-1", at(DAY)))?.version).toBe(
+					grant.version + (takeBumpsVersion ? 1 : 0),
+				);
 			});
 
 			it("is kept by a refresh that wrote, and counts on at the version it left", async () => {
@@ -2182,13 +2195,12 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			const HOUR = 3_600_000;
 			/**
 			 * Takes one rotation at `now`, and answers the window it counted into and
-			 * the version it left, which a give-back of it names; `bumped` is whether
-			 * the take answered that version.
+			 * the version it left, which a give-back of it names.
 			 */
 			const takeOne = async (
 				expectedVersion: number,
 				now = at(DAY),
-			): Promise<{ readonly since: Date; readonly version: number; readonly bumped: boolean }> => {
+			): Promise<{ readonly since: Date; readonly version: number }> => {
 				if (store.takeRotation === undefined) throw new Error("fixture: no takeRotation");
 				const taken = await store.takeRotation({
 					grantId: "g-1",
@@ -2203,7 +2215,6 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				return {
 					since: taken.grant.rotations?.since ?? INVALID,
 					version: taken.grant.version,
-					bumped: taken.version !== undefined,
 				};
 			};
 			const refund = (
@@ -2222,6 +2233,8 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				}
 				return record;
 			};
+			/** A case on the take's bump: skipped for a store whose take does not bump yet. */
+			const onBump = it.skipIf(factory.takeBumpsVersion === false);
 
 			it("gives back one rotation of the window it was taken in, bumps the version, and touches nothing else", async () => {
 				const grant = await activated();
@@ -2253,40 +2266,46 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				});
 			});
 
-			it("refuses a give-back at the version before the take: only the version the take answered gives back", async (context) => {
-				const grant = await activated();
-				const { since, version, bumped } = await takeOne(grant.version, at(DAY));
-				context.skip(!bumped, "the store's take bumps no version");
-				const before = await recordOf(at(DAY));
-				expect(await refund(grant.version, since)).toEqual({ ok: false });
-				expect(await store.find("g-1", at(DAY + MIN))).toStrictEqual(before);
-				expect((await refund(version, since)).ok).toBe(true);
-			});
+			onBump(
+				"refuses a give-back at the version before the take: only the version the take left gives back",
+				async () => {
+					const grant = await activated();
+					const { since, version } = await takeOne(grant.version, at(DAY));
+					const before = await recordOf(at(DAY));
+					expect(await refund(grant.version, since)).toEqual({ ok: false });
+					expect(await store.find("g-1", at(DAY + MIN))).toStrictEqual(before);
+					expect((await refund(version, since)).ok).toBe(true);
+				},
+			);
 
-			it("refuses a late give-back of one attempt after the next attempt's take, and the next attempt's write lands", async (context) => {
-				const grant = await activated();
-				const first = await takeOne(grant.version, at(DAY));
-				context.skip(!first.bumped, "the store's take bumps no version");
-				const next = await takeOne(first.version, at(DAY + MIN));
-				expect(await refund(first.version, first.since, at(DAY + 2 * MIN))).toEqual({ ok: false });
-				expect(
-					await store.replaceCredentials({
-						grantId: "g-1",
-						expectedVersion: next.version,
-						credentials: credentials("2"),
-						ineligible: null,
-						now: at(DAY + 2 * MIN),
-					}),
-				).toMatchObject({ ok: true, grant: { version: next.version + 1 } });
-				// The first attempt's rotation stays spent: an overcount, never a lost write.
-				expect((await recordOf(at(DAY + 2 * MIN))).rotations).toStrictEqual({
-					since: at(DAY),
-					count: 2,
-				});
-				expect(await store.open("g-1", at(DAY + 2 * MIN))).toMatchObject({
-					credentials: { state: "ok", value: credentials("2") },
-				});
-			});
+			onBump(
+				"refuses a late give-back of one attempt after the next attempt's take, and the next attempt's write lands",
+				async () => {
+					const grant = await activated();
+					const first = await takeOne(grant.version, at(DAY));
+					const next = await takeOne(first.version, at(DAY + MIN));
+					expect(await refund(first.version, first.since, at(DAY + 2 * MIN))).toEqual({
+						ok: false,
+					});
+					expect(
+						await store.replaceCredentials({
+							grantId: "g-1",
+							expectedVersion: next.version,
+							credentials: credentials("2"),
+							ineligible: null,
+							now: at(DAY + 2 * MIN),
+						}),
+					).toMatchObject({ ok: true, grant: { version: next.version + 1 } });
+					// The first attempt's rotation stays spent: an overcount, never a lost write.
+					expect((await recordOf(at(DAY + 2 * MIN))).rotations).toStrictEqual({
+						since: at(DAY),
+						count: 2,
+					});
+					expect(await store.open("g-1", at(DAY + 2 * MIN))).toMatchObject({
+						credentials: { state: "ok", value: credentials("2") },
+					});
+				},
+			);
 
 			it("never goes below none: a window with nothing in it gives nothing back", async () => {
 				const grant = await activated();
