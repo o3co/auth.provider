@@ -15,14 +15,13 @@
  */
 
 /**
- * `deviceGrantModule` boot invariants.
+ * The device-grant module's boot invariants.
  *
  * Two settings have no default and fail boot instead, for two different
  * reasons — and both reasons are the point of the test.
  */
 
 import type {
-	AppConfig,
 	BootstrapMap,
 	ClientRepository,
 	CsrfGuard,
@@ -53,9 +52,14 @@ import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { DEVICE_GRANT_ADMISSION_ACTIONS } from "#/admissionActions.mjs";
-import { deviceGrantConfigSchema, deviceGrantModule } from "#/module.mjs";
+import {
+	deviceAuthorizationGrantModule,
+	deviceGrantConfigSchema,
+	deviceGrantModule,
+} from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { LIVE_AUTH_TIME_MS, liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
+import { shippedDeviceGrantSection } from "./shippedSection.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -126,6 +130,8 @@ interface Overrides {
 	readonly withCsrfGuard?: boolean;
 	/** Leave the audit sink's absence undeclared: no `auditSink` in `core.declaredAbsent`. */
 	readonly withoutAuditDeclaration?: boolean;
+	/** Leave the `oauthTokenSettings` slot unfilled, as a composition without the oauth module would. */
+	readonly withoutOAuthTokenSettings?: boolean;
 	/** Modules listed after the device grant's. */
 	readonly extraModules?: readonly Module[];
 }
@@ -143,15 +149,14 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			oauth: {
 				...core.oauth,
 			},
-			"device-grant": {
-				enabled: false,
-				verificationUriComplete: false,
-				codeLifetimeSeconds: 600,
-				pollingIntervalSeconds: 5,
-				...(overrides.deviceGrant ?? {}),
-			},
+			// The section as a composition layers the package's reference under it.
+			"device-grant": shippedDeviceGrantSection(overrides.deviceGrant),
 		},
 		pathResolver: (s: string) => s,
+		// What the oauth module provides, filled by hand: no oauth module here.
+		...(overrides.withoutOAuthTokenSettings === true
+			? {}
+			: { oauthTokenSettings: createTestOAuthTokenSettings() }),
 		clientRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 		...(overrides.withStore === false ? {} : { deviceCodeStore: createMemoryDeviceCodeStore() }),
@@ -172,49 +177,31 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 	} as unknown as BootstrapMap;
 };
 
-/**
- * Boot the module built from the same config `createApp` validates — the
- * one a composition root holds and hands both.
- */
-const boot = (overrides: Overrides) => {
-	const bootstrapComponents = makeBoot(overrides);
-	return createApp({
-		modules: [
-			deviceGrantModule({ config: bootstrapComponents.config as AppConfig }),
-			...(overrides.extraModules ?? []),
-		],
-		bootstrapComponents,
+/** Boot the module, which reads its switch from the configuration `createApp` parses. */
+const boot = (overrides: Overrides) =>
+	createApp({
+		modules: [deviceAuthorizationGrantModule, ...(overrides.extraModules ?? [])],
+		bootstrapComponents: makeBoot(overrides),
 	});
-};
 
-/** What `createApp` hands a contribution: the config, and whatever slots the test wires. */
-type TestDeps = { readonly config: unknown } & Readonly<Record<string, unknown>>;
+/** What `createApp` hands a contribution: the module's section, and whatever slots the test wires. */
+type TestDeps = Readonly<Record<string, unknown>>;
 
 /** Lifetimes within the 300 s access token these tests configure, which every reader holds a slot to. */
 const WITHIN_CONFIGURATION = { accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 } };
 
-/** `d` with the module's section, parsed from its config as boot parses it, unless `d` hands one. */
-const withSection = (d: unknown): unknown =>
-	Object.hasOwn(d as object, "section")
-		? d
-		: {
-				...(d as object),
-				section: deviceGrantConfigSchema.parse(
-					((d as TestDeps).config as { "device-grant"?: unknown } | undefined)?.["device-grant"],
-				),
-			};
+/** The section `written` lays over the shipped one, parsed as boot parses it. */
+const sectionOf = (written: Readonly<Record<string, unknown>>) =>
+	deviceGrantConfigSchema.parse(shippedDeviceGrantSection(written));
 
-/**
- * The contributions of the module built for `deps.config`, each factory
- * handed its section as `createApp` would call it with `deps`.
- */
-const contributionsFor = (deps: TestDeps) => {
-	const contributes = deviceGrantModule({ config: deps.config as AppConfig }).contributes;
+/** The contributions of the module, as `createApp` calls each factory with its deps. */
+const contributionsFor = (_deps?: TestDeps) => {
+	const contributes = deviceAuthorizationGrantModule.contributes;
 	type Factory = (d: unknown) => unknown;
 	const handed =
 		(factory: unknown): Factory =>
 		(d) =>
-			(factory as Factory)(withSection(d));
+			(factory as Factory)(d);
 	const each = (kind: Readonly<Record<string, unknown>> | undefined) =>
 		kind === undefined
 			? undefined
@@ -232,11 +219,11 @@ const ENABLED = {
 	verificationUri: "https://example.test/device",
 };
 
-describe("deviceGrantModule — boot", () => {
-	it("refuses the factory listed uncalled — the pre-factory form, `modules: [deviceGrantModule]`", async () => {
+describe("the device-grant module — boot", () => {
+	it("refuses the deprecated factory listed uncalled, `modules: [deviceGrantModule]`", async () => {
 		// The compiler does not catch it: a function has a `name`, the one
-		// field `Module` requires. Listed that way the module contributed
-		// nothing and boot succeeded, with no grant, no route and none of the
+		// field `Module` requires. Listed that way the module would contribute
+		// nothing and boot succeed, with no grant, no route and none of the
 		// refusals below. Core refuses any such entry.
 		await expect(
 			createApp({
@@ -304,10 +291,7 @@ describe("deviceGrantModule — boot", () => {
 			...makeBoot({ deviceGrant: ENABLED }),
 			csrfGuard,
 		} as unknown as BootstrapMap;
-		return createApp({
-			modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
-			bootstrapComponents,
-		});
+		return createApp({ modules: [deviceAuthorizationGrantModule], bootstrapComponents });
 	};
 
 	it.each([
@@ -364,9 +348,7 @@ describe("deviceGrantModule — boot", () => {
 	});
 
 	it("takes csrfGuard as an optional slot, and imports nothing of the session package", () => {
-		const installed = deviceGrantModule({
-			config: makeBoot({ deviceGrant: ENABLED }).config as AppConfig,
-		});
+		const installed = deviceAuthorizationGrantModule;
 		expect(installed.optional).toContain("csrfGuard");
 		expect(installed.requires).not.toContain("csrfGuard");
 	});
@@ -414,48 +396,28 @@ describe("deviceGrantModule — boot", () => {
 		await handle.dispose();
 	});
 
-	it.each([
-		["built enabled, booted with the grant off", ENABLED, { enabled: false }],
-		["built disabled, booted with the grant on", { enabled: false }, ENABLED],
-	])("refuses to boot when the module was %s", async (_label, builtFrom, bootedWith) => {
-		// The factory decides from the config it is handed whether the grant
-		// is contributed; the routes and the discovery field read the config
-		// `createApp` validated. Two configs that disagree would register a
-		// grant whose device can never start, or serve a flow whose token
-		// endpoint refuses the grant — so the disagreement is the refusal.
-		const bootstrapComponents = makeBoot({ deviceGrant: bootedWith });
-		const config = bootstrapComponents.config as AppConfig;
-		const handedToFactory = {
-			...config,
-			"device-grant": builtFrom,
-		} as AppConfig;
-		await expect(
-			createApp({
-				modules: [deviceGrantModule({ config: handedToFactory })],
-				bootstrapComponents,
-			}),
-		).rejects.toThrow(/configuration createApp parsed has device-grant\.enabled/);
+	it("refuses to boot enabled without oauthTokenSettings, naming the slot", async () => {
+		// The issuer client authentication checks an assertion's audience
+		// against, the device token's lifetime and the email-verified gate are
+		// the oauth module's: the grant reads them from the slot alone, never
+		// from the configuration.
+		await expect(boot({ deviceGrant: ENABLED, withoutOAuthTokenSettings: true })).rejects.toThrow(
+			/oauthTokenSettings/,
+		);
+	});
+
+	it("boots disabled without oauthTokenSettings: switched off, the module requires nothing", async () => {
+		const handle = await boot({ withoutOAuthTokenSettings: true });
+		await handle.dispose();
 	});
 
 	it.each([
 		["true", true],
 		["false", false],
 	])(
-		"reads the switch written as an environment variable's %j as its section's schema does, in the factory as at boot",
+		"reads the switch written as an environment variable's %j, as its section's schema reads it",
 		async (written, on) => {
-			// The two phases: a composition root hands the factory the
-			// configuration it read before boot, unparsed, and boot parses the
-			// one it resolved. The factory reads `device-grant.enabled` with
-			// the section's own schema, so the two agree.
-			const bootstrapComponents = makeBoot({ deviceGrant: ENABLED });
-			const config = {
-				...(bootstrapComponents.config as AppConfig),
-				"device-grant": { ...ENABLED, enabled: written },
-			} as unknown as AppConfig;
-			const handle = await createApp({
-				modules: [deviceGrantModule({ config })],
-				bootstrapComponents: { ...bootstrapComponents, config },
-			});
+			const handle = await boot({ deviceGrant: { ...ENABLED, enabled: written } });
 			try {
 				expect(
 					handle.components.grantHandlerResolver?.get(DEVICE_CODE_GRANT_TYPE) !== undefined,
@@ -466,27 +428,21 @@ describe("deviceGrantModule — boot", () => {
 		},
 	);
 
-	it("names the disagreement, not a missing store, when the booted config declares the store absent", async () => {
-		// The grant is contributed before the routes are, and it needs a
-		// store. Built enabled and booted off with `store = "unsupported"`
-		// and no store wired, the first refusal has to be the one that says
-		// what is actually wrong — the two configs — rather than the store
-		// the booted config correctly says it does not need.
-		const bootstrapComponents = makeBoot({
-			deviceGrant: { enabled: false, store: "unsupported" },
-			withStore: false,
+	it("reads an absent switch as off: a section without enabled registers nothing", async () => {
+		const { enabled: _enabled, ...withoutSwitch } = shippedDeviceGrantSection(ENABLED);
+		const bootstrapComponents = makeBoot({});
+		const handle = await createApp({
+			modules: [deviceAuthorizationGrantModule],
+			bootstrapComponents: {
+				...bootstrapComponents,
+				config: { ...bootstrapComponents.config, "device-grant": withoutSwitch },
+			} as unknown as BootstrapMap,
 		});
-		const config = bootstrapComponents.config as AppConfig;
-		const handedToFactory = {
-			...config,
-			"device-grant": ENABLED,
-		} as AppConfig;
-		await expect(
-			createApp({
-				modules: [deviceGrantModule({ config: handedToFactory })],
-				bootstrapComponents,
-			}),
-		).rejects.toThrow(/configuration createApp parsed has device-grant\.enabled/);
+		try {
+			expect(handle.components.grantHandlerResolver?.get(DEVICE_CODE_GRANT_TYPE)).toBeUndefined();
+		} finally {
+			await handle.dispose();
+		}
 	});
 
 	it("refuses to boot with no audit sink unless core.declaredAbsent lists it", async () => {
@@ -499,7 +455,7 @@ describe("deviceGrantModule — boot", () => {
 	});
 });
 
-describe("deviceGrantModule — the actions it registers", () => {
+describe("the device-grant module — the actions it registers", () => {
 	it("registers the three body actions device verification admits, lookup and deny granting nothing", async () => {
 		const handle = await boot({ deviceGrant: ENABLED });
 		try {
@@ -535,21 +491,14 @@ describe("deviceGrantModule — the actions it registers", () => {
 	});
 });
 
-describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
+describe("the device-grant module — discovery (RFC 8628 §4)", () => {
 	it("contributes the endpoint as an issuer-relative path when enabled", () => {
 		// A client has no other way to find the endpoint, so the metadata is
 		// the feature being reachable rather than a description of it. Under
 		// `endpoints`, not `metadata`: core prefixes the issuer and refuses an
 		// `*_endpoint` literal — the served document is pinned end to end in
 		// composition.test.mts.
-		const deps = {
-			config: {
-				oauth: {
-					jwt: { issuer: "https://as.example.test" },
-				},
-				"device-grant": ENABLED,
-			},
-		};
+		const deps = { section: sectionOf(ENABLED) };
 		const contribution = contributionsFor(deps)?.discoveryMetadata?.[0] as (
 			deps: unknown,
 		) => Record<string, unknown>;
@@ -559,17 +508,16 @@ describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 		});
 	});
 
-	it("advertises nothing when disabled: the module built off declares nothing but its section", () => {
+	it("advertises nothing when disabled: the switch reads off, so boot runs none of its factories", () => {
 		// The discovery document must not claim a capability the deployment
-		// does not have.
-		const built = deviceGrantModule({
-			config: { "device-grant": { enabled: false } } as unknown as AppConfig,
-		});
-		expect(Object.keys(built).sort()).toEqual(["name", "section"]);
+		// does not have; the document served is pinned in composition.test.mts.
+		expect(deviceAuthorizationGrantModule.section?.isEnabled?.(sectionOf({ enabled: false }))).toBe(
+			false,
+		);
 	});
 });
 
-describe("deviceGrantModule — the route it actually contributes", () => {
+describe("the device-grant module — the route it actually contributes", () => {
 	/** Build the contributed router and mount it, as `assembleApp` would. */
 	const mountContributedRoute = (index: number, deps: TestDeps) => {
 		const factory = contributionsFor(deps)?.routes?.[index] as (d: unknown) => {
@@ -583,21 +531,19 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	};
 
 	const enabledDeps = (overrides: { limits?: Record<string, RateLimitSpec> } = {}) => ({
-		config: {
-			oauth: {
-				jwt: { issuer: "https://as.example.test" },
-				accessToken: { expiresIn: 300 },
-				refreshToken: { expiresIn: 86_400 },
-			},
-			"device-grant": {
-				enabled: true,
-				verificationUri: "https://example.test/device",
-				verificationUriComplete: false,
-				codeLifetimeSeconds: 600,
-				pollingIntervalSeconds: 5,
-				rateLimit: { limit: 5, windowSeconds: 300 },
-			},
-		},
+		section: sectionOf({
+			enabled: true,
+			verificationUri: "https://example.test/device",
+			verificationUriComplete: false,
+			codeLifetimeSeconds: 600,
+			pollingIntervalSeconds: 5,
+			rateLimit: { limit: 5, windowSeconds: 300 },
+		}),
+		// What the oauth module provides: the issuer and the lifetimes.
+		oauthTokenSettings: createTestOAuthTokenSettings({
+			...WITHIN_CONFIGURATION,
+			issuer: "https://as.example.test",
+		}),
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		userSessionStore: liveSessionStore(),
@@ -701,13 +647,12 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it.each([0, 1])(
-		"mounts route %i with no rateLimit.failMode: the outage policy is the limiter's own",
+		"mounts route %i with no configuration at all: the outage policy is the limiter's own",
 		(index) => {
 			const deps = enabledDeps();
+			expect(deps).not.toHaveProperty("config");
 			const factory = contributionsFor(deps)?.routes?.[index] as (d: unknown) => unknown;
-			expect(() =>
-				factory({ ...deps, config: { ...deps.config, rateLimit: undefined } }),
-			).not.toThrow();
+			expect(() => factory(deps)).not.toThrow();
 		},
 	);
 
@@ -729,7 +674,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 	it("runs the csrfGuard it is handed in front of the whole route, with no session.* in the configuration", async () => {
 		// The guard is the slot's, not one rebuilt from the session's
-		// configuration: `enabledDeps` carries no `session` section, and a
+		// configuration: `enabledDeps` carries no configuration, and a
 		// guard that refuses everything refuses a request the handler would
 		// otherwise answer, whatever its action.
 		const refusing: CsrfGuard = Object.freeze({
@@ -739,7 +684,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			},
 		});
 		const deps = { ...enabledDeps(), csrfGuard: refusing };
-		expect("session" in (deps.config as Record<string, unknown>)).toBe(false);
+		expect(deps).not.toHaveProperty("config");
 		const app = mountVerificationRoute(deps);
 		for (const action of ["lookup", "approve", "deny"]) {
 			const res = await request(app)
@@ -764,10 +709,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		}
 	};
 
-	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides, over the configuration's", () =>
+	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides", () =>
 		atLiveAuthTime(async () => {
-			// The configuration leaves it off; the slot turns it on, and the
-			// signed-in user-1 has no verified email.
+			// The slot turns it on, and the signed-in user-1 has no verified email.
 			const app = mountVerificationRoute({
 				...enabledDeps(),
 				oauthTokenSettings: createTestOAuthTokenSettings({
@@ -787,29 +731,19 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			});
 		}));
 
-	it("reads requireEmailVerified off the oauthTokenSettings a module provides when the configuration turns it on", () =>
+	it("reads no requireEmailVerified from the configuration: the slot's false approves as the setting off does", () =>
 		atLiveAuthTime(async () => {
-			// The other way round: the slot says false, and a reader that took
-			// `false` for "unset" would fall through to the configuration's `true`.
+			// A configuration that turns it on, handed beside a slot that says
+			// false: the module reads the slot alone.
 			const approve = (deps: TestDeps) =>
 				request(mountVerificationRoute(deps))
 					.post("/oauth/device/verification")
 					.set("Host", "as.example.test")
 					.set("Origin", "http://as.example.test")
 					.send({ action: "approve", user_code: "BCDF-GHJK" });
-			const configOn = (): TestDeps => {
-				const base = enabledDeps();
-				return {
-					...base,
-					config: { ...base.config, oauth: { ...base.config.oauth, requireEmailVerified: true } },
-				};
-			};
-			// The configuration alone holds the approval.
-			expect((await approve(configOn())).status).toBe(403);
-			// The slot's false is read, and the approval goes on to the code as it
-			// does with the setting off.
 			const res = await approve({
-				...configOn(),
+				...enabledDeps(),
+				config: { oauth: { requireEmailVerified: true } },
 				oauthTokenSettings: createTestOAuthTokenSettings({
 					...WITHIN_CONFIGURATION,
 					requireEmailVerified: false,
@@ -842,10 +776,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			const deps = enabledDeps();
 			const app = mountVerificationRoute({
 				...deps,
-				config: {
-					...deps.config,
-					rateLimit: { failMode: failMode === "open" ? "closed" : "open" },
-				},
+				config: { rateLimit: { failMode: failMode === "open" ? "closed" : "open" } },
 				rateLimiter: { ...brokenLimiter, failMode },
 			});
 
@@ -1581,8 +1512,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	 */
 	const withVerificationBudget = (rateLimit: unknown) => {
 		const deps = enabledDeps();
-		const section = { ...deviceGrantConfigSchema.parse(deps.config["device-grant"]), rateLimit };
-		return { ...deps, section, config: { ...deps.config, "device-grant": section } };
+		return { ...deps, section: { ...deps.section, rateLimit } };
 	};
 
 	it("refuses to mount device/verification without the budget, device-grant.rateLimit", () => {
@@ -1678,40 +1608,43 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 });
 
-describe("deviceGrantModule — disabled surface", () => {
-	it("contributes no grant when disabled", () => {
+describe("the device-grant module — disabled surface", () => {
+	it("registers no grant when disabled", async () => {
 		// Observable behaviour matches "not installed": with nothing
 		// registered, the token endpoint answers `unsupported_grant_type` and
 		// `grant_types_supported` does not name the grant — both pinned beside
 		// `oauthModule` in composition.test.mts. A refusing handler registered
 		// in its place was advertised as a supported grant.
-		const contributes = contributionsFor({
-			config: { "device-grant": { enabled: false } },
-		});
-		expect(contributes?.grants).toBeUndefined();
+		const handle = await boot({ deviceGrant: { enabled: false } });
+		try {
+			expect(handle.components.grantHandlerResolver?.get(DEVICE_CODE_GRANT_TYPE)).toBeUndefined();
+		} finally {
+			await handle.dispose();
+		}
 	});
 
-	it("contributes no grant when the switch it is handed is none its section's schema reads", () => {
-		// Boot refuses the value; the factory builds the grant off meanwhile.
-		const contributes = contributionsFor({
-			config: { "device-grant": { ...ENABLED, enabled: "yes" } },
-		});
-		expect(contributes?.grants).toBeUndefined();
+	it("refuses to boot with a switch its section's schema does not read, naming the key", async () => {
+		await expect(boot({ deviceGrant: { ...ENABLED, enabled: "yes" } })).rejects.toThrow(
+			/device-grant\.enabled/,
+		);
 	});
 
-	it("contributes the grant when enabled", () => {
-		const contributes = contributionsFor({
-			config: { "device-grant": ENABLED },
-		});
-		expect(Object.keys(contributes?.grants ?? {})).toEqual([DEVICE_CODE_GRANT_TYPE]);
+	it("refuses the grant factory called directly without oauthTokenSettings, naming the slot", () => {
+		const factory = contributionsFor()?.grants?.[DEVICE_CODE_GRANT_TYPE] as (d: unknown) => unknown;
+		expect(() =>
+			factory({
+				section: sectionOf(ENABLED),
+				deviceCodeStore: createMemoryDeviceCodeStore(),
+				keyStore: createSymmetricKeyStore("device-lifetime-secret.at-least-32-bytes"),
+			}),
+		).toThrow(/oauthTokenSettings/);
 	});
 });
 
-describe("deviceGrantModule — the access-token lifetime", () => {
-	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
-		// The module hands the grant its lifetime at composition. Only the new
-		// keys are configured, so reading the deprecated `expiresIn` would hand
-		// it `undefined` and mint a token with no `exp` claim at all.
+describe("the device-grant module — the access-token lifetime", () => {
+	it("mints the default lifetime of the oauthTokenSettings slot and ignores an expires_in request parameter", async () => {
+		// The module hands the grant its lifetime at composition, from the
+		// slot the oauth module provides.
 		const approvedStore = {
 			...createMemoryDeviceCodeStore(),
 			poll: async () => ({
@@ -1731,18 +1664,11 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 				},
 			}),
 		} satisfies DeviceCodeStore;
-		const base = makeValidCoreConfig();
 		const deps = {
-			config: {
-				oauth: {
-					...base.oauth,
-					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
-				},
-				"device-grant": {
-					enabled: true,
-					verificationUri: "https://example.test/device",
-				},
-			},
+			section: sectionOf(ENABLED),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				accessTokenLifetime: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+			}),
 			deviceCodeStore: approvedStore,
 			keyStore: createSymmetricKeyStore("device-lifetime-secret.at-least-32-bytes"),
 		};
@@ -1764,9 +1690,9 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 		expect((payload.exp as number) - (payload.iat as number)).toBe(600);
 	});
 
-	it("mints the default lifetime of the oauthTokenSettings a module provides, over the configuration's", async () => {
+	it("reads no lifetime from the configuration: the slot's is minted whatever `oauth.accessToken` says", async () => {
 		// The oauth module owns `oauth {}` and provides what others read of it;
-		// a composition without it reads the configuration as before (above).
+		// a composition without it fills the slot.
 		const store = {
 			...createMemoryDeviceCodeStore(),
 			poll: async () => ({
@@ -1793,8 +1719,8 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 					...base.oauth,
 					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
 				},
-				"device-grant": { enabled: true, verificationUri: "https://example.test/device" },
 			},
+			section: sectionOf(ENABLED),
 			oauthTokenSettings: createTestOAuthTokenSettings({
 				accessTokenLifetime: { defaultExpiresIn: 900, maxExpiresIn: 7200 },
 			}),
@@ -1815,7 +1741,7 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 	});
 });
 
-describe("deviceGrantModule — private_key_jwt on the mounted route", () => {
+describe("the device-grant module — private_key_jwt on the mounted route", () => {
 	const ISSUER = "https://as.example.test";
 	const JWT_CLIENT = "assertion-app";
 	const JWT_BEARER_CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -1869,21 +1795,8 @@ describe("deviceGrantModule — private_key_jwt on the mounted route", () => {
 	};
 
 	const depsWith = (replaySeenSet?: unknown) => ({
-		config: {
-			oauth: {
-				jwt: { issuer: ISSUER },
-				accessToken: { expiresIn: 300 },
-				refreshToken: { expiresIn: 86_400 },
-			},
-			"device-grant": {
-				enabled: true,
-				verificationUri: "https://example.test/device",
-				verificationUriComplete: false,
-				codeLifetimeSeconds: 600,
-				pollingIntervalSeconds: 5,
-				rateLimit: { limit: 5, windowSeconds: 300 },
-			},
-		},
+		section: sectionOf(ENABLED),
+		oauthTokenSettings: createTestOAuthTokenSettings({ ...WITHIN_CONFIGURATION, issuer: ISSUER }),
 		clientRepository: jwtRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		rateLimiter: createMemoryRateLimiter({

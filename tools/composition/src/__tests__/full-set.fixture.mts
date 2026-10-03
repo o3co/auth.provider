@@ -93,7 +93,10 @@ import {
 	type RecordingMailSender,
 	withUserRepositoryHttp,
 } from "@o3co/auth-provider-core/testing";
-import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import {
+	DEVICE_CODE_GRANT_TYPE,
+	deviceAuthorizationGrantModule,
+} from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationTypeModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationTypeModule } from "@o3co/auth-provider-federation-github";
@@ -728,7 +731,6 @@ function httpUserRepository(http: Readonly<Record<string, unknown>>): Promise<Us
 
 /** Every module the template does not compose, as a deployment adds them to its manifest. */
 function addedModules(
-	config: AppConfig,
 	features: Features,
 	stores: AddedStores,
 	f: Fakes,
@@ -737,7 +739,7 @@ function addedModules(
 	outage: { once: FixtureCeremony["requirement"] | undefined },
 ): Module[] {
 	return [
-		deviceGrantModule({ config }),
+		deviceAuthorizationGrantModule,
 		stores.deviceCode === "redis" ? redisDeviceCodeStoreModule : memoryDeviceCodeStoreModule,
 		dpopModule,
 		mtlsModule,
@@ -944,8 +946,8 @@ export async function fullSetOptions(
 		...(userHttp === undefined
 			? {}
 			: { switches: (switches: Switches) => ({ ...switches, storeTransport: userHttp }) }),
-		extraModules: (config) => [
-			...addedModules(config, features, added, f, interrupt, opened, outage),
+		extraModules: () => [
+			...addedModules(features, added, f, interrupt, opened, outage),
 			...(ownModules ?? []),
 		],
 		// The caller's own overrides win, its own mail sender included.
