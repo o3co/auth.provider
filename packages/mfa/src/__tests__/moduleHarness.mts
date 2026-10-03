@@ -51,6 +51,7 @@ import {
 	coreConfigForTests,
 	createRecordingLoginCompletion,
 	createTestCsrfGuard,
+	createTestOAuthTokenSettings,
 	makeValidAppConfig,
 	renamedVariableCaptures,
 } from "@o3co/auth-provider-core/testing";
@@ -184,6 +185,16 @@ export function configFor(
 const providing = (name: string, provides: Record<string, () => unknown>): Module =>
 	defineModule({ name, provides: provides as never });
 
+/**
+ * The `oauthTokenSettings` slot holding `issuer` — {@link ISSUER} unless
+ * given — which the TOTP factor's module requires for the deployment's
+ * issuer: what the oauth module provides in a deployment.
+ */
+export const oauthTokenSettingsFor = (issuer: string = ISSUER): Module =>
+	providing("test:oauth-token-settings", {
+		oauthTokenSettings: () => createTestOAuthTokenSettings({ issuer }),
+	});
+
 /** A limiter that allows what a test sends: every prefix well above any test's traffic. */
 const generousRateLimiter = (): RateLimiter =>
 	createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 1000, windowSeconds: 60 } });
@@ -297,6 +308,11 @@ export interface BootOptions {
 	readonly withoutLoginCompletion?: boolean;
 	/** Install `mfaModule` alone, without the TOTP factor's module: a composition whose factors are all another package's. */
 	readonly withoutTotpModule?: boolean;
+	/**
+	 * The deployment's issuer the `oauthTokenSettings` slot holds, {@link ISSUER}
+	 * by default; `null`, and no module provides the slot.
+	 */
+	readonly tokenIssuer?: string | null;
 	readonly logger?: SpyLogger;
 }
 
@@ -350,6 +366,7 @@ export function modulesFor(options: BootOptions = {}): {
 				: [providing("test:user-session-store", { userSessionStore: () => userSessionStore })]),
 			providing("test:mfa-factor-store", { mfaFactorStore: () => factorStore }),
 			providing("test:mfa-transaction-store", { mfaTransactionStore: () => transactionStore }),
+			...(options.tokenIssuer === null ? [] : [oauthTokenSettingsFor(options.tokenIssuer)]),
 			...(options.withoutTotpModule === true
 				? [mfaModule(options.options ?? { environment: "development" })]
 				: mfaModules(options.options ?? { environment: "development" })),

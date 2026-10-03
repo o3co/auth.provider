@@ -375,13 +375,9 @@ Module-level messages that arrive wrapped in a factory failure:
   or "optional"` — installed is on, so an MFA-off deployment does not install
   it; the package's settings, each a `RangeError` `cause` naming its key — the
   key ring and the development sample key as `packages/mfa/README.md` lists
-  them, `mfa.transactionTtlSeconds` outside 60 to 1800 seconds,
-  `mfa.maxAttemptsPerTransaction` outside 2 to 10, an
-  `mfa.lockout` core's `checkConfiguredMfaLockoutPolicy` refuses
+  them, and an `mfa.lockout` core's `checkConfiguredMfaLockoutPolicy` refuses
   (`mfa.lockout.hardLimit must be at least 10: …`, `mfa.lockout.hardLimit
-  must be above mfa.lockout.threshold: …`, …), and an
-  `mfa.enrollment.requireEmailProof` other than `when-mail`, `always` or
-  `never`; `mfa.enrollment.requireEmailProof is "always" and no mail sender is
+  must be above mfa.lockout.threshold: …`, …); `mfa.enrollment.requireEmailProof is "always" and no mail sender is
   wired` — nobody could give the account-email proof, so nobody could bind a
   factor: wire a mail sender, or set `MFA_ENROLLMENT_REQUIRE_EMAIL_PROOF` to
   `when-mail` or `never` (the MFA ADR's D20); `mfa.page.url is not set`
@@ -404,7 +400,18 @@ Module-level messages that arrive wrapped in a factory failure:
   beside `sessionModule` — the module is refused at the requires-closure
   (`missing-required-component`), naming the slot. The MFA requirement — the second-factor authority —
   whose reach is not what the enabled factors reach is core's refusal
-  (`contribute-factory-failed`, naming the module).
+  (`contribute-factory-failed`, naming the module). Before any factory runs,
+  `config-validation-failed` names the key: one the `mfa` or
+  `mfa-totp-factor` section does not know, at any level
+  (`mfa.lockout: has a key it does not know: …`) — an empty `mfa.factors`
+  block an older configuration left is one: delete it — and a value out of
+  its range or shape, `mfa.transactionTtlSeconds` outside 60 to 1800
+  seconds, `mfa.maxAttemptsPerTransaction` outside 2 to 10 and an
+  `mfa.enrollment.requireEmailProof` other than `when-mail`, `always` or
+  `never` among them. An enabled TOTP factor (`mfaTotpFactorModule`) in a
+  composition no module provides `oauthTokenSettings` to is refused at the
+  requires-closure (`missing-required-component`), naming the slot: install
+  the oauth module, or provide the slot.
 - The WebAuthn second factor (`webauthnMfaFactorModule`,
   `packages/webauthn/src/mfaFactor/module.mts`): with
   `webauthn-mfa-factor.enabled` on and no relying party — the

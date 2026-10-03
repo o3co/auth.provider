@@ -74,17 +74,6 @@ const NOT_YET_STRICT: Readonly<Record<string, readonly string[]>> = {
 		"oauth.resourceIndicator",
 		"oauth.revocation",
 	],
-	mfa: [
-		"mfa",
-		"mfa.encryptionKeys.0",
-		"mfa.enrollment",
-		"mfa.lockout",
-		"mfa.manage",
-		"mfa.page",
-		"mfa.rateLimit",
-		"mfa.rateLimit.routes",
-	],
-	"mfa-totp-factor": ["mfa-totp-factor"],
 	webauthn: ["webauthn", "webauthn.rateLimit", "webauthn.rateLimit.authenticationOptions"],
 	"session-store": ["session-store.storage"],
 };

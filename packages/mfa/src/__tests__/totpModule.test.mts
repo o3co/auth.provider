@@ -22,8 +22,11 @@
  * resolver. It reads its own section, `mfa-totp-factor`, alone — never the key
  * ring, which a factor never holds — which boot parses with the module's
  * schema before any factory runs; a configuration still setting the section's
- * old path, `mfa.factors.totp`, is refused naming the new one. It registers no
- * session requirement: that is the MFA module's.
+ * old path, `mfa.factors.totp`, is refused naming the new one. The deployment's
+ * issuer, which an unset TOTP issuer defaults to the host of, is the
+ * `oauthTokenSettings` slot's, which the module requires: never the
+ * configuration's. It registers no session requirement: that is the MFA
+ * module's.
  */
 
 import {
@@ -33,7 +36,11 @@ import {
 	type MfaFactorResolver,
 	type Module,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig, unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	makeValidAppConfig,
+	unreadableModuleLeaves,
+} from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { mfaModule } from "#/module.mjs";
 import { encodeBase32 } from "#/totp/base32.mjs";
@@ -43,6 +50,19 @@ import { UNSET_RENAMED_VARIABLES } from "./moduleHarness.mjs";
 
 const TOTP = { enabled: true, algorithm: "SHA1", digits: 6, period: 30, window: 1 };
 
+/** The deployment's issuer the `oauthTokenSettings` slot holds unless a test names another. */
+const SLOT_ISSUER = "https://login.example";
+
+/** An issuer with no host a TOTP issuer could default to: an IPv6 literal would put a colon in the otpauth label. */
+const NO_TOTP_HOST = "https://[2001:db8::1]";
+
+/** The `oauthTokenSettings` slot, holding `issuer`: what the oauth module provides in a deployment. */
+const tokenSettings = (issuer: string): Module =>
+	defineModule({
+		name: "test:oauth-token-settings",
+		provides: { oauthTokenSettings: () => createTestOAuthTokenSettings({ issuer }) },
+	});
+
 const base = makeValidAppConfig();
 /** A configuration whose `mfa-totp-factor` section is `totp`, or which has none, capturing no renamed variable set. */
 const configWith = (
@@ -50,7 +70,7 @@ const configWith = (
 	mfa: Record<string, unknown> = {},
 ) => ({
 	...base,
-	oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://login.example" } },
+	oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: NO_TOTP_HOST } },
 	mfa: { mode: "off", ...mfa },
 	...(totp === undefined ? {} : { "mfa-totp-factor": totp }),
 	"renamed-variables": UNSET_RENAMED_VARIABLES,
@@ -82,20 +102,30 @@ afterEach(async () => {
 	disposable = undefined;
 });
 
-async function boot(config: Record<string, unknown>) {
+/** The modules a boot composes: the factor's, the slot's holding `issuer` (none when `null`), and the reader. */
+const modulesOf = (issuer: string | null, seen: { resolver?: MfaFactorResolver } = {}) => [
+	mfaTotpFactorModule,
+	...(issuer === null ? [] : [tokenSettings(issuer)]),
+	reader(seen),
+];
+
+async function boot(config: Record<string, unknown>, issuer: string | null = SLOT_ISSUER) {
 	const seen: { resolver?: MfaFactorResolver } = {};
 	const handle = await createApp({
-		modules: [mfaTotpFactorModule, reader(seen)],
+		modules: modulesOf(issuer, seen),
 		bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
 	});
 	disposable = handle;
 	return { handle, resolver: seen.resolver };
 }
 
-async function bootRefusal(config: Record<string, unknown>): Promise<BootError> {
+async function bootRefusal(
+	config: Record<string, unknown>,
+	issuer: string | null = SLOT_ISSUER,
+): Promise<BootError> {
 	try {
 		disposable = await createApp({
-			modules: [mfaTotpFactorModule, reader({})],
+			modules: modulesOf(issuer),
 			bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
 		});
 	} catch (error) {
@@ -106,9 +136,10 @@ async function bootRefusal(config: Record<string, unknown>): Promise<BootError> 
 }
 
 describe("mfaTotpFactorModule", () => {
-	it("is a module of its own, stateless, asking only for the config", () => {
+	it("is a module of its own, stateless, asking only for the oauthTokenSettings slot — never the whole configuration", () => {
 		expect(mfaTotpFactorModule.name).toBe("mfa-totp-factor");
-		expect(mfaTotpFactorModule.requires).toEqual(["config"]);
+		expect(mfaTotpFactorModule.requires).toEqual(["oauthTokenSettings"]);
+		expect(mfaTotpFactorModule.optional).toBeUndefined();
 		expect(mfaTotpFactorModule.replicaSafety).toBeUndefined();
 		expect(Object.keys(mfaTotpFactorModule.contributes ?? {})).toEqual(["mfaFactors"]);
 	});
@@ -131,7 +162,7 @@ describe("mfaTotpFactorModule", () => {
 		expect([...(resolver?.entries() ?? [])].map(([kind]) => kind)).toEqual(["totp"]);
 	});
 
-	it("builds the factor from the configuration: its window, and the issuer from oauth.jwt.issuer", async () => {
+	it("builds the factor from its section and the slot: its window, and the issuer from the oauthTokenSettings slot, whatever oauth.jwt.issuer names", async () => {
 		const { resolver } = await boot(configWith({ ...TOTP, window: 0 }));
 		const factor = resolver?.get("totp");
 		if (factor === undefined) throw new Error("no totp factor");
@@ -191,19 +222,34 @@ describe("mfaTotpFactorModule", () => {
 		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 
-	it("boots a switched-off factor whatever oauth.jwt.issuer names: the issuer is resolved only for a factor that is on", async () => {
-		const noHost = (enabled: unknown) => ({
-			...configWith({ ...TOTP, enabled }),
-			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://[2001:db8::1]" } },
-		});
-		const { resolver } = await boot(noHost(false));
+	it("boots a switched-off factor whatever the slot's issuer names: the issuer is resolved only for a factor that is on", async () => {
+		const { resolver } = await boot(configWith({ ...TOTP, enabled: false }), NO_TOTP_HOST);
 		expect(resolver?.get("totp")).toBeUndefined();
 		await disposable?.dispose();
 		disposable = undefined;
-		const refused = await bootRefusal(noHost(true));
+		const refused = await bootRefusal(configWith({ ...TOTP }), NO_TOTP_HOST);
 		expect(refused.reason).toBe("contribute-factory-failed");
 		expect(refused.message).toContain("mfa-totp-factor.issuer");
 		expect(refused.message).toContain("MFA_TOTP_FACTOR_ISSUER");
+	});
+
+	it("boots an issuer written for it over a slot whose issuer names no host", async () => {
+		const { resolver } = await boot(configWith({ ...TOTP, issuer: "Example Co" }), NO_TOTP_HOST);
+		expect(resolver?.get("totp")).toBeDefined();
+	});
+
+	it("refuses an enabled factor in a composition no module provides the slot to, naming the slot", async () => {
+		const refused = await bootRefusal(configWith({ ...TOTP }), null);
+		expect(refused.reason).toBe("missing-required-component");
+		expect(refused.details).toMatchObject({
+			missingKey: "oauthTokenSettings",
+			rootModule: "mfa-totp-factor",
+		});
+	});
+
+	it("boots a switched-off factor in a composition no module provides the slot to", async () => {
+		const { resolver } = await boot(configWith({ ...TOTP, enabled: false }), null);
+		expect(resolver?.get("totp")).toBeUndefined();
 	});
 
 	it("reads no key ring: the factor never holds a key", async () => {

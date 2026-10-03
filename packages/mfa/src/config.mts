@@ -93,19 +93,24 @@ const wholeNumber = (min: number, max: number, unit: string) => {
 };
 
 /**
- * {@link wholeNumber}, or the decimal digits an environment variable carries
- * as a string, whitespace around them allowed, which every leaf of a module's
- * section must read. Nothing else is read as a number: not `null`, `true`,
- * `""`, `"0x10"` or `"1e1"`, which `z.coerce.number()` would turn into one.
+ * `bounded`, or the decimal digits an environment variable carries as a
+ * string, whitespace around them allowed, read as their number and held to
+ * `bounded` — what every leaf of a module's section must read. Nothing else
+ * is read as a number: not `null`, `true`, `""`, `"0x10"` or `"1e1"`, which
+ * `z.coerce.number()` would turn into one.
  */
-export const environmentWholeNumber = (min: number, max: number, unit: string) => {
-	const error = `must be a whole number from ${min} to ${max}${unit}`;
-	const bounded = wholeNumber(min, max, unit);
-	return z.union(
+const fromEnvironment = (bounded: z.ZodNumber, error: string) =>
+	z.union(
 		[bounded, z.string({ error }).trim().regex(/^\d+$/, { error }).transform(Number).pipe(bounded)],
 		{ error },
 	);
-};
+
+/** A whole number from `min` to `max`, as {@link fromEnvironment} reads one. */
+export const environmentWholeNumber = (min: number, max: number, unit: string) =>
+	fromEnvironment(
+		wholeNumber(min, max, unit),
+		`must be a whole number from ${min} to ${max}${unit}`,
+	);
 
 const ISSUER_RULE =
 	"must be well-formed text, not blank, with no control character and no colon — the otpauth label puts one between the issuer and the account";
@@ -119,11 +124,12 @@ const isShowableIssuer = (issuer: string): boolean =>
 
 /**
  * The TOTP factor's section, `mfa-totp-factor`: its switch and parameters,
- * and the issuer an authenticator app shows. The TOTP factor's module parses
- * it with this schema before any factory runs; the issuer's default, which
- * needs the deployment's issuer, is `readMfaTotpSettings`'s.
+ * and the issuer an authenticator app shows. Strict: a key the section does
+ * not know is refused by its name. The TOTP factor's module parses it with
+ * this schema before any factory runs; the issuer's default, which needs the
+ * deployment's issuer, is `readMfaTotpSettings`'s.
  */
-export const mfaTotpConfigSchema = z.object(
+export const mfaTotpConfigSchema = z.strictObject(
 	{
 		enabled: coerceBooleanFromEnv,
 		algorithm: z.enum(TOTP_ALGORITHMS, {
@@ -156,6 +162,10 @@ const mfaModeSchema = z.enum(MFA_MODES, { error: 'must be "off", "optional" or "
 
 const RING_SHAPE = "must be a list of { id?, key } entries";
 
+/** An entry of the ring's refusal: a key it does not know, named, or {@link RING_SHAPE}. */
+const ringEntryError = (issue: Parameters<typeof sectionError>[0]): string =>
+	issue.code === "unrecognized_keys" ? sectionError(issue) : RING_SHAPE;
+
 /**
  * The fewest and the most attempts one transaction may allow: an email-proof
  * first binding spends one on the proof and one on the binding.
@@ -163,10 +173,13 @@ const RING_SHAPE = "must be a list of { id?, key } entries";
 const MFA_MAX_ATTEMPTS_PER_TRANSACTION = { min: 2, max: 10 } as const;
 
 const POSITIVE_WHOLE = "must be a positive whole number";
-const positiveWhole = z
-	.number({ error: POSITIVE_WHOLE })
-	.int({ error: POSITIVE_WHOLE })
-	.positive({ error: POSITIVE_WHOLE });
+const positiveWhole = fromEnvironment(
+	z
+		.number({ error: POSITIVE_WHOLE })
+		.int({ error: POSITIVE_WHOLE })
+		.positive({ error: POSITIVE_WHOLE }),
+	POSITIVE_WHOLE,
+);
 
 /**
  * `mfa.lockout`, the subject lock: each field a positive whole number here;
@@ -175,7 +188,7 @@ const positiveWhole = z
  * the Date range — is core's `checkConfiguredMfaLockoutPolicy`, which
  * `readMfaSettings` applies under the key.
  */
-const lockoutSchema = z.object(
+const lockoutSchema = z.strictObject(
 	{
 		threshold: positiveWhole,
 		baseSeconds: positiveWhole,
@@ -188,7 +201,7 @@ const lockoutSchema = z.object(
 );
 
 /** `mfa.page`, the MFA page a step-up starts on: a section holding its `url`. */
-const mfaPageSchema = z.object(
+const mfaPageSchema = z.strictObject(
 	{ url: z.string({ error: "must be a string" }) },
 	{ error: sectionError },
 );
@@ -209,9 +222,9 @@ export const MFA_RECENT_WINDOW_SECONDS = {
  * session stays recent — what adding or removing a way into the account asks
  * of the session.
  */
-const manageSchema = z.object(
+const manageSchema = z.strictObject(
 	{
-		maxAgeSeconds: wholeNumber(
+		maxAgeSeconds: environmentWholeNumber(
 			MFA_RECENT_WINDOW_SECONDS.min,
 			MFA_RECENT_WINDOW_SECONDS.max,
 			" seconds",
@@ -231,11 +244,27 @@ const MFA_MAX_FACTORS_PER_SUBJECT = { min: 2, max: 100 } as const;
  * comes before a first binding (the MFA ADR's D24) — `when-mail`, `always`
  * or `never`.
  */
-const enrollmentSchema = z.object(
+const enrollmentSchema = z.strictObject(
 	{
 		requireEmailProof: z.enum(REQUIRE_EMAIL_PROOF, {
 			error: 'must be "when-mail", "always" or "never"',
 		}),
+	},
+	{ error: sectionError },
+);
+
+/**
+ * `mfa.rateLimit`: `routes`, the budget every `/session/mfa` POST limits
+ * under, `{ limit, windowSeconds }`. The schema holds its shape alone: the MFA
+ * module's contribution reads the two values as core's
+ * `requireUsableConfiguredRateLimitSpec` does — a number, or a string of
+ * decimal digits — and refuses a budget no limiter can apply, naming the key.
+ */
+const rateLimitSchema = z.strictObject(
+	{
+		routes: z
+			.strictObject({ limit: z.unknown(), windowSeconds: z.unknown() }, { error: sectionError })
+			.optional(),
 	},
 	{ error: sectionError },
 );
@@ -245,43 +274,48 @@ const MFA_STORE_TIMEOUT_MS = { min: 1_000, max: 2_147_483_647 } as const;
 
 /**
  * The MFA module's section, `mfa`: its mode, the page's shape, the key ring,
- * a transaction's life and attempts, the subject lock, recent MFA's window,
- * the first binding's proof and the records a subject may hold, with their
- * ranges. The page may be left out, and an empty url is
- * allowed: the module refuses either as unset. The ring's refusals (a key
- * that is not 32 bytes, an empty ring, a duplicate id), the sample key's and
- * how the lock's fields relate are not the schema's: `readMfaSettings` makes
- * them, where the keys are decoded, the environment is known and core's rule
- * is applied.
+ * a transaction's life and attempts, the subject lock, the routes' budget,
+ * recent MFA's window, the first binding's proof and the records a subject
+ * may hold, with their ranges. Strict at every level: a key the section does
+ * not know is refused by its name. Every number also reads the decimal digits
+ * an environment variable carries. The page may be left out, and an empty url
+ * is allowed: the module refuses either as unset; so may the routes' budget,
+ * which leaves the routes to a wired limiter. The ring's refusals (a key that
+ * is not 32 bytes, an empty ring, a duplicate id), the sample key's, how the
+ * lock's fields relate and whether the routes' budget is one a limiter can
+ * apply are not the schema's: `readMfaSettings` and the module make them,
+ * where the keys are decoded, the environment is known and core's rules are
+ * applied.
  */
-export const mfaConfigSchema = z.object(
+export const mfaConfigSchema = z.strictObject(
 	{
 		mode: mfaModeSchema,
 		page: mfaPageSchema.optional(),
 		encryptionKeys: z.array(
-			z.object(
+			z.strictObject(
 				{
 					id: z.string({ error: "must be a string, or left out" }).optional(),
 					key: z.string({ error: "must be canonical base64 of 32 bytes" }).optional(),
 				},
-				{ error: RING_SHAPE },
+				{ error: ringEntryError },
 			),
 			{ error: RING_SHAPE },
 		),
-		transactionTtlSeconds: wholeNumber(
+		transactionTtlSeconds: environmentWholeNumber(
 			MFA_TRANSACTION_TTL_SECONDS.min,
 			MFA_TRANSACTION_TTL_SECONDS.max,
 			" seconds",
 		),
-		maxAttemptsPerTransaction: wholeNumber(
+		maxAttemptsPerTransaction: environmentWholeNumber(
 			MFA_MAX_ATTEMPTS_PER_TRANSACTION.min,
 			MFA_MAX_ATTEMPTS_PER_TRANSACTION.max,
 			"",
 		),
 		lockout: lockoutSchema,
+		rateLimit: rateLimitSchema.optional(),
 		manage: manageSchema,
 		enrollment: enrollmentSchema,
-		maxFactorsPerSubject: wholeNumber(
+		maxFactorsPerSubject: environmentWholeNumber(
 			MFA_MAX_FACTORS_PER_SUBJECT.min,
 			MFA_MAX_FACTORS_PER_SUBJECT.max,
 			" records",
@@ -295,21 +329,17 @@ export const mfaConfigSchema = z.object(
 	{ error: sectionError },
 );
 
+/** The `mfa` section as the MFA module reads it: {@link mfaConfigSchema}, its mode left out reading as unset. */
+const mfaSectionObjectSchema = mfaConfigSchema.partial({ mode: true });
+
 /**
  * What the MFA module's section schema checks before any factory runs: the
- * mode and the page's shape, as {@link mfaConfigSchema} holds them, and every
- * other key handed on unread, for {@link readMfaSettings}. A missing section
- * or mode reads as unset, which the module refuses as it refuses `off`; a
- * missing page or an empty url is the module's to refuse.
+ * whole section, as {@link mfaConfigSchema} holds it, every key it does not
+ * know refused. A missing section or mode reads as unset, which the module
+ * refuses as it refuses `off`; a missing page or an empty url is the module's
+ * to refuse, and so is what {@link readMfaSettings} refuses beyond the schema.
  */
-export const mfaSectionSchema = mfaConfigSchema
-	.pick({ mode: true, page: true })
-	.partial()
-	.loose()
-	.optional();
-
-/** What the MFA module's settings parse: every key of {@link mfaConfigSchema} but the mode and the page. */
-const mfaModuleSettingsSchema = mfaConfigSchema.omit({ mode: true, page: true });
+export const mfaSectionSchema = mfaSectionObjectSchema.optional();
 
 /**
  * `mfa-totp-factor` as the factor and its module read it: the switch and the
@@ -406,7 +436,7 @@ function issuerHost(issuer: unknown): string {
 	// A bracketed IPv6 host would carry the colon the label cannot.
 	if (host === "" || host.includes(":")) {
 		throw new RangeError(
-			`${TOTP_SECTION}.issuer is not set, and oauth.jwt.issuer names no host it could default to: set MFA_TOTP_FACTOR_ISSUER`,
+			`${TOTP_SECTION}.issuer is not set, and the deployment's issuer (the oauthTokenSettings slot's) names no host it could default to: set MFA_TOTP_FACTOR_ISSUER`,
 		);
 	}
 	return host;
@@ -427,9 +457,8 @@ function totpSettings(totp: z.infer<typeof mfaTotpConfigSchema>, issuer: unknown
 /**
  * The TOTP factor's section, `mfa-totp-factor` — what the TOTP factor's
  * module reads. A `RangeError` names each key refused. `options.issuer` is
- * the deployment's issuer — the `oauthTokenSettings` slot's when the
- * composition holds it, `oauth.jwt.issuer` otherwise — whose host an unset
- * TOTP issuer defaults to.
+ * the deployment's issuer — the `oauthTokenSettings` slot's — whose host an
+ * unset TOTP issuer defaults to.
  */
 export function readMfaTotpSettings(
 	section: unknown,
@@ -540,16 +569,17 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
  * and whether it carries the development sample key, a transaction's life
  * and attempts, recent MFA's window, the first binding's proof, the records
  * a subject may hold, and the subject lock — held to core's
- * `checkConfiguredMfaLockoutPolicy` under `mfa.lockout`. Not the mode, which the
- * module's section schema reads, and no factor's section: the TOTP factor's
- * is {@link readMfaTotpSettings}'s. `options.environment` is the name the
+ * `checkConfiguredMfaLockoutPolicy` under `mfa.lockout`. The whole section is
+ * held to its schema, as the module's section schema holds it; not the mode,
+ * the page or the routes' budget, which the module reads from its section,
+ * and no factor's section: the TOTP factor's is {@link readMfaTotpSettings}'s. `options.environment` is the name the
  * composition root selected its configuration by, and
  * `options.deploymentMode` the `deploymentMode` slot's value. A refusal is a
  * `RangeError` that names the key and quotes no key material.
  */
 export function readMfaSettings(section: unknown, options: MfaSettingsOptions): MfaSettings {
 	checkDeploymentMode(options.deploymentMode, "mfa settings: deploymentMode");
-	const settings = parseSection(mfaModuleSettingsSchema, section, "mfa");
+	const settings = parseSection(mfaSectionObjectSchema, section, "mfa");
 	const { ring, developmentSampleKeyAccepted } = readKeyRing(settings.encryptionKeys, options);
 	checkConfiguredMfaLockoutPolicy(settings.lockout, "mfa.lockout");
 	return {

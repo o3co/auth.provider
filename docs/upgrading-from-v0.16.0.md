@@ -210,9 +210,11 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   and the key, where it used to be ignored. Before you upgrade, check every
   key you set against the module's README, and correct or delete the ones it
   does not list. The sections that still accept an unknown key are `oauth`
-  (the section and its nested blocks), `mfa` (the section and its nested
-  blocks), `mfa-totp-factor`, `webauthn` (the section and its `rateLimit`
-  blocks) and `session-store.storage`. The keys under `audit-sink` are the
+  (the section and its nested blocks), `webauthn` (the section and its
+  `rateLimit` blocks) and `session-store.storage`. `mfa`, at every level, and
+  `mfa-totp-factor` refuse one too (#1329): an empty `mfa.factors` block an
+  older configuration leaves behind (the TOTP factor's old path, its
+  variables unset) is such a key — delete it. The keys under `audit-sink` are the
   names of the sinks you register, and each sink's options are its own, so
   those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
@@ -457,6 +459,14 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **BREAKING: an enabled TOTP factor requires the `oauthTokenSettings`
+  slot (#1329).** `mfaTotpFactorModule` takes the deployment's issuer, which
+  an unset `mfa-totp-factor.issuer` defaults to the host of, from the slot
+  alone and no longer reads `oauth.jwt.issuer` from the whole configuration.
+  `oauthModule` provides the slot; a composition without it whose TOTP factor
+  is on provides the slot itself, or the boot is refused
+  (`missing-required-component`, naming `oauthTokenSettings`). A factor
+  switched off by `mfa-totp-factor.enabled = false` requires nothing.
 - **The federation projections.** A name-keyed contribution factory (a
   `grants` or `mfaFactors` entry, say) that reads `federationProviders` or
   `federationRedirectPolicyResolver` while it runs refuses the boot
