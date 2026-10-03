@@ -49,6 +49,7 @@ import {
 	type SupportsSessionsOnlyRevocation,
 	supportsDelegatedAuthorization,
 	type UserSessionStore,
+	wholeNumberFromEnv,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import {
@@ -114,6 +115,10 @@ export const federationGrantsConfigSchema = z
 		refreshLockTtlMs: duration(z.number().int().positive()),
 		lockWaitMs: duration(z.number().int().nonnegative()),
 		persistRetryBudgetMs: duration(z.number().int().positive()),
+		// The rotation budget: upstream refresh-token rotations a grant may
+		// take in a window, and the window in seconds.
+		rotationBudget: wholeNumberFromEnv(z.number().int().positive()).optional(),
+		rotationWindow: duration(z.number().int().positive()),
 		// Whether a subject-wide revocation may be asked to leave this subject's
 		// established grants standing: an allowance the caller must use.
 		allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),

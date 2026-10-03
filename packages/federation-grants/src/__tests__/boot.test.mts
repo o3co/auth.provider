@@ -402,6 +402,33 @@ describe("enabling the feature", () => {
 		await handle.dispose();
 	});
 
+	it("boots with the rotation budget's settings written", async () => {
+		const handle = await boot({ grants: { rotationBudget: 2, rotationWindow: "600" } });
+		await handle.dispose();
+	});
+
+	it("refuses a rotation budget or window below one, naming the key", async () => {
+		for (const [key, value] of [
+			["rotationBudget", 0],
+			["rotationBudget", "1.5"],
+			["rotationWindow", 0],
+			["rotationWindow", "an hour"],
+		] as const) {
+			const error = await boot({ grants: { [key]: value } }).then(
+				() => undefined,
+				(thrown: unknown) => thrown,
+			);
+			expect(error, `${key} ${value}`).toBeInstanceOf(BootError);
+			const { issues } = (error as BootError).details as {
+				issues: readonly { readonly path: readonly PropertyKey[] }[];
+			};
+			expect(
+				issues.map((i) => i.path.join(".")),
+				`${key} ${value}`,
+			).toContain(`federation-grants.${key}`);
+		}
+	});
+
 	it("refuses to boot with nowhere to keep grants", async () => {
 		await expect(boot({ withStore: false })).rejects.toThrow(/federationGrantStore/);
 	});
