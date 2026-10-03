@@ -78,14 +78,16 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     on the entry, enabled or not, or the boot is refused at config
     validation (`config-validation-failed` at
     `core.federations.<name>.type`, [below](#values-read-more-strictly)).
-  - A fork that composes `googleFederationModule` or
-    `oidcFederationModule(name)` beside the new list removes it: a module
-    that contributes `federations` or `federationRedirectPolicies` is
-    refused as `contribution-kind-guarded`
-    ([below](#compositions-and-code)). A module of its own that only
-    provides a bridge's slot (`googleFederationConfig`,
-    `oidcFederationConfigs`) is not refused: with those modules gone,
-    nothing reads the slot.
+  - A fork that composed `googleFederationModule` or
+    `oidcFederationModule(name)` beside the new list removes it: both are
+    gone from their packages
+    ([exports](#exports-removed-and-signatures-changed)), and a module of
+    its own that contributes `federations` or `federationRedirectPolicies`
+    is refused as `contribution-kind-guarded`
+    ([below](#compositions-and-code)). A module of its own that provided a
+    bridge's slot (`googleFederationConfig`, `oidcFederationConfigs`) goes
+    too: the packages no longer declare those slots, and nothing reads
+    them.
   - Code of a fork's own that read `core.federations` from what
     `readSwitches` answers gets nothing there now. Read it at boot, from the
     parsed configuration (a module that requires `config`, as the bridges
@@ -515,6 +517,38 @@ modules fills them.
   `FederationRedirectPolicyUnpairedDetails` are gone, and `BootErrorReason`
   loses `"federation-redirect-policy-unpaired"`; a federation registers
   through its type ([above](#slots-admission-and-wiring)).
+- **BREAKING: each federation package ships only its type module** (#1297,
+  #1299, #1300, #1301). Removed, each with the `ComponentMap` slot it
+  required: `googleFederationModule` and `googleFederationConfig` from
+  federation-google; `githubFederationModule` and `githubFederationConfig`
+  from federation-github; `appleFederationModule` and
+  `appleFederationConfig` from federation-apple; and
+  `oidcFederationModule(name)`, `oidcFederationNames`,
+  `readOidcFederationConfigs` and `oidcFederationConfigs` from
+  federation-oidc. Compose `googleFederationTypeModule()`,
+  `githubFederationTypeModule()`, `appleFederationTypeModule()` or
+  `oidcFederationTypeModule()` instead, drop the module that filled the
+  slot, and write each client as a
+  `core.federations.<name> { type = "<type>", … }` entry with the flat keys
+  its type's schema names (each package's README). The entry's name is the
+  federation's, so `core.federations.google` keeps its routes under
+  `/session/oauth/federation/google`; a second client of a type is another
+  entry of that type. A test that handed the provider a `fetch` through the
+  slot passes it to the type module instead
+  (`oidcFederationTypeModule({ fetch })`, and so for each), which sends every
+  upstream request of every entry of its type through it.
+  - **Apple's key goes inline.** The Apple README's bridge read the key from
+    the file `privateKeyPath` named; an entry takes the `.p8` file's PEM
+    contents as `privateKey`, for example through an environment
+    substitution (`privateKey = ${APPLE_PRIVATE_KEY}`), and refuses
+    `privateKeyPath` as a key its schema does not name. An entry's
+    `privateKey` is the PEM the configuration held at boot, so a key
+    replaced under the type module takes effect at the next restart.
+    Rotating the key without a restart (a `privateKey` getter that re-reads
+    the file) and a `clientSecret` resolver remain available only through
+    `createAppleProvider`, in code: a federation type of your own whose
+    factory builds the provider with it
+    ([Apple README](../packages/federation-apple/README.md#the-rotating-client-secret)).
 - **Rate-limit helpers** (`resolveSeededLimitSpecs`, `resolveLoginLimitSpec`,
   the per-feature prefixes and specs) are gone from core; the prefixes are
   exported by the packages that key them (#782).
