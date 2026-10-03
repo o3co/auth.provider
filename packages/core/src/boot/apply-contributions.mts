@@ -27,7 +27,7 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
-import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
+import type { GrantHandler, MfaFactor } from "../modules/manifest/contributes-map.mjs";
 import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
@@ -56,6 +56,7 @@ import type {
 	ComponentWorld,
 	ContributionCollectorMap,
 	ContributionKind,
+	GrantCollector,
 	ListCollector,
 	NameKeyedCollector,
 	RegistryWorld,
@@ -130,15 +131,21 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 
 /**
  * Instantiate a stable read-side `GrantHandlerResolver` backed by the given
- * `NameKeyedCollector`. `get` / `entries` read through at call time, so a
- * factory that captures the resolver before the collector is populated sees
- * the full view at request time.
+ * `NameKeyedCollector`. A grant type whose factory answered `null` — the
+ * grant switched off by its module's settings — is absent from what it
+ * answers, as a grant type no module contributes is. `get` / `entries` read
+ * through at call time, so a factory that captures the resolver before the
+ * collector is populated sees the full view at request time.
  * @internal
  */
-function makeGrantHandlerResolver(collector: NameKeyedCollector<unknown>): GrantHandlerResolver {
+function makeGrantHandlerResolver(collector: GrantCollector): GrantHandlerResolver {
 	return {
-		get: (grantType: string) => collector.get(grantType) as ReturnType<GrantHandlerResolver["get"]>,
-		entries: () => collector.entries() as ReturnType<GrantHandlerResolver["entries"]>,
+		get: (grantType: string) => collector.get(grantType) ?? undefined,
+		entries: function* (): IterableIterator<readonly [string, GrantHandler]> {
+			for (const [grantType, handler] of collector.entries()) {
+				if (handler !== null) yield [grantType, handler] as const;
+			}
+		},
 	};
 }
 
@@ -380,9 +387,7 @@ export function prepareSyntheticProjections(
 		admissionActions,
 	} = contributionKinds;
 	if (grants !== undefined) {
-		inject("grantHandlerResolver", () =>
-			makeGrantHandlerResolver(grants as NameKeyedCollector<unknown>),
-		);
+		inject("grantHandlerResolver", () => makeGrantHandlerResolver(grants));
 	}
 	if (tokenExchangeValidators !== undefined) {
 		inject("tokenExchangeValidatorResolver", () =>
@@ -461,8 +466,8 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
  *   (`isUsableRateLimitSpec`). What registers is the frozen copy that was
  *   validated.
  *
- * `null` (switched off by configuration) passes for `mfaFactors` and
- * `rateLimitBudgets` and keeps the name claimed.
+ * `null` (switched off by configuration) passes for `grants`, `mfaFactors`
+ * and `rateLimitBudgets` and keeps the name claimed.
  * @internal
  */
 function checkNameKeyedValue(
@@ -472,6 +477,7 @@ function checkNameKeyedValue(
 	issuer: string | undefined,
 ): unknown {
 	if (kind === "grants") {
+		if (value === null) return value;
 		// What `/oauth/token` dispatches to, calling `handle`, and what the
 		// resolver lists as registered: one answer to both only when the value
 		// is a handler.
@@ -481,7 +487,7 @@ function checkNameKeyedValue(
 				: undefined;
 		if (typeof handle !== "function") {
 			throw new RangeError(
-				`grants "${name}": the factory must answer a grant handler, an object whose handle is a function`,
+				`grants "${name}": the factory must answer a grant handler, an object whose handle is a function, or null to switch the grant off`,
 			);
 		}
 		return value;
@@ -1251,9 +1257,25 @@ export async function applyContributions(
 				| undefined;
 			if (collector === undefined) continue;
 			const name = entry.key as string;
-			if (collector.get(name) === undefined) {
+			const target = collector.get(name);
+			if (target === undefined) {
 				throw new BootError({
 					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}".`,
+					reason: "override-target-missing",
+					stage: "applyContributions",
+					details: {
+						reason: "override-target-missing",
+						kind: entry.kind,
+						name,
+						overridingModule: moduleName,
+					},
+				});
+			}
+			// A switched-off grant has no handler to replace: an override of it
+			// would switch on what its owner's settings switched off.
+			if (entry.kind === "grants" && target === null) {
+				throw new BootError({
+					message: `Pre-scan: override target "${name}" for kind "${entry.kind}" missing in module "${moduleName}". Its contributor answered null: the grant is switched off, so there is no handler to override.`,
 					reason: "override-target-missing",
 					stage: "applyContributions",
 					details: {
