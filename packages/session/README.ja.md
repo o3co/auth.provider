@@ -227,7 +227,7 @@ CSRF トークンの鍵は `session-store.secret` から導出され、`session-
 | フェデレーションのコールバック | `["fed"]` — `fed` は「フェデレーション経由」を表すデプロイ定義のマーカーで、core の `FEDERATED_AMR`。このパッケージも re-export する。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。`trustUpstreamAmr = true` のフェデレーションでは、その横に上流 IdP の `amr` | primary は `fed`、フェデレーションの名前、そして — フェデレーションが IdP を信頼しない限り — IdP の `amr` を `upstreamAmr` として |
 | アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない | 変わらない |
 
-**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`core.federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのセクションの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationTrustsUpstreamAmr` で読む — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは合成を拒否し（`RangeError`）、環境変数が渡す綴りはスキーマが変換する。各フェデレーションのスイッチはインストールされた名前ごとに保持され、ログインはそのコールバックが来た名前のスイッチを取る。`authentication.federation` が名指すのもその名前である。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
+**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`core.federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのエントリの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationTrustsUpstreamAmr` で読む — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは合成を拒否し（`RangeError`）、環境変数が渡す綴りはスキーマが変換する。各フェデレーションのスイッチはインストールされた名前ごとに保持され、ログインはそのコールバックが来た名前のスイッチを取る。`authentication.federation` が名指すのもその名前である。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
 
 **信頼の取り消し。** `trustUpstreamAmr` を `true` から `false` にしても、既にそのもとで記録されたセッションには届かない: その `amr` は IdP の値を持ち続ける — 書かれたときには保証されていた — ので、そこから発行されたトークンはそれを運び続け、そこから発行されたリフレッシュトークンはファミリーが終わるまで（ログインから `oauth.refreshToken.expiresIn`、既定 1 日）それを引き継ぐ。すぐに取り消すには、そのフェデレーション経由でサインインした subject について core の `revokeAllForSubject` を呼ぶ: そのセッション、そこから発行されたリフレッシュファミリーとコード、そしてこのプロバイダー自身が検証するすべてのアクセストークン（イントロスペクション、`/oauth/userinfo`、フェデレーショントークンのルート、トークン交換、リフレッシュグラント）を終わらせ、利用者は新しい設定のもとで再びログインする。リソースサーバーがオフラインで検証するアクセストークンは `exp` まで生きる。`revokeAllForSubject` には `subjectRevocation` と `subjectSessionIndex` の配線が要り、無ければ自身を `incomplete` と報告する。手順は [運用ランブック](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust) にある。
 
@@ -393,47 +393,44 @@ cookie を厳密に一つのホストに固定するのは `__Host-` であり�
 
 ### フェデレーションの設定
 
-`core.federations.<name>` がフェデレーションに名前を付け、`extractFederationSection`（[`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts)）がそれを読むモジュールのためにセクションを正規化する。受け付ける形は三つ:
+`core.federations.<name>` のエントリはそれぞれ一つのフェデレーションで、`/session/oauth/federation/<name>` で到達する。エントリはフラットで、core が所有するキーとその `type` のキーが並んで置かれる。
 
 ```hocon
 core.federations {
-  # 省略形: キーが type を表す（ここでは "google"）。
   google {
     enabled = true
+    type = "google"
     clientId = ${CORE_FEDERATIONS_GOOGLE_CLIENT_ID}
     clientSecret = ${CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
     clientUrl = "https://app.example.com/"
   }
 
-  # type を明示したフラットな形。
   okta {
     enabled = true
     type = "oidc"
     issuer = "https://dev-123.okta.com"
+    callbackURL = "https://auth.example.com/session/oauth/federation/okta/callback"
     # …
   }
 
-  # ネストした形: type の名前のサブセクションの下に資格情報を置く。
   keycloak {
-    enabled = true
+    enabled = false
     type = "oidc"
-    oidc {
-      issuer = "https://sso.example.com/realms/staff"
-      # …
-    }
+    issuer = "https://sso.example.com/realms/staff"
+    # …
   }
 }
 ```
 
-ネストした形のセクションがトップレベルにも `clientId`・`clientSecret`・`callbackURL` を持つと起動に失敗する。それ以外のトップレベルのフィールドはサブセクションと並んで残り、サブセクションも同じフィールドを持てばサブセクションの値で上書きされる。`enabled = true` の無いセクションは無視される。Google・GitHub・Apple のモジュールはシングルテナント — それぞれ固定の名前（`google`、`github`、`apple`）でプロバイダーを登録する — なので、デプロイが持てるのはそれぞれ高々一つ。`type = "oidc"` のセクション（[`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md)）は一セクションが一フェデレーションになる。
+core が所有するのは `enabled`、`type`、`trustUpstreamAmr`、`callbackURL` で、それ以外のキーはエントリの type のもの。すべてのエントリは、有効か無効かにかかわらず `type` を名指しする: 無いもの、または空のものは起動を拒否される（`core.federations.<name>.type` における `config-validation-failed`）。有効なエントリを扱うのは、その type を `federationTypes` に登録したモジュールで、そのモジュールがエントリごとにプロバイダーとリダイレクトポリシーを一つずつ、どちらもエントリの名前で作る。したがって一つの type はいくつでもエントリを持てる。Google・GitHub・Apple・OIDC の各パッケージはそのようなモジュール — `googleFederationTypeModule()`、`githubFederationTypeModule()`、`appleFederationTypeModule()`、`oidcFederationTypeModule()` — を export し、それぞれ type `"google"`、`"github"`、`"apple"`、`"oidc"` を扱う（任意の OpenID Connect IdP には [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md)）。各パッケージの README がその type のキーを挙げる。無効なエントリは core のスキーマより先では読まれない。
 
 起動時の規則:
 
-- 有効なセクションはすべて `callbackURL` を持たなければならず、無ければ `sessionModule` が起動に失敗する。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
-- `trustUpstreamAmr` はどの形でもセクションの最上位、`enabled` の横に置く。無ければ `false` で、（スキーマの変換のあと）真偽値でないものは起動に失敗する。ネストした形のサブセクションの中（`core.federations.okta.oidc.trustUpstreamAmr`）に書いても起動に失敗し、`enabled` の横に置くよう告げる — さもなければ無視されてしまう。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
+- core は type に振り分けるすべてのエントリに空でない `callbackURL` を要求し、無ければ起動を拒否する（`core.federations.<name>.callbackURL` における `config-validation-failed`）。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
+- `trustUpstreamAmr` はエントリの最上位、`enabled` の横でだけ読まれる。無ければ `false` で、（環境変数が渡す綴りを変換したあと）真偽値でないものは core のスキーマが拒否する。別のキーの下に置いた `trustUpstreamAmr`（`core.federations.okta.oidc.trustUpstreamAmr`）は読まれない。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
 - すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。`type` で扱われるフェデレーション（`federationTypes`）は、core から両方を対で受け取る。
-- `sessionModule` は設定と contribution を突き合わせない。一方向は core の起動が検査する: 設定で有効だがどのモジュールも扱わないフェデレーションは起動を拒否される（`federation-type-unhandled`）。逆方向は検査されない: 有効なセクションなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。これで起動を失敗させたい組み立ては自分で検査を加える。
+- `sessionModule` は設定と contribution を突き合わせない。一方向は core の起動が検査する: その `type` をインストールされたどのモジュールも登録しない有効なエントリは起動を拒否される（`federation-type-unhandled`）。逆方向は検査されない: 有効なエントリなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。これで起動を失敗させたい組み立ては自分で検査を加える。
 
 ### リダイレクト許可リスト
 
