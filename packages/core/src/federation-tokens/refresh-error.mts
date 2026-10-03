@@ -237,26 +237,17 @@ export function classifyFederationRefreshError(
  * a rotation counted for it may be given back. Anything that may have been
  * acted on is not: the budget counts rotations that may have happened.
  *
- * The upstream's own code on the thrown value (`.error`) proves it only when
- * it is one this provider knows and not an outage's
+ * Read by `readFederationUpstreamDelivery` over the whole chain. The
+ * upstream's own code (`.error`), at any Error level, proves it only when it
+ * is one this provider knows and not an outage's
  * ({@link FEDERATION_UPSTREAM_OUTAGE_CODES}, which a retrieval stamps as "may
- * have been processed"); any other code there is a reason to doubt. Beside
- * it, the transport and the status are read by
- * `readFederationUpstreamDelivery`: `unknown` there decides, `unprocessed`
- * proves it, and silence leaves it to the code. Never throws.
+ * have been processed"); any other code there doubts. Never throws.
  */
 export function isDefiniteFederationRefreshFailure(error: unknown): boolean {
-	let code: unknown;
-	if (error !== null && typeof error === "object") {
-		code = readOrUnreadable(error, "error");
-		if (code === UNREADABLE) return false;
-	}
-	const known =
-		code !== undefined &&
-		isKnownFederationRefreshErrorCode(code) &&
-		!FEDERATION_UPSTREAM_OUTAGE_CODES.has(code);
-	if (code !== undefined && !known) return false;
-	const delivery = readFederationUpstreamDelivery(error);
-	if (delivery === "unknown") return false;
-	return delivery === "unprocessed" || known;
+	return readFederationUpstreamDelivery(error, judgeUpstreamErrorCode) === "unprocessed";
 }
+
+const judgeUpstreamErrorCode = (code: unknown): "unprocessed" | "unknown" =>
+	isKnownFederationRefreshErrorCode(code) && !FEDERATION_UPSTREAM_OUTAGE_CODES.has(code)
+		? "unprocessed"
+		: "unknown";

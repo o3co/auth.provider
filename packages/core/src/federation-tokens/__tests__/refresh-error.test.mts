@@ -532,6 +532,16 @@ describe("isDefiniteFederationRefreshFailure — a refresh the upstream provably
 		).toBe(false);
 	});
 
+	it("is not an outage named at a deeper level, beside a status that would have proved it", () => {
+		expect(
+			isDefiniteFederationRefreshFailure(
+				new Error("adapter", {
+					cause: Object.assign(new Error("e"), { error: "temporarily_unavailable", status: 400 }),
+				}),
+			),
+		).toBe(false);
+	});
+
 	it("is not what says nothing", () => {
 		expect(isDefiniteFederationRefreshFailure(new Error("something"))).toBe(false);
 		expect(isDefiniteFederationRefreshFailure("thrown string")).toBe(false);

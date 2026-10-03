@@ -373,17 +373,21 @@ describe("readFederationUpstreamOutage — the walk, saying when a field it read
 	});
 });
 
+/** The upstream's own code, judged as the refresh-error reader judges it: `invalid_client` proves, anything else doubts. */
+const delivery = (error: unknown) =>
+	readFederationUpstreamDelivery(error, (code) =>
+		code === "invalid_client" ? "unprocessed" : "unknown",
+	);
+
 describe("readFederationUpstreamDelivery — whether the request is known not to have been acted on", () => {
 	const statusError = (status: number, over: object = {}) =>
 		Object.assign(new Error("e"), { status }, over);
 
 	it("is `unprocessed` for an answer the upstream gives without acting: a 4xx but 408 and 499, a 501 and a 503", () => {
 		for (const status of [400, 401, 403, 404, 429, 501, 503]) {
-			expect(readFederationUpstreamDelivery(statusError(status)), String(status)).toBe(
-				"unprocessed",
-			);
+			expect(delivery(statusError(status)), String(status)).toBe("unprocessed");
 			expect(
-				readFederationUpstreamDelivery(new Error("e", { cause: new ForeignResponse(status) })),
+				delivery(new Error("e", { cause: new ForeignResponse(status) })),
 				`Response ${status}`,
 			).toBe("unprocessed");
 		}
@@ -391,9 +395,9 @@ describe("readFederationUpstreamDelivery — whether the request is known not to
 
 	it("is `unknown` for a status that may follow a forwarded request: 408, 499, 500, 502, 504 and any other 5xx", () => {
 		for (const status of [408, 499, 500, 502, 504, 520, 522, 524, 599]) {
-			expect(readFederationUpstreamDelivery(statusError(status)), String(status)).toBe("unknown");
+			expect(delivery(statusError(status)), String(status)).toBe("unknown");
 			expect(
-				readFederationUpstreamDelivery(new Error("e", { cause: new ForeignResponse(status) })),
+				delivery(new Error("e", { cause: new ForeignResponse(status) })),
 				`Response ${status}`,
 			).toBe("unknown");
 		}
@@ -413,10 +417,9 @@ describe("readFederationUpstreamDelivery — whether the request is known not to
 			"ERR_TLS_CERT_ALTNAME_INVALID",
 			"ERR_TLS_HANDSHAKE_TIMEOUT",
 		]) {
-			expect(
-				readFederationUpstreamDelivery(new TypeError("fetch failed", { cause: coded(code) })),
-				code,
-			).toBe("unprocessed");
+			expect(delivery(new TypeError("fetch failed", { cause: coded(code) })), code).toBe(
+				"unprocessed",
+			);
 		}
 	});
 
@@ -430,26 +433,19 @@ describe("readFederationUpstreamDelivery — whether the request is known not to
 			"ERR_TLS_RENEGOTIATION_DISABLED",
 			"ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
 		]) {
-			expect(
-				readFederationUpstreamDelivery(new TypeError("fetch failed", { cause: coded(code) })),
-				code,
-			).toBe("unknown");
+			expect(delivery(new TypeError("fetch failed", { cause: coded(code) })), code).toBe("unknown");
 		}
 		for (const name of ["AbortError", "TimeoutError"]) {
-			expect(readFederationUpstreamDelivery(Object.assign(new Error("t"), { name })), name).toBe(
-				"unknown",
-			);
+			expect(delivery(Object.assign(new Error("t"), { name })), name).toBe("unknown");
 		}
 	});
 
 	it("reads the name first at every level, the thrown value's included: a timeout beside a 503 is unknown", () => {
+		expect(delivery(Object.assign(new Error("t"), { name: "TimeoutError", status: 503 }))).toBe(
+			"unknown",
+		);
 		expect(
-			readFederationUpstreamDelivery(
-				Object.assign(new Error("t"), { name: "TimeoutError", status: 503 }),
-			),
-		).toBe("unknown");
-		expect(
-			readFederationUpstreamDelivery(
+			delivery(
 				new Error("wrapped", {
 					cause: Object.assign(new Error("t"), { name: "AbortError", status: 400 }),
 				}),
@@ -458,15 +454,93 @@ describe("readFederationUpstreamDelivery — whether the request is known not to
 	});
 
 	it("is `silent` for what says nothing, and `unknown` for a field it cannot read", () => {
-		expect(readFederationUpstreamDelivery(new Error("something"))).toBe("silent");
-		expect(readFederationUpstreamDelivery("thrown string")).toBe("silent");
-		expect(readFederationUpstreamDelivery(undefined)).toBe("silent");
+		expect(delivery(new Error("something"))).toBe("silent");
+		expect(delivery("thrown string")).toBe("silent");
+		expect(delivery(undefined)).toBe("silent");
 		const hostile = new Proxy(new Error("x"), {
 			get: (target, key) => {
 				if (key === "status") throw new Error("trap");
 				return Reflect.get(target, key);
 			},
 		});
-		expect(readFederationUpstreamDelivery(hostile)).toBe("unknown");
+		expect(delivery(hostile)).toBe("unknown");
+	});
+});
+
+describe("readFederationUpstreamDelivery — the whole chain", () => {
+	const timeout = () => Object.assign(new Error("t"), { name: "TimeoutError" });
+	const abort = () => Object.assign(new Error("a"), { name: "AbortError" });
+
+	it("is `unknown` when any level is, whatever another level proved", () => {
+		expect(delivery(Object.assign(new Error("e", { cause: abort() }), { status: 400 }))).toBe(
+			"unknown",
+		);
+		expect(
+			delivery(
+				Object.assign(
+					new Error("e", {
+						cause: new TypeError("fetch failed", { cause: { code: "ECONNRESET" } }),
+					}),
+					{ status: 503 },
+				),
+			),
+		).toBe("unknown");
+		expect(
+			delivery(
+				Object.assign(
+					new Error("e", { cause: new TypeError("fetch failed", { cause: coded("ECONNRESET") }) }),
+					{ status: 503 },
+				),
+			),
+		).toBe("unknown");
+		expect(
+			delivery(Object.assign(new Error("e", { cause: timeout() }), { code: "ECONNREFUSED" })),
+		).toBe("unknown");
+	});
+
+	it("is `unknown` for a field it cannot read at any level: a throwing `cause`, `status` or `.error`", () => {
+		const throwing = (key: string, over: object = {}) =>
+			Object.defineProperty(Object.assign(new Error("e"), over), key, {
+				get: () => {
+					throw new Error("trap");
+				},
+			});
+		expect(delivery(throwing("cause", { status: 400 }))).toBe("unknown");
+		expect(delivery(throwing("error", { status: 400 }))).toBe("unknown");
+		expect(delivery(new Error("wrapped", { cause: throwing("status") }))).toBe("unknown");
+		expect(delivery(new Error("wrapped", { cause: throwing("cause", { status: 400 }) }))).toBe(
+			"unknown",
+		);
+	});
+
+	it("reads the upstream's code at every Error level: one it does not prove makes that level `unknown`", () => {
+		expect(
+			delivery(
+				new Error("adapter", {
+					cause: Object.assign(new Error("e"), { error: "temporarily_unavailable", status: 400 }),
+				}),
+			),
+		).toBe("unknown");
+		expect(
+			delivery(
+				new Error("adapter", { cause: Object.assign(new Error("e"), { error: "invalid_client" }) }),
+			),
+		).toBe("unprocessed");
+		// A parsed body is not an Error: its code is the IdP's text, and is not read.
+		expect(
+			delivery(Object.assign(new Error("e", { cause: { error: "whatever" } }), { status: 400 })),
+		).toBe("unprocessed");
+	});
+
+	it("reads a status that is present but not an error status as `unknown`", () => {
+		for (const status of ["504", 0, 200, 600, null]) {
+			expect(delivery(Object.assign(new Error("e"), { status })), String(status)).toBe("unknown");
+		}
+	});
+
+	it("is `unknown` for a chain longer than it reads: what lies beyond may doubt it", () => {
+		let deep: Error = Object.assign(new Error("innermost"), { status: 400 });
+		for (let i = 0; i < 6; i++) deep = new Error(`level ${i}`, { cause: deep });
+		expect(delivery(deep)).toBe("unknown");
 	});
 });

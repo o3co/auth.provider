@@ -1151,8 +1151,15 @@ up on, a connection lost after it was sent, a 500, a 502, a 504 or any other
 names in its body (stamped as "may have been processed"), and a code it does
 not know. The give-back is guarded by the version the take was made at and
 bumps it, which makes it once per attempt; one that is refused or throws is
-reported and leaves the rotation spent, and changes no answer, and a failure
-stamp that lost on the version gives nothing back. It is a version-bumping
+reported and leaves the rotation spent, and changes no answer, and a refused
+stamp gives nothing back. The whole chain of the error is read, up to its
+depth limit: a level that proves it is needed, and any level that doubts it —
+a field that cannot be read, a code that does not prove it, a status that is
+not an error status, a chain longer than the limit — keeps the rotation.
+A 503 is the known exception: a service mesh (Envoy, Istio) can answer it
+after forwarding the request, so it can undercount one rotation per such
+answer. The failure backoff still bounds the attempts, and doubting every 503
+would let an ordinary outage spend the budget. It is a version-bumping
 write made under the lock after a failure, the same class as a credential
 write in flight: one that may still land keeps the lock, and it is spent of
 the one persist budget the lock is sized for. So an upstream that hangs, or

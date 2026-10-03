@@ -239,30 +239,43 @@ const NOT_SENT: ReadonlySet<string> = new Set([
  * upstream refusing it, but a 408 or a 499 (the request or the client gave
  * up), and a 501 or a 503 is a server that did not take it on; a 500, a 502,
  * a 504 and any other 5xx may come back over a request that was forwarded
- * and acted on. `undefined` for anything that is not an error status.
+ * and acted on. A status that is not an integer from 400 to 599 proves
+ * nothing and is doubted. (A mesh such as Envoy or Istio can answer 503 after
+ * forwarding: that undercounts one rotation per such answer, which the
+ * failure backoff bounds.)
  */
-const statusDelivery = (status: unknown): "unprocessed" | "unknown" | undefined => {
+const statusDelivery = (status: unknown): "unprocessed" | "unknown" => {
 	if (typeof status !== "number" || !Number.isInteger(status) || status < 400 || status > 599) {
-		return undefined;
+		return "unknown";
 	}
 	if (status === 408 || status === 499) return "unknown";
 	if (status < 500 || status === 501 || status === 503) return "unprocessed";
 	return "unknown";
 };
 
+/** How the upstream's own error code (`.error`) is judged: the caller's, which knows the codes. */
+export type FederationUpstreamErrorCodeJudge = (code: unknown) => "unprocessed" | "unknown";
+
 /**
- * What the transport and the status of a failed upstream call prove: that
- * the request was not acted on (`unprocessed`), that it may have been
- * (`unknown`), or nothing (`silent`). Each level — the thrown value, then the
- * Error causes and the `Response` it was raised over, as
- * {@link readFederationUpstreamOutage} walks them — is read in one order: a
- * request given up on (`AbortError`, `TimeoutError`) is `unknown` whatever
- * else it carries; then the status; then the transport code — one of a
- * request that never left is `unprocessed`, any other transport code
- * `unknown`. A field that cannot be read is `unknown`. Never throws.
+ * What a failed upstream call proves about the request: that it was not
+ * acted on (`unprocessed`), that it may have been (`unknown`), or nothing
+ * (`silent`). The whole chain is read, up to the depth limit: the thrown
+ * value, then its causes as {@link readFederationUpstreamOutage} walks them.
+ * Any level that doubts makes it `unknown`; it is `unprocessed` only when a
+ * level proved it and none doubted.
+ *
+ * At each level: a request given up on (`AbortError`, `TimeoutError`)
+ * doubts; a `status` that is present is judged as an HTTP status; the
+ * upstream's own code (`.error`), when present, is judged by `judgeErrorCode`;
+ * a transport code of a request that never left proves, any other transport
+ * code doubts. A cause that is neither an Error nor a `Response` (a parsed
+ * body) ends the chain, read only for doubt: a transport code or an abandoned
+ * name. A field that cannot be read, and a chain longer than the limit,
+ * doubt. Never throws.
  */
 export function readFederationUpstreamDelivery(
 	error: unknown,
+	judgeErrorCode: FederationUpstreamErrorCodeJudge,
 ): "unprocessed" | "unknown" | "silent" {
 	let unreadable = false;
 	const field = (value: unknown, key: string): unknown => {
@@ -271,29 +284,47 @@ export function readFederationUpstreamDelivery(
 		return read?.value;
 	};
 	if (typeof error !== "object" || error === null) return "silent";
+	let proved = false;
 	let current: unknown = error;
 	for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
 		if (isResponse(current)) {
 			const status = field(current, "status");
-			if (unreadable) return "unknown";
-			return statusDelivery(status) ?? "silent";
+			if (unreadable || statusDelivery(status) === "unknown") return "unknown";
+			return "unprocessed";
 		}
-		// The thrown value is read whatever it is; a cause only when it is an Error.
-		if (depth > 0 && !isError(current)) return "silent";
-		if (typeof current !== "object" || current === null) return "silent";
+		if (typeof current !== "object" || current === null) {
+			return proved ? "unprocessed" : "silent";
+		}
 		const name = field(current, "name");
-		const status = field(current, "status");
 		const code = field(current, "code");
 		if (unreadable) return "unknown";
 		if (typeof name === "string" && ABANDONED.has(name)) return "unknown";
-		const answered = statusDelivery(status);
-		if (answered !== undefined) return answered;
+		if (depth > 0 && !isError(current)) {
+			// A parsed body: what it says can only doubt.
+			return isTransportCode(code) ? "unknown" : proved ? "unprocessed" : "silent";
+		}
+		const status = field(current, "status");
+		const upstreamCode = field(current, "error");
+		if (unreadable) return "unknown";
+		if (status !== undefined) {
+			if (statusDelivery(status) === "unknown") return "unknown";
+			proved = true;
+		}
+		if (upstreamCode !== undefined) {
+			if (judgeErrorCode(upstreamCode) === "unknown") return "unknown";
+			proved = true;
+		}
 		if (typeof code === "string") {
-			if (NOT_SENT.has(code) || X509_VERIFICATION.has(code)) return "unprocessed";
-			if (isTransportCode(code)) return "unknown";
+			if (NOT_SENT.has(code) || X509_VERIFICATION.has(code)) proved = true;
+			else if (isTransportCode(code)) return "unknown";
 		}
 		current = field(current, "cause");
 		if (unreadable) return "unknown";
 	}
-	return "silent";
+	// Longer than it reads: what lies beyond may doubt it.
+	return typeof current === "object" && current !== null
+		? "unknown"
+		: proved
+			? "unprocessed"
+			: "silent";
 }

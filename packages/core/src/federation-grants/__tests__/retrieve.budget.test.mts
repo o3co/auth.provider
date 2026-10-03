@@ -537,6 +537,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs);
 			expect(await answer).toMatchObject({ ok: false, code: "temporarily_unavailable" });
 			expect(reported).toContain("rotation");
+			await Promise.all(h.background);
 			expect(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).toEqual({
 				acquired: false,
 				reason: "timeout",

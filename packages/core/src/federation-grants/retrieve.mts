@@ -1328,8 +1328,8 @@ async function refreshUnderLock(
 			);
 		}
 		const noted = await stamp(deps, request, guard, failure, limits.persistRetryBudgetMs);
-		// A stamp refused on the version lost a race: the grant moved on, and
-		// there is nothing of this attempt's to give back to.
+		// A refused stamp gives nothing back: the grant moved on, and there is
+		// nothing of this attempt's to give back to.
 		const given = noted.outcome === "refused" ? {} : await giveBack();
 		// The lock is let go of, whatever the failure was, unless a give-back is
 		// still in flight. A failure that ARRIVED
