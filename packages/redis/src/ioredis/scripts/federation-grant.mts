@@ -525,7 +525,7 @@ return {1, redis.call('HGETALL', KEYS[1])}
  * expiry, whose window opened at exactly that instant and holds at least one: the count down by
  * one and the version bumped, which makes it once per attempt. Writes only `rotationsCount` and
  * `version`: no deadline moved. The window's fields are read as the take reads them, and the
- * version only as a safe integer.
+ * version only as a safe integer whose successor is one too.
  */
 const LUA_FG_REFUND_ROTATION = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -534,9 +534,10 @@ local opened = tonumber(ARGV[3])
 if now == nil or expected == nil or opened == nil then return {0} end
 local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
--- A safe integer, or the bump below could leave it where it was.
+-- A safe integer with a safe successor: the bump below must move it, to a
+-- version the reader accepts.
 local version = fg_int(g['version'])
-if version == nil or version ~= expected then return {0} end
+if version == nil or version ~= expected or version >= 9007199254740991 then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
 local since = fg_int(g['rotationsSince'])

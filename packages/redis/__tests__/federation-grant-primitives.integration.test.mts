@@ -1062,18 +1062,22 @@ describe("refundRotation", () => {
 		expect(await rawOf()).toEqual(before);
 	});
 
-	it("refuses a stored version past the safe integers, which a bump could not move, and writes nothing", async () => {
-		await activeWithCredential();
-		const version = 2 ** 53;
-		await redis.hset(grantKey("g-1"), {
-			version: String(version),
-			rotationsSince: String(at(DAY)),
-			rotationsCount: "2",
-		});
-		const before = await rawOf();
-		expect(await refund({ expectedVersion: version })).toBeNull();
-		expect(await refund({ expectedVersion: version })).toBeNull();
-		expect(await rawOf()).toEqual(before);
+	it("refuses a stored version whose successor is not a safe integer, and writes nothing", async () => {
+		// 2^53 a bump could not move; the largest safe integer it would move to
+		// a version no reader accepts.
+		for (const version of [2 ** 53, Number.MAX_SAFE_INTEGER]) {
+			await activeWithCredential();
+			await redis.hset(grantKey("g-1"), {
+				version: String(version),
+				rotationsSince: String(at(DAY)),
+				rotationsCount: "2",
+			});
+			const before = await rawOf();
+			expect(await refund({ expectedVersion: version }), String(version)).toBeNull();
+			expect(await refund({ expectedVersion: version }), String(version)).toBeNull();
+			expect(await rawOf(), String(version)).toEqual(before);
+			await redis.del(grantKey("g-1"), credKey("g-1"));
+		}
 	});
 });
 
