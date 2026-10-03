@@ -1216,8 +1216,9 @@ export interface ComponentAbsenceUndeclaredDetails {
  * merged. Also, at stage 1, naming the module and the channel: a module's
  * `overrides.admissionActions` entry, naming the action (an action's grade is
  * its registrant's), and a module's `contributes` or `overrides` of
- * `federations` or `federationRedirectPolicies`, naming the entry when the
- * kind was given as a record (a federation registers through its type alone).
+ * `federations` or `federationRedirectPolicies` whatever it holds, the module
+ * switched on or not (a federation registers through its type alone), naming
+ * the container's first entry only when the container is a record with one.
  */
 export interface ContributionKindGuardedDetails {
 	readonly reason: "contribution-kind-guarded";
@@ -1231,6 +1232,11 @@ export interface ContributionKindGuardedDetails {
 	/** Present for a module's contribution or override; absent for a host collector. */
 	readonly channel?: "contributes" | "overrides";
 	readonly module?: string;
+	/**
+	 * The entry refused: the action of an `admissionActions` override, or the
+	 * first entry of a federation kind's container when it is a record with
+	 * one; absent otherwise.
+	 */
 	readonly name?: string;
 }
 

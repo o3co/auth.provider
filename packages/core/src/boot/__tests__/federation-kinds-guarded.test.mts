@@ -178,6 +178,128 @@ describe("federations and federationRedirectPolicies — a module may neither co
 	});
 });
 
+describe("federations and federationRedirectPolicies — refused whatever the value, switched on or not", () => {
+	/** Each container shape, and the entry a refusal names: only a record's first entry. */
+	const SHAPES: readonly (readonly [string, () => unknown, string | undefined])[] = [
+		["a record", () => ({ corp: () => providerNamed("corp"), partner: () => null }), "corp"],
+		["an empty record", () => ({}), undefined],
+		["a list", () => [() => providerNamed("corp")], undefined],
+		["an empty list", () => [], undefined],
+		["null", () => null, undefined],
+		["a number", () => 7, undefined],
+		["a string", () => "corp", undefined],
+		[
+			"a function (a factory written without its name)",
+			() => () => providerNamed("corp"),
+			undefined,
+		],
+	];
+
+	for (const kind of KINDS) {
+		for (const channel of CHANNELS) {
+			it.each(SHAPES)(`refuses ${channel}.${kind} given as %s`, async (_shape, value, name) => {
+				const direct = defineModule({
+					name: "test:direct",
+					[channel]: { [kind]: value() },
+				} as never);
+
+				const err = await refusal(
+					createApp({ modules: [direct], bootstrapComponents: bootWith() }),
+				);
+
+				expect(err.reason).toBe("contribution-kind-guarded");
+				expect(err.stage).toBe("validateManifests");
+				expect(err.details).toEqual({
+					reason: "contribution-kind-guarded",
+					kind,
+					channel,
+					module: "test:direct",
+					...(name === undefined ? {} : { name }),
+				});
+			});
+		}
+	}
+
+	it("refuses contributes: { federations: <a factory> }, which no record holds", async () => {
+		const direct = defineModule({
+			name: "test:direct",
+			contributes: { federations: () => providerNamed("corp") } as never,
+		});
+
+		const err = await refusal(createApp({ modules: [direct], bootstrapComponents: bootWith() }));
+
+		expect(err.details).toEqual({
+			reason: "contribution-kind-guarded",
+			kind: "federations",
+			channel: "contributes",
+			module: "test:direct",
+		});
+	});
+
+	it("refuses overrides: { federationRedirectPolicies: null }", async () => {
+		const direct = defineModule({
+			name: "test:direct",
+			overrides: { federationRedirectPolicies: null } as never,
+		});
+
+		const err = await refusal(createApp({ modules: [direct], bootstrapComponents: bootWith() }));
+
+		expect(err.details).toEqual({
+			reason: "contribution-kind-guarded",
+			kind: "federationRedirectPolicies",
+			channel: "overrides",
+			module: "test:direct",
+		});
+	});
+
+	it.each(KINDS)("refuses a module declaring %s that its section switches off", async (kind) => {
+		const value = vi.fn(() => providerNamed("corp"));
+		const switchable = defineModule({
+			name: "test:switchable",
+			section: {
+				schema: z.object({ enabled: z.boolean() }),
+				isEnabled: (section: { enabled: boolean }) => section.enabled,
+			},
+			contributes: { [kind]: { corp: value } },
+		} as never);
+
+		const err = await refusal(
+			createApp({
+				modules: [switchable],
+				bootstrapComponents: bootWith({ "test:switchable": { enabled: false } }),
+			}),
+		);
+
+		expect(err.reason).toBe("contribution-kind-guarded");
+		expect(err.details).toEqual({
+			reason: "contribution-kind-guarded",
+			kind,
+			channel: "contributes",
+			module: "test:switchable",
+			name: "corp",
+		});
+		expect(value).not.toHaveBeenCalled();
+	});
+
+	it("refuses a manifest whose contributes answers the kind to one read and not to the next", async () => {
+		let reads = 0;
+		const flipping = {
+			name: "test:flipping",
+			get contributes() {
+				reads += 1;
+				return reads === 1 ? { federations: { corp: () => providerNamed("corp") } } : {};
+			},
+		};
+
+		const err = await refusal(
+			createApp({ modules: [flipping as never], bootstrapComponents: bootWith() }),
+		);
+
+		expect(err.reason).toBe("contribution-kind-guarded");
+		expect(err.details).toMatchObject({ kind: "federations", module: "test:flipping" });
+	});
+});
+
 describe("federations and federationRedirectPolicies — a host may not supply the collector", () => {
 	it.each(KINDS)("refuses contributionKinds.%s before anything is merged", async (kind) => {
 		const collector = mergeWithBuiltins(undefined)[kind];
@@ -195,6 +317,56 @@ describe("federations and federationRedirectPolicies — a host may not supply t
 		expect(err.details).toEqual({ reason: "contribution-kind-guarded", kind });
 		expect(err.message).toContain(`contributionKinds replaces the collector for "${kind}"`);
 		expect(err.message).toContain("federationTypes");
+	});
+});
+
+describe("federations and federationRedirectPolicies — the host map is read once", () => {
+	/**
+	 * A host map offering `federations`, a collector seeded with `google`, to
+	 * the reads `present` answers true for, and hiding it from the others.
+	 */
+	function flipping(present: (read: number) => boolean) {
+		const seeded = mergeWithBuiltins(undefined).federations;
+		seeded?.register("google", providerNamed("google"));
+		let reads = 0;
+		const shows = (): boolean => {
+			reads += 1;
+			return present(reads);
+		};
+		const map = new Proxy({} as Record<string, unknown>, {
+			ownKeys: () => ["federations"],
+			getOwnPropertyDescriptor: (_target, key) =>
+				key === "federations" && shows()
+					? { value: seeded, enumerable: true, configurable: true, writable: true }
+					: undefined,
+			has: (_target, key) => key === "federations" && shows(),
+			get: (_target, key) => (key === "federations" ? seeded : undefined),
+		});
+		return { map, seeded };
+	}
+
+	it("refuses a map that offers the collector to its first read", async () => {
+		const { map } = flipping((read) => read === 1);
+
+		const err = await refusal(
+			createApp({ modules: [], bootstrapComponents: bootWith(), contributionKinds: map }),
+		);
+
+		expect(err.reason).toBe("contribution-kind-guarded");
+		expect(err.details).toEqual({ reason: "contribution-kind-guarded", kind: "federations" });
+	});
+
+	it("registers nothing outside dispatch from a map that offers the collector only to later reads", async () => {
+		const { map } = flipping((read) => read > 1);
+
+		const handle = await createApp({
+			modules: [],
+			bootstrapComponents: bootWith(),
+			contributionKinds: map,
+		});
+
+		expect([...(handle.components.federationProviders?.keys() ?? [])]).toEqual([]);
+		await handle.dispose();
 	});
 });
 

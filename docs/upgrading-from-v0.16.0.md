@@ -449,9 +449,11 @@ modules fills them.
   `federationRedirectPolicies` (#1314).** Core registers a federation's
   provider and redirect policy from its `core.federations` entry alone, with
   the factories of the type the entry names, so either kind in a module's
-  `contributes` or `overrides` refuses the boot before any factory runs
-  (`contribution-kind-guarded`, naming the module, the kind, the channel and
-  the entry's name), and so does a collector for either in `createApp`'s
+  `contributes` or `overrides` refuses the boot before any factory runs,
+  whatever it holds and whether or not the module's section switches it off
+  (`contribution-kind-guarded`, naming the module, the kind and the channel,
+  and the entry's name when the kind holds a record with an entry: its
+  first), and so does a collector for either in `createApp`'s
   `contributionKinds`. `ContributesMap` has no `federations` key, and the
   pairing check of a direct provider and policy is gone with them
   ([exports](#exports-removed-and-signatures-changed)). Register a type
@@ -462,7 +464,10 @@ modules fills them.
   `federationTypeForTests` from `@o3co/auth-provider-core/testing`. The
   provider a type's factory builds is named after its entry, or the boot is
   refused (`contribute-factory-failed`, naming the module, kind
-  `federations` and the entry's name, #1283).
+  `federations` and the entry's name, #1283). A deployment that customised a
+  federation's redirect policy through `federationRedirectPolicies` overrides
+  the type instead (`overrides.federationTypes.<type>`, with its own
+  `redirectPolicy`).
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). An override
   that loosens a budget refuses the boot. In code: the `failMode` options are

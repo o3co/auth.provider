@@ -762,41 +762,71 @@ function checkSessionRequirementKindGuard(modules: readonly NormalisedModule[]):
  * A module contributes or overrides neither `federations` nor
  * `federationRedirectPolicies`: an entry of either would serve no
  * federation, since only the module registering an enabled entry's type
- * handles it. Refused here, before any factory runs, as the kind guarded
- * (`contribution-kind-guarded`), naming the module, the channel and — for a
- * name-keyed entry — its name; the message points the author at
+ * handles it. A pre-config row, over every module — switched on or not —
+ * before any factory runs: the kind as an own key of the manifest's
+ * `contributes` or `overrides` is refused whatever it holds (a record, a
+ * list, an empty one, `null`, a scalar, a function), and so is an entry of
+ * it in the normalised manifest, which a getter answering differently
+ * twice could hold without the key on this read. Refused as the kind
+ * guarded (`contribution-kind-guarded`), naming the module and the channel,
+ * and `name` — the first entry of the container — only when the container is
+ * a record with an entry; the message points the author at
  * `federationTypes`.
  * @internal
  */
-function checkFederationKindGuard(modules: readonly NormalisedModule[]): void {
-	// Read off the normalised entries — what the pass applies — not the raw
-	// manifest, whose maps a getter could answer differently twice.
-	for (const m of modules) {
-		for (const [channel, entries] of [
-			["contributes", m.contributesEntries],
-			["overrides", m.overridesEntries],
-		] as const) {
-			const entry = entries.find(({ kind }) =>
+function checkFederationKindGuard(
+	rawModules: readonly Module[],
+	modules: readonly NormalisedModule[],
+): void {
+	const refuse = (
+		module: string,
+		channel: "contributes" | "overrides",
+		kind: (typeof FEDERATION_KINDS)[number],
+		name: string | undefined,
+	): never => {
+		throw new BootError({
+			message:
+				`Module "${module}" ${channel} ${kind}${name === undefined ? "" : ` ${JSON.stringify(name)}`}, ` +
+				`which no module may: ${FEDERATION_KINDS_REGISTERED}. To handle a federation, register a type under federationTypes instead.`,
+			reason: "contribution-kind-guarded",
+			stage: "validateManifests",
+			details: {
+				reason: "contribution-kind-guarded",
+				kind,
+				channel,
+				module,
+				...(name === undefined ? {} : { name }),
+			},
+		});
+	};
+	rawModules.forEach((m, index) => {
+		for (const channel of ["contributes", "overrides"] as const) {
+			const map: unknown = m[channel];
+			if ((typeof map === "object" || typeof map === "function") && map !== null) {
+				for (const kind of FEDERATION_KINDS) {
+					if (!Object.hasOwn(map, kind)) continue;
+					const container: unknown = (map as Record<string, unknown>)[kind];
+					const isRecord =
+						typeof container === "object" && container !== null && !Array.isArray(container);
+					refuse(m.name, channel, kind, isRecord ? Object.keys(container)[0] : undefined);
+				}
+			}
+			const normalised = modules[index];
+			const entries =
+				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
+			const entry = entries?.find(({ kind }) =>
 				(FEDERATION_KINDS as readonly string[]).includes(kind),
 			);
-			if (entry === undefined) continue;
-			const name = typeof entry.key === "string" ? entry.key : undefined;
-			throw new BootError({
-				message:
-					`Module "${m.name}" ${channel} ${entry.kind}${name === undefined ? "" : ` ${JSON.stringify(name)}`}, ` +
-					`which no module may: ${FEDERATION_KINDS_REGISTERED}. To handle a federation, register a type under federationTypes instead.`,
-				reason: "contribution-kind-guarded",
-				stage: "validateManifests",
-				details: {
-					reason: "contribution-kind-guarded",
-					kind: entry.kind as (typeof FEDERATION_KINDS)[number],
+			if (entry !== undefined) {
+				refuse(
+					m.name,
 					channel,
-					module: m.name,
-					...(name === undefined ? {} : { name }),
-				},
-			});
+					entry.kind as (typeof FEDERATION_KINDS)[number],
+					typeof entry.key === "string" ? entry.key : undefined,
+				);
+			}
 		}
-	}
+	});
 }
 
 /**
@@ -2959,6 +2989,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		run: (ctx) => checkUniqueModuleNames(ctx.rawModules),
 	},
 	{
+		id: "federation-kind-guard",
+		spec: "issue #728 (a federation registers through the type its entry names, whatever a module declares, switched on or not)",
+		run: (ctx) => checkFederationKindGuard(ctx.rawModules, ctx.modules),
+	},
+	{
 		id: "module-section-paths",
 		spec: "issue #728 (a section's transitional path, the paths it moved from, the variables renamed with them, and its one owner)",
 		run: (ctx) => checkModuleSectionPaths(ctx.rawModules, ctx.relocating),
@@ -3023,11 +3058,6 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		id: "session-requirement-kind-guard",
 		spec: "A2-β §5.1 (after step 3): the session-admission ADR's D3",
 		run: (ctx) => checkSessionRequirementKindGuard(ctx.modules),
-	},
-	{
-		id: "federation-kind-guard",
-		spec: "issue #728 (a federation registers through the type its entry names)",
-		run: (ctx) => checkFederationKindGuard(ctx.modules),
 	},
 	{
 		id: "requires-closure",
