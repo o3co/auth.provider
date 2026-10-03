@@ -58,6 +58,72 @@ interface Window {
 	readonly resetAt: number;
 }
 
+/** `a` is evicted before `b`: fewer attempts, then the earlier end. */
+const before = (a: Window, b: Window): boolean =>
+	a.count < b.count || (a.count === b.count && a.resetAt < b.resetAt);
+
+/**
+ * The `size` windows evicted first among those offered, kept in a max-heap
+ * whose top is the one evicted last, so one pass selects them in
+ * O(n log size).
+ */
+class Victims {
+	readonly #heap: Array<{ readonly key: string; readonly window: Window }> = [];
+	readonly #size: number;
+
+	constructor(size: number) {
+		this.#size = size;
+	}
+
+	offer(key: string, window: Window): void {
+		const heap = this.#heap;
+		if (heap.length < this.#size) {
+			heap.push({ key, window });
+			this.#up(heap.length - 1);
+			return;
+		}
+		const top = heap[0];
+		if (top !== undefined && before(window, top.window)) {
+			heap[0] = { key, window };
+			this.#down(0);
+		}
+	}
+
+	keys(): string[] {
+		return this.#heap.map(({ key }) => key);
+	}
+
+	#up(index: number): void {
+		const heap = this.#heap;
+		let i = index;
+		while (i > 0) {
+			const parent = (i - 1) >> 1;
+			const [child, above] = [heap[i], heap[parent]];
+			if (child === undefined || above === undefined || !before(above.window, child.window)) return;
+			[heap[i], heap[parent]] = [above, child];
+			i = parent;
+		}
+	}
+
+	#down(index: number): void {
+		const heap = this.#heap;
+		let i = index;
+		for (;;) {
+			let latest = i;
+			for (const child of [2 * i + 1, 2 * i + 2]) {
+				const [c, l] = [heap[child], heap[latest]];
+				if (c !== undefined && l !== undefined && before(l.window, c.window)) latest = child;
+			}
+			if (latest === i) return;
+			[heap[i], heap[latest]] = [
+				heap[latest] as (typeof heap)[number],
+				heap[i] as (typeof heap)[number],
+			];
+			i = latest;
+		}
+	}
+}
+
 export function createMemoryAttemptCounter(
 	options: MemoryAttemptCounterOptions = {},
 ): AttemptCounter {
@@ -75,16 +141,15 @@ export function createMemoryAttemptCounter(
 
 	/** Drops the ended windows, then, if still full, a batch of the least-counted live ones. */
 	const makeRoom = (at: number): void => {
-		const live: Array<readonly [string, Window]> = [];
+		const victims = new Victims(batch);
 		for (const [key, window] of windows) {
 			if (window.resetAt <= at) windows.delete(key);
-			else live.push([key, window]);
+			else victims.offer(key, window);
 		}
 		if (windows.size < maxEntries) return;
-		live.sort(([, a], [, b]) => a.count - b.count || a.resetAt - b.resetAt);
-		const victims = live.slice(0, batch);
-		for (const [key] of victims) windows.delete(key);
-		unreported += victims.length;
+		const evicted = victims.keys();
+		for (const key of evicted) windows.delete(key);
+		unreported += evicted.length;
 		if (at - lastWarnAt >= ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS) {
 			logger.warn({ ...tagged, evicted: unreported, maxEntries }, "attempt_counter_evicted");
 			unreported = 0;

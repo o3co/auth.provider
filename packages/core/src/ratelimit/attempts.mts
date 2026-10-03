@@ -97,7 +97,9 @@ const MIN_RESET_HORIZON_SECONDS = 86_400;
  * attempt or 0 on a refused one, `resetAt` not a valid `Date` within
  * {@link ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS} of `[nowMs, nowMs + max(windowSeconds,
  * one day)]`, or a read that throws. The day keeps a window started under an
- * earlier, longer spec a count rather than an outage.
+ * earlier, longer spec a count rather than an outage; a window of more than a
+ * day, shortened while it runs, reads as an outage until its end is within a
+ * day, which bounds how far ahead a faulty counter can lock a key.
  */
 export function readAttemptCount(
 	answer: unknown,

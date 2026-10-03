@@ -133,6 +133,34 @@ describe("createMemoryAttemptCounter", () => {
 		expect((await counter.consume("k3", SPEC)).remaining).toBe(0);
 	});
 
+	it("picks a batch's windows by fewest attempts, then earliest end, among many", async () => {
+		const time = clock();
+		const logger = quietWarn();
+		const counter = createMemoryAttemptCounter({ now: time.now, maxEntries: 300, logger });
+		const spec: AttemptSpec = { limit: 10, windowSeconds: 600 };
+		// k0..k299: every key but three is counted twice; k150, k10 and k200 once, in that order.
+		const once = ["k150", "k10", "k200"];
+		for (const key of once) {
+			time.advance(1);
+			await counter.consume(key, spec);
+		}
+		for (let i = 0; i < 300; i++) {
+			const key = `k${i}`;
+			if (once.includes(key)) continue;
+			time.advance(1);
+			await counter.consume(key, spec);
+			await counter.consume(key, spec);
+		}
+		await counter.consume("new", spec);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ evicted: 3, maxEntries: 300 },
+			"attempt_counter_evicted",
+		);
+		// The three counted once are gone and start again; a key counted twice is kept.
+		expect((await counter.consume("k0", spec)).remaining).toBe(7);
+		for (const key of once) expect((await counter.consume(key, spec)).remaining).toBe(9);
+	});
+
 	it("holds many keys when built without maxEntries", async () => {
 		const logger = quietWarn();
 		const counter = createMemoryAttemptCounter({ logger });
