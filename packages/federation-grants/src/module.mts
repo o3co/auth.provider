@@ -198,12 +198,15 @@ const issuerOf = (deps: FederationGrantsModuleDeps): string =>
 /**
  * An enabled deployment with nowhere to keep grants would
  * authenticate a client and then answer 503 to everything, having accepted
- * `enabled = true` as if it meant something.
+ * `enabled = true` as if it meant something. A store without the rotation
+ * budget's members (one written against an earlier port, or in plain
+ * JavaScript) would answer 503 to every refresh instead.
  */
 const requireStore = (
 	deps: FederationGrantsModuleDeps,
 ): NonNullable<FederationGrantsModuleDeps["federationGrantStore"]> => {
-	if (deps.federationGrantStore === undefined) {
+	const store = deps.federationGrantStore;
+	if (store === undefined) {
 		throw new Error(
 			"federationGrantsModule: federation-grants.enabled = true requires a " +
 				"federationGrantStore component. A grant is a user's standing consent that " +
@@ -213,7 +216,17 @@ const requireStore = (
 				"redisFederationGrantStoreModule.",
 		);
 	}
-	return deps.federationGrantStore;
+	const members: Partial<typeof store> = store;
+	if (typeof members.takeRotation !== "function" || typeof members.refundRotation !== "function") {
+		throw new Error(
+			"federationGrantsModule: the federationGrantStore component does not implement " +
+				"takeRotation and refundRotation, which the FederationGrantStore port requires. " +
+				"They keep the per-grant rotation budget that bounds upstream refresh-token " +
+				"rotations; implement both, or install the bundled memory store (single replica " +
+				"only) or redisFederationGrantStoreModule.",
+		);
+	}
+	return store;
 };
 
 /**

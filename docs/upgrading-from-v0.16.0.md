@@ -631,9 +631,13 @@ with what a store of yours records and refuses. Per port:
   bumping the version, so once per attempt. Persist `rotations`, a required
   key of the usage fields, `undefined` until the first take and reset by
   `activate`. Run the contract suite in
-  `packages/core/src/federation-grants/__tests__/store.contract.mts` (not
-  exported: copy the file into your store's tests). A store without the two
-  members no longer type-checks.
+  `packages/core/src/federation-grants/__tests__/store.contract.mts`. It is
+  not exported, and core's copy imports through core's own `#/` alias, so
+  start from the Redis package's copy,
+  `packages/redis/__tests__/adapters.federation-grant-store.contract.mts`,
+  which imports only `@o3co/auth-provider-core`. A store without the two
+  members no longer type-checks, and `federationGrantsModule` refuses to boot
+  with one that lacks either.
 - **`FederationGrantStore` callers** give an access token's
   `effectiveExpiresAt` on `activate` / `replaceCredentials` (#1078). A
   **`FederationGrantRefresher`** of your own reports `tokenType` (#1228); its
@@ -848,10 +852,12 @@ are the template README's
 [Operator runbook §7, Rolling out](operator-runbook.md#rolling-out) has the
 detail; what a mixed fleet of v0.16.0 and this release does:
 
-- **Upgrade every package together, onto the same release.** A federation
-  grant store whose take bumps the version (the Redis store of this release)
-  paired with an older core refuses every write after the take: each
-  refresh's rotated token would be lost (#1032).
+- **Upgrade every package together, onto the same release:** core and every
+  adapter package at one release in each replica.
+- **The federation-grant rotation budget binds once no v0.16.0 replica
+  remains** (#1032). A v0.16.0 replica takes no rotation, so the refreshes it
+  makes are not counted against a grant's budget; its writes keep the
+  `rotations` a newer replica counted.
 
 - **Codes cross releases** for at most one code lifetime. A code a v0.16.0
   replica issued, redeemed by this release, yields tokens without `amr`, and

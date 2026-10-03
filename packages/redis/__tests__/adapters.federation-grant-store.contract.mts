@@ -2066,8 +2066,13 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					const version = (await store.find(id, at(5 * MIN)))?.version ?? 1;
 					expect(await take(version, at(5 * MIN), {}, id), id).toEqual({ ok: false });
 				}
-				expect(await rotationsOf(at(DAY), "g-needs-user")).toBeUndefined();
-				expect(await rotationsOf(at(DAY), "g-revoked")).toBeUndefined();
+				for (const id of ["g-needs-user", "g-revoked"]) {
+					// Named, and `undefined`: the key is required on the record.
+					expect(Object.entries((await store.find(id, at(DAY))) ?? {}), id).toContainEqual([
+						"rotations",
+						undefined,
+					]);
+				}
 			});
 
 			it("writes nothing when refused for a spent budget: neither the count nor the version moves", async () => {

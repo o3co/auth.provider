@@ -108,6 +108,18 @@ const durableStoreModule = defineModule({
 	} as never,
 });
 
+/** The memory store without `member`, as a store written against an earlier port would be. */
+const storeModuleWithout = (member: "takeRotation" | "refundRotation") =>
+	defineModule({
+		name: `test-federation-grant-store-without-${member}`,
+		provides: {
+			federationGrantStore: () => {
+				const { [member]: _none, ...store } = createMemoryFederationGrantStore();
+				return store;
+			},
+		} as never,
+	});
+
 /** A single-boundary adapter: `revokeBefore` and `revokedBefore`, with no grants boundary on it. */
 const olderRevocation = {
 	kind: "redis",
@@ -175,8 +187,11 @@ interface Setup {
 	readonly connections?: Record<string, unknown>;
 	readonly grants?: Record<string, unknown>;
 	readonly withStore?: boolean;
-	/** `"memory"` is the bundled pair; `"durable"` says grants outlive the process. */
-	readonly store?: "memory" | "durable";
+	/**
+	 * `"memory"` is the bundled pair; `"durable"` says grants outlive the
+	 * process; `"without-take"` / `"without-refund"` lack a rotation member.
+	 */
+	readonly store?: "memory" | "durable" | "without-take" | "without-refund";
 	/** What ends a grant a user withdrew on a replica that never saw the withdrawal. */
 	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
@@ -247,9 +262,13 @@ const boot = (setup: Setup) => {
 			: [
 					setup.store === "durable"
 						? durableStoreModule
-						: setup.storeClosed === undefined
-							? storeModule
-							: storeModuleClosingInto(setup.storeClosed),
+						: setup.store === "without-take"
+							? storeModuleWithout("takeRotation")
+							: setup.store === "without-refund"
+								? storeModuleWithout("refundRotation")
+								: setup.storeClosed === undefined
+									? storeModule
+									: storeModuleClosingInto(setup.storeClosed),
 				]),
 		...(setup.federationFirst === false ? federation : []),
 	];
@@ -365,6 +384,15 @@ describe("enabling the feature", () => {
 		const handle = await boot({ federationFirst: false });
 		await handle.dispose();
 	});
+
+	it.each(["without-take", "without-refund"] as const)(
+		"refuses to boot with a grant store %s, naming both rotation members",
+		async (store) => {
+			// A store without them keeps no rotation budget, or keeps every rotation
+			// it took: refused here, not met as a storage outage at every refresh.
+			await expect(boot({ store })).rejects.toThrow(/takeRotation.*refundRotation/s);
+		},
+	);
 
 	it("boots with the rotation budget's settings written", async () => {
 		const handle = await boot({ grants: { rotationBudget: 2, rotationWindow: "600" } });

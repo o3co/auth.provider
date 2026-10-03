@@ -1213,8 +1213,13 @@ What the amendments above say of a store without `takeRotation` or
 take must bump the version once and answer the new one: retrieval takes only a
 grant answered for this grant at exactly the version the look read plus one,
 and anything else is the take's outage, with no upstream call. Every package
-is upgraded together: a bumping store with an older core refuses every write
-after the take.
+is upgraded together. The deployment-order hazard above, a bumping store with
+an older core refusing every write after the take, concerns a 0.17
+development core from before the fence, not v0.16.0: v0.16.0 takes no
+rotation at all, so in a fleet mixing it with 0.17 its refreshes are not
+counted against the budget (its writes keep the `rotations` others counted),
+and the bound holds only once every replica runs 0.17. A store that lacks
+either member is refused at boot by `federationGrantsModule`.
 
 A refresh no longer has to take whatever it is answered with: a fresh token
 that carries less of the asked-for scope than a held token that is still good
