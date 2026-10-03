@@ -94,10 +94,7 @@ const TOLERATED_EDGES: Readonly<Record<string, readonly string[]>> = {
 	"packages/federation-apple -> @o3co/auth-provider-session": ["createFederationRedirectPolicy"],
 	"packages/federation-github -> @o3co/auth-provider-session": ["createFederationRedirectPolicy"],
 	"packages/federation-google -> @o3co/auth-provider-session": ["createFederationRedirectPolicy"],
-	"packages/federation-oidc -> @o3co/auth-provider-session": [
-		"createFederationRedirectPolicy",
-		"extractFederationSection",
-	],
+	"packages/federation-oidc -> @o3co/auth-provider-session": ["createFederationRedirectPolicy"],
 };
 
 /** A workspace: its directory, relative to the repository, and its manifest. */
