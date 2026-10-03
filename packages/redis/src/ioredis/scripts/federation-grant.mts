@@ -486,7 +486,7 @@ return {1, redis.call('HGETALL', KEYS[1])}
  * stored expiry: a new window when there is none or the clock is at or past its end, else one
  * more below the limit, else refused. Writes only `rotationsSince` and `rotationsCount`: no
  * version bump, no deadline moved. A window whose fields do not read as the TypeScript reader
- * reads them is none, there and here alike.
+ * reads them is none, there and here alike; one counted down to 0 is still a window.
  */
 const LUA_FG_TAKE_ROTATION = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -505,7 +505,7 @@ local since = fg_int(g['rotationsSince'])
 local count = fg_int(g['rotationsCount'])
 -- The Date range: a since past it is no instant the reader can answer.
 if since ~= nil and (since > 8640000000000000 or since < -8640000000000000) then since = nil end
-if since == nil or count == nil or count < 1 or not (now < since + window) then
+if since == nil or count == nil or count < 0 or not (now < since + window) then
   since = now
   count = 1
 elseif count < limit then
@@ -516,6 +516,38 @@ end
 redis.call('HSET', KEYS[1],
   'rotationsSince', string.format('%.0f', since),
   'rotationsCount', string.format('%.0f', count))
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
+/**
+ * Gives back one rotation. `KEYS[1]` = record; `ARGV` = the caller's clock, the expected
+ * version, the window's opening. On an `active` grant at that version, before its stored
+ * expiry, whose window opened at exactly that instant and holds at least one: the count down by
+ * one and the version bumped, which makes it once per attempt. Writes only `rotationsCount` and
+ * `version`: no deadline moved. The window's fields are read as the take reads them, and the
+ * version only as a safe integer whose successor is one too.
+ */
+const LUA_FG_REFUND_ROTATION = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+local opened = tonumber(ARGV[3])
+if now == nil or expected == nil or opened == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+-- A safe integer with a safe successor: the bump below must move it, to a
+-- version the reader accepts.
+local version = fg_int(g['version'])
+if version == nil or version ~= expected or version >= 9007199254740991 then return {0} end
+local expiresAt = fg_num(g['expiresAtMs'])
+if expiresAt == nil or not (now < expiresAt) then return {0} end
+local since = fg_int(g['rotationsSince'])
+local count = fg_int(g['rotationsCount'])
+-- The Date range: a since past it is no window, as the take reads it.
+if since ~= nil and (since > 8640000000000000 or since < -8640000000000000) then since = nil end
+if since == nil or since ~= opened or count == nil or count < 1 then return {0} end
+redis.call('HSET', KEYS[1],
+  'rotationsCount', string.format('%.0f', count - 1),
+  'version', string.format('%.0f', version + 1))
 return {1, redis.call('HGETALL', KEYS[1])}
 `;
 
@@ -534,3 +566,4 @@ export const FG_REQUIRE_REAUTH = defineScript(LUA_FG_REQUIRE_REAUTH);
 export const FG_REVOKE = defineScript(LUA_FG_REVOKE);
 export const FG_NOTE_FAILURE = defineScript(LUA_FG_NOTE_FAILURE);
 export const FG_TAKE_ROTATION = defineScript(LUA_FG_TAKE_ROTATION);
+export const FG_REFUND_ROTATION = defineScript(LUA_FG_REFUND_ROTATION);

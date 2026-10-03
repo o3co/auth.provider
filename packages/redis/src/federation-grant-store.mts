@@ -263,7 +263,7 @@ const parseMarker = (text: string | undefined): FederationGrantIneligibilityMark
 
 /**
  * The rotation budget's window, or none: both fields whole numbers, the
- * opening a date and the count at least 1, as the take script reads them.
+ * opening a date and the count not below 0, as the scripts read them.
  */
 const parseRotations = (
 	since: string | undefined,
@@ -271,7 +271,7 @@ const parseRotations = (
 ): FederationGrantRotations | undefined => {
 	const opened = dateFrom(since);
 	const taken = numberFrom(count);
-	if (opened === undefined || !isDate(opened) || taken === undefined || taken < 1) {
+	if (opened === undefined || !isDate(opened) || taken === undefined || taken < 0) {
 		return undefined;
 	}
 	return { since: opened, count: taken };
@@ -707,6 +707,30 @@ export function createRedisFederationGrantStore(
 					);
 				};
 
+	/**
+	 * The port's optional `refundRotation`, offered only over a client that
+	 * has the primitive. The instants are refused before anything is sent; the
+	 * script checks every state.
+	 */
+	const clientRefund = client.refundRotation?.bind(client);
+	const refundRotationOver: FederationGrantStore["refundRotation"] =
+		clientRefund === undefined
+			? undefined
+			: async (input) => {
+					const nowMs = instant(input.now, "now");
+					const sinceMs = instant(input.since, "since");
+					// As in `replaceCredentials`: a fractional version would round into a match.
+					if (!Number.isSafeInteger(input.expectedVersion)) return { ok: false };
+					return written(
+						await clientRefund(grantKey(input.grantId), {
+							nowMs,
+							expectedVersion: input.expectedVersion,
+							sinceMs,
+						}),
+						input.grantId,
+					);
+				};
+
 	return {
 		kind: "redis",
 
@@ -1038,6 +1062,7 @@ export function createRedisFederationGrantStore(
 		},
 
 		...(takeRotationOver === undefined ? {} : { takeRotation: takeRotationOver }),
+		...(refundRotationOver === undefined ? {} : { refundRotation: refundRotationOver }),
 
 		async touch(grantId, at) {
 			const atMs = at?.getTime?.();

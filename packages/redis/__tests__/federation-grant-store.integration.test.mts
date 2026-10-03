@@ -83,6 +83,12 @@ const alternating = (keyPrefix: string): FederationGrantStore => {
 				throw new Error("fixture: the store has no takeRotation");
 			return await store.takeRotation(input);
 		},
+		refundRotation: async (input) => {
+			const store = pick();
+			if (store.refundRotation === undefined)
+				throw new Error("fixture: the store has no refundRotation");
+			return await store.refundRotation(input);
+		},
 		touch: (id, at) => pick().touch(id, at),
 		acquireRefreshLock: (id, bounds) => pick().acquireRefreshLock(id, bounds),
 	};
