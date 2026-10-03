@@ -172,7 +172,7 @@ describe("the federation types the template bundles", () => {
 	});
 
 	it("refuse to guess an enabled entry's type: one that names none is refused, naming the type to set", async () => {
-		// What a scaffold whose own `core.federations.google` predates `type` boots as.
+		// A scaffold's own `core.federations.google` entry that names no type.
 		const withoutType = (config: Switches): Switches => {
 			const core = (config as { core?: { federations?: Record<string, object> } }).core;
 			const { type: _dropped, ...google } = (core?.federations?.google ?? {}) as {
