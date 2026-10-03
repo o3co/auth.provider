@@ -53,6 +53,7 @@ const EXEMPT: Readonly<Record<string, string>> = {
 	"redis-rate-limiter.limits":
 		"each key is a rate-limit prefix, named by the module that owns it or by the deployment",
 	"federation-grants.connections": "each key is a connection the deployment names",
+	"oauth.authorize.acrValues": "each key is an acr value the deployment vouches for",
 	"federation-grants.connections.*.authorizationParams":
 		"each key is an authorization request parameter the upstream defines; the module refuses the ones it sets itself",
 };
@@ -63,17 +64,6 @@ const EXEMPT: Readonly<Record<string, string>> = {
  * and a module with it.
  */
 const NOT_YET_STRICT: Readonly<Record<string, readonly string[]>> = {
-	oauth: [
-		"oauth",
-		"oauth.accessToken",
-		"oauth.authorize",
-		"oauth.authorize.acrValues",
-		"oauth.jwt",
-		"oauth.nonce",
-		"oauth.refreshToken",
-		"oauth.resourceIndicator",
-		"oauth.revocation",
-	],
 	webauthn: ["webauthn", "webauthn.rateLimit", "webauthn.rateLimit.authenticationOptions"],
 	"session-store": ["session-store.storage"],
 };
@@ -188,6 +178,14 @@ const SAMPLES: Readonly<Record<string, (base: unknown) => readonly unknown[]>> =
 				{ kid: "es-1", publicKeyPath: "/keys/es-1.pub.pem", expiresAt: "2026-12-31T00:00:00Z" },
 			],
 		}),
+	],
+	// The paths other sections moved from, which the oauth section accepts only
+	// as an empty object.
+	oauth: (base) => [
+		["grants", "code", "deviceAuthorization", "tokenExchange", "mtls", "dpop", "tokenBinding"].reduce(
+			(sample, key) => withValue(sample, [key], {}),
+			withValue(base, ["jwt", "signingKey"], {}),
+		),
 	],
 	mtls: (base) => [
 		withValue(base, ["fullPki", "revocation"], { mode: "ocsp", onUnavailable: "reject" }),
