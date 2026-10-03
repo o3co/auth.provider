@@ -77,7 +77,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 	/** Spends the whole budget at `when`, as other calls would have. */
 	const spend = async (limit: number, when = now()) => {
 		const opened = await h.store.open("g-1", when);
-		const version = opened?.grant.version as number;
+		let version = opened?.grant.version as number;
 		for (let i = 0; i < limit; i++) {
 			const taken = await h.store.takeRotation?.({
 				grantId: "g-1",
@@ -86,7 +86,8 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 				windowMs: HOUR,
 				now: when,
 			});
-			expect(taken?.ok).toBe(true);
+			if (!taken?.ok) throw new Error("fixture: the take was refused");
+			version = taken.grant.version;
 		}
 	};
 
@@ -381,6 +382,70 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			expect(h.refresh).not.toHaveBeenCalled();
 		});
 
+		it("that does not answer in time lets the lock go: the take is guarded by the look's version, so it can never land under the next holder's refresh", async () => {
+			await seedEndingAt(10 * MIN);
+			withTake(() => new Promise(() => {}));
+			setNow(at(20 * MIN));
+			const pending = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.upstreamTimeoutMs);
+			expect(await pending).toMatchObject({ ok: false, reason: "storage" });
+			await Promise.all(h.background);
+			expect(
+				(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).acquired,
+			).toBe(true);
+		});
+
+		it("that lands late, after the next holder's look and before its take, makes that take refuse: `concurrent_update`, and the upstream is not asked", async () => {
+			await seedEndingAt(10 * MIN);
+			// A's take hangs past the soft deadline, and lands only when B is about to take.
+			let land!: () => void;
+			const landing = new Promise<void>((resolve) => {
+				land = resolve;
+			});
+			let landed: Promise<unknown> = Promise.resolve();
+			let takes = 0;
+			withTake(async (input) => {
+				takes += 1;
+				if (takes === 1) {
+					const late = landing.then(() => realTake(input));
+					landed = late;
+					return late;
+				}
+				land();
+				await landed;
+				return realTake(input);
+			});
+			setNow(at(20 * MIN));
+			const first = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.upstreamTimeoutMs);
+			expect(await first).toMatchObject({ ok: false, reason: "storage" });
+			await Promise.all(h.background);
+
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "concurrent_update",
+			});
+			expect(h.refresh).not.toHaveBeenCalled();
+			expect(await h.store.find("g-1", now())).toMatchObject({
+				rotations: { since: at(20 * MIN), count: 1 },
+			});
+		});
+
+		it("that answers, if only after the soft deadline, lets the lock go: nothing of it is left in flight", async () => {
+			await seedEndingAt(10 * MIN);
+			withTake(async (input) => {
+				setNow(new Date(now().getTime() + limits.upstreamTimeoutMs));
+				return realTake(input);
+			});
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: false, reason: "storage" });
+			await Promise.all(h.background);
+			expect(
+				(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).acquired,
+			).toBe(true);
+		});
+
 		it("that answers after the soft deadline has passed asks the upstream nothing either", async () => {
 			await seedEndingAt(10 * MIN);
 			withTake(async (input) => {
@@ -585,6 +650,230 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 				).toBe(true);
 			},
 		);
+	});
+
+	describe("the version the take left", () => {
+		type Refund = NonNullable<FederationGrantStore["refundRotation"]>;
+		const realRefund: Refund = (input) => (h.store.refundRotation as Refund)(input);
+
+		/** Spies on every guarded write after the take, and answers the versions each named. */
+		const guardedWrites = () => {
+			const named: Array<readonly [string, number]> = [];
+			const spy =
+				<I extends { readonly expectedVersion: number }, R>(name: string, write: (input: I) => R) =>
+				(input: I): R => {
+					named.push([name, input.expectedVersion]);
+					return write(input);
+				};
+			h.deps.store = {
+				...h.store,
+				replaceCredentials: spy("replaceCredentials", h.store.replaceCredentials),
+				requireReauthorization: spy("requireReauthorization", h.store.requireReauthorization),
+				noteRefreshFailure: spy("noteRefreshFailure", h.store.noteRefreshFailure),
+				refundRotation: spy("refundRotation", realRefund),
+			};
+			return named;
+		};
+
+		it("guards the refresh's write by it, one past the version the look read", async () => {
+			const grant = await seedEndingAt(10 * MIN);
+			const named = guardedWrites();
+			h.refresh.mockImplementation(async () => refreshed("next", now()));
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-next", refreshed: true });
+			expect(named).toEqual([["replaceCredentials", grant.version + 1]]);
+		});
+
+		it("guards the failure stamp and the give-back by it", async () => {
+			const grant = await seedEndingAt(10 * MIN);
+			const named = guardedWrites();
+			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			expect(named).toEqual([
+				["noteRefreshFailure", grant.version + 1],
+				["refundRotation", grant.version + 1],
+			]);
+			expect((await h.store.find("g-1", now()))?.version).toBe(grant.version + 2);
+		});
+
+		it("guards the mark an `invalid_grant` leaves by it", async () => {
+			const grant = await seedEndingAt(10 * MIN);
+			const named = guardedWrites();
+			h.refresh.mockRejectedValueOnce(
+				Object.assign(new Error("x"), { error: "invalid_grant", status: 400 }),
+			);
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({
+				ok: false,
+				code: "reauthorization_required",
+				reason: "upstream_invalid_grant",
+			});
+			expect(named).toEqual([["requireReauthorization", grant.version + 1]]);
+		});
+
+		it("is the version the look read for a store whose take does not bump: its writes are guarded by that", async () => {
+			const grant = await seedEndingAt(10 * MIN);
+			const named = guardedWrites();
+			const store = h.deps.store;
+			// A take that does not bump, as a store that predates the bump does.
+			h.deps.store = {
+				...store,
+				takeRotation: async (input) => {
+					const found = await h.store.find(input.grantId, input.now);
+					return found === null ? { ok: false } : { ok: true, grant: found };
+				},
+			};
+			h.refresh.mockImplementation(async () => refreshed("next", now()));
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-next", refreshed: true });
+			expect(named).toEqual([["replaceCredentials", grant.version]]);
+		});
+
+		it.each([
+			["a fraction", 2.5],
+			["NaN", Number.NaN],
+			["a string", "3"],
+		])(
+			"that is %s asks the upstream nothing, and answers `storage`: no write could be guarded by it",
+			async (_, version: unknown) => {
+				await seedEndingAt(10 * MIN);
+				withTake(async (input) => {
+					const taken = await realTake(input);
+					return taken.ok
+						? { ok: true, grant: { ...taken.grant, version: version as number } }
+						: taken;
+				});
+				setNow(at(20 * MIN));
+				const result = await retrieve();
+				expect(result).toMatchObject({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(failureOf(result)).toMatchObject({ during: "rotation" });
+				expect(h.refresh).not.toHaveBeenCalled();
+			},
+		);
+
+		it.each([
+			["two past the look's", (grant: { version: number }) => grant.version + 1],
+			["behind the look's", (grant: { version: number }) => grant.version - 2],
+		])(
+			"that is %s asks the upstream nothing, and answers `storage`: a take bumps once or not at all",
+			async (_, answered) => {
+				await seedEndingAt(10 * MIN);
+				withTake(async (input) => {
+					const taken = await realTake(input);
+					return taken.ok
+						? { ok: true, grant: { ...taken.grant, version: answered(taken.grant) } }
+						: taken;
+				});
+				setNow(at(20 * MIN));
+				const result = await retrieve();
+				expect(result).toMatchObject({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(failureOf(result)).toMatchObject({ during: "rotation" });
+				expect(h.refresh).not.toHaveBeenCalled();
+			},
+		);
+
+		it("answered for another grant asks the upstream nothing, and answers `storage`", async () => {
+			await seedEndingAt(10 * MIN);
+			withTake(async (input) => {
+				const taken = await realTake(input);
+				return taken.ok ? { ok: true, grant: { ...taken.grant, id: "g-other" } } : taken;
+			});
+			setNow(at(20 * MIN));
+			const result = await retrieve();
+			expect(result).toMatchObject({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "storage",
+			});
+			expect(failureOf(result)).toMatchObject({ during: "rotation" });
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			["no grant", () => undefined],
+			["a grant that is not an object", () => "g-1"],
+			[
+				"a grant whose version throws when read",
+				() => ({
+					get version(): number {
+						throw new Error("unreadable");
+					},
+				}),
+			],
+		])(
+			"answered `ok` with %s asks the upstream nothing, and answers `storage`, without throwing",
+			async (_, grant) => {
+				await seedEndingAt(10 * MIN);
+				withTake(async () => ({ ok: true, grant: grant() as never }));
+				setNow(at(20 * MIN));
+				const result = await retrieve();
+				expect(result).toMatchObject({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(failureOf(result)).toMatchObject({ during: "rotation" });
+				expect(h.refresh).not.toHaveBeenCalled();
+			},
+		);
+
+		it("refuses a give-back that lands after the next holder's take, and the next holder's rotated token is stored and answered", async () => {
+			await seedEndingAt(10 * MIN);
+			// The first attempt's give-back is held back, and let go of only once the
+			// next attempt has taken its rotation and is asking the upstream.
+			let letGo!: () => void;
+			const held = new Promise<void>((resolve) => {
+				letGo = resolve;
+			});
+			const late: Promise<Awaited<ReturnType<Refund>>>[] = [];
+			h.deps.store = {
+				...h.store,
+				refundRotation: (input) => {
+					const landed = held.then(() => realRefund(input));
+					late.push(landed);
+					return landed;
+				},
+			};
+
+			setNow(at(20 * MIN));
+			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			const first = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs);
+			expect(await first).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			await Promise.all(h.background);
+
+			// The first holder's lock has run out, and its failure no longer holds the upstream off.
+			setNow(at(30 * MIN));
+			let lateOutcome: Awaited<ReturnType<Refund>> | undefined;
+			h.refresh.mockImplementationOnce(async () => {
+				letGo();
+				lateOutcome = await late[0];
+				return refreshed("second", now());
+			});
+			expect(await retrieve()).toMatchObject({
+				ok: true,
+				accessToken: "at-second",
+				refreshed: true,
+			});
+			expect(lateOutcome).toEqual({ ok: false });
+			expect(await stored()).toMatchObject({
+				refreshToken: `${SECRET}-second`,
+				accessToken: { value: "at-second" },
+			});
+			// The first attempt's rotation stays spent: an overcount, never a lost write.
+			expect((await h.store.find("g-1", now())) as { rotations?: unknown }).toMatchObject({
+				rotations: { since: at(20 * MIN), count: 2 },
+			});
+		});
 	});
 
 	describe("a refresh whose answer carries less of what was asked than the token held", () => {

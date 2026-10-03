@@ -1100,15 +1100,16 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		])(
 			"is a loss when the write never landed and somebody else's did — %s",
 			async (_, refreshToken, accessToken) => {
-				const grant = await h.seed();
+				await h.seed();
 				setNow(DUE);
 				// No rotation: what this call tries to store keeps the stored refresh token.
 				h.refresh.mockResolvedValue(refreshed("1", DUE, { refreshToken: undefined }));
 				const real = h.store.replaceCredentials.bind(h.store);
-				vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async () => {
+				vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async (input) => {
+					// At the version the record has, which is the one this call's write names.
 					await real({
 						grantId: "g-1",
-						expectedVersion: grant.version,
+						expectedVersion: input.expectedVersion,
 						credentials: {
 							refreshToken,
 							accessToken: {
@@ -1141,14 +1142,14 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			// An IdP that does not rotate, and an adapter that answers nonsense: two
 			// replicas would store the same refresh token and no access token. What
 			// this call tried to store includes its marker, and that one is dated.
-			const grant = await h.seed();
+			await h.seed();
 			setNow(GONE);
 			h.refresh.mockResolvedValue({ refreshToken: SECRET } as DelegatedTokens);
 			const real = h.store.replaceCredentials.bind(h.store);
-			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async () => {
+			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async (input) => {
 				await real({
 					grantId: "g-1",
-					expectedVersion: grant.version,
+					expectedVersion: input.expectedVersion,
 					credentials: { refreshToken: SECRET, accessToken: undefined },
 					ineligible: {
 						reason: "malformed_token_response",

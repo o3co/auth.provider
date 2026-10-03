@@ -631,7 +631,7 @@ export function createMemoryFederationGrantStore(
 			} else {
 				return failed();
 			}
-			return written(entry, { ...grant, rotations });
+			return written(entry, { ...grant, version: grant.version + 1, rotations });
 		},
 
 		async refundRotation(input) {

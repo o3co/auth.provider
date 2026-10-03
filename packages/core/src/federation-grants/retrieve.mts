@@ -506,7 +506,11 @@ type Evaluation =
 	| {
 			readonly kind: "refresh";
 			readonly grant: AuthorizedFederationGrant;
-			/** What every write of the refresh is guarded by, read before the upstream is asked. */
+			/**
+			 * What every write of the refresh is guarded by, read before the upstream
+			 * is asked: the version the look read, and after a rotation is taken, the
+			 * version of the grant the take answered.
+			 */
 			readonly guard: WriteGuard;
 			readonly connection: FederationGrantConnection;
 			readonly refreshToken: string;
@@ -1547,15 +1551,34 @@ async function stamp(
 	return { outcome: noted.value.ok ? "written" : "refused" };
 }
 
+/** A field of a grant a store answered, or `undefined` where there is none to read. */
+function answeredField(grant: unknown, field: "id" | "version"): unknown {
+	try {
+		return typeof grant === "object" && grant !== null
+			? (grant as { readonly [K in typeof field]?: unknown })[field]
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Takes one rotation from the grant's budget: the last step before the
- * upstream is asked, under the lock and at the version the refresh's writes
- * are guarded by. Waited for until `deadline`, the soft one, and an answer
+ * upstream is asked, under the lock and at the version the look under it
+ * read. Waited for until `deadline`, the soft one, and an answer
  * that comes later is not used: nobody waits for the rotation it would admit.
  * What is answered instead is the take's outage, or a refusal, which the last
  * look tells apart: a budget spent meanwhile, or a grant that changed. A store
  * without the member keeps no budget, and nothing is taken. `at`: when the
- * take was answered; `since`: the window it counted into.
+ * take was answered; `since`: the window it counted into; `guard`: what every
+ * later write of the attempt is guarded by, the version of the grant the take
+ * answered (one past the look's where the take bumps, the look's where it does
+ * not). One that answers a grant it could not have written (another grant, a
+ * version at neither of those, or none that can be read) is the take's
+ * outage: the upstream must not rotate a token that could not be stored. One
+ * that never answered lets the lock go: it is guarded by the look's version,
+ * so landing late it is refused after the next holder's take, or makes that
+ * take refuse before the upstream is asked.
  */
 async function takeRotation(
 	deps: RetrieveFederationGrantTokenDeps,
@@ -1563,12 +1586,17 @@ async function takeRotation(
 	guard: WriteGuard,
 	deadline: number,
 ): Promise<
-	| { readonly taken: true; readonly at: number; readonly since?: Date }
+	| {
+			readonly taken: true;
+			readonly at: number;
+			readonly since?: Date;
+			readonly guard: WriteGuard;
+	  }
 	| { readonly taken: false; readonly denial: FederationGrantDenial }
 > {
 	const { store } = deps;
 	const take = store.takeRotation;
-	if (take === undefined) return { taken: true, at: deps.now().getTime() };
+	if (take === undefined) return { taken: true, at: deps.now().getTime(), guard };
 	const { limit, windowMs } = federationGrantRotationBudget(deps.limits);
 	const askedAt = deps.now();
 	const taken = await within(
@@ -1589,10 +1617,26 @@ async function takeRotation(
 		};
 	}
 	if (!taken.value.ok) return { taken: false, denial: unavailable("concurrent_update") };
-	// The window the take counted into, as the store answered it: what a give-back names.
 	const written = taken.value.grant;
+	// The grant this take could have written: this one, at the look's version
+	// bumped once, or left where the store's take does not bump.
+	const answered = answeredField(written, "version");
+	const bumped = guard.expectedVersion + 1;
+	const version =
+		answered === bumped ? bumped : answered === guard.expectedVersion ? answered : undefined;
+	if (answeredField(written, "id") !== guard.grantId || version === undefined) {
+		const unusable = new TypeError("the store's take answered a grant it could not have written");
+		return {
+			taken: false,
+			denial: unavailable("storage", report(deps, request, "rotation", unusable)),
+		};
+	}
+	const after: WriteGuard = { grantId: guard.grantId, expectedVersion: version };
+	// The window the take counted into, as the store answered it: what a give-back names.
 	const since = hasFederationGrantAuthorization(written) ? written.rotations?.since : undefined;
-	return instantOf(since) === undefined ? { taken: true, at } : { taken: true, at, since };
+	return instantOf(since) === undefined
+		? { taken: true, at, guard: after }
+		: { taken: true, at, since, guard: after };
 }
 
 /**
@@ -1805,7 +1849,7 @@ async function refresh(
 		// The take's time is spent of the soft deadline.
 		startedAt = take.at;
 		rotation = take.since;
-		held = again;
+		held = { ...again, guard: take.guard };
 		refresher = found;
 	} catch (error) {
 		// A dependency threw where it should not have. The bug is the

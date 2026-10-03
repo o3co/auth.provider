@@ -118,4 +118,6 @@ runFederationGrantStoreContract("redis", {
 	// Two connections: Redis orders nothing between them, so a release can
 	// reach the server ahead of a lock attempt sent before it.
 	lockCallsMayOvertake: true,
+	// The rotation take's script does not bump the version yet.
+	takeBumpsVersion: false,
 });

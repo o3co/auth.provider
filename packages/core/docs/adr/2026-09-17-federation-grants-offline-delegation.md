@@ -1118,16 +1118,18 @@ below the issued one, or a token stored already past half its life each let a
 client rotate on most requests. The bound is now a budget per grant: at most
 `rotationBudget` rotations (24) in a window of `rotationWindow` (an hour),
 counted in the record's non-secret `rotations` by the store's optional
-`takeRotation`, without a version bump. A rotation here is a refresh the
+`takeRotation`, without a version bump (superseded by the version-fence
+amendment below: the take bumps it). A rotation here is a refresh the
 upstream may have acted on, whether or not it issued a new refresh token: the
 shrinking-lifetime path drives a refresh per request at an IdP that does not
 rotate as much as at one that does. The window is fixed, not sliding: it
 opens at its first take and closes `rotationWindow` later, so any hour that
 straddles two windows can hold up to twice the budget. The rotation is taken under the refresh
 lock, after the look under it and immediately before the upstream is asked, at
-the version the refresh's writes are guarded by, and its time is spent of the
-soft deadline. A take that throws or does not answer in time asks the upstream
-nothing and answers `temporarily_unavailable` / `storage`; a refused take ends
+the version the refresh's writes are guarded by (the version the look read;
+the writes after it are guarded by the version the take left, per the
+amendment below), and its time is spent of the soft deadline. A take that
+throws or does not answer in time asks the upstream nothing and answers `temporarily_unavailable` / `storage`; a refused take ends
 in the last look, where a grant that changed is `concurrent_update` and
 otherwise the budget is spent. Every look reads `rotations` as a hint by the
 same rule, so a spent budget takes no lock. With the budget spent, a good
@@ -1152,8 +1154,9 @@ or certificate that failed). Anything else keeps its rotation: a request given
 up on, a connection lost after it was sent, a 500, a 502, a 504 or any other
 5xx (a gateway that timed out had forwarded the request), an outage the IdP
 names in its body (stamped as "may have been processed"), and a code it does
-not know. The give-back is guarded by the version the take was made at and
-bumps it, which makes it once per attempt; one that is refused or throws is
+not know. The give-back is guarded by the version the take was made at
+(superseded by the version-fence amendment below: the version the take left)
+and bumps it, which makes it once per attempt; one that is refused or throws is
 reported and leaves the rotation spent, and changes no answer, and a refused
 stamp gives nothing back. The whole chain of the error is read, up to its
 depth limit: a level that proves it is needed, and any level that doubts it —
@@ -1173,6 +1176,32 @@ the budget's. An `invalid_grant` gives nothing back: it ends the credential,
 and an activation starts the budget afresh. The budget binds only with a store
 that implements `takeRotation`, and gives back only with one that implements
 `refundRotation` too: both bundled stores, memory and Redis, implement both.
+
+**Amended 2026-10-03 (#1032): the take is a version fence.** `takeRotation`
+bumps the version once, and the grant it answers carries the new version.
+Every later write of the attempt (the refresh's write, the failure stamp, the
+mark and the give-back) is guarded by the version of that answered grant. A
+write of an earlier attempt that lands late, after its lock ran out and the
+next holder took its rotation, is refused: a late give-back leaves the
+rotation spent (an overcount, the safe way round) and can no longer bump the
+version under the next holder and refuse its write. A take that does not
+answer in time lets the lock go: the take itself is guarded by the version the
+look read, so landing late it can never land under the next holder's refresh.
+Against a store whose take bumps, it is refused after the next holder's take,
+or it makes that take refuse (`concurrent_update`, and the upstream is not
+asked); against one whose take does not bump, it costs one extra counted
+rotation. Keeping the lock instead would answer every caller `lock_timeout`
+until it ran out. The fence holds for a store whose take bumps: the memory
+store now, and the bundled Redis store in its follow-up. Against a store whose
+take does not bump, the answered grant carries the version the take was made
+at, so every write after the take is guarded as before the fence, and the late
+give-back race stays open there until that store bumps.
+
+Deployment order: core ships before (or with) a store whose take bumps. This
+core reads the guard off the grant the take answered, so it is right against
+either kind of store. An older core keeps the guard it read before the take,
+and against a bumping store every write after the take would be refused: each
+refresh's rotated token would be lost.
 
 A refresh no longer has to take whatever it is answered with: a fresh token
 that carries less of the asked-for scope than a held token that is still good

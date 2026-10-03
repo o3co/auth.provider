@@ -112,7 +112,10 @@ export interface FederationGrantUsage {
 export interface FederationGrantRotations {
 	/** When the window opened: the first take in it. */
 	readonly since: Date;
-	/** Rotations taken in the window: `1` for the first. */
+	/**
+	 * Rotations taken in the window: `1` for the first. A give-back can leave it
+	 * at `0`, and that is still a window: it closes at `since + windowMs`.
+	 */
 	readonly count: number;
 }
 

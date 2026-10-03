@@ -262,8 +262,14 @@ export interface FederationGrantStore {
 	 * - else, `count` below `limit`: `count + 1`;
 	 * - else the budget is spent, and the write is refused.
 	 *
-	 * No `version` bump, nothing else touched. Kept by `replaceCredentials`,
-	 * reset by `activate`.
+	 * In the same step `version` is bumped, once, and the grant answered
+	 * carries the new one; nothing else is touched. Every later write of the
+	 * attempt, its give-back included, is guarded by that version, so one from
+	 * an earlier attempt can never land after a later take. A refused take
+	 * writes nothing and bumps nothing. Kept by `replaceCredentials`, reset by
+	 * `activate`. A store whose take does not bump yet (the bundled Redis
+	 * store, until its follow-up) is tolerated: retrieval reads the guard off
+	 * the answered grant, which then carries the version the take was made at.
 	 *
 	 * The window is fixed, not sliding: it opens at its first take, so any
 	 * `windowMs` that straddles two windows can hold up to twice `limit` takes.
@@ -294,8 +300,9 @@ export interface FederationGrantStore {
 	/**
 	 * Gives back a rotation `takeRotation` took, for an attempt the upstream
 	 * definitely did not perform. A rotation here is a refresh the upstream
-	 * may have acted on, whether or not it issued a new refresh token. The grant must be `active`, at the caller's
-	 * `version` (the one the take was made at), with `now` before `expiresAt`,
+	 * may have acted on, whether or not it issued a new refresh token. The
+	 * grant must be `active`, at the caller's `version` (the one the take left,
+	 * on the grant it answered), with `now` before `expiresAt`,
 	 * and `rotations.since` must be `since`, the window the take counted into,
 	 * with a `count` of at least one. Then, in one atomic step, `count - 1` and
 	 * `version` bumped; nothing else touched. The bump makes it once per

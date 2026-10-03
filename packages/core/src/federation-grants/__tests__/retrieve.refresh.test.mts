@@ -551,8 +551,8 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 					});
 					expect(await h.store.find("g-1", DUE)).toMatchObject({
 						status: "active",
-						// Bumped by the rotation given back: the upstream answered.
-						version: grant.version + 1,
+						// Bumped by the rotation taken, and by the one given back: the upstream answered.
+						version: grant.version + 2,
 						rotations: { count: 0 },
 						refreshFailure: { kind: "rejected", upstreamCode: code, count: 1 },
 					});
@@ -797,9 +797,61 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 
 			it("is not overwritten by an admitted refresh's failure: a stamp that landed late stands, and the next holder is answered from it", async () => {
 				// A's stamp hangs past the budget and past the lease; B takes the
-				// lock and is asking the upstream when A's stamp lands; B's outage
-				// arrives after it. The store refuses B's stamp (commit 1), and B's
-				// last look reads the user.
+				// lock and A's stamp lands as B takes its rotation, before B asks the
+				// upstream; B's outage arrives after it. The store refuses B's stamp
+				// (commit 1), and B's last look reads the user.
+				await h.seed();
+				setNow(GONE);
+				let land!: () => void;
+				const landing = new Promise<void>((resolve) => {
+					land = resolve;
+				});
+				const realStamp = h.store.noteRefreshFailure.bind(h.store);
+				let landed: Promise<unknown> = Promise.resolve();
+				vi.spyOn(h.store, "noteRefreshFailure").mockImplementationOnce((input) => {
+					const written = landing.then(() => realStamp(input));
+					landed = written;
+					return written;
+				});
+				const takes = h.store.takeRotation?.bind(h.store);
+				let taken = 0;
+				h.deps.store = {
+					...h.store,
+					takeRotation: async (input) => {
+						taken += 1;
+						if (taken === 2) {
+							land();
+							await landed;
+						}
+						if (takes === undefined) throw new Error("fixture: no takeRotation");
+						return takes(input);
+					},
+				};
+				h.refresh.mockRejectedValueOnce(asksFor("consent_required"));
+				const first = retrieve();
+				await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 100);
+				expect(await first).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
+
+				await vi.advanceTimersByTimeAsync(limits.refreshLockTtlMs + 1_000);
+				const call = pendingUpstream();
+				const second = retrieve({ correlationId: "req-2" });
+				await vi.advanceTimersByTimeAsync(100);
+				expect(h.refresh).toHaveBeenCalledTimes(2);
+				expect(await stamp()).toMatchObject({ kind: "rejected", upstreamCode: "consent_required" });
+				call.reject(Object.assign(new Error("x"), { status: 503 }));
+				expect(await second).toStrictEqual({
+					ok: false,
+					code: "reauthorization_required",
+					reason: "upstream_consent_required",
+				});
+				await Promise.all(h.background);
+				expect(await stamp()).toMatchObject({ kind: "rejected", upstreamCode: "consent_required" });
+			});
+
+			it("is refused when it lands after the next holder's take: the next holder answers its own outage", async () => {
+				// A's stamp hangs past the budget and past the lease; B takes the
+				// lock, and its take bumps the version, so A's stamp, landing while
+				// B is asking the upstream, is refused. B's outage is what is stamped.
 				await h.seed();
 				setNow(GONE);
 				const real = h.store.noteRefreshFailure.bind(h.store);
@@ -820,15 +872,15 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				// A's stamp lands while B is still waiting on the upstream — and
 				// inside B's own deadline, so that what B does next is B's write.
 				await vi.advanceTimersByTimeAsync(2_000);
-				expect(await stamp()).toMatchObject({ kind: "rejected", upstreamCode: "consent_required" });
+				expect(await stamp()).toBeUndefined();
 				call.reject(Object.assign(new Error("x"), { status: 503 }));
-				expect(await second).toStrictEqual({
+				expect(await second).toMatchObject({
 					ok: false,
-					code: "reauthorization_required",
-					reason: "upstream_consent_required",
+					code: "temporarily_unavailable",
+					reason: "upstream",
 				});
 				await Promise.all(h.background);
-				expect(await stamp()).toMatchObject({ kind: "rejected", upstreamCode: "consent_required" });
+				expect(await stamp()).toMatchObject({ kind: "unavailable" });
 			});
 
 			it("is overtaken by an admitted refresh that succeeds: its rotated credential is what is stored, and the stamp is gone", async () => {
@@ -850,7 +902,8 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				await vi.advanceTimersByTimeAsync(100);
 				expect(h.refresh).toHaveBeenCalledTimes(2);
 				await vi.advanceTimersByTimeAsync(2_000);
-				expect(await stamp()).toMatchObject({ kind: "rejected", upstreamCode: "consent_required" });
+				// Refused: B's take moved the version on.
+				expect(await stamp()).toBeUndefined();
 				call.resolve(refreshed("b", now()));
 				expect(await second).toMatchObject({ ok: true, accessToken: "at-b" });
 				await Promise.all(h.background);
@@ -931,11 +984,11 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				h.refresh.mockRejectedValueOnce(error);
 				expect(await retrieve()).toStrictEqual({ ok: false, ...denial });
 				const after = await h.store.open("g-1", GONE);
-				// A rotation given back bumps the version; one kept leaves it.
+				// The take bumps the version, and a rotation given back bumps it again.
 				expect(after).toMatchObject({
 					grant: {
 						status: "active",
-						version: grant.version + (refunded ? 1 : 0),
+						version: grant.version + (refunded ? 2 : 1),
 						rotations: { count: refunded ? 0 : 1 },
 					},
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
@@ -1135,8 +1188,8 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				reason: "consented_lifetime",
 			});
 			// And the write was made with the time AT the write: the store refused
-			// it, so nothing was stored after the expiry.
-			expect(await h.store.find("g-1", at(HOUR + 1_000))).toMatchObject({ version: 2 });
+			// it, so nothing was stored after the expiry. The take's bump is all.
+			expect(await h.store.find("g-1", at(HOUR + 1_000))).toMatchObject({ version: 3 });
 		});
 
 		it("a subject-wide revocation stamps its boundary while the upstream is being asked, and never reaches this grant", async () => {
@@ -1362,9 +1415,9 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			});
 			expect(write.mock.calls.length).toBeGreaterThan(1);
 			expect(await types()).toContain("federation.grant.refresh_persist_failed storage");
-			// The grant is untouched, and the lock is released.
+			// The grant is untouched but for the take's bump, and the lock is released.
 			write.mockRestore();
-			expect(await h.store.find("g-1", now())).toMatchObject({ version: grant.version });
+			expect(await h.store.find("g-1", now())).toMatchObject({ version: grant.version + 1 });
 			const lock = await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 });
 			expect(lock.acquired).toBe(true);
 		});
