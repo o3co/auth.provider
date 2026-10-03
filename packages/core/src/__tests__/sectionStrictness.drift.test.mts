@@ -18,9 +18,10 @@
  * Each of core's own modules refuses an unknown key at every object level of
  * its own section, so a typo or a key an older version read refuses boot
  * naming its path instead of being dropped unread. The samples are core's
- * `reference.conf` as it resolves with no optional variable set, and a
- * sample of its own for a section whose levels the file leaves out. The same
- * guard holds every package's modules in `tools/composition`.
+ * `reference.conf` as it resolves with no optional variable set, and samples
+ * of their own for the levels the file leaves out, so every level each schema
+ * declares is reached. The same guard holds every package's modules in
+ * `tools/composition`.
  */
 
 import { fileURLToPath } from "node:url";
@@ -48,6 +49,12 @@ const CORE_SECTIONED: readonly Module[] = Object.values(coreExports).filter(
 		(value as Module).section !== undefined,
 );
 
+/** The levels of core's own sections whose keys are open by design, each with why. */
+const CORE_EXEMPT: Readonly<Record<string, string>> = {
+	"core-rate-limiter-memory.limits":
+		"each key is a rate-limit prefix (`<prefix>:...`), named by the module that owns it or by the deployment",
+};
+
 describe("core's own modules refuse an unknown key at every level of their sections", () => {
 	it("finds them: the JWKS module's and the in-process stores' among them (the guard is not vacuous)", () => {
 		expect(CORE_SECTIONED.map((module) => module.name)).toEqual(
@@ -68,15 +75,18 @@ describe("core's own modules refuse an unknown key at every level of their secti
 			sectionStrictnessProblems(CORE_SECTIONED, {
 				tree,
 				samples: {
-					// The file sets every key but jwks's, each bound to an unset variable.
-					jwks: { path: "/keys/jwks.json", cacheMaxAge: "300" },
+					// The file sets no jwks key: each is bound to an unset variable.
+					jwks: [{ path: "/keys/jwks.json", cacheMaxAge: "300" }],
 					// The file declares no `limits` entry: one, so its level is reached.
-					"core-rate-limiter-memory": {
-						maxBuckets: 10000,
-						defaultLimit: { limit: 60, windowSeconds: 60 },
-						limits: { login: { limit: 5, windowSeconds: 60 } },
-					},
+					"core-rate-limiter-memory": [
+						{
+							maxBuckets: 10000,
+							defaultLimit: { limit: 60, windowSeconds: 60 },
+							limits: { login: { limit: 5, windowSeconds: 60 } },
+						},
+					],
 				},
+				exempt: CORE_EXEMPT,
 			}),
 		).toEqual([]);
 	});

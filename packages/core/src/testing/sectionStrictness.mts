@@ -17,32 +17,41 @@
 /**
  * The check that a module refuses an unknown key inside its own section, at
  * every object level: a typo, or a key an older version read, then refuses
- * boot naming its path instead of being dropped or kept unread. Each level of
- * a valid sample of the section is given one unknown key, carrying a string
- * (what an environment variable sets) and then an empty object (what a
- * nested block sets), and parsed with the section's schema; a level where
- * either parses is named. A level whose keys are open by design — a record
- * keyed by names the deployment chooses — is exempted by the caller, with
- * its reason.
+ * boot naming its path instead of being dropped or kept unread.
  *
- * Limits: only the levels the sample holds are reached, so a sample sets each
- * nested object, and an entry in each record and list, it should check; a
- * level that refuses both values for another reason (a record whose entries
- * refuse a string and an empty object) counts as refusing the key.
+ * Each level of each valid sample of the section is given one unknown key and
+ * parsed with the section's schema, the key carrying in turn a string (what an
+ * environment variable sets), an empty object (what a nested block sets) and
+ * a copy of each of the level's own entries (what an entry of a record looks
+ * like); a level where any of them parses is named. A level whose keys are
+ * open by design — a record keyed by names the deployment chooses — is
+ * exempted by the caller, with its reason.
+ *
+ * The samples must reach every object level the schema declares
+ * (`schemaObjectLevels`): each nested object, an entry of each record and an
+ * element of each list, and each form of a union — a level they do not reach
+ * is named, so a block added to a section is checked as soon as it is
+ * declared. A form is reached when a sample's value at its path parses with
+ * it; a path with one form, when a sample holds an object there.
  */
 
+import { type SchemaObjectLevel, schemaObjectLevels } from "../config/schema-path.mjs";
 import type { SectionSchema } from "../modules/manifest/module-section.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 
 export interface SectionStrictnessOptions {
 	/**
-	 * The configuration each section's sample is read from, at the section's
-	 * path: a resolved configuration, or a package's `reference.conf`, as
-	 * plain data. A section it does not hold is sampled as `{}`.
+	 * The configuration a sample of each section is read from, at the
+	 * section's path: a resolved configuration, or a package's
+	 * `reference.conf`, as plain data.
 	 */
 	readonly tree?: unknown;
-	/** A sample per module name, taken over what `tree` holds for its section. */
-	readonly samples?: Readonly<Record<string, unknown>>;
+	/**
+	 * More samples per module name, checked beside what `tree` holds for its
+	 * section: the levels and the forms `tree` does not reach. A module with
+	 * neither is sampled as `{}`.
+	 */
+	readonly samples?: Readonly<Record<string, readonly unknown[]>>;
 	/**
 	 * The levels whose keys are open by design, each an operator path
 	 * (`<section>.<path>`, `*` matching any one key) mapped to why. An
@@ -55,9 +64,6 @@ export interface SectionStrictnessOptions {
 /** The key no section declares. */
 const UNKNOWN_KEY = "unknownKeyOfTheStrictnessCheck";
 
-/** What an unknown key may carry: an environment variable's string, a nested block. */
-const UNKNOWN_VALUES: readonly (() => unknown)[] = [() => "unknown", () => ({})];
-
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -65,6 +71,10 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 function valueAt(tree: unknown, segments: readonly string[]): unknown {
 	let cursor: unknown = tree;
 	for (const segment of segments) {
+		if (Array.isArray(cursor) && /^\d+$/.test(segment)) {
+			cursor = cursor[Number(segment)];
+			continue;
+		}
 		if (!isPlainObject(cursor) || !Object.hasOwn(cursor, segment)) return undefined;
 		cursor = cursor[segment];
 	}
@@ -111,12 +121,11 @@ function refusal(schema: SectionSchema, value: unknown): string | undefined {
 	}
 }
 
-/** Whether the exempt path `pattern` names the level at `segments`. */
-function matches(pattern: string, segments: readonly string[]): boolean {
-	const parts = pattern.split(".");
+/** Whether the path `pattern` (`*` any one segment) names the path `segments`. */
+function matches(pattern: readonly string[], segments: readonly string[]): boolean {
 	return (
-		parts.length === segments.length &&
-		parts.every((part, index) => part === "*" || part === segments[index])
+		pattern.length === segments.length &&
+		pattern.every((part, index) => part === "*" || part === segments[index])
 	);
 }
 
@@ -129,21 +138,52 @@ function inside(pattern: string, section: readonly string[]): boolean {
 	);
 }
 
+/** The keys a form declares, for naming it: an object's shape, or "a record". */
+function formName(level: SchemaObjectLevel): string {
+	if (level.kind === "record") return "its record form";
+	const shape = (level.schema as unknown as { shape: Record<string, unknown> }).shape;
+	return `its form with keys ${Object.keys(shape).sort().join(", ")}`;
+}
+
+/** What the samples leave unreached of the levels the section's schema declares. */
+function unreachedLevels(
+	schema: SectionSchema,
+	samples: readonly unknown[],
+	section: readonly string[],
+	name: string,
+): string[] {
+	const reached = samples.flatMap((sample) =>
+		objectLevels(sample).map((at) => ({ at, value: valueAt(sample, at) })),
+	);
+	const byPath = Map.groupBy(schemaObjectLevels(schema), (level) => level.path.join("."));
+	return [...byPath.values()].flatMap((forms) => {
+		const path = (forms[0] as SchemaObjectLevel).path;
+		const where = [...section, ...path].join(".");
+		const there = reached.filter(({ at }) => matches(path, at));
+		if (there.length === 0) return [`${where}: not reached by module "${name}"'s samples`];
+		if (forms.length === 1) return [];
+		return forms
+			.filter((form) => !there.some(({ value }) => form.schema.safeParse(value).success))
+			.map((form) => `${where}: ${formName(form)} is not reached by module "${name}"'s samples`);
+	});
+}
+
 /**
  * Every object level of the modules' sections where an unknown key is not
  * refused, as `<section>.<path>: …`, one line per problem, sorted — `[]` when
- * nothing is. Also named: a section whose sample its schema refuses (or
- * cannot parse synchronously), an exemption with no reason, and an exemption
- * inside a checked section that matches no level keeping an unknown key. A
- * module without a section is skipped; an exemption outside every checked
- * section is left to the check that holds its module.
+ * nothing is. Also named: a level the schema declares that no sample reaches
+ * (`<section>.<path>`, `*` for any record key or list index), a sample its
+ * schema refuses (or cannot parse synchronously), an exemption with no
+ * reason, and an exemption inside a checked section that matches no level
+ * keeping an unknown key. A module without a section is skipped; an
+ * exemption outside every checked section is left to the check that holds
+ * its module.
  */
 export function sectionStrictnessProblems(
 	modules: readonly Module[],
 	options: SectionStrictnessOptions = {},
 ): string[] {
 	const exempt = Object.entries(options.exempt ?? {});
-	const samples = options.samples ?? {};
 	const problems: string[] = [];
 	const used = new Set<string>();
 	const checked: { readonly module: Module; readonly segments: readonly string[] }[] = [];
@@ -156,29 +196,46 @@ export function sectionStrictnessProblems(
 		// Unset, `at` is the module's name as one key, not split on dots.
 		const segments = section.at === undefined ? [module.name] : section.at.split(".");
 		checked.push({ module, segments });
-		const sample = Object.hasOwn(samples, module.name)
-			? samples[module.name]
-			: (valueAt(options.tree, segments) ?? {});
-		const refused = refusal(section.schema, sample);
-		if (refused !== undefined) {
+		const fromTree = valueAt(options.tree, segments);
+		const given = [
+			...(fromTree === undefined ? [] : [fromTree]),
+			...(options.samples?.[module.name] ?? []),
+		];
+		const valid: unknown[] = [];
+		for (const sample of given.length === 0 ? [{}] : given) {
+			const refused = refusal(section.schema, sample);
+			if (refused === undefined) {
+				valid.push(sample);
+				continue;
+			}
 			problems.push(
 				`${segments.join(".")}: module "${module.name}"'s sample is refused by its section schema — ${refused}`,
 			);
-			continue;
 		}
-		for (const at of objectLevels(sample)) {
-			const level = [...segments, ...at];
-			const keeps = UNKNOWN_VALUES.some(
-				(value) => refusal(section.schema, withUnknownKey(sample, at, value())) === undefined,
-			);
-			const exemptions = exempt.filter(([pattern]) => matches(pattern, level));
+		if (valid.length === 0) continue;
+		problems.push(...unreachedLevels(section.schema, valid, segments, module.name));
+		const keeping = new Set<string>();
+		const levels = new Map<string, readonly string[]>();
+		for (const sample of valid) {
+			for (const at of objectLevels(sample)) {
+				const level = [...segments, ...at];
+				levels.set(level.join("."), level);
+				const entries = Object.values(valueAt(sample, at) as Record<string, unknown>);
+				const keeps = ["unknown", {}, ...entries].some(
+					(value) => refusal(section.schema, withUnknownKey(sample, at, value)) === undefined,
+				);
+				if (keeps) keeping.add(level.join("."));
+			}
+		}
+		for (const [path, level] of levels) {
+			const exemptions = exempt.filter(([pattern]) => matches(pattern.split("."), level));
 			if (exemptions.length > 0) {
-				if (keeps) for (const [pattern] of exemptions) used.add(pattern);
+				if (keeping.has(path)) for (const [pattern] of exemptions) used.add(pattern);
 				continue;
 			}
-			if (keeps) {
+			if (keeping.has(path)) {
 				problems.push(
-					`${level.join(".")}: module "${module.name}"'s section schema does not refuse an unknown key`,
+					`${path}: module "${module.name}"'s section schema does not refuse an unknown key`,
 				);
 			}
 		}

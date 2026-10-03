@@ -17,10 +17,12 @@
 /**
  * Where a configuration path lands in a Zod schema: the schema that
  * parses the value at a dot path, found by walking the schema's objects and
- * the wrappers a configuration schema puts around them. Two readers use it:
- * the transitional reader's picked schema (`pickConfigSchema`, what a
- * composition root reads before it knows its modules) and the guard that
- * every leaf an environment variable sets reads the string it arrives as.
+ * the wrappers a configuration schema puts around them. Three readers use
+ * it: the transitional reader's picked schema (`pickConfigSchema`, what a
+ * composition root reads before it knows its modules), the guard that every
+ * leaf an environment variable sets reads the string it arrives as, and the
+ * check that a section refuses an unknown key at every object level it
+ * declares (`schemaObjectLevels`).
  */
 
 import { z } from "zod";
@@ -77,7 +79,11 @@ function bodiesOf(schema: z.ZodType, onTransform?: () => void): z.ZodType[] {
 	if (def.type === "intersection" && def.left && def.right) {
 		return [...inner(def.left), ...inner(def.right)];
 	}
-	if (def.type === "lazy" && def.getter) return inner(def.getter());
+	if (def.type === "lazy" && def.getter) {
+		// The schema's own cached result, so a schema that reaches itself is the same object again.
+		const cached = (schema as unknown as { _zod: { innerType?: z.ZodType } })._zod.innerType;
+		return inner(cached ?? def.getter());
+	}
 	return [schema];
 }
 
@@ -236,6 +242,46 @@ export function unreadableLeaves(
 	walk(schema, prefix);
 	// Each path is a key of `found` once, so no two compare equal.
 	return [...found].sort(([a], [b]) => (a < b ? -1 : 1)).map(([path, leaf]) => ({ path, leaf }));
+}
+
+/** An object or a record a schema declares, at its path (`*`: any record key or list index). */
+export interface SchemaObjectLevel {
+	readonly path: readonly string[];
+	readonly kind: "object" | "record";
+	/** The object or record schema itself, its wrappers seen through. */
+	readonly schema: z.ZodType;
+}
+
+/**
+ * Every object and record `schema` declares, at its path: through objects, a
+ * record's values and a list's elements, each form of a union and both sides
+ * of an intersection listed at the same path. A lazy schema is followed until
+ * it reaches a schema already on the way, which is listed there and not
+ * entered again. In walk order, parents first.
+ */
+export function schemaObjectLevels(schema: z.ZodType): SchemaObjectLevel[] {
+	const levels: SchemaObjectLevel[] = [];
+	const walk = (node: z.ZodType, path: readonly string[], ancestors: ReadonlySet<z.ZodType>) => {
+		for (const body of bodiesOf(node)) {
+			// A schema met again on its own way down is listed once more, not entered.
+			const again = ancestors.has(body);
+			const within = new Set(ancestors).add(body);
+			const def = defOf(body);
+			if (def.type === "object" && def.shape) {
+				levels.push({ path, kind: "object", schema: body });
+				if (again) continue;
+				for (const [key, child] of Object.entries(def.shape)) walk(child, [...path, key], within);
+			} else if (def.type === "record" && def.valueType) {
+				levels.push({ path, kind: "record", schema: body });
+				if (again) continue;
+				walk(def.valueType, [...path, "*"], within);
+			} else if (def.type === "array" && def.element && !again) {
+				walk(def.element, [...path, "*"], within);
+			}
+		}
+	};
+	walk(schema, [], new Set());
+	return levels;
 }
 
 /** The paths of `unreadableLeaves`. */

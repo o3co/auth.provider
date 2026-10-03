@@ -90,11 +90,15 @@ another's body limit, or a memory store booting under `core.deployment.mode =
   or factor
   ([`disabled-modules.test.mts`](src/__tests__/disabled-modules.test.mts)).
 - **Every module refuses an unknown key in its own section.** Core's
-  `sectionStrictnessProblems` over every sectioned module of the full set,
-  each section sampled from the configuration the full set boots with: a
-  level open by design is exempt with its reason, and a module not yet strict
-  is on an allowlist that may only shrink — an entry no longer needed fails,
-  and so does a new offender
+  `sectionStrictnessProblems` over every module with a section that the full
+  set loads on memory stores or on Redis, that a package exports, or that an
+  exported module factory builds (each factory is listed, and a new one
+  fails until it is), each section sampled from the configuration it boots
+  with or its package's `reference.conf`, and from samples that reach every
+  level and every form its schema declares: a level open by design is exempt
+  with its reason, and a module not yet strict is on an allowlist pinned level
+  by level that may only shrink — a level no longer needed fails, and so does
+  a new offender
   ([`section-strictness.test.mts`](src/__tests__/section-strictness.test.mts)).
 - **What it checks on real Redis, under `core.deployment.mode = "multi"`.** That
   nothing in the full set declares replica-unsafe state, that each added

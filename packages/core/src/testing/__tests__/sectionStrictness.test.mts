@@ -19,7 +19,9 @@
  * object level of its own section. Each level of a valid sample is given an
  * unknown key, and each level whose schema keeps or drops the key unread is
  * named by its operator path; a level the caller exempts, with a reason, is
- * not — and an exemption that exempts nothing is named in turn.
+ * not — and an exemption that exempts nothing is named in turn. Every object
+ * level the schema declares, and every form of a union, must be reached by a
+ * sample, or the level is named as not reached.
  */
 
 import { describe, expect, it } from "vitest";
@@ -30,6 +32,11 @@ import { sectionStrictnessProblems } from "#/testing/sectionStrictness.mjs";
 
 const sectioned = (name: string, schema: z.ZodType, at?: string): Module =>
 	defineModule({ name, section: at === undefined ? { schema } : { schema, at } }) as Module;
+
+const keeps = (path: string, module = "fixture") =>
+	`${path}: module "${module}"'s section schema does not refuse an unknown key`;
+const unreached = (path: string, module = "fixture") =>
+	`${path}: not reached by module "${module}"'s samples`;
 
 const Strict = z
 	.object({
@@ -51,7 +58,7 @@ describe("sectionStrictnessProblems — the levels that keep an unknown key", ()
 	it("names the section when its top level strips an unknown key", () => {
 		const stripping = z.object({ retries: z.number().optional() }).optional();
 		expect(sectionStrictnessProblems([sectioned("fixture", stripping)])).toEqual([
-			'fixture: module "fixture"\'s section schema does not refuse an unknown key',
+			keeps("fixture"),
 		]);
 	});
 
@@ -63,24 +70,29 @@ describe("sectionStrictnessProblems — the levels that keep an unknown key", ()
 			sectionStrictnessProblems([sectioned("fixture", nestedLoose)], {
 				tree: { fixture: { backoff: { initial: 1 } } },
 			}),
-		).toEqual([
-			'fixture.backoff: module "fixture"\'s section schema does not refuse an unknown key',
-		]);
+		).toEqual([keeps("fixture.backoff")]);
 	});
 
-	it("checks only the levels the sample holds: a nested object it leaves out is not reached", () => {
-		const nestedLoose = z
-			.object({ backoff: z.looseObject({ initial: z.number().optional() }).optional() })
-			.strict()
-			.optional();
-		expect(sectionStrictnessProblems([sectioned("fixture", nestedLoose)])).toEqual([]);
-	});
-
-	it("names an open record's level, whatever its entries take: an unknown key is an object there", () => {
+	it("names an open record's level and its entries' levels", () => {
 		const open = z.record(z.string(), z.record(z.string(), z.unknown())).optional();
-		expect(sectionStrictnessProblems([sectioned("fixture", open)])).toEqual([
-			'fixture: module "fixture"\'s section schema does not refuse an unknown key',
-		]);
+		expect(
+			sectionStrictnessProblems([sectioned("fixture", open)], {
+				tree: { fixture: { splunk: { token: "t" } } },
+			}),
+		).toEqual([keeps("fixture.splunk"), keeps("fixture")]);
+	});
+
+	it("names a record whose entries refuse a string and an empty object: an unknown key copying an entry is kept", () => {
+		const limits = z
+			.object({
+				limits: z.record(z.string(), z.object({ limit: z.number() }).strict()),
+			})
+			.strict();
+		expect(
+			sectionStrictnessProblems([sectioned("fixture", limits)], {
+				tree: { fixture: { limits: { login: { limit: 5 } } } },
+			}),
+		).toEqual([keeps("fixture.limits")]);
 	});
 
 	it("checks each entry of a record and each element of a list as a level of its own", () => {
@@ -94,11 +106,7 @@ describe("sectionStrictnessProblems — the levels that keep an unknown key", ()
 			sectionStrictnessProblems([sectioned("fixture", entries)], {
 				tree: { fixture: { limits: { login: { limit: 5 } }, hosts: [{ name: "a" }] } },
 			}),
-		).toEqual([
-			'fixture.hosts.0: module "fixture"\'s section schema does not refuse an unknown key',
-			'fixture.limits.login: module "fixture"\'s section schema does not refuse an unknown key',
-			'fixture.limits: module "fixture"\'s section schema does not refuse an unknown key',
-		]);
+		).toEqual([keeps("fixture.hosts.0"), keeps("fixture.limits.login"), keeps("fixture.limits")]);
 	});
 
 	it("names the section at its transitional path when the module declares `at`", () => {
@@ -107,9 +115,7 @@ describe("sectionStrictnessProblems — the levels that keep an unknown key", ()
 			sectionStrictnessProblems([sectioned("fixture", stripping, "legacy.fixture")], {
 				tree: { legacy: { fixture: { retries: 1 } } },
 			}),
-		).toEqual([
-			'legacy.fixture: module "fixture"\'s section schema does not refuse an unknown key',
-		]);
+		).toEqual([keeps("legacy.fixture")]);
 	});
 
 	it("skips a module without a section", () => {
@@ -117,24 +123,81 @@ describe("sectionStrictnessProblems — the levels that keep an unknown key", ()
 	});
 });
 
-describe("sectionStrictnessProblems — the sample each section is checked from", () => {
+describe("sectionStrictnessProblems — every level the schema declares is reached", () => {
+	it("names a nested block no sample holds", () => {
+		expect(sectionStrictnessProblems([sectioned("fixture", Strict)])).toEqual([
+			unreached("fixture.backoff"),
+		]);
+	});
+
+	it("names a record's entries and a list's elements when no sample holds one", () => {
+		const entries = z
+			.object({
+				limits: z.record(z.string(), z.object({ limit: z.number() }).strict()),
+				hosts: z.array(z.object({ name: z.string() }).strict()),
+			})
+			.strict();
+		expect(
+			sectionStrictnessProblems([sectioned("fixture", entries)], {
+				tree: { fixture: { limits: {}, hosts: [] } },
+			}),
+		).toEqual([unreached("fixture.hosts.*"), unreached("fixture.limits.*")]);
+	});
+
+	it("names each form of a union no sample takes, by its keys", () => {
+		const forms = z
+			.object({
+				store: z.union([
+					z.object({ type: z.literal("file"), path: z.string() }).strict(),
+					z
+						.object({
+							type: z.literal("remote"),
+							tls: z.object({ ca: z.string() }).strict(),
+						})
+						.strict(),
+				]),
+			})
+			.strict();
+		expect(
+			sectionStrictnessProblems([sectioned("fixture", forms)], {
+				tree: { fixture: { store: { type: "file", path: "/k" } } },
+			}),
+		).toEqual([
+			unreached("fixture.store.tls"),
+			'fixture.store: its form with keys tls, type is not reached by module "fixture"\'s samples',
+		]);
+		expect(
+			sectionStrictnessProblems([sectioned("fixture", forms)], {
+				tree: { fixture: { store: { type: "file", path: "/k" } } },
+				samples: { fixture: [{ store: { type: "remote", tls: { ca: "pem" } } }] },
+			}),
+		).toEqual([]);
+	});
+});
+
+describe("sectionStrictnessProblems — the samples each section is checked from", () => {
 	const Required = z.object({ url: z.string(), tls: z.looseObject({}) }).strict();
 
-	it("reads the sample at the section's path in `tree`", () => {
+	it("reads a sample at the section's path in `tree`", () => {
 		expect(
 			sectionStrictnessProblems([sectioned("fixture", Required)], {
 				tree: { fixture: { url: "https://a.test", tls: {} } },
 			}),
-		).toEqual(['fixture.tls: module "fixture"\'s section schema does not refuse an unknown key']);
+		).toEqual([keeps("fixture.tls")]);
 	});
 
-	it("takes a sample named for the module over the tree", () => {
+	it("checks each sample given for the module beside the tree's", () => {
 		expect(
 			sectionStrictnessProblems([sectioned("fixture", Required)], {
-				tree: { fixture: { nothing: true } },
-				samples: { fixture: { url: "https://a.test", tls: {} } },
+				samples: { fixture: [{ url: "https://a.test", tls: {} }] },
 			}),
-		).toEqual(['fixture.tls: module "fixture"\'s section schema does not refuse an unknown key']);
+		).toEqual([keeps("fixture.tls")]);
+		const problems = sectionStrictnessProblems([sectioned("fixture", Required)], {
+			tree: { fixture: { nothing: true } },
+			samples: { fixture: [{ url: "https://a.test", tls: {} }] },
+		});
+		expect(problems).toHaveLength(2);
+		expect(problems).toContain(keeps("fixture.tls"));
 	});
 
 	it("names a section whose sample its schema refuses, rather than counting every level refused", () => {
@@ -159,12 +222,14 @@ describe("sectionStrictnessProblems — the sample each section is checked from"
 });
 
 describe("sectionStrictnessProblems — levels exempt by the caller", () => {
+	const Counts = z.record(z.string(), z.number()).optional();
 	const Sinks = z.record(z.string(), z.record(z.string(), z.unknown())).optional();
 
 	it("does not name a level the caller exempts with a reason", () => {
 		expect(
-			sectionStrictnessProblems([sectioned("sinks", Sinks)], {
-				exempt: { sinks: "each key names a sink the deployment registers" },
+			sectionStrictnessProblems([sectioned("counts", Counts)], {
+				tree: { counts: { login: 5 } },
+				exempt: { counts: "each key names a prefix the deployment chooses" },
 			}),
 		).toEqual([]);
 	});
@@ -183,8 +248,11 @@ describe("sectionStrictnessProblems — levels exempt by the caller", () => {
 
 	it("names an exemption without a reason", () => {
 		expect(
-			sectionStrictnessProblems([sectioned("sinks", Sinks)], { exempt: { sinks: " " } }),
-		).toEqual(["sinks: exempt with no reason"]);
+			sectionStrictnessProblems([sectioned("counts", Counts)], {
+				tree: { counts: { login: 5 } },
+				exempt: { counts: " " },
+			}),
+		).toEqual(["counts: exempt with no reason"]);
 	});
 
 	it("names an exemption in a checked section that exempts nothing, so the list only shrinks", () => {
@@ -205,6 +273,7 @@ describe("sectionStrictnessProblems — levels exempt by the caller", () => {
 	it("leaves an exemption outside every checked section to the check that holds its module", () => {
 		expect(
 			sectionStrictnessProblems([sectioned("fixture", Strict)], {
+				tree: { fixture: { backoff: {} } },
 				exempt: { sinks: "each key names a sink the deployment registers" },
 			}),
 		).toEqual([]);
