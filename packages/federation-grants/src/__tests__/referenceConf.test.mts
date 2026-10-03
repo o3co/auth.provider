@@ -69,6 +69,8 @@ describe("the package's config/reference.conf", () => {
 			refreshLockTtlMs: 30000,
 			lockWaitMs: 5000,
 			persistRetryBudgetMs: 3000,
+			rotationBudget: 24,
+			rotationWindow: 3600,
 			allowKeepOnSubjectRevocation: false,
 			identityLookup: "required",
 			consent: {},

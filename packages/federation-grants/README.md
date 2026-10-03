@@ -400,6 +400,16 @@ on the credential, whatever OAuth code its body names — a 503 saying
 `invalid_grant` does not end the credential, and one naming an interaction code
 is not the user's absence. A 429 is no outage.
 
+Each grant has a rotation budget: at most `federation-grants.rotationBudget`
+upstream refresh-token rotations (24 by default) in a window of
+`federation-grants.rotationWindow` seconds (3600 by default). The window
+opens when its first rotation is taken, and a rotation given back (a refresh
+the upstream provably did not act on) leaves it where it opened. With the
+budget spent, a good stored token is still answered; otherwise the answer is `429 rate_limited/provider` with
+`Retry-After` until the window closes. Each setting is a whole number of at
+least 1, refused at boot otherwise. The [operator
+runbook](../../docs/operator-runbook.md) says how to tune them.
+
 An unknown grant id, a grant belonging to another client and one belonging to
 another subject all answer the same `404` body, byte for byte.
 
