@@ -85,24 +85,9 @@ const handle = await createApp({
 `oidc` entry — discovery, token, UserInfo, JWKS — through that fetch: a proxy,
 or a test double. Without it the global `fetch` is used.
 
-### Deprecated: one module per instance
-
-`oidcFederationModule(<name>)`, `oidcFederationNames` and
-`readOidcFederationConfigs` ([`src/module.mts`](src/module.mts)), and the
-`oidcFederationConfigs` slot they share, are deprecated in favour of
-`oidcFederationTypeModule()`. They still work: each
-`oidcFederationModule(<name>)` contributes `federations.<name>` and
-`federationRedirectPolicies.<name>` from its entry in the
-`oidcFederationConfigs` slot, which the composition root fills with
-`readOidcFederationConfigs(federationsOf(config))`; a `fetch` goes in that
-slot's entry. `readOidcFederationConfigs` reads an entry with the same schema
-as the type module, ignoring keys it does not name, and also accepts the
-nested shape (`okta { type = "oidc", oidc { ... } }`). Both paths build the
-same provider and redirect policy for one entry. Composing the type module and
-`oidcFederationModule(<name>)` for the same entry refuses boot
-(`duplicate-contribute`): one federation has one handler. The scaffold
-(`@o3co/create-auth-provider`) composes `oidcFederationTypeModule()` and
-fills no slot.
+The module per instance (`oidcFederationModule(<name>)`), its helpers
+`readOidcFederationConfigs` and `oidcFederationNames`, and the
+`oidcFederationConfigs` slot were removed in favour of this type module.
 
 ### Configuration
 
@@ -169,7 +154,7 @@ the schema fills in no default.
 | `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package README](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
 
 `fetch` is not an entry key: it is the type module's option (above), and an
-`OidcProviderConfig` field for `createOidcProvider` and the deprecated slot.
+`OidcProviderConfig` field for `createOidcProvider`.
 
 ### What happens at boot
 
@@ -310,10 +295,6 @@ linked:
   `OidcFederationTypeModuleOptions`.
 - `OIDC_FEDERATION_TYPE` (`"oidc"`, [`src/type-module.mts`](src/type-module.mts)),
   `DEFAULT_OIDC_SCOPES`.
-- Deprecated, for `oidcFederationTypeModule`: `oidcFederationModule`,
-  `readOidcFederationConfigs` and `oidcFederationNames`
-  ([`src/module.mts`](src/module.mts)), and the `oidcFederationConfigs`
-  `ComponentMap` slot, declared there by module augmentation (not an export).
 - Types: `OidcEntry` ([`src/entry.mts`](src/entry.mts)), an entry's own keys as
   the schema answers them; [`OidcProviderConfig`](src/oidc.mts),
   `OidcEndpointOverrides`, `OidcProvider` ([`src/oidc.mts`](src/oidc.mts));
@@ -329,10 +310,9 @@ publishes, and records every request.
 
 | Test file | Pins |
 | --- | --- |
-| [`oidc.test.mts`](src/__tests__/oidc.test.mts) | discovery and its refusals, client authentication, the login steps above, the profile, refresh, logout and `mapClaims` |
+| [`oidc.test.mts`](src/__tests__/oidc.test.mts) | the federation name, discovery and its refusals, client authentication, the login steps above, the profile, refresh, logout and `mapClaims` |
 | [`at-hash.test.mts`](src/__tests__/at-hash.test.mts) | the `at_hash` check |
 | [`library-errors.test.mts`](src/__tests__/library-errors.test.mts) | what core's `loggableError` keeps of the errors `openid-client` throws for a token answer, and that a construction failure keeps the library's text off its message and on its `cause` |
 | [`delegated.test.mts`](src/__tests__/delegated.test.mts) | `SupportsDelegatedAuthorization` |
-| [`oidc-type-module.test.mts`](src/__tests__/oidc-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, the strict, flat schema, the `fetch` option, parity with the deprecated module per instance, and the refusal of both for one entry |
-| [`oidc-module.test.mts`](src/__tests__/oidc-module.test.mts), [`oidc-module-boot.test.mts`](src/__tests__/oidc-module-boot.test.mts) | the deprecated reader and module per instance, and their boot |
+| [`oidc-type-module.test.mts`](src/__tests__/oidc-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, the strict, flat schema, the `fetch` option, a discovery failure refusing boot, and every key of an entry reaching the provider and its redirect policy |
 | [`session-routes.e2e.test.mts`](src/__tests__/session-routes.e2e.test.mts) | a login through the session routes, end to end, and that a failed exchange is logged without the token response the library carries on the error |
