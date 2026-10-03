@@ -297,8 +297,9 @@ each policy, the same way the slot table is (#458).
 
 A declaration says why a slot is empty; it does not stand in for the component
 where a feature needs it. `device-grant.store = "unsupported"` is
-for a deployment that leaves the grant off — `deviceGrantModule` with the grant
-enabled refuses to boot without a store, whatever the declaration says (#626).
+for a deployment that leaves the grant off — `deviceAuthorizationGrantModule` with
+the grant enabled refuses to boot without a store, whatever the declaration says
+(#626).
 
 **Replica safety.** In-process state stores are correct on one node and wrong on
 several. `core.deployment.mode = "multi"` with one wired refuses boot, naming each
