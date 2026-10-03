@@ -4,7 +4,7 @@ Last updated: 2026-10-03
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
-package contributes beside its provider, and the express-session store those
+package's type builds beside its provider, and the express-session store those
 routes — and every other route that reads `req.session` — run over.
 
 ## Responsibility
@@ -49,7 +49,9 @@ responsibilities:
 - how a federation is driven: `state`, PKCE and `nonce`, the `form_post`
   transaction and its cookie, claim precedence, the `amr` a login records, and
   what a callback writes to the stores;
-- the `federationRedirectPolicies` contribution kind and the
+- the `federationRedirectPolicies` key it declares on core's `ContributesMap`,
+  which types the redirect policy a federation type's `redirectPolicy` answers
+  (boot refuses a module's contribution or override of it), and the
   `federationRedirectPolicyResolver` slot it declares on core
   ([`src/federations/contributes.mts`](src/federations/contributes.mts)), and
   [`FederationResult`](src/federations/types.mts);
@@ -91,8 +93,9 @@ package's store module. What the split costs is stated in
 
 **Why the three live together.** Each of the other two exists for the routes.
 
-- The toolkit: the redirect policy is a contribution kind this package declares
-  and its router consumes. It is the router's, which is why every adapter
+- The toolkit: the redirect policy is a contract this package declares — its
+  type is what a federation type's `redirectPolicy` answers — and its router
+  consumes. It is the router's, which is why every adapter
   package takes this package as a peer dependency. A federation's entry is not
   read here: core's `federationsOf` and `enabledFederationsOf` are the one
   reading of `core.federations`, the router's callback URLs included. The pure
@@ -136,7 +139,8 @@ Peer dependencies: `@o3co/auth-provider-core`, `express@^5.0.0` and
 one dependency of its own is `zod`, which its sections' schemas are written in.
 
 Core is a peer because this package augments it (the
-`federationRedirectPolicies` contribution kind and its slot), and an
+`federationRedirectPolicies` key that types a federation's redirect policy, and
+its slot), and an
 augmentation reaches only the copy of core it resolves: as a peer, that is
 your composition's one copy. A deployment on `session-store.storage.type = "memory"`
 installs neither Redis library; nothing imports them until the Redis store is
@@ -352,7 +356,8 @@ signs as the module does, so tokens issued under that secret keep verifying.
 | GET | `/session/oauth/federation/:name/callback` | Callback of a `query` federation; `405` (`Allow: POST`) for a `form_post` one |
 | POST | `/session/oauth/federation/:name/callback` | Callback of a `form_post` federation; `405` (`Allow: GET`) for a `query` one |
 
-`:name` is the federation's name; a name no module contributed is `404`.
+`:name` is the federation's name; a name no enabled `core.federations` entry
+registers is `404`.
 
 The manifest ([`src/module.mts`](src/module.mts)):
 
@@ -360,9 +365,10 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `federationTokenStore`, `sessionFederationIndex`, `csrfTokenSigner` (what the
   CSRF token is signed and checked with; the session store's module provides
   it), and the synthetic
-  `federationProviders` and `federationRedirectPolicyResolver`, which the boot
-  planner builds from per-federation modules' `federations.<name>` and
-  `federationRedirectPolicies.<name>` contributions, and
+  `federationProviders` and `federationRedirectPolicyResolver`, which core
+  builds from the federations it dispatches by type — for each enabled
+  `core.federations` entry, the provider and the redirect policy the module
+  registering its `type` builds — and
   `sessionRequirementResolver` — the password login asks the registered
   requirements through core's
   [session admission](../core/src/session-admission/README.md) before anything
@@ -1197,16 +1203,15 @@ Boot rules:
   (`core.federations.okta.oidc.trustUpstreamAmr`) is not read. No environment
   variable is wired for it. What it decides is
   [above](#what-a-session-records-about-the-authentication).
-- Every `federations.<name>` contribution must be paired with a
-  `federationRedirectPolicies.<name>` one and vice versa, or boot fails with
-  `federation-redirect-policy-unpaired`. A federation a module handles by its
-  `type` (`federationTypes`) gets both from core, together.
-- `sessionModule` does not cross-check config against contributions; core's
-  boot does one direction: an enabled entry whose `type` no installed module
-  registers refuses boot (`federation-type-unhandled`). The other direction is
-  not checked: a federation contributed without an enabled entry has no
-  callback URL, and its start answers `500 misconfiguration`. A composition that
-  wants that to fail boot adds the check itself.
+- A federation's provider and redirect policy come together from the module
+  registering its `type` under `federationTypes`: one of each per enabled entry,
+  named after it. Modules cannot contribute or override `federations` or
+  `federationRedirectPolicies`; either is refused at boot
+  (`contribution-kind-guarded`).
+- `sessionModule` does not cross-check config against the registered
+  federations; core's boot does: an enabled entry whose `type` no installed
+  module registers refuses boot (`federation-type-unhandled`). A disabled entry
+  registers no federation, so its start answers `404`.
 
 ### Redirect allowlists
 
@@ -1267,9 +1272,11 @@ start carries a `redirect_to`, and a start that carries one needs
 `authCallbackUrl`.
 
 `FederationRedirectPolicy` ([`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts))
-is the replacement point: a module may contribute its own policy for a
-federation, and must fail closed. `createFederationRedirectPolicy` is the
-default; `checkRedirectShape`, `createRedirectAllowlistValidator`,
+is the replacement point: a federation type's `redirectPolicy` builds the
+policy for each of its entries, and a policy other than the default must fail
+closed. A deployment that customises a federation's redirect policy overrides
+its type (`overrides.federationTypes.<type>`). `createFederationRedirectPolicy`
+is the default; `checkRedirectShape`, `createRedirectAllowlistValidator`,
 `describeRedirectRejection` and `isLoopbackHostname` are exported so a custom
 policy reuses the same rules and rejection vocabulary. The policy's methods
 answer with a [`FederationResult`](src/federations/types.mts): `ok` with a value,

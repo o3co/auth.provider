@@ -16,9 +16,9 @@
 
 /**
  * Declaration-merge augmentations for `@o3co/auth-provider-core` contributed
- * by `@o3co/auth-provider-session`: the `federationRedirectPolicies`
- * contribution kind and the synthetic ComponentMap key
- * `federationRedirectPolicyResolver`.
+ * by `@o3co/auth-provider-session`: the `federationRedirectPolicies` key on
+ * ContributesMap, which types the redirect policy, and the synthetic
+ * ComponentMap key `federationRedirectPolicyResolver`.
  *
  * Trade-off: merging the synthetic key onto ComponentMap means the type system
  * does not reject `provides: { federationRedirectPolicyResolver: ... }`; boot
@@ -34,15 +34,16 @@ import type {
 
 declare module "@o3co/auth-provider-core" {
 	/**
-	 * Name-keyed contribution kind for redirect policies.
+	 * The kind redirect policies register under, declared at type level only:
+	 * core reads this key to type the redirect policy a federation type's
+	 * `redirectPolicy` answers (`FederationRedirectPolicyContribution`). It
+	 * stays here until the redirect-policy contract moves into core.
 	 *
-	 * - `contributes.federationRedirectPolicies[name]`: throw on duplicate.
-	 * - `overrides.federationRedirectPolicies[name]`: throw if name not already registered.
-	 * - Registration order does not affect dispatch (keyed by exact name match).
-	 *
-	 * Pairing invariant, enforced by validate-manifests: every `federations[name]`
-	 * MUST have a matching `federationRedirectPolicies[name]` and vice versa.
-	 * Mismatch → BootError({ reason: "federation-redirect-policy-unpaired" }).
+	 * Boot registers one policy per enabled `core.federations` entry, built by
+	 * the type the entry names, under the entry's name beside its provider. A
+	 * module's `contributes` or `overrides` of this kind is refused at boot
+	 * (`contribution-kind-guarded`); a deployment customising a federation's
+	 * policy overrides its type (`overrides.federationTypes.<type>`).
 	 */
 	interface ContributesMap<Deps = ProviderDeps<never, never>> {
 		readonly federationRedirectPolicies?: {
@@ -52,8 +53,8 @@ declare module "@o3co/auth-provider-core" {
 
 	/**
 	 * Synthetic key for the redirect-policy resolver: a read-only projection of
-	 * the boot planner's `federationRedirectPolicies` collector, parallel to
-	 * `federationProviders`. The `Resolver` suffix follows
+	 * the policies boot registers under `federationRedirectPolicies`, parallel
+	 * to `federationProviders`. The `Resolver` suffix follows
 	 * `tokenExchangeValidatorResolver` / `grantHandlerResolver` and keeps it
 	 * apart from the contribution kind's name.
 	 *

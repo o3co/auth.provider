@@ -146,8 +146,8 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 
 	it("does NOT export the createFederationProviderFactory federation factory", async () => {
 		const mod = await import("#/index.mjs");
-		// No createFederationProviderFactory / FederationProviderFactory: federation
-		// consumers extend via per-federation defineModule
+		// No createFederationProviderFactory / FederationProviderFactory: a
+		// federation package registers a type under `federationTypes`
 		// (see federation-google / federation-github).
 		expect((mod as Record<string, unknown>).createFederationProviderFactory).toBeUndefined();
 	});
