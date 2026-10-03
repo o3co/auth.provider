@@ -107,9 +107,9 @@ async function boot(options: Parameters<typeof compose>[0] = {}): Promise<Compos
 const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-core":
 		"jwksModule, the memory stores, the refresh-token family rotation and revocation",
-	"@o3co/auth-provider-federation-google": "googleFederationModule",
+	"@o3co/auth-provider-federation-google": "googleFederationTypeModule, the google type",
 	"@o3co/auth-provider-federation-grants": "federationGrantsModules",
-	"@o3co/auth-provider-federation-oidc": "oidcFederationModule, one per `oidc` section",
+	"@o3co/auth-provider-federation-oidc": "oidcFederationTypeModule, the oidc type",
 	"@o3co/auth-provider-foundation":
 		"the HTTP user repository adapter; foundationMfaFactorStoreModule under MFA_MODE with adapters.mfaFactorStore = store (tools/composition boots it)",
 	"@o3co/auth-provider-mfa":
@@ -184,10 +184,8 @@ const ALL_ON_MODULES = [
 	"oauth-authorization",
 	"jwks",
 	"session",
-	"federation-google",
-	"google-federation-config",
-	"oidc-federation-config",
-	"federation-oidc-oidc",
+	"federation-google-type",
+	"federation-oidc",
 	"logging",
 	"http",
 	"key-store",
@@ -237,11 +235,12 @@ describe("every module the template can turn on boots together", () => {
 		);
 	});
 
-	it("registers every federation and every grant a module contributes", async () => {
+	it("registers a federation for every enabled entry of a type a module contributes, and every grant", async () => {
 		const { modules, handle, app } = await boot();
-		const federations = modules.flatMap((m) => contributionNames(m, "federations")).sort();
-		expect(federations).toEqual(["google", "oidc"]);
-		expect([...(handle.components.federationProviders?.keys() ?? [])].sort()).toEqual(federations);
+		const types = modules.flatMap((m) => contributionNames(m, "federationTypes")).sort();
+		expect(types).toEqual(["google", "oidc"]);
+		// The shipped entries are named after their types.
+		expect([...(handle.components.federationProviders?.keys() ?? [])].sort()).toEqual(types);
 
 		const grants = modules.flatMap((m) => contributionNames(m, "grants")).sort();
 		expect(grants).toEqual(ENABLED_GRANTS);

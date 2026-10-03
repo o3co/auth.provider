@@ -205,6 +205,26 @@ describe("phase one reads its switches and nothing else", () => {
 		expect([...reads].filter((path) => !covered(path))).toEqual([]);
 	});
 
+	it("reads no federation entry: core dispatches each by its type at boot", () => {
+		expect(SWITCHES.filter((path) => path.startsWith("core.federations"))).toEqual([]);
+		const federationEnvs: readonly Readonly<Record<string, string>>[] = [
+			{},
+			{ CORE_FEDERATIONS_GOOGLE_ENABLED: "true" },
+		];
+		for (const federations of federationEnvs) {
+			const { config, reads } = recording(
+				readSwitches(readOwnLayers(ownFiles("production"), { env: { ...env, ...federations } })),
+			);
+			expectedSessionRequirements(config);
+			buildModules(config, { environment: "production" });
+			expect(
+				[...reads].filter(
+					(path) => path === "core.federations" || path.startsWith("core.federations."),
+				),
+			).toEqual([]);
+		}
+	});
+
 	it("still refuses a switch it reads that the schema refuses, naming it", () => {
 		const bad = operatorLayer('adapters.rateLimiter = "carrier-pigeon"\n');
 		expect(() => readSwitches(readOwnLayers([bad, ...ownFiles("production")], { env }))).toThrow(

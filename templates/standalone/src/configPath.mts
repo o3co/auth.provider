@@ -139,9 +139,12 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  * What the template reads before it knows its modules, through core's
  * reader: the switches `buildModules` and its module factories choose by, and
  * the configuration's `core.sessionRequirements`, which
- * `expectedSessionRequirements` reads (the log level is `readLogging`'s). A
- * module a deployment adds that reads its configuration when it is built adds
- * those paths here, or passes them to `readSwitches` as `reads`.
+ * `expectedSessionRequirements` reads (the log level is `readLogging`'s).
+ * No federation entry is among them: the template loads the federation types
+ * it bundles whatever `core.federations` says, and boot dispatches each
+ * enabled entry to its type. A module a deployment adds that reads its
+ * configuration when it is built adds those paths here, or passes them to
+ * `readSwitches` as `reads`.
  * `two-phase-config.test.mts` holds this list to what the template reads.
  *
  * Every path here and in `reads` must be one core's transitional base
@@ -153,7 +156,6 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  */
 export const SWITCHES: readonly string[] = [
 	"core.sessionRequirements",
-	"core.federations",
 	"federation-grants.enabled",
 	"session-store.storage",
 	"oauth-session.enabled",

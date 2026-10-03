@@ -368,12 +368,9 @@ describe("standalone smoke test", () => {
 	});
 
 	// A freshly scaffolded app must boot under the default
-	// `core.federations.google.enabled = false`. `buildModules` includes
-	// `googleFederationModule` and its config bridge only when enabled, since
-	// the bridge throws at boot when `extractFederationSection` returns
-	// undefined. The manifest is asserted directly, so a bypassed gate fails
-	// even if the bridge is later made tolerant of `undefined`; then the
-	// handle must still boot.
+	// `core.federations.google.enabled = false`. The federation types the
+	// template bundles are loaded whatever the configuration says, and with no
+	// entry enabled they handle nothing: no federation is registered.
 	it("boots when google federation is disabled (default scaffold config)", async () => {
 		const modules = buildModules(switches, {
 			keyStoreModule: testKeyStoreModule,
@@ -381,15 +378,15 @@ describe("standalone smoke test", () => {
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		});
 		const moduleNames = modules.map((m) => m.name);
-		expect(moduleNames).not.toContain("federation-google");
-		expect(moduleNames).not.toContain("google-federation-config");
+		expect(moduleNames).toContain("federation-google-type");
+		expect(moduleNames).toContain("federation-oidc");
 
 		const handle = await createApp({
 			modules,
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		handleRef = handle;
-		expect(handle).toBeDefined();
+		expect(handle.components.federationProviders?.size ?? 0).toBe(0);
 	});
 
 	// The composition root must default to the Redis-backed RT family store
