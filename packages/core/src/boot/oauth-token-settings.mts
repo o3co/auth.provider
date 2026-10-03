@@ -33,15 +33,17 @@ import { checkOAuthTokenSettings } from "../token-settings/check.mjs";
 type Components = Readonly<Record<string, unknown>>;
 
 /**
- * The issuer: the slot's when the composition holds it — read whole, held
- * first to what its readers read (`checkOAuthTokenSettings`), so a slot
- * without a canonical issuer refuses rather than the configuration's being
- * read beside it — else `oauth.jwt.issuer` as the configuration carries it,
- * unvalidated, for each reader to hold to its own rule.
+ * The issuer: the slot's when the composition holds it — the snapshot
+ * stage 3 put there (`token-settings-slot.mts`), already held to the
+ * contract and the configured lifetimes, read whole through
+ * `checkOAuthTokenSettings`, so a slot without a canonical issuer refuses
+ * rather than the configuration's being read beside it — else
+ * `oauth.jwt.issuer` as the configuration carries it, unvalidated, for each
+ * reader to hold to its own rule.
  */
 export function compositionIssuer(components: Components): unknown {
 	if (Object.hasOwn(components, "oauthTokenSettings")) {
-		return checkOAuthTokenSettings(components.oauthTokenSettings, components.config).issuer;
+		return checkOAuthTokenSettings(components.oauthTokenSettings).issuer;
 	}
 	return (components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt
 		?.issuer;

@@ -750,6 +750,7 @@ describe("webauthnModule — refresh-token family wiring", () => {
 			},
 		} as never);
 
+		if (handler === null) throw new Error("webauthnModule's grant factory answered null");
 		const { result } = await handler.handle(makeCtx(makeClient()));
 
 		expect(result.status).toBe(200);

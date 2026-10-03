@@ -511,12 +511,51 @@ export type ContributionKindMap = Partial<ContributionCollectorMap>;
 // ---------------------------------------------------------------------------
 
 /**
+ * What a composition root hands boot in `bootstrapComponents` beside the
+ * components: inputs stage 1 reads itself. Each key is reserved — boot takes
+ * it out of the map before any check reads the map and seeds no component
+ * from it, and a module that provides, requires or optionally reads a
+ * component of its name, or an `overrideComponents` entry of it, refuses boot
+ * (`reserved-component-key`).
+ */
+export interface ReservedBootstrapInputs {
+	/**
+	 * The configuration's defaults: what the composition resolves from the
+	 * `reference.conf` files of the modules it loads and core's
+	 * (`moduleReferences`), in the same order, with no operator layer and no
+	 * environment — unparsed, as `config` is. Optional; `undefined` is none.
+	 * Resolve it exactly as the configuration is resolved — the same reader
+	 * and the same conversion to plain data (`toObject` with the same
+	 * options) — since a section is compared with its default whole,
+	 * prototypes included, and one built differently differs.
+	 *
+	 * Stage 1 reads it for the top-level sections no loaded module owns that
+	 * set something: one it holds and the configuration leaves equal to it —
+	 * a sibling's section, which a package's `reference.conf` sets whenever
+	 * any of its modules is loaded — is not named; one it holds and the
+	 * operator's files or the environment set otherwise is named once at warn
+	 * as `config_sections_not_loaded`; one it does not hold is
+	 * `config_sections_ignored`. Without it, every such section is
+	 * `config_sections_ignored`. Names only, never a value.
+	 *
+	 * It is read once, before any check, into a copy of its plain data: an
+	 * object of sections whose values are strings, numbers, booleans, `null`,
+	 * lists and objects (prototype `Object.prototype` or none), each an own
+	 * data property. Anything else — not an object of sections, an accessor,
+	 * a value that throws as it is read, a Proxy's trap included — refuses
+	 * boot (`config-defaults-invalid`), naming the path and no value.
+	 */
+	readonly configDefaults?: unknown;
+}
+
+/**
  * Map of component values originating from the host environment, pre-seeded
- * into the DI graph before any module factory runs.
+ * into the DI graph before any module factory runs, with the reserved inputs
+ * stage 1 reads itself ({@link ReservedBootstrapInputs}).
  */
 export type BootstrapMap = {
 	readonly [K in ComponentKey]?: ComponentMap[K];
-};
+} & ReservedBootstrapInputs;
 
 /**
  * The minimal host contract of the built-in createApp call: a closed shape,
@@ -699,7 +738,8 @@ export type BootErrorReason =
 	| "environment-variable-renamed"
 	| "authoritative-without-provides"
 	| "authoritative-component-overridden"
-	| "token-settings-lifetime-exceeds-configuration";
+	| "token-settings-lifetime-exceeds-configuration"
+	| "config-defaults-invalid";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — one per BootErrorReason, 40 in all
@@ -887,22 +927,33 @@ export interface AuthoritativeComponentOverriddenDetails {
 }
 
 /**
- * An `oauthTokenSettings` a host filled names a token lifetime longer than
- * the one core resolves from the configuration, which sizes the retention
- * of what revokes that token.
+ * An `oauthTokenSettings` names a token lifetime longer than the one core
+ * resolves from the configuration, which sizes the retention of what
+ * revokes that token: a host map's at stage 1, or as the value enters the
+ * component map at stage 3 (a module's, or a host's that answered stage 1
+ * differently).
  */
-export interface TokenSettingsLifetimeExceedsConfigurationDetails {
+export type TokenSettingsLifetimeExceedsConfigurationDetails = {
 	readonly reason: "token-settings-lifetime-exceeds-configuration";
 	readonly componentKey: "oauthTokenSettings";
-	/** The host map the slot came from. */
-	readonly source: "bootstrapComponents" | "overrideComponents";
 	/** The slot's member, as the contract names it. */
 	readonly member: "accessTokenLifetime.maxExpiresIn" | "refreshTokenExpiresIn";
 	/** The slot's lifetime, in seconds. */
 	readonly slotSeconds: number;
 	/** The lifetime core resolves from the configuration, in seconds. */
 	readonly configurationSeconds: number;
-}
+} & (
+	| {
+			/** The host map the slot came from. */
+			readonly source: "bootstrapComponents" | "overrideComponents";
+	  }
+	| {
+			/** A module's `provides`. */
+			readonly source: "provides";
+			/** The module that provided it. */
+			readonly module: string;
+	  }
+);
 
 export interface InvalidRouteAdvertisementPathDetails {
 	readonly reason: "invalid-route-advertisement-path";
@@ -923,6 +974,9 @@ export interface InvalidRouteAdvertisementPathDetails {
  * - `__proto__` as an own key of a host map (`source`): set on the component
  *   map it would replace the prototype, so every key of its value would read
  *   as a component no module provided.
+ * - `configDefaults`, the reserved bootstrap input (`ReservedBootstrapInputs`),
+ *   provided, required or read optionally by a module (`module`), or an
+ *   `overrideComponents` entry: boot reads it itself, and no component carries it.
  */
 export type ReservedComponentKeyDetails =
 	| {
@@ -930,6 +984,17 @@ export type ReservedComponentKeyDetails =
 			readonly componentKey: string;
 			readonly source: "module-requires" | "module-optional";
 			readonly module: string;
+	  }
+	| {
+			readonly reason: "reserved-component-key";
+			readonly componentKey: "configDefaults";
+			readonly source: "module-provides";
+			readonly module: string;
+	  }
+	| {
+			readonly reason: "reserved-component-key";
+			readonly componentKey: "configDefaults";
+			readonly source: "overrideComponents";
 	  }
 	| {
 			readonly reason: "reserved-component-key";
@@ -1023,6 +1088,18 @@ export interface EnvironmentVariableRenamedDetails {
  * whole configuration, or, once that passed, the modules' own sections, each
  * parsed by its manifest's `section.schema`.
  */
+/**
+ * `bootstrapComponents.configDefaults` is not plain data boot can read once
+ * (`ReservedBootstrapInputs`): `path` is the keys from its top to what is
+ * wrong — `[]` for the value itself — and `problem` says what is wrong. No
+ * value is carried.
+ */
+export interface ConfigDefaultsInvalidDetails {
+	readonly reason: "config-defaults-invalid";
+	readonly path: readonly string[];
+	readonly problem: string;
+}
+
 export interface ConfigValidationFailedDetails {
 	readonly reason: "config-validation-failed";
 	/**
@@ -1380,6 +1457,7 @@ export type BootErrorDetails =
 	| LifecycleWithoutProvidesDetails
 	| InvalidRouteAdvertisementPathDetails
 	| ConfigValidationFailedDetails
+	| ConfigDefaultsInvalidDetails
 	| CircularDependencyDetails
 	| ProvidesFactoryFailedDetails
 	| ContributeFactoryFailedDetails

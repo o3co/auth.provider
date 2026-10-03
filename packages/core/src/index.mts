@@ -139,6 +139,7 @@ export type {
 	BootstrapMap,
 	CircularDependencyDetails,
 	CollectedRouteContribution,
+	ConfigDefaultsInvalidDetails,
 	ConfigPathRelocatedDetails,
 	ConfigValidationFailedDetails,
 	ContributeAndOverrideSameKeyDetails,
@@ -167,6 +168,7 @@ export type {
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
 	RegisteredFederationType,
+	ReservedBootstrapInputs,
 	ReservedComponentKeyDetails,
 	RouteCollector,
 	RouteOrderCycleDetails,
@@ -253,6 +255,9 @@ export { readTransitionalConfig } from "./config/composed.mjs";
 // How a configured value is read where its owning schema did not run, and how
 // a refusal quotes it.
 export { configuredNumber, shownConfigValue } from "./config/configuredValue.mjs";
+// Core's own section, read from the resolved configuration before boot: what
+// a composition root reads of core's settings before it knows its modules.
+export { type CoreSection, readCoreSection } from "./config/core-section.mjs";
 export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // The reference.conf files a composition layers beneath its own
 // configuration — core's, and each loaded module's package's (`section.reference`).

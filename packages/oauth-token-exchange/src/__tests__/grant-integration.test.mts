@@ -39,7 +39,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { tokenExchangeModule } from "#/module.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import { ISSUER, keyStore, secretKey, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import {
+	ISSUER,
+	keyStore,
+	secretKey,
+	signSelfIssuedAccessToken,
+	tokenSettings,
+} from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -85,15 +91,7 @@ function buildHandler(store: RefreshTokenFamilyRevocation) {
 		[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
 	]);
 	return createTokenExchangeGrant({
-		config: {
-			oauth: {
-				jwt: { issuer: ISSUER },
-				accessToken: { expiresIn: 300 },
-				refreshToken: { expiresIn: 86400 },
-				grants: {},
-			},
-			// biome-ignore lint/suspicious/noExplicitAny: test scaffold config
-		} as any,
+		oauthTokenSettings: tokenSettings,
 		keyStore,
 		refreshTokenFamilyRevocation: store,
 		tokenExchangeValidatorResolver: validators,
@@ -212,7 +210,12 @@ describe("token_exchange — integration", () => {
 
 		const handle = await createTestApp({
 			modules: [tokenExchangeModule, clientRepositoryModule, keyStoreModule],
-			bootstrapComponents: { config, pathResolver: (s) => s },
+			bootstrapComponents: {
+				config,
+				pathResolver: (s) => s,
+				// What the oauth module provides; a composition without it fills the slot.
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+			},
 		});
 
 		expect(handle.inspect.grants.has(TOKEN_EXCHANGE_GRANT_TYPE)).toBe(true);
@@ -221,38 +224,11 @@ describe("token_exchange — integration", () => {
 		await handle.dispose();
 	});
 
-	it("declares a configSchema for boot-time config validation", async () => {
+	it("declares no configSchema: it reads its own section and the slots it declares", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
-		expect(tokenExchangeModule.configSchema).toBeDefined();
-	});
-
-	it("fails boot with config-validation-failed when oauth.jwt.issuer is missing", async () => {
-		const { BootError, defineModule } = await import("@o3co/auth-provider-core");
-		const { createTestApp, makeValidAppConfig } = await import("@o3co/auth-provider-core/testing");
-		const { tokenExchangeModule } = await import("#/module.mjs");
-
-		const clientRepositoryModule = defineModule({
-			name: "test:client-repository",
-			provides: { clientRepository: () => clientRepository },
-		});
-		const keyStoreModule = defineModule({
-			name: "test:key-store",
-			provides: { keyStore: () => keyStore },
-		});
-
-		// The fixture carries an issuer, which is required, so strip it here to
-		// reach the state this test is about.
-		const config = makeValidAppConfig();
-		delete (config.oauth.jwt as { issuer?: unknown }).issuer;
-		await expect(
-			createTestApp({
-				modules: [tokenExchangeModule, clientRepositoryModule, keyStoreModule],
-				bootstrapComponents: { config, pathResolver: (s) => s },
-			}),
-		).rejects.toMatchObject({
-			name: "BootError",
-			reason: "config-validation-failed",
-		} satisfies Partial<InstanceType<typeof BootError>>);
+		expect(tokenExchangeModule.configSchema).toBeUndefined();
+		expect(tokenExchangeModule.requires).not.toContain("config");
+		expect(tokenExchangeModule.optional ?? []).not.toContain("config");
 	});
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
@@ -276,6 +252,118 @@ describe("token_exchange — integration", () => {
 	it("declares grantPolicy in optional so the grant-policy gate reaches token-exchange", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
 		expect(tokenExchangeModule.optional).toContain("grantPolicy");
+	});
+});
+
+// The module reads its own section and the slots it declares, never the
+// whole configuration: the issuer and the lifetimes are the
+// `oauthTokenSettings` slot's, which a composition without the oauth module
+// fills itself.
+describe("tokenExchangeModule booted without the oauth module", () => {
+	let handle: AppHandle | undefined;
+	afterEach(async () => {
+		await handle?.dispose();
+		handle = undefined;
+	});
+
+	/**
+	 * The fixture configuration, whose issuer is not the slot's, with `oauth {}`
+	 * laid over it.
+	 */
+	const configWith = (oauth: Record<string, unknown> = {}) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://configuration.example" },
+				revocation: { accessToken: "unsupported" as const, subject: "unsupported" as const },
+				...oauth,
+			},
+		};
+	};
+
+	const boot = (bootstrap: Record<string, unknown>) =>
+		createApp({
+			modules: [
+				tokenExchangeModule,
+				defineModule({
+					name: "test:client-repository",
+					provides: { clientRepository: () => clientRepository },
+				}),
+				defineModule({ name: "test:key-store", provides: { keyStore: () => keyStore } }),
+			],
+			bootstrapComponents: { pathResolver: (s: string) => s, ...bootstrap } as never,
+		});
+
+	it("boots from the slot a host fills, holding a subject token to its issuer and minting its lifetime, not the configuration's", async () => {
+		handle = await boot({
+			config: configWith(),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				issuer: ISSUER,
+				accessTokenLifetime: { defaultExpiresIn: 120, maxExpiresIn: 120 },
+			}),
+		});
+		const grant = handle.components.grantHandlerResolver?.get(TOKEN_EXCHANGE_GRANT_TYPE);
+		if (!grant) throw new Error("the boot did not register the token-exchange grant");
+
+		const { result } = await grant.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) return;
+		expect(result.tokens.expires_in).toBe(120);
+	});
+
+	it("is refused at boot when nothing fills oauthTokenSettings, naming the slot", async () => {
+		await expect(boot({ config: configWith() })).rejects.toMatchObject({
+			name: "BootError",
+			reason: "missing-required-component",
+			details: { missingKey: "oauthTokenSettings", rootModule: "oauth-token-exchange" },
+		});
+	});
+
+	it("refuses the section's old path, oauth.tokenExchange, naming oauth-token-exchange", async () => {
+		await expect(
+			boot({
+				config: configWith({ tokenExchange: { maxActorChainDepth: 1 } }),
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "config-path-relocated",
+			details: {
+				relocated: [
+					{
+						module: "oauth-token-exchange",
+						from: "oauth.tokenExchange.maxActorChainDepth",
+						to: "oauth-token-exchange.maxActorChainDepth",
+					},
+				],
+			},
+		});
+	});
+
+	it("refuses a key its section does not declare, naming its path", async () => {
+		await expect(
+			boot({
+				config: {
+					...configWith(),
+					"oauth-token-exchange": { maxActorChainDepth: 2, maxActorChainDept: 1 },
+				},
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "config-validation-failed",
+			message: expect.stringMatching(/oauth-token-exchange[\s\S]*maxActorChainDept\b/),
+		});
 	});
 });
 
@@ -340,6 +428,8 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					},
 				},
 				pathResolver: (s: string) => s,
+				// What the oauth module provides; a composition without it fills the slot.
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
 			},
 		});
 		const grant: GrantHandler | undefined =
@@ -1804,11 +1894,11 @@ describe("absence policy", () => {
 	});
 });
 
-describe("tokenExchangeModule's contributions read oauthTokenSettings over the configuration", () => {
+describe("tokenExchangeModule's contributions read oauthTokenSettings, never the configuration", () => {
 	// Beside oauthModule the slot is derived from the same `oauth {}` the
 	// configuration carries, and nothing substitutes it, so the two cannot
 	// disagree there. Which one a contribution reads shows only here, where
-	// the deps hand it a slot that disagrees with the configuration — as a
+	// the deps hand it a configuration that disagrees with the slot — as a
 	// composition without oauthModule, which fills the slot itself, may.
 	const SLOT_ISSUER = "https://slot.example";
 	const configWith = (jwt: Record<string, unknown> = {}) => {
@@ -1867,7 +1957,6 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 	it("accepts a subject token with no typ when the slot's legacyTypAccept is on and the configuration's off", async () => {
 		const token = await untypedToken();
 		const config = configWith({ legacyTypAccept: false });
-		expect(await validatorFor({ config }).validate(token, { role: "subject" })).toBeNull();
 		expect(
 			await validatorFor({
 				config,
@@ -1881,7 +1970,6 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 		// to the configuration's `true`.
 		const token = await untypedToken();
 		const config = configWith({ legacyTypAccept: true });
-		expect(await validatorFor({ config }).validate(token, { role: "subject" })).not.toBeNull();
 		expect(
 			await validatorFor({
 				config,
@@ -1890,7 +1978,7 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 		).toBeNull();
 	});
 
-	it("reads a slot whole: one without legacyTypAccept is refused, naming the member, not read beside the configuration's", async () => {
+	it("reads a slot whole: one without legacyTypAccept is refused, naming the member, not read from the configuration", async () => {
 		// Read member by member, the configuration's `true` would stand in for
 		// the member the slot lacks, and accept an untyped token on a slot
 		// nobody meant to say so.

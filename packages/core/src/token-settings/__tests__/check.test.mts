@@ -61,6 +61,33 @@ const settingsWith = (change: (draft: Record<string, unknown>) => void): unknown
 	return draft;
 };
 
+/** A member missing or breaking its contract rule, and the name its refusal carries. */
+const MEMBER_CASES: ReadonlyArray<readonly [string, (draft: Record<string, unknown>) => void]> = [
+	["oauthTokenSettings.issuer", (d) => delete d.issuer],
+	["oauthTokenSettings.issuer", (d) => (d.issuer = "http://auth.example.com")],
+	["oauthTokenSettings.issuer", (d) => (d.issuer = "https://auth.test?tenant=a")],
+	["oauthTokenSettings.legacyTypAccept", (d) => delete d.legacyTypAccept],
+	["oauthTokenSettings.legacyTypAccept", (d) => (d.legacyTypAccept = "true")],
+	["oauthTokenSettings.accessTokenLifetime", (d) => delete d.accessTokenLifetime],
+	[
+		"oauthTokenSettings.accessTokenLifetime",
+		(d) => (d.accessTokenLifetime = { defaultExpiresIn: 7200, maxExpiresIn: 3600 }),
+	],
+	[
+		"oauthTokenSettings.accessTokenLifetime",
+		(d) => (d.accessTokenLifetime = { defaultExpiresIn: 60 }),
+	],
+	["oauthTokenSettings.refreshTokenExpiresIn", (d) => delete d.refreshTokenExpiresIn],
+	["oauthTokenSettings.refreshTokenExpiresIn", (d) => (d.refreshTokenExpiresIn = 0)],
+	[
+		"oauthTokenSettings.refreshTokenExpiresIn",
+		(d) => (d.refreshTokenExpiresIn = MAX_DURATION_SECONDS + 1),
+	],
+	["oauthTokenSettings.resourceIndicatorEnabled", (d) => delete d.resourceIndicatorEnabled],
+	["oauthTokenSettings.requireEmailVerified", (d) => delete d.requireEmailVerified],
+	["oauthTokenSettings.requireEmailVerified", (d) => (d.requireEmailVerified = 1)],
+];
+
 describe("checkOAuthTokenSettings", () => {
 	it("answers settings that keep the contract, as they are", () => {
 		const settings = createTestOAuthTokenSettings({
@@ -103,32 +130,7 @@ describe("checkOAuthTokenSettings", () => {
 	});
 
 	it("refuses a member that is missing or breaks the contract, naming it", () => {
-		const cases: ReadonlyArray<readonly [string, (draft: Record<string, unknown>) => void]> = [
-			["oauthTokenSettings.issuer", (d) => delete d.issuer],
-			["oauthTokenSettings.issuer", (d) => (d.issuer = "http://auth.example.com")],
-			["oauthTokenSettings.issuer", (d) => (d.issuer = "https://auth.test?tenant=a")],
-			["oauthTokenSettings.legacyTypAccept", (d) => delete d.legacyTypAccept],
-			["oauthTokenSettings.legacyTypAccept", (d) => (d.legacyTypAccept = "true")],
-			["oauthTokenSettings.accessTokenLifetime", (d) => delete d.accessTokenLifetime],
-			[
-				"oauthTokenSettings.accessTokenLifetime",
-				(d) => (d.accessTokenLifetime = { defaultExpiresIn: 7200, maxExpiresIn: 3600 }),
-			],
-			[
-				"oauthTokenSettings.accessTokenLifetime",
-				(d) => (d.accessTokenLifetime = { defaultExpiresIn: 60 }),
-			],
-			["oauthTokenSettings.refreshTokenExpiresIn", (d) => delete d.refreshTokenExpiresIn],
-			["oauthTokenSettings.refreshTokenExpiresIn", (d) => (d.refreshTokenExpiresIn = 0)],
-			[
-				"oauthTokenSettings.refreshTokenExpiresIn",
-				(d) => (d.refreshTokenExpiresIn = MAX_DURATION_SECONDS + 1),
-			],
-			["oauthTokenSettings.resourceIndicatorEnabled", (d) => delete d.resourceIndicatorEnabled],
-			["oauthTokenSettings.requireEmailVerified", (d) => delete d.requireEmailVerified],
-			["oauthTokenSettings.requireEmailVerified", (d) => (d.requireEmailVerified = 1)],
-		];
-		for (const [member, change] of cases) {
+		for (const [member, change] of MEMBER_CASES) {
 			const value = settingsWith(change);
 			const label = `${member} in ${JSON.stringify(value)}`;
 			expect(() => checkOAuthTokenSettings(value, CONFIG), label).toThrow(RangeError);
@@ -258,5 +260,55 @@ describe("checkOAuthTokenSettings", () => {
 				expect(() => checkOAuthTokenSettings(build(), CONFIG), member).toThrow(member);
 			}
 		});
+	});
+});
+
+describe("checkOAuthTokenSettings without the configuration", () => {
+	it("answers settings that keep the contract, whatever the configuration's lifetimes", () => {
+		// Lifetimes the fixture configuration would refuse: without it, the
+		// check holds the slot to its contract alone. Boot holds a held slot to
+		// the configured lifetimes itself.
+		const settings = createTestOAuthTokenSettings({
+			accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: MAX_DURATION_SECONDS },
+			refreshTokenExpiresIn: MAX_DURATION_SECONDS,
+		});
+		expect(checkOAuthTokenSettings(settings)).toEqual(settings);
+	});
+
+	it("refuses a member that is missing or breaks the contract, naming it", () => {
+		for (const [member, change] of MEMBER_CASES) {
+			const value = settingsWith(change);
+			const label = `${member} in ${JSON.stringify(value)}`;
+			expect(() => checkOAuthTokenSettings(value), label).toThrow(RangeError);
+			expect(() => checkOAuthTokenSettings(value), label).toThrow(member);
+		}
+	});
+
+	it("refuses what is not settings at all", () => {
+		for (const value of [undefined, null, "https://auth.test", 1, []]) {
+			expect(() => checkOAuthTokenSettings(value), String(value)).toThrow(RangeError);
+			expect(() => checkOAuthTokenSettings(value), String(value)).toThrow(/oauthTokenSettings/);
+		}
+	});
+
+	it("answers a snapshot frozen at every level", () => {
+		const base = createTestOAuthTokenSettings();
+		const host = { ...base, accessTokenLifetime: { ...base.accessTokenLifetime } };
+		const checked = checkOAuthTokenSettings(host);
+		host.accessTokenLifetime.maxExpiresIn = 7200;
+		expect(checked.accessTokenLifetime.maxExpiresIn).toBe(base.accessTokenLifetime.maxExpiresIn);
+		expect(Object.isFrozen(checked)).toBe(true);
+		expect(Object.isFrozen(checked.accessTokenLifetime)).toBe(true);
+	});
+
+	it("still holds the lifetimes to a configuration a caller passes, even one that resolves none", () => {
+		const longer = createTestOAuthTokenSettings({ refreshTokenExpiresIn: 86_401 });
+		expect(() => checkOAuthTokenSettings(longer, CONFIG)).toThrow(
+			/oauthTokenSettings\.refreshTokenExpiresIn.*86401.*86400/,
+		);
+		// Passing a configuration is the transitional form even when the value
+		// is `undefined`: the configuration's absence is refused, never read as
+		// the configuration-free form.
+		expect(() => checkOAuthTokenSettings(createTestOAuthTokenSettings(), undefined)).toThrow();
 	});
 });

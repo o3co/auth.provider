@@ -106,6 +106,7 @@
 . ConditionalRemoveAnswer type
 . ConditionalReplaceAnswer type
 . ConditionalSetRemoveAnswer type
+. ConfigDefaultsInvalidDetails type
 . ConfigPathRelocatedDetails type
 . ConfigSchema type
 . ConfigValidationFailedDetails type
@@ -126,6 +127,7 @@
 . CookieCarrier type
 . CoreConfig type
 . CoreConfigSchema value
+. CoreSection type
 . CorsMiddlewareOptions type
 . CorsRoute type
 . CreateAppOptions type
@@ -566,6 +568,7 @@
 . RequirementInterruption type
 . RequirementSession type
 . RequirementVerdict type
+. ReservedBootstrapInputs type
 . ReservedComponentKeyDetails type
 . RetrieveFederationGrantTokenDeps type
 . RetrieveFederationGrantTokenRequest type
@@ -988,6 +991,7 @@
 . readConditionalRemoveAnswer value
 . readConditionalReplaceAnswer value
 . readConditionalSetRemoveAnswer value
+. readCoreSection value
 . readDeviceAuthorization value
 . readEnrollmentFacts value
 . readEnvironmentName value
@@ -1194,6 +1198,7 @@
 ./testing RenamedVariableCaptureInput type
 ./testing RenamedVariableCheck type
 ./testing RequirementContractInput type
+./testing SectionStrictnessOptions type
 ./testing SessionCookiePolicyContractInput type
 ./testing TestAppHandle type
 ./testing TestCsrfGuardOptions type
@@ -1240,6 +1245,7 @@
 ./testing renamedVariableCaptures value
 ./testing renamedVariableProblems value
 ./testing resolverForTests value
+./testing sectionStrictnessProblems value
 ./testing sessionCookiePolicyContract value
 ./testing sessionRequirementContract value
 ./testing testMfaFactorProofs value

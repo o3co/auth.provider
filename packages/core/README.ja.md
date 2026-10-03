@@ -31,30 +31,39 @@ composition root は自分の設定を解決します — 自分のファイル�
 2. 書かれたものの上に重ねるので、どのスキーマも宣言していないキーは残ります — トップレベルでも、core が宣言するセクションの下でも;
 3. そのうえで、読み込まれた各モジュールの `configSchema` で base の出力をパースし、各モジュール自身のセクションをそのパスでパースしてそこに書き戻します: 読み込まれたモジュールのセクションが取り除かれることはありません。
 
-どれかが拒否する値は、オペレーターが書いた各パスを示して boot を拒否します（`config-validation-failed`）。`Object.prototype` のメンバー（`__proto__`、`constructor`、`toString` など）または `prototype` と同じ名前のキーも、どの階層にあっても、スキーマの結果にかかわらず同じく拒否します: スキーマは `__proto__` を読まずに捨て、それ以外の名前では、名前による参照が継承されたメンバーを見つけることがあるためです。この検査が見るのは設定自身のデータプロパティで、パースされた HOCON ファイルが持つものはすべてこれに当たります。コードで組み立てた設定の getter は、この検査ではなくスキーマのパースが読みます。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、設定と並べて bootstrap したロガーに一度だけ名前が出ます — `config_sections_ignored`（`warn`、名前つき）。セクション名の綴り間違いはここに現れます。何も設定しないセクション — 空のもの、または空のセクションだけを持つもの — は名前が出ません。`JWKS_PATH` と `JWKS_CACHE_MAX_AGE` が未設定のとき core 自身の `reference.conf` が残す `jwks` がそれに当たります。core のスキーマが他パッケージのセクションをまだミラーしている間（下記）、それらはどれも名前が出ません: ミラーされたセクションは、モジュールが読み込まれているかどうかにかかわらず所有されているものとして数えます。boot がパースしたものは `config` スロットにあります。ハンドルから読んでください。
+どれかが拒否する値は、オペレーターが書いた各パスを示して boot を拒否します（`config-validation-failed`）。`Object.prototype` のメンバー（`__proto__`、`constructor`、`toString` など）または `prototype` と同じ名前のキーも、どの階層にあっても、スキーマの結果にかかわらず同じく拒否します: スキーマは `__proto__` を読まずに捨て、それ以外の名前では、名前による参照が継承されたメンバーを見つけることがあるためです。この検査が見るのは設定自身のデータプロパティで、パースされた HOCON ファイルが持つものはすべてこれに当たります。コードで組み立てた設定の getter は、この検査ではなくスキーマのパースが読みます。読み込まれたどのモジュールも所有しないトップレベルのセクションは残され、設定と並べて bootstrap したロガーに `warn` で一度だけ、名前だけが出ます（値は出しません）。パッケージの `reference.conf` はそのモジュールのどれかが読み込まれれば重ねられるので、読み込まれていない兄弟モジュールのセクションも設定します。composition root が設定の既定値 — `bootstrapComponents.configDefaults`、同じ reference を自分のファイルなし・環境変数なしで、設定と同じ方法でプレーンなデータにしたもの（セクションは既定値と丸ごと比べるため。[`ReservedBootstrapInputs`](src/boot/types.mts)）— も boot に渡すと、boot はそれらを区別します: 既定値が持ち、設定がそれと等しいままのセクションは名前が出ません。オペレーターのファイルか環境変数が変えたものは `config_sections_not_loaded` — 構成が読み込まないモジュールへの設定 — です。既定値が持たないものは `config_sections_ignored` で、セクション名の綴り間違いはここに現れます。既定値がなければ、そうしたセクションはすべて `config_sections_ignored` です。何も設定しないセクション — 空のもの、または空のセクションだけを持つもの — は名前が出ません。`JWKS_PATH` と `JWKS_CACHE_MAX_AGE` が未設定のとき core 自身の `reference.conf` が残す `jwks` がそれに当たります。core のスキーマが他パッケージのセクションをまだミラーしている間（下記）、それらはどれも名前が出ません: ミラーされたセクションは、モジュールが読み込まれているかどうかにかかわらず所有されているものとして数えます。同じように、パッケージの `reference.conf` が `renamed-variables` に捕捉する変数のうち、解決時に設定されていて、読み込まれたどのモジュールも — core も — 改名を宣言していないものは、`environment_variables_not_applied`（`warn`、名前つき）として一度だけ名前が出ます。たとえば Redis パッケージを読み込み、そのレートリミッターを読み込まずに設定した `RATE_LIMIT_FAIL_MODE` です。boot がパースしたものは `config` スロットにあります。ハンドルから読んでください。
 
 ```typescript
 import { fileURLToPath } from "node:url";
 import { type AppConfig, createApp, moduleReferences } from "@o3co/auth-provider-core";
-import { parseFile } from "@o3co/ts.hocon";
+import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 
-// 構成自身のファイルを、読み込むすべてのパッケージの reference.conf の上に（core のものを最後に）。
-const resolved = moduleReferences(modules)
-  .reduce(
-    (layered, reference) => layered.withFallback(parseFile(fileURLToPath(reference))),
-    parseFile("config/application.conf"),
-  )
-  .toObject();
+// `own` を、読み込むすべてのパッケージの reference.conf の上に（core のものを最後に）。
+const layered = (own: Config, options?: { env: Record<string, string> }) =>
+  moduleReferences(modules)
+    .reduce(
+      (config, reference) => config.withFallback(parseFile(fileURLToPath(reference), options)),
+      own,
+    )
+    .toObject();
+
+const resolved = layered(parseFile("config/application.conf"));
+// 同じ reference を、構成自身のファイルなし・環境変数なしで。
+const configDefaults = layered(empty(), { env: {} });
 
 const handle = await createApp({
   modules,
   // パースしないまま: createApp が、読み込まれたすべてのモジュールのスキーマで一度だけパースする。
-  bootstrapComponents: { config: resolved as unknown as AppConfig, pathResolver: import.meta.resolve },
+  bootstrapComponents: {
+    config: resolved as unknown as AppConfig,
+    configDefaults,
+    pathResolver: import.meta.resolve,
+  },
 });
 const config = handle.components.config; // boot がパースしたもの
 ```
 
-各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するいくつかのセクション（`webauthn`、`federation-grants.enabled`）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。ストアのセクション（`core-rate-limiter-memory`、`redis-*`）と、各セクションの移動元のパスは、存在だけを宣言します: 書かれたまま残し、それを解析するモジュールと移動の拒否に渡します。パッケージの `reference.conf` はそのモジュールのどれかが読み込まれれば重ねられるので、読み込まれないかもしれないモジュールのセクションも設定します。宣言されているので、それらは無視されたセクションとして名前が出ません。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ — は、自分のファイルを core の `reference.conf` だけの上に重ねて解決し（`coreReference()`: まだモジュールを知らないので、どのパッケージの reference も分かりません）、`readTransitionalConfig(resolved, paths)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: 指定した各パスを core の base がそこに宣言するスキーマでパースし、それ以外は書かれたまま検査しません — 検査するのは boot です。したがってこの第一段階は、パッケージの `reference.conf` だけが設定するものを見ず、パッケージの reference が補うセクションを読んではいけません。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
+各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するいくつかのセクション（`webauthn`、`federation-grants.enabled`）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。ストアのセクション（`core-rate-limiter-memory`、`redis-*`）と、各セクションの移動元のパスは、存在だけを宣言します: 書かれたまま残し、それを解析するモジュールと移動の拒否に渡します。パッケージの `reference.conf` はそのモジュールのどれかが読み込まれれば重ねられるので、読み込まれないかもしれないモジュールのセクションも設定します。宣言されているので、それらは無視されたセクションとして名前が出ません。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ — は、自分のファイルを core の `reference.conf` だけの上に重ねて解決し（`coreReference()`: まだモジュールを知らないので、どのパッケージの reference も分かりません）、`readTransitionalConfig(resolved, paths)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: 指定した各パスを core の base がそこに宣言するスキーマでパースし、それ以外は書かれたまま検査しません — 検査するのは boot です。したがってこの第一段階は、パッケージの `reference.conf` だけが設定するものを見ず、パッケージの reference が補うセクションを読んではいけません。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。core 自身のセクションは `readCoreSection(resolved)`（[`src/config/core-section.mts`](src/config/core-section.mts)）で読みます: `core {}` だけを、boot がパースするのと同じ厳格なスキーマで読み、同じ文言で拒否し、ほかのセクションは読みません。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
 
 `AppConfigSchema` は非推奨です。`createApp` の前にこれでパースすると、宣言していないセクションがすべて取り除かれ — #472、#495、#496 はそうしてセクションを失いました — それを続ける構成は、解決したものより少ないものを boot に渡すことになります。export は残り、そこから推論される型 `AppConfig` はパース済みの設定の型です。
 
@@ -270,7 +279,7 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 それぞれの仕組みが拡張面の 1 つの軸です: `routes`・`grants`・`federationTypes` への contribution は振る舞いを足し（plugin）、`provides` はポートのスロットを埋め（adapter）、`supportsX` ガードで検出される任意のメソッドはアダプターの追加機能であり（capability）、core が合成する contribution の種別は core の判断の意味を変えます（extension）。新しいポリシーをどの軸に載せるかは [AGENTS.md](../../AGENTS.md#extension-surface-four-axes) の規則です。
 
-設定を読むモジュールは、自分のセクションをマニフェストで宣言します（[#728](https://github.com/o3co/auth.provider/issues/728)）: `section.schema` はモジュールが所有する唯一のセクションの Zod スキーマで、boot はどのファクトリーよりも先にそのセクションをパースし、スキーマの出力の型を持つ `deps.section` としてすべてのファクトリーに渡します。スキーマが拒否する値は、オペレーターが書いたパスを示して boot を拒否します（`config-validation-failed`）。セクションはモジュール名の位置から読まれ、まだ古いパスにある間は `section.at` の位置から読まれます。`section.relocatedFrom` はセクションの移動元のパスを示します。そこにまだキーを設定している設定は、そのキーの新しいパスとそれを束縛する環境変数、またはキーが削除されたことを示して boot を拒否します（`config-path-relocated`）。0.x 系の間の橋渡しで、最初のメジャーリリースで削除されます（削除を忘れたリリースカットは relocated-paths のドリフトテストが失敗させます）。`section.renamedVariables` は名前が変わった環境変数を、古い名前からそれが束縛されていた古いパスへの対応で示します（新しい名前は新しいパスが束縛される変数で、削除されたキーのものにはありません）。パッケージの `reference.conf` は各名前を予約セクション `renamed-variables` に捕捉します。解決時に古い名前が設定されていたと捕捉された場合、新しい名前が同じ値で捕捉されていなければ boot を拒否します（`environment-variable-renamed`）。削除されたキーの変数が設定されている場合と、名前が捕捉されていない場合も同じく拒否します。`section.reference` はパッケージの `config/reference.conf` を指します: boot はこれを読まず、`moduleReferences(modules)`（[`src/config/references.mts`](src/config/references.mts)）が、構成が読み込むモジュールの reference を、それぞれ一度ずつ、core 自身のもの（`coreReference()`）を一番下にして答え、composition root はそれを自分のファイルの下に重ねます。パッケージは自分の reference を、自分のテストで `@o3co/auth-provider-core/testing` の `packageReferenceProblems` を使って検査します。boot はパースした各モジュールのセクションをそのパスで設定に書き戻すので、`config` を読むファクトリーは、セクションのスキーマがそれをどうしたかを見ます。別のモジュールのセクションの内側にあるセクションはその内側に書き戻され、二つのモジュールが同じパスにセクションを宣言することはできません（`module-section-path-invalid`）。boot が core のスキーマの後に設定全体をパースする `configSchema` は、各セクションがモジュール名の下に移った時点で非推奨になります。
+設定を読むモジュールは、自分のセクションをマニフェストで宣言します（[#728](https://github.com/o3co/auth.provider/issues/728)）: `section.schema` はモジュールが所有する唯一のセクションの Zod スキーマで、boot はどのファクトリーよりも先にそのセクションをパースし、スキーマの出力の型を持つ `deps.section` としてすべてのファクトリーに渡します。スキーマが拒否する値は、オペレーターが書いたパスを示して boot を拒否します（`config-validation-failed`）。セクションはモジュール名の位置から読まれ、まだ古いパスにある間は `section.at` の位置から読まれます。`section.relocatedFrom` はセクションの移動元のパスを示します。そこにまだキーを設定している設定は、そのキーの新しいパスとそれを束縛する環境変数、またはキーが削除されたことを示して boot を拒否します（`config-path-relocated`）。0.x 系の間の橋渡しで、最初のメジャーリリースで削除されます（削除を忘れたリリースカットは relocated-paths のドリフトテストが失敗させます）。`section.renamedVariables` は名前が変わった環境変数を、古い名前からそれが束縛されていた古いパスへの対応で示します（新しい名前は新しいパスが束縛される変数で、削除されたキーのものにはありません）。パッケージの `reference.conf` は各名前を予約セクション `renamed-variables` に捕捉します。解決時に古い名前が設定されていたと捕捉された場合、新しい名前が同じ値で捕捉されていなければ boot を拒否します（`environment-variable-renamed`）。削除されたキーの変数が設定されている場合と、名前が捕捉されていない場合も同じく拒否します。`section.reference` はパッケージの `config/reference.conf` を指します: boot はこれを読まず、`moduleReferences(modules)`（[`src/config/references.mts`](src/config/references.mts)）が、構成が読み込むモジュールの reference を、それぞれ一度ずつ、core 自身のもの（`coreReference()`）を一番下にして答え、composition root はそれを自分のファイルの下に重ねます。パッケージは自分の reference を、自分のテストで `@o3co/auth-provider-core/testing` の `packageReferenceProblems` を使って検査します。セクションのスキーマは、宣言していないキーをどのオブジェクト階層でも拒否するものとします。そうすれば、綴りの誤りや以前のバージョンが読んでいたキーは、無視されるのではなく、その場所を示して boot を拒否します（`config-validation-failed`）。同じエントリーの `sectionStrictnessProblems` は、モジュールのセクションのうち未知のキーを残す階層をそれぞれ示し（設計上キーが開いている階層、つまりデプロイメントが選ぶ名前をキーとするレコードは、理由を添えて除外します）、スキーマが宣言しているのに渡したサンプルが届かない階層も示します。boot はパースした各モジュールのセクションをそのパスで設定に書き戻すので、`config` を読むファクトリーは、セクションのスキーマがそれをどうしたかを見ます。別のモジュールのセクションの内側にあるセクションはその内側に書き戻され、二つのモジュールが同じパスにセクションを宣言することはできません（`module-section-path-invalid`）。boot が core のスキーマの後に設定全体をパースする `configSchema` は、各セクションがモジュール名の下に移った時点で非推奨になります。
 
 自分の `enabled` キーを持つモジュールは、それをスイッチ `section.isEnabled` として宣言し、boot はパース済みのセクションでそれを呼びます。`false` を答えたモジュールは何も登録しません — スロット、コントリビューション、ルート、admission action、レート制限の予算、他のスロットへの要求、absence policy、ライフサイクルのいずれも — し、そのファクトリーは一つも実行されず、インストールされていないのと同じになります。ただしセクションはパースされ、旧パスは引き続き拒否されます。そのモジュールだけが提供するはずだったスロットを要求するモジュールは、インストールされていないときと同じく拒否されます。
 
@@ -467,7 +476,7 @@ const myGrantModule = defineModule({
 });
 ```
 
-`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。`GrantFactory` は `GrantDependencies` を受け取り、その必須スロットは `config` と `keyStore` なので、モジュールはその両方を requires します。boot planner はグラントを `my_grant` で登録し、`/oauth/token` は `grantHandlerResolver` synthetic key を通じてそれにディスパッチします。
+`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。`GrantFactory` は `GrantDependencies` を受け取り、その必須スロットは `config` と `keyStore` なので、モジュールはその両方を requires します。oauth モジュールの設定の issuer、有効期間、スイッチを読むグラントは `oauthTokenSettings` を optional に宣言し、`checkOAuthTokenSettings(deps.oauthTokenSettings)` で検査します。これは設定を必要としません: スロットの有効期間を設定の値に収めるのは boot 自身です。boot planner はグラントを `my_grant` で登録し、`/oauth/token` は `grantHandlerResolver` synthetic key を通じてそれにディスパッチします。
 
 ### YAML からクライアントとユーザーを読み込む
 

@@ -250,7 +250,7 @@ describe("ModuleSpec.authoritative", () => {
 			overrideComponents: { oauthTokenSettings: SECOND },
 		});
 		try {
-			expect(seen.settings).toBe(SECOND);
+			expect(seen.settings).toEqual(SECOND);
 		} finally {
 			await handle.dispose();
 		}
@@ -264,7 +264,7 @@ describe("ModuleSpec.authoritative", () => {
 			overrideComponents: { oauthTokenSettings: SECOND },
 		});
 		try {
-			expect(seen.settings).toBe(SECOND);
+			expect(seen.settings).toEqual(SECOND);
 		} finally {
 			await handle.dispose();
 		}
@@ -277,7 +277,7 @@ describe("ModuleSpec.authoritative", () => {
 			bootstrapComponents: bootstrap(),
 		});
 		try {
-			expect(seen.settings).toBe(OWNED);
+			expect(seen.settings).toEqual(OWNED);
 		} finally {
 			await handle.dispose();
 		}
@@ -358,7 +358,7 @@ describe("ModuleSpec.authoritative — every module, every key, the keys materia
 				overrideComponents: make() as never,
 			});
 			try {
-				expect(seen.settings).toBe(OWNED);
+				expect(seen.settings).toEqual(OWNED);
 			} finally {
 				await handle.dispose();
 			}
@@ -441,7 +441,7 @@ describe("the host maps are read once", () => {
 			overrideComponents: hiding as never,
 		});
 		try {
-			expect(seen.settings).toBe(OWNED);
+			expect(seen.settings).toEqual(OWNED);
 			expect(reads).toBe(1);
 		} finally {
 			await handle.dispose();

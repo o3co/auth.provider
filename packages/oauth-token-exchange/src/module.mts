@@ -31,21 +31,6 @@ import {
 } from "./validator/selfIssuedAccessToken.mjs";
 
 /**
- * Token Exchange config slice: requires a non-empty `oauth.jwt.issuer`, which
- * core's base schema leaves optional. The built-in self-issued validator
- * compares a token's issuer with it, so a missing or empty issuer fails boot
- * with `BootError(reason: "config-validation-failed")` before the validator
- * factory runs.
- */
-const tokenExchangeConfigSchema = z.object({
-	oauth: z.object({
-		jwt: z.object({
-			issuer: z.string().min(1),
-		}),
-	}),
-});
-
-/**
  * The schema of `oauth-token-exchange {}`, the module's own section. Strict:
  * a key it does not declare refuses boot. `maxActorChainDepth` bounds RFC 8693
  * actor delegation chains, so repeated exchanges cannot nest `act` claims
@@ -62,7 +47,11 @@ const REQUIRES = [
 	"tokenExchangeValidatorResolver",
 	"clientRepository",
 	"keyStore",
-	"config",
+	// What the oauth module provides of `oauth {}`: the lifetimes the grant
+	// mints within, and the issuer and `legacyTypAccept` the validator holds a
+	// subject token to. A composition without the oauth module fills it. The
+	// whole configuration is not read.
+	"oauthTokenSettings",
 ] as const;
 const OPTIONAL = [
 	// Read by the grant alone (`familyRefusal` in grant.mts) for the
@@ -92,10 +81,6 @@ const OPTIONAL = [
 	// the one ends the other. Optional as it is on `oauthModule`: without a
 	// store no surface judges a `sid`.
 	"userSessionStore",
-	// What the oauth module provides of `oauth {}`: the lifetimes the grant
-	// mints within, and the issuer and `legacyTypAccept` the validator holds a
-	// subject token to. Read from the configuration when no module provides it.
-	"oauthTokenSettings",
 ] as const;
 
 type Requires = (typeof REQUIRES)[number];
@@ -120,7 +105,6 @@ export const tokenExchangeModule: Module = defineModule<
 	typeof tokenExchangeSectionSchema
 >({
 	name: "oauth-token-exchange",
-	configSchema: tokenExchangeConfigSchema,
 	// The package's `config/reference.conf` holds this section's default and
 	// binds OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH at its new path, the
 	// name that path derives, so no variable is renamed.
@@ -153,24 +137,17 @@ export const tokenExchangeModule: Module = defineModule<
 		},
 		tokenExchangeValidators: {
 			[ACCESS_TOKEN_TYPE]: (deps: TokenExchangeModuleDeps) => {
-				// The `oauthTokenSettings` slot whole, checked, when the composition
-				// holds it; the configuration's keys when not. Never a mix.
-				const settings =
-					deps.oauthTokenSettings === undefined
-						? undefined
-						: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config);
+				// The `oauthTokenSettings` slot, read whole.
+				const settings = checkOAuthTokenSettings(deps.oauthTokenSettings);
 				return createSelfIssuedAccessTokenValidator({
 					keyStore: deps.keyStore,
-					issuer: settings === undefined ? deps.config.oauth.jwt.issuer : settings.issuer,
+					issuer: settings.issuer,
 					// No `refreshTokenFamilyRevocation`: the grant owns the family
 					// check (see OPTIONAL).
 					accessTokenDenylist: deps.accessTokenDenylist,
 					subjectRevocation: deps.subjectRevocation,
 					// The operator's setting, not the validator's own default.
-					legacyTypAccept:
-						settings === undefined
-							? deps.config.oauth.jwt.legacyTypAccept
-							: settings.legacyTypAccept,
+					legacyTypAccept: settings.legacyTypAccept,
 					logger: deps.logger,
 				});
 			},

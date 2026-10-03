@@ -121,6 +121,8 @@ export {
 	renamedVariableCaptures,
 	renamedVariableProblems,
 } from "./renamedVariables.mjs";
+// The check that each module refuses an unknown key at every level of its section.
+export { type SectionStrictnessOptions, sectionStrictnessProblems } from "./sectionStrictness.mjs";
 export {
 	type CsrfGuardContractInput,
 	createTestCsrfGuard,

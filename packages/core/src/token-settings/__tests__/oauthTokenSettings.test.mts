@@ -114,7 +114,7 @@ describe("the oauthTokenSettings slot", () => {
 			} as never,
 		});
 		try {
-			expect(seen).toBe(settings);
+			expect(seen).toEqual(settings);
 		} finally {
 			await handle.dispose();
 		}
