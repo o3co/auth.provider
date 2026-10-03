@@ -123,7 +123,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	};
 	// Deployment config, resolved once at construction; `resolveOAuthOptions`
 	// owns the defensive read for hand-built configs.
-	const { requireEmailVerified } = resolveOAuthOptions(config);
+	const { requireEmailVerified } = resolveOAuthOptions(config.oauth);
 	// Read once at construction, so an invalid hand-built configuration is
 	// refused before any request.
 	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;

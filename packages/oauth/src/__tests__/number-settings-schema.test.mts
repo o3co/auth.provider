@@ -53,8 +53,19 @@ const REFUSED: ReadonlyArray<unknown> = [
 	Number.NaN,
 ];
 
+/** The keys of `oauth {}` its schema requires. */
+const REQUIRED = {
+	jwt: { issuer: "https://auth.test" },
+	accessToken: { expiresIn: 3600 },
+	refreshToken: { expiresIn: 86400, unknownFamilyPolicy: "reject", legacyRtPolicy: "reject" },
+	oidcMode: "oidc-required",
+};
+
 const parse = (key: string, value: unknown) =>
-	oauthSectionSchema.safeParse({ clientIdMetadataDocuments: { enabled: false, [key]: value } });
+	oauthSectionSchema.safeParse({
+		...REQUIRED,
+		clientIdMetadataDocuments: { enabled: false, [key]: value },
+	});
 
 const issuesAt = (result: ReturnType<typeof parse>, key: string) =>
 	(result.error?.issues ?? [])
