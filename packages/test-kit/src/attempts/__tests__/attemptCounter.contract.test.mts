@@ -108,6 +108,10 @@ const CASE = {
 	concurrent: "concurrent attempts on one key are counted exactly, across instances",
 	badInput: "a key or spec it cannot count is rejected, and counts nothing",
 	outage: "a counter that cannot reach its backend rejects, never answering a count",
+	lowered:
+		"a limit lowered on a live key applies at once: limit 5, then limit 2, allows the second attempt with nothing remaining and refuses the third",
+	raised:
+		"a limit raised on a live key applies at once, and the refused attempts counted nothing: limit 2 spent, then limit 5, allows the next attempt with 2 remaining",
 } as const;
 
 /** The names of the cases that refuse the counter `make` builds over core's, on a fake clock. */
@@ -257,6 +261,63 @@ describe("attemptCounterContract refuses a broken counter", () => {
 			},
 		}));
 		expect(refused).toContain(CASE.badInput);
+	});
+
+	it("refuses a counter that keeps the limit a key's window started with", async () => {
+		const refused = await refusedBy((inner) => {
+			const first = new Map<string, AttemptSpec>();
+			return {
+				consume: (key, spec) => {
+					if (!first.has(key)) first.set(key, spec);
+					return inner.consume(key, first.get(key) as AttemptSpec);
+				},
+			};
+		});
+		expect(refused).toContain(CASE.lowered);
+		expect(refused).toContain(CASE.raised);
+	});
+
+	it("refuses a counter that counts refused attempts", async () => {
+		const refused = await refusedBy((_inner, clock) => {
+			const windows = new Map<string, { count: number; resetAt: number }>();
+			return {
+				consume: async (key, spec) => {
+					const now = clock.now();
+					let window = windows.get(key);
+					if (window === undefined || window.resetAt <= now) {
+						window = { count: 0, resetAt: now + spec.windowSeconds * 1000 };
+						windows.set(key, window);
+					}
+					window.count += 1;
+					const allowed = window.count <= spec.limit;
+					return {
+						allowed,
+						remaining: allowed ? spec.limit - window.count : 0,
+						resetAt: new Date(window.resetAt),
+					};
+				},
+			};
+		});
+		expect(refused).toContain(CASE.raised);
+	});
+
+	it("refuses a counter that takes a key past 512 characters", async () => {
+		const refused = await refusedBy((inner) => ({
+			consume: (key, spec) =>
+				inner.consume(typeof key === "string" && key.length > 512 ? key.slice(0, 512) : key, spec),
+		}));
+		expect(refused).toContain(CASE.badInput);
+	});
+
+	it("refuses a counter whose window ends far later than its spec's", async () => {
+		const refused = await refusedBy((_inner, clock) => {
+			const late = createMemoryAttemptCounter({ now: clock.now });
+			return {
+				consume: (key, spec) =>
+					late.consume(key, { ...spec, windowSeconds: spec.windowSeconds * 10 }),
+			};
+		});
+		expect(refused).toContain(CASE.window);
 	});
 
 	it("refuses a counter that answers an outage as an allowed attempt", async () => {

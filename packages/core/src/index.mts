@@ -936,23 +936,26 @@ export {
 	type AttemptCounterFailure,
 	type AttemptGuard,
 	type AttemptGuardOptions,
+	type AttemptPerIpOptions,
 	type AttemptVerdict,
 	attemptCounterUnavailableEnvelope,
 	createAttemptGuard,
 	DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS,
 } from "./ratelimit/attemptGuard.mjs";
 export {
+	ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
 	type AttemptCount,
 	type AttemptCounter,
 	type AttemptSpec,
 	isAttemptKey,
 	isAttemptSpec,
+	MAX_ATTEMPT_KEY_LENGTH,
 	readAttemptCount,
 } from "./ratelimit/attempts.mjs";
 export {
+	ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS,
 	createMemoryAttemptCounter,
 	DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES,
-	MemoryAttemptCounterFullError,
 	type MemoryAttemptCounterOptions,
 } from "./ratelimit/attemptsMemory.mjs";
 // The one lookup every bundled limiter takes a key's budget from.

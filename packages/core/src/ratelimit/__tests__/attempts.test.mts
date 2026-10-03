@@ -22,17 +22,21 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { MAX_DURATION_SECONDS } from "#/config/durations.mjs";
 import {
+	ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
 	type AttemptCount,
 	type AttemptCounter,
 	type AttemptSpec,
 	isAttemptKey,
 	isAttemptSpec,
+	MAX_ATTEMPT_KEY_LENGTH,
 	readAttemptCount,
 } from "#/ratelimit/attempts.mjs";
 import type { RateLimiter } from "#/ratelimit/types.mjs";
 
 const SPEC: AttemptSpec = { limit: 5, windowSeconds: 60 };
 const RESET = new Date("2026-10-03T00:01:00.000Z");
+/** Half a window before RESET: the reading's clock. */
+const NOW = RESET.getTime() - 30_000;
 
 describe("AttemptCounter", () => {
 	it("consumes against a spec handed in by the caller, and is not a RateLimiter", () => {
@@ -70,12 +74,15 @@ describe("isAttemptSpec", () => {
 });
 
 describe("isAttemptKey", () => {
-	it("accepts a non-empty string", () => {
+	it("accepts a non-empty string of at most 512 characters", () => {
+		expect(MAX_ATTEMPT_KEY_LENGTH).toBe(512);
 		expect(isAttemptKey("login:ip:192.0.2.1")).toBe(true);
+		expect(isAttemptKey("k".repeat(512))).toBe(true);
 	});
 
 	it.each([
 		["an empty string", ""],
+		["a string of 513 characters", "k".repeat(513)],
 		["a number", 1],
 		["undefined", undefined],
 		["an object", { toString: () => "k" }],
@@ -87,7 +94,7 @@ describe("isAttemptKey", () => {
 describe("readAttemptCount", () => {
 	it("reads an allowed count into a fresh, frozen copy", () => {
 		const answer = { allowed: true, remaining: 4, resetAt: new Date(RESET) };
-		const read = readAttemptCount(answer, SPEC);
+		const read = readAttemptCount(answer, SPEC, NOW);
 		expect(read).toEqual({ allowed: true, remaining: 4, resetAt: RESET });
 		expect(Object.isFrozen(read)).toBe(true);
 		answer.resetAt.setTime(0);
@@ -95,7 +102,7 @@ describe("readAttemptCount", () => {
 	});
 
 	it("reads a refusal with nothing remaining", () => {
-		expect(readAttemptCount({ allowed: false, remaining: 0, resetAt: RESET }, SPEC)).toEqual({
+		expect(readAttemptCount({ allowed: false, remaining: 0, resetAt: RESET }, SPEC, NOW)).toEqual({
 			allowed: false,
 			remaining: 0,
 			resetAt: RESET,
@@ -118,7 +125,7 @@ describe("readAttemptCount", () => {
 				return RESET;
 			},
 		};
-		expect(readAttemptCount(answer, SPEC)?.remaining).toBe(1);
+		expect(readAttemptCount(answer, SPEC, NOW)?.remaining).toBe(1);
 		expect(reads.sort()).toEqual(["allowed", "remaining", "resetAt"]);
 	});
 
@@ -139,7 +146,21 @@ describe("readAttemptCount", () => {
 		["resetAt a number", { allowed: true, remaining: 1, resetAt: RESET.getTime() }],
 		["resetAt an Invalid Date", { allowed: true, remaining: 1, resetAt: new Date(Number.NaN) }],
 	])("answers undefined for %s", (_label, answer) => {
-		expect(readAttemptCount(answer, SPEC)).toBeUndefined();
+		expect(readAttemptCount(answer, SPEC, NOW)).toBeUndefined();
+	});
+
+	it("reads a window's end from the allowance before now to a window and the allowance after it", () => {
+		expect(ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS).toBe(5_000);
+		const at = (ms: number) =>
+			readAttemptCount({ allowed: true, remaining: 1, resetAt: new Date(ms) }, SPEC, NOW);
+		expect(at(NOW - 5_000)?.resetAt.getTime()).toBe(NOW - 5_000);
+		expect(at(NOW + 60_000 + 5_000)?.resetAt.getTime()).toBe(NOW + 65_000);
+		expect(at(NOW - 5_001)).toBeUndefined();
+		expect(at(NOW + 65_001)).toBeUndefined();
+		expect(at(NOW + 365 * 86_400_000)).toBeUndefined();
+		expect(
+			readAttemptCount({ allowed: true, remaining: 1, resetAt: RESET }, SPEC, Number.NaN),
+		).toBeUndefined();
 	});
 
 	it("answers undefined, never throws, for an answer whose read throws", () => {
@@ -150,6 +171,6 @@ describe("readAttemptCount", () => {
 				throw new Error("getter");
 			},
 		};
-		expect(readAttemptCount(answer, SPEC)).toBeUndefined();
+		expect(readAttemptCount(answer, SPEC, NOW)).toBeUndefined();
 	});
 });

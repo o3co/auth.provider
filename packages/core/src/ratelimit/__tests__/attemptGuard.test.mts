@@ -17,10 +17,11 @@
 /**
  * `createAttemptGuard`: the per-process fallback each deployment mode allows,
  * failing closed whenever the counter has no usable answer (a throw, a
- * timeout, a malformed answer), whatever the counter declares, and the
- * `RateLimit-*` / `Retry-After` headers, from the owner's spec.
+ * timeout, a malformed answer), whatever the counter declares, `Retry-After`
+ * alone on a refusal, keys bounded, and the refusal hook.
  */
 
+import { createHash } from "node:crypto";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, type Mock, vi } from "vitest";
@@ -99,7 +100,7 @@ const guardOf = (options: Partial<AttemptGuardOptions> = {}): AttemptGuard =>
 
 const appOf = (guard: AttemptGuard) => {
 	const app = express();
-	app.post("/per-ip", guard.perIp, (_req, res) => {
+	app.post("/per-ip", guard.perIp(), (_req, res) => {
 		res.status(200).json({ ok: true });
 	});
 	app.post("/subject/:sub", async (req, res) => {
@@ -143,6 +144,21 @@ describe("createAttemptGuard: the per-process fallback, by deployment mode", () 
 		expect((await request(app).post("/per-ip")).status).toBe(429);
 	});
 
+	it("sizes the per-process counter by maxEntries", async () => {
+		const guard = guardOf({ counter: undefined, deploymentMode: "single", maxEntries: 1 });
+		const app = appOf(guard);
+		await request(app).post("/subject/a");
+		await request(app).post("/subject/a");
+		expect((await request(app).post("/subject/a")).status).toBe(429);
+		// b takes the one entry, evicting a's window, which then starts again.
+		await request(app).post("/subject/b");
+		expect((await request(app).post("/subject/a")).status).toBe(200);
+	});
+
+	it("refuses a maxEntries the per-process counter cannot use", () => {
+		expect(() => guardOf({ counter: undefined, maxEntries: 0 })).toThrow(RangeError);
+	});
+
 	it.each(["single", "multi", "unset"] as const)(
 		"builds silently over a shared counter under %s",
 		(deploymentMode) => {
@@ -175,6 +191,7 @@ describe("createAttemptGuard: what it is built from", () => {
 		["empty", ""],
 		["carrying a colon", "login:ip"],
 		["not a string", 7],
+		["of 65 characters", "t".repeat(65)],
 	])("refuses a tag %s", (_label, tag) => {
 		expect(() => guardOf({ tag: tag as string })).toThrow(RangeError);
 	});
@@ -215,28 +232,91 @@ describe("createAttemptGuard: keys and the spec handed to the counter", () => {
 		]);
 		for (const call of counter.calls) expect(call.spec).toEqual(SPEC);
 	});
+
+	it("hands an id of up to 128 characters as it is, and a longer one as its SHA-256", async () => {
+		const counter = scripted(() => count(true, 1));
+		const app = appOf(guardOf({ counter }));
+		const short = "a".repeat(128 - "user:".length);
+		const long = "b".repeat(129 - "user:".length);
+		await request(app).post(`/subject/${short}`);
+		await request(app).post(`/subject/${long}`);
+		const digest = createHash("sha256").update(`user:${long}`).digest("hex");
+		expect(counter.calls.map((c) => c.key)).toEqual([`login:user:${short}`, `login:h:${digest}`]);
+	});
+
+	it("hashes a long client address the same way", async () => {
+		const counter = scripted(() => count(true, 1));
+		const app = appOf(guardOf({ counter }));
+		app.set("trust proxy", true);
+		const forwarded = "c".repeat(200);
+		await request(app).post("/per-ip").set("X-Forwarded-For", forwarded);
+		const digest = createHash("sha256").update(`ip:${forwarded}`).digest("hex");
+		expect(counter.calls.map((c) => c.key)).toEqual([`login:h:${digest}`]);
+	});
 });
 
 describe("createAttemptGuard: answers and headers", () => {
-	it("lets an allowed attempt through with the owner's limit and the count's remaining and reset", async () => {
+	it("lets an allowed attempt through telling nothing of the count", async () => {
 		const app = appOf(guardOf({ counter: scripted(() => count(true, 1, 30_500)) }));
 		const res = await request(app).post("/per-ip");
 		expect(res.status).toBe(200);
-		expect(res.headers["ratelimit-limit"]).toBe("2");
-		expect(res.headers["ratelimit-remaining"]).toBe("1");
-		expect(res.headers["ratelimit-reset"]).toBe("31");
+		expect(res.headers["ratelimit-limit"]).toBeUndefined();
+		expect(res.headers["ratelimit-remaining"]).toBeUndefined();
+		expect(res.headers["ratelimit-reset"]).toBeUndefined();
 		expect(res.headers["retry-after"]).toBeUndefined();
 	});
 
-	it("answers a refusal 429 rate_limited with Retry-After, and the handler does not run", async () => {
+	it("answers a refusal 429 rate_limited, uncached, with Retry-After alone, and the handler does not run", async () => {
 		const app = appOf(guardOf({ counter: scripted(() => count(false, 0, 12_000)) }));
 		const res = await request(app).post("/subject/alice");
 		expect(res.status).toBe(429);
 		expect(res.body).toEqual({ error: "rate_limited", error_description: "Rate limit exceeded" });
-		expect(res.headers["ratelimit-limit"]).toBe("2");
-		expect(res.headers["ratelimit-remaining"]).toBe("0");
-		expect(res.headers["ratelimit-reset"]).toBe("12");
+		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.headers["retry-after"]).toBe("12");
+		expect(res.headers["ratelimit-limit"]).toBeUndefined();
+		expect(res.headers["ratelimit-remaining"]).toBeUndefined();
+		expect(res.headers["ratelimit-reset"]).toBeUndefined();
+	});
+
+	it("calls the per-IP middleware's refusal hook with the request and the count, after answering", async () => {
+		const refusals: Array<{ path: string; count: AttemptCount }> = [];
+		let next = count(true, 1);
+		const guard = guardOf({ counter: scripted(() => next) });
+		const app = express();
+		app.post(
+			"/h",
+			guard.perIp({ onRefused: (req, c) => refusals.push({ path: req.path, count: c }) }),
+			(_req, res) => {
+				res.status(204).end();
+			},
+		);
+		expect((await request(app).post("/h")).status).toBe(204);
+		expect(refusals).toEqual([]);
+		next = count(false, 0);
+		expect((await request(app).post("/h")).status).toBe(429);
+		expect(refusals).toEqual([{ path: "/h", count: count(false, 0) }]);
+	});
+
+	it("answers the refusal 429 even when the hook throws, and logs the hook's failure", async () => {
+		const logger = makeLogger();
+		const guard = guardOf({ counter: scripted(() => count(false, 0)), logger });
+		const app = express();
+		app.post(
+			"/h",
+			guard.perIp({
+				onRefused: () => {
+					throw new Error("hook");
+				},
+			}),
+			(_req, res) => {
+				res.status(204).end();
+			},
+		);
+		expect((await request(app).post("/h")).status).toBe(429);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ tag: "login" }),
+			"attempt_refused_hook_failed",
+		);
 	});
 
 	it("answers a refusal with the route's own error when it names one", async () => {
@@ -255,9 +335,8 @@ describe("createAttemptGuard: answers and headers", () => {
 	});
 
 	it("reports a reset already past as 0", async () => {
-		const app = appOf(guardOf({ counter: scripted(() => count(false, 0, -5_000)) }));
+		const app = appOf(guardOf({ counter: scripted(() => count(false, 0, -3_000)) }));
 		const res = await request(app).post("/per-ip");
-		expect(res.headers["ratelimit-reset"]).toBe("0");
 		expect(res.headers["retry-after"]).toBe("0");
 	});
 
@@ -295,7 +374,7 @@ describe("createAttemptGuard: fails closed", () => {
 		const handler = vi.fn();
 		const guard = guardOf({ counter, logger, auditSink: sink, ...extra });
 		const app = express();
-		app.post("/per-ip", guard.perIp, (_req, res) => {
+		app.post("/per-ip", guard.perIp(), (_req, res) => {
 			handler();
 			res.status(200).end();
 		});
@@ -307,6 +386,7 @@ describe("createAttemptGuard: fails closed", () => {
 			error: "service_unavailable",
 			error_description: "Attempt counter temporarily unavailable",
 		});
+		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.headers["ratelimit-limit"]).toBeUndefined();
 		expect(res.headers["retry-after"]).toBeUndefined();
 		expect(handler).not.toHaveBeenCalled();
@@ -357,6 +437,11 @@ describe("createAttemptGuard: fails closed", () => {
 		["no remaining", { allowed: true, resetAt: new Date(NOW) }],
 		["allowed as a string", { allowed: "true", remaining: 1, resetAt: new Date(NOW) }],
 		["an Invalid Date", { allowed: true, remaining: 1, resetAt: new Date(Number.NaN) }],
+		["a reset long past", { allowed: true, remaining: 1, resetAt: new Date(NOW - 5_001) }],
+		[
+			"a reset past the owner's window",
+			{ allowed: false, remaining: 0, resetAt: new Date(NOW + 65_001) },
+		],
 		[
 			"more remaining than the owner's limit leaves",
 			{ allowed: true, remaining: 5, resetAt: new Date(NOW) },

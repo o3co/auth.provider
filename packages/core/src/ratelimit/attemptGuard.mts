@@ -25,10 +25,16 @@
  * - failing closed: a counter that throws, does not answer within
  *   `timeoutMs`, or answers something `readAttemptCount` refuses is an outage,
  *   answered `503` whatever the counter declares, logged and audited;
- * - the `RateLimit-*` headers, with `Retry-After` on a refusal, as the rate
- *   limit guard sends them, from the owner's limit.
+ * - what a response says of the count: on a refusal `Retry-After` alone,
+ *   with `Cache-Control: no-store` on every answer it writes, and never
+ *   `RateLimit-*`, which would tell whoever guesses a secret how many guesses
+ *   are left and when more come.
+ *
+ * A key's id longer than {@link MAX_PLAIN_ID_LENGTH} is handed to the counter
+ * as its SHA-256, so neither a long key nor a long raw value reaches a store.
  */
 
+import { createHash } from "node:crypto";
 import type { Request, RequestHandler, Response } from "express";
 import { auditedError } from "../audit/auditedError.mjs";
 import { emitAuditEvent } from "../audit/factory.mjs";
@@ -51,6 +57,12 @@ import { createMemoryAttemptCounter } from "./attemptsMemory.mjs";
 /** How long a consume is waited for by default before the guard answers `503`. */
 export const DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS = 2_000;
 
+/** The longest id a key carries as it is; a longer one is carried as `h:<sha256 hex>`. */
+const MAX_PLAIN_ID_LENGTH = 128;
+
+/** The longest tag: with a hashed id, every key stays well inside a counter's key bound. */
+const MAX_TAG_LENGTH = 64;
+
 export interface AttemptGuardOptions {
 	/** The `attemptCounter` slot's value. Absent: a per-process counter, where the deployment mode allows one. */
 	readonly counter?: AttemptCounter;
@@ -68,8 +80,18 @@ export interface AttemptGuardOptions {
 	readonly timeoutMs?: number;
 	/** The 429's error code and description. Default `rate_limited`, "Rate limit exceeded". */
 	readonly refused?: { readonly error: string; readonly description: string };
-	/** Epoch milliseconds, for the headers and the per-process counter. Default `Date.now`. */
+	/** Epoch milliseconds, for reading a count and for the per-process counter. Default `Date.now`. */
 	readonly now?: () => number;
+	/** The per-process counter's `maxEntries`; a shared counter is sized by its own backend. */
+	readonly maxEntries?: number;
+}
+
+export interface AttemptPerIpOptions {
+	/**
+	 * Called after a refusal is answered, so the owning module can audit it.
+	 * A throw is logged `attempt_refused_hook_failed` and changes nothing.
+	 */
+	readonly onRefused?: (req: Request, count: AttemptCount) => void;
 }
 
 /** What the guard answered an attempt with. Only on `allowed` does the caller go on; the others are already answered. */
@@ -82,7 +104,7 @@ export interface AttemptGuard {
 	/** Counts one attempt under `<tag>:<id>`, and answers the request itself unless it is allowed. */
 	attempt(req: Request, res: Response, id: string): Promise<AttemptVerdict>;
 	/** Middleware counting one attempt per request under `<tag>:ip:<req.ip>`. */
-	readonly perIp: RequestHandler;
+	perIp(options?: AttemptPerIpOptions): RequestHandler;
 }
 
 /** Why a counter had no usable answer. */
@@ -132,8 +154,15 @@ const isUsableTimeout = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_TIMER_MS;
 
 function checkTag(tag: unknown): string {
-	if (typeof tag !== "string" || tag.length === 0 || tag.includes(":")) {
-		throw new RangeError("createAttemptGuard: tag must be a non-empty string without ':'");
+	if (
+		typeof tag !== "string" ||
+		tag.length === 0 ||
+		tag.length > MAX_TAG_LENGTH ||
+		tag.includes(":")
+	) {
+		throw new RangeError(
+			`createAttemptGuard: tag must be a non-empty string of at most ${MAX_TAG_LENGTH} characters, without ':'`,
+		);
 	}
 	return tag;
 }
@@ -184,7 +213,11 @@ function counterFor(
 			"attempt_counter_not_shared",
 		);
 	}
-	return createMemoryAttemptCounter(options.now === undefined ? {} : { now: options.now });
+	return createMemoryAttemptCounter({
+		logger,
+		...(options.now === undefined ? {} : { now: options.now }),
+		...(options.maxEntries === undefined ? {} : { maxEntries: options.maxEntries }),
+	});
 }
 
 export function createAttemptGuard(options: AttemptGuardOptions): AttemptGuard {
@@ -205,6 +238,12 @@ export function createAttemptGuard(options: AttemptGuardOptions): AttemptGuard {
 	const { auditSink } = options;
 	const counter = counterFor(options, tag, spec, logger);
 
+	/** `<tag>:<id>`, the id hashed when it is long. */
+	const keyFor = (id: string): string =>
+		`${tag}:${
+			id.length > MAX_PLAIN_ID_LENGTH ? `h:${createHash("sha256").update(id).digest("hex")}` : id
+		}`;
+
 	/** The count, or why there is none. */
 	const consume = async (key: string): Promise<AttemptCount | Outage> => {
 		const answered = await within(
@@ -213,7 +252,7 @@ export function createAttemptGuard(options: AttemptGuardOptions): AttemptGuard {
 		);
 		if (answered === "elapsed") return { failure: "timed_out" };
 		if (!answered.ok) return { failure: "threw", error: answered.error };
-		return readAttemptCount(answered.value, spec) ?? { failure: "malformed" };
+		return readAttemptCount(answered.value, spec, now()) ?? { failure: "malformed" };
 	};
 
 	const reportOutage = (req: Request, { failure, error }: Outage): void => {
@@ -239,28 +278,42 @@ export function createAttemptGuard(options: AttemptGuardOptions): AttemptGuard {
 	};
 
 	const attempt = async (req: Request, res: Response, id: string): Promise<AttemptVerdict> => {
-		const outcome = await consume(`${tag}:${id}`);
+		const outcome = await consume(keyFor(id));
 		if ("failure" in outcome) {
 			reportOutage(req, outcome);
-			res.status(503).json(attemptCounterUnavailableEnvelope());
+			res.status(503).set("Cache-Control", "no-store").json(attemptCounterUnavailableEnvelope());
 			return { verdict: "unavailable" };
 		}
-		const resetSeconds = Math.max(0, Math.ceil((outcome.resetAt.getTime() - now()) / 1000));
-		res.setHeader("RateLimit-Limit", String(spec.limit));
-		res.setHeader("RateLimit-Remaining", String(outcome.remaining));
-		res.setHeader("RateLimit-Reset", String(resetSeconds));
 		if (!outcome.allowed) {
-			res.setHeader("Retry-After", String(resetSeconds));
-			res.status(429).json(refused);
+			const retryAfter = Math.max(0, Math.ceil((outcome.resetAt.getTime() - now()) / 1000));
+			res
+				.status(429)
+				.set({ "Cache-Control": "no-store", "Retry-After": String(retryAfter) })
+				.json(refused);
 			return { verdict: "refused", count: outcome };
 		}
 		return { verdict: "allowed", count: outcome };
 	};
 
-	const perIp: RequestHandler = async (req, res, next) => {
-		const verdict = await attempt(req, res, `ip:${req.ip ?? "unknown"}`);
-		if (verdict.verdict === "allowed") next();
-	};
+	const perIp =
+		({ onRefused }: AttemptPerIpOptions = {}): RequestHandler =>
+		async (req, res, next) => {
+			const verdict = await attempt(req, res, `ip:${req.ip ?? "unknown"}`);
+			if (verdict.verdict === "allowed") {
+				next();
+				return;
+			}
+			if (verdict.verdict !== "refused" || onRefused === undefined) return;
+			try {
+				onRefused(req, verdict.count);
+			} catch (error) {
+				const projected = loggableError(error);
+				logger.error(
+					{ tag, error: projected.detail ?? projected.name },
+					"attempt_refused_hook_failed",
+				);
+			}
+		};
 
 	return { attempt, perIp };
 }

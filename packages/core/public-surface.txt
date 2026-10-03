@@ -1,5 +1,7 @@
 . ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY value
 . ADMISSION_GRADES value
+. ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS value
+. ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS value
 . AUDIT_SINK_ABSENCE_POLICY value
 . AbsencePolicy type
 . AccessTokenAuthorization type
@@ -44,6 +46,7 @@
 . AttemptCounterFailure type
 . AttemptGuard type
 . AttemptGuardOptions type
+. AttemptPerIpOptions type
 . AttemptSpec type
 . AttemptVerdict type
 . AuditEvent type
@@ -347,6 +350,7 @@
 . MAIL_PURPOSES value
 . MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS value
 . MAX_ASSERTION_LIFETIME_SECONDS value
+. MAX_ATTEMPT_KEY_LENGTH value
 . MAX_CLIENT_ID_LENGTH value
 . MAX_DURATION_MS value
 . MAX_DURATION_SECONDS value
@@ -376,7 +380,6 @@
 . MappedClaims type
 . MemoryAccessTokenDenylist type
 . MemoryAccessTokenDenylistOptions type
-. MemoryAttemptCounterFullError value
 . MemoryAttemptCounterOptions type
 . MemoryChallengeStore type
 . MemoryChallengeStoreOptions type

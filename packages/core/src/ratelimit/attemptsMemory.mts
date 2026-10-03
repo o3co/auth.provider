@@ -16,12 +16,16 @@
 
 /**
  * The in-process `AttemptCounter`: one process's windows, lost on a restart,
- * so a limit it enforces is per replica. Anyone who can reach a guarded route
- * drives its writes, so it holds at most `maxEntries` keys and, full, refuses
- * a new key as a store fault (the guard answers `503`) rather than evict a
- * live window, which would hand that window's key a fresh limit.
+ * so a limit it enforces is per replica. It holds at most `maxEntries` keys.
+ * Full, it drops the windows that have ended and, if still full, evicts the
+ * live window that ends first, warning `attempt_counter_evicted` (counts
+ * only) at most once a minute. Evicting rather than refusing keeps a flood of
+ * fresh keys from locking out every new client; an evicted key only starts
+ * a new window, which gains nothing for a key its holder can mint anew.
  */
 
+import { consoleLogger } from "../logging/consoleLogger.mjs";
+import type { Logger } from "../logging/Logger.mjs";
 import { usableMaxEntries } from "../single-use/max-entries.mjs";
 import {
 	type AttemptCount,
@@ -33,19 +37,16 @@ import {
 
 export const DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES = 100_000;
 
+/** The least time between two `attempt_counter_evicted` warnings. */
+export const ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS = 60_000;
+
 export interface MemoryAttemptCounterOptions {
 	/** The most keys it holds a window for. Default {@link DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES}. */
 	readonly maxEntries?: number;
 	/** Epoch milliseconds. Default `Date.now`. */
 	readonly now?: () => number;
-}
-
-/** A new key refused because every key the counter holds has a window running. */
-export class MemoryAttemptCounterFullError extends Error {
-	override readonly name = "MemoryAttemptCounterFullError";
-	constructor(maxEntries: number) {
-		super(`in-process attempt counter is full: ${maxEntries} keys have a window running`);
-	}
+	/** Where an eviction is reported. Default `consoleLogger`. */
+	readonly logger?: Pick<Logger, "warn">;
 }
 
 interface Window {
@@ -61,27 +62,38 @@ export function createMemoryAttemptCounter(
 		"createMemoryAttemptCounter",
 	);
 	const now = options.now ?? Date.now;
+	const logger = options.logger ?? consoleLogger;
 	const windows = new Map<string, Window>();
-	// No window held ends before this: until then a full counter has no room
-	// to make, and refuses without a scan.
-	let earliestEnd = Number.NEGATIVE_INFINITY;
+	let unreported = 0;
+	let lastWarnAt = Number.NEGATIVE_INFINITY;
 
-	const makeRoom = (at: number): boolean => {
-		if (windows.size < maxEntries) return true;
-		if (at < earliestEnd) return false;
-		let earliest = Number.POSITIVE_INFINITY;
+	/** Drops the ended windows, then, if still full, the live one that ends first. */
+	const makeRoom = (at: number): void => {
+		let earliestKey: string | undefined;
+		let earliestEnd = Number.POSITIVE_INFINITY;
 		for (const [key, window] of windows) {
 			if (window.resetAt <= at) windows.delete(key);
-			else if (window.resetAt < earliest) earliest = window.resetAt;
+			else if (window.resetAt < earliestEnd) {
+				earliestKey = key;
+				earliestEnd = window.resetAt;
+			}
 		}
-		earliestEnd = earliest;
-		return windows.size < maxEntries;
+		if (windows.size < maxEntries || earliestKey === undefined) return;
+		windows.delete(earliestKey);
+		unreported += 1;
+		if (at - lastWarnAt >= ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS) {
+			logger.warn({ evicted: unreported, maxEntries }, "attempt_counter_evicted");
+			unreported = 0;
+			lastWarnAt = at;
+		}
 	};
 
 	return {
 		async consume(key: string, spec: AttemptSpec): Promise<AttemptCount> {
 			if (!isAttemptKey(key)) {
-				throw new TypeError("createMemoryAttemptCounter: key must be a non-empty string");
+				throw new TypeError(
+					"createMemoryAttemptCounter: key must be a non-empty string of at most 512 characters",
+				);
 			}
 			if (!isAttemptSpec(spec)) {
 				throw new RangeError(
@@ -106,10 +118,9 @@ export function createMemoryAttemptCounter(
 				};
 			}
 			if (running !== undefined) windows.delete(key);
-			else if (!makeRoom(at)) throw new MemoryAttemptCounterFullError(maxEntries);
+			else if (windows.size >= maxEntries) makeRoom(at);
 			const resetAt = at + windowSeconds * 1000;
 			windows.set(key, { count: 1, resetAt });
-			if (resetAt < earliestEnd) earliestEnd = resetAt;
 			return { allowed: true, remaining: limit - 1, resetAt: new Date(resetAt) };
 		},
 	};

@@ -49,9 +49,10 @@ export interface AttemptCount {
  *
  * `consume` counts one attempt under `key`, atomically: of the attempts made
  * under one key in one window, by any number of callers or replicas, exactly
- * the first `spec.limit` are allowed. A window starts at the first attempt
- * counted under a key with no window running, and ends `spec.windowSeconds`
- * later. Keys are counted apart.
+ * the first `spec.limit` are allowed, each against the spec handed in with
+ * it, and a refused attempt counts nothing. A window starts at the first
+ * attempt counted under a key with no window running, and ends
+ * `spec.windowSeconds` later. Keys are counted apart.
  *
  * It rejects, counting nothing, a key `isAttemptKey` refuses or a spec
  * `isAttemptSpec` refuses. A backend that cannot count rejects: an outage is
@@ -75,17 +76,29 @@ export const isAttemptSpec = (value: unknown): value is AttemptSpec => {
 	);
 };
 
-/** A key a counter takes: a non-empty string. */
+/** The longest key a counter takes. */
+export const MAX_ATTEMPT_KEY_LENGTH = 512;
+
+/** A key a counter takes: a non-empty string of at most {@link MAX_ATTEMPT_KEY_LENGTH} characters. */
 export const isAttemptKey = (value: unknown): value is string =>
-	typeof value === "string" && value.length > 0;
+	typeof value === "string" && value.length > 0 && value.length <= MAX_ATTEMPT_KEY_LENGTH;
+
+/** How far a counter's clock may stand from the reader's when its window's end is judged. */
+export const ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS = 5_000;
 
 /**
- * A counter's answer as a fresh, frozen count, each field read once, or
- * `undefined` when it is not one under `spec`: `allowed` not a boolean,
- * `remaining` not a whole number below `spec.limit` on an allowed attempt or
- * 0 on a refused one, `resetAt` not a valid `Date`, or a read that throws.
+ * A counter's answer, read at `nowMs`, as a fresh, frozen count, each field
+ * read once, or `undefined` when it is not one under `spec`: `allowed` not a
+ * boolean, `remaining` not a whole number below `spec.limit` on an allowed
+ * attempt or 0 on a refused one, `resetAt` not a valid `Date` within
+ * {@link ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS} of `[nowMs, nowMs + windowSeconds]`,
+ * or a read that throws.
  */
-export function readAttemptCount(answer: unknown, spec: AttemptSpec): AttemptCount | undefined {
+export function readAttemptCount(
+	answer: unknown,
+	spec: AttemptSpec,
+	nowMs: number,
+): AttemptCount | undefined {
 	let allowed: unknown;
 	let remaining: unknown;
 	let resetAt: unknown;
@@ -101,7 +114,13 @@ export function readAttemptCount(answer: unknown, spec: AttemptSpec): AttemptCou
 	}
 	if (allowed ? remaining >= spec.limit : remaining !== 0) return undefined;
 	const resetMs = instantOf(resetAt);
-	if (resetMs === undefined) return undefined;
+	if (resetMs === undefined || !Number.isFinite(nowMs)) return undefined;
+	if (
+		resetMs < nowMs - ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS ||
+		resetMs > nowMs + spec.windowSeconds * 1000 + ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS
+	) {
+		return undefined;
+	}
 	return Object.freeze({ allowed, remaining, resetAt: new Date(resetMs) });
 }
 

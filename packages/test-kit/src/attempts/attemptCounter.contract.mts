@@ -17,8 +17,9 @@
 /**
  * The contract suite of core's `AttemptCounter` port, the counter behind a
  * verifier's own attempt limits: a fixed window per key that allows exactly
- * the first `limit` attempts, against the spec handed in with each attempt;
- * keys counted apart; remaining and the window's end answered right;
+ * the first `limit` attempts, against the spec handed in with each attempt,
+ * a lowered or raised limit applying at once and a refused attempt counting
+ * nothing; keys counted apart; remaining and the window's end answered right;
  * concurrent attempts counted exactly; a key or spec it cannot count
  * rejected, counting nothing; and, declared, an outage rejected rather than
  * answered as a count. Every answer is read through core's
@@ -92,14 +93,15 @@ async function elapse(harness: AttemptCounterHarness, ms: number): Promise<void>
 	await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** One attempt, its answer read as the guard reads it. */
+/** One attempt, its answer read as the guard reads it, on the counter's clock. */
 async function attempt(
-	counter: AttemptCounter,
+	harness: AttemptCounterHarness,
 	key: string,
 	spec: AttemptSpec,
+	counter: AttemptCounter = harness.counter,
 ): Promise<AttemptCount> {
 	const answer: unknown = await counter.consume(key, spec);
-	const read = readAttemptCount(answer, spec);
+	const read = readAttemptCount(answer, spec, nowOf(harness));
 	assert.ok(
 		read !== undefined,
 		`consume(${key}) answered ${String(answer)}, which is not a count under ${JSON.stringify(spec)}`,
@@ -125,7 +127,7 @@ function assertWindowEnd(
 	);
 }
 
-const BAD_KEYS: readonly unknown[] = ["", undefined, null, 7, {}];
+const BAD_KEYS: readonly unknown[] = ["", "k".repeat(513), undefined, null, 7, {}];
 
 const BAD_SPECS: readonly unknown[] = [
 	undefined,
@@ -175,7 +177,7 @@ export function attemptCounterContract(
 			const key = freshKey("window");
 			const from = nowOf(harness);
 			const answers: AttemptCount[] = [];
-			for (let i = 0; i < 5; i++) answers.push(await attempt(harness.counter, key, spec));
+			for (let i = 0; i < 5; i++) answers.push(await attempt(harness, key, spec));
 			const to = nowOf(harness);
 			assert.deepEqual(
 				answers.map((a) => [a.allowed, a.remaining]),
@@ -202,13 +204,13 @@ export function attemptCounterContract(
 		test("a window ends windowSeconds after its first attempt, and the next attempt starts another", async (harness) => {
 			const spec: AttemptSpec = { limit: 1, windowSeconds: 1 };
 			const key = freshKey("reset");
-			const first = await attempt(harness.counter, key, spec);
+			const first = await attempt(harness, key, spec);
 			assert.equal(first.allowed, true);
-			assert.equal((await attempt(harness.counter, key, spec)).allowed, false);
+			assert.equal((await attempt(harness, key, spec)).allowed, false);
 			if (harness.clock !== undefined) {
 				await elapse(harness, 999);
 				assert.equal(
-					(await attempt(harness.counter, key, spec)).allowed,
+					(await attempt(harness, key, spec)).allowed,
 					false,
 					"the window has not ended a millisecond before its end",
 				);
@@ -217,7 +219,7 @@ export function attemptCounterContract(
 				await elapse(harness, 1_000 + REAL_CLOCK_TOLERANCE_MS / 2);
 			}
 			const from = nowOf(harness);
-			const next = await attempt(harness.counter, key, spec);
+			const next = await attempt(harness, key, spec);
 			const to = nowOf(harness);
 			assert.deepEqual(
 				[next.allowed, next.remaining],
@@ -232,7 +234,7 @@ export function attemptCounterContract(
 			const spec: AttemptSpec = { limit: 2, windowSeconds: 60 };
 			const base = freshKey("keys");
 			const spent = `${base}:ip:192.0.2.1`;
-			for (let i = 0; i < 3; i++) await attempt(harness.counter, spent, spec);
+			for (let i = 0; i < 3; i++) await attempt(harness, spent, spec);
 			for (const other of [
 				`${base}:ip:192.0.2.2`,
 				`${base}:user:192.0.2.1`,
@@ -242,18 +244,14 @@ export function attemptCounterContract(
 				`${base}:__proto__`,
 				`${base}:constructor`,
 			]) {
-				const answer = await attempt(harness.counter, other, spec);
+				const answer = await attempt(harness, other, spec);
 				assert.deepEqual(
 					[answer.allowed, answer.remaining],
 					[true, 1],
 					`${other} is counted apart from ${spent}`,
 				);
 			}
-			assert.equal(
-				(await attempt(harness.counter, spent, spec)).allowed,
-				false,
-				`${spent} is still spent`,
-			);
+			assert.equal((await attempt(harness, spent, spec)).allowed, false, `${spent} is still spent`);
 		}),
 
 		test("each key is counted against the spec handed in with its attempt", async (harness) => {
@@ -262,7 +260,7 @@ export function attemptCounterContract(
 				const key = freshKey(`spec-${limit}`);
 				const allowed: boolean[] = [];
 				for (let i = 0; i <= limit; i++) {
-					allowed.push((await attempt(harness.counter, key, spec)).allowed);
+					allowed.push((await attempt(harness, key, spec)).allowed);
 				}
 				assert.deepEqual(
 					allowed,
@@ -277,7 +275,9 @@ export function attemptCounterContract(
 			const key = freshKey("concurrent");
 			const counters = [harness.counter, harness.second ?? harness.counter];
 			const answers = await Promise.all(
-				Array.from({ length: 24 }, (_, i) => attempt(counters[i % 2] as AttemptCounter, key, spec)),
+				Array.from({ length: 24 }, (_, i) =>
+					attempt(harness, key, spec, counters[i % 2] as AttemptCounter),
+				),
 			);
 			const allowed = answers.filter((a) => a.allowed);
 			assert.equal(allowed.length, 5, `${allowed.length} of 24 concurrent attempts allowed, not 5`);
@@ -299,11 +299,59 @@ export function attemptCounterContract(
 			for (const bad of BAD_SPECS) {
 				await assert.rejects(consume(key, bad), `the spec ${shown(bad)} is rejected`);
 			}
-			const first = await attempt(harness.counter, key, spec);
+			const first = await attempt(harness, key, spec);
 			assert.deepEqual(
 				[first.allowed, first.remaining],
 				[true, 1],
 				"a rejected attempt counted nothing under its key",
+			);
+			const longest = `${key}:${"k".repeat(512)}`.slice(0, 512);
+			assert.equal(
+				(await attempt(harness, longest, spec)).allowed,
+				true,
+				"a key of 512 characters is counted",
+			);
+		}),
+
+		test("a limit lowered on a live key applies at once: limit 5, then limit 2, allows the second attempt with nothing remaining and refuses the third", async (harness) => {
+			const key = freshKey("lowered");
+			const wide: AttemptSpec = { limit: 5, windowSeconds: 60 };
+			const narrow: AttemptSpec = { limit: 2, windowSeconds: 60 };
+			const answers = [
+				await attempt(harness, key, wide),
+				await attempt(harness, key, narrow),
+				await attempt(harness, key, narrow),
+			];
+			assert.deepEqual(
+				answers.map((a) => [a.allowed, a.remaining]),
+				[
+					[true, 4],
+					[true, 0],
+					[false, 0],
+				],
+			);
+		}),
+
+		test("a limit raised on a live key applies at once, and the refused attempts counted nothing: limit 2 spent, then limit 5, allows the next attempt with 2 remaining", async (harness) => {
+			const key = freshKey("raised");
+			const narrow: AttemptSpec = { limit: 2, windowSeconds: 60 };
+			const wide: AttemptSpec = { limit: 5, windowSeconds: 60 };
+			const answers = [
+				await attempt(harness, key, narrow),
+				await attempt(harness, key, narrow),
+				await attempt(harness, key, narrow),
+				await attempt(harness, key, narrow),
+				await attempt(harness, key, wide),
+			];
+			assert.deepEqual(
+				answers.map((a) => [a.allowed, a.remaining]),
+				[
+					[true, 1],
+					[true, 0],
+					[false, 0],
+					[false, 0],
+					[true, 2],
+				],
 			);
 		}),
 	];
