@@ -30,7 +30,6 @@ export type {
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
-	FederationFactory,
 	// One configured federation as its type's factories receive it, what a
 	// federation package declares it handles, keyed by type, and the redirect
 	// policy such a declaration builds.

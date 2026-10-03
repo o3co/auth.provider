@@ -5,7 +5,6 @@ import type { Contributed } from "../contributed.mjs";
 import type {
 	AuditHookFactory,
 	ContributesMap,
-	FederationFactory,
 	FederationInstance,
 	FederationTypeContribution,
 	GrantFactory,
@@ -16,13 +15,14 @@ import type { ProviderDeps } from "../provider.mjs";
 // Local fixture deps — does NOT augment shared ComponentMap.
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
-test("ContributesMap has exactly core's fourteen contribution kinds", () => {
-	// `federationRedirectPolicies` is absent: the session package adds it
-	// through `declare module` augmentation.
+test("ContributesMap has exactly core's thirteen contribution kinds", () => {
+	// `federations` is absent: a federation registers through the type its
+	// entry names (`federationTypes`). `federationRedirectPolicies` is absent
+	// too: the session package declares it, for its policy's type, through
+	// `declare module` augmentation.
 	type Keys = keyof ContributesMap<LocalDeps>;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "grants"
-		| "federations"
 		| "tokenExchangeValidators"
 		| "mfaFactors"
 		| "auditHooks"
@@ -91,11 +91,6 @@ test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget 
 	expectTypeOf<RateLimitBudgetFactory<LocalDeps>>().toEqualTypeOf<
 		(deps: LocalDeps) => Contributed<RateLimitSpec | null>
 	>();
-});
-
-test("a federations entry is the factory alone, name-keyed by the federation's name", () => {
-	type Entry = NonNullable<ContributesMap<LocalDeps>["federations"]>[string];
-	expectTypeOf<Entry>().toEqualTypeOf<FederationFactory<LocalDeps>>();
 });
 
 test("federationTypes is name-keyed by the type an entry names, each declaring its entry schema and the provider and redirect-policy factories given the entry", () => {

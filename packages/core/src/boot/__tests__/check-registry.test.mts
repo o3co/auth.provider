@@ -48,6 +48,7 @@ describe("stage-1 check registries", () => {
 		expect(STAGE_ONE_PRE_CONFIG_CHECKS.map((c) => c.id)).toEqual([
 			"module-entries-are-manifests",
 			"unique-module-names",
+			"federation-kind-guard",
 			"module-section-paths",
 			"relocated-config-paths",
 			"renamed-environment-variables",
@@ -65,7 +66,6 @@ describe("stage-1 check registries", () => {
 			"contribution-shapes",
 			"per-kind-contribute-duplicates",
 			"route-collisions",
-			"federation-redirect-policy-pairing",
 			"override-targets",
 			"override-duplicates",
 			"same-module-contribute-override",

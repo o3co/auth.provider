@@ -41,7 +41,7 @@ export type { Contributed };
 /** Type produced by a `GrantFactory<Deps>` contribution. */
 export type GrantHandler = ConcreteGrantHandler;
 
-/** Type produced by a `FederationFactory<Deps>` contribution: the adapter port itself. */
+/** Type produced by a `federationTypes` entry's `factory`: the adapter port itself. */
 export type FederationProvider = ConcreteFederationProvider;
 
 /**
@@ -82,7 +82,6 @@ export type GrantPolicyHookContribution = GrantPolicyHook;
 // Per-kind factory types: each is `(deps: Deps) => Value`.
 
 export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler>;
-export type FederationFactory<Deps> = (deps: Deps) => Contributed<FederationProvider>;
 
 /**
  * One configured federation as a type's factories receive it: the operator's
@@ -99,10 +98,16 @@ export interface FederationInstance<E> {
 
 /**
  * What a `federationTypes` declaration's `redirectPolicy` answers: the value
- * the `federationRedirectPolicies` contribution kind takes. That kind is
- * declared by the package that owns the redirect policy, by augmenting
- * `ContributesMap`; with its declaration in the program this is its policy
- * type, and `unknown` without it.
+ * registered under the `federationRedirectPolicies` contribution kind. The
+ * package that owns the redirect policy declares that kind's type, by
+ * augmenting `ContributesMap`; with its declaration in the program this is
+ * its policy type, and `unknown` without it.
+ *
+ * The augmentation is read for its type alone: boot refuses a module's
+ * `contributes` or `overrides` of `federationRedirectPolicies` at stage 1
+ * (`contribution-kind-guarded`), and registers each policy from the type its
+ * `core.federations` entry names. The key stays declared, by its owner, until
+ * the redirect-policy contract is core's, since this type is read off it.
  */
 export type FederationRedirectPolicyContribution = ContributesMap extends {
 	readonly federationRedirectPolicies?: {
@@ -215,7 +220,7 @@ export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimit
  * `federationRedirectPolicies`).
  *
  * Collisions:
- * - Name-keyed (`grants`, `federations`, `tokenExchangeValidators`,
+ * - Name-keyed (`grants`, `tokenExchangeValidators`,
  *   `mfaFactors`, `sessionRequirements`, `rateLimitBudgets`,
  *   `federationTypes`, `admissionActions`): a duplicate refuses boot.
  * - List-shaped (`auditHooks`, `routes`, `grantPolicyHooks`,
@@ -227,13 +232,13 @@ export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimit
  */
 export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	readonly grants?: { readonly [grantType: string]: GrantFactory<Deps> };
-	readonly federations?: {
-		readonly [name: string]: FederationFactory<Deps>;
-	};
 	/**
 	 * Federation types, keyed by the `type` a `core.federations` entry names
 	 * ({@link FederationTypeContribution}). Boot dispatches each enabled entry
-	 * of a registered type to it. Two packages claiming one type refuse boot
+	 * of a registered type to it, and registers the provider and redirect
+	 * policy it builds under the entry's name: a federation registers this way
+	 * alone, and a module contributing or overriding `federations` or
+	 * `federationRedirectPolicies` refuses boot (`contribution-kind-guarded`). Two packages claiming one type refuse boot
 	 * (`duplicate-contribute`); a declaration without an `entrySchema`, a
 	 * `factory` and a `redirectPolicy` refuses it at stage 1
 	 * (`contribution-malformed`); a host may not supply the collector

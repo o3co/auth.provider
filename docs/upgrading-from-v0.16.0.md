@@ -80,8 +80,9 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     `core.federations.<name>.type`, [below](#values-read-more-strictly)).
   - A fork that composes `googleFederationModule` or
     `oidcFederationModule(name)` beside the new list removes it: a module
-    that contributes `federations.<name>` for an entry its type also handles
-    is refused as `duplicate-contribute`. A module of its own that only
+    that contributes `federations` or `federationRedirectPolicies` is
+    refused as `contribution-kind-guarded`
+    ([below](#compositions-and-code)). A module of its own that only
     provides a bridge's slot (`googleFederationConfig`,
     `oidcFederationConfigs`) is not refused: with those modules gone,
     nothing reads the slot.
@@ -218,9 +219,9 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   or not: one without, or with an empty or blank one, refuses the boot at config
   validation (`config-validation-failed` at `core.federations.<name>.type`).
   Only the module registering that type under `federationTypes` handles an
-  enabled entry; a module contributing `federations.<name>` directly no
-  longer does, nor does a host whose `federations` collector holds the name.
-  Write the `type` of the module that handles each entry — `"google"`,
+  enabled entry; no module contributes a federation by its name any more
+  (`contribution-kind-guarded`, [below](#compositions-and-code)). Write the
+  `type` of the module that handles each entry — `"google"`,
   `"github"`, `"apple"`, `"oidc"`, or your own module's — and install that
   module.
 - **An enabled federation nothing handles.** An enabled
@@ -444,15 +445,29 @@ modules fills them.
   `core.federations` dispatches by type register after that pass, so it would
   miss them. Read them in a routes factory or at request time, as the bundled
   modules do.
-- **A federation contributed by its key.** A module that contributes or
-  overrides `federations.<key>` directly answers a provider named `<key>`;
-  one named otherwise, one without a name, or one that is not an object
-  refuses the boot (`contribute-factory-failed`, naming the module, kind
-  `federations` and the key, #1283), as a provider built by its `type`
-  already did. It used to boot, and the federation's routes at `<key>` looked
-  up the redirect policy and callback URL by the provider's name: another
-  federation's, or none. Name the provider after the key it is contributed
-  under.
+- **BREAKING: a module no longer contributes or overrides `federations` or
+  `federationRedirectPolicies` (#1314).** Core registers a federation's
+  provider and redirect policy from its `core.federations` entry alone, with
+  the factories of the type the entry names, so either kind in a module's
+  `contributes` or `overrides` refuses the boot before any factory runs,
+  whatever it holds and whether or not the module's section switches it off
+  (`contribution-kind-guarded`, naming the module, the kind and the channel,
+  and the entry's name when the kind holds a record with an entry: its
+  first), and so does a collector for either in `createApp`'s
+  `contributionKinds`. `ContributesMap` has no `federations` key, and the
+  pairing check of a direct provider and policy is gone with them
+  ([exports](#exports-removed-and-signatures-changed)). Register a type
+  under `federationTypes` instead — `defineFederationType` with a `factory`
+  that builds the provider and a `redirectPolicy` that builds its redirect
+  policy, both given the entry — and write that type on each
+  `core.federations.<name>` the module handles; a test registers one with
+  `federationTypeForTests` from `@o3co/auth-provider-core/testing`. The
+  provider a type's factory builds is named after its entry, or the boot is
+  refused (`contribute-factory-failed`, naming the module, kind
+  `federations` and the entry's name, #1283). A deployment that customised a
+  federation's redirect policy through `federationRedirectPolicies` overrides
+  the type instead (`overrides.federationTypes.<type>`, with its own
+  `redirectPolicy`).
 - **Rate limits.** The module that keys a prefix contributes its budget
   (`rateLimitBudgets`); the bundled limiters seed none (#782). An override
   that loosens a budget refuses the boot. In code: the `failMode` options are
@@ -496,6 +511,10 @@ modules fills them.
 - **Core's unwired MFA surface** (`createMfaRouter`, `MfaProvider`,
   `createMfaProviderFactory` and their types) is gone, and `BootErrorReason`
   loses `"mfa-partial-wiring"` (#702). MFA is `@o3co/auth-provider-mfa`.
+- **Direct federation contributions** (#1314): `FederationFactory` and
+  `FederationRedirectPolicyUnpairedDetails` are gone, and `BootErrorReason`
+  loses `"federation-redirect-policy-unpaired"`; a federation registers
+  through its type ([above](#slots-admission-and-wiring)).
 - **Rate-limit helpers** (`resolveSeededLimitSpecs`, `resolveLoginLimitSpec`,
   the per-feature prefixes and specs) are gone from core; the prefixes are
   exported by the packages that key them (#782).

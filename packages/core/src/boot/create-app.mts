@@ -78,8 +78,9 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
  * `mergeWithBuiltins` seeds the built-in contribution kinds and consumer kinds
  * overlay them, except `sessionRequirements` and `mfaFactors`
  * (`session-requirement-kind-guarded`) and `rateLimitBudgets`,
- * `federationTypes` and `admissionActions` (`contribution-kind-guarded`),
- * which `createApp` refuses to see replaced before the merge
+ * `federationTypes`, `admissionActions`, `auditHooks`, `federations` and
+ * `federationRedirectPolicies` (`contribution-kind-guarded`), which
+ * `createApp` refuses to see replaced before the merge
  * (`refuseGuardedHostKinds`).
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
@@ -88,12 +89,14 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
 export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	options: CreateAppOptions<B>,
 ): Promise<AppHandle> {
-	const { modules, contributionKinds } = options;
+	const { modules } = options;
 	// Each host map is read once, here: stage 1 checks what later stages use,
 	// so a map that answers differently on a later read (a Proxy, a getter)
-	// cannot have one answer checked and another materialised.
+	// cannot have one answer checked and another materialised — nor can the
+	// collectors the guard below reads differ from the ones merged.
 	const bootstrapComponents = snapshotHostMap(options.bootstrapComponents);
 	const overrideComponents = snapshotHostMap(options.overrideComponents);
+	const contributionKinds = snapshotHostMap(options.contributionKinds);
 
 	// A host collector for a guarded kind is refused before anything is merged
 	// or validated.
