@@ -489,7 +489,7 @@ const authorizeSchema = withRemovedKeys(
  */
 export const MAX_TRUST_PROXY_HOPS = 255;
 
-/** Why an entry without a type, or with an empty one, is refused. */
+/** Why an entry without a type, or with an empty or blank one, is refused. */
 const FEDERATION_TYPE_REQUIRED =
 	"every federation names its type: the federationTypes key of the installed module that handles it";
 
@@ -505,7 +505,9 @@ const FEDERATION_TYPE_REQUIRED =
 const federationEntrySchema = z
 	.object({
 		enabled: coerceBooleanFromEnv,
-		type: z.string({ error: FEDERATION_TYPE_REQUIRED }).min(1, { error: FEDERATION_TYPE_REQUIRED }),
+		type: z
+			.string({ error: FEDERATION_TYPE_REQUIRED })
+			.regex(/\S/, { error: FEDERATION_TYPE_REQUIRED }),
 		// Whether this federation's upstream IdP's `amr` counts (MFA ADR): it is
 		// recorded in the session's `amr` beside `fed`, stamped on tokens and
 		// matched for `acr`. Absent is `false`: the values are kept apart

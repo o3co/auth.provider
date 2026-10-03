@@ -50,10 +50,12 @@ describe("core.federations schema — every entry names its type", () => {
 	});
 
 	it.each([
-		["an enabled entry", true],
-		["a disabled entry", false],
-	])("refuses %s whose type is empty", (_label, enabled) => {
-		const result = federationsSchema.safeParse({ google: { enabled, type: "" } });
+		["an enabled entry", true, ""],
+		["a disabled entry", false, ""],
+		["an enabled entry", true, "   "],
+		["a disabled entry", false, " \t"],
+	])("refuses %s whose type is empty or blank (%j)", (_label, enabled, type) => {
+		const result = federationsSchema.safeParse({ google: { enabled, type } });
 
 		expect(result.success).toBe(false);
 		if (!result.success) {

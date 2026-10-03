@@ -215,7 +215,7 @@ step 2, lists every retired key and what you see. New since v0.16.0:
 
 - **BREAKING: every federation names its `type`, and only its type's module
   handles it (#1309).** Every `core.federations` entry sets `type`, enabled
-  or not: one without, or with an empty one, refuses the boot at config
+  or not: one without, or with an empty or blank one, refuses the boot at config
   validation (`config-validation-failed` at `core.federations.<name>.type`).
   Only the module registering that type under `federationTypes` handles an
   enabled entry; a module contributing `federations.<name>` directly no
