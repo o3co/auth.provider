@@ -1191,8 +1191,8 @@ Against a store whose take bumps, it is refused after the next holder's take,
 or it makes that take refuse (`concurrent_update`, and the upstream is not
 asked); against one whose take does not bump, it costs one extra counted
 rotation. Keeping the lock instead would answer every caller `lock_timeout`
-until it ran out. The fence holds for a store whose take bumps: the memory
-store now, and the bundled Redis store in its follow-up. Against a store whose
+until it ran out. The fence holds for a store whose take bumps: both bundled
+stores, memory and Redis, bump. Against a store whose
 take does not bump, the answered grant carries the version the take was made
 at, so every write after the take is guarded as before the fence, and the late
 give-back race stays open there until that store bumps.

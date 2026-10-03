@@ -181,9 +181,10 @@ describe("the rotation budget's fields", () => {
 			windowMs: HOUR,
 			now: at(DAY),
 		});
+		// The take bumped the version: the refresh writes at the one it left.
 		const replaced = await held.replaceCredentials({
 			grantId: "g-1",
-			expectedVersion: grant.version,
+			expectedVersion: grant.version + 1,
 			credentials: credentials("2"),
 			ineligible: null,
 			now: at(DAY + MIN),
@@ -249,21 +250,21 @@ describe("takeRotation's bounds", () => {
 	it("count a fractional window as the whole milliseconds it spans: instants are whole", async () => {
 		const held = store();
 		const grant = await activated(held);
-		const take = (now: Date) =>
+		const take = (now: Date, expectedVersion: number) =>
 			held.takeRotation?.({
 				grantId: "g-1",
-				expectedVersion: grant.version,
+				expectedVersion,
 				limit: 1,
 				windowMs: 0.5,
 				now,
 			});
-		expect((await take(at(DAY)))?.ok).toBe(true);
+		expect((await take(at(DAY), grant.version))?.ok).toBe(true);
 		// 0.5 ms on: the next whole instant is already past the window.
-		expect(await take(at(DAY + 1))).toMatchObject({
+		expect(await take(at(DAY + 1), grant.version + 1)).toMatchObject({
 			ok: true,
 			grant: { rotations: { since: at(DAY + 1), count: 1 } },
 		});
-		expect(await take(at(DAY + 1))).toEqual({ ok: false });
+		expect(await take(at(DAY + 1), grant.version + 2)).toEqual({ ok: false });
 	});
 });
 
@@ -292,10 +293,11 @@ describe("refundRotation", () => {
 	it("leaves a window counted down to none, read back from every read, which a take counts on into", async () => {
 		const held = store();
 		const grant = await activated(held);
-		await takeAt(held, grant.version, at(DAY));
-		expect(await refundAt(held, grant.version, at(DAY), at(DAY + MIN))).toMatchObject({
+		const taken = await takeAt(held, grant.version, at(DAY));
+		expect(taken.grant.version).toBe(grant.version + 1);
+		expect(await refundAt(held, grant.version + 1, at(DAY), at(DAY + MIN))).toMatchObject({
 			ok: true,
-			grant: { version: grant.version + 1, rotations: { since: at(DAY), count: 0 } },
+			grant: { version: grant.version + 2, rotations: { since: at(DAY), count: 0 } },
 		});
 		expect(await redis.hmget(grantKey("g-1"), "rotationsSince", "rotationsCount")).toEqual([
 			String(at(DAY).getTime()),
@@ -304,8 +306,8 @@ describe("refundRotation", () => {
 		for (const read of await everyRead(held, at(DAY + MIN))) {
 			expect(read).toMatchObject({ rotations: { since: at(DAY), count: 0 } });
 		}
-		expect(await takeAt(held, grant.version + 1, at(DAY + 2 * MIN))).toMatchObject({
-			grant: { rotations: { since: at(DAY), count: 1 } },
+		expect(await takeAt(held, grant.version + 2, at(DAY + 2 * MIN))).toMatchObject({
+			grant: { version: grant.version + 3, rotations: { since: at(DAY), count: 1 } },
 		});
 	});
 
@@ -317,10 +319,10 @@ describe("refundRotation", () => {
 		const before = await redis.hgetall(grantKey("g-1"));
 		const deadlines = [await redis.pexpiretime(grantKey("g-1")), await redis.pexpiretime(credKey)];
 		const credential = await redis.get(credKey);
-		expect((await refundAt(held, grant.version, at(DAY), at(DAY + MIN)))?.ok).toBe(true);
+		expect((await refundAt(held, grant.version + 1, at(DAY), at(DAY + MIN)))?.ok).toBe(true);
 		expect(await redis.hgetall(grantKey("g-1"))).toEqual({
 			...before,
-			version: String(grant.version + 1),
+			version: String(grant.version + 2),
 			rotationsCount: "0",
 		});
 		expect([await redis.pexpiretime(grantKey("g-1")), await redis.pexpiretime(credKey)]).toEqual(
@@ -349,7 +351,7 @@ describe("refundRotation", () => {
 			else await redis.hset(grantKey("g-1"), field, value);
 			const stored = await redis.hgetall(grantKey("g-1"));
 			expect(
-				await refundAt(held, grant.version, at(DAY), at(DAY + MIN)),
+				await refundAt(held, grant.version + 1, at(DAY), at(DAY + MIN)),
 				`${field}=${value}`,
 			).toEqual({ ok: false });
 			expect(await redis.hgetall(grantKey("g-1")), `${field}=${value}`).toEqual(stored);
@@ -363,15 +365,15 @@ describe("refundRotation", () => {
 			const other = storeOver(makeIoredisFederationGrantStoreClient(second));
 			const grant = await activated(held);
 			await takeAt(held, grant.version, at(DAY));
-			await takeAt(held, grant.version, at(DAY + MIN));
+			await takeAt(held, grant.version + 1, at(DAY + MIN));
 			const results = await Promise.all(
 				[held, other, held, other].map((each) =>
-					refundAt(each, grant.version, at(DAY), at(DAY + 2 * MIN)),
+					refundAt(each, grant.version + 2, at(DAY), at(DAY + 2 * MIN)),
 				),
 			);
 			expect(results.filter((result) => result?.ok === true)).toHaveLength(1);
 			expect(await redis.hmget(grantKey("g-1"), "version", "rotationsCount")).toEqual([
-				String(grant.version + 1),
+				String(grant.version + 3),
 				"1",
 			]);
 		} finally {
@@ -384,7 +386,7 @@ describe("refundRotation", () => {
 		const grant = await activated(held);
 		await takeAt(held, grant.version, at(DAY));
 		await redis.del(grantKey("g-1"));
-		expect(await refundAt(held, grant.version, at(DAY), at(DAY + MIN))).toEqual({ ok: false });
+		expect(await refundAt(held, grant.version + 1, at(DAY), at(DAY + MIN))).toEqual({ ok: false });
 		expect(await redis.exists(grantKey("g-1"))).toBe(0);
 	});
 
