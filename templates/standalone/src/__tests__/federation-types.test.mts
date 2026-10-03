@@ -206,12 +206,33 @@ describe("the template reads no federation entry before boot", () => {
 		["redirectAllowlist", '"https://app.test/home"'],
 		["sessionDomain", "42"],
 		["requireAuthorizationResponseIss", '"no"'],
+		// Only an environment variable's string is read as a flag's spelling.
+		["requireAuthorizationResponseIss", "1"],
+		["requireAuthorizationResponseIss", "[true]"],
 	])(
 		"leaves %s, a key of the entry's type, to the type's schema, which core refuses it by, at its path",
 		async (key, value) => {
 			const err = await refusal({ operatorHocon: `core.federations.google.${key} = ${value}\n` });
 			expect(err.reason).toBe("config-validation-failed");
 			expect(err.message).toContain(`core.federations.google.${key}`);
+		},
+	);
+});
+
+describe("an enabled Google federation's credentials", () => {
+	it.each([
+		["unset", undefined],
+		["exported empty", ""],
+	])(
+		"refuse the boot when the client secret is %s, at its path, quoting no value of the entry",
+		async (_case, secret) => {
+			const { CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET: _shipped, ...env } = SINGLE_ENV;
+			const err = await refusal({
+				env: secret === undefined ? env : { ...env, CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET: secret },
+			});
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toContain("core.federations.google.clientSecret");
+			expect(err.message).not.toContain(SINGLE_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_ID as string);
 		},
 	);
 });

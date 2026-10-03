@@ -861,6 +861,24 @@ describe("the shipped config boots with every documented override supplied as a 
 				clientUrl: COMMENTED_FEDERATION_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_URL,
 				requireAuthorizationResponseIss: false,
 			});
+			// `toEqual` passes a key present as `undefined`: no variable binds
+			// `endSessionEndpoint`, so the entry must not carry the key at all.
+			expect(dispatched.get("google")?.entry).not.toHaveProperty("endSessionEndpoint");
+		});
+
+		it("hands the Google type no key the documented variables leave unset, not even as undefined", async () => {
+			const { dispatched } = await bootDispatched(DOCUMENTED_ENV);
+			const entry = dispatched.get("google")?.entry;
+			expect(entry).toBeDefined();
+			for (const key of [
+				"sessionDomain",
+				"authCallbackUrl",
+				"clientUrl",
+				"requireAuthorizationResponseIss",
+				"endSessionEndpoint",
+			]) {
+				expect(entry, key).not.toHaveProperty(key);
+			}
 		});
 
 		it("binds every variable the configuration documents commented out", () => {

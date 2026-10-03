@@ -391,7 +391,7 @@ core.federations {
 }
 ```
 
-`google` のエントリが下の変数のほかに受け付けるキー — `redirectAllowlist`、`sessionDomain`、`authCallbackUrl`、`clientUrl`、`requireAuthorizationResponseIss`、`endSessionEndpoint` — は `config/application.conf` と [パッケージの README](../../packages/federation-google/README.md) にある。挙げられていないキーはエントリを拒否させる。
+`google` のエントリが下の変数のほかに受け付けるキー — `redirectAllowlist`、`sessionDomain`、`authCallbackUrl`、`clientUrl`、`requireAuthorizationResponseIss`、`endSessionEndpoint` — の完全な一覧は [パッケージの README](../../packages/federation-google/README.md) にある。`config/application.conf` は `endSessionEndpoint` 以外のすべてを示す。type が挙げていないキーはエントリを拒否させる。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|

@@ -632,9 +632,10 @@ core.federations {
 
 The keys a `google` entry takes beside the variables below — `redirectAllowlist`,
 `sessionDomain`, `authCallbackUrl`, `clientUrl`,
-`requireAuthorizationResponseIss`, `endSessionEndpoint` — are in
-`config/application.conf` and [the package's README](../../packages/federation-google/README.md);
-a key it does not name refuses the entry.
+`requireAuthorizationResponseIss`, `endSessionEndpoint` — are listed in full
+in [the package's README](../../packages/federation-google/README.md);
+`config/application.conf` shows every one of them but `endSessionEndpoint`.
+A key the type does not name refuses the entry.
 
 | Variable | Default | Description |
 |---|---|---|
