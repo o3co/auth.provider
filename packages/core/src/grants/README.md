@@ -12,7 +12,7 @@ It is separate because every grant package — `oauth`, `device-grant`, `oauth-t
 
 ## Public contract
 
-- The handler contract — `GrantHandler`, `GrantContext`, `SessionData`, `GrantHandlerResult`, `GrantDependencies`, `GrantFactory` — is [`types.mts`](./types.mts). The contribution-side `GrantHandler` in `../modules/manifest/contributes-map.mts` is this type.
+- The handler contract — `GrantHandler`, `GrantContext`, `SessionData`, `GrantHandlerResult`, `GrantDependencies`, `GrantFactory` — is [`types.mts`](./types.mts). The contribution-side `GrantHandler` in `../modules/manifest/contributes-map.mts` is this type, and `GrantFactory` is the contribution-side `GrantFactory<GrantDependencies>`: a handler, or `null` for a grant its module's settings switch off.
 - Token minting is [`token.mts`](./token.mts); every other shared rule (id_token, logout_token, the claim filter, policy evaluation, resource indicators, confirmation matching, token binding, sender constraint, authentication claims, the email-verified gate) is one file each, named for what it holds.
 - [`registry.mts`](./registry.mts) — `GrantRegistry` / `GrantRegistryError`, `@internal`: not exported from the root barrel; `../boot/create-app.mts` wraps it as the `grants` collector, and `../testing/` re-exports it for tests that build a registry by hand.
 - Package README: [Grant System](../../README.md#grant-system), [Token Utilities](../../README.md#token-utilities), [OIDC id_token and claim filter](../../README.md#oidc-id_token-and-claim-filter), [Logout helpers](../../README.md#logout-helpers).

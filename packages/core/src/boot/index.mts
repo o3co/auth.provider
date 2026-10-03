@@ -64,6 +64,7 @@ export type {
 	EnvironmentVariableRenamedDetails,
 	FederationTypeUnhandledDetails,
 	FrozenWorld,
+	GrantCollector,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
 	ListCollector,

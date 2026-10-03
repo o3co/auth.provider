@@ -53,6 +53,7 @@ import type {
 	ContributionKindMap,
 	CreateAppOptions,
 	DefaultBootstrapMap,
+	GrantCollector,
 	ListCollector,
 	NameKeyedCollector,
 	RegisteredFederationType,
@@ -211,7 +212,7 @@ function snapshotHostMap<T>(map: T): T {
 /**
  * Seed the built-in contribution kinds and overlay any consumer-supplied
  * collectors on top:
- * - grants: a `NameKeyedCollector` over one `GrantRegistry`, which holds the
+ * - grants: a `GrantCollector` over one `GrantRegistry`, which holds the
  *   handlers and answers every call (`register` / `replace` throw
  *   `GrantRegistryError`).
  * - the other name-keyed kinds: a Map-backed `NameKeyedCollector`, the only
@@ -253,7 +254,7 @@ export function mergeWithBuiltins(
 // ---------------------------------------------------------------------------
 
 /**
- * Build the `grants` `NameKeyedCollector` over one `GrantRegistry`. The
+ * Build the `grants` `GrantCollector` over one `GrantRegistry`. The
  * registry is the only store: `entries()` — what `grantHandlerResolver`
  * lists — reads the same map `get` does. `get` answers `null` for a grant
  * type registered switched off, so boot's pre-scan sees it claimed;
@@ -261,7 +262,7 @@ export function mergeWithBuiltins(
  *
  * @internal
  */
-function makeGrantCollector(): NameKeyedCollector<GrantHandler | null> {
+function makeGrantCollector(): GrantCollector {
 	const registry = new GrantRegistry();
 
 	return {

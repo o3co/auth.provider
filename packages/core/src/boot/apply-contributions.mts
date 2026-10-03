@@ -56,6 +56,7 @@ import type {
 	ComponentWorld,
 	ContributionCollectorMap,
 	ContributionKind,
+	GrantCollector,
 	ListCollector,
 	NameKeyedCollector,
 	RegistryWorld,
@@ -137,9 +138,7 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * collector is populated sees the full view at request time.
  * @internal
  */
-function makeGrantHandlerResolver(
-	collector: NameKeyedCollector<GrantHandler | null>,
-): GrantHandlerResolver {
+function makeGrantHandlerResolver(collector: GrantCollector): GrantHandlerResolver {
 	return {
 		get: (grantType: string) => collector.get(grantType) ?? undefined,
 		entries: function* (): IterableIterator<readonly [string, GrantHandler]> {

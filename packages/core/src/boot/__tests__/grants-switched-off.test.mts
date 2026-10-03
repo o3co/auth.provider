@@ -28,12 +28,18 @@
 
 import express, { Router } from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
-import type { GrantHandler } from "../../grants/types.mjs";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type {
+	GrantDependencies,
+	GrantHandler,
+	GrantFactory as RootGrantFactory,
+} from "../../grants/types.mjs";
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
+import type { GrantFactory } from "../../modules/manifest/contributes-map.mjs";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import type { ContributionCollectorMap, GrantCollector, NameKeyedCollector } from "../types.mjs";
 import { BootError } from "../types.mjs";
 
 const OFF = "urn:test:grant-off";
@@ -54,16 +60,20 @@ function withIssuer() {
 	} as unknown as ReturnType<typeof makeValidAppConfig>;
 }
 
-const boot = (modules: readonly Module[]) =>
+const boot = (modules: readonly Module[], contributionKinds?: ContributionCollectorMap) =>
 	createTestApp({
 		modules: [...modules],
 		bootstrapComponents: { config: withIssuer(), pathResolver: (s: string) => s },
+		contributionKinds,
 	});
 
 /** What `createTestApp` refused with, or a failure when it booted. */
-async function refusal(modules: readonly Module[]): Promise<BootError> {
+async function refusal(
+	modules: readonly Module[],
+	contributionKinds?: ContributionCollectorMap,
+): Promise<BootError> {
 	try {
-		const handle = await boot(modules);
+		const handle = await boot(modules, contributionKinds);
 		await handle.dispose();
 	} catch (err) {
 		expect(err).toBeInstanceOf(BootError);
@@ -215,5 +225,87 @@ describe("grants — a factory that answers null registers nothing", () => {
 		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 
 		await handle.dispose();
+	});
+});
+
+/**
+ * A host's own `grants` collector, as `contributionKinds` takes it: a plain
+ * map that keeps what it is handed, a switched-off grant's `null` included,
+ * and lists it.
+ */
+function hostGrantCollector(): GrantCollector & {
+	readonly held: Map<string, GrantHandler | null>;
+} {
+	const held = new Map<string, GrantHandler | null>();
+	return {
+		kind: "name-keyed",
+		held,
+		register: (name, value) => {
+			if (held.has(name)) throw new Error(`duplicate ${name}`);
+			held.set(name, value);
+		},
+		replace: (name, value) => {
+			if (!held.has(name)) throw new Error(`unknown ${name}`);
+			held.set(name, value);
+		},
+		get: (name) => held.get(name),
+		entries: () => held.entries(),
+	};
+}
+
+describe("grants — a host's own collector", () => {
+	it("is handed null for a switched-off grant, and the resolver still answers it as absent", async () => {
+		const host = hostGrantCollector();
+		const handle = await boot([grantsOwner], { grants: host });
+		const resolver = handle.components.grantHandlerResolver;
+
+		expect(host.held.get(OFF)).toBeNull();
+		expect(resolver?.get(OFF)).toBeUndefined();
+		expect([...(resolver?.entries() ?? [])].map(([grantType]) => grantType)).toEqual([ON]);
+
+		await handle.dispose();
+	});
+
+	it("keeps the claim and refuses an override of it as with core's collector", async () => {
+		const duplicate = await refusal(
+			[
+				grantsOwner,
+				defineModule({
+					name: "test:grants-second",
+					contributes: { grants: { [OFF]: () => fakeGrantHandler("second") } },
+				}),
+			],
+			{ grants: hostGrantCollector() },
+		);
+		expect(duplicate.reason).toBe("duplicate-contribute");
+
+		const override = await refusal(
+			[
+				grantsOwner,
+				defineModule({
+					name: "test:grants-overrider",
+					overrides: { grants: { [OFF]: () => fakeGrantHandler("override") } },
+				}),
+			],
+			{ grants: hostGrantCollector() },
+		);
+		expect(override.reason).toBe("override-target-missing");
+	});
+
+	it("must take null: a collector that takes handlers only does not fit the grants slot", () => {
+		expectTypeOf<NonNullable<ContributionCollectorMap["grants"]>>().toEqualTypeOf<GrantCollector>();
+		expectTypeOf<NameKeyedCollector<GrantHandler>>().not.toExtend<GrantCollector>();
+		expectTypeOf<NameKeyedCollector<GrantHandler | null>>().toExtend<GrantCollector>();
+	});
+});
+
+describe("grants — the factory types", () => {
+	it("types the root GrantFactory as the contribution factory over GrantDependencies, null included", () => {
+		expectTypeOf<RootGrantFactory>().toEqualTypeOf<GrantFactory<GrantDependencies>>();
+		const settingsGated: RootGrantFactory = (deps) =>
+			deps.config === undefined ? null : fakeGrantHandler("gated");
+		const alwaysOn: RootGrantFactory = () => fakeGrantHandler("always");
+		expect(settingsGated).toBeTypeOf("function");
+		expect(alwaysOn).toBeTypeOf("function");
 	});
 });

@@ -478,7 +478,7 @@ const myGrantModule = defineModule({
 });
 ```
 
-Add `myGrantModule` to the `modules` array passed to `createApp`. A `GrantFactory` receives `GrantDependencies`, whose required slots are `config` and `keyStore`, so the module requires both. A grant that reads the issuer, a lifetime or a switch of the oauth module's settings declares `oauthTokenSettings` optional and holds it with `checkOAuthTokenSettings(deps.oauthTokenSettings)`, which needs no configuration; boot holds the slot's lifetimes to the configured ones itself. The boot planner registers the grant under `my_grant`, and `/oauth/token` dispatches to it through the `grantHandlerResolver` synthetic key.
+Add `myGrantModule` to the `modules` array passed to `createApp`. A `GrantFactory` receives `GrantDependencies`, whose required slots are `config` and `keyStore`, so the module requires both. It answers the handler, or `null` when the module's own settings switch the grant off, and may answer through a promise. A grant that reads the issuer, a lifetime or a switch of the oauth module's settings declares `oauthTokenSettings` optional and holds it with `checkOAuthTokenSettings(deps.oauthTokenSettings)`, which needs no configuration; boot holds the slot's lifetimes to the configured ones itself. The boot planner registers the grant under `my_grant`, and `/oauth/token` dispatches to it through the `grantHandlerResolver` synthetic key.
 
 ### Loading clients and users from YAML
 

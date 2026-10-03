@@ -381,6 +381,27 @@ export interface NameKeyedCollector<V> {
 }
 
 /**
+ * Collector for the `grants` kind: a `NameKeyedCollector` whose values are a
+ * grant handler or `null`, a grant its module's settings switched off, which
+ * claims the grant type. Its mutators are function-valued properties, so
+ * their parameter is checked strictly: a collector that takes handlers only
+ * is not one, since boot hands it `null`.
+ */
+export interface GrantCollector {
+	readonly kind: "name-keyed";
+	/** Register a handler, or `null` for a switched-off grant, by grant type. Throws on duplicate. */
+	readonly register: (name: string, value: GrantHandler | null) => void;
+	/** Replace a registered grant type's value. Throws if the grant type is unknown. */
+	readonly replace: (name: string, value: GrantHandler | null) => void;
+	/** Optional activation boundary — throws further mutation attempts when defined. */
+	readonly freeze?: () => void;
+	/** The handler, `null` for a switched-off grant type, `undefined` for an unregistered one. */
+	get(name: string): GrantHandler | null | undefined;
+	/** The registered grant types; a switched-off one may be listed with `null`. */
+	entries(): IterableIterator<readonly [string, GrantHandler | null]>;
+}
+
+/**
  * Collector for list-shaped contribution kinds (auditHooks,
  * grantPolicyHooks). Same-instance values are deduplicated.
  */
@@ -415,7 +436,7 @@ export interface ContributionCollectorMap {
 	 * grant its module's settings switched off: it claims the grant type, and
 	 * `grantHandlerResolver` leaves it out. It is no override target.
 	 */
-	readonly grants?: NameKeyedCollector<GrantHandler | null>;
+	readonly grants?: GrantCollector;
 	/**
 	 * Collector for `federations`, by name: the provider stage 4 builds for
 	 * each `core.federations` entry stage 1 dispatched to its type. Boot
