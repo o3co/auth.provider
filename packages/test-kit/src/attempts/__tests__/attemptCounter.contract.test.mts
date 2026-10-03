@@ -112,6 +112,8 @@ const CASE = {
 		"a limit lowered on a live key applies at once: limit 5, then limit 2, allows the second attempt with nothing remaining and refuses the third",
 	raised:
 		"a limit raised on a live key applies at once, and the refused attempts counted nothing: limit 2 spent, then limit 5, allows the next attempt with 2 remaining",
+	shortened:
+		"a window shortened on a live key keeps its end: window 60, then window 1, answers the same resetAt",
 } as const;
 
 /** The names of the cases that refuse the counter `make` builds over core's, on a fake clock. */
@@ -275,6 +277,13 @@ describe("attemptCounterContract refuses a broken counter", () => {
 		});
 		expect(refused).toContain(CASE.lowered);
 		expect(refused).toContain(CASE.raised);
+	});
+
+	it("refuses a counter that starts a new window when a spec changes the window", async () => {
+		const refused = await refusedBy((inner) => ({
+			consume: (key, spec) => inner.consume(`${key}#${spec.windowSeconds}`, spec),
+		}));
+		expect(refused).toContain(CASE.shortened);
 	});
 
 	it("refuses a counter that counts refused attempts", async () => {

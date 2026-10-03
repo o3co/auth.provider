@@ -18,8 +18,8 @@
  * The contract suite of core's `AttemptCounter` port, the counter behind a
  * verifier's own attempt limits: a fixed window per key that allows exactly
  * the first `limit` attempts, against the spec handed in with each attempt,
- * a lowered or raised limit applying at once and a refused attempt counting
- * nothing; keys counted apart; remaining and the window's end answered right;
+ * a lowered or raised limit applying at once, a changed window keeping a
+ * running window's end, and a refused attempt counting nothing; keys counted apart; remaining and the window's end answered right;
  * concurrent attempts counted exactly; a key or spec it cannot count
  * rejected, counting nothing; and, declared, an outage rejected rather than
  * answered as a count. Every answer is read through core's
@@ -268,6 +268,18 @@ export function attemptCounterContract(
 					`a limit of ${limit} handed in allows ${limit} attempts and refuses the next`,
 				);
 			}
+		}),
+
+		test("a window shortened on a live key keeps its end: window 60, then window 1, answers the same resetAt", async (harness) => {
+			const key = freshKey("shortened");
+			const first = await attempt(harness, key, { limit: 5, windowSeconds: 60 });
+			const second = await attempt(harness, key, { limit: 5, windowSeconds: 1 });
+			assert.deepEqual([second.allowed, second.remaining], [true, 3]);
+			assert.equal(
+				second.resetAt.getTime(),
+				first.resetAt.getTime(),
+				"a spec's window applies when a window starts, never to one already running",
+			);
 		}),
 
 		test("concurrent attempts on one key are counted exactly, across instances", async (harness) => {

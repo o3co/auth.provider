@@ -30,8 +30,13 @@
  *   `RateLimit-*`, which would tell whoever guesses a secret how many guesses
  *   are left and when more come.
  *
- * A key's id longer than {@link MAX_PLAIN_ID_LENGTH} is handed to the counter
- * as its SHA-256, so neither a long key nor a long raw value reaches a store.
+ * A key's id longer than {@link MAX_PLAIN_ID_LENGTH}, or one that starts with
+ * `h:`, is handed to the counter as its SHA-256, so neither a long key nor a
+ * long raw value reaches a store, and no id is taken for a hashed one.
+ *
+ * Use one key kind per guard (per IP, or per user), with a guard of its own
+ * for each: under one per-process counter, cheap keys of one kind would push
+ * out the scarce windows of the other.
  */
 
 import { createHash } from "node:crypto";
@@ -89,9 +94,9 @@ export interface AttemptGuardOptions {
 export interface AttemptPerIpOptions {
 	/**
 	 * Called after a refusal is answered, so the owning module can audit it.
-	 * A throw is logged `attempt_refused_hook_failed` and changes nothing.
+	 * A throw or a rejection is logged `attempt_refused_hook_failed` and changes nothing.
 	 */
-	readonly onRefused?: (req: Request, count: AttemptCount) => void;
+	readonly onRefused?: (req: Request, count: AttemptCount) => unknown;
 }
 
 /** What the guard answered an attempt with. Only on `allowed` does the caller go on; the others are already answered. */
@@ -215,6 +220,7 @@ function counterFor(
 	}
 	return createMemoryAttemptCounter({
 		logger,
+		tag,
 		...(options.now === undefined ? {} : { now: options.now }),
 		...(options.maxEntries === undefined ? {} : { maxEntries: options.maxEntries }),
 	});
@@ -241,7 +247,9 @@ export function createAttemptGuard(options: AttemptGuardOptions): AttemptGuard {
 	/** `<tag>:<id>`, the id hashed when it is long. */
 	const keyFor = (id: string): string =>
 		`${tag}:${
-			id.length > MAX_PLAIN_ID_LENGTH ? `h:${createHash("sha256").update(id).digest("hex")}` : id
+			id.length > MAX_PLAIN_ID_LENGTH || id.startsWith("h:")
+				? `h:${createHash("sha256").update(id).digest("hex")}`
+				: id
 		}`;
 
 	/** The count, or why there is none. */
@@ -304,15 +312,17 @@ export function createAttemptGuard(options: AttemptGuardOptions): AttemptGuard {
 				return;
 			}
 			if (verdict.verdict !== "refused" || onRefused === undefined) return;
-			try {
-				onRefused(req, verdict.count);
-			} catch (error) {
-				const projected = loggableError(error);
-				logger.error(
-					{ tag, error: projected.detail ?? projected.name },
-					"attempt_refused_hook_failed",
-				);
-			}
+			const { count } = verdict;
+			// A hook's throw or rejection is reported here; it never reaches the response or the process.
+			void Promise.resolve()
+				.then(() => onRefused(req, count))
+				.catch((error: unknown) => {
+					const projected = loggableError(error);
+					logger.error(
+						{ tag, error: projected.detail ?? projected.name },
+						"attempt_refused_hook_failed",
+					);
+				});
 		};
 
 	return { attempt, perIp };

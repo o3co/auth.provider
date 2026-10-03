@@ -144,6 +144,18 @@ describe("createAttemptGuard: the per-process fallback, by deployment mode", () 
 		expect((await request(app).post("/per-ip")).status).toBe(429);
 	});
 
+	it("tags the per-process counter's eviction warning with the guard's tag", async () => {
+		const logger = makeLogger();
+		const guard = guardOf({ counter: undefined, deploymentMode: "single", maxEntries: 1, logger });
+		const app = appOf(guard);
+		await request(app).post("/subject/a");
+		await request(app).post("/subject/b");
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ tag: "login", evicted: 1, maxEntries: 1 },
+			"attempt_counter_evicted",
+		);
+	});
+
 	it("sizes the per-process counter by maxEntries", async () => {
 		const guard = guardOf({ counter: undefined, deploymentMode: "single", maxEntries: 1 });
 		const app = appOf(guard);
@@ -244,6 +256,18 @@ describe("createAttemptGuard: keys and the spec handed to the counter", () => {
 		expect(counter.calls.map((c) => c.key)).toEqual([`login:user:${short}`, `login:h:${digest}`]);
 	});
 
+	it("hashes an id that starts with h:, so no short id is a hashed key", async () => {
+		const counter = scripted(() => count(true, 1));
+		const guard = guardOf({ counter });
+		const app = express();
+		app.post("/v", async (req, res) => {
+			if ((await guard.attempt(req, res, "h:abc")).verdict === "allowed") res.status(204).end();
+		});
+		await request(app).post("/v");
+		const digest = createHash("sha256").update("h:abc").digest("hex");
+		expect(counter.calls.map((c) => c.key)).toEqual([`login:h:${digest}`]);
+	});
+
 	it("hashes a long client address the same way", async () => {
 		const counter = scripted(() => count(true, 1));
 		const app = appOf(guardOf({ counter }));
@@ -297,26 +321,65 @@ describe("createAttemptGuard: answers and headers", () => {
 		expect(refusals).toEqual([{ path: "/h", count: count(false, 0) }]);
 	});
 
-	it("answers the refusal 429 even when the hook throws, and logs the hook's failure", async () => {
-		const logger = makeLogger();
-		const guard = guardOf({ counter: scripted(() => count(false, 0)), logger });
-		const app = express();
-		app.post(
-			"/h",
-			guard.perIp({
-				onRefused: () => {
-					throw new Error("hook");
-				},
-			}),
-			(_req, res) => {
-				res.status(204).end();
+	it.each([
+		[
+			"throws",
+			() => {
+				throw new Error("hook");
 			},
-		);
-		expect((await request(app).post("/h")).status).toBe(429);
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ tag: "login" }),
-			"attempt_refused_hook_failed",
-		);
+		],
+		["rejects", async () => Promise.reject(new Error("hook"))],
+	])(
+		"answers the refusal 429 when the hook %s, logs the failure, and leaves no unhandled rejection",
+		async (_label, onRefused) => {
+			const unhandled: unknown[] = [];
+			const onUnhandled = (reason: unknown) => unhandled.push(reason);
+			process.on("unhandledRejection", onUnhandled);
+			try {
+				const logger = makeLogger();
+				const guard = guardOf({ counter: scripted(() => count(false, 0)), logger });
+				const app = express();
+				app.post("/h", guard.perIp({ onRefused }), (_req, res) => {
+					res.status(204).end();
+				});
+				const res = await request(app).post("/h");
+				await settleAudit();
+				await settleAudit();
+				expect(res.status).toBe(429);
+				expect(res.body).toEqual({
+					error: "rate_limited",
+					error_description: "Rate limit exceeded",
+				});
+				expect(logger.error).toHaveBeenCalledWith(
+					expect.objectContaining({ tag: "login" }),
+					"attempt_refused_hook_failed",
+				);
+				expect(unhandled).toEqual([]);
+			} finally {
+				process.off("unhandledRejection", onUnhandled);
+			}
+		},
+	);
+
+	it("does not call the refusal hook on an outage", async () => {
+		const onRefused = vi.fn();
+		const guard = guardOf({
+			counter: scripted(() => {
+				throw new Error("down");
+			}),
+		});
+		const app = express();
+		app.post("/h", guard.perIp({ onRefused }), (_req, res) => {
+			res.status(204).end();
+		});
+		expect((await request(app).post("/h")).status).toBe(503);
+		await settleAudit();
+		expect(onRefused).not.toHaveBeenCalled();
+	});
+
+	it("rounds Retry-After up to the whole second", async () => {
+		const app = appOf(guardOf({ counter: scripted(() => count(false, 0, 12_500)) }));
+		expect((await request(app).post("/per-ip")).headers["retry-after"]).toBe("13");
 	});
 
 	it("answers a refusal with the route's own error when it names one", async () => {

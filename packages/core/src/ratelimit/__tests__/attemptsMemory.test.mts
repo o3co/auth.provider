@@ -68,22 +68,77 @@ describe("createMemoryAttemptCounter", () => {
 		});
 	});
 
-	it("at its cap, evicts the live window that ends first, keeps the rest, and warns with counts only", async () => {
+	it("at its cap, evicts the least-counted live window, the one that ends first among equals, and warns with counts and its tag", async () => {
 		const time = clock();
 		const logger = quietWarn();
-		const counter = createMemoryAttemptCounter({ now: time.now, maxEntries: 2, logger });
-		await counter.consume("long", { limit: 2, windowSeconds: 120 });
-		await counter.consume("first-to-end", SPEC);
-		await counter.consume("first-to-end", SPEC);
-		time.advance(1_000);
-		expect((await counter.consume("new", SPEC)).allowed).toBe(true);
-		// The evicted key starts again; the kept one is still counted.
-		expect((await counter.consume("first-to-end", SPEC)).remaining).toBe(1);
+		const spec: AttemptSpec = { limit: 3, windowSeconds: 60 };
+		const counter = createMemoryAttemptCounter({
+			now: time.now,
+			maxEntries: 3,
+			logger,
+			tag: "login",
+		});
+		await counter.consume("twice", spec);
+		await counter.consume("twice", spec);
+		time.advance(1);
+		await counter.consume("once-early", spec);
+		time.advance(1);
+		await counter.consume("once-late", spec);
+		time.advance(1);
+		await counter.consume("new", spec);
+		// The kept keys are still counted; the evicted one starts again.
+		expect((await counter.consume("twice", spec)).remaining).toBe(0);
+		expect((await counter.consume("once-late", spec)).remaining).toBe(1);
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 		expect(logger.warn).toHaveBeenCalledWith(
-			{ evicted: 1, maxEntries: 2 },
+			{ tag: "login", evicted: 1, maxEntries: 3 },
 			"attempt_counter_evicted",
 		);
+		expect((await counter.consume("once-early", spec)).remaining).toBe(2);
+	});
+
+	it("keeps an exhausted key through a fill of fresh keys", async () => {
+		const time = clock();
+		const counter = createMemoryAttemptCounter({
+			now: time.now,
+			maxEntries: 10,
+			logger: quietWarn(),
+		});
+		const spec: AttemptSpec = { limit: 3, windowSeconds: 900 };
+		for (let i = 0; i < 4; i++) await counter.consume("victim", spec);
+		for (let i = 0; i < 1_000; i++) {
+			time.advance(1);
+			await counter.consume(`fresh-${i}`, spec);
+		}
+		expect((await counter.consume("victim", spec)).allowed).toBe(false);
+	});
+
+	it("evicts a batch of one in a hundred of maxEntries at once", async () => {
+		const time = clock();
+		const logger = quietWarn();
+		const counter = createMemoryAttemptCounter({ now: time.now, maxEntries: 200, logger });
+		for (let i = 0; i < 200; i++) {
+			time.advance(1);
+			await counter.consume(`k${i}`, SPEC);
+		}
+		await counter.consume("new", SPEC);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ evicted: 2, maxEntries: 200 },
+			"attempt_counter_evicted",
+		);
+		// k0 and k1 ended first among equals; k2 is kept.
+		expect((await counter.consume("k2", SPEC)).remaining).toBe(0);
+		// A second new key fits in the room the batch left: no second eviction.
+		await counter.consume("new-2", SPEC);
+		expect((await counter.consume("k3", SPEC)).remaining).toBe(0);
+	});
+
+	it("holds many keys when built without maxEntries", async () => {
+		const logger = quietWarn();
+		const counter = createMemoryAttemptCounter({ logger });
+		for (let i = 0; i < 2_000; i++) await counter.consume(`k${i}`, SPEC);
+		expect((await counter.consume("k0", SPEC)).remaining).toBe(0);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("makes room from windows that have ended before it evicts a live one", async () => {

@@ -17,11 +17,13 @@
 /**
  * The in-process `AttemptCounter`: one process's windows, lost on a restart,
  * so a limit it enforces is per replica. It holds at most `maxEntries` keys.
- * Full, it drops the windows that have ended and, if still full, evicts the
- * live window that ends first, warning `attempt_counter_evicted` (counts
- * only) at most once a minute. Evicting rather than refusing keeps a flood of
- * fresh keys from locking out every new client; an evicted key only starts
- * a new window, which gains nothing for a key its holder can mint anew.
+ * Full, it drops the windows that have ended and, if still full, evicts in
+ * one scan a batch of about one in a hundred of `maxEntries`: the live
+ * windows with the fewest attempts, the ones that end first among equals.
+ * A key that has spent its limit outlives a flood of fresh keys, and the
+ * scan's cost is shared by the batch. It warns `attempt_counter_evicted`
+ * (counts and its tag only) at most once a minute. Evicting rather than
+ * refusing keeps a flood of fresh keys from locking out every new client.
  */
 
 import { consoleLogger } from "../logging/consoleLogger.mjs";
@@ -47,6 +49,8 @@ export interface MemoryAttemptCounterOptions {
 	readonly now?: () => number;
 	/** Where an eviction is reported. Default `consoleLogger`. */
 	readonly logger?: Pick<Logger, "warn">;
+	/** The `tag` on the eviction warning: what the counter counts for. */
+	readonly tag?: string;
 }
 
 interface Window {
@@ -64,25 +68,25 @@ export function createMemoryAttemptCounter(
 	const now = options.now ?? Date.now;
 	const logger = options.logger ?? consoleLogger;
 	const windows = new Map<string, Window>();
+	const batch = Math.max(1, Math.floor(maxEntries / 100));
+	const tagged = options.tag === undefined ? {} : { tag: options.tag };
 	let unreported = 0;
 	let lastWarnAt = Number.NEGATIVE_INFINITY;
 
-	/** Drops the ended windows, then, if still full, the live one that ends first. */
+	/** Drops the ended windows, then, if still full, a batch of the least-counted live ones. */
 	const makeRoom = (at: number): void => {
-		let earliestKey: string | undefined;
-		let earliestEnd = Number.POSITIVE_INFINITY;
+		const live: Array<readonly [string, Window]> = [];
 		for (const [key, window] of windows) {
 			if (window.resetAt <= at) windows.delete(key);
-			else if (window.resetAt < earliestEnd) {
-				earliestKey = key;
-				earliestEnd = window.resetAt;
-			}
+			else live.push([key, window]);
 		}
-		if (windows.size < maxEntries || earliestKey === undefined) return;
-		windows.delete(earliestKey);
-		unreported += 1;
+		if (windows.size < maxEntries) return;
+		live.sort(([, a], [, b]) => a.count - b.count || a.resetAt - b.resetAt);
+		const victims = live.slice(0, batch);
+		for (const [key] of victims) windows.delete(key);
+		unreported += victims.length;
 		if (at - lastWarnAt >= ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS) {
-			logger.warn({ evicted: unreported, maxEntries }, "attempt_counter_evicted");
+			logger.warn({ ...tagged, evicted: unreported, maxEntries }, "attempt_counter_evicted");
 			unreported = 0;
 			lastWarnAt = at;
 		}
