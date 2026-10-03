@@ -18,9 +18,9 @@
  * boot/federation-entries.mts: the dispatch of `core.federations` by type.
  * What a `federationTypes` declaration registers as, read once; at stage 1,
  * the refusal of an enabled entry whose type no module registers and the
- * parse of each entry dispatched to a registered type; at stage 4, the
- * provider and the redirect policy one dispatched entry builds, the provider
- * held to the name it registers under.
+ * parse of each entry dispatched to a registered type, no two of them sharing
+ * a callback URL; at stage 4, the provider and the redirect policy one
+ * dispatched entry builds, the provider held to the name it registers under.
  */
 
 import type { z } from "zod";
@@ -208,6 +208,16 @@ const nestsUnderType = (entry: object, type: string): boolean => {
 	return typeof nested === "object" && nested !== null;
 };
 
+/** What a refusal adds when `entry` nests its type's keys under its type. */
+const flatHint = (entry: object, type: string): string =>
+	nestsUnderType(entry, type)
+		? `; a dispatched entry is flat: the keys nested under ${JSON.stringify(type)} are not read, so write them beside its type`
+		: "";
+
+/** Whether `issue` is a schema's refusal of the key `key` as unrecognized. */
+const refusesKey = (issue: z.ZodIssue, key: string): boolean =>
+	issue.code === "unrecognized_keys" && issue.path.length === 0 && issue.keys.includes(key);
+
 /**
  * Parses each enabled `core.federations` entry whose `type` a module
  * registers, in the configuration's key order: its name held to the
@@ -219,10 +229,16 @@ const nestsUnderType = (entry: object, type: string): boolean => {
  * (`core.federations.<name>…`), each refused entry listed with the module
  * whose declaration of its type is in force and its path; a schema that
  * throws, or answers a value that throws as it is copied, is an issue at the
- * entry. An entry is flat: a key named after its type is read as one of the
- * type's keys, and the refusal of a missing `callbackURL` says so when that
- * key holds an object. Runs after `checkFederationEntriesHandled`, so every
- * enabled entry's type is registered.
+ * entry. Two such entries never share a `callbackURL`: the callback answers
+ * only the federation its path names, so only one of the two could complete
+ * a login. Each entry after the first that carries one is an issue at its
+ * `callbackURL`, naming the first; the values are compared as written, and
+ * the message quotes none of them. An entry is flat: a key named after its
+ * type is read as one of the type's keys, and the refusal of a missing
+ * `callbackURL`, or a type's schema's refusal of that key as unrecognized,
+ * says so when that key holds an object. Runs after
+ * `checkFederationEntriesHandled`, so every enabled entry's type is
+ * registered.
  * @internal
  */
 export function parseFederationEntries(
@@ -235,6 +251,8 @@ export function parseFederationEntries(
 	// Each issue as the message names it, its entry's name written by `entryAt`.
 	const named: string[] = [];
 	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
+	// Each callbackURL a dispatched entry carries, with the first entry that carries it.
+	const byCallbackURL = new Map<string, string>();
 	for (const [name, entry] of enabledFederationsOf(config)) {
 		const type = typeOf(entry);
 		const declared = types.get(type);
@@ -252,10 +270,17 @@ export function parseFederationEntries(
 			issue(
 				["callbackURL"],
 				"an enabled federation's callbackURL is required: the URL its upstream redirects back to" +
-					(nestsUnderType(entry, type)
-						? `; a dispatched entry is flat: the keys nested under ${JSON.stringify(type)} are not read, so write them beside its type`
-						: ""),
+					flatHint(entry, type),
 			);
+		} else {
+			const other = byCallbackURL.get(callbackURL);
+			if (other === undefined) byCallbackURL.set(callbackURL, name);
+			else {
+				issue(
+					["callbackURL"],
+					`an enabled federation's callbackURL is its own, and ${entryAt(other)} has the same one: the callback answers only the federation its path names, so only one of the two could complete a login; give each enabled federation its own callbackURL, or set one of them enabled = false`,
+				);
+			}
 		}
 		const result = parseSection(
 			declared.snapshot.entrySchema as z.ZodType,
@@ -263,7 +288,14 @@ export function parseFederationEntries(
 			`the entry schema of the type ${JSON.stringify(type)}`,
 		);
 		if ("issues" in result) {
-			for (const { path, message, ...extra } of result.issues) issue(path, message, extra);
+			for (const schemaIssue of result.issues) {
+				const { path, message, ...extra } = schemaIssue;
+				issue(
+					path,
+					refusesKey(schemaIssue, type) ? message + flatHint(entry, type) : message,
+					extra,
+				);
+			}
 		}
 		let parsed: unknown;
 		if ("data" in result) {
