@@ -229,6 +229,28 @@ Each one implements a port core declares; the slot name is in parentheses.
   tokens with no session behind the call, and the records of acquiring one.
   See [Federation grants](#federation-grants).
 - `RateLimiter` (`rateLimiter`)
+- `AttemptCounter` (`attemptCounter`) — the counter behind a verifier's own
+  attempt limits, which core's `createAttemptGuard` runs on: one script per
+  attempt over a hash per key (the window's count and end). Its keys live
+  under their own prefix (`redis-attempt-counter.keyPrefix`, default
+  `attempt:`), apart from the rate limiter's, which have the same
+  `<tag>:<id>` form under no prefix. A window's end is set on this side's
+  clock, the one the guard reads the count on, and the key's TTL is relative
+  (`PEXPIRE`: the window's length plus five seconds). A window is running while
+  its end is after the caller's clock or its TTL is above those five seconds,
+  so neither a server clock set apart nor a replica clock running ahead ends
+  one early: a replica ahead past a window's end is answered that end, which
+  the guard takes within five seconds and answers `503` beyond, never with a
+  fresh window. A forward step of the server's wall clock can still expire
+  windows early, as for every key with a TTL. A refused attempt writes nothing, and a reply that is no count
+  rejects, which the guard answers `503`. `redisAttemptCounterModule` refuses
+  the boot (`attempt-counter-evictable`) on a server whose `maxmemory-policy`
+  is not `noeviction`: every window's key carries a TTL, so any evicting policy
+  may drop a running window and give its key a fresh one. A policy it cannot
+  read is one warning, `attempt_counter_durability_unchecked`, and the boot
+  goes on. Give the counter a server, or a database on one, that does not
+  evict. Windows do not survive a restart of a server without persistence: each
+  key starts a fresh window after one.
 - `CodeRepository` (`codeRepository`) — authorization codes.
 - `DeviceCodeStore` (`deviceCodeStore`) — pending RFC 8628 device
   authorizations for `@o3co/auth-provider-device-grant`. The in-process
@@ -444,6 +466,7 @@ Each adapter ships in up to two forms:
 | `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redis-federation-grant-store` (`keyPrefix`, `listingAllowanceMs`, `tombstoneRetention`, `encryptionMode`, `encryptionKeys`) | — |
 | `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redis-federation-grant-intent-store` (`keyPrefix`, default `fg:`) | — |
 | `redisRateLimiterModule` | `rateLimiterClient`, `rateLimitBudgetResolver` | `rateLimiter` | `redis-rate-limiter` | `redisRateLimiterBuilder` |
+| `redisAttemptCounterModule` | `attemptCounterClient` | `attemptCounter` | `redis-attempt-counter` (`keyPrefix`, default `attempt:`) | — |
 | `redisCodeRepositoryModule` | `codeRepositoryClient` | `codeRepository` | `redisCodeRepository` | `redisCodeRepositoryBuilder` |
 | `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redis-device-code-store` | `redisDeviceCodeStoreBuilder` |
 | `redisConsentStoreModule` | `consentStoreClient`, `pendingConsentStoreClient` | `consentStore`, `pendingConsentStore` | `redis-consent-store` | `redisConsentStoreBuilder`, `redisPendingConsentStoreBuilder` |
@@ -511,6 +534,7 @@ give the same answers:
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is not a `Date` with a finite time (core's `checkSubjectRevocationInstant`) | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor (the boundary as recorded, clamped, plus the retention) for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
 | `MfaTransactionStore.create` | an `expiresAtMs` outside the Date range, or not after this process's clock | `PEXPIREAT` = the expiry rounded up, set once; no later write moves it. The subject lock's keys carry no TTL while a run is counted, and otherwise expire a day after the last failure stops counting (see [MFA stores](#mfa-stores)) |
+| `AttemptCounter.consume` | a key or spec core's `isAttemptKey` / `isAttemptSpec` refuses (a window is at most a day), and a clock that answers no instant | `PEXPIRE` = the window's length plus `ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS`, relative so the server's clock does not decide it, set when a window opens; no later attempt moves it |
 | `RateLimiter` | at construction, any spec, `defaultLimit` included, that is not a positive whole `limit` and a positive whole `windowSeconds` ending within the Date range: zero, NaN, a fraction, a negative number, or a window past the range. Core's `createRateLimitBudgetLookup` does the check, and the in-process limiter applies the same one. Such a spec is refused, never dropped and never replaced by the default, a looser budget than the operator wrote. Only a `defaultLimit` nobody gave is the built-in 60 per 60 s. The config schemas refuse the same values, and hold a window to one year | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
 
 [`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
@@ -1269,6 +1293,9 @@ core original anywhere below its imports, and when no Redis test runs it.
 conditional-set suite and the factor set's own cases), which
 [`mfa-factor-store.test.mts`](__tests__/mfa-factor-store.test.mts) runs over
 two connections, with a tombstone's expiry brought forward by `PEXPIRE`.
+`AttemptCounter`'s suite is the test kit's `attemptCounterContract`, which
+[`attempt-counter.test.mts`](__tests__/attempt-counter.test.mts) runs over two
+connections, on a hand-moved clock and on the real one.
 Which ports have a suite, and the one Redis adapter the suites do not run
 against (`AccessTokenDenylist`, whose expiry is Redis's own key TTL and cannot
 follow the suite's fake clock), are in

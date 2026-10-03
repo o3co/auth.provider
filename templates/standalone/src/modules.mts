@@ -524,6 +524,11 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
 				.rateLimiterClient;
 		},
+		// `redisAttemptCounterModule` consumes this slot where a deployment installs it.
+		attemptCounterClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(section, lifecycleRegistrar, readinessRegistrar, logger)
+				.attemptCounterClient;
+		},
 		// `redisCodeRepositoryModule` consumes this slot when
 		// `adapters.codeRepository = "redis"`.
 		codeRepositoryClient: async ({ section, lifecycleRegistrar, readinessRegistrar, logger }) => {
