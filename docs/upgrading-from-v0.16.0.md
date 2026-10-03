@@ -133,8 +133,10 @@ An old path refuses the boot, naming the new one and the variable bound to
 it, while the module that owns it is loaded. A renamed variable refuses the
 boot when it is set alone or beside its new name at a different value; set
 to the same value as its new name, it boots, so a fleet can carry both
-through a rolling upgrade. Sections are strict: a key a section does not
-declare refuses the boot, naming it, where it used to be dropped.
+through a rolling upgrade. Sections are strict: a key a module's section
+does not declare refuses the boot, naming its path, where it used to be
+dropped — [Values read more strictly](#values-read-more-strictly) lists the
+sections that still accept one.
 
 | What moved | Where it is listed |
 | --- | --- |
@@ -201,6 +203,20 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   A key named after an `Object.prototype` member (`__proto__`,
   `constructor`, `toString`, …), at any depth, refuses the boot naming its
   path (#1216).
+- **BREAKING: a key a module's section does not declare refuses the boot
+  (#1325).** From this release, a key inside a module's own section that the
+  module does not read — a typo, or a key an older version read — refuses the
+  boot (`config-validation-failed`), naming the section or block that holds it
+  and the key, where it used to be ignored. Before you upgrade, check every
+  key you set against the module's README, and correct or delete the ones it
+  does not list. The sections that still accept an unknown key are `oauth`
+  (the section and its nested blocks), `webauthn` (the section and its
+  `rateLimit` blocks) and `session-store.storage`. `mfa`, at every level, and
+  `mfa-totp-factor` refuse one too (#1329): an empty `mfa.factors` block an
+  older configuration leaves behind (the TOTP factor's old path, its
+  variables unset) is such a key — delete it. The keys under `audit-sink` are the
+  names of the sinks you register, and each sink's options are its own, so
+  those stay open.
 - **The session cookie.** A `SESSION_STORE_NAME` that is not an RFC 6265 token
   or is empty, a `__Secure-` or `__Host-` name (in any case) without what the
   prefix requires, and a `SESSION_STORE_DOMAIN` that is not a host name refuse
@@ -443,6 +459,14 @@ modules fills them.
   `oauthTokenSettings` are authoritative while their module is loaded (#783,
   #785). The `session` package's `createSessionCsrfGuard`, `createLoginEntry`
   and `createSessionCsrfTokenSigner` fill them without `sessionModule`.
+- **BREAKING: an enabled TOTP factor requires the `oauthTokenSettings`
+  slot (#1329).** `mfaTotpFactorModule` takes the deployment's issuer, which
+  an unset `mfa-totp-factor.issuer` defaults to the host of, from the slot
+  alone and no longer reads `oauth.jwt.issuer` from the whole configuration.
+  `oauthModule` provides the slot; a composition without it whose TOTP factor
+  is on provides the slot itself, or the boot is refused
+  (`missing-required-component`, naming `oauthTokenSettings`). A factor
+  switched off by `mfa-totp-factor.enabled = false` requires nothing.
 - **The federation projections.** A name-keyed contribution factory (a
   `grants` or `mfaFactors` entry, say) that reads `federationProviders` or
   `federationRedirectPolicyResolver` while it runs refuses the boot
@@ -485,6 +509,24 @@ modules fills them.
   deps object for their factories carries. `createDeviceVerificationHandler`'s
   `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
   `revokedBefore` (#717).
+- **BREAKING: an enabled `dpopModule` requires `oauthTokenSettings`, and
+  no longer reads the configuration (#728).** It takes the issuer every
+  proof's `htu` is checked against from the slot alone, and no longer falls
+  back to `oauth.jwt.issuer` when no module provides it. With `oauthModule`
+  installed nothing changes. A composition with DPoP enabled and without
+  `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`
+  (core's `OAuthTokenSettings`), or the boot is refused for the
+  missing component. A deps object handed to the module's factories carries
+  `oauthTokenSettings`; `config` is no longer read. Disabled, the module
+  requires nothing.
+- **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
+  section's defaults live only in the package's `config/reference.conf`. A
+  configuration that layers the modules' references (`moduleReferences`, as
+  the template does) sees no change. One built by hand writes every key of a
+  `dpop` section it sets — `iatWindowSeconds`, `algWhitelist`,
+  `replayStoreTtlSeconds` and `nonce { required, ttlSeconds }` — or the boot
+  is refused naming the missing key; an absent section, or one without
+  `enabled`, is off. Parsed directly, an absent section is `undefined`.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
@@ -553,6 +595,23 @@ modules fills them.
     `createAppleProvider`, in code: a federation type of your own whose
     factory builds the provider with it
     ([Apple README](../packages/federation-apple/README.md#the-rotating-client-secret)).
+- **BREAKING: token exchange reads `oauthTokenSettings`, not the
+  configuration** (#1331). `tokenExchangeModule` requires the
+  `oauthTokenSettings` slot and no longer requires `config` or declares a
+  `configSchema`: the issuer and `legacyTypAccept` a subject token is held to,
+  and the lifetimes it mints within, are the slot's. A composition with
+  `oauthModule` changes nothing, since the module provides the slot; one
+  without it fills the slot itself, or the boot is refused
+  (`missing-required-component`, naming `oauthTokenSettings`).
+  `createTokenExchangeGrant` takes `oauthTokenSettings`, required, in place of
+  `config`, and holds it to its contract only: a caller building the grant
+  outside `createApp` passes the snapshot
+  `checkOAuthTokenSettings(value, config)` answers, which also holds the
+  lifetimes within the configuration's. The grant no longer refuses a
+  `config` setting `oauth.tokenExchange`; the boot refuses that path
+  (`config-path-relocated`) wherever the module is installed, and a
+  hand-built grant takes the bound as `section.maxActorChainDepth`
+  ([token-exchange README](../packages/oauth-token-exchange/README.md#public-api)).
 - **Rate-limit helpers** (`resolveSeededLimitSpecs`, `resolveLoginLimitSpec`,
   the per-feature prefixes and specs) are gone from core; the prefixes are
   exported by the packages that key them (#782).

@@ -27,6 +27,7 @@ import {
 	outputKinds,
 	pickConfigSchema,
 	readsEnvironmentString,
+	schemaObjectLevels,
 	schemasAtPath,
 	unreadableLeafPaths,
 } from "#/config/schema-path.mjs";
@@ -186,5 +187,39 @@ describe("readsEnvironmentString — every scalar type classified, an unknown on
 
 	it("reports a leaf of a type it does not read, in an object", () => {
 		expect(unreadableLeafPaths(z.object({ value: z.date(), name: z.string() }))).toEqual(["value"]);
+	});
+});
+
+describe("schemaObjectLevels — every object and record a schema declares", () => {
+	const paths = (schema: z.ZodType) =>
+		schemaObjectLevels(schema).map(({ path, kind }) => `${path.join(".") || "(root)"}:${kind}`);
+
+	it("walks objects, a record's values and a list's elements, through wrappers and pipes", () => {
+		const schema = z
+			.object({
+				limits: z.record(z.string(), z.object({ limit: z.number() })).default({}),
+				hosts: z.array(z.object({ name: z.string() })).optional(),
+				wait: z.preprocess((v) => v, z.object({ ms: z.number() })),
+				name: z.string(),
+			})
+			.optional();
+		expect(paths(schema)).toEqual([
+			"(root):object",
+			"limits:record",
+			"limits.*:object",
+			"hosts.*:object",
+			"wait:object",
+		]);
+	});
+
+	it("names each form of a union at the same path", () => {
+		const schema = z.union([z.object({ a: z.string() }), z.object({ b: z.string() })]);
+		expect(paths(schema)).toEqual(["(root):object", "(root):object"]);
+	});
+
+	it("stops at a lazy schema that reaches itself again", () => {
+		type Node = { readonly child?: Node };
+		const node: z.ZodType<Node> = z.lazy(() => z.object({ child: node.optional() }));
+		expect(paths(node)).toEqual(["(root):object", "child:object"]);
 	});
 });

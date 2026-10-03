@@ -1,5 +1,7 @@
 . ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY value
 . ADMISSION_GRADES value
+. ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS value
+. ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS value
 . AUDIT_SINK_ABSENCE_POLICY value
 . AbsencePolicy type
 . AccessTokenAuthorization type
@@ -39,6 +41,14 @@
 . AssertionVerificationResult type
 . AssertionVerifier type
 . AsymmetricKeyStoreOptions type
+. AttemptCount type
+. AttemptCounter type
+. AttemptCounterFailure type
+. AttemptGuard type
+. AttemptGuardOptions type
+. AttemptPerIpOptions type
+. AttemptSpec type
+. AttemptVerdict type
 . AuditEvent type
 . AuditEventDetails type
 . AuditHook type
@@ -96,6 +106,7 @@
 . ConditionalRemoveAnswer type
 . ConditionalReplaceAnswer type
 . ConditionalSetRemoveAnswer type
+. ConfigDefaultsInvalidDetails type
 . ConfigPathRelocatedDetails type
 . ConfigSchema type
 . ConfigValidationFailedDetails type
@@ -126,9 +137,11 @@
 . CsrfGuard type
 . CsrfTokenSigner type
 . CsrfVerdict type
+. DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS value
 . DEFAULT_CLOCK_SKEW_MS value
 . DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS value
 . DEFAULT_FEDERATION_RESPONSE_MODE value
+. DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES value
 . DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES value
 . DEFAULT_MFA_SUBJECT_LEASE_MS value
 . DEFAULT_SIGNING_ALGORITHM value
@@ -339,6 +352,8 @@
 . MAIL_PURPOSES value
 . MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS value
 . MAX_ASSERTION_LIFETIME_SECONDS value
+. MAX_ATTEMPT_KEY_LENGTH value
+. MAX_ATTEMPT_WINDOW_SECONDS value
 . MAX_CLIENT_ID_LENGTH value
 . MAX_DURATION_MS value
 . MAX_DURATION_SECONDS value
@@ -368,6 +383,7 @@
 . MappedClaims type
 . MemoryAccessTokenDenylist type
 . MemoryAccessTokenDenylistOptions type
+. MemoryAttemptCounterOptions type
 . MemoryChallengeStore type
 . MemoryChallengeStoreOptions type
 . MemoryConsentStore type
@@ -553,6 +569,7 @@
 . RequirementInterruption type
 . RequirementSession type
 . RequirementVerdict type
+. ReservedBootstrapInputs type
 . ReservedComponentKeyDetails type
 . RetrieveFederationGrantTokenDeps type
 . RetrieveFederationGrantTokenRequest type
@@ -683,6 +700,7 @@
 . assertSecretEntropy value
 . assertUsableRateLimitSpecs value
 . assertionLifetime value
+. attemptCounterUnavailableEnvelope value
 . auditErrorList value
 . auditErrorText value
 . auditedError value
@@ -747,6 +765,7 @@
 . createAdapterFactory value
 . createApp value
 . createAsymmetricKeyStore value
+. createAttemptGuard value
 . createAuditSinkFactory value
 . createChallengeCeremony value
 . createChallengeStoreFactory value
@@ -768,6 +787,7 @@
 . createKeyStoreFactory value
 . createMemoryAccessTokenDenylist value
 . createMemoryAssertionIssuerRegistry value
+. createMemoryAttemptCounter value
 . createMemoryChallengeStore value
 . createMemoryConsentStore value
 . createMemoryDeviceCodeStore value
@@ -867,6 +887,8 @@
 . hasFederationGrantAuthorization value
 . identityClaimsProblem value
 . isAbsenceDeclared value
+. isAttemptKey value
+. isAttemptSpec value
 . isBearerTokenType value
 . isCanonicalIssuer value
 . isClientRecordRefused value
@@ -965,6 +987,7 @@
 . rateLimiterUnavailableEnvelope value
 . readAccessTokenRevocationMode value
 . readAcrTable value
+. readAttemptCount value
 . readConditionalCreateAnswer value
 . readConditionalRemoveAnswer value
 . readConditionalReplaceAnswer value
@@ -1176,6 +1199,7 @@
 ./testing RenamedVariableCaptureInput type
 ./testing RenamedVariableCheck type
 ./testing RequirementContractInput type
+./testing SectionStrictnessOptions type
 ./testing SessionCookiePolicyContractInput type
 ./testing TestAppHandle type
 ./testing TestCsrfGuardOptions type
@@ -1222,6 +1246,7 @@
 ./testing renamedVariableCaptures value
 ./testing renamedVariableProblems value
 ./testing resolverForTests value
+./testing sectionStrictnessProblems value
 ./testing sessionCookiePolicyContract value
 ./testing sessionRequirementContract value
 ./testing testMfaFactorProofs value

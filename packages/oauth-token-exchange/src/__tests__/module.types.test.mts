@@ -17,6 +17,7 @@
 import type {
 	ExchangeTokenValidator,
 	GrantPolicyHook,
+	OAuthTokenSettings,
 	ProviderDeps,
 } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -32,7 +33,8 @@ const REQUIRES = [
 	"tokenExchangeValidatorResolver",
 	"clientRepository",
 	"keyStore",
-	"config",
+	// The issuer and the lifetimes; the whole configuration is not read.
+	"oauthTokenSettings",
 ] as const;
 const OPTIONAL = [
 	"refreshTokenFamilyRevocation",
@@ -41,8 +43,6 @@ const OPTIONAL = [
 	"accessTokenDenylist",
 	"subjectRevocation",
 	"userSessionStore",
-	// What the oauth module provides of `oauth {}`.
-	"oauthTokenSettings",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
@@ -87,6 +87,10 @@ describe("createTokenExchangeGrant declares the slots it reads", () => {
 		expectTypeOf<GrantDeps>().toHaveProperty("userSessionStore");
 		expectTypeOf<GrantDeps>().not.toHaveProperty("refreshTokenFamilyRotation");
 		expectTypeOf<GrantDeps>().not.toHaveProperty("sessionRPRegistry");
+		// The issuer and lifetimes come from the token settings, required, and
+		// nothing is read of the whole configuration.
+		expectTypeOf<GrantDeps>().not.toHaveProperty("config");
+		expectTypeOf<GrantDeps["oauthTokenSettings"]>().toEqualTypeOf<OAuthTokenSettings>();
 		if (false as boolean) {
 			const deps = {} as GrantDeps;
 			// @ts-expect-error — the exchange reads no RP registry

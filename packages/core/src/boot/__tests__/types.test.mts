@@ -115,6 +115,7 @@ describe("BootErrorReason", () => {
 			| "authoritative-without-provides"
 			| "authoritative-component-overridden"
 			| "token-settings-lifetime-exceeds-configuration"
+			| "config-defaults-invalid"
 		>();
 	});
 });

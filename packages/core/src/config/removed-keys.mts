@@ -335,6 +335,17 @@ export function findRenamedVariables<V extends RenamedVariable>(
 	});
 }
 
+/**
+ * Every name `config`'s `renamed-variables` section captures set — a string,
+ * the empty one included — in capture order; none when it has no such
+ * section. Names alone: a variable may carry a secret.
+ */
+export function setCaptures(config: unknown): readonly string[] {
+	const section = readOwn(config, [RENAMED_VARIABLES_SECTION]);
+	if (!isPlainObject(section)) return [];
+	return Object.keys(section).filter((name) => typeof capturedIn(section, name) === "string");
+}
+
 /** `config` without the reserved `renamed-variables` section; `config` itself when it has none. */
 export function withoutRenamedVariables(config: unknown): unknown {
 	if (!isPlainObject(config) || !Object.hasOwn(config, RENAMED_VARIABLES_SECTION)) return config;
