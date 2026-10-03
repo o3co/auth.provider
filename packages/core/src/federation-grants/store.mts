@@ -252,17 +252,21 @@ export interface FederationGrantStore {
 
 	/**
 	 * Takes one upstream refresh-token rotation from the grant's rotation
-	 * budget, before the upstream is asked. The grant must be `active`, at the
-	 * caller's `version`, with `now` before `expiresAt`. Then, in one atomic
-	 * step against `rotations`:
+	 * budget, before the upstream is asked. A rotation here is a refresh the
+	 * upstream may have acted on, whether or not it issued a new refresh
+	 * token. The grant must be `active`, at the caller's `version`, with `now`
+	 * before `expiresAt`. Then, in one atomic step against `rotations`:
 	 *
-	 * - none, or `now` at or after `since + windowMs`: a new window,
-	 *   `{ since: now, count: 1 }`;
+	 * - none, a `since` that holds no instant, or `now` at or after
+	 *   `since + windowMs`: a new window, `{ since: now, count: 1 }`;
 	 * - else, `count` below `limit`: `count + 1`;
 	 * - else the budget is spent, and the write is refused.
 	 *
 	 * No `version` bump, nothing else touched. Kept by `replaceCredentials`,
 	 * reset by `activate`.
+	 *
+	 * The window is fixed, not sliding: it opens at its first take, so any
+	 * `windowMs` that straddles two windows can hold up to twice `limit` takes.
 	 *
 	 * Bounds are checked before the record, and rejected with a `RangeError`, as
 	 * a `now` that is not a date is: a `limit` that is not a whole number of at
@@ -284,6 +288,27 @@ export interface FederationGrantStore {
 		readonly expectedVersion: number;
 		readonly limit: number;
 		readonly windowMs: number;
+		readonly now: Date;
+	}): Promise<FederationGrantWrite>;
+
+	/**
+	 * Gives back a rotation `takeRotation` took, for an attempt the upstream
+	 * definitely did not perform. A rotation here is a refresh the upstream
+	 * may have acted on, whether or not it issued a new refresh token. The grant must be `active`, at the caller's
+	 * `version` (the one the take was made at), with `now` before `expiresAt`,
+	 * and `rotations.since` must be `since`, the window the take counted into,
+	 * with a `count` of at least one. Then, in one atomic step, `count - 1` and
+	 * `version` bumped; nothing else touched. The bump makes it once per
+	 * attempt: a second give-back at the same version is refused. A `now` or a
+	 * `since` that is not a date is a `RangeError`.
+	 *
+	 * Optional for now, as `takeRotation` is, and the two become required
+	 * together: a store without it keeps every rotation taken.
+	 */
+	refundRotation?(input: {
+		readonly grantId: string;
+		readonly expectedVersion: number;
+		readonly since: Date;
 		readonly now: Date;
 	}): Promise<FederationGrantWrite>;
 

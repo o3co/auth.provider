@@ -2119,6 +2119,117 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 		});
 
+		describe("refundRotation", () => {
+			// Optional on the port, as `takeRotation` is: a store without it keeps
+			// every rotation taken.
+			beforeEach((context) => {
+				context.skip(
+					store.refundRotation === undefined || store.takeRotation === undefined,
+					"the store gives no rotation back",
+				);
+			});
+
+			const HOUR = 3_600_000;
+			/** Takes one rotation at `now`, and answers the window it counted into. */
+			const takeOne = async (expectedVersion: number, now = at(DAY)): Promise<Date> => {
+				if (store.takeRotation === undefined) throw new Error("fixture: no takeRotation");
+				const taken = await store.takeRotation({
+					grantId: "g-1",
+					expectedVersion,
+					limit: 3,
+					windowMs: HOUR,
+					now,
+				});
+				if (!taken.ok || !hasFederationGrantAuthorization(taken.grant)) {
+					throw new Error("fixture: the take was refused");
+				}
+				return taken.grant.rotations?.since ?? INVALID;
+			};
+			const refund = (
+				expectedVersion: number,
+				since: Date,
+				now = at(DAY + MIN),
+				grantId = "g-1",
+			): Promise<FederationGrantWrite> => {
+				if (store.refundRotation === undefined) throw new Error("fixture: no refundRotation");
+				return store.refundRotation({ grantId, expectedVersion, since, now });
+			};
+			const recordOf = async (now: Date, grantId = "g-1") => {
+				const record = await store.find(grantId, now);
+				if (record === null || !hasFederationGrantAuthorization(record)) {
+					throw new Error("fixture: the grant is gone");
+				}
+				return record;
+			};
+
+			it("gives back one rotation of the window it was taken in, bumps the version, and touches nothing else", async () => {
+				const grant = await activated();
+				await takeOne(grant.version, at(DAY));
+				const since = await takeOne(grant.version, at(DAY + MIN));
+				const before = await recordOf(at(DAY + MIN));
+				const written = await refund(grant.version, since, at(DAY + 2 * MIN));
+				const expected = {
+					...before,
+					version: grant.version + 1,
+					rotations: { since: at(DAY), count: 1 },
+				};
+				expect(written).toStrictEqual({ ok: true, grant: expected });
+				expect(await store.find("g-1", at(DAY + 2 * MIN))).toStrictEqual(expected);
+				expect(await store.open("g-1", at(DAY + 2 * MIN))).toMatchObject({
+					credentials: { state: "ok", value: credentials("1") },
+				});
+			});
+
+			it("gives back an attempt once: a second give-back at the same version is refused", async () => {
+				const grant = await activated();
+				await takeOne(grant.version, at(DAY));
+				const since = await takeOne(grant.version, at(DAY + MIN));
+				expect((await refund(grant.version, since)).ok).toBe(true);
+				expect(await refund(grant.version, since)).toEqual({ ok: false });
+				expect((await recordOf(at(DAY + MIN))).rotations).toStrictEqual({
+					since: at(DAY),
+					count: 1,
+				});
+			});
+
+			it("never goes below none: a window with nothing in it gives nothing back", async () => {
+				const grant = await activated();
+				const since = await takeOne(grant.version, at(DAY));
+				expect((await refund(grant.version, since)).ok).toBe(true);
+				expect((await recordOf(at(DAY + MIN))).rotations).toStrictEqual({ since, count: 0 });
+				expect(await refund(grant.version + 1, since)).toEqual({ ok: false });
+				expect((await recordOf(at(DAY + MIN))).rotations).toStrictEqual({ since, count: 0 });
+			});
+
+			it("refuses another window, another version, a time past the expiry, a grant with no budget taken and one that is not active, changing nothing", async () => {
+				const grant = await activated();
+				const since = await takeOne(grant.version, at(DAY));
+				const before = await store.find("g-1", at(DAY));
+				expect(await refund(grant.version, at(DAY - MIN))).toEqual({ ok: false });
+				expect(await refund(grant.version + 1, since)).toEqual({ ok: false });
+				expect(await refund(grant.version, since, at(31 * DAY))).toEqual({ ok: false });
+				expect(await store.find("g-1", at(DAY))).toStrictEqual(before);
+
+				const untaken = await activated("g-untaken");
+				expect(await refund(untaken.version, since, at(DAY), "g-untaken")).toEqual({ ok: false });
+				await store.createPending(pendingInput("g-pending", "h-p"));
+				await needingUser("g-needs-user");
+				for (const id of ["g-pending", "g-needs-user", "g-unknown"]) {
+					const version = (await store.find(id, at(5 * MIN)))?.version ?? 1;
+					expect(await refund(version, since, at(5 * MIN), id), id).toEqual({ ok: false });
+				}
+			});
+
+			it("refuses a time or a window that is not a date with a RangeError, and changes nothing", async () => {
+				const grant = await activated();
+				const since = await takeOne(grant.version, at(DAY));
+				const before = await store.find("g-1", at(DAY));
+				await expect(refund(grant.version, since, INVALID)).rejects.toThrow(RangeError);
+				await expect(refund(grant.version, INVALID)).rejects.toThrow(RangeError);
+				expect(await store.find("g-1", at(DAY))).toStrictEqual(before);
+			});
+		});
+
 		describe("touch", () => {
 			it("sets lastUsedAt on an active grant, without bumping the version", async () => {
 				const grant = await activated();

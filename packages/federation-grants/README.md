@@ -177,6 +177,9 @@ say what each one means and what to do.
   another replica holds the refresh (`lock_timeout`) or won the write
   (`concurrent_update`) is `federation_grant_token_contended`, a warn: nothing
   is down.
+- **A grant store that keeps no rotation budget** (one without
+  `takeRotation`) is one warn at boot, `federation_grant_store_no_rotation_budget`:
+  the upstream refresh-token rotations of a grant are then not bounded.
 - **A consent answer the CSRF policy refuses** is one warn,
   `federation_grant_consent_csrf_refused`, with `reason` — the guard's
   (`foreign_origin`, `token_absent`, `token_invalid`), or `unrecognized` for a

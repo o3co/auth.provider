@@ -20,6 +20,7 @@ import type { AuthorizedFederationGrant } from "#/federation-grants/types.mjs";
 import type { DelegatedTokens } from "#/federations/types.mjs";
 import {
 	at,
+	CONSENTED,
 	connection,
 	type Harness,
 	HOUR,
@@ -706,16 +707,51 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			});
 		});
 
-		it("is not given one for a scope the upstream never puts in a token, either", async () => {
+		it.each([
+			// The upstream narrowed the grant: the fresh token is stored and answered.
+			["a scope the upstream no longer grants", "calendar.read"],
+			["a scope the upstream never puts in a token", "calendar.write"],
+		])("is not given one for %s, either", async (_, scope) => {
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockImplementation(async () =>
 				refreshed(`n${h.refresh.mock.calls.length}`, now(), { scope: "openid" }),
 			);
 			for (let i = 0; i < 4; i++) {
-				expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
+				expect(await retrieve({ scope: [scope] })).toStrictEqual({
 					ok: false,
 					code: "invalid_scope",
+				});
+				setNow(new Date(now().getTime() + 5_000));
+			}
+			expect(h.refresh).toHaveBeenCalledTimes(1);
+		});
+
+		it("is not made to rotate on every request by a scope its held token carries and the upstream no longer puts in one: the marker bounds it", async () => {
+			// A held token broadened beyond the grant, by an IdP that accumulates
+			// consent; refreshes now answer the grant's scopes alone.
+			await h.seed({
+				credentials: {
+					refreshToken: SECRET,
+					accessToken: {
+						value: "at-0",
+						tokenType: "Bearer",
+						obtainedAt: T0,
+						issuedLifetime: 3600,
+						effectiveExpiresAt: at(HOUR),
+						scopes: [...CONSENTED],
+					},
+				},
+			});
+			setNow(DUE);
+			h.refresh.mockImplementation(async () =>
+				refreshed(`n${h.refresh.mock.calls.length}`, now(), { scope: SCOPES.join(" ") }),
+			);
+			// Every request while the held token lives.
+			for (let i = 0; i < 3; i++) {
+				expect(await retrieve({ scope: ["calendar.write"] })).toMatchObject({
+					ok: true,
+					accessToken: "at-0",
 				});
 				setNow(new Date(now().getTime() + 5_000));
 			}
@@ -734,6 +770,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		it.each<[string, Partial<typeof request>]>([
 			["a min_ttl above what is left", { minTtlSeconds: 3600 }],
 			["a scope the token lacks", { scope: ["calendar.read"] }],
+			["a scope no token carries", { scope: ["calendar.write"] }],
 		])(
 			"is not made to rotate on every request by %s when the adapter's expiry is earlier than its lifetime",
 			async (_, ask) => {

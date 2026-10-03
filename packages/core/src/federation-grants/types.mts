@@ -263,6 +263,13 @@ export type FederationGrantIneligibilityReason =
 	/** Not a bearer token: a route with no proof key cannot present a sender-constrained one. */
 	| "token_type_unsupported"
 	/**
+	 * The upstream answered a refresh with a token that carries the grant's
+	 * scopes but not one the held token carries and the call asked for. The
+	 * held token is kept while it is good; the marker keeps the upstream from
+	 * being asked again about it until its interval has passed.
+	 */
+	| "scope_not_granted"
+	/**
 	 * The adapter reported a refresh without a usable access token, or with a
 	 * field of the wrong type. The refresh token it came with is kept all the
 	 * same, and the marker keeps a broken adapter from rotating on every request.
@@ -395,6 +402,7 @@ export interface FederationGrantRetrievalFailure {
 		| "backstop_revoke"
 		| "lock"
 		| "release"
+		| "rotation"
 		| "upstream"
 		| "mark"
 		| "write"

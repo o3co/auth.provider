@@ -94,6 +94,7 @@ const STORE_OF: Readonly<Partial<Record<FederationGrantRetrievalFailure["during"
 	backstop_revoke: "federation_grant",
 	lock: "federation_grant",
 	release: "federation_grant",
+	rotation: "federation_grant",
 	mark: "federation_grant",
 	write: "federation_grant",
 	touch: "federation_grant",

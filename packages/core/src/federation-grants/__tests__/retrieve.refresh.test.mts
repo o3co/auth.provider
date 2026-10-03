@@ -296,6 +296,8 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE, { scope: "openid" }));
+			// The fresh token lacks a scope of the grant's own: the upstream narrowed
+			// the grant, and that is what is stored and answered.
 			expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
 				ok: false,
 				code: "invalid_scope",
@@ -549,7 +551,9 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 					});
 					expect(await h.store.find("g-1", DUE)).toMatchObject({
 						status: "active",
-						version: grant.version,
+						// Bumped by the rotation given back: the upstream answered.
+						version: grant.version + 1,
+						rotations: { count: 0 },
 						refreshFailure: { kind: "rejected", upstreamCode: code, count: 1 },
 					});
 					expect(h.store.holdsCredential("g-1")).toBe(true);
@@ -855,11 +859,14 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			});
 		});
 
-		const refusals: Array<[string, unknown, object]> = [
+		// `refunded`: whether the rotation taken for the attempt is given back —
+		// only for an answer that proves the upstream did not rotate.
+		const refusals: Array<[string, unknown, object, boolean]> = [
 			[
 				"a message that only mentions invalid_grant",
 				new Error("invalid_grant: said a proxy's error page"),
 				{ code: "upstream_rejected", reason: "unknown" },
+				false,
 			],
 			[
 				"an error code this provider knows",
@@ -868,6 +875,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				// 2026-09-17-federation-grants-offline-delegation, D12): the wait
 				// is what the stamp says.
 				{ code: "upstream_rejected", reason: "invalid_client", retryAfterSeconds: 300 },
+				true,
 			],
 			// An upstream that echoes what it was sent, in the one field that gets
 			// echoed on: not a code, so not repeated.
@@ -875,6 +883,7 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				"an error code that is a secret",
 				Object.assign(new Error(`leaked ${SECRET}`), { error: `bad token ${SECRET}` }),
 				{ code: "upstream_rejected", reason: "unknown" },
+				false,
 			],
 			[
 				"a rate limit with advice",
@@ -884,37 +893,63 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 				}),
 				// The advice is honoured for the backoff at least: thirty seconds.
 				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
+				true,
 			],
 			[
 				"a rate limit without",
 				Object.assign(new Error("x"), { status: 429 }),
 				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
+				true,
 			],
 			[
 				"an outage",
 				Object.assign(new Error("x"), { status: 503 }),
 				{ code: "temporarily_unavailable", reason: "upstream" },
+				true,
+			],
+			// A gateway that timed out forwarded the request: the IdP may have rotated.
+			[
+				"a gateway timeout",
+				Object.assign(new Error("x"), { status: 504 }),
+				{ code: "temporarily_unavailable", reason: "upstream" },
+				false,
+			],
+			[
+				"an outage the IdP names in its body, at a status that is not a 5xx",
+				Object.assign(new Error("x"), { error: "temporarily_unavailable", status: 400 }),
+				{ code: "upstream_rejected", reason: "temporarily_unavailable" },
+				false,
 			],
 		];
 
 		it.each(refusals)(
 			"changes nothing in the record for anything else — %s",
-			async (_, error, denial) => {
+			async (_, error, denial, refunded) => {
 				const grant = await h.seed();
 				setNow(GONE);
 				const before = await h.store.open("g-1", GONE);
 				h.refresh.mockRejectedValueOnce(error);
 				expect(await retrieve()).toStrictEqual({ ok: false, ...denial });
 				const after = await h.store.open("g-1", GONE);
+				// A rotation given back bumps the version; one kept leaves it.
 				expect(after).toMatchObject({
-					grant: { status: "active", version: grant.version },
+					grant: {
+						status: "active",
+						version: grant.version + (refunded ? 1 : 0),
+						rotations: { count: refunded ? 0 : 1 },
+					},
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
-				// Nothing but the failure stamp: the credentials whole, and the grant
-				// whole apart from it — key for key.
+				// Nothing but the failure stamp and the rotation: the credentials
+				// whole, and the grant whole apart from them — key for key.
 				expect(after?.credentials).toStrictEqual(before?.credentials);
-				const { refreshFailure: _after, ...afterRest } = after?.grant ?? {};
-				const { refreshFailure: _before, ...beforeRest } = before?.grant ?? {};
+				const {
+					refreshFailure: _after,
+					rotations: _taken,
+					version: _bumped,
+					...afterRest
+				} = after?.grant ?? {};
+				const { refreshFailure: _before, version: _version, ...beforeRest } = before?.grant ?? {};
 				expect(afterRest).toStrictEqual(beforeRest);
 				expect(
 					(await types()).filter((entry) => entry.startsWith("federation.grant.refresh_failed ")),
@@ -1544,10 +1579,11 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 			let readings = 0;
 			h.deps.now = () => {
 				readings += 1;
-				// The eighth reading is the worker's first: two for each of the two
+				// The tenth reading is the worker's first: two for each of the two
 				// looks, one before the lock is asked for, one when it is acknowledged,
-				// and one when the upstream is about to be asked.
-				if (readings === 8) throw new Error("clock bug");
+				// one when the upstream is about to be asked, and two for the rotation
+				// taken from the budget.
+				if (readings === 10) throw new Error("clock bug");
 				return now();
 			};
 			expect(await retrieve()).toStrictEqual({
@@ -1652,6 +1688,24 @@ describe("retrieveFederationGrantToken — the refresh", () => {
 describe("assertFederationGrantRetrievalLimits", () => {
 	it("accepts the defaults: 25 s + 3 s leave two of the lock's 30", () => {
 		expect(() => assertFederationGrantRetrievalLimits(limits)).not.toThrow();
+	});
+
+	it("refuses a rotation budget a store would refuse, and takes one that is absent as the default", () => {
+		expect(() =>
+			assertFederationGrantRetrievalLimits({ ...limits, rotationBudget: 1, rotationWindowMs: 1 }),
+		).not.toThrow();
+		for (const rotationBudget of [0, 1.5, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(
+				() => assertFederationGrantRetrievalLimits({ ...limits, rotationBudget }),
+				String(rotationBudget),
+			).toThrow(RangeError);
+		}
+		for (const rotationWindowMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(
+				() => assertFederationGrantRetrievalLimits({ ...limits, rotationWindowMs }),
+				String(rotationWindowMs),
+			).toThrow(RangeError);
+		}
 	});
 
 	it("refuses a lock that could run out before a refresh has settled, and wants a margin: a fit by a millisecond is not one", () => {

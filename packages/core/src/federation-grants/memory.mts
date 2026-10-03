@@ -623,7 +623,8 @@ export function createMemoryFederationGrantStore(
 			// each counted.
 			const previous = grant.rotations;
 			let rotations: FederationGrantRotations;
-			if (previous === undefined || nowMs >= previous.since.getTime() + input.windowMs) {
+			// A `since` that holds no instant is no window: this take opens one.
+			if (previous === undefined || !(nowMs < previous.since.getTime() + input.windowMs)) {
 				rotations = { since: new Date(nowMs), count: 1 };
 			} else if (previous.count < input.limit) {
 				rotations = { since: new Date(previous.since), count: previous.count + 1 };
@@ -631,6 +632,30 @@ export function createMemoryFederationGrantStore(
 				return failed();
 			}
 			return written(entry, { ...grant, rotations });
+		},
+
+		async refundRotation(input) {
+			const nowMs = instant(input.now, "now");
+			const sinceMs = instant(input.since, "since");
+			const entry = visible(input.grantId, nowMs);
+			if (entry === undefined) return failed();
+			const grant = entry.grant;
+			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
+			if (!(nowMs < grant.expiresAt.getTime())) return failed();
+			const previous = grant.rotations;
+			if (
+				previous === undefined ||
+				previous.since.getTime() !== sinceMs ||
+				!(previous.count >= 1)
+			) {
+				return failed();
+			}
+			// The bump is what makes it once per attempt.
+			return written(entry, {
+				...grant,
+				version: grant.version + 1,
+				rotations: { since: new Date(sinceMs), count: previous.count - 1 },
+			});
 		},
 
 		async touch(grantId, at) {

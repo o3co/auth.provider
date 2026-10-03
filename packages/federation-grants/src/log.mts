@@ -53,7 +53,10 @@ type Cause = [] | [error: unknown];
 export interface FederationGrantLog {
 	/** An outage answered `503` or `temporarily_unavailable`: exactly one line, at error. */
 	outage(event: string, fields: LogFields, ...cause: Cause): void;
-	/** A failure that changed no answer, or contention: one line, at warn. */
+	/**
+	 * A failure that changed no answer, contention, or a bound a component
+	 * does not keep: one line, at warn.
+	 */
 	degraded(event: string, fields: LogFields, ...cause: Cause): void;
 	/**
 	 * A request refused for what it carried, where the deployment's own

@@ -65,6 +65,7 @@ import {
 	type FederationGrantDelegatedAuthorizer,
 } from "./browserRoutes.mjs";
 import { resolveFederationGrantConnections } from "./connections.mjs";
+import { createFederationGrantLog } from "./log.mjs";
 import { createFederationGrantRouter, FEDERATION_GRANTS_RATE_LIMIT_PREFIX } from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 
@@ -501,6 +502,14 @@ export const federationGrantsModule = defineModule<
 					connections,
 				);
 				const lifetimes = resolveFederationGrantAcquisitionLimits(deps.section);
+				// Booted, but without the bound on upstream rotations a store keeps
+				// with `takeRotation`: said once, here.
+				if (store.takeRotation === undefined) {
+					createFederationGrantLog(deps.logger).degraded(
+						"federation_grant_store_no_rotation_budget",
+						{},
+					);
+				}
 				// The drain's allowance, for a host that bounds dispose(). The component
 				// cleanup runs the drain, ahead of the store; this waits only on a drain
 				// already started, never on a registry the host supplied.
