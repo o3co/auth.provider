@@ -90,9 +90,9 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     `readSwitches` answers gets nothing there now. Read it at boot, from the
     parsed configuration (a module that requires `config`, as the bridges
     did), or let a federation type module handle the entry, which core
-    hands it at boot: the template bundles Google's and OIDC's, and
-    `@o3co/auth-provider-federation-github` ships
-    `githubFederationTypeModule()`.
+    hands it at boot: the template bundles Google's and OIDC's, and the
+    GitHub and Apple packages ship `githubFederationTypeModule()` and
+    `appleFederationTypeModule()`.
   - Each entry's keys are now read by its type's strict schema: a key the
     type does not name, or the keys nested under the type's name
     (`google { google { … } }`), refuse the boot at the key's path, where the
