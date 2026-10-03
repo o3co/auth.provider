@@ -20,10 +20,14 @@
  * section's schema parses without losing a path — core's
  * `packageReferenceProblems`, the check every package with defaults runs over
  * its own file — with `maxActorChainDepth` at 3 unless
- * `OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH` says otherwise.
+ * `OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH` says otherwise. The section
+ * refuses an unknown key at every level (core's `sectionStrictnessProblems`).
  */
 
-import { packageReferenceProblems } from "@o3co/auth-provider-core/testing";
+import {
+	packageReferenceProblems,
+	sectionStrictnessProblems,
+} from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { tokenExchangeModule } from "#/module.mjs";
@@ -47,6 +51,11 @@ describe("the package's config/reference.conf", () => {
 
 	it("is declared by the module and holds only its section, which its schema parses without losing a path", () => {
 		expect(packageReferenceProblems({ reference: REFERENCE, modules, read: read() })).toEqual([]);
+	});
+
+	it("holds a section that refuses an unknown key at every level", () => {
+		const path = new URL(REFERENCE).pathname;
+		expect(sectionStrictnessProblems(modules, { tree: read()(path) })).toEqual([]);
 	});
 
 	it("defaults maxActorChainDepth to 3, and reads OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH", () => {

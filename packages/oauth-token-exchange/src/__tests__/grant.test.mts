@@ -15,7 +15,6 @@
  */
 
 import {
-	type AppConfig,
 	type ClientRepository,
 	consoleLogger,
 	createInMemoryUserSessionStore,
@@ -27,10 +26,12 @@ import {
 	type GrantPolicyRequest,
 	type Logger,
 	MAX_CLIENT_ID_LENGTH,
+	type OAuthTokenSettings,
 	type PublicClient,
 	passwordSessionAuthentication,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
@@ -40,19 +41,11 @@ import {
 	keyStore,
 	makeFamilyRevocation,
 	signSelfIssuedAccessToken,
+	tokenSettings,
 	tokensOf,
 } from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
-
-const mockConfig = {
-	oauth: {
-		jwt: { issuer: ISSUER },
-		accessToken: { expiresIn: 300 },
-		refreshToken: { expiresIn: 86400 },
-		grants: {},
-	},
-} as unknown as AppConfig;
 
 const publicClient = (overrides: Partial<PublicClient> = {}): PublicClient => ({
 	clientId: "client-a",
@@ -81,7 +74,7 @@ function buildGrant(
 		clientRepository?: ClientRepository;
 		/** Pass `null` to explicitly omit the store from deps (fail-closed tests). */
 		refreshTokenFamilyRevocation?: ReturnType<typeof makeFamilyRevocation> | null;
-		config?: AppConfig;
+		oauthTokenSettings?: OAuthTokenSettings;
 		grantPolicy?: GrantPolicyHook;
 		logger?: Logger;
 		userSessionStore?: UserSessionStore;
@@ -100,7 +93,7 @@ function buildGrant(
 		[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
 	]);
 	return createTokenExchangeGrant({
-		config: overrides.config ?? mockConfig,
+		oauthTokenSettings: overrides.oauthTokenSettings ?? tokenSettings,
 		keyStore,
 		refreshTokenFamilyRevocation: grantStore,
 		tokenExchangeValidatorResolver: validators,
@@ -173,19 +166,41 @@ const ctx = (
 });
 
 describe("createTokenExchangeGrant — the lifetime it mints with, read when it is built", () => {
-	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
+	it("is refused when it is built with token settings whose access-token lifetime breaks the contract", () => {
 		// Read per request, a hand-built lifetime failed every exchange with a
 		// 500, after client authentication had spent whatever it spends.
-		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
-		for (const accessToken of [
-			{ expiresIn: 1.5 },
-			{ expiresIn: 0 },
+		for (const accessTokenLifetime of [
+			{ defaultExpiresIn: 1.5, maxExpiresIn: 300 },
+			{ defaultExpiresIn: 0, maxExpiresIn: 300 },
 			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
 			{},
 		]) {
-			const config = { oauth: { ...base.oauth, accessToken } } as unknown as AppConfig;
-			expect(() => buildGrant({ config }), JSON.stringify(accessToken)).toThrow(RangeError);
+			const oauthTokenSettings = {
+				...tokenSettings,
+				accessTokenLifetime,
+			} as unknown as OAuthTokenSettings;
+			expect(() => buildGrant({ oauthTokenSettings }), JSON.stringify(accessTokenLifetime)).toThrow(
+				/oauthTokenSettings\.accessTokenLifetime/,
+			);
 		}
+	});
+
+	it("reads no configuration: built from its token settings alone, it mints their default lifetime", async () => {
+		const g = buildGrant({
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				issuer: ISSUER,
+				accessTokenLifetime: { defaultExpiresIn: 123, maxExpiresIn: 123 },
+			}),
+		});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "s",
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-1" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(tokensOf(result).expires_in).toBe(123);
 	});
 });
 
@@ -1468,20 +1483,6 @@ describe("createTokenExchangeGrant — happy path", () => {
 		});
 	});
 
-	it("refuses to be built from oauth.tokenExchange with no section, naming oauth-token-exchange.maxActorChainDepth", () => {
-		// A bound written at the old path and read as unset would widen the
-		// chain to the default: the grant refuses instead.
-		const config = {
-			...mockConfig,
-			oauth: { ...mockConfig.oauth, tokenExchange: { maxActorChainDepth: 1 } },
-		} as unknown as AppConfig;
-		expect(() => buildGrant({ config })).toThrow(RangeError);
-		expect(() => buildGrant({ config })).toThrow(
-			/oauth\.tokenExchange[\s\S]*oauth-token-exchange\.maxActorChainDepth/,
-		);
-		expect(() => buildGrant({ config, section: { maxActorChainDepth: 1 } })).not.toThrow();
-	});
-
 	it("rejects actor delegation when adding actor would exceed maxActorChainDepth", async () => {
 		const g = buildGrant({ section: { maxActorChainDepth: 2 } });
 		const subject = await signSelfIssuedAccessToken({
@@ -2219,7 +2220,7 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 			validate: async () => ({ sub: "user-1", scope: "read", claims: { sid: "sid-foreign" } }),
 		};
 		const g = createTokenExchangeGrant({
-			config: mockConfig,
+			oauthTokenSettings: tokenSettings,
 			keyStore,
 			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			tokenExchangeValidatorResolver: new Map([[ACCESS_TOKEN_TYPE, foreign]]),
@@ -2306,7 +2307,7 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 					},
 				};
 				const g = createTokenExchangeGrant({
-					config: mockConfig,
+					oauthTokenSettings: tokenSettings,
 					keyStore,
 					refreshTokenFamilyRevocation: makeFamilyRevocation(),
 					tokenExchangeValidatorResolver: new Map([[ACCESS_TOKEN_TYPE, failing]]),

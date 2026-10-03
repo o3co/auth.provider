@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -88,6 +88,9 @@ const handle = await createApp({
         // seen-set. Several: redisReplaySeenSetModule from
         // @o3co/auth-provider-redis, which every replica shares.
         memoryReplaySeenSetModule,
+        // The deployment's issuer comes from the oauthTokenSettings component,
+        // which oauthModule from @o3co/auth-provider-oauth provides. Without
+        // that module, put an oauthTokenSettings value in bootstrapComponents.
         /* + your other modules */
     ],
     bootstrapComponents: { config, /* ... */ },
@@ -109,13 +112,16 @@ core.tokenBinding {
 }
 ```
 
-The defaults are the ones shown; the module's schema applies them, and the
-package ships them as HOCON in [`config/reference.conf`](config/reference.conf)
-(exported as `@o3co/auth-provider-dpop/reference.conf`), which `dpopModule`
-declares as its section's reference, so core's `moduleReferences(modules)`
-names it for a composition root that layers what its modules declare. A key
-the section does not declare refuses boot. The public exports are
-listed in [`src/index.mts`](src/index.mts).
+The defaults are the ones shown. They live only in
+[`config/reference.conf`](config/reference.conf) (exported as
+`@o3co/auth-provider-dpop/reference.conf`): the module's schema fills none.
+`dpopModule` declares that file as its section's reference, so core's
+`moduleReferences(modules)` names it for a composition root that layers what
+its modules declare; a root that builds its configuration by hand layers it
+too, or writes every key. A `dpop` section missing a key refuses boot, naming
+the key; an absent section, or one without `enabled`, is off. A key the
+section does not declare refuses boot. The public exports are listed in
+[`src/index.mts`](src/index.mts).
 
 The section's old path, `oauth.dpop`, refuses boot (`config-path-relocated`)
 naming each key's new path, and `oauth.dpop.replay-store` as removed: the
@@ -242,7 +248,7 @@ both run it ([docs/adapter-surface.md](../../docs/adapter-surface.md)).
 
 ## Operator requirements
 
-- **`oauth.jwt.issuer` MUST name the origin clients actually reach.** It is read through the oauth module's `oauthTokenSettings` slot when a composition holds it, and from the configuration when not ([#728](https://github.com/o3co/auth.provider/issues/728)). The `htu` a proof is checked against is built from the configured issuer's origin plus the path of the request, *not* from `req.protocol` and the `Host` header ([#292](https://github.com/o3co/auth.provider/issues/292)). Those two read `X-Forwarded-Proto` / `X-Forwarded-Host` whenever Express `trust proxy` is on, which would let a caller who could reach the AS past the edge choose the value its own proof had to match — satisfying both halves of the comparison at once. The issuer is a property of the deployment and no request can move it, which is the whole reason it is the right source. Boot fails with DPoP enabled and no issuer.
+- **`oauth.jwt.issuer` MUST name the origin clients actually reach.** The module reads it through the `oauthTokenSettings` component, which `oauthModule` provides from `oauth {}`, and never from the configuration ([#728](https://github.com/o3co/auth.provider/issues/728)): with DPoP enabled, a composition without `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`, or boot is refused for the missing component. The `htu` a proof is checked against is built from the configured issuer's origin plus the path of the request, *not* from `req.protocol` and the `Host` header ([#292](https://github.com/o3co/auth.provider/issues/292)). Those two read `X-Forwarded-Proto` / `X-Forwarded-Host` whenever Express `trust proxy` is on, which would let a caller who could reach the AS past the edge choose the value its own proof had to match — satisfying both halves of the comparison at once. The issuer is a property of the deployment and no request can move it, which is the whole reason it is the right source. Boot fails with DPoP enabled and no `oauthTokenSettings`, or one whose issuer is not a canonical URL.
 
   The practical consequence: a deployment whose issuer is `https://auth.example.com` verifies proofs whose `htu` names `https://auth.example.com/...` regardless of what the proxy forwards, and **regardless of whether `trust proxy` is set at all**. If clients reach the AS at some other origin, that origin — not the internal one — is the issuer you should have configured. A path prefix on the issuer is ignored: the path comes from the request, which already carries the prefix the AS is mounted under.
 

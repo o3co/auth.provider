@@ -58,7 +58,7 @@ const handle = await createApp({
     // The memory store is single-replica; @o3co/auth-provider-redis ships a shared one.
     memoryRefreshTokenFamilyStoreModule,
     defaultRefreshTokenFamilyRevocationModule,
-    // The grant requires oauth.jwt.issuer, and with an issuer configured the
+    // oauthModule requires oauth.jwt.issuer, and with an issuer configured the
     // discovery document needs the jwks_uri this module contributes.
     jwksModule,
     // …the modules that provide clientRepository, codeRepository and keyStore
@@ -73,14 +73,14 @@ The grant type URI is `urn:ietf:params:oauth:grant-type:token-exchange` (IETF re
 
 The built-in `access_token` validator is contributed by `tokenExchangeModule` itself. Consumers do not create or mutate a validator registry.
 
-`oauthModule` has requirements of its own — a `loginEntry` provider where it builds `/authorize`, and the absence decisions for `auditSink` and the revocation stores — listed in the oauth README's [Composing it](../oauth/README.md#composing-it). What this module requires, what it reads optionally and which absent slots must be declared is its manifest, [`module.mts`](./src/module.mts): it requires `config`, `clientRepository` and `keyStore`, and `oauth.jwt.issuer` must be a non-empty string or boot fails with `config-validation-failed`. `accessTokenDenylist` and `subjectRevocation` are optional to wire but not to decide: an unfilled one must be declared with `oauth.revocation.accessToken = "unsupported"` / `oauth.revocation.subject = "unsupported"`, or boot refuses. `userSessionStore` is optional as it is on `oauthModule`: wired, the exchange refuses a token whose session has ended (note 21).
+`oauthModule` has requirements of its own — a `loginEntry` provider where it builds `/authorize`, and the absence decisions for `auditSink` and the revocation stores — listed in the oauth README's [Composing it](../oauth/README.md#composing-it). What this module requires, what it reads optionally and which absent slots must be declared is its manifest, [`module.mts`](./src/module.mts): it requires `oauthTokenSettings`, `clientRepository` and `keyStore`, and reads nothing of the whole configuration — only its own section and those slots. `oauthTokenSettings` carries the issuer and `legacyTypAccept` a subject token is held to and the lifetimes the grant mints within: `oauthModule` provides it, and a composition without the oauth module fills it itself (core's [`OAuthTokenSettings`](../core/src/token-settings/types.mts)); unfilled, boot refuses with `missing-required-component`. `accessTokenDenylist` and `subjectRevocation` are optional to wire but not to decide: an unfilled one must be declared with `oauth.revocation.accessToken = "unsupported"` / `oauth.revocation.subject = "unsupported"`, or boot refuses. `userSessionStore` is optional as it is on `oauthModule`: wired, the exchange refuses a token whose session has ended (note 21).
 
 ## Public API
 
 Exported from [`src/index.mts`](./src/index.mts):
 
 - `tokenExchangeModule` — [`module.mts`](./src/module.mts). The module value to install.
-- `createTokenExchangeGrant`, `TokenExchangeDependencies`, `TOKEN_EXCHANGE_GRANT_TYPE`, `ACCESS_TOKEN_TYPE` — [`grant.mts`](./src/grant.mts). The handler itself, for a composition that dispatches it from its own route.
+- `createTokenExchangeGrant`, `TokenExchangeDependencies`, `TOKEN_EXCHANGE_GRANT_TYPE`, `ACCESS_TOKEN_TYPE` — [`grant.mts`](./src/grant.mts). The handler itself, for a composition that dispatches it from its own route. It takes `oauthTokenSettings`, required, and no `config`; it holds the value to its contract, not to the lifetimes core resolves from the configuration. Within `createApp` boot holds every slot to those before a factory runs; a caller building the handler outside `createApp` owns that bound and passes the snapshot `checkOAuthTokenSettings(value, config)` answers, or a token could be minted to outlive the records that revoke it. `section.maxActorChainDepth` is the module's section's key (3 when not given).
 - `createSelfIssuedAccessTokenValidator`, `CreateSelfIssuedAccessTokenValidatorOptions` — [`validator/selfIssuedAccessToken.mts`](./src/validator/selfIssuedAccessToken.mts). The built-in validator. `issuer` is required; the factory throws without a non-empty one, because without it an `at+jwt` signed by the same key store but naming another issuer could pass. It takes no `refreshTokenFamilyRevocation`: the options type declares the key `never`, so a deps object spread into them does not compile, and the factory throws if the key is present, even as `undefined`. The family check is the handler's (note 1), so a composition that dispatches `createTokenExchangeGrant` itself gives that slot to the handler. The validator does not check the family: a caller using it outside `createTokenExchangeGrant` must check `familyId` itself, and refuse the token when it has no family store — and, the same way, check the session its `sid` names against a `UserSessionStore` (note 21), which the validator does not.
 
 The validator contract is not re-exported: import `ExchangeTokenValidator`, `ValidatedToken` and `ExchangeTokenValidationContext` from `@o3co/auth-provider-core`.
@@ -110,12 +110,12 @@ clients:
 
 A token-exchange request may carry an optional `expires_in` form parameter: the lifetime, in seconds, the client wants the issued token to have. RFC 8693 defines no such parameter and RFC 6749 §3.2 has a server ignore a parameter it does not recognise, so sending it is safe against any authorization server.
 
-- **Absent, or sent without a value** (`expires_in=`, RFC 6749 §3.2): the token gets `oauth.accessToken.defaultExpiresIn`. Both lifetimes, and the issuer and `legacyTypAccept` a subject token is held to, are the oauth module's, read through the `oauthTokenSettings` slot when a composition holds it and from the configuration when not ([#728](https://github.com/o3co/auth.provider/issues/728)).
+- **Absent, or sent without a value** (`expires_in=`, RFC 6749 §3.2): the token gets `oauth.accessToken.defaultExpiresIn`. Both lifetimes, and the issuer and `legacyTypAccept` a subject token is held to, are the oauth module's, read through the `oauthTokenSettings` slot alone, never from the configuration ([#728](https://github.com/o3co/auth.provider/issues/728)).
 - **Present:** honoured up to `oauth.accessToken.maxExpiresIn` — a larger request is **clamped** to the max, not refused — and always capped at the subject token's remaining lifetime (Security note 16). The response's `expires_in` is the lifetime actually minted; read it rather than assuming the request was granted in full.
 - **`maxExpiresIn` unset means the default.** Until the operator raises it (`OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`), a request can shorten a token but not lengthen it. Security note 19 is what raising it costs.
 - **Malformed is refused** with `400 invalid_request` naming `expires_in`: sent more than once, zero, longer than 10 digits, or anything but ASCII decimal digits — no sign, decimal point, exponent or whitespace.
 - **Only this grant reads it.** Every other grant ignores the parameter and mints the default.
-- **The configured pair is read when the grant is built** (core's `resolveAccessTokenLifetime`). A hand-built configuration it refuses makes `createTokenExchangeGrant` throw a `RangeError` naming the key, rather than answering every exchange with a 500.
+- **The pair is read when the grant is built** (core's `checkOAuthTokenSettings`). A hand-built `oauthTokenSettings` whose lifetimes break the contract makes `createTokenExchangeGrant` throw a `RangeError` naming the member, rather than answering every exchange with a 500.
 
 ## External JWT subject_token
 

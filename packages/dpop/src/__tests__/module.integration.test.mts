@@ -20,6 +20,8 @@
  *     mounted;
  *   - enabled, a valid proof populates `req.tokenBinding` (`kind`,
  *     `confirmation.jkt`) and an invalid one is `400 invalid_dpop_proof`;
+ *   - the expected `htu`'s origin is the `oauthTokenSettings` slot's issuer,
+ *     which an enabled module requires, never read from the configuration;
  *   - every accepted proof is recorded in core's `replaySeenSet` slot, and an
  *     enabled mechanism with no seen-set is refused at boot;
  *   - the memory seen-set answers `core.deployment.mode` through core's
@@ -47,6 +49,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { dpopConfigSchema, dpopModule } from "#/module.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
+import { shippedDpopSection } from "./shippedSection.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -59,7 +62,10 @@ const UNSET_RENAMED_VARIABLES = renamedVariableCaptures({
 	env: {},
 });
 
-/** Minimal bootstrap with extended dpop config. */
+/**
+ * Minimal bootstrap: core's configuration with the shipped `dpop` section,
+ * switched by `dpopEnabled`, and the slots an enabled module reads.
+ */
 const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
 	({
 		config: {
@@ -68,17 +74,15 @@ const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
 				...makeValidCoreConfig().core,
 				tokenBinding: { dispatchPolicy: "intent-explicit" },
 			},
-			dpop: {
-				enabled: dpopEnabled,
-				iatWindowSeconds: 60,
-				algWhitelist: ["ES256", "ES384", "EdDSA", "RS256"],
-				replayStoreTtlSeconds: 300,
-			},
+			dpop: shippedDpopSection({ enabled: dpopEnabled }),
 			"renamed-variables": UNSET_RENAMED_VARIABLES,
 		} as never,
 		pathResolver: (s: string) => s,
 		// Where every accepted proof's jti is recorded.
 		replaySeenSet: createMemoryReplaySeenSet(),
+		// The deployment's issuer, which the oauth module provides in a full
+		// composition.
+		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER_ORIGIN }),
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 /**
@@ -122,16 +126,25 @@ const makeTokenBindingObserver =
 
 /**
  * Invoke the module's contributed mechanism factory directly, the way the boot
- * planner does. Used for the boot-time guards, which have to be reached
- * without `createApp` first rejecting the config for the same reason. The
- * seen-set is handed over as the planner would, so each guard is reached on
- * its own account rather than refused for the missing set.
+ * planner does, with the module's own section out of `config` and the slots
+ * it reads — never the whole configuration. Used for the boot-time guards,
+ * which have to be reached without `createApp` first rejecting the config
+ * for the same reason. The seen-set and the token settings are handed over
+ * as the planner would, so each guard is reached on its own account rather
+ * than refused for a missing slot.
  */
-const buildMechanism = (config: unknown) => {
+const buildMechanism = (
+	config: unknown,
+	oauthTokenSettings: unknown = createTestOAuthTokenSettings({ issuer: ISSUER_ORIGIN }),
+) => {
 	const factory = dpopModule.contributes?.tokenBindingMechanisms?.[0];
 	if (factory === undefined) throw new Error("dpopModule contributes no mechanism factory");
 	const section = dpopConfigSchema.parse((config as { dpop?: unknown }).dpop);
-	return factory({ config, section, replaySeenSet: createMemoryReplaySeenSet() } as never);
+	return factory({
+		section,
+		replaySeenSet: createMemoryReplaySeenSet(),
+		oauthTokenSettings,
+	} as never);
 };
 
 // ---------------------------------------------------------------------------
@@ -145,7 +158,10 @@ describe("dpopModule — integration via createApp", () => {
 	});
 
 	it("when disabled: no DPoP middleware; requests without DPoP header succeed", async () => {
-		const boot = makeBoot(false);
+		// Disabled, the module requires nothing: no token settings are wired.
+		const { oauthTokenSettings: _unwired, ...boot } = makeBoot(false) as BootstrapMap & {
+			oauthTokenSettings?: unknown;
+		};
 
 		// Observer route: records req.tokenBinding, responds 200.
 		const received: { tokenBinding?: unknown } = {};
@@ -491,11 +507,15 @@ describe("dpopModule — integration via createApp", () => {
 		await handle.dispose();
 	});
 
-	it("holds a proof's htu to the issuer of the oauthTokenSettings a module provides, over the configuration's", async () => {
-		// The oauth module owns `oauth {}` and provides what others read of it;
-		// a composition without it reads the configuration's issuer (above).
+	it("requires the oauthTokenSettings slot, and never the whole configuration", () => {
+		expect(dpopModule.requires).toEqual(["oauthTokenSettings"]);
+		expect(dpopModule.optional).not.toContain("config");
+		expect(dpopModule.optional).not.toContain("oauthTokenSettings");
+	});
+
+	it("holds a proof's htu to the issuer of the oauthTokenSettings slot, not the configuration's", async () => {
+		// The oauth module owns `oauth {}` and provides what others read of it.
 		const SLOT_ORIGIN = "https://slot.test";
-		expect(dpopModule.optional).toContain("oauthTokenSettings");
 		const observerModule = defineModule({
 			name: "observer",
 			contributes: {
@@ -510,6 +530,9 @@ describe("dpopModule — integration via createApp", () => {
 				],
 			},
 		});
+		const { oauthTokenSettings: _hosts, ...boot } = makeBoot(true) as BootstrapMap & {
+			oauthTokenSettings?: unknown;
+		};
 		const handle = await createApp({
 			modules: [
 				dpopModule,
@@ -521,7 +544,7 @@ describe("dpopModule — integration via createApp", () => {
 					},
 				}),
 			],
-			bootstrapComponents: makeBoot(true),
+			bootstrapComponents: boot,
 		});
 		try {
 			const app = express();
@@ -538,44 +561,43 @@ describe("dpopModule — integration via createApp", () => {
 		}
 	});
 
-	it("builds the mechanism when the slot names an issuer and the configuration names none", () => {
-		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
-		const oauth = (boot.config as { oauth: Record<string, unknown> }).oauth;
-		delete oauth.jwt;
+	it("builds the mechanism from its section and the slot, handed no configuration", () => {
 		const factory = dpopModule.contributes?.tokenBindingMechanisms?.[0];
 		expect(() =>
 			factory?.({
-				config: boot.config,
-				section: dpopConfigSchema.parse((boot.config as { dpop?: unknown }).dpop),
+				section: dpopConfigSchema.parse(shippedDpopSection({ enabled: true })),
 				replaySeenSet: createMemoryReplaySeenSet(),
 				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://slot.test" }),
 			} as never),
 		).not.toThrow();
 	});
 
-	it("refuses to build a mechanism when no canonical issuer is configured", () => {
+	it("refuses to boot enabled with no oauthTokenSettings, naming the slot", async () => {
 		// The origin every proof's `htu` is checked against is the deployment's
-		// own. Without one the AS would have to rebuild it from the request's
-		// forwarded headers, a binding the caller controls both sides of, so it
-		// refuses to construct. Exercised through the contributed factory
-		// because `createApp` parses `CoreConfigSchema` first and would reject
-		// the config before the module is reached; this guard protects a
-		// composition root that builds the mechanism itself.
-		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
-		const oauth = (boot.config as { oauth: Record<string, unknown> }).oauth;
-		delete oauth.jwt;
-
-		expect(() => buildMechanism(boot.config)).toThrow(/oauth\.jwt\.issuer/);
-		// The refusal states the rule it enforces, with no issue reference.
-		expect(() => buildMechanism(boot.config)).not.toThrow(/#\d/);
+		// own issuer. A composition without the oauth module fills the slot
+		// itself; without it the module is not wired.
+		const { oauthTokenSettings: _unwired, ...boot } = makeBoot(true) as BootstrapMap & {
+			oauthTokenSettings?: unknown;
+		};
+		const refusal = await createApp({ modules: [dpopModule], bootstrapComponents: boot }).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { name?: unknown; message?: string },
+		);
+		expect(refusal).toMatchObject({ name: "BootError" });
+		expect(refusal?.message).toMatch(/oauthTokenSettings/);
 	});
 
-	it("refuses to build a mechanism when the issuer is a bare host rather than a URL", () => {
+	it("refuses to build a mechanism when the slot's issuer is a bare host rather than a URL", () => {
 		// The shape a `Host` header supplies; an origin is never derived from one.
-		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
-		(boot.config as { oauth: { jwt: unknown } }).oauth.jwt = { issuer: "as.example:3000" };
-
-		expect(() => buildMechanism(boot.config)).toThrow(/issuer/i);
+		expect(() =>
+			buildMechanism(makeBoot(true).config, {
+				...createTestOAuthTokenSettings(),
+				issuer: "as.example:3000",
+			}),
+		).toThrow(/issuer/i);
 	});
 });
 
@@ -779,15 +801,15 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 				...(opts.mode === undefined ? {} : { deployment: { mode: opts.mode } }),
 				tokenBinding: { dispatchPolicy: "intent-explicit" },
 			},
-			dpop: {
+			dpop: shippedDpopSection({
 				enabled: opts.enabled ?? true,
-				iatWindowSeconds: 60,
 				algWhitelist: ["ES256"],
 				replayStoreTtlSeconds: opts.replayTtlSeconds ?? 300,
-			},
+			}),
 			"renamed-variables": UNSET_RENAMED_VARIABLES,
 		},
 		pathResolver: (s: string) => s,
+		oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER_ORIGIN }),
 		...(opts.logger === undefined ? {} : { logger: opts.logger }),
 		...(typeof opts.seenSet === "object" ? { replaySeenSet: opts.seenSet } : {}),
 	} as never as BootstrapMap;

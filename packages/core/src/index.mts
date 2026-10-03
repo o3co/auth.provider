@@ -139,6 +139,7 @@ export type {
 	BootstrapMap,
 	CircularDependencyDetails,
 	CollectedRouteContribution,
+	ConfigDefaultsInvalidDetails,
 	ConfigPathRelocatedDetails,
 	ConfigValidationFailedDetails,
 	ContributeAndOverrideSameKeyDetails,
@@ -167,6 +168,7 @@ export type {
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
 	RegisteredFederationType,
+	ReservedBootstrapInputs,
 	ReservedComponentKeyDetails,
 	RouteCollector,
 	RouteOrderCycleDetails,
@@ -932,6 +934,36 @@ export type {
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
+// A verifier's own attempt limits: the counter port, its reading, the
+// in-process counter, and the guard that owns the fallback, the outage and
+// the headers.
+export {
+	type AttemptCounterFailure,
+	type AttemptGuard,
+	type AttemptGuardOptions,
+	type AttemptPerIpOptions,
+	type AttemptVerdict,
+	attemptCounterUnavailableEnvelope,
+	createAttemptGuard,
+	DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS,
+} from "./ratelimit/attemptGuard.mjs";
+export {
+	ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
+	type AttemptCount,
+	type AttemptCounter,
+	type AttemptSpec,
+	isAttemptKey,
+	isAttemptSpec,
+	MAX_ATTEMPT_KEY_LENGTH,
+	MAX_ATTEMPT_WINDOW_SECONDS,
+	readAttemptCount,
+} from "./ratelimit/attempts.mjs";
+export {
+	ATTEMPT_COUNTER_EVICTION_WARN_INTERVAL_MS,
+	createMemoryAttemptCounter,
+	DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES,
+	type MemoryAttemptCounterOptions,
+} from "./ratelimit/attemptsMemory.mjs";
 // The one lookup every bundled limiter takes a key's budget from.
 export {
 	createRateLimitBudgetLookup,

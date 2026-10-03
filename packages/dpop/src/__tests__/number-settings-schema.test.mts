@@ -23,12 +23,16 @@
 
 import { describe, expect, it } from "vitest";
 import { dpopConfigSchema } from "#/module.mjs";
+import { shippedDpopSection } from "./shippedSection.mjs";
 
-/** Each key `dpop {}` reads a number at, with the section that sets it. */
+/** Each key `dpop {}` reads a number at, with the shipped section that sets it. */
 const KEYS: ReadonlyArray<readonly [path: string, set: (value: unknown) => unknown]> = [
-	["iatWindowSeconds", (value) => ({ iatWindowSeconds: value })],
-	["replayStoreTtlSeconds", (value) => ({ replayStoreTtlSeconds: value })],
-	["nonce.ttlSeconds", (value) => ({ nonce: { ttlSeconds: value } })],
+	["iatWindowSeconds", (value) => shippedDpopSection({ iatWindowSeconds: value })],
+	["replayStoreTtlSeconds", (value) => shippedDpopSection({ replayStoreTtlSeconds: value })],
+	[
+		"nonce.ttlSeconds",
+		(value) => shippedDpopSection({ nonce: { required: "never", ttlSeconds: value } }),
+	],
 ];
 
 /** What an operator might write that is not a whole number in decimal digits. */
