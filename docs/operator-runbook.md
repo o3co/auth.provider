@@ -2502,7 +2502,7 @@ lists every breaking change since, and which of the steps below each needs.
      (`config-validation-failed`, naming its path) where it used to be
      dropped unread: a typo, or a key nothing reads any more. A path another
      section moved from (`oauth.grants`, `oauth.dpop`, …) may stay only as an
-     empty object. The keys the section declares are in the
+     empty object or `null`. The keys the section declares are in the
      [oauth README](../packages/oauth/README.md#configuration).
 
 6. **The template's own settings, the adapter selections, the repositories,

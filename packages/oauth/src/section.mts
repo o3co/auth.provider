@@ -29,10 +29,12 @@
  * refuses naming what became of them (`oauth.jwt`'s flat key fields,
  * `oauth.refreshToken.legacyTokenCompat`, `oauth.authorize.allowUnmarkedClients`),
  * and the paths other modules' sections moved from (`oauth.grants`,
- * `oauth.dpop`, `oauth.jwt.signingKey`, …), a key set under one of which
- * refuses boot naming its new path before any section is parsed. Here a moved
- * path may only be an empty object, which sets nothing, and a retired key is a
- * key this section does not declare.
+ * `oauth.dpop`, `oauth.jwt.signingKey`, …). A key set under one of those
+ * paths refuses boot naming its new path, before any section is parsed, while
+ * a loaded module declares that it moved there; otherwise this section refuses
+ * it as a key it does not declare. Here a moved path may only be an empty
+ * object or null, which set nothing, and a retired key is a key this section
+ * does not declare.
  */
 
 import {
@@ -48,10 +50,11 @@ import { z } from "zod";
 
 /**
  * A path another module's section moved from: it sets nothing here, so only an
- * empty object — a layer that still carries the old section, emptied — is
- * accepted, and a key under it is refused.
+ * empty object — a layer that still carries the old section, emptied — or null,
+ * HOCON's way of unsetting an inherited block, is accepted, and a key under it
+ * is refused.
  */
-const movedAway = z.object({}).strict().optional();
+const movedAway = z.object({}).strict().nullable().optional();
 
 /** `oauth.jwt`: the canonical issuer and the typ-less-token switch. */
 const jwtSchema = z

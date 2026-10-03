@@ -124,8 +124,9 @@ describe("every level refuses a key it does not declare, at its path", () => {
 		"dpop",
 		"tokenBinding",
 		"jwt.signingKey",
-	])("accepts %s, a path another section moved from, only as an empty object", (path) => {
+	])("accepts %s, a path another section moved from, only as an empty object or null", (path) => {
 		expect(issuesOf(withValue(path, {}))).toEqual([]);
+		expect(issuesOf(withValue(path, null))).toEqual([]);
 		expect(issuesOf(withValue(path, { enabled: true }))).toEqual([
 			{ path, message: 'Unrecognized key: "enabled"', code: "unrecognized_keys" },
 		]);

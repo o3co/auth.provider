@@ -22,7 +22,7 @@
  * operator when core stops declaring the section. What core retired from the
  * section stays core's: a retired key core refuses naming what became of it,
  * the module as a key it does not declare; a path another section moved from
- * core carries unread, the module only as an empty object. Boot refuses a key
+ * core carries unread, the module only as an empty object or null. Boot refuses a key
  * set under a moved path naming its new one before either schema runs, while
  * the module it moved to is loaded.
  *

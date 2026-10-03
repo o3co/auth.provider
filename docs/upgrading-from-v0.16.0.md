@@ -208,7 +208,7 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   path. It used to be dropped unread. A path another section moved from
   (`oauth.grants`, `oauth.dpop`, `oauth.mtls`, `oauth.deviceAuthorization`,
   `oauth.tokenExchange`, `oauth.code`, `oauth.tokenBinding`,
-  `oauth.jwt.signingKey`) may stay as an empty object; a key set under it is
+  `oauth.jwt.signingKey`) may stay as an empty object or `null`; a key set under it is
   refused, naming its new path while the module it moved to is loaded, and
   as a key `oauth` does not declare otherwise. The keys, their defaults and
   their variables are unchanged; they are listed in the
