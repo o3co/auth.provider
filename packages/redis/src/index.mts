@@ -92,6 +92,7 @@ export type {
 	RedisDurability,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
+	RefundFederationGrantRotationInput,
 	ReplaceFederationGrantCredentialsInput,
 	ReplaySeenSetClient,
 	RequireFederationGrantReauthorizationInput,

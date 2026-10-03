@@ -754,13 +754,19 @@ and a copy moved into the past cannot keep a live grant from being ended.
 
 The port's optional `takeRotation` is one script over two fields of the
 grant hash, `rotationsSince` and `rotationsCount`: non-secret, outside the
-envelope, compared against the version and written without bumping it.
-`replaceCredentials` and every other write keep them; `activate` removes
-both. A record without both, or with one that is not a whole number, has no
-window, and the script and the reader agree on that. The store offers
-`takeRotation` only over a client that has the primitive: a
-`FederationGrantStoreClient` of your own without it gives a store that keeps
-no rotation budget. During a rolling deploy, an activation by an earlier
+envelope, compared against the version and written without bumping it. Its
+optional `refundRotation` is one script too: at the version the take was
+made at, and only for the window whose `rotationsSince` it names, it counts
+`rotationsCount` down by one, never below 0, and bumps the version, so a
+second give-back of the same attempt is refused. Both read the caller's
+clock, as every write does. `replaceCredentials` and every other write keep
+the fields; `activate` removes both. A record without both, or with one that
+is not a whole number (or a count below 0), has no window, and the scripts
+and the reader agree on that; a window counted down to 0 is still one, and
+the next take counts into it. The store offers each member only over a
+client that has its primitive: a `FederationGrantStoreClient` of your own
+without `takeRotation` gives a store that keeps no rotation budget, and one
+without `refundRotation` a store that keeps every rotation taken. During a rolling deploy, an activation by an earlier
 release leaves the fields in place, so a renewed grant can start with the
 budget it had.
 

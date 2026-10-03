@@ -1172,7 +1172,7 @@ minutes of it spend all 24. Bounding that is the failure backoff's to do, not
 the budget's. An `invalid_grant` gives nothing back: it ends the credential,
 and an activation starts the budget afresh. The budget binds only with a store
 that implements `takeRotation`, and gives back only with one that implements
-`refundRotation` too: the Redis store's members follow separately.
+`refundRotation` too: both bundled stores, memory and Redis, implement both.
 
 A refresh no longer has to take whatever it is answered with: a fresh token
 that carries less of the asked-for scope than a held token that is still good

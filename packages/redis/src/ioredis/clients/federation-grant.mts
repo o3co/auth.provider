@@ -29,6 +29,7 @@ import {
 	FG_NAME_INTENT,
 	FG_NOTE_FAILURE,
 	FG_PRUNE,
+	FG_REFUND_ROTATION,
 	FG_REPLACE,
 	FG_REQUIRE_REAUTH,
 	FG_RESERVE,
@@ -217,6 +218,17 @@ export function makeIoredisFederationGrantStoreClient(
 						fgNumber(input.limit),
 						fgNumber(input.windowMs),
 					],
+				),
+			);
+		},
+
+		async refundRotation(grantKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_REFUND_ROTATION,
+					[grantKey],
+					[fgNumber(input.nowMs), fgNumber(input.expectedVersion), fgNumber(input.sinceMs)],
 				),
 			);
 		},

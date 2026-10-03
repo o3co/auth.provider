@@ -957,7 +957,7 @@ describe("takeRotation", () => {
 		await activeWithCredential();
 		for (const [since, count] of [
 			[String(at(DAY)), "1e0"],
-			[String(at(DAY)), "0"],
+			[String(at(DAY)), "-1"],
 			[`${at(DAY)}.5`, "1"],
 			[String(at(DAY)), undefined],
 		] as const) {
