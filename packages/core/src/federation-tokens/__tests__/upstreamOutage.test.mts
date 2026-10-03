@@ -538,6 +538,40 @@ describe("readFederationUpstreamDelivery — the whole chain", () => {
 		}
 	});
 
+	it("reads a throwing `code` as doubt, a parsed body that says nothing as silence, and an adapter's own code as nothing", () => {
+		expect(
+			delivery(
+				Object.defineProperty(new Error("e"), "code", {
+					get: () => {
+						throw new Error("trap");
+					},
+				}),
+			),
+		).toBe("unknown");
+		expect(delivery(new Error("e", { cause: { error_description: "nothing to doubt" } }))).toBe(
+			"silent",
+		);
+		expect(delivery(Object.assign(new Error("e"), { code: "ADAPTER_VALIDATION_FAILED" }))).toBe(
+			"silent",
+		);
+	});
+
+	it("reads a chain exactly as long as it reads to its end: what it proved stands, and silence is silence", () => {
+		const chain = (innermost: Error, wrappers: number): Error => {
+			let current = innermost;
+			for (let i = 0; i < wrappers; i++) current = new Error(`level ${i}`, { cause: current });
+			return current;
+		};
+		// Five levels: the thrown value and four causes, the last with none.
+		expect(delivery(chain(Object.assign(new Error("innermost"), { status: 400 }), 4))).toBe(
+			"unprocessed",
+		);
+		expect(delivery(chain(new Error("innermost"), 4))).toBe("silent");
+		expect(delivery(chain(new Error("innermost", { cause: "a string, not an Error" }), 4))).toBe(
+			"silent",
+		);
+	});
+
 	it("is `unknown` for a chain longer than it reads: what lies beyond may doubt it", () => {
 		let deep: Error = Object.assign(new Error("innermost"), { status: 400 });
 		for (let i = 0; i < 6; i++) deep = new Error(`level ${i}`, { cause: deep });
