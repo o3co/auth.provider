@@ -203,9 +203,13 @@ caller that arrives after the rotation nor kept once it completes. That works
 through whatever you passed as `privateKey`, to `createAppleProvider` as much as
 to `createAppleClientSecret`: the option is read at every token exchange, not
 copied at construction. **Rotating the key without a restart is available only
-through `createAppleProvider`**, in a module you write — never for a named `core.federations` entry: an
+through `createAppleProvider`**, never under `appleFederationTypeModule()`: an
 entry's `privateKey` is the PEM the configuration held at boot, so a key
-replaced under the type module takes effect on the next restart. Through
+replaced under the type module takes effect on the next restart. A federation
+is registered only through a type, so the route is a federation type of your
+own (`defineFederationType`, registered under `federationTypes`) whose factory
+builds the provider with `createAppleProvider`; that provider is named
+`apple`, so the entry of that type must be named `apple`. Through
 `createAppleProvider`, make `privateKey` a getter that re-reads the file —
 `get privateKey() { return readFileSync(path, "utf8"); }` — which then runs on
 every token exchange.
