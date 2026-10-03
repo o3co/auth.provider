@@ -133,8 +133,8 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-device-grant": "deviceGrantModule",
 	"@o3co/auth-provider-dpop": "dpopModule",
-	"@o3co/auth-provider-federation-apple": "appleFederationModule",
-	"@o3co/auth-provider-federation-github": "githubFederationModule",
+	"@o3co/auth-provider-federation-apple": "appleFederationTypeModule",
+	"@o3co/auth-provider-federation-github": "githubFederationTypeModule",
 	"@o3co/auth-provider-mtls": "mtlsModule",
 	"@o3co/auth-provider-oauth-token-exchange": "tokenExchangeModule",
 	"@o3co/auth-provider-test-kit": "no module: contract suites and fakes, for tests",
