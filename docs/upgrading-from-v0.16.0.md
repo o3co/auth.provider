@@ -567,6 +567,23 @@ modules fills them.
     `createAppleProvider`, in code: a federation type of your own whose
     factory builds the provider with it
     ([Apple README](../packages/federation-apple/README.md#the-rotating-client-secret)).
+- **BREAKING: token exchange reads `oauthTokenSettings`, not the
+  configuration** (#1331). `tokenExchangeModule` requires the
+  `oauthTokenSettings` slot and no longer requires `config` or declares a
+  `configSchema`: the issuer and `legacyTypAccept` a subject token is held to,
+  and the lifetimes it mints within, are the slot's. A composition with
+  `oauthModule` changes nothing, since the module provides the slot; one
+  without it fills the slot itself, or the boot is refused
+  (`missing-required-component`, naming `oauthTokenSettings`).
+  `createTokenExchangeGrant` takes `oauthTokenSettings`, required, in place of
+  `config`, and holds it to its contract only: a caller building the grant
+  outside `createApp` passes the snapshot
+  `checkOAuthTokenSettings(value, config)` answers, which also holds the
+  lifetimes within the configuration's. The grant no longer refuses a
+  `config` setting `oauth.tokenExchange`; the boot refuses that path
+  (`config-path-relocated`) wherever the module is installed, and a
+  hand-built grant takes the bound as `section.maxActorChainDepth`
+  ([token-exchange README](../packages/oauth-token-exchange/README.md#public-api)).
 - **Rate-limit helpers** (`resolveSeededLimitSpecs`, `resolveLoginLimitSpec`,
   the per-feature prefixes and specs) are gone from core; the prefixes are
   exported by the packages that key them (#782).

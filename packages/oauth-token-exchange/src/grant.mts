@@ -43,7 +43,6 @@ import {
 	policyOutOfBounds,
 	policyUnavailable,
 	readGrantPolicyDecision,
-	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { invalidRequest, isRefusal, tokenAnswer } from "./answers.mjs";
 import { authenticateClient } from "./clientAuthentication.mjs";
@@ -62,52 +61,39 @@ import {
 /**
  * What the exchange reads: the shared grant slots it uses, the client repository,
  * and core's validator resolver. The module's `ProviderDeps<R, O>` satisfies
- * every slot.
+ * every slot. Nothing is read of the whole configuration.
  */
 export interface TokenExchangeDependencies
 	extends Pick<
 			GrantDependencies,
-			| "config"
-			| "keyStore"
-			| "logger"
-			| "grantPolicy"
-			| "refreshTokenFamilyRevocation"
-			| "userSessionStore"
+			"keyStore" | "logger" | "grantPolicy" | "refreshTokenFamilyRevocation" | "userSessionStore"
 		>,
 		ProviderDeps<"clientRepository"> {
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
-	/** What the oauth module provides of `oauth {}`; the configuration is read when absent. */
-	readonly oauthTokenSettings?: OAuthTokenSettings;
+	/**
+	 * What the oauth module provides of `oauth {}`: the access-token lifetimes
+	 * the grant mints within. Held to its contract here; that its lifetimes are
+	 * within the ones core resolves from the configuration is the caller's to
+	 * hold. Within `createApp`, boot holds every slot to them before any
+	 * reader runs. A caller building the grant by hand, outside `createApp`,
+	 * passes the value `checkOAuthTokenSettings(value, config)` answers.
+	 */
+	readonly oauthTokenSettings: OAuthTokenSettings;
 	/**
 	 * The module's own section, `oauth-token-exchange {}`: the deepest actor
-	 * chain accepted before the current actor is added, 3 when unset. Without
-	 * it, a configuration still setting `oauth.tokenExchange` is refused.
+	 * chain accepted before the current actor is added, 3 when unset.
 	 */
 	readonly section?: { readonly maxActorChainDepth?: number };
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
-	// Fail closed: a bound written at the old path, read as unset, would widen
-	// the actor chain to the default.
-	if (
-		deps.section === undefined &&
-		(deps.config as { oauth?: { tokenExchange?: unknown } }).oauth?.tokenExchange !== undefined
-	) {
-		throw new RangeError(
-			"createTokenExchangeGrant: oauth.tokenExchange has moved to oauth-token-exchange; " +
-				"hand maxActorChainDepth as section.maxActorChainDepth " +
-				"(oauth-token-exchange.maxActorChainDepth), and remove oauth.tokenExchange.",
-		);
-	}
-	// The lifetimes are read once, when the grant is built, so a hand-built
-	// configuration the resolver refuses fails the composition instead of every
-	// request after client authentication. The oauth module's settings when present
-	// (checked whole), else the configuration through core's reader.
-	const { defaultExpiresIn, maxExpiresIn } =
-		deps.oauthTokenSettings === undefined
-			? resolveAccessTokenLifetime(deps.config)
-			: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).accessTokenLifetime;
+	// The lifetimes are read once, when the grant is built, so a hand-built value
+	// that breaks the contract fails the composition instead of every request after
+	// client authentication. Checked whole, never member by member.
+	const { defaultExpiresIn, maxExpiresIn } = checkOAuthTokenSettings(
+		deps.oauthTokenSettings,
+	).accessTokenLifetime;
 
 	return {
 		// Deny by absence: token exchange mints a fresh credential from one the client
