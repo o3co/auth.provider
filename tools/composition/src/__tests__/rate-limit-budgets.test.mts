@@ -26,7 +26,7 @@
  * - shipped: every package on, as the full set boots it;
  * - configured: each owner's own key set by an operator
  *   (`session.rateLimit.login`, `device-grant.rateLimit`,
- *   `webauthn.rateLimit.authenticationOptions`, `mfa.rateLimit.routes`);
+ *   `webauthn.rateLimit.authenticationOptions`);
  * - declared: the same, and every prefix also declared in the limiter's own
  *   `limits`, which wins;
  * - off: the owners switched off — the device grant disabled, WebAuthn and
@@ -36,8 +36,8 @@
  *   not installed, or installed and switched off (the device grant), sets no
  *   budget.
  *
- * `token` has no owner: the limiter's `defaultLimit`, or its own `limits`
- * entry.
+ * `token` has no owner, and `mfa`'s owner claims it with no budget: the
+ * limiter's `defaultLimit`, or its own `limits` entry.
  */
 
 import { BootError, defineModule, type RateLimiter } from "@o3co/auth-provider-core";
@@ -99,9 +99,8 @@ const TABLE: Readonly<Record<Prefix, Readonly<Record<Cell, Applied>>>> = {
 		offConfigured: spec(60, 60),
 	},
 	mfa: {
-		// `mfa.rateLimit.routes` ships 60 per 300 s.
-		shipped: spec(60, 300),
-		configured: spec(13, 240),
+		shipped: spec(60, 60),
+		configured: spec(60, 60),
 		declared: spec(6, 75),
 		off: spec(60, 60),
 		offConfigured: spec(60, 60),
@@ -120,7 +119,6 @@ const OWNERS_KEYS = `
 session.rateLimit.login { windowMs = 60000, limit = 7 }
 device-grant.rateLimit { limit = 3, windowSeconds = 120 }
 webauthn.rateLimit.authenticationOptions { limit = 11, windowSeconds = 30 }
-mfa.rateLimit.routes { limit = 13, windowSeconds = 240 }
 `;
 
 /** Every prefix in the limiter's own section, beside the owners' keys. */
