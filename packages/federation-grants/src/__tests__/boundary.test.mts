@@ -42,7 +42,11 @@ import {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "@o3co/auth-provider-core";
-import { coreConfigForTests, makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import {
+	coreConfigForTests,
+	federationTypeForTests,
+	makeValidCoreConfig,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -88,17 +92,9 @@ const delegated = {
 	refreshDelegatedToken: refreshed,
 } as unknown as FederationProvider;
 
-const federationModule = defineModule({
-	name: "test-federation-upstream",
-	contributes: {
-		federations: { upstream: () => delegated },
-		federationRedirectPolicies: {
-			upstream: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	} as never,
+/** The module that handles the `upstream` entry's type, with the provider above. */
+const federationModule = federationTypeForTests("upstream-idp", {
+	provider: () => delegated,
 });
 
 const storeModule = defineModule({
@@ -134,6 +130,8 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 					federations: {
 						upstream: {
 							enabled: true,
+							type: "upstream-idp",
+							callbackURL: "https://provider.example/federation/upstream/callback",
 							issuer: connection.upstreamIssuer,
 							// The pair the grant's identity is pinned to: a different client id
 							// here is a different upstream account, and the grant is retired.

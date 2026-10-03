@@ -46,7 +46,6 @@ import {
 	createInMemorySubjectSessionIndex,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
-	defineModule,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 	resolveSubjectRevocationHorizonMs,
@@ -55,6 +54,7 @@ import {
 import {
 	coreConfigForTests,
 	createTestSessionCookiePolicy,
+	federationTypeForTests,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
 import { cascadeLogout, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
@@ -101,17 +101,9 @@ const delegated = {
 	}),
 } as unknown as FederationProvider;
 
-const federationModule = defineModule({
-	name: "test-federation-upstream",
-	contributes: {
-		federations: { upstream: () => delegated },
-		federationRedirectPolicies: {
-			upstream: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	} as never,
+/** The module that handles the `upstream` entry's type, with the provider above. */
+const federationModule = federationTypeForTests("upstream-idp", {
+	provider: () => delegated,
 });
 
 /** One boundary pair and one grant store, shared by the service and the routes. */
@@ -152,6 +144,8 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 			federations: {
 				upstream: {
 					enabled: true,
+					type: "upstream-idp",
+					callbackURL: "https://provider.example/federation/upstream/callback",
 					issuer: connection.upstreamIssuer,
 					clientId: connection.upstreamClientId,
 				},

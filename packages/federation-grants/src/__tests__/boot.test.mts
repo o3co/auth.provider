@@ -42,6 +42,7 @@ import {
 import {
 	coreConfigForTests,
 	createTestOAuthTokenSettings,
+	federationTypeForTests,
 	makeValidCoreConfig,
 } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
@@ -163,21 +164,16 @@ const sessionOnly = {
 	refreshToken: async () => ({}),
 } as unknown as FederationProvider;
 
-const federationModule = (name: string, provider: FederationProvider) =>
-	defineModule({
-		name: `test-federation-${name}`,
-		contributes: {
-			federations: { [name]: () => provider },
-			// A federation must be contributed with its redirect policy, which
-			// is a boot invariant of its own and nothing to do with grants.
-			federationRedirectPolicies: {
-				[name]: () => ({
-					validateRedirect: () => ({ ok: true as const, value: undefined }),
-					resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-				}),
-			},
-		} as never,
-	});
+/** The type of the `upstream` entry, handled by the module below. */
+const UPSTREAM_TYPE = "upstream-idp";
+
+/**
+ * The module that handles the `upstream` entry's type: its provider is the
+ * one a test passes, and the fixture's redirect policy, which is a boot
+ * invariant of its own and nothing to do with grants, stands beside it.
+ */
+const federationModule = (provider: FederationProvider) =>
+	federationTypeForTests(UPSTREAM_TYPE, { provider: () => provider });
 
 const CONNECTION = {
 	federation: "upstream",
@@ -259,8 +255,7 @@ const UNCONFIGURED_LOGIN_ENTRY: LoginEntry = Object.freeze(
 );
 
 const boot = (setup: Setup) => {
-	const federation =
-		setup.provider === null ? [] : [federationModule("upstream", setup.provider ?? delegated)];
+	const federation = setup.provider === null ? [] : [federationModule(setup.provider ?? delegated)];
 	const modules = [
 		...(setup.federationFirst === false ? [] : federation),
 		sessionMiddlewareModule,
@@ -287,13 +282,19 @@ const boot = (setup: Setup) => {
 			config: {
 				...makeValidCoreConfig(),
 				...coreConfigForTests({
-					// Configured only beside the module that contributes it, so no
+					// Configured only beside the module that handles its type, so no
 					// composition here holds an enabled federation that nothing handles.
 					...(setup.provider === null
 						? {}
 						: {
 								federations: {
-									upstream: { enabled: true, issuer: "https://issuer.example", clientId: "cid" },
+									upstream: {
+										enabled: true,
+										type: UPSTREAM_TYPE,
+										callbackURL: "https://provider.example/federation/upstream/callback",
+										issuer: "https://issuer.example",
+										clientId: "cid",
+									},
 								},
 							}),
 					...(setup.withAudit === false ? {} : { declaredAbsent: ["auditSink"] }),
