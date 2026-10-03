@@ -569,6 +569,15 @@ const clientRepo = new InMemoryClientRepository(
 - 同梱の 2 つのリミッターは、キーの予算を一つのルックアップ `createRateLimitBudgetLookup`（[`src/ratelimit/budgetLookup.mts`](src/ratelimit/budgetLookup.mts)）から得る: キーのプレフィックスに対するリミッター自身の `limits` の項目、なければ寄与された予算（ルックアップごとに一度だけ読んで凍結した複製を検査する。範囲外の予算はチェックを障害にする）、なければ `defaultLimit`。ビルダーの経路 — `registerBuiltinRateLimiters` と Redis パッケージの `redisRateLimiterBuilder` — は自分の `limits` と `defaultLimit` からリミッターを作り、寄与された予算を読まない。読むのはリミッターモジュールである
 - ガードの障害時ポリシーはリミッター自身の `failMode` で、ガードまたはポリシー（`checkWithFailMode` が受け取る `createRateLimitPolicy`）を作るときに一度だけ読んで検査する: `open` ならリクエストを通し、`closed` または宣言なしは `503` を返し、それ以外の値や読めない `failMode` は作成を拒否する。プロセス内のリミッターは宣言しない。`redis-rate-limiter.failMode` が決めるのは `redisRateLimiterModule` が作るリミッターだけで、ホスト独自のリミッターやラッパーは自分のものを答える（ラッパーは `failMode` を引き継ぐ）。そのキーの旧パス `rateLimit.failMode` が `open` なのに配線されたリミッターがそうでないとき、boot は `rate_limit_fail_mode_not_applied` を警告する
 
+#### 試行カウンター
+
+検証側自身の試行回数の上限 — 秘密を検査するモジュールがキーごとに許す回数 — は、レートリミッターとは別のポートで数える。レートリミッターの予算と障害時ポリシーはデプロイメントのものである。
+
+- ポートは [`src/ratelimit/attempts.mts`](src/ratelimit/attempts.mts) の `AttemptCounter` で、`attemptCounter` スロットの値。`consume(key, spec)` は固定窓で試行を 1 回数え、`allowed`・`remaining`・`resetAt` を答える。spec（`AttemptSpec`、`{ limit, windowSeconds }`）は上限を持つモジュールが呼び出しごとに渡すので、デプロイメントの設定で緩めることはできない。カウンターは自分の上限を持たない。カウンターの答えは `readAttemptCount` を通してだけ読み、spec のもとでの回数になっていない答えは拒否する
+- ルートが数える方法は `createAttemptGuard`（[`src/ratelimit/attemptGuard.mts`](src/ratelimit/attemptGuard.mts)）だけ: `perIp` は `<tag>:ip:<ip>`、`attempt(req, res, id)` は `<tag>:<id>` をキーにする。カウンターが配線されていないときのプロセス内のフォールバック（`core.deployment.mode = "multi"` では拒否、未設定では `attempt_counter_not_shared` を警告、`"single"` では何も出さない）、閉じた側に倒すこと — 例外を投げる、`timeoutMs`（既定 `DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS`、2 秒）以内に答えない、壊れた回数を答えるカウンターは障害とし、カウンターが何を宣言していても `503`（`attemptCounterUnavailableEnvelope`）を返し、`attempt_counter_unavailable` をログに出し `rate_limit.unavailable` を監査する — と、持ち主の上限から出す `RateLimit-*` ヘッダー（拒否時は `Retry-After` と `429`）はガードが持つ
+- プロセス内のカウンターは `createMemoryAttemptCounter`（[`src/ratelimit/attemptsMemory.mts`](src/ratelimit/attemptsMemory.mts)）で、プロセスごとに数え、再起動で失われる。保持するキーは最大 `maxEntries`（`DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES`、10 万）で、満杯のときは生きている窓を追い出さず、新しいキーを拒否する（`MemoryAttemptCounterFullError`。ガードは `503` を返す）
+- スイート: `@o3co/auth-provider-test-kit` の `attemptCounterContract`
+
 #### リフレッシュトークンファミリー（RFC 6819 §5.2.2.3 の replay 検出）
 
 - ポートは [`src/refresh-token-family/types.mts`](src/refresh-token-family/types.mts) の `RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation`

@@ -39,6 +39,13 @@
 . AssertionVerificationResult type
 . AssertionVerifier type
 . AsymmetricKeyStoreOptions type
+. AttemptCount type
+. AttemptCounter type
+. AttemptCounterFailure type
+. AttemptGuard type
+. AttemptGuardOptions type
+. AttemptSpec type
+. AttemptVerdict type
 . AuditEvent type
 . AuditEventDetails type
 . AuditHook type
@@ -125,9 +132,11 @@
 . CsrfGuard type
 . CsrfTokenSigner type
 . CsrfVerdict type
+. DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS value
 . DEFAULT_CLOCK_SKEW_MS value
 . DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS value
 . DEFAULT_FEDERATION_RESPONSE_MODE value
+. DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES value
 . DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES value
 . DEFAULT_MFA_SUBJECT_LEASE_MS value
 . DEFAULT_SIGNING_ALGORITHM value
@@ -367,6 +376,8 @@
 . MappedClaims type
 . MemoryAccessTokenDenylist type
 . MemoryAccessTokenDenylistOptions type
+. MemoryAttemptCounterFullError value
+. MemoryAttemptCounterOptions type
 . MemoryChallengeStore type
 . MemoryChallengeStoreOptions type
 . MemoryConsentStore type
@@ -682,6 +693,7 @@
 . assertSecretEntropy value
 . assertUsableRateLimitSpecs value
 . assertionLifetime value
+. attemptCounterUnavailableEnvelope value
 . auditErrorList value
 . auditErrorText value
 . auditedError value
@@ -746,6 +758,7 @@
 . createAdapterFactory value
 . createApp value
 . createAsymmetricKeyStore value
+. createAttemptGuard value
 . createAuditSinkFactory value
 . createChallengeCeremony value
 . createChallengeStoreFactory value
@@ -767,6 +780,7 @@
 . createKeyStoreFactory value
 . createMemoryAccessTokenDenylist value
 . createMemoryAssertionIssuerRegistry value
+. createMemoryAttemptCounter value
 . createMemoryChallengeStore value
 . createMemoryConsentStore value
 . createMemoryDeviceCodeStore value
@@ -866,6 +880,8 @@
 . hasFederationGrantAuthorization value
 . identityClaimsProblem value
 . isAbsenceDeclared value
+. isAttemptKey value
+. isAttemptSpec value
 . isBearerTokenType value
 . isCanonicalIssuer value
 . isClientRecordRefused value
@@ -964,6 +980,7 @@
 . rateLimiterUnavailableEnvelope value
 . readAccessTokenRevocationMode value
 . readAcrTable value
+. readAttemptCount value
 . readConditionalCreateAnswer value
 . readConditionalRemoveAnswer value
 . readConditionalReplaceAnswer value

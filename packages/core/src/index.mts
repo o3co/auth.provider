@@ -929,6 +929,32 @@ export type {
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
+// A verifier's own attempt limits: the counter port, its reading, the
+// in-process counter, and the guard that owns the fallback, the outage and
+// the headers.
+export {
+	type AttemptCounterFailure,
+	type AttemptGuard,
+	type AttemptGuardOptions,
+	type AttemptVerdict,
+	attemptCounterUnavailableEnvelope,
+	createAttemptGuard,
+	DEFAULT_ATTEMPT_COUNTER_TIMEOUT_MS,
+} from "./ratelimit/attemptGuard.mjs";
+export {
+	type AttemptCount,
+	type AttemptCounter,
+	type AttemptSpec,
+	isAttemptKey,
+	isAttemptSpec,
+	readAttemptCount,
+} from "./ratelimit/attempts.mjs";
+export {
+	createMemoryAttemptCounter,
+	DEFAULT_MEMORY_ATTEMPT_COUNTER_MAX_ENTRIES,
+	MemoryAttemptCounterFullError,
+	type MemoryAttemptCounterOptions,
+} from "./ratelimit/attemptsMemory.mjs";
 // The one lookup every bundled limiter takes a key's budget from.
 export {
 	createRateLimitBudgetLookup,
