@@ -723,7 +723,7 @@ string array; none of the bundled adapters does). By default it is kept in
 `authentication.upstreamAmr`, for the record: no token carries it and no
 `acr_values` entry is met by it — an IdP's word about its own login is not this
 provider's. `trustUpstreamAmr = true`, beside `enabled` in the federation's
-section, records it beside `fed`, where it counts, as every federation's did
+entry, records it beside `fed`, where it counts, as every federation's did
 before the switch existed. The routes read each installed federation's switch
 once, when they are built, through core's `federationTrustsUpstreamAmr` — the
 reading `@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session
@@ -1138,70 +1138,73 @@ reading it as a gate would be reading a string.
 
 ### Configuring federations
 
-`core.federations.<name>` names a federation; `extractFederationSection`
-([`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts))
-normalises a section for the module that reads it. Three shapes are accepted:
+Each `core.federations.<name>` entry is one federation, reached at
+`/session/oauth/federation/<name>`. An entry is flat: the keys core owns and the
+keys of its `type` sit side by side.
 
 ```hocon
 core.federations {
-  # Shorthand: the key names the type (here "google").
   google {
     enabled = true
+    type = "google"
     clientId = ${CORE_FEDERATIONS_GOOGLE_CLIENT_ID}
     clientSecret = ${CORE_FEDERATIONS_GOOGLE_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
     clientUrl = "https://app.example.com/"
   }
 
-  # Flat with an explicit type.
   okta {
     enabled = true
     type = "oidc"
     issuer = "https://dev-123.okta.com"
+    callbackURL = "https://auth.example.com/session/oauth/federation/okta/callback"
     # …
   }
 
-  # Nested: the credentials under a sub-section named by the type.
   keycloak {
-    enabled = true
+    enabled = false
     type = "oidc"
-    oidc {
-      issuer = "https://sso.example.com/realms/staff"
-      # …
-    }
+    issuer = "https://sso.example.com/realms/staff"
+    # …
   }
 }
 ```
 
-A nested section that also sets `clientId`, `clientSecret` or `callbackURL` at
-its top level fails boot; any other top-level field is kept beside the
-sub-section, and one the sub-section also sets is overridden by it. A section
-without `enabled = true` is ignored. The Google, GitHub and Apple
-modules are single-tenant — each registers its provider under a fixed name
-(`google`, `github`, `apple`) — so a deployment has at most one of each;
-`type = "oidc"` sections
-([`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md)) are one
-federation per section.
+Core owns `enabled`, `type`, `trustUpstreamAmr` and `callbackURL`; every other
+key belongs to the entry's type. Every entry names its `type`, enabled or not:
+one without, or with an empty one, refuses boot (`config-validation-failed` at
+`core.federations.<name>.type`). An enabled entry is handled by the module that
+registers its type under `federationTypes`, which builds one provider and one
+redirect policy for it, both named after the entry, so a type can have any
+number of entries. The Google, GitHub, Apple and OIDC packages each export such
+a module — `googleFederationTypeModule()`, `githubFederationTypeModule()`,
+`appleFederationTypeModule()` and `oidcFederationTypeModule()`, for the types
+`"google"`, `"github"`, `"apple"` and `"oidc"`
+([`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) for
+any OpenID Connect IdP); each package's README lists its type's keys. A
+disabled entry is not read past core's schema.
 
 Boot rules:
 
-- Every enabled section must have a `callbackURL`, or `sessionModule` fails boot.
-  The federation router hands exactly that value to the adapter as `redirect_uri`.
-- `trustUpstreamAmr` sits at a section's top level, beside `enabled`, in every
-  shape; it is `false` when absent, and anything but a boolean (after the
-  schema's coercion) fails boot. Written inside a nested section's
-  sub-section (`core.federations.okta.oidc.trustUpstreamAmr`) it fails boot too,
-  saying it belongs beside `enabled` — it would otherwise be ignored. No
-  environment variable is wired for it. What it decides is
+- Core requires a non-empty `callbackURL` on every entry it dispatches to a
+  type, or boot is refused (`config-validation-failed` at
+  `core.federations.<name>.callbackURL`). The federation router hands exactly
+  that value to the adapter as `redirect_uri`.
+- `trustUpstreamAmr` is read only at an entry's top level, beside `enabled`; it
+  is `false` when absent, and core's schema refuses anything but a boolean
+  (after coercing the spellings an environment variable delivers). A
+  `trustUpstreamAmr` nested under another key
+  (`core.federations.okta.oidc.trustUpstreamAmr`) is not read. No environment
+  variable is wired for it. What it decides is
   [above](#what-a-session-records-about-the-authentication).
 - Every `federations.<name>` contribution must be paired with a
   `federationRedirectPolicies.<name>` one and vice versa, or boot fails with
   `federation-redirect-policy-unpaired`. A federation a module handles by its
   `type` (`federationTypes`) gets both from core, together.
 - `sessionModule` does not cross-check config against contributions; core's
-  boot does one direction: a federation enabled in config that no module
-  handles refuses boot (`federation-type-unhandled`). The other direction is
-  not checked: a federation contributed without an enabled section has no
+  boot does one direction: an enabled entry whose `type` no installed module
+  registers refuses boot (`federation-type-unhandled`). The other direction is
+  not checked: a federation contributed without an enabled entry has no
   callback URL, and its start answers `500 misconfiguration`. A composition that
   wants that to fail boot adds the check itself.
 
