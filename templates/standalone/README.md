@@ -607,8 +607,10 @@ two types it bundles — `google` (`@o3co/auth-provider-federation-google`) and
 `oidc` (`@o3co/auth-provider-federation-oidc`) — whatever the map says, and
 reads no entry itself: a key an entry carries is read, and a malformed one
 refused at its path (`core.federations.<name>.<key>`), by core and by the
-type's schema. An enabled entry with no `type`, or of a type no loaded module
-handles, refuses the boot (`federation-type-unhandled`), naming the entry.
+type's schema. An entry with no `type`, enabled or not, is refused at
+`core.federations.<name>.type` (`config-validation-failed`); an enabled entry
+of a type no loaded module handles refuses the boot
+(`federation-type-unhandled`), naming the entry.
 GitHub and Apple are not bundled: a deployment that wants one adds its
 package and its module to `buildModules` — GitHub's type module,
 `githubFederationTypeModule()`, with entries of `type = "github"`; Apple's
