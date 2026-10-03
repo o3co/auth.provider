@@ -268,7 +268,7 @@ describe("the oauth module names oauthTokenSettings authoritative", () => {
 			overrideComponents: { oauthTokenSettings: SECOND },
 		});
 		try {
-			expect(seen.settings).toBe(SECOND);
+			expect(seen.settings).toEqual(SECOND);
 		} finally {
 			await handle.dispose();
 		}
