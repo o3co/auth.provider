@@ -57,8 +57,6 @@ export function githubFederationTypeModule(
 ): Module {
 	const upstreamFetch = options.fetch;
 	return defineModule({
-		// Not `federation-github`, the deprecated fixed-name module's name: a
-		// composition may hold both while it moves from one to the other.
 		name: "federation-github-type",
 		contributes: {
 			federationTypes: {

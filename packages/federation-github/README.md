@@ -113,23 +113,10 @@ read by the provider and the redirect policy; the schema fills in no default.
 | `endSessionEndpoint` | no | Replaces GitHub's logout — see [Refresh and logout](#refresh-and-logout). |
 
 `fetch` is not an entry key: it is the type module's option (above), and a
-`GithubProviderConfig` field for `createGithubProvider` and the deprecated
-slot.
+`GithubProviderConfig` field for `createGithubProvider`.
 
-### Deprecated: the fixed-name module
-
-`githubFederationModule` and the `githubFederationConfig` slot it requires
-([`src/github.mts`](src/github.mts)) are deprecated in favour of
-`githubFederationTypeModule()`. They still work: the module contributes
-`federations.github` and `federationRedirectPolicies.github` — the name is
-fixed at `github` — from the [`GithubProviderConfig`](src/github.mts) a
-composition root's bridge module puts in the slot, and a `fetch` goes in that
-object. The bridge reads no schema of this package, so it accepts whatever it
-forwards; the four redirect fields reach the redirect policy only through it.
-Both paths build the same provider and redirect policy for one entry.
-Composing the type module (module name `federation-github-type`) and
-`githubFederationModule` (`federation-github`) for the same entry refuses boot
-(`duplicate-contribute`): one federation has one handler.
+The fixed-name module `githubFederationModule` and its `githubFederationConfig`
+slot were removed in favour of `githubFederationTypeModule()`.
 
 `createGithubProvider` throws at boot when `clientId`, `clientSecret` or
 `callbackURL` is missing.
@@ -213,9 +200,6 @@ Exported from [`src/index.mts`](src/index.mts):
 - `GITHUB_FEDERATION_TYPE` (`"github"`, [`src/type-module.mts`](src/type-module.mts)).
 - `createGithubProvider(config)` ([`src/github.mts`](src/github.mts)) — the
   provider for the federation `github`.
-- Deprecated, for `githubFederationTypeModule`: `githubFederationModule`
-  ([`src/github.mts`](src/github.mts)), and the `githubFederationConfig`
-  `ComponentMap` slot, declared there by module augmentation (not an export).
 - Types: `GithubEntry` ([`src/entry.mts`](src/entry.mts)), an entry's own keys
   as the schema answers them; [`GithubProviderConfig`](src/github.mts),
   `GithubProvider` ([`src/github.mts`](src/github.mts)).
@@ -236,5 +220,4 @@ are pinned by the tests' assertions instead.
 | [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the REST headers, the e-mail choice, malformed rows and a failed `/user/emails`, the scope rules, `expiresAt`, `expiresIn` and `tokenType`, no refresh, `mapClaims`, `endSession`, and that `config.fetch` carries every request |
 | [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and `id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no `id`, or one that is not a positive safe integer or a canonical digit string) |
 | [`fake-github.test.mts`](src/__tests__/fake-github.test.mts) | the fake itself: form-encoded token answers, the `User-Agent` refusal, and that the adapter's requests satisfy both |
-| [`github-type-module.test.mts`](src/__tests__/github-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes under the entry's name, the strict, flat schema, that a refusal never quotes the client secret, the `fetch` option, parity with the deprecated fixed-name module, and the refusal of both for one entry |
-| [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the deprecated fixed-name module's contributions and boot |
+| [`github-type-module.test.mts`](src/__tests__/github-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes under the entry's name, the strict, flat schema, that a refusal never quotes the client secret, the `fetch` option, and that every key of the entry reaches the provider and its redirect policy |
