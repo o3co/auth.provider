@@ -123,26 +123,31 @@ function makeConsumedCeremony(): ChallengeCeremony {
 	};
 }
 
+/**
+ * The configuration the grant reads: core's token-binding section alone. The lifetimes come from
+ * the `oauthTokenSettings` slot, never from here.
+ */
 function makeConfig(
 	overrides: { readonly bindConfidentialClientRefreshTokens?: boolean } = {},
 ): GrantDependencies["config"] {
-	return {
-		oauth: {
-			jwt: { issuer: ISSUER },
-			accessToken: { expiresIn: ACCESS_TOKEN_TTL },
-			refreshToken: { expiresIn: REFRESH_TOKEN_TTL },
-		},
-		...(overrides.bindConfidentialClientRefreshTokens === undefined
-			? {}
-			: {
-					core: {
-						tokenBinding: {
-							bindConfidentialClientRefreshTokens: overrides.bindConfidentialClientRefreshTokens,
-						},
+	return (overrides.bindConfidentialClientRefreshTokens === undefined
+		? {}
+		: {
+				core: {
+					tokenBinding: {
+						bindConfidentialClientRefreshTokens: overrides.bindConfidentialClientRefreshTokens,
 					},
-				}),
-	} as unknown as GrantDependencies["config"];
+				},
+			}) as unknown as GrantDependencies["config"];
 }
+
+/** The slot the grant mints with: this file's issuer and lifetimes. */
+const tokenSettings = () =>
+	createTestOAuthTokenSettings({
+		issuer: ISSUER,
+		accessTokenLifetime: { defaultExpiresIn: ACCESS_TOKEN_TTL, maxExpiresIn: ACCESS_TOKEN_TTL },
+		refreshTokenExpiresIn: REFRESH_TOKEN_TTL,
+	});
 
 type WebAuthnDeps = Parameters<typeof createWebAuthnGrant>[0];
 
@@ -156,6 +161,7 @@ async function makeDeps(
 		keyStore,
 		webauthnCredentialStore: credentialStore,
 		challengeCeremony: makeConsumedCeremony(),
+		oauthTokenSettings: tokenSettings(),
 		webauthnConfig: createTestWebAuthnConfig({ origin: [ISSUER] }),
 		...overrides,
 	};
@@ -237,20 +243,49 @@ beforeEach(() => {
 // The lifetimes it mints with, read when it is built
 // ---------------------------------------------------------------------------
 
+describe("createWebAuthnGrant — the oauthTokenSettings it reads", () => {
+	it("mints from the slot alone, with a configuration that carries no oauth key", async () => {
+		const tokens = await issue(
+			await makeDeps({
+				config: {} as GrantDependencies["config"],
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					issuer: ISSUER,
+					accessTokenLifetime: { defaultExpiresIn: 111, maxExpiresIn: 111 },
+					refreshTokenExpiresIn: 2222,
+				}),
+			}),
+			makeCtx(makeClient()),
+		);
+		const access = decodePayload(tokens.access_token);
+		const refresh = decodePayload(tokens.refresh_token as string);
+		expect((access.exp as number) - (access.iat as number)).toBe(111);
+		expect((refresh.exp as number) - (refresh.iat as number)).toBe(2222);
+	});
+
+	it("is never built without the slot, naming it, whatever the configuration holds", async () => {
+		const { oauthTokenSettings: _slot, ...deps } = await makeDeps({
+			oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+		});
+		expect(() => createWebAuthnGrant(deps as never)).toThrow(/oauthTokenSettings/);
+	});
+});
+
 describe("createWebAuthnGrant — the lifetimes it mints with", () => {
-	// A configuration built by hand never met the schema. The lifetimes are
-	// read when the grant is built: read per request, a bad one would be
-	// refused only after the ceremony had consumed the challenge — a 500, and
-	// a passkey assertion that can never be presented again.
+	// A slot built by hand never met boot's check. The lifetimes are read when the grant is
+	// built: read per request, a bad one would be refused only after the ceremony had consumed
+	// the challenge — a 500, and a passkey assertion that can never be presented again.
 	const broken: Array<[string, Record<string, unknown>]> = [
-		["oauth.refreshToken.expiresIn = 1.5", { refreshToken: { expiresIn: 1.5 } }],
-		["oauth.refreshToken.expiresIn = NaN", { refreshToken: { expiresIn: Number.NaN } }],
-		["oauth.refreshToken.expiresIn = 0", { refreshToken: { expiresIn: 0 } }],
-		["no oauth.refreshToken.expiresIn", { refreshToken: {} }],
-		["oauth.accessToken.expiresIn = 1.5", { accessToken: { expiresIn: 1.5 } }],
+		["refreshTokenExpiresIn = 1.5", { refreshTokenExpiresIn: 1.5 }],
+		["refreshTokenExpiresIn = NaN", { refreshTokenExpiresIn: Number.NaN }],
+		["refreshTokenExpiresIn = 0", { refreshTokenExpiresIn: 0 }],
+		["no refreshTokenExpiresIn", { refreshTokenExpiresIn: undefined }],
+		[
+			"accessTokenLifetime.defaultExpiresIn = 1.5",
+			{ accessTokenLifetime: { defaultExpiresIn: 1.5, maxExpiresIn: ACCESS_TOKEN_TTL } },
+		],
 	];
 	for (const [label, over] of broken) {
-		it(`is refused when it is built with ${label}, and no challenge is consumed`, async () => {
+		it(`is refused when it is built with a slot whose ${label}, and no challenge is consumed`, async () => {
 			const challengeStore = createMemoryChallengeStore();
 			const challengeCeremony = createChallengeCeremony({
 				challengeStore,
@@ -258,10 +293,9 @@ describe("createWebAuthnGrant — the lifetimes it mints with", () => {
 			});
 			const challenge = "lifetime-challenge";
 			await challengeStore.issue("webauthn:authentication", challenge, Date.now() + 60_000);
-			const base = makeConfig() as unknown as { oauth: Record<string, unknown> };
 			const deps = await makeDeps({
 				challengeCeremony,
-				config: { oauth: { ...base.oauth, ...over } } as unknown as GrantDependencies["config"],
+				oauthTokenSettings: { ...tokenSettings(), ...over } as never,
 			});
 
 			let refused: unknown;
@@ -278,7 +312,9 @@ describe("createWebAuthnGrant — the lifetimes it mints with", () => {
 
 			expect(await challengeStore.find("webauthn:authentication", challenge)).not.toBeNull();
 			expect(refused).toBeInstanceOf(RangeError);
-			expect((refused as Error).message).toMatch(/oauth\.(refreshToken|accessToken)\.expiresIn/);
+			expect((refused as Error).message).toMatch(
+				/oauthTokenSettings\.(refreshTokenExpiresIn|accessTokenLifetime)/,
+			);
 		});
 	}
 });
@@ -573,28 +609,21 @@ describe("createWebAuthnGrant — refresh-token family lifecycle", () => {
 		expect("tokens" in result).toBe(false);
 	});
 
-	it("is never built when oauth.refreshToken.expiresIn is unset, so no token without exp is minted", async () => {
-		// With no configured TTL `generateToken` emits no `exp` and the family
-		// has no expiry to register under. Read when the grant is built, a
-		// missing lifetime refuses the composition before any ceremony consumes
-		// a challenge.
-		const noTtlConfig = {
-			oauth: {
-				jwt: { issuer: ISSUER },
-				accessToken: { expiresIn: ACCESS_TOKEN_TTL },
-				refreshToken: {},
-			},
-		} as unknown as GrantDependencies["config"];
+	it("is never built when the slot carries no refresh-token lifetime, so no token without exp is minted", async () => {
+		// With no lifetime `generateToken` emits no `exp` and the family has no expiry to
+		// register under. Read when the grant is built, a missing lifetime refuses the
+		// composition before any ceremony consumes a challenge.
+		const { refreshTokenExpiresIn: _unset, ...withoutLifetime } = tokenSettings();
 		const register = vi.fn(async () => {});
 		const deps = await makeDeps({
-			config: noTtlConfig,
+			oauthTokenSettings: withoutLifetime as never,
 			refreshTokenFamilyRotation: {
 				register,
 				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
 			},
 		});
 
-		expect(() => createWebAuthnGrant(deps)).toThrow(/oauth\.refreshToken\.expiresIn/);
+		expect(() => createWebAuthnGrant(deps)).toThrow(/oauthTokenSettings\.refreshTokenExpiresIn/);
 		expect(register).not.toHaveBeenCalled();
 	});
 
@@ -647,10 +676,9 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens", () => {
 		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
 	});
 
-	it("binds a confidential client's refresh token exactly when core's resolveTokenBindingSettings says so, though the composition holds oauthTokenSettings", async () => {
+	it("binds a confidential client's refresh token exactly when core's resolveTokenBindingSettings says so", async () => {
 		// The setting applies across every binding mechanism, so it is core's;
 		// the slot carries none, and the grant reads core's reader.
-		const base = makeConfig() as unknown as { oauth: Record<string, unknown> };
 		for (const tokenBinding of [
 			undefined,
 			{},
@@ -660,15 +688,11 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens", () => {
 			{ bindConfidentialClientRefreshTokens: "true" },
 			{ "dispatch-policy": "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
 		]) {
-			const config = {
-				...base,
-				oauth: { ...base.oauth, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
-			} as unknown as GrantDependencies["config"];
+			const config = (tokenBinding === undefined
+				? {}
+				: { core: { tokenBinding } }) as unknown as GrantDependencies["config"];
 			const tokens = await issue(
-				await makeDeps({
-					config,
-					oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
-				}),
+				await makeDeps({ config }),
 				makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
 					tokenBinding: dpopBinding("PROOF-JKT"),
 				}),
@@ -678,23 +702,6 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens", () => {
 				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens,
 			);
 		}
-	});
-
-	it("mints the lifetimes of the oauthTokenSettings the composition holds, over the configuration's", async () => {
-		const tokens = await issue(
-			await makeDeps({
-				oauthTokenSettings: createTestOAuthTokenSettings({
-					issuer: ISSUER,
-					accessTokenLifetime: { defaultExpiresIn: 111, maxExpiresIn: 111 },
-					refreshTokenExpiresIn: 2222,
-				}),
-			}),
-			makeCtx(makeClient()),
-		);
-		const access = decodePayload(tokens.access_token);
-		const refresh = decodePayload(tokens.refresh_token as string);
-		expect((access.exp as number) - (access.iat as number)).toBe(111);
-		expect((refresh.exp as number) - (refresh.iat as number)).toBe(2222);
 	});
 
 	it("emits no cnf when the request carried no binding", async () => {
@@ -734,7 +741,8 @@ describe("webauthnModule — refresh-token family wiring", () => {
 			keyStore,
 			webauthnCredentialStore: credentialStore,
 			challengeCeremony: makeConsumedCeremony(),
-			webauthnConfig: {
+			oauthTokenSettings: tokenSettings(),
+			section: {
 				rpId: "test.example",
 				rpName: "Test",
 				origin: [ISSUER],

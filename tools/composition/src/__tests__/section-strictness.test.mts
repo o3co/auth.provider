@@ -74,7 +74,6 @@ const NOT_YET_STRICT: Readonly<Record<string, readonly string[]>> = {
 		"oauth.resourceIndicator",
 		"oauth.revocation",
 	],
-	webauthn: ["webauthn", "webauthn.rateLimit", "webauthn.rateLimit.authenticationOptions"],
 	"session-store": ["session-store.storage"],
 };
 
