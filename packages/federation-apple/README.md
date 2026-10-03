@@ -138,32 +138,16 @@ schema fills in no default.
 | `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package's redirect rules](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
 | `endSessionEndpoint` | no | An upstream logout endpoint ([Refresh and logout](#refresh-and-logout)). Apple publishes none. |
 
-Migrating from a bridge for the deprecated module: an entry takes the PEM
-inline, as `privateKey` (through an environment substitution, as above); a
-`privateKeyPath` the bridge read the file from is not an entry key, and is
-refused as an unknown one.
-
 `fetch` and `jwksUri` are not entry keys: they are test seams of
-`AppleProviderConfig`, for `createAppleProvider` and the deprecated slot, and
-the type module's seam is its `fetch` option (above), which reaches Apple's
+`AppleProviderConfig`, for `createAppleProvider`, and the type module's seam is its `fetch` option (above), which reaches Apple's
 JWKS as well.
 Neither is a resolver for `clientSecret`, nor a `privateKey` read anew at every
 token exchange: a configuration holds strings, read at boot. Those two are
 code-only, through `createAppleProvider`.
 
-### Deprecated: the fixed-name module
+### Removed: the fixed-name module
 
-`appleFederationModule` and the `appleFederationConfig` slot it requires are
-deprecated in favour of `appleFederationTypeModule()`. They still work: the
-module contributes `federations.apple` and `federationRedirectPolicies.apple`
-— single-tenant, `provider.name` fixed at `"apple"` — from an
-[`AppleProviderConfig`](src/apple.mts) that a bridge module in the composition
-root builds from the `core.federations.apple` entry and provides as
-`appleFederationConfig`. The redirect policy is built from that same object,
-so a redirect field the bridge leaves out is one the policy never sees. For
-the same entry both paths build the same provider and the same redirect
-policy. Composing the type module and `appleFederationModule` for the same
-entry refuses boot (`duplicate-contribute`): one federation has one handler.
+`appleFederationModule` and its `appleFederationConfig` slot were removed in favour of `appleFederationTypeModule()` and a `core.federations.<name> { type = "apple" }` entry.
 
 ## What you need from Apple, and which one goes where
 
@@ -190,9 +174,9 @@ than letting the authorization endpoint answer the first login with an opaque
 session module derives the `redirect_uri` from `core.federations.<name>.callbackURL`,
 and a request whose derived URL is not the configured `callbackURL` is refused
 before anything reaches Apple. Under the type module they are one value, the
-entry's; under the deprecated module they are one value only if the bridge
-copies it, and a composition where they drift fails at the first request
-instead of validating one URL and sending another.
+entry's; a composition that builds the provider with `createAppleProvider`
+and lets them drift fails at the first request instead of validating one URL
+and sending another.
 
 ## The rotating client secret
 
@@ -222,8 +206,7 @@ caller that arrives after the rotation nor kept once it completes. That works
 through whatever you passed as `privateKey`, to `createAppleProvider` as much as
 to `createAppleClientSecret`: the option is read at every token exchange, not
 copied at construction. **Rotating the key without a restart is available only
-through `createAppleProvider`** — in the deprecated `appleFederationConfig`
-slot, or in a module you write — never for a named `core.federations` entry: an
+through `createAppleProvider`**, in a module you write — never for a named `core.federations` entry: an
 entry's `privateKey` is the PEM the configuration held at boot, so a key
 replaced under the type module takes effect on the next restart. Through
 `createAppleProvider`, make `privateKey` a getter that re-reads the file —
@@ -297,8 +280,7 @@ both fail closed without one.
 - **`is_private_email` marks a Hide My Email relay address**
   (`…@privaterelay.appleid.com`) and is surfaced as `isPrivateEmail` so a
   deployment can decide about it — it is namespaced under
-  `claims.federated.<name>` (the entry's name; `apple` under the deprecated
-  module), never promoted. Relay addresses forward mail and the
+  `claims.federated.<name>` (the entry's name), never promoted. Relay addresses forward mail and the
   user can disable them at any time; if reaching a real inbox matters, this is
   the value to act on. `isPrivateRelayEmail(email)` is exported for the same
   decision elsewhere. Apple's own marker wins; the relay domain is consulted
@@ -367,7 +349,9 @@ Exported from [`src/index.mts`](src/index.mts), each from the file linked:
   the Module contributing `federationTypes.apple`, with its options
   `AppleFederationTypeModuleOptions`, and `APPLE_FEDERATION_TYPE` (`"apple"`).
 - `createAppleProvider(config)` ([`src/apple.mts`](src/apple.mts)) — the
-  provider for the federation `apple`.
+  provider for the federation `apple`, built from code: the way to what an
+  entry cannot carry (a `clientSecret` resolver, a `privateKey` read at every
+  signing, a `jwksUri` override).
 - `createAppleClientSecret(options)`
   ([`src/client-secret.mts`](src/client-secret.mts)) — the ES256 signer, a
   resolver for `clientSecret`.
@@ -379,10 +363,6 @@ Exported from [`src/index.mts`](src/index.mts), each from the file linked:
 - Types: `AppleEntry` ([`src/entry.mts`](src/entry.mts)), an entry's own keys
   as the schema answers them; `AppleProviderConfig`, `AppleProvider`,
   `AppleClientSecretOptions`.
-- Deprecated, for `appleFederationTypeModule`: `appleFederationModule`
-  ([`src/apple.mts`](src/apple.mts)), and the `appleFederationConfig`
-  `ComponentMap` slot it requires, declared there by module augmentation (not
-  an export).
 
 ## Tests
 
@@ -394,5 +374,4 @@ Exported from [`src/index.mts`](src/index.mts), each from the file linked:
 | [`apple.token-snapshot.test.mts`](src/__tests__/apple.token-snapshot.test.mts) | the lifetime, `expiresIn` and `tokenType` a login and a refresh report, with and without `expires_in`, and that a non-string `scope` is refused by the library |
 | [`apple.issuer-parameter.test.mts`](src/__tests__/apple.issuer-parameter.test.mts) | the RFC 9207 `iss` check |
 | [`claim-precedence.test.mts`](src/__tests__/claim-precedence.test.mts) | Apple's claims under the session package's precedence rules |
-| [`apple-type-module.test.mts`](src/__tests__/apple-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes, the strict, flat schema, the `fetch` option, refusals that quote no credential, parity with the deprecated module, and the refusal of both for one entry |
-| [`apple-module.test.mts`](src/__tests__/apple-module.test.mts), [`apple-module-boot.test.mts`](src/__tests__/apple-module-boot.test.mts) | the deprecated module's contributions and boot |
+| [`apple-type-module.test.mts`](src/__tests__/apple-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes, the strict, flat schema, the `fetch` option, refusals that quote no credential, and every key of an entry reaching the provider or the redirect policy |

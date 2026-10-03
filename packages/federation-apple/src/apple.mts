@@ -17,7 +17,6 @@
 import {
 	callbackUrlForExchange,
 	codeChallenge,
-	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationClientSecret,
@@ -32,23 +31,8 @@ import {
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-core";
-import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 import { createAppleClientSecret } from "./client-secret.mjs";
-
-// ComponentMap slot declaration-merge: exposes appleFederationConfig as a typed
-// DI slot. Consumers supply this via a small bootstrap module that reads from
-// app config.
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		/**
-		 * @deprecated Read only by the deprecated `appleFederationModule`.
-		 * `appleFederationTypeModule()` takes each entry from `core.federations`
-		 * itself, through core's dispatch by type.
-		 */
-		readonly appleFederationConfig?: AppleProviderConfig;
-	}
-}
 
 export const APPLE_ISSUER = "https://appleid.apple.com";
 const APPLE_JWKS_URI = "https://appleid.apple.com/auth/keys";
@@ -233,9 +217,10 @@ function resolveSecretSource(name: string, config: AppleProviderConfig): Federat
 }
 
 /**
- * The Sign in with Apple provider for the federation `apple`: the provider
- * the deprecated fixed-name module builds, and `appleFederationTypeModule()`
- * builds the same one under each entry's name.
+ * The Sign in with Apple provider for the federation `apple`, built from code:
+ * the provider `appleFederationTypeModule()` builds under each entry's name,
+ * with what an entry cannot carry — a client-secret resolver, a `privateKey`
+ * read at every signing, a `jwksUri` override.
  */
 export function createAppleProvider(config: AppleProviderConfig): AppleProvider {
 	return buildAppleProvider("apple", config);
@@ -515,30 +500,3 @@ export function buildAppleProvider(name: string, config: AppleProviderConfig): A
 		},
 	};
 }
-
-/**
- * Const Module for the Sign in with Apple federation integration.
- *
- * Contributes `federations.apple` (the upstream OIDC provider) and
- * `federationRedirectPolicies.apple` (the consumer redirect URL policy),
- * which must be contributed together. Config arrives through the
- * `appleFederationConfig` ComponentMap slot. Single-tenant, as the Google and
- * GitHub modules are: registered under the name "apple".
- *
- * @deprecated Use `appleFederationTypeModule()`: one module handles every
- * `core.federations` entry of type `apple`, read from the configuration by
- * core, under the entry's own name, with no `appleFederationConfig` slot to
- * fill. Composing both for one entry refuses boot.
- */
-export const appleFederationModule = defineModule({
-	name: "federation-apple",
-	requires: ["appleFederationConfig"] as const,
-	contributes: {
-		federations: {
-			apple: (deps) => createAppleProvider(deps.appleFederationConfig),
-		},
-		federationRedirectPolicies: {
-			apple: (deps) => createFederationRedirectPolicy(deps.appleFederationConfig),
-		},
-	},
-});

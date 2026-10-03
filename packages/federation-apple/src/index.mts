@@ -19,7 +19,6 @@ export {
 	APPLE_ISSUER,
 	APPLE_NAME_PART_MAX_LENGTH,
 	APPLE_PRIVATE_RELAY_DOMAIN,
-	appleFederationModule,
 	createAppleProvider,
 	isPrivateRelayEmail,
 } from "./apple.mjs";

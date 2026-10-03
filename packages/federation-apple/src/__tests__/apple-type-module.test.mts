@@ -18,12 +18,11 @@ import {
 	type AppConfig,
 	type AppHandle,
 	BootError,
+	codeChallenge,
 	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
 	type FederationProvider,
-	federationsOf,
-	type Module,
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
@@ -41,25 +40,18 @@ import {
 	sessionStoreModuleFor,
 } from "@o3co/auth-provider-session";
 import express from "express";
-import { decodeJwt, decodeProtectedHeader, jwtVerify } from "jose";
+import { jwtVerify } from "jose";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	APPLE_ISSUER,
-	type AppleProvider,
-	type AppleProviderConfig,
-	appleFederationModule,
-	appleFederationTypeModule,
-} from "#/index.mjs";
+import { APPLE_ISSUER, type AppleProvider, appleFederationTypeModule } from "#/index.mjs";
 import { makeTestSigningKey } from "./helpers.mjs";
 
 /**
  * The module that handles every `core.federations` entry of type `apple`,
  * through core's `createApp`: one provider and one redirect policy per
  * enabled entry, under the entry's name; the entry flat and held to a strict
- * schema; Apple reached through the fetch the module was given; and the same
- * provider and policy as the deprecated fixed-name module builds for the same
- * entry.
+ * schema; Apple reached through the fetch the module was given; and every
+ * key of an entry reaching the provider or the redirect policy built from it.
  */
 
 const APPLE = {
@@ -148,8 +140,6 @@ const activatorModule = defineModule({
 });
 
 interface BootOptions {
-	/** The modules that handle the entries; default the type module over `fetch`. */
-	readonly federationModules?: readonly Module[];
 	readonly fetch?: typeof fetch;
 	readonly authenticateByToken?: (token: string) => Promise<unknown>;
 }
@@ -173,9 +163,7 @@ async function boot(federations: Record<string, unknown>, options: BootOptions =
 		defaultRefreshTokenFamilyRevocationModule,
 		repositoryModule,
 		activatorModule,
-		...(options.federationModules ?? [
-			appleFederationTypeModule(options.fetch ? { fetch: options.fetch } : {}),
-		]),
+		appleFederationTypeModule(options.fetch ? { fetch: options.fetch } : {}),
 	];
 	const handle = await createApp({
 		modules,
@@ -499,50 +487,9 @@ describe("appleFederationTypeModule through createApp", () => {
 			}
 		});
 	});
-
-	it("refuses the deprecated fixed-name module beside it for the same entry: one federation has one handler", async () => {
-		const fake = await fakeApple(entryWeb.clientId);
-		const err = await refusal(
-			boot(
-				{ apple: entryWeb },
-				{
-					federationModules: [
-						appleFederationTypeModule({ fetch: fake.fetch }),
-						appleFederationModule,
-						bridgeFor("apple", fake.fetch),
-					],
-				},
-			),
-		);
-		expect(err.reason).toBe("duplicate-contribute");
-		expect(err.message).toMatch(/federation-apple-type/);
-		expect(err.message).toMatch(/"federation-apple"/);
-	});
 });
 
-/**
- * A bridge as composition roots write one for the deprecated module: the
- * entry's keys copied into the `appleFederationConfig` slot, with the fetch
- * beside them.
- */
-function bridgeFor(name: string, upstreamFetch: typeof fetch): Module {
-	return defineModule({
-		name: "test:apple-federation-config",
-		requires: ["config"] as const,
-		provides: {
-			appleFederationConfig: ({ config }): AppleProviderConfig => {
-				const {
-					enabled: _enabled,
-					type: _type,
-					...entry
-				} = federationsOf(config)[name] as Record<string, unknown>;
-				return { ...(entry as unknown as AppleProviderConfig), fetch: upstreamFetch };
-			},
-		},
-	});
-}
-
-describe("appleFederationTypeModule — parity with the deprecated fixed-name module", () => {
+describe("appleFederationTypeModule — what the provider and the policy make of an entry's keys", () => {
 	const options = {
 		redirectAllowlist: ["https://web.test/welcome"],
 		sessionDomain: "web.test",
@@ -550,97 +497,106 @@ describe("appleFederationTypeModule — parity with the deprecated fixed-name mo
 		endSessionEndpoint: "https://web.test/apple-logout",
 	};
 	const CALLBACK = "https://auth.test/session/oauth/federation/apple/callback";
+	const VERIFIER = "v".repeat(43);
 	const entries: readonly (readonly [string, Record<string, unknown>])[] = [
 		["a static clientSecret", { ...entryWeb, callbackURL: CALLBACK, ...options }],
 		["key material", { ...withKeyMaterial(KEY_MATERIAL), callbackURL: CALLBACK, ...options }],
 	];
 
-	/** The provider and the policy one path builds for `apple` from `entry`, against a fresh fake Apple. */
-	async function built(path: "fixed-name" | "type", entry: Record<string, unknown>) {
-		const fake = await fakeApple(entryWeb.clientId, "sub-1");
-		const { handle } = await boot(
-			{ apple: entry },
-			{
-				federationModules:
-					path === "type"
-						? [appleFederationTypeModule({ fetch: fake.fetch })]
-						: [appleFederationModule, bridgeFor("apple", fake.fetch)],
-			},
-		);
-		const provider = providersOf(handle).get("apple");
-		const policy = policiesOf(handle).get("apple");
-		if (provider === undefined || policy === undefined) {
-			return expect.fail(`the ${path} path built no provider or no policy for apple`);
-		}
-		return { fake, provider, policy };
-	}
-
 	it.each(entries)(
-		"builds the same provider and the same redirect policy from one entry (%s)",
+		"builds the Apple provider and the redirect policy from the entry (%s)",
 		async (_what, entry) => {
-			const fixedName = await built("fixed-name", entry);
-			const type = await built("type", entry);
+			const fake = await fakeApple(entryWeb.clientId, "sub-1");
+			const { handle } = await boot({ apple: entry }, { fetch: fake.fetch });
+			const provider = providersOf(handle).get("apple") as AppleProvider | undefined;
+			const policy = policiesOf(handle).get("apple");
+			if (provider === undefined || policy === undefined) {
+				return expect.fail("the type module built no provider or no policy for apple");
+			}
 
-			expect(type.provider.name).toBe(fixedName.provider.name);
-			expect(type.provider.scope).toEqual(fixedName.provider.scope);
-			expect(type.provider.responseMode).toBe(fixedName.provider.responseMode);
-			expect(Object.keys(type.provider).sort()).toEqual(Object.keys(fixedName.provider).sort());
+			expect(provider.name).toBe("apple");
+			expect(provider.scope).toEqual(["name", "email"]);
+			expect(provider.responseMode).toBe("form_post");
+			// The whole Apple provider: refresh, upstream logout and claim mapping
+			// beside the login flow.
+			expect(Object.keys(provider).sort()).toEqual([
+				"buildAuthorizationUrl",
+				"endSession",
+				"exchangeCode",
+				"mapClaims",
+				"name",
+				"refreshToken",
+				"responseMode",
+				"scope",
+			]);
 
-			const authorize = (provider: FederationProvider) =>
-				provider.buildAuthorizationUrl({
-					redirectUri: CALLBACK,
-					state: "state-1",
-					codeVerifier: "v".repeat(43),
-					nonce: "nonce-1",
-				}).href;
-			expect(authorize(type.provider)).toBe(authorize(fixedName.provider));
+			const authUrl = provider.buildAuthorizationUrl({
+				redirectUri: CALLBACK,
+				state: "state-1",
+				codeVerifier: VERIFIER,
+				nonce: "nonce-1",
+			});
+			expect(`${authUrl.origin}${authUrl.pathname}`).toBe(APPLE.authorizationEndpoint);
+			expect(Object.fromEntries(authUrl.searchParams)).toEqual({
+				client_id: "com.example.web",
+				redirect_uri: CALLBACK,
+				response_type: "code",
+				scope: "name email",
+				state: "state-1",
+				code_challenge: codeChallenge(VERIFIER),
+				code_challenge_method: "S256",
+				nonce: "nonce-1",
+			});
 
-			const exchange = async ({ fake, provider }: Awaited<ReturnType<typeof built>>) => {
-				fake.nonce = "nonce-1";
-				const profile = await provider.exchangeCode({
-					code: "code-1",
-					codeVerifier: "v".repeat(43),
-					redirectUri: CALLBACK,
-					nonce: "nonce-1",
+			fake.nonce = "nonce-1";
+			const profile = await provider.exchangeCode({
+				code: "code-1",
+				codeVerifier: VERIFIER,
+				redirectUri: CALLBACK,
+				nonce: "nonce-1",
+			});
+			expect(profile).toMatchObject({
+				issuer: APPLE_ISSUER,
+				sub: "sub-1",
+				email: "alice@example.test",
+			});
+			expect(fake.requestsTo(APPLE.jwksUri)).toHaveLength(1);
+			const { client_secret: secret, ...body } = Object.fromEntries(
+				fake.lastTokenRequest()?.body ?? [],
+			);
+			expect(body).toEqual({
+				grant_type: "authorization_code",
+				code: "code-1",
+				code_verifier: VERIFIER,
+				redirect_uri: CALLBACK,
+				client_id: "com.example.web",
+			});
+			if (entry.clientSecret !== undefined) {
+				expect(secret).toBe(entry.clientSecret);
+			} else {
+				const { payload, protectedHeader } = await jwtVerify(secret ?? "", signingKey.publicKey, {
+					audience: APPLE_ISSUER,
 				});
-				// A signed client secret is minted per instance (its iat and exp
-				// differ): compared by its header and the claims that name the
-				// team, the client and the audience.
-				const { client_secret: secret, ...body } = Object.fromEntries(
-					fake.lastTokenRequest()?.body ?? [],
-				);
-				const signed =
-					secret === undefined || !secret.includes(".")
-						? secret
-						: {
-								header: decodeProtectedHeader(secret),
-								claims: (({ iss, sub, aud }) => ({ iss, sub, aud }))(decodeJwt(secret)),
-							};
-				return {
-					issuer: profile.issuer,
-					sub: profile.sub,
-					email: profile.email,
-					jwks: fake.requestsTo(APPLE.jwksUri).length,
-					body,
-					signed,
-				};
-			};
-			expect(await exchange(type)).toEqual(await exchange(fixedName));
-
-			const logout = (provider: FederationProvider) =>
-				(provider as AppleProvider)
-					.endSession({ idTokenHint: "id-1", postLogoutRedirectUri: "https://web.test/bye" })
-					.then(({ url, method }) => ({ url: url.href, method }));
-			expect(await logout(type.provider)).toEqual(await logout(fixedName.provider));
-
-			for (const url of ["https://web.test/welcome", "https://elsewhere.test/"]) {
-				expect(type.policy.validateRedirect(url)).toEqual(fixedName.policy.validateRedirect(url));
+				expect(protectedHeader).toMatchObject({ alg: "ES256", kid: "KEY9876543" });
+				expect(payload).toMatchObject({ iss: "TEAM123456", sub: "com.example.web" });
 			}
-			for (const session of [{}, { redirectTo: "https://web.test/welcome" }]) {
-				expect(type.policy.resolveCallbackRedirect(session)).toEqual(
-					fixedName.policy.resolveCallbackRedirect(session),
-				);
-			}
+
+			const logout = await provider.endSession({
+				idTokenHint: "id-1",
+				postLogoutRedirectUri: "https://web.test/bye",
+			});
+			expect(logout.method).toBe("GET");
+			expect(logout.url.href).toBe(
+				"https://web.test/apple-logout?id_token_hint=id-1&post_logout_redirect_uri=https%3A%2F%2Fweb.test%2Fbye",
+			);
+
+			expect(policy.validateRedirect("https://web.test/welcome")).toEqual({ ok: true });
+			expect(policy.validateRedirect("https://elsewhere.test/").ok).toBe(false);
+			expect(policy.resolveCallbackRedirect({})).toEqual({ ok: true, value: "https://web.test/" });
+			expect(policy.resolveCallbackRedirect({ redirectTo: "https://web.test/welcome" })).toEqual({
+				ok: true,
+				value: "https://web.test/auth/callback?redirect_to=https%3A%2F%2Fweb.test%2Fwelcome",
+			});
 		},
 	);
 });
