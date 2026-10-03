@@ -63,6 +63,31 @@ rather than `workspace:*`, and refresh the lockfile. Then:
   store (#1177).
 - A mail sender of your own goes through `buildModules`'
   `overrides.mailSenderModules`, never into the module list (#1241).
+- **BREAKING: federations are handled by their `type`** (#1291). The
+  template's federation config bridges (`googleFederationConfigModule`,
+  `oidcFederationConfigModule`) and its reading of the federation map before
+  boot (`googleEnabled`, `oidcFederationNames` in `buildModules`,
+  `core.federations` in `SWITCHES`) are gone. `buildModules` always lists
+  `googleFederationTypeModule()` and `oidcFederationTypeModule()`, and core
+  hands each enabled `core.federations` entry to the module of its `type`.
+  So every entry needs a `type`. The new `application.conf` writes
+  `type = "google"` on `core.federations.google`; a scaffold that keeps its
+  own `application.conf`, or layers its own `core.federations.google`
+  without a `type`, adds `type = "google"` to it, or an enabled one refuses
+  the boot (`federation-type-unhandled`) naming
+  `core.federations.google.type = "google"`. A fork that composes
+  `googleFederationModule`, `oidcFederationModule(name)` or a bridge of its
+  own beside the new list removes them: next to an entry its type handles,
+  each is refused as `duplicate-contribute`. Each entry's keys are now read
+  by its type's strict schema: a key the type does not name, or the keys
+  nested under the type's name (`google { google { … } }`), refuse the boot
+  at the key's path, where the bridges ignored the one and accepted the
+  other. A missing or empty Google credential is refused at its path too,
+  where the provider used to refuse it. Every `CORE_FEDERATIONS_*` variable
+  reads as before, `CORE_FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS`'s
+  spellings and `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`'s two values included.
+  A second Google client is now configuration alone: another entry with
+  `type = "google"` ([template README](../templates/standalone/README.md#google-federation)).
 - Install MFA only through `MFA_MODE`
   ([Turning MFA on](#turning-mfa-on)).
 - **MFA is on by default** in the new `config/reference.conf`

@@ -26,7 +26,7 @@ the Google and generic OpenID Connect federation adapters, `-federation-grants`,
   slot), the signing key store, the client and user repositories, the audit
   sink, the one shared
   Redis connection, the in-memory user-session stores, code repository and
-  federation token store, and the federation config bridges —
+  federation token store —
   [`src/modules.mts`](src/modules.mts), with the defaults of the sections they
   own in [`config/reference.conf`](config/reference.conf). They are the
   scaffold's rather than a package's because each builds its component from
@@ -312,7 +312,7 @@ It reads the two files above once, under one snapshot of the environment
 variable changed, while the process starts cannot make boot parse something
 other than what the modules were chosen by. First, before it knows its
 modules, it reads the switches `buildModules` chooses them by — the
-federations, the features — and the `sessionRequirements` it derives the
+features, never a federation entry — and the `sessionRequirements` it derives the
 session requirements it expects from, from the two files above over core's
 `reference.conf` alone (`readSwitches`, with core's transitional reader),
 parsing those paths (`SWITCHES`) and nothing else. It reads `adapters` — which
@@ -601,6 +601,41 @@ key's path under `core.federations`; a `FEDERATIONS_GOOGLE_*` or
 `FEDERATIONS_OIDC_*` variable set alone, or beside its new name at a different
 value, is refused before any module is chosen.
 
+Every entry names its `type`, and boot hands each enabled entry to the module
+that handles that type, under the entry's name. The template always loads the
+two types it bundles — `google` (`@o3co/auth-provider-federation-google`) and
+`oidc` (`@o3co/auth-provider-federation-oidc`) — whatever the map says, and
+reads no entry itself: a key an entry carries is read, and a malformed one
+refused at its path (`core.federations.<name>.<key>`), by core and by the
+type's schema. An enabled entry with no `type`, or of a type no loaded module
+handles, refuses the boot (`federation-type-unhandled`), naming the entry.
+GitHub and Apple are not bundled: a deployment that wants one adds its
+package and its module to `buildModules` — GitHub's type module,
+`githubFederationTypeModule()`, with entries of `type = "github"`; Apple's
+per its [README](../../packages/federation-apple/README.md).
+
+`core.federations.google` ships with `type = "google"`. A second Google
+client is a second entry of that type, under its own name and with its own
+callback:
+
+```hocon
+core.federations {
+  google-work {
+    enabled = true
+    type = "google"
+    clientId = ${GOOGLE_WORK_CLIENT_ID}
+    clientSecret = ${GOOGLE_WORK_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/google-work/callback"
+  }
+}
+```
+
+The keys a `google` entry takes beside the variables below — `redirectAllowlist`,
+`sessionDomain`, `authCallbackUrl`, `clientUrl`,
+`requireAuthorizationResponseIss`, `endSessionEndpoint` — are in
+`config/application.conf` and [the package's README](../../packages/federation-google/README.md);
+a key it does not name refuses the entry.
+
 | Variable | Default | Description |
 |---|---|---|
 | `CORE_FEDERATIONS_GOOGLE_ENABLED` | `false` | Enable Google OAuth federation |
@@ -641,9 +676,8 @@ core.federations {
 }
 ```
 
-The entry's `type` names the implementation. `core.federations.google` without a
-`type` is the built-in Google federation; with `type = "oidc"` it is a generic
-OIDC instance named `google`, and the built-in module is not composed.
+The entry's `type` names the implementation, never its name: an entry named
+`google` with `type = "oidc"` is a generic OIDC federation named `google`.
 
 Every field the package accepts — `scopes`, `discovery` / `endpoints`,
 `privateKey`, `userInfo`, `idTokenSignedResponseAlg`, `clockToleranceSeconds` —
@@ -1026,7 +1060,7 @@ are configured per federation (`CORE_FEDERATIONS_GOOGLE_CALLBACK_URL`,
 3. **One module per store slot.** Each adapter switch — `adapters.federationTokenStore`, `adapters.userSessionStores`, `adapters.rateLimiter`, `adapters.codeRepository`, `adapters.accessTokenDenylist`, `adapters.replaySeenSet`, `adapters.consentStore`, the two federation-grant store switches and the two MFA store switches — picks one of a memory / Redis pair (or, for the MFA factors, the Store). Both provide the same slot, so wiring both is a boot-time slot collision. `adapters.consentStore = "none"` wires neither, the federation-grant stores are wired only while the feature is enabled, and the MFA stores only while `MFA_MODE` installs MFA.
 4. **The shared Redis connection comes with the first Redis-backed module.** `standaloneRedisClientsModule` opens the one ioredis connection every Redis adapter here uses, from its own section (`redis-clients`), and is added whenever a composed module needs one. The refresh-token family store is on Redis in the shipped composition, so a deployment always has it; the in-memory family store is a test override (`overrides.refreshTokenFamilyModules`).
 5. **The template's own settings modules are always composed.** `loggingModule` and `httpModule` own `logging {}` and `http {}`, the CORS list among `http`'s keys (`http.cors.allowedOrigins`). `httpModule` provides core's `httpSettings`, which is authoritative, so no `overrideComponents` entry replaces it while the module is loaded; it also provides the template's `httpHostSettings`, which `app.mts` reads after boot for the port and the readiness deadline. The logger is built before boot from the `logging` section (`readLogging`), not by a module, and handed to boot as the `logger` component.
-6. **A federation adapter comes with its config bridge.** `googleFederationModule` with `googleFederationConfigModule` — only for an enabled `core.federations.google` entry whose `type` is `google`, so a `type = "oidc"` section named `google` is not composed twice — and one `oidcFederationModule(name)` per enabled `type = "oidc"` section, with the one `oidcFederationConfigModule` they share. A bridge's provider throws when its section is absent, so the pair is included at composition time rather than gated inside it.
+6. **The federation types are always composed.** `googleFederationTypeModule()` and `oidcFederationTypeModule()` are listed whatever `core.federations` says: each contributes its type, and boot builds one federation per enabled entry of it, under the entry's name, so a federation is added or removed in configuration alone. Nothing in the list reads an entry. A module that contributes a federation under an entry's name directly beside an entry dispatched by its type is a boot-time `duplicate-contribute`: add a federation of another kind as a type module, and give its entries that type.
 7. **The mail sender follows the environment.** `@o3co/auth-provider-standard`'s development sender, which logs each code, where the configuration was selected as `development`; its module installs only where that name, and `CONFIG_ENV` and `NODE_ENV` wherever they are set, each read `development` or `test`, and refuses the boot otherwise, or where `core.deployment.mode` is `multi`. Under any other name, the SMTP sender's module, whose section is `standard-smtp-mail-sender` ([the package's README](../../packages/standard/README.md)); its sender is built only where something reads the `mailSender` slot, and there the boot needs `STANDARD_SMTP_MAIL_SENDER_HOST` and `STANDARD_SMTP_MAIL_SENDER_FROM`. While `MFA_MODE` is `off` nothing reads the slot, so the template boots without them; with MFA on, the MFA module and the operator reset read it. A sender of your own replaces this choice: pass its module where [`src/app.mts`](src/app.mts) calls `buildModules`, as `buildModules(switches, { environment: env, logger, mailSenderModules: [mySenderModule] })`. Given, `mailSenderModules` is installed under every environment name and the bundled sender is not, so the two never both provide the slot; an empty list installs no sender, and a module that needs one (the MFA email factor, or the MFA module with `requireEmailProof = "always"`) then refuses the boot.
 
 `jwksModule` (from core) is always composed: a provider that signs tokens publishes its verification keys whether or not an issuer is configured. What each route module mounts is in its package's README. One behaviour to know when composing: `sessionModule`'s `POST /session/logout` deletes the `UserSession` record (so `/oauth/introspect` and `/oauth/userinfo` stop honouring tokens minted from that session), the subject index and the federation entries — but it does **not** revoke refresh-token families; `POST /oauth/logout` is the endpoint that runs the full cascade. See [Which logout endpoint invalidates what](../../docs/operator-runbook.md#which-logout-endpoint-invalidates-what).
