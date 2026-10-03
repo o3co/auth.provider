@@ -232,6 +232,10 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   every such entry (#1273). It used to boot, and the federation's routes
   answered `404`. Install the module that handles it, correct its `type`, or
   set `enabled = false`.
+- **BREAKING: two enabled federations cannot share a `callbackURL`.** Two
+  enabled `core.federations` entries with the same `callbackURL` refuse the
+  boot (`config-validation-failed` at `core.federations.<name>.callbackURL`).
+  Only one of them could complete a login. Give each its own.
 
 The boot refusals you can meet, with their messages, are in
 [operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).

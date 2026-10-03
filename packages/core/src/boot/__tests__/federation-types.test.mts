@@ -29,6 +29,7 @@ import { z } from "zod";
 import type { FederationProvider } from "../../federations/types.mjs";
 import type { Module } from "../../modules/manifest/index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
+import { federationTypeForTests } from "../../testing/fixtures/federationType.mjs";
 import { coreConfigForTests, makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { applyContributions } from "../apply-contributions.mjs";
 import { createApp, mergeWithBuiltins } from "../create-app.mjs";
@@ -155,6 +156,12 @@ async function refusal(promise: Promise<unknown>): Promise<BootError> {
 	}
 	return expect.fail("boot should have been refused");
 }
+
+/** The issues a `config-validation-failed` refusal lists. */
+const issuesOf = (
+	err: BootError,
+): readonly { readonly path: unknown[]; readonly message: string }[] =>
+	(err.details as unknown as { issues: { path: unknown[]; message: string }[] }).issues;
 
 /** The redirect-policy projection, which the session package declares on the component map. */
 const redirectPolicies = (handle: AppHandle): ReadonlyMap<string, unknown> | undefined =>
@@ -408,6 +415,166 @@ describe("core.federations — dispatched by type", () => {
 
 		expect(err.message).toContain("core.federations.corp.callbackURL");
 		expect(err.message).not.toContain("flat");
+	});
+
+	it("says a dispatched entry is flat when its type's strict schema refuses the key named after its type", async () => {
+		const { module, factory } = acmePackage({
+			entrySchema: z.object({ issuer: z.string().optional() }).strict(),
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					corp: enabledEntry("acme", "corp", {
+						acme: { issuer: "https://corp.example" },
+						extra: { issuer: "https://corp.example" },
+					}),
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		const issues = issuesOf(err);
+		expect(issues).toHaveLength(1);
+		expect(issues[0]?.path).toEqual(["core", "federations", "corp"]);
+		expect(issues[0]?.message).toContain(
+			'a dispatched entry is flat: the keys nested under "acme" are not read, so write them beside its type',
+		);
+		expect(err.message).toContain(
+			'a dispatched entry is flat: the keys nested under "acme" are not read',
+		);
+		expect(err.message).not.toContain("core.federations.corp.callbackURL");
+		expect(factory).not.toHaveBeenCalled();
+	});
+
+	it("does not say an entry is flat when a strict schema refuses another key", async () => {
+		const { module } = acmePackage({ entrySchema: z.object({ issuer: z.string() }).strict() });
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					corp: enabledEntry("acme", "corp", {
+						issuer: "https://corp.example",
+						other: { issuer: "https://corp.example" },
+					}),
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).not.toContain("flat");
+	});
+
+	it("boots a nested shape under a type whose schema reads the key named after it", async () => {
+		const handle = await createApp({
+			modules: [federationStores, federationTypeForTests("acme")],
+			bootstrapComponents: federationsConfig({
+				corp: enabledEntry("acme", "corp", { acme: { issuer: "https://corp.example" } }),
+			}),
+		});
+
+		expect(handle.components.federationProviders?.get("corp")?.name).toBe("corp");
+		await handle.dispose();
+	});
+
+	it("refuses two enabled entries that share a callbackURL, naming the other entry and not the URL", async () => {
+		const { module, factory } = acmePackage();
+		const shared = "https://auth.example/session/federation/shared/callback";
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					corp: enabledEntry("acme", "corp", {
+						issuer: "https://corp.example",
+						callbackURL: shared,
+					}),
+					partner: enabledEntry("acme", "partner", {
+						issuer: "https://partner.example",
+						callbackURL: shared,
+					}),
+					"third idp": enabledEntry("acme", "third", {
+						issuer: "https://third.example",
+						callbackURL: shared,
+					}),
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toMatchObject({
+			reason: "config-validation-failed",
+			issues: [
+				expect.objectContaining({ path: ["core", "federations", "partner", "callbackURL"] }),
+				expect.objectContaining({ path: ["core", "federations", "third idp"] }),
+				expect.objectContaining({ path: ["core", "federations", "third idp", "callbackURL"] }),
+			],
+		});
+		const issues = issuesOf(err);
+		expect(issues[0]?.message).toContain("core.federations.corp");
+		expect(issues[2]?.message).toContain("core.federations.corp");
+		expect(err.message).toContain("core.federations.partner.callbackURL");
+		expect(err.message).toContain('core.federations."third idp".callbackURL');
+		expect(err.message).not.toContain(shared);
+		expect(JSON.stringify(err.details)).not.toContain(shared);
+		expect(factory).not.toHaveBeenCalled();
+	});
+
+	it("names an entry that is not a bare key quoted when another entry shares its callbackURL", async () => {
+		const { module } = acmePackage();
+		const shared = "https://auth.example/cb";
+
+		const err = await refusal(
+			createApp({
+				modules: [federationStores, module],
+				bootstrapComponents: federationsConfig({
+					"corp.idp": enabledEntry("acme", "corp", { issuer: "https://a", callbackURL: shared }),
+					partner: enabledEntry("acme", "partner", { issuer: "https://b", callbackURL: shared }),
+				}),
+			}),
+		);
+
+		const issues = issuesOf(err);
+		expect(issues.at(-1)?.path).toEqual(["core", "federations", "partner", "callbackURL"]);
+		expect(issues.at(-1)?.message).toContain('core.federations."corp.idp"');
+	});
+
+	it("boots two entries sharing a callbackURL when one of them is disabled", async () => {
+		const { module } = acmePackage();
+		const shared = "https://auth.example/session/federation/corp/callback";
+
+		const handle = await createApp({
+			modules: [federationStores, module],
+			bootstrapComponents: federationsConfig({
+				corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
+				partner: {
+					...enabledEntry("acme", "partner", { issuer: "https://partner.example" }),
+					enabled: false,
+					callbackURL: shared,
+				},
+			}),
+		});
+
+		expect([...(handle.components.federationProviders?.keys() ?? [])]).toEqual(["corp"]);
+		await handle.dispose();
+	});
+
+	it("boots two enabled entries whose callbackURLs differ", async () => {
+		const { module } = acmePackage();
+
+		const handle = await createApp({
+			modules: [federationStores, module],
+			bootstrapComponents: federationsConfig({
+				corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
+				partner: enabledEntry("acme", "partner", { issuer: "https://partner.example" }),
+			}),
+		});
+
+		expect([...(handle.components.federationProviders?.keys() ?? [])]).toEqual(["corp", "partner"]);
+		await handle.dispose();
 	});
 
 	it("writes a name that is not a bare key quoted, so a newline in it does not split the message", async () => {
