@@ -478,9 +478,10 @@ modules fills them.
 - **BREAKING: the session package no longer exports `extractFederationSection`**
   (#1313), and reads federation entries flat only: each enabled entry's
   `callbackURL` beside `enabled`, with no `type` defaulted to the entry's name
-  and no `[type] { … }` sub-section. A key named after the type is one of the
-  type's own keys, so an entry holding an object there now boots, where it was
-  refused as a "mixed shape". Read `core.federations` with core's
+  and no `[type] { … }` sub-section. A key named after the type is handed to
+  the type's schema like any other key (a strict schema, as every bundled
+  type's is, refuses it), so session no longer refuses it as a "mixed shape".
+  Read `core.federations` with core's
   `federationsOf` or `enabledFederationsOf` and take the flat keys, or
   register a type under `federationTypes`, whose factories receive the entry's
   name, its `callbackURL` and its keys as the type's schema parsed them.

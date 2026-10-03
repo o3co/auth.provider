@@ -1306,6 +1306,8 @@ const exampleEntrySchema = z.strictObject({
   clientSecret: z.string().min(1),
   clientUrl: z.string().optional(),
   redirectAllowlist: z.array(z.string()).optional(),
+  authCallbackUrl: z.string().optional(),
+  sessionDomain: z.string().optional(),
 });
 
 export const exampleFederationTypeModule = defineModule({
