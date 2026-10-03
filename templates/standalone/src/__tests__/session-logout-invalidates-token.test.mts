@@ -90,7 +90,7 @@ const config: AppConfig & Record<string, unknown> = {
 	},
 	// The session requirements this composition expects, as the shipped
 	// `application.conf` does (ADR 2026-09-28-session-admission): none.
-	...coreConfigForTests({ federations: { google: { enabled: false } } }),
+	...coreConfigForTests({ federations: { google: { enabled: false, type: "google" } } }),
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

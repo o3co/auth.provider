@@ -24,20 +24,14 @@
  * path.
  */
 
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
-import {
-	readOwnLayers,
-	readSwitches,
-	resolveConfigPaths,
-	resolveLayers,
-	type Switches,
-} from "#/configPath.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths, resolveLayers } from "#/configPath.mjs";
 import {
 	type Composition,
 	compose,
@@ -171,21 +165,28 @@ describe("the federation types the template bundles", () => {
 		expect(start.searchParams.get("client_id")).toBe(SINGLE_ENV.CORE_FEDERATIONS_GOOGLE_CLIENT_ID);
 	});
 
-	it("refuse to guess an enabled entry's type: one that names none is refused, naming the type to set", async () => {
-		// A scaffold's own `core.federations.google` entry that names no type.
-		const withoutType = (config: Switches): Switches => {
-			const core = (config as { core?: { federations?: Record<string, object> } }).core;
-			const { type: _dropped, ...google } = (core?.federations?.google ?? {}) as {
-				type?: unknown;
-			};
-			return {
-				...config,
-				core: { ...core, federations: { ...core?.federations, google } },
-			} as unknown as Switches;
-		};
-		const err = await refusal({ config: withoutType });
-		expect(err.reason).toBe("federation-type-unhandled");
-		expect(err.message).toContain('set core.federations.google.type = "google"');
+	it("register the type of every entry each shipped configuration file writes", () => {
+		const registered = new Set(
+			buildModules(resolveConfig(SINGLE_ENV)).flatMap((module) =>
+				Object.keys(module.contributes?.federationTypes ?? {}),
+			),
+		);
+		const written = readdirSync(configDir)
+			.filter((file) => file.endsWith(".conf"))
+			.flatMap((file) => {
+				const resolved = resolveLayers(readOwnLayers([join(configDir, file)], { env: {} }), []) as {
+					core?: { federations?: Record<string, { type?: unknown }> };
+				};
+				return Object.entries(resolved.core?.federations ?? {}).map(([name, entry]) => ({
+					file,
+					name,
+					type: entry.type,
+				}));
+			});
+		expect(written).not.toEqual([]);
+		expect(written.filter(({ type }) => typeof type !== "string" || !registered.has(type))).toEqual(
+			[],
+		);
 	});
 });
 
