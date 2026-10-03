@@ -919,6 +919,7 @@ describe("takeRotation", () => {
 		await take({ limit: 1 });
 		expect(await take({ limit: 1, nowMs: at(DAY + HOUR - 1), expectedVersion: 3 })).toBeNull();
 		expect(await take({ limit: 1, nowMs: at(DAY + HOUR), expectedVersion: 3 })).toMatchObject({
+			version: "4",
 			rotationsSince: String(at(DAY + HOUR)),
 			rotationsCount: "1",
 		});
@@ -1123,6 +1124,15 @@ describe("the stored version, as every script reads it", () => {
 			retryAfterSeconds: undefined,
 			upstreamCode: undefined,
 		});
+	const refund = (expectedVersion: number) => {
+		if (client.refundRotation === undefined)
+			throw new Error("fixture: the client has no refundRotation");
+		return client.refundRotation(grantKey("g-1"), {
+			nowMs: at(DAY),
+			expectedVersion,
+			sinceMs: at(DAY - MIN),
+		});
+	};
 	const guarded = {
 		takeRotation: take,
 		replaceCredentials: (expectedVersion: number) =>
@@ -1151,8 +1161,16 @@ describe("the stored version, as every script reads it", () => {
 		}
 	});
 
+	it("is refused by a take one below the largest safe integer: the version it would answer could not be bumped by the attempt's next write", async () => {
+		await activeWithCredential();
+		await redis.hset(grantKey("g-1"), "version", String(MAX - 1));
+		const before = await rawOf();
+		expect(await take(MAX - 1)).toBeNull();
+		expect(await rawOf()).toStrictEqual(before);
+	});
+
 	it("is refused by an activation at the largest safe integer, and by one that does not read as a safe integer, and nothing is written", async () => {
-		for (const version of [String(MAX), "2.0"]) {
+		for (const version of [String(MAX), ...LOOSE]) {
 			await pending();
 			await redis.hset(grantKey("g-1"), "version", version);
 			const before = await rawOf();
@@ -1177,22 +1195,38 @@ describe("the stored version, as every script reads it", () => {
 				atMs: at(DAY),
 				by: "operator",
 			});
-			expect(fields, version).toMatchObject({ status: "revoked", version });
+			expect(fields, version).toMatchObject({
+				status: "revoked",
+				version,
+				revokedBy: "operator",
+				revokedAt: String(at(DAY)),
+			});
 			expect(await redis.exists(credKey("g-1")), version).toBe(0);
 			await redis.del(grantKey("g-1"), credKey("g-1"));
 		}
 	});
 
 	it("matches the expected version only when it reads as the reader reads it", async () => {
-		const compared = { ...guarded, noteRefreshFailure: stamp };
+		const compared = { ...guarded, noteRefreshFailure: stamp, refundRotation: refund };
 		for (const [name, write] of Object.entries(compared)) {
-			for (const version of LOOSE) {
+			// "2" first: the same write lands on the canonical spelling, so each
+			// refusal below is the spelling's.
+			for (const version of ["2", ...LOOSE]) {
+				const label = `${name} ${JSON.stringify(version)}`;
 				await activeWithCredential();
-				await redis.hset(grantKey("g-1"), "version", version);
+				await redis.hset(grantKey("g-1"), {
+					version,
+					rotationsSince: String(at(DAY - MIN)),
+					rotationsCount: "1",
+				});
 				const before = await rawOf();
-				expect(await write(2), `${name} ${JSON.stringify(version)}`).toBeNull();
-				expect(await rawOf(), `${name} ${JSON.stringify(version)}`).toStrictEqual(before);
-				expect(await redis.get(credKey("g-1")), name).toBe("v2.sealed-1");
+				if (version === "2") {
+					expect(await write(2), label).not.toBeNull();
+				} else {
+					expect(await write(2), label).toBeNull();
+					expect(await rawOf(), label).toStrictEqual(before);
+					expect(await redis.get(credKey("g-1")), label).toBe("v2.sealed-1");
+				}
 				await redis.del(grantKey("g-1"), credKey("g-1"));
 			}
 		}

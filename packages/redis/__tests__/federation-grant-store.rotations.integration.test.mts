@@ -307,7 +307,7 @@ describe("refundRotation", () => {
 			expect(read).toMatchObject({ rotations: { since: at(DAY), count: 0 } });
 		}
 		expect(await takeAt(held, grant.version + 2, at(DAY + 2 * MIN))).toMatchObject({
-			grant: { rotations: { since: at(DAY), count: 1 } },
+			grant: { version: grant.version + 3, rotations: { since: at(DAY), count: 1 } },
 		});
 	});
 

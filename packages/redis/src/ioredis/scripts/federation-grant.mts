@@ -508,6 +508,9 @@ local g = fg_visible(KEYS[1], now)
 if g == nil or g['status'] ~= 'active' then return {0} end
 local version = fg_bumpable(g['version'])
 if version == nil or version ~= expected then return {0} end
+-- The version this answers guards the attempt's next write, which bumps it:
+-- it must be bumpable itself.
+if version + 1 >= 9007199254740991 then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
 local since = fg_int(g['rotationsSince'])

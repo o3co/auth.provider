@@ -786,9 +786,14 @@ take would be refused.
 Every script that bumps the version reads it as the TypeScript reader does: a
 safe integer whose successor is one too. A version stored at
 `Number.MAX_SAFE_INTEGER`, or one that only Lua's `tonumber` reads (`2.0`,
-`0x2`), is refused by every guarded write, which writes nothing, and is
-compared as no version at all. A revocation, which must always win, still
-ends such a grant and leaves its version as it was.
+`0x2`), is refused by every write that bumps, which writes nothing, and is
+compared as no version at all. A take also refuses one below
+`Number.MAX_SAFE_INTEGER`: the version it answers guards the attempt's next
+write, which must be able to bump it. A revocation, which must always win,
+still ends such a grant and leaves its version as it was. Over a version only
+`tonumber` reads, that leaves a revoked record the reader cannot decode; the
+scripts only ever write canonical versions, so only a write to the keyspace
+from outside this store produces one.
 
 The credential is sealed under a key **ring**, in core's `v2` key-ring
 envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the
