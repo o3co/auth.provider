@@ -14,6 +14,15 @@
  * limitations under the License.
  */
 
+/**
+ * The Apple federation provider: the authorization URL, the `form_post` code
+ * exchange with a client secret given as is or signed from the key material,
+ * the ID token verified against Apple's keys, the profile and RP-initiated
+ * logout. `buildAppleProvider` builds it under a federation's name, as the
+ * type module does for each entry; `createAppleProvider` builds it under the
+ * name `apple`, for code that wires a provider by hand.
+ */
+
 import {
 	callbackUrlForExchange,
 	codeChallenge,
