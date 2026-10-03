@@ -267,9 +267,9 @@ describe("phase two: what createApp is handed", () => {
 		// The template's application.conf wins over a package's reference…
 		expect(resolved.oauth?.revocation).toEqual({ accessToken: "denylist" });
 		// …and a package's reference over core's.
-		expect((resolved.core?.tokenBinding as { dispatchPolicy?: unknown } | undefined)?.dispatchPolicy).toBe(
-			"widget-policy",
-		);
+		expect(
+			(resolved.core?.tokenBinding as { dispatchPolicy?: unknown } | undefined)?.dispatchPolicy,
+		).toBe("widget-policy");
 	});
 
 	it("layers no reference a loaded module does not declare", () => {
