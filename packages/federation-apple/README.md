@@ -145,9 +145,6 @@ Neither is a resolver for `clientSecret`, nor a `privateKey` read anew at every
 token exchange: a configuration holds strings, read at boot. Those two are
 code-only, through `createAppleProvider`.
 
-### Removed: the fixed-name module
-
-`appleFederationModule` and its `appleFederationConfig` slot were removed in favour of `appleFederationTypeModule()` and a `core.federations.<name> { type = "apple" }` entry.
 
 ## What you need from Apple, and which one goes where
 
