@@ -167,6 +167,7 @@ export type {
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
 	RegisteredFederationType,
+	ReservedBootstrapInputs,
 	ReservedComponentKeyDetails,
 	RouteCollector,
 	RouteOrderCycleDetails,

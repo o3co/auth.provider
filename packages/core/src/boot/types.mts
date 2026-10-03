@@ -511,12 +511,39 @@ export type ContributionKindMap = Partial<ContributionCollectorMap>;
 // ---------------------------------------------------------------------------
 
 /**
+ * What a composition root hands boot in `bootstrapComponents` beside the
+ * components: inputs stage 1 reads itself. Each key is reserved — boot takes
+ * it out of the map before any check reads the map, seeds no component from
+ * it, and no module can require it.
+ */
+export interface ReservedBootstrapInputs {
+	/**
+	 * The configuration's defaults: what the composition resolves from the
+	 * `reference.conf` files of the modules it loads and core's
+	 * (`moduleReferences`), in the same order, with no operator layer and no
+	 * environment — unparsed, as `config` is. Optional.
+	 *
+	 * Stage 1 reads it for the top-level sections no loaded module owns that
+	 * set something: one it holds and the configuration leaves equal to it —
+	 * a sibling's section, which a package's `reference.conf` sets whenever
+	 * any of its modules is loaded — is not named; one it holds and the
+	 * operator's files or the environment changed is named once at warn as
+	 * `config_sections_not_loaded`; one it does not hold is
+	 * `config_sections_ignored`. Without it, every such section is
+	 * `config_sections_ignored`. A value that is not an object holds no
+	 * section. Names only, never a value.
+	 */
+	readonly configDefaults?: unknown;
+}
+
+/**
  * Map of component values originating from the host environment, pre-seeded
- * into the DI graph before any module factory runs.
+ * into the DI graph before any module factory runs, with the reserved inputs
+ * stage 1 reads itself ({@link ReservedBootstrapInputs}).
  */
 export type BootstrapMap = {
 	readonly [K in ComponentKey]?: ComponentMap[K];
-};
+} & ReservedBootstrapInputs;
 
 /**
  * The minimal host contract of the built-in createApp call: a closed shape,

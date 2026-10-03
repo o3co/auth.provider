@@ -552,6 +552,7 @@
 . RequirementInterruption type
 . RequirementSession type
 . RequirementVerdict type
+. ReservedBootstrapInputs type
 . ReservedComponentKeyDetails type
 . RetrieveFederationGrantTokenDeps type
 . RetrieveFederationGrantTokenRequest type

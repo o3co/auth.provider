@@ -78,6 +78,7 @@ export type {
 	ProvidesFactoryFailedDetails,
 	RegisteredFederationType,
 	RegistryWorld,
+	ReservedBootstrapInputs,
 	ReservedComponentKeyDetails,
 	RouteCollector,
 	RouteOrderCycleDetails,
