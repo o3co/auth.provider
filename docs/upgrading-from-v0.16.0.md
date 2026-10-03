@@ -75,10 +75,9 @@ rather than `workspace:*`, and refresh the lockfile. Then:
     (`{env}.conf`) merges over it, so a `core.federations.google` written
     there inherits that type. A scaffold that keeps its own
     `application.conf`, or declares an entry of its own, writes the `type`
-    on the entry, or an enabled one refuses the boot
-    (`federation-type-unhandled`), naming the entry and, for an entry named
-    after a loaded type, the setting to add
-    (`core.federations.google.type = "google"`).
+    on the entry, enabled or not, or the boot is refused at config
+    validation (`config-validation-failed` at
+    `core.federations.<name>.type`, [below](#values-read-more-strictly)).
   - A fork that composes `googleFederationModule` or
     `oidcFederationModule(name)` beside the new list removes it: a module
     that contributes `federations.<name>` for an entry its type also handles
@@ -214,13 +213,22 @@ step 2, lists every retired key and what you see. New since v0.16.0:
   the requirement it names is expected, registered and declares the
   second-factor authority (#1249).
 
+- **BREAKING: every federation names its `type`, and only its type's module
+  handles it (#1309).** Every `core.federations` entry sets `type`, enabled
+  or not: one without, or with an empty one, refuses the boot at config
+  validation (`config-validation-failed` at `core.federations.<name>.type`).
+  Only the module registering that type under `federationTypes` handles an
+  enabled entry; a module contributing `federations.<name>` directly no
+  longer does, nor does a host whose `federations` collector holds the name.
+  Write the `type` of the module that handles each entry — `"google"`,
+  `"github"`, `"apple"`, `"oidc"`, or your own module's — and install that
+  module.
 - **An enabled federation nothing handles.** An enabled
-  `core.federations.<name>` that no installed module handles — no module
-  registers its `type` under `federationTypes`, and none contributes
-  `federations.<name>` — refuses the boot (`federation-type-unhandled`),
-  naming every such entry (#1273). It used to boot, and the federation's
-  routes answered `404`. Install the module that handles it, correct its
-  `type`, or set `enabled = false`.
+  `core.federations.<name>` whose `type` no installed module registers under
+  `federationTypes` refuses the boot (`federation-type-unhandled`), naming
+  every such entry (#1273). It used to boot, and the federation's routes
+  answered `404`. Install the module that handles it, correct its `type`, or
+  set `enabled = false`.
 
 The boot refusals you can meet, with their messages, are in
 [operator runbook §1](operator-runbook.md#boot-refusals-you-will-meet).

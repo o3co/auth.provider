@@ -227,11 +227,12 @@ oauth-session.enabled = true
 # 32 bytes (256 bits), e.g. `openssl rand -hex 32`.
 session-store { secret = ${SESSION_STORE_SECRET} }
 
-# One section per federation. `type` names the adapter package and defaults
-# to the section's name; each adapter's README lists its settings.
+# One section per federation. `type` names the module that handles it and
+# is required, enabled or not; each adapter's README lists its settings.
 core.federations {
   google {
     enabled = false
+    type = "google"
     # clientId, clientSecret, callbackURL — required when enabled = true
   }
   # okta { enabled = false, type = "oidc" }   # any OpenID Connect IdP, by issuer
