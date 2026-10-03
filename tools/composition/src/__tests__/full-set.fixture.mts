@@ -28,9 +28,11 @@
  *   packages' `reference.conf` files are layered because their modules
  *   declare them (`section.reference`), as `app.mts` does.
  * - The small modules each package's README has a deployment write: the
- *   WebAuthn, Apple and GitHub config bridges and a `grantPolicy` (WebAuthn
- *   refuses to boot without one, and no package ships one). The federation
- *   bridges point each adapter's `fetch` at a fake upstream.
+ *   WebAuthn config bridge and a `grantPolicy` (WebAuthn refuses to boot
+ *   without one, and no package ships one).
+ * - The Apple and GitHub federations as `core.federations` entries of their
+ *   types, handled by each package's type module, whose `fetch` option points
+ *   it at a fake upstream.
  * - A mail sender, core's recording one, handed to the tests
  *   (`FullSet.mail`). It fills the slot as a composition root's override of
  *   the template's SMTP sender's module: the module stays installed and its
@@ -67,7 +69,6 @@ import {
 	createRepositoryFactories,
 	defaultChallengeCeremonyModule,
 	defineModule,
-	federationsOf,
 	type GrantPolicyHook,
 	type InterruptionAnswer,
 	loggableError,
@@ -94,8 +95,8 @@ import {
 } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { dpopModule } from "@o3co/auth-provider-dpop";
-import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
-import { githubFederationModule } from "@o3co/auth-provider-federation-github";
+import { appleFederationTypeModule } from "@o3co/auth-provider-federation-apple";
+import { githubFederationTypeModule } from "@o3co/auth-provider-federation-github";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import {
 	type FoundationUserRepositoryUrls,
@@ -695,29 +696,11 @@ const GITHUB_ID = 12345;
 /** The handle the GitHub federation's callback resolves through `authenticateByToken`. */
 export const GITHUB_HANDLE = `github:${GITHUB_ID}`;
 
-/** A federation's fields in `core.federations`, as the bridges read them (they check nothing else). */
-const section = (config: AppConfig, name: string): Record<string, string> =>
-	(federationsOf(config)[name] as Record<string, string> | undefined) ?? {};
-
-function federationBridges(config: AppConfig, features: Features, f: Fakes): Module[] {
-	const bridge = (name: "apple" | "github", fetch: typeof globalThis.fetch) => {
-		const { clientId, clientSecret, callbackURL, clientUrl } = section(config, name);
-		return defineModule({
-			name: `deployment:${name}-federation-config`,
-			provides: {
-				[`${name}FederationConfig`]: () => ({
-					clientId,
-					clientSecret,
-					callbackURL,
-					clientUrl,
-					fetch,
-				}),
-			},
-		});
-	};
+/** The Apple and GitHub type modules, each sending its upstream requests to its fake. */
+function federationTypeModules(features: Features, f: Fakes): Module[] {
 	return [
-		...(features.apple ? [appleFederationModule, bridge("apple", f.apple.fetch)] : []),
-		...(features.github ? [githubFederationModule, bridge("github", f.github.fetch)] : []),
+		...(features.apple ? [appleFederationTypeModule({ fetch: f.apple.fetch })] : []),
+		...(features.github ? [githubFederationTypeModule({ fetch: f.github.fetch })] : []),
 	];
 }
 
@@ -775,7 +758,7 @@ function addedModules(
 		...(features.webauthn && features.mfa ? [webauthnMfaFactorModule] : []),
 		grantPolicyModule,
 		...requirementModules(interrupt, ceremonies, outage),
-		...federationBridges(config, features, f),
+		...federationTypeModules(features, f),
 	];
 }
 
