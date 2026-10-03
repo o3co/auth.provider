@@ -101,8 +101,8 @@ nested shape (`okta { type = "oidc", oidc { ... } }`). Both paths build the
 same provider and redirect policy for one entry. Composing the type module and
 `oidcFederationModule(<name>)` for the same entry refuses boot
 (`duplicate-contribute`): one federation has one handler. The scaffold
-(`@o3co/create-auth-provider`) still composes the deprecated modules in
-`src/buildModules.mts`.
+(`@o3co/create-auth-provider`) composes `oidcFederationTypeModule()` and
+fills no slot.
 
 ### Configuration
 

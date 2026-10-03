@@ -208,19 +208,18 @@ start that carries `redirect_to` needs an allowlist entry for it and
 therefore ends every such login on a `500` instead of in the app. The bridge above does not forward the other
 optional fields (`endSessionEndpoint`, `requireAuthorizationResponseIss`, `accessType`); forward them if the deployment sets them. It
 reads the section only when its `type` is `google` (the default for a section
-named `google`), as the standalone template does (in `buildModules.mts`), so a `type = "oidc"` section
-under that name is not read as this adapter's. It casts; a production bridge
-checks each field's type, as the template's Google bridge
-(`googleFederationConfigModule` in
-[`templates/standalone/src/modules.mts`](../../templates/standalone/src/modules.mts)) does.
+named `google`), so a `type = "oidc"` section under that name is not read as
+this adapter's. It casts; a production bridge checks each field's type, and
+the type's entry schema (`googleEntrySchema` in [`src/entry.mts`](src/entry.mts))
+is the reference for each field's shape.
 `clientSecret` is a string. `createGoogleProvider` throws at boot when
 `clientId`, `clientSecret` or `callbackURL` is missing.
 
 Both modules build the same provider and redirect policy for one entry.
 Composing `googleFederationTypeModule()` and `googleFederationModule` for the
 entry `google` refuses boot (`duplicate-contribute`): one federation has one
-handler. The standalone template still composes the deprecated module and its
-bridge.
+handler. The standalone template composes `googleFederationTypeModule()` and
+writes no bridge.
 
 ## What a login does
 
@@ -283,8 +282,9 @@ token route (it answers `410 refresh_token_absent` once that token expires).
 In code, only an omitted field means the default: any other value, `null`
 included, is refused at construction (an entry's `null` reads as absent
 first). Under the deprecated module, an environment override arrives as a
-string, so coerce it in the bridge; the standalone template's bridge forwards
-it from `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`.
+string, so coerce it in the bridge. The standalone template's entry binds
+`accessType` to `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`, and the type module
+reads it.
 
 Keeping an earlier session's refresh token for the same `<name>:<sub>` is not
 done: it would need a credential store that outlives sessions.
@@ -308,8 +308,8 @@ of an environment variable (above). In code **it must be a boolean**: an
 environment override arrives as the string `"false"`, which is truthy, so
 `createGoogleProvider` refuses anything that is not a boolean instead of
 quietly keeping the requirement on. Under the deprecated module, the bridge
-above does not forward it; forward and coerce it there, as the standalone
-template's bridge does.
+above does not forward it; forward it there, coerced to a boolean as the
+entry's schema reads it.
 
 If every Google login starts answering `502 exchange_failed` with the log cause
 `response parameter "iss" (issuer) missing`, either Google stopped sending the
