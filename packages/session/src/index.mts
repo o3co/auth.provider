@@ -81,7 +81,6 @@ export {
 	mergeFederatedClaims,
 	PROMOTABLE_FEDERATED_CLAIMS,
 } from "./federations/claim-precedence.mjs";
-export { extractFederationSection } from "./federations/extract-federation-section.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
 export { resolveCallbackRedirect } from "./federations/helpers.mjs";
 // The federation redirect policy.

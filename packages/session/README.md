@@ -27,10 +27,9 @@ responsibilities:
    [interrupt it](#when-a-requirement-interrupts-the-login).
 2. **The federation-adapter toolkit** — what an adapter package imports from
    the router it plugs into: `createFederationRedirectPolicy` and the allowlist
-   rules it is built from, and `extractFederationSection`. The helpers an
-   adapter builds its upstream requests with — `codeChallenge`,
-   `callbackUrlForExchange`, `FederationClientSecret` / `resolveClientSecret` —
-   are core's.
+   rules it is built from. The helpers an adapter builds its upstream requests
+   with — `codeChallenge`, `callbackUrlForExchange`, `FederationClientSecret` /
+   `resolveClientSecret` — are core's.
 3. **The browser session store** — `sessionStoreModule` / `sessionStoreModuleFor`
    and `createSessionStoreFactory` / `registerBuiltinSessionStores`: the
    express-session middleware, its cookie and its store (memory, or Redis through
@@ -93,9 +92,10 @@ package's store module. What the split costs is stated in
 **Why the three live together.** Each of the other two exists for the routes.
 
 - The toolkit: the redirect policy is a contribution kind this package declares
-  and its router consumes, and `extractFederationSection` reads the config shape
-  the router reads callback URLs from. Both are the router's, which is why
-  every adapter package takes this package as a peer dependency. The pure
+  and its router consumes. It is the router's, which is why every adapter
+  package takes this package as a peer dependency. A federation's entry is not
+  read here: core's `federationsOf` and `enabledFederationsOf` are the one
+  reading of `core.federations`, the router's callback URLs included. The pure
   request helpers are not here: the router uses none of them, so they live in
   core beside the contract that tells adapters to use them.
 - The store: it is what `req.session` is, and the routes here are what write it;
@@ -1287,32 +1287,37 @@ provider at the start leg); a `4xx` is not logged
 ### Writing an adapter
 
 For an IdP that publishes an OpenID Connect discovery document, write no code:
-a `type = "oidc"` section of
+a `type = "oidc"` entry of
 [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) is the
-adapter. Otherwise an adapter is a module that contributes both
-`federations.<name>` (the `FederationProvider`) and
-`federationRedirectPolicies.<name>`, with its config on a typed `ComponentMap`
-slot that a small bridge module fills from `extractFederationSection`:
+adapter. Otherwise an adapter is a module that registers a type under
+`federationTypes`: the schema of an entry's own keys, flat, and the two
+factories core calls for each enabled entry of the type, with the entry's name,
+its `callbackURL` and the keys the schema answered. Core removes the keys it
+owns (`enabled`, `type`, `trustUpstreamAmr`, `callbackURL`) before the schema
+reads the entry:
 
 ```ts
-import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
+import { defineFederationType, defineModule } from "@o3co/auth-provider-core";
 import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
+import { z } from "zod";
 
-declare module "@o3co/auth-provider-core" {
-  interface ComponentMap {
-    readonly exampleFederationConfig?: ExampleConfig;
-  }
-}
+const exampleEntrySchema = z.strictObject({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  clientUrl: z.string().optional(),
+  redirectAllowlist: z.array(z.string()).optional(),
+});
 
-export const exampleFederationModule = defineModule({
-  name: "federation:example",
-  requires: ["exampleFederationConfig"] as const,
+export const exampleFederationTypeModule = defineModule({
+  name: "federation-example-type",
   contributes: {
-    federations: {
-      example: (deps): FederationProvider => createExampleProvider(deps.exampleFederationConfig),
-    },
-    federationRedirectPolicies: {
-      example: (deps) => createFederationRedirectPolicy(deps.exampleFederationConfig),
+    federationTypes: {
+      example: defineFederationType()({
+        entrySchema: exampleEntrySchema,
+        factory: (_deps, { name, callbackURL, entry }) =>
+          createExampleProvider(name, { ...entry, callbackURL }),
+        redirectPolicy: (_deps, { entry }) => createFederationRedirectPolicy(entry),
+      }),
     },
   },
 });
