@@ -148,15 +148,15 @@ fails naming it and the install command.
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
-import { googleFederationModule } from "@o3co/auth-provider-federation-google";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 
 const handle = await createApp({
   modules: [
     sessionStoreModuleFor(config), // first, so every module after it can read req.session; provides csrfTokenSigner too
     sessionModule,                 // a const Module, not a factory
-    googleFederationModule,        // contributes federations.google + federationRedirectPolicies.google
+    googleFederationTypeModule(),  // handles every core.federations entry of type "google"
     // ... modules providing userRepository, userSessionStore, federationTokenStore,
-    //     sessionFederationIndex and googleFederationConfig
+    //     sessionFederationIndex
   ],
   bootstrapComponents: { config, pathResolver },
 });
