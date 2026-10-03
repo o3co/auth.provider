@@ -30,11 +30,50 @@ const federationsSchema = CoreConfigSchema.shape.core.unwrap().shape.federations
  */
 const minimalConfig = makeValidAppConfig();
 
+describe("core.federations schema — every entry names its type", () => {
+	it.each([
+		["an enabled entry", true],
+		["a disabled entry", false],
+	])("refuses %s without a type at core.federations.<name>.type", (_label, enabled) => {
+		const result = AppConfigSchema.safeParse({
+			...minimalConfig,
+			core: { ...minimalConfig.core, federations: { google: { enabled } } },
+		});
+
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const issue = result.error.issues.find(
+				(i) => i.path.join(".") === "core.federations.google.type",
+			);
+			expect(issue?.message).toContain("every federation names its type");
+		}
+	});
+
+	it.each([
+		["an enabled entry", true],
+		["a disabled entry", false],
+	])("refuses %s whose type is empty", (_label, enabled) => {
+		const result = federationsSchema.safeParse({ google: { enabled, type: "" } });
+
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.issues.map((i) => i.path.join("."))).toEqual(["google.type"]);
+		}
+	});
+
+	it("accepts an entry that names its type", () => {
+		const parsed = federationsSchema.parse({ google: { enabled: true, type: "google" } });
+
+		expect(parsed.google.type).toBe("google");
+	});
+});
+
 describe("core.federations schema — open to z.record with passthrough", () => {
-	it("accepts shorthand: core.federations.google { enabled: true, clientId, clientSecret, callbackURL }", () => {
+	it("accepts a flat entry: core.federations.google { enabled: true, type, clientId, clientSecret, callbackURL }", () => {
 		const parsed = federationsSchema.parse({
 			google: {
 				enabled: true,
+				type: "google",
 				clientId: "test-client-id",
 				clientSecret: "test-client-secret",
 				callbackURL: "https://example.com/callback",
@@ -47,44 +86,39 @@ describe("core.federations schema — open to z.record with passthrough", () => 
 		expect(google.callbackURL).toBe("https://example.com/callback");
 	});
 
-	it("accepts explicit multi-tenant: core.federations['google-work'] { type: 'google', google: { clientId, ... } }", () => {
+	it("accepts a second entry of one type under another name: core.federations['google-work'] { type: 'google', clientId, ... }", () => {
 		const parsed = federationsSchema.parse({
 			"google-work": {
 				enabled: false,
 				type: "google",
-				google: {
-					clientId: "work-client-id",
-					clientSecret: "work-client-secret",
-					callbackURL: "https://work.example.com/callback",
-				},
+				clientId: "work-client-id",
+				clientSecret: "work-client-secret",
+				callbackURL: "https://work.example.com/callback",
 			},
 		});
 		const entry = parsed["google-work"] as Record<string, unknown>;
 		expect(entry.type).toBe("google");
-		const nested = entry.google as Record<string, unknown>;
-		expect(nested.clientId).toBe("work-client-id");
+		expect(entry.clientId).toBe("work-client-id");
 	});
 
-	it("accepts arbitrary custom type: core.federations['corporate-sso'] { type: 'saml', saml: { entityId: '...' } }", () => {
+	it("accepts arbitrary custom type, its keys kept as written: core.federations['corporate-sso'] { type: 'saml', entityId: '...' }", () => {
 		const parsed = federationsSchema.parse({
 			"corporate-sso": {
 				enabled: false,
 				type: "saml",
-				saml: {
-					entityId: "https://idp.example.com/saml",
-					ssoUrl: "https://idp.example.com/sso",
-				},
+				entityId: "https://idp.example.com/saml",
+				ssoUrl: "https://idp.example.com/sso",
 			},
 		});
 		const entry = parsed["corporate-sso"] as Record<string, unknown>;
 		expect(entry.type).toBe("saml");
-		const saml = entry.saml as Record<string, unknown>;
-		expect(saml.entityId).toBe("https://idp.example.com/saml");
+		expect(entry.entityId).toBe("https://idp.example.com/saml");
 	});
 
 	it("rejects entries that omit enabled (schema is strict — defaults live in hocon)", () => {
 		const result = federationsSchema.safeParse({
 			google: {
+				type: "google",
 				clientId: "test-client-id",
 				clientSecret: "test-client-secret",
 				callbackURL: "https://example.com/callback",
@@ -112,6 +146,7 @@ describe("core.federations schema — open to z.record with passthrough", () => 
 			federationsSchema.parse({
 				google: {
 					enabled: true,
+					type: "google",
 				},
 			}),
 		).not.toThrow();
@@ -121,7 +156,7 @@ describe("core.federations schema — open to z.record with passthrough", () => 
 		// CORE_FEDERATIONS_GOOGLE_ENABLED=true arrives as the string "true" from ts.hocon env-var
 		// substitution when the z.record wrapper prevents hocon-level coerce traversal.
 		const parsed = federationsSchema.parse({
-			google: { enabled: "true" },
+			google: { enabled: "true", type: "google" },
 		});
 		expect(parsed.google.enabled).toBe(true);
 	});
@@ -130,42 +165,42 @@ describe("core.federations schema — open to z.record with passthrough", () => 
 		// Critical: z.coerce.boolean() would coerce "false" → true (non-empty string).
 		// The preprocess must return false for the string "false".
 		const parsed = federationsSchema.parse({
-			google: { enabled: "false" },
+			google: { enabled: "false", type: "google" },
 		});
 		expect(parsed.google.enabled).toBe(false);
 	});
 
 	it("coerces enabled='1' string to true", () => {
 		const parsed = federationsSchema.parse({
-			google: { enabled: "1" },
+			google: { enabled: "1", type: "google" },
 		});
 		expect(parsed.google.enabled).toBe(true);
 	});
 
 	it("coerces enabled='0' string to false", () => {
 		const parsed = federationsSchema.parse({
-			google: { enabled: "0" },
+			google: { enabled: "0", type: "google" },
 		});
 		expect(parsed.google.enabled).toBe(false);
 	});
 
 	it("preserves enabled=true boolean", () => {
 		const parsed = federationsSchema.parse({
-			google: { enabled: true },
+			google: { enabled: true, type: "google" },
 		});
 		expect(parsed.google.enabled).toBe(true);
 	});
 
 	it("preserves enabled=false boolean", () => {
 		const parsed = federationsSchema.parse({
-			google: { enabled: false },
+			google: { enabled: false, type: "google" },
 		});
 		expect(parsed.google.enabled).toBe(false);
 	});
 
 	it("treats empty string as false (env var unset case)", () => {
 		const parsed = federationsSchema.parse({
-			google: { enabled: "" },
+			google: { enabled: "", type: "google" },
 		});
 		expect(parsed.google.enabled).toBe(false);
 	});
@@ -174,7 +209,10 @@ describe("core.federations schema — open to z.record with passthrough", () => 
 		expect(() =>
 			AppConfigSchema.parse({
 				...minimalConfig,
-				core: { ...minimalConfig.core, federations: { google: { enabled: "yes" } } },
+				core: {
+					...minimalConfig.core,
+					federations: { google: { enabled: "yes", type: "google" } },
+				},
 			}),
 		).toThrow();
 	});

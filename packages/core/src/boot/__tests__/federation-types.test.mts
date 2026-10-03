@@ -20,9 +20,8 @@
  * entry names, the schema of such an entry and the factories that build a
  * provider and its redirect policy from one entry. Boot parses every enabled
  * entry whose type a module registers with that schema at stage 1, and
- * registers the pair under the entry's name at stage 4. An enabled entry no
- * module handles — by its type, or by contributing `federations.<name>` —
- * refuses boot.
+ * registers the pair under the entry's name at stage 4. Every entry names
+ * its type, and an enabled entry whose type no module registers refuses boot.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -121,13 +120,9 @@ const directly = (moduleName: string, name: string): Module =>
 	});
 
 /** An enabled entry of `type` with a callback URL and `extra`. */
-const enabledEntry = (
-	type: string | undefined,
-	name: string,
-	extra: Record<string, unknown> = {},
-) => ({
+const enabledEntry = (type: string, name: string, extra: Record<string, unknown> = {}) => ({
 	enabled: true,
-	...(type === undefined ? {} : { type }),
+	type,
 	callbackURL: `https://auth.example/session/federation/${name}/callback`,
 	...extra,
 });
@@ -527,7 +522,6 @@ describe("core.federations — dispatched by type", () => {
 			bootstrapComponents: federationsConfig({
 				corp: { enabled: false, type: "acme", issuer: 42 },
 				legacy: { enabled: false, type: "nobody", clientId: 7 },
-				bare: { enabled: false },
 			}),
 		});
 
@@ -540,15 +534,14 @@ describe("core.federations — dispatched by type", () => {
 });
 
 describe("core.federations — an enabled entry no module handles refuses boot", () => {
-	it("lists every enabled entry no module handles, by its type or by its name, with the types handled", async () => {
+	it("lists every enabled entry whose type no installed module registers, with the types handled", async () => {
 		const err = await refusal(
 			createApp({
-				modules: [federationStores, acmePackage().module, directly("federation-google", "google")],
+				modules: [federationStores, acmePackage().module],
 				bootstrapComponents: federationsConfig({
 					corp: enabledEntry("acme", "corp", { issuer: "https://corp.example" }),
 					partner: enabledEntry("acmee", "partner", { clientSecret: "s3cr3t-value" }),
-					legacy: enabledEntry(undefined, "legacy", { clientSecret: "s3cr3t-value" }),
-					google: enabledEntry(undefined, "google"),
+					legacy: enabledEntry("nobody", "legacy", { clientSecret: "s3cr3t-value" }),
 					off: { enabled: false, type: "nobody" },
 				}),
 			}),
@@ -558,66 +551,58 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 		expect(err.stage).toBe("validateManifests");
 		expect(err.details).toEqual({
 			reason: "federation-type-unhandled",
-			unhandled: [{ federationName: "partner", type: "acmee" }, { federationName: "legacy" }],
+			unhandled: [
+				{ federationName: "partner", type: "acmee" },
+				{ federationName: "legacy", type: "nobody" },
+			],
 			handled: ["acme"],
 		});
 		expect(err.message).toContain("core.federations.partner");
 		expect(err.message).toContain('"acmee"');
 		expect(err.message).toContain('federationTypes["acmee"]');
 		expect(err.message).toContain("core.federations.legacy");
-		expect(err.message).toContain('federations["legacy"]');
+		expect(err.message).toContain('federationTypes["nobody"]');
 		expect(err.message).toContain('["acme"]');
 		expect(err.message).toContain("enabled = false");
 		expect(err.message).not.toContain("s3cr3t-value");
 	});
 
-	it("boots an enabled entry without a type that a module contributes by name", async () => {
-		const handle = await createApp({
-			modules: [federationStores, directly("federation-google", "google")],
-			bootstrapComponents: federationsConfig({ google: enabledEntry(undefined, "google") }),
-		});
+	it.each([
+		["an enabled entry", true],
+		["a disabled entry", false],
+	])(
+		"refuses %s without a type at core.federations.<name>.type, whatever module contributes its name",
+		async (_label, enabled) => {
+			const err = await refusal(
+				createApp({
+					modules: [federationStores, directly("federation-google", "google")],
+					bootstrapComponents: federationsConfig({
+						google: {
+							enabled,
+							callbackURL: "https://auth.example/session/federation/google/callback",
+						},
+					}),
+				}),
+			);
 
-		expect(handle.components.federationProviders?.get("google")?.name).toBe("google");
-		await handle.dispose();
-	});
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.message).toContain("core.federations.google.type");
+			expect(err.details).toMatchObject({
+				reason: "config-validation-failed",
+				issues: expect.arrayContaining([
+					expect.objectContaining({ path: ["core", "federations", "google", "type"] }),
+				]),
+			});
+		},
+	);
 
-	it("boots an enabled entry whose type no module registers while a module contributes its name, and parses nothing", async () => {
-		const handle = await createApp({
-			modules: [federationStores, directly("federation-google", "google")],
-			bootstrapComponents: federationsConfig({
-				google: enabledEntry("google", "google", { clientId: 7 }),
-			}),
-		});
-
-		expect(handle.components.federationProviders?.get("google")?.name).toBe("google");
-		await handle.dispose();
-	});
-
-	it("refuses an enabled entry without a type that no module contributes", async () => {
+	it("does not take a module contributing an enabled entry's name as handling it: only its type does", async () => {
 		const err = await refusal(
 			createApp({
-				modules: [federationStores],
-				bootstrapComponents: federationsConfig({ google: enabledEntry(undefined, "google") }),
-			}),
-		);
-
-		expect(err.reason).toBe("federation-type-unhandled");
-		expect(err.details).toEqual({
-			reason: "federation-type-unhandled",
-			unhandled: [{ federationName: "google" }],
-			handled: [],
-		});
-	});
-
-	it("suggests the type of the entry's name when an installed module handles it, without assuming it", async () => {
-		const { module, factory } = acmePackage();
-
-		const err = await refusal(
-			createApp({
-				modules: [federationStores, module],
+				modules: [federationStores, directly("federation-google", "google")],
 				bootstrapComponents: federationsConfig({
-					acme: enabledEntry(undefined, "acme", { issuer: "https://acme.example" }),
-					corp: enabledEntry(undefined, "corp"),
+					google: enabledEntry("google", "google", { clientId: 7 }),
 				}),
 			}),
 		);
@@ -625,26 +610,33 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 		expect(err.reason).toBe("federation-type-unhandled");
 		expect(err.details).toEqual({
 			reason: "federation-type-unhandled",
-			unhandled: [{ federationName: "acme" }, { federationName: "corp" }],
-			handled: ["acme"],
+			unhandled: [{ federationName: "google", type: "google" }],
+			handled: [],
 		});
-		expect(err.message).toContain('set core.federations.acme.type = "acme"');
-		expect(err.message).not.toContain("core.federations.corp.type =");
-		expect(factory).not.toHaveBeenCalled();
+		expect(err.message).toContain('federationTypes["google"]');
+		expect(err.message).toContain(
+			'module "federation-google" contributes federations["google"] directly, which handles no entry',
+		);
 	});
 
-	it("boots an enabled entry without a type whose name the host's federations collector already holds", async () => {
+	it("does not take the host's federations collector holding an enabled entry's name as handling it", async () => {
 		const { federations } = mergeWithBuiltins(undefined);
 		federations?.register("google", providerNamed("google"));
 
-		const handle = await createApp({
-			modules: [federationStores],
-			bootstrapComponents: federationsConfig({ google: enabledEntry(undefined, "google") }),
-			contributionKinds: { federations },
-		});
+		const err = await refusal(
+			createApp({
+				modules: [federationStores],
+				bootstrapComponents: federationsConfig({ google: enabledEntry("google", "google") }),
+				contributionKinds: { federations },
+			}),
+		);
 
-		expect(handle.components.federationProviders?.get("google")?.name).toBe("google");
-		await handle.dispose();
+		expect(err.reason).toBe("federation-type-unhandled");
+		expect(err.details).toEqual({
+			reason: "federation-type-unhandled",
+			unhandled: [{ federationName: "google", type: "google" }],
+			handled: [],
+		});
 	});
 
 	it.each(["federations", "federationRedirectPolicies"] as const)(
@@ -692,14 +684,14 @@ describe("core.federations — an enabled entry no module handles refuses boot",
 			createApp({
 				modules: [federationStores],
 				bootstrapComponents: federationsConfig({
-					"corp\nidp": enabledEntry(undefined, "corp"),
+					"corp\nidp": enabledEntry("nobody", "corp"),
 					"partner\nidp": enabledEntry("nobody", "partner"),
 				}),
 			}),
 		);
 		expect(unhandled.reason).toBe("federation-type-unhandled");
 		expect(unhandled.message).not.toContain("\n");
-		expect(unhandled.message).toContain('core.federations."corp\\nidp" names no type');
+		expect(unhandled.message).toContain('core.federations."corp\\nidp" names the type "nobody"');
 		expect(unhandled.message).toContain('core.federations."partner\\nidp".enabled = false');
 
 		const both = await refusal(

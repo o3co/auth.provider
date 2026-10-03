@@ -489,22 +489,27 @@ const authorizeSchema = withRemovedKeys(
  */
 export const MAX_TRUST_PROXY_HOPS = 255;
 
+/** Why an entry without a type, or with an empty one, is refused. */
+const FEDERATION_TYPE_REQUIRED =
+	"every federation names its type: the federationTypes key of the installed module that handles it";
+
 /**
  * One federation in `core.federations`. Core owns `enabled`, `type`,
  * `trustUpstreamAmr` and `callbackURL`, and boot strips them before the
  * schema of the entry's type sees the entry; every other key is the type's,
- * kept as written here. `callbackURL` is not declared here: boot requires it
- * of an entry it dispatches by type.
+ * kept as written here, beside them: an entry is flat. Every entry names its
+ * `type`, enabled or not: the module registering that type under
+ * `federationTypes` is the one that handles it. `callbackURL` is not declared
+ * here: boot requires it of an entry it dispatches by type.
  */
 const federationEntrySchema = z
 	.object({
 		enabled: coerceBooleanFromEnv,
-		type: z.string().optional(),
+		type: z.string({ error: FEDERATION_TYPE_REQUIRED }).min(1, { error: FEDERATION_TYPE_REQUIRED }),
 		// Whether this federation's upstream IdP's `amr` counts (MFA ADR): it is
 		// recorded in the session's `amr` beside `fed`, stamped on tokens and
 		// matched for `acr`. Absent is `false`: the values are kept apart
-		// (`authentication.upstreamAmr`). Beside `enabled` in both shapes, never
-		// inside a type's own section.
+		// (`authentication.upstreamAmr`).
 		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
 	})
 	.passthrough();

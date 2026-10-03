@@ -3100,7 +3100,7 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 	},
 	{
 		id: "federation-entries-handled",
-		spec: "issue #728 (an enabled core.federations entry is handled by its type, or by a module contributing its name)",
+		spec: "issue #728 (an enabled core.federations entry is handled by the module registering its type)",
 		run: (ctx) =>
 			checkFederationEntriesHandled(ctx.modules, ctx.parsedConfig, ctx.contributionKinds),
 	},

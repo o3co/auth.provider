@@ -265,8 +265,11 @@ describe("the federations, under core.federations", () => {
 	});
 
 	it("refuses an enabled federation without the stores it needs, naming it under core.federations", async () => {
-		const err = await refusal(boot({}, "core.federations.upstream.enabled = true\n"));
+		const err = await refusal(
+			boot({}, "core.federations.upstream.enabled = true\ncore.federations.upstream.type = oidc\n"),
+		);
 
+		expect(err.reason).toBe("federation-stores-incomplete");
 		expect(err.message).toContain("core.federations.upstream");
 	});
 

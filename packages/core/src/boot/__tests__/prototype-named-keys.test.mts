@@ -136,7 +136,7 @@ describe("a configuration key named after an Object.prototype member, or prototy
 		const err = refusal(
 			[],
 			resolved({
-				core: { ...core, federations: loaded(`constructor { enabled = false }`) },
+				core: { ...core, federations: loaded(`constructor { enabled = false, type = oidc }`) },
 				...loaded(`extra { toString = 1 }`),
 			}),
 		);

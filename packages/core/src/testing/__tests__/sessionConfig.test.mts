@@ -56,12 +56,14 @@ describe("withInsecureSessionCookie", () => {
 });
 
 describe("withFederation", () => {
-	it("answers a copy with core.federations.<name> an enabled entry: its callback URL and client credentials", () => {
+	it("answers a copy with core.federations.<name> an enabled entry: its type, callback URL and client credentials", () => {
 		const config = withFederation(makeValidAppConfig(), "stub", {
+			type: "stub",
 			callbackURL: "https://auth.test/session/oauth/federation/stub/callback",
 		});
 		expect(config.core.federations.stub).toEqual({
 			enabled: true,
+			type: "stub",
 			clientId: "stub-client",
 			clientSecret: "stub-secret",
 			callbackURL: "https://auth.test/session/oauth/federation/stub/callback",
@@ -70,23 +72,25 @@ describe("withFederation", () => {
 		expect(config).not.toHaveProperty("federations");
 	});
 
-	it("writes the type the entry names when given one, and none otherwise", () => {
+	it("writes the type the entry names, which every entry names", () => {
 		const typed = withFederation(makeValidAppConfig(), "corp", {
 			type: "oidc",
 			callbackURL: "https://auth.test/corp",
 		});
 		expect(typed.core.federations.corp).toMatchObject({ enabled: true, type: "oidc" });
 		expect(AppConfigSchema.parse(typed).core?.federations?.corp).toMatchObject({ type: "oidc" });
-		const typeless = withFederation(makeValidAppConfig(), "stub", {
-			callbackURL: "https://auth.test/stub",
-		});
-		expect(typeless.core.federations.stub).not.toHaveProperty("type");
+		// @ts-expect-error: an entry without a type is no entry core reads.
+		withFederation(makeValidAppConfig(), "stub", { callbackURL: "https://auth.test/stub" });
 	});
 
 	it("keeps the federations already there, and leaves the configuration it was given as it was", () => {
 		const base = makeValidAppConfig();
-		const one = withFederation(base, "first", { callbackURL: "https://auth.test/first" });
+		const one = withFederation(base, "first", {
+			type: "oidc",
+			callbackURL: "https://auth.test/first",
+		});
 		const two = withFederation(one, "second", {
+			type: "oidc",
 			callbackURL: "https://auth.test/second",
 			clientId: "client-2",
 			clientSecret: "secret-2",

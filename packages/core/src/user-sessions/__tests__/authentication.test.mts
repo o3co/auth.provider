@@ -569,62 +569,34 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts",
 		expect(federationTrustsUpstreamAmr(config({ trustUpstreamAmr: true }), "google")).toBe(false);
 	});
 
-	it("still refuses an unusable switch on a section that is not enabled, and one inside its sub-section", () => {
+	it("still refuses an unusable switch on a section that is not enabled", () => {
 		// Enabling the federation later must not be what first reveals it.
 		expect(() =>
 			federationTrustsUpstreamAmr(config({ enabled: false, trustUpstreamAmr: "yes" }), "google"),
 		).toThrow(new RangeError("core.federations.google.trustUpstreamAmr must be true or false"));
-		expect(() =>
-			federationTrustsUpstreamAmr(
-				config({ enabled: false, type: "oidc", oidc: { trustUpstreamAmr: true } }),
-				"google",
-			),
-		).toThrow(RangeError);
-	});
-
-	it("reads the switch beside enabled in the nested shape too", () => {
-		expect(
-			federationTrustsUpstreamAmr(
-				config({ enabled: true, type: "google", trustUpstreamAmr: true, google: {} }),
-				"google",
-			),
-		).toBe(true);
-		expect(
-			federationTrustsUpstreamAmr(
-				config({ enabled: true, type: "google", google: { clientId: "x" } }),
-				"google",
-			),
-		).toBe(false);
 	});
 
 	it.each([
 		[
-			"a typed sub-section",
-			{ okta: { enabled: true, type: "oidc", oidc: { trustUpstreamAmr: true } } },
-			"okta",
-			"core.federations.okta.oidc.trustUpstreamAmr",
+			"a switch saying true there",
+			{ enabled: true, type: "oidc", oidc: { trustUpstreamAmr: true } },
+			false,
 		],
 		[
-			"a typed sub-section, saying false",
-			{ okta: { enabled: true, type: "oidc", oidc: { trustUpstreamAmr: false } } },
-			"okta",
-			"core.federations.okta.oidc.trustUpstreamAmr",
+			"an unusable switch there",
+			{ enabled: true, type: "oidc", oidc: { trustUpstreamAmr: "yes" } },
+			false,
 		],
 		[
-			"the sub-section a shorthand key names",
-			{ google: { enabled: true, google: { trustUpstreamAmr: true } } },
-			"google",
-			"core.federations.google.google.trustUpstreamAmr",
+			"a switch saying false there, beside one saying true",
+			{ enabled: true, type: "oidc", trustUpstreamAmr: true, oidc: { trustUpstreamAmr: false } },
+			true,
 		],
 	])(
-		"refuses the switch inside %s, saying it belongs beside enabled, rather than ignore it",
-		(_label, federations, name, placed) => {
-			// Ignored there, an operator who wrote it would believe the IdP
-			// trusted — or, writing false, distrusted — when neither holds.
-			expect(() => federationTrustsUpstreamAmr({ core: { federations } }, name)).toThrow(
-				new RangeError(
-					`${placed} belongs beside enabled, as core.federations.${name}.trustUpstreamAmr`,
-				),
+		"does not read a key named after the type, an entry being flat: %s",
+		(_label, entry, trusts) => {
+			expect(federationTrustsUpstreamAmr({ core: { federations: { okta: entry } } }, "okta")).toBe(
+				trusts,
 			);
 		},
 	);

@@ -246,12 +246,12 @@ describe("per-reason *Details discriminators", () => {
 		>().toEqualTypeOf<"grant-policy-without-issuer">();
 	});
 
-	it("FederationTypeUnhandledDetails lists each unhandled entry, its type when it names one, and the types handled", () => {
+	it("FederationTypeUnhandledDetails lists each unhandled entry with the type it names, and the types handled", () => {
 		expectTypeOf<
 			FederationTypeUnhandledDetails["reason"]
 		>().toEqualTypeOf<"federation-type-unhandled">();
 		expectTypeOf<FederationTypeUnhandledDetails["unhandled"]>().toEqualTypeOf<
-			readonly { readonly federationName: string; readonly type?: string }[]
+			readonly { readonly federationName: string; readonly type: string }[]
 		>();
 		expectTypeOf<FederationTypeUnhandledDetails["handled"]>().toEqualTypeOf<readonly string[]>();
 	});
