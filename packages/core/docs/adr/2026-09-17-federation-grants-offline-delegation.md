@@ -1174,6 +1174,17 @@ and an activation starts the budget afresh. The budget binds only with a store
 that implements `takeRotation`, and gives back only with one that implements
 `refundRotation` too: both bundled stores, memory and Redis, implement both.
 
+**Amended 2026-10-03 (#1032): the take is a version fence.** `takeRotation`
+bumps the version once and answers it, and every later write of the attempt
+(the refresh's write, the failure stamp, the mark and the give-back) is
+guarded by that version. A write of an earlier attempt that lands late, after
+its lock ran out and the next holder took its rotation, is refused: a late
+give-back leaves the rotation spent (an overcount, the safe way round) and can
+no longer bump the version under the next holder and refuse its write. A take
+that answers no version does not bump, and its attempt's writes are guarded by
+the version it was taken at, until the answered version is required of every
+store.
+
 A refresh no longer has to take whatever it is answered with: a fresh token
 that carries less of the asked-for scope than a held token that is still good
 and carries it does not replace that token, as long as the fresh token still

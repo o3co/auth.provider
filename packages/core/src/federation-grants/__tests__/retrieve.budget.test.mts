@@ -77,7 +77,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 	/** Spends the whole budget at `when`, as other calls would have. */
 	const spend = async (limit: number, when = now()) => {
 		const opened = await h.store.open("g-1", when);
-		const version = opened?.grant.version as number;
+		let version = opened?.grant.version as number;
 		for (let i = 0; i < limit; i++) {
 			const taken = await h.store.takeRotation?.({
 				grantId: "g-1",
@@ -86,7 +86,8 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 				windowMs: HOUR,
 				now: when,
 			});
-			expect(taken?.ok).toBe(true);
+			if (!taken?.ok) throw new Error("fixture: the take was refused");
+			version = taken.grant.version;
 		}
 	};
 
@@ -585,6 +586,158 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 				).toBe(true);
 			},
 		);
+	});
+
+	describe("the version the take answered", () => {
+		type Refund = NonNullable<FederationGrantStore["refundRotation"]>;
+		const realRefund: Refund = (input) => (h.store.refundRotation as Refund)(input);
+
+		/** Spies on every guarded write after the take, and answers the versions each named. */
+		const guardedWrites = () => {
+			const named: Array<readonly [string, number]> = [];
+			const spy =
+				<I extends { readonly expectedVersion: number }, R>(name: string, write: (input: I) => R) =>
+				(input: I): R => {
+					named.push([name, input.expectedVersion]);
+					return write(input);
+				};
+			h.deps.store = {
+				...h.store,
+				replaceCredentials: spy("replaceCredentials", h.store.replaceCredentials),
+				requireReauthorization: spy("requireReauthorization", h.store.requireReauthorization),
+				noteRefreshFailure: spy("noteRefreshFailure", h.store.noteRefreshFailure),
+				refundRotation: spy("refundRotation", realRefund),
+			};
+			return named;
+		};
+
+		it("guards the refresh's write by it, one past the version the look read", async () => {
+			const grant = await seedEndingAt(10 * MIN);
+			const named = guardedWrites();
+			h.refresh.mockImplementation(async () => refreshed("next", now()));
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-next", refreshed: true });
+			expect(named).toEqual([["replaceCredentials", grant.version + 1]]);
+		});
+
+		it("guards the failure stamp and the give-back by it", async () => {
+			const grant = await seedEndingAt(10 * MIN);
+			const named = guardedWrites();
+			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			expect(named).toEqual([
+				["noteRefreshFailure", grant.version + 1],
+				["refundRotation", grant.version + 1],
+			]);
+			expect((await h.store.find("g-1", now()))?.version).toBe(grant.version + 2);
+		});
+
+		it("guards the mark an `invalid_grant` leaves by it", async () => {
+			const grant = await seedEndingAt(10 * MIN);
+			const named = guardedWrites();
+			h.refresh.mockRejectedValueOnce(
+				Object.assign(new Error("x"), { error: "invalid_grant", status: 400 }),
+			);
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({
+				ok: false,
+				code: "reauthorization_required",
+				reason: "upstream_invalid_grant",
+			});
+			expect(named).toEqual([["requireReauthorization", grant.version + 1]]);
+		});
+
+		it("is not there for a store whose take answers none: its writes are guarded by the version the look read", async () => {
+			const grant = await seedEndingAt(10 * MIN);
+			const named = guardedWrites();
+			const store = h.deps.store;
+			// A take that counts without bumping, as a store that predates the bump does.
+			h.deps.store = {
+				...store,
+				takeRotation: async (input) => {
+					const found = await h.store.find(input.grantId, input.now);
+					return found === null ? { ok: false } : { ok: true, grant: found };
+				},
+			};
+			h.refresh.mockImplementation(async () => refreshed("next", now()));
+			setNow(at(20 * MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-next", refreshed: true });
+			expect(named).toEqual([["replaceCredentials", grant.version]]);
+		});
+
+		it.each([
+			["a fraction", 2.5],
+			["NaN", Number.NaN],
+			["a string", "3"],
+		])(
+			"that is %s asks the upstream nothing, and answers `storage`: no write could be guarded by it",
+			async (_, version) => {
+				await seedEndingAt(10 * MIN);
+				withTake(async (input) => {
+					const taken = await realTake(input);
+					return taken.ok ? { ...taken, version: version as number } : taken;
+				});
+				setNow(at(20 * MIN));
+				const result = await retrieve();
+				expect(result).toMatchObject({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(failureOf(result)).toMatchObject({ during: "rotation" });
+				expect(h.refresh).not.toHaveBeenCalled();
+			},
+		);
+
+		it("refuses a give-back that lands after the next holder's take, and the next holder's rotated token is stored and answered", async () => {
+			await seedEndingAt(10 * MIN);
+			// The first attempt's give-back is held back, and let go of only once the
+			// next attempt has taken its rotation and is asking the upstream.
+			let letGo!: () => void;
+			const held = new Promise<void>((resolve) => {
+				letGo = resolve;
+			});
+			const late: Promise<Awaited<ReturnType<Refund>>>[] = [];
+			h.deps.store = {
+				...h.store,
+				refundRotation: (input) => {
+					const landed = held.then(() => realRefund(input));
+					late.push(landed);
+					return landed;
+				},
+			};
+
+			setNow(at(20 * MIN));
+			h.refresh.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
+			const first = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs);
+			expect(await first).toMatchObject({ ok: false, code: "temporarily_unavailable" });
+			await Promise.all(h.background);
+
+			// The first holder's lock has run out, and its failure no longer holds the upstream off.
+			setNow(at(30 * MIN));
+			let lateOutcome: Awaited<ReturnType<Refund>> | undefined;
+			h.refresh.mockImplementationOnce(async () => {
+				letGo();
+				lateOutcome = await late[0];
+				return refreshed("second", now());
+			});
+			expect(await retrieve()).toMatchObject({
+				ok: true,
+				accessToken: "at-second",
+				refreshed: true,
+			});
+			expect(lateOutcome).toEqual({ ok: false });
+			expect(await stored()).toMatchObject({
+				refreshToken: `${SECRET}-second`,
+				accessToken: { value: "at-second" },
+			});
+			// The first attempt's rotation stays spent: an overcount, never a lost write.
+			expect((await h.store.find("g-1", now())) as { rotations?: unknown }).toMatchObject({
+				rotations: { since: at(20 * MIN), count: 2 },
+			});
+		});
 	});
 
 	describe("a refresh whose answer carries less of what was asked than the token held", () => {

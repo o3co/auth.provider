@@ -1545,6 +1545,7 @@ export type {
 	FederationGrantIntentPointer,
 	FederationGrantLockResult,
 	FederationGrantOpened,
+	FederationGrantRotationTake,
 	FederationGrantStore,
 	FederationGrantWrite,
 } from "./federation-grants/store.mjs";
