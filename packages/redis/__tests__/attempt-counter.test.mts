@@ -92,20 +92,30 @@ const counterAt = (keyPrefix: string, connection: Redis, now?: () => number): At
 		...(now === undefined ? {} : { now }),
 	});
 
-/** A clock the harness moves by hand, starting at the host's time so every deadline is ahead of the server's. */
-const handClock = () => {
+/** A clock the harness moves by hand, for the counter and for the server's countdowns, starting at the host's time. */
+const handClock = (prefix: string) => {
 	let now = Date.now();
 	return {
 		now: () => now,
-		advance: (ms: number) => {
+		/**
+		 * Lets `ms` pass for the server's countdowns too: each key under `prefix`
+		 * loses `ms` of its TTL, as it would have on a server whose time moved.
+		 */
+		advance: async (ms: number) => {
 			now += ms;
+			for (const key of await first().keys(`${prefix}*`)) {
+				const pttl = await first().pttl(key);
+				if (pttl <= 0) continue;
+				if (pttl > ms) await first().pexpire(key, pttl - ms);
+				else await first().del(key);
+			}
 		},
 	};
 };
 
 const harness = (clocked: boolean) => async (): Promise<AttemptCounterHarness> => {
 	const prefix = freshPrefix();
-	const clock = clocked ? handClock() : undefined;
+	const clock = clocked ? handClock(prefix) : undefined;
 	const opened: Redis[] = [];
 	return {
 		counter: counterAt(prefix, first(), clock?.now),
@@ -209,6 +219,53 @@ describe("createRedisAttemptCounter on Redis", () => {
 		expect(raised.allowed).toBe(true);
 		expect(await first().pexpiretime(key)).toBe(before[1]);
 	});
+
+	describe("two replicas whose clocks stand apart, on one Redis", () => {
+		const WINDOW: AttemptSpec = { limit: 3, windowSeconds: 20 };
+
+		const replicas = (aheadMs: number) => {
+			const prefix = freshPrefix();
+			const at = Date.now();
+			return {
+				prefix,
+				at,
+				behind: counterAt(prefix, first(), () => at),
+				ahead: counterAt(prefix, second(), () => at + aheadMs),
+			};
+		};
+
+		it("a replica 30 s ahead never reopens a window the server still runs: its attempt is answered no count, and the window keeps its end and count", async () => {
+			const { prefix, at, behind, ahead } = replicas(30_000);
+			const opened = await behind.consume("k", WINDOW);
+			expect(opened.resetAt.getTime()).toBe(at + 20_000);
+			await expect(ahead.consume("k", WINDOW)).rejects.toThrow(/answered no count/);
+			expect(await first().hgetall(`${prefix}k`)).toEqual({
+				count: "2",
+				resetAt: String(at + 20_000),
+			});
+			const next = await behind.consume("k", WINDOW);
+			expect([next.allowed, next.remaining]).toEqual([true, 0]);
+			expect((await behind.consume("k", WINDOW)).allowed).toBe(false);
+		});
+
+		it("a replica ahead by less than the clock allowance past the window's end is counted in the running window, answered its end", async () => {
+			const { at, behind, ahead } = replicas(23_000);
+			await behind.consume("k", WINDOW);
+			const skewed = await ahead.consume("k", WINDOW);
+			expect([skewed.allowed, skewed.remaining, skewed.resetAt.getTime()]).toEqual([
+				true,
+				1,
+				at + 20_000,
+			]);
+		});
+	});
+
+	it("rejects an attempt whose key holds another type, counting nothing", async () => {
+		const prefix = freshPrefix();
+		await first().set(`${prefix}k`, "x");
+		await expect(counterAt(prefix, first()).consume("k", SPEC)).rejects.toThrow(/WRONGTYPE/);
+		expect(await first().get(`${prefix}k`)).toBe("x");
+	});
 });
 
 describe("createRedisAttemptCounter over a client whose reply is no count", () => {
@@ -263,6 +320,12 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 			await expect(counter.consume("k", SPEC)).rejects.toThrow(RangeError);
 		}
 		expect(asked).toBe(0);
+	});
+
+	it("refuses an empty key prefix at construction", () => {
+		expect(() => createRedisAttemptCounter({ client: answering(good), keyPrefix: "" })).toThrow(
+			RangeError,
+		);
 	});
 
 	it("hands the client the prefixed key, the caller's clock, the limit, the window's end and the clock allowance", async () => {
@@ -341,6 +404,7 @@ describe("redisAttemptCounterModule", () => {
 		expect(redisAttemptCounterModule.section?.at).toBeUndefined();
 		expect(schema?.parse(undefined)).toEqual({ keyPrefix: "attempt:" });
 		expect(schema?.safeParse({ keyPrefx: "a:" }).success).toBe(false);
+		expect(schema?.safeParse({ keyPrefix: "" }).success).toBe(false);
 	});
 
 	it("fills the attemptCounter slot with a counter keyed under the section's prefix", async () => {

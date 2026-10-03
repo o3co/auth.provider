@@ -23,11 +23,14 @@
  * limiter's, which keys them bare, and a shared server must never count an
  * attempt in a limiter's counter or the reverse.
  *
- * One clock. A window's end and whether one is running are judged on this
- * side's clock (`now`), the one the attempt guard reads the count on. The key's
- * TTL is relative: the window's length plus `ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS`,
- * so however far the server's clock stands from this side's, Redis frees a
- * window only after it has ended. Nothing deletes one.
+ * Clocks. A window's end is set on this side's clock (`now`), the one the
+ * attempt guard reads the count on, and its key's TTL is relative: the
+ * window's length plus `ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS`. A window is running
+ * while its end is after `now` or its TTL is above the allowance, so neither a
+ * server's clock set apart nor a replica's running ahead ends one early. A
+ * replica ahead past the window's end is answered that end, which the guard
+ * takes within the allowance and answers `503` beyond it. A forward step of
+ * the server's wall clock still expires windows early, as for every TTL.
  *
  * A reply that is no count under the spec (`readAttemptCount`) rejects, as an
  * unreachable server does: the guard answers either as an outage.
@@ -50,6 +53,7 @@ import {
 	loggableError,
 	readAttemptCount,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type {
 	AttemptCounterClient,
 	AttemptCounterConsumeReply,
@@ -60,7 +64,7 @@ import {
 	RedisStoreEvictableError,
 	VOLATILE_POLICIES,
 } from "./internal/eviction-policy.mjs";
-import { keyPrefixSection, redisReference } from "./internal/section.mjs";
+import { redisReference } from "./internal/section.mjs";
 
 /** The key namespace a counter given none keys its windows under. */
 export const DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX = "attempt:";
@@ -88,6 +92,11 @@ const isConsumeReply = (reply: unknown): reply is AttemptCounterConsumeReply => 
 export function createRedisAttemptCounter(options: RedisAttemptCounterOptions): AttemptCounter {
 	const { client } = options;
 	const keyPrefix = options.keyPrefix ?? DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX;
+	if (keyPrefix === "") {
+		throw new RangeError(
+			"createRedisAttemptCounter: keyPrefix must not be empty: the rate limiter keys the same form under no prefix",
+		);
+	}
 	const now = options.now ?? Date.now;
 
 	return {
@@ -134,6 +143,12 @@ export function createRedisAttemptCounter(options: RedisAttemptCounterOptions): 
 		},
 	};
 }
+
+/** The module's section: its key namespace alone, strict, never empty. */
+const sectionSchema = z
+	.object({ keyPrefix: z.string().min(1).default(DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX) })
+	.strict()
+	.default(() => ({ keyPrefix: DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX }));
 
 /** What a policy that is not `noeviction` may evict, for the refusal's message. */
 const evictedBy = (policy: string): string =>
@@ -190,7 +205,7 @@ export const redisAttemptCounterModule = defineModule({
 	requires: ["attemptCounterClient"] as const,
 	optional: ["logger"] as const,
 	section: {
-		schema: keyPrefixSection(DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX),
+		schema: sectionSchema,
 		reference: redisReference(),
 	},
 	provides: {

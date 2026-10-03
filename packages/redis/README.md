@@ -234,18 +234,23 @@ Each one implements a port core declares; the slot name is in parentheses.
   attempt over a hash per key (the window's count and end). Its keys live
   under their own prefix (`redis-attempt-counter.keyPrefix`, default
   `attempt:`), apart from the rate limiter's, which have the same
-  `<tag>:<id>` form under no prefix. A window's end, and whether one is
-  running, are judged on this side's clock, the one the guard reads the count
-  on; the key's TTL is relative (`PEXPIRE`: the window's length plus five
-  seconds), so the server's clock, however far off, never frees a running
-  window. A refused attempt writes nothing, and a reply that is no count
+  `<tag>:<id>` form under no prefix. A window's end is set on this side's
+  clock, the one the guard reads the count on, and the key's TTL is relative
+  (`PEXPIRE`: the window's length plus five seconds). A window is running while
+  its end is after the caller's clock or its TTL is above those five seconds,
+  so neither a server clock set apart nor a replica clock running ahead ends
+  one early: a replica ahead past a window's end is answered that end, which
+  the guard takes within five seconds and answers `503` beyond, never with a
+  fresh window. A forward step of the server's wall clock can still expire
+  windows early, as for every key with a TTL. A refused attempt writes nothing, and a reply that is no count
   rejects, which the guard answers `503`. `redisAttemptCounterModule` refuses
   the boot (`attempt-counter-evictable`) on a server whose `maxmemory-policy`
   is not `noeviction`: every window's key carries a TTL, so any evicting policy
   may drop a running window and give its key a fresh one. A policy it cannot
   read is one warning, `attempt_counter_durability_unchecked`, and the boot
   goes on. Give the counter a server, or a database on one, that does not
-  evict.
+  evict. Windows do not survive a restart of a server without persistence: each
+  key starts a fresh window after one.
 - `CodeRepository` (`codeRepository`) — authorization codes.
 - `DeviceCodeStore` (`deviceCodeStore`) — pending RFC 8628 device
   authorizations for `@o3co/auth-provider-device-grant`. The in-process
