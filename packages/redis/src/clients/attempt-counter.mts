@@ -16,8 +16,10 @@
 
 /**
  * The attempt counter's client: one attempt counted against a fixed window as one indivisible
- * step.
+ * step, and what its server says about evicting keys.
  */
+
+import type { RedisDurability } from "./durability.mjs";
 
 // --- AttemptCounterClient --------------------------------------------------
 
@@ -29,8 +31,12 @@ export interface AttemptCounterConsumeInput {
 	readonly limit: number;
 	/** Where a window this attempt opens ends, whole epoch milliseconds. */
 	readonly resetAtMs: number;
-	/** When the key of a window this attempt opens expires (`PEXPIREAT`), at or after `resetAtMs`. */
-	readonly expiresAtMs: number;
+	/**
+	 * How long past its end, in milliseconds, the key of a window this attempt opens lives. The
+	 * key's TTL is relative (`PEXPIRE` of `resetAtMs − nowMs` plus this), so the server's clock
+	 * never decides when a running window is freed.
+	 */
+	readonly expiryAllowanceMs: number;
 }
 
 /** What {@link AttemptCounterClient.consume} answers. */
@@ -56,8 +62,11 @@ export interface AttemptCounterClient {
 	 *     `nowMs`; then the attempt is allowed and counted while the count is
 	 *     below `limit`, and refused otherwise, writing nothing
 	 *   - with no window running, open one: count 1, ending at `resetAtMs`,
-	 *     the key expiring at `expiresAtMs`
-	 *   - a running window's end and deadline are never moved
+	 *     the key's TTL `resetAtMs − nowMs + expiryAllowanceMs`
+	 *   - a running window's end and TTL are never moved
 	 */
 	consume(key: string, input: AttemptCounterConsumeInput): Promise<AttemptCounterConsumeReply>;
+
+	/** What the server says about evicting and keeping keys, read once at boot by the module. */
+	durability(): Promise<RedisDurability>;
 }

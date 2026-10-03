@@ -15,13 +15,15 @@
  */
 
 /**
- * The attempt counter's client over one ioredis connection: one script per attempt. A reply
- * the script does not document is an error, never a count.
+ * The attempt counter's client over one ioredis connection: one script per attempt, and the
+ * durability report its module's boot check reads. A reply the script does not document is an
+ * error, never a count.
  */
 
 import type { Redis } from "ioredis";
 import type { AttemptCounterClient } from "../../clients.mjs";
 import { runScript } from "../commands.mjs";
+import { redisDurability } from "../durability.mjs";
 import { ATTEMPT_COUNTER_CONSUME } from "../scripts/attempt-counter.mjs";
 
 export function makeIoredisAttemptCounterClient(io: Redis): AttemptCounterClient {
@@ -35,7 +37,7 @@ export function makeIoredisAttemptCounterClient(io: Redis): AttemptCounterClient
 					String(input.nowMs),
 					String(input.limit),
 					String(input.resetAtMs),
-					String(input.expiresAtMs),
+					String(input.expiryAllowanceMs),
 				],
 			);
 			if (!Array.isArray(reply) || reply.length !== 3) {
@@ -51,5 +53,6 @@ export function makeIoredisAttemptCounterClient(io: Redis): AttemptCounterClient
 			}
 			return { allowed: allowed === 1, count, resetAtMs };
 		},
+		durability: () => redisDurability(io),
 	};
 }

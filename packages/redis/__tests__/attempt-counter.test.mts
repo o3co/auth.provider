@@ -6,28 +6,40 @@
 /**
  * The Redis `AttemptCounter` against test-kit's `attemptCounterContract` on a
  * real Redis, on a hand-moved clock and on the real one, and what the Redis
- * adapter adds: its own key namespace, the key's deadline, a refused attempt
- * writing nothing, a reply that is no count rejected, and its module.
+ * adapter adds: its own key namespace, the key's lifetime on the counter's
+ * clock, a refused attempt writing nothing, a reply that is no count rejected,
+ * and its module, which refuses a server that may evict a running window.
  */
 
 import {
+	type AppConfig,
 	ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
 	type AttemptCounter,
 	type AttemptSpec,
+	consoleLogger,
+	createApp,
+	defineModule,
+	type Logger,
+	loggableError,
 } from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import {
 	type AttemptCounterContractInput,
 	type AttemptCounterHarness,
 	attemptCounterContract,
 } from "@o3co/auth-provider-test-kit";
 import { Redis } from "ioredis";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	createRedisAttemptCounter,
 	DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX,
 	redisAttemptCounterModule,
 } from "#/attempt-counter.mjs";
-import type { AttemptCounterClient, AttemptCounterConsumeReply } from "#/clients.mjs";
+import type {
+	AttemptCounterClient,
+	AttemptCounterConsumeReply,
+	RedisDurability,
+} from "#/clients.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { testRedis } from "./support/redis.mjs";
 
@@ -41,6 +53,28 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await Promise.all(connections.map((connection) => connection.quit()));
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+/** A server that keeps what it is written: what a stub client reports unless a case says otherwise. */
+const DURABLE: RedisDurability = {
+	maxmemoryPolicy: "noeviction",
+	appendOnly: true,
+	snapshots: undefined,
+	refusal: undefined,
+};
+
+/** A client that reports `durability` and is asked nothing else. */
+const unaskedClient = (
+	durability: RedisDurability | (() => Promise<RedisDurability>) = DURABLE,
+): AttemptCounterClient => ({
+	consume: async () => {
+		throw new Error("consume was not expected");
+	},
+	durability: typeof durability === "function" ? durability : async () => durability,
 });
 
 const first = (): Redis => connections[0] as Redis;
@@ -129,15 +163,34 @@ describe("createRedisAttemptCounter on Redis", () => {
 		expect([next.allowed, next.remaining]).toEqual([true, 0]);
 	});
 
-	it("expires a window's key past its end by the clock allowance, on the counter's clock", async () => {
+	it.each([
+		["an hour ahead of", 3_600_000],
+		["level with", 0],
+		["an hour behind", -3_600_000],
+	])(
+		"gives a window's key the window's remaining time plus the clock allowance, the counter's clock %s the server's",
+		async (_label, offset) => {
+			const prefix = freshPrefix();
+			const now = Date.now() + offset;
+			const counter = counterAt(prefix, first(), () => now);
+			const count = await counter.consume("k", SPEC);
+			expect(count.resetAt.getTime()).toBe(now + 60_000);
+			const lifetime = 60_000 + ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS;
+			const pttl = await first().pttl(`${prefix}k`);
+			expect(pttl).toBeLessThanOrEqual(lifetime);
+			expect(pttl).toBeGreaterThan(lifetime - 2_000);
+		},
+	);
+
+	it("keeps a running window's key through a later attempt, on a counter clock far behind the server's", async () => {
 		const prefix = freshPrefix();
-		const now = Date.now() + 3_600_000;
+		let now = Date.now() - 3_600_000;
 		const counter = counterAt(prefix, first(), () => now);
-		const count = await counter.consume("k", SPEC);
-		expect(count.resetAt.getTime()).toBe(now + 60_000);
-		expect(await first().pexpiretime(`${prefix}k`)).toBe(
-			now + 60_000 + ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
-		);
+		await counter.consume("k", SPEC);
+		now += 30_000;
+		const second = await counter.consume("k", SPEC);
+		expect([second.allowed, second.remaining]).toEqual([true, 0]);
+		expect((await counter.consume("k", SPEC)).allowed).toBe(false);
 	});
 
 	it("writes nothing for a refused attempt, and keeps the window's end and deadline when a later spec changes the window", async () => {
@@ -163,6 +216,7 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 	const NOW = Date.parse("2026-10-03T00:00:00.000Z");
 
 	const answering = (reply: unknown): AttemptCounterClient => ({
+		...unaskedClient(),
 		consume: async () => reply as AttemptCounterConsumeReply,
 	});
 
@@ -198,6 +252,7 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 	it("rejects a clock that answers no instant, asking nothing", async () => {
 		let asked = 0;
 		const client: AttemptCounterClient = {
+			...unaskedClient(),
 			consume: async () => {
 				asked += 1;
 				return good;
@@ -210,9 +265,10 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 		expect(asked).toBe(0);
 	});
 
-	it("hands the client the prefixed key, the caller's clock, the limit, the window's end and the key's deadline", async () => {
+	it("hands the client the prefixed key, the caller's clock, the limit, the window's end and the clock allowance", async () => {
 		const seen: unknown[] = [];
 		const client: AttemptCounterClient = {
+			...unaskedClient(),
 			consume: async (key, input) => {
 				seen.push([key, input]);
 				return good;
@@ -227,17 +283,57 @@ describe("createRedisAttemptCounter over a client whose reply is no count", () =
 					nowMs: NOW,
 					limit: 3,
 					resetAtMs: NOW + 60_000,
-					expiresAtMs: NOW + 60_000 + ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
+					expiryAllowanceMs: ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS,
 				},
 			],
 		]);
 	});
 });
 
+/** A logger that records what each level is handed. */
+function recordingLogger(): { logger: Logger; calls: Array<{ level: string; args: unknown[] }> } {
+	const calls: Array<{ level: string; args: unknown[] }> = [];
+	const record =
+		(level: string) =>
+		(...args: unknown[]): void => {
+			calls.push({ level, args });
+		};
+	const logger: Logger = {
+		trace: record("trace"),
+		debug: record("debug"),
+		info: record("info"),
+		warn: record("warn"),
+		error: record("error"),
+		fatal: record("fatal"),
+		child: () => logger,
+	};
+	return { logger, calls };
+}
+
+/** A reply error as ioredis raises one. */
+const replyError = (message: string): Error =>
+	Object.assign(new Error(message), { name: "ReplyError" });
+
 describe("redisAttemptCounterModule", () => {
-	it("has the canonical name and requires attemptCounterClient alone", () => {
+	const provide = (deps: Record<string, unknown>): Promise<AttemptCounter> => {
+		const provider = redisAttemptCounterModule.provides?.attemptCounter;
+		if (provider === undefined) throw new Error("redis-attempt-counter provides no attemptCounter");
+		return (provider as unknown as (deps: unknown) => Promise<AttemptCounter>)({
+			section: { keyPrefix: "attempt:" },
+			...deps,
+		});
+	};
+
+	const boot = (durability: RedisDurability | (() => Promise<RedisDurability>), logger?: Logger) =>
+		provide({
+			attemptCounterClient: unaskedClient(durability),
+			...(logger === undefined ? {} : { logger }),
+		});
+
+	it("has the canonical name, requires attemptCounterClient alone and reads the logger if there is one", () => {
 		expect(redisAttemptCounterModule.name).toBe("redis-attempt-counter");
 		expect(redisAttemptCounterModule.requires).toEqual(["attemptCounterClient"]);
+		expect(redisAttemptCounterModule.optional).toEqual(["logger"]);
 	});
 
 	it(`reads its own section, 'redis-attempt-counter', strict, whose keyPrefix defaults to '${DEFAULT_REDIS_ATTEMPT_COUNTER_KEY_PREFIX}'`, () => {
@@ -250,16 +346,149 @@ describe("redisAttemptCounterModule", () => {
 	it("fills the attemptCounter slot with a counter keyed under the section's prefix", async () => {
 		const keys: string[] = [];
 		const attemptCounterClient: AttemptCounterClient = {
+			...unaskedClient(),
 			consume: async (key, input) => {
 				keys.push(key);
 				return { allowed: true, count: 1, resetAtMs: input.resetAtMs };
 			},
 		};
-		const counter = redisAttemptCounterModule.provides?.attemptCounter?.({
+		const counter = await provide({
 			section: { keyPrefix: "tenant-a:attempt:" },
 			attemptCounterClient,
-		} as never) as AttemptCounter;
+		});
 		await counter.consume("login:ip:192.0.2.1", { limit: 5, windowSeconds: 60 });
 		expect(keys).toEqual(["tenant-a:attempt:login:ip:192.0.2.1"]);
+	});
+
+	it("boots on noeviction, and says nothing", async () => {
+		const { logger, calls } = recordingLogger();
+		await boot(DURABLE, logger);
+		expect(calls).toEqual([]);
+	});
+
+	it.each([
+		"allkeys-lru",
+		"allkeys-lfu",
+		"allkeys-random",
+		"volatile-lru",
+		"volatile-lfu",
+		"volatile-random",
+		"volatile-ttl",
+		"",
+		"lru",
+		"NOEVICTION",
+	])(
+		"refuses %j at boot: any policy but noeviction may evict a running window, whose key carries a TTL",
+		async (policy) => {
+			const { logger, calls } = recordingLogger();
+			const refused = boot({ ...DURABLE, maxmemoryPolicy: policy }, logger);
+			await expect(refused).rejects.toMatchObject({
+				name: "RedisStoreEvictableError",
+				reason: "attempt-counter-evictable",
+				maxmemoryPolicy: policy,
+			});
+			await expect(refused).rejects.toThrow(
+				/attemptCounter: .*noeviction.*\(attempt-counter-evictable\)$/,
+			);
+			expect(calls).toEqual([]);
+		},
+	);
+
+	it("says what a policy may evict in its refusal", async () => {
+		await expect(boot({ ...DURABLE, maxmemoryPolicy: "allkeys-lru" })).rejects.toThrow(
+			/"allkeys-lru", which may evict any key/,
+		);
+		await expect(boot({ ...DURABLE, maxmemoryPolicy: "volatile-ttl" })).rejects.toThrow(
+			/"volatile-ttl", which may evict any key with a TTL/,
+		);
+	});
+
+	it("warns once that the check could not run when the policy could not be read, naming the refusal, and boots", async () => {
+		const refusal = replyError("ERR unknown command 'CONFIG'");
+		const { logger, calls } = recordingLogger();
+		await boot(
+			{ maxmemoryPolicy: undefined, appendOnly: undefined, snapshots: undefined, refusal },
+			logger,
+		);
+		expect(calls).toEqual([
+			{
+				level: "warn",
+				args: [
+					{
+						store: "attemptCounter",
+						adapter: "redis",
+						unread: ["maxmemory-policy"],
+						err: loggableError(refusal),
+					},
+					"attempt_counter_durability_unchecked",
+				],
+			},
+		]);
+	});
+
+	it("fails the boot when the server cannot be asked at all: an outage is not a refusal", async () => {
+		const outage = new Error("Connection is closed.");
+		await expect(boot(() => Promise.reject(outage))).rejects.toBe(outage);
+	});
+
+	it("writes its line on consoleLogger when no logger slot is filled", async () => {
+		const warn = vi.spyOn(consoleLogger, "warn").mockImplementation(() => undefined);
+		await boot({ ...DURABLE, maxmemoryPolicy: undefined });
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(warn).toHaveBeenCalledWith(
+			{ store: "attemptCounter", adapter: "redis", unread: ["maxmemory-policy"] },
+			"attempt_counter_durability_unchecked",
+		);
+	});
+
+	/** Reads the slot, as the attempt guard's callers will, and contributes a route so it is a closure root. */
+	const reader = defineModule({
+		name: "test:attempt-counter-reader",
+		optional: ["attemptCounter"] as const,
+		contributes: {
+			routes: [
+				{
+					mountPath: "/__test_noop__",
+					id: "test-noop",
+					handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+				},
+			],
+		},
+	});
+
+	it("boots through createApp off the shared clients on the test server, which does not evict", async () => {
+		const handle = await createApp({
+			modules: [redisAttemptCounterModule, reader],
+			bootstrapComponents: {
+				config: makeValidCoreConfig() as AppConfig,
+				pathResolver: (p: string) => p,
+				...makeIoredisClients(first()),
+			} as never,
+		});
+		try {
+			const components = handle.components as Record<string, unknown>;
+			expect(typeof (components.attemptCounter as AttemptCounter | undefined)?.consume).toBe(
+				"function",
+			);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("is a refused boot through createApp on a server that may evict, naming the module", async () => {
+		const refused = createApp({
+			modules: [redisAttemptCounterModule, reader],
+			bootstrapComponents: {
+				config: makeValidCoreConfig() as AppConfig,
+				pathResolver: (p: string) => p,
+				attemptCounterClient: unaskedClient({ ...DURABLE, maxmemoryPolicy: "volatile-lru" }),
+			} as never,
+		});
+		await expect(refused).rejects.toMatchObject({
+			name: "BootError",
+			reason: "provides-factory-failed",
+			details: { module: "redis-attempt-counter", componentKey: "attemptCounter" },
+			cause: { reason: "attempt-counter-evictable", maxmemoryPolicy: "volatile-lru" },
+		});
 	});
 });

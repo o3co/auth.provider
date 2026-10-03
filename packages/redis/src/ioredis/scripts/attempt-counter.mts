@@ -22,16 +22,19 @@ import { defineScript } from "./define.mjs";
 
 /**
  * `KEYS[1]` = the window's hash (`count`, `resetAt`); `ARGV` = the caller's clock, the limit,
- * the end of a window this attempt opens, the key's deadline. A window is running while its end
+ * the end of a window this attempt opens, the clock allowance. A window is running while its end
  * is after the caller's clock: below the limit the attempt is counted, at it the attempt is
- * refused and nothing is written. Otherwise a window opens, ending at `ARGV[3]`, its key
- * expiring at `ARGV[4]`. Replies `{allowed (0|1), count, resetAt}`.
+ * refused and nothing is written. Otherwise a window opens, ending at `ARGV[3]`, its key given a
+ * relative TTL, the window's length on the caller's clock plus the allowance: the server's clock
+ * never frees a running window. Replies `{allowed (0|1), count, resetAt}`.
  */
 export const ATTEMPT_COUNTER_CONSUME = defineScript(
 	`
 local now = tonumber(ARGV[1])
 local limit = tonumber(ARGV[2])
-if now == nil or limit == nil or tonumber(ARGV[3]) == nil or tonumber(ARGV[4]) == nil then
+local opensUntil = tonumber(ARGV[3])
+local allowance = tonumber(ARGV[4])
+if now == nil or limit == nil or opensUntil == nil or allowance == nil or not (now < opensUntil) then
   return redis.error_reply('ERR attempt counter: malformed arguments')
 end
 local count = tonumber(redis.call('HGET', KEYS[1], 'count'))
@@ -41,7 +44,7 @@ if count ~= nil and resetAt ~= nil and now < resetAt then
   return {1, redis.call('HINCRBY', KEYS[1], 'count', 1), resetAt}
 end
 redis.call('HSET', KEYS[1], 'count', 1, 'resetAt', ARGV[3])
-redis.call('PEXPIREAT', KEYS[1], ARGV[4])
-return {1, 1, tonumber(ARGV[3])}
+redis.call('PEXPIRE', KEYS[1], opensUntil - now + allowance)
+return {1, 1, opensUntil}
 `.trim(),
 );

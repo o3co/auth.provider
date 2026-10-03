@@ -236,12 +236,16 @@ Each one implements a port core declares; the slot name is in parentheses.
   `attempt:`), apart from the rate limiter's, which have the same
   `<tag>:<id>` form under no prefix. A window's end, and whether one is
   running, are judged on this side's clock, the one the guard reads the count
-  on; the key expires (`PEXPIREAT`) five seconds past the window's end on the
-  server's, so a server running a little ahead never frees a running window.
-  A refused attempt writes nothing, and a reply that is no count rejects, which
-  the guard answers `503`. A `maxmemory-policy` other than `noeviction` can
-  drop a running window, giving its key a fresh one: give the counter a server
-  that does not evict.
+  on; the key's TTL is relative (`PEXPIRE`: the window's length plus five
+  seconds), so the server's clock, however far off, never frees a running
+  window. A refused attempt writes nothing, and a reply that is no count
+  rejects, which the guard answers `503`. `redisAttemptCounterModule` refuses
+  the boot (`attempt-counter-evictable`) on a server whose `maxmemory-policy`
+  is not `noeviction`: every window's key carries a TTL, so any evicting policy
+  may drop a running window and give its key a fresh one. A policy it cannot
+  read is one warning, `attempt_counter_durability_unchecked`, and the boot
+  goes on. Give the counter a server, or a database on one, that does not
+  evict.
 - `CodeRepository` (`codeRepository`) — authorization codes.
 - `DeviceCodeStore` (`deviceCodeStore`) — pending RFC 8628 device
   authorizations for `@o3co/auth-provider-device-grant`. The in-process
@@ -525,7 +529,7 @@ give the same answers:
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is not a `Date` with a finite time (core's `checkSubjectRevocationInstant`) | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor (the boundary as recorded, clamped, plus the retention) for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
 | `MfaTransactionStore.create` | an `expiresAtMs` outside the Date range, or not after this process's clock | `PEXPIREAT` = the expiry rounded up, set once; no later write moves it. The subject lock's keys carry no TTL while a run is counted, and otherwise expire a day after the last failure stops counting (see [MFA stores](#mfa-stores)) |
-| `AttemptCounter.consume` | a key or spec core's `isAttemptKey` / `isAttemptSpec` refuses (a window is at most a day), and a clock that answers no instant | `PEXPIREAT` = the window's end plus `ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS`, set when a window opens; no later attempt moves it |
+| `AttemptCounter.consume` | a key or spec core's `isAttemptKey` / `isAttemptSpec` refuses (a window is at most a day), and a clock that answers no instant | `PEXPIRE` = the window's length plus `ATTEMPT_COUNT_CLOCK_ALLOWANCE_MS`, relative so the server's clock does not decide it, set when a window opens; no later attempt moves it |
 | `RateLimiter` | at construction, any spec, `defaultLimit` included, that is not a positive whole `limit` and a positive whole `windowSeconds` ending within the Date range: zero, NaN, a fraction, a negative number, or a window past the range. Core's `createRateLimitBudgetLookup` does the check, and the in-process limiter applies the same one. Such a spec is refused, never dropped and never replaced by the default, a looser budget than the operator wrote. Only a `defaultLimit` nobody gave is the built-in 60 per 60 s. The config schemas refuse the same values, and hold a window to one year | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
 
 [`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for

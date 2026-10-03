@@ -15,8 +15,9 @@
  */
 
 /**
- * What a Redis server says about keeping what it is written, for the MFA stores' boot check. A
- * reply that refuses a question leaves that part unread; any other failure rejects.
+ * What a Redis server says about keeping what it is written, for the boot checks of the MFA
+ * stores and the attempt counter. A reply that refuses a question leaves that part unread; any
+ * other failure rejects.
  */
 
 import type { Redis } from "ioredis";
