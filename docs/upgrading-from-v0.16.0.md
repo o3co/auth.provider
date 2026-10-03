@@ -509,6 +509,24 @@ modules fills them.
   deps object for their factories carries. `createDeviceVerificationHandler`'s
   `subjectRevocation` is the full `SubjectRevocation`, no longer a `Pick` of
   `revokedBefore` (#717).
+- **BREAKING: an enabled `dpopModule` requires `oauthTokenSettings`, and
+  no longer reads the configuration (#728).** It takes the issuer every
+  proof's `htu` is checked against from the slot alone, and no longer falls
+  back to `oauth.jwt.issuer` when no module provides it. With `oauthModule`
+  installed nothing changes. A composition with DPoP enabled and without
+  `oauthModule` puts an `oauthTokenSettings` value in `bootstrapComponents`
+  (core's `OAuthTokenSettings`), or the boot is refused for the
+  missing component. A deps object handed to the module's factories carries
+  `oauthTokenSettings`; `config` is no longer read. Disabled, the module
+  requires nothing.
+- **BREAKING: `dpopConfigSchema` fills no default (#728).** The `dpop`
+  section's defaults live only in the package's `config/reference.conf`. A
+  configuration that layers the modules' references (`moduleReferences`, as
+  the template does) sees no change. One built by hand writes every key of a
+  `dpop` section it sets — `iatWindowSeconds`, `algWhitelist`,
+  `replayStoreTtlSeconds` and `nonce { required, ttlSeconds }` — or the boot
+  is refused naming the missing key; an absent section, or one without
+  `enabled`, is off. Parsed directly, an absent section is `undefined`.
 - **Renamed variables.** A configuration handed to `createApp` carries core's
   `renamed-variables` captures: layer core's `reference.conf`, or call
   `renamedVariableCaptures({ modules, core: CORE_RELOCATIONS, env })` from
