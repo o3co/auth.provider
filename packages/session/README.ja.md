@@ -58,15 +58,15 @@ core が peer なのは、このパッケージが core を拡張する（`feder
 ```ts
 import { createApp } from "@o3co/auth-provider-core";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
-import { googleFederationModule } from "@o3co/auth-provider-federation-google";
+import { googleFederationTypeModule } from "@o3co/auth-provider-federation-google";
 
 const handle = await createApp({
   modules: [
     sessionStoreModuleFor(config), // 先頭に置く。後に続くすべてのモジュールが req.session を読めるように。csrfTokenSigner も提供する
     sessionModule,                 // factory ではなく const Module
-    googleFederationModule,        // federations.google と federationRedirectPolicies.google を contribute
+    googleFederationTypeModule(),  // type が "google" の core.federations エントリをすべて扱う
     // ... userRepository、userSessionStore、federationTokenStore、
-    //     sessionFederationIndex、googleFederationConfig を提供するモジュール
+    //     sessionFederationIndex を提供するモジュール
   ],
   bootstrapComponents: { config, pathResolver },
 });
