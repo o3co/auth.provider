@@ -1185,11 +1185,17 @@ write of an earlier attempt that lands late, after its lock ran out and the
 next holder took its rotation, is refused: a late give-back leaves the
 rotation spent (an overcount, the safe way round) and can no longer bump the
 version under the next holder and refuse its write. A take that does not
-answer in time keeps the lock, since it may still land and bump. The fence
-holds for a store whose take bumps: the memory store now, and the bundled
-Redis store in its follow-up. Against a store whose take does not bump, the
-answered grant carries the version the take was made at, so retrieval
-behaves as before, race included.
+answer in time lets the lock go: the take itself is guarded by the version the
+look read, so landing late it can never land under the next holder's refresh.
+Against a store whose take bumps, it is refused after the next holder's take,
+or it makes that take refuse (`concurrent_update`, and the upstream is not
+asked); against one whose take does not bump, it costs one extra counted
+rotation. Keeping the lock instead would answer every caller `lock_timeout`
+until it ran out. The fence holds for a store whose take bumps: the memory
+store now, and the bundled Redis store in its follow-up. Against a store whose
+take does not bump, the answered grant carries the version the take was made
+at, so every write after the take is guarded as before the fence, and the late
+give-back race stays open there until that store bumps.
 
 Deployment order: core ships before (or with) a store whose take bumps. This
 core reads the guard off the grant the take answered, so it is right against

@@ -1551,6 +1551,17 @@ async function stamp(
 	return { outcome: noted.value.ok ? "written" : "refused" };
 }
 
+/** The version of a grant a store answered, or `undefined` where there is none to read. */
+function versionOf(grant: unknown): unknown {
+	try {
+		return typeof grant === "object" && grant !== null
+			? (grant as { readonly version?: unknown }).version
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Takes one rotation from the grant's budget: the last step before the
  * upstream is asked, under the lock and at the version the look under it
@@ -1564,7 +1575,9 @@ async function stamp(
  * answered (one past the look's where the take bumps, the look's where it does
  * not). One that answers a version no write could be guarded by is the take's
  * outage: the upstream must not rotate a token that could not be stored. One
- * that never answered keeps the lock.
+ * that never answered lets the lock go: it is guarded by the look's version,
+ * so landing late it is refused after the next holder's take, or makes that
+ * take refuse before the upstream is asked.
  */
 async function takeRotation(
 	deps: RetrieveFederationGrantTokenDeps,
@@ -1578,11 +1591,7 @@ async function takeRotation(
 			readonly since?: Date;
 			readonly guard: WriteGuard;
 	  }
-	| {
-			readonly taken: false;
-			readonly denial: FederationGrantDenial;
-			readonly keepLock?: true;
-	  }
+	| { readonly taken: false; readonly denial: FederationGrantDenial }
 > {
 	const { store } = deps;
 	const take = store.takeRotation;
@@ -1604,17 +1613,14 @@ async function takeRotation(
 		return {
 			taken: false,
 			denial: unavailable("storage", report(deps, request, "rotation", NOT_ANSWERED)),
-			// One that never answered may still land, and it bumps the version: it
-			// must not land under the next holder's refresh.
-			...(taken === "elapsed" ? { keepLock: true as const } : {}),
 		};
 	}
 	if (!taken.value.ok) return { taken: false, denial: unavailable("concurrent_update") };
 	const written = taken.value.grant;
-	const version: unknown = written.version;
+	const version = versionOf(written);
 	if (typeof version !== "number" || !Number.isSafeInteger(version)) {
 		const unusable = new TypeError(
-			"the store's take answered a version that is not a safe integer",
+			"the store's take answered no grant version that is a safe integer",
 		);
 		return {
 			taken: false,
@@ -1833,7 +1839,7 @@ async function refresh(
 			leaseStartedAt + deps.limits.upstreamTimeoutMs,
 		);
 		if (!take.taken) {
-			if (take.keepLock !== true) handOver(deps, request, release());
+			handOver(deps, request, release());
 			return lastLook(deps, request, take.denial);
 		}
 		// The take's time is spent of the soft deadline.

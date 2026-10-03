@@ -382,7 +382,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			expect(h.refresh).not.toHaveBeenCalled();
 		});
 
-		it("that does not answer in time keeps the lock: it may still land and bump the version under the next holder", async () => {
+		it("that does not answer in time lets the lock go: the take is guarded by the look's version, so it can never land under the next holder's refresh", async () => {
 			await seedEndingAt(10 * MIN);
 			withTake(() => new Promise(() => {}));
 			setNow(at(20 * MIN));
@@ -390,9 +390,45 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			await vi.advanceTimersByTimeAsync(limits.upstreamTimeoutMs);
 			expect(await pending).toMatchObject({ ok: false, reason: "storage" });
 			await Promise.all(h.background);
-			expect(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).toEqual({
-				acquired: false,
-				reason: "timeout",
+			expect(
+				(await h.store.acquireRefreshLock("g-1", { ttlMs: 1_000, waitForMs: 0 })).acquired,
+			).toBe(true);
+		});
+
+		it("that lands late, after the next holder's look and before its take, makes that take refuse: `concurrent_update`, and the upstream is not asked", async () => {
+			await seedEndingAt(10 * MIN);
+			// A's take hangs past the soft deadline, and lands only when B is about to take.
+			let land!: () => void;
+			const landing = new Promise<void>((resolve) => {
+				land = resolve;
+			});
+			let landed: Promise<unknown> = Promise.resolve();
+			let takes = 0;
+			withTake(async (input) => {
+				takes += 1;
+				if (takes === 1) {
+					const late = landing.then(() => realTake(input));
+					landed = late;
+					return late;
+				}
+				land();
+				await landed;
+				return realTake(input);
+			});
+			setNow(at(20 * MIN));
+			const first = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.upstreamTimeoutMs);
+			expect(await first).toMatchObject({ ok: false, reason: "storage" });
+			await Promise.all(h.background);
+
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "concurrent_update",
+			});
+			expect(h.refresh).not.toHaveBeenCalled();
+			expect(await h.store.find("g-1", now())).toMatchObject({
+				rotations: { since: at(20 * MIN), count: 1 },
 			});
 		});
 
@@ -700,7 +736,7 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 			["a string", "3"],
 		])(
 			"that is %s asks the upstream nothing, and answers `storage`: no write could be guarded by it",
-			async (_, version) => {
+			async (_, version: unknown) => {
 				await seedEndingAt(10 * MIN);
 				withTake(async (input) => {
 					const taken = await realTake(input);
@@ -708,6 +744,34 @@ describe("retrieveFederationGrantToken — the rotation budget", () => {
 						? { ok: true, grant: { ...taken.grant, version: version as number } }
 						: taken;
 				});
+				setNow(at(20 * MIN));
+				const result = await retrieve();
+				expect(result).toMatchObject({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(failureOf(result)).toMatchObject({ during: "rotation" });
+				expect(h.refresh).not.toHaveBeenCalled();
+			},
+		);
+
+		it.each([
+			["no grant", () => undefined],
+			["a grant that is not an object", () => "g-1"],
+			[
+				"a grant whose version throws when read",
+				() => ({
+					get version(): number {
+						throw new Error("unreadable");
+					},
+				}),
+			],
+		])(
+			"answered `ok` with %s asks the upstream nothing, and answers `storage`, without throwing",
+			async (_, grant) => {
+				await seedEndingAt(10 * MIN);
+				withTake(async () => ({ ok: true, grant: grant() as never }));
 				setNow(at(20 * MIN));
 				const result = await retrieve();
 				expect(result).toMatchObject({
