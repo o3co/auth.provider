@@ -218,6 +218,10 @@ export interface GrantHandler {
  *   `iat`, so only RTs minted before the change are caught.
  * - `logger`: security audit events (RT replay, unknown-family decisions,
  *   legacy-token acceptance); silent when absent, for minimal test harnesses.
+ * - `oauthTokenSettings`: the issuer, lifetimes and switches a grant reads of
+ *   the oauth module's settings, held whole with `checkOAuthTokenSettings`
+ *   rather than read from `config`; absent in a composition without the
+ *   oauth module. `config` stays required while grants still read it.
  */
 export type GrantDependencies = ProviderDeps<
 	"config" | "keyStore",
@@ -230,6 +234,7 @@ export type GrantDependencies = ProviderDeps<
 	| "sessionFederationIndex"
 	| "subjectRevocation"
 	| "logger"
+	| "oauthTokenSettings"
 >;
 
 /**

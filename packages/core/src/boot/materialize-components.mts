@@ -28,6 +28,7 @@ import { prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { auditSlotFor } from "./audit-fan-out.mjs";
 import { clientRecordSlotFor } from "./client-record-slot.mjs";
 import { failureSummary } from "./failure-summary.mjs";
+import { tokenSettingsSlotFor } from "./token-settings-slot.mjs";
 import type {
 	BootPlan,
 	BootstrapMap,
@@ -121,13 +122,18 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * provider factory in `plan.providerActivations` order. The `auditSink`
  * slot is `audit-fan-out.mts`'s to fill (`auditSlotFor`), and the
  * `clientRepository` slot `client-record-slot.mts`'s (`clientRecordSlotFor`,
- * core's client-record boundary over whatever fills it); a cleanup is still
- * handed the provider's own value.
+ * core's client-record boundary over whatever fills it), and the
+ * `oauthTokenSettings` slot `token-settings-slot.mts`'s
+ * (`tokenSettingsSlotFor`, the checked, frozen snapshot of whatever fills
+ * it); a cleanup is still handed the provider's own value.
  *
  * A factory failure becomes `BootError reason="provides-factory-failed"`, its
  * message naming the thrown value by `failureSummary` (never
  * `String(thrown)`). The cleanups of the components already materialised run
- * first, in reverse, and their errors go to `details.cleanupErrors`.
+ * first, in reverse, and their errors go to `details.cleanupErrors`. A
+ * provided `oauthTokenSettings` the slot refuses is reported the same way,
+ * after the provider's own cleanup too, unless the refusal is already a
+ * BootError (a lifetime beyond the configuration's), which is thrown as it is.
  */
 export async function materializeComponents(
 	plan: BootPlan,
@@ -176,6 +182,11 @@ export async function materializeComponents(
 	// The `clientRepository` slot's handling, `client-record-slot.mts`'s alone.
 	const clientRecordSlot = clientRecordSlotFor(components);
 	clientRecordSlot.beforeProviders();
+	// The `oauthTokenSettings` slot's handling, `token-settings-slot.mts`'s alone.
+	const tokenSettingsSlot = tokenSettingsSlotFor(components, bootstrapComponents.config);
+	tokenSettingsSlot.beforeProviders(
+		overrideComponents !== undefined && Object.hasOwn(overrideComponents, "oauthTokenSettings"),
+	);
 
 	for (const activation of plan.providerActivations) {
 		const { module: moduleName, componentKey } = activation;
@@ -208,14 +219,9 @@ export async function materializeComponents(
 			validatedModule.section,
 		);
 
-		// Awaited uniformly: a factory may be sync or async.
-		let value: unknown;
-		try {
-			value = await factory(deps as never);
-		} catch (thrownValue) {
-			// Partial rollback of the components already materialised.
+		/** Rolls back what is materialised, then reports the provider's failure. */
+		const providerFailed = async (thrownValue: unknown): Promise<never> => {
 			const cleanupErrors = await runCleanupsReverse(cleanups);
-
 			throw new BootError({
 				message: `Module "${moduleName}" provider factory for "${String(componentKey)}" failed: ${failureSummary(thrownValue)}`,
 				reason: "provides-factory-failed",
@@ -229,12 +235,16 @@ export async function materializeComponents(
 				},
 				cause: thrownValue,
 			});
-		}
+		};
 
-		components[componentKey as string] = clientRecordSlot.provided(
-			componentKey,
-			auditSlot.provided(componentKey, value),
-		);
+		// Awaited uniformly: a factory may be sync or async.
+		let value: unknown;
+		try {
+			value = await factory(deps as never);
+		} catch (thrownValue) {
+			// Partial rollback of the components already materialised.
+			await providerFailed(thrownValue);
+		}
 
 		const cleanupFn = manifest.lifecycle?.[componentKey]?.cleanup;
 		if (cleanupFn !== undefined) {
@@ -245,6 +255,21 @@ export async function materializeComponents(
 				value,
 			});
 		}
+
+		let held: unknown;
+		try {
+			held = tokenSettingsSlot.provided(componentKey, value, moduleName);
+		} catch (refusal) {
+			// The provider's own value is rolled back with the rest.
+			if (!(refusal instanceof BootError)) await providerFailed(refusal);
+			await runCleanupsReverse(cleanups);
+			throw refusal;
+		}
+
+		components[componentKey as string] = clientRecordSlot.provided(
+			componentKey,
+			auditSlot.provided(componentKey, held),
+		);
 	}
 
 	return {

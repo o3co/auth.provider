@@ -54,7 +54,7 @@ const handle = await createApp({
 const config = handle.components.config; // boot がパースしたもの
 ```
 
-各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するいくつかのセクション（`webauthn`、`federation-grants.enabled`）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。ストアのセクション（`core-rate-limiter-memory`、`redis-*`）と、各セクションの移動元のパスは、存在だけを宣言します: 書かれたまま残し、それを解析するモジュールと移動の拒否に渡します。パッケージの `reference.conf` はそのモジュールのどれかが読み込まれれば重ねられるので、読み込まれないかもしれないモジュールのセクションも設定します。宣言されているので、それらは無視されたセクションとして名前が出ません。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ — は、自分のファイルを core の `reference.conf` だけの上に重ねて解決し（`coreReference()`: まだモジュールを知らないので、どのパッケージの reference も分かりません）、`readTransitionalConfig(resolved, paths)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: 指定した各パスを core の base がそこに宣言するスキーマでパースし、それ以外は書かれたまま検査しません — 検査するのは boot です。したがってこの第一段階は、パッケージの `reference.conf` だけが設定するものを見ず、パッケージの reference が補うセクションを読んではいけません。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
+各セクションがモジュール名の下に移るまで — #728 の移動 PR — core のスキーマは他パッケージが所有するいくつかのセクション（`webauthn`、`federation-grants.enabled`）をまだミラーしており、boot は設定がそれを持つたびに、それを読むモジュールが読み込まれているかどうかにかかわらず検証します。ストアのセクション（`core-rate-limiter-memory`、`redis-*`）と、各セクションの移動元のパスは、存在だけを宣言します: 書かれたまま残し、それを解析するモジュールと移動の拒否に渡します。パッケージの `reference.conf` はそのモジュールのどれかが読み込まれれば重ねられるので、読み込まれないかもしれないモジュールのセクションも設定します。宣言されているので、それらは無視されたセクションとして名前が出ません。composition root がモジュールを知る前に読まなければならないもの — モジュールを選ぶスイッチ — は、自分のファイルを core の `reference.conf` だけの上に重ねて解決し（`coreReference()`: まだモジュールを知らないので、どのパッケージの reference も分かりません）、`readTransitionalConfig(resolved, paths)`（[`src/config/composed.mts`](src/config/composed.mts)）で読みます: 指定した各パスを core の base がそこに宣言するスキーマでパースし、それ以外は書かれたまま検査しません — 検査するのは boot です。したがってこの第一段階は、パッケージの `reference.conf` だけが設定するものを見ず、パッケージの reference が補うセクションを読んではいけません。これは過渡的なもので、それらのスイッチが composition root 自身のセクションに移った時点でなくなります。core 自身のセクションは `readCoreSection(resolved)`（[`src/config/core-section.mts`](src/config/core-section.mts)）で読みます: `core {}` だけを、boot がパースするのと同じ厳格なスキーマで読み、同じ文言で拒否し、ほかのセクションは読みません。standalone テンプレートの [`app.mts`](../../templates/standalone/src/app.mts) は、ちょうどこの二段階で設定を読みます。
 
 `AppConfigSchema` は非推奨です。`createApp` の前にこれでパースすると、宣言していないセクションがすべて取り除かれ — #472、#495、#496 はそうしてセクションを失いました — それを続ける構成は、解決したものより少ないものを boot に渡すことになります。export は残り、そこから推論される型 `AppConfig` はパース済みの設定の型です。
 
@@ -467,7 +467,7 @@ const myGrantModule = defineModule({
 });
 ```
 
-`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。`GrantFactory` は `GrantDependencies` を受け取り、その必須スロットは `config` と `keyStore` なので、モジュールはその両方を requires します。boot planner はグラントを `my_grant` で登録し、`/oauth/token` は `grantHandlerResolver` synthetic key を通じてそれにディスパッチします。
+`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。`GrantFactory` は `GrantDependencies` を受け取り、その必須スロットは `config` と `keyStore` なので、モジュールはその両方を requires します。oauth モジュールの設定の issuer、有効期間、スイッチを読むグラントは `oauthTokenSettings` を optional に宣言し、`checkOAuthTokenSettings(deps.oauthTokenSettings)` で検査します。これは設定を必要としません: スロットの有効期間を設定の値に収めるのは boot 自身です。boot planner はグラントを `my_grant` で登録し、`/oauth/token` は `grantHandlerResolver` synthetic key を通じてそれにディスパッチします。
 
 ### YAML からクライアントとユーザーを読み込む
 

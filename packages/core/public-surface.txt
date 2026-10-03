@@ -116,6 +116,7 @@
 . CookieCarrier type
 . CoreConfig type
 . CoreConfigSchema value
+. CoreSection type
 . CorsMiddlewareOptions type
 . CorsRoute type
 . CreateAppOptions type
@@ -968,6 +969,7 @@
 . readConditionalRemoveAnswer value
 . readConditionalReplaceAnswer value
 . readConditionalSetRemoveAnswer value
+. readCoreSection value
 . readDeviceAuthorization value
 . readEnrollmentFacts value
 . readEnvironmentName value

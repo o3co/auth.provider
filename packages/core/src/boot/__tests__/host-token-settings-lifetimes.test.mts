@@ -23,7 +23,9 @@
  * lifetime would outlive the record that revokes its token
  * (docs/adapter-surface.md, `oauthTokenSettings`). Boot refuses the pair,
  * naming the member and both values: a host map at stage 1, before any
- * provider runs, and a value a module provides where a reader first reads it.
+ * provider runs, and a value a module provides as it enters the component
+ * map at stage 3, before any consumer reads it (`token-settings-slot.test.mts`
+ * has the snapshot every consumer then reads).
  */
 
 import { describe, expect, it } from "vitest";
@@ -124,7 +126,7 @@ describe("a host-filled oauthTokenSettings is held to the configuration's lifeti
 		}
 	});
 
-	it("refuses a slot a module provides that outlasts the configuration's, where a reader reads it", async () => {
+	it("refuses a slot a module provides that outlasts the configuration's, as it is materialised", async () => {
 		// Not oauthModule, whose provider resolves its lifetimes from the same
 		// configuration: another module, advertising a longer refresh token.
 		const booting = createApp({
@@ -140,7 +142,11 @@ describe("a host-filled oauthTokenSettings is held to the configuration's lifeti
 			],
 			bootstrapComponents: { config: config(), pathResolver: (p: string) => p } as never,
 		});
-		await expect(booting).rejects.toThrow(RangeError);
+		await expect(booting).rejects.toBeInstanceOf(BootError);
+		await expect(booting).rejects.toMatchObject({
+			reason: "token-settings-lifetime-exceeds-configuration",
+			stage: "materializeComponents",
+		});
 		await expect(booting).rejects.toThrow(
 			/oauthTokenSettings\.refreshTokenExpiresIn.*172800.*86400/,
 		);

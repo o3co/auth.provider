@@ -887,22 +887,33 @@ export interface AuthoritativeComponentOverriddenDetails {
 }
 
 /**
- * An `oauthTokenSettings` a host filled names a token lifetime longer than
- * the one core resolves from the configuration, which sizes the retention
- * of what revokes that token.
+ * An `oauthTokenSettings` names a token lifetime longer than the one core
+ * resolves from the configuration, which sizes the retention of what
+ * revokes that token: a host map's at stage 1, or as the value enters the
+ * component map at stage 3 (a module's, or a host's that answered stage 1
+ * differently).
  */
-export interface TokenSettingsLifetimeExceedsConfigurationDetails {
+export type TokenSettingsLifetimeExceedsConfigurationDetails = {
 	readonly reason: "token-settings-lifetime-exceeds-configuration";
 	readonly componentKey: "oauthTokenSettings";
-	/** The host map the slot came from. */
-	readonly source: "bootstrapComponents" | "overrideComponents";
 	/** The slot's member, as the contract names it. */
 	readonly member: "accessTokenLifetime.maxExpiresIn" | "refreshTokenExpiresIn";
 	/** The slot's lifetime, in seconds. */
 	readonly slotSeconds: number;
 	/** The lifetime core resolves from the configuration, in seconds. */
 	readonly configurationSeconds: number;
-}
+} & (
+	| {
+			/** The host map the slot came from. */
+			readonly source: "bootstrapComponents" | "overrideComponents";
+	  }
+	| {
+			/** A module's `provides`. */
+			readonly source: "provides";
+			/** The module that provided it. */
+			readonly module: string;
+	  }
+);
 
 export interface InvalidRouteAdvertisementPathDetails {
 	readonly reason: "invalid-route-advertisement-path";
