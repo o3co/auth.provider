@@ -43,6 +43,7 @@ import {
 	registerBuiltinKeyStores,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { federationTypeForTests } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -151,18 +152,11 @@ const partner: FederationProvider = {
 	}),
 };
 
-const partnerFederationModule = defineModule({
-	name: "test:partner-federation",
-	contributes: {
-		federations: { [FEDERATION]: () => partner },
-		federationRedirectPolicies: {
-			[FEDERATION]: () => ({
-				validateRedirect: () => ({ ok: true as const, value: undefined }),
-				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-			}),
-		},
-	} as never,
-});
+/**
+ * The partner federation's type: the `partner` entry is the IdP above, with a
+ * redirect policy that accepts every redirect and resolves the callback to `/`.
+ */
+const partnerFederationModule = federationTypeForTests(FEDERATION, { provider: () => partner });
 
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",
