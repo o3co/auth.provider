@@ -21,6 +21,7 @@ import {
 	type KeyStore,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
 import { expect } from "vitest";
 
@@ -29,6 +30,12 @@ export const keyStore: KeyStore = createSymmetricKeyStore(SECRET);
 export const secretKey = createSecretKey(Buffer.from(SECRET));
 
 export const ISSUER = "https://auth.example";
+
+/** The token settings a hand-built grant mints within: a 300-second access token. */
+export const tokenSettings = createTestOAuthTokenSettings({
+	issuer: ISSUER,
+	accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
+});
 
 export async function signSelfIssuedAccessToken(
 	claims: Record<string, unknown>,

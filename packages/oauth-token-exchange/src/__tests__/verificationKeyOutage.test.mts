@@ -42,6 +42,7 @@ import {
 	SECRET,
 	secretKey,
 	signSelfIssuedAccessToken,
+	tokenSettings,
 } from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
@@ -93,15 +94,7 @@ const spyLogger = () => {
 function grantWith(lookup: "up" | "down", logger: Logger = spyLogger() as unknown as Logger) {
 	const keyStore = keyStoreWith(lookup);
 	return createTokenExchangeGrant({
-		config: {
-			oauth: {
-				jwt: { issuer: ISSUER },
-				accessToken: { expiresIn: 300 },
-				refreshToken: { expiresIn: 86400 },
-				grants: {},
-			},
-			// biome-ignore lint/suspicious/noExplicitAny: test scaffold config
-		} as any,
+		oauthTokenSettings: tokenSettings,
 		keyStore,
 		logger,
 		refreshTokenFamilyRevocation: makeFamilyRevocation(),
@@ -158,15 +151,7 @@ describe("token exchange — a keystore that cannot answer", () => {
 		});
 		const ACTOR_TYPE = "urn:example:actor";
 		const grant = createTokenExchangeGrant({
-			config: {
-				oauth: {
-					jwt: { issuer: ISSUER },
-					accessToken: { expiresIn: 300 },
-					refreshToken: { expiresIn: 86400 },
-					grants: {},
-				},
-				// biome-ignore lint/suspicious/noExplicitAny: test scaffold config
-			} as any,
+			oauthTokenSettings: tokenSettings,
 			keyStore: working,
 			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			tokenExchangeValidatorResolver: new Map([
