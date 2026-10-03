@@ -19,7 +19,7 @@ import { type ResolvedPkceOptions, resolvePkceOptions } from "./grants/pkce.mjs"
 
 /**
  * The `oauth.*` knobs the OAuth routers and grants consume, resolved once at
- * composition time. Plain data — consumers never re-read `config` per request.
+ * composition time. Plain data — consumers never re-read the section per request.
  */
 export interface ResolvedOAuthOptions {
 	/**
@@ -95,11 +95,10 @@ export interface ResolvedOAuthOptions {
 }
 
 /**
- * Shape-only view of the `oauth` config block. This is the ONE place the
- * defensive cast lives: every field is read through optional chaining so
- * hand-built configs that never passed the zod schema (`AppConfigSchema`)
- * — test fixtures, embedders composing their own `AppConfig` — resolve to
- * safe defaults.
+ * Shape-only view of the `oauth` section. This is the ONE place the
+ * defensive cast lives: every field is read through optional chaining so a
+ * hand-built section that never passed the module's schema — test fixtures,
+ * embedders composing their own `AppConfig` — resolves to safe defaults.
  */
 type OAuthConfigShape = {
 	jwt?: { issuer?: unknown; legacyTypAccept?: boolean };
@@ -153,8 +152,10 @@ const positiveIntOrUndefined = (value: unknown): number | undefined => {
 
 /**
  * Resolves every `oauth.*` knob the OAuth routers and grants consume into one
- * plain typed options object, at composition time, tolerating a hand-built
- * config that bypassed the schema. Defaults:
+ * plain typed options object, at composition time, from the section `oauth`:
+ * the oauth module's parsed section, or, for a router or grant built by hand,
+ * the `oauth {}` its configuration carries, which may have bypassed the schema.
+ * Defaults:
  *
  * - boolean opt-ins (`requireEmailVerified`, `resourceIndicator.enabled`)
  *   enable only on literal `true`; an absent value reads `false`;
@@ -170,8 +171,8 @@ const positiveIntOrUndefined = (value: unknown): number | undefined => {
  *   `constructor` would read `Object`.
  */
 
-export const resolveOAuthOptions = (config: unknown): ResolvedOAuthOptions => {
-	const oauth = (config as { oauth?: OAuthConfigShape } | undefined)?.oauth;
+export const resolveOAuthOptions = (section: unknown): ResolvedOAuthOptions => {
+	const oauth = section as OAuthConfigShape | undefined;
 
 	return {
 		issuer: oauth?.jwt?.issuer,

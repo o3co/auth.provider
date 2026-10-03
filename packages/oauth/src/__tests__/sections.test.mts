@@ -40,7 +40,7 @@ import {
 import { makeValidAppConfig, packageReferenceProblems } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
-import { oauthModule, oauthSectionSchema } from "#/module.mjs";
+import { oauthEndpointsModule, oauthSectionSchema } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { oauthSessionModule } from "#/oauthSession.mjs";
 import { capturing, type GrantSwitches, withGrants } from "./_helpers/sections.mjs";
@@ -87,7 +87,7 @@ const everyModule = (): Module[] => {
 		jwtBearer: true,
 	}) as AppConfig;
 	return [
-		oauthModule({ config }),
+		oauthEndpointsModule,
 		oauthSessionModule({ config }),
 		oauthAuthorizationModule({ config }),
 	];
@@ -110,13 +110,14 @@ describe("the package's config/reference.conf", () => {
 	});
 
 	it("is declared by each of them and holds only their sections, which their schemas parse without losing a path", () => {
+		// The issuer has no default: a deployment sets it, as here.
 		const read = (path: string, env: Readonly<Record<string, string>>): unknown =>
-			parseFile(path, { env: { ...env } }).toObject();
+			parseFile(path, { env: { OAUTH_JWT_ISSUER: "https://auth.test", ...env } }).toObject();
 		// Built from the reference itself, as a root that layers it builds them:
 		// each module's section holds the switches to what it was built with.
 		const config = { ...makeValidAppConfig(), ...defaults() } as AppConfig;
 		const modules = [
-			oauthModule({ config }),
+			oauthEndpointsModule,
 			oauthSessionModule({ config }),
 			oauthAuthorizationModule({ config }),
 		];
@@ -240,6 +241,7 @@ describe("the oauth module's section, as an environment variable carries it", ()
 		["a list written in configuration, as written", ["a.example"], ["a.example"]],
 	] as const)("reads clientIdMetadataDocuments.allowedHosts from %s", (_what, written, read) => {
 		const parsed = oauthSectionSchema.parse({
+			...makeValidAppConfig().oauth,
 			clientIdMetadataDocuments: { enabled: "true", allowedHosts: written },
 		});
 		expect(parsed.clientIdMetadataDocuments?.allowedHosts).toEqual(read);
@@ -299,7 +301,7 @@ describe("boot, over a configuration that captures the modules' renamed variable
 	const composition = (change: (config: Record<string, unknown>) => Record<string, unknown>) => {
 		const config = change(makeValidAppConfig() as unknown as Record<string, unknown>);
 		const modules = [
-			oauthModule({ config: config as AppConfig }),
+			oauthEndpointsModule,
 			oauthSessionModule({ config: config as AppConfig }),
 			oauthAuthorizationModule({ config: config as AppConfig }),
 		];

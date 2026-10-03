@@ -45,7 +45,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { oauthModule } from "#/module.mjs";
+import { oauthEndpointsModule } from "#/module.mjs";
 import { oauthConfigForTests } from "#/testing/index.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
@@ -111,7 +111,7 @@ const boot = async (clientRepository: ClientRepository) => {
 	const config = { ...makeValidAppConfig(), ...oauthConfigForTests() };
 	const handle = await createTestApp({
 		modules: [
-			oauthModule({ config }),
+			oauthEndpointsModule,
 			memoryAccessTokenDenylistModule,
 			jwksModule,
 			authorizationCodeGrantModule,
