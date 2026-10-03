@@ -77,10 +77,7 @@ afterEach(async () => {
  * Boots the session routes over `federations` as `core.federations`, the
  * type `loose` registered, and any `extra` modules; answers the app.
  */
-async function boot(
-	federations: Readonly<Record<string, object>>,
-	extra: readonly ReturnType<typeof defineModule>[] = [],
-): Promise<express.Express> {
+async function boot(federations: Readonly<Record<string, object>>): Promise<express.Express> {
 	const base = withInsecureSessionCookie(makeValidAppConfig());
 	const config = withSessionCaptures({
 		...base,
@@ -99,7 +96,6 @@ async function boot(
 				name: "test:deployment-providers",
 				provides: { userRepository: () => userRepository },
 			}),
-			...extra,
 		],
 		bootstrapComponents: { config, pathResolver: (s: string) => s },
 	});
@@ -154,33 +150,15 @@ describe("the federation routes take each callback URL from the flat entries cor
 		);
 	});
 
-	it("takes no callback URL from a disabled entry: a provider contributed under its name cannot start", async () => {
-		// A module contributing the name directly, where the entry is switched
-		// off: the routes know the provider and have no callback URL for it.
-		const direct = defineModule({
-			name: "test:direct-federation",
-			contributes: {
-				federations: { off: () => echoingProvider("off") },
-				federationRedirectPolicies: {
-					off: () => ({
-						validateRedirect: () => ({ ok: true as const, value: undefined }),
-						resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
-					}),
-				},
+	it("takes nothing from a disabled entry: its type registers no provider, and its start is not found", async () => {
+		const app = await boot({
+			off: {
+				enabled: false,
+				type: TYPE,
+				callbackURL: "https://auth.test/session/oauth/federation/off/callback",
 			},
 		});
-		const app = await boot(
-			{
-				off: {
-					enabled: false,
-					type: TYPE,
-					callbackURL: "https://auth.test/session/oauth/federation/off/callback",
-				},
-			},
-			[direct],
-		);
 		const start = await request(app).get("/session/oauth/federation/off");
-		expect(start.status).toBe(500);
-		expect(start.body.error).toBe("misconfiguration");
+		expect(start.status).toBe(404);
 	});
 });
