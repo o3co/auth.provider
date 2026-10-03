@@ -85,9 +85,6 @@ const handle = await createApp({
 `oidc` entry — discovery, token, UserInfo, JWKS — through that fetch: a proxy,
 or a test double. Without it the global `fetch` is used.
 
-The module per instance (`oidcFederationModule(<name>)`), its helpers
-`readOidcFederationConfigs` and `oidcFederationNames`, and the
-`oidcFederationConfigs` slot were removed in favour of this type module.
 
 ### Configuration
 
