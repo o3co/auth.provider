@@ -37,7 +37,10 @@ type Components = Readonly<Record<string, unknown>>;
  * first to what its readers read (`checkOAuthTokenSettings`), so a slot
  * without a canonical issuer refuses rather than the configuration's being
  * read beside it — else `oauth.jwt.issuer` as the configuration carries it,
- * unvalidated, for each reader to hold to its own rule.
+ * unvalidated, for each reader to hold to its own rule. The slot is held
+ * to the lifetimes core resolves from the configuration as well: this is
+ * where boot bounds a module's slot by them, so a reader holding the slot
+ * alone need not.
  */
 export function compositionIssuer(components: Components): unknown {
 	if (Object.hasOwn(components, "oauthTokenSettings")) {

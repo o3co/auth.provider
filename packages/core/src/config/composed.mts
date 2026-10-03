@@ -146,13 +146,22 @@ export function operatorPath(path: readonly PropertyKey[]): string {
  */
 export function readTransitionalConfig(raw: unknown, reads: readonly string[]): AppConfig {
 	const written = withoutRenamedVariables(raw);
-	const picked = pickConfigSchema(TransitionalConfigSchema, reads);
-	let result: ReturnType<typeof picked.safeParse>;
+	const parsed = parsedOrRefused(pickConfigSchema(TransitionalConfigSchema, reads), written);
+	return overlayConfig(written, parsed) as AppConfig;
+}
+
+/**
+ * `value` parsed by `schema`, or a `RangeError` naming each issue at its
+ * operator path (the whole configuration named as such), with the Zod error
+ * as its `cause`. A parse that throws instead of answering — a getter on a
+ * hand-built configuration — is a refusal like any other, carrying what it
+ * threw as the `cause`, not an error escaping the reader.
+ */
+export function parsedOrRefused<T>(schema: z.ZodType<T>, value: unknown): T {
+	let result: ReturnType<typeof schema.safeParse>;
 	try {
-		result = picked.safeParse(written);
+		result = schema.safeParse(value);
 	} catch (thrown) {
-		// A read that throws — a getter on a hand-built configuration — is a
-		// refusal like any other, not an error escaping the reader.
 		throw new RangeError(
 			"Config validation failed — core's configuration schema threw instead of answering, so it could not be parsed synchronously; the error it threw is this error's cause",
 			{ cause: thrown },
@@ -167,5 +176,5 @@ export function readTransitionalConfig(raw: unknown, reads: readonly string[]): 
 			{ cause: result.error },
 		);
 	}
-	return overlayConfig(written, result.data) as AppConfig;
+	return result.data;
 }

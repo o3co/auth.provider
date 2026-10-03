@@ -156,18 +156,43 @@ const readOnce = (member: string, read: () => unknown): unknown => {
 
 /**
  * The `oauthTokenSettings` a composition holds, as a snapshot frozen at
- * every level: each member a reader reads, read from `value` exactly once,
- * held to its contract rule, and no lifetime longer than the one core
- * resolves from `config`, whoever provides the slot. What is validated is
- * what is answered: a getter that changes its answer, or a host that
- * changes its object later, changes nothing a reader holds. Members no
- * reader reads are neither checked nor carried.
+ * every level: each member a reader reads, read from `value` exactly once
+ * and held to its contract rule. What is validated is what is answered: a
+ * getter that changes its answer, or a host that changes its object later,
+ * changes nothing a reader holds. Members no reader reads are neither
+ * checked nor carried.
  *
- * @throws RangeError naming the first member that does not hold (both
- *   values for a lifetime) or whose read throws, or the slot when it holds
- *   no settings object.
+ * This form needs no configuration: it holds the lifetimes to their
+ * contract rule alone. Bounding them by the ones core resolves from the
+ * configuration is core's: boot holds every slot a composition holds to
+ * them, whoever provides it — a host map's at stage 1, a module's when boot
+ * reads the slot's issuer (`compositionIssuer`).
+ *
+ * @throws RangeError naming the first member that does not hold or whose
+ *   read throws, or the slot when it holds no settings object.
  */
-export function checkOAuthTokenSettings(value: unknown, config: unknown): OAuthTokenSettings {
+export function checkOAuthTokenSettings(value: unknown): OAuthTokenSettings;
+/**
+ * Transitional: the check above, and no lifetime longer than the one core
+ * resolves from `config` (both values named when one is). For a reader that
+ * still holds the whole configuration; a reader holds the slot with the
+ * one-argument form instead. Passing `config` selects this form even when
+ * it is `undefined`, which refuses.
+ */
+export function checkOAuthTokenSettings(value: unknown, config: unknown): OAuthTokenSettings;
+export function checkOAuthTokenSettings(
+	value: unknown,
+	...configuration: [] | [config: unknown]
+): OAuthTokenSettings {
+	const snapshot = settingsSnapshot(value);
+	if (configuration.length === 0) return snapshot;
+	const beyond = lifetimeBeyondConfiguration(snapshot, configuration[0]);
+	if (beyond !== undefined) throw new RangeError(lifetimeBeyondConfigurationMessage(beyond));
+	return snapshot;
+}
+
+/** The slot held to its contract rule, as a snapshot frozen at every level. */
+function settingsSnapshot(value: unknown): OAuthTokenSettings {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		throw new RangeError(
 			`oauthTokenSettings must be the settings object its contract describes, and the composition's slot holds ${shown(value)}. ${WHY}`,
@@ -217,7 +242,7 @@ export function checkOAuthTokenSettings(value: unknown, config: unknown): OAuthT
 		if (typeof read !== "boolean") refuse(name, "must be true or false", read);
 	}
 
-	const snapshot: OAuthTokenSettings = Object.freeze({
+	return Object.freeze({
 		issuer: issuer as string,
 		legacyTypAccept: switches.get("legacyTypAccept") as boolean,
 		accessTokenLifetime: Object.freeze({ defaultExpiresIn, maxExpiresIn }),
@@ -225,7 +250,4 @@ export function checkOAuthTokenSettings(value: unknown, config: unknown): OAuthT
 		resourceIndicatorEnabled: switches.get("resourceIndicatorEnabled") as boolean,
 		requireEmailVerified: switches.get("requireEmailVerified") as boolean,
 	});
-	const beyond = lifetimeBeyondConfiguration(snapshot, config);
-	if (beyond !== undefined) throw new RangeError(lifetimeBeyondConfigurationMessage(beyond));
-	return snapshot;
 }

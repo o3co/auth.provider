@@ -25,6 +25,7 @@ It is separate because every grant package — `oauth`, `device-grant`, `oauth-t
 - A handler returns a `GrantHandlerResult` — status and tokens or an RFC 6749 error, plus an optional `sessionMutation` — and never touches the response.
 - `generateToken` signs through `KeyStore.sign`, so `alg` and `kid` are the key store's; `cnf` is emitted only when a `confirmation` is given; `jti` and `issuedAt` may be reserved by the caller (#449) and are otherwise minted here.
 - The optional `GrantDependencies` stores are absence-tolerant: no `sid`, no `subjectRevocation`, no logger is "nothing to bind to", never an error.
+- `GrantDependencies.oauthTokenSettings` is the oauth module's settings slot, optional: a grant reads the issuer, lifetimes and switches from it, held with `checkOAuthTokenSettings`, rather than from `config` — [`../boot/__tests__/grant-token-settings.test.mts`](../boot/__tests__/grant-token-settings.test.mts).
 
 ## Dependencies
 

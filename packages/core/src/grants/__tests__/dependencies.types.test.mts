@@ -17,6 +17,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { ComponentMap } from "../../modules/manifest/component-map.mjs";
 import type { ProviderDeps } from "../../modules/manifest/provider.mjs";
+import type { OAuthTokenSettings } from "../../token-settings/types.mjs";
 import type { GrantDependencies } from "../types.mjs";
 
 // `GrantDependencies` is the one statement of what a grant may
@@ -39,6 +40,7 @@ type GrantSlots = ProviderDeps<
 	| "sessionFederationIndex"
 	| "subjectRevocation"
 	| "logger"
+	| "oauthTokenSettings"
 >;
 
 describe("GrantDependencies is defined on ComponentMap slots", () => {
@@ -52,6 +54,21 @@ describe("GrantDependencies is defined on ComponentMap slots", () => {
 	it("types `config` as the `config` slot, not as a CoreConfig widened by an index signature", () => {
 		expectTypeOf<GrantDependencies["config"]>().toEqualTypeOf<
 			NonNullable<ComponentMap["config"]>
+		>();
+		expect(true).toBe(true);
+	});
+
+	it("types `oauthTokenSettings` as the slot's value, optional, so a grant reads it without `config`", () => {
+		expectTypeOf<GrantDependencies["oauthTokenSettings"]>().toEqualTypeOf<
+			ComponentMap["oauthTokenSettings"]
+		>();
+		expectTypeOf<
+			NonNullable<GrantDependencies["oauthTokenSettings"]>
+		>().toEqualTypeOf<OAuthTokenSettings>();
+		// Optional: a module that never declared it still hands its deps to a grant.
+		expectTypeOf<ProviderDeps<"config" | "keyStore">>().toMatchTypeOf<GrantDependencies>();
+		expectTypeOf<ProviderDeps<"config" | "keyStore", "oauthTokenSettings">>().toMatchTypeOf<
+			Pick<GrantDependencies, "oauthTokenSettings">
 		>();
 		expect(true).toBe(true);
 	});
