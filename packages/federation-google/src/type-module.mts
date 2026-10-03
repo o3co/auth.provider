@@ -52,8 +52,7 @@ export interface GoogleFederationTypeModuleOptions {
  * to the Store (`<name>:<sub>`), so two entries are two Google clients side by
  * side. It requires no dependency.
  *
- * Its module name is `federation-google-type`, beside the deprecated
- * fixed-name module's `federation-google`.
+ * Its module name is `federation-google-type`.
  */
 export function googleFederationTypeModule(
 	options: GoogleFederationTypeModuleOptions = {},

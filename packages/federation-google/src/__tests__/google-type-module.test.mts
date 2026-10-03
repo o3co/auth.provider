@@ -22,7 +22,6 @@ import {
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
 	type FederationProvider,
-	type Module,
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
@@ -43,20 +42,14 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { googleEntrySchema } from "#/entry.mjs";
-import {
-	type GoogleProvider,
-	type GoogleProviderConfig,
-	googleFederationModule,
-	googleFederationTypeModule,
-} from "#/index.mjs";
+import { type GoogleProvider, googleFederationTypeModule } from "#/index.mjs";
 
 /**
  * The module that handles every `core.federations` entry of type `google`,
  * through core's `createApp`: one provider and one redirect policy per
  * enabled entry, under the entry's name; the entry flat and held to a strict
- * schema; Google reached through the fetch the module was given; and the same
- * provider and policy as the deprecated fixed-name module builds for the same
- * entry.
+ * schema; Google reached through the fetch the module was given; and each of
+ * the entry's keys reaching the provider or the policy it is for.
  */
 
 const GOOGLE = {
@@ -118,16 +111,7 @@ const activatorModule = defineModule({
 	},
 });
 
-/** Supplies the deprecated module's slot, as a composition root's bridge does. */
-const slotModule = (config: GoogleProviderConfig): Module =>
-	defineModule({
-		name: "test:google-federation-config",
-		provides: { googleFederationConfig: () => config },
-	});
-
 interface BootOptions {
-	/** The modules that handle the entries; default the type module over `fetch`. */
-	readonly federationModules?: readonly Module[];
 	readonly fetch?: typeof fetch;
 	readonly authenticateByToken?: (token: string) => Promise<unknown>;
 }
@@ -151,9 +135,7 @@ async function boot(federations: Record<string, unknown>, options: BootOptions =
 		defaultRefreshTokenFamilyRevocationModule,
 		repositoryModule,
 		activatorModule,
-		...(options.federationModules ?? [
-			googleFederationTypeModule(options.fetch ? { fetch: options.fetch } : {}),
-		]),
+		googleFederationTypeModule(options.fetch ? { fetch: options.fetch } : {}),
 	];
 	const handle = await createApp({
 		modules,
@@ -391,25 +373,6 @@ describe("googleFederationTypeModule through createApp", () => {
 			expect(JSON.stringify(err.details)).not.toContain(SECRET);
 		});
 	});
-
-	it("refuses the deprecated module beside it for the same entry: one federation has one handler", async () => {
-		const idp = await fakeGoogle("client-a");
-		const err = await refusal(
-			boot(
-				{ google: entryA },
-				{
-					federationModules: [
-						googleFederationTypeModule({ fetch: idp.fetch }),
-						googleFederationModule,
-						slotModule({ clientId: "client-a", clientSecret: "secret-a", callbackURL: CALLBACK_A }),
-					],
-				},
-			),
-		);
-		expect(err.reason).toBe("duplicate-contribute");
-		expect(err.message).toMatch(/"federation-google-type"/);
-		expect(err.message).toMatch(/"federation-google"/);
-	});
 });
 
 describe("googleEntrySchema", () => {
@@ -436,112 +399,128 @@ describe("googleEntrySchema", () => {
 	});
 });
 
-describe("googleFederationTypeModule — parity with the deprecated module", () => {
-	const options = {
+describe("googleFederationTypeModule — an entry's keys reach its provider and its policy", () => {
+	const everyKey = {
+		...entryA,
 		redirectAllowlist: ["https://app-a.test/welcome"],
 		sessionDomain: "app-a.test",
 		authCallbackUrl: "https://app-a.test/auth/callback",
 		endSessionEndpoint: "https://accounts.google.test/logout",
+		accessType: "offline",
+		requireAuthorizationResponseIss: false,
 	};
-	const entries: readonly (readonly [string, Record<string, unknown>])[] = [
-		["the defaults", { ...entryA }],
-		["online access", { ...entryA, accessType: "online" }],
-		[
-			"every key",
-			{ ...entryA, ...options, accessType: "offline", requireAuthorizationResponseIss: false },
-		],
-	];
 
-	/** The provider and the policy one module builds for `google` from `entry`, against a fresh fake Google. */
-	async function built(path: "deprecated" | "type", entry: Record<string, unknown>) {
+	/** The provider and the policy the module builds for `google` from `entry`, against a fresh fake Google. */
+	async function built(entry: Record<string, unknown>) {
 		const idp = await fakeGoogle("client-a", "google-sub-a");
-		const { enabled: _on, type: _type, ...slot } = entry;
-		const { handle } = await boot(
-			{ google: entry },
-			{
-				federationModules:
-					path === "type"
-						? [googleFederationTypeModule({ fetch: idp.fetch })]
-						: [
-								googleFederationModule,
-								slotModule({ ...(slot as unknown as GoogleProviderConfig), fetch: idp.fetch }),
-							],
-			},
-		);
+		const { handle } = await boot({ google: entry }, { fetch: idp.fetch });
 		const provider = providersOf(handle).get("google") as GoogleProvider | undefined;
 		const policy = policiesOf(handle).get("google");
 		if (provider === undefined || policy === undefined) {
-			return expect.fail(`the ${path} module built no provider or no policy for google`);
+			return expect.fail("the module built no provider or no policy for google");
 		}
 		return { idp, provider, policy };
 	}
 
-	it.each(entries)(
-		"builds the same provider and the same redirect policy from one entry (%s)",
-		async (_what, entry) => {
-			const deprecated = await built("deprecated", entry);
-			const type = await built("type", entry);
-
-			expect(type.provider.name).toBe("google");
-			expect(type.provider.name).toBe(deprecated.provider.name);
-			expect(type.provider.scope).toEqual(deprecated.provider.scope);
-			expect(Object.keys(type.provider).sort()).toEqual(Object.keys(deprecated.provider).sort());
-			expect(authorize(type.provider, CALLBACK_A).href).toBe(
-				authorize(deprecated.provider, CALLBACK_A).href,
+	/** A code exchange whose callback carries no `iss`, and the token request it made, if any. */
+	async function exchangeWithoutIss({ idp, provider }: Awaited<ReturnType<typeof built>>) {
+		const { code } = idp.authorize(authorize(provider, CALLBACK_A));
+		const outcome = await provider
+			.exchangeCode({
+				code,
+				codeVerifier: VERIFIER,
+				redirectUri: CALLBACK_A,
+				nonce: "nonce-1",
+				callbackParams: {},
+			})
+			.then(
+				(profile) => ({ sub: profile.sub, issuer: profile.issuer, email: profile.email }),
+				(err: Error) => ({ refused: err.name }),
 			);
+		const token = idp.lastTokenRequest();
+		return {
+			outcome,
+			authorization: token?.headers.get("authorization") ?? null,
+			body: Object.fromEntries(token?.body ?? []),
+		};
+	}
 
-			const exchange = async ({ idp, provider }: Awaited<ReturnType<typeof built>>) => {
-				const url = authorize(provider, CALLBACK_A);
-				const { code } = idp.authorize(url);
-				// No `iss` on the callback: refused unless the entry turned the requirement off.
-				const outcome = await provider
-					.exchangeCode({
-						code,
-						codeVerifier: VERIFIER,
-						redirectUri: CALLBACK_A,
-						nonce: "nonce-1",
-						callbackParams: {},
-					})
-					.then(
-						(profile) => ({ sub: profile.sub, issuer: profile.issuer, email: profile.email }),
-						(err: Error) => ({ refused: err.name }),
-					);
-				const token = idp.lastTokenRequest();
-				return {
-					outcome,
-					authorization: token?.headers.get("authorization"),
-					body: Object.fromEntries(token?.body ?? []),
-				};
-			};
-			const exchanged = await exchange(type);
-			expect(exchanged).toEqual(await exchange(deprecated));
-			if (entry.requireAuthorizationResponseIss === false) {
-				expect(exchanged.outcome).toEqual({
-					sub: "google-sub-a",
-					issuer: GOOGLE.issuer,
-					email: "alice@example.test",
-				});
-				expect(exchanged.body.client_secret).toBe("secret-a");
-			} else {
-				// Refused before the token request: the callback carries no `iss`.
-				expect(exchanged.outcome).toEqual({ refused: expect.any(String) });
-				expect(exchanged.body).toEqual({});
-			}
+	it("builds a provider that refreshes, logs out and maps claims, asking for openid, profile and email", async () => {
+		const { provider } = await built(entryA);
+		expect(Object.keys(provider).sort()).toEqual([
+			"buildAuthorizationUrl",
+			"endSession",
+			"exchangeCode",
+			"mapClaims",
+			"name",
+			"refreshToken",
+			"scope",
+		]);
+		expect(provider.scope).toEqual(["openid", "profile", "email"]);
+	});
 
-			const endSession = (provider: GoogleProvider) =>
-				provider.endSession({ postLogoutRedirectUri: "https://app-a.test/bye", state: "s" });
-			expect((await endSession(type.provider)).url.href).toBe(
-				(await endSession(deprecated.provider)).url.href,
-			);
+	it("asks for offline access and the consent screen unless the entry's accessType is online", async () => {
+		for (const entry of [entryA, { ...entryA, accessType: "offline" }]) {
+			const url = authorize((await built(entry)).provider, CALLBACK_A);
+			expect(url.searchParams.get("access_type")).toBe("offline");
+			expect(url.searchParams.get("prompt")).toBe("consent");
+		}
+		const online = authorize(
+			(await built({ ...entryA, accessType: "online" })).provider,
+			CALLBACK_A,
+		);
+		expect(online.searchParams.get("access_type")).toBeNull();
+		expect(online.searchParams.get("prompt")).toBeNull();
+	});
 
-			for (const url of ["https://app-a.test/welcome", "https://elsewhere.test/"]) {
-				expect(type.policy.validateRedirect(url)).toEqual(deprecated.policy.validateRedirect(url));
-			}
-			for (const session of [{}, { redirectTo: "https://app-a.test/welcome" }]) {
-				expect(type.policy.resolveCallbackRedirect(session)).toEqual(
-					deprecated.policy.resolveCallbackRedirect(session),
-				);
-			}
-		},
-	);
+	it("refuses a callback without iss before the token request, unless the entry turns the requirement off", async () => {
+		expect(await exchangeWithoutIss(await built(entryA))).toEqual({
+			outcome: { refused: expect.any(String) },
+			authorization: null,
+			body: {},
+		});
+
+		const allowed = await exchangeWithoutIss(await built(everyKey));
+		expect(allowed.outcome).toEqual({
+			sub: "google-sub-a",
+			issuer: GOOGLE.issuer,
+			email: "alice@example.test",
+		});
+		// The client secret goes in the body (`client_secret_post`), not a Basic header.
+		expect(allowed.authorization).toBeNull();
+		expect(allowed.body.client_id).toBe("client-a");
+		expect(allowed.body.client_secret).toBe("secret-a");
+	});
+
+	it("logs out through the entry's endSessionEndpoint, or straight to the handed URI without one", async () => {
+		const logout = { postLogoutRedirectUri: "https://app-a.test/bye", state: "s" };
+		expect((await (await built(entryA)).provider.endSession(logout)).url.href).toBe(
+			"https://app-a.test/bye?state=s",
+		);
+		expect((await (await built(everyKey)).provider.endSession(logout)).url.href).toBe(
+			"https://accounts.google.test/logout?post_logout_redirect_uri=https%3A%2F%2Fapp-a.test%2Fbye&state=s",
+		);
+	});
+
+	it("builds the redirect policy from the entry's allowlist, session domain and auth callback URL", async () => {
+		const welcome = "https://app-a.test/welcome";
+
+		const none = (await built(entryA)).policy;
+		expect(none.validateRedirect(welcome).ok).toBe(false);
+		expect(none.resolveCallbackRedirect({})).toEqual({ ok: true, value: "https://app-a.test/" });
+		expect(none.resolveCallbackRedirect({ redirectTo: welcome })).toMatchObject({
+			ok: false,
+			status: 500,
+			error: "misconfiguration",
+		});
+
+		const every = (await built(everyKey)).policy;
+		expect(every.validateRedirect(welcome)).toEqual({ ok: true });
+		expect(every.validateRedirect("https://elsewhere.test/").ok).toBe(false);
+		expect(every.resolveCallbackRedirect({})).toEqual({ ok: true, value: "https://app-a.test/" });
+		expect(every.resolveCallbackRedirect({ redirectTo: welcome })).toEqual({
+			ok: true,
+			value: `https://app-a.test/auth/callback?redirect_to=${encodeURIComponent(welcome)}`,
+		});
+	});
 });

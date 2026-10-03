@@ -94,6 +94,7 @@ const handle = await createApp({
 test double. Without it the global `fetch` is used. Its module name is
 `federation-google-type`.
 
+
 ### Configuration
 
 ```hocon
@@ -137,89 +138,8 @@ redirect policy; the schema fills in no default.
 | `endSessionEndpoint` | no | An upstream end-session URL for logout; Google publishes none — [below](#refresh-and-logout). |
 
 `fetch` is not an entry key: it is the type module's option (above), and a
-`GoogleProviderConfig` field for `createGoogleProvider` and the deprecated
-slot. Nor is `jwksUri`: where Google's signing keys are fetched from is not the
+`GoogleProviderConfig` field for `createGoogleProvider`. Nor is `jwksUri`: where Google's signing keys are fetched from is not the
 configuration's to move. It stays a `GoogleProviderConfig` field.
-
-### Deprecated: the fixed-name module
-
-`googleFederationModule` and the `googleFederationConfig` slot it requires
-are deprecated in favour of `googleFederationTypeModule()`. They still work:
-the module contributes `federations.google` and
-`federationRedirectPolicies.google` from the slot, which a small
-config-bootstrap module in the composition root fills:
-
-```ts
-import { createApp, defineModule, federationsOf } from "@o3co/auth-provider-core";
-import {
-  extractFederationSection,
-  sessionModule,
-  sessionStoreModuleFor,
-} from "@o3co/auth-provider-session";
-import {
-  googleFederationModule,
-  type GoogleProviderConfig,
-} from "@o3co/auth-provider-federation-google";
-
-const googleConfigBridgeModule = defineModule({
-  name: "google-federation-config",
-  requires: ["config"] as const,
-  provides: {
-    googleFederationConfig: (deps): GoogleProviderConfig => {
-      const slice = extractFederationSection(federationsOf(deps.config), "google");
-      if (slice?.type !== "google") throw new Error("core.federations.google must be enabled, with type google");
-      return {
-        clientId: slice.clientId as string,
-        clientSecret: slice.clientSecret as string,
-        callbackURL: slice.callbackURL as string,
-        // The redirect policy is built from this same object: a redirect
-        // field left out here is one the policy never sees.
-        redirectAllowlist: slice.redirectAllowlist as readonly string[] | undefined,
-        sessionDomain: slice.sessionDomain as string | undefined,
-        authCallbackUrl: slice.authCallbackUrl as string | undefined,
-        clientUrl: slice.clientUrl as string | undefined,
-      };
-    },
-  },
-});
-
-const handle = await createApp({
-  modules: [
-    sessionStoreModuleFor(config),
-    sessionModule,
-    googleFederationModule,
-    googleConfigBridgeModule,
-    // ... composition-root modules supplying userRepository and the session stores
-  ],
-  bootstrapComponents: { config, pathResolver },
-});
-```
-
-This module is single-tenant: `provider.name` is fixed at `"google"`, so the
-federation is `core.federations.google` and a deployment has one Google client. The config fields
-are [`GoogleProviderConfig`](src/google.mts). The four redirect fields
-(`redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl`) follow the
-[session package's redirect rules](../session/README.md#redirect-allowlists),
-and they reach the redirect policy only through this slot. **Set `clientUrl`:**
-a login whose start carried no `redirect_to` lands there, and without it the
-callback answers `500 misconfiguration` after the session has been saved; a
-start that carries `redirect_to` needs an allowlist entry for it and
-`authCallbackUrl` as well. A bridge that forwards the credentials alone
-therefore ends every such login on a `500` instead of in the app. The bridge above does not forward the other
-optional fields (`endSessionEndpoint`, `requireAuthorizationResponseIss`, `accessType`); forward them if the deployment sets them. It
-reads the section only when its `type` is `google` (the default for a section
-named `google`), so a `type = "oidc"` section under that name is not read as
-this adapter's. It casts; a production bridge checks each field's type, and
-the type's entry schema (`googleEntrySchema` in [`src/entry.mts`](src/entry.mts))
-is the reference for each field's shape.
-`clientSecret` is a string. `createGoogleProvider` throws at boot when
-`clientId`, `clientSecret` or `callbackURL` is missing.
-
-Both modules build the same provider and redirect policy for one entry.
-Composing `googleFederationTypeModule()` and `googleFederationModule` for the
-entry `google` refuses boot (`duplicate-contribute`): one federation has one
-handler. The standalone template composes `googleFederationTypeModule()` and
-writes no bridge.
 
 ## What a login does
 
@@ -281,8 +201,7 @@ to sign in and never refreshes Google's access token through the federation
 token route (it answers `410 refresh_token_absent` once that token expires).
 In code, only an omitted field means the default: any other value, `null`
 included, is refused at construction (an entry's `null` reads as absent
-first). Under the deprecated module, an environment override arrives as a
-string, so coerce it in the bridge. The standalone template's entry binds
+first). The standalone template's entry binds
 `accessType` to `CORE_FEDERATIONS_GOOGLE_ACCESS_TYPE`, and the type module
 reads it.
 
@@ -307,9 +226,7 @@ Google's is refused either way. An entry's schema reads the string spellings
 of an environment variable (above). In code **it must be a boolean**: an
 environment override arrives as the string `"false"`, which is truthy, so
 `createGoogleProvider` refuses anything that is not a boolean instead of
-quietly keeping the requirement on. Under the deprecated module, the bridge
-above does not forward it; forward it there, coerced to a boolean as the
-entry's schema reads it.
+quietly keeping the requirement on.
 
 If every Google login starts answering `502 exchange_failed` with the log cause
 `response parameter "iss" (issuer) missing`, either Google stopped sending the
@@ -347,11 +264,6 @@ Exported from [`src/index.mts`](src/index.mts):
 - `GOOGLE_FEDERATION_TYPE` (`"google"`, [`src/type-module.mts`](src/type-module.mts)).
 - `createGoogleProvider(config)` ([`src/google.mts`](src/google.mts)) — the
   provider, named `google`.
-- Deprecated, for `googleFederationTypeModule`: `googleFederationModule`
-  ([`src/google.mts`](src/google.mts)), the const Module contributing
-  `federations.google` and `federationRedirectPolicies.google`, and the
-  `googleFederationConfig` `ComponentMap` slot it requires, declared there by
-  module augmentation (not an export).
 - Types: `GoogleEntry` ([`src/entry.mts`](src/entry.mts)), an entry's own keys
   as the schema answers them; [`GoogleProviderConfig`](src/google.mts),
   `GoogleProvider`.
@@ -366,5 +278,4 @@ Exported from [`src/index.mts`](src/index.mts):
 | [`google.signature.test.mts`](src/__tests__/google.signature.test.mts) | that the id_token's signature is verified against the JWKS |
 | [`google.token-snapshot.test.mts`](src/__tests__/google.token-snapshot.test.mts) | the lifetime, `expiresIn` and `tokenType` a login and a refresh report, with and without `expires_in`, and that a non-string `scope` is refused by the library |
 | [`google.issuer-parameter.test.mts`](src/__tests__/google.issuer-parameter.test.mts) | the RFC 9207 `iss` check and `requireAuthorizationResponseIss` |
-| [`google-type-module.test.mts`](src/__tests__/google-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes, the strict, flat schema, refusals that quote no secret, the `fetch` option, parity with the deprecated module, and the refusal of both for one entry |
-| [`google-module.test.mts`](src/__tests__/google-module.test.mts), [`google-module-boot.test.mts`](src/__tests__/google-module-boot.test.mts) | the deprecated module's contributions and boot with the session module |
+| [`google-type-module.test.mts`](src/__tests__/google-type-module.test.mts) | the type module through `createApp`: one provider and policy per entry, a login through the session routes, the strict, flat schema, refusals that quote no secret, the `fetch` option, and each entry key reaching the provider or the redirect policy |

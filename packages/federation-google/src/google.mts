@@ -17,7 +17,6 @@
 import {
 	callbackUrlForExchange,
 	codeChallenge,
-	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
@@ -29,22 +28,7 @@ import {
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-core";
-import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
-
-// ComponentMap slot declaration-merge: exposes googleFederationConfig as a typed
-// DI slot. Consumers supply this via a small bootstrap module that reads from
-// app config.
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		/**
-		 * @deprecated Read only by the deprecated `googleFederationModule`.
-		 * `googleFederationTypeModule()` takes each entry from
-		 * `core.federations` itself, through core's dispatch by type.
-		 */
-		readonly googleFederationConfig?: GoogleProviderConfig;
-	}
-}
 
 const GOOGLE_ISSUER = "https://accounts.google.com";
 const SCOPES = ["openid", "profile", "email"] as const;
@@ -107,7 +91,7 @@ export type GoogleProvider = FederationProvider &
 	SupportsLogout &
 	SupportsClaimMapping;
 
-/** The name the fixed-name module and `createGoogleProvider` register the provider under. */
+/** The name `createGoogleProvider` gives the provider. */
 const DEFAULT_NAME = "google";
 
 export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvider {
@@ -129,7 +113,7 @@ export function createNamedGoogleProvider(
 		throw new Error(`${subject} requires clientId, clientSecret, and callbackURL`);
 	}
 	// The library reads this as a truthy flag, and an environment override
-	// arrives as the string "false" — which is truthy. A bridge that forwards it
+	// arrives as the string "false" — which is truthy. A caller that forwards it
 	// uncoerced would leave the requirement on during the very incident the
 	// switch exists for, so anything that is not a boolean is refused here.
 	if (
@@ -347,30 +331,3 @@ export function createNamedGoogleProvider(
 		},
 	};
 }
-
-/**
- * Const Module for the Google federation integration.
- *
- * Contributes `federations.google` (the upstream OIDC provider) and
- * `federationRedirectPolicies.google` (the consumer redirect URL policy).
- * Config is supplied via the `googleFederationConfig` ComponentMap slot.
- * Single-tenant: registered under the name "google".
- *
- * @deprecated Use `googleFederationTypeModule()`: one module handles every
- * `core.federations` entry of type `google`, each under its own name, read
- * from the configuration by core, with no `googleFederationConfig` slot to
- * fill. Composing both for one entry refuses boot.
- */
-export const googleFederationModule = defineModule({
-	name: "federation-google",
-	requires: ["googleFederationConfig"] as const,
-	contributes: {
-		federations: {
-			// Single-tenant: provider.name is fixed at "google".
-			google: (deps) => createGoogleProvider(deps.googleFederationConfig),
-		},
-		federationRedirectPolicies: {
-			google: (deps) => createFederationRedirectPolicy(deps.googleFederationConfig),
-		},
-	},
-});
