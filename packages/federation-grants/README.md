@@ -402,9 +402,10 @@ is not the user's absence. A 429 is no outage.
 
 Each grant has a rotation budget: at most `federation-grants.rotationBudget`
 upstream refresh-token rotations (24 by default) in a window of
-`federation-grants.rotationWindow` seconds (3600 by default), opened by the
-window's first rotation. With the budget spent, a good stored token is still
-answered; otherwise the answer is `429 rate_limited/provider` with
+`federation-grants.rotationWindow` seconds (3600 by default). The window
+opens when its first rotation is taken, and a rotation given back (a refresh
+the upstream provably did not act on) leaves it where it opened. With the
+budget spent, a good stored token is still answered; otherwise the answer is `429 rate_limited/provider` with
 `Retry-After` until the window closes. Each setting is a whole number of at
 least 1, refused at boot otherwise. The [operator
 runbook](../../docs/operator-runbook.md) says how to tune them.
