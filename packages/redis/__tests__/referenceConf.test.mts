@@ -20,6 +20,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import {
 	redisAccessTokenDenylistModule,
+	redisAttemptCounterModule,
 	redisChallengeStoreModule,
 	redisCodeRepositoryModule,
 	redisConsentStoreModule,
@@ -40,6 +41,7 @@ const REFERENCE = new URL("../config/reference.conf", import.meta.url);
 
 const MODULES: readonly Module[] = [
 	redisAccessTokenDenylistModule,
+	redisAttemptCounterModule,
 	redisChallengeStoreModule,
 	redisCodeRepositoryModule,
 	redisConsentStoreModule,
@@ -126,6 +128,7 @@ describe("the package's config/reference.conf", () => {
 
 	it.each([
 		["redis-access-token-denylist.keyPrefix", "atdeny:"],
+		["redis-attempt-counter.keyPrefix", "attempt:"],
 		["redis-challenge-store.keyPrefix", "chal:"],
 		["redis-code-repository.keyPrefix", "oauth:code:"],
 		["redis-code-repository.defaultExpiresIn", 600],
